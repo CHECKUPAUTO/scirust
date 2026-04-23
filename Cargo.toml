@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "scirust-macros",
+    "scirust-autodiff",
+    "scirust-simd-macros",
+    "scirust-simd",
+    "scirust-gpu",
+    "scirust-gpu-macros",
+    "scirust-core",
+    "examples/demo",
+]
+exclude = ["scirust-rustc-driver"]
+resolver = "3"

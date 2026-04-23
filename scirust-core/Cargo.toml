@@ -1,0 +1,11 @@
+[package]
+name = "scirust-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scirust-autodiff = { path = "../scirust-autodiff" }
+scirust-macros = { path = "../scirust-macros" }
+scirust-simd = { path = "../scirust-simd" }
+scirust-gpu = { path = "../scirust-gpu" }
+scirust-gpu-macros = { path = "../scirust-gpu-macros" }

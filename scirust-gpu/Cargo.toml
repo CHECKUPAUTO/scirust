@@ -1,0 +1,12 @@
+[package]
+name = "scirust-gpu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rayon = { version = "1.10", optional = true }
+
+[features]
+default = ["cpu-fallback"]
+cpu-fallback = ["rayon"]
+cuda = []
