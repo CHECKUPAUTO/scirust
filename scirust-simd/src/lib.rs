@@ -1,3 +1,6 @@
+pub mod portable;
+pub use portable::simd_ops;
+
 //! SciRust SIMD auto-vectorization utilities.
 //!
 //! This crate provides:
@@ -354,3 +357,7 @@ mod tests {
         assert_eq!(double(3.0), 6.0);
     }
 }
+
+pub mod dispatch;
+
+pub mod complex;

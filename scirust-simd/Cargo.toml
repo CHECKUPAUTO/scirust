@@ -10,5 +10,6 @@ license = "MIT OR Apache-2.0"
 scirust-simd-macros = { path = "../scirust-simd-macros" }
 
 [features]
+portable-simd = []
 default = []
 portable_simd = []

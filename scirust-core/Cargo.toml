@@ -9,3 +9,8 @@ scirust-macros = { path = "../scirust-macros" }
 scirust-simd = { path = "../scirust-simd" }
 scirust-gpu = { path = "../scirust-gpu" }
 scirust-gpu-macros = { path = "../scirust-gpu-macros" }
+
+
+[features]
+default = []
+portable-simd = ["scirust-simd/portable-simd"]

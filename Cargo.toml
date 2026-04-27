@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "examples/v7a_mnist_demo",
+    "examples/simd_views_demo",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
