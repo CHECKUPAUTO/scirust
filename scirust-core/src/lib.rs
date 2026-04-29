@@ -10,7 +10,7 @@ pub mod matrix {
     pub mod backend;
 }
 
-pub mod autodiff { pub mod optim; }
+pub mod autodiff { pub mod optim; pub mod scheduler; }
 
 pub mod lazy;
 

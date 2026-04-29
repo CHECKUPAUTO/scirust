@@ -26,6 +26,7 @@
 //   }
 
 pub mod mnist;
+pub mod augment;
 
 use crate::autodiff::reverse::Tensor;
 use crate::nn::rng::PcgEngine;
