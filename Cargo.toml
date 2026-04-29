@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "examples/v9_quickstart",
     "examples/v7a_mnist_demo",
     "examples/simd_views_demo",
     "scirust-macros",

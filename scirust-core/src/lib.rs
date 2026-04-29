@@ -15,3 +15,5 @@ pub mod autodiff { pub mod optim; }
 pub mod lazy;
 
 pub mod data;
+
+pub mod error;

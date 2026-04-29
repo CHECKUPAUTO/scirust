@@ -1,6 +1,3 @@
-pub mod portable;
-pub use portable::simd_ops;
-
 //! SciRust SIMD auto-vectorization utilities.
 //!
 //! This crate provides:
@@ -16,6 +13,9 @@ pub use portable::simd_ops;
 //!   feature detection and scalar fallback.
 
 #![cfg_attr(feature = "portable_simd", feature(portable_simd))]
+
+pub mod portable;
+pub use portable::simd_ops;
 
 pub use scirust_simd_macros::simd;
 

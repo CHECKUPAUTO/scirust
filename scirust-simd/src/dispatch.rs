@@ -8,10 +8,9 @@
 // caché. Coût d'un appel : un load atomique.
 
 use std::sync::OnceLock;
-use crate::matrix::backend::{
-    SimdBackend, ScalarBackend,
-    #[cfg(feature = "portable-simd")] PortableSimdBackend,
-};
+use crate::matrix::backend::{SimdBackend, ScalarBackend};
+#[cfg(feature = "portable_simd")]
+use crate::matrix::backend::PortableSimdBackend;
 
 // ------------------------------------------------------------------ //
 //  Énumération des backends disponibles                               //

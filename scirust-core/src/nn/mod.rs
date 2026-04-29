@@ -22,4 +22,8 @@ pub use module::{
     Linear, ReLU, Sigmoid, Dropout, Sequential,
 };
 
+pub mod conv2d;
+pub mod batch_norm;
+pub mod pool;
+pub mod conv_utils;
 pub mod parallel;
