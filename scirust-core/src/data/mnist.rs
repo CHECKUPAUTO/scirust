@@ -133,6 +133,20 @@ impl MnistDataset {
     }
 }
 
+impl MnistDataset {
+    pub fn get(&self, idx: usize) -> (Tensor, Tensor) {
+        let xdim = self.h * self.w;
+        let x = Tensor::from_vec(
+            self.images[idx * xdim..(idx + 1) * xdim].to_vec(), 1, xdim,
+        );
+        let y = Tensor::from_vec(
+            self.labels_one_hot[idx * self.n_classes..(idx + 1) * self.n_classes].to_vec(),
+            1, self.n_classes,
+        );
+        (x, y)
+    }
+}
+
 impl Dataset for MnistDataset {
     fn sample(&self, idx: usize) -> (&[f32], &[f32]) {
         let xdim = self.h * self.w;

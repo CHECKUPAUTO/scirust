@@ -136,7 +136,7 @@ fn evaluate(model: &mut Sequential, test_ds: &InMemoryDataset) -> f32 {
         let mut y_labels = Vec::with_capacity(bs);
         for j in i..end {
             let (x, y) = test_ds.get(j);
-            x_data.extend_from_slice(&x.data);
+            x_data.extend_from_slice(x);
             // y est one-hot : trouver l'index du 1
             let label = y.iter().position(|&v| v > 0.5).unwrap();
             y_labels.push(label);
