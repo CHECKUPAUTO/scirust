@@ -19,15 +19,16 @@ pub use init::{
     KaimingNormal, KaimingUniform,
 };
 pub use loss::{Loss, MseLoss, BceLossApprox, HuberPseudoLoss};
-pub use loss::strict;
 pub use module::{
     Module,
     Linear, ReLU, Sigmoid, Dropout, Sequential,
 };
 
-pub mod linear;
 pub mod conv2d;
 pub mod batch_norm;
 pub mod pool;
 pub mod conv_utils;
 pub mod parallel;
+pub mod linear;
+pub mod activation;
+pub mod sequential;
