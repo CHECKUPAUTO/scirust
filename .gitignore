@@ -15,3 +15,15 @@ Cargo.lock.bak
 
 # OS
 .DS_Store
+
+# MNIST data files (downloaded on demand)
+data/mnist/
+mnist/
+
+# MNIST data files
+data/mnist/
+mnist/
+
+# MNIST data files (downloaded on demand)
+data/mnist/
+mnist/
