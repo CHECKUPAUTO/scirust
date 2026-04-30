@@ -261,7 +261,7 @@ impl AugmentedDataset {
 
 impl super::Dataset for AugmentedDataset {
     fn sample(&self, idx: usize) -> (&[f32], &[f32]) {
-        let (x, y) = self.base.sample(idx);
+        let (x, _y) = self.base.sample(idx);
         let mut x_aug = x.to_vec();
         for t in &self.transforms {
             t.apply(&mut x_aug, self.dims);
