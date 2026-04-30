@@ -1,23 +1,17 @@
-# Rust build artifacts
-/target
-**/*.rs.bk
-*.rlib
-*.rmeta
+# Build artifacts
+target/
+**/target/
+Cargo.lock.bak
+
+# Backup files
+*.bak
+*.old
+*.backup*
+*.stub.bak
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
-*~
+.idea/
 
 # OS
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
