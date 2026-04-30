@@ -20,8 +20,12 @@
 // ne pas casser l'usage existant. Migration progressive.
 
 use std::fmt;
+// use crate::tensor::device::Device;
 
-use crate::tensor::device::Device;
+/// Device placeholder (stub).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Device { Cpu, Gpu }
+
 
 // ================================================================== //
 //  Type d'erreur principal                                            //

@@ -230,7 +230,7 @@ impl Module for Conv2d {
         self.last_b_idx = bias_v.as_ref().map(|v| v.idx());
 
         match &self.backend {
-            ConvBackend::CpuOnly => input.conv2d_forward(weight_v, bias_v, cfg),
+            ConvBackend::CpuOnly => input.conv2d_forward(weight_v, bias_v, b, self.in_c, h, w, self.out_c, self.kernel, self.stride, cfg.pad()),
 
             #[cfg(feature = "wgpu")]
             ConvBackend::GpuDescend { ctx, pipelines } => {

@@ -47,7 +47,7 @@ fn build_model(rng: &mut PcgEngine) -> Sequential {
     Sequential::new()
         .push(Linear::new(784, 256, &KaimingNormal, &Zeros, rng).with_name("fc1"))
         .push(ReLU)
-        .push(Dropout::new(0.2).with_seed(rng.next_u32() as u64))
+        .push(Dropout::new(0.2, rng.next_u32() as u64))
         .push(Linear::new(256, 128, &KaimingNormal, &Zeros, rng).with_name("fc2"))
         .push(ReLU)
         .push(Linear::new(128, 10, &KaimingNormal, &Zeros, rng).with_name("fc3"))
@@ -91,12 +91,13 @@ fn train(
 
             let logits = model.forward(&tape, xv);
             let loss = CrossEntropyLoss.forward(logits, yv);
+            let loss_idx = loss.idx();
             loss.backward();
 
             opt.step(&model.parameter_indices(), &tape);
             model.sync(&tape);
 
-            epoch_loss += tape.value(loss.idx()).data[0];
+            epoch_loss += tape.value(loss_idx).data[0];
             n_batches += 1;
             step += 1;
         }
@@ -137,7 +138,7 @@ fn evaluate(model: &mut Sequential, test_ds: &InMemoryDataset) -> f32 {
             let (x, y) = test_ds.get(j);
             x_data.extend_from_slice(&x.data);
             // y est one-hot : trouver l'index du 1
-            let label = y.data.iter().position(|&v| v > 0.5).unwrap();
+            let label = y.iter().position(|&v| v > 0.5).unwrap();
             y_labels.push(label);
         }
         let x_batch = Tensor::from_vec(x_data, bs, 784);
@@ -217,7 +218,7 @@ fn main() {
         .add(AddGaussianNoise::new(0.05))            // robustesse au bruit
         .add(Normalize::mnist());                    // normalisation finale
 
-    let aug_train = AugmentedDataset::new(
+    let aug_train = AugmentedDataset::from_pipeline(
         train_subset, aug_pipeline, 1, 28, 28,
     ).with_seed(7);
 

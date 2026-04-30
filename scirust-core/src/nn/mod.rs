@@ -6,6 +6,8 @@ pub mod rng;
 pub mod init;
 pub mod loss;
 pub mod module;
+pub mod layer_norm;
+pub mod transformer;
 
 // Réexports les plus utilisés pour ergonomie
 pub use rng::PcgEngine;
@@ -17,11 +19,13 @@ pub use init::{
     KaimingNormal, KaimingUniform,
 };
 pub use loss::{Loss, MseLoss, BceLossApprox, HuberPseudoLoss};
+pub use loss::strict;
 pub use module::{
     Module,
     Linear, ReLU, Sigmoid, Dropout, Sequential,
 };
 
+pub mod linear;
 pub mod conv2d;
 pub mod batch_norm;
 pub mod pool;

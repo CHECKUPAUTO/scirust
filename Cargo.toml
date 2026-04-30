@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "examples/v11_pattern_classifier",
     "examples/v10a_augmented_mnist",
     "examples/v9_quickstart",
     "examples/v7a_mnist_demo",

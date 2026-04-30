@@ -9,6 +9,7 @@
 //   - période 2^64, distribution uniforme cryptographiquement décente
 //     pour de l'init de poids (NB : pas pour de la cryptographie)
 
+#[derive(Clone)]
 pub struct PcgEngine {
     state: u64,
     inc:   u64,

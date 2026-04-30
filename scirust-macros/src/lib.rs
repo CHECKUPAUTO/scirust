@@ -152,7 +152,7 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
             arg_map.insert(a2.clone(), d2.clone());
             arg_map.insert(a3.clone(), d3.clone());
 
-            let make_body = |active: usize| {
+            let make_body = |_active: usize| {
                 let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
                 let mut body = input_fn.block.clone();
                 replacer.visit_block_mut(&mut body);

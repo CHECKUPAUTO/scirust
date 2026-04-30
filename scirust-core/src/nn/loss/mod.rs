@@ -42,7 +42,7 @@ impl Loss for MseLoss {
         let n = (r * c) as f32;
         assert_eq!(pred.shape(), target.shape(), "MSE: shape mismatch");
         let diff = pred.sub(target);
-        diff.hadamard(diff).sum().scale(1.0 / n)
+        diff.clone().hadamard(diff).sum().scale(1.0 / n)
     }
 }
 
@@ -138,3 +138,4 @@ mod tests {
         assert!(grad.data.iter().all(|&g| g > 0.0));
     }
 }
+pub mod strict;

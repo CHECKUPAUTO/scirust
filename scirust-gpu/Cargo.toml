@@ -10,3 +10,4 @@ rayon = { version = "1.10", optional = true }
 default = ["cpu-fallback"]
 cpu-fallback = ["rayon"]
 cuda = []
+wgpu = []

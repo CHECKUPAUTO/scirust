@@ -38,13 +38,14 @@ fn main() {
         let yv = tape.input(y.clone());
         let logits = model.forward(&tape, xv);
         let loss = CrossEntropyLoss.forward(logits, yv);
+        let loss_idx = loss.idx();
         loss.backward();
         opt.step(&model.parameter_indices(), &tape);
         model.sync(&tape);
 
         if epoch % 20 == 0 {
             println!("epoch {epoch:3}: loss = {:.4}",
-                     tape.value(loss.idx()).data[0]);
+                     tape.value(loss_idx).data[0]);
         }
     }
 

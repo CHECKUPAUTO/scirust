@@ -42,6 +42,7 @@ pub trait Module {
 
     /// Récupère les valeurs mises à jour depuis le tape (post-step).
     fn sync(&mut self, tape: &Tape);
+    fn box_clone(&self) -> Box<dyn Module>;
 
     /// (nom, tensor) pour la sérialisation.
     fn state_dict(&self) -> Vec<(String, Tensor)>;
@@ -57,6 +58,7 @@ pub trait Module {
 //  Linear — y = x @ W + b                                             //
 // ================================================================== //
 
+#[derive(Clone)]
 pub struct Linear {
     pub weight:   Tensor,            // (in_features, out_features)
     pub bias:     Tensor,            // (1, out_features)
@@ -93,6 +95,7 @@ impl Linear {
 }
 
 impl Module for Linear {
+    fn box_clone(&self) -> Box<dyn Module> { Box::new(self.clone()) }
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let w = tape.input(self.weight.clone());
         let b = tape.input(self.bias.clone());
@@ -146,6 +149,7 @@ macro_rules! impl_stateless_activation {
             }
             fn parameter_indices(&self) -> Vec<usize> { vec![] }
             fn sync(&mut self, _: &Tape) {}
+            fn box_clone(&self) -> Box<dyn Module> { Box::new($name) }
             fn state_dict(&self) -> Vec<(String, Tensor)> { vec![] }
             fn load_state_dict(&mut self, _: &HashMap<String, Tensor>) -> usize { 0 }
         }
@@ -159,6 +163,7 @@ impl_stateless_activation!(Sigmoid, sigmoid);
 //  Dropout                                                            //
 // ================================================================== //
 
+#[derive(Clone)]
 pub struct Dropout {
     pub p:        f32,
     pub training: bool,
@@ -173,6 +178,7 @@ impl Dropout {
 }
 
 impl Module for Dropout {
+    fn box_clone(&self) -> Box<dyn Module> { Box::new(self.clone()) }
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         if !self.training || self.p == 0.0 { return input; }
         let (rows, cols) = input.shape();
@@ -199,6 +205,12 @@ pub struct Sequential {
     pub layers: Vec<Box<dyn Module>>,
 }
 
+impl Clone for Sequential {
+    fn clone(&self) -> Self {
+        Self { layers: self.layers.iter().map(|l| l.box_clone()).collect() }
+    }
+}
+
 impl Sequential {
     pub fn new() -> Self { Self { layers: Vec::new() } }
 
@@ -209,6 +221,7 @@ impl Sequential {
 }
 
 impl Module for Sequential {
+    fn box_clone(&self) -> Box<dyn Module> { Box::new(self.clone()) }
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let mut x = input;
         for layer in &mut self.layers { x = layer.forward(tape, x); }

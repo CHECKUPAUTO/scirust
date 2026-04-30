@@ -361,3 +361,4 @@ mod tests {
 pub mod dispatch;
 
 pub mod complex;
+pub mod matrix;

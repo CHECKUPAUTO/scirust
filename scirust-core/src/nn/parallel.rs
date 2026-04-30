@@ -63,11 +63,11 @@ pub fn average_grads(workers_grads: &[Grads]) -> Grads {
     let mut result: Grads = Vec::with_capacity(n_params);
 
     for p_idx in 0..n_params {
-        let (name, ref first) = workers_grads[0][p_idx];
+        let (name, first) = &workers_grads[0][p_idx];
         let mut acc = first.clone();
         for w_idx in 1..workers_grads.len() {
-            let (other_name, ref other) = workers_grads[w_idx][p_idx];
-            assert_eq!(*other_name, name,
+            let (other_name, other) = &workers_grads[w_idx][p_idx];
+            assert_eq!(other_name, name,
                        "ordre des params incohérent entre workers");
             assert_eq!(other.shape(), acc.shape(),
                        "shape inconsistant pour param '{name}'");

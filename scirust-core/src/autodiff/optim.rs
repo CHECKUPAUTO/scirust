@@ -24,13 +24,6 @@ pub trait Optimizer {
     /// Lit les gradients via `tape.grad(idx)`, écrit les valeurs via
     /// `tape.set_value(idx, ...)`.
     fn step(&mut self, params: &[usize], tape: &Tape);
-
-    /// Permet de modifier le LR pendant l'entraînement
-    /// (typiquement via un LrSchedule).
-    fn set_lr(&mut self, lr: f32);
-
-    /// Accès au LR courant pour logging / checkpoint
-    fn lr(&self) -> f32;
 }
 
 // ------------------------------------------------------------------ //
@@ -66,14 +59,6 @@ impl Sgd {
 }
 
 impl Optimizer for Sgd {
-    fn set_lr(&mut self, lr: f32) {
-        self.lr = lr;
-    }
-
-    fn lr(&self) -> f32 {
-        self.lr
-    }
-
     fn step(&mut self, params: &[usize], tape: &Tape) {
         for &idx in params {
             let mut value = tape.value(idx);
@@ -132,17 +117,10 @@ impl Adam {
     pub fn with_weight_decay(mut self, wd: f32) -> Self {
         self.weight_decay = wd; self
     }
+    pub fn lr(&self) -> f32 { self.lr }
 }
 
 impl Optimizer for Adam {
-    fn set_lr(&mut self, lr: f32) {
-        self.lr = lr;
-    }
-
-    fn lr(&self) -> f32 {
-        self.lr
-    }
-
     fn step(&mut self, params: &[usize], tape: &Tape) {
         self.t += 1;
         let bc1 = 1.0 - self.beta1.powi(self.t as i32);  // bias correction 1
@@ -182,22 +160,12 @@ impl Optimizer for Adam {
 }
 
 // ------------------------------------------------------------------ //
-//  Helper : apply_schedule                                            //
-// ------------------------------------------------------------------ //
-
-/// Helper : applique un LrSchedule à un Optimizer pour le step donné.
-/// Évite l'idiome verbeux `opt.set_lr(sched.lr_at(step))`.
-pub fn apply_schedule<S: crate::autodiff::scheduler::LrSchedule, O: Optimizer>(
-    sched: &S,
-    opt: &mut O,
-    step: usize,
-) {
-    opt.set_lr(sched.lr_at(step));
-}
-
-// ------------------------------------------------------------------ //
 //  Tests                                                              //
 // ------------------------------------------------------------------ //
+pub fn apply_schedule(scheduler: &impl crate::autodiff::scheduler::LrSchedule, opt: &mut Adam, step: usize) {
+    opt.lr = scheduler.lr_at(step);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,7 +182,7 @@ mod tests {
         let half = tape.input(Tensor::from_vec(vec![0.5], 1, 1));
         let sq = x.hadamard(x);
         let loss = sq.hadamard(half).sum();
-        loss.backward();
+        loss.tape.backward(loss.idx());
 
         let mut opt = Sgd::new(0.1);
         opt.step(&[x.idx()], &tape);
@@ -229,7 +197,7 @@ mod tests {
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(vec![5.0, -3.0], 1, 2));
         let loss = x.hadamard(x).sum();
-        loss.backward();
+        loss.tape.backward(loss.idx());
 
         let mut opt = Adam::new(0.1);
         opt.step(&[x.idx()], &tape);
@@ -241,36 +209,5 @@ mod tests {
         // x[1] : -3.0 - lr*~(-1) ≈ -2.9
         assert!(new_x.data[0] < 5.0, "x[0] = {} should decrease", new_x.data[0]);
         assert!(new_x.data[1] > -3.0, "x[1] = {} should increase", new_x.data[1]);
-    }
-
-    #[test]
-    fn adam_set_lr_changes_step_size() {
-        let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![10.0], 1, 1));
-        let loss = x.clone().hadamard(x.clone()).sum();
-        loss.backward();
-
-        let mut opt = Adam::new(0.1);
-        let lr_before = opt.lr();
-        opt.set_lr(0.001);
-        let lr_after = opt.lr();
-        assert!((lr_before - 0.1).abs() < 1e-7);
-        assert!((lr_after - 0.001).abs() < 1e-7);
-    }
-
-    #[test]
-    fn schedule_drives_optimizer_lr() {
-        use crate::autodiff::scheduler::{StepLr, LrSchedule};
-        let mut opt = Adam::new(0.1);
-        let sched = StepLr::new(0.1, 0.5, 10);
-        // Step 0 : LR = 0.1
-        opt.set_lr(sched.lr_at(0));
-        assert_eq!(opt.lr(), 0.1);
-        // Step 10 : LR = 0.05
-        opt.set_lr(sched.lr_at(10));
-        assert!((opt.lr() - 0.05).abs() < 1e-7);
-        // Step 30 : LR = 0.0125
-        opt.set_lr(sched.lr_at(30));
-        assert!((opt.lr() - 0.0125).abs() < 1e-7);
     }
 }

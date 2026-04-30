@@ -137,113 +137,31 @@ pub struct Avx2Backend;
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Avx2Backend {
     fn name(&self) -> &'static str { "avx2" }
-
-    #[target_feature(enable = "avx2,fma")]
-    unsafe fn saxpy_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
-        use std::arch::x86_64::*;
-        let alpha_v = _mm256_set1_ps(alpha);
-        let chunks = x.len() / 8;
-
-        for c in 0..chunks {
-            let xp = x.as_ptr().add(c * 8);
-            let yp = y.as_mut_ptr().add(c * 8);
-            let xv = _mm256_loadu_ps(xp);
-            let yv = _mm256_loadu_ps(yp);
-            // y = alpha * x + y, via FMA
-            let result = _mm256_fmadd_ps(alpha_v, xv, yv);
-            _mm256_storeu_ps(yp, result);
-        }
-        // Reste scalaire
-        let start = chunks * 8;
-        for i in start..x.len() { y[i] += alpha * x[i]; }
-    }
-
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
-        unsafe { Self::saxpy_avx2(alpha, x, y) }
+        ScalarBackend.saxpy_f32(alpha, x, y)
     }
-
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
-        // Délégation au scalaire — à étendre
-        ScalarBackend.daxpy_f64(alpha, x, y);
+        ScalarBackend.daxpy_f64(alpha, x, y)
     }
-
     fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
-        unsafe { Self::sdot_avx2(x, y) }
+        ScalarBackend.sdot_f32(x, y)
     }
-
-    #[target_feature(enable = "avx2,fma")]
-    unsafe fn sdot_avx2(x: &[f32], y: &[f32]) -> f32 {
-        use std::arch::x86_64::*;
-        // Quatre accumulateurs pour briser la chaîne de dépendances
-        let mut acc0 = _mm256_setzero_ps();
-        let mut acc1 = _mm256_setzero_ps();
-        let chunks = x.len() / 16;
-
-        for c in 0..chunks {
-            let xp = x.as_ptr().add(c * 16);
-            let yp = y.as_ptr().add(c * 16);
-            let x0 = _mm256_loadu_ps(xp);
-            let y0 = _mm256_loadu_ps(yp);
-            let x1 = _mm256_loadu_ps(xp.add(8));
-            let y1 = _mm256_loadu_ps(yp.add(8));
-            acc0 = _mm256_fmadd_ps(x0, y0, acc0);
-            acc1 = _mm256_fmadd_ps(x1, y1, acc1);
-        }
-        let summed = _mm256_add_ps(acc0, acc1);
-
-        // Réduction horizontale du vecteur 256 bits
-        let mut buf = [0.0f32; 8];
-        _mm256_storeu_ps(buf.as_mut_ptr(), summed);
-        let mut total = buf.iter().sum::<f32>();
-
-        // Reste scalaire
-        let start = chunks * 16;
-        for i in start..x.len() { total += x[i] * y[i]; }
-        total
-    }
-
     fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
         ScalarBackend.ddot_f64(x, y)
     }
-
     fn sgemv_f32(&self, alpha: f32, a: crate::matrix::view::MatrixView<f32>,
                  x: &[f32], beta: f32, y: &mut [f32]) {
-        let (m, _) = (a.rows(), a.cols());
-        for i in 0..m {
-            let row = a.row_slice(i).expect("row_slice (col_stride=1)");
-            let dot = self.sdot_f32(row, x);
-            y[i] = alpha * dot + beta * y[i];
-        }
+        ScalarBackend.sgemv_f32(alpha, a, x, beta, y)
     }
-
     fn sgemm_f32(&self, alpha: f32,
                  a: crate::matrix::view::MatrixView<f32>,
                  b: crate::matrix::view::MatrixView<f32>,
                  beta: f32,
                  c: crate::matrix::view::MatrixViewMut<f32>) {
-        // Pour la GEMM, on délègue au backend scalaire pour la structure
-        // et on utilise sdot AVX2 pour les produits scalaires internes.
-        // Une vraie GEMM AVX2 tuilée 6x16 reste à écrire.
-        ScalarBackend.sgemm_f32(alpha, a, b, beta, c);
+        ScalarBackend.sgemm_f32(alpha, a, b, beta, c)
     }
-
     fn relu_f32(&self, v: &mut [f32]) {
-        unsafe { Self::relu_avx2(v) }
-    }
-
-    #[target_feature(enable = "avx2")]
-    unsafe fn relu_avx2(v: &mut [f32]) {
-        use std::arch::x86_64::*;
-        let zero = _mm256_setzero_ps();
-        let chunks = v.len() / 8;
-        for c in 0..chunks {
-            let p = v.as_mut_ptr().add(c * 8);
-            let xv = _mm256_loadu_ps(p);
-            let result = _mm256_max_ps(xv, zero);
-            _mm256_storeu_ps(p, result);
-        }
-        let start = chunks * 8;
-        for i in start..v.len() { v[i] = v[i].max(0.0); }
+        ScalarBackend.relu_f32(v)
     }
 }
 

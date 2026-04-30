@@ -126,7 +126,7 @@ pub struct KaimingUniform;
 impl Initializer for KaimingUniform {
     fn fill(&self, tensor: &mut Tensor, rng: &mut PcgEngine) {
         let fan_in = tensor.rows;
-        let bound = (6.0 / fan_in as f32).sqrt();
+        let bound = (6.0_f32 / fan_in as f32).sqrt();
         for x in tensor.data.iter_mut() { *x = rng.uniform(-bound, bound); }
     }
 }

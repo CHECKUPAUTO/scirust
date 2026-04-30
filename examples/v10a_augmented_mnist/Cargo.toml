@@ -1,5 +1,5 @@
 [package]
-name    = "v10a_augmented_mnist"
+name = "v10a_augmented_mnist"
 version = "0.1.0"
 edition = "2021"
 

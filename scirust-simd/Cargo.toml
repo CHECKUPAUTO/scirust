@@ -1,7 +1,7 @@
 [package]
 name = "scirust-simd"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["SciRust Team"]
 description = "SIMD auto-vectorization primitives for SciRust"
 license = "MIT OR Apache-2.0"

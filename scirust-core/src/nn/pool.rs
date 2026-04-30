@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::module::Module;
 
+#[derive(Clone)]
 pub struct MaxPool2d {
     pub kernel: usize,
     pub stride: usize,
@@ -36,6 +37,7 @@ impl MaxPool2d {
 }
 
 impl Module for MaxPool2d {
+    fn box_clone(&self) -> Box<dyn Module> { Box::new(self.clone()) }
     fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let (c, h, w) = match (self.cached_c, self.cached_h, self.cached_w) {
             (Some(c), Some(h), Some(w)) => (c, h, w),
