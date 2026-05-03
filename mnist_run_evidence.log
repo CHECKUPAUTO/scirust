@@ -1,0 +1,23 @@
+=== SciRust v11.1 — MNIST Classifier ===
+
+Chargement MNIST depuis /root/scirust/data/mnist...
+Train : 60000 images 28x28
+Test  : 10000 images 28x28
+
+Utilisé : 60000 train, 10000 test
+
+Architecture : Linear(784→256) → ReLU → Linear(256→10)
+Entraînement : 5 epochs, batch=64, Adam(lr=0.001)
+
+  Epoch  1 : loss = 0.2615 (938 batches)
+  Epoch  2 : loss = 0.1068 (938 batches)
+  Epoch  3 : loss = 0.0719 (938 batches)
+  Epoch  4 : loss = 0.0517 (938 batches)
+  Epoch  5 : loss = 0.0382 (938 batches)
+
+Évaluation sur test set...
+
+=== RÉSULTAT ===
+  Accuracy : 97.70% (9770/10000)
+
+✅ SUCCÈS — SciRust v11.1 classifie MNIST correctement.
