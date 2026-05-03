@@ -415,8 +415,11 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
             )
         }
         Expr::Abs(a) => {
-            // d/dx |u| = sign(u) * du  (stub: just du)
-            diff(a, var)
+            // d/dx |u| = sign(u) * du  where sign(u) = u / |u|
+            Expr::Mul(
+                Box::new(Expr::Div(a.clone(), Box::new(Expr::Abs(a.clone())))),
+                Box::new(diff(a, var)),
+            )
         }
     }
 }
@@ -584,20 +587,49 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
     }
 }
 
-// ── Optimizer (stub — numeric gradient descent) ──
+// ── Optimizer (numeric gradient descent) ──
 
 pub struct Optimizer {
     pub lr: f64,
     pub momentum: f64,
+    pub max_iter: usize,
     velocity: HashMap<usize, f64>,
 }
 
 impl Optimizer {
-    pub fn new(lr: f64, _max_iter: usize) -> Self {
-        Self { lr, momentum: 0.9, velocity: HashMap::new() }
+    pub fn new(lr: f64, max_iter: usize) -> Self {
+        Self { lr, momentum: 0.9, max_iter, velocity: HashMap::new() }
     }
 
     pub fn set_momentum(&mut self, m: f64) { self.momentum = m; }
+
+    /// Minimize a 1-D function using finite-difference gradient descent
+    /// with backtracking line search. Returns the x value that minimizes f.
+    pub fn minimize<F: Fn(f64) -> f64>(&self, f: F, x0: f64) -> f64 {
+        let mut x = x0;
+        let h = 1e-8;
+        let tol = 1e-8;
+
+        for _ in 0..self.max_iter {
+            // Central finite difference gradient
+            let grad = (f(x + h) - f(x - h)) / (2.0 * h);
+            if grad.abs() < tol {
+                break;
+            }
+
+            // Backtracking line search (Armijo-like)
+            let mut step = self.lr;
+            for _ in 0..20 {
+                let x_new = x - step * grad;
+                if f(x_new) < f(x) {
+                    x = x_new;
+                    break;
+                }
+                step *= 0.5;
+            }
+        }
+        x
+    }
 }
 
 // ── Pattern discovery / polynomial fit ──

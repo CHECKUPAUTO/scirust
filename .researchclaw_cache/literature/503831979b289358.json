@@ -1,0 +1,425 @@
+{
+  "query": "final synthesis three hypotheses human",
+  "source": "arxiv",
+  "limit": 15,
+  "timestamp": 1777752397.6309927,
+  "papers": [
+    {
+      "paper_id": "arxiv-2202.04977",
+      "title": "Needs-aware Artificial Intelligence: AI that 'serves [human] needs'",
+      "authors": [
+        {
+          "name": "Ryan Watkins",
+          "affiliation": ""
+        },
+        {
+          "name": "Soheil Human",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "By defining the current limits (and thereby the frontiers), many boundaries are shaping, and will continue to shape, the future of Artificial Intelligence (AI). We push on these boundaries in order to make further progress into what were yesterday's frontiers. They are both pliable and resilient - always creating new boundaries of what AI can (or should) achieve. Among these are technical boundaries (such as processing capacity), psychological boundaries (such as human trust in AI systems), ethical boundaries (such as with AI weapons), and conceptual boundaries (such as the AI people can imagine). It is within this final category while it can play a fundamental role in all other boundaries} that we find the construct of needs and the limitations that our current concept of need places on the future AI.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2202.04977",
+      "url": "https://arxiv.org/abs/2202.04977",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2306.09274",
+      "title": "Conditional Human Sketch Synthesis with Explicit Abstraction Control",
+      "authors": [
+        {
+          "name": "Dar-Yen Chen",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "This paper presents a novel free-hand sketch synthesis approach addressing explicit abstraction control in class-conditional and photo-to-sketch synthesis. Abstraction is a vital aspect of sketches, as it defines the fundamental distinction between a sketch and an image. Previous works relied on implicit control to achieve different levels of abstraction, leading to inaccurate control and synthesized sketches deviating from human sketches. To resolve this challenge, we propose two novel abstraction control mechanisms, state embeddings and the stroke token, integrated into a transformer-based latent diffusion model (LDM). These mechanisms explicitly provide the required amount of points or strokes to the model, enabling accurate point-level and stroke-level control in synthesized sketches while preserving recognizability. Outperforming state-of-the-art approaches, our method effectively generates diverse, non-rigid and human-like sketches. The proposed approach enables coherent sketch synthesis and excels in representing human habits with desired abstraction levels, highlighting the potential of sketch synthesis for real-world applications.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2306.09274",
+      "url": "https://arxiv.org/abs/2306.09274",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2209.09724",
+      "title": "Advanced Data Protection Control (ADPC): An Interdisciplinary Overview",
+      "authors": [
+        {
+          "name": "Soheil Human",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "The Advanced Data Protection Control (ADPC) is a technical specification - and a set of sociotechnical mechanisms surrounding it - that can change the current practice of Internet-based personal data protection and consenting by providing novel and standardized means for the communication of privacy and consenting data, meta-data, information, requests, preferences, and decisions. The ADPC supports humans in practicing their rights to privacy and agency by giving them more human-centric control over the processing of their personal data and consent. It helps the data controllers to improve their users' experiences and provides them with easy-to-adopt means to comply with the relevant legal and ethical requirements and expectations.",
+      "venue": "cs.NI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2209.09724",
+      "url": "https://arxiv.org/abs/2209.09724",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-1904.03285",
+      "title": "Can You Explain That? Lucid Explanations Help Human-AI Collaborative Image Retrieval",
+      "authors": [
+        {
+          "name": "Arijit Ray",
+          "affiliation": ""
+        },
+        {
+          "name": "Yi Yao",
+          "affiliation": ""
+        },
+        {
+          "name": "Rakesh Kumar",
+          "affiliation": ""
+        },
+        {
+          "name": "Ajay Divakaran",
+          "affiliation": ""
+        },
+        {
+          "name": "Giedrius Burachas",
+          "affiliation": ""
+        }
+      ],
+      "year": 2019,
+      "abstract": "While there have been many proposals on making AI algorithms explainable, few have attempted to evaluate the impact of AI-generated explanations on human performance in conducting human-AI collaborative tasks. To bridge the gap, we propose a Twenty-Questions style collaborative image retrieval game, Explanation-assisted Guess Which (ExAG), as a method of evaluating the efficacy of explanations (visual evidence or textual justification) in the context of Visual Question Answering (VQA). In our proposed ExAG, a human user needs to guess a secret image picked by the VQA agent by asking natural language questions to it. We show that overall, when AI explains its answers, users succeed more often in guessing the secret image correctly. Notably, a few correct explanations can readily improve human performance when VQA answers are mostly incorrect as compared to no-explanation games. Furthermore, we also show that while explanations rated as \"helpful\" significantly improve human performance, \"incorrect\" and \"unhelpful\" explanations can degrade performance as compared to no-explanation games. Our experiments, therefore, demonstrate that ExAG is an effective means to evaluate the efficacy of AI-generated explanations on a human-AI collaborative task.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "1904.03285",
+      "url": "https://arxiv.org/abs/1904.03285",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-1004.4609",
+      "title": "Synthesis of Reversible Functions Beyond Gate Count and Quantum Cost",
+      "authors": [
+        {
+          "name": "Robert Wille",
+          "affiliation": ""
+        },
+        {
+          "name": "Mehdi Saeedi",
+          "affiliation": ""
+        },
+        {
+          "name": "Rolf Drechsler",
+          "affiliation": ""
+        }
+      ],
+      "year": 2010,
+      "abstract": "Many synthesis approaches for reversible and quantum logic have been proposed so far. However, most of them generate circuits with respect to simple metrics, i.e. gate count or quantum cost. On the other hand, to physically realize reversible and quantum hardware, additional constraints exist. In this paper, we describe cost metrics beyond gate count and quantum cost that should be considered while synthesizing reversible and quantum logic for the respective target technologies. We show that the evaluation of a synthesis approach may differ if additional costs are applied. In addition, a new cost metric, namely Nearest Neighbor Cost (NNC) which is imposed by realistic physical quantum architectures, is considered in detail. We discuss how existing synthesis flows can be extended to generate optimal circuits with respect to NNC while still keeping the quantum cost small.",
+      "venue": "quant-ph",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "1004.4609",
+      "url": "https://arxiv.org/abs/1004.4609",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2504.14689",
+      "title": "Designing AI Systems that Augment Human Performed vs. Demonstrated Critical Thinking",
+      "authors": [
+        {
+          "name": "Katelyn Xiaoying Mei",
+          "affiliation": ""
+        },
+        {
+          "name": "Nic Weber",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The recent rapid advancement of LLM-based AI systems has accelerated our search and production of information. While the advantages brought by these systems seemingly improve the performance or efficiency of human activities, they do not necessarily enhance human capabilities. Recent research has started to examine the impact of generative AI on individuals' cognitive abilities, especially critical thinking. Based on definitions of critical thinking across psychology and education, this position paper proposes the distinction between demonstrated and performed critical thinking in the era of generative AI and discusses the implication of this distinction in research and development of AI systems that aim to augment human critical thinking.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2504.14689",
+      "url": "https://arxiv.org/abs/2504.14689",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2603.12895",
+      "title": "Human-Centered Evaluation of an LLM-Based Process Modeling Copilot: A Mixed-Methods Study with Domain Experts",
+      "authors": [
+        {
+          "name": "Chantale Lauer",
+          "affiliation": ""
+        },
+        {
+          "name": "Peter Pfeiffer",
+          "affiliation": ""
+        },
+        {
+          "name": "Nijat Mehdiyev",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "Integrating Large Language Models (LLMs) into business process management tools promises to democratize Business Process Model and Notation (BPMN) modeling for non-experts. While automated frameworks assess syntactic and semantic quality, they miss human factors like trust, usability, and professional alignment. We conducted a mixed-methods evaluation of our proposed solution, an LLM-powered BPMN copilot, with five process modeling experts using focus groups and standardized questionnaires. Our findings reveal a critical tension between acceptable perceived usability (mean CUQ score: 67.2/100) and notably lower trust (mean score: 48.8\\%), with reliability rated as the most critical concern (M=1.8/5). Furthermore, we identified output-quality issues, prompting difficulties, and a need for the LLM to ask more in-depth clarifying questions about the process. We envision five use cases ranging from domain-expert support to enterprise quality assurance. We demonstrate the necessity of human-centered evaluation complementing automated benchmarking for LLM modeling agents.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2603.12895",
+      "url": "https://arxiv.org/abs/2603.12895",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2107.14449",
+      "title": "Synth-by-Reg (SbR): Contrastive learning for synthesis-based registration of paired images",
+      "authors": [
+        {
+          "name": "Adri\u00e0 Casamitjana",
+          "affiliation": ""
+        },
+        {
+          "name": "Matteo Mancini",
+          "affiliation": ""
+        },
+        {
+          "name": "Juan Eugenio Iglesias",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Nonlinear inter-modality registration is often challenging due to the lack of objective functions that are good proxies for alignment. Here we propose a synthesis-by-registration method to convert this problem into an easier intra-modality task. We introduce a registration loss for weakly supervised image translation between domains that does not require perfectly aligned training data. This loss capitalises on a registration U-Net with frozen weights, to drive a synthesis CNN towards the desired translation. We complement this loss with a structure preserving constraint based on contrastive learning, which prevents blurring and content shifts due to overfitting. We apply this method to the registration of histological sections to MRI slices, a key step in 3D histology reconstruction. Results on two different public datasets show improvements over registration based on mutual information (13% reduction in landmark error) and synthesis-based algorithms such as CycleGAN (11% reduction), and are comparable to a registration CNN with label supervision. Code and data are publicly available at \\url{https://github.com/acasamitjana/SynthByReg}",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1007/978-3-030-87592-3_5",
+      "arxiv_id": "2107.14449",
+      "url": "https://arxiv.org/abs/2107.14449",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2602.09423",
+      "title": "Beyond Input-Output: Rethinking Creativity through Design-by-Analogy in Human-AI Collaboration",
+      "authors": [
+        {
+          "name": "Xuechen Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Shuai Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Nan Cao",
+          "affiliation": ""
+        },
+        {
+          "name": "Qing Chen",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "While the proliferation of foundation models has significantly boosted individual productivity, it also introduces a potential challenge: the homogenization of creative content. In response, we revisit Design-by-Analogy (DbA), a cognitively grounded approach that fosters novel solutions by mapping inspiration across domains. However, prevailing perspectives often restrict DbA to early ideation or specific data modalities, while reducing AI-driven design to simplified input-output pipelines. Such conceptual limitations inadvertently foster widespread design fixation. To address this, we expand the understanding of DbA by embedding it into the entire creative process, thereby demonstrating its capacity to mitigate such fixation. Through a systematic review of 85 studies, we identify six forms of representation and classify techniques across seven stages of the creative process. We further discuss three major application domains: creative industries, intelligent manufacturing, and education and services, demonstrating DbA's practical relevance. Building on this synthesis, we frame DbA as a mediating technology for human-AI collaboration and outline the potential opportunities and inherent risks for advancing creativity support in HCI and design research.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "10.1145/3772318.3791403",
+      "arxiv_id": "2602.09423",
+      "url": "https://arxiv.org/abs/2602.09423",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2504.16770",
+      "title": "DeBiasMe: De-biasing Human-AI Interactions with Metacognitive AIED (AI in Education) Interventions",
+      "authors": [
+        {
+          "name": "Chaeyeon Lim",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "While generative artificial intelligence (Gen AI) increasingly transforms academic environments, a critical gap exists in understanding and mitigating human biases in AI interactions, such as anchoring and confirmation bias. This position paper advocates for metacognitive AI literacy interventions to help university students critically engage with AI and address biases across the Human-AI interaction workflows. The paper presents the importance of considering (1) metacognitive support with deliberate friction focusing on human bias; (2) bi-directional Human-AI interaction intervention addressing both input formulation and output interpretation; and (3) adaptive scaffolding that responds to diverse user engagement patterns. These frameworks are illustrated through ongoing work on \"DeBiasMe,\" AIED (AI in Education) interventions designed to enhance awareness of cognitive biases while empowering user agency in AI interactions. The paper invites multiple stakeholders to engage in discussions on design and evaluation methods for scaffolding mechanisms, bias visualization, and analysis frameworks. This position contributes to the emerging field of AI-augmented learning by emphasizing the critical role of metacognition in helping students navigate the complex interaction between human, statistical, and systemic biases in AI use while highlighting how cognitive adaptation to AI systems must be explicitly integrated into comprehensive AI literacy frameworks.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2504.16770",
+      "url": "https://arxiv.org/abs/2504.16770",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2507.11460",
+      "title": "Human-Robot collaboration in surgery: Advances and challenges towards autonomous surgical assistants",
+      "authors": [
+        {
+          "name": "Jacinto Colan",
+          "affiliation": ""
+        },
+        {
+          "name": "Ana Davila",
+          "affiliation": ""
+        },
+        {
+          "name": "Yutaro Yamada",
+          "affiliation": ""
+        },
+        {
+          "name": "Yasuhisa Hasegawa",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Human-robot collaboration in surgery represents a significant area of research, driven by the increasing capability of autonomous robotic systems to assist surgeons in complex procedures. This systematic review examines the advancements and persistent challenges in the development of autonomous surgical robotic assistants (ASARs), focusing specifically on scenarios where robots provide meaningful and active support to human surgeons. Adhering to the PRISMA guidelines, a comprehensive literature search was conducted across the IEEE Xplore, Scopus, and Web of Science databases, resulting in the selection of 32 studies for detailed analysis. Two primary collaborative setups were identified: teleoperation-based assistance and direct hands-on interaction. The findings reveal a growing research emphasis on ASARs, with predominant applications currently in endoscope guidance, alongside emerging progress in autonomous tool manipulation. Several key challenges hinder wider adoption, including the alignment of robotic actions with human surgeon preferences, the necessity for procedural awareness within autonomous systems, the establishment of seamless human-robot information exchange, and the complexities of skill acquisition in shared workspaces. This review synthesizes current trends, identifies critical limitations, and outlines future research directions essential to improve the reliability, safety, and effectiveness of human-robot collaboration in surgical environments.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2507.11460",
+      "url": "https://arxiv.org/abs/2507.11460",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-1909.06415",
+      "title": "Enabling Intuitive Human-Robot Teaming Using Augmented Reality and Gesture Control",
+      "authors": [
+        {
+          "name": "Jason M. Gregory",
+          "affiliation": ""
+        },
+        {
+          "name": "Christopher Reardon",
+          "affiliation": ""
+        },
+        {
+          "name": "Kevin Lee",
+          "affiliation": ""
+        },
+        {
+          "name": "Geoffrey White",
+          "affiliation": ""
+        },
+        {
+          "name": "Ki Ng",
+          "affiliation": ""
+        },
+        {
+          "name": "Caitlyn Sims",
+          "affiliation": ""
+        }
+      ],
+      "year": 2019,
+      "abstract": "Human-robot teaming offers great potential because of the opportunities to combine strengths of heterogeneous agents. However, one of the critical challenges in realizing an effective human-robot team is efficient information exchange - both from the human to the robot as well as from the robot to the human. In this work, we present and analyze an augmented reality-enabled, gesture-based system that supports intuitive human-robot teaming through improved information exchange. Our proposed system requires no external instrumentation aside from human-wearable devices and shows promise of real-world applicability for service-oriented missions. Additionally, we present preliminary results from a pilot study with human participants, and highlight lessons learned and open research questions that may help direct future development, fielding, and experimentation of autonomous HRI systems.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "1909.06415",
+      "url": "https://arxiv.org/abs/1909.06415",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2110.15054",
+      "title": "Adaptive Multimodal and Multisensory Empathic Technologies for Enhanced Human Communication",
+      "authors": [
+        {
+          "name": "Roxana Girju",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "As digital social platforms and mobile technologies are becoming more prevalent and robust, the use of Artificial Intelligence (AI) in facilitating human communication will grow. This, in turn, will pave the way for the development of intuitive, adaptive, and effective empathic AI interfaces that better address the needs of socially and culturally diverse communities. I believe such developments must consider a principled framework that includes the human perceptual senses in the digital design process right from the start, for a more accurate, as well as a more aesthetic, memorable, and soothing experience. In this position paper, I suggest features, identify some challenges that need to be addressed in the process, and propose some future research directions that I think should be part of the design and implementation. Such an approach will allow various communities of practice to investigate the areas of intersection between artificial intelligence, on one side, and human communication, perceptual needs and social and cultural values, on the other.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2110.15054",
+      "url": "https://arxiv.org/abs/2110.15054",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2103.01555",
+      "title": "Careful with That! Observation of Human Movements to Estimate Objects Properties",
+      "authors": [
+        {
+          "name": "Linda Lastrico",
+          "affiliation": ""
+        },
+        {
+          "name": "Alessandro Carf\u00ec",
+          "affiliation": ""
+        },
+        {
+          "name": "Alessia Vignolo",
+          "affiliation": ""
+        },
+        {
+          "name": "Alessandra Sciutti",
+          "affiliation": ""
+        },
+        {
+          "name": "Fulvio Mastrogiovanni",
+          "affiliation": ""
+        },
+        {
+          "name": "Francesco Rea",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Humans are very effective at interpreting subtle properties of the partner's movement and use this skill to promote smooth interactions. Therefore, robotic platforms that support human partners in daily activities should acquire similar abilities. In this work we focused on the features of human motor actions that communicate insights on the weight of an object and the carefulness required in its manipulation. Our final goal is to enable a robot to autonomously infer the degree of care required in object handling and to discriminate whether the item is light or heavy, just by observing a human manipulation. This preliminary study represents a promising step towards the implementation of those abilities on a robot observing the scene with its camera. Indeed, we succeeded in demonstrating that it is possible to reliably deduct if the human operator is careful when handling an object, through machine learning algorithms relying on the stream of visual acquisition from either a robot camera or from a motion capture system. On the other hand, we observed that the same approach is inadequate to discriminate between light and heavy objects.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "10.1007/978-3-030-71356-0_10",
+      "arxiv_id": "2103.01555",
+      "url": "https://arxiv.org/abs/2103.01555",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2206.00474",
+      "title": "Towards Responsible AI: A Design Space Exploration of Human-Centered Artificial Intelligence User Interfaces to Investigate Fairness",
+      "authors": [
+        {
+          "name": "Yuri Nakao",
+          "affiliation": ""
+        },
+        {
+          "name": "Lorenzo Strappelli",
+          "affiliation": ""
+        },
+        {
+          "name": "Simone Stumpf",
+          "affiliation": ""
+        },
+        {
+          "name": "Aisha Naseer",
+          "affiliation": ""
+        },
+        {
+          "name": "Daniele Regoli",
+          "affiliation": ""
+        },
+        {
+          "name": "Giulia Del Gamba",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "With Artificial intelligence (AI) to aid or automate decision-making advancing rapidly, a particular concern is its fairness. In order to create reliable, safe and trustworthy systems through human-centred artificial intelligence (HCAI) design, recent efforts have produced user interfaces (UIs) for AI experts to investigate the fairness of AI models. In this work, we provide a design space exploration that supports not only data scientists but also domain experts to investigate AI fairness. Using loan applications as an example, we held a series of workshops with loan officers and data scientists to elicit their requirements. We instantiated these requirements into FairHIL, a UI to support human-in-the-loop fairness investigations, and describe how this UI could be generalized to other use cases. We evaluated FairHIL through a think-aloud user study. Our work contributes better designs to investigate an AI model's fairness-and move closer towards responsible AI.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2206.00474",
+      "url": "https://arxiv.org/abs/2206.00474",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    }
+  ]
+}

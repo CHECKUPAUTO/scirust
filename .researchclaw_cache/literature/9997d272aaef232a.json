@@ -1,0 +1,777 @@
+{
+  "query": "Build-working-autonomous-research-tool",
+  "source": "openalex",
+  "limit": 15,
+  "timestamp": 1777752388.3833368,
+  "papers": [
+    {
+      "paper_id": "oalex-W2067404301",
+      "title": "The qualitative content analysis process",
+      "authors": [
+        {
+          "name": "Satu Elo",
+          "affiliation": "University of Oulu"
+        },
+        {
+          "name": "Helvi Kyng\u00e4s",
+          "affiliation": "University of Oulu"
+        }
+      ],
+      "year": 2008,
+      "abstract": "AIM: This paper is a description of inductive and deductive content analysis. BACKGROUND: Content analysis is a method that may be used with either qualitative or quantitative data and in an inductive or deductive way. Qualitative content analysis is commonly used in nursing studies but little has been published on the analysis process and many research books generally only provide a short description of this method. DISCUSSION: When using content analysis, the aim was to build a model to describe the phenomenon in a conceptual form. Both inductive and deductive analysis processes are represented as three main phases: preparation, organizing and reporting. The preparation phase is similar in both approaches. The concepts are derived from the data in inductive content analysis. Deductive content analysis is used when the structure of analysis is operationalized on the basis of previous knowledge. CONCLUSION: Inductive content analysis is used in cases where there are no previous studies dealing with the phenomenon or when it is fragmented. A deductive approach is useful if the general aim was to test a previous theory in a different situation or to compare categories at different time periods.",
+      "venue": "Journal of Advanced Nursing",
+      "citation_count": 21909,
+      "doi": "10.1111/j.1365-2648.2007.04569.x",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1111/j.1365-2648.2007.04569.x",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2302501749",
+      "title": "The FAIR Guiding Principles for scientific data management and stewardship",
+      "authors": [
+        {
+          "name": "Mark D. Wilkinson",
+          "affiliation": "Centre for Plant Biotechnology and Genomics"
+        },
+        {
+          "name": "Michel Dumontier",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "IJsbrand Jan Aalbersberg",
+          "affiliation": "RELX Group (Netherlands)"
+        },
+        {
+          "name": "Gabrielle Appleton",
+          "affiliation": "RELX Group (Netherlands)"
+        },
+        {
+          "name": "Myles Axton",
+          "affiliation": "The Nature Conservancy"
+        },
+        {
+          "name": "Arie Baak",
+          "affiliation": "EuroQol Research Foundation"
+        },
+        {
+          "name": "Niklas Blomberg",
+          "affiliation": "Wellcome Sanger Institute"
+        },
+        {
+          "name": "Jan\u2010Willem Boiten",
+          "affiliation": "Lygature"
+        },
+        {
+          "name": "Luiz Olavo Bonino da Silva Santos",
+          "affiliation": "Vrije Universiteit Amsterdam"
+        },
+        {
+          "name": "Philip E. Bourne",
+          "affiliation": "National Institutes of Health"
+        },
+        {
+          "name": "Jildau Bouwman",
+          "affiliation": "Pension Fund for Care and Well-Being"
+        },
+        {
+          "name": "Anthony J. Brookes",
+          "affiliation": "University of Leicester"
+        },
+        {
+          "name": "Tim W. Clark",
+          "affiliation": "Harvard University"
+        },
+        {
+          "name": "Merc\u00e8 Crosas",
+          "affiliation": "Harvard University Press"
+        },
+        {
+          "name": "Ingrid Dillo",
+          "affiliation": "Data Archiving Networked Services (DANS)"
+        },
+        {
+          "name": "Olivier Dumon",
+          "affiliation": "RELX Group (Netherlands)"
+        },
+        {
+          "name": "Scott Edmunds",
+          "affiliation": "BGI Group (China)"
+        },
+        {
+          "name": "Chris T. Evelo",
+          "affiliation": "Maastricht University"
+        },
+        {
+          "name": "Richard Finkers",
+          "affiliation": "Graduate School Experimental Plant Sciences"
+        },
+        {
+          "name": "Alejandra Gonz\u00e1lez-Beltr\u00e1n",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Alasdair J. G. Gray",
+          "affiliation": "Heriot-Watt University"
+        },
+        {
+          "name": "Paul Groth",
+          "affiliation": "RELX Group (Netherlands)"
+        },
+        {
+          "name": "Carole Goble",
+          "affiliation": "University of Manchester"
+        },
+        {
+          "name": "Jeffrey S. Grethe",
+          "affiliation": "University of California San Diego"
+        },
+        {
+          "name": "Jaap Heringa",
+          "affiliation": "Dutch Institute for Healthcare Improvement"
+        },
+        {
+          "name": "Peter A.C. \u2019t Hoen",
+          "affiliation": "Leiden University Medical Center"
+        },
+        {
+          "name": "Rob Hooft",
+          "affiliation": "Nederlandse Spoorwegen"
+        },
+        {
+          "name": "Tobias Kuhn",
+          "affiliation": "Vrije Universiteit Amsterdam"
+        },
+        {
+          "name": "Ruben Kok",
+          "affiliation": "Dutch Institute for Healthcare Improvement"
+        },
+        {
+          "name": "Joost N. Kok",
+          "affiliation": "Leiden University"
+        },
+        {
+          "name": "Scott J. Lusher",
+          "affiliation": "Netherlands eScience Center"
+        },
+        {
+          "name": "Maryann E. Martone",
+          "affiliation": "Space Micro (United States)"
+        },
+        {
+          "name": "Albert Mons",
+          "affiliation": "Clinical Research Consultants (United States)"
+        },
+        {
+          "name": "Abel L. Packer",
+          "affiliation": "Funda\u00e7\u00e3o de Apoio \u00e0 Universidade Federal de S\u00e3o Paulo"
+        },
+        {
+          "name": "Bengt Persson",
+          "affiliation": "Uppsala University"
+        },
+        {
+          "name": "Philippe Rocca\u2010Serra",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Marco Roos",
+          "affiliation": "Leiden University Medical Center"
+        },
+        {
+          "name": "Ren\u00e9 van Schaik",
+          "affiliation": "Bayer (Belgium)"
+        },
+        {
+          "name": "Susanna\u2010Assunta Sansone",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Erik Schultes",
+          "affiliation": "Leiden University"
+        },
+        {
+          "name": "Thierry Sengstag",
+          "affiliation": "SIB Swiss Institute of Bioinformatics"
+        },
+        {
+          "name": "Ted Slater",
+          "affiliation": "Toray (United States)"
+        },
+        {
+          "name": "George Strawn",
+          "affiliation": ""
+        },
+        {
+          "name": "Morris A. Swertz",
+          "affiliation": "University Medical Center Groningen"
+        },
+        {
+          "name": "Mark Thompson",
+          "affiliation": "Leiden University Medical Center"
+        },
+        {
+          "name": "Johan van der Lei",
+          "affiliation": "Erasmus MC"
+        },
+        {
+          "name": "Erik M. van Mulligen",
+          "affiliation": "Erasmus MC"
+        },
+        {
+          "name": "Jan Velterop",
+          "affiliation": ""
+        },
+        {
+          "name": "Andra Waagmeester",
+          "affiliation": "Province of Antwerp"
+        },
+        {
+          "name": "Peter Wittenburg",
+          "affiliation": "Max Planck Computing and Data Facility"
+        },
+        {
+          "name": "Katherine Wolstencroft",
+          "affiliation": "Leiden University"
+        },
+        {
+          "name": "Jun Zhao",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Barend Mons",
+          "affiliation": "Leiden University Medical Center"
+        }
+      ],
+      "year": 2016,
+      "abstract": "There is an urgent need to improve the infrastructure supporting the reuse of scholarly data. A diverse set of stakeholders-representing academia, industry, funding agencies, and scholarly publishers-have come together to design and jointly endorse a concise and measureable set of principles that we refer to as the FAIR Data Principles. The intent is that these may act as a guideline for those wishing to enhance the reusability of their data holdings. Distinct from peer initiatives that focus on the human scholar, the FAIR Principles put specific emphasis on enhancing the ability of machines to automatically find and use the data, in addition to supporting its reuse by individuals. This Comment is the first formal publication of the FAIR Principles, and includes the rationale behind them, and some exemplar implementations in the community.",
+      "venue": "Scientific Data",
+      "citation_count": 17224,
+      "doi": "10.1038/sdata.2016.18",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/sdata.2016.18",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2120145199",
+      "title": "QUANTUM ESPRESSO: a modular and open-source software project for quantum simulations of materials",
+      "authors": [
+        {
+          "name": "Paolo Giannozzi",
+          "affiliation": "University of Udine"
+        },
+        {
+          "name": "Stefano Baroni",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Nicola Bonini",
+          "affiliation": "Massachusetts Institute of Technology"
+        },
+        {
+          "name": "Matteo Calandra",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Roberto Car",
+          "affiliation": "Princeton University"
+        },
+        {
+          "name": "Carlo Cavazzoni",
+          "affiliation": "Cineca"
+        },
+        {
+          "name": "Davide Ceresoli",
+          "affiliation": "Massachusetts Institute of Technology"
+        },
+        {
+          "name": "G. Chiarotti",
+          "affiliation": "Superconducting and other Innovative Materials and Devices Institute"
+        },
+        {
+          "name": "Matteo Cococcioni",
+          "affiliation": "University of Minnesota"
+        },
+        {
+          "name": "Isma\u00efla Dabo",
+          "affiliation": "Institut national de recherche en sciences et technologies du num\u00e9rique"
+        },
+        {
+          "name": "Andrea Dal Corso",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Stefano de Gironcoli",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Stefano Fabris",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Guido Fratesi",
+          "affiliation": "University of Milano-Bicocca"
+        },
+        {
+          "name": "Ralph Gebauer",
+          "affiliation": "The Abdus Salam International Centre for Theoretical Physics (ICTP)"
+        },
+        {
+          "name": "U. Gerstmann",
+          "affiliation": "Paderborn University"
+        },
+        {
+          "name": "Christos Gougoussis",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Anton Kokalj",
+          "affiliation": "AREA Science Park"
+        },
+        {
+          "name": "Michele Lazzeri",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Layla Martin\u2010Samos",
+          "affiliation": "AREA Science Park"
+        },
+        {
+          "name": "Nicola Marzari",
+          "affiliation": "Massachusetts Institute of Technology"
+        },
+        {
+          "name": "Francesco Mauri",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Riccardo Mazzarello",
+          "affiliation": "ETH Zurich"
+        },
+        {
+          "name": "Stefano Paolini",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Alfredo Pasquarello",
+          "affiliation": "\u00c9cole Polytechnique F\u00e9d\u00e9rale de Lausanne"
+        },
+        {
+          "name": "Lorenzo Paulatto",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Carlo Sbraccia",
+          "affiliation": "AREA Science Park"
+        },
+        {
+          "name": "Sandro Scandolo",
+          "affiliation": "The Abdus Salam International Centre for Theoretical Physics (ICTP)"
+        },
+        {
+          "name": "Gabriele Sclauzero",
+          "affiliation": "Scuola Internazionale Superiore di Studi Avanzati"
+        },
+        {
+          "name": "Ari P. Seitsonen",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Alexander Smogunov",
+          "affiliation": "The Abdus Salam International Centre for Theoretical Physics (ICTP)"
+        },
+        {
+          "name": "Paolo Umari",
+          "affiliation": "AREA Science Park"
+        },
+        {
+          "name": "Renata M. Wentzcovitch",
+          "affiliation": "University of Minnesota"
+        }
+      ],
+      "year": 2009,
+      "abstract": "QUANTUM ESPRESSO is an integrated suite of computer codes for electronic-structure calculations and materials modeling, based on density-functional theory, plane waves, and pseudopotentials (norm-conserving, ultrasoft, and projector-augmented wave). The acronym ESPRESSO stands for opEn Source Package for Research in Electronic Structure, Simulation, and Optimization. It is freely available to researchers around the world under the terms of the GNU General Public License. QUANTUM ESPRESSO builds upon newly-restructured electronic-structure codes that have been developed and tested by some of the original authors of novel electronic-structure algorithms and applied in the last twenty years by some of the leading materials modeling groups worldwide. Innovation and efficiency are still its main focus, with special attention paid to massively parallel architectures, and a great effort being devoted to user friendliness. QUANTUM ESPRESSO is evolving towards a distribution of independent and interoperable codes in the spirit of an open-source project, where researchers active in the field of electronic-structure calculations are encouraged to participate in the project by contributing their own codes or by implementing their own ideas into existing codes.",
+      "venue": "Journal of Physics Condensed Matter",
+      "citation_count": 28516,
+      "doi": "10.1088/0953-8984/21/39/395502",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1088/0953-8984/21/39/395502",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2111619626",
+      "title": "Internet of Things (IoT): A vision, architectural elements, and future directions",
+      "authors": [
+        {
+          "name": "Jayavardhana Gubbi",
+          "affiliation": "University of Melbourne"
+        },
+        {
+          "name": "Rajkumar Buyya",
+          "affiliation": "University of Melbourne"
+        },
+        {
+          "name": "Slaven Marusic",
+          "affiliation": "University of Melbourne"
+        },
+        {
+          "name": "Marimuthu Palaniswami",
+          "affiliation": "University of Melbourne"
+        }
+      ],
+      "year": 2013,
+      "abstract": "",
+      "venue": "Future Generation Computer Systems",
+      "citation_count": 11862,
+      "doi": "10.1016/j.future.2013.01.010",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.future.2013.01.010",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2981731882",
+      "title": "Explainable Artificial Intelligence (XAI): Concepts, taxonomies, opportunities and challenges toward responsible AI",
+      "authors": [
+        {
+          "name": "Alejandro Barredo Arrieta",
+          "affiliation": "Tecnalia"
+        },
+        {
+          "name": "Natalia D\u00edaz-Rodr\u00edguez",
+          "affiliation": "\u00c9cole Nationale Sup\u00e9rieure de Techniques Avanc\u00e9es"
+        },
+        {
+          "name": "Javier Del Ser",
+          "affiliation": "Tecnalia"
+        },
+        {
+          "name": "Adrien Bennetot",
+          "affiliation": "Sorbonne Universit\u00e9"
+        },
+        {
+          "name": "Siham Tabik",
+          "affiliation": ""
+        },
+        {
+          "name": "Alberto Barbado",
+          "affiliation": "Telefonica Research and Development"
+        },
+        {
+          "name": "Salvador Garc\u00eda",
+          "affiliation": ""
+        },
+        {
+          "name": "Sergio Gil-L\u00f3pez",
+          "affiliation": "Tecnalia"
+        },
+        {
+          "name": "Daniel Molina",
+          "affiliation": ""
+        },
+        {
+          "name": "Richard Benjamins",
+          "affiliation": "Telefonica Research and Development"
+        },
+        {
+          "name": "Raja Chatila",
+          "affiliation": "Sorbonne Universit\u00e9"
+        },
+        {
+          "name": "Francisco Herrera",
+          "affiliation": ""
+        }
+      ],
+      "year": 2019,
+      "abstract": "",
+      "venue": "Information Fusion",
+      "citation_count": 8557,
+      "doi": "10.1016/j.inffus.2019.12.012",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.inffus.2019.12.012",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2164599981",
+      "title": "Situated Cognition and the Culture of Learning",
+      "authors": [
+        {
+          "name": "John Seely Brown",
+          "affiliation": "Institute for Learning and Development"
+        },
+        {
+          "name": "Allan Collins",
+          "affiliation": "Institute for Learning and Development"
+        },
+        {
+          "name": "Paul Duguid",
+          "affiliation": "Buckingham Browne & Nichols"
+        }
+      ],
+      "year": 1989,
+      "abstract": "Many teaching practices implicitly assume that conceptual knowledge can be abstracted from the situations in which it is learned and used. This article argues that this assumption inevitably limits the effectiveness of such practices. Drawing on recent research into cognition as it is manifest in everyday activity, the authors argue that knowledge is situated, being in part a product of the activity, context, and culture in which it is developed and used. They discuss how this view of knowledge affects our understanding of learning, and they note that conventional schooling too often ignores the influence of school culture on what is learned in school. As an alternative to conventional practices, they propose cognitive apprenticeship (Collins, Brown, &amp; Newman, in press), which honors the situated nature of knowledge. They examine two examples of mathematics instruction that exhibit certain key features of this approach to teaching.",
+      "venue": "Educational Researcher",
+      "citation_count": 12922,
+      "doi": "10.3102/0013189x018001032",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3102/0013189x018001032",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2193503481",
+      "title": "Overview of the Coupled Model Intercomparison Project Phase 6 (CMIP6) experimental design and organization",
+      "authors": [
+        {
+          "name": "Veronika Eyring",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Sandrine Bony",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Gerald A. Meehl",
+          "affiliation": "NSF National Center for Atmospheric Research"
+        },
+        {
+          "name": "C. A. Senior",
+          "affiliation": "Met Office"
+        },
+        {
+          "name": "Bj\u00f6rn Stevens",
+          "affiliation": "Max Planck Institute for Meteorology"
+        },
+        {
+          "name": "Ronald J. Stouffer",
+          "affiliation": "National Oceanic and Atmospheric Administration"
+        },
+        {
+          "name": "Karl E. Taylor",
+          "affiliation": "Lawrence Livermore National Laboratory"
+        }
+      ],
+      "year": 2016,
+      "abstract": "Abstract. By coordinating the design and distribution of global climate model simulations of the past, current, and future climate, the Coupled Model Intercomparison Project (CMIP) has become one of the foundational elements of climate science. However, the need to address an ever-expanding range of scientific questions arising from more and more research communities has made it necessary to revise the organization of CMIP. After a long and wide community consultation, a new and more federated structure has been put in place. It consists of three major elements: (1) a handful of common experiments, the DECK (Diagnostic, Evaluation and Characterization of Klima) and CMIP historical simulations (1850\u2013near present) that will maintain continuity and help document basic characteristics of models across different phases of CMIP; (2) common standards, coordination, infrastructure, and documentation that will facilitate the distribution of model outputs and the characterization of the model ensemble; and (3) an ensemble of CMIP-Endorsed Model Intercomparison Projects (MIPs) that will be specific to a particular phase of CMIP (now CMIP6) and that will build on the DECK and CMIP historical simulations to address a large range of specific questions and fill the scientific gaps of the previous CMIP phases. The DECK and CMIP historical simulations, together with the use of CMIP data standards, will be the entry cards for models participating in CMIP. Participation in CMIP6-Endorsed MIPs by individual modelling groups will be at their own discretion and will depend on their scientific interests and priorities. With the Grand Science Challenges of the World Climate Research Programme (WCRP) as its scientific backdrop, CMIP6 will address three broad questions: \u2013 How does the Earth system respond to forcing? \u2013 What are the origins and consequences of systematic model biases? \u2013 How can we assess future climate changes given internal climate variability, predictability, and uncertainties in scenarios? This CMIP6 overview paper presents the background and rationale for the new structure of CMIP, provides a detailed description of the DECK and CMIP6 historical simulations, and includes a brief introduction to the 21 CMIP6-Endorsed MIPs.",
+      "venue": "Geoscientific model development",
+      "citation_count": 11726,
+      "doi": "10.5194/gmd-9-1937-2016",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.5194/gmd-9-1937-2016",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2134295053",
+      "title": "Internet of Things: A Survey on Enabling Technologies, Protocols, and Applications",
+      "authors": [
+        {
+          "name": "Ala Al\u2010Fuqaha",
+          "affiliation": "Western Michigan University"
+        },
+        {
+          "name": "Mohsen Guizani",
+          "affiliation": "Qatar University"
+        },
+        {
+          "name": "Mehdi Mohammadi",
+          "affiliation": "Western Michigan University"
+        },
+        {
+          "name": "Mohammed Aledhari",
+          "affiliation": "Western Michigan University"
+        },
+        {
+          "name": "Moussa Ayyash",
+          "affiliation": "Chicago State University"
+        }
+      ],
+      "year": 2015,
+      "abstract": "This paper provides an overview of the Internet of Things (IoT) with emphasis on enabling technologies, protocols, and application issues. The IoT is enabled by the latest developments in RFID, smart sensors, communication technologies, and Internet protocols. The basic premise is to have smart sensors collaborate directly without human involvement to deliver a new class of applications. The current revolution in Internet, mobile, and machine-to-machine (M2M) technologies can be seen as the first phase of the IoT. In the coming years, the IoT is expected to bridge diverse technologies to enable new applications by connecting physical objects together in support of intelligent decision making. This paper starts by providing a horizontal overview of the IoT. Then, we give an overview of some technical details that pertain to the IoT enabling technologies, protocols, and applications. Compared to other survey papers in the field, our objective is to provide a more thorough summary of the most relevant protocols and application issues to enable researchers and application developers to get up to speed quickly on how the different protocols fit together to deliver desired functionalities without having to go through RFCs and the standards specifications. We also provide an overview of some of the key IoT challenges presented in the recent literature and provide a summary of related research work. Moreover, we explore the relation between the IoT and other emerging technologies including big data analytics and cloud and fog computing. We also present the need for better horizontal integration among IoT services. Finally, we present detailed service use-cases to illustrate how the different protocols presented in the paper fit together to deliver desired IoT services.",
+      "venue": "IEEE Communications Surveys & Tutorials",
+      "citation_count": 8201,
+      "doi": "10.1109/comst.2015.2444095",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/comst.2015.2444095",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3090360564",
+      "title": "COVID\u201019 and the New Technologies of Organizing: Digital Exhaust, Digital Footprints, and Artificial Intelligence in the Wake of Remote Work",
+      "authors": [
+        {
+          "name": "Paul M. Leonardi",
+          "affiliation": "University of California System"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Companies have flirted with remote work since the 1970s. Estimates from late 2019 suggested that slightly more than 5 per cent of employees worked remotely with regularity. But as COVID-19 has spread across the globe over the past few months, and shelter-in-place orders were issued by governments, many companies have initiated a rapid and wholesale shift to remote work arrangements, at least for knowledge-intensive work. This shift is enabled by digital technologies that allow workers to communicate via text, audio, and video and to share and edit data and documents in real-time. As examples of the dramatic and swift increase in remote work enabled by digital technologies, Zoom\u2019s daily active user base grew by 67 per cent in March 2020, the number of daily active users of Microsoft Teams grew from 20 million in November 2019 to 44 million in March 2020, and Slack added 7,000 new paid customers in February and March, 2020 \u2013 roughly 40 per cent more than in each of its previous two quarters. Google announced it will continue remote work until at least summer 2021 and Twitter extended the opportunity for all employees to work remotely indefinitely. Most discussions around this shift to remote work have focused on exploring first-order effects \u2013 areas of organizational behaviour that are likely to change directly following a transition to working exclusively through digital technologies. Although first-order effects are important, it is the second-order effects of remote working that have the potential to be the most profound, but are the most understudied. In this paper, I explore three of the most important second-order effects likely to shape the trajectory of work for several decades: (1) Remote work creates vast amounts of digital exhaust, (2) Digital exhaust is used to turn employees into data representations, and (3) Artificial intelligence (AI) uses those data representations to predict (and shape) employee behaviour. Increases in the use of digital technologies produces corresponding increases in the amount of work that is recorded and stored. Every time employees send each other emails via Outlook, message each other on Slack, initiate a video conference in Zoom, like someone\u2019s post on Jive, form a team in Microsoft Teams, or assign someone to project milestones in Trello, these digital technologies record that action as meta-data. Whereas most office-based employees conduct slightly more than 50 per cent of their communications through digital channels, record roughly 25 per cent of their meetings, or document how they approached a particular work task some 10 per cent of the time (all figures according to my own research), remote workers in the age of COVID-19 are conducting nearly ALL of these activities through digital technologies that create time-stamped logs of their behaviour. These meta-data are digital exhaust. Logs of employee behaviour are called digital exhaust because they are by-products of other activities, like setting up a meeting or running calculations. Although the term \u2018exhaust\u2019 may signal the inadvertent nature of such digital records and connote worthlessness, nothing could be further from the truth. In my own research, I have documented how digital exhaust can be used to help employees reduce work duplication and increase innovation (Leonardi, 2014), develop more accurate organizational metaknowledge \u2013 knowledge of \u2018who knows what\u2019 and \u2018who knows who\u2019 (Leonardi, 2015), and apportion work tasks more effectively (Leonardi, 2018). Organizational leaders who collect and analyse digital exhaust created by employees can develop efficient systems for knowledge transfer (Leonardi and Meyer, 2015) more effectively implement strategy (Neeley and Leonardi, 2018), and identify individuals whose networks are optimized for certain roles (Leonardi and Contractor, 2018). To more thoroughly explore the kinds of digital exhaust produced by remote work, researchers might ask questions such as: How do workers/managers interpret signals from one\u2019s digital exhaust? How does access to colleagues\u2019 digital exhaust shape an organization\u2019s knowledge economy or power structure? What are the ethics of granting access to other people\u2019s digital exhaust and what implications does it have for organizational justice and equity? By themselves, individual particles of digital exhaust contain very little meaning. For example, if an employee starts work late one day (as recorded by VPN login times), spends an unusually short amount of time working with information in a portal (as recorded by server-side time-stamps), and is unusually quiet in a meeting (as recorded by total seconds of talk-time in a Zoom session), none of these pieces of digital exhaust by themselves tells us much. But when those pieces are combined, examined over time to qualify a pattern of behaviour, and compared to other employees\u2019 patterns, they can start to create inferences that an employee is, for example, disconnecting from the organization. Putting these pieces of digital exhaust together allows companies to construct digital footprints of employees, teams, and sub-units. Digital footprints are collections of data that represent an entity. They are the mathematical representation of everything a company knows about that entity and they are used to make predictions about its behaviour. Digital footprints are constantly updated as the entity produces more digital exhaust. In my research, I have documented how employees who recognize that their mediated activities allow companies to create digital footprints of them sometimes feel as though they are being surveilled by peers and leaders, causing them to act in ways that leave purposeful patterns of exhaust that effectively game the system (Leonardi and Treem, 2012). I\u2019ve also shown how the creation of digital footprints can create a vicious cycle in which employees feel that everyone else\u2019s actions are more visible than theirs, thus compelling them to work more so as to enable the company to produce a digital footprint of them suggesting they are exceptionally hard workers: These employees experience high levels of burnout (Cristea and Leonardi, 2019). Because the volume of digital exhaust produced in the era of COVID-19 is prodigious, organizations increasingly use algorithms that code digital exhaust into particular categories of action, sort those categories, and perform complex computations that link them together. The result is that algorithms are increasingly central in turning employees\u2019 digital exhaust into digital footprints that serve as data representations of them. To explore this process, scholars might ask: Under what conditions do managers and leaders become confident that digital footprints are accurate representation of employee behaviour? What changes arise when employees become aware that management is observing their work by attending to their digital footprints? In what ways can digital footprints aid in mentoring and coaching and in what ways will they serve as warrants for disciplinary action or censure? It is only in the past several years that the computational power and development of mathematics undergirding AI have progressed far enough to make meaningful predictions based on people\u2019s digital footprints. Although many companies were ready to analyse data at scale, they didn\u2019t have enough of it to analyse because most employees\u2019 actions were not recorded and stored. COVID-19 solved that problem. Today, companies are beginning to use algorithms to sift through the digital footprints assembled as remote workers create digital exhaust. The most advanced companies are using AI to combine these patterns with new datasets (like employee turnover or performance data) to test assumptions about certain relationships, learn autonomously from these tests, and, make predictions about future employee behaviour. These predictions can set the stage for managerial and organizational policy decisions. As organizations increasingly make use of algorithms to sort through the glut of digital exhaust they collect and store, employees are sometimes unfairly advantaged or disadvantaged by the way those data are turned into predictions by AI (Leonardi and Treem, in press). It is clear that the vast amounts of digital exhaust produced through remote work arrangements can improve organizational behaviour in many ways, but they also threaten to undermine some of the very systems, processes and institutions that make workplaces fair and equitable. Most of the digital tools organizations implement to help with remote work are cloud-based applications hosted by vendors whose contract rights give them access to some or all of the digital exhaust produced through them. Those vendors are able to use algorithmic modelling to create macro-level digital footprints of the behaviour of people and organizations and use AI to make predictions. They sell those predictions to other companies that market to us and bid to consult with our organizations, and they use those digital footprints to improve their own technologies in ways that allow them to collect even more digital exhaust. Zuboff (2019) has written eloquently about how vendors monetize digital exhaust and use it to construct digital footprints that predict and shape our behaviour. To explore how AI is used to turn digital footprints into predictions, researchers might begin to ask questions like: How will leaders incorporate AI-based predictions into their decision-making processes? Should organizations be required to let employees see predictions of their own behaviour and what are the consequences of this choice? Under what conditions do predictions of employee behaviour instigate a set of compensatory activities that turn them into self-fulfilling prophecies? Some observers argue that we are entering an era in which remote work will be the \u2018new normal\u2019. If that prediction comes true, it means that people, teams, and organizations will be quantified, modelled, and shaped in heretofore unknown ways. Others argue that remote work will not become mainstream soon and that most workers will return to offices when the pandemic subsides, will resume activities in which they work outside of digital technologies, and will produce much less digital exhaust. If that vision of the future comes true, it is unlikely to portend any less of a dramatic shift in the way organizations operate than if people remain working remotely. That is because the scale and duration of remote work that COVID-19 has enabled has already produced so much digital exhaust that companies will build models from this unique window of time for decades to come. Regardless of whether remote work remains common or whether it becomes another brief spike in the long history of starts and stops since the 1970s, it is very likely that the digital footprints produced during COVID-19 will serve the basis for many organizational practices, policies, and ideologies in the future. It is these second-order effects of remote work that need to be understood, discussed, and debated today so that organizational scholars can provide the insights that will allow us to thoughtfully build and manage the organizations of tomorrow.",
+      "venue": "Journal of Management Studies",
+      "citation_count": 263,
+      "doi": "10.1111/joms.12648",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1111/joms.12648",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2058401212",
+      "title": "Internet of Things for Smart Cities",
+      "authors": [
+        {
+          "name": "Andr\u00e9a Zanella",
+          "affiliation": "University of Padua"
+        },
+        {
+          "name": "Nicola Bui",
+          "affiliation": "IMDEA Networks"
+        },
+        {
+          "name": "Angelo Castellani",
+          "affiliation": ""
+        },
+        {
+          "name": "Lorenzo Vangelista",
+          "affiliation": "Consorzio Futuro in Ricerca"
+        },
+        {
+          "name": "Michele Zorzi",
+          "affiliation": "Consorzio Futuro in Ricerca"
+        }
+      ],
+      "year": 2014,
+      "abstract": "The Internet of Things (IoT) shall be able to incorporate transparently and seamlessly a large number of different and heterogeneous end systems, while providing open access to selected subsets of data for the development of a plethora of digital services. Building a general architecture for the IoT is hence a very complex task, mainly because of the extremely large variety of devices, link layer technologies, and services that may be involved in such a system. In this paper, we focus specifically to an urban IoT system that, while still being quite a broad category, are characterized by their specific application domain. Urban IoTs, in fact, are designed to support the Smart City vision, which aims at exploiting the most advanced communication technologies to support added-value services for the administration of the city and for the citizens. This paper hence provides a comprehensive survey of the enabling technologies, protocols, and architecture for an urban IoT. Furthermore, the paper will present and discuss the technical solutions and best-practice guidelines adopted in the Padova Smart City project, a proof-of-concept deployment of an IoT island in the city of Padova, Italy, performed in collaboration with the city municipality.",
+      "venue": "IEEE Internet of Things Journal",
+      "citation_count": 6042,
+      "doi": "10.1109/jiot.2014.2306328",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/jiot.2014.2306328",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W1482190741",
+      "title": "Repbase Update, a database of repetitive elements in eukaryotic genomes",
+      "authors": [
+        {
+          "name": "Weidong Bao",
+          "affiliation": "Genetic Information Research Institute"
+        },
+        {
+          "name": "Kenji K. Kojima",
+          "affiliation": "Genetic Information Research Institute"
+        },
+        {
+          "name": "Oleksiy Kohany",
+          "affiliation": "Genetic Information Research Institute"
+        }
+      ],
+      "year": 2015,
+      "abstract": "Repbase Update (RU) is a database of representative repeat sequences in eukaryotic genomes. Since its first development as a database of human repetitive sequences in 1992, RU has been serving as a well-curated reference database fundamental for almost all eukaryotic genome sequence analyses. Here, we introduce recent updates of RU, focusing on technical issues concerning the submission and updating of Repbase entries and will give short examples of using RU data. RU sincerely invites a broader submission of repeat sequences from the research community.",
+      "venue": "Mobile DNA",
+      "citation_count": 3360,
+      "doi": "10.1186/s13100-015-0041-9",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/s13100-015-0041-9",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3135028703",
+      "title": "Machine Learning: Algorithms, Real-World Applications and Research Directions",
+      "authors": [
+        {
+          "name": "Iqbal H. Sarker",
+          "affiliation": "Chittagong University of Engineering & Technology"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "SN Computer Science",
+      "citation_count": 4932,
+      "doi": "10.1007/s42979-021-00592-x",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s42979-021-00592-x",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2026999073",
+      "title": "Development of tethered autonomous mobile robot systems for field works",
+      "authors": [
+        {
+          "name": "Edwardo F. Fukushima",
+          "affiliation": "Tokyo Institute of Technology"
+        },
+        {
+          "name": "Noriyuki Kitamura",
+          "affiliation": "Mitsubishi Heavy Industries (Japan)"
+        },
+        {
+          "name": "Shigeo Hirose",
+          "affiliation": "Tokyo Institute of Technology"
+        }
+      ],
+      "year": 2001,
+      "abstract": "This paper describes the implementation details, advantages and potential applications of autonomous tethered mobile robot systems using the 'hyper-tether' concept. Hyper-tether is a new research area on tethered connections, which provide tethering among different mobile robot types, such as a robot with the environment and a robot with humans and animals. Its basic function is to actively control the tether's tension and/or length, but it also considers tether launching, anchoring, power delivery, data communication cabling and built-in trajectory command generation capabilities. Many of these features can be efficiently applied to build a tethered mobile robot system which remotely manipulates a working tool that can be useful for land-mine detection and removal, trimming of gardens and grass cutting of wide areas (e.g. golf courses, soccer and baseball fields), spraying of agricultural chemicals, forestry and construction works, etc. In this paper, a simple prototype of hypertether's winch-tether pair and a working tool equipped with a grass cutter was constructed, and basic experiments were performed to demonstrate the validity of the proposed system.",
+      "venue": "Advanced Robotics",
+      "citation_count": 33,
+      "doi": "10.1163/156855301750398374",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1163/156855301750398374",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2912494746",
+      "title": "",
+      "authors": [
+        {
+          "name": "Ulrich Rembold",
+          "affiliation": "Karlsruhe Institute of Technology"
+        },
+        {
+          "name": "Sergej Fatikow",
+          "affiliation": "Karlsruhe Institute of Technology"
+        }
+      ],
+      "year": 1997,
+      "abstract": "",
+      "venue": "Journal of Intelligent & Robotic Systems",
+      "citation_count": 31,
+      "doi": "10.1023/a:1007987316940",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1023/a:1007987316940",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3041064909",
+      "title": "COVID\u201019 and Management Education: Reflections on Challenges, Opportunities, and Potential Futures",
+      "authors": [
+        {
+          "name": "Stephen Brammer",
+          "affiliation": "University of Bath"
+        },
+        {
+          "name": "Timothy Clark",
+          "affiliation": "Singapore Management University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "COVID-19 is having profound impacts on tertiary education globally. Border closures, cuts to aviation capacity, mandatory quarantine on entering a country, restrictions on mass gatherings, and social distancing all pose challenges to higher education (HE) institutions. Business Schools (BSs) have larger and more internationally diverse cohorts of students and staff, generating particular challenges, but also often have more mature digital and remote education capabilities that enable responses to COVID-19. Therefore, exploring emergent evidence on how BSs are likely to be affected by COVID-19 over the short, medium, and long term is of significant importance to our community. In this commentary, we share a perspective on the impacts of COVID-19 that draws upon our experience as leaders of BSs in Asia, Australia, and the United Kingdom. Our reflections are limited by our experiences and we acknowledge both our partiality and the diverse broader impacts of COVID-19 on business and society. As COVID-19 emerged in January and February 2020, the impacts on universities and BSs reflected the pattern of the academic year and the concentration of cases in a small number of countries (China, Japan, South Korea). In the UK and parts of Asia, the pandemic emerged mid-way through the academic year, and so manifested initially in challenges associated with navigating end-of-cycle teaching and assessment. In Australia, the crisis emerged at the beginning of a new academic year, and the initial focus lay with serving Chinese students that were prevented from returning to Australia. Subsequently, outbreaks increased exponentially across countries, and impacts broadened to encompass all on-campus teaching, international student activities, and pastoral support. COVID-19 also impacted student recruitment and attempts to maintain financial sustainability through the crisis. BSs rapidly adapted pedagogy and assessment. Currently, BSs are contemplating a more planned and structured adaptation to a \u201cnew normal\u201d. Students are perhaps the BS's most affected stakeholder throughout the pandemic and were at the forefront of BS's minds when designing and implementing responses. Students in the later stages of their courses are concerned to understand the impacts of COVID-19 on their progression and graduation. New students are concerned for the impacts on their experience. Students and their family members have contracted COVID, causing considerable anxiety within student communities. Because BSs tend to be highly externally engaged, our institutions encountered significant challenges with providing internships, international study tours and exchanges, as well as other co-curricula elements of university life. Considerations regarding whether and how to repatriate students overseas at the time the crisis arose were especially challenging. Many students, especially research postgraduates, are also staff within their universities, or undertook part time work in other industry sectors, especially retail and hospitality. The broader economic impacts of COVID-19 have led to significant numbers of students experiencing hardship, including international students that are stranded in their country of study throughout the pandemic. Staff, both academic and professional, have been significantly affected by COVID-19. The pandemic has necessitated the largest and quickest transformation of pedagogic and assessment practice ever seen in contemporary universities. This put pressure on institutional systems of quality assurance and governance as well as increasing workload for faculty and professional staff. This required support for colleagues, including the development of formal training on software and communities of practice through which good practices were shared. Both SMU and Macquarie benefited from some specific adaptations made prior to the crisis. At SMU, there is a requirement that all faculty undertake an Emergency Preparedness for Teaching and Learning (EPTL) because of the smoke haze from forest fires. This meant that the great majority of faculty were trained in online methods. At Macquarie, the launching of the Global MBA programme in partnership with Coursera had led to the development of substantial learning and capacity among both academic and professional staff. However, COVID-19 caused, and is to some degree still causing, considerable stress, uncertainty, and work for faculty. Adaptation of assessment at short notice presented particular challenges, especially in fields with specific accreditation requirements (e.g. accounting, actuarial studies). Shifting exams online has been a test of maintaining rigour and standards. As academic leaders, we have been made acutely aware of the heterogeneous experience and challenge faced by staff through the crisis. Juggling widespread homeworking, alongside home schooling, navigating other caring and household responsibilities has blurred boundaries between work and home, and has led to longer working hours and greater stress. Governments, in Australia and the UK at least, have not quickly responded to calls for additional funding required to adapt to the pandemic. Instead, government has preferred to focus on extending some limited credit lines, offering the generalised schemes of employment protection seen in the wider economy, and signalling specific funding to regional economic recovery. It remains unclear whether or how governments will seek to support the financial sustainability of the university sector. In the UK and Australia, there has been very limited coordination across universities. In contrast, in Singapore the Ministry of Education (MOE) and six Autonomous Universities (AUs) have worked in partnership addressing the many issues linked to COVID-19 to ensure a common approach across all institutions (e.g., the timing and approach to withdrawing from international student exchanges). As Singaporean students turn away from studying at overseas Universities next academic year, the MOE has made more places available to AUs to absorb this additional demand. One of the most profound potential long run impacts of COVID-19 on BSs located in comprehensive Universities flows from its possible impacts on their prevailing business model. Many comprehensive research universities involve a business model in which: (i) research is cross-subsidised by teaching, (ii) disciplines with comparatively low costs of teaching (such as humanities, social sciences, business and management, IT) subsidise high cost of teaching disciplines (such as medicine, laboratory science, engineering), and (iii) international-fee paying student tuition subsidises domestic student tuition. These cross-subsidies enable universities to thrive at the institutional level. COVID-19 threatens to fundamentally undermine the delicate web of cross-subsidies at the heart of comprehensive university financial models. The pandemic initially forced BSs to look inward to their own operations and adapting these to meet the challenges of the pandemic. Equally, the attention of many partners shifted to their own core business activities. However, as the crisis has become prolonged, BSs are beginning to seek to actively engage with business partners, advisory boards, alumni and other stakeholders, both to offer support in the form of research, training and advice to help them navigate the crisis, and to enlist their support in responding to the crisis. Participation, for example, of senior advisory board members in online support for the career and employability development of students has been hugely valuable. COVID-19 has put considerable strain on schools in relation to the clarity and timeliness of communication with stakeholders, especially students and staff. Resolving uncertainties is a critical leadership activity, especially during a crisis, and a dramatically higher tempo of communication both from university leadership and within our schools has helped to reduce perceived distance between leadership and colleagues. One of the most pleasing benefits of adapting to COVID-19 is the success of holding frequent scalable online meetings through Teams or Zoom that permit open Q&A formats that reassure staff regarding how universities are adapting to the crisis. Communication with students has been more complex because of their idiosyncratic study pathways, and the need for individualised attention to their ongoing support. COVID-19 led to significant innovation in our universities regarding the processes and timetables of academic governance. These innovations in normal academic processes introduced considerably greater agility and capacity for innovation into our courses and programmes. Decision making in relation to COVID-19 challenged and stretched the processes in many institutions particularly in terms of the degree to which they could follow due process, permit prior consultation and deliberation, and allow for disciplinary differences. The experience of agility through COVID-19 provokes questions regarding whether the current layers and set of discretions are sustainable, whether their processes permit the degree of flexible future thinking and resilience building required, and whether they can iteratively reimagine the future to create a sustainable institution. One of the most positive experiences of COVID-19 for us has been to witness the scale, scope, speed, and quality of our colleagues\u2019 adaptation to new circumstances, and the receptivity within our communities to experiment with new ways of engaging with teaching and research. The variety of alternative ways of helping students to continue their learning, colleagues\u2019 imagination in designing new forms of learning support and assessment, and staff willingness to deploy new technologies is generating long-lasting impacts. Remote education tools are enabling external partners to play a more prominent role in many aspects of our curricula because they reduce the time cost of that involvement. Necessity is, in many ways, the mother of invention, and it has been hugely exciting to see the inventiveness of colleagues in responding to the challenges of COVID-19. COVID-19 is leading to major structural change in HE, driven by the competitive dynamics of brand strength, shifting student demands, the development and diffusion of new learning technologies, the reduction in international students, and the entry of large technology companies into the market. COVID-19 may result in the closure, merger, and restructuring of universities as funding impacts emerge. At the most fundamental level, COVID-19 poses a challenge to our core activity of supporting the development of students through a broad range of curricula and co-curricula experiences and opportunities. It significantly impedes the delivery of an interactive, personalised and predominantly face-to-face experience based around a rich campus life. Adapting to a prolonged pandemic will require Universities to build flexible and resilient models of education that enable continuous adaptation to different phases of the \u201cnew normal\u201d. COVID-19 has accelerated and intensified long-run pedagogic trends, constituting a natural experiment in which numerous innovations are trialled and evaluated. Early indications are that many of the innovations made during the pandemic will continue to be valued and expected by students beyond the crisis. Just as COVID-19 has stimulated significant pedagogic innovation, it has also presented significant opportunities for BS research. Understanding organizational and institutional responses to the crisis, exploring implications for work, employment and leadership, evaluating impacts on international businesses in light of supply chain issues, illuminating impacts on individual patterns of consumption and attitudes to risk, highlighting the financial consequences of the crisis and how they might be mitigated, and modelling the progression and impacts of policy interventions are all arenas in which BS research is playing an important role. The fundamental economics and geography of HE are being challenged by COVID-19. Universities are being encouraged to respond to needs and imperatives in their local and regional economies and societies, alongside an outlook that is likely characterised by a reduction in international student numbers. This trend will generate notable opportunities but will also necessitate broader adaptation of broad-based HE institutions to an environment where sources of cross-subsidy are less available. This will require the careful recalibration of different value propositions and the development of faculty and staff to be able to operate with a new agility as they switch modes depending on the phase of the pandemic. COVID-19 has had profound effects on the nature and balance of work in BSs. In addition to work intensification, and the need for rapid adaptation and learning, staff have experienced a significant shift in the balance between research and teaching in their roles. COVID-19 has raised the salience and demands in relation to learning and teaching and reduced the emphasis on research during the crisis period. It is critical both that the career impacts of the crisis are justly responded to, and that consideration to how our vibrant research cultures can be sustained through this, and future crisis. Steve Brammer is Dean of the School of Management at the University of Bath and was until recently the Executive Dean of Macquarie Business School at Macquarie University in Australia, both research intensive comprehensive universities. His research concerns the social responsibilities of organizations. Timothy Clark is Provost of Singapore Management University, a specialist university comprising business and management, information systems, law and social science. He has researched and published extensively on the activities and roles of different producers of management ideas.",
+      "venue": "British Journal of Management",
+      "citation_count": 283,
+      "doi": "10.1111/1467-8551.12425",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1111/1467-8551.12425",
+      "source": "openalex",
+      "_bibtex_override": ""
+    }
+  ]
+}

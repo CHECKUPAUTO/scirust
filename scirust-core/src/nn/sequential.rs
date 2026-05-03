@@ -66,6 +66,31 @@ impl Module for Sequential {
             layer.sync(tape);
         }
     }
+
+    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
+        let mut map = std::collections::HashMap::new();
+        for (i, layer) in self.layers.iter().enumerate() {
+            let inner = layer.state_dict();
+            for (k, v) in inner {
+                map.insert(format!("{}.{}", i, k), v);
+            }
+        }
+        map
+    }
+
+    fn load_state_dict(&mut self, state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
+        // Group parameters by layer index prefix e.g. "0.weight" -> layer 0
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            let prefix = format!("{}.", i);
+            let mut inner: std::collections::HashMap<String, ndarray::ArrayD<f64>> = std::collections::HashMap::new();
+            for (k, v) in &state {
+                if let Some(stripped) = k.strip_prefix(&prefix) {
+                    inner.insert(stripped.to_string(), v.clone());
+                }
+            }
+            layer.load_state_dict(inner);
+        }
+    }
 }
 
 #[cfg(test)]

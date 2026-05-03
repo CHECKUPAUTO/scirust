@@ -22,8 +22,8 @@
 use std::fmt;
 // use crate::tensor::device::Device;
 
-/// Device placeholder (stub).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Computational device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Device { Cpu, Gpu }
 
 

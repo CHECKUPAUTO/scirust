@@ -1,0 +1,1434 @@
+{
+  "query": "Build-working-autonomous-research-tool",
+  "source": "arxiv",
+  "limit": 40,
+  "timestamp": 1777751638.761716,
+  "papers": [
+    {
+      "paper_id": "arxiv-2103.03482",
+      "title": "Pilot Investigation for a Comprehensive Taxonomy of Autonomous Entities",
+      "authors": [
+        {
+          "name": "William Wagner",
+          "affiliation": ""
+        },
+        {
+          "name": "Anna \u0179akowska",
+          "affiliation": ""
+        },
+        {
+          "name": "Clement Aladi",
+          "affiliation": ""
+        },
+        {
+          "name": "Joseph Santhosh",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "This paper documents an exploratory pilot study to define the term Autonomous Entity, and any characteristics that are required to identify or classify an Autonomous Entity. Our solution builds on previous work with regard to philosophical and scientific classification methods but focuses on a novel Design Science Research Methodology (DSRM) and model to help identify those characteristics which make any autonomous entity similar or different from others. We have solved the problem of not having an existing term to define our lens by creating a new combinatorial term: \"Riskyishness\". We present a DSRM and instrument for initial investigation, as well as observational and statistical descriptions of their use in the real world to solicit domain expertise and statistical evidence. Further, we demonstrate a specific application of the methodology by creating a second artifact - a tool to score existing and future technologies based on Riskyishness. The first artifact also provides a technique to disentangle miscellaneous existing technologies or add dimensions to the tools to capture future additions and paradigm shifts.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2103.03482",
+      "url": "https://arxiv.org/abs/2103.03482",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2508.14111",
+      "title": "From AI for Science to Agentic Science: A Survey on Autonomous Scientific Discovery",
+      "authors": [
+        {
+          "name": "Jiaqi Wei",
+          "affiliation": ""
+        },
+        {
+          "name": "Yuejin Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiang Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yuhan Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiang Zhuang",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhangyang Gao",
+          "affiliation": ""
+        },
+        {
+          "name": "Dongzhan Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Guangshuai Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhiqiang Gao",
+          "affiliation": ""
+        },
+        {
+          "name": "Juntai Cao",
+          "affiliation": ""
+        },
+        {
+          "name": "Zijie Qiu",
+          "affiliation": ""
+        },
+        {
+          "name": "Ming Hu",
+          "affiliation": ""
+        },
+        {
+          "name": "Chenglong Ma",
+          "affiliation": ""
+        },
+        {
+          "name": "Shixiang Tang",
+          "affiliation": ""
+        },
+        {
+          "name": "Junjun He",
+          "affiliation": ""
+        },
+        {
+          "name": "Chunfeng Song",
+          "affiliation": ""
+        },
+        {
+          "name": "Xuming He",
+          "affiliation": ""
+        },
+        {
+          "name": "Qiang Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Chenyu You",
+          "affiliation": ""
+        },
+        {
+          "name": "Shuangjia Zheng",
+          "affiliation": ""
+        },
+        {
+          "name": "Ning Ding",
+          "affiliation": ""
+        },
+        {
+          "name": "Wanli Ouyang",
+          "affiliation": ""
+        },
+        {
+          "name": "Nanqing Dong",
+          "affiliation": ""
+        },
+        {
+          "name": "Yu Cheng",
+          "affiliation": ""
+        },
+        {
+          "name": "Siqi Sun",
+          "affiliation": ""
+        },
+        {
+          "name": "Lei Bai",
+          "affiliation": ""
+        },
+        {
+          "name": "Bowen Zhou",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Artificial intelligence (AI) is reshaping scientific discovery, evolving from specialized computational tools into autonomous research partners. We position Agentic Science as a pivotal stage within the broader AI for Science paradigm, where AI systems progress from partial assistance to full scientific agency. Enabled by large language models (LLMs), multimodal systems, and integrated research platforms, agentic AI shows capabilities in hypothesis generation, experimental design, execution, analysis, and iterative refinement -- behaviors once regarded as uniquely human. This survey provides a domain-oriented review of autonomous scientific discovery across life sciences, chemistry, materials science, and physics. We unify three previously fragmented perspectives -- process-oriented, autonomy-oriented, and mechanism-oriented -- through a comprehensive framework that connects foundational capabilities, core processes, and domain-specific realizations. Building on this framework, we (i) trace the evolution of AI for Science, (ii) identify five core capabilities underpinning scientific agency, (iii) model discovery as a dynamic four-stage workflow, (iv) review applications across the above domains, and (v) synthesize key challenges and future opportunities. This work establishes a domain-oriented synthesis of autonomous scientific discovery and positions Agentic Science as a structured paradigm for advancing AI-driven research.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2508.14111",
+      "url": "https://arxiv.org/abs/2508.14111",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2604.03286",
+      "title": "Toward Full Autonomous Laboratory Instrumentation Control with Large Language Models",
+      "authors": [
+        {
+          "name": "Yong Xie",
+          "affiliation": ""
+        },
+        {
+          "name": "Kexin He",
+          "affiliation": ""
+        },
+        {
+          "name": "Andres Castellanos-Gomez",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "The control of complex laboratory instrumentation often requires significant programming expertise, creating a barrier for researchers lacking computational skills. This work explores the potential of large language models (LLMs), such as ChatGPT, and LLM-based artificial intelligence (AI) agents to enable efficient programming and automation of scientific equipment. Through a case study involving the implementation of a setup that can be used as a single-pixel camera or a scanning photocurrent microscope, we demonstrate how ChatGPT can facilitate the creation of custom scripts for instrumentation control, significantly reducing the technical barrier for experimental customization. Building on this capability, we further illustrate how LLM-assisted tools can be extended into autonomous AI agents capable of independently operating laboratory instruments and iteratively refining control strategies. This approach underscores the transformative role of LLM-based tools and AI agents in democratizing laboratory automation and accelerating scientific progress.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "10.1002/sstr.202500173",
+      "arxiv_id": "2604.03286",
+      "url": "https://arxiv.org/abs/2604.03286",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2011.13880",
+      "title": "REAL-X -- Robot open-Ended Autonomous Learning Architectures: Achieving Truly End-to-End Sensorimotor Autonomous Learning Systems",
+      "authors": [
+        {
+          "name": "Emilio Cartoni",
+          "affiliation": ""
+        },
+        {
+          "name": "Davide Montella",
+          "affiliation": ""
+        },
+        {
+          "name": "Jochen Triesch",
+          "affiliation": ""
+        },
+        {
+          "name": "Gianluca Baldassarre",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Open-ended learning is a core research field of developmental robotics and AI aiming to build learning machines and robots that can autonomously acquire knowledge and skills incrementally as infants and children. The first contribution of this work is to study the challenges posed by the previously proposed benchmark `REAL competition' aiming to foster the development of truly open-ended learning robot architectures. The competition involves a simulated camera-arm robot that: (a) in a first `intrinsic phase' acquires sensorimotor competence by autonomously interacting with objects; (b) in a second `extrinsic phase' is tested with tasks unknown in the intrinsic phase to measure the quality of knowledge previously acquired. This benchmark requires the solution of multiple challenges usually tackled in isolation, in particular exploration, sparse-rewards, object learning, generalisation, task/goal self-generation, and autonomous skill learning. As a second contribution, we present a set of `REAL-X' robot architectures that are able to solve different versions of the benchmark, where we progressively release initial simplifications. The architectures are based on a planning approach that dynamically increases abstraction, and intrinsic motivations to foster exploration. REAL-X achieves a good performance level in very demanding conditions. We argue that the REAL benchmark represents a valuable tool for studying open-ended learning in its hardest form.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2011.13880",
+      "url": "https://arxiv.org/abs/2011.13880",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2104.13207",
+      "title": "SocialAI 0.1: Towards a Benchmark to Stimulate Research on Socio-Cognitive Abilities in Deep Reinforcement Learning Agents",
+      "authors": [
+        {
+          "name": "Grgur Kova\u010d",
+          "affiliation": ""
+        },
+        {
+          "name": "R\u00e9my Portelas",
+          "affiliation": ""
+        },
+        {
+          "name": "Katja Hofmann",
+          "affiliation": ""
+        },
+        {
+          "name": "Pierre-Yves Oudeyer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Building embodied autonomous agents capable of participating in social interactions with humans is one of the main challenges in AI. This problem motivated many research directions on embodied language use. Current approaches focus on language as a communication tool in very simplified and non diverse social situations: the \"naturalness\" of language is reduced to the concept of high vocabulary size and variability. In this paper, we argue that aiming towards human-level AI requires a broader set of key social skills: 1) language use in complex and variable social contexts; 2) beyond language, complex embodied communication in multimodal settings within constantly evolving social worlds. In this work we explain how concepts from cognitive sciences could help AI to draw a roadmap towards human-like intelligence, with a focus on its social dimensions. We then study the limits of a recent SOTA Deep RL approach when tested on a first grid-world environment from the upcoming SocialAI, a benchmark to assess the social skills of Deep RL agents. Videos and code are available at https://sites.google.com/view/socialai01 .",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2104.13207",
+      "url": "https://arxiv.org/abs/2104.13207",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2411.00188",
+      "title": "Building Multi-Agent Copilot towards Autonomous Agricultural Data Management and Analysis",
+      "authors": [
+        {
+          "name": "Yu Pan",
+          "affiliation": ""
+        },
+        {
+          "name": "Jianxin Sun",
+          "affiliation": ""
+        },
+        {
+          "name": "Hongfeng Yu",
+          "affiliation": ""
+        },
+        {
+          "name": "Joe Luck",
+          "affiliation": ""
+        },
+        {
+          "name": "Geng Bai",
+          "affiliation": ""
+        },
+        {
+          "name": "Nipuna Chamara",
+          "affiliation": ""
+        },
+        {
+          "name": "Yufeng Ge",
+          "affiliation": ""
+        },
+        {
+          "name": "Tala Awada",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Current agricultural data management and analysis paradigms are to large extent traditional, in which data collecting, curating, integration, loading, storing, sharing and analyzing still involve too much human effort and know-how. The experts, researchers and the farm operators need to understand the data and the whole process of data management pipeline to make fully use of the data. The essential problem of the traditional paradigm is the lack of a layer of orchestrational intelligence which can understand, organize and coordinate the data processing utilities to maximize data management and analysis outcome. The emerging reasoning and tool mastering abilities of large language models (LLM) make it a potentially good fit to this position, which helps a shift from the traditional user-driven paradigm to AI-driven paradigm. In this paper, we propose and explore the idea of a LLM based copilot for autonomous agricultural data management and analysis. Based on our previously developed platform of Agricultural Data Management and Analytics (ADMA), we build a proof-of-concept multi-agent system called ADMA Copilot, which can understand user's intent, makes plans for data processing pipeline and accomplishes tasks automatically, in which three agents: a LLM based controller, an input formatter and an output formatter collaborate together. Different from existing LLM based solutions, by defining a meta-program graph, our work decouples control flow and data flow to enhance the predictability of the behaviour of the agents. Experiments demonstrates the intelligence, autonomy, efficacy, efficiency, extensibility, flexibility and privacy of our system. Comparison is also made between ours and existing systems to show the superiority and potential of our system.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2411.00188",
+      "url": "https://arxiv.org/abs/2411.00188",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2601.04583",
+      "title": "Autonomous Agents on Blockchains: Standards, Execution Models, and Trust Boundaries",
+      "authors": [
+        {
+          "name": "Saad Alqithami",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "Advances in large language models have enabled agentic AI systems that can reason, plan, and interact with external tools to execute multi-step workflows, while public blockchains have evolved into a programmable substrate for value transfer, access control, and verifiable state transitions. Their convergence introduces a high-stakes systems challenge: designing standard, interoperable, and secure interfaces that allow agents to observe on-chain state, formulate transaction intents, and authorize execution without exposing users, protocols, or organizations to unacceptable security, governance, or economic risks. This survey systematizes the emerging landscape of agent-blockchain interoperability through a systematic literature review, identifying 317 relevant works from an initial pool of over 3000 records. We contribute a five-part taxonomy of integration patterns spanning read-only analytics, simulation and intent generation, delegated execution, autonomous signing, and multi-agent workflows; a threat model tailored to agent-driven transaction pipelines that captures risks ranging from prompt injection and policy misuse to key compromise, adversarial execution dynamics, and multi-agent collusion; and a comparative capability matrix analyzing more than 20 representative systems across 13 dimensions, including custody models, permissioning, policy enforcement, observability, and recovery. Building on the gaps revealed by this analysis, we outline a research roadmap centered on two interface abstractions: a Transaction Intent Schema for portable and unambiguous goal specification, and a Policy Decision Record for auditable, verifiable policy enforcement across execution environments. We conclude by proposing a reproducible evaluation suite and benchmarks for assessing the safety, reliability, and economic robustness of agent-mediated on-chain execution.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2601.04583",
+      "url": "https://arxiv.org/abs/2601.04583",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2509.02547",
+      "title": "The Landscape of Agentic Reinforcement Learning for LLMs: A Survey",
+      "authors": [
+        {
+          "name": "Guibin Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Hejia Geng",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiaohang Yu",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhenfei Yin",
+          "affiliation": ""
+        },
+        {
+          "name": "Zaibin Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Zelin Tan",
+          "affiliation": ""
+        },
+        {
+          "name": "Heng Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhongzhi Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiangyuan Xue",
+          "affiliation": ""
+        },
+        {
+          "name": "Yijiang Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Yifan Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Yang Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Chen Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yutao Fan",
+          "affiliation": ""
+        },
+        {
+          "name": "Zihu Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Songtao Huang",
+          "affiliation": ""
+        },
+        {
+          "name": "Francisco Piedrahita-Velez",
+          "affiliation": ""
+        },
+        {
+          "name": "Yue Liao",
+          "affiliation": ""
+        },
+        {
+          "name": "Hongru Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Mengyue Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Heng Ji",
+          "affiliation": ""
+        },
+        {
+          "name": "Jun Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Shuicheng Yan",
+          "affiliation": ""
+        },
+        {
+          "name": "Philip Torr",
+          "affiliation": ""
+        },
+        {
+          "name": "Lei Bai",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The emergence of agentic reinforcement learning (Agentic RL) marks a paradigm shift from conventional reinforcement learning applied to large language models (LLM RL), reframing LLMs from passive sequence generators into autonomous, decision-making agents embedded in complex, dynamic worlds. This survey formalizes this conceptual shift by contrasting the degenerate single-step Markov Decision Processes (MDPs) of LLM-RL with the temporally extended, partially observable Markov decision processes (POMDPs) that define Agentic RL. Building on this foundation, we propose a comprehensive twofold taxonomy: one organized around core agentic capabilities, including planning, tool use, memory, reasoning, self-improvement, and perception, and the other around their applications across diverse task domains. Central to our thesis is that reinforcement learning serves as the critical mechanism for transforming these capabilities from static, heuristic modules into adaptive, robust agentic behavior. To support and accelerate future research, we consolidate the landscape of open-source environments, benchmarks, and frameworks into a practical compendium. By synthesizing over five hundred recent works, this survey charts the contours of this rapidly evolving field and highlights the opportunities and challenges that will shape the development of scalable, general-purpose AI agents.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2509.02547",
+      "url": "https://arxiv.org/abs/2509.02547",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2508.04915",
+      "title": "ConfAgents: A Conformal-Guided Multi-Agent Framework for Cost-Efficient Medical Diagnosis",
+      "authors": [
+        {
+          "name": "Huiya Zhao",
+          "affiliation": ""
+        },
+        {
+          "name": "Yinghao Zhu",
+          "affiliation": ""
+        },
+        {
+          "name": "Zixiang Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yasha Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Junyi Gao",
+          "affiliation": ""
+        },
+        {
+          "name": "Liantao Ma",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The efficacy of AI agents in healthcare research is hindered by their reliance on static, predefined strategies. This creates a critical limitation: agents can become better tool-users but cannot learn to become better strategic planners, a crucial skill for complex domains like healthcare. We introduce HealthFlow, a self-evolving AI agent that overcomes this limitation through a novel meta-level evolution mechanism. HealthFlow autonomously refines its own high-level problem-solving policies by distilling procedural successes and failures into a durable, strategic knowledge base. To anchor our research and facilitate reproducible evaluation, we introduce EHRFlowBench, a new benchmark featuring complex, realistic health data analysis tasks derived from peer-reviewed clinical research. Our comprehensive experiments demonstrate that HealthFlow's self-evolving approach significantly outperforms state-of-the-art agent frameworks. This work marks a necessary shift from building better tool-users to designing smarter, self-evolving task-managers, paving the way for more autonomous and effective AI for scientific discovery.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2508.04915",
+      "url": "https://arxiv.org/abs/2508.04915",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2505.19339",
+      "title": "Towards Humanoid Robot Autonomy: A Dynamic Architecture Integrating Continuous thought Machines (CTM) and Model Context Protocol (MCP)",
+      "authors": [
+        {
+          "name": "Libo Wang",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "To address the gaps between the static pre-set \"thinking-planning-action\" of humanoid robots in unfamiliar scenarios and the highly programmed \"call tool-return result\" due to the lack of autonomous coding capabilities, this work designs a dynamic architecture connecting continuous thought machines (CTM) and model context protocol (MCP). It proposes a theoretical parallel solution through tick-slab and uses rank compression to achieve parameter suppression to provide a solution for achieving autonomous actions due to autonomous coding. The researcher used a simulation-based experiment using OpenAI's o4-mini-high as a tool to build the experimental environment, and introduced the extended SayCan dataset to conduct nine epochs of experiments. The experimental results show that the CTM-MCP architecture is feasible and effective through the data results of seven metrics: task success rate (TSR), execution success rate (ESR), average episode length (AEL), ROSCOE, REVEAL, proficiency self-assessment (PSA), task effectiveness (TE). In practice, it provides a reference experience for exploring the autonomous dynamic coding of humanoid robots based on continuous thinking to achieve human-like autonomous actions.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2505.19339",
+      "url": "https://arxiv.org/abs/2505.19339",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2212.10693",
+      "title": "Requirements Engineering for Artificial Intelligence Systems: A Systematic Mapping Study",
+      "authors": [
+        {
+          "name": "Khlood Ahmad",
+          "affiliation": ""
+        },
+        {
+          "name": "Mohamed Abdelrazek",
+          "affiliation": ""
+        },
+        {
+          "name": "Chetan Arora",
+          "affiliation": ""
+        },
+        {
+          "name": "Muneera Bano",
+          "affiliation": ""
+        },
+        {
+          "name": "John Grundy",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "[Context] In traditional software systems, Requirements Engineering (RE) activities are well-established and researched. However, building Artificial Intelligence (AI) based software with limited or no insight into the system's inner workings poses significant new challenges to RE. Existing literature has focused on using AI to manage RE activities, with limited research on RE for AI (RE4AI). [Objective] This paper investigates current approaches for specifying requirements for AI systems, identifies available frameworks, methodologies, tools, and techniques used to model requirements, and finds existing challenges and limitations. [Method] We performed a systematic mapping study to find papers on current RE4AI approaches. We identified 43 primary studies and analysed the existing methodologies, models, tools, and techniques used to specify and model requirements in real-world scenarios. [Results] We found several challenges and limitations of existing RE4AI practices. The findings highlighted that current RE applications were not adequately adaptable for building AI systems and emphasised the need to provide new techniques and tools to support RE4AI. [Conclusion] Our results showed that most of the empirical studies on RE4AI focused on autonomous, self-driving vehicles and managing data requirements, and areas such as ethics, trust, and explainability need further research.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2212.10693",
+      "url": "https://arxiv.org/abs/2212.10693",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2101.06054",
+      "title": "Artificial Intelligence for IT Operations (AIOPS) Workshop White Paper",
+      "authors": [
+        {
+          "name": "Jasmin Bogatinovski",
+          "affiliation": ""
+        },
+        {
+          "name": "Sasho Nedelkoski",
+          "affiliation": ""
+        },
+        {
+          "name": "Alexander Acker",
+          "affiliation": ""
+        },
+        {
+          "name": "Florian Schmidt",
+          "affiliation": ""
+        },
+        {
+          "name": "Thorsten Wittkopp",
+          "affiliation": ""
+        },
+        {
+          "name": "Soeren Becker",
+          "affiliation": ""
+        },
+        {
+          "name": "Jorge Cardoso",
+          "affiliation": ""
+        },
+        {
+          "name": "Odej Kao",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Artificial Intelligence for IT Operations (AIOps) is an emerging interdisciplinary field arising in the intersection between the research areas of machine learning, big data, streaming analytics, and the management of IT operations. AIOps, as a field, is a candidate to produce the future standard for IT operation management. To that end, AIOps has several challenges. First, it needs to combine separate research branches from other research fields like software reliability engineering. Second, novel modelling techniques are needed to understand the dynamics of different systems. Furthermore, it requires to lay out the basis for assessing: time horizons and uncertainty for imminent SLA violations, the early detection of emerging problems, autonomous remediation, decision making, support of various optimization objectives. Moreover, a good understanding and interpretability of these aiding models are important for building trust between the employed tools and the domain experts. Finally, all this will result in faster adoption of AIOps, further increase the interest in this research field and contribute to bridging the gap towards fully-autonomous operating IT systems.\n  The main aim of the AIOPS workshop is to bring together researchers from both academia and industry to present their experiences, results, and work in progress in this field. The workshop aims to strengthen the community and unite it towards the goal of joining the efforts for solving the main challenges the field is currently facing. A consensus and adoption of the principles of openness and reproducibility will boost the research in this emerging area significantly.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2101.06054",
+      "url": "https://arxiv.org/abs/2101.06054",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2407.01489",
+      "title": "Agentless: Demystifying LLM-based Software Engineering Agents",
+      "authors": [
+        {
+          "name": "Chunqiu Steven Xia",
+          "affiliation": ""
+        },
+        {
+          "name": "Yinlin Deng",
+          "affiliation": ""
+        },
+        {
+          "name": "Soren Dunn",
+          "affiliation": ""
+        },
+        {
+          "name": "Lingming Zhang",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Recent advancements in large language models (LLMs) have significantly advanced the automation of software development tasks, including code synthesis, program repair, and test generation. More recently, researchers and industry practitioners have developed various autonomous LLM agents to perform end-to-end software development tasks. These agents are equipped with the ability to use tools, run commands, observe feedback from the environment, and plan for future actions. However, the complexity of these agent-based approaches, together with the limited abilities of current LLMs, raises the following question: Do we really have to employ complex autonomous software agents? To attempt to answer this question, we build Agentless -- an agentless approach to automatically solve software development problems. Compared to the verbose and complex setup of agent-based approaches, Agentless employs a simplistic three-phase process of localization, repair, and patch validation, without letting the LLM decide future actions or operate with complex tools. Our results on the popular SWE-bench Lite benchmark show that surprisingly the simplistic Agentless is able to achieve both the highest performance (32.00%, 96 correct fixes) and low cost ($0.70) compared with all existing open-source software agents! Furthermore, we manually classified the problems in SWE-bench Lite and found problems with exact ground truth patch or insufficient/misleading issue descriptions. As such, we construct SWE-bench Lite-S by excluding such problematic issues to perform more rigorous evaluation and comparison. Our work highlights the current overlooked potential of a simple, interpretable technique in autonomous software development. We hope Agentless will help reset the baseline, starting point, and horizon for autonomous software agents, and inspire future work along this crucial direction.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2407.01489",
+      "url": "https://arxiv.org/abs/2407.01489",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2504.19956",
+      "title": "Securing Agentic AI: A Comprehensive Threat Model and Mitigation Framework for Generative AI Agents",
+      "authors": [
+        {
+          "name": "Vineeth Sai Narajala",
+          "affiliation": ""
+        },
+        {
+          "name": "Om Narayan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "As generative AI (GenAI) agents become more common in enterprise settings, they introduce security challenges that differ significantly from those posed by traditional systems. These agents are not just LLMs; they reason, remember, and act, often with minimal human oversight. This paper introduces a comprehensive threat model tailored specifically for GenAI agents, focusing on how their autonomy, persistent memory access, complex reasoning, and tool integration create novel risks. This research work identifies 9 primary threats and organizes them across five key domains: cognitive architecture vulnerabilities, temporal persistence threats, operational execution vulnerabilities, trust boundary violations, and governance circumvention. These threats are not just theoretical they bring practical challenges such as delayed exploitability, cross-system propagation, cross system lateral movement, and subtle goal misalignments that are hard to detect with existing frameworks and standard approaches. To help address this, the research work present two complementary frameworks: ATFAA - Advanced Threat Framework for Autonomous AI Agents, which organizes agent-specific risks, and SHIELD, a framework proposing practical mitigation strategies designed to reduce enterprise exposure. While this work builds on existing work in LLM and AI security, the focus is squarely on what makes agents different and why those differences matter. Ultimately, this research argues that GenAI agents require a new lens for security. If we fail to adapt our threat models and defenses to account for their unique architecture and behavior, we risk turning a powerful new tool into a serious enterprise liability.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2504.19956",
+      "url": "https://arxiv.org/abs/2504.19956",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2412.10133",
+      "title": "You Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects",
+      "authors": [
+        {
+          "name": "Islem Bouzenia",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael Pradel",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "The ability to execute the test suite of a project is essential in many scenarios, e.g., to assess code quality and code coverage, to validate code changes made by developers or automated tools, and to ensure compatibility with dependencies. Despite its importance, executing the test suite of a project can be challenging in practice because different projects use different programming languages, software ecosystems, build systems, testing frameworks, and other tools. These challenges make it difficult to create a reliable, universal test execution method that works across different projects. This paper presents ExecutionAgent, an automated technique that prepares scripts for building an arbitrary project from source code and running its test cases. Inspired by the way a human developer would address this task, our approach is a large language model (LLM)-based agent that autonomously executes commands and interacts with the host system. The agent uses meta-prompting to gather guidelines on the latest technologies related to the given project, and it iteratively refines its process based on feedback from the previous steps. Our evaluation applies ExecutionAgent to 50 open-source projects that use 14 different programming languages and many different build and testing tools. The approach successfully executes the test suites of 33/50 projects, while matching the test results of ground truth test suite executions with a deviation of only 7.5%. These results improve over the best previously available technique by 6.6x. The costs imposed by the approach are reasonable, with an execution time of 74 minutes and LLM costs of USD 0.16, on average per project. We envision ExecutionAgent to serve as a valuable tool for developers, automated programming tools, and researchers that need to execute tests across a wide variety of projects.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2412.10133",
+      "url": "https://arxiv.org/abs/2412.10133",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2410.09403",
+      "title": "Many Heads Are Better Than One: Improved Scientific Idea Generation by A LLM-Based Multi-Agent System",
+      "authors": [
+        {
+          "name": "Haoyang Su",
+          "affiliation": ""
+        },
+        {
+          "name": "Renqi Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Shixiang Tang",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhenfei Yin",
+          "affiliation": ""
+        },
+        {
+          "name": "Xinzhe Zheng",
+          "affiliation": ""
+        },
+        {
+          "name": "Jinzhe Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Biqing Qi",
+          "affiliation": ""
+        },
+        {
+          "name": "Qi Wu",
+          "affiliation": ""
+        },
+        {
+          "name": "Hui Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Wanli Ouyang",
+          "affiliation": ""
+        },
+        {
+          "name": "Philip Torr",
+          "affiliation": ""
+        },
+        {
+          "name": "Bowen Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Nanqing Dong",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "The rapid advancement of scientific progress requires innovative tools that can accelerate knowledge discovery. Although recent AI methods, particularly large language models (LLMs), have shown promise in tasks such as hypothesis generation and experimental design, they fall short of replicating the collaborative nature of real-world scientific practices, where diverse experts work together in teams to tackle complex problems. To address the limitations, we propose an LLM-based multi-agent system, i.e., Virtual Scientists (VirSci), designed to mimic the teamwork inherent in scientific research. VirSci organizes a team of agents to collaboratively generate, evaluate, and refine research ideas. Through comprehensive experiments, we demonstrate that this multi-agent approach outperforms the state-of-the-art method in producing novel scientific ideas. We further investigate the collaboration mechanisms that contribute to its tendency to produce ideas with higher novelty, offering valuable insights to guide future research and illuminating pathways toward building a robust system for autonomous scientific discovery. The code is available at https://github.com/open-sciencelab/Virtual-Scientists.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2410.09403",
+      "url": "https://arxiv.org/abs/2410.09403",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2505.22531",
+      "title": "Training RL Agents for Multi-Objective Network Defense Tasks",
+      "authors": [
+        {
+          "name": "Andres Molina-Markham",
+          "affiliation": ""
+        },
+        {
+          "name": "Luis Robaina",
+          "affiliation": ""
+        },
+        {
+          "name": "Sean Steinle",
+          "affiliation": ""
+        },
+        {
+          "name": "Akash Trivedi",
+          "affiliation": ""
+        },
+        {
+          "name": "Derek Tsui",
+          "affiliation": ""
+        },
+        {
+          "name": "Nicholas Potteiger",
+          "affiliation": ""
+        },
+        {
+          "name": "Lauren Brandt",
+          "affiliation": ""
+        },
+        {
+          "name": "Ransom Winder",
+          "affiliation": ""
+        },
+        {
+          "name": "Ahmad Ridley",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Open-ended learning (OEL) -- which emphasizes training agents that achieve broad capability over narrow competency -- is emerging as a paradigm to develop artificial intelligence (AI) agents to achieve robustness and generalization. However, despite promising results that demonstrate the benefits of OEL, applying OEL to develop autonomous agents for real-world cybersecurity applications remains a challenge.\n  We propose a training approach, inspired by OEL, to develop autonomous network defenders. Our results demonstrate that like in other domains, OEL principles can translate into more robust and generalizable agents for cyber defense. To apply OEL to network defense, it is necessary to address several technical challenges. Most importantly, it is critical to provide a task representation approach over a broad universe of tasks that maintains a consistent interface over goals, rewards and action spaces. This way, the learning agent can train with varying network conditions, attacker behaviors, and defender goals while being able to build on previously gained knowledge.\n  With our tools and results, we aim to fundamentally impact research that applies AI to solve cybersecurity problems. Specifically, as researchers develop gyms and benchmarks for cyber defense, it is paramount that they consider diverse tasks with consistent representations, such as those we propose in our work.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2505.22531",
+      "url": "https://arxiv.org/abs/2505.22531",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2602.19555",
+      "title": "SOK: A Taxonomy of Attack Vectors and Defense Strategies for Agentic Supply Chain Runtime",
+      "authors": [
+        {
+          "name": "Xiaochong Jiang",
+          "affiliation": ""
+        },
+        {
+          "name": "Shiqi Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Wenting Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yichen Liu",
+          "affiliation": ""
+        },
+        {
+          "name": "Cheng Ji",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "Agentic systems based on large language models (LLMs) operate not merely as text generators but as autonomous entities that dynamically retrieve information and invoke tools. This execution model shifts the attack surface from traditional build-time artifacts to inference-time dependencies, exposing agents to manipulation through untrusted data and probabilistic capability resolution. While prior work has examined model-level vulnerabilities, security risks arising from the complex, cyclic runtime behavior of agents remain fragmented.\n  This paper systematizes existing research into a unified runtime framework. We categorize threats into data supply chain attacks (distinguishing between transient context injection and persistent memory poisoning) and tool supply chain attacks (spanning discovery, implementation, and invocation phases). Crucially, we identify the emergence of the Viral Agent Loop, where agents effectively become vectors for self-propagating generative worms that require no code vulnerabilities to spread. We argue for a transition to a Zero-Trust Runtime Architecture, where context is treated as untrusted control flow, and tool execution is bounded by cryptographic provenance rather than semantic likelihood.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2602.19555",
+      "url": "https://arxiv.org/abs/2602.19555",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2509.26354",
+      "title": "Your Agent May Misevolve: Emergent Risks in Self-evolving LLM Agents",
+      "authors": [
+        {
+          "name": "Shuai Shao",
+          "affiliation": ""
+        },
+        {
+          "name": "Qihan Ren",
+          "affiliation": ""
+        },
+        {
+          "name": "Chen Qian",
+          "affiliation": ""
+        },
+        {
+          "name": "Boyi Wei",
+          "affiliation": ""
+        },
+        {
+          "name": "Dadi Guo",
+          "affiliation": ""
+        },
+        {
+          "name": "Jingyi Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Xinhao Song",
+          "affiliation": ""
+        },
+        {
+          "name": "Linfeng Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Weinan Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Dongrui Liu",
+          "affiliation": ""
+        },
+        {
+          "name": "Jing Shao",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Advances in Large Language Models (LLMs) have enabled a new class of self-evolving agents that autonomously improve through interaction with the environment, demonstrating strong capabilities. However, self-evolution also introduces novel risks overlooked by current safety research. In this work, we study the case where an agent's self-evolution deviates in unintended ways, leading to undesirable or even harmful outcomes. We refer to this as Misevolution. To provide a systematic investigation, we evaluate misevolution along four key evolutionary pathways: model, memory, tool, and workflow. Our empirical findings reveal that misevolution is a widespread risk, affecting agents built even on top-tier LLMs (e.g., Gemini-2.5-Pro). Different emergent risks are observed in the self-evolutionary process, such as the degradation of safety alignment after memory accumulation, or the unintended introduction of vulnerabilities in tool creation and reuse. To our knowledge, this is the first study to systematically conceptualize misevolution and provide empirical evidence of its occurrence, highlighting an urgent need for new safety paradigms for self-evolving agents. Finally, we discuss potential mitigation strategies to inspire further research on building safer and more trustworthy self-evolving agents. Our code and data are available at https://github.com/ShaoShuai0605/Misevolution . Warning: this paper includes examples that may be offensive or harmful in nature.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2509.26354",
+      "url": "https://arxiv.org/abs/2509.26354",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2208.08834",
+      "title": "Outlier Detection using Self-Organizing Maps for Automated Blood Cell Analysis",
+      "authors": [
+        {
+          "name": "Stefan R\u00f6hrl",
+          "affiliation": ""
+        },
+        {
+          "name": "Alice Hein",
+          "affiliation": ""
+        },
+        {
+          "name": "Lucie Huang",
+          "affiliation": ""
+        },
+        {
+          "name": "Dominik Heim",
+          "affiliation": ""
+        },
+        {
+          "name": "Christian Klenk",
+          "affiliation": ""
+        },
+        {
+          "name": "Manuel Lengl",
+          "affiliation": ""
+        },
+        {
+          "name": "Martin Knopp",
+          "affiliation": ""
+        },
+        {
+          "name": "Nawal Hafez",
+          "affiliation": ""
+        },
+        {
+          "name": "Oliver Hayden",
+          "affiliation": ""
+        },
+        {
+          "name": "Klaus Diepold",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "The quality of datasets plays a crucial role in the successful training and deployment of deep learning models. Especially in the medical field, where system performance may impact the health of patients, clean datasets are a safety requirement for reliable predictions. Therefore, outlier detection is an essential process when building autonomous clinical decision systems. In this work, we assess the suitability of Self-Organizing Maps for outlier detection specifically on a medical dataset containing quantitative phase images of white blood cells. We detect and evaluate outliers based on quantization errors and distance maps. Our findings confirm the suitability of Self-Organizing Maps for unsupervised Out-Of-Distribution detection on the dataset at hand. Self-Organizing Maps perform on par with a manually specified filter based on expert domain knowledge. Additionally, they show promise as a tool in the exploration and cleaning of medical datasets. As a direction for future research, we suggest a combination of Self-Organizing Maps and feature extraction based on deep learning.",
+      "venue": "eess.IV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2208.08834",
+      "url": "https://arxiv.org/abs/2208.08834",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2504.16939",
+      "title": "A Desideratum for Conversational Agents: Capabilities, Challenges, and Future Directions",
+      "authors": [
+        {
+          "name": "Emre Can Acikgoz",
+          "affiliation": ""
+        },
+        {
+          "name": "Cheng Qian",
+          "affiliation": ""
+        },
+        {
+          "name": "Hongru Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Vardhan Dongre",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiusi Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Heng Ji",
+          "affiliation": ""
+        },
+        {
+          "name": "Dilek Hakkani-T\u00fcr",
+          "affiliation": ""
+        },
+        {
+          "name": "Gokhan Tur",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Recent advances in Large Language Models (LLMs) have propelled conversational AI from traditional dialogue systems into sophisticated agents capable of autonomous actions, contextual awareness, and multi-turn interactions with users. Yet, fundamental questions about their capabilities, limitations, and paths forward remain open. This survey paper presents a desideratum for next-generation Conversational Agents - what has been achieved, what challenges persist, and what must be done for more scalable systems that approach human-level intelligence. To that end, we systematically analyze LLM-driven Conversational Agents by organizing their capabilities into three primary dimensions: (i) Reasoning - logical, systematic thinking inspired by human intelligence for decision making, (ii) Monitor - encompassing self-awareness and user interaction monitoring, and (iii) Control - focusing on tool utilization and policy following. Building upon this, we introduce a novel taxonomy by classifying recent work on Conversational Agents around our proposed desideratum. We identify critical research gaps and outline key directions, including realistic evaluations, long-term multi-turn reasoning skills, self-evolution capabilities, collaborative and multi-agent task completion, personalization, and proactivity. This work aims to provide a structured foundation, highlight existing limitations, and offer insights into potential future research directions for Conversational Agents, ultimately advancing progress toward Artificial General Intelligence (AGI). We maintain a curated repository of papers at: https://github.com/emrecanacikgoz/awesome-conversational-agents.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2504.16939",
+      "url": "https://arxiv.org/abs/2504.16939",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2510.27130",
+      "title": "AI Agents in Drug Discovery",
+      "authors": [
+        {
+          "name": "Srijit Seal",
+          "affiliation": ""
+        },
+        {
+          "name": "Dinh Long Huynh",
+          "affiliation": ""
+        },
+        {
+          "name": "Moudather Chelbi",
+          "affiliation": ""
+        },
+        {
+          "name": "Sara Khosravi",
+          "affiliation": ""
+        },
+        {
+          "name": "Ankur Kumar",
+          "affiliation": ""
+        },
+        {
+          "name": "Mattson Thieme",
+          "affiliation": ""
+        },
+        {
+          "name": "Isaac Wilks",
+          "affiliation": ""
+        },
+        {
+          "name": "Mark Davies",
+          "affiliation": ""
+        },
+        {
+          "name": "Jessica Mustali",
+          "affiliation": ""
+        },
+        {
+          "name": "Yannick Sun",
+          "affiliation": ""
+        },
+        {
+          "name": "Nick Edwards",
+          "affiliation": ""
+        },
+        {
+          "name": "Daniil Boiko",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrei Tyrin",
+          "affiliation": ""
+        },
+        {
+          "name": "Douglas W. Selinger",
+          "affiliation": ""
+        },
+        {
+          "name": "Ayaan Parikh",
+          "affiliation": ""
+        },
+        {
+          "name": "Rahul Vijayan",
+          "affiliation": ""
+        },
+        {
+          "name": "Shoman Kasbekar",
+          "affiliation": ""
+        },
+        {
+          "name": "Dylan Reid",
+          "affiliation": ""
+        },
+        {
+          "name": "Andreas Bender",
+          "affiliation": ""
+        },
+        {
+          "name": "Ola Spjuth",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Artificial intelligence (AI) agents are emerging as transformative tools in drug discovery, with the ability to autonomously reason, act, and learn through complicated research workflows. Building on large language models (LLMs) coupled with perception, computation, action, and memory tools, these agentic AI systems could integrate diverse biomedical data, execute tasks, carry out experiments via robotic platforms, and iteratively refine hypotheses in closed loops. We provide a conceptual and technical overview of agentic AI architectures, ranging from ReAct and Reflection to Supervisor and Swarm systems, and illustrate their applications across key stages of drug discovery, including literature synthesis, toxicity prediction, automated protocol generation, small-molecule synthesis, drug repurposing, and end-to-end decision-making. To our knowledge, this represents the first comprehensive work to present real-world implementations and quantifiable impacts of agentic AI systems deployed in operational drug discovery settings. Early implementations demonstrate substantial gains in speed, reproducibility, and scalability, compressing workflows that once took months into hours while maintaining scientific traceability. We discuss the current challenges related to data heterogeneity, system reliability, privacy, and benchmarking, and outline future directions towards technology in support of science and translation.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2510.27130",
+      "url": "https://arxiv.org/abs/2510.27130",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2505.10924",
+      "title": "A Survey on the Safety and Security Threats of Computer-Using Agents: JARVIS or Ultron?",
+      "authors": [
+        {
+          "name": "Ada Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Yongjiang Wu",
+          "affiliation": ""
+        },
+        {
+          "name": "Junyuan Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Jingyu Xiao",
+          "affiliation": ""
+        },
+        {
+          "name": "Shu Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "Jen-tse Huang",
+          "affiliation": ""
+        },
+        {
+          "name": "Kun Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Wenxuan Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Shuai Wang",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Recently, AI-driven interactions with computing devices have advanced from basic prototype tools to sophisticated, LLM-based systems that emulate human-like operations in graphical user interfaces. We are now witnessing the emergence of \\emph{Computer-Using Agents} (CUAs), capable of autonomously performing tasks such as navigating desktop applications, web pages, and mobile apps. However, as these agents grow in capability, they also introduce novel safety and security risks. Vulnerabilities in LLM-driven reasoning, with the added complexity of integrating multiple software components and multimodal inputs, further complicate the security landscape. In this paper, we present a systematization of knowledge on the safety and security threats of CUAs. We conduct a comprehensive literature review and distill our findings along four research objectives: \\textit{\\textbf{(i)}} define the CUA that suits safety analysis; \\textit{\\textbf{(ii)} } categorize current safety threats among CUAs; \\textit{\\textbf{(iii)}} propose a comprehensive taxonomy of existing defensive strategies; \\textit{\\textbf{(iv)}} summarize prevailing benchmarks, datasets, and evaluation metrics used to assess the safety and performance of CUAs. Building on these insights, our work provides future researchers with a structured foundation for exploring unexplored vulnerabilities and offers practitioners actionable guidance in designing and deploying secure Computer-Using Agents.",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2505.10924",
+      "url": "https://arxiv.org/abs/2505.10924",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2510.09804",
+      "title": "Rapid Development of Omics Data Analysis Applications through Vibe Coding",
+      "authors": [
+        {
+          "name": "Jesse G. Meyer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Building custom data analysis platforms traditionally requires extensive software engineering expertise, limiting accessibility for many researchers. Here, I demonstrate that modern large language models (LLMs) and autonomous coding agents can dramatically lower this barrier through a process called 'vibe coding', an iterative, conversational style of software creation where users describe goals in natural language and AI agents generate, test, and refine executable code in real-time. As a proof of concept, I used Vibe coding to create a fully functional proteomics data analysis website capable of performing standard tasks, including data normalization, differential expression testing, and volcano plot visualization. The entire application, including user interface, backend logic, and data upload pipeline, was developed in less than ten minutes using only four natural-language prompts, without any manual coding, at a cost of under $2. Previous works in this area typically require tens of thousands of dollars in research effort from highly trained programmers. I detail the step-by-step generation process and evaluate the resulting code's functionality. This demonstration highlights how vibe coding enables domain experts to rapidly prototype sophisticated analytical tools, transforming the pace and accessibility of computational biology software development.",
+      "venue": "q-bio.OT",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2510.09804",
+      "url": "https://arxiv.org/abs/2510.09804",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2511.21920",
+      "title": "Toward Automated and Trustworthy Scientific Analysis and Visualization with LLM-Generated Code",
+      "authors": [
+        {
+          "name": "Apu Kumar Chakroborti",
+          "affiliation": ""
+        },
+        {
+          "name": "Yi Ding",
+          "affiliation": ""
+        },
+        {
+          "name": "Lipeng Wan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "As modern science becomes increasingly data-intensive, the ability to analyze and visualize large-scale, complex datasets is critical to accelerating discovery. However, many domain scientists lack the programming expertise required to develop custom data analysis workflows, creating barriers to timely and effective insight. Large language models (LLMs) offer a promising solution by generating executable code from natural language descriptions. In this paper, we investigate the trustworthiness of open-source LLMs in autonomously producing Python scripts for scientific data analysis and visualization. We construct a benchmark suite of domain-inspired prompts that reflect real-world research tasks and systematically evaluate the executability and correctness of the generated code. Our findings show that, without human intervention, the reliability of LLM-generated code is limited, with frequent failures caused by ambiguous prompts and the models' insufficient understanding of domain-specific contexts. To address these challenges, we design and assess three complementary strategies: data-aware prompt disambiguation, retrieval-augmented prompt enhancement, and iterative error repair. While these methods significantly improve execution success rates and output quality, further refinement is needed. This work highlights both the promise and current limitations of LLM-driven automation in scientific workflows and introduces actionable techniques and a reusable benchmark for building more inclusive, accessible, and trustworthy AI-assisted research tools.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2511.21920",
+      "url": "https://arxiv.org/abs/2511.21920",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2206.01134",
+      "title": "Language and Culture Internalisation for Human-Like Autotelic AI",
+      "authors": [
+        {
+          "name": "C\u00e9dric Colas",
+          "affiliation": ""
+        },
+        {
+          "name": "Tristan Karch",
+          "affiliation": ""
+        },
+        {
+          "name": "Cl\u00e9ment Moulin-Frier",
+          "affiliation": ""
+        },
+        {
+          "name": "Pierre-Yves Oudeyer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Building autonomous agents able to grow open-ended repertoires of skills across their lives is a fundamental goal of artificial intelligence (AI). A promising developmental approach recommends the design of intrinsically motivated agents that learn new skills by generating and pursuing their own goals - autotelic agents. But despite recent progress, existing algorithms still show serious limitations in terms of goal diversity, exploration, generalisation or skill composition. This perspective calls for the immersion of autotelic agents into rich socio-cultural worlds, an immensely important attribute of our environment that shapes human cognition but is mostly omitted in modern AI. Inspired by the seminal work of Vygotsky, we propose Vygotskian autotelic agents - agents able to internalise their interactions with others and turn them into cognitive tools. We focus on language and show how its structure and informational content may support the development of new cognitive functions in artificial agents as it does in humans. We justify the approach by uncovering several examples of new artificial cognitive functions emerging from interactions between language and embodiment in recent works at the intersection of deep reinforcement learning and natural language processing. Looking forward, we highlight future opportunities and challenges for Vygotskian Autotelic AI research, including the use of language models as cultural models supporting artificial cognitive development.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "10.1038/s42256-022-00591-4",
+      "arxiv_id": "2206.01134",
+      "url": "https://arxiv.org/abs/2206.01134",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2212.00888",
+      "title": "Decisions that Explain Themselves: A User-Centric Deep Reinforcement Learning Explanation System",
+      "authors": [
+        {
+          "name": "Xiaoran Wu",
+          "affiliation": ""
+        },
+        {
+          "name": "Zihan Yan",
+          "affiliation": ""
+        },
+        {
+          "name": "Chongjie Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Tongshuang Wu",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "With deep reinforcement learning (RL) systems like autonomous driving being wildly deployed but remaining largely opaque, developers frequently use explainable RL (XRL) tools to better understand and work with deep RL agents. However, previous XRL works employ a techno-centric research approach, ignoring how RL developers perceive the generated explanations. Through a pilot study, we identify major goals for RL practitioners to use XRL methods and four pitfalls that widen the gap between existing XRL methods and these goals. The pitfalls include inaccessible reasoning processes, inconsistent or unintelligible explanations, and explanations that cannot be generalized. To fill the discovered gap, we propose a counterfactual-inference-based explanation method that discovers the details of the reasoning process of RL agents and generates natural language explanations. Surrounding this method, we build an interactive XRL system where users can actively explore explanations and influential information. In a user study with 14 participants, we validated that developers identified 20.9% more abnormal behaviors and limitations of RL agents with our system compared to the baseline method, and using our system helped end users improve their performance in actionability tests by 25.1% in an auto-driving task and by 16.9% in a StarCraft II micromanagement task.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2212.00888",
+      "url": "https://arxiv.org/abs/2212.00888",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2405.06176",
+      "title": "Lowering Barriers to Entry for Fully-Integrated Custom Payloads on a DJI Matrice",
+      "authors": [
+        {
+          "name": "Joshua Springer",
+          "affiliation": ""
+        },
+        {
+          "name": "Gylfi \u00de\u00f3r Gu\u00f0mundsson",
+          "affiliation": ""
+        },
+        {
+          "name": "Marcel Kyas",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Consumer-grade drones have become effective multimedia collection tools, spring-boarded by rapid development in embedded CPUs, GPUs, and cameras. They are best known for their ability to cheaply collect high-quality aerial video, 3D terrain scans, infrared imagery, etc., with respect to manned aircraft. However, users can also create and attach custom sensors, actuators, or computers, so the drone can collect different data, generate composite data, or interact intelligently with its environment, e.g., autonomously changing behavior to land in a safe way, or choosing further data collection sites. Unfortunately, developing custom payloads is prohibitively difficult for many researchers outside of engineering. We provide guidelines for how to create a sophisticated computational payload that integrates a Raspberry Pi 5 into a DJI Matrice 350. The payload fits into the Matrice's case like a typical DJI payload (but is much cheaper), is easy to build and expand (3D-printed), uses the drone's power and telemetry, can control the drone and its other payloads, can access the drone's sensors and camera feeds, and can process video and stream it to the operator via the controller in real time. We describe the difficulties and proprietary quirks we encountered, how we worked through them, and provide setup scripts and a known-working configuration for others to use.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2405.06176",
+      "url": "https://arxiv.org/abs/2405.06176",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2505.20273",
+      "title": "Ten Principles of AI Agent Economics",
+      "authors": [
+        {
+          "name": "Ke Yang",
+          "affiliation": ""
+        },
+        {
+          "name": "ChengXiang Zhai",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The rapid rise of AI-based autonomous agents is transforming human society and economic systems, as these entities increasingly exhibit human-like or superhuman intelligence. From excelling at complex games like Go to tackling diverse general-purpose tasks with large language and multimodal models, AI agents are evolving from specialized tools into dynamic participants in social and economic ecosystems. Their autonomy and decision-making capabilities are poised to impact industries, professions, and human lives profoundly, raising critical questions about their integration into economic activities, potential ethical concerns, and the balance between their utility and safety.\n  To address these challenges, this paper presents ten principles of AI agent economics, offering a framework to understand how AI agents make decisions, influence social interactions, and participate in the broader economy. Drawing on economics, decision theory, and ethics, we explore fundamental questions, such as whether AI agents might evolve from tools into independent entities, their impact on labor markets, and the ethical safeguards needed to align them with human values. These principles build on existing economic theories while accounting for the unique traits of AI agents, providing a roadmap for their responsible integration into human systems.\n  Beyond theoretical insights, this paper highlights the urgency of future research into AI trustworthiness, ethical guidelines, and regulatory oversight. As we enter a transformative era, this work serves as both a guide and a call to action, ensuring AI agents contribute positively to human progress while addressing risks tied to their unprecedented capabilities.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2505.20273",
+      "url": "https://arxiv.org/abs/2505.20273",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2107.00956",
+      "title": "SocialAI: Benchmarking Socio-Cognitive Abilities in Deep Reinforcement Learning Agents",
+      "authors": [
+        {
+          "name": "Grgur Kova\u010d",
+          "affiliation": ""
+        },
+        {
+          "name": "R\u00e9my Portelas",
+          "affiliation": ""
+        },
+        {
+          "name": "Katja Hofmann",
+          "affiliation": ""
+        },
+        {
+          "name": "Pierre-Yves Oudeyer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Building embodied autonomous agents capable of participating in social interactions with humans is one of the main challenges in AI. Within the Deep Reinforcement Learning (DRL) field, this objective motivated multiple works on embodied language use. However, current approaches focus on language as a communication tool in very simplified and non-diverse social situations: the \"naturalness\" of language is reduced to the concept of high vocabulary size and variability. In this paper, we argue that aiming towards human-level AI requires a broader set of key social skills: 1) language use in complex and variable social contexts; 2) beyond language, complex embodied communication in multimodal settings within constantly evolving social worlds. We explain how concepts from cognitive sciences could help AI to draw a roadmap towards human-like intelligence, with a focus on its social dimensions. As a first step, we propose to expand current research to a broader set of core social skills. To do this, we present SocialAI, a benchmark to assess the acquisition of social skills of DRL agents using multiple grid-world environments featuring other (scripted) social agents. We then study the limits of a recent SOTA DRL approach when tested on SocialAI and discuss important next steps towards proficient social agents. Videos and code are available at https://sites.google.com/view/socialai.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2107.00956",
+      "url": "https://arxiv.org/abs/2107.00956",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2210.09114",
+      "title": "INSANE: Cross-Domain UAV Data Sets with Increased Number of Sensors for developing Advanced and Novel Estimators",
+      "authors": [
+        {
+          "name": "Christian Brommer",
+          "affiliation": ""
+        },
+        {
+          "name": "Alessandro Fornasier",
+          "affiliation": ""
+        },
+        {
+          "name": "Martin Scheiber",
+          "affiliation": ""
+        },
+        {
+          "name": "Jeff Delaune",
+          "affiliation": ""
+        },
+        {
+          "name": "Roland Brockers",
+          "affiliation": ""
+        },
+        {
+          "name": "Jan Steinbrener",
+          "affiliation": ""
+        },
+        {
+          "name": "Stephan Weiss",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "For real-world applications, autonomous mobile robotic platforms must be capable of navigating safely in a multitude of different and dynamic environments with accurate and robust localization being a key prerequisite. To support further research in this domain, we present the INSANE data sets - a collection of versatile Micro Aerial Vehicle (MAV) data sets for cross-environment localization. The data sets provide various scenarios with multiple stages of difficulty for localization methods. These scenarios range from trajectories in the controlled environment of an indoor motion capture facility, to experiments where the vehicle performs an outdoor maneuver and transitions into a building, requiring changes of sensor modalities, up to purely outdoor flight maneuvers in a challenging Mars analog environment to simulate scenarios which current and future Mars helicopters would need to perform. The presented work aims to provide data that reflects real-world scenarios and sensor effects. The extensive sensor suite includes various sensor categories, including multiple Inertial Measurement Units (IMUs) and cameras. Sensor data is made available as raw measurements and each data set provides highly accurate ground truth, including the outdoor experiments where a dual Real-Time Kinematic (RTK) Global Navigation Satellite System (GNSS) setup provides sub-degree and centimeter accuracy (1-sigma). The sensor suite also includes a dedicated high-rate IMU to capture all the vibration dynamics of the vehicle during flight to support research on novel machine learning-based sensor signal enhancement methods for improved localization. The data sets and post-processing tools are available at: https://sst.aau.at/cns/datasets",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2210.09114",
+      "url": "https://arxiv.org/abs/2210.09114",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2402.05188",
+      "title": "InCoRo: In-Context Learning for Robotics Control with Feedback Loops",
+      "authors": [
+        {
+          "name": "Jiaqiang Ye Zhu",
+          "affiliation": ""
+        },
+        {
+          "name": "Carla Gomez Cano",
+          "affiliation": ""
+        },
+        {
+          "name": "David Vazquez Bermudez",
+          "affiliation": ""
+        },
+        {
+          "name": "Michal Drozdzal",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "One of the challenges in robotics is to enable robotic units with the reasoning capability that would be robust enough to execute complex tasks in dynamic environments. Recent advances in LLMs have positioned them as go-to tools for simple reasoning tasks, motivating the pioneering work of Liang et al. [35] that uses an LLM to translate natural language commands into low-level static execution plans for robotic units. Using LLMs inside robotics systems brings their generalization to a new level, enabling zero-shot generalization to new tasks. This paper extends this prior work to dynamic environments. We propose InCoRo, a system that uses a classical robotic feedback loop composed of an LLM controller, a scene understanding unit, and a robot. Our system continuously analyzes the state of the environment and provides adapted execution commands, enabling the robot to adjust to changing environmental conditions and correcting for controller errors. Our system does not require any iterative optimization to learn to accomplish a task as it leverages in-context learning with an off-the-shelf LLM model. Through an extensive validation process involving two standardized industrial robotic units -- SCARA and DELTA types -- we contribute knowledge about these robots, not popular in the community, thereby enriching it. We highlight the generalization capabilities of our system and show that (1) in-context learning in combination with the current state-of-the-art LLMs is an effective way to implement a robotic controller; (2) in static environments, InCoRo surpasses the prior art in terms of the success rate; (3) in dynamic environments, we establish new state-of-the-art for the SCARA and DELTA units, respectively. This research paves the way towards building reliable, efficient, intelligent autonomous systems that adapt to dynamic environments.",
+      "venue": "cs.RO",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2402.05188",
+      "url": "https://arxiv.org/abs/2402.05188",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2508.14300",
+      "title": "MultiFuzz: A Dense Retrieval-based Multi-Agent System for Network Protocol Fuzzing",
+      "authors": [
+        {
+          "name": "Youssef Maklad",
+          "affiliation": ""
+        },
+        {
+          "name": "Fares Wael",
+          "affiliation": ""
+        },
+        {
+          "name": "Ali Hamdi",
+          "affiliation": ""
+        },
+        {
+          "name": "Wael Elsersy",
+          "affiliation": ""
+        },
+        {
+          "name": "Khaled Shaban",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Traditional protocol fuzzing techniques, such as those employed by AFL-based systems, often lack effectiveness due to a limited semantic understanding of complex protocol grammars and rigid seed mutation strategies. Recent works, such as ChatAFL, have integrated Large Language Models (LLMs) to guide protocol fuzzing and address these limitations, pushing protocol fuzzers to wider exploration of the protocol state space. But ChatAFL still faces issues like unreliable output, LLM hallucinations, and assumptions of LLM knowledge about protocol specifications. This paper introduces MultiFuzz, a novel dense retrieval-based multi-agent system designed to overcome these limitations by integrating semantic-aware context retrieval, specialized agents, and structured tool-assisted reasoning. MultiFuzz utilizes agentic chunks of protocol documentation (RFC Documents) to build embeddings in a vector database for a retrieval-augmented generation (RAG) pipeline, enabling agents to generate more reliable and structured outputs, enhancing the fuzzer in mutating protocol messages with enhanced state coverage and adherence to syntactic constraints. The framework decomposes the fuzzing process into modular groups of agents that collaborate through chain-of-thought reasoning to dynamically adapt fuzzing strategies based on the retrieved contextual knowledge. Experimental evaluations on the Real-Time Streaming Protocol (RTSP) demonstrate that MultiFuzz significantly improves branch coverage and explores deeper protocol states and transitions over state-of-the-art (SOTA) fuzzers such as NSFuzz, AFLNet, and ChatAFL. By combining dense retrieval, agentic coordination, and language model reasoning, MultiFuzz establishes a new paradigm in autonomous protocol fuzzing, offering a scalable and extensible foundation for future research in intelligent agentic-based fuzzing systems.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2508.14300",
+      "url": "https://arxiv.org/abs/2508.14300",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2010.04821",
+      "title": "Understanding Local Robustness of Deep Neural Networks under Natural Variations",
+      "authors": [
+        {
+          "name": "Ziyuan Zhong",
+          "affiliation": ""
+        },
+        {
+          "name": "Yuchi Tian",
+          "affiliation": ""
+        },
+        {
+          "name": "Baishakhi Ray",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Deep Neural Networks (DNNs) are being deployed in a wide range of settings today, from safety-critical applications like autonomous driving to commercial applications involving image classifications. However, recent research has shown that DNNs can be brittle to even slight variations of the input data. Therefore, rigorous testing of DNNs has gained widespread attention.\n  While DNN robustness under norm-bound perturbation got significant attention over the past few years, our knowledge is still limited when natural variants of the input images come. These natural variants, e.g. a rotated or a rainy version of the original input, are especially concerning as they can occur naturally in the field without any active adversary and may lead to undesirable consequences. Thus, it is important to identify the inputs whose small variations may lead to erroneous DNN behaviors. The very few studies that looked at DNN's robustness under natural variants, however, focus on estimating the overall robustness of DNNs across all the test data rather than localizing such error-producing points. This work aims to bridge this gap.\n  To this end, we study the local per-input robustness properties of the DNNs and leverage those properties to build a white-box (DeepRobust-W) and a black-box (DeepRobust-B) tool to automatically identify the non-robust points. Our evaluation of these methods on three DNN models spanning three widely used image classification datasets shows that they are effective in flagging points of poor robustness. In particular, DeepRobust-W and DeepRobust-B are able to achieve an F1 score of up to 91.4% and 99.1%, respectively. We further show that DeepRobust-W can be applied to a regression problem in another domain. Our evaluation on three self-driving car models demonstrates that DeepRobust-W is effective in identifying points of poor robustness with F1 score up to 78.9%.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2010.04821",
+      "url": "https://arxiv.org/abs/2010.04821",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    }
+  ]
+}

@@ -1,0 +1,688 @@
+{
+  "query": "Build-working-autonomous-research-tool review",
+  "source": "arxiv",
+  "limit": 40,
+  "timestamp": 1777751645.0655322,
+  "papers": [
+    {
+      "paper_id": "arxiv-2503.23249",
+      "title": "Context in object detection: a systematic literature review",
+      "authors": [
+        {
+          "name": "Mahtab Jamali",
+          "affiliation": ""
+        },
+        {
+          "name": "Paul Davidsson",
+          "affiliation": ""
+        },
+        {
+          "name": "Reza Khoshkangini",
+          "affiliation": ""
+        },
+        {
+          "name": "Martin Georg Ljungqvist",
+          "affiliation": ""
+        },
+        {
+          "name": "Radu-Casian Mihailescu",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Context is an important factor in computer vision as it offers valuable information to clarify and analyze visual data. Utilizing the contextual information inherent in an image or a video can improve the precision and effectiveness of object detectors. For example, where recognizing an isolated object might be challenging, context information can improve comprehension of the scene. This study explores the impact of various context-based approaches to object detection. Initially, we investigate the role of context in object detection and survey it from several perspectives. We then review and discuss the most recent context-based object detection approaches and compare them. Finally, we conclude by addressing research questions and identifying gaps for further studies. More than 265 publications are included in this survey, covering different aspects of context in different categories of object detection, including general object detection, video object detection, small object detection, camouflaged object detection, zero-shot, one-shot, and few-shot object detection. This literature review presents a comprehensive overview of the latest advancements in context-based object detection, providing valuable contributions such as a thorough understanding of contextual information and effective methods for integrating various context types into object detection, thus benefiting researchers.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1007/s10462-025-11186-x",
+      "arxiv_id": "2503.23249",
+      "url": "https://arxiv.org/abs/2503.23249",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2306.06955",
+      "title": "A Brief Review of Hypernetworks in Deep Learning",
+      "authors": [
+        {
+          "name": "Vinod Kumar Chauhan",
+          "affiliation": ""
+        },
+        {
+          "name": "Jiandong Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Ping Lu",
+          "affiliation": ""
+        },
+        {
+          "name": "Soheila Molaei",
+          "affiliation": ""
+        },
+        {
+          "name": "David A. Clifton",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "Hypernetworks, or hypernets for short, are neural networks that generate weights for another neural network, known as the target network. They have emerged as a powerful deep learning technique that allows for greater flexibility, adaptability, dynamism, faster training, information sharing, and model compression. Hypernets have shown promising results in a variety of deep learning problems, including continual learning, causal inference, transfer learning, weight pruning, uncertainty quantification, zero-shot learning, natural language processing, and reinforcement learning. Despite their success across different problem settings, there is currently no comprehensive review available to inform researchers about the latest developments and to assist in utilizing hypernets. To fill this gap, we review the progress in hypernets. We present an illustrative example of training deep neural networks using hypernets and propose categorizing hypernets based on five design criteria: inputs, outputs, variability of inputs and outputs, and the architecture of hypernets. We also review applications of hypernets across different deep learning problem settings, followed by a discussion of general scenarios where hypernets can be effectively employed. Finally, we discuss the challenges and future directions that remain underexplored in the field of hypernets. We believe that hypernetworks have the potential to revolutionize the field of deep learning. They offer a new way to design and train neural networks, and they have the potential to improve the performance of deep learning models on a variety of tasks. Through this review, we aim to inspire further advancements in deep learning through hypernetworks.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "10.1007/s10462-024-10862-8",
+      "arxiv_id": "2306.06955",
+      "url": "https://arxiv.org/abs/2306.06955",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2406.19407",
+      "title": "YOLO advances to its genesis: a decadal and comprehensive review of the You Only Look Once (YOLO) series",
+      "authors": [
+        {
+          "name": "Ranjan Sapkota",
+          "affiliation": ""
+        },
+        {
+          "name": "Marco Flores Calero",
+          "affiliation": ""
+        },
+        {
+          "name": "Rizwan Qureshi",
+          "affiliation": ""
+        },
+        {
+          "name": "Chetan Badgujar",
+          "affiliation": ""
+        },
+        {
+          "name": "Upesh Nepal",
+          "affiliation": ""
+        },
+        {
+          "name": "Alwin Poulose",
+          "affiliation": ""
+        },
+        {
+          "name": "Peter Zeno",
+          "affiliation": ""
+        },
+        {
+          "name": "Uday Bhanu Prakash Vaddevolu",
+          "affiliation": ""
+        },
+        {
+          "name": "Sheheryar Khan",
+          "affiliation": ""
+        },
+        {
+          "name": "Maged Shoman",
+          "affiliation": ""
+        },
+        {
+          "name": "Hong Yan",
+          "affiliation": ""
+        },
+        {
+          "name": "Manoj Karkee",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "This review systematically examines the progression of the You Only Look Once (YOLO) object detection algorithms from YOLOv1 to the recently unveiled YOLOv12. Employing a reverse chronological analysis, this study examines the advancements introduced by YOLO algorithms, beginning with YOLOv12 and progressing through YOLO11 (or YOLOv11), YOLOv10, YOLOv9, YOLOv8, and subsequent versions to explore each version's contributions to enhancing speed, detection accuracy, and computational efficiency in real-time object detection. Additionally, this study reviews the alternative versions derived from YOLO architectural advancements of YOLO-NAS, YOLO-X, YOLO-R, DAMO-YOLO, and Gold-YOLO. Moreover, the study highlights the transformative impact of YOLO models across five critical application areas: autonomous vehicles and traffic safety, healthcare and medical imaging, industrial manufacturing, surveillance and security, and agriculture. By detailing the incremental technological advancements in subsequent YOLO versions, this review chronicles the evolution of YOLO, and discusses the challenges and limitations in each of the earlier versions. The evolution signifies a path towards integrating YOLO with multimodal, context-aware, and Artificial General Intelligence (AGI) systems for the next YOLO decade, promising significant implications for future developments in AI-driven applications. YOLO Review, YOLO Advances, YOLOv13, YOLOv14, YOLOv15, YOLOv16, YOLOv17, YOLOv18, YOLOv19, YOLOv20, YOLO review, YOLO Object Detection",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1007/s10462-025-11253-3",
+      "arxiv_id": "2406.19407",
+      "url": "https://arxiv.org/abs/2406.19407",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2301.10079",
+      "title": "Reformulation Techniques for Automated Planning: A Systematic Review",
+      "authors": [
+        {
+          "name": "Diaeddin Alarnaouti",
+          "affiliation": ""
+        },
+        {
+          "name": "George Baryannis",
+          "affiliation": ""
+        },
+        {
+          "name": "Mauro Vallati",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "Automated planning is a prominent area of Artificial Intelligence, and an important component for intelligent autonomous agents. A cornerstone of domain-independent planning is the separation between planning logic, i.e. the automated reasoning side, and the knowledge model, that encodes a formal representation of domain knowledge needed to reason upon a given problem to synthesise a solution plan. Such a separation enables the use of reformulation techniques, which transform how a model is represented in order to improve the efficiency of plan generation. Over the past decades, significant research effort has been devoted to the design of reformulation techniques. In this paper, we present a systematic review of the large body of work on reformulation techniques for classical planning, aiming to provide a holistic view of the field and to foster future research in the area. As a tangible outcome, we provide a qualitative comparison of the existing classes of techniques, that can help researchers gain an overview of their strengths and weaknesses.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "10.1017/S0269888923000097",
+      "arxiv_id": "2301.10079",
+      "url": "https://arxiv.org/abs/2301.10079",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2507.00218",
+      "title": "Learning for routing: A guided review of recent developments and future directions",
+      "authors": [
+        {
+          "name": "Fangting Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Attila Lischka",
+          "affiliation": ""
+        },
+        {
+          "name": "Balazs Kulcsar",
+          "affiliation": ""
+        },
+        {
+          "name": "Jiaming Wu",
+          "affiliation": ""
+        },
+        {
+          "name": "Morteza Haghir Chehreghani",
+          "affiliation": ""
+        },
+        {
+          "name": "Gilbert Laporte",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "This paper reviews the current progress in applying machine learning (ML) tools to solve NP-hard combinatorial optimization problems, with a focus on routing problems such as the traveling salesman problem (TSP) and the vehicle routing problem (VRP). Due to the inherent complexity of these problems, exact algorithms often require excessive computational time to find optimal solutions, while heuristics can only provide approximate solutions without guaranteeing optimality. With the recent success of machine learning models, there is a growing trend in proposing and implementing diverse ML techniques to enhance the resolution of these challenging routing problems. We propose a taxonomy categorizing ML-based routing methods into construction-based and improvement-based approaches, highlighting their applicability to various problem characteristics. This review aims to integrate traditional OR methods with state-of-the-art ML techniques, providing a structured framework to guide future research and address emerging VRP variants.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "10.1016/j.tre.2025.104278",
+      "arxiv_id": "2507.00218",
+      "url": "https://arxiv.org/abs/2507.00218",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2103.04931",
+      "title": "Monte Carlo Tree Search: A Review of Recent Modifications and Applications",
+      "authors": [
+        {
+          "name": "Maciej \u015awiechowski",
+          "affiliation": ""
+        },
+        {
+          "name": "Konrad Godlewski",
+          "affiliation": ""
+        },
+        {
+          "name": "Bartosz Sawicki",
+          "affiliation": ""
+        },
+        {
+          "name": "Jacek Ma\u0144dziuk",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Monte Carlo Tree Search (MCTS) is a powerful approach to designing game-playing bots or solving sequential decision problems. The method relies on intelligent tree search that balances exploration and exploitation. MCTS performs random sampling in the form of simulations and stores statistics of actions to make more educated choices in each subsequent iteration. The method has become a state-of-the-art technique for combinatorial games, however, in more complex games (e.g. those with high branching factor or real-time ones), as well as in various practical domains (e.g. transportation, scheduling or security) an efficient MCTS application often requires its problem-dependent modification or integration with other techniques. Such domain-specific modifications and hybrid approaches are the main focus of this survey. The last major MCTS survey has been published in 2012. Contributions that appeared since its release are of particular interest for this review.",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "10.1007/s10462-022-10228-y",
+      "arxiv_id": "2103.04931",
+      "url": "https://arxiv.org/abs/2103.04931",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2110.12102",
+      "title": "The Quantum Revolution in Philosophy (Book Review)",
+      "authors": [
+        {
+          "name": "Eddy Keming Chen",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "In this thought-provoking book, Richard Healey proposes a new interpretation of quantum theory inspired by pragmatist philosophy. Healey puts forward the interpretation as an alternative to realist quantum theories on the one hand such as Bohmian mechanics, spontaneous collapse theories, and many-worlds interpretations, which are different proposals for describing what the quantum world is like and what the basic laws of physics are, and non-realist interpretations on the other hand such as quantum Bayesianism, which proposes to understand quantum theory as describing agents' subjective epistemic states. The central idea of Healey's proposal is to understand quantum theory as providing not a description of the physical world but a set of authoritative and objectively correct prescriptions about how agents should act. The book provides a detailed development and defense of that idea, and it contains interesting discussions about a wide range of philosophical issues such as representation, probability, explanation, causation, objectivity, meaning, and fundamentality. Healey's project is at the intersection of physics and philosophy. The book is divided into two parts. Part I of the book discusses the foundational questions in quantum theory from the perspective of the prescriptive interpretation. In Part II, Healey discusses the philosophical implications of the view. Both parts are written in a way that is largely accessible to non-specialists. In this brief book review, I will focus on two questions: (1) How does Healey's idea work? (2) What reasons are there to believe in it?",
+      "venue": "physics.hist-ph",
+      "citation_count": 0,
+      "doi": "10.1215/00318108-8012864",
+      "arxiv_id": "2110.12102",
+      "url": "https://arxiv.org/abs/2110.12102",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2103.01768",
+      "title": "Air taxi service for urban mobility: A critical review of recent developments, future challenges, and opportunities",
+      "authors": [
+        {
+          "name": "Suchithra Rajendran",
+          "affiliation": ""
+        },
+        {
+          "name": "Sharan Srinivas",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Expected to operate in the imminent future, air taxi service (ATS) is an aerial on-demand transport for a single passenger or a small group of riders, which seeks to transform the method of everyday commute. This uncharted territory in the emerging transportation world is anticipated to enable consumers bypass traffic congestion in urban road networks. By adopting an electric vertical takeoff and landing concept (eVTOL), air taxis could be operational from skyports retrofitted on building rooftops, thus gaining advantage from an implementation standpoint. Motivated by the potential impact of ATS, this study provides a review of air taxi systems and associated operations. We first discuss the current developments in the ATS (demand prediction, air taxi network design, and vehicle configuration). Next, we anticipate potential future challenges of ATS from an operations management perspective, and review the existing literature that could be leveraged to tackle these problems (ride-matching, pricing strategies, vehicle maintenance scheduling, and pilot training and recruitment). Finally, we detail future research opportunities in the air taxi domain.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "10.1016/j.tre.2020.102090",
+      "arxiv_id": "2103.01768",
+      "url": "https://arxiv.org/abs/2103.01768",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2309.06451",
+      "title": "Statistical Applications in Pain Management: A Review",
+      "authors": [
+        {
+          "name": "Flora Fan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "Chronic pain is a widespread and debilitating condition that affects millions of individuals worldwide. Recent research has unveiled a connection between chronic pain and epigenetic processes, shedding light on the complex interplay between genetics, environment, and pain perception. This review synthesizes findings from several studies exploring the relationship between epigenetic modifications, pain intensity, disability, and various other factors in individuals with chronic pain. The studies encompass a range of chronic pain conditions, including chronic low back pain, knee osteoarthritis pain, and pain in the context of underlying health conditions. The review highlights key findings and implications from each study and discusses their collective contributions to our understanding of the epigenetic mechanisms underpinning chronic pain.",
+      "venue": "q-bio.QM",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2309.06451",
+      "url": "https://arxiv.org/abs/2309.06451",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2102.03679",
+      "title": "A Review of Product Safety Regulations in the European Union",
+      "authors": [
+        {
+          "name": "Jukka Ruohonen",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Product safety has been a concern in Europe ever since the early 1960s. Despite the long and relatively stable historical lineage of product safety regulations, new technologies, changes in the world economy, and other major transformations have in recent years brought product safety again to the forefront of policy debates. As reforms are also underway, there is a motivation to review the complex safety policy framework in the European Union (EU). Thus, building on deliberative policy analysis and interpretative literature review, this paper reviews the safety policy for non-food consumer products in the EU. The review covers the historical background and the main laws, administration and enforcement, standardization and harmonization, laws enacted for specific products, notifications delivered by national safety authorities, recalls of dangerous products, and the liability of these. Based on the review and analysis of these themes and the associated literature, some current policy challenges are further discussed.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "10.1365/s43439-022-00057-8",
+      "arxiv_id": "2102.03679",
+      "url": "https://arxiv.org/abs/2102.03679",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2403.02613",
+      "title": "Large Language Models and Video Games: A Preliminary Scoping Review",
+      "authors": [
+        {
+          "name": "Penny Sweetser",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Large language models (LLMs) hold interesting potential for the design, development, and research of video games. Building on the decades of prior research on generative AI in games, many researchers have sped to investigate the power and potential of LLMs for games. Given the recent spike in LLM-related research in games, there is already a wealth of relevant research to survey. In order to capture a snapshot of the state of LLM research in games, and to help lay the foundation for future work, we carried out an initial scoping review of relevant papers published so far. In this paper, we review 76 papers published between 2022 to early 2024 on LLMs and video games, with key focus areas in game AI, game development, narrative, and game research and reviews. Our paper provides an early state of the field and lays the groundwork for future research and reviews on this topic.",
+      "venue": "cs.HC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2403.02613",
+      "url": "https://arxiv.org/abs/2403.02613",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2502.12510",
+      "title": "Aspect-Guided Multi-Level Perturbation Analysis of Large Language Models in Automated Peer Review",
+      "authors": [
+        {
+          "name": "Jiatao Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Yanheng Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Xinyu Hu",
+          "affiliation": ""
+        },
+        {
+          "name": "Mingqi Gao",
+          "affiliation": ""
+        },
+        {
+          "name": "Xiaojun Wan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "We propose an aspect-guided, multi-level perturbation framework to evaluate the robustness of Large Language Models (LLMs) in automated peer review. Our framework explores perturbations in three key components of the peer review process-papers, reviews, and rebuttals-across several quality aspects, including contribution, soundness, presentation, tone, and completeness. By applying targeted perturbations and examining their effects on both LLM-as-Reviewer and LLM-as-Meta-Reviewer, we investigate how aspect-based manipulations, such as omitting methodological details from papers or altering reviewer conclusions, can introduce significant biases in the review process. We identify several potential vulnerabilities: review conclusions that recommend a strong reject may significantly influence meta-reviews, negative or misleading reviews may be wrongly interpreted as thorough, and incomplete or hostile rebuttals can unexpectedly lead to higher acceptance rates. Statistical tests show that these biases persist under various Chain-of-Thought prompting strategies, highlighting the lack of robust critical evaluation in current LLMs. Our framework offers a practical methodology for diagnosing these vulnerabilities, thereby contributing to the development of more reliable and robust automated reviewing systems.",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2502.12510",
+      "url": "https://arxiv.org/abs/2502.12510",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2007.11200",
+      "title": "Review on ferroelectric/polar metals",
+      "authors": [
+        {
+          "name": "W. X. Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "A. Ariando",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "The possibility of reconciliation between seemingly mutually exclusive properties in one system can not only lead to theoretical breakthroughs but also potential novel applications. The research on the coexistence of two purportedly contra-indicated properties, ferroelectricity/polarity and conductivity, proposed by Anderson and Blount over 50 years ago was recently revitalized by the discovery of the first unambiguous polar metal LiOsO3 and further fueled by the demonstration of the first switchable ferroelectric metal WTe2. In this review, we first discuss the reasons why the coexistence of ferroelectricity/polarity and conductivity have been deemed incompatible, followed by a review on the history of ferroelectric/polar metals. Secondly, we review the important milestones along with the corresponding mechanisms for the ferroelectric/polar metallic phases in these materials. Thirdly, we summarize the design approaches for ferroelectric/polar metals. Finally, we discuss the future prospects and potential applications of ferroelectric/polar metals.",
+      "venue": "cond-mat.mtrl-sci",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2007.11200",
+      "url": "https://arxiv.org/abs/2007.11200",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2406.05688",
+      "title": "Peer Review as A Multi-Turn and Long-Context Dialogue with Role-Based Interactions",
+      "authors": [
+        {
+          "name": "Cheng Tan",
+          "affiliation": ""
+        },
+        {
+          "name": "Dongxin Lyu",
+          "affiliation": ""
+        },
+        {
+          "name": "Siyuan Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhangyang Gao",
+          "affiliation": ""
+        },
+        {
+          "name": "Jingxuan Wei",
+          "affiliation": ""
+        },
+        {
+          "name": "Siqi Ma",
+          "affiliation": ""
+        },
+        {
+          "name": "Zicheng Liu",
+          "affiliation": ""
+        },
+        {
+          "name": "Stan Z. Li",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Large Language Models (LLMs) have demonstrated wide-ranging applications across various fields and have shown significant potential in the academic peer-review process. However, existing applications are primarily limited to static review generation based on submitted papers, which fail to capture the dynamic and iterative nature of real-world peer reviews. In this paper, we reformulate the peer-review process as a multi-turn, long-context dialogue, incorporating distinct roles for authors, reviewers, and decision makers. We construct a comprehensive dataset containing over 26,841 papers with 92,017 reviews collected from multiple sources, including the top-tier conference and prestigious journal. This dataset is meticulously designed to facilitate the applications of LLMs for multi-turn dialogues, effectively simulating the complete peer-review process. Furthermore, we propose a series of metrics to evaluate the performance of LLMs for each role under this reformulated peer-review setting, ensuring fair and comprehensive evaluations. We believe this work provides a promising perspective on enhancing the LLM-driven peer-review process by incorporating dynamic, role-based interactions. It aligns closely with the iterative and interactive nature of real-world academic peer review, offering a robust foundation for future research and development in this area. We open-source the dataset at https://github.com/chengtan9907/ReviewMT.",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2406.05688",
+      "url": "https://arxiv.org/abs/2406.05688",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2601.19138",
+      "title": "AgenticSCR: An Autonomous Agentic Secure Code Review for Immature Vulnerabilities Detection",
+      "authors": [
+        {
+          "name": "Wachiraphan Charoenwet",
+          "affiliation": ""
+        },
+        {
+          "name": "Kla Tantithamthavorn",
+          "affiliation": ""
+        },
+        {
+          "name": "Patanamon Thongtanunam",
+          "affiliation": ""
+        },
+        {
+          "name": "Hong Yi Lin",
+          "affiliation": ""
+        },
+        {
+          "name": "Minwoo Jeong",
+          "affiliation": ""
+        },
+        {
+          "name": "Ming Wu",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "Secure code review is critical at the pre-commit stage, where vulnerabilities must be caught early under tight latency and limited-context constraints. Existing SAST-based checks are noisy and often miss immature, context-dependent vulnerabilities, while standalone Large Language Models (LLMs) are constrained by context windows and lack explicit tool use. Agentic AI, which combine LLMs with autonomous decision-making, tool invocation, and code navigation, offer a promising alternative, but their effectiveness for pre-commit secure code review is not yet well understood. In this work, we introduce AgenticSCR, an agentic AI for secure code review for detecting immature vulnerabilities during the pre-commit stage, augmented by security-focused semantic memories. Using our own curated benchmark of immature vulnerabilities, tailored to the pre-commit secure code review, we empirically evaluate how accurate is our AgenticSCR for localizing, detecting, and explaining immature vulnerabilities. Our results show that AgenticSCR achieves at least 153% relatively higher percentage of correct code review comments than the static LLM-based baseline, and also substantially surpasses SAST tools. Moreover, AgenticSCR generates more correct comments in four out of five vulnerability types, consistently and significantly outperforming all other baselines. These findings highlight the importance of Agentic Secure Code Review, paving the way towards an emerging research area of immature vulnerability detection.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2601.19138",
+      "url": "https://arxiv.org/abs/2601.19138",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2508.18003",
+      "title": "Previously on... Automating Code Review",
+      "authors": [
+        {
+          "name": "Robert Heum\u00fcller",
+          "affiliation": ""
+        },
+        {
+          "name": "Frank Ortmeier",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Modern Code Review (MCR) is a standard practice in software engineering, yet it demands substantial time and resource investments. Recent research has increasingly explored automating core review tasks using machine learning (ML) and deep learning (DL). As a result, there is substantial variability in task definitions, datasets, and evaluation procedures. This study provides the first comprehensive analysis of MCR automation research, aiming to characterize the field's evolution, formalize learning tasks, highlight methodological challenges, and offer actionable recommendations to guide future research. Focusing on the primary code review tasks, we systematically surveyed 691 publications and identified 24 relevant studies published between May 2015 and April 2024. Each study was analyzed in terms of tasks, models, metrics, baselines, results, validity concerns, and artifact availability. In particular, our analysis reveals significant potential for standardization, including 48 task metric combinations, 22 of which were unique to their original paper, and limited dataset reuse. We highlight challenges and derive concrete recommendations for examples such as the temporal bias threat, which are rarely addressed so far. Our work contributes to a clearer overview of the field, supports the framing of new research, helps to avoid pitfalls, and promotes greater standardization in evaluation practices.",
+      "venue": "cs.SE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2508.18003",
+      "url": "https://arxiv.org/abs/2508.18003",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2508.11678",
+      "title": "Optimizing Peer Grading: A Systematic Literature Review of Reviewer Assignment Strategies and Quantity of Reviewers",
+      "authors": [
+        {
+          "name": "Uchswas Paul",
+          "affiliation": ""
+        },
+        {
+          "name": "Shail Shah",
+          "affiliation": ""
+        },
+        {
+          "name": "Sri Vaishnavi Mylavarapu",
+          "affiliation": ""
+        },
+        {
+          "name": "M. Parvez Rashid",
+          "affiliation": ""
+        },
+        {
+          "name": "Edward Gehringer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Peer assessment has established itself as a critical pedagogical tool in academic settings, offering students timely, high-quality feedback to enhance learning outcomes. However, the efficacy of this approach depends on two factors: (1) the strategic allocation of reviewers and (2) the number of reviews per artifact. This paper presents a systematic literature review of 87 studies (2010--2024) to investigate how reviewer-assignment strategies and the number of reviews per submission impact the accuracy, fairness, and educational value of peer assessment. We identified four common reviewer-assignment strategies: random assignment, competency-based assignment, social-network-based assignment, and bidding. Drawing from both quantitative data and qualitative insights, we explored the trade-offs involved in each approach. Random assignment, while widely used, often results in inconsistent grading and fairness concerns. Competency-based strategies can address these issues. Meanwhile, social and bidding-based methods have the potential to improve fairness and timeliness -- existing empirical evidence is limited. In terms of review count, assigning three reviews per submission emerges as the most common practice. A range of three to five reviews per student or per submission is frequently cited as a recommended spot that balances grading accuracy, student workload, learning outcomes, and engagement.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2508.11678",
+      "url": "https://arxiv.org/abs/2508.11678",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2001.10617",
+      "title": "Systematic Review of Approaches to Improve Peer Assessment at Scale",
+      "authors": [
+        {
+          "name": "Manikandan Ravikiran",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Peer Assessment is a task of analysis and commenting on student's writing by peers, is core of all educational components both in campus and in MOOC's. However, with the sheer scale of MOOC's & its inherent personalised open ended learning, automatic grading and tools assisting grading at scale is highly important. Previously we presented survey on tasks of post classification, knowledge tracing and ended with brief review on Peer Assessment (PA), with some initial problems. In this review we shall continue review on PA from perspective of improving the review process itself. As such rest of this review focus on three facets of PA namely Auto grading and Peer Assessment Tools (we shall look only on how peer reviews/auto-grading is carried), strategies to handle Rogue Reviews, Peer Review Improvement using Natural Language Processing. The consolidated set of papers and resources so used are released in https://github.com/manikandan-ravikiran/cs6460-Survey-2.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2001.10617",
+      "url": "https://arxiv.org/abs/2001.10617",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2308.02443",
+      "title": "AI Literature Review Suite",
+      "authors": [
+        {
+          "name": "David A. Tovar",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "The process of conducting literature reviews is often time-consuming and labor-intensive. To streamline this process, I present an AI Literature Review Suite that integrates several functionalities to provide a comprehensive literature review. This tool leverages the power of open access science, large language models (LLMs) and natural language processing to enable the searching, downloading, and organizing of PDF files, as well as extracting content from articles. Semantic search queries are used for data retrieval, while text embeddings and summarization using LLMs present succinct literature reviews. Interaction with PDFs is enhanced through a user-friendly graphical user interface (GUI). The suite also features integrated programs for bibliographic organization, interaction and query, and literature review summaries. This tool presents a robust solution to automate and optimize the process of literature review in academic and industrial research.",
+      "venue": "cs.DL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2308.02443",
+      "url": "https://arxiv.org/abs/2308.02443",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2310.04694",
+      "title": "DNA-Based Data Storage Systems: A Review of Implementations and Code Constructions",
+      "authors": [
+        {
+          "name": "Olgica Milenkovic",
+          "affiliation": ""
+        },
+        {
+          "name": "Chao Pan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "In this review paper, we delve into the nascent field of molecular data storage, focusing on system implementations and code constructions. We start by providing an overview of basic concepts in synthetic and computational biology. Afterwards, we proceed with a review of the diverse approaches followed to implement such systems. In the process, we identify new problems in communication and coding theory, and discuss some relevant results pertaining to DNA sequence profiles, coded trace reconstruction, coding for DNA punchcard systems and coding for unique reconstruction.",
+      "venue": "cs.ET",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2310.04694",
+      "url": "https://arxiv.org/abs/2310.04694",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2501.07703",
+      "title": "A Review on the Security Vulnerabilities of the IoMT against Malware Attacks and DDoS",
+      "authors": [
+        {
+          "name": "Lily Dzamesi",
+          "affiliation": ""
+        },
+        {
+          "name": "Nelly Elsayed",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The Internet of Medical Things (IoMT) has transformed the healthcare industry by connecting medical devices in monitoring treatment outcomes of patients. This increased connectivity has resulted to significant security vulnerabilities in the case of malware and Distributed Denial of Service (DDoS) attacks. This literature review examines the vulnerabilities of IoMT devices, focusing on critical threats and exploring mitigation strategies. We conducted a comprehensive search across leading databases such as ACM Digital Library, IEEE Xplore, and Elsevier to analyze peer-reviewed studies published within the last five years (from 2019 to 2024). The review shows that inadequate encryption protocols, weak authentication methods, and irregular firmware updates are the main causes of risks associated with IoMT devices. We have identified emerging solutions like machine learning algorithms, blockchain technology, and edge computing as promising approaches to enhance IoMT security. This review emphasizes the pressing need to develop lightweight security measures and standardized protocols to protect patient data and ensure the integrity of healthcare services.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2501.07703",
+      "url": "https://arxiv.org/abs/2501.07703",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2311.16346",
+      "title": "Small and Dim Target Detection in IR Imagery: A Review",
+      "authors": [
+        {
+          "name": "Nikhil Kumar",
+          "affiliation": ""
+        },
+        {
+          "name": "Pravendra Singh",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "While there has been significant progress in object detection using conventional image processing and machine learning algorithms, exploring small and dim target detection in the IR domain is a relatively new area of study. The majority of small and dim target detection methods are derived from conventional object detection algorithms, albeit with some alterations. The task of detecting small and dim targets in IR imagery is complex. This is because these targets often need distinct features, the background is cluttered with unclear details, and the IR signatures of the scene can change over time due to fluctuations in thermodynamics. The primary objective of this review is to highlight the progress made in this field. This is the first review in the field of small and dim target detection in infrared imagery, encompassing various methodologies ranging from conventional image processing to cutting-edge deep learning-based approaches. The authors have also introduced a taxonomy of such approaches. There are two main types of approaches: methodologies using several frames for detection, and single-frame-based detection techniques. Single frame-based detection techniques encompass a diverse range of methods, spanning from traditional image processing-based approaches to more advanced deep learning methodologies. Our findings indicate that deep learning approaches perform better than traditional image processing-based approaches. In addition, a comprehensive compilation of various available datasets has also been provided. Furthermore, this review identifies the gaps and limitations in existing techniques, paving the way for future research and development in this area.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2311.16346",
+      "url": "https://arxiv.org/abs/2311.16346",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2403.03107",
+      "title": "On-Demand Mobility Services for Infrastructure and Community Resilience: A Review toward Synergistic Disaster Response Systems",
+      "authors": [
+        {
+          "name": "Jiangbo Yu",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Mobility-on-demand (MOD) services have the potential to significantly improve the adaptiveness and recovery of urban systems, in the wake of disruptive events. But there lacks a comprehensive review on using MOD services for such purposes in addition to serving regular travel demand. This paper presents a review that suggests a noticeable increase within recent years on this topic across four main areas: resilient MOD services, novel usage of MOD services for improving infrastructure and community resilience, empirical impact evaluation, and enabling and augmenting technologies. The review shows that MOD services have been utilized to support anomaly detection, essential supply delivery, evacuation and rescue, on-site medical care, power grid stabilization, transit service substitution during downtime, and infrastructure and equipment repair. Such a versatility suggests a comprehensive assessment framework and modeling methodologies for evaluating system design alternatives that simultaneously serve different purposes. The review also reveals that integrating suitable technologies, business models, and long-term planning efforts offers significant synergistic benefits.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2403.03107",
+      "url": "https://arxiv.org/abs/2403.03107",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2103.03927",
+      "title": "AudioVisual Speech Synthesis: A brief literature review",
+      "authors": [
+        {
+          "name": "Efthymios Georgiou",
+          "affiliation": ""
+        },
+        {
+          "name": "Athanasios Katsamanis",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "This brief literature review studies the problem of audiovisual speech synthesis, which is the problem of generating an animated talking head given a text as input. Due to the high complexity of this problem, we approach it as the composition of two problems. Specifically, that of Text-to-Speech (TTS) synthesis as well as the voice-driven talking head animation. For TTS, we present models that are used to map text to intermediate acoustic representations, e.g. mel-spectrograms, as well as models that generate voice signals conditioned on these intermediate representations, i.e vocoders. For the talking-head animation problem, we categorize approaches based on whether they produce human faces or anthropomorphic figures. An attempt is also made to discuss the importance of the choice of facial models in the second case. Throughout the review, we briefly describe the most important work in audiovisual speech synthesis, trying to highlight the advantages and disadvantages of the various approaches.",
+      "venue": "cs.SD",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2103.03927",
+      "url": "https://arxiv.org/abs/2103.03927",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    }
+  ]
+}

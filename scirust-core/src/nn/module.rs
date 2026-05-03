@@ -34,4 +34,16 @@ pub trait Module {
     /// Lit les valeurs courantes des paramètres depuis la tape (après step()).
     /// Met à jour les Tensor stockés dans la struct du module.
     fn sync(&mut self, tape: &Tape);
+
+    /// Return the module's parameters as a map of name -> ndarray f64 tensor.
+    /// Used for checkpoint saving via `save_state_dict`.
+    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
+        std::collections::HashMap::new()
+    }
+
+    /// Load parameters from a state dict produced by `state_dict()`.
+    /// Each module implementation should match parameter names and shapes.
+    fn load_state_dict(&mut self, _state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
+        // default: no-op
+    }
 }

@@ -1,0 +1,551 @@
+{
+  "query": "Build-working-autonomous-research-tool recent advances",
+  "source": "arxiv",
+  "limit": 40,
+  "timestamp": 1777751654.4607372,
+  "papers": [
+    {
+      "paper_id": "arxiv-2203.03047",
+      "title": "Recent Advances in Neural Text Generation: A Task-Agnostic Survey",
+      "authors": [
+        {
+          "name": "Chen Tang",
+          "affiliation": ""
+        },
+        {
+          "name": "Frank Guerin",
+          "affiliation": ""
+        },
+        {
+          "name": "Chenghua Lin",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "In recent years, considerable research has been dedicated to the application of neural models in the field of natural language generation (NLG). The primary objective is to generate text that is both linguistically natural and human-like, while also exerting control over the generation process. This paper offers a comprehensive and task-agnostic survey of the recent advancements in neural text generation. These advancements have been facilitated through a multitude of developments, which we categorize into four key areas: data construction, neural frameworks, training and inference strategies, and evaluation metrics. By examining these different aspects, we aim to provide a holistic overview of the progress made in the field. Furthermore, we explore the future directions for the advancement of neural text generation, which encompass the utilization of neural pipelines and the incorporation of background knowledge. These avenues present promising opportunities to further enhance the capabilities of NLG systems. Overall, this survey serves to consolidate the current state of the art in neural text generation and highlights potential avenues for future research and development in this dynamic field.",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2203.03047",
+      "url": "https://arxiv.org/abs/2203.03047",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2011.13740",
+      "title": "Recent Advances in Selective Image Encryption and its Indispensability due to COVID-19",
+      "authors": [
+        {
+          "name": "Aditya Jyoti Paul",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "The COVID-19 pandemic serves as a grim reminder of the unexpected nature of these outbreaks and gives rise to a unique set of research challenges in a variety of fields. As people all over the world adjust to this new 'normal', with most workplaces, from companies to educational institutions shifting online, enormous surges in the transmission of images and videos have been observed, creating record-breaking stresses on the internet backbone. At the same time, maintaining the privacy and security of the users' data is of immense importance, this is where fast and efficient image encryption algorithms play a vital role. This paper discusses the calamitous effects of the pandemic on the world population and how their changes in multimedia consumption have led to an urgent need for the development and deployment of secure and fast image encryption, especially selective image encryption techniques. It carefully surveys the most recent advances in this field, discusses their real-world effects and finally explores some future research avenues, to provide swift relief and recover from the disastrous effects of the pandemic.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "10.1109/RAICS51191.2020.9332513",
+      "arxiv_id": "2011.13740",
+      "url": "https://arxiv.org/abs/2011.13740",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2411.00773",
+      "title": "LogiCity: Advancing Neuro-Symbolic AI with Abstract Urban Simulation",
+      "authors": [
+        {
+          "name": "Bowen Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhaoyu Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Qiwei Du",
+          "affiliation": ""
+        },
+        {
+          "name": "Jinqi Luo",
+          "affiliation": ""
+        },
+        {
+          "name": "Wenshan Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yaqi Xie",
+          "affiliation": ""
+        },
+        {
+          "name": "Simon Stepputtis",
+          "affiliation": ""
+        },
+        {
+          "name": "Chen Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Katia P. Sycara",
+          "affiliation": ""
+        },
+        {
+          "name": "Pradeep Kumar Ravikumar",
+          "affiliation": ""
+        },
+        {
+          "name": "Alexander G. Gray",
+          "affiliation": ""
+        },
+        {
+          "name": "Xujie Si",
+          "affiliation": ""
+        },
+        {
+          "name": "Sebastian Scherer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Recent years have witnessed the rapid development of Neuro-Symbolic (NeSy) AI systems, which integrate symbolic reasoning into deep neural networks. However, most of the existing benchmarks for NeSy AI fail to provide long-horizon reasoning tasks with complex multi-agent interactions. Furthermore, they are usually constrained by fixed and simplistic logical rules over limited entities, making them far from real-world complexities. To address these crucial gaps, we introduce LogiCity, the first simulator based on customizable first-order logic (FOL) for an urban-like environment with multiple dynamic agents. LogiCity models diverse urban elements using semantic and spatial concepts, such as IsAmbulance(X) and IsClose(X, Y). These concepts are used to define FOL rules that govern the behavior of various agents. Since the concepts and rules are abstractions, they can be universally applied to cities with any agent compositions, facilitating the instantiation of diverse scenarios. Besides, a key feature of LogiCity is its support for user-configurable abstractions, enabling customizable simulation complexities for logical reasoning. To explore various aspects of NeSy AI, LogiCity introduces two tasks, one features long-horizon sequential decision-making, and the other focuses on one-step visual reasoning, varying in difficulty and agent behaviors. Our extensive evaluation reveals the advantage of NeSy frameworks in abstract reasoning. Moreover, we highlight the significant challenges of handling more complex abstractions in long-horizon multi-agent scenarios or under high-dimensional, imbalanced data. With its flexible design, various features, and newly raised challenges, we believe LogiCity represents a pivotal step forward in advancing the next generation of NeSy AI. All the code and data are open-sourced at our website: https://jaraxxus-me.github.io/LogiCity/",
+      "venue": "cs.AI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2411.00773",
+      "url": "https://arxiv.org/abs/2411.00773",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2103.10492",
+      "title": "Recent Advances in Deep Learning Techniques for Face Recognition",
+      "authors": [
+        {
+          "name": "Md. Tahmid Hasan Fuad",
+          "affiliation": ""
+        },
+        {
+          "name": "Awal Ahmed Fime",
+          "affiliation": ""
+        },
+        {
+          "name": "Delowar Sikder",
+          "affiliation": ""
+        },
+        {
+          "name": "Md. Akil Raihan Iftee",
+          "affiliation": ""
+        },
+        {
+          "name": "Jakaria Rabbi",
+          "affiliation": ""
+        },
+        {
+          "name": "Mabrook S. Al-rakhami",
+          "affiliation": ""
+        },
+        {
+          "name": "Abdu Gumae",
+          "affiliation": ""
+        },
+        {
+          "name": "Ovishake Sen",
+          "affiliation": ""
+        },
+        {
+          "name": "Mohtasim Fuad",
+          "affiliation": ""
+        },
+        {
+          "name": "Md. Nazrul Islam",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "In recent years, researchers have proposed many deep learning (DL) methods for various tasks, and particularly face recognition (FR) made an enormous leap using these techniques. Deep FR systems benefit from the hierarchical architecture of the DL methods to learn discriminative face representation. Therefore, DL techniques significantly improve state-of-the-art performance on FR systems and encourage diverse and efficient real-world applications. In this paper, we present a comprehensive analysis of various FR systems that leverage the different types of DL techniques, and for the study, we summarize 168 recent contributions from this area. We discuss the papers related to different algorithms, architectures, loss functions, activation functions, datasets, challenges, improvement ideas, current and future trends of DL-based FR systems. We provide a detailed discussion of various DL methods to understand the current state-of-the-art, and then we discuss various activation and loss functions for the methods. Additionally, we summarize different datasets used widely for FR tasks and discuss challenges related to illumination, expression, pose variations, and occlusion. Finally, we discuss improvement ideas, current and future trends of FR tasks.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1109/ACCESS.2021.3096136",
+      "arxiv_id": "2103.10492",
+      "url": "https://arxiv.org/abs/2103.10492",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2507.08760",
+      "title": "Recent Advances in Understanding R-Process Nucleosynthesis in Metal-Poor Stars and Stellar Systems",
+      "authors": [
+        {
+          "name": "Avrajit Bandyopadhyay",
+          "affiliation": ""
+        },
+        {
+          "name": "Timothy C. Beers",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "The rapid neutron-capture process (r-process) is responsible for the creation of roughly half of the elements heavier than iron, including precious metals like silver, gold, and platinum, as well as radioactive elements such as thorium and uranium. Despite its importance, the nature of the astrophysical sites where the r-process occurs, and the detailed mechanisms of its formation, remain elusive. The key to resolving these mysteries lies in the study of chemical signatures preserved in ancient, metal-poor stars. In this review, we explore r-process nucleosynthesis, focusing on the sites, progenitors, and formation mechanisms. We discuss the role of potential astrophysical sites such as neutron star mergers, core-collapse supernovae, magneto-rotational supernovae, and collapsars, that can play a key role in producing the heavy elements. We also highlight the importance of studying these signatures through high-resolution spectroscopic surveys, stellar archaeology, and multi-messenger astronomy. Recent advancements, such as the gravitational wave event GW170817 and detection of the r-process in the ejecta of its associated kilonovae, have established neutron star mergers as one of the confirmed sites. However, questions remain regarding whether they are the only sites that could have contributed in early epochs or if additional sources are needed to explain the signatures of r-process found in the oldest stars. Additionally, there are strong indications pointing towards additional sources of r-process-rich nuclei in the context of Galactic evolutionary timescales. This review summarizes what has been learned so far, the challenges that remain, and the exciting prospects for future discoveries. The increasing synergy between observational facilities, computational models, and large-scale surveys is poised to transform our understanding of r-process nucleosynthesis in the coming years.",
+      "venue": "astro-ph.SR",
+      "citation_count": 0,
+      "doi": "10.3390/universe11070229",
+      "arxiv_id": "2507.08760",
+      "url": "https://arxiv.org/abs/2507.08760",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2206.03301",
+      "title": "Recent Advances in Bayesian Optimization",
+      "authors": [
+        {
+          "name": "Xilu Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Yaochu Jin",
+          "affiliation": ""
+        },
+        {
+          "name": "Sebastian Schmitt",
+          "affiliation": ""
+        },
+        {
+          "name": "Markus Olhofer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Bayesian optimization has emerged at the forefront of expensive black-box optimization due to its data efficiency. Recent years have witnessed a proliferation of studies on the development of new Bayesian optimization algorithms and their applications. Hence, this paper attempts to provide a comprehensive and updated survey of recent advances in Bayesian optimization and identify interesting open problems. We categorize the existing work on Bayesian optimization into nine main groups according to the motivations and focus of the proposed algorithms. For each category, we present the main advances with respect to the construction of surrogate models and adaptation of the acquisition functions. Finally, we discuss the open questions and suggest promising future research directions, in particular with regard to heterogeneity, privacy preservation, and fairness in distributed and federated optimization systems.",
+      "venue": "cs.LG",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2206.03301",
+      "url": "https://arxiv.org/abs/2206.03301",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2402.00998",
+      "title": "Recent Advances on Uniqueness of Competitive Equilibrium",
+      "authors": [
+        {
+          "name": "Alexis Akira Toda",
+          "affiliation": ""
+        },
+        {
+          "name": "Kieran James Walsh",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "This article reviews the recent advances in the uniqueness and multiplicity of competitive equilibria in models arising in mathematical economics, finance, macroeconomics, and trade.",
+      "venue": "econ.TH",
+      "citation_count": 0,
+      "doi": "10.1016/j.jmateco.2024.103008",
+      "arxiv_id": "2402.00998",
+      "url": "https://arxiv.org/abs/2402.00998",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2206.12650",
+      "title": "Machine Learning-based Biological Ageing Estimation Technologies: A Survey",
+      "authors": [
+        {
+          "name": "Zhaonian Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Richard Jiang",
+          "affiliation": ""
+        },
+        {
+          "name": "Danny Crookes",
+          "affiliation": ""
+        },
+        {
+          "name": "Paul Chazot",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "In recent years, there are various methods of estimating Biological Age (BA) have been developed. Especially with the development of machine learning (ML), there are more and more types of BA predictions, and the accuracy has been greatly improved. The models for the estimation of BA play an important role in monitoring healthy aging, and could provide new tools to detect health status in the general population and give warnings to sub-healthy people. We will mainly review three age prediction methods by using ML. They are based on blood biomarkers, facial images, and structural neuroimaging features. For now, the model using blood biomarkers is the simplest, most direct, and most accurate method. The face image method is affected by various aspects such as race, environment, etc., the prediction accuracy is not very good, which cannot make a great contribution to the medical field. In summary, we are here to track the way forward in the era of big data for us and other potential general populations and show ways to leverage the vast amounts of data available today.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2206.12650",
+      "url": "https://arxiv.org/abs/2206.12650",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2109.05088",
+      "title": "Recent advances in blood rheology: A review",
+      "authors": [
+        {
+          "name": "Antony N. Beris",
+          "affiliation": ""
+        },
+        {
+          "name": "Jeffrey S. Horner",
+          "affiliation": ""
+        },
+        {
+          "name": "Soham Jariwala",
+          "affiliation": ""
+        },
+        {
+          "name": "Mathew J. Armstrong",
+          "affiliation": ""
+        },
+        {
+          "name": "Norman J. Wagner",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Due to the potential impact on the diagnosis and treatment of various cardiovascular diseases, work on the rheology of blood has significantly expanded in the last decade, both experimentally and theoretically. Experimentally, blood has been confirmed to demonstrate a variety of non-Newtonian rheological characteristics, including pseudoplasticity, viscoelasticity, and thixotropy. New rheological experiments and the development of more controlled experimental protocols on more extensive, broadly physiologically characterized, human blood samples demonstrate the sensitivity of aspects of hemorheology to several physiological factors. For example, at high shear rates to the red blood cells elastically deformation, imparting viscoelasticity, while and at low shear rates, they form rouleaux structures that impart additional, thixotropic behavior. In addition to these advances in experimental methods and validated data sets, significant advances have also been made in both microscopic simulations and macroscopic, continuum, modeling, as well as novel, multiscale approaches. We outline and evaluate the most promising of these recent advances. Although we primarily focus on human blood rheology, we also discuss recent observations on variations across some animal species that provide some indication on evolutionary effects.",
+      "venue": "cond-mat.soft",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2109.05088",
+      "url": "https://arxiv.org/abs/2109.05088",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2402.08385",
+      "title": "Hitchin systems: some recent advances",
+      "authors": [
+        {
+          "name": "O. K. Sheinman",
+          "affiliation": ""
+        },
+        {
+          "name": "Bin Wang",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "A survey of some recent advances in parabolic Hitchin systems (parabolic Bouville--Narasimhan--Ramanan correspondence, mirror symmetry for parabolic Hitchin systems), and in exact methods of solving the non-parabolic Hitchin systems.",
+      "venue": "math-ph",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2402.08385",
+      "url": "https://arxiv.org/abs/2402.08385",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2203.04778",
+      "title": "Special Issue on Advances in Chiral Quark Models",
+      "authors": [
+        {
+          "name": "Jorge Segovia",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "The number of exotic candidates in both light- and heavy-quark hadron sectors has increased dramatically since the discovery by the Belle Collaboration of the so-called $X(3872)$ in 2003. It is clear that the simple quark model picture needs an extension and thus the last twenty years have witnessed an explosion of related theoretical and experimental activity. The ultimate goal of theory is to describe the properties of exotic states from the first principles of Quantum Chromodynamics (QCD), which is the non-Abelian Quantum Field Theory that describes the strong interaction. However, since this task is quite challenging, a more modest goal to start with is the development of QCD-motivated phenomenological models that specify the colored constituents, how they are clustered, and the forces between them. This Special Issue invited contributions reporting recent advances of phenomenological quark models in the study of hadron's spectrocopy, structure, and interactions, paying special attention to the exotic candidates but without losing sight of the conventional states. In response to the call for papers, and after a comprehensive peer review process, 8 articles qualified for acceptance in the final edition of the Special Issue. The authors are from geographically distributed countries such as Spain, South Africa, Ghana, China, Brazil, Argentina. This reflects the impact of the proposed topic and the effective organization of the guest editorial team of this Special Issue.",
+      "venue": "hep-ph",
+      "citation_count": 0,
+      "doi": "10.3390/sym13112046",
+      "arxiv_id": "2203.04778",
+      "url": "https://arxiv.org/abs/2203.04778",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2401.04840",
+      "title": "Recent developments in testable leptogenesis",
+      "authors": [
+        {
+          "name": "Yannis Georis",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Low-scale leptogenesis is an attractive explanation for the observed baryon asymmetry of our universe that can be tested at a variety of laboratory experiments. In these proceedings, we review some recent advances in this field. In particular, we find that the viable parameter space is strongly enhanced, compared to the minimal case with two right-handed neutrinos, when a third generation is considered and explore the impact of such enhancement on the testability of the scenario. Finally, we also look at the impact of specific flavour and CP symmetries on said parameter space.",
+      "venue": "hep-ph",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2401.04840",
+      "url": "https://arxiv.org/abs/2401.04840",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2506.04129",
+      "title": "Recent Advances in Medical Image Classification",
+      "authors": [
+        {
+          "name": "Loan Dao",
+          "affiliation": ""
+        },
+        {
+          "name": "Ngoc Quoc Ly",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Medical image classification is crucial for diagnosis and treatment, benefiting significantly from advancements in artificial intelligence. The paper reviews recent progress in the field, focusing on three levels of solutions: basic, specific, and applied. It highlights advances in traditional methods using deep learning models like Convolutional Neural Networks and Vision Transformers, as well as state-of-the-art approaches with Vision Language Models. These models tackle the issue of limited labeled data, and enhance and explain predictive results through Explainable Artificial Intelligence.",
+      "venue": "eess.IV",
+      "citation_count": 0,
+      "doi": "10.14569/ijacsa.2024.0150727",
+      "arxiv_id": "2506.04129",
+      "url": "https://arxiv.org/abs/2506.04129",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2301.11390",
+      "title": "Current problems and recent advances in wormhole physics",
+      "authors": [
+        {
+          "name": "Kirill A. Bronnikov",
+          "affiliation": ""
+        },
+        {
+          "name": "Sergey V. Sushkov",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "Wormholes are extremely attractive objects for research, and although many mathematical and physical properties of these objects have been discovered and studied in the recent decades, there remain many unsolved problems and opportunities of interest. The Special issue of Universe entitled ``Recent Advances in Wormhole Physics,'' containing 14 contributions, is aimed at enlightening some recent results in selected areas of wormhole physics.",
+      "venue": "gr-qc",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2301.11390",
+      "url": "https://arxiv.org/abs/2301.11390",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2507.05066",
+      "title": "Recent Advances in Maximum-Entropy Sampling",
+      "authors": [
+        {
+          "name": "Marcia Fampa",
+          "affiliation": ""
+        },
+        {
+          "name": "Jon Lee",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "In 2022, we published the book Maximum-Entropy Sampling: Algorithms and Application (Springer). Since then, there have been several notable advancements on this topic. In this manuscript, we survey some recent highlights.",
+      "venue": "cs.DS",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2507.05066",
+      "url": "https://arxiv.org/abs/2507.05066",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2111.02162",
+      "title": "Byzantine Agreement with Less Communication: Recent Advances",
+      "authors": [
+        {
+          "name": "Shir Cohen",
+          "affiliation": ""
+        },
+        {
+          "name": "Idit Keidar",
+          "affiliation": ""
+        },
+        {
+          "name": "Oded Naor",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "In recent years, Byzantine Agreement is being considered in increasing scales due to the proliferation of blockchains and other decentralized financial technologies. Consequently, a number of works have improved its communication complexity in various network models. In this short paper we survey recent advances and outline some open research questions on the subject.",
+      "venue": "cs.DC",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2111.02162",
+      "url": "https://arxiv.org/abs/2111.02162",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2512.16590",
+      "title": "Recent Advances in Metallic Glasses",
+      "authors": [
+        {
+          "name": "Silvia Bonfanti",
+          "affiliation": ""
+        },
+        {
+          "name": "Ralf Busch",
+          "affiliation": ""
+        },
+        {
+          "name": "Jesper Byggm\u00e4star",
+          "affiliation": ""
+        },
+        {
+          "name": "Jeppe C. Dyre",
+          "affiliation": ""
+        },
+        {
+          "name": "J\u00fcrgen Eckert",
+          "affiliation": ""
+        },
+        {
+          "name": "Spencer Fajardo",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael L. Falk",
+          "affiliation": ""
+        },
+        {
+          "name": "Isabella Gallino",
+          "affiliation": ""
+        },
+        {
+          "name": "Jamie J. Kruzic",
+          "affiliation": ""
+        },
+        {
+          "name": "Jiayin Lu",
+          "affiliation": ""
+        },
+        {
+          "name": "Giulio Monaco",
+          "affiliation": ""
+        },
+        {
+          "name": "Misaki Ozawa",
+          "affiliation": ""
+        },
+        {
+          "name": "Anshul D. S. Parmar",
+          "affiliation": ""
+        },
+        {
+          "name": "Chris H. Rycroft",
+          "affiliation": ""
+        },
+        {
+          "name": "Srikanth Sastry",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "This paper reviews recent advances in the field of metallic glasses, focusing on the development of novel experimental techniques and in silico models. We discuss progress in experimental characterization, additive manufacturing, multiscale modeling approaches, and the growing role of machine learning in understanding and designing these complex materials. On the experimental side, we highlight measurements of thermophysical properties of supercooled liquids via fast chip calorimetry and enhancements in mechanical properties through rejuvenation treatments. This work underscores the crucial role of short-range order and medium-range order in controlling metallic glass mechanical properties. Recent progress in structural probes allows in situ observations of deformation mechanisms, positioning the field well to further advance our understanding of mechanical properties. Additive manufacturing of metallic glasses is discussed as one encouraging new manufacturing route for metallic glasses. We examine laser powder-bed fusion process physics and the central trade-off between amorphicity and densification, including heat affected zone devitrification and defects formation, together with emerging mitigation strategies and applications. On the theoretical and simulation side, we review advances in nanoscale, mesoscale, and continuum modeling of metallic glasses that have led to promising approaches by which multiscale schemes can incorporate data sourced from atomic-scale simulations. These efforts have helped to elucidate the connection between the glass structure and mechanical and rheological responses. We also cover the development of machine learning interatomic potentials for metallic glasses, along with machine learning driven prediction of glass forming ability and inverse design methods. Finally, challenges and directions for future research are presented and discussed.",
+      "venue": "cond-mat.mtrl-sci",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2512.16590",
+      "url": "https://arxiv.org/abs/2512.16590",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    }
+  ]
+}

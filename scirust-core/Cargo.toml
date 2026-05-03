@@ -10,6 +10,7 @@ scirust-simd = { path = "../scirust-simd" }
 scirust-gpu = { path = "../scirust-gpu" }
 scirust-gpu-macros = { path = "../scirust-gpu-macros" }
 rand = "0.9"
+ndarray = "0.16"
 
 [features]
 default = []

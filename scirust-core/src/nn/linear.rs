@@ -68,6 +68,48 @@ impl Module for Linear {
         if let Some(i) = self.last_w_idx { self.weight = tape.value(i); }
         if let Some(i) = self.last_b_idx { self.bias   = tape.value(i); }
     }
+
+    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
+        let mut map = std::collections::HashMap::new();
+        // Convert weight Tensor -> ndarray ArrayD<f64>
+        let w_shape = ndarray::IxDyn(&[self.weight.rows, self.weight.cols]);
+        let w_data: Vec<f64> = self.weight.data.iter().map(|&x| x as f64).collect();
+        map.insert("weight".to_string(), ndarray::ArrayD::from_shape_vec(w_shape, w_data).unwrap());
+
+        // Convert bias Tensor -> ndarray ArrayD<f64>
+        let b_shape = ndarray::IxDyn(&[self.bias.rows, self.bias.cols]);
+        let b_data: Vec<f64> = self.bias.data.iter().map(|&x| x as f64).collect();
+        map.insert("bias".to_string(), ndarray::ArrayD::from_shape_vec(b_shape, b_data).unwrap());
+        map
+    }
+
+    fn load_state_dict(&mut self, state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
+        if let Some(w) = state.get("weight") {
+            let expected = self.in_features * self.out_features;
+            let got: usize = w.shape().iter().product();
+            if got != expected {
+                panic!("Linear::load_state_dict: weight size mismatch: expected {}, got {}", expected, got);
+            }
+            let flat: Vec<f32> = w.iter().map(|&x| x as f32).collect();
+            self.weight.data = flat;
+            // Shape may be different from in_features x out_features due to transposition conventions;
+            // we keep the module's stored shape but update the data values.
+            // Reshape if needed:
+            if w.shape().len() == 2 {
+                self.weight.rows = w.shape()[0];
+                self.weight.cols = w.shape()[1];
+            }
+        }
+        if let Some(b) = state.get("bias") {
+            let flat: Vec<f32> = b.iter().map(|&x| x as f32).collect();
+            self.bias.data = flat;
+            if b.shape().len() >= 1 {
+                let n = b.shape()[0];
+                self.bias.rows = 1;
+                self.bias.cols = n;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -160,5 +202,38 @@ mod tests {
         let _y = lin.forward(&tape, x);
         // Linear a 2 paramètres : weight et bias
         assert_eq!(lin.parameter_indices().len(), 2);
+    }
+
+    #[test]
+    fn linear_state_dict_contains_weight_and_bias() {
+        let mut rng = PcgEngine::new(42);
+        let lin = Linear::new(3, 5, &KaimingNormal, &Zeros, &mut rng);
+        let sd = lin.state_dict();
+        assert_eq!(sd.len(), 2);
+
+        let w = sd.get("weight").unwrap();
+        assert_eq!(w.shape(), &[3, 5]);
+
+        let b = sd.get("bias").unwrap();
+        assert_eq!(b.shape(), &[1, 5]);
+    }
+
+    #[test]
+    fn linear_state_dict_round_trip() {
+        let mut rng = PcgEngine::new(42);
+        let mut lin1 = Linear::new(2, 3, &KaimingNormal, &Zeros, &mut rng);
+        let sd = lin1.state_dict();
+
+        // Create a second Linear with different weights and load state_dict from first
+        let mut rng2 = PcgEngine::new(99);
+        let mut lin2 = Linear::new(2, 3, &Zeros, &Zeros, &mut rng2);
+        // Before load, lin2 has all zeros
+        assert!(lin2.weight.data.iter().all(|&x| x == 0.0));
+
+        lin2.load_state_dict(sd);
+
+        // After load, lin2 should match lin1
+        assert_eq!(lin2.weight.data, lin1.weight.data);
+        assert_eq!(lin2.bias.data, lin1.bias.data);
     }
 }

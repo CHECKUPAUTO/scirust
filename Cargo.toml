@@ -1,10 +1,6 @@
 [workspace]
 members = [
-    "examples/v11_pattern_classifier",
-    "examples/v10a_augmented_mnist",
-    "examples/v9_quickstart",
-    "examples/v7a_mnist_demo",
-    "examples/simd_views_demo",
+    "examples/quickstart_v2",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -12,7 +8,23 @@ members = [
     "scirust-gpu",
     "scirust-gpu-macros",
     "scirust-core",
-    "examples/demo",
+    "scirust-learning",
+    "scirust-symbolic",
+    "scirust-reasoning",
 ]
-exclude = ["scirust-rustc-driver"]
+exclude = [
+    "scirust-rustc-driver",
+    "examples/demo",
+    "examples/v2_features_demo",
+    "examples/v3_features_demo",
+    "examples/v5_features_demo",
+    "examples/v6_features_demo",
+    "examples/v6_1_features_demo",
+    "examples/v7a_mnist_demo",
+    "examples/v9_quickstart",
+    "examples/v10a_augmented_mnist",
+    "examples/v11_pattern_classifier",
+    "examples/simd_views_demo",
+    "examples/benchmarks",
+]
 resolver = "3"

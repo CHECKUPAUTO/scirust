@@ -1,0 +1,1960 @@
+{
+  "query": "Build-working-autonomous-research-tool survey",
+  "source": "openalex",
+  "limit": 40,
+  "timestamp": 1777751643.2548413,
+  "papers": [
+    {
+      "paper_id": "oalex-W3135028703",
+      "title": "Machine Learning: Algorithms, Real-World Applications and Research Directions",
+      "authors": [
+        {
+          "name": "Iqbal H. Sarker",
+          "affiliation": "Chittagong University of Engineering & Technology"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "SN Computer Science",
+      "citation_count": 4932,
+      "doi": "10.1007/s42979-021-00592-x",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s42979-021-00592-x",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3140854437",
+      "title": "Review of deep learning: concepts, CNN architectures, challenges, applications, future directions",
+      "authors": [
+        {
+          "name": "Laith Alzubaidi",
+          "affiliation": "Queensland University of Technology"
+        },
+        {
+          "name": "Jinglan Zhang",
+          "affiliation": "Queensland University of Technology"
+        },
+        {
+          "name": "Amjad J. Humaidi",
+          "affiliation": "University of Technology - Iraq"
+        },
+        {
+          "name": "Ayad Q. Al-Dujaili",
+          "affiliation": "Middle Technical University"
+        },
+        {
+          "name": "Ye Duan",
+          "affiliation": "University of Missouri"
+        },
+        {
+          "name": "Omran Al-Shamma",
+          "affiliation": "University of Information Technology and Communications"
+        },
+        {
+          "name": "Jos\u00e9 Santamar\u00eda",
+          "affiliation": "Universidad de Ja\u00e9n"
+        },
+        {
+          "name": "Mohammed A. Fadhel",
+          "affiliation": "Thi Qar University"
+        },
+        {
+          "name": "Muthana Al\u2010Amidie",
+          "affiliation": "University of Missouri"
+        },
+        {
+          "name": "Laith Farhan",
+          "affiliation": "Manchester Metropolitan University"
+        }
+      ],
+      "year": 2021,
+      "abstract": "In the last few years, the deep learning (DL) computing paradigm has been deemed the Gold Standard in the machine learning (ML) community. Moreover, it has gradually become the most widely used computational approach in the field of ML, thus achieving outstanding results on several complex cognitive tasks, matching or even beating those provided by human performance. One of the benefits of DL is the ability to learn massive amounts of data. The DL field has grown fast in the last few years and it has been extensively used to successfully address a wide range of traditional applications. More importantly, DL has outperformed well-known ML techniques in many domains, e.g., cybersecurity, natural language processing, bioinformatics, robotics and control, and medical information processing, among many others. Despite it has been contributed several works reviewing the State-of-the-Art on DL, all of them only tackled one aspect of the DL, which leads to an overall lack of knowledge about it. Therefore, in this contribution, we propose using a more holistic approach in order to provide a more suitable starting point from which to develop a full understanding of DL. Specifically, this review attempts to provide a more comprehensive survey of the most important aspects of DL and including those enhancements recently added to the field. In particular, this paper outlines the importance of DL, presents the types of DL techniques and networks. It then presents convolutional neural networks (CNNs) which the most utilized DL network type and describes the development of CNNs architectures together with their main features, e.g., starting with the AlexNet network and closing with the High-Resolution network (HR.Net). Finally, we further present the challenges and suggested solutions to help researchers understand the existing research gaps. It is followed by a list of the major DL applications. Computational tools including FPGA, GPU, and CPU are summarized along with a description of their influence on DL. The paper ends with the evolution matrix, benchmark datasets, and summary and conclusion.",
+      "venue": "Journal Of Big Data",
+      "citation_count": 7330,
+      "doi": "10.1186/s40537-021-00444-8",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/s40537-021-00444-8",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2136893259",
+      "title": "4 Research Methods: Quantitative and Qualitative Approaches",
+      "authors": [
+        {
+          "name": "Durk Gorter",
+          "affiliation": ""
+        },
+        {
+          "name": "Jasone Cenoz",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "The improvement and expansion of higher education have been priorities of our national development in Kenya.Within a span of thirty five years since independence, we have witnessed the creation of five public universities.Several private universities have also been established.In our national universities, more professional programmes have been developed at both undergraduate and postgraduate levels and several departments now offer Ph.D programmes through research.As one of many African countries that have suffered from the effects of colonialism and marginalization, Kenya has made tremendous progress in the field of higher education that should be desired for the wider region, now defined by the Preferential Trade Area (PTA) and the Common Market of East and Southern Africa (COMESA).There has, however, been a constant lack of locally available textbooks for use at both the undergraduate and postgraduate levels.Many departments continue to use imported textbooks at a great price in foreign exchange.Worse still, the teaching staff have to relate material in these texts to our local situation and experiences.With the onset of the third millennium and the ever-growing quest for information, there is a desperate need for people to write books in various areas of specialization that are relevant to our needs.One of the objectives of any institution of higher learning is to conduct research.Research generates new knowledge and information; it extends the frontiers of understanding as we gain new insights into phenomena.There can be no improvement of higher education without sound research.The Kenya Government has encouraged and supported research in our public universities and has gone further to establish independent research institutes in several disciplines.This is testimony to the important role that research plays in the national development of any country.It is with these points in mind that we set about the task of writing a book on research methods.Research methods as a subject cuts across the boundaries of all disciplines.Whether in History, Engineering, Medicine, Education or Literature, a researcher needs the necessary tools to conduct a research study properly.We sincerely believe that Research Methods compliments arid strengthens the philosophy of our system of education by equipping the student or any aspiring researcher with the necessary tools and skills to identify a problem and look for practical solutions in a systematic way.Excellent research skills should also strengthen a person's ability to work, thirik and act independently.In writing this book, we felt a research methods book should be \"skill\" and \"application\" oriented.We have therefore tried to discuss thoroughly the necessary skills in research and how such skills should be applied when conducting a research study.This text is intended for people who will either conduct field research.Or who need to rely on literature research.It is therefore suitable for university students at both the undergraduate and graduate levels and for personnel in Government and Non-Governmental Organizations.University teaching staff should also find this book useful as a reference text for their research.The organization of the material in this text follows the format of the research process.Chapters 1 and 2 deal with the definition and purpose of research.Chapters 3-9 deal with the critical, elemen. of the research process.Chapters 10 and 12 deal with types of research while Chapter 11 discusses logistical and ethical issues in research.Finally, research and project proposal development is discussed in Chapter 13.This chapter should be particularly helpful to students who are doing higher degrees and practitioners who may want to develop project proposals.There are review assignments at the .end of each chapter to help in studying and revision.An example of a published journal paper is included in Appendix I.The journal article contains most of the components of a research report as discussed in Chapter 9.While the book lays great emphasis on quantitative research methods, it also gives an introduction to qualitative approaches in Chapter 12. Information on qualitative approaches is also given under various topics throughout the text.",
+      "venue": "Multilingual Matters eBooks",
+      "citation_count": 5005,
+      "doi": "10.21832/9781800417151-006",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.21832/9781800417151-006",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3017131514",
+      "title": "Artificial Intelligence in Education: A Review",
+      "authors": [
+        {
+          "name": "Lijia Chen",
+          "affiliation": "Yango University"
+        },
+        {
+          "name": "Pingping Chen",
+          "affiliation": "Fuzhou University"
+        },
+        {
+          "name": "Zhijian Lin",
+          "affiliation": "Fuzhou University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The purpose of this study was to assess the impact of Artificial Intelligence (AI) on education. Premised on a narrative and framework for assessing AI identified from a preliminary analysis, the scope of the study was limited to the application and effects of AI in administration, instruction, and learning. A qualitative research approach, leveraging the use of literature review as a research design and approach was used and effectively facilitated the realization of the study purpose. Artificial intelligence is a field of study and the resulting innovations and developments that have culminated in computers, machines, and other artifacts having human-like intelligence characterized by cognitive abilities, learning, adaptability, and decision-making capabilities. The study ascertained that AI has extensively been adopted and used in education, particularly by education institutions, in different forms. AI initially took the form of computer and computer related technologies, transitioning to web-based and online intelligent education systems, and ultimately with the use of embedded computer systems, together with other technologies, the use of humanoid robots and web-based chatbots to perform instructors' duties and functions independently or with instructors. Using these platforms, instructors have been able to perform different administrative functions, such as reviewing and grading students' assignments more effectively and efficiently, and achieve higher quality in their teaching activities. On the other hand, because the systems leverage machine learning and adaptability, curriculum and content has been customized and personalized in line with students' needs, which has fostered uptake and retention, thereby improving learners experience and overall quality of learning.",
+      "venue": "IEEE Access",
+      "citation_count": 3286,
+      "doi": "10.1109/access.2020.2988510",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2988510",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3194730353",
+      "title": "Deep Learning: A Comprehensive Overview on Techniques, Taxonomy, Applications and Research Directions",
+      "authors": [
+        {
+          "name": "Iqbal H. Sarker",
+          "affiliation": "Chittagong University of Engineering & Technology"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "SN Computer Science",
+      "citation_count": 2364,
+      "doi": "10.1007/s42979-021-00815-1",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s42979-021-00815-1",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2982936646",
+      "title": "Digital Twin: Enabling Technologies, Challenges and Open Research",
+      "authors": [
+        {
+          "name": "Aidan Fuller",
+          "affiliation": "Keele University"
+        },
+        {
+          "name": "Zhong Fan",
+          "affiliation": "Keele University"
+        },
+        {
+          "name": "Charles Day",
+          "affiliation": "Keele University"
+        },
+        {
+          "name": "Chris Barlow",
+          "affiliation": "Risk Management Solutions (United Kingdom)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Digital Twin technology is an emerging concept that has become the centre of attention for industry and, in more recent years, academia. The advancements in industry 4.0 concepts have facilitated its growth, particularly in the manufacturing industry. The Digital Twin is defined extensively but is best described as the effortless integration of data between a physical and virtual machine in either direction. The challenges, applications, and enabling technologies for Artificial Intelligence, Internet of Things (IoT) and Digital Twins are presented. A review of publications relating to Digital Twins is performed, producing a categorical review of recent papers. The review has categorised them by research areas: manufacturing, healthcare and smart cities, discussing a range of papers that reflect these areas and the current state of research. The paper provides an assessment of the enabling technologies, challenges and open research for Digital Twins.",
+      "venue": "IEEE Access",
+      "citation_count": 2327,
+      "doi": "10.1109/access.2020.2998358",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2998358",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2953303875",
+      "title": "A Survey of Autonomous Driving: <i>Common Practices and Emerging Technologies</i>",
+      "authors": [
+        {
+          "name": "Ekim Yurtsever",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Jacob Lambert",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Alexander Carballo",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Kazuya Takeda",
+          "affiliation": "Nagoya University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Automated driving systems (ADSs) promise a safe, comfortable and efficient driving experience. However, fatalities involving vehicles equipped with ADSs are on the rise. The full potential of ADSs cannot be realized unless the robustness of state-of-the-art is improved further. This paper discusses unsolved problems and surveys the technical aspect of automated driving. Studies regarding present challenges, high-level system architectures, emerging methodologies and core functions including localization, mapping, perception, planning, and human machine interfaces, were thoroughly reviewed. Furthermore, many state-of-the-art algorithms were implemented and compared on our own platform in a real-world driving setting. The paper concludes with an overview of available datasets and tools for ADS development.",
+      "venue": "IEEE Access",
+      "citation_count": 1684,
+      "doi": "10.1109/access.2020.2983149",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2983149",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4386142022",
+      "title": "Interpreting Black-Box Models: A Review on Explainable Artificial Intelligence",
+      "authors": [
+        {
+          "name": "Vikas Hassija",
+          "affiliation": "KIIT University"
+        },
+        {
+          "name": "Vinay Chamola",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Atmesh Mahapatra",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Abhinandan Singal",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Divyansh Goel",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Kaizhu Huang",
+          "affiliation": "Duke Kunshan University"
+        },
+        {
+          "name": "Simone Scardapane",
+          "affiliation": "Sapienza University of Rome"
+        },
+        {
+          "name": "Indro Spinelli",
+          "affiliation": "Istituto Nazionale di Fisica Nucleare, Sezione di Roma I"
+        },
+        {
+          "name": "Mufti Mahmud",
+          "affiliation": "Nottingham Trent University"
+        },
+        {
+          "name": "Amir Hussain",
+          "affiliation": "Edinburgh Napier University"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Abstract Recent years have seen a tremendous growth in Artificial Intelligence (AI)-based methodological development in a broad range of domains. In this rapidly evolving field, large number of methods are being reported using machine learning (ML) and Deep Learning (DL) models. Majority of these models are inherently complex and lacks explanations of the decision making process causing these models to be termed as 'Black-Box'. One of the major bottlenecks to adopt such models in mission-critical application domains, such as banking, e-commerce, healthcare, and public services and safety, is the difficulty in interpreting them. Due to the rapid proleferation of these AI models, explaining their learning and decision making process are getting harder which require transparency and easy predictability. Aiming to collate the current state-of-the-art in interpreting the black-box models, this study provides a comprehensive analysis of the explainable AI (XAI) models. To reduce false negative and false positive outcomes of these back-box models, finding flaws in them is still difficult and inefficient. In this paper, the development of XAI is reviewed meticulously through careful selection and analysis of the current state-of-the-art of XAI research. It also provides a comprehensive and in-depth evaluation of the XAI frameworks and their efficacy to serve as a starting point of XAI for applied and theoretical researchers. Towards the end, it highlights emerging and critical issues pertaining to XAI research to showcase major, model-specific trends for better explanation, enhanced transparency, and improved prediction accuracy.",
+      "venue": "Cognitive Computation",
+      "citation_count": 1566,
+      "doi": "10.1007/s12559-023-10179-8",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s12559-023-10179-8",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3003667836",
+      "title": "Digital Twin: Values, Challenges and Enablers From a Modeling Perspective",
+      "authors": [
+        {
+          "name": "Adil Rasheed",
+          "affiliation": "SINTEF"
+        },
+        {
+          "name": "Omer San",
+          "affiliation": "Oklahoma State University"
+        },
+        {
+          "name": "Trond Kvamsdal",
+          "affiliation": "SINTEF"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Digital twin can be defined as a virtual representation of a physical asset enabled through data and simulators for real-time prediction, optimization, monitoring, controlling, and improved decision making. Recent advances in computational pipelines, multiphysics solvers, artificial intelligence, big data cybernetics, data processing and management tools bring the promise of digital twins and their impact on society closer to reality. Digital twinning is now an important and emerging trend in many applications. Also referred to as a computational megamodel, device shadow, mirrored system, avatar or a synchronized virtual prototype, there can be no doubt that a digital twin plays a transformative role not only in how we design and operate cyber-physical intelligent systems, but also in how we advance the modularity of multi-disciplinary systems to tackle fundamental barriers not addressed by the current, evolutionary modeling practices. In this work, we review the recent status of methodologies and techniques related to the construction of digital twins mostly from a modeling perspective. Our aim is to provide a detailed coverage of the current challenges and enabling technologies along with recommendations and reflections for various stakeholders.",
+      "venue": "IEEE Access",
+      "citation_count": 1636,
+      "doi": "10.1109/access.2020.2970143",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2970143",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3003385079",
+      "title": "The Ethics of AI Ethics: An Evaluation of Guidelines",
+      "authors": [
+        {
+          "name": "Thilo Hagendorff",
+          "affiliation": "University of T\u00fcbingen"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Abstract Current advances in research, development and application of artificial intelligence (AI) systems have yielded a far-reaching discourse on AI ethics. In consequence, a number of ethics guidelines have been released in recent years. These guidelines comprise normative principles and recommendations aimed to harness the \u201cdisruptive\u201d potentials of new AI technologies. Designed as a semi-systematic evaluation, this paper analyzes and compares 22 guidelines, highlighting overlaps but also omissions. As a result, I give a detailed overview of the field of AI ethics. Finally, I also examine to what extent the respective ethical principles and values are implemented in the practice of research, development and application of AI systems\u2014and how the effectiveness in the demands of AI ethics can be improved.",
+      "venue": "Minds and Machines",
+      "citation_count": 1566,
+      "doi": "10.1007/s11023-020-09517-8",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11023-020-09517-8",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3110989801",
+      "title": "Towards 6G wireless communication networks: vision, enabling technologies, and new paradigm shifts",
+      "authors": [
+        {
+          "name": "Xiaohu You",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Cheng\u2010Xiang Wang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Jie Huang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Xiqi Gao",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Zaichen Zhang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Mao Wang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Yongming Huang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Chuan Zhang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Yanxiang Jiang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Jiaheng Wang",
+          "affiliation": "Huawei Technologies (China)"
+        },
+        {
+          "name": "Min Zhu",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Bin Sheng",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Dongming Wang",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Zhiwen Pan",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Pengcheng Zhu",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Yang Yang",
+          "affiliation": "ShanghaiTech University"
+        },
+        {
+          "name": "Zening Liu",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Ping Zhang",
+          "affiliation": "Beijing University of Posts and Telecommunications"
+        },
+        {
+          "name": "Xiaofeng Tao",
+          "affiliation": "Beijing University of Posts and Telecommunications"
+        },
+        {
+          "name": "Shaoqian Li",
+          "affiliation": "University of Electronic Science and Technology of China"
+        },
+        {
+          "name": "Zhi Chen",
+          "affiliation": "University of Electronic Science and Technology of China"
+        },
+        {
+          "name": "Xinying Ma",
+          "affiliation": "University of Electronic Science and Technology of China"
+        },
+        {
+          "name": "I Chih\u2010Lin",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Shuangfeng Han",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Ke Li",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Chengkang Pan",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Zhimin Zheng",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Lajos Hanzo",
+          "affiliation": "China Mobile (China)"
+        },
+        {
+          "name": "Xuemin Shen",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Yingjie Jay Guo",
+          "affiliation": "University of Technology Sydney"
+        },
+        {
+          "name": "Zhiguo Ding",
+          "affiliation": "University of Manchester"
+        },
+        {
+          "name": "Harald Haas",
+          "affiliation": "University of Edinburgh"
+        },
+        {
+          "name": "Wen Tong",
+          "affiliation": "Huawei Technologies (Canada)"
+        },
+        {
+          "name": "Peiying Zhu",
+          "affiliation": "Southeast University"
+        },
+        {
+          "name": "Ganghua Yang",
+          "affiliation": "Huawei Technologies (China)"
+        },
+        {
+          "name": "Jun Wang",
+          "affiliation": "Huawei Technologies (China)"
+        },
+        {
+          "name": "Erik G. Larsson",
+          "affiliation": "Link\u00f6ping University"
+        },
+        {
+          "name": "Hien Quoc Ngo",
+          "affiliation": "Queen's University Belfast"
+        },
+        {
+          "name": "Wei Hong",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Haiming Wang",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Debin Hou",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Jixin Chen",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Zhe Chen",
+          "affiliation": "University of Electronic Science and Technology of China"
+        },
+        {
+          "name": "Zhang\u2010Cheng Hao",
+          "affiliation": "Purple Mountain Laboratories"
+        },
+        {
+          "name": "Geoffrey Ye Li",
+          "affiliation": "Georgia Institute of Technology"
+        },
+        {
+          "name": "Rahim Tafazolli",
+          "affiliation": "University of Surrey"
+        },
+        {
+          "name": "Yue Gao",
+          "affiliation": "University of Surrey"
+        },
+        {
+          "name": "H. Vincent Poor",
+          "affiliation": "Princeton University"
+        },
+        {
+          "name": "Gerhard Fettweis",
+          "affiliation": "University of Electronic Science and Technology of China"
+        },
+        {
+          "name": "Ying\u2010Chang Liang",
+          "affiliation": "University of Electronic Science and Technology of China"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Abstract The fifth generation (5G) wireless communication networks are being deployed worldwide from 2020 and more capabilities are in the process of being standardized, such as mass connectivity, ultra-reliability, and guaranteed low latency. However, 5G will not meet all requirements of the future in 2030 and beyond, and sixth generation (6G) wireless communication networks are expected to provide global coverage, enhanced spectral/energy/cost efficiency, better intelligence level and security, etc. To meet these requirements, 6G networks will rely on new enabling technologies, i.e., air interface and transmission technologies and novel network architecture, such as waveform design, multiple access, channel coding schemes, multi-antenna technologies, network slicing, cell-free architecture, and cloud/fog/edge computing. Our vision on 6G is that it will have four new paradigm shifts. First, to satisfy the requirement of global coverage, 6G will not be limited to terrestrial communication networks, which will need to be complemented with non-terrestrial networks such as satellite and unmanned aerial vehicle (UAV) communication networks, thus achieving a space-air-ground-sea integrated communication network. Second, all spectra will be fully explored to further increase data rates and connection density, including the sub-6 GHz, millimeter wave (mmWave), terahertz (THz), and optical frequency bands. Third, facing the big datasets generated by the use of extremely heterogeneous networks, diverse communication scenarios, large numbers of antennas, wide bandwidths, and new service requirements, 6G networks will enable a new range of smart applications with the aid of artificial intelligence (AI) and big data technologies. Fourth, network security will have to be strengthened when developing 6G networks. This article provides a comprehensive survey of recent advances and future trends in these four aspects. Clearly, 6G with additional technical requirements beyond those of 5G will enable faster and further communications to the extent that the boundary between physical and cyber worlds disappears.",
+      "venue": "Science China Information Sciences",
+      "citation_count": 1907,
+      "doi": "10.1007/s11432-020-2955-6",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11432-020-2955-6",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4386958277",
+      "title": "Revolutionizing healthcare: the role of artificial intelligence in clinical practice",
+      "authors": [
+        {
+          "name": "Shuroug A. Alowais",
+          "affiliation": ""
+        },
+        {
+          "name": "Sahar S. Alghamdi",
+          "affiliation": "King Abdullah International Medical Research Center"
+        },
+        {
+          "name": "Nada Alsuhebany",
+          "affiliation": "King Saud bin Abdulaziz University for Health Sciences"
+        },
+        {
+          "name": "Tariq Alqahtani",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Abdulrahman Alshaya",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Sumaya N. Almohareb",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Atheer Aldairem",
+          "affiliation": "King Abdullah International Medical Research Center"
+        },
+        {
+          "name": "Mohammed Alrashed",
+          "affiliation": "King Abdullah International Medical Research Center"
+        },
+        {
+          "name": "Khalid Bin Saleh",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Hisham A. Badreldin",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Majed S. Al Yami",
+          "affiliation": "National Guard Health Affairs"
+        },
+        {
+          "name": "Shmeylan Al Harbi",
+          "affiliation": "King Saud bin Abdulaziz University for Health Sciences"
+        },
+        {
+          "name": "Abdulkareem Albekairy",
+          "affiliation": "King Abdullah International Medical Research Center"
+        }
+      ],
+      "year": 2023,
+      "abstract": "INTRODUCTION: Healthcare systems are complex and challenging for all stakeholders, but artificial intelligence (AI) has transformed various fields, including healthcare, with the potential to improve patient care and quality of life. Rapid AI advancements can revolutionize healthcare by integrating it into clinical practice. Reporting AI's role in clinical practice is crucial for successful implementation by equipping healthcare providers with essential knowledge and tools. RESEARCH SIGNIFICANCE: This review article provides a comprehensive and up-to-date overview of the current state of AI in clinical practice, including its potential applications in disease diagnosis, treatment recommendations, and patient engagement. It also discusses the associated challenges, covering ethical and legal considerations and the need for human expertise. By doing so, it enhances understanding of AI's significance in healthcare and supports healthcare organizations in effectively adopting AI technologies. MATERIALS AND METHODS: The current investigation analyzed the use of AI in the healthcare system with a comprehensive review of relevant indexed literature, such as PubMed/Medline, Scopus, and EMBASE, with no time constraints but limited to articles published in English. The focused question explores the impact of applying AI in healthcare settings and the potential outcomes of this application. RESULTS: Integrating AI into healthcare holds excellent potential for improving disease diagnosis, treatment selection, and clinical laboratory testing. AI tools can leverage large datasets and identify patterns to surpass human performance in several healthcare aspects. AI offers increased accuracy, reduced costs, and time savings while minimizing human errors. It can revolutionize personalized medicine, optimize medication dosages, enhance population health management, establish guidelines, provide virtual health assistants, support mental health care, improve patient education, and influence patient-physician trust. CONCLUSION: AI can be used to diagnose diseases, develop personalized treatment plans, and assist clinicians with decision-making. Rather than simply automating tasks, AI is about developing technologies that can enhance patient care across healthcare settings. However, challenges related to data privacy, bias, and the need for human expertise must be addressed for the responsible and effective implementation of AI in healthcare.",
+      "venue": "BMC Medical Education",
+      "citation_count": 2663,
+      "doi": "10.1186/s12909-023-04698-z",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/s12909-023-04698-z",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3023211159",
+      "title": "A comprehensive survey on support vector machine classification: Applications, challenges and trends",
+      "authors": [
+        {
+          "name": "Jair Cervantes",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        },
+        {
+          "name": "Farid Garc\u00eda\u2010Lamont",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        },
+        {
+          "name": "Lisbeth Rodr\u00edguez-Mazahua",
+          "affiliation": "Instituto Tecnologico de Orizaba"
+        },
+        {
+          "name": "Asdr\u00fabal L\u00f3pez\u2010Chau",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        }
+      ],
+      "year": 2020,
+      "abstract": "",
+      "venue": "Neurocomputing",
+      "citation_count": 2214,
+      "doi": "10.1016/j.neucom.2019.10.118",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.neucom.2019.10.118",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4247155454",
+      "title": "Artificial Intelligence and Management: The Automation\u2013Augmentation Paradox",
+      "authors": [
+        {
+          "name": "Sebastian Raisch",
+          "affiliation": "University of Geneva"
+        },
+        {
+          "name": "Sebastian Krakowski",
+          "affiliation": "Stockholm School of Economics"
+        }
+      ],
+      "year": 2021,
+      "abstract": "Taking three recent business books on artificial intelligence (AI) as a starting point, we explore the automation and augmentation concepts in the management domain. Whereas automation implies that machines take over a human task, augmentation means that humans collaborate closely with machines to perform a task. Taking a normative stance, the three books advise organizations to prioritize augmentation, which they relate to superior performance. Using a more comprehensive paradox theory perspective, we argue that, in the management domain, augmentation cannot be neatly separated from automation. These dual AI applications are interdependent across time and space, creating a paradoxical tension. Overemphasizing either augmentation or automation fuels reinforcing cycles with negative organizational and societal outcomes. However, if organizations adopt a broader perspective comprising both automation and augmentation, they could deal with the tension and achieve complementarities that benefit business and society. Drawing on our insights, we conclude that management scholars need to be involved in research on the use of AI in organizations. We also argue that a substantial change is required in how AI research is currently conducted in order to develop meaningful theory and to provide practice with sound advice.",
+      "venue": "Academy of Management Review",
+      "citation_count": 1658,
+      "doi": "10.5465/amr.2018.0072",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.5465/amr.2018.0072",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4225323055",
+      "title": "Flamingo: a Visual Language Model for Few-Shot Learning",
+      "authors": [
+        {
+          "name": "Jean-Baptiste Alayrac",
+          "affiliation": ""
+        },
+        {
+          "name": "Jeff Donahue",
+          "affiliation": ""
+        },
+        {
+          "name": "Pauline Luc",
+          "affiliation": ""
+        },
+        {
+          "name": "Antoine Miech",
+          "affiliation": ""
+        },
+        {
+          "name": "Iain Barr",
+          "affiliation": ""
+        },
+        {
+          "name": "Yana Hasson",
+          "affiliation": ""
+        },
+        {
+          "name": "Karel Lenc",
+          "affiliation": ""
+        },
+        {
+          "name": "Arthur Mensch",
+          "affiliation": ""
+        },
+        {
+          "name": "Katie Millican",
+          "affiliation": ""
+        },
+        {
+          "name": "Malcolm Reynolds",
+          "affiliation": ""
+        },
+        {
+          "name": "Roman Ring",
+          "affiliation": ""
+        },
+        {
+          "name": "Eliza Rutherford",
+          "affiliation": ""
+        },
+        {
+          "name": "Serkan Cabi",
+          "affiliation": ""
+        },
+        {
+          "name": "Tengda Han",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhitao Gong",
+          "affiliation": ""
+        },
+        {
+          "name": "Sina Samangooei",
+          "affiliation": ""
+        },
+        {
+          "name": "Marianne Monteiro",
+          "affiliation": ""
+        },
+        {
+          "name": "Jacob Menick",
+          "affiliation": ""
+        },
+        {
+          "name": "Sebastian Borgeaud",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew Brock",
+          "affiliation": ""
+        },
+        {
+          "name": "Aida Nematzadeh",
+          "affiliation": ""
+        },
+        {
+          "name": "Sahand Sharifzadeh",
+          "affiliation": ""
+        },
+        {
+          "name": "Miko\u0142aj Bi\u0144kowski",
+          "affiliation": ""
+        },
+        {
+          "name": "Ricardo Barreira",
+          "affiliation": ""
+        },
+        {
+          "name": "Oriol Vinyals",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew Zisserman",
+          "affiliation": ""
+        },
+        {
+          "name": "Karen Simonyan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Building models that can be rapidly adapted to novel tasks using only a handful of annotated examples is an open challenge for multimodal machine learning research. We introduce Flamingo, a family of Visual Language Models (VLM) with this ability. We propose key architectural innovations to: (i) bridge powerful pretrained vision-only and language-only models, (ii) handle sequences of arbitrarily interleaved visual and textual data, and (iii) seamlessly ingest images or videos as inputs. Thanks to their flexibility, Flamingo models can be trained on large-scale multimodal web corpora containing arbitrarily interleaved text and images, which is key to endow them with in-context few-shot learning capabilities. We perform a thorough evaluation of our models, exploring and measuring their ability to rapidly adapt to a variety of image and video tasks. These include open-ended tasks such as visual question-answering, where the model is prompted with a question which it has to answer; captioning tasks, which evaluate the ability to describe a scene or an event; and close-ended tasks such as multiple-choice visual question-answering. For tasks lying anywhere on this spectrum, a single Flamingo model can achieve a new state of the art with few-shot learning, simply by prompting the model with task-specific examples. On numerous benchmarks, Flamingo outperforms models fine-tuned on thousands of times more task-specific data.",
+      "venue": "arXiv (Cornell University)",
+      "citation_count": 1239,
+      "doi": "10.48550/arxiv.2204.14198",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.48550/arxiv.2204.14198",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4286276003",
+      "title": "Ten Years of Industrie 4.0",
+      "authors": [
+        {
+          "name": "Henning Kagermann",
+          "affiliation": "Acatech"
+        },
+        {
+          "name": "Wolfgang Wahlster",
+          "affiliation": "German Research Centre for Artificial Intelligence"
+        }
+      ],
+      "year": 2022,
+      "abstract": "A decade after its introduction, Industrie 4.0 has been established globally as the dominant paradigm for the digital transformation of the manufacturing industry. Amalgamating research-based results and practical experience from the German industry, this contribution reviews the progress made in implementing Industrie 4.0 and identifies future fields of action from a technological and application-oriented perspective. Putting the human in the center, Industrie 4.0 is the basis for data-based value creation, innovative business models, and agile forms of organization. Today, in the German manufacturing industry, the Internet of Things and cyber\u2013physical production systems are a reality in newly built factories, and the connectivity of machinery has been significantly increased in existing factories. Now, the trends of industrial AI, edge computing up to the edge cloud, 5G in the factory, team robotics, autonomous intralogistics systems, and trustworthy data infrastructures must be leveraged to strengthen resilience, sovereignty, semantic interoperability, and sustainability. This enables the creation of digital innovation ecosystems that ensure long-term adaptability in a volatile economic and geopolitical environment. In sum, this review represents a comprehensive assessment of the status quo and identifies what is needed in the future to reap the rewards of the groundwork done in the first ten years of Industrie 4.0.",
+      "venue": "Sci",
+      "citation_count": 906,
+      "doi": "10.3390/sci4030026",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3390/sci4030026",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3177813494",
+      "title": "Evaluating Large Language Models Trained on Code",
+      "authors": [
+        {
+          "name": "Mark Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Jerry Tworek",
+          "affiliation": ""
+        },
+        {
+          "name": "Heewoo Jun",
+          "affiliation": ""
+        },
+        {
+          "name": "Qiming Yuan",
+          "affiliation": ""
+        },
+        {
+          "name": "Henrique Pond\u00e9 de Oliveira Pinto",
+          "affiliation": ""
+        },
+        {
+          "name": "Jared Kaplan",
+          "affiliation": ""
+        },
+        {
+          "name": "Harrison Edwards",
+          "affiliation": ""
+        },
+        {
+          "name": "Yuri Burda",
+          "affiliation": ""
+        },
+        {
+          "name": "Nicholas Joseph",
+          "affiliation": ""
+        },
+        {
+          "name": "Greg Brockman",
+          "affiliation": ""
+        },
+        {
+          "name": "Alex Ray",
+          "affiliation": ""
+        },
+        {
+          "name": "Raul Puri",
+          "affiliation": ""
+        },
+        {
+          "name": "Gretchen Krueger",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael Petrov",
+          "affiliation": ""
+        },
+        {
+          "name": "Heidy Khlaaf",
+          "affiliation": ""
+        },
+        {
+          "name": "Girish Sastry",
+          "affiliation": ""
+        },
+        {
+          "name": "Pamela Mishkin",
+          "affiliation": ""
+        },
+        {
+          "name": "Brooke Chan",
+          "affiliation": ""
+        },
+        {
+          "name": "Scott Gray",
+          "affiliation": ""
+        },
+        {
+          "name": "Nick Ryder",
+          "affiliation": ""
+        },
+        {
+          "name": "Mikhail Pavlov",
+          "affiliation": ""
+        },
+        {
+          "name": "Alethea Power",
+          "affiliation": ""
+        },
+        {
+          "name": "\u0141ukasz Kaiser",
+          "affiliation": ""
+        },
+        {
+          "name": "Mohammad Bavarian",
+          "affiliation": ""
+        },
+        {
+          "name": "Clemens Winter",
+          "affiliation": ""
+        },
+        {
+          "name": "Philippe Tillet",
+          "affiliation": ""
+        },
+        {
+          "name": "Felipe Petroski Such",
+          "affiliation": ""
+        },
+        {
+          "name": "Dave Cummings",
+          "affiliation": ""
+        },
+        {
+          "name": "Matthias Plappert",
+          "affiliation": ""
+        },
+        {
+          "name": "Fotios Chantzis",
+          "affiliation": ""
+        },
+        {
+          "name": "Elizabeth A. Barnes",
+          "affiliation": ""
+        },
+        {
+          "name": "Ariel Herbert-Voss",
+          "affiliation": ""
+        },
+        {
+          "name": "William H. Guss",
+          "affiliation": ""
+        },
+        {
+          "name": "Alex Nichol",
+          "affiliation": ""
+        },
+        {
+          "name": "Alex Paino",
+          "affiliation": ""
+        },
+        {
+          "name": "Nikolas Tezak",
+          "affiliation": ""
+        },
+        {
+          "name": "Jie Tang",
+          "affiliation": ""
+        },
+        {
+          "name": "I. Babuschkin",
+          "affiliation": ""
+        },
+        {
+          "name": "Suchir Balaji",
+          "affiliation": ""
+        },
+        {
+          "name": "Shantanu Jain",
+          "affiliation": ""
+        },
+        {
+          "name": "William S. Saunders",
+          "affiliation": ""
+        },
+        {
+          "name": "Christopher Hesse",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew N. Carr",
+          "affiliation": ""
+        },
+        {
+          "name": "Jan Leike",
+          "affiliation": ""
+        },
+        {
+          "name": "Joshua Achiam",
+          "affiliation": ""
+        },
+        {
+          "name": "Vedant Misra",
+          "affiliation": ""
+        },
+        {
+          "name": "Evan Morikawa",
+          "affiliation": ""
+        },
+        {
+          "name": "Alec Radford",
+          "affiliation": ""
+        },
+        {
+          "name": "Matthew M. Knight",
+          "affiliation": ""
+        },
+        {
+          "name": "Miles Brundage",
+          "affiliation": ""
+        },
+        {
+          "name": "Mira Murati",
+          "affiliation": ""
+        },
+        {
+          "name": "Katie Mayer",
+          "affiliation": ""
+        },
+        {
+          "name": "Peter Welinder",
+          "affiliation": ""
+        },
+        {
+          "name": "Bob McGrew",
+          "affiliation": ""
+        },
+        {
+          "name": "Dario Amodei",
+          "affiliation": ""
+        },
+        {
+          "name": "Sam McCandlish",
+          "affiliation": ""
+        },
+        {
+          "name": "Ilya Sutskever",
+          "affiliation": ""
+        },
+        {
+          "name": "Wojciech Zaremba",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "We introduce Codex, a GPT language model fine-tuned on publicly available code from GitHub, and study its Python code-writing capabilities. A distinct production version of Codex powers GitHub Copilot. On HumanEval, a new evaluation set we release to measure functional correctness for synthesizing programs from docstrings, our model solves 28.8% of the problems, while GPT-3 solves 0% and GPT-J solves 11.4%. Furthermore, we find that repeated sampling from the model is a surprisingly effective strategy for producing working solutions to difficult prompts. Using this method, we solve 70.2% of our problems with 100 samples per problem. Careful investigation of our model reveals its limitations, including difficulty with docstrings describing long chains of operations and with binding operations to variables. Finally, we discuss the potential broader impacts of deploying powerful code generation technologies, covering safety, security, and economics.",
+      "venue": "arXiv (Cornell University)",
+      "citation_count": 1415,
+      "doi": "10.48550/arxiv.2107.03374",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.48550/arxiv.2107.03374",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3120894151",
+      "title": "Deep learning-enabled medical computer vision",
+      "authors": [
+        {
+          "name": "Andre Esteva",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Katherine Chou",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Serena Yeung",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Nikhil Naik",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Ali Madani",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Ali Mottaghi",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Yun Liu",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Eric J. Topol",
+          "affiliation": "Scripps Research Institute"
+        },
+        {
+          "name": "Jeff Dean",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Richard Socher",
+          "affiliation": "Salesforce (United States)"
+        }
+      ],
+      "year": 2021,
+      "abstract": "A decade of unprecedented progress in artificial intelligence (AI) has demonstrated the potential for many fields-including medicine-to benefit from the insights that AI techniques can extract from data. Here we survey recent progress in the development of modern computer vision techniques-powered by deep learning-for medical applications, focusing on medical imaging, medical video, and clinical deployment. We start by briefly summarizing a decade of progress in convolutional neural networks, including the vision tasks they enable, in the context of healthcare. Next, we discuss several example medical imaging applications that stand to benefit-including cardiology, pathology, dermatology, ophthalmology-and propose new avenues for continued work. We then expand into general medical video, highlighting ways in which clinical workflows can integrate computer vision to enhance care. Finally, we discuss the challenges and hurdles required for real-world clinical deployment of these technologies.",
+      "venue": "npj Digital Medicine",
+      "citation_count": 1235,
+      "doi": "10.1038/s41746-020-00376-2",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41746-020-00376-2",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3126686235",
+      "title": "The Road Towards 6G: A Comprehensive Survey",
+      "authors": [
+        {
+          "name": "Wei Jiang",
+          "affiliation": "German Research Centre for Artificial Intelligence"
+        },
+        {
+          "name": "Bin Han",
+          "affiliation": "University of Kaiserslautern"
+        },
+        {
+          "name": "Mohammad Asif Habibi",
+          "affiliation": "University of Kaiserslautern"
+        },
+        {
+          "name": "Hans Dieter Schotten",
+          "affiliation": "University of Kaiserslautern"
+        }
+      ],
+      "year": 2021,
+      "abstract": "As of today, the fifth generation (5G) mobile communication system has been rolled out in many countries and the number of 5G subscribers already reaches a very large scale. It is time for academia and industry to shift their attention towards the next generation. At this crossroad, an overview of the current state of the art and a vision of future communications are definitely of interest. This article thus aims to provide a comprehensive survey to draw a picture of the sixth generation (6G) system in terms of drivers, use cases, usage scenarios, requirements, key performance indicators (KPIs), architecture, and enabling technologies. First, we attempt to answer the question of \u201cIs there any need for 6G?\u201d by shedding light on its key driving factors, in which we predict the explosive growth of mobile traffic until 2030, and envision potential use cases and usage scenarios. Second, the technical requirements of 6G are discussed and compared with those of 5G with respect to a set of KPIs in a quantitative manner. Third, the state-of-the-art 6G research efforts and activities from representative institutions and countries are summarized, and a tentative roadmap of definition, specification, standardization, and regulation is projected. Then, we identify a dozen of potential technologies and introduce their principles, advantages, challenges, and open research issues. Finally, the conclusions are drawn to paint a picture of \u201cWhat 6G may look like?.\u201d This survey is intended to serve as an enlightening guideline to spur interests and further investigations for subsequent research and development of 6G communications systems.",
+      "venue": "IEEE Open Journal of the Communications Society",
+      "citation_count": 1455,
+      "doi": "10.1109/ojcoms.2021.3057679",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/ojcoms.2021.3057679",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4393065402",
+      "title": "A survey on large language model based autonomous agents",
+      "authors": [
+        {
+          "name": "Lei Wang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Chen Ma",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Xueyang Feng",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zeyu Zhang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Hao Yang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Jingsen Zhang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zhiyuan Chen",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Jiakai Tang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Xu Chen",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Yankai Lin",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Wayne Xin Zhao",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zhewei Wei",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Ji-Rong Wen",
+          "affiliation": "Renmin University of China"
+        }
+      ],
+      "year": 2024,
+      "abstract": "Abstract Autonomous agents have long been a research focus in academic and industry communities. Previous research often focuses on training agents with limited knowledge within isolated environments, which diverges significantly from human learning processes, and makes the agents hard to achieve human-like decisions. Recently, through the acquisition of vast amounts of Web knowledge, large language models (LLMs) have shown potential in human-level intelligence, leading to a surge in research on LLM-based autonomous agents. In this paper, we present a comprehensive survey of these studies, delivering a systematic review of LLM-based autonomous agents from a holistic perspective. We first discuss the construction of LLM-based autonomous agents, proposing a unified framework that encompasses much of previous work. Then, we present a overview of the diverse applications of LLM-based autonomous agents in social science, natural science, and engineering. Finally, we delve into the evaluation strategies commonly used for LLM-based autonomous agents. Based on the previous studies, we also present several challenges and future directions in this field.",
+      "venue": "Frontiers of Computer Science",
+      "citation_count": 992,
+      "doi": "10.1007/s11704-024-40231-1",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11704-024-40231-1",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3003651800",
+      "title": "Internet of Things (IoT) for Next-Generation Smart Systems: A Review of Current Challenges, Future Trends and Prospects for Emerging 5G-IoT Scenarios",
+      "authors": [
+        {
+          "name": "Kinza Shafique",
+          "affiliation": "DHA Suffa University"
+        },
+        {
+          "name": "Bilal A. Khawaja",
+          "affiliation": "Islamic University of Madinah"
+        },
+        {
+          "name": "Farah Sabir",
+          "affiliation": "Karachi Institute of Economics and Technology"
+        },
+        {
+          "name": "Sameer Qazi",
+          "affiliation": "Karachi Institute of Economics and Technology"
+        },
+        {
+          "name": "Muhammad Mustaqim",
+          "affiliation": "National University of Sciences and Technology"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The Internet of Things (IoT)-centric concepts like augmented reality, high-resolution video streaming, self-driven cars, smart environment, e-health care, etc. have a ubiquitous presence now. These applications require higher data-rates, large bandwidth, increased capacity, low latency and high throughput. In light of these emerging concepts, IoT has revolutionized the world by providing seamless connectivity between heterogeneous networks (HetNets). The eventual aim of IoT is to introduce the plug and play technology providing the end-user, ease of operation, remotely access control and configurability. This paper presents the IoT technology from a bird's eye view covering its statistical/architectural trends, use cases, challenges and future prospects. The paper also presents a detailed and extensive overview of the emerging 5G-IoT scenario. Fifth Generation (5G) cellular networks provide key enabling technologies for ubiquitous deployment of the IoT technology. These include carrier aggregation, multiple-input multiple-output (MIMO), massive-MIMO (M-MIMO), coordinated multipoint processing (CoMP), device-to-device (D2D) communications, centralized radio access network (CRAN), software-defined wireless sensor networking (SD-WSN), network function virtualization (NFV) and cognitive radios (CRs). This paper presents an exhaustive review for these key enabling technologies and also discusses the new emerging use cases of 5G-IoT driven by the advances in artificial intelligence, machine and deep learning, ongoing 5G initiatives, quality of service (QoS) requirements in 5G and its standardization issues. Finally, the paper discusses challenges in the implementation of 5G-IoT due to high data-rates requiring both cloud-based platforms and IoT devices based edge computing.",
+      "venue": "IEEE Access",
+      "citation_count": 1279,
+      "doi": "10.1109/access.2020.2970118",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2970118",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4366262984",
+      "title": "Explainable Artificial Intelligence (XAI): What we know and what is left to attain Trustworthy Artificial Intelligence",
+      "authors": [
+        {
+          "name": "Sajid Ali",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Tamer Abuhmed",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Shaker El\u2013Sappagh",
+          "affiliation": "Suez University"
+        },
+        {
+          "name": "Khan Muhammad",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Jos\u00e9 M. Alonso",
+          "affiliation": "Universidade de Santiago de Compostela"
+        },
+        {
+          "name": "Roberto Confalonieri",
+          "affiliation": "University of Padua"
+        },
+        {
+          "name": "Riccardo Guidotti",
+          "affiliation": "University of Pisa"
+        },
+        {
+          "name": "Javier Del Ser",
+          "affiliation": "University of the Basque Country"
+        },
+        {
+          "name": "Natalia D\u00edaz-Rodr\u00edguez",
+          "affiliation": "Universidad de Granada"
+        },
+        {
+          "name": "Francisco Herrera",
+          "affiliation": "Universidad de Granada"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Artificial intelligence (AI) is currently being utilized in a wide range of sophisticated applications, but the outcomes of many AI models are challenging to comprehend and trust due to their black-box nature. Usually, it is essential to understand the reasoning behind an AI model\u2019s decision-making. Thus, the need for eXplainable AI (XAI) methods for improving trust in AI models has arisen. XAI has become a popular research subject within the AI field in recent years. Existing survey papers have tackled the concepts of XAI, its general terms, and post-hoc explainability methods but there have not been any reviews that have looked at the assessment methods, available tools, XAI datasets, and other related aspects. Therefore, in this comprehensive study, we provide readers with an overview of the current research and trends in this rapidly emerging area with a case study example. The study starts by explaining the background of XAI, common definitions, and summarizing recently proposed techniques in XAI for supervised machine learning. The review divides XAI techniques into four axes using a hierarchical categorization system: (i) data explainability, (ii) model explainability, (iii) post-hoc explainability, and (iv) assessment of explanations. We also introduce available evaluation metrics as well as open-source packages and datasets with future research directions. Then, the significance of explainability in terms of legal demands, user viewpoints, and application orientation is outlined, termed as XAI concerns. This paper advocates for tailoring explanation content to specific user types. An examination of XAI techniques and evaluation was conducted by looking at 410 critical articles, published between January 2016 and October 2022, in reputed journals and using a wide range of research databases as a source of information. The article is aimed at XAI researchers who are interested in making their AI models more trustworthy, as well as towards researchers from other disciplines who are looking for effective XAI methods to complete tasks with confidence while communicating meaning from data.",
+      "venue": "Information Fusion",
+      "citation_count": 1390,
+      "doi": "10.1016/j.inffus.2023.101805",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.inffus.2023.101805",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3043220753",
+      "title": "Smart Radio Environments Empowered by Reconfigurable Intelligent Surfaces: How it Works, State of Research, and Road Ahead",
+      "authors": [
+        {
+          "name": "Marco Di Renzo",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Alessio Zappone",
+          "affiliation": "Universit\u00e0 degli studi di Cassino e del Lazio Meridionale"
+        },
+        {
+          "name": "M\u00e9rouane Debbah",
+          "affiliation": "Huawei Technologies (France)"
+        },
+        {
+          "name": "Mohamed\u2010Slim Alouini",
+          "affiliation": "King Abdullah University of Science and Technology"
+        },
+        {
+          "name": "Chau Yuen",
+          "affiliation": "Singapore University of Technology and Design"
+        },
+        {
+          "name": "Julien de Rosny",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Sergei Tretyakov",
+          "affiliation": "Aalto University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Reconfigurable intelligent surfaces (RISs) are an emerging transmission technology for application to wireless communications. RISs can be realized in different ways, which include (i) large arrays of inexpensive antennas that are usually spaced half of the wavelength apart; and (ii) metamaterial-based planar or conformal large surfaces whose scattering elements have sizes and inter-distances much smaller than the wavelength. Compared with other transmission technologies, e.g., phased arrays, multi-antenna transmitters, and relays, RISs require the largest number of scattering elements, but each of them needs to be backed by the fewest and least costly components. Also, no power amplifiers are usually needed. For these reasons, RISs constitute a promising software-defined architecture that can be realized at reduced cost, size, weight, and power (C-SWaP design), and are regarded as an enabling technology for realizing the emerging concept of smart radio environments (SREs). In this paper, we (i) introduce the emerging research field of RIS-empowered SREs; (ii) overview the most suitable applications of RISs in wireless networks; (iii) present an electromagnetic-based communication-theoretic framework for analyzing and optimizing metamaterial-based RISs; (iv) provide a comprehensive overview of the current state of research; and (v) discuss the most important research issues to tackle. Owing to the interdisciplinary essence of RIS-empowered SREs, finally, we put forth the need of reconciling and reuniting C. E. Shannon\u2019s mathematical theory of communication with G. Green\u2019s and J. C. Maxwell\u2019s mathematical theories of electromagnetism for appropriately modeling, analyzing, optimizing, and deploying future wireless networks empowered by RISs.",
+      "venue": "arXiv (Cornell University)",
+      "citation_count": 3079,
+      "doi": "10.1109/jsac.2020.3007211",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/jsac.2020.3007211",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4387835442",
+      "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+      "authors": [
+        {
+          "name": "Joon Sung Park",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Joseph O\u2019Brien",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Carrie J. Cai",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Meredith Ringel Morris",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Percy Liang",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Michael S. Bernstein",
+          "affiliation": "Stanford University"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Believable proxies of human behavior can empower interactive applications ranging from immersive environments to rehearsal spaces for interpersonal communication to prototyping tools. In this paper, we introduce generative agents: computational software agents that simulate believable human behavior. Generative agents wake up, cook breakfast, and head to work; artists paint, while authors write; they form opinions, notice each other, and initiate conversations; they remember and reflect on days past as they plan the next day. To enable generative agents, we describe an architecture that extends a large language model to store a complete record of the agent\u2019s experiences using natural language, synthesize those memories over time into higher-level reflections, and retrieve them dynamically to plan behavior. We instantiate generative agents to populate an interactive sandbox environment inspired by The Sims, where end users can interact with a small town of twenty-five agents using natural language. In an evaluation, these generative agents produce believable individual and emergent social behaviors. For example, starting with only a single user-specified notion that one agent wants to throw a Valentine\u2019s Day party, the agents autonomously spread invitations to the party over the next two days, make new acquaintances, ask each other out on dates to the party, and coordinate to show up for the party together at the right time. We demonstrate through ablation that the components of our agent architecture\u2014observation, planning, and reflection\u2014each contribute critically to the believability of agent behavior. By fusing large language models with computational interactive agents, this work introduces architectural and interaction patterns for enabling believable simulations of human behavior.",
+      "venue": "",
+      "citation_count": 1312,
+      "doi": "10.1145/3586183.3606763",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1145/3586183.3606763",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2999472659",
+      "title": "A Survey on the Internet of Things (IoT) Forensics: Challenges, Approaches, and Open Issues",
+      "authors": [
+        {
+          "name": "Maria Stoyanova",
+          "affiliation": "Technische Universit\u00e4t Berlin"
+        },
+        {
+          "name": "Yannis Nikoloudakis",
+          "affiliation": "Hellenic Mediterranean University"
+        },
+        {
+          "name": "Spyros Panagiotakis",
+          "affiliation": "Hellenic Mediterranean University"
+        },
+        {
+          "name": "Evangelos Pallis",
+          "affiliation": "Hellenic Mediterranean University"
+        },
+        {
+          "name": "Evangelos Markakis",
+          "affiliation": "Hellenic Mediterranean University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Today is the era of the Internet of Things (IoT). The recent advances in hardware and information technology have accelerated the deployment of billions of interconnected, smart and adaptive devices in critical infrastructures like health, transportation, environmental control, and home automation. Transferring data over a network without requiring any kind of human-to-computer or human-to-human interaction, brings reliability and convenience to consumers, but also opens a new world of opportunity for intruders, and introduces a whole set of unique and complicated questions to the field of Digital Forensics. Although IoT data could be a rich source of evidence, forensics professionals cope with diverse problems, starting from the huge variety of IoT devices and non-standard formats, to the multi-tenant cloud infrastructure and the resulting multi-jurisdictional litigations. A further challenge is the end-to-end encryption which represents a trade-off between users' right to privacy and the success of the forensics investigation. Due to its volatile nature, digital evidence has to be acquired and analyzed using validated tools and techniques that ensure the maintenance of the Chain of Custody. Therefore, the purpose of this paper is to identify and discuss the main issues involved in the complex process of IoT-based investigations, particularly all legal, privacy and cloud security challenges. Furthermore, this work provides an overview of the past and current theoretical models in the digital forensics science. Special attention is paid to frameworks that aim to extract data in a privacy-preserving manner or secure the evidence integrity using decentralized blockchain-based solutions. In addition, the present paper addresses the ongoing Forensics-as-a-Service (FaaS) paradigm, as well as some promising cross-cutting data reduction and forensics intelligence techniques. Finally, several other research trends and open issues are presented, with emphasis on the need for proactive Forensics Readiness strategies and generally agreed-upon standards.",
+      "venue": "IEEE Communications Surveys & Tutorials",
+      "citation_count": 821,
+      "doi": "10.1109/comst.2019.2962586",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/comst.2019.2962586",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3089706104",
+      "title": "Satellite Communications in the New Space Era: A Survey and Future Challenges",
+      "authors": [
+        {
+          "name": "Oltjon Kodheli",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Eva Lagunas",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Nicola Maturo",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Shree Krishna Sharma",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Bhavani Shankar",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Jes\u00fas Fabi\u00e1n Mendoza Montoya",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Juan Carlos Merlano Dunc\u00e1n",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Danilo Spano",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Symeon Chatzinotas",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Steven Kisseleff",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Jorge Querol",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Lei Lei",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Thang X. Vu",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "George Goussetis",
+          "affiliation": "Sensors (United States)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Satellite communications (SatComs) have recently entered a period of renewed interest motivated by technological advances and nurtured through private investment and ventures. The present survey aims at capturing the state of the art in SatComs, while highlighting the most promising open research topics. Firstly, the main innovation drivers are motivated, such as new constellation types, on-board processing capabilities, non-terrestrial networks and space-based data collection/processing. Secondly, the most promising applications are described, i.e., 5G integration, space communications, Earth observation, aeronautical and maritime tracking and communication. Subsequently, an in-depth literature review is provided across five axes: i) system aspects, ii) air interface, iii) medium access, iv) networking, v) testbeds & prototyping. Finally, a number of future challenges and the respective open research topics are described.",
+      "venue": "IEEE Communications Surveys & Tutorials",
+      "citation_count": 1289,
+      "doi": "10.1109/comst.2020.3028247",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/comst.2020.3028247",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3094793347",
+      "title": "A strategic framework for artificial intelligence in marketing",
+      "authors": [
+        {
+          "name": "Ming\u2010Hui Huang",
+          "affiliation": "National Taiwan University"
+        },
+        {
+          "name": "Roland T. Rust",
+          "affiliation": "University of Maryland, College Park"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Abstract The authors develop a three-stage framework for strategic marketing planning, incorporating multiple artificial intelligence (AI) benefits: mechanical AI for automating repetitive marketing functions and activities, thinking AI for processing data to arrive at decisions, and feeling AI for analyzing interactions and human emotions. This framework lays out the ways that AI can be used for marketing research, strategy (segmentation, targeting, and positioning, STP), and actions. At the marketing research stage, mechanical AI can be used for data collection, thinking AI for market analysis, and feeling AI for customer understanding. At the marketing strategy (STP) stage, mechanical AI can be used for segmentation (segment recognition), thinking AI for targeting (segment recommendation), and feeling AI for positioning (segment resonance). At the marketing action stage, mechanical AI can be used for standardization, thinking AI for personalization, and feeling AI for relationalization. We apply this framework to various areas of marketing, organized by marketing 4Ps/4Cs, to illustrate the strategic use of AI.",
+      "venue": "Journal of the Academy of Marketing Science",
+      "citation_count": 1435,
+      "doi": "10.1007/s11747-020-00749-9",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11747-020-00749-9",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4402843978",
+      "title": "Interpretable machine learning",
+      "authors": [
+        {
+          "name": "Parliamentary Office of Science and Technology",
+          "affiliation": ""
+        },
+        {
+          "name": "Lorna Christie",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Machine learning (ML, a type of artificial intelligence) is increasingly being used to support decision making in a variety of applications including recruitment and clinical diagnoses. While ML has many advantages, there are concerns that in some cases it may not be possible to explain completely how its outputs have been produced. This POSTnote gives an overview of ML and its role in decision-making. It examines the challenges of understanding how a complex ML system has reached its output, and some of the technical approaches to making ML easier to interpret. It also gives a brief overview of some of the proposed tools for making ML systems more accountable.",
+      "venue": "",
+      "citation_count": 982,
+      "doi": "10.58248/pn633",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.58248/pn633",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3120697286",
+      "title": "Machine Learning Applications for Precision Agriculture: A Comprehensive Review",
+      "authors": [
+        {
+          "name": "Abhinav Sharma",
+          "affiliation": "University of Petroleum and Energy Studies"
+        },
+        {
+          "name": "Arpit Jain",
+          "affiliation": "University of Petroleum and Energy Studies"
+        },
+        {
+          "name": "Prateek Gupta",
+          "affiliation": "University of Petroleum and Energy Studies"
+        },
+        {
+          "name": "Vinay Chowdary",
+          "affiliation": "University of Petroleum and Energy Studies"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Agriculture plays a vital role in the economic growth of any country. With the increase of population, frequent changes in climatic conditions and limited resources, it becomes a challenging task to fulfil the food requirement of the present population. Precision agriculture also known as smart farming have emerged as an innovative tool to address current challenges in agricultural sustainability. The mechanism that drives this cutting edge technology is machine learning (ML). It gives the machine ability to learn without being explicitly programmed. ML together with IoT (Internet of Things) enabled farm machinery are key components of the next agriculture revolution. In this article, authors present a systematic review of ML applications in the field of agriculture. The areas that are focused are prediction of soil parameters such as organic carbon and moisture content, crop yield prediction, disease and weed detection in crops and species detection. ML with computer vision are reviewed for the classification of a different set of crop images in order to monitor the crop quality and yield assessment. This approach can be integrated for enhanced livestock production by predicting fertility patterns, diagnosing eating disorders, cattle behaviour based on ML models using data collected by collar sensors, etc. Intelligent irrigation which includes drip irrigation and intelligent harvesting techniques are also reviewed that reduces human labour to a great extent. This article demonstrates how knowledge-based agriculture can improve the sustainable productivity and quality of the product.",
+      "venue": "IEEE Access",
+      "citation_count": 991,
+      "doi": "10.1109/access.2020.3048415",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.3048415",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3004337988",
+      "title": "From Smart Farming towards Agriculture 5.0: A Review on Crop Data Management",
+      "authors": [
+        {
+          "name": "Ver\u00f3nica S\u00e1iz-Rubio",
+          "affiliation": "Universitat Polit\u00e8cnica de Val\u00e8ncia"
+        },
+        {
+          "name": "Francisco Rovira-M\u00e1s",
+          "affiliation": "Universitat Polit\u00e8cnica de Val\u00e8ncia"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The information that crops offer is turned into profitable decisions only when efficiently managed. Current advances in data management are making Smart Farming grow exponentially as data have become the key element in modern agriculture to help producers with critical decision-making. Valuable advantages appear with objective information acquired through sensors with the aim of maximizing productivity and sustainability. This kind of data-based managed farms rely on data that can increase efficiency by avoiding the misuse of resources and the pollution of the environment. Data-driven agriculture, with the help of robotic solutions incorporating artificial intelligent techniques, sets the grounds for the sustainable agriculture of the future. This paper reviews the current status of advanced farm management systems by revisiting each crucial step, from data acquisition in crop fields to variable rate applications, so that growers can make optimized decisions to save money while protecting the environment and transforming how food will be produced to sustainably match the forthcoming population growth.",
+      "venue": "Agronomy",
+      "citation_count": 916,
+      "doi": "10.3390/agronomy10020207",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3390/agronomy10020207",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4210916416",
+      "title": "Tackling Climate Change with Machine Learning",
+      "authors": [
+        {
+          "name": "Lynn H. Kaack",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "David Rolnick",
+          "affiliation": "Carnegie Mellon University"
+        },
+        {
+          "name": "Priya L. Donti",
+          "affiliation": "Hertie School"
+        },
+        {
+          "name": "Kelly Kochanski",
+          "affiliation": "University of Colorado Boulder"
+        },
+        {
+          "name": "Alexandre Lacoste",
+          "affiliation": ""
+        },
+        {
+          "name": "Kris Sankaran",
+          "affiliation": "University of Wisconsin\u2013Madison"
+        },
+        {
+          "name": "Andrew Slavin Ross",
+          "affiliation": "Harvard University"
+        },
+        {
+          "name": "Nikola Milojevic-Dupont",
+          "affiliation": "Mercator Research Institute on Global Commons and Climate Change"
+        },
+        {
+          "name": "Natasha Jaques",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Anna Waldman\u2010Brown",
+          "affiliation": "Massachusetts Institute of Technology"
+        },
+        {
+          "name": "Alexandra Sasha Luccioni",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "Tegan Maharaj",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "Evan David Sherwin",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Mukkavilli, Karthik",
+          "affiliation": "Lawrence Berkeley National Laboratory"
+        },
+        {
+          "name": "Konrad P. K\u00f6rding",
+          "affiliation": "California University of Pennsylvania"
+        },
+        {
+          "name": "Carla P. Gomes",
+          "affiliation": "Cornell University"
+        },
+        {
+          "name": "Andrew Y. Ng",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Demis Hassabis",
+          "affiliation": "Google DeepMind (United Kingdom)"
+        },
+        {
+          "name": "John Platt",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Felix Creutzig",
+          "affiliation": "Mercator Research Institute on Global Commons and Climate Change"
+        },
+        {
+          "name": "Jennifer Chayes",
+          "affiliation": "University of California, Berkeley"
+        },
+        {
+          "name": "Yoshua Bengio",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        }
+      ],
+      "year": 2022,
+      "abstract": "Climate change is one of the greatest challenges facing humanity, and we, as machine learning experts, may wonder how we can help. Here we describe how machine learning can be a powerful tool in reducing greenhouse gas emissions and helping society adapt to a changing climate. From smart grids to disaster management, we identify high impact problems where existing gaps can be filled by machine learning, in collaboration with other fields. Our recommendations encompass exciting research questions as well as promising business opportunities. We call on the machine learning community to join the global effort against climate change.",
+      "venue": "OPUS 4 (Zuse Institute Berlin)",
+      "citation_count": 804,
+      "doi": "10.1145/3485128",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1145/3485128",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4225716729",
+      "title": "AI-Based Modeling: Techniques, Applications and Research Issues Towards Automation, Intelligent and Smart Systems",
+      "authors": [
+        {
+          "name": "Iqbal H. Sarker",
+          "affiliation": "Chittagong University of Engineering & Technology"
+        }
+      ],
+      "year": 2022,
+      "abstract": "by academics and industry people as well as decision-makers in various real-world scenarios and application domains.",
+      "venue": "SN Computer Science",
+      "citation_count": 1030,
+      "doi": "10.1007/s42979-022-01043-x",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s42979-022-01043-x",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3023617420",
+      "title": "A Comprehensive Review of the COVID-19 Pandemic and the Role of IoT, Drones, AI, Blockchain, and 5G in Managing its Impact",
+      "authors": [
+        {
+          "name": "Vinay Chamola",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Vikas Hassija",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Vatsal Gupta",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Mohsen Guizani",
+          "affiliation": "Qatar University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The unprecedented outbreak of the 2019 novel coronavirus, termed as COVID-19 by the World Health Organization (WHO), has placed numerous governments around the world in a precarious position. The impact of the COVID-19 outbreak, earlier witnessed by the citizens of China alone, has now become a matter of grave concern for virtually every country in the world. The scarcity of resources to endure the COVID-19 outbreak combined with the fear of overburdened healthcare systems has forced a majority of these countries into a state of partial or complete lockdown. The number of laboratory-confirmed coronavirus cases has been increasing at an alarming rate throughout the world, with reportedly more than 3 million confirmed cases as of 30 April 2020. Adding to these woes, numerous false reports, misinformation, and unsolicited fears in regards to coronavirus, are being circulated regularly since the outbreak of the COVID-19. In response to such acts, we draw on various reliable sources to present a detailed review of all the major aspects associated with the COVID-19 pandemic. In addition to the direct health implications associated with the outbreak of COVID-19, this study highlights its impact on the global economy. In drawing things to a close, we explore the use of technologies such as the Internet of Things (IoT), Unmanned Aerial Vehicles (UAVs), blockchain, Artificial Intelligence (AI), and 5G, among others, to help mitigate the impact of COVID-19 outbreak.",
+      "venue": "IEEE Access",
+      "citation_count": 1116,
+      "doi": "10.1109/access.2020.2992341",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2992341",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3045086480",
+      "title": "6G and Beyond: The Future of Wireless Communications Systems",
+      "authors": [
+        {
+          "name": "Ian F. Akyildiz",
+          "affiliation": "Georgia Institute of Technology"
+        },
+        {
+          "name": "A.C. Kak",
+          "affiliation": "Georgia Institute of Technology"
+        },
+        {
+          "name": "Shuai Nie",
+          "affiliation": "Georgia Institute of Technology"
+        }
+      ],
+      "year": 2020,
+      "abstract": "6G and beyond will fulfill the requirements of a fully connected world and provide ubiquitous wireless connectivity for all. Transformative solutions are expected to drive the surge for accommodating a rapidly growing number of intelligent devices and services. Major technological breakthroughs to achieve connectivity goals within 6G include: (i) a network operating at the THz band with much wider spectrum resources, (ii) intelligent communication environments that enable a wireless propagation environment with active signal transmission and reception, (iii) pervasive artificial intelligence, (iv) large-scale network automation, (v) an all-spectrum reconfigurable front-end for dynamic spectrum access, (vi) ambient backscatter communications for energy savings, (vii) the Internet of Space Things enabled by CubeSats and UAVs, and (viii) cell-free massive MIMO communication networks. In this roadmap paper, use cases for these enabling techniques as well as recent advancements on related topics are highlighted, and open problems with possible solutions are discussed, followed by a development timeline outlining the worldwide efforts in the realization of 6G. Going beyond 6G, promising early-stage technologies such as the Internet of NanoThings, the Internet of BioNanoThings, and quantum communications, which are expected to have a far-reaching impact on wireless communications, have also been discussed at length in this paper.",
+      "venue": "IEEE Access",
+      "citation_count": 1321,
+      "doi": "10.1109/access.2020.3010896",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.3010896",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3036816925",
+      "title": "Value-Oriented and Ethical Technology Engineering in Industry 5.0: A Human-Centric Perspective for the Design of the Factory of the Future",
+      "authors": [
+        {
+          "name": "Francesco Longo",
+          "affiliation": "University of Calabria"
+        },
+        {
+          "name": "Antonio Padovano",
+          "affiliation": "University of Calabria"
+        },
+        {
+          "name": "Steven Umbrello",
+          "affiliation": "University of Turin"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Although manufacturing companies are currently situated at a transition point in what has been called Industry 4.0, a new revolutionary wave\u2014Industry 5.0\u2014is emerging as an \u2018Age of Augmentation\u2019 when the human and machine reconcile and work in perfect symbiosis with one another. Recent years have indeed assisted in drawing attention to the human-centric design of Cyber-Physical Production Systems (CPPS) and to the genesis of the \u2018Operator 4.0\u2019, two novel concepts that raise significant ethical questions regarding the impact of technology on workers and society at large. This paper argues that a value-oriented and ethical technology engineering in Industry 5.0 is an urgent and sensitive topic as demonstrated by a survey administered to industry leaders from different companies. The Value Sensitive Design (VSD) approach is proposed as a principled framework to illustrate how technologies enabling human\u2013machine symbiosis in the Factory of the Future can be designed to embody elicited human values and to illustrate actionable steps that engineers and designers can take in their design projects. Use cases based on real solutions and prototypes discuss how a design-for-values approach aids in the investigation and mitigation of ethical issues emerging from the implementation of technological solutions and, hence, support the migration to a symbiotic Factory of the Future.",
+      "venue": "Applied Sciences",
+      "citation_count": 609,
+      "doi": "10.3390/app10124182",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3390/app10124182",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3081261125",
+      "title": "Consumers and Artificial Intelligence: An Experiential Perspective",
+      "authors": [
+        {
+          "name": "Stefano Puntoni",
+          "affiliation": ""
+        },
+        {
+          "name": "Rebecca Walker Reczek",
+          "affiliation": ""
+        },
+        {
+          "name": "Markus Giesler",
+          "affiliation": ""
+        },
+        {
+          "name": "Simona Botti",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Artificial intelligence (AI) helps companies offer important benefits to consumers, such as health monitoring with wearable devices, advice with recommender systems, peace of mind with smart household products, and convenience with voice-activated virtual assistants. However, although AI can be seen as a neutral tool to be evaluated on efficiency and accuracy, this approach does not consider the social and individual challenges that can occur when AI is deployed. This research aims to bridge these two perspectives: on one side, the authors acknowledge the value that embedding AI technology into products and services can provide to consumers. On the other side, the authors build on and integrate sociological and psychological scholarship to examine some of the costs consumers experience in their interactions with AI. In doing so, the authors identify four types of consumer experiences with AI: (1) data capture, (2) classification, (3) delegation, and (4) social. This approach allows the authors to discuss policy and managerial avenues to address the ways in which consumers may fail to experience value in organizations\u2019 investments into AI and to lay out an agenda for future research.",
+      "venue": "Journal of Marketing",
+      "citation_count": 959,
+      "doi": "10.1177/0022242920953847",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1177/0022242920953847",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3040838455",
+      "title": "Event-Based Vision: A Survey",
+      "authors": [
+        {
+          "name": "Guillermo Gallego",
+          "affiliation": "Einstein Center Digital Future"
+        },
+        {
+          "name": "Tobi Delbruck",
+          "affiliation": "SIB Swiss Institute of Bioinformatics"
+        },
+        {
+          "name": "Garrick Orchard",
+          "affiliation": "Intel (United States)"
+        },
+        {
+          "name": "Chiara Bartolozzi",
+          "affiliation": "Italian Institute of Technology"
+        },
+        {
+          "name": "Brian Taba",
+          "affiliation": "IBM (United States)"
+        },
+        {
+          "name": "Andrea Censi",
+          "affiliation": "ETH Zurich"
+        },
+        {
+          "name": "Stefan Leutenegger",
+          "affiliation": "Imperial College London"
+        },
+        {
+          "name": "Andrew J. Davison",
+          "affiliation": "Imperial College London"
+        },
+        {
+          "name": "Jorg Conradt",
+          "affiliation": "KTH Royal Institute of Technology"
+        },
+        {
+          "name": "Kostas Daniilidis",
+          "affiliation": "University of Pennsylvania"
+        },
+        {
+          "name": "Davide Scaramuzza",
+          "affiliation": "University of Zurich"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Event cameras are bio-inspired sensors that differ from conventional frame cameras: Instead of capturing images at a fixed rate, they asynchronously measure per-pixel brightness changes, and output a stream of events that encode the time, location and sign of the brightness changes. Event cameras offer attractive properties compared to traditional cameras: high temporal resolution (in the order of \u03bcs), very high dynamic range (140 dB versus 60 dB), low power consumption, and high pixel bandwidth (on the order of kHz) resulting in reduced motion blur. Hence, event cameras have a large potential for robotics and computer vision in challenging scenarios for traditional cameras, such as low-latency, high speed, and high dynamic range. However, novel methods are required to process the unconventional output of these sensors in order to unlock their potential. This paper provides a comprehensive overview of the emerging field of event-based vision, with a focus on the applications and the algorithms developed to unlock the outstanding properties of event cameras. We present event cameras from their working principle, the actual sensors that are available and the tasks that they have been used for, from low-level vision (feature detection and tracking, optic flow, etc.) to high-level vision (reconstruction, segmentation, recognition). We also discuss the techniques developed to process events, including learning-based techniques, as well as specialized processors for these novel sensors, such as spiking neural networks. Additionally, we highlight the challenges that remain to be tackled and the opportunities that lie ahead in the search for a more efficient, bio-inspired way for machines to perceive and interact with the world.",
+      "venue": "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "citation_count": 1931,
+      "doi": "10.1109/tpami.2020.3008413",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/tpami.2020.3008413",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3038273726",
+      "title": "Investigating the emerging COVID-19 research trends in the field of business and management: A bibliometric analysis approach",
+      "authors": [
+        {
+          "name": "Surabhi Verma",
+          "affiliation": "University of Southern Denmark"
+        },
+        {
+          "name": "Anders Gustafsson",
+          "affiliation": "BI Norwegian Business School"
+        }
+      ],
+      "year": 2020,
+      "abstract": "",
+      "venue": "Journal of Business Research",
+      "citation_count": 1055,
+      "doi": "10.1016/j.jbusres.2020.06.057",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.jbusres.2020.06.057",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3111221273",
+      "title": "Industrial Artificial Intelligence in Industry 4.0 - Systematic Review, Challenges and Outlook",
+      "authors": [
+        {
+          "name": "Ricardo Silva Peres",
+          "affiliation": "University of Lisbon"
+        },
+        {
+          "name": "Xiaodong Jia",
+          "affiliation": "University of Cincinnati"
+        },
+        {
+          "name": "Jay Lee",
+          "affiliation": "University of Cincinnati"
+        },
+        {
+          "name": "Keyi Sun",
+          "affiliation": "Foxconn (United States)"
+        },
+        {
+          "name": "Armando Walter Colombo",
+          "affiliation": "University of Applied Sciences Emden Leer"
+        },
+        {
+          "name": "Jos\u00e9 Barata",
+          "affiliation": "University of Lisbon"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The advent of the Industry 4.0 initiative has made it so that manufacturing environments are becoming more and more dynamic, connected but also inherently more complex, with additional inter-dependencies, uncertainties and large volumes of data being generated. Recent advances in Industrial Artificial Intelligence have showcased the potential of this technology to assist manufacturers in tackling the challenges associated with this digital transformation of Cyber-Physical Systems, through its data-driven predictive analytics and capacity to assist decision-making in highly complex, non-linear and often multistage environments. However, the industrial adoption of such solutions is still relatively low beyond the experimental pilot stage, as real environments provide unique and difficult challenges for which organizations are still unprepared. The aim of this paper is thus two-fold. First, a systematic review of current Industrial Artificial Intelligence literature is presented, focusing on its application in real manufacturing environments to identify the main enabling technologies and core design principles. Then, a set of key challenges and opportunities to be addressed by future research efforts are formulated along with a conceptual framework to bridge the gap between research in this field and the manufacturing industry, with the goal of promoting industrial adoption through a successful transition towards a digitized and data-driven company-wide culture. This paper is among the first to provide a clear definition and holistic view of Industrial Artificial Intelligence in the Industry 4.0 landscape, identifying and analysing its fundamental building blocks and ongoing trends. Its findings are expected to assist and empower researchers and manufacturers alike to better understand the requirements and steps necessary for a successful transition into Industry 4.0 supported by AI, as well as the challenges that may arise during this process.",
+      "venue": "IEEE Access",
+      "citation_count": 635,
+      "doi": "10.1109/access.2020.3042874",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.3042874",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2999765337",
+      "title": "Questioning the AI: Informing Design Practices for Explainable AI User Experiences",
+      "authors": [
+        {
+          "name": "Q. Vera Liao",
+          "affiliation": "IBM (United States)"
+        },
+        {
+          "name": "Daniel Gruen",
+          "affiliation": "Cambridge Scientific (United States)"
+        },
+        {
+          "name": "Sarah Miller",
+          "affiliation": "Cambridge Scientific (United States)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "A surge of interest in explainable AI (XAI) has led to a vast collection of algorithmic work on the topic. While many recognize the necessity to incorporate explainability features in AI systems, how to address real-world user needs for understanding AI remains an open question. By interviewing 20 UX and design practitioners working on various AI products, we seek to identify gaps between the current XAI algorithmic work and practices to create explainable AI products. To do so, we develop an algorithm-informed XAI question bank in which user needs for explainability are represented as prototypical questions users might ask about the AI, and use it as a study probe. Our work contributes insights into the design space of XAI, informs efforts to support design practices in this space, and identifies opportunities for future XAI work. We also provide an extended XAI question bank and discuss how it can be used for creating user-centered XAI.",
+      "venue": "",
+      "citation_count": 628,
+      "doi": "10.1145/3313831.3376590",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1145/3313831.3376590",
+      "source": "openalex",
+      "_bibtex_override": ""
+    }
+  ]
+}

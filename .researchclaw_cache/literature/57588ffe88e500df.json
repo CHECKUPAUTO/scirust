@@ -1,0 +1,1492 @@
+{
+  "query": "Build-working-autonomous-research-tool state of the art",
+  "source": "arxiv",
+  "limit": 40,
+  "timestamp": 1777751651.383611,
+  "papers": [
+    {
+      "paper_id": "arxiv-2210.15664",
+      "title": "State of the Art in Dense Monocular Non-Rigid 3D Reconstruction",
+      "authors": [
+        {
+          "name": "Edith Tretschk",
+          "affiliation": ""
+        },
+        {
+          "name": "Navami Kairanda",
+          "affiliation": ""
+        },
+        {
+          "name": "Mallikarjun B R",
+          "affiliation": ""
+        },
+        {
+          "name": "Rishabh Dabral",
+          "affiliation": ""
+        },
+        {
+          "name": "Adam Kortylewski",
+          "affiliation": ""
+        },
+        {
+          "name": "Bernhard Egger",
+          "affiliation": ""
+        },
+        {
+          "name": "Marc Habermann",
+          "affiliation": ""
+        },
+        {
+          "name": "Pascal Fua",
+          "affiliation": ""
+        },
+        {
+          "name": "Christian Theobalt",
+          "affiliation": ""
+        },
+        {
+          "name": "Vladislav Golyanik",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "3D reconstruction of deformable (or non-rigid) scenes from a set of monocular 2D image observations is a long-standing and actively researched area of computer vision and graphics. It is an ill-posed inverse problem, since -- without additional prior assumptions -- it permits infinitely many solutions leading to accurate projection to the input 2D images. Non-rigid reconstruction is a foundational building block for downstream applications like robotics, AR/VR, or visual content creation. The key advantage of using monocular cameras is their omnipresence and availability to the end users as well as their ease of use compared to more sophisticated camera set-ups such as stereo or multi-view systems. This survey focuses on state-of-the-art methods for dense non-rigid 3D reconstruction of various deformable objects and composite scenes from monocular videos or sets of monocular views. It reviews the fundamentals of 3D reconstruction and deformation modeling from 2D image observations. We then start from general methods -- that handle arbitrary scenes and make only a few prior assumptions -- and proceed towards techniques making stronger assumptions about the observed objects and types of deformations (e.g. human faces, bodies, hands, and animals). A significant part of this STAR is also devoted to classification and a high-level comparison of the methods, as well as an overview of the datasets for training and evaluation of the discussed techniques. We conclude by discussing open challenges in the field and the social aspects associated with the usage of the reviewed methods.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2210.15664",
+      "url": "https://arxiv.org/abs/2210.15664",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2210.04940",
+      "title": "The Galactic Chemical Evolution of phosphorus observed with IGRINS",
+      "authors": [
+        {
+          "name": "G. Nandakumar",
+          "affiliation": ""
+        },
+        {
+          "name": "N. Ryde",
+          "affiliation": ""
+        },
+        {
+          "name": "M. Montelius",
+          "affiliation": ""
+        },
+        {
+          "name": "B. Thorsbro",
+          "affiliation": ""
+        },
+        {
+          "name": "H. J\u00f6nsson",
+          "affiliation": ""
+        },
+        {
+          "name": "G. Mace",
+          "affiliation": ""
+        },
+        {
+          "name": "Lund Observatory",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "Theoretical Physics",
+          "affiliation": ""
+        },
+        {
+          "name": "Lund University",
+          "affiliation": ""
+        },
+        {
+          "name": "Box 43",
+          "affiliation": ""
+        },
+        {
+          "name": "SE-221 00 Lund",
+          "affiliation": ""
+        },
+        {
+          "name": "Sweden",
+          "affiliation": ""
+        },
+        {
+          "name": "Kapteyn Astronomical Institute",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Groningen",
+          "affiliation": ""
+        },
+        {
+          "name": "Landleven 12",
+          "affiliation": ""
+        },
+        {
+          "name": "NL-9747 AD Groningen",
+          "affiliation": ""
+        },
+        {
+          "name": "the Netherlands",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "School of Science",
+          "affiliation": ""
+        },
+        {
+          "name": "The University of Tokyo",
+          "affiliation": ""
+        },
+        {
+          "name": "7-3-1 Hongo",
+          "affiliation": ""
+        },
+        {
+          "name": "Bunkyo-ku",
+          "affiliation": ""
+        },
+        {
+          "name": "Tokyo 113-0033",
+          "affiliation": ""
+        },
+        {
+          "name": "Japan",
+          "affiliation": ""
+        },
+        {
+          "name": "Materials Science",
+          "affiliation": ""
+        },
+        {
+          "name": "Applied Mathematics",
+          "affiliation": ""
+        },
+        {
+          "name": "Malm\u00f6 University",
+          "affiliation": ""
+        },
+        {
+          "name": "SE-205 06 Malm\u00f6",
+          "affiliation": ""
+        },
+        {
+          "name": "Sweden",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "McDonald Observatory",
+          "affiliation": ""
+        },
+        {
+          "name": "The University of Texas",
+          "affiliation": ""
+        },
+        {
+          "name": "Austin",
+          "affiliation": ""
+        },
+        {
+          "name": "TX 78712",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Phosphorus (P) is considered to be one of the key elements for life, making it an important element to look for in the abundance analysis of spectra of stellar systems. Yet, there exists only a handful of spectroscopic studies to estimate the P abundances and investigate its trend across a range of metallicities. We have observed full HK band spectra at a spectral resolving power of R=45,000 with IGRINS instrument. Abundances are determined using SME in combination with 1D MARCS stellar atmosphere models. The investigated sample of stars have reliable stellar parameters estimated using optical FIES spectra (GILD; J\u00f6nsson et al. in prep.). In order to determine the P abundances from the 16482.92 Angstrom P line, we take special care of the CO($\u03bd=7-4$) blend. We determine the C, N, O abundances from atomic carbon and a range of non-blended molecular lines (CO, CN, OH) which are aplenty in the H band region of K giant stars, assuring an appropriate modelling of the blending CO($\u03bd=7-4$) line. We present [P/Fe] vs [Fe/H] trend for 38 K giant stars in the metallicity range of -1.2 dex $<$ [Fe/H] $<$ 0.4 dex. We find that our trend matches well with the compiled literature sample of prominently dwarf stars and limited number of giant stars. Our trend is found to be higher by $\\sim$ 0.05 - 0.1 dex compared to the theoretical chemical evolution trend in Cescutti et al. 2012 resulting from core collapse supernova (type II) of massive stars with the P yields from Kobayashi et al. (2006) arbitrarily increased by a factor of 2.75. Thus the enhancement factor might need to be $\\sim$ 0.05 - 0.1 dex higher to match our trend. We also find an empirically determined primary behaviour for phosphorus. Furthermore, the phosphorus abundance is found to be elevated by $\\sim$ 0.6 - 0.9 dex in two metal poor s-enriched stars compared to the theoretical chemical evolution trend.",
+      "venue": "astro-ph.SR",
+      "citation_count": 0,
+      "doi": "10.1051/0004-6361/202244724",
+      "arxiv_id": "2210.04940",
+      "url": "https://arxiv.org/abs/2210.04940",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2512.14671",
+      "title": "ART: Articulated Reconstruction Transformer",
+      "authors": [
+        {
+          "name": "Zizhang Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Cheng Zhang",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhengqin Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Henry Howard-Jenkins",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhaoyang Lv",
+          "affiliation": ""
+        },
+        {
+          "name": "Chen Geng",
+          "affiliation": ""
+        },
+        {
+          "name": "Jiajun Wu",
+          "affiliation": ""
+        },
+        {
+          "name": "Richard Newcombe",
+          "affiliation": ""
+        },
+        {
+          "name": "Jakob Engel",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhao Dong",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "We introduce ART, Articulated Reconstruction Transformer -- a category-agnostic, feed-forward model that reconstructs complete 3D articulated objects from only sparse, multi-state RGB images. Previous methods for articulated object reconstruction either rely on slow optimization with fragile cross-state correspondences or use feed-forward models limited to specific object categories. In contrast, ART treats articulated objects as assemblies of rigid parts, formulating reconstruction as part-based prediction. Our newly designed transformer architecture maps sparse image inputs to a set of learnable part slots, from which ART jointly decodes unified representations for individual parts, including their 3D geometry, texture, and explicit articulation parameters. The resulting reconstructions are physically interpretable and readily exportable for simulation. Trained on a large-scale, diverse dataset with per-part supervision, and evaluated across diverse benchmarks, ART achieves significant improvements over existing baselines and establishes a new state of the art for articulated object reconstruction from image inputs.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2512.14671",
+      "url": "https://arxiv.org/abs/2512.14671",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2108.10071",
+      "title": "Elysium: Context-Aware Bytecode-Level Patching to Automatically Heal Vulnerable Smart Contracts",
+      "authors": [
+        {
+          "name": "Christof Ferreira Torres",
+          "affiliation": ""
+        },
+        {
+          "name": "Hugo Jonker",
+          "affiliation": ""
+        },
+        {
+          "name": "Radu State",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "Fixing bugs is easiest by patching source code. However, source code is not always available: only 0.3% of the ~49M smart contracts that are currently deployed on Ethereum have their source code publicly available. Moreover, since contracts may call functions from other contracts, security flaws in closed-source contracts may affect open-source contracts as well. However, current state-of-the-art approaches that operate on closed-source contracts (i.e., EVM bytecode), such as EVMPatch and SmartShield, make use of purely hard-coded templates that leverage fix patching patterns. As a result, they cannot dynamically adapt to the bytecode that is being patched, which severely limits their flexibility and scalability. For instance, when patching integer overflows using hard-coded templates, a particular patch template needs to be employed as the bounds to be checked are different for each integer size. In this paper, we propose Elysium, a scalable approach towards automatic smart contract repair at the bytecode level. Elysium combines template-based and semantic-based patching by inferring context information from bytecode. Elysium is currently able to patch 7 different types of vulnerabilities in smart contracts automatically and can easily be extended with new templates and new bug-finding tools. We evaluate its effectiveness and correctness using 3 different datasets by replaying more than 500K transactions on patched contracts. We find that Elysium outperforms existing tools by patching at least 30% more contracts correctly. Finally, we also compare the overhead of Elysium in terms of deployment and transaction cost. In comparison to other tools, we find that generally Elysium minimizes the runtime cost (i.e., transaction cost) up to a factor of 1.7, for only a marginally higher deployment cost, where deployment cost is a one-time cost as compared to the runtime cost.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2108.10071",
+      "url": "https://arxiv.org/abs/2108.10071",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2005.12156",
+      "title": "ConFuzzius: A Data Dependency-Aware Hybrid Fuzzer for Smart Contracts",
+      "authors": [
+        {
+          "name": "Christof Ferreira Torres",
+          "affiliation": ""
+        },
+        {
+          "name": "Antonio Ken Iannillo",
+          "affiliation": ""
+        },
+        {
+          "name": "Arthur Gervais",
+          "affiliation": ""
+        },
+        {
+          "name": "Radu State",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Smart contracts are Turing-complete programs that are executed across a blockchain. Unlike traditional programs, once deployed, they cannot be modified. As smart contracts carry more value, they become more of an exciting target for attackers. Over the last years, they suffered from exploits costing millions of dollars due to simple programming mistakes. As a result, a variety of tools for detecting bugs have been proposed. Most of these tools rely on symbolic execution, which may yield false positives due to over-approximation. Recently, many fuzzers have been proposed to detect bugs in smart contracts. However, these tend to be more effective in finding shallow bugs and less effective in finding bugs that lie deep in the execution, therefore achieving low code coverage and many false negatives. An alternative that has proven to achieve good results in traditional programs is hybrid fuzzing, a combination of symbolic execution and fuzzing. In this work, we study hybrid fuzzing on smart contracts and present ConFuzzius, the first hybrid fuzzer for smart contracts. ConFuzzius uses evolutionary fuzzing to exercise shallow parts of a smart contract and constraint solving to generate inputs that satisfy complex conditions that prevent evolutionary fuzzing from exploring deeper parts. Moreover, ConFuzzius leverages dynamic data dependency analysis to efficiently generate sequences of transactions that are more likely to result in contract states in which bugs may be hidden. We evaluate the effectiveness of ConFuzzius by comparing it with state-of-the-art symbolic execution tools and fuzzers for smart contracts. Our evaluation on a curated dataset of 128 contracts and 21K real-world contracts shows that our hybrid approach detects more bugs (up to 23%) while outperforming state-of-the-art in terms of code coverage (up to 69%), and that data dependency analysis boosts bug detection up to 18%.",
+      "venue": "cs.CR",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2005.12156",
+      "url": "https://arxiv.org/abs/2005.12156",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2401.07398",
+      "title": "Cross Domain Early Crop Mapping using CropSTGAN",
+      "authors": [
+        {
+          "name": "Yiqun Wang",
+          "affiliation": ""
+        },
+        {
+          "name": "Hui Huang",
+          "affiliation": ""
+        },
+        {
+          "name": "Radu State",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "Driven by abundant satellite imagery, machine learning-based approaches have recently been promoted to generate high-resolution crop cultivation maps to support many agricultural applications. One of the major challenges faced by these approaches is the limited availability of ground truth labels. In the absence of ground truth, existing work usually adopts the \"direct transfer strategy\" that trains a classifier using historical labels collected from other regions and then applies the trained model to the target region. Unfortunately, the spectral features of crops exhibit inter-region and inter-annual variability due to changes in soil composition, climate conditions, and crop progress, the resultant models perform poorly on new and unseen regions or years. Despite recent efforts, such as the application of the deep adaptation neural network (DANN) model structure in the deep adaptation crop classification network (DACCN), to tackle the above cross-domain challenges, their effectiveness diminishes significantly when there is a large dissimilarity between the source and target regions. This paper introduces the Crop Mapping Spectral-temporal Generative Adversarial Neural Network (CropSTGAN), a novel solution for cross-domain challenges, that doesn't require target domain labels. CropSTGAN learns to transform the target domain's spectral features to those of the source domain, effectively bridging large dissimilarities. Additionally, it employs an identity loss to maintain the intrinsic local structure of the data. Comprehensive experiments across various regions and years demonstrate the benefits and effectiveness of the proposed approach. In experiments, CropSTGAN is benchmarked against various state-of-the-art (SOTA) methods. Notably, CropSTGAN significantly outperforms these methods in scenarios with large data distribution dissimilarities between the target and source domains.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1109/ACCESS.2024.3436620",
+      "arxiv_id": "2401.07398",
+      "url": "https://arxiv.org/abs/2401.07398",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2604.03255",
+      "title": "State of the Art Report for Smart Habitat for Older Persons -- Working Group 3 -- Healthcare",
+      "authors": [
+        {
+          "name": "Birgitta Langhammer",
+          "affiliation": ""
+        },
+        {
+          "name": "Oscar Martinez Mozos",
+          "affiliation": ""
+        },
+        {
+          "name": "Ana Mendes",
+          "affiliation": ""
+        },
+        {
+          "name": "Joana Madureira",
+          "affiliation": ""
+        },
+        {
+          "name": "Lina Seduikyte",
+          "affiliation": ""
+        },
+        {
+          "name": "Martin Weigl",
+          "affiliation": ""
+        },
+        {
+          "name": "Heidi Salonen",
+          "affiliation": ""
+        },
+        {
+          "name": "Veronika Kotradyova",
+          "affiliation": ""
+        },
+        {
+          "name": "Ondrej Krejcar",
+          "affiliation": ""
+        },
+        {
+          "name": "Sarmite Mikulioniene",
+          "affiliation": ""
+        },
+        {
+          "name": "Willeke van Staalduinen",
+          "affiliation": ""
+        },
+        {
+          "name": "Carina Dantas",
+          "affiliation": ""
+        },
+        {
+          "name": "Petra Maresova",
+          "affiliation": ""
+        },
+        {
+          "name": "Willeke van Staalduinen",
+          "affiliation": ""
+        },
+        {
+          "name": "Carina Dantas",
+          "affiliation": ""
+        },
+        {
+          "name": "Barakovic Sabina",
+          "affiliation": ""
+        },
+        {
+          "name": "Barakovic Husic Jasmina",
+          "affiliation": ""
+        },
+        {
+          "name": "Jonathan Gomez-Raja",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "This document reports the State of the Art of science and practice on three topics related to smart and healthy ageing at home: furniture and habitats, Information and Communication Technologies (ICT), and healthcare. The reports were prepared by the working groups of COST Action CA16226, Sheld-on. Sheld-on is a network of researchers, user representatives, industry members, and other stakeholders. The three domains covered in this report were the areas of interest for three working groups from the COST Action. The aim of each working group was to assess the State of the Art for disciplinary understanding, identification of advances in smart furniture and habitat, products, industries and success stories. The findings on these topics of all working groups are compiled here. Due to the different backgrounds of the members of each of the working groups, the document is divided in three separate parts that can be considered as separate State of the Art reports. The goal of this document is to be used as input in the fourth working group of Sheld-on COST Action: Solutions for Ageing Well at Home, in the Community, and at Work, where experts from the three different domains converge to a single working group in order to achieve the action objectives.",
+      "venue": "cs.CY",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2604.03255",
+      "url": "https://arxiv.org/abs/2604.03255",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2309.06552",
+      "title": "The Art of Planetary Science: Art as a Tool for Scientific Inquiry and Public Discourse around Space Exploration",
+      "authors": [
+        {
+          "name": "Jamie L. Molaro",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "Art can be a powerful tool in science engagement efforts to help facilitate learning and public discourse around space and space exploration. The Art of Planetary Science is an annual exhibition combining science and art which aims to help people to connect more meaningfully to science outside of traditional education models. Works solicited from scientists and from the public explore the beauty of the universe, as well as communicate and abstract scientific concepts from an artistic framework. These events offer the public a unique perspective on science and an opportunity to participate in dialogue around how and why we explore space. As an extension of the exhibition, a series of workshops for artists and educators focuses on techniques in creating science-driven art and how it can be used as a tool for scientific inquiry. We will discuss our success with these efforts and the important role that art can play in shaping the evolving narrative of humanity's relationship to space.",
+      "venue": "physics.pop-ph",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2309.06552",
+      "url": "https://arxiv.org/abs/2309.06552",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2309.05856",
+      "title": "Multi-Point Detection of the Powerful Gamma Ray Burst GRB221009A Propagation through the Heliosphere on October 9, 2022",
+      "authors": [
+        {
+          "name": "Andrii Voshchepynets",
+          "affiliation": ""
+        },
+        {
+          "name": "Oleksiy Agapitov",
+          "affiliation": ""
+        },
+        {
+          "name": "Lynn Wilson",
+          "affiliation": ""
+        },
+        {
+          "name": "Vassilis Angelopoulos",
+          "affiliation": ""
+        },
+        {
+          "name": "Samer T. Alnussirat",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael Balikhin",
+          "affiliation": ""
+        },
+        {
+          "name": "Myroslava Hlebena",
+          "affiliation": ""
+        },
+        {
+          "name": "Ihor Korol",
+          "affiliation": ""
+        },
+        {
+          "name": "Davin Larson",
+          "affiliation": ""
+        },
+        {
+          "name": "David Mitchell",
+          "affiliation": ""
+        },
+        {
+          "name": "Christopher Owen",
+          "affiliation": ""
+        },
+        {
+          "name": "Ali Rahmati",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of System Analysis",
+          "affiliation": ""
+        },
+        {
+          "name": "Optimization Theory",
+          "affiliation": ""
+        },
+        {
+          "name": "Uzhhorod National University",
+          "affiliation": ""
+        },
+        {
+          "name": "Uzhhorod",
+          "affiliation": ""
+        },
+        {
+          "name": "Ukraine",
+          "affiliation": ""
+        },
+        {
+          "name": "Space Sciences Laboratory",
+          "affiliation": ""
+        },
+        {
+          "name": ":",
+          "affiliation": ""
+        },
+        {
+          "name": "University of California Berkeley Berkeley",
+          "affiliation": ""
+        },
+        {
+          "name": "CA 94720",
+          "affiliation": ""
+        },
+        {
+          "name": "Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "Space Physics Department",
+          "affiliation": ""
+        },
+        {
+          "name": "National Taras Shevchenko University of Kyiv",
+          "affiliation": ""
+        },
+        {
+          "name": "Kyiv",
+          "affiliation": ""
+        },
+        {
+          "name": "Ukraine",
+          "affiliation": ""
+        },
+        {
+          "name": "Goddard Space Flight Center",
+          "affiliation": ""
+        },
+        {
+          "name": "National Aeronautics",
+          "affiliation": ""
+        },
+        {
+          "name": "Space Administration",
+          "affiliation": ""
+        },
+        {
+          "name": "Greenbelt",
+          "affiliation": ""
+        },
+        {
+          "name": "MD",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Earth",
+          "affiliation": ""
+        },
+        {
+          "name": "Planetary",
+          "affiliation": ""
+        },
+        {
+          "name": "Space Sciences",
+          "affiliation": ""
+        },
+        {
+          "name": "University of California Los Angeles",
+          "affiliation": ""
+        },
+        {
+          "name": "Los Angeles",
+          "affiliation": ""
+        },
+        {
+          "name": "CA}",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Sheffield",
+          "affiliation": ""
+        },
+        {
+          "name": "Sheffield",
+          "affiliation": ""
+        },
+        {
+          "name": "UK",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Algebra",
+          "affiliation": ""
+        },
+        {
+          "name": "Differential Equation",
+          "affiliation": ""
+        },
+        {
+          "name": "Uzhhorod National University",
+          "affiliation": ""
+        },
+        {
+          "name": "Uzhhorod",
+          "affiliation": ""
+        },
+        {
+          "name": "Ukraine",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Mathematical Analysis",
+          "affiliation": ""
+        },
+        {
+          "name": "The John Paul II Catholic University of Lublin",
+          "affiliation": ""
+        },
+        {
+          "name": "Lublin",
+          "affiliation": ""
+        },
+        {
+          "name": "Poland}",
+          "affiliation": ""
+        }
+      ],
+      "year": 2023,
+      "abstract": "We present the results of processing the effects of the powerful Gamma Ray Burst GRB221009A captured by the charged particle detectors (electrostatic analyzers and solid-state detectors) onboard spacecraft at different points in the heliosphere on October 9, 2022. To follow the GRB221009A propagation through the heliosphere we used the electron and proton flux measurements from solar missions Solar Orbiter and STEREO-A; Earth magnetosphere and the solar wind missions THEMIS and Wind; meteorological satellites POES15, POES19, MetOp3; and MAVEN - a NASA mission orbiting Mars. GRB221009A had a structure of four bursts: less intense Pulse 1 - the triggering impulse - was detected by gamma-ray observatories at 131659 UT (near the Earth); the most intense Pulses 2 and 3 were detected on board all the spacecraft from the list, and Pulse 4 detected in more than 500 s after Pulse 1. Due to their different scientific objectives, the spacecraft, which data was used in this study, were separated by more than 1 AU (Solar Orbiter and MAVEN). This enabled tracking GRB221009A as it was propagating across the heliosphere. STEREO-A was the first to register Pulse 2 and 3 of the GRB, almost 100 seconds before their detection by spacecraft in the vicinity of Earth. MAVEN detected GRB221009A Pulses 2, 3, and 4 at the orbit of Mars about 237 seconds after their detection near Earth. By processing the time delays observed we show that the source location of the GRB221009A was at RA 288.5 degrees, Dec 18.5 degrees (J2000) with an error cone of 2 degrees",
+      "venue": "astro-ph.HE",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2309.05856",
+      "url": "https://arxiv.org/abs/2309.05856",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2503.24102",
+      "title": "Is Small Language Model the Silver Bullet to Low-Resource Languages Machine Translation?",
+      "authors": [
+        {
+          "name": "Yewei Song",
+          "affiliation": ""
+        },
+        {
+          "name": "Lujun Li",
+          "affiliation": ""
+        },
+        {
+          "name": "Cedric Lothritz",
+          "affiliation": ""
+        },
+        {
+          "name": "Saad Ezzini",
+          "affiliation": ""
+        },
+        {
+          "name": "Lama Sleem",
+          "affiliation": ""
+        },
+        {
+          "name": "Niccolo Gentile",
+          "affiliation": ""
+        },
+        {
+          "name": "Radu State",
+          "affiliation": ""
+        },
+        {
+          "name": "Tegawend\u00e9 F. Bissyand\u00e9",
+          "affiliation": ""
+        },
+        {
+          "name": "Jacques Klein",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Low-resource languages (LRLs) lack sufficient linguistic resources and are underrepresented in benchmark datasets, resulting in persistently lower translation quality than high-resource languages, especially in privacy-sensitive and resource-limited contexts. Firstly, this study systematically evaluates state-of-the-art smaller Large Language Models in 200 languages using the FLORES-200 benchmark, highlighting persistent deficiencies and disparities in the translation of LRLs. To mitigate these limitations, we investigate knowledge distillation from large pre-trained teacher models to Small Language Models (SLMs) through supervised fine-tuning. The results show substantial improvements; for example, the translation performance of English to Luxembourgish (EN to LB), measured by the LLM-as-a-Judge score, increases from 0.36 to 0.89 in the validation set for Llama-3.2-3B. We further investigate various fine-tuning configurations and tasks to clarify the trade-offs between data scale and training efficiency, verify that the model retains its general capabilities without significant catastrophic forgetting after training, and explore the distillation benefits to other LRLs on SLMs (Khasi, Assamese, and Ukrainian). In general, this work exposes the limitations and fairness issues of current SLMs in LRL translation and systematically explores the potential of using the distillation of knowledge from large to small models, offering practical, empirically grounded recommendations to improve LRL translation systems",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2503.24102",
+      "url": "https://arxiv.org/abs/2503.24102",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2202.03086",
+      "title": "Machine Translation from Signed to Spoken Languages: State of the Art and Challenges",
+      "authors": [
+        {
+          "name": "Mathieu De Coster",
+          "affiliation": ""
+        },
+        {
+          "name": "Dimitar Shterionov",
+          "affiliation": ""
+        },
+        {
+          "name": "Mieke Van Herreweghe",
+          "affiliation": ""
+        },
+        {
+          "name": "Joni Dambre",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Automatic translation from signed to spoken languages is an interdisciplinary research domain, lying on the intersection of computer vision, machine translation and linguistics. Nevertheless, research in this domain is performed mostly by computer scientists in isolation. As the domain is becoming increasingly popular - the majority of scientific papers on the topic of sign language translation have been published in the past three years - we provide an overview of the state of the art as well as some required background in the different related disciplines. We give a high-level introduction to sign language linguistics and machine translation to illustrate the requirements of automatic sign language translation. We present a systematic literature review to illustrate the state of the art in the domain and then, harking back to the requirements, lay out several challenges for future research. We find that significant advances have been made on the shoulders of spoken language machine translation research. However, current approaches are often not linguistically motivated or are not adapted to the different input modality of sign languages. We explore challenges related to the representation of sign language data, the collection of datasets, the need for interdisciplinary research and requirements for moving beyond research, towards applications. Based on our findings, we advocate for interdisciplinary research and to base future research on linguistic analysis of sign languages. Furthermore, the inclusion of deaf and hearing end users of sign language translation applications in use case identification, data collection and evaluation is of the utmost importance in the creation of useful sign language translation models. We recommend iterative, human-in-the-loop, design and development of sign language translation models.",
+      "venue": "cs.CL",
+      "citation_count": 0,
+      "doi": "10.1007/s10209-023-00992-1",
+      "arxiv_id": "2202.03086",
+      "url": "https://arxiv.org/abs/2202.03086",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2007.07837",
+      "title": "Multi-nucleon transfer in the interaction of 977 MeV and 1143 MeV $^{204}$Hg with $^{208}$Pb",
+      "authors": [
+        {
+          "name": "V. V. Desai",
+          "affiliation": ""
+        },
+        {
+          "name": "A. Pica",
+          "affiliation": ""
+        },
+        {
+          "name": "W. Loveland",
+          "affiliation": ""
+        },
+        {
+          "name": "J. S. Barrett",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Chemistry",
+          "affiliation": ""
+        },
+        {
+          "name": "Oregon State University",
+          "affiliation": ""
+        },
+        {
+          "name": "Corvallis",
+          "affiliation": ""
+        },
+        {
+          "name": "Oregon 97331 USA",
+          "affiliation": ""
+        },
+        {
+          "name": "E. A. McCutchan",
+          "affiliation": ""
+        },
+        {
+          "name": "National Nuclear Data Center",
+          "affiliation": ""
+        },
+        {
+          "name": "Brookhaven National Laboratory",
+          "affiliation": ""
+        },
+        {
+          "name": "Upton",
+          "affiliation": ""
+        },
+        {
+          "name": "New York 11973",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        },
+        {
+          "name": "S. Zhu",
+          "affiliation": ""
+        },
+        {
+          "name": "M. P. Carpenter",
+          "affiliation": ""
+        },
+        {
+          "name": "J. P. Greene",
+          "affiliation": ""
+        },
+        {
+          "name": "T. Lauritsen",
+          "affiliation": ""
+        },
+        {
+          "name": "Physics Division",
+          "affiliation": ""
+        },
+        {
+          "name": "Argonne National Laboratory",
+          "affiliation": ""
+        },
+        {
+          "name": "Argonne",
+          "affiliation": ""
+        },
+        {
+          "name": "Illinois 60439 USA",
+          "affiliation": ""
+        },
+        {
+          "name": "R. V. F. Janssens",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Physics",
+          "affiliation": ""
+        },
+        {
+          "name": "Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "University of North Carolina at Chapel Hill",
+          "affiliation": ""
+        },
+        {
+          "name": "Chapel Hill",
+          "affiliation": ""
+        },
+        {
+          "name": "North Carolina 27599 USA",
+          "affiliation": ""
+        },
+        {
+          "name": "Triangle Universities Nuclear Laboratory",
+          "affiliation": ""
+        },
+        {
+          "name": "Duke University",
+          "affiliation": ""
+        },
+        {
+          "name": "Durham",
+          "affiliation": ""
+        },
+        {
+          "name": "North Carolina 27708 USA",
+          "affiliation": ""
+        },
+        {
+          "name": "B. M. S. Amro",
+          "affiliation": ""
+        },
+        {
+          "name": "Dept. of Physics",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Massachusetts Lowell",
+          "affiliation": ""
+        },
+        {
+          "name": "Lowell MA 01854 USA",
+          "affiliation": ""
+        },
+        {
+          "name": "W. B. Walters",
+          "affiliation": ""
+        },
+        {
+          "name": "Dept. of Chemistry",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Maryland",
+          "affiliation": ""
+        },
+        {
+          "name": "College Park",
+          "affiliation": ""
+        },
+        {
+          "name": "MD",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "A previous study of symmetric collisions of massive nuclei has shown that current models of multi-nucleon transfer (MNT) reactions do not adequately describe the transfer product yields. To gain further insight into this problem, we have measured the yields of MNT products in the interaction of 977 (E/A = 4.79 MeV) and 1143 MeV (E/A = 5.60 MeV) $^{204}$Hg with $^{208}$Pb. We find that the yield of multi-nucleon transfer products are similar in these two reactions and are substantially lower than those observed in the reaction of 1257 MeV (E/A = 6.16 MeV) $^{204}$Hg + $^{198}$Pt. We compare our measurements with the predictions of the GRAZING-F, di-nuclear systems (DNS) and improved quantum molecular dynamics (ImQMD) models. For the observed isotopes of the elements Au, Hg, Tl, Pb and Bi, the measured values of the MNT cross sections are orders of magnitude larger than the predicted values. Furthermore, the various models predict the formation of nuclides near the N=126 shell, which are not observed.",
+      "venue": "nucl-ex",
+      "citation_count": 0,
+      "doi": "10.1103/PhysRevC.101.034612",
+      "arxiv_id": "2007.07837",
+      "url": "https://arxiv.org/abs/2007.07837",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2501.11667",
+      "title": "A One-Dimensional Energy Balance Model Parameterization for the Formation of CO2 Ice on the Surfaces of Eccentric Extrasolar Planets",
+      "authors": [
+        {
+          "name": "Vidya Venkatesan",
+          "affiliation": ""
+        },
+        {
+          "name": "Aomawa L. Shields",
+          "affiliation": ""
+        },
+        {
+          "name": "Russell Deitrick",
+          "affiliation": ""
+        },
+        {
+          "name": "Eric T. Wolf",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew Rushby",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Physics",
+          "affiliation": ""
+        },
+        {
+          "name": "Astronomy",
+          "affiliation": ""
+        },
+        {
+          "name": "University of California",
+          "affiliation": ""
+        },
+        {
+          "name": "Irvine",
+          "affiliation": ""
+        },
+        {
+          "name": "California",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        },
+        {
+          "name": "School of Earth",
+          "affiliation": ""
+        },
+        {
+          "name": "Ocean Sciences",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Victoria",
+          "affiliation": ""
+        },
+        {
+          "name": "Victoria",
+          "affiliation": ""
+        },
+        {
+          "name": "Canada",
+          "affiliation": ""
+        },
+        {
+          "name": "Laboratory for Atmospheric",
+          "affiliation": ""
+        },
+        {
+          "name": "Space Physics",
+          "affiliation": ""
+        },
+        {
+          "name": "University of Colorado Boulder",
+          "affiliation": ""
+        },
+        {
+          "name": "Boulder",
+          "affiliation": ""
+        },
+        {
+          "name": "Colorado",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        },
+        {
+          "name": "Sellers Exoplanet Environment Collaboration",
+          "affiliation": ""
+        },
+        {
+          "name": "NASA Goddard Space Flight Center",
+          "affiliation": ""
+        },
+        {
+          "name": "Greenbelt",
+          "affiliation": ""
+        },
+        {
+          "name": "Maryland",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        },
+        {
+          "name": "Blue Marble Space Institute of Science",
+          "affiliation": ""
+        },
+        {
+          "name": "Seattle",
+          "affiliation": ""
+        },
+        {
+          "name": "Washington",
+          "affiliation": ""
+        },
+        {
+          "name": "USA",
+          "affiliation": ""
+        },
+        {
+          "name": "Department of Earth",
+          "affiliation": ""
+        },
+        {
+          "name": "Planetary Sciences",
+          "affiliation": ""
+        },
+        {
+          "name": "Birkbeck University of London",
+          "affiliation": ""
+        },
+        {
+          "name": "London",
+          "affiliation": ""
+        },
+        {
+          "name": "United Kingdom",
+          "affiliation": ""
+        }
+      ],
+      "year": 2025,
+      "abstract": "Eccentric planets may spend a significant portion of their orbits at large distances from their host stars, where low temperatures can cause atmospheric CO2 to condense out onto the surface, similar to the polar ice caps on Mars. The radiative effects on the climates of these planets throughout their orbits would depend on the wavelength-dependent albedo of surface CO2 ice that may accumulate at or near apoastron and vary according to the spectral energy distribution of the host star. To explore these possible effects, we incorporated a CO2 ice-albedo parameterization into a one-dimensional energy balance climate model. With the inclusion of this parameterization, our simulations demonstrated that F-dwarf planets require 29% more orbit-averaged flux to thaw out of global water ice cover compared with simulations that solely use a traditional pure water ice-albedo parameterization. When no eccentricity is assumed, and host stars are varied, F-dwarf planets with higher bond albedos relative to their M-dwarf planet counterparts require 30% more orbit-averaged flux to exit a water snowball state. Additionally, the intense heat experienced at periastron aids eccentric planets in exiting a snowball state with a smaller increase in instellation compared with planets on circular orbits; this enables eccentric planets to exhibit warmer conditions along a broad range of instellation. This study emphasizes the significance of incorporating an albedo parameterization for the formation of CO2 ice into climate models to accurately assess the habitability of eccentric planets, as we show that, even at moderate eccentricities, planets with Earth-like atmospheres can reach surface temperatures cold enough for the condensation of CO2 onto their surfaces, as can planets receiving low amounts of instellation on circular orbits.",
+      "venue": "astro-ph.EP",
+      "citation_count": 0,
+      "doi": "10.1089/ast.2023.0103",
+      "arxiv_id": "2501.11667",
+      "url": "https://arxiv.org/abs/2501.11667",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2107.06935",
+      "title": "Object Retrieval and Localization in Large Art Collections using Deep Multi-Style Feature Fusion and Iterative Voting",
+      "authors": [
+        {
+          "name": "Nikolai Ufer",
+          "affiliation": ""
+        },
+        {
+          "name": "Sabine Lang",
+          "affiliation": ""
+        },
+        {
+          "name": "Bj\u00f6rn Ommer",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "The search for specific objects or motifs is essential to art history as both assist in decoding the meaning of artworks. Digitization has produced large art collections, but manual methods prove to be insufficient to analyze them. In the following, we introduce an algorithm that allows users to search for image regions containing specific motifs or objects and find similar regions in an extensive dataset, helping art historians to analyze large digitized art collections. Computer vision has presented efficient methods for visual instance retrieval across photographs. However, applied to art collections, they reveal severe deficiencies because of diverse motifs and massive domain shifts induced by differences in techniques, materials, and styles. In this paper, we present a multi-style feature fusion approach that successfully reduces the domain gap and improves retrieval results without labelled data or curated image collections. Our region-based voting with GPU-accelerated approximate nearest-neighbour search allows us to find and localize even small motifs within an extensive dataset in a few seconds. We obtain state-of-the-art results on the Brueghel dataset and demonstrate its generalization to inhomogeneous collections with a large number of distractors.",
+      "venue": "cs.CV",
+      "citation_count": 0,
+      "doi": "10.1007/978-3-030-66096-3_12",
+      "arxiv_id": "2107.06935",
+      "url": "https://arxiv.org/abs/2107.06935",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2412.04850",
+      "title": "The Impact of Artificial Intelligence on Art Research: An Analysis of Academic Productivity and Multidisciplinary Integration",
+      "authors": [
+        {
+          "name": "Yang Ding",
+          "affiliation": ""
+        }
+      ],
+      "year": 2024,
+      "abstract": "This study investigates the transformative impact of artificial intelligence on art research by analysing data from 749 art research projects and 555,982 non art research projects, as well as 23,999 journal articles. We utilized the SciBERT model for text analysis on research funding proposals and the econometric model to evaluate AI impact on the academic productivity and impact. Our findings reveal that AI has significantly reshaped the role of art across various disciplines. The integration of AI has led to a notable expansion in keyword networks, highlighting advancements in visual art creation, data driven methodologies, and interactive educational tools. AI has also facilitated the integration of art knowledge into nearly all research disciplines, contrasting with the traditionally confined distribution of art knowledge. Despite the substantial increase in publication impact and citation counts facilitated by AI, it has not markedly improved the likelihood of publishing in high-prestige journals. These insights illustrate the complex nature of AI's impact enhancing research impact while presenting challenges in publication efficiency and multidisciplinary integration. The study offers a nuanced understanding of AI's role in art research and suggests directions for addressing the ongoing challenges of integrating art and AI across disciplines.",
+      "venue": "cs.DL",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2412.04850",
+      "url": "https://arxiv.org/abs/2412.04850",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2603.05834",
+      "title": "Architectural Unification for Polarimetric Imaging Across Multiple Degradations",
+      "authors": [
+        {
+          "name": "Chu Zhou",
+          "affiliation": ""
+        },
+        {
+          "name": "Yufei Han",
+          "affiliation": ""
+        },
+        {
+          "name": "Junda Liao",
+          "affiliation": ""
+        },
+        {
+          "name": "Linrui Dai",
+          "affiliation": ""
+        },
+        {
+          "name": "Wangze Xu",
+          "affiliation": ""
+        },
+        {
+          "name": "Art Subpa-Asa",
+          "affiliation": ""
+        },
+        {
+          "name": "Heng Guo",
+          "affiliation": ""
+        },
+        {
+          "name": "Boxin Shi",
+          "affiliation": ""
+        },
+        {
+          "name": "Imari Sato",
+          "affiliation": ""
+        }
+      ],
+      "year": 2026,
+      "abstract": "Polarimetric imaging aims to recover polarimetric parameters, including Total Intensity (TI), Degree of Polarization (DoP), and Angle of Polarization (AoP), from captured polarized measurements. In real-world scenarios, these measurements are frequently affected by diverse degradations such as low-light noise, motion blur, and mosaicing artifacts. Due to the nonlinear dependency of DoP and AoP on the measured intensities, accurately retrieving physically consistent polarimetric parameters from degraded observations remains highly challenging. Existing approaches typically adopt task-specific network architectures tailored to individual degradation types, limiting their adaptability across different restoration scenarios. Moreover, many methods rely on multi-stage processing pipelines that suffer from error accumulation, or operate solely in a single domain (either image or Stokes domain), failing to fully exploit the intrinsic physical relationships between them. In this work, we propose a unified architectural framework for polarimetric imaging that is structurally shared across multiple degradation scenarios. Rather than redesigning network structures for each task, our framework maintains a consistent architectural design while being trained separately for different degradations. The model performs single-stage joint image-Stokes processing, avoiding error accumulation and explicitly preserving physical consistency. Extensive experiments show that this unified architectural design, when trained for specific degradation types, consistently achieves state-of-the-art performance across low-light denoising, motion deblurring, and demosaicing tasks, establishing a versatile and physically grounded solution for degraded polarimetric imaging.",
+      "venue": "eess.IV",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2603.05834",
+      "url": "https://arxiv.org/abs/2603.05834",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2108.11478",
+      "title": "Quantum Metric and Correlated States in Two-dimensional Systems",
+      "authors": [
+        {
+          "name": "Enrico Rossi",
+          "affiliation": ""
+        }
+      ],
+      "year": 2021,
+      "abstract": "The recent realization of twisted, two-dimensional, bilayers exhibiting strongly correlated states has created a platform in which the relation between the properties of the electronic bands and the nature of the correlated states can be studied in unprecedented ways. The reason is that these systems allow extraordinary control of the electronic bands' properties, for example by varying the relative twist angle between the layers forming the system. In particular, in twisted bilayers the low energy bands can be tuned to be very flat and with a nontrivial quantum metric. This allows the quantitative and experimental exploration of the relation between the metric of Bloch quantum states and the properties of correlated states. In this work we first review the general connection between quantum metric and the properties of correlated states that break a continuous symmetry. We then discuss the specific case when the correlated state is a superfluid and show how the quantum metric is related to the superfluid stiffness. To exemplify such relation we show results for the case of superconductivity in magic angle twisted bilayer graphene. We conclude by discussing possible research directions to further elucidate the connection between quantum metric and correlated states' properties.",
+      "venue": "cond-mat.supr-con",
+      "citation_count": 0,
+      "doi": "10.1016/j.cossms.2021.100952",
+      "arxiv_id": "2108.11478",
+      "url": "https://arxiv.org/abs/2108.11478",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2201.12513",
+      "title": "The Geography of Facebook Groups in the United States",
+      "authors": [
+        {
+          "name": "Ama\u00e7 Herda\u011fdelen",
+          "affiliation": ""
+        },
+        {
+          "name": "Lada Adamic",
+          "affiliation": ""
+        },
+        {
+          "name": "Bogdan State",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "We use exploratory factor analysis to investigate the online persistence of known community-level patterns of social capital variance in the U.S. context. Our analysis focuses on Facebook groups, specifically those that tend to connect users in the same local area. We investigate the relationship between established, localized measures of social capital at the county level and patterns of participation in Facebook groups in the same areas. We identify four main factors that distinguish Facebook group engagement by county. The first captures small, private groups, dense with friendship connections. The second captures very local and small groups. The third captures non-local, large, public groups, with more age mixing. The fourth captures partially local groups of medium to large size. The first and third factor correlate with community level social capital measures, while the second and fourth do not. Together and individually, the factors are predictive of offline social capital measures, even controlling for various demographic attributes of the counties. Our analysis reveals striking patterns of correlation between established measures of social capital and patterns of online interaction in local Facebook groups. To our knowledge this is the first systematic test of the association between offline regional social capital and patterns of online community engagement in the same regions.",
+      "venue": "cs.SI",
+      "citation_count": 0,
+      "doi": "",
+      "arxiv_id": "2201.12513",
+      "url": "https://arxiv.org/abs/2201.12513",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2006.03644",
+      "title": "Stance Detection on Social Media: State of the Art and Trends",
+      "authors": [
+        {
+          "name": "Abeer AlDayel",
+          "affiliation": ""
+        },
+        {
+          "name": "Walid Magdy",
+          "affiliation": ""
+        }
+      ],
+      "year": 2020,
+      "abstract": "Stance detection on social media is an emerging opinion mining paradigm for various social and political applications in which sentiment analysis may be sub-optimal. There has been a growing research interest for developing effective methods for stance detection methods varying among multiple communities including natural language processing, web science, and social computing. This paper surveys the work on stance detection within those communities and situates its usage within current opinion mining techniques in social media. It presents an exhaustive review of stance detection techniques on social media, including the task definition, different types of targets in stance detection, features set used, and various machine learning approaches applied. The survey reports state-of-the-art results on the existing benchmark datasets on stance detection, and discusses the most effective approaches. In addition, this study explores the emerging trends and different applications of stance detection on social media. The study concludes by discussing the gaps in the current existing research and highlights the possible future directions for stance detection on social media.",
+      "venue": "cs.SI",
+      "citation_count": 0,
+      "doi": "10.1016/j.ipm.2021.102597",
+      "arxiv_id": "2006.03644",
+      "url": "https://arxiv.org/abs/2006.03644",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "arxiv-2209.13713",
+      "title": "Studying Gamow-Teller transitions and the assignment of isomeric and ground states at $N=50$",
+      "authors": [
+        {
+          "name": "Ali Mollaebrahimi",
+          "affiliation": ""
+        },
+        {
+          "name": "Christine Hornung",
+          "affiliation": ""
+        },
+        {
+          "name": "Timo Dickel",
+          "affiliation": ""
+        },
+        {
+          "name": "Daler Amanbayev",
+          "affiliation": ""
+        },
+        {
+          "name": "Gabriella Kripko-Koncz",
+          "affiliation": ""
+        },
+        {
+          "name": "Wolfgang R. Pla\u00df",
+          "affiliation": ""
+        },
+        {
+          "name": "Samuel Ayet San Andr\u00e9s",
+          "affiliation": ""
+        },
+        {
+          "name": "S\u00f6nke Beck",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrey Blazhev",
+          "affiliation": ""
+        },
+        {
+          "name": "Julian Bergmann",
+          "affiliation": ""
+        },
+        {
+          "name": "Hans Geissel",
+          "affiliation": ""
+        },
+        {
+          "name": "Magdalena G\u00f3rska",
+          "affiliation": ""
+        },
+        {
+          "name": "Hubert Grawe",
+          "affiliation": ""
+        },
+        {
+          "name": "Florian Greiner",
+          "affiliation": ""
+        },
+        {
+          "name": "Emma Haettner",
+          "affiliation": ""
+        },
+        {
+          "name": "Nasser Kalantar-Nayestanaki",
+          "affiliation": ""
+        },
+        {
+          "name": "Ivan Miskun",
+          "affiliation": ""
+        },
+        {
+          "name": "Fr\u00e9d\u00e9ric Nowacki",
+          "affiliation": ""
+        },
+        {
+          "name": "Christoph Scheidenberger",
+          "affiliation": ""
+        },
+        {
+          "name": "Soumya Bagchi",
+          "affiliation": ""
+        },
+        {
+          "name": "Dimiter L. Balabanski",
+          "affiliation": ""
+        },
+        {
+          "name": "Ziga Brencic",
+          "affiliation": ""
+        },
+        {
+          "name": "Olga Charviakova",
+          "affiliation": ""
+        },
+        {
+          "name": "Paul Constantin",
+          "affiliation": ""
+        },
+        {
+          "name": "Masoumeh Dehghan",
+          "affiliation": ""
+        },
+        {
+          "name": "Jens Ebert",
+          "affiliation": ""
+        },
+        {
+          "name": "Lizzy Gr\u00f6f",
+          "affiliation": ""
+        },
+        {
+          "name": "Oscar Hall",
+          "affiliation": ""
+        },
+        {
+          "name": "Muhsin N. Harakeh",
+          "affiliation": ""
+        },
+        {
+          "name": "Satbir Kaur",
+          "affiliation": ""
+        },
+        {
+          "name": "Anu Kankainen",
+          "affiliation": ""
+        },
+        {
+          "name": "Ronja Kn\u00f6bel",
+          "affiliation": ""
+        },
+        {
+          "name": "Daria A. Kostyleva",
+          "affiliation": ""
+        },
+        {
+          "name": "Natalia Kurkova",
+          "affiliation": ""
+        },
+        {
+          "name": "Natalia Kuzminchuk",
+          "affiliation": ""
+        },
+        {
+          "name": "Israel Mardor",
+          "affiliation": ""
+        },
+        {
+          "name": "Dragos Nichita",
+          "affiliation": ""
+        },
+        {
+          "name": "Jan-Hendrik Otto",
+          "affiliation": ""
+        },
+        {
+          "name": "Zygmunt Patyk",
+          "affiliation": ""
+        },
+        {
+          "name": "Stephane Pietri",
+          "affiliation": ""
+        },
+        {
+          "name": "Sivaji Purushothaman",
+          "affiliation": ""
+        },
+        {
+          "name": "Moritz Pascal Reiter",
+          "affiliation": ""
+        },
+        {
+          "name": "Ann-Kathrin Rink",
+          "affiliation": ""
+        },
+        {
+          "name": "Heidi Roesch",
+          "affiliation": ""
+        },
+        {
+          "name": "Anamaria Sp\u0103taru",
+          "affiliation": ""
+        },
+        {
+          "name": "Goran Stanic",
+          "affiliation": ""
+        },
+        {
+          "name": "Alexandru State",
+          "affiliation": ""
+        },
+        {
+          "name": "Yoshiki K. Tanaka",
+          "affiliation": ""
+        },
+        {
+          "name": "Matjaz Vencelj",
+          "affiliation": ""
+        },
+        {
+          "name": "Helmut Weick",
+          "affiliation": ""
+        },
+        {
+          "name": "John S. Winfield",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael I. Yavor",
+          "affiliation": ""
+        },
+        {
+          "name": "Jianwei Zhao",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Direct mass measurements of neutron-deficient nuclides around the $N=50$ shell closure below $^{100}$Sn were performed at the FRS Ion Catcher (FRS-IC) at GSI, Germany. The nuclei were produced by projectile fragmentation of $^{124}$Xe, separated in the fragment separator FRS and delivered to the FRS-IC. The masses of 14 ground states and two isomers were measured with relative mass uncertainties down to $1\\times 10^{-7}$ using the multiple-reflection time-of-flight mass spectrometer of the FRS-IC, including the first direct mass measurements of $^{98}$Cd and $^{97}$Rh. A new $Q_\\mathrm{EC} = 5437\\pm67$ keV was obtained for $^{98}$Cd, resulting in a summed Gamow-Teller (GT) strength for the five observed transitions ($0^+\\longrightarrow1^+$) as $B(\\text{GT})=2.94^{+0.32}_{-0.28}$. Investigation of this result in state-of-the-art shell model approaches sheds light into a better understanding of the GT transitions in even-even isotones at $N=50$. The excitation energy of the long-lived isomeric state in $^{94}$Rh was determined for the first time to be $293\\pm 21$ keV. This, together with the shell model calculations, allows the level ordering in $^{94}$Rh to be understood.",
+      "venue": "nucl-ex",
+      "citation_count": 0,
+      "doi": "10.1016/j.physletb.2023.137833",
+      "arxiv_id": "2209.13713",
+      "url": "https://arxiv.org/abs/2209.13713",
+      "source": "arxiv",
+      "_bibtex_override": ""
+    }
+  ]
+}

@@ -55,6 +55,7 @@ impl Add for Expr {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
         match (&self, &rhs) {
+            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a + b),
             (Expr::Const(0.0), _) => rhs,
             (_, Expr::Const(0.0)) => self,
             _ => Expr::Add(Box::new(self), Box::new(rhs)),
@@ -66,6 +67,7 @@ impl Sub for Expr {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self {
         match (&self, &rhs) {
+            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a - b),
             (_, Expr::Const(0.0)) => self,
             _ => Expr::Sub(Box::new(self), Box::new(rhs)),
         }

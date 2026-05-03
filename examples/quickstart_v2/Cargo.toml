@@ -1,0 +1,11 @@
+[package]
+name    = "quickstart_v2"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "quickstart_v2"
+path = "src/main.rs"
+
+[dependencies]
+scirust-core = { path = "../../scirust-core" }

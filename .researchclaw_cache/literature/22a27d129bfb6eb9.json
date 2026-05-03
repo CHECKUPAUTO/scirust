@@ -1,0 +1,2036 @@
+{
+  "query": "Build-working-autonomous-research-tool benchmark",
+  "source": "openalex",
+  "limit": 40,
+  "timestamp": 1777751649.2904775,
+  "papers": [
+    {
+      "paper_id": "oalex-W3017131514",
+      "title": "Artificial Intelligence in Education: A Review",
+      "authors": [
+        {
+          "name": "Lijia Chen",
+          "affiliation": "Yango University"
+        },
+        {
+          "name": "Pingping Chen",
+          "affiliation": "Fuzhou University"
+        },
+        {
+          "name": "Zhijian Lin",
+          "affiliation": "Fuzhou University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The purpose of this study was to assess the impact of Artificial Intelligence (AI) on education. Premised on a narrative and framework for assessing AI identified from a preliminary analysis, the scope of the study was limited to the application and effects of AI in administration, instruction, and learning. A qualitative research approach, leveraging the use of literature review as a research design and approach was used and effectively facilitated the realization of the study purpose. Artificial intelligence is a field of study and the resulting innovations and developments that have culminated in computers, machines, and other artifacts having human-like intelligence characterized by cognitive abilities, learning, adaptability, and decision-making capabilities. The study ascertained that AI has extensively been adopted and used in education, particularly by education institutions, in different forms. AI initially took the form of computer and computer related technologies, transitioning to web-based and online intelligent education systems, and ultimately with the use of embedded computer systems, together with other technologies, the use of humanoid robots and web-based chatbots to perform instructors' duties and functions independently or with instructors. Using these platforms, instructors have been able to perform different administrative functions, such as reviewing and grading students' assignments more effectively and efficiently, and achieve higher quality in their teaching activities. On the other hand, because the systems leverage machine learning and adaptability, curriculum and content has been customized and personalized in line with students' needs, which has fostered uptake and retention, thereby improving learners experience and overall quality of learning.",
+      "venue": "IEEE Access",
+      "citation_count": 3286,
+      "doi": "10.1109/access.2020.2988510",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2988510",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3140854437",
+      "title": "Review of deep learning: concepts, CNN architectures, challenges, applications, future directions",
+      "authors": [
+        {
+          "name": "Laith Alzubaidi",
+          "affiliation": "Queensland University of Technology"
+        },
+        {
+          "name": "Jinglan Zhang",
+          "affiliation": "Queensland University of Technology"
+        },
+        {
+          "name": "Amjad J. Humaidi",
+          "affiliation": "University of Technology - Iraq"
+        },
+        {
+          "name": "Ayad Q. Al-Dujaili",
+          "affiliation": "Middle Technical University"
+        },
+        {
+          "name": "Ye Duan",
+          "affiliation": "University of Missouri"
+        },
+        {
+          "name": "Omran Al-Shamma",
+          "affiliation": "University of Information Technology and Communications"
+        },
+        {
+          "name": "Jos\u00e9 Santamar\u00eda",
+          "affiliation": "Universidad de Ja\u00e9n"
+        },
+        {
+          "name": "Mohammed A. Fadhel",
+          "affiliation": "Thi Qar University"
+        },
+        {
+          "name": "Muthana Al\u2010Amidie",
+          "affiliation": "University of Missouri"
+        },
+        {
+          "name": "Laith Farhan",
+          "affiliation": "Manchester Metropolitan University"
+        }
+      ],
+      "year": 2021,
+      "abstract": "In the last few years, the deep learning (DL) computing paradigm has been deemed the Gold Standard in the machine learning (ML) community. Moreover, it has gradually become the most widely used computational approach in the field of ML, thus achieving outstanding results on several complex cognitive tasks, matching or even beating those provided by human performance. One of the benefits of DL is the ability to learn massive amounts of data. The DL field has grown fast in the last few years and it has been extensively used to successfully address a wide range of traditional applications. More importantly, DL has outperformed well-known ML techniques in many domains, e.g., cybersecurity, natural language processing, bioinformatics, robotics and control, and medical information processing, among many others. Despite it has been contributed several works reviewing the State-of-the-Art on DL, all of them only tackled one aspect of the DL, which leads to an overall lack of knowledge about it. Therefore, in this contribution, we propose using a more holistic approach in order to provide a more suitable starting point from which to develop a full understanding of DL. Specifically, this review attempts to provide a more comprehensive survey of the most important aspects of DL and including those enhancements recently added to the field. In particular, this paper outlines the importance of DL, presents the types of DL techniques and networks. It then presents convolutional neural networks (CNNs) which the most utilized DL network type and describes the development of CNNs architectures together with their main features, e.g., starting with the AlexNet network and closing with the High-Resolution network (HR.Net). Finally, we further present the challenges and suggested solutions to help researchers understand the existing research gaps. It is followed by a list of the major DL applications. Computational tools including FPGA, GPU, and CPU are summarized along with a description of their influence on DL. The paper ends with the evolution matrix, benchmark datasets, and summary and conclusion.",
+      "venue": "Journal Of Big Data",
+      "citation_count": 7330,
+      "doi": "10.1186/s40537-021-00444-8",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/s40537-021-00444-8",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2953303875",
+      "title": "A Survey of Autonomous Driving: <i>Common Practices and Emerging Technologies</i>",
+      "authors": [
+        {
+          "name": "Ekim Yurtsever",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Jacob Lambert",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Alexander Carballo",
+          "affiliation": "Nagoya University"
+        },
+        {
+          "name": "Kazuya Takeda",
+          "affiliation": "Nagoya University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Automated driving systems (ADSs) promise a safe, comfortable and efficient driving experience. However, fatalities involving vehicles equipped with ADSs are on the rise. The full potential of ADSs cannot be realized unless the robustness of state-of-the-art is improved further. This paper discusses unsolved problems and surveys the technical aspect of automated driving. Studies regarding present challenges, high-level system architectures, emerging methodologies and core functions including localization, mapping, perception, planning, and human machine interfaces, were thoroughly reviewed. Furthermore, many state-of-the-art algorithms were implemented and compared on our own platform in a real-world driving setting. The paper concludes with an overview of available datasets and tools for ADS development.",
+      "venue": "IEEE Access",
+      "citation_count": 1684,
+      "doi": "10.1109/access.2020.2983149",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2983149",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3186209406",
+      "title": "Artificial intelligence in healthcare: transforming the practice of medicine",
+      "authors": [
+        {
+          "name": "Junaid Bajwa",
+          "affiliation": "Microsoft Research (United Kingdom)"
+        },
+        {
+          "name": "Usman Munir",
+          "affiliation": "Microsoft Research (United Kingdom)"
+        },
+        {
+          "name": "Aditya Nori",
+          "affiliation": "Microsoft Research (United Kingdom)"
+        },
+        {
+          "name": "Bryan Williams",
+          "affiliation": "University College London"
+        }
+      ],
+      "year": 2021,
+      "abstract": "Artificial intelligence (AI) is a powerful and disruptive area of computer science, with the potential to fundamentally transform the practice of medicine and the delivery of healthcare. In this review article, we outline recent breakthroughs in the application of AI in healthcare, describe a roadmap to building effective, reliable and safe AI systems, and discuss the possible future direction of AI augmented healthcare systems.",
+      "venue": "Future Healthcare Journal",
+      "citation_count": 1502,
+      "doi": "10.7861/fhj.2021-0095",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.7861/fhj.2021-0095",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3043220753",
+      "title": "Smart Radio Environments Empowered by Reconfigurable Intelligent Surfaces: How it Works, State of Research, and Road Ahead",
+      "authors": [
+        {
+          "name": "Marco Di Renzo",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Alessio Zappone",
+          "affiliation": "Universit\u00e0 degli studi di Cassino e del Lazio Meridionale"
+        },
+        {
+          "name": "M\u00e9rouane Debbah",
+          "affiliation": "Huawei Technologies (France)"
+        },
+        {
+          "name": "Mohamed\u2010Slim Alouini",
+          "affiliation": "King Abdullah University of Science and Technology"
+        },
+        {
+          "name": "Chau Yuen",
+          "affiliation": "Singapore University of Technology and Design"
+        },
+        {
+          "name": "Julien de Rosny",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Sergei Tretyakov",
+          "affiliation": "Aalto University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Reconfigurable intelligent surfaces (RISs) are an emerging transmission technology for application to wireless communications. RISs can be realized in different ways, which include (i) large arrays of inexpensive antennas that are usually spaced half of the wavelength apart; and (ii) metamaterial-based planar or conformal large surfaces whose scattering elements have sizes and inter-distances much smaller than the wavelength. Compared with other transmission technologies, e.g., phased arrays, multi-antenna transmitters, and relays, RISs require the largest number of scattering elements, but each of them needs to be backed by the fewest and least costly components. Also, no power amplifiers are usually needed. For these reasons, RISs constitute a promising software-defined architecture that can be realized at reduced cost, size, weight, and power (C-SWaP design), and are regarded as an enabling technology for realizing the emerging concept of smart radio environments (SREs). In this paper, we (i) introduce the emerging research field of RIS-empowered SREs; (ii) overview the most suitable applications of RISs in wireless networks; (iii) present an electromagnetic-based communication-theoretic framework for analyzing and optimizing metamaterial-based RISs; (iv) provide a comprehensive overview of the current state of research; and (v) discuss the most important research issues to tackle. Owing to the interdisciplinary essence of RIS-empowered SREs, finally, we put forth the need of reconciling and reuniting C. E. Shannon\u2019s mathematical theory of communication with G. Green\u2019s and J. C. Maxwell\u2019s mathematical theories of electromagnetism for appropriately modeling, analyzing, optimizing, and deploying future wireless networks empowered by RISs.",
+      "venue": "arXiv (Cornell University)",
+      "citation_count": 3079,
+      "doi": "10.1109/jsac.2020.3007211",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/jsac.2020.3007211",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4386142022",
+      "title": "Interpreting Black-Box Models: A Review on Explainable Artificial Intelligence",
+      "authors": [
+        {
+          "name": "Vikas Hassija",
+          "affiliation": "KIIT University"
+        },
+        {
+          "name": "Vinay Chamola",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Atmesh Mahapatra",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Abhinandan Singal",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Divyansh Goel",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Kaizhu Huang",
+          "affiliation": "Duke Kunshan University"
+        },
+        {
+          "name": "Simone Scardapane",
+          "affiliation": "Sapienza University of Rome"
+        },
+        {
+          "name": "Indro Spinelli",
+          "affiliation": "Istituto Nazionale di Fisica Nucleare, Sezione di Roma I"
+        },
+        {
+          "name": "Mufti Mahmud",
+          "affiliation": "Nottingham Trent University"
+        },
+        {
+          "name": "Amir Hussain",
+          "affiliation": "Edinburgh Napier University"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Abstract Recent years have seen a tremendous growth in Artificial Intelligence (AI)-based methodological development in a broad range of domains. In this rapidly evolving field, large number of methods are being reported using machine learning (ML) and Deep Learning (DL) models. Majority of these models are inherently complex and lacks explanations of the decision making process causing these models to be termed as 'Black-Box'. One of the major bottlenecks to adopt such models in mission-critical application domains, such as banking, e-commerce, healthcare, and public services and safety, is the difficulty in interpreting them. Due to the rapid proleferation of these AI models, explaining their learning and decision making process are getting harder which require transparency and easy predictability. Aiming to collate the current state-of-the-art in interpreting the black-box models, this study provides a comprehensive analysis of the explainable AI (XAI) models. To reduce false negative and false positive outcomes of these back-box models, finding flaws in them is still difficult and inefficient. In this paper, the development of XAI is reviewed meticulously through careful selection and analysis of the current state-of-the-art of XAI research. It also provides a comprehensive and in-depth evaluation of the XAI frameworks and their efficacy to serve as a starting point of XAI for applied and theoretical researchers. Towards the end, it highlights emerging and critical issues pertaining to XAI research to showcase major, model-specific trends for better explanation, enhanced transparency, and improved prediction accuracy.",
+      "venue": "Cognitive Computation",
+      "citation_count": 1566,
+      "doi": "10.1007/s12559-023-10179-8",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s12559-023-10179-8",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4225323055",
+      "title": "Flamingo: a Visual Language Model for Few-Shot Learning",
+      "authors": [
+        {
+          "name": "Jean-Baptiste Alayrac",
+          "affiliation": ""
+        },
+        {
+          "name": "Jeff Donahue",
+          "affiliation": ""
+        },
+        {
+          "name": "Pauline Luc",
+          "affiliation": ""
+        },
+        {
+          "name": "Antoine Miech",
+          "affiliation": ""
+        },
+        {
+          "name": "Iain Barr",
+          "affiliation": ""
+        },
+        {
+          "name": "Yana Hasson",
+          "affiliation": ""
+        },
+        {
+          "name": "Karel Lenc",
+          "affiliation": ""
+        },
+        {
+          "name": "Arthur Mensch",
+          "affiliation": ""
+        },
+        {
+          "name": "Katie Millican",
+          "affiliation": ""
+        },
+        {
+          "name": "Malcolm Reynolds",
+          "affiliation": ""
+        },
+        {
+          "name": "Roman Ring",
+          "affiliation": ""
+        },
+        {
+          "name": "Eliza Rutherford",
+          "affiliation": ""
+        },
+        {
+          "name": "Serkan Cabi",
+          "affiliation": ""
+        },
+        {
+          "name": "Tengda Han",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhitao Gong",
+          "affiliation": ""
+        },
+        {
+          "name": "Sina Samangooei",
+          "affiliation": ""
+        },
+        {
+          "name": "Marianne Monteiro",
+          "affiliation": ""
+        },
+        {
+          "name": "Jacob Menick",
+          "affiliation": ""
+        },
+        {
+          "name": "Sebastian Borgeaud",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew Brock",
+          "affiliation": ""
+        },
+        {
+          "name": "Aida Nematzadeh",
+          "affiliation": ""
+        },
+        {
+          "name": "Sahand Sharifzadeh",
+          "affiliation": ""
+        },
+        {
+          "name": "Miko\u0142aj Bi\u0144kowski",
+          "affiliation": ""
+        },
+        {
+          "name": "Ricardo Barreira",
+          "affiliation": ""
+        },
+        {
+          "name": "Oriol Vinyals",
+          "affiliation": ""
+        },
+        {
+          "name": "Andrew Zisserman",
+          "affiliation": ""
+        },
+        {
+          "name": "Karen Simonyan",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Building models that can be rapidly adapted to novel tasks using only a handful of annotated examples is an open challenge for multimodal machine learning research. We introduce Flamingo, a family of Visual Language Models (VLM) with this ability. We propose key architectural innovations to: (i) bridge powerful pretrained vision-only and language-only models, (ii) handle sequences of arbitrarily interleaved visual and textual data, and (iii) seamlessly ingest images or videos as inputs. Thanks to their flexibility, Flamingo models can be trained on large-scale multimodal web corpora containing arbitrarily interleaved text and images, which is key to endow them with in-context few-shot learning capabilities. We perform a thorough evaluation of our models, exploring and measuring their ability to rapidly adapt to a variety of image and video tasks. These include open-ended tasks such as visual question-answering, where the model is prompted with a question which it has to answer; captioning tasks, which evaluate the ability to describe a scene or an event; and close-ended tasks such as multiple-choice visual question-answering. For tasks lying anywhere on this spectrum, a single Flamingo model can achieve a new state of the art with few-shot learning, simply by prompting the model with task-specific examples. On numerous benchmarks, Flamingo outperforms models fine-tuned on thousands of times more task-specific data.",
+      "venue": "arXiv (Cornell University)",
+      "citation_count": 1239,
+      "doi": "10.48550/arxiv.2204.14198",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.48550/arxiv.2204.14198",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3003667836",
+      "title": "Digital Twin: Values, Challenges and Enablers From a Modeling Perspective",
+      "authors": [
+        {
+          "name": "Adil Rasheed",
+          "affiliation": "SINTEF"
+        },
+        {
+          "name": "Omer San",
+          "affiliation": "Oklahoma State University"
+        },
+        {
+          "name": "Trond Kvamsdal",
+          "affiliation": "SINTEF"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Digital twin can be defined as a virtual representation of a physical asset enabled through data and simulators for real-time prediction, optimization, monitoring, controlling, and improved decision making. Recent advances in computational pipelines, multiphysics solvers, artificial intelligence, big data cybernetics, data processing and management tools bring the promise of digital twins and their impact on society closer to reality. Digital twinning is now an important and emerging trend in many applications. Also referred to as a computational megamodel, device shadow, mirrored system, avatar or a synchronized virtual prototype, there can be no doubt that a digital twin plays a transformative role not only in how we design and operate cyber-physical intelligent systems, but also in how we advance the modularity of multi-disciplinary systems to tackle fundamental barriers not addressed by the current, evolutionary modeling practices. In this work, we review the recent status of methodologies and techniques related to the construction of digital twins mostly from a modeling perspective. Our aim is to provide a detailed coverage of the current challenges and enabling technologies along with recommendations and reflections for various stakeholders.",
+      "venue": "IEEE Access",
+      "citation_count": 1636,
+      "doi": "10.1109/access.2020.2970143",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2970143",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3023211159",
+      "title": "A comprehensive survey on support vector machine classification: Applications, challenges and trends",
+      "authors": [
+        {
+          "name": "Jair Cervantes",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        },
+        {
+          "name": "Farid Garc\u00eda\u2010Lamont",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        },
+        {
+          "name": "Lisbeth Rodr\u00edguez-Mazahua",
+          "affiliation": "Instituto Tecnologico de Orizaba"
+        },
+        {
+          "name": "Asdr\u00fabal L\u00f3pez\u2010Chau",
+          "affiliation": "Universidad Aut\u00f3noma del Estado de M\u00e9xico"
+        }
+      ],
+      "year": 2020,
+      "abstract": "",
+      "venue": "Neurocomputing",
+      "citation_count": 2214,
+      "doi": "10.1016/j.neucom.2019.10.118",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.neucom.2019.10.118",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4393065402",
+      "title": "A survey on large language model based autonomous agents",
+      "authors": [
+        {
+          "name": "Lei Wang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Chen Ma",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Xueyang Feng",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zeyu Zhang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Hao Yang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Jingsen Zhang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zhiyuan Chen",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Jiakai Tang",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Xu Chen",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Yankai Lin",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Wayne Xin Zhao",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Zhewei Wei",
+          "affiliation": "Renmin University of China"
+        },
+        {
+          "name": "Ji-Rong Wen",
+          "affiliation": "Renmin University of China"
+        }
+      ],
+      "year": 2024,
+      "abstract": "Abstract Autonomous agents have long been a research focus in academic and industry communities. Previous research often focuses on training agents with limited knowledge within isolated environments, which diverges significantly from human learning processes, and makes the agents hard to achieve human-like decisions. Recently, through the acquisition of vast amounts of Web knowledge, large language models (LLMs) have shown potential in human-level intelligence, leading to a surge in research on LLM-based autonomous agents. In this paper, we present a comprehensive survey of these studies, delivering a systematic review of LLM-based autonomous agents from a holistic perspective. We first discuss the construction of LLM-based autonomous agents, proposing a unified framework that encompasses much of previous work. Then, we present a overview of the diverse applications of LLM-based autonomous agents in social science, natural science, and engineering. Finally, we delve into the evaluation strategies commonly used for LLM-based autonomous agents. Based on the previous studies, we also present several challenges and future directions in this field.",
+      "venue": "Frontiers of Computer Science",
+      "citation_count": 992,
+      "doi": "10.1007/s11704-024-40231-1",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11704-024-40231-1",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3120894151",
+      "title": "Deep learning-enabled medical computer vision",
+      "authors": [
+        {
+          "name": "Andre Esteva",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Katherine Chou",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Serena Yeung",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Nikhil Naik",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Ali Madani",
+          "affiliation": "Salesforce (United States)"
+        },
+        {
+          "name": "Ali Mottaghi",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Yun Liu",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Eric J. Topol",
+          "affiliation": "Scripps Research Institute"
+        },
+        {
+          "name": "Jeff Dean",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Richard Socher",
+          "affiliation": "Salesforce (United States)"
+        }
+      ],
+      "year": 2021,
+      "abstract": "A decade of unprecedented progress in artificial intelligence (AI) has demonstrated the potential for many fields-including medicine-to benefit from the insights that AI techniques can extract from data. Here we survey recent progress in the development of modern computer vision techniques-powered by deep learning-for medical applications, focusing on medical imaging, medical video, and clinical deployment. We start by briefly summarizing a decade of progress in convolutional neural networks, including the vision tasks they enable, in the context of healthcare. Next, we discuss several example medical imaging applications that stand to benefit-including cardiology, pathology, dermatology, ophthalmology-and propose new avenues for continued work. We then expand into general medical video, highlighting ways in which clinical workflows can integrate computer vision to enhance care. Finally, we discuss the challenges and hurdles required for real-world clinical deployment of these technologies.",
+      "venue": "npj Digital Medicine",
+      "citation_count": 1235,
+      "doi": "10.1038/s41746-020-00376-2",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41746-020-00376-2",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2955639361",
+      "title": "Towards Robust Monocular Depth Estimation: Mixing Datasets for Zero-Shot Cross-Dataset Transfer",
+      "authors": [
+        {
+          "name": "Rene Ranftl",
+          "affiliation": "Intel (Germany)"
+        },
+        {
+          "name": "Katrin Lasinger",
+          "affiliation": ""
+        },
+        {
+          "name": "David Hafner",
+          "affiliation": "Intel (Germany)"
+        },
+        {
+          "name": "Konrad Schindler",
+          "affiliation": ""
+        },
+        {
+          "name": "Vladlen Koltun",
+          "affiliation": "Intel (United States)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The success of monocular depth estimation relies on large and diverse training sets. Due to the challenges associated with acquiring dense ground-truth depth across different environments at scale, a number of datasets with distinct characteristics and biases have emerged. We develop tools that enable mixing multiple datasets during training, even if their annotations are incompatible. In particular, we propose a robust training objective that is invariant to changes in depth range and scale, advocate the use of principled multi-objective learning to combine data from different sources, and highlight the importance of pretraining encoders on auxiliary tasks. Armed with these tools, we experiment with five diverse training datasets, including a new, massive data source: 3D films. To demonstrate the generalization power of our approach we use zero-shot cross-dataset transfer, i.e. we evaluate on datasets that were not seen during training. The experiments confirm that mixing data from complementary sources greatly improves monocular depth estimation. Our approach clearly outperforms competing methods across diverse datasets, setting a new state of the art for monocular depth estimation.",
+      "venue": "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "citation_count": 1282,
+      "doi": "10.1109/tpami.2020.3019967",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/tpami.2020.3019967",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3040838455",
+      "title": "Event-Based Vision: A Survey",
+      "authors": [
+        {
+          "name": "Guillermo Gallego",
+          "affiliation": "Einstein Center Digital Future"
+        },
+        {
+          "name": "Tobi Delbruck",
+          "affiliation": "SIB Swiss Institute of Bioinformatics"
+        },
+        {
+          "name": "Garrick Orchard",
+          "affiliation": "Intel (United States)"
+        },
+        {
+          "name": "Chiara Bartolozzi",
+          "affiliation": "Italian Institute of Technology"
+        },
+        {
+          "name": "Brian Taba",
+          "affiliation": "IBM (United States)"
+        },
+        {
+          "name": "Andrea Censi",
+          "affiliation": "ETH Zurich"
+        },
+        {
+          "name": "Stefan Leutenegger",
+          "affiliation": "Imperial College London"
+        },
+        {
+          "name": "Andrew J. Davison",
+          "affiliation": "Imperial College London"
+        },
+        {
+          "name": "Jorg Conradt",
+          "affiliation": "KTH Royal Institute of Technology"
+        },
+        {
+          "name": "Kostas Daniilidis",
+          "affiliation": "University of Pennsylvania"
+        },
+        {
+          "name": "Davide Scaramuzza",
+          "affiliation": "University of Zurich"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Event cameras are bio-inspired sensors that differ from conventional frame cameras: Instead of capturing images at a fixed rate, they asynchronously measure per-pixel brightness changes, and output a stream of events that encode the time, location and sign of the brightness changes. Event cameras offer attractive properties compared to traditional cameras: high temporal resolution (in the order of \u03bcs), very high dynamic range (140 dB versus 60 dB), low power consumption, and high pixel bandwidth (on the order of kHz) resulting in reduced motion blur. Hence, event cameras have a large potential for robotics and computer vision in challenging scenarios for traditional cameras, such as low-latency, high speed, and high dynamic range. However, novel methods are required to process the unconventional output of these sensors in order to unlock their potential. This paper provides a comprehensive overview of the emerging field of event-based vision, with a focus on the applications and the algorithms developed to unlock the outstanding properties of event cameras. We present event cameras from their working principle, the actual sensors that are available and the tasks that they have been used for, from low-level vision (feature detection and tracking, optic flow, etc.) to high-level vision (reconstruction, segmentation, recognition). We also discuss the techniques developed to process events, including learning-based techniques, as well as specialized processors for these novel sensors, such as spiking neural networks. Additionally, we highlight the challenges that remain to be tackled and the opportunities that lie ahead in the search for a more efficient, bio-inspired way for machines to perceive and interact with the world.",
+      "venue": "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "citation_count": 1931,
+      "doi": "10.1109/tpami.2020.3008413",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/tpami.2020.3008413",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4387835442",
+      "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+      "authors": [
+        {
+          "name": "Joon Sung Park",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Joseph O\u2019Brien",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Carrie J. Cai",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Meredith Ringel Morris",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Percy Liang",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Michael S. Bernstein",
+          "affiliation": "Stanford University"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Believable proxies of human behavior can empower interactive applications ranging from immersive environments to rehearsal spaces for interpersonal communication to prototyping tools. In this paper, we introduce generative agents: computational software agents that simulate believable human behavior. Generative agents wake up, cook breakfast, and head to work; artists paint, while authors write; they form opinions, notice each other, and initiate conversations; they remember and reflect on days past as they plan the next day. To enable generative agents, we describe an architecture that extends a large language model to store a complete record of the agent\u2019s experiences using natural language, synthesize those memories over time into higher-level reflections, and retrieve them dynamically to plan behavior. We instantiate generative agents to populate an interactive sandbox environment inspired by The Sims, where end users can interact with a small town of twenty-five agents using natural language. In an evaluation, these generative agents produce believable individual and emergent social behaviors. For example, starting with only a single user-specified notion that one agent wants to throw a Valentine\u2019s Day party, the agents autonomously spread invitations to the party over the next two days, make new acquaintances, ask each other out on dates to the party, and coordinate to show up for the party together at the right time. We demonstrate through ablation that the components of our agent architecture\u2014observation, planning, and reflection\u2014each contribute critically to the believability of agent behavior. By fusing large language models with computational interactive agents, this work introduces architectural and interaction patterns for enabling believable simulations of human behavior.",
+      "venue": "",
+      "citation_count": 1312,
+      "doi": "10.1145/3586183.3606763",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1145/3586183.3606763",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3086436251",
+      "title": "HOTA: A Higher Order Metric for Evaluating Multi-object Tracking",
+      "authors": [
+        {
+          "name": "Jonathon Luiten",
+          "affiliation": "RWTH Aachen University"
+        },
+        {
+          "name": "Aljos\u0306a Os\u0306ep",
+          "affiliation": ""
+        },
+        {
+          "name": "Patrick Dendorfer",
+          "affiliation": ""
+        },
+        {
+          "name": "Philip Torr",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Andreas Geiger",
+          "affiliation": "Max Planck Institute for Intelligent Systems"
+        },
+        {
+          "name": "Laura Leal-Taix\u00e9",
+          "affiliation": ""
+        },
+        {
+          "name": "Bastian Leibe",
+          "affiliation": "RWTH Aachen University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Multi-object tracking (MOT) has been notoriously difficult to evaluate. Previous metrics overemphasize the importance of either detection or association. To address this, we present a novel MOT evaluation metric, higher order tracking accuracy (HOTA), which explicitly balances the effect of performing accurate detection, association and localization into a single unified metric for comparing trackers. HOTA decomposes into a family of sub-metrics which are able to evaluate each of five basic error types separately, which enables clear analysis of tracking performance. We evaluate the effectiveness of HOTA on the MOTChallenge benchmark, and show that it is able to capture important aspects of MOT performance not previously taken into account by established metrics. Furthermore, we show HOTA scores better align with human visual evaluation of tracking performance.",
+      "venue": "International Journal of Computer Vision",
+      "citation_count": 982,
+      "doi": "10.1007/s11263-020-01375-2",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11263-020-01375-2",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4366262984",
+      "title": "Explainable Artificial Intelligence (XAI): What we know and what is left to attain Trustworthy Artificial Intelligence",
+      "authors": [
+        {
+          "name": "Sajid Ali",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Tamer Abuhmed",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Shaker El\u2013Sappagh",
+          "affiliation": "Suez University"
+        },
+        {
+          "name": "Khan Muhammad",
+          "affiliation": "Sungkyunkwan University"
+        },
+        {
+          "name": "Jos\u00e9 M. Alonso",
+          "affiliation": "Universidade de Santiago de Compostela"
+        },
+        {
+          "name": "Roberto Confalonieri",
+          "affiliation": "University of Padua"
+        },
+        {
+          "name": "Riccardo Guidotti",
+          "affiliation": "University of Pisa"
+        },
+        {
+          "name": "Javier Del Ser",
+          "affiliation": "University of the Basque Country"
+        },
+        {
+          "name": "Natalia D\u00edaz-Rodr\u00edguez",
+          "affiliation": "Universidad de Granada"
+        },
+        {
+          "name": "Francisco Herrera",
+          "affiliation": "Universidad de Granada"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Artificial intelligence (AI) is currently being utilized in a wide range of sophisticated applications, but the outcomes of many AI models are challenging to comprehend and trust due to their black-box nature. Usually, it is essential to understand the reasoning behind an AI model\u2019s decision-making. Thus, the need for eXplainable AI (XAI) methods for improving trust in AI models has arisen. XAI has become a popular research subject within the AI field in recent years. Existing survey papers have tackled the concepts of XAI, its general terms, and post-hoc explainability methods but there have not been any reviews that have looked at the assessment methods, available tools, XAI datasets, and other related aspects. Therefore, in this comprehensive study, we provide readers with an overview of the current research and trends in this rapidly emerging area with a case study example. The study starts by explaining the background of XAI, common definitions, and summarizing recently proposed techniques in XAI for supervised machine learning. The review divides XAI techniques into four axes using a hierarchical categorization system: (i) data explainability, (ii) model explainability, (iii) post-hoc explainability, and (iv) assessment of explanations. We also introduce available evaluation metrics as well as open-source packages and datasets with future research directions. Then, the significance of explainability in terms of legal demands, user viewpoints, and application orientation is outlined, termed as XAI concerns. This paper advocates for tailoring explanation content to specific user types. An examination of XAI techniques and evaluation was conducted by looking at 410 critical articles, published between January 2016 and October 2022, in reputed journals and using a wide range of research databases as a source of information. The article is aimed at XAI researchers who are interested in making their AI models more trustworthy, as well as towards researchers from other disciplines who are looking for effective XAI methods to complete tasks with confidence while communicating meaning from data.",
+      "venue": "Information Fusion",
+      "citation_count": 1390,
+      "doi": "10.1016/j.inffus.2023.101805",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.inffus.2023.101805",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3023617420",
+      "title": "A Comprehensive Review of the COVID-19 Pandemic and the Role of IoT, Drones, AI, Blockchain, and 5G in Managing its Impact",
+      "authors": [
+        {
+          "name": "Vinay Chamola",
+          "affiliation": "Birla Institute of Technology and Science, Pilani"
+        },
+        {
+          "name": "Vikas Hassija",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Vatsal Gupta",
+          "affiliation": "Jaypee Institute of Information Technology"
+        },
+        {
+          "name": "Mohsen Guizani",
+          "affiliation": "Qatar University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The unprecedented outbreak of the 2019 novel coronavirus, termed as COVID-19 by the World Health Organization (WHO), has placed numerous governments around the world in a precarious position. The impact of the COVID-19 outbreak, earlier witnessed by the citizens of China alone, has now become a matter of grave concern for virtually every country in the world. The scarcity of resources to endure the COVID-19 outbreak combined with the fear of overburdened healthcare systems has forced a majority of these countries into a state of partial or complete lockdown. The number of laboratory-confirmed coronavirus cases has been increasing at an alarming rate throughout the world, with reportedly more than 3 million confirmed cases as of 30 April 2020. Adding to these woes, numerous false reports, misinformation, and unsolicited fears in regards to coronavirus, are being circulated regularly since the outbreak of the COVID-19. In response to such acts, we draw on various reliable sources to present a detailed review of all the major aspects associated with the COVID-19 pandemic. In addition to the direct health implications associated with the outbreak of COVID-19, this study highlights its impact on the global economy. In drawing things to a close, we explore the use of technologies such as the Internet of Things (IoT), Unmanned Aerial Vehicles (UAVs), blockchain, Artificial Intelligence (AI), and 5G, among others, to help mitigate the impact of COVID-19 outbreak.",
+      "venue": "IEEE Access",
+      "citation_count": 1116,
+      "doi": "10.1109/access.2020.2992341",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2992341",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3089706104",
+      "title": "Satellite Communications in the New Space Era: A Survey and Future Challenges",
+      "authors": [
+        {
+          "name": "Oltjon Kodheli",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Eva Lagunas",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Nicola Maturo",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Shree Krishna Sharma",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Bhavani Shankar",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Jes\u00fas Fabi\u00e1n Mendoza Montoya",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Juan Carlos Merlano Dunc\u00e1n",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Danilo Spano",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Symeon Chatzinotas",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Steven Kisseleff",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Jorge Querol",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Lei Lei",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "Thang X. Vu",
+          "affiliation": "University of Luxembourg"
+        },
+        {
+          "name": "George Goussetis",
+          "affiliation": "Sensors (United States)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Satellite communications (SatComs) have recently entered a period of renewed interest motivated by technological advances and nurtured through private investment and ventures. The present survey aims at capturing the state of the art in SatComs, while highlighting the most promising open research topics. Firstly, the main innovation drivers are motivated, such as new constellation types, on-board processing capabilities, non-terrestrial networks and space-based data collection/processing. Secondly, the most promising applications are described, i.e., 5G integration, space communications, Earth observation, aeronautical and maritime tracking and communication. Subsequently, an in-depth literature review is provided across five axes: i) system aspects, ii) air interface, iii) medium access, iv) networking, v) testbeds & prototyping. Finally, a number of future challenges and the respective open research topics are described.",
+      "venue": "IEEE Communications Surveys & Tutorials",
+      "citation_count": 1289,
+      "doi": "10.1109/comst.2020.3028247",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/comst.2020.3028247",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3003651800",
+      "title": "Internet of Things (IoT) for Next-Generation Smart Systems: A Review of Current Challenges, Future Trends and Prospects for Emerging 5G-IoT Scenarios",
+      "authors": [
+        {
+          "name": "Kinza Shafique",
+          "affiliation": "DHA Suffa University"
+        },
+        {
+          "name": "Bilal A. Khawaja",
+          "affiliation": "Islamic University of Madinah"
+        },
+        {
+          "name": "Farah Sabir",
+          "affiliation": "Karachi Institute of Economics and Technology"
+        },
+        {
+          "name": "Sameer Qazi",
+          "affiliation": "Karachi Institute of Economics and Technology"
+        },
+        {
+          "name": "Muhammad Mustaqim",
+          "affiliation": "National University of Sciences and Technology"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The Internet of Things (IoT)-centric concepts like augmented reality, high-resolution video streaming, self-driven cars, smart environment, e-health care, etc. have a ubiquitous presence now. These applications require higher data-rates, large bandwidth, increased capacity, low latency and high throughput. In light of these emerging concepts, IoT has revolutionized the world by providing seamless connectivity between heterogeneous networks (HetNets). The eventual aim of IoT is to introduce the plug and play technology providing the end-user, ease of operation, remotely access control and configurability. This paper presents the IoT technology from a bird's eye view covering its statistical/architectural trends, use cases, challenges and future prospects. The paper also presents a detailed and extensive overview of the emerging 5G-IoT scenario. Fifth Generation (5G) cellular networks provide key enabling technologies for ubiquitous deployment of the IoT technology. These include carrier aggregation, multiple-input multiple-output (MIMO), massive-MIMO (M-MIMO), coordinated multipoint processing (CoMP), device-to-device (D2D) communications, centralized radio access network (CRAN), software-defined wireless sensor networking (SD-WSN), network function virtualization (NFV) and cognitive radios (CRs). This paper presents an exhaustive review for these key enabling technologies and also discusses the new emerging use cases of 5G-IoT driven by the advances in artificial intelligence, machine and deep learning, ongoing 5G initiatives, quality of service (QoS) requirements in 5G and its standardization issues. Finally, the paper discusses challenges in the implementation of 5G-IoT due to high data-rates requiring both cloud-based platforms and IoT devices based edge computing.",
+      "venue": "IEEE Access",
+      "citation_count": 1279,
+      "doi": "10.1109/access.2020.2970118",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2970118",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4210916416",
+      "title": "Tackling Climate Change with Machine Learning",
+      "authors": [
+        {
+          "name": "Lynn H. Kaack",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "David Rolnick",
+          "affiliation": "Carnegie Mellon University"
+        },
+        {
+          "name": "Priya L. Donti",
+          "affiliation": "Hertie School"
+        },
+        {
+          "name": "Kelly Kochanski",
+          "affiliation": "University of Colorado Boulder"
+        },
+        {
+          "name": "Alexandre Lacoste",
+          "affiliation": ""
+        },
+        {
+          "name": "Kris Sankaran",
+          "affiliation": "University of Wisconsin\u2013Madison"
+        },
+        {
+          "name": "Andrew Slavin Ross",
+          "affiliation": "Harvard University"
+        },
+        {
+          "name": "Nikola Milojevic-Dupont",
+          "affiliation": "Mercator Research Institute on Global Commons and Climate Change"
+        },
+        {
+          "name": "Natasha Jaques",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Anna Waldman\u2010Brown",
+          "affiliation": "Massachusetts Institute of Technology"
+        },
+        {
+          "name": "Alexandra Sasha Luccioni",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "Tegan Maharaj",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        },
+        {
+          "name": "Evan David Sherwin",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Mukkavilli, Karthik",
+          "affiliation": "Lawrence Berkeley National Laboratory"
+        },
+        {
+          "name": "Konrad P. K\u00f6rding",
+          "affiliation": "California University of Pennsylvania"
+        },
+        {
+          "name": "Carla P. Gomes",
+          "affiliation": "Cornell University"
+        },
+        {
+          "name": "Andrew Y. Ng",
+          "affiliation": "Stanford University"
+        },
+        {
+          "name": "Demis Hassabis",
+          "affiliation": "Google DeepMind (United Kingdom)"
+        },
+        {
+          "name": "John Platt",
+          "affiliation": "Google (United States)"
+        },
+        {
+          "name": "Felix Creutzig",
+          "affiliation": "Mercator Research Institute on Global Commons and Climate Change"
+        },
+        {
+          "name": "Jennifer Chayes",
+          "affiliation": "University of California, Berkeley"
+        },
+        {
+          "name": "Yoshua Bengio",
+          "affiliation": "Mila - Quebec Artificial Intelligence Institute"
+        }
+      ],
+      "year": 2022,
+      "abstract": "Climate change is one of the greatest challenges facing humanity, and we, as machine learning experts, may wonder how we can help. Here we describe how machine learning can be a powerful tool in reducing greenhouse gas emissions and helping society adapt to a changing climate. From smart grids to disaster management, we identify high impact problems where existing gaps can be filled by machine learning, in collaboration with other fields. Our recommendations encompass exciting research questions as well as promising business opportunities. We call on the machine learning community to join the global effort against climate change.",
+      "venue": "OPUS 4 (Zuse Institute Berlin)",
+      "citation_count": 804,
+      "doi": "10.1145/3485128",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1145/3485128",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3183048323",
+      "title": "A survey of uncertainty in deep neural networks",
+      "authors": [
+        {
+          "name": "Jakob Gawlikowski",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Cedrique Rovile Njieutcheu Tassi",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Mohsin Ali",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Jong\u2010Seok Lee",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Matthias Humt",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Jianxiang Feng",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Anna Kruspe",
+          "affiliation": "Technical University of Munich"
+        },
+        {
+          "name": "Rudolph Triebel",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Peter Jung",
+          "affiliation": "Deutsches Zentrum f\u00fcr Luft- und Raumfahrt e. V. (DLR)"
+        },
+        {
+          "name": "Ribana Roscher",
+          "affiliation": "University of Bonn"
+        },
+        {
+          "name": "Muhammad Shahzad",
+          "affiliation": "Technical University of Munich"
+        },
+        {
+          "name": "Wen Yang",
+          "affiliation": "Wuhan University"
+        },
+        {
+          "name": "Richard Bamler",
+          "affiliation": "Technical University of Munich"
+        },
+        {
+          "name": "Xiao Xiang Zhu",
+          "affiliation": "Technical University of Munich"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Abstract Over the last decade, neural networks have reached almost every field of science and become a crucial part of various real world applications. Due to the increasing spread, confidence in neural network predictions has become more and more important. However, basic neural networks do not deliver certainty estimates or suffer from over- or under-confidence, i.e. are badly calibrated. To overcome this, many researchers have been working on understanding and quantifying uncertainty in a neural network\u2019s prediction. As a result, different types and sources of uncertainty have been identified and various approaches to measure and quantify uncertainty in neural networks have been proposed. This work gives a comprehensive overview of uncertainty estimation in neural networks, reviews recent advances in the field, highlights current challenges, and identifies potential research opportunities. It is intended to give anyone interested in uncertainty estimation in neural networks a broad overview and introduction, without presupposing prior knowledge in this field. For that, a comprehensive introduction to the most crucial sources of uncertainty is given and their separation into reducible model uncertainty and irreducible data uncertainty is presented. The modeling of these uncertainties based on deterministic neural networks, Bayesian neural networks (BNNs), ensemble of neural networks, and test-time data augmentation approaches is introduced and different branches of these fields as well as the latest developments are discussed. For a practical application, we discuss different measures of uncertainty, approaches for calibrating neural networks, and give an overview of existing baselines and available implementations. Different examples from the wide spectrum of challenges in the fields of medical image analysis, robotics, and earth observation give an idea of the needs and challenges regarding uncertainties in the practical applications of neural networks. Additionally, the practical limitations of uncertainty quantification methods in neural networks for mission- and safety-critical real world applications are discussed and an outlook on the next steps towards a broader usage of such methods is given.",
+      "venue": "Artificial Intelligence Review",
+      "citation_count": 1096,
+      "doi": "10.1007/s10462-023-10562-9",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s10462-023-10562-9",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4383346782",
+      "title": "The imperative for regulatory oversight of large language models (or generative AI) in healthcare",
+      "authors": [
+        {
+          "name": "Bertalan Mesk\u00f3",
+          "affiliation": "Semmelweis University"
+        },
+        {
+          "name": "Eric J. Topol",
+          "affiliation": "Scripps Research Institute"
+        }
+      ],
+      "year": 2023,
+      "abstract": "The rapid advancements in artificial intelligence (AI) have led to the development of sophisticated large language models (LLMs) such as GPT-4 and Bard. The potential implementation of LLMs in healthcare settings has already garnered considerable attention because of their diverse applications that include facilitating clinical documentation, obtaining insurance pre-authorization, summarizing research papers, or working as a chatbot to answer questions for patients about their specific data and concerns. While offering transformative potential, LLMs warrant a very cautious approach since these models are trained differently from AI-based medical technologies that are regulated already, especially within the critical context of caring for patients. The newest version, GPT-4, that was released in March, 2023, brings the potentials of this technology to support multiple medical tasks; and risks from mishandling results it provides to varying reliability to a new level. Besides being an advanced LLM, it will be able to read texts on images and analyze the context of those images. The regulation of GPT-4 and generative AI in medicine and healthcare without damaging their exciting and transformative potential is a timely and critical challenge to ensure safety, maintain ethical standards, and protect patient privacy. We argue that regulatory oversight should assure medical professionals and patients can use LLMs without causing harm or compromising their data or privacy. This paper summarizes our practical recommendations for what we can expect from regulators to bring this vision to reality.",
+      "venue": "npj Digital Medicine",
+      "citation_count": 870,
+      "doi": "10.1038/s41746-023-00873-0",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41746-023-00873-0",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3159759907",
+      "title": "Mandatory CSR and sustainability reporting: economic analysis and literature review",
+      "authors": [
+        {
+          "name": "Hans Bonde Christensen",
+          "affiliation": "University of Illinois Chicago"
+        },
+        {
+          "name": "Luzi Hail",
+          "affiliation": "University of Pennsylvania"
+        },
+        {
+          "name": "Christian Leuz",
+          "affiliation": "University of Chicago"
+        }
+      ],
+      "year": 2021,
+      "abstract": "Abstract This study collates potential economic effects of mandated disclosure and reporting standards for corporate social responsibility (CSR) and sustainability topics. We first outline key features of CSR reporting. Next, we draw on relevant academic literatures in accounting, finance, economics, and management to discuss and evaluate the potential economic consequences of a requirement for CSR and sustainability reporting for U.S. firms, including effects in capital markets, on stakeholders other than investors, and on firm behavior. We also discuss issues related to the implementation and enforcement of CSR and sustainability reporting standards as well as two approaches to sustainability reporting that differ in their overarching goals and materiality standards. Our analysis yields a number of insights that are relevant for the current debate on mandatory CSR and sustainability reporting. It also points scholars to avenues for future research.",
+      "venue": "Review of Accounting Studies",
+      "citation_count": 1490,
+      "doi": "10.1007/s11142-021-09609-5",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s11142-021-09609-5",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3036816925",
+      "title": "Value-Oriented and Ethical Technology Engineering in Industry 5.0: A Human-Centric Perspective for the Design of the Factory of the Future",
+      "authors": [
+        {
+          "name": "Francesco Longo",
+          "affiliation": "University of Calabria"
+        },
+        {
+          "name": "Antonio Padovano",
+          "affiliation": "University of Calabria"
+        },
+        {
+          "name": "Steven Umbrello",
+          "affiliation": "University of Turin"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Although manufacturing companies are currently situated at a transition point in what has been called Industry 4.0, a new revolutionary wave\u2014Industry 5.0\u2014is emerging as an \u2018Age of Augmentation\u2019 when the human and machine reconcile and work in perfect symbiosis with one another. Recent years have indeed assisted in drawing attention to the human-centric design of Cyber-Physical Production Systems (CPPS) and to the genesis of the \u2018Operator 4.0\u2019, two novel concepts that raise significant ethical questions regarding the impact of technology on workers and society at large. This paper argues that a value-oriented and ethical technology engineering in Industry 5.0 is an urgent and sensitive topic as demonstrated by a survey administered to industry leaders from different companies. The Value Sensitive Design (VSD) approach is proposed as a principled framework to illustrate how technologies enabling human\u2013machine symbiosis in the Factory of the Future can be designed to embody elicited human values and to illustrate actionable steps that engineers and designers can take in their design projects. Use cases based on real solutions and prototypes discuss how a design-for-values approach aids in the investigation and mitigation of ethical issues emerging from the implementation of technological solutions and, hence, support the migration to a symbiotic Factory of the Future.",
+      "venue": "Applied Sciences",
+      "citation_count": 609,
+      "doi": "10.3390/app10124182",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3390/app10124182",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4293229829",
+      "title": "Unlocking the value of artificial intelligence in human resource management through AI capability framework",
+      "authors": [
+        {
+          "name": "Soumyadeb Chowdhury",
+          "affiliation": "TBS Education"
+        },
+        {
+          "name": "Prasanta Kumar Dey",
+          "affiliation": "Aston University"
+        },
+        {
+          "name": "Sian Joel-Edgar",
+          "affiliation": "Northeastern University London"
+        },
+        {
+          "name": "Sudeshna Bhattacharya",
+          "affiliation": "Aston University"
+        },
+        {
+          "name": "Oscar Rodr\u00edguez-Esp\u00edndola",
+          "affiliation": "Aston University"
+        },
+        {
+          "name": "Am\u00e9lie Abadie",
+          "affiliation": ""
+        },
+        {
+          "name": "Linh Truong",
+          "affiliation": "Aston University"
+        }
+      ],
+      "year": 2022,
+      "abstract": "",
+      "venue": "Human Resource Management Review",
+      "citation_count": 767,
+      "doi": "10.1016/j.hrmr.2022.100899",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.hrmr.2022.100899",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4283392904",
+      "title": "Artificial intelligence and smart vision for building and construction 4.0: Machine and deep learning methods and applications",
+      "authors": [
+        {
+          "name": "Shanaka Kristombu Baduge",
+          "affiliation": "The University of Melbourne"
+        },
+        {
+          "name": "Sadeep Thilakarathna",
+          "affiliation": "The University of Melbourne"
+        },
+        {
+          "name": "Jude Shalitha Perera",
+          "affiliation": "The University of Melbourne"
+        },
+        {
+          "name": "Mehrdad Arashpour",
+          "affiliation": "Monash University"
+        },
+        {
+          "name": "P. Sharafi",
+          "affiliation": "Western Sydney University"
+        },
+        {
+          "name": "Bertrand Teodosio",
+          "affiliation": "Victoria University"
+        },
+        {
+          "name": "Ankit Shringi",
+          "affiliation": "Monash University"
+        },
+        {
+          "name": "Priyan Mendis",
+          "affiliation": "The University of Melbourne"
+        }
+      ],
+      "year": 2022,
+      "abstract": "This article presents a state-of-the-art review of the applications of Artificial Intelligence (AI), Machine Learning (ML), and Deep Learning (DL) in building and construction industry 4.0 in the facets of architectural design and visualization; material design and optimization; structural design and analysis; offsite manufacturing and automation; construction management, progress monitoring, and safety; smart operation, building management and health monitoring; and durability, life cycle analysis, and circular economy. This paper presents a unique perspective on applications of AI/DL/ML in these domains for the complete building lifecycle, from conceptual stage, design stage, construction stage, operational and maintenance stage until the end of life. Furthermore, data collection strategies using smart vision and sensors, data cleaning methods (post-processing), data storage for developing these models are discussed, and the challenges in model development and strategies to overcome these challenges are elaborated. Future trends in these domains and possible research avenues are also presented.",
+      "venue": "Automation in Construction",
+      "citation_count": 876,
+      "doi": "10.1016/j.autcon.2022.104440",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.autcon.2022.104440",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4318486595",
+      "title": "The rise of self-driving labs in chemical and materials sciences",
+      "authors": [
+        {
+          "name": "Milad Abolhasani",
+          "affiliation": "North Carolina State University"
+        },
+        {
+          "name": "Eugenia Kumacheva",
+          "affiliation": "University of Toronto"
+        }
+      ],
+      "year": 2023,
+      "abstract": "",
+      "venue": "Nature Synthesis",
+      "citation_count": 484,
+      "doi": "10.1038/s44160-022-00231-0",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s44160-022-00231-0",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3093410479",
+      "title": "Network intrusion detection system: A systematic study of machine learning and deep learning approaches",
+      "authors": [
+        {
+          "name": "Zeeshan Ahmad",
+          "affiliation": "Universiti Malaysia Sarawak"
+        },
+        {
+          "name": "Adnan Shahid Khan",
+          "affiliation": "Universiti Malaysia Sarawak"
+        },
+        {
+          "name": "Cheah Wai Shiang",
+          "affiliation": "Universiti Malaysia Sarawak"
+        },
+        {
+          "name": "Johari Abdullah",
+          "affiliation": "Universiti Malaysia Sarawak"
+        },
+        {
+          "name": "Farhan Ahmad",
+          "affiliation": "University of Derby"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Abstract The rapid advances in the internet and communication fields have resulted in a huge increase in the network size and the corresponding data. As a result, many novel attacks are being generated and have posed challenges for network security to accurately detect intrusions. Furthermore, the presence of the intruders with the aim to launch various attacks within the network cannot be ignored. An intrusion detection system (IDS) is one such tool that prevents the network from possible intrusions by inspecting the network traffic, to ensure its confidentiality, integrity, and availability. Despite enormous efforts by the researchers, IDS still faces challenges in improving detection accuracy while reducing false alarm rates and in detecting novel intrusions. Recently, machine learning (ML) and deep learning (DL)\u2010based IDS systems are being deployed as potential solutions to detect intrusions across the network in an efficient manner. This article first clarifies the concept of IDS and then provides the taxonomy based on the notable ML and DL techniques adopted in designing network\u2010based IDS (NIDS) systems. A comprehensive review of the recent NIDS\u2010based articles is provided by discussing the strengths and limitations of the proposed solutions. Then, recent trends and advancements of ML and DL\u2010based NIDS are provided in terms of the proposed methodology, evaluation metrics, and dataset selection. Using the shortcomings of the proposed methods, we highlighted various research challenges and provided the future scope for the research in improving ML and DL\u2010based NIDS.",
+      "venue": "Transactions on Emerging Telecommunications Technologies",
+      "citation_count": 1154,
+      "doi": "10.1002/ett.4150",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1002/ett.4150",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3045086480",
+      "title": "6G and Beyond: The Future of Wireless Communications Systems",
+      "authors": [
+        {
+          "name": "Ian F. Akyildiz",
+          "affiliation": "Georgia Institute of Technology"
+        },
+        {
+          "name": "A.C. Kak",
+          "affiliation": "Georgia Institute of Technology"
+        },
+        {
+          "name": "Shuai Nie",
+          "affiliation": "Georgia Institute of Technology"
+        }
+      ],
+      "year": 2020,
+      "abstract": "6G and beyond will fulfill the requirements of a fully connected world and provide ubiquitous wireless connectivity for all. Transformative solutions are expected to drive the surge for accommodating a rapidly growing number of intelligent devices and services. Major technological breakthroughs to achieve connectivity goals within 6G include: (i) a network operating at the THz band with much wider spectrum resources, (ii) intelligent communication environments that enable a wireless propagation environment with active signal transmission and reception, (iii) pervasive artificial intelligence, (iv) large-scale network automation, (v) an all-spectrum reconfigurable front-end for dynamic spectrum access, (vi) ambient backscatter communications for energy savings, (vii) the Internet of Space Things enabled by CubeSats and UAVs, and (viii) cell-free massive MIMO communication networks. In this roadmap paper, use cases for these enabling techniques as well as recent advancements on related topics are highlighted, and open problems with possible solutions are discussed, followed by a development timeline outlining the worldwide efforts in the realization of 6G. Going beyond 6G, promising early-stage technologies such as the Internet of NanoThings, the Internet of BioNanoThings, and quantum communications, which are expected to have a far-reaching impact on wireless communications, have also been discussed at length in this paper.",
+      "venue": "IEEE Access",
+      "citation_count": 1321,
+      "doi": "10.1109/access.2020.3010896",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.3010896",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3112288498",
+      "title": "Deep Learning for Safe Autonomous Driving: Current Challenges and Future Directions",
+      "authors": [
+        {
+          "name": "Khan Muhammad",
+          "affiliation": "Sejong University"
+        },
+        {
+          "name": "Amin Ullah",
+          "affiliation": "Sejong University"
+        },
+        {
+          "name": "Jaime Lloret",
+          "affiliation": "University of Staffordshire"
+        },
+        {
+          "name": "Javier Del Ser",
+          "affiliation": "University of the Basque Country"
+        },
+        {
+          "name": "Victor Hugo C. de Albuquerque",
+          "affiliation": "Instituto Federal de Educa\u00e7\u00e3o, Ci\u00eancia e Tecnologia do Cear\u00e1"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Advances in information and signal processing technologies have a significant impact on autonomous driving (AD), improving driving safety while minimizing the efforts of human drivers with the help of advanced artificial intelligence (AI) techniques. Recently, deep learning (DL) approaches have solved several real-world problems of complex nature. However, their strengths in terms of control processes for AD have not been deeply investigated and highlighted yet. This survey highlights the power of DL architectures in terms of reliability and efficient real-time performance and overviews state-of-the-art strategies for safe AD, with their major achievements and limitations. Furthermore, it covers major embodiments of DL along the AD pipeline including measurement, analysis, and execution, with a focus on road, lane, vehicle, pedestrian, drowsiness detection, collision avoidance, and traffic sign detection through sensing and vision-based DL methods. In addition, we discuss on the performance of several reviewed methods by using different evaluation metrics, with critics on their pros and cons. Finally, this survey highlights the current issues of safe DL-based AD with a prospect of recommendations for future research, rounding up a reference material for newcomers and researchers willing to join this vibrant area of Intelligent Transportation Systems.",
+      "venue": "IEEE Transactions on Intelligent Transportation Systems",
+      "citation_count": 596,
+      "doi": "10.1109/tits.2020.3032227",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/tits.2020.3032227",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3023042104",
+      "title": "QSAR without borders",
+      "authors": [
+        {
+          "name": "Eugene Muratov",
+          "affiliation": "University of North Carolina at Chapel Hill"
+        },
+        {
+          "name": "J\u00fcrgen Bajorath",
+          "affiliation": "University of Bonn"
+        },
+        {
+          "name": "Robert P. Sheridan",
+          "affiliation": "Merck & Co., Inc., Rahway, NJ, USA (United States)"
+        },
+        {
+          "name": "Igor V. Tetko",
+          "affiliation": "Helmholtz Zentrum M\u00fcnchen"
+        },
+        {
+          "name": "Dmitry Filimonov",
+          "affiliation": "Institute of Biomedical Chemistry"
+        },
+        {
+          "name": "Vladimir Poroikov",
+          "affiliation": "Institute of Biomedical Chemistry"
+        },
+        {
+          "name": "Tudor I. Oprea",
+          "affiliation": "University of New Mexico"
+        },
+        {
+          "name": "Igor I. Baskin",
+          "affiliation": "Lomonosov Moscow State University"
+        },
+        {
+          "name": "Alexandre Varnek",
+          "affiliation": "Universit\u00e9 de Strasbourg"
+        },
+        {
+          "name": "Adri\u00e1n E. Roitberg",
+          "affiliation": "University of Florida"
+        },
+        {
+          "name": "Olexandr Isayev",
+          "affiliation": "University of North Carolina at Chapel Hill"
+        },
+        {
+          "name": "Stefano Curtalolo",
+          "affiliation": "Duke University"
+        },
+        {
+          "name": "Denis Fourches",
+          "affiliation": "North Carolina State University"
+        },
+        {
+          "name": "Yoram Cohen",
+          "affiliation": "University of California, Los Angeles"
+        },
+        {
+          "name": "Al\u00e1n Aspuru\u2010Guzik",
+          "affiliation": "Toronto Public Health"
+        },
+        {
+          "name": "David A. Winkler",
+          "affiliation": "University of Nottingham"
+        },
+        {
+          "name": "Dimitris K. Agrafiotis",
+          "affiliation": "Novartis (Switzerland)"
+        },
+        {
+          "name": "Artem Cherkasov",
+          "affiliation": "University of British Columbia"
+        },
+        {
+          "name": "Alexander Tropsha",
+          "affiliation": "University of North Carolina at Chapel Hill"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Prediction of chemical bioactivity and physical properties has been one of the most important applications of statistical and more recently, machine learning and artificial intelligence methods in chemical sciences. This field of research, broadly known as quantitative structure-activity relationships (QSAR) modeling, has developed many important algorithms and has found a broad range of applications in physical organic and medicinal chemistry in the past 55+ years. This Perspective summarizes recent technological advances in QSAR modeling but it also highlights the applicability of algorithms, modeling methods, and validation practices developed in QSAR to a wide range of research areas outside of traditional QSAR boundaries including synthesis planning, nanotechnology, materials science, biomaterials, and clinical informatics. As modern research methods generate rapidly increasing amounts of data, the knowledge of robust data-driven modelling methods professed within the QSAR field can become essential for scientists working both within and outside of chemical research. We hope that this contribution highlighting the generalizable components of QSAR modeling will serve to address this challenge.",
+      "venue": "Chemical Society Reviews",
+      "citation_count": 826,
+      "doi": "10.1039/d0cs00098a",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1039/d0cs00098a",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4295122555",
+      "title": "Deep Residual Learning for Image Recognition: A Survey",
+      "authors": [
+        {
+          "name": "Muhammad Shafiq",
+          "affiliation": "Guangzhou University"
+        },
+        {
+          "name": "Zhaoquan Gu",
+          "affiliation": "Harbin Institute of Technology"
+        }
+      ],
+      "year": 2022,
+      "abstract": "Deep Residual Networks have recently been shown to significantly improve the performance of neural networks trained on ImageNet, with results beating all previous methods on this dataset by large margins in the image classification task. However, the meaning of these impressive numbers and their implications for future research are not fully understood yet. In this survey, we will try to explain what Deep Residual Networks are, how they achieve their excellent results, and why their successful implementation in practice represents a significant advance over existing techniques. We also discuss some open questions related to residual learning as well as possible applications of Deep Residual Networks beyond ImageNet. Finally, we discuss some issues that still need to be resolved before deep residual learning can be applied on more complex problems.",
+      "venue": "Applied Sciences",
+      "citation_count": 890,
+      "doi": "10.3390/app12188972",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.3390/app12188972",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3208687975",
+      "title": "Recent advances and applications of deep learning methods in materials science",
+      "authors": [
+        {
+          "name": "Kamal Choudhary",
+          "affiliation": "National Institute of Standards and Technology"
+        },
+        {
+          "name": "Brian DeCost",
+          "affiliation": "National Institute of Standards and Technology"
+        },
+        {
+          "name": "Chi Chen",
+          "affiliation": "University of California San Diego"
+        },
+        {
+          "name": "Anubhav Jain",
+          "affiliation": "Lawrence Berkeley National Laboratory"
+        },
+        {
+          "name": "Francesca Tavazza",
+          "affiliation": "National Institute of Standards and Technology"
+        },
+        {
+          "name": "Ryan Cohn",
+          "affiliation": "Carnegie Mellon University"
+        },
+        {
+          "name": "Cheol Woo Park",
+          "affiliation": "Northwestern University"
+        },
+        {
+          "name": "Alok Choudhary",
+          "affiliation": "Northwestern University"
+        },
+        {
+          "name": "Ankit Agrawal",
+          "affiliation": "Northwestern University"
+        },
+        {
+          "name": "Simon J. L. Billinge",
+          "affiliation": "Columbia University"
+        },
+        {
+          "name": "Elizabeth A. Holm",
+          "affiliation": "Carnegie Mellon University"
+        },
+        {
+          "name": "Shyue Ping Ong",
+          "affiliation": "University of California San Diego"
+        },
+        {
+          "name": "Chris Wolverton",
+          "affiliation": "Northwestern University"
+        }
+      ],
+      "year": 2022,
+      "abstract": "Abstract Deep learning (DL) is one of the fastest-growing topics in materials data science, with rapidly emerging applications spanning atomistic, image-based, spectral, and textual data modalities. DL allows analysis of unstructured data and automated identification of features. The recent development of large materials databases has fueled the application of DL methods in atomistic prediction in particular. In contrast, advances in image and spectral data have largely leveraged synthetic data enabled by high-quality forward models as well as by generative unsupervised DL methods. In this article, we present a high-level overview of deep learning methods followed by a detailed discussion of recent developments of deep learning in atomistic simulation, materials imaging, spectral analysis, and natural language processing. For each modality we discuss applications involving both theoretical and experimental data, typical modeling approaches with their strengths and limitations, and relevant publicly available software and datasets. We conclude the review with a discussion of recent cross-cutting work related to uncertainty quantification in this field and a brief perspective on limitations, challenges, and potential growth areas for DL methods in materials science.",
+      "venue": "npj Computational Materials",
+      "citation_count": 1013,
+      "doi": "10.1038/s41524-022-00734-6",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41524-022-00734-6",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4306292106",
+      "title": "AI-big data analytics for building automation and management systems: a survey, actual challenges and future perspectives",
+      "authors": [
+        {
+          "name": "Yassine Himeur",
+          "affiliation": "Information Technology University"
+        },
+        {
+          "name": "Mariam Elnour",
+          "affiliation": "Qatar University"
+        },
+        {
+          "name": "Fodil Fadli",
+          "affiliation": "Qatar University"
+        },
+        {
+          "name": "Nader Meskin",
+          "affiliation": "Qatar University"
+        },
+        {
+          "name": "Ioan Petri",
+          "affiliation": "Centre for Sustainable Energy"
+        },
+        {
+          "name": "Yacine Rezgui",
+          "affiliation": "Centre for Sustainable Energy"
+        },
+        {
+          "name": "Fay\u00e7al Bensaali",
+          "affiliation": "Qatar University"
+        },
+        {
+          "name": "Abbes Amira",
+          "affiliation": "University of Sharjah"
+        }
+      ],
+      "year": 2022,
+      "abstract": "In theory, building automation and management systems (BAMSs) can provide all the components and functionalities required for analyzing and operating buildings. However, in reality, these systems can only ensure the control of heating ventilation and air conditioning system systems. Therefore, many other tasks are left to the operator, e.g. evaluating buildings' performance, detecting abnormal energy consumption, identifying the changes needed to improve efficiency, ensuring the security and privacy of end-users, etc. To that end, there has been a movement for developing artificial intelligence (AI) big data analytic tools as they offer various new and tailor-made solutions that are incredibly appropriate for practical buildings' management. Typically, they can help the operator in (i) analyzing the tons of connected equipment data; and; (ii) making intelligent, efficient, and on-time decisions to improve the buildings' performance. This paper presents a comprehensive systematic survey on using AI-big data analytics in BAMSs. It covers various AI-based tasks, e.g. load forecasting, water management, indoor environmental quality monitoring, occupancy detection, etc. The first part of this paper adopts a well-designed taxonomy to overview existing frameworks. A comprehensive review is conducted about different aspects, including the learning process, building environment, computing platforms, and application scenario. Moving on, a critical discussion is performed to identify current challenges. The second part aims at providing the reader with insights into the real-world application of AI-big data analytics. Thus, three case studies that demonstrate the use of AI-big data analytics in BAMSs are presented, focusing on energy anomaly detection in residential and office buildings and energy and performance optimization in sports facilities. Lastly, future directions and valuable recommendations are identified to improve the performance and reliability of BAMSs in intelligent buildings.",
+      "venue": "Artificial Intelligence Review",
+      "citation_count": 464,
+      "doi": "10.1007/s10462-022-10286-2",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s10462-022-10286-2",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3033920763",
+      "title": "Human motion trajectory prediction: a survey",
+      "authors": [
+        {
+          "name": "Andrey Rudenko",
+          "affiliation": "\u00d6rebro University"
+        },
+        {
+          "name": "Luigi Palmieri",
+          "affiliation": "Robert Bosch (Germany)"
+        },
+        {
+          "name": "Michael Herman",
+          "affiliation": ""
+        },
+        {
+          "name": "Kris M Kitani",
+          "affiliation": "Carnegie Mellon University"
+        },
+        {
+          "name": "Dariu M Gavrila",
+          "affiliation": "Delft University of Technology"
+        },
+        {
+          "name": "Kai O Arras",
+          "affiliation": "Robert Bosch (Germany)"
+        }
+      ],
+      "year": 2020,
+      "abstract": "With growing numbers of intelligent autonomous systems in human environments, the ability of such systems to perceive, understand, and anticipate human behavior becomes increasingly important. Specifically, predicting future positions of dynamic agents and planning considering such predictions are key tasks for self-driving vehicles, service robots, and advanced surveillance systems. This article provides a survey of human motion trajectory prediction. We review, analyze, and structure a large selection of work from different communities and propose a taxonomy that categorizes existing methods based on the motion modeling approach and level of contextual information used. We provide an overview of the existing datasets and performance metrics. We discuss limitations of the state of the art and outline directions for further research.",
+      "venue": "The International Journal of Robotics Research",
+      "citation_count": 602,
+      "doi": "10.1177/0278364920917446",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1177/0278364920917446",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3152617045",
+      "title": "Blockchain smart contracts: Applications, challenges, and future trends",
+      "authors": [
+        {
+          "name": "Shafaq Khan",
+          "affiliation": "Zayed University"
+        },
+        {
+          "name": "Faiza Loukil",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Chirine Gh\u00e9dira",
+          "affiliation": "Universit\u00e9 Claude Bernard Lyon 1"
+        },
+        {
+          "name": "Elhadj Benkhelifa",
+          "affiliation": "University of Staffordshire"
+        },
+        {
+          "name": "Anoud Bani-Hani",
+          "affiliation": "Zayed University"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "Peer-to-Peer Networking and Applications",
+      "citation_count": 778,
+      "doi": "10.1007/s12083-021-01127-0",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/s12083-021-01127-0",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3194188670",
+      "title": "Towards the sustainable discovery and development of new antibiotics",
+      "authors": [
+        {
+          "name": "Marcus Miethke",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Marco Pieroni",
+          "affiliation": "University of Parma"
+        },
+        {
+          "name": "Tilmann Weber",
+          "affiliation": "Novo Nordisk Foundation"
+        },
+        {
+          "name": "Mark Br\u00f6nstrup",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Peter Hammann",
+          "affiliation": "Justus-Liebig-Universit\u00e4t Gie\u00dfen"
+        },
+        {
+          "name": "Ludovic Halby",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Paola B. Arimondo",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Philippe Glaser",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Bertrand Aigle",
+          "affiliation": "Institut National de Recherche pour l'Agriculture, l'Alimentation et l'Environnement"
+        },
+        {
+          "name": "Helge B. Bode",
+          "affiliation": "Goethe University Frankfurt"
+        },
+        {
+          "name": "Rui Moreira",
+          "affiliation": "University of Lisbon"
+        },
+        {
+          "name": "Yanyan Li",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Andriy Luzhetskyy",
+          "affiliation": "Saarland University"
+        },
+        {
+          "name": "Marnix H. Medema",
+          "affiliation": "Wageningen University & Research"
+        },
+        {
+          "name": "Jean\u2010Luc Pernodet",
+          "affiliation": "Universit\u00e9 Paris-Saclay"
+        },
+        {
+          "name": "Marc Stadler",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Jos\u00e9 R. Tormo",
+          "affiliation": "Fundaci\u00f3n Medina"
+        },
+        {
+          "name": "Olga Genilloud",
+          "affiliation": "Fundaci\u00f3n Medina"
+        },
+        {
+          "name": "Andrew W. Truman",
+          "affiliation": "John Innes Centre"
+        },
+        {
+          "name": "Kira J. Weissman",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Eriko Takano",
+          "affiliation": "University of Manchester"
+        },
+        {
+          "name": "Stefano Sabatini",
+          "affiliation": "University of Perugia"
+        },
+        {
+          "name": "Evi Stegmann",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Heike Br\u00f6tz\u2010Oesterhelt",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Wolfgang Wohlleben",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Myriam Seemann",
+          "affiliation": "Centre National de la Recherche Scientifique"
+        },
+        {
+          "name": "Martin Empting",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Anna K. H. Hirsch",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Brigitta Loretz",
+          "affiliation": "Helmholtz Centre for Infection Research"
+        },
+        {
+          "name": "Claus\u2010Michael Lehr",
+          "affiliation": "Helmholtz Centre for Infection Research"
+        },
+        {
+          "name": "Alexander Titz",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Jennifer Herrmann",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Timo Jaeger",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Silke Alt",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Thomas Hesterkamp",
+          "affiliation": "German Center for Infection Research"
+        },
+        {
+          "name": "Mathias Winterhalter",
+          "affiliation": "Constructor University"
+        },
+        {
+          "name": "Andrea Schiefer",
+          "affiliation": "University Hospital Bonn"
+        },
+        {
+          "name": "Kenneth Pfarr",
+          "affiliation": "University Hospital Bonn"
+        },
+        {
+          "name": "Achim Hoerauf",
+          "affiliation": "University Hospital Bonn"
+        },
+        {
+          "name": "Heather Graz",
+          "affiliation": ""
+        },
+        {
+          "name": "Michael Graz",
+          "affiliation": "University of Bristol"
+        },
+        {
+          "name": "Mika Lindvall",
+          "affiliation": "Arrien Pharmaceuticals (United States)"
+        },
+        {
+          "name": "Savithri Ramurthy",
+          "affiliation": "Drug Discovery Laboratory (Norway)"
+        },
+        {
+          "name": "Anders Karl\u00e9n",
+          "affiliation": "Uppsala University"
+        },
+        {
+          "name": "Maarten van Dongen",
+          "affiliation": ""
+        },
+        {
+          "name": "Hrvoje Petkovi\u0107",
+          "affiliation": "University of Ljubljana"
+        },
+        {
+          "name": "Andreas Keller",
+          "affiliation": "Saarland University"
+        },
+        {
+          "name": "Fr\u00e9d\u00e9ric Peyrane",
+          "affiliation": ""
+        },
+        {
+          "name": "Stefano Donadio",
+          "affiliation": ""
+        },
+        {
+          "name": "Laurent Fraisse",
+          "affiliation": "Drugs for Neglected Diseases Initiative"
+        },
+        {
+          "name": "Laura J. V. Piddock",
+          "affiliation": "Global Antibiotic Research & Development Partnership"
+        },
+        {
+          "name": "Ian H. Gilbert",
+          "affiliation": "University of Dundee"
+        },
+        {
+          "name": "Heinz E. Moser",
+          "affiliation": "Novartis (China)"
+        },
+        {
+          "name": "Rolf M\u00fcller",
+          "affiliation": "German Center for Infection Research"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "Nature Reviews Chemistry",
+      "citation_count": 1130,
+      "doi": "10.1038/s41570-021-00313-1",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41570-021-00313-1",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3017089210",
+      "title": "Blockchain for Industry 4.0: A Comprehensive Review",
+      "authors": [
+        {
+          "name": "Umesh Bodkhe",
+          "affiliation": "Nirma University"
+        },
+        {
+          "name": "Sudeep Tanwar",
+          "affiliation": "Nirma University"
+        },
+        {
+          "name": "Karan Parekh",
+          "affiliation": "Nirma University"
+        },
+        {
+          "name": "Pimal Khanpara",
+          "affiliation": "Nirma University"
+        },
+        {
+          "name": "Sudhanshu Tyagi",
+          "affiliation": "Thapar Institute of Engineering & Technology"
+        },
+        {
+          "name": "Neeraj Kumar",
+          "affiliation": "Asia University"
+        },
+        {
+          "name": "Mamoun Alazab",
+          "affiliation": "Charles Darwin University"
+        }
+      ],
+      "year": 2020,
+      "abstract": "Due to the proliferation of ICT during the last few decades, there is an exponential increase in the usage of various smart applications such as smart farming, smart healthcare, supply-chain & logistics, business, tourism and hospitality, energy management etc. However, for all the aforementioned applications, security and privacy are major concerns keeping in view of the usage of the open channel, i.e., Internet for data transfer. Although many security solutions and standards have been proposed over the years to enhance the security levels of aforementioned smart applications, but the existing solutions are either based upon the centralized architecture (having single point of failure) or having high computation and communication costs. Moreover, most of the existing security solutions have focussed only on few aspects and fail to address scalability, robustness, data storage, network latency, auditability, immutability, and traceability. To handle the aforementioned issues, blockchain technology can be one of the solutions. Motivated from these facts, in this paper, we present a systematic review of various blockchain-based solutions and their applicability in various Industry 4.0-based applications. Our contributions in this paper are in four fold. Firstly, we explored the current state-of-the-art solutions in the blockchain technology for the smart applications. Then, we illustrated the reference architecture used for the blockchain applicability in various Industry 4.0 applications. Then, merits and demerits of the traditional security solutions are also discussed in comparison to their countermeasures. Finally, we provided a comparison of existing blockchain-based security solutions using various parameters to provide deep insights to the readers about its applicability in various applications.",
+      "venue": "IEEE Access",
+      "citation_count": 735,
+      "doi": "10.1109/access.2020.2988579",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1109/access.2020.2988579",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4381848566",
+      "title": "Connecting the dots in trustworthy Artificial Intelligence: From AI principles, ethics, and key requirements to responsible AI systems and regulation",
+      "authors": [
+        {
+          "name": "Natalia D\u00edaz-Rodr\u00edguez",
+          "affiliation": "Universidad de Granada"
+        },
+        {
+          "name": "Javier Del Ser",
+          "affiliation": "University of the Basque Country"
+        },
+        {
+          "name": "Mark Coeckelbergh",
+          "affiliation": "University of Vienna"
+        },
+        {
+          "name": "Marcos L\u00f3pez de Prado",
+          "affiliation": "Khalifa University of Science and Technology"
+        },
+        {
+          "name": "Enrique Herrera\u2010Viedma",
+          "affiliation": "Universidad de Granada"
+        },
+        {
+          "name": "Francisco Herrera",
+          "affiliation": "Universidad de Granada"
+        }
+      ],
+      "year": 2023,
+      "abstract": "Trustworthy Artificial Intelligence (AI) is based on seven technical requirements sustained over three main pillars that should be met throughout the system\u2019s entire life cycle: it should be (1) lawful, (2) ethical, and (3) robust, both from a technical and a social perspective. However, attaining truly trustworthy AI concerns a wider vision that comprises the trustworthiness of all processes and actors that are part of the system\u2019s life cycle, and considers previous aspects from different lenses. A more holistic vision contemplates four essential axes: the global principles for ethical use and development of AI-based systems, a philosophical take on AI ethics, a risk-based approach to AI regulation, and the mentioned pillars and requirements. The seven requirements (human agency and oversight; robustness and safety; privacy and data governance; transparency; diversity, non-discrimination and fairness; societal and environmental wellbeing; and accountability) are analyzed from a triple perspective: What each requirement for trustworthy AI is, Why it is needed, and How each requirement can be implemented in practice. On the other hand, a practical approach to implement trustworthy AI systems allows defining the concept of responsibility of AI-based systems facing the law, through a given auditing process. Therefore, a responsible AI system is the resulting notion we introduce in this work, and a concept of utmost necessity that can be realized through auditing processes, subject to the challenges posed by the use of regulatory sandboxes. Our multidisciplinary vision of trustworthy AI culminates in a debate on the diverging views published lately about the future of AI. Our reflections in this matter conclude that regulation is a key for reaching a consensus among these views, and that trustworthy and responsible AI systems will be crucial for the present and future of our society.",
+      "venue": "Information Fusion",
+      "citation_count": 622,
+      "doi": "10.1016/j.inffus.2023.101896",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1016/j.inffus.2023.101896",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3137125108",
+      "title": "Interpretable machine learning: Fundamental principles and 10 grand challenges",
+      "authors": [
+        {
+          "name": "Cynthia Rudin",
+          "affiliation": ""
+        },
+        {
+          "name": "Chaofan Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Zhi Chen",
+          "affiliation": ""
+        },
+        {
+          "name": "Haiyang Huang",
+          "affiliation": ""
+        },
+        {
+          "name": "Lesia Semenova",
+          "affiliation": ""
+        },
+        {
+          "name": "Chudi Zhong",
+          "affiliation": ""
+        }
+      ],
+      "year": 2022,
+      "abstract": "Interpretability in machine learning (ML) is crucial for high stakes decisions and troubleshooting. In this work, we provide fundamental principles for interpretable ML, and dispel common misunderstandings that dilute the importance of this crucial topic. We also identify 10 technical challenge areas in interpretable machine learning and provide history and background on each problem. Some of these problems are classically important, and some are recent problems that have arisen in the last few years. These problems are: (1) Optimizing sparse logical models such as decision trees; (2) Optimization of scoring systems; (3) Placing constraints into generalized additive models to encourage sparsity and better interpretability; (4) Modern case-based reasoning, including neural networks and matching for causal inference; (5) Complete supervised disentanglement of neural networks; (6) Complete or even partial unsupervised disentanglement of neural networks; (7) Dimensionality reduction for data visualization; (8) Machine learning models that can incorporate physics and other generative or causal constraints; (9) Characterization of the \u201cRashomon set\u201d of good models; and (10) Interpretable reinforcement learning. This survey is suitable as a starting point for statisticians and computer scientists interested in working in interpretable machine learning.",
+      "venue": "Statistics Surveys",
+      "citation_count": 810,
+      "doi": "10.1214/21-ss133",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1214/21-ss133",
+      "source": "openalex",
+      "_bibtex_override": ""
+    }
+  ]
+}

@@ -1,0 +1,621 @@
+{
+  "query": "final synthesis three hypotheses human",
+  "source": "openalex",
+  "limit": 15,
+  "timestamp": 1777752394.9071417,
+  "papers": [
+    {
+      "paper_id": "oalex-W2141455051",
+      "title": "Biodiversity, Ecosystem Functioning, and Human Wellbeing",
+      "authors": [
+        {
+          "name": "Shahid Naeem",
+          "affiliation": "Columbia University"
+        },
+        {
+          "name": "Daniel E. Bunker",
+          "affiliation": "New Jersey Institute of Technology"
+        },
+        {
+          "name": "Andy Hector",
+          "affiliation": "University of Zurich"
+        },
+        {
+          "name": "Michel Loreau",
+          "affiliation": "McGill University"
+        },
+        {
+          "name": "Charles Perrings",
+          "affiliation": "Arizona State University"
+        }
+      ],
+      "year": 2009,
+      "abstract": "Abstract How will biodiversity loss affect ecosystem functioning, ecosystem services, and human wellbeing? In an age of accelerating biodiversity loss, this volume summarizes recent advances in biodiversity\u2010ecosystem functioning research and explores the economics of biodiversity and ecosystem services. The first section summarizes the development of the basic science and provides a meta-analysis that quantitatively tests several biodiversity and ecosystem functioning hypotheses. The second section describes the natural science foundations of biodiversity\u2010ecosystem functioning research, including: quantifying functional diversity, the development of the field into a predictive science, effects of stability and complexity, methods to quantify mechanisms by which diversity affects functioning, the importance of trophic structure, microbial ecology, and spatial dynamics. The third section takes research on biodiversity and ecosystem functioning further than it has ever gone into the human dimension. The first six chapters cover the most pressing environmental challenges humanity faces, including effects of diversity on: climate change mitigation, restoration of degraded habitats, managed ecosystems, pollination, disease, and biological invasions. The remaining chapters of section three that consider the economic perspective, including: a synthesis of the economics of ecosystem services and biodiversity, and the options open to policy-makers to address the failure of markets to account for the loss of ecosystem services; an examination of the challenges of valuing ecosystem services and, hence, to understanding the human consequences of decisions that neglect these services; and an examination of the ways in which economists are currently incorporating biodiversity and ecosystem functioning research into decision models for the conservation and management of biodiversity. The final section describes new advances in ecoinformatics that will help transform this field into a globally predictive science, and finally, summarizes the advancements and future directions of the field. The book's ultimate conclusion is that biodiversity is an essential element of any strategy for sustainable development.",
+      "venue": "",
+      "citation_count": 597,
+      "doi": "10.1093/acprof:oso/9780199547951.001.0001",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1093/acprof:oso/9780199547951.001.0001",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W1966327575",
+      "title": "WGCNA: an R package for weighted correlation network analysis",
+      "authors": [
+        {
+          "name": "Peter Langfelder",
+          "affiliation": "University of California, Los Angeles"
+        },
+        {
+          "name": "Steve Horvath",
+          "affiliation": "University of California, Los Angeles"
+        }
+      ],
+      "year": 2008,
+      "abstract": "BACKGROUND: Correlation networks are increasingly being used in bioinformatics applications. For example, weighted gene co-expression network analysis is a systems biology method for describing the correlation patterns among genes across microarray samples. Weighted correlation network analysis (WGCNA) can be used for finding clusters (modules) of highly correlated genes, for summarizing such clusters using the module eigengene or an intramodular hub gene, for relating modules to one another and to external sample traits (using eigengene network methodology), and for calculating module membership measures. Correlation networks facilitate network based gene screening methods that can be used to identify candidate biomarkers or therapeutic targets. These methods have been successfully applied in various biological contexts, e.g. cancer, mouse genetics, yeast genetics, and analysis of brain imaging data. While parts of the correlation network methodology have been described in separate publications, there is a need to provide a user-friendly, comprehensive, and consistent software implementation and an accompanying tutorial. RESULTS: The WGCNA R software package is a comprehensive collection of R functions for performing various aspects of weighted correlation network analysis. The package includes functions for network construction, module detection, gene selection, calculations of topological properties, data simulation, visualization, and interfacing with external software. Along with the R package we also present R software tutorials. While the methods development was motivated by gene expression data, the underlying data mining approach can be applied to a variety of different settings. CONCLUSION: The WGCNA package provides R functions for weighted correlation network analysis, e.g. co-expression network analysis of gene expression data. The R package along with its source code and additional material are freely available at http://www.genetics.ucla.edu/labs/horvath/CoexpressionNetwork/Rpackages/WGCNA.",
+      "venue": "BMC Bioinformatics",
+      "citation_count": 28625,
+      "doi": "10.1186/1471-2105-9-559",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/1471-2105-9-559",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3022903699",
+      "title": "The PRISMA Statement for Reporting Systematic Reviews and Meta-Analyses of Studies That Evaluate Health Care Interventions: Explanation and Elaboration",
+      "authors": [
+        {
+          "name": "Alessandro Liberati",
+          "affiliation": "University of Modena and Reggio Emilia"
+        },
+        {
+          "name": "Douglas G. Altman",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Jennifer Tetzlaff",
+          "affiliation": "Ottawa Hospital"
+        },
+        {
+          "name": "Cynthia D. Mulrow",
+          "affiliation": ""
+        },
+        {
+          "name": "Peter C G\u00f8tzsche",
+          "affiliation": "Cochrane"
+        },
+        {
+          "name": "John P. A. Ioannidis",
+          "affiliation": "University of Ioannina"
+        },
+        {
+          "name": "Mike Clarke",
+          "affiliation": "Trinity College Dublin"
+        },
+        {
+          "name": "P.J. Devereaux",
+          "affiliation": "McMaster University"
+        },
+        {
+          "name": "Jos Kleijnen",
+          "affiliation": "Maastricht University"
+        },
+        {
+          "name": "David Moher",
+          "affiliation": "Ottawa Hospital"
+        }
+      ],
+      "year": 2009,
+      "abstract": "Systematic reviews and meta-analyses are essential to summarize evidence relating to efficacy and safety of health care interventions accurately and reliably. The clarity and transparency of these reports, however, is not optimal. Poor reporting of systematic reviews diminishes their value to clinicians, policy makers, and other users.Since the development of the QUOROM (QUality Of Reporting Of Meta-analysis) Statement--a reporting guideline published in 1999--there have been several conceptual, methodological, and practical advances regarding the conduct and reporting of systematic reviews and meta-analyses. Also, reviews of published systematic reviews have found that key information about these studies is often poorly reported. Realizing these issues, an international group that included experienced authors and methodologists developed PRISMA (Preferred Reporting Items for Systematic reviews and Meta-Analyses) as an evolution of the original QUOROM guideline for systematic reviews and meta-analyses of evaluations of health care interventions.The PRISMA Statement consists of a 27-item checklist and a four-phase flow diagram. The checklist includes items deemed essential for transparent reporting of a systematic review. In this Explanation and Elaboration document, we explain the meaning and rationale for each checklist item. For each item, we include an example of good reporting and, where possible, references to relevant empirical studies and methodological literature. The PRISMA Statement, this document, and the associated Web site (http://www.prisma-statement.org/) should be helpful resources to improve reporting of systematic reviews and meta-analyses.",
+      "venue": "PLoS Medicine",
+      "citation_count": 27757,
+      "doi": "10.1371/journal.pmed.1000100",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1371/journal.pmed.1000100",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2020155291",
+      "title": "Fostering implementation of health services research findings into practice: a consolidated framework for advancing implementation science",
+      "authors": [
+        {
+          "name": "Laura J. Damschroder",
+          "affiliation": "VA Ann Arbor Healthcare System"
+        },
+        {
+          "name": "David C. Aron",
+          "affiliation": "Louis Stokes Cleveland VA Medical Center"
+        },
+        {
+          "name": "Rosalind E. Keith",
+          "affiliation": "VA Ann Arbor Healthcare System"
+        },
+        {
+          "name": "Susan Kirsh",
+          "affiliation": "Louis Stokes Cleveland VA Medical Center"
+        },
+        {
+          "name": "J Alexander",
+          "affiliation": "University of Michigan\u2013Ann Arbor"
+        },
+        {
+          "name": "Julie C. Lowery",
+          "affiliation": "VA Ann Arbor Healthcare System"
+        }
+      ],
+      "year": 2009,
+      "abstract": "BACKGROUND: Many interventions found to be effective in health services research studies fail to translate into meaningful patient care outcomes across multiple contexts. Health services researchers recognize the need to evaluate not only summative outcomes but also formative outcomes to assess the extent to which implementation is effective in a specific setting, prolongs sustainability, and promotes dissemination into other settings. Many implementation theories have been published to help promote effective implementation. However, they overlap considerably in the constructs included in individual theories, and a comparison of theories reveals that each is missing important constructs included in other theories. In addition, terminology and definitions are not consistent across theories. We describe the Consolidated Framework For Implementation Research (CFIR) that offers an overarching typology to promote implementation theory development and verification about what works where and why across multiple contexts. METHODS: We used a snowball sampling approach to identify published theories that were evaluated to identify constructs based on strength of conceptual or empirical support for influence on implementation, consistency in definitions, alignment with our own findings, and potential for measurement. We combined constructs across published theories that had different labels but were redundant or overlapping in definition, and we parsed apart constructs that conflated underlying concepts. RESULTS: The CFIR is composed of five major domains: intervention characteristics, outer setting, inner setting, characteristics of the individuals involved, and the process of implementation. Eight constructs were identified related to the intervention (e.g., evidence strength and quality), four constructs were identified related to outer setting (e.g., patient needs and resources), 12 constructs were identified related to inner setting (e.g., culture, leadership engagement), five constructs were identified related to individual characteristics, and eight constructs were identified related to process (e.g., plan, evaluate, and reflect). We present explicit definitions for each construct. CONCLUSION: The CFIR provides a pragmatic structure for approaching complex, interacting, multi-level, and transient states of constructs in the real world by embracing, consolidating, and unifying key constructs from published implementation theories. It can be used to guide formative evaluations and build the implementation knowledge base across multiple studies and settings.",
+      "venue": "Implementation Science",
+      "citation_count": 14568,
+      "doi": "10.1186/1748-5908-4-50",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1186/1748-5908-4-50",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3123893780",
+      "title": "PRISMA 2020 explanation and elaboration: updated guidance and exemplars for reporting systematic reviews",
+      "authors": [
+        {
+          "name": "Matthew J. Page",
+          "affiliation": "Monash Health"
+        },
+        {
+          "name": "David Moher",
+          "affiliation": "University of Ottawa"
+        },
+        {
+          "name": "Patrick M. Bossuyt",
+          "affiliation": "University of Amsterdam"
+        },
+        {
+          "name": "Isabelle Boutron",
+          "affiliation": "Inserm"
+        },
+        {
+          "name": "Tammy Hoffmann",
+          "affiliation": "Bond University"
+        },
+        {
+          "name": "Cynthia D. Mulrow",
+          "affiliation": "The University of Texas Health Science Center at San Antonio"
+        },
+        {
+          "name": "Larissa Shamseer",
+          "affiliation": "University of Ottawa"
+        },
+        {
+          "name": "Jennifer Tetzlaff",
+          "affiliation": ""
+        },
+        {
+          "name": "Elie A. Akl",
+          "affiliation": "Impact"
+        },
+        {
+          "name": "Sue Brennan",
+          "affiliation": "Monash University"
+        },
+        {
+          "name": "Roger Chou",
+          "affiliation": "Oregon Health & Science University"
+        },
+        {
+          "name": "Julie Glanville",
+          "affiliation": "Leeds and York Partnership NHS Foundation Trust"
+        },
+        {
+          "name": "Jeremy Grimshaw",
+          "affiliation": "University of Ottawa"
+        },
+        {
+          "name": "Asbj\u00f8rn Hr\u00f3bjartsson",
+          "affiliation": "University of Southern Denmark"
+        },
+        {
+          "name": "Manoj M. Lalu",
+          "affiliation": "Ottawa Hospital"
+        },
+        {
+          "name": "Tianjing Li",
+          "affiliation": "Johns Hopkins University"
+        },
+        {
+          "name": "Elizabeth Loder",
+          "affiliation": "Brigham and Women's Hospital"
+        },
+        {
+          "name": "Evan Mayo\u2010Wilson",
+          "affiliation": "Indiana University Bloomington"
+        },
+        {
+          "name": "Steve McDonald",
+          "affiliation": "Monash University"
+        },
+        {
+          "name": "Luke A. McGuinness",
+          "affiliation": "University of Bristol"
+        },
+        {
+          "name": "Lesley Stewart",
+          "affiliation": "University of York"
+        },
+        {
+          "name": "James Thomas",
+          "affiliation": "University College London"
+        },
+        {
+          "name": "Andrea C. Tricco",
+          "affiliation": "St. Michael's Hospital"
+        },
+        {
+          "name": "Vivian Welch",
+          "affiliation": "University of Ottawa"
+        },
+        {
+          "name": "Penny Whiting",
+          "affiliation": "University of Bristol"
+        },
+        {
+          "name": "Joanne E. McKenzie",
+          "affiliation": "Monash University"
+        }
+      ],
+      "year": 2021,
+      "abstract": "The PRISMA 2020 statement includes a checklist of 27 items to guide reporting of systematic reviews In this article we explain why reporting of each item is recommended, present bullet points that detail the reporting recommendations, and present examples from published reviews We hope that uptake of the PRISMA 2020 statement will lead to more transparent, complete, and accurate reporting of systematic reviews, thus facilitating evidence based decision making on 1 September",
+      "venue": "BMJ",
+      "citation_count": 10537,
+      "doi": "10.1136/bmj.n160",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1136/bmj.n160",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2134833483",
+      "title": "The PRISMA statement for reporting systematic reviews and meta-analyses of studies that evaluate healthcare interventions: explanation and elaboration",
+      "authors": [
+        {
+          "name": "A. Liberati",
+          "affiliation": "Mario Negri Institute for Pharmacological Research"
+        },
+        {
+          "name": "Doug Altman",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Jennifer Tetzlaff",
+          "affiliation": "Ottawa Hospital Research Institute"
+        },
+        {
+          "name": "Cynthia D. Mulrow",
+          "affiliation": ""
+        },
+        {
+          "name": "Peter C G\u00f8tzsche",
+          "affiliation": "Cochrane"
+        },
+        {
+          "name": "John P. A. Ioannidis",
+          "affiliation": "University of Ioannina"
+        },
+        {
+          "name": "Mike Clarke",
+          "affiliation": "Cochrane"
+        },
+        {
+          "name": "P.J. Devereaux",
+          "affiliation": "McMaster University"
+        },
+        {
+          "name": "Jos Kleijnen",
+          "affiliation": "Maastricht University"
+        },
+        {
+          "name": "David Moher",
+          "affiliation": "Ottawa Hospital"
+        }
+      ],
+      "year": 2009,
+      "abstract": "Systematic reviews and meta-analyses are essential to summarise evidence relating to efficacy and safety of healthcare interventions accurately and reliably. The clarity and transparency of these reports, however, are not optimal. Poor reporting of systematic reviews diminishes their value to clinicians, policy makers, and other users. Since the development of the QUOROM (quality of reporting of meta-analysis) statement-a reporting guideline published in 1999-there have been several conceptual, methodological, and practical advances regarding the conduct and reporting of systematic reviews and meta-analyses. Also, reviews of published systematic reviews have found that key information about these studies is often poorly reported. Realising these issues, an international group that included experienced authors and methodologists developed PRISMA (preferred reporting items for systematic reviews and meta-analyses) as an evolution of the original QUOROM guideline for systematic reviews and meta-analyses of evaluations of health care interventions. The PRISMA statement consists of a 27-item checklist and a four-phase flow diagram. The checklist includes items deemed essential for transparent reporting of a systematic review. In this explanation and elaboration document, we explain the meaning and rationale for each checklist item. For each item, we include an example of good reporting and, where possible, references to relevant empirical studies and methodological literature. The PRISMA statement, this document, and the associated website (www.prisma-statement.org/) should be helpful resources to improve reporting of systematic reviews and meta-analyses.",
+      "venue": "BMJ",
+      "citation_count": 17543,
+      "doi": "10.1136/bmj.b2700",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1136/bmj.b2700",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2228338508",
+      "title": "Heavy Metal Toxicity and the Environment",
+      "authors": [
+        {
+          "name": "Paul B. Tchounwou",
+          "affiliation": "Jackson State University"
+        },
+        {
+          "name": "Cl\u00e9ment G. Yedjou",
+          "affiliation": "Jackson State University"
+        },
+        {
+          "name": "Anita K. Patlolla",
+          "affiliation": "Jackson State University"
+        },
+        {
+          "name": "Dwayne J. Sutton",
+          "affiliation": "Jackson State University"
+        }
+      ],
+      "year": 2012,
+      "abstract": "",
+      "venue": "Proceedings of the Fourth International Symposium on Polarization Phenomena in Nuclear Reactions",
+      "citation_count": 6910,
+      "doi": "10.1007/978-3-7643-8340-4_6",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1007/978-3-7643-8340-4_6",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2105874120",
+      "title": "Comparative physiology of salt and water stress",
+      "authors": [
+        {
+          "name": "Rana Munns",
+          "affiliation": "Plant Industry"
+        }
+      ],
+      "year": 2002,
+      "abstract": "Plant responses to salt and water stress have much in common. Salinity reduces the ability of plants to take up water, and this quickly causes reductions in growth rate, along with a suite of metabolic changes identical to those caused by water stress. The initial reduction in shoot growth is probably due to hormonal signals generated by the roots. There may be salt-specific effects that later have an impact on growth; if excessive amounts of salt enter the plant, salt will eventually rise to toxic levels in the older transpiring leaves, causing premature senescence, and reduce the photosynthetic leaf area of the plant to a level that cannot sustain growth. These effects take time to develop. Salt-tolerant plants differ from salt-sensitive ones in having a low rate of Na+ and Cl-- transport to leaves, and the ability to compartmentalize these ions in vacuoles to prevent their build-up in cytoplasm or cell walls and thus avoid salt toxicity. In order to understand the processes that give rise to tolerance of salt, as distinct from tolerance of osmotic stress, and to identify genes that control the transport of salt across membranes, it is important to avoid treatments that induce cell plasmolysis, and to design experiments that distinguish between tolerance of salt and tolerance of water stress.",
+      "venue": "Plant Cell & Environment",
+      "citation_count": 6317,
+      "doi": "10.1046/j.0016-8025.2001.00808.x",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1046/j.0016-8025.2001.00808.x",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2032541700",
+      "title": "CONSORT 2010 Explanation and Elaboration: updated guidelines for reporting parallel group randomised trials",
+      "authors": [
+        {
+          "name": "David Moher",
+          "affiliation": "Ottawa Hospital Research Institute"
+        },
+        {
+          "name": "Sally Hopewell",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Kenneth F. Schulz",
+          "affiliation": "Family Health International 360"
+        },
+        {
+          "name": "V\u00edctor M. Montori",
+          "affiliation": "Mayo Clinic in Florida"
+        },
+        {
+          "name": "Peter C G\u00f8tzsche",
+          "affiliation": "Cochrane"
+        },
+        {
+          "name": "P.J. Devereaux",
+          "affiliation": "McMaster University Medical Centre"
+        },
+        {
+          "name": "Diana Elbourne",
+          "affiliation": "London School of Hygiene & Tropical Medicine"
+        },
+        {
+          "name": "Matthias Egger",
+          "affiliation": "University of Bern"
+        },
+        {
+          "name": "Doug Altman",
+          "affiliation": "University of Oxford"
+        }
+      ],
+      "year": 2010,
+      "abstract": "Overwhelming evidence shows the quality of reporting of randomised controlled trials (RCTs) is not optimal. Without transparent reporting, readers cannot judge the reliability and validity of trial findings nor extract information for systematic reviews. Recent methodological analyses indicate that inadequate reporting and design are associated with biased estimates of treatment effects. Such systematic error is seriously damaging to RCTs, which are considered the gold standard for evaluating interventions because of their ability to minimise or avoid bias. A group of scientists and editors developed the CONSORT (Consolidated Standards of Reporting Trials) statement to improve the quality of reporting of RCTs. It was first published in 1996 and updated in 2001. The statement consists of a checklist and flow diagram that authors can use for reporting an RCT. Many leading medical journals and major international editorial groups have endorsed the CONSORT statement. The statement facilitates critical appraisal and interpretation of RCTs. During the 2001 CONSORT revision, it became clear that explanation and elaboration of the principles underlying the CONSORT statement would help investigators and others to write or appraise trial reports. A CONSORT explanation and elaboration article was published in 2001 alongside the 2001 version of the CONSORT statement. After an expert meeting in January 2007, the CONSORT statement has been further revised and is published as the CONSORT 2010 Statement. This update improves the wording and clarity of the previous checklist and incorporates recommendations related to topics that have only recently received recognition, such as selective outcome reporting bias. This explanatory and elaboration document-intended to enhance the use, understanding, and dissemination of the CONSORT statement-has also been extensively revised. It presents the meaning and rationale for each new and updated checklist item providing examples of good reporting and, where possible, references to relevant empirical studies. Several examples of flow diagrams are included. The CONSORT 2010 Statement, this revised explanatory and elaboration document, and the associated website (www.consort-statement.org) should be helpful resources to improve reporting of randomised trials.",
+      "venue": "BMJ",
+      "citation_count": 8986,
+      "doi": "10.1136/bmj.c869",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1136/bmj.c869",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3122877168",
+      "title": "",
+      "authors": [
+        {
+          "name": "J\u00f6rg Henseler",
+          "affiliation": "Radboud University Nijmegen"
+        },
+        {
+          "name": "Christian M. Ringle",
+          "affiliation": ""
+        },
+        {
+          "name": "Rudolf R. Sinkovics",
+          "affiliation": ""
+        }
+      ],
+      "year": 2009,
+      "abstract": "\\n Contains fulltext :\\n 82505.pdf (Publisher\u2019s version ) (Closed access)\\n",
+      "venue": "Research Explorer (The University of Manchester)",
+      "citation_count": 10631,
+      "doi": "10.1108/s1474-7979(2009)0000020014",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1108/s1474-7979(2009)0000020014",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W3105081694",
+      "title": "COVID-Net: a tailored deep convolutional neural network design for detection of COVID-19 cases from chest X-ray images",
+      "authors": [
+        {
+          "name": "Linda Wang\ufeff",
+          "affiliation": "University of Waterloo"
+        },
+        {
+          "name": "Zhong Qiu Lin",
+          "affiliation": "University of Waterloo"
+        },
+        {
+          "name": "Alexander Wong",
+          "affiliation": "University of Waterloo"
+        }
+      ],
+      "year": 2020,
+      "abstract": "The Coronavirus Disease 2019 (COVID-19) pandemic continues to have a devastating effect on the health and well-being of the global population. A critical step in the fight against COVID-19 is effective screening of infected patients, with one of the key screening approaches being radiology examination using chest radiography. It was found in early studies that patients present abnormalities in chest radiography images that are characteristic of those infected with COVID-19. Motivated by this and inspired by the open source efforts of the research community, in this study we introduce COVID-Net, a deep convolutional neural network design tailored for the detection of COVID-19 cases from chest X-ray (CXR) images that is open source and available to the general public. To the best of the authors' knowledge, COVID-Net is one of the first open source network designs for COVID-19 detection from CXR images at the time of initial release. We also introduce COVIDx, an open access benchmark dataset that we generated comprising of 13,975 CXR images across 13,870 patient patient cases, with the largest number of publicly available COVID-19 positive cases to the best of the authors' knowledge. Furthermore, we investigate how COVID-Net makes predictions using an explainability method in an attempt to not only gain deeper insights into critical factors associated with COVID cases, which can aid clinicians in improved screening, but also audit COVID-Net in a responsible and transparent manner to validate that it is making decisions based on relevant information from the CXR images. By no means a production-ready solution, the hope is that the open access COVID-Net, along with the description on constructing the open source COVIDx dataset, will be leveraged and build upon by both researchers and citizen data scientists alike to accelerate the development of highly accurate yet practical deep learning solutions for detecting COVID-19 cases and accelerate treatment of those who need it the most.",
+      "venue": "Scientific Reports",
+      "citation_count": 3128,
+      "doi": "10.1038/s41598-020-76550-z",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41598-020-76550-z",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2110223248",
+      "title": "Oxidative Decay of DNA",
+      "authors": [
+        {
+          "name": "Kenneth B. Beckman",
+          "affiliation": "University of California, Berkeley"
+        },
+        {
+          "name": "Bruce N. Ames",
+          "affiliation": "University of California, Berkeley"
+        }
+      ],
+      "year": 1997,
+      "abstract": "The study of DNA oxidation has progressed from an exploratory phase, during which its basic biochemistry was established, into a field branching out into numerous areas. Early on, radiation biologists discovered that radiolysis of water generates oxygen free radicals, which are responsible for many of the consequences of irradiating living things. The characterization of radiation-induced oxidative DNA lesions, and the connection between radiation and cancer, caused a surge of interest in DNA oxidationper se and raised the possibility of DNA damage from biological oxidants. Nucleic acid biochemists, cancer biologists, and toxicologists then set out to ask key questions: \"how much oxidative DNA damage is there, how does it get there, how and when is it removed, and what are the consequences?\" A proliferation of techniques has resulted in the confirmation of the early hypotheses and also delivered some surprises. In this minireview, we have outlined some of the most interesting recent results. Extensive reviews on DNA oxidation published elsewhere have discussed the earlier work in detail (1Ames B.N. Shigenaga M.K. Hagen T.M. Proc. Natl. Acad. Sci. U. S. A. 1993; 90: 7915-7922Crossref PubMed Scopus (5354) Google Scholar, 2Dreher D. Junod A.F. Eur. J. Cancer. 1996; 32A: 30-38Abstract Full Text PDF PubMed Scopus (758) Google Scholar, 3Loft S. Poulsen H.E. J. Mol. Med. 1996; 74: 297-312Crossref PubMed Scopus (822) Google Scholar, 4Richter C. Int. J. Biochem. Cell Biol. 1995; 27: 647-653Crossref PubMed Scopus (283) Google Scholar, 5Wiseman H. Kaur H. Halliwell B. Cancer Lett. 1995; 93: 113-120Crossref PubMed Scopus (121) Google Scholar). A companion minireview by Henle and Linn (6Henle E.S. Linn S. J. Biol. Chem. 1997; 272: 19095-19098Abstract Full Text Full Text PDF PubMed Scopus (470) Google Scholar) covers in depth the biochemistry of DNA oxidation. The steady-state amount of DNA oxidation appears to be massive, with oxidative adducts occurring at a frequency that is 1 or more orders of magnitude higher than non-oxidative adducts (1Ames B.N. Shigenaga M.K. Hagen T.M. Proc. Natl. Acad. Sci. U. S. A. 1993; 90: 7915-7922Crossref PubMed Scopus (5354) Google Scholar, 7Ames B.N. Gold L.S. Willett W.C. Proc. Natl. Acad. Sci. U. S. A. 1995; 92: 5258-5265Crossref PubMed Scopus (1121) Google Scholar). Despite their abundance, oxidative DNA adducts exist in a large background (105\u2013106) of unaltered nucleotides, which may be prone to oxidation during sample preparation and analysis. Concerns about artifactual oxidation, combined with the different values that have been generated by alternative methods, have fueled an ongoing debate over the most appropriate techniques for studying DNA oxidation. Gas chromatography coupled with mass spectroscopy (GC-MS), 1The abbreviations used are: GC-MS, gas chromatography-mass spectroscopy; HPLC, high pressure liquid chromatography; oxo8dG, 8-oxo-7,8-dihydro-2\u2032-deoxyguanosine; oxo8Gua, 8-oxo-guanine; EC, electrochemical; Fapy, formamidopyrimidine; PCR, polymerase chain reaction; Q-PCR, quantitative PCR; mAb, monoclonal antibody. initially used in characterizing oxidative adducts, is also a quantitative tool whose principal advantage is the simultaneous analysis of a number of different adducts (5Wiseman H. Kaur H. Halliwell B. Cancer Lett. 1995; 93: 113-120Crossref PubMed Scopus (121) Google Scholar). DNA is chemically hydrolyzed, derivatized, and injected onto GC-MS. In the absence of a mass spectrometer, an alternative approach is the enzymatic hydrolysis of DNA to nucleosides and chromatography of the hydrolysate by HPLC (8Shigenaga M.K. Aboujaoude E.N. Chen Q. Ames B.N. Methods Enzymol. 1994; 234: 16-33Crossref PubMed Scopus (292) Google Scholar). The adducts 8-oxo-7,8-dihydro-2\u2032-deoxyguanosine (oxo8dG) and its corresponding base 8-oxo-guanine (oxo8Gua) are especially useful in this regard, since they are electrochemically active, lending themselves to sensitive electrochemical (EC) detection. The relative simplicity and high sensitivity of HPLC-EC detection of oxo8dG have made it the most popular method for monitoring DNA oxidation in vivo. Generally speaking, GC-MS estimates of DNA oxidation have been higher than HPLC-EC estimates, by about a factor of 10 (9Douki T. Delatour T. Bianchini F. Cadet J. Carcinogenesis. 1996; 17: 347-353Crossref PubMed Scopus (112) Google Scholar). The debate about the cause of the difference (an overestimate due to artifactual oxidation with GC-MS versus an underestimate due to inefficient enzymatic digestion with HPLC-EC) has now been settled; artifactual oxidation occurs during GC-MS derivatization, in the case of guanine/oxo8dG (10Ravanat J.L. Turesky R.J. Gremaud E. Trudel L.J. Stadler R.H. Chem. Res. Toxicol. 1995; 8: 1039-1045Crossref PubMed Scopus (198) Google Scholar) and in the case of adducts formed from adenine, cytosine, thymine, and thymidine (9Douki T. Delatour T. Bianchini F. Cadet J. Carcinogenesis. 1996; 17: 347-353Crossref PubMed Scopus (112) Google Scholar). The HPLC-EC method itself, however, has also been criticized on the grounds that the variability of the assay is unacceptable (11Adachi S. Zeisig M. Moller L. Carcinogenesis. 1995; 16: 253-258Crossref PubMed Scopus (88) Google Scholar, 12Nakae D. Mizumoto Y. Kobayashi E. Noguchi O. Konishi Y. Cancer Lett. 1995; 97: 233-239Crossref PubMed Scopus (144) Google Scholar, 13Nakajima M. Takeuchi T. Morimoto K. Carcinogenesis. 1996; 17: 787-791Crossref PubMed Scopus (71) Google Scholar, 14Finnegan M.T.V. Herbert K.E. Evans M.D. Griffiths H.R. Lunec J. Free Radical Biol. Med. 1996; 20: 93-98Crossref PubMed Scopus (35) Google Scholar, 15Nakajima M. Takeuchi T. Takeshita T. Morimoto K. Environ. Health Perspect. 1996; 104: 1336-1338Crossref PubMed Scopus (66) Google Scholar). Estimates of the ratio of oxo8dG to dG (for example, in rat tissues) have ranged from approximately 0.25 \u00d7 10\u22125 to higher than 10\u22124, and it has been suggested that artifactual oxidation is to blame. Artifactual oxidation poses problems of accuracy and precision. For example, the total cellular burden of oxidative adducts has been estimated from HPLC-EC measurements of oxo8dG (1Ames B.N. Shigenaga M.K. Hagen T.M. Proc. Natl. Acad. Sci. U. S. A. 1993; 90: 7915-7922Crossref PubMed Scopus (5354) Google Scholar), on the assumption that oxo8dG represents 5% of all adducts (it is one of about 20 major radiation adducts characterized by GC-MS (16Dizdaroglu M. Mutat. Res. 1992; 275: 331-342Crossref PubMed Scopus (493) Google Scholar)). This estimate, about a million oxidative adducts per rat cell (1Ames B.N. Shigenaga M.K. Hagen T.M. Proc. Natl. Acad. Sci. U. S. A. 1993; 90: 7915-7922Crossref PubMed Scopus (5354) Google Scholar), is a number which argues forcibly that oxidative mutagenesis must be important in vivo (2Dreher D. Junod A.F. Eur. J. Cancer. 1996; 32A: 30-38Abstract Full Text PDF PubMed Scopus (758) Google Scholar, 3Loft S. Poulsen H.E. J. Mol. Med. 1996; 74: 297-312Crossref PubMed Scopus (822) Google Scholar, 7Ames B.N. Gold L.S. Willett W.C. Proc. Natl. Acad. Sci. U. S. A. 1995; 92: 5258-5265Crossref PubMed Scopus (1121) Google Scholar). To the extent that the initial measurement of oxo8dG may be artificially elevated, this estimate may also be inaccurate. Worse, perhaps, is the effect that artifactual oxidation has on the ability to detect an elevation of oxo8dG. If the DNA damage \"signal\" is obscured by background artifact \"noise,\" then real increases in DNA oxidation may be obscured or fail to achieve statistical significance. Fortunately, a number of incremental improvements have recently been introduced (12Nakae D. Mizumoto Y. Kobayashi E. Noguchi O. Konishi Y. Cancer Lett. 1995; 97: 233-239Crossref PubMed Scopus (144) Google Scholar, 13Nakajima M. Takeuchi T. Morimoto K. Carcinogenesis. 1996; 17: 787-791Crossref PubMed Scopus (71) Google Scholar), driving down the estimate of steady-state oxo8dG 2\u20135-fold from previous estimates. The current lowest estimates of the ratio of oxo8dG/dG (in rat hepatocytes and human lymphocytes) cluster around 0.25 \u00d7 10\u22125, equivalent to approximately 7,500 oxo8dG or about 1.5 \u00d7 105 oxidative adducts per human cell (if oxo8dG represents 5% of all such adducts) (12Nakae D. Mizumoto Y. Kobayashi E. Noguchi O. Konishi Y. Cancer Lett. 1995; 97: 233-239Crossref PubMed Scopus (144) Google Scholar,13Nakajima M. Takeuchi T. Morimoto K. Carcinogenesis. 1996; 17: 787-791Crossref PubMed Scopus (71) Google Scholar). 150,000 oxidative adducts per cell represents a huge load of damage: is there solid evidence that this number is accurate? Although it is difficult to rule out some contribution by artifactual oxidation to these values (or indeed to values derived from any of the techniques that have been devised), emerging features of experiments with oxo8dG lend them credibility. Namely, recent studies show low sample-to-sample variance, as well as dramaticpatterns of appearance and disappearance of oxo8dG following oxidant challenges, occurring in parallel with the induction of oxo8dG repair activity (13Nakajima M. Takeuchi T. Morimoto K. Carcinogenesis. 1996; 17: 787-791Crossref PubMed Scopus (71) Google Scholar, 17Asami S. Hirano T. Yamaguchi R. Tomioka Y. Itoh H. Kasai H. Cancer Res. 1996; 56: 2546-2549PubMed Google Scholar, 18Hirano T. Yamaguchi R. Asami S. Iwamoto N. Kasai H. J. Gerontol. A Biol. Sci. Med. Sci. 1996; 51: B303-307Crossref PubMed Scopus (61) Google Scholar, 19Kaneko T. Tahara S. Matsuo M. Mutat. Res. 1996; 316: 277-285Crossref PubMed Scopus (178) Google Scholar, 20Lee Y.S. Choi J.Y. Park M.K. Choi E.M. Kasai H. Chung M.H. Mutat. Res. 1996; 364: 227-233Crossref PubMed Scopus (43) Google Scholar, 21Umemura T. Hasegawa R. Sai-Kato K. Nishikawa A. Furukawa F. Toyokuni S. Uchida K. Inoue T. Kurokawa Y. Jpn. J. Cancer Res. 1996; 87: 882-886Crossref PubMed Scopus (47) Google Scholar). Together with the fact that radically different techniques (discussed below) have demonstrated similar degrees and patterns of induced DNA damage, these results suggest that the problem of artifactual noise has been tamed, if not eliminated. Elsewhere, we have discussed in detail how to avoid the artifacts that can occur with HPLC-EC. 2H. Helbock, K. B. Beckman, P. Walter, M. K. Shigenaga, A. A. Woodall, H. C. Yeo, and B. N. Ames, manuscript in preparation. The cloning and overexpression of repair enzymes continue to provide new ways to detect oxidative adducts. Enzymes such as Escherichia coli endonuclease III and formamidopyrimidine glycosylase (Fapy glycosylase), which recognize and excise oxidized pyrimidines and purines, respectively, possess associated lyase activities that result in strand cleavage (23Demple B. Harrison L. Annu. Rev. Biochem. 1994; 63: 915-948Crossref PubMed Scopus (1282) Google Scholar). Treating DNA with these enzymes introduces nicks, which may then be measured by alkaline elution (24Ballmaier D. Epe B. Carcinogenesis. 1995; 16: 335-342Crossref PubMed Scopus (106) Google Scholar), nick translation (25Czene S. Harms-Ringdahl M. Mutat. Res. 1995; 336: 235-242Crossref PubMed Scopus (44) Google Scholar), or ring opening of supercoiled molecules (26Epe B. Hegler J. Methods Enzymol. 1994; 234: 122-131Crossref PubMed Scopus (124) Google Scholar). The polymerase chain reaction (PCR) has provided an approach called \"quantitative PCR\" (Q-PCR), which takes advantage of the fact that many DNA lesions block thermostable DNA polymerases, thereby decreasing the efficiency of amplification (27Yakes F.M. Van Houten B. Proc. Natl. Acad. Sci. U. S. A. 1997; 94: 514-519Crossref PubMed Scopus (1413) Google Scholar). As the length of the desired amplicon increases, the probability that a strand-terminating adduct will occur also increases, as does the sensitivity of the method. With appropriate controls and calculations, the technique is quantitative, although the types of DNA lesions resulting in decreased amplification are only known in general. There is potential that Q-PCR may be coupled with repair endonucleases, enabling the quantification of specific adducts. All of the techniques discussed so far, from GC-MS to Q-PCR, require purified DNA. A technique for estimating the rate of oxo8dG formation, which does not require the isolation of DNA and its associated problems, is the measurement of its repair products excreted into urine or tissue culture medium (3Loft S. Poulsen H.E. J. Mol. Med. 1996; 74: 297-312Crossref PubMed Scopus (822) Google Scholar, 28Shigenaga M.K. Gimeno C.J. Ames B.N. Proc. Natl. Acad. Sci. U. S. A. 1989; 86: 9697-9701Crossref PubMed Scopus (692) Google Scholar, 29Loft S. Vistisen K. Ewertz M. Tjonneland A. Overvad K. Poulsen H.E. Carcinogenesis. 1992; 13: 2241-2247Crossref PubMed Scopus (587) Google Scholar). The daily flux of repaired adducts should reflect the intracellular rate of DNA damage, if not in a direct way. Although there is a different set of concerns surrounding the accuracy of these methods (such as uncertainty about repair pathways and products, oxidation of free nucleotide pools, and the contribution of cell and mitochondrial turnover), an overwhelming advantage of these methods is that they are non-invasive and integrative. As a consequence, the measurement of repaired adducts in urine is one of the few techniques that has been routinely applied to humans. Recently, an elegant and related approach has been reported: the measurement of oxo8dG in small amounts of heart muscle interstitial fluid, collected with a microdialysis probe. During a period of reperfusion following ischemia (a well established model of oxidative stress) a rapid increase in intercellular oxo8dG was observed (30Yang C.-S. Tsai P.-J. Chen W.-Y. Kuo J.-S. Redox Report. 1996; 2: 379-383Crossref PubMed Google Scholar). Last, there exist two techniques that preserve cellular integrity: single-cell gel electrophoresis and immunohistochemistry with anti-DNA-adduct monoclonal antibodies (mAbs). Single-cell gel electrophoresis, also descriptively termed the \"comet\" assay, involves casting cells in a thin agarose gel on a microscope slide and running the DNA out of the nuclei by electrophoresis. The more fragmented the chromatin, the more it migrates, assuming (upon staining) the appearance of a comet's tail streaking away from the nucleus in the direction of the anode. The analysis of the length and intensity of the tail (its \"moment\") is achieved with the help of software (31Fairbairn D.W. Olive P.L. O'Neill K.L. Mutat. Res. 1995; 339: 37-59Crossref PubMed Scopus (1481) Google Scholar). Modifications of the assay permit the analysis of specific lesions; alkaline conditions are used to study single-strand nicks, and by treating cells in agarose in situ with an enzyme such as Fapy glycosylase prior to single-cell gel electrophoresis, the method has been used to detect the substrate oxo8Gua (32Collins A.R. Ma A.G. Duthie S.J. Mutat. Res. 1995; 336: 69-77Crossref PubMed Scopus (612) Google Scholar, 33Dennog C. Hartmann A. Frey G. Speit G. Mutagenesis. 1996; 11: 605-609Crossref PubMed Scopus (98) Google Scholar). The specificity of mAbs has also been utilized; mAbs to thymine glycol, for instance, are used in enzyme-linked immunosorbent assays of purified DNA (34Cooper P.K. Nouspikel T. Clarkson S.G. Leadon S.A. Science. 1997; 275: 990-993Crossref PubMed Scopus (285) Google Scholar). The ultimate power of mAbs, however, may lie in their ability to detect DNA damage in fixed cells and tissues in situ, as was recently reported for a mAb to oxo8Gua (35Yarborough A. Zhang Y.J. Hsu T.M. Santella R.M. Cancer Res. 1996; 56: 683-688PubMed Google Scholar). There is no single ideal method for measuring oxidative lesions, as all have their strengths and weaknesses. For instance, GC-MS and HPLC-EC are rigorously quantitative but require relatively large quantities of pure nucleic acids. Molecular biological methods like Q-PCR require less DNA but are not as specific in their detection. Cellular assays are ideal for analyzing tiny samples (hundreds of cells) and avoiding cellular disruption but are semi-quantitative. What is encouraging about recent results is the growing congruence between studies using different approaches. Until the last 2 years, it had become almost accepted wisdom that the role of the superoxide anion radical (O\u00b7\u03042) in DNA oxidation was its ability to reduce ferric iron (Fe3+) to ferrous iron (Fe2+); Fe2+ catalyzes the formation of the hydroxyl radical \u22c5OH (from H2O2) which, according to the scheme (referred to as Fenton chemistry), is the ultimate reactive species in DNA oxidation (6Henle E.S. Linn S. J. Biol. Chem. 1997; 272: 19095-19098Abstract Full Text Full Text PDF PubMed Scopus (470) Google Scholar). Support for the roles of all three components of this model (O\u00b7\u03042, iron, and H2O2) continues to accumulate (36Takeuchi T. Nakajima M. Morimoto K. Carcinogenesis. 1996; 17: 1543-1548Crossref PubMed Scopus (62) Google Scholar, 37Teixeira H.D. Meneghini R. Biochem. J. 1996; 315: 821-825Crossref PubMed Scopus (23) Google Scholar). However, as is discussed in the companion minireview by Henle and Linn (6Henle E.S. Linn S. J. Biol. Chem. 1997; 272: 19095-19098Abstract Full Text Full Text PDF PubMed Scopus (470) Google Scholar), the nuances of DNA oxidation have turned out to be more complex and interesting. For one, the nature of the ultimate oxidant responsible for DNA damage by H2O2 is unclear. Detailed experiments have illustrated that a model of freely diffusible\u22c5OH fails to account for the strikingly parallel dynamics of DNA strand scission in vitro and cytotoxicity of H2O2 to E. coli. Rather, multiple classes of oxidant appear to exist, associated with the DNA double helix to different extents (6Henle E.S. Linn S. J. Biol. Chem. 1997; 272: 19095-19098Abstract Full Text Full Text PDF PubMed Scopus (470) Google Scholar). Moreover, the role of O\u00b7\u03042 in reducing free ferric iron has been challenged by experiments suggesting that its principal role is to release iron from protein-bound iron-sulfur clusters (38Keyer K. Imlay J.A. Proc. Natl. Acad. Sci. U. S. A. 1996; 93: 13635-13640Crossref PubMed Scopus (671) Google Scholar). Besides O\u00b7\u03042, there are other reductants (such as NADH) that effectively reduce Fe3+ to Fe2+ and that may be more relevant as reductants of free or DNA-bound iron than is O\u00b7\u03042 (39Keyer K. Gort A.S. Imlay J.A. J. Bacteriol. 1995; 177: 6782-6790Crossref PubMed Scopus (182) Google Scholar). Copper (40Kasprzak K.S. Cancer Invest. 1995; 13: 411-430Crossref PubMed Scopus (261) Google Scholar) and less well studied transition metals such as chromium (41Tsou T.C. Chen C.L. J.L. Carcinogenesis. 1996; 17: PubMed Scopus Google Scholar) also in in DNA oxidation. such as also with other the adduct oxo8dG T. Cadet J. Free Radical Res. 1996; PubMed Scopus Google Scholar, S. S. Lett. 1995; PubMed Scopus Google Scholar, R.H. Mutat. Res. 1995; 339: PubMed Scopus Google Scholar). oxo8dG is more to than which the fact that more oxidative products than oxo8dG exist R.M. R. Free Radical Biol. Med. 1996; PubMed Scopus Google Scholar, T. Cadet J. Ames B.N. Chem. Res. Toxicol. 1996; PubMed Scopus Google Scholar). oxidative DNA adducts may be formed the of results in products that are to adducts T. Ames B.N. Chem. Res. Toxicol. 1994; PubMed Scopus Google Scholar). Recently, we have reported that the of protein-bound with in B.N. Shigenaga M.K. Hagen T.M. 1995; PubMed Scopus Google Scholar), suggesting that adducts may also increase with A is the evidence that DNA is not a of oxidative damage and DNA appears at more than DNA to oxidation by iron H. R. Carcinogenesis. 1996; 17: PubMed Scopus Google Scholar), and repair of a number of adducts is more rapid in DNA in the than in total B. B. R. Free Radical Biol. Med. 1997; PubMed Scopus Google Scholar). A of DNA oxidation involves the possibility that oxidation may be by the of the DNA double with have that oxidative damage may resulting in the formation of oxo8dG in at a from a oxidant 1996; PubMed Scopus Google Scholar). If such a is important in it may that the of DNA to or oxidation in In E. oxidative DNA damage is by pathways nucleotide and base The endonuclease which and oxidized and Fapy glycosylase (23Demple B. Harrison L. Annu. Rev. Biochem. 1994; 63: 915-948Crossref PubMed Scopus (1282) Google Scholar), which a similar role on oxidized The enzyme is one of three products in the a set of three repair enzymes that mutagenesis by by oxo8Gua with with oxo8Gua and by the oxidized nucleotide to the thereby its into DNA. Although a of oxidative repair enzymes it is important to the fact that of the E. coli activities may result in increases in the rate of mutagenesis and that or activities have been in the cloning of human of endonuclease III R. T. C. C.J. T. Proc. Natl. Acad. Sci. U. S. A. 1997; 94: PubMed Scopus Google Scholar), C. J. Bacteriol. 1996; PubMed Scopus Google Scholar), and K. M. T. T. S. H. M. J. Biol. Chem. 1993; Full Text PDF PubMed Google Scholar) and the recent of a activity M. A. K. S. Y. Kasai H. J. Mutat. Res. 1997; PubMed Scopus Google Scholar). As be of a of DNA damage, repair of oxidative lesions appears The cloning of in repair of oxidative damage and the of by will permit a of the hypotheses of cancer and C. J. Bacteriol. 1996; PubMed Scopus Google Scholar). possess in to their of The which an associated oxo8Gua lyase activity and is to the of E. may be one such A. L. J. 1996; PubMed Scopus Google Scholar). In to its in the a at between translation and DNA Moreover, of the human have been reported in and a associated with of the adduct oxo8dG. cells also the burden of DNA repair to their an which, early to the is to oxidative DNA damage Mutat. Res. 1995; PubMed Scopus Google Scholar). in to resulting from of there may be or associated with inefficient repair of In for instance, a in the repair of oxidative damage of and is observed Cancer Res. 1996; 56: Google Scholar). The of oxidative adducts in human cells appears to be In the of adducts ranged from to P. M. Nucleic Res. 1996; PubMed Scopus Google Scholar). In human repair of some adducts (for example, is so rapid that a of for their detection A. R. Halliwell B. Biochem. Res. 1996; PubMed Scopus Google Scholar). The of DNA adducts should be oxo8dG may appear and with an in the cells thymine and single-strand a result of may increase A. R. Halliwell B. Biochem. Res. 1996; PubMed Scopus Google Scholar). or the effect of a low to an that is at high M. Science. 1996; PubMed Scopus Google Scholar) may be relevant for some oxidative as has been to be the case for low radiation S. Mutat. Res. 1996; PubMed Scopus Google Scholar). oxygen of at for instance, oxidative DNA damage to cells on the of but fails to cause damage on C. Hartmann A. Frey G. Speit G. Mutagenesis. 1996; 11: 605-609Crossref PubMed Scopus (98) Google in it results in a of total and oxidative DNA of which oxidative adducts in chromatin, results in of some oxidative DNA adducts an B. B. R. Free Radical Biol. Med. 1997; PubMed Scopus Google Scholar), and other of the of oxidative damage by have (27Yakes F.M. Van Houten B. Proc. Natl. Acad. Sci. U. S. A. 1997; 94: 514-519Crossref PubMed Scopus (1413) Google Scholar). results are not since are induced in to oxidative a that has recently been to oxo8Gua glycosylase activity in E. coli Park Kasai H. S. Park Choi Chung M.H. Mutat. Res. 1996; PubMed Scopus Google Scholar) and Y.S. Choi J.Y. Park M.K. Choi E.M. Kasai H. Chung M.H. Mutat. Res. 1996; 364: 227-233Crossref PubMed Scopus (43) Google Scholar). This that there is a of in oxidative and repair and that cells may a burden of oxidative adducts that to the rate of and evidence that DNA oxidation is and is a major to human cancer three major and such as from (1Ames B.N. Shigenaga M.K. Hagen T.M. Proc. Natl. Acad. Sci. U. S. A. 1993; 90: 7915-7922Crossref PubMed Scopus (5354) Google Scholar, 3Loft S. Poulsen H.E. J. Mol. Med. 1996; 74: 297-312Crossref PubMed Scopus (822) Google Scholar, 7Ames B.N. Gold L.S. Willett W.C. Proc. Natl. Acad. Sci. U. S. A. 1995; 92: 5258-5265Crossref PubMed Scopus (1121) Google Scholar, J. 1996; 63: PubMed Scopus Google T.M. K.L. Park Ames B.N. Proc. Natl. Acad. Sci. U. S. A. 1997; 94: PubMed Scopus Google Scholar). high of and the and cells to of reactive such as and such as these may to as much as of all human and evidence of oxidative damage during is to the most recent DNA oxidation has been measured during cancer",
+      "venue": "Journal of Biological Chemistry",
+      "citation_count": 944,
+      "doi": "10.1074/jbc.272.32.19633",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1074/jbc.272.32.19633",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2884430236",
+      "title": "Machine learning for molecular and materials science",
+      "authors": [
+        {
+          "name": "Keith T. Butler",
+          "affiliation": "Research Complex at Harwell"
+        },
+        {
+          "name": "Daniel W. Davies",
+          "affiliation": "University of Bath"
+        },
+        {
+          "name": "Hugh Cartwright",
+          "affiliation": "University of Oxford"
+        },
+        {
+          "name": "Olexandr Isayev",
+          "affiliation": "University of North Carolina at Chapel Hill"
+        },
+        {
+          "name": "Aron Walsh",
+          "affiliation": "Yonsei University"
+        }
+      ],
+      "year": 2018,
+      "abstract": "",
+      "venue": "Nature",
+      "citation_count": 4378,
+      "doi": "10.1038/s41586-018-0337-2",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41586-018-0337-2",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W4210774372",
+      "title": "Hepatocellular carcinoma",
+      "authors": [
+        {
+          "name": "Josep M. Llovet",
+          "affiliation": "Instituci\u00f3 Catalana de Recerca i Estudis Avan\u00e7ats"
+        },
+        {
+          "name": "Robin Kate Kelley",
+          "affiliation": "University of California, San Francisco"
+        },
+        {
+          "name": "Augusto Villanueva",
+          "affiliation": "Icahn School of Medicine at Mount Sinai"
+        },
+        {
+          "name": "Amit G. Singal",
+          "affiliation": "The University of Texas Southwestern Medical Center"
+        },
+        {
+          "name": "Eli Pikarsky",
+          "affiliation": "Hebrew University of Jerusalem"
+        },
+        {
+          "name": "Sasan Roayaie",
+          "affiliation": "White Plains Hospital"
+        },
+        {
+          "name": "Riccardo Lencioni",
+          "affiliation": "University of Pisa"
+        },
+        {
+          "name": "Kazuhiko Koike",
+          "affiliation": "University of Tokyo Hospital"
+        },
+        {
+          "name": "Jessica Zucman\u2010Rossi",
+          "affiliation": "Inserm"
+        },
+        {
+          "name": "Richard S. Finn",
+          "affiliation": "University of California, Los Angeles"
+        }
+      ],
+      "year": 2021,
+      "abstract": "",
+      "venue": "Nature Reviews Disease Primers",
+      "citation_count": 6294,
+      "doi": "10.1038/s41572-020-00240-3",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.1038/s41572-020-00240-3",
+      "source": "openalex",
+      "_bibtex_override": ""
+    },
+    {
+      "paper_id": "oalex-W2291288208",
+      "title": "Wicked Problems in Design Thinking",
+      "authors": [
+        {
+          "name": "Richard Buchanan",
+          "affiliation": ""
+        }
+      ],
+      "year": 1992,
+      "abstract": "Abstract Only critical distancing let Godard value the premonitory potential of film, and at the same time, point out the incapacity to register the realness that it generated. The filmmaker has always believed that \u201cfilm is prophetic, it predicts and announces things\u201d, and that this condition corresponds to its essence as a record. Ranci\u00e8re in a lucid reading of Film History says that for Godard: \u201cfilm is responsible for not filming fields in their time; great for filming them before their time and guilty for not knowing how to recognize them\u201d. This article begins with these clear political propositions, as well as proposing some variations.",
+      "venue": "Design Issues",
+      "citation_count": 3409,
+      "doi": "10.2307/1511637",
+      "arxiv_id": "",
+      "url": "https://doi.org/10.2307/1511637",
+      "source": "openalex",
+      "_bibtex_override": ""
+    }
+  ]
+}
