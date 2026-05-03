@@ -22,6 +22,11 @@ pub mod activation;
 pub mod sequential;
 pub mod loss;
 pub mod dropout;
+pub mod conv_utils;
+pub mod conv2d;
+pub mod pool;
+pub mod batch_norm;
+pub mod layer_norm;
 
 // Re-exports pour confort
 pub use module::Module;
@@ -32,3 +37,8 @@ pub use activation::{ReLU, Sigmoid};
 pub use sequential::Sequential;
 pub use loss::{Loss, MseLoss, CrossEntropyLoss, NllLoss};
 pub use dropout::Dropout;
+pub use conv_utils::{Padding, ConvConfig};
+pub use conv2d::Conv2d;
+pub use pool::MaxPool2d;
+pub use batch_norm::BatchNorm1d;
+pub use layer_norm::LayerNorm;

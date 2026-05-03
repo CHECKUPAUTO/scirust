@@ -51,8 +51,10 @@ impl Dataset for InMemoryDataset {
 }
 
 pub mod mnist;
+pub mod cifar10;
 pub mod augment;
 pub mod loader;
 
 pub use loader::DataLoader;
 pub use mnist::MnistDataset;
+pub use cifar10::Cifar10Dataset;

@@ -2,6 +2,7 @@
 members = [
     "examples/mnist_classifier",
     "examples/quickstart_v2",
+    "examples/cifar10_classifier",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -12,8 +13,10 @@ members = [
     "scirust-learning",
     "scirust-symbolic",
     "scirust-reasoning",
+    "turboquant",
 ]
 exclude = [
+    "soullink-node-patched",
     "scirust-rustc-driver",
     "examples/demo",
     "examples/v2_features_demo",
