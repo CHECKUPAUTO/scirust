@@ -183,19 +183,20 @@ impl TensorND {
         let new_strides = compute_strides(&new_shape);
 
         // Parcours tous les éléments et les place à leur nouvelle position
+        let ndim = self.ndim();
+        let mut new_indices = vec![0usize; ndim];
+        let mut old_indices = vec![0usize; ndim];
         #[allow(clippy::needless_range_loop)]
         for flat_idx in 0..new_numel {
             // Convertir flat_idx en indices dans le nouveau tenseur
             let mut rem = flat_idx;
-            let mut new_indices = vec![0usize; self.ndim()];
-            for i in 0..self.ndim() {
+            for i in 0..ndim {
                 new_indices[i] = rem / new_strides[i];
                 rem %= new_strides[i];
             }
 
             // Trouver l'indice original
-            let mut old_indices = vec![0usize; self.ndim()];
-            for i in 0..self.ndim() {
+            for i in 0..ndim {
                 old_indices[axes[i]] = new_indices[i];
             }
 
@@ -237,16 +238,18 @@ impl TensorND {
         let new_strides = compute_strides(&new_shape);
 
         // Copie élément par élément
+        let ndim = self.ndim();
+        let mut new_indices = vec![0usize; ndim];
+        let mut old_indices = vec![0usize; ndim];
         #[allow(clippy::needless_range_loop)]
         for flat_idx in 0..new_numel {
             let mut rem = flat_idx;
-            let mut new_indices = vec![0usize; self.ndim()];
-            for i in 0..self.ndim() {
+            for i in 0..ndim {
                 new_indices[i] = rem / new_strides[i];
                 rem %= new_strides[i];
             }
 
-            let mut old_indices = new_indices.clone();
+            old_indices.copy_from_slice(&new_indices);
             old_indices[axis] += start;
             let old_flat = self.offset(&old_indices);
             new_data[flat_idx] = self.data[old_flat];

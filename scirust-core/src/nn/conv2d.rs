@@ -100,11 +100,13 @@ impl Conv2d {
         .expect("Conv2d::new failed — utilise try_new pour gérer l'erreur")
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.into();
         self
     }
 
+    #[must_use]
     pub fn input_dims(mut self, h: usize, w: usize) -> Self {
         self.cached_h = Some(h);
         self.cached_w = Some(w);

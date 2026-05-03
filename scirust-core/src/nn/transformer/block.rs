@@ -49,6 +49,7 @@ impl TransformerBlock {
         s
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.into();
         self.ln1.name  = format!("{}.ln1",  self.name);

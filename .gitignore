@@ -1,24 +1,40 @@
 # Build artifacts
-target/
-**/target/
-Cargo.lock.bak
-
-# Backup files
-*.bak
-*.old
-*.backup*
-*.stub.bak
-
-# Patch/backup directories
-soullink-node-patched/
+/target/
+Cargo.lock
+*.rlib
+*.so
+*.dylib
+*.dll
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+*.swp
+*.swo
 
 # OS
 .DS_Store
+Thumbs.db
 
-# MNIST data files (downloaded on demand)
-data/mnist/
-mnist/
+# Data
+/data/
+*.bin
+*.tar.gz
+*.zip
+
+# TurboQuant
+.turboquant-backup/
+turboquant/
+scripts/turboquant-*.sh
+systemd/turboquant-*.service
+
+# Cache
+.fastembed_cache/
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.bak
+*.lock

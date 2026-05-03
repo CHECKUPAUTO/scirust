@@ -49,16 +49,16 @@ impl Tensor {
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::add shape mismatch");
         let mut out = self.clone();
-        for i in 0..out.data.len() {
-            out.data[i] += other.data[i];
+        for (a, b) in out.data.iter_mut().zip(&other.data) {
+            *a += b;
         }
         out
     }
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::sub shape mismatch");
         let mut out = self.clone();
-        for i in 0..out.data.len() {
-            out.data[i] -= other.data[i];
+        for (a, b) in out.data.iter_mut().zip(&other.data) {
+            *a -= b;
         }
         out
     }
@@ -68,8 +68,8 @@ impl Tensor {
     pub fn div(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::div shape mismatch");
         let mut out = self.clone();
-        for i in 0..out.data.len() {
-            out.data[i] /= other.data[i];
+        for (a, b) in out.data.iter_mut().zip(&other.data) {
+            *a /= b;
         }
         out
     }
@@ -80,8 +80,8 @@ impl Tensor {
             "Tensor::hadamard shape mismatch"
         );
         let mut out = self.clone();
-        for i in 0..out.data.len() {
-            out.data[i] *= other.data[i];
+        for (a, b) in out.data.iter_mut().zip(&other.data) {
+            *a *= b;
         }
         out
     }
@@ -272,6 +272,23 @@ impl Tensor {
                 self.rows, self.cols, rows, cols
             );
         }
+    }
+}
+
+impl std::ops::Index<(usize, usize)> for Tensor {
+    type Output = f32;
+    fn index(&self, (row, col): (usize, usize)) -> &f32 {
+        assert!(row < self.rows, "row {} out of bounds (rows={})", row, self.rows);
+        assert!(col < self.cols, "col {} out of bounds (cols={})", col, self.cols);
+        &self.data[row * self.cols + col]
+    }
+}
+
+impl std::ops::IndexMut<(usize, usize)> for Tensor {
+    fn index_mut(&mut self, (row, col): (usize, usize)) -> &mut f32 {
+        assert!(row < self.rows, "row {} out of bounds (rows={})", row, self.rows);
+        assert!(col < self.cols, "col {} out of bounds (cols={})", col, self.cols);
+        &mut self.data[row * self.cols + col]
     }
 }
 
@@ -2489,5 +2506,88 @@ mod tests {
         });
 
         assert!(tape.is_grad_enabled()); // restaure
+    }
+
+    #[test]
+    fn tensor_index_read() {
+        let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
+        assert_eq!(t[(0, 0)], 1.0);
+        assert_eq!(t[(0, 2)], 3.0);
+        assert_eq!(t[(1, 0)], 4.0);
+        assert_eq!(t[(1, 2)], 6.0);
+    }
+
+    #[test]
+    fn tensor_index_mut_write() {
+        let mut t = Tensor::zeros(2, 3);
+        t[(1, 2)] = 7.0;
+        assert_eq!(t[(1, 2)], 7.0);
+        assert_eq!(t[(0, 0)], 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn tensor_index_panics_oob_row() {
+        let t = Tensor::zeros(2, 3);
+        let _ = t[(5, 0)];
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn tensor_index_panics_oob_col() {
+        let t = Tensor::zeros(2, 3);
+        let _ = t[(0, 5)];
+    }
+
+    #[test]
+    #[should_panic(expected = "size mismatch")]
+    fn tensor_from_vec_panics_on_size_mismatch() {
+        let _ = Tensor::from_vec(vec![1.0, 2.0, 3.0], 2, 2);
+    }
+
+    #[test]
+    fn tensor_from_vec_accepts_exact_size() {
+        let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        assert_eq!(t[(0, 0)], 1.0);
+        assert_eq!(t[(1, 1)], 4.0);
+    }
+
+    #[test]
+    fn matmul_identity() {
+        let tape = Tape::new();
+        let a = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let i = tape.input(Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], 2, 2));
+        let y = a.matmul(i);
+        assert_eq!(tape.value(y.idx()).data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "matmul")]
+    fn matmul_panics_on_incompatible_shapes() {
+        let tape = Tape::new();
+        let a = tape.input(Tensor::zeros(2, 3));
+        let b = tape.input(Tensor::zeros(4, 2));
+        let _ = a.matmul(b);
+    }
+
+    #[test]
+    fn softmax_single_element_is_one() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![5.0], 1, 1));
+        let y = x.softmax(1);
+        let v = tape.value(y.idx());
+        assert!((v.data[0] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn softmax_numerical_stability_large_values() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1000.0, 1001.0, 1002.0], 1, 3));
+        let y = x.softmax(1);
+        let v = tape.value(y.idx());
+        let sum: f32 = v.data.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5, "softmax should sum to 1, got {}", sum);
+        // Check no NaN/Inf
+        assert!(v.data.iter().all(|x| x.is_finite()));
     }
 }

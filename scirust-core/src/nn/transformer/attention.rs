@@ -43,6 +43,7 @@ impl MultiHeadAttention {
         }
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.into();
         self

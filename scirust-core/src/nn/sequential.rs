@@ -26,12 +26,14 @@ impl Sequential {
         Self { layers: Vec::new() }
     }
 
+    #[must_use]
     #[allow(clippy::should_implement_trait)]
     pub fn add<M: Module + 'static>(mut self, module: M) -> Self {
         self.layers.push(Box::new(module));
         self
     }
 
+    #[must_use]
     pub fn add_boxed(mut self, module: Box<dyn Module>) -> Self {
         self.layers.push(module);
         self

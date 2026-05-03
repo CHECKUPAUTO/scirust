@@ -36,6 +36,7 @@ impl LayerNorm {
         }
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.into();
         self
@@ -152,5 +153,39 @@ mod tests {
         let g = tape.grad(x_idx);
         // Gradient existe et n'est pas nul partout
         assert!(g.data.iter().any(|&v| v.abs() > 1e-6));
+    }
+
+    #[test]
+    fn layer_norm_multi_row() {
+        let mut rng = PcgEngine::new(1);
+        let mut ln = LayerNorm::new(2, 1e-5, &Zeros, &mut rng);
+        ln.gamma = Tensor::from_vec(vec![1.0, 1.0], 1, 2);
+        ln.beta = Tensor::zeros(1, 2);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 3.0, 2.0, 4.0], 2, 2));
+        let y = ln.forward(&tape, x);
+        let v = tape.value(y.idx());
+        // Row 0: mean=2, std=1 → [-1, 1]
+        assert!((v.data[0] - (-1.0)).abs() < 1e-4);
+        assert!((v.data[1] - 1.0).abs() < 1e-4);
+        // Row 1: mean=3, std=1 → [-1, 1]
+        assert!((v.data[2] - (-1.0)).abs() < 1e-4);
+        assert!((v.data[3] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn layer_norm_state_dict_round_trip() {
+        let mut rng = PcgEngine::new(1);
+        let ln1 = LayerNorm::new(4, 1e-5, &Zeros, &mut rng);
+        let sd = ln1.state_dict();
+        assert_eq!(sd.len(), 2);
+        assert!(sd.contains_key("layer_norm/gamma"));
+        assert!(sd.contains_key("layer_norm/beta"));
+
+        let mut rng2 = PcgEngine::new(99);
+        let mut ln2 = LayerNorm::new(4, 1e-5, &Zeros, &mut rng2);
+        ln2.load_state_dict(&sd).unwrap();
+        assert_eq!(ln2.gamma.data, ln1.gamma.data);
+        assert_eq!(ln2.beta.data, ln1.beta.data);
     }
 }

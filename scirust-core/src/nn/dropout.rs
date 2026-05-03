@@ -169,4 +169,30 @@ mod tests {
 
         assert_eq!(v1.data, v2.data, "Same seed should produce identical masks");
     }
+
+    #[test]
+    fn dropout_p_zero_is_identity() {
+        let mut dropout = Dropout::new(0.0, 42);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let y = dropout.forward(&tape, x);
+        let v = tape.value(y.idx());
+        assert_eq!(v.data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn dropout_p_high_mostly_zeros() {
+        let mut dropout = Dropout::new(0.99, 42);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0; 1000], 10, 100));
+        let y = dropout.forward(&tape, x);
+        let v = tape.value(y.idx());
+        let n_zeros = v.data.iter().filter(|&&x| x == 0.0).count();
+        // With p=0.99, expect ~99% zeros, accept >95%
+        assert!(
+            n_zeros > 950,
+            "Dropout p=0.99: expected mostly zeros, got {} zeros out of 1000",
+            n_zeros
+        );
+    }
 }
