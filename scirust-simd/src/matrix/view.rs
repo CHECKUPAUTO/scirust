@@ -26,6 +26,7 @@ impl<'a, T: Copy> MatrixView<'a, T> {
 
 #[derive(Debug)]
 pub struct MatrixViewMut<'a, T> {
+    #[allow(dead_code)]
     data: &'a mut [T],
     rows: usize,
     cols: usize,

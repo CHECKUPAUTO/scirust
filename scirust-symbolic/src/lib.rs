@@ -519,7 +519,6 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
 
 /// Check if two expressions are equivalent by evaluating at random points.
 pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
-    use std::hash::{Hasher, BuildHasher};
     let vars = vec!["x", "y", "z", "u", "v", "w"];
     for i in 0..20 {
         let mut bindings = HashMap::new();

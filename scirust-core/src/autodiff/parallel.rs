@@ -356,6 +356,21 @@ impl ParallelTape {
                     let diff = g_broadcast.sub(&sm.hadamard(&sum_g.broadcast_to(av.rows, av.cols)));
                     t_grads[input] = t_grads[input].add(&diff);
                 }
+                Op::Broadcast { input, rows, cols } => {
+                    let av = &values[input];
+                    let g_sum = if av.rows == rows && av.cols == cols {
+                        g.clone()
+                    } else if av.rows == 1 && av.cols == cols {
+                        g.sum_axis(0)
+                    } else if av.rows == rows && av.cols == 1 {
+                        g.sum_axis(1)
+                    } else if av.rows == 1 && av.cols == 1 {
+                        Tensor::from_vec(vec![g.sum()], 1, 1)
+                    } else {
+                        panic!("Broadcast backward: unsupported shape ({},{}) -> ({},{})", av.rows, av.cols, rows, cols);
+                    };
+                    t_grads[input] = t_grads[input].add(&g_sum);
+                }
 
                 Op::Transpose2d(a) => {
                     t_grads[a] = t_grads[a].add(&g.transpose());

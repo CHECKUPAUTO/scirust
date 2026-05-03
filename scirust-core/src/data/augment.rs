@@ -1,7 +1,5 @@
 //! Data augmentation pipeline — V10A
 
-use rand::Rng;
-
 /// Dimensions d'une image (channels, height, width)
 #[derive(Clone, Copy, Debug)]
 pub struct ImageDims {
@@ -228,7 +226,7 @@ impl Transform for Compose {
 // AugmentedDataset
 // ──────────────────────────────────────────
 
-use super::{Dataset, InMemoryDataset};
+use super::{InMemoryDataset};
 
 /// Wrapper Dataset qui applique des transforms à la volée.
 pub struct AugmentedDataset {

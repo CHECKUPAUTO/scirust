@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn linear_state_dict_round_trip() {
         let mut rng = PcgEngine::new(42);
-        let mut lin1 = Linear::new(2, 3, &KaimingNormal, &Zeros, &mut rng);
+        let lin1 = Linear::new(2, 3, &KaimingNormal, &Zeros, &mut rng);
         let sd = lin1.state_dict();
 
         // Create a second Linear with different weights and load state_dict from first

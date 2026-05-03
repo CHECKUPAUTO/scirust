@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "examples/mnist_classifier",
     "examples/quickstart_v2",
     "scirust-macros",
     "scirust-autodiff",

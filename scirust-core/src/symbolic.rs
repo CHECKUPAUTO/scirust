@@ -593,6 +593,7 @@ pub struct Optimizer {
     pub lr: f64,
     pub momentum: f64,
     pub max_iter: usize,
+    #[allow(dead_code)]
     velocity: HashMap<usize, f64>,
 }
 

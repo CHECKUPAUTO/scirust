@@ -59,10 +59,8 @@ impl Loss for CrossEntropyLoss {
         // 6) log(Z_per_row) — shape (batch, 1)
         let log_z = z_per_row.log();  // (batch, 1)
 
-        // 7) Broadcast log_z sur (batch, n_classes) via ones matmul
-        // log_z (batch, 1) @ ones(1, n_classes) = (batch, n_classes)
-        let ones_row = tape.input(Tensor::from_vec(vec![1.0; n_classes], 1, n_classes));
-        let log_z_broadcast = log_z.matmul(ones_row);   // (batch, n_classes)
+        // 7) Broadcast log_z sur (batch, n_classes) via broadcast natif
+        let log_z_broadcast = log_z.broadcast(batch, n_classes);   // (batch, n_classes)
 
         // 8) log_softmax = shifted - log_z_broadcast
         let log_softmax = shifted.sub(log_z_broadcast);
