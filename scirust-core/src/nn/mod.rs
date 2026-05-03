@@ -29,4 +29,4 @@ pub use init::{Initializer, KaimingNormal, XavierUniform, Zeros, SmallNormal};
 pub use linear::Linear;
 pub use activation::{ReLU, Sigmoid};
 pub use sequential::Sequential;
-pub use loss::{Loss, MseLoss, CrossEntropyLoss};
+pub use loss::{Loss, MseLoss, CrossEntropyLoss, NllLoss};

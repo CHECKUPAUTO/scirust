@@ -19,7 +19,8 @@
 // (utilisable derrière `Box<dyn Module>`). Les méthodes ne sont donc pas
 // génériques sur le lifetime.
 
-use crate::autodiff::reverse::{Tape, Var};
+use crate::autodiff::reverse::{Tape, Var, Tensor};
+use std::collections::HashMap;
 
 pub trait Module {
     /// Forward pass : push les ops sur la tape, retourne la Var sortie.
@@ -35,15 +36,15 @@ pub trait Module {
     /// Met à jour les Tensor stockés dans la struct du module.
     fn sync(&mut self, tape: &Tape);
 
-    /// Return the module's parameters as a map of name -> ndarray f64 tensor.
+    /// Return the module's parameters as a map of name -> Tensor.
     /// Used for checkpoint saving via `save_state_dict`.
-    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
-        std::collections::HashMap::new()
+    fn state_dict(&self) -> HashMap<String, Tensor> {
+        HashMap::new()
     }
 
     /// Load parameters from a state dict produced by `state_dict()`.
     /// Each module implementation should match parameter names and shapes.
-    fn load_state_dict(&mut self, _state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
-        // default: no-op
+    fn load_state_dict(&mut self, _sd: &HashMap<String, Tensor>) -> Result<(), String> {
+        Ok(())
     }
 }

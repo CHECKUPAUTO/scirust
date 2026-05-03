@@ -69,46 +69,25 @@ impl Module for Linear {
         if let Some(i) = self.last_b_idx { self.bias   = tape.value(i); }
     }
 
-    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
+    fn state_dict(&self) -> std::collections::HashMap<String, Tensor> {
         let mut map = std::collections::HashMap::new();
-        // Convert weight Tensor -> ndarray ArrayD<f64>
-        let w_shape = ndarray::IxDyn(&[self.weight.rows, self.weight.cols]);
-        let w_data: Vec<f64> = self.weight.data.iter().map(|&x| x as f64).collect();
-        map.insert("weight".to_string(), ndarray::ArrayD::from_shape_vec(w_shape, w_data).unwrap());
-
-        // Convert bias Tensor -> ndarray ArrayD<f64>
-        let b_shape = ndarray::IxDyn(&[self.bias.rows, self.bias.cols]);
-        let b_data: Vec<f64> = self.bias.data.iter().map(|&x| x as f64).collect();
-        map.insert("bias".to_string(), ndarray::ArrayD::from_shape_vec(b_shape, b_data).unwrap());
+        map.insert("weight".to_string(), self.weight.clone());
+        map.insert("bias".to_string(), self.bias.clone());
         map
     }
 
-    fn load_state_dict(&mut self, state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
-        if let Some(w) = state.get("weight") {
-            let expected = self.in_features * self.out_features;
-            let got: usize = w.shape().iter().product();
-            if got != expected {
-                panic!("Linear::load_state_dict: weight size mismatch: expected {}, got {}", expected, got);
-            }
-            let flat: Vec<f32> = w.iter().map(|&x| x as f32).collect();
-            self.weight.data = flat;
-            // Shape may be different from in_features x out_features due to transposition conventions;
-            // we keep the module's stored shape but update the data values.
-            // Reshape if needed:
-            if w.shape().len() == 2 {
-                self.weight.rows = w.shape()[0];
-                self.weight.cols = w.shape()[1];
-            }
+    fn load_state_dict(&mut self, sd: &std::collections::HashMap<String, Tensor>) -> Result<(), String> {
+        let w = sd.get("weight").ok_or_else(|| "missing key: weight".to_string())?;
+        let b = sd.get("bias").ok_or_else(|| "missing key: bias".to_string())?;
+        if w.shape() != (self.in_features, self.out_features) {
+            return Err(format!("weight shape mismatch: expected {:?}, got {:?}", (self.in_features, self.out_features), w.shape()));
         }
-        if let Some(b) = state.get("bias") {
-            let flat: Vec<f32> = b.iter().map(|&x| x as f32).collect();
-            self.bias.data = flat;
-            if b.shape().len() >= 1 {
-                let n = b.shape()[0];
-                self.bias.rows = 1;
-                self.bias.cols = n;
-            }
+        if b.shape() != (1, self.out_features) {
+            return Err(format!("bias shape mismatch: expected {:?}, got {:?}", (1, self.out_features), b.shape()));
         }
+        self.weight = w.clone();
+        self.bias = b.clone();
+        Ok(())
     }
 }
 
@@ -212,10 +191,10 @@ mod tests {
         assert_eq!(sd.len(), 2);
 
         let w = sd.get("weight").unwrap();
-        assert_eq!(w.shape(), &[3, 5]);
+        assert_eq!(w.shape(), (3, 5));
 
         let b = sd.get("bias").unwrap();
-        assert_eq!(b.shape(), &[1, 5]);
+        assert_eq!(b.shape(), (1, 5));
     }
 
     #[test]
@@ -230,10 +209,22 @@ mod tests {
         // Before load, lin2 has all zeros
         assert!(lin2.weight.data.iter().all(|&x| x == 0.0));
 
-        lin2.load_state_dict(sd);
+        lin2.load_state_dict(&sd).unwrap();
 
         // After load, lin2 should match lin1
         assert_eq!(lin2.weight.data, lin1.weight.data);
         assert_eq!(lin2.bias.data, lin1.bias.data);
+    }
+
+    #[test]
+    fn linear_load_missing_keys_returns_error() {
+        let mut rng = PcgEngine::new(42);
+        let mut lin = Linear::new(2, 3, &KaimingNormal, &Zeros, &mut rng);
+        let mut sd = std::collections::HashMap::new();
+        sd.insert("weight".to_string(), Tensor::zeros(2, 3));
+        // missing bias
+        let res = lin.load_state_dict(&sd);
+        assert!(res.is_err(), "expected error for missing bias");
+        assert!(res.unwrap_err().contains("bias"), "error should mention missing key");
     }
 }

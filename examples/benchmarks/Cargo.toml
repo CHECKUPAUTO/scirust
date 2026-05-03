@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "benchmarks"
 version = "0.1.0"
@@ -12,4 +14,12 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
 name = "simd_vs_scalar"
+harness = false
+
+[[bench]]
+name = "nn_ops"
+harness = false
+
+[[bench]]
+name = "io_bench"
 harness = false

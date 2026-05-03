@@ -14,7 +14,7 @@
 // Les paramètres sont la concaténation des paramètres de tous les sous-modules.
 // sync() propage à tous les sous-modules.
 
-use crate::autodiff::reverse::{Tape, Var};
+use crate::autodiff::reverse::{Tape, Var, Tensor};
 use crate::nn::module::Module;
 
 pub struct Sequential {
@@ -34,6 +34,10 @@ impl Sequential {
     pub fn add_boxed(mut self, module: Box<dyn Module>) -> Self {
         self.layers.push(module);
         self
+    }
+
+    pub fn from_layers(layers: Vec<Box<dyn Module>>) -> Self {
+        Self { layers }
     }
 
     pub fn len(&self) -> usize { self.layers.len() }
@@ -67,7 +71,7 @@ impl Module for Sequential {
         }
     }
 
-    fn state_dict(&self) -> std::collections::HashMap<String, ndarray::ArrayD<f64>> {
+    fn state_dict(&self) -> std::collections::HashMap<String, Tensor> {
         let mut map = std::collections::HashMap::new();
         for (i, layer) in self.layers.iter().enumerate() {
             let inner = layer.state_dict();
@@ -78,18 +82,21 @@ impl Module for Sequential {
         map
     }
 
-    fn load_state_dict(&mut self, state: std::collections::HashMap<String, ndarray::ArrayD<f64>>) {
-        // Group parameters by layer index prefix e.g. "0.weight" -> layer 0
-        for (i, layer) in self.layers.iter_mut().enumerate() {
-            let prefix = format!("{}.", i);
-            let mut inner: std::collections::HashMap<String, ndarray::ArrayD<f64>> = std::collections::HashMap::new();
-            for (k, v) in &state {
-                if let Some(stripped) = k.strip_prefix(&prefix) {
-                    inner.insert(stripped.to_string(), v.clone());
+    fn load_state_dict(&mut self, state: &std::collections::HashMap<String, Tensor>) -> Result<(), String> {
+        let mut grouped: std::collections::HashMap<usize, std::collections::HashMap<String, Tensor>> = std::collections::HashMap::new();
+        for (k, v) in state {
+            if let Some((idx_str, rest)) = k.split_once('.') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    grouped.entry(idx).or_default().insert(rest.to_string(), v.clone());
                 }
             }
-            layer.load_state_dict(inner);
         }
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            if let Some(inner) = grouped.get(&i) {
+                layer.load_state_dict(inner)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -231,5 +238,62 @@ mod tests {
         assert_eq!(correct, 4,
             "MLP n'a pas appris XOR. Prédictions: {:?}, targets: {:?}",
             final_predictions, targets);
+    }
+
+    #[test]
+    fn sequential_state_dict_indexed() {
+        let mut rng = PcgEngine::new(42);
+        let mlp = Sequential::new()
+            .add(Linear::new(2, 4, &KaimingNormal, &Zeros, &mut rng))
+            .add(ReLU::new())
+            .add(Linear::new(4, 1, &KaimingNormal, &Zeros, &mut rng));
+
+        let sd = mlp.state_dict();
+        // Linear layers at indices 0 and 2; ReLU at index 1 has no params
+        assert!(sd.contains_key("0.weight"), "expected 0.weight");
+        assert!(sd.contains_key("0.bias"), "expected 0.bias");
+        assert!(!sd.contains_key("1.weight"), "ReLU should not have weight");
+        assert!(sd.contains_key("2.weight"), "expected 2.weight");
+        assert!(sd.contains_key("2.bias"), "expected 2.bias");
+    }
+
+    #[test]
+    fn sequential_load_state_dict_handles_indices_above_9() {
+        let mut rng = PcgEngine::new(42);
+        let mut layers: Vec<Box<dyn Module>> = Vec::new();
+        for _ in 0..11 {
+            layers.push(Box::new(
+                Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng)
+            ));
+        }
+        let seq = Sequential::from_layers(layers);
+
+        let state = seq.state_dict();
+        // Doit contenir "0.weight", ..., "10.weight"
+        assert!(state.contains_key("10.weight"));
+        assert!(state.contains_key("10.bias"));
+
+        // Reload et vérifie que rien n'a fui d'index croisés.
+        let mut rng2 = PcgEngine::new(99);
+        let mut layers2: Vec<Box<dyn Module>> = Vec::new();
+        for _ in 0..11 {
+            layers2.push(Box::new(
+                Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng2)
+            ));
+        }
+        let mut seq2 = Sequential::from_layers(layers2);
+        seq2.load_state_dict(&state).unwrap();
+
+        // Les poids du layer 1 dans seq2 doivent venir du layer 1 de seq,
+        // pas du layer 10.
+        let s2_state = seq2.state_dict();
+        assert_eq!(
+            s2_state["1.weight"].data,
+            state["1.weight"].data
+        );
+        assert_eq!(
+            s2_state["10.weight"].data,
+            state["10.weight"].data
+        );
     }
 }

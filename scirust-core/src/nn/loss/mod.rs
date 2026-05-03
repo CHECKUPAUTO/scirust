@@ -11,9 +11,11 @@
 
 pub mod mse;
 pub mod cross_entropy;
+pub mod nll;
 
 pub use mse::MseLoss;
 pub use cross_entropy::CrossEntropyLoss;
+pub use nll::NllLoss;
 
 use crate::autodiff::reverse::{Tape, Var};
 
