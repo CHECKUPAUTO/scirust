@@ -1,7 +1,7 @@
 use crate::autodiff::reverse::Tensor;
 use crate::data::Dataset;
 use crate::tensor::tensor_nd::TensorND;
-use rand::{SeedableRng, RngCore};
+use rand::{RngCore, SeedableRng};
 
 pub struct DataLoader<D: Dataset> {
     dataset: D,
@@ -37,7 +37,10 @@ impl<D: Dataset> DataLoader<D> {
     }
 
     pub fn iter(&mut self) -> DataLoaderIter<'_, D> {
-        DataLoaderIter { loader: self, pos: 0 }
+        DataLoaderIter {
+            loader: self,
+            pos: 0,
+        }
     }
 
     pub fn iter_nd(
@@ -70,7 +73,9 @@ impl<'a, D: Dataset> Iterator for DataLoaderIter<'a, D> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let n = self.loader.dataset.n_samples();
-        if self.pos >= n { return None; }
+        if self.pos >= n {
+            return None;
+        }
         let end = (self.pos + self.loader.batch_size).min(n);
         let bs = end - self.pos;
         let x_dim = self.loader.dataset.sample(0).0.len();
@@ -84,7 +89,10 @@ impl<'a, D: Dataset> Iterator for DataLoaderIter<'a, D> {
             y_data.extend_from_slice(y);
         }
         self.pos = end;
-        Some((Tensor::from_vec(x_data, bs, x_dim), Tensor::from_vec(y_data, bs, y_dim)))
+        Some((
+            Tensor::from_vec(x_data, bs, x_dim),
+            Tensor::from_vec(y_data, bs, y_dim),
+        ))
     }
 }
 
@@ -104,8 +112,7 @@ mod tests {
         let dataset = InMemoryDataset::new(x_data, y_data, x_dim, y_dim);
 
         let mut loader = DataLoader::new(dataset, 4, false, 42);
-        let (x_batch, y_batch) = loader.iter_nd(&[3, 4, 5], &[2]
-        ).next().unwrap();
+        let (x_batch, y_batch) = loader.iter_nd(&[3, 4, 5], &[2]).next().unwrap();
 
         assert_eq!(x_batch.shape(), &[4, 3, 4, 5]);
         assert_eq!(y_batch.shape(), &[4, 2]);
@@ -134,7 +141,10 @@ mod tests {
         loader2.shuffle_epoch(0);
         let (x2, _) = loader2.iter_nd(&[2, 3], &[1]).next().unwrap();
 
-        assert_eq!(x1.data, x2.data, "Same seed should produce identical shuffled batches");
+        assert_eq!(
+            x1.data, x2.data,
+            "Same seed should produce identical shuffled batches"
+        );
     }
 
     #[test]
@@ -147,8 +157,7 @@ mod tests {
         let dataset = InMemoryDataset::new(x_data, y_data, x_dim, y_dim);
 
         let mut loader = DataLoader::new(dataset, 3, false, 42);
-        let mut batches = loader.iter_nd(&[2, 2], &[1]
-        );
+        let mut batches = loader.iter_nd(&[2, 2], &[1]);
 
         let (x1, _) = batches.next().unwrap();
         assert_eq!(x1.shape(), &[3, 2, 2]);

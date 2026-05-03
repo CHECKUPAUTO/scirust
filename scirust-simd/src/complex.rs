@@ -22,21 +22,31 @@ pub struct Complex<T> {
 
 impl<T: Copy> Complex<T> {
     #[inline]
-    pub const fn new(re: T, im: T) -> Self { Self { re, im } }
+    pub const fn new(re: T, im: T) -> Self {
+        Self { re, im }
+    }
 }
 
 impl Complex<f32> {
     pub const ZERO: Self = Self { re: 0.0, im: 0.0 };
-    pub const ONE:  Self = Self { re: 1.0, im: 0.0 };
-    pub const I:    Self = Self { re: 0.0, im: 1.0 };
+    pub const ONE: Self = Self { re: 1.0, im: 0.0 };
+    pub const I: Self = Self { re: 0.0, im: 1.0 };
 
     #[inline]
-    pub fn norm_sqr(self) -> f32 { self.re * self.re + self.im * self.im }
+    pub fn norm_sqr(self) -> f32 {
+        self.re * self.re + self.im * self.im
+    }
 
     #[inline]
-    pub fn conj(self) -> Self { Self { re: self.re, im: -self.im } }
+    pub fn conj(self) -> Self {
+        Self {
+            re: self.re,
+            im: -self.im,
+        }
+    }
 
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: Self) -> Self {
         Self {
             re: self.re * other.re - self.im * other.im,
@@ -75,12 +85,18 @@ pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
     let src_f = as_f32(src);
 
     let (pre, mid_dst, suf_dst) = dst_f.as_simd_mut::<8>();
-    let (_, mid_src, _)         = src_f.as_simd::<8>();
+    let (_, mid_src, _) = src_f.as_simd::<8>();
 
-    for (d, s) in pre.iter_mut().zip(src_f.iter()) { *d += s; }
-    for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter()) { *vd += vs; }
+    for (d, s) in pre.iter_mut().zip(src_f.iter()) {
+        *d += s;
+    }
+    for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter()) {
+        *vd += vs;
+    }
     let offset = pre.len() + mid_dst.len() * 8;
-    for (d, s) in suf_dst.iter_mut().zip(src_f[offset..].iter()) { *d += s; }
+    for (d, s) in suf_dst.iter_mut().zip(src_f[offset..].iter()) {
+        *d += s;
+    }
 }
 
 #[cfg(not(feature = "portable-simd"))]
@@ -112,11 +128,7 @@ pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
 //                = [a0_re*b0_re - a0_im*b0_im, a0_re*b0_im + a0_im*b0_re, ...]
 
 #[cfg(feature = "portable-simd")]
-pub fn complex_mul_f32(
-    dst: &mut [Complex<f32>],
-    a: &[Complex<f32>],
-    b: &[Complex<f32>],
-) {
+pub fn complex_mul_f32(dst: &mut [Complex<f32>], a: &[Complex<f32>], b: &[Complex<f32>]) {
     use std::simd::{f32x8, simd_swizzle};
     assert!(dst.len() == a.len() && a.len() == b.len());
 
@@ -156,12 +168,10 @@ pub fn complex_mul_f32(
 }
 
 #[cfg(not(feature = "portable-simd"))]
-pub fn complex_mul_f32(
-    dst: &mut [Complex<f32>],
-    a: &[Complex<f32>],
-    b: &[Complex<f32>],
-) {
-    for i in 0..a.len() { dst[i] = a[i].mul(b[i]); }
+pub fn complex_mul_f32(dst: &mut [Complex<f32>], a: &[Complex<f32>], b: &[Complex<f32>]) {
+    for i in 0..a.len() {
+        dst[i] = a[i].mul(b[i]);
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -179,7 +189,7 @@ pub fn complex_dot_hermitian_f32(a: &[Complex<f32>], b: &[Complex<f32>]) -> Comp
 
     #[cfg(feature = "portable-simd")]
     {
-        use std::simd::{f32x8, simd_swizzle, num::SimdFloat};
+        use std::simd::{f32x8, num::SimdFloat, simd_swizzle};
 
         let a_f = as_f32(a);
         let b_f = as_f32(b);
@@ -248,14 +258,23 @@ pub fn complex_norm_l2_f32(v: &[Complex<f32>]) -> f32 {
         let mut acc = f32x8::splat(0.0);
         let (pre, mid, suf) = v_f.as_simd::<8>();
         let mut scalar_acc = 0.0f32;
-        for x in pre { scalar_acc += x * x; }
-        for vx in mid { acc += vx * vx; }
-        for x in suf { scalar_acc += x * x; }
+        for x in pre {
+            scalar_acc += x * x;
+        }
+        for vx in mid {
+            acc += vx * vx;
+        }
+        for x in suf {
+            scalar_acc += x * x;
+        }
         (scalar_acc + acc.reduce_sum()).sqrt()
     }
     #[cfg(not(feature = "portable-simd"))]
     {
-        v.iter().map(|c| c.re * c.re + c.im * c.im).sum::<f32>().sqrt()
+        v.iter()
+            .map(|c| c.re * c.re + c.im * c.im)
+            .sum::<f32>()
+            .sqrt()
     }
 }
 
@@ -269,7 +288,7 @@ mod tests {
     #[test]
     fn test_complex_add() {
         let mut dst = vec![Complex::new(1.0f32, 2.0); 5];
-        let src     = vec![Complex::new(3.0f32, -1.0); 5];
+        let src = vec![Complex::new(3.0f32, -1.0); 5];
         complex_add_f32(&mut dst, &src);
         for c in &dst {
             assert!((c.re - 4.0).abs() < 1e-6);
@@ -291,17 +310,29 @@ mod tests {
     #[test]
     fn test_complex_mul_simd_chunk() {
         // Test avec 4 complexes (= 1 chunk SIMD)
-        let a: Vec<_> = (0..4).map(|i| Complex::new(i as f32, (i + 1) as f32)).collect();
-        let b: Vec<_> = (0..4).map(|i| Complex::new((i * 2) as f32, (i + 3) as f32)).collect();
+        let a: Vec<_> = (0..4)
+            .map(|i| Complex::new(i as f32, (i + 1) as f32))
+            .collect();
+        let b: Vec<_> = (0..4)
+            .map(|i| Complex::new((i * 2) as f32, (i + 3) as f32))
+            .collect();
         let mut dst = vec![Complex::ZERO; 4];
         complex_mul_f32(&mut dst, &a, &b);
 
         for i in 0..4 {
             let expected = a[i].mul(b[i]);
-            assert!((dst[i].re - expected.re).abs() < 1e-4,
-                    "re mismatch at {i}: {} vs {}", dst[i].re, expected.re);
-            assert!((dst[i].im - expected.im).abs() < 1e-4,
-                    "im mismatch at {i}: {} vs {}", dst[i].im, expected.im);
+            assert!(
+                (dst[i].re - expected.re).abs() < 1e-4,
+                "re mismatch at {i}: {} vs {}",
+                dst[i].re,
+                expected.re
+            );
+            assert!(
+                (dst[i].im - expected.im).abs() < 1e-4,
+                "im mismatch at {i}: {} vs {}",
+                dst[i].im,
+                expected.im
+            );
         }
     }
 
@@ -309,9 +340,9 @@ mod tests {
     fn test_complex_dot_hermitian_self() {
         // <a, a> = sum |a_i|² (réel pur)
         let a = vec![
-            Complex::new(3.0f32, 4.0),    // |.|² = 25
-            Complex::new(1.0f32, 0.0),    // |.|² = 1
-            Complex::new(0.0f32, 2.0),    // |.|² = 4
+            Complex::new(3.0f32, 4.0), // |.|² = 25
+            Complex::new(1.0f32, 0.0), // |.|² = 1
+            Complex::new(0.0f32, 2.0), // |.|² = 4
         ];
         let result = complex_dot_hermitian_f32(&a, &a);
         assert!((result.re - 30.0).abs() < 1e-5);

@@ -12,10 +12,10 @@
 //   data_batch_1.bin … data_batch_5.bin  (train)
 //   test_batch.bin                        (test)
 
+use crate::data::InMemoryDataset;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
-use crate::data::InMemoryDataset;
 
 pub const CIFAR10_IMAGE_SIZE: usize = 32 * 32 * 3;
 pub const CIFAR10_N_CLASSES: usize = 10;
@@ -30,8 +30,14 @@ pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<
     let record_size = 3073;
     let n = raw.len() / record_size;
     if raw.len() % record_size != 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData,
-            format!("taille fichier CIFAR-10 invalide : {} non divisible par {}", raw.len(), record_size)));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "taille fichier CIFAR-10 invalide : {} non divisible par {}",
+                raw.len(),
+                record_size
+            ),
+        ));
     }
 
     let mut images = vec![0.0f32; n * CIFAR10_IMAGE_SIZE];
@@ -51,11 +57,11 @@ pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<
 /// Dataset CIFAR-10 complet (train + test).
 pub struct Cifar10Dataset {
     pub n_train: usize,
-    pub n_test:  usize,
+    pub n_test: usize,
     pub images_train: Vec<f32>,
     pub labels_train_one_hot: Vec<f32>,
     pub labels_train_raw: Vec<u8>,
-    pub images_test:  Vec<f32>,
+    pub images_test: Vec<f32>,
     pub labels_test_one_hot: Vec<f32>,
     pub labels_test_raw: Vec<u8>,
 }
@@ -89,7 +95,8 @@ impl Cifar10Dataset {
         }
 
         Ok(Self {
-            n_train, n_test,
+            n_train,
+            n_test,
             images_train: train_images,
             labels_train_one_hot: train_one_hot,
             labels_train_raw: train_labels_raw,
@@ -103,7 +110,8 @@ impl Cifar10Dataset {
         InMemoryDataset::new(
             self.images_train.clone(),
             self.labels_train_one_hot.clone(),
-            CIFAR10_IMAGE_SIZE, CIFAR10_N_CLASSES,
+            CIFAR10_IMAGE_SIZE,
+            CIFAR10_N_CLASSES,
         )
     }
 
@@ -111,7 +119,8 @@ impl Cifar10Dataset {
         InMemoryDataset::new(
             self.images_test.clone(),
             self.labels_test_one_hot.clone(),
-            CIFAR10_IMAGE_SIZE, CIFAR10_N_CLASSES,
+            CIFAR10_IMAGE_SIZE,
+            CIFAR10_N_CLASSES,
         )
     }
 
@@ -120,7 +129,8 @@ impl Cifar10Dataset {
         InMemoryDataset::new(
             self.images_train[..n * CIFAR10_IMAGE_SIZE].to_vec(),
             self.labels_train_one_hot[..n * CIFAR10_N_CLASSES].to_vec(),
-            CIFAR10_IMAGE_SIZE, CIFAR10_N_CLASSES,
+            CIFAR10_IMAGE_SIZE,
+            CIFAR10_N_CLASSES,
         )
     }
 
@@ -129,7 +139,8 @@ impl Cifar10Dataset {
         InMemoryDataset::new(
             self.images_test[..n * CIFAR10_IMAGE_SIZE].to_vec(),
             self.labels_test_one_hot[..n * CIFAR10_N_CLASSES].to_vec(),
-            CIFAR10_IMAGE_SIZE, CIFAR10_N_CLASSES,
+            CIFAR10_IMAGE_SIZE,
+            CIFAR10_N_CLASSES,
         )
     }
 }

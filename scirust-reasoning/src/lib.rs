@@ -67,10 +67,7 @@ pub fn solve_quadratic(a: f64, b: f64, c: f64) -> Result<(f64, f64), String> {
         return Err("no real solutions".into());
     }
     let sqrt_disc = disc.sqrt();
-    Ok((
-        (-b + sqrt_disc) / (2.0 * a),
-        (-b - sqrt_disc) / (2.0 * a),
-    ))
+    Ok(((-b + sqrt_disc) / (2.0 * a), (-b - sqrt_disc) / (2.0 * a)))
 }
 
 /// Prove that two expression strings are approximately equal by parsing and
@@ -136,11 +133,7 @@ fn collect_vars(expr: &scirust_symbolic::Expr, vars: &mut HashSet<String>) {
             vars.insert(v.clone());
         }
         Expr::Const(_) => {}
-        Expr::Add(a, b)
-        | Expr::Sub(a, b)
-        | Expr::Mul(a, b)
-        | Expr::Div(a, b)
-        | Expr::Pow(a, b) => {
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Pow(a, b) => {
             collect_vars(a, vars);
             collect_vars(b, vars);
         }

@@ -10,8 +10,8 @@
 //   Layout col-major  : row_stride = 1,     col_stride = rows
 //   Sous-matrice      : strides identiques au parent, ptr décalé
 
-use std::ops::{Index, IndexMut};
 use std::marker::PhantomData;
+use std::ops::{Index, IndexMut};
 
 // ------------------------------------------------------------------ //
 //  Trait de base partagé                                              //
@@ -20,9 +20,18 @@ use std::marker::PhantomData;
 pub trait MatrixShape {
     fn rows(&self) -> usize;
     fn cols(&self) -> usize;
-    #[inline] fn len(&self) -> usize { self.rows() * self.cols() }
-    #[inline] fn is_empty(&self) -> bool { self.len() == 0 }
-    #[inline] fn shape(&self) -> (usize, usize) { (self.rows(), self.cols()) }
+    #[inline]
+    fn len(&self) -> usize {
+        self.rows() * self.cols()
+    }
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    #[inline]
+    fn shape(&self) -> (usize, usize) {
+        (self.rows(), self.cols())
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -31,12 +40,12 @@ pub trait MatrixShape {
 
 #[derive(Clone, Copy)]
 pub struct MatrixView<'a, T> {
-    ptr:        *const T,
-    rows:       usize,
-    cols:       usize,
-    row_stride: usize,  // sauts en mémoire entre deux lignes
-    col_stride: usize,  // sauts en mémoire entre deux colonnes
-    _marker:    PhantomData<&'a T>,
+    ptr: *const T,
+    rows: usize,
+    cols: usize,
+    row_stride: usize, // sauts en mémoire entre deux lignes
+    col_stride: usize, // sauts en mémoire entre deux colonnes
+    _marker: PhantomData<&'a T>,
 }
 
 // SAFETY : T: Sync implique MatrixView<T>: Send + Sync
@@ -66,13 +75,20 @@ impl<'a, T> MatrixView<'a, T> {
     /// restent dans les limites de la mémoire pointée.
     #[inline]
     pub unsafe fn from_raw_parts(
-        ptr:        *const T,
-        rows:       usize,
-        cols:       usize,
+        ptr: *const T,
+        rows: usize,
+        cols: usize,
         row_stride: usize,
         col_stride: usize,
     ) -> Self {
-        Self { ptr, rows, cols, row_stride, col_stride, _marker: PhantomData }
+        Self {
+            ptr,
+            rows,
+            cols,
+            row_stride,
+            col_stride,
+            _marker: PhantomData,
+        }
     }
 
     /// Sous-vue [row_start..row_start+nrows, col_start..col_start+ncols]
@@ -80,14 +96,23 @@ impl<'a, T> MatrixView<'a, T> {
     #[inline]
     pub fn subview(
         &self,
-        row_start: usize, nrows: usize,
-        col_start: usize, ncols: usize,
+        row_start: usize,
+        nrows: usize,
+        col_start: usize,
+        ncols: usize,
     ) -> MatrixView<'a, T> {
-        assert!(row_start + nrows <= self.rows, "sous-vue hors bornes (lignes)");
-        assert!(col_start + ncols <= self.cols, "sous-vue hors bornes (colonnes)");
+        assert!(
+            row_start + nrows <= self.rows,
+            "sous-vue hors bornes (lignes)"
+        );
+        assert!(
+            col_start + ncols <= self.cols,
+            "sous-vue hors bornes (colonnes)"
+        );
         unsafe {
             MatrixView::from_raw_parts(
-                self.ptr.add(row_start * self.row_stride + col_start * self.col_stride),
+                self.ptr
+                    .add(row_start * self.row_stride + col_start * self.col_stride),
                 nrows,
                 ncols,
                 self.row_stride,
@@ -124,10 +149,7 @@ impl<'a, T> MatrixView<'a, T> {
     pub fn row_slice(&self, r: usize) -> Option<&'a [T]> {
         if self.col_stride == 1 {
             Some(unsafe {
-                std::slice::from_raw_parts(
-                    self.ptr.add(r * self.row_stride),
-                    self.cols,
-                )
+                std::slice::from_raw_parts(self.ptr.add(r * self.row_stride), self.cols)
             })
         } else {
             None
@@ -136,14 +158,20 @@ impl<'a, T> MatrixView<'a, T> {
 }
 
 impl<'a, T> MatrixShape for MatrixView<'a, T> {
-    fn rows(&self) -> usize { self.rows }
-    fn cols(&self) -> usize { self.cols }
+    fn rows(&self) -> usize {
+        self.rows
+    }
+    fn cols(&self) -> usize {
+        self.cols
+    }
 }
 
 impl<'a, T> Index<(usize, usize)> for MatrixView<'a, T> {
     type Output = T;
     #[inline(always)]
-    fn index(&self, (r, c): (usize, usize)) -> &T { self.get(r, c) }
+    fn index(&self, (r, c): (usize, usize)) -> &T {
+        self.get(r, c)
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -151,12 +179,12 @@ impl<'a, T> Index<(usize, usize)> for MatrixView<'a, T> {
 // ------------------------------------------------------------------ //
 
 pub struct MatrixViewMut<'a, T> {
-    ptr:        *mut T,
-    rows:       usize,
-    cols:       usize,
+    ptr: *mut T,
+    rows: usize,
+    cols: usize,
     row_stride: usize,
     col_stride: usize,
-    _marker:    PhantomData<&'a mut T>,
+    _marker: PhantomData<&'a mut T>,
 }
 
 unsafe impl<'a, T: Send> Send for MatrixViewMut<'a, T> {}
@@ -179,8 +207,13 @@ impl<'a, T> MatrixViewMut<'a, T> {
     #[inline]
     pub fn as_view(&self) -> MatrixView<'_, T> {
         unsafe {
-            MatrixView::from_raw_parts(self.ptr as *const T, self.rows, self.cols,
-                                       self.row_stride, self.col_stride)
+            MatrixView::from_raw_parts(
+                self.ptr as *const T,
+                self.rows,
+                self.cols,
+                self.row_stride,
+                self.col_stride,
+            )
         }
     }
 
@@ -188,14 +221,18 @@ impl<'a, T> MatrixViewMut<'a, T> {
     #[inline]
     pub fn subview_mut(
         &mut self,
-        row_start: usize, nrows: usize,
-        col_start: usize, ncols: usize,
+        row_start: usize,
+        nrows: usize,
+        col_start: usize,
+        ncols: usize,
     ) -> MatrixViewMut<'_, T> {
         assert!(row_start + nrows <= self.rows);
         assert!(col_start + ncols <= self.cols);
         unsafe {
             MatrixViewMut {
-                ptr: self.ptr.add(row_start * self.row_stride + col_start * self.col_stride),
+                ptr: self
+                    .ptr
+                    .add(row_start * self.row_stride + col_start * self.col_stride),
                 rows: nrows,
                 cols: ncols,
                 row_stride: self.row_stride,
@@ -215,10 +252,7 @@ impl<'a, T> MatrixViewMut<'a, T> {
     pub fn row_slice_mut(&mut self, r: usize) -> Option<&mut [T]> {
         if self.col_stride == 1 {
             Some(unsafe {
-                std::slice::from_raw_parts_mut(
-                    self.ptr.add(r * self.row_stride),
-                    self.cols,
-                )
+                std::slice::from_raw_parts_mut(self.ptr.add(r * self.row_stride), self.cols)
             })
         } else {
             None
@@ -227,8 +261,12 @@ impl<'a, T> MatrixViewMut<'a, T> {
 }
 
 impl<'a, T> MatrixShape for MatrixViewMut<'a, T> {
-    fn rows(&self) -> usize { self.rows }
-    fn cols(&self) -> usize { self.cols }
+    fn rows(&self) -> usize {
+        self.rows
+    }
+    fn cols(&self) -> usize {
+        self.cols
+    }
 }
 
 impl<'a, T> Index<(usize, usize)> for MatrixViewMut<'a, T> {
@@ -263,7 +301,7 @@ mod tests {
         let data = make_4x4();
         let view = MatrixView::from_slice(&data, 4, 4);
         assert_eq!(view[(0, 0)], 0.0);
-        assert_eq!(view[(1, 2)], 6.0);  // 1*4 + 2 = 6
+        assert_eq!(view[(1, 2)], 6.0); // 1*4 + 2 = 6
         assert_eq!(view[(3, 3)], 15.0);
     }
 
@@ -274,7 +312,7 @@ mod tests {
         // Sous-matrice 2x2 à partir de (1,1)
         let sub = view.subview(1, 2, 1, 2);
         assert_eq!(sub.shape(), (2, 2));
-        assert_eq!(sub[(0, 0)], 5.0);  // data[1*4+1]
+        assert_eq!(sub[(0, 0)], 5.0); // data[1*4+1]
         assert_eq!(sub[(1, 1)], 10.0); // data[2*4+2]
     }
 

@@ -19,7 +19,7 @@
 // (utilisable derrière `Box<dyn Module>`). Les méthodes ne sont donc pas
 // génériques sur le lifetime.
 
-use crate::autodiff::reverse::{Tape, Var, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use std::collections::HashMap;
 
 pub trait Module {

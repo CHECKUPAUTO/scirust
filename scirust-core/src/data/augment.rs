@@ -9,8 +9,12 @@ pub struct ImageDims {
 }
 
 impl ImageDims {
-    pub fn new(c: usize, h: usize, w: usize) -> Self { Self { c, h, w } }
-    pub fn n_pixels(&self) -> usize { self.c * self.h * self.w }
+    pub fn new(c: usize, h: usize, w: usize) -> Self {
+        Self { c, h, w }
+    }
+    pub fn n_pixels(&self) -> usize {
+        self.c * self.h * self.w
+    }
 }
 
 /// Trait pour une transformation d'augmentation.
@@ -28,11 +32,15 @@ impl<T> TransformClone for T
 where
     T: Transform + Clone + 'static,
 {
-    fn clone_box(&self) -> Box<dyn Transform> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transform> {
+        Box::new(self.clone())
+    }
 }
 
 impl Clone for Box<dyn Transform> {
-    fn clone(&self) -> Self { self.clone_box() }
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 // ──────────────────────────────────────────
@@ -41,16 +49,22 @@ impl Clone for Box<dyn Transform> {
 
 /// Flip horizontal aléatoire.
 #[derive(Clone, Debug)]
-pub struct RandomFlipH { pub p: f32 }
+pub struct RandomFlipH {
+    pub p: f32,
+}
 
 impl RandomFlipH {
-    pub fn new(p: f32) -> Self { Self { p } }
+    pub fn new(p: f32) -> Self {
+        Self { p }
+    }
 }
 
 impl Transform for RandomFlipH {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
         use rand::random;
-        if random::<f32>() >= self.p { return; }
+        if random::<f32>() >= self.p {
+            return;
+        }
         for c in 0..dims.c {
             let c_off = c * dims.h * dims.w;
             for y in 0..dims.h {
@@ -67,16 +81,22 @@ impl Transform for RandomFlipH {
 
 /// Flip vertical aléatoire.
 #[derive(Clone, Debug)]
-pub struct RandomFlipV { pub p: f32 }
+pub struct RandomFlipV {
+    pub p: f32,
+}
 
 impl RandomFlipV {
-    pub fn new(p: f32) -> Self { Self { p } }
+    pub fn new(p: f32) -> Self {
+        Self { p }
+    }
 }
 
 impl Transform for RandomFlipV {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
         use rand::random;
-        if random::<f32>() >= self.p { return; }
+        if random::<f32>() >= self.p {
+            return;
+        }
         for c in 0..dims.c {
             let c_off = c * dims.h * dims.w;
             for y in 0..dims.h / 2 {
@@ -100,7 +120,11 @@ pub struct RandomCrop {
 
 impl RandomCrop {
     pub fn new(crop_h: usize, crop_w: usize, pad: usize) -> Self {
-        Self { crop_h, crop_w, pad }
+        Self {
+            crop_h,
+            crop_w,
+            pad,
+        }
     }
 }
 
@@ -148,7 +172,9 @@ pub struct Normalize {
 }
 
 impl Normalize {
-    pub fn new(mean: Vec<f32>, std: Vec<f32>) -> Self { Self { mean, std } }
+    pub fn new(mean: Vec<f32>, std: Vec<f32>) -> Self {
+        Self { mean, std }
+    }
     pub fn mnist() -> Self {
         Self::new(vec![0.1307], vec![0.3081])
     }
@@ -177,7 +203,9 @@ pub struct AddGaussianNoise {
 }
 
 impl AddGaussianNoise {
-    pub fn new(std: f32) -> Self { Self { std } }
+    pub fn new(std: f32) -> Self {
+        Self { std }
+    }
 }
 
 impl Transform for AddGaussianNoise {
@@ -202,8 +230,11 @@ pub struct Compose {
 
 impl Compose {
     pub fn new() -> Self {
-        Self { transforms: Vec::new() }
+        Self {
+            transforms: Vec::new(),
+        }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, t: impl Transform + 'static) -> Self {
         self.transforms.push(Box::new(t));
         self
@@ -211,7 +242,9 @@ impl Compose {
 }
 
 impl Default for Compose {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Transform for Compose {
@@ -226,7 +259,7 @@ impl Transform for Compose {
 // AugmentedDataset
 // ──────────────────────────────────────────
 
-use super::{InMemoryDataset};
+use super::InMemoryDataset;
 
 /// Wrapper Dataset qui applique des transforms à la volée.
 pub struct AugmentedDataset {
@@ -236,13 +269,33 @@ pub struct AugmentedDataset {
 }
 
 impl AugmentedDataset {
-    pub fn new(base: InMemoryDataset, transforms: Vec<Box<dyn Transform>>, dims: ImageDims) -> Self {
-        Self { base, transforms, dims }
+    pub fn new(
+        base: InMemoryDataset,
+        transforms: Vec<Box<dyn Transform>>,
+        dims: ImageDims,
+    ) -> Self {
+        Self {
+            base,
+            transforms,
+            dims,
+        }
     }
-    pub fn from_pipeline(base: InMemoryDataset, pipeline: Compose, _channels: usize, h: usize, w: usize) -> Self {
-        Self { base, transforms: pipeline.transforms, dims: ImageDims::new(_channels, h, w) }
+    pub fn from_pipeline(
+        base: InMemoryDataset,
+        pipeline: Compose,
+        _channels: usize,
+        h: usize,
+        w: usize,
+    ) -> Self {
+        Self {
+            base,
+            transforms: pipeline.transforms,
+            dims: ImageDims::new(_channels, h, w),
+        }
     }
-    pub fn with_seed(self, _seed: u64) -> Self { self }
+    pub fn with_seed(self, _seed: u64) -> Self {
+        self
+    }
 
     pub fn sample(&self, idx: usize) -> (Vec<f32>, &[f32]) {
         let (x, y) = self.base.sample(idx);
@@ -253,8 +306,15 @@ impl AugmentedDataset {
         (x_aug, y)
     }
 
-    pub fn n_samples(&self) -> usize { self.base.n_samples() }
-    pub fn len(&self) -> usize { self.n_samples() }
+    pub fn n_samples(&self) -> usize {
+        self.base.n_samples()
+    }
+    pub fn len(&self) -> usize {
+        self.n_samples()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl super::Dataset for AugmentedDataset {
@@ -270,5 +330,7 @@ impl super::Dataset for AugmentedDataset {
         // For now, return base sample without augment to satisfy compiler.
         self.base.sample(idx)
     }
-    fn n_samples(&self) -> usize { self.base.n_samples() }
+    fn n_samples(&self) -> usize {
+        self.base.n_samples()
+    }
 }

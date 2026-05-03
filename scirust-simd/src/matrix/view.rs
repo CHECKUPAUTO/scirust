@@ -10,14 +10,25 @@ pub struct MatrixView<'a, T> {
 
 impl<'a, T: Copy> MatrixView<'a, T> {
     pub fn new(data: &'a [T], rows: usize, cols: usize) -> Self {
-        Self { data, rows, cols, col_stride: 1 }
+        Self {
+            data,
+            rows,
+            cols,
+            col_stride: 1,
+        }
     }
 
-    pub fn rows(&self) -> usize { self.rows }
-    pub fn cols(&self) -> usize { self.cols }
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
 
     pub fn row_slice(&self, i: usize) -> Option<&[T]> {
-        if i >= self.rows { return None; }
+        if i >= self.rows {
+            return None;
+        }
         let start = i * self.cols * self.col_stride;
         let end = start + self.cols;
         Some(&self.data[start..end])
@@ -37,6 +48,10 @@ impl<'a, T: Copy> MatrixViewMut<'a, T> {
         Self { data, rows, cols }
     }
 
-    pub fn rows(&self) -> usize { self.rows }
-    pub fn cols(&self) -> usize { self.cols }
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
 }

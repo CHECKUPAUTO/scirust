@@ -13,8 +13,8 @@
 // accumule en effet les noeuds — voir adam_converges_on_quadratic
 // dans les tests pour le pattern complet.
 
-use std::collections::HashMap;
 use crate::autodiff::reverse::{Tape, Tensor};
+use std::collections::HashMap;
 
 // ================================================================== //
 //  Trait Optimizer                                                    //
@@ -38,10 +38,10 @@ pub trait Optimizer {
 // ================================================================== //
 
 pub struct Sgd {
-    pub lr:           f32,
-    pub momentum:     f32,
+    pub lr: f32,
+    pub momentum: f32,
     pub weight_decay: f32,
-    velocities:       HashMap<usize, Tensor>,
+    velocities: HashMap<usize, Tensor>,
 }
 
 impl Sgd {
@@ -70,10 +70,16 @@ impl Optimizer for Sgd {
         for &idx in params {
             let mut value = tape.value(idx);
             let grad = tape.grad(idx);
-            assert_eq!(value.shape(), grad.shape(),
-                "Sgd::step: shape mismatch param/grad (idx={})", idx);
+            assert_eq!(
+                value.shape(),
+                grad.shape(),
+                "Sgd::step: shape mismatch param/grad (idx={})",
+                idx
+            );
 
-            let v = self.velocities.entry(idx)
+            let v = self
+                .velocities
+                .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
 
             for i in 0..value.data.len() {
@@ -91,8 +97,12 @@ impl Optimizer for Sgd {
         }
     }
 
-    fn lr(&self) -> f32 { self.lr }
-    fn set_lr(&mut self, lr: f32) { self.lr = lr; }
+    fn lr(&self) -> f32 {
+        self.lr
+    }
+    fn set_lr(&mut self, lr: f32) {
+        self.lr = lr;
+    }
 }
 
 // ================================================================== //
@@ -100,14 +110,14 @@ impl Optimizer for Sgd {
 // ================================================================== //
 
 pub struct Adam {
-    pub lr:           f32,
-    pub beta1:        f32,
-    pub beta2:        f32,
-    pub epsilon:      f32,
+    pub lr: f32,
+    pub beta1: f32,
+    pub beta2: f32,
+    pub epsilon: f32,
     pub weight_decay: f32,
-    t: usize,                          // step counter (pour bias correction)
-    m: HashMap<usize, Tensor>,         // 1er moment (moyenne mobile gradient)
-    v: HashMap<usize, Tensor>,         // 2e moment (moyenne mobile gradient²)
+    t: usize,                  // step counter (pour bias correction)
+    m: HashMap<usize, Tensor>, // 1er moment (moyenne mobile gradient)
+    v: HashMap<usize, Tensor>, // 2e moment (moyenne mobile gradient²)
 }
 
 impl Adam {
@@ -144,18 +154,26 @@ impl Adam {
 impl Optimizer for Adam {
     fn step(&mut self, params: &[usize], tape: &Tape) {
         self.t += 1;
-        let bc1 = 1.0 - self.beta1.powi(self.t as i32);   // bias correction 1
-        let bc2 = 1.0 - self.beta2.powi(self.t as i32);   // bias correction 2
+        let bc1 = 1.0 - self.beta1.powi(self.t as i32); // bias correction 1
+        let bc2 = 1.0 - self.beta2.powi(self.t as i32); // bias correction 2
 
         for &idx in params {
             let mut value = tape.value(idx);
             let grad = tape.grad(idx);
-            assert_eq!(value.shape(), grad.shape(),
-                "Adam::step: shape mismatch param/grad (idx={})", idx);
+            assert_eq!(
+                value.shape(),
+                grad.shape(),
+                "Adam::step: shape mismatch param/grad (idx={})",
+                idx
+            );
 
-            let m = self.m.entry(idx)
+            let m = self
+                .m
+                .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
-            let v = self.v.entry(idx)
+            let v = self
+                .v
+                .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
 
             for i in 0..value.data.len() {
@@ -180,8 +198,12 @@ impl Optimizer for Adam {
         }
     }
 
-    fn lr(&self) -> f32 { self.lr }
-    fn set_lr(&mut self, lr: f32) { self.lr = lr; }
+    fn lr(&self) -> f32 {
+        self.lr
+    }
+    fn set_lr(&mut self, lr: f32) {
+        self.lr = lr;
+    }
 }
 
 // ================================================================== //
@@ -195,8 +217,8 @@ impl Optimizer for Adam {
 /// implémente le trait Optimizer).
 pub fn apply_schedule(
     scheduler: &impl crate::autodiff::scheduler::LrSchedule,
-    opt:       &mut dyn Optimizer,
-    step:      usize,
+    opt: &mut dyn Optimizer,
+    step: usize,
 ) {
     opt.set_lr(scheduler.lr_at(step));
 }
@@ -264,8 +286,12 @@ mod tests {
         }
 
         // Le momentum doit amener x plus près de 0
-        assert!(x_with_mom.abs() < x_no_mom.abs(),
-            "Avec momentum: |x|={}, sans: |x|={}", x_with_mom.abs(), x_no_mom.abs());
+        assert!(
+            x_with_mom.abs() < x_no_mom.abs(),
+            "Avec momentum: |x|={}, sans: |x|={}",
+            x_with_mom.abs(),
+            x_no_mom.abs()
+        );
     }
 
     // ---------- Adam ---------- //
@@ -283,8 +309,16 @@ mod tests {
         let new_x = tape.value(x.idx());
         // Le gradient est 2x = (10, -6). Adam premier pas avec bias correction
         // ≈ ±lr (parce que m_hat / sqrt(v_hat) ≈ sign(g) au premier step).
-        assert!(new_x.data[0] < 5.0,  "x[0] = {} should decrease", new_x.data[0]);
-        assert!(new_x.data[1] > -3.0, "x[1] = {} should increase", new_x.data[1]);
+        assert!(
+            new_x.data[0] < 5.0,
+            "x[0] = {} should decrease",
+            new_x.data[0]
+        );
+        assert!(
+            new_x.data[1] > -3.0,
+            "x[1] = {} should increase",
+            new_x.data[1]
+        );
     }
 
     #[test]
@@ -331,8 +365,12 @@ mod tests {
             x_value = tape.value(x.idx()).data[0];
         }
 
-        assert!((x_value - target).abs() < 0.05,
-            "Adam n'a pas convergé: x final = {}, target = {}", x_value, target);
+        assert!(
+            (x_value - target).abs() < 0.05,
+            "Adam n'a pas convergé: x final = {}, target = {}",
+            x_value,
+            target
+        );
     }
 
     #[test]
@@ -362,10 +400,18 @@ mod tests {
             params[1] = v.data[1];
         }
 
-        assert!((params[0] - target[0]).abs() < 0.05,
-            "x[0] = {}, target = {}", params[0], target[0]);
-        assert!((params[1] - target[1]).abs() < 0.05,
-            "x[1] = {}, target = {}", params[1], target[1]);
+        assert!(
+            (params[0] - target[0]).abs() < 0.05,
+            "x[0] = {}, target = {}",
+            params[0],
+            target[0]
+        );
+        assert!(
+            (params[1] - target[1]).abs() < 0.05,
+            "x[1] = {}, target = {}",
+            params[1],
+            target[1]
+        );
     }
 
     #[test]
@@ -391,7 +437,9 @@ mod tests {
 
         struct ConstantHalf;
         impl LrSchedule for ConstantHalf {
-            fn lr_at(&self, _step: usize) -> f32 { 0.5 }
+            fn lr_at(&self, _step: usize) -> f32 {
+                0.5
+            }
         }
 
         let mut opt = Adam::new(0.001);

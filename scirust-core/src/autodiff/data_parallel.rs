@@ -7,7 +7,6 @@ use super::parallel::ParallelTape;
 pub struct GradientAggregator;
 
 impl GradientAggregator {
-
     /// Element-wise sum across workers.
     ///
     /// `grads` is a slice of per-worker gradient vectors (each of length N).
@@ -184,7 +183,10 @@ mod tests {
                 saved: SavedData::None,
             });
             let y = tape.alloc_node(Node {
-                op: Op::Scale { input: x, scalar: 2.0 },
+                op: Op::Scale {
+                    input: x,
+                    scalar: 2.0,
+                },
                 shape: (1, 1),
                 saved: SavedData::None,
             });
@@ -218,7 +220,10 @@ mod tests {
                 saved: SavedData::None,
             });
             let y = tape.alloc_node(Node {
-                op: Op::Scale { input: x, scalar: 3.0 },
+                op: Op::Scale {
+                    input: x,
+                    scalar: 3.0,
+                },
                 shape: (1, 1),
                 saved: SavedData::None,
             });
@@ -251,7 +256,10 @@ mod tests {
                 saved: SavedData::None,
             });
             let y = tape.alloc_node(Node {
-                op: Op::Scale { input: x, scalar: 2.0 },
+                op: Op::Scale {
+                    input: x,
+                    scalar: 2.0,
+                },
                 shape: (1, 1),
                 saved: SavedData::None,
             });
@@ -272,14 +280,21 @@ mod tests {
         // Mean: [3,3]
         let mut trainer = DataParallelTrainer::new(2);
         let avg_grads = trainer.train_batch(|tape, worker| {
-            let x_vals: Vec<f32> = if worker == 0 { vec![1.0, 2.0] } else { vec![4.0, 5.0] };
+            let x_vals: Vec<f32> = if worker == 0 {
+                vec![1.0, 2.0]
+            } else {
+                vec![4.0, 5.0]
+            };
             let x = tape.alloc_node(Node {
                 op: Op::Input,
                 shape: (1, 2),
                 saved: SavedData::None,
             });
             let y = tape.alloc_node(Node {
-                op: Op::Scale { input: x, scalar: 3.0 },
+                op: Op::Scale {
+                    input: x,
+                    scalar: 3.0,
+                },
                 shape: (1, 2),
                 saved: SavedData::None,
             });

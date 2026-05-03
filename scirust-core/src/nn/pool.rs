@@ -19,7 +19,13 @@ pub struct MaxPool2d {
 
 impl MaxPool2d {
     pub fn new(kernel: usize, stride: usize) -> Self {
-        Self { kernel, stride, cached_c: None, cached_h: None, cached_w: None }
+        Self {
+            kernel,
+            stride,
+            cached_c: None,
+            cached_h: None,
+            cached_w: None,
+        }
     }
 
     pub fn input_shape(mut self, c: usize, h: usize, w: usize) -> Self {
@@ -39,11 +45,20 @@ impl Module for MaxPool2d {
         input.max_pool2d(c, h, w, self.kernel, self.stride)
     }
 
-    fn parameter_indices(&self) -> Vec<usize> { vec![] }
+    fn parameter_indices(&self) -> Vec<usize> {
+        vec![]
+    }
     fn sync(&mut self, _tape: &Tape) {}
 
-    fn state_dict(&self) -> HashMap<String, Tensor> { HashMap::new() }
-    fn load_state_dict(&mut self, _sd: &HashMap<String, Tensor>) -> std::result::Result<(), String> { Ok(()) }
+    fn state_dict(&self) -> HashMap<String, Tensor> {
+        HashMap::new()
+    }
+    fn load_state_dict(
+        &mut self,
+        _sd: &HashMap<String, Tensor>,
+    ) -> std::result::Result<(), String> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -55,7 +70,10 @@ mod tests {
         let mut pool = MaxPool2d::new(2, 2).input_shape(1, 4, 4);
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(
-            (1..=16).map(|x| x as f32).collect(), 1, 16));
+            (1..=16).map(|x| x as f32).collect(),
+            1,
+            16,
+        ));
         let y = pool.forward(&tape, x);
         let yt = tape.value(y.idx());
         assert_eq!(yt.shape(), (1, 4));

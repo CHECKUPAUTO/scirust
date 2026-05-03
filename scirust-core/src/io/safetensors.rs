@@ -44,20 +44,17 @@
 
 const MAX_HEADER_SIZE: usize = 16 * 1024 * 1024;
 
-use std::collections::HashMap;
-use std::io::{self, Read, Write};
-use std::fs::File;
-use std::path::Path;
 use crate::autodiff::reverse::Tensor;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::path::Path;
 
 // ================================================================== //
 //  Sauvegarde                                                         //
 // ================================================================== //
 
-pub fn save_safetensors<P: AsRef<Path>>(
-    tensors: &[(String, Tensor)],
-    path: P,
-) -> io::Result<()> {
+pub fn save_safetensors<P: AsRef<Path>>(tensors: &[(String, Tensor)], path: P) -> io::Result<()> {
     let bytes = serialize(tensors);
     let mut f = File::create(path)?;
     f.write_all(&bytes)?;
@@ -73,8 +70,10 @@ pub fn serialize(tensors: &[(String, Tensor)]) -> Vec<u8> {
         let entry = format!(
             r#""{}":{{"dtype":"F32","shape":[{},{}],"data_offsets":[{},{}]}}"#,
             escape_json(name),
-            t.rows, t.cols,
-            offset, offset + n_bytes,
+            t.rows,
+            t.cols,
+            offset,
+            offset + n_bytes,
         );
         entries.push(entry);
         offset += n_bytes;
@@ -110,7 +109,10 @@ fn unescape_json(s: &str) -> String {
                 Some('n') => out.push('\n'),
                 Some('t') => out.push('\t'),
                 Some('r') => out.push('\r'),
-                Some(c) => { out.push('\\'); out.push(c); }
+                Some(c) => {
+                    out.push('\\');
+                    out.push(c);
+                }
                 None => out.push('\\'),
             }
         } else {
@@ -124,9 +126,7 @@ fn unescape_json(s: &str) -> String {
 //  Chargement                                                         //
 // ================================================================== //
 
-pub fn load_safetensors<P: AsRef<Path>>(
-    path: P,
-) -> io::Result<HashMap<String, Tensor>> {
+pub fn load_safetensors<P: AsRef<Path>>(path: P) -> io::Result<HashMap<String, Tensor>> {
     let mut f = File::open(path)?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
@@ -135,20 +135,33 @@ pub fn load_safetensors<P: AsRef<Path>>(
 
 pub fn deserialize(bytes: &[u8]) -> io::Result<HashMap<String, Tensor>> {
     if bytes.len() < 8 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "fichier trop court"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "fichier trop court",
+        ));
     }
     let header_size_bytes: [u8; 8] = bytes[0..8].try_into().expect("header size slice");
     let header_size_u64 = u64::from_le_bytes(header_size_bytes);
-    let header_size = usize::try_from(header_size_u64)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "header_size overflow sur cette plateforme"))?;
+    let header_size = usize::try_from(header_size_u64).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size overflow sur cette plateforme",
+        )
+    })?;
     if header_size > MAX_HEADER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("header trop grand : {} bytes (max {})", header_size, MAX_HEADER_SIZE),
+            format!(
+                "header trop grand : {} bytes (max {})",
+                header_size, MAX_HEADER_SIZE
+            ),
         ));
     }
     if 8 + header_size > bytes.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "header_size invalide"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size invalide",
+        ));
     }
     let header = std::str::from_utf8(&bytes[8..8 + header_size])
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -162,7 +175,10 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
     let bytes = header.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] != b'"' { i += 1; continue; }
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
         let key_start = i + 1;
         let key_end = find_unescaped_quote(&bytes[key_start..])
             .map(|p| key_start + p)
@@ -170,7 +186,9 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
         let key = &header[key_start..key_end];
         i = key_end + 1;
 
-        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b':') { i += 1; }
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b':') {
+            i += 1;
+        }
 
         if key == "__metadata__" {
             i = skip_balanced(bytes, i, b'{', b'}');
@@ -178,8 +196,10 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
         }
 
         if i >= bytes.len() || bytes[i] != b'{' {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("attendu '{{' après {key}")));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("attendu '{{' après {key}"),
+            ));
         }
         let obj_end = skip_balanced(bytes, i, b'{', b'}');
         let obj = &header[i..obj_end];
@@ -187,35 +207,51 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
 
         let dtype = extract_str_field(obj, "dtype")?;
         if dtype != "F32" {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("dtype non supporté : {dtype}")));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("dtype non supporté : {dtype}"),
+            ));
         }
         let shape = extract_array_field(obj, "shape")?;
         let offsets = extract_array_field(obj, "data_offsets")?;
 
         if shape.len() != 2 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("seuls les tenseurs 2D sont supportés, got shape len {}", shape.len())));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "seuls les tenseurs 2D sont supportés, got shape len {}",
+                    shape.len()
+                ),
+            ));
         }
         if offsets.len() != 2 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "data_offsets doit être [s, e]"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "data_offsets doit être [s, e]",
+            ));
         }
 
         let (rows, cols) = (shape[0] as usize, shape[1] as usize);
         let (start, end) = (offsets[0] as usize, offsets[1] as usize);
         if end > data.len() || start > end {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "offsets hors bornes"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "offsets hors bornes",
+            ));
         }
         let n = (end - start) / 4;
         if n != rows * cols {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("taille data inattendue : {n} vs {}", rows * cols)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("taille data inattendue : {n} vs {}", rows * cols),
+            ));
         }
 
         let mut floats = Vec::with_capacity(n);
         for k in 0..n {
             let off = start + k * 4;
-            let float_bytes: [u8; 4] = data[off..off + 4].try_into()
+            let float_bytes: [u8; 4] = data[off..off + 4]
+                .try_into()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "offset data invalide"))?;
             let f = f32::from_le_bytes(float_bytes);
             floats.push(f);
@@ -230,8 +266,13 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
 fn find_unescaped_quote(b: &[u8]) -> Option<usize> {
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' { i += 2; continue; }
-        if b[i] == b'"' { return Some(i); }
+        if b[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b[i] == b'"' {
+            return Some(i);
+        }
         i += 1;
     }
     None
@@ -246,10 +287,13 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> usize {
             i = i + 1 + p + 1;
             continue;
         }
-        if bytes[i] == open { depth += 1; }
-        else if bytes[i] == close {
+        if bytes[i] == open {
+            depth += 1;
+        } else if bytes[i] == close {
             depth -= 1;
-            if depth == 0 { return i + 1; }
+            if depth == 0 {
+                return i + 1;
+            }
         }
         i += 1;
     }
@@ -258,10 +302,11 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> usize {
 
 fn extract_str_field(obj: &str, name: &str) -> io::Result<String> {
     let pat = format!(r#""{}":""#, name);
-    let start = obj.find(&pat)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("champ {name} absent")))?
-        + pat.len();
-    let end = obj[start..].find('"')
+    let start = obj.find(&pat).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("champ {name} absent"))
+    })? + pat.len();
+    let end = obj[start..]
+        .find('"')
         .map(|p| start + p)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "string non terminée"))?;
     Ok(obj[start..end].to_string())
@@ -269,16 +314,15 @@ fn extract_str_field(obj: &str, name: &str) -> io::Result<String> {
 
 fn extract_array_field(obj: &str, name: &str) -> io::Result<Vec<i64>> {
     let pat = format!(r#""{}":["#, name);
-    let start = obj.find(&pat)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("champ {name} absent")))?
-        + pat.len();
-    let end = obj[start..].find(']')
+    let start = obj.find(&pat).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("champ {name} absent"))
+    })? + pat.len();
+    let end = obj[start..]
+        .find(']')
         .map(|p| start + p)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "array non terminé"))?;
     let inner = &obj[start..end];
-    let nums: Result<Vec<i64>, _> = inner.split(',')
-        .map(|s| s.trim().parse::<i64>())
-        .collect();
+    let nums: Result<Vec<i64>, _> = inner.split(',').map(|s| s.trim().parse::<i64>()).collect();
     nums.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
@@ -290,9 +334,10 @@ pub fn serialize_with_metadata(
     tensors: &[(String, Tensor)],
     metadata: &std::collections::HashMap<String, String>,
 ) -> Vec<u8> {
-    let meta_entries: Vec<String> = metadata.iter().map(|(k, v)| {
-        format!(r#""{}":"{}""#, escape_json(k), escape_json(v))
-    }).collect();
+    let meta_entries: Vec<String> = metadata
+        .iter()
+        .map(|(k, v)| format!(r#""{}":"{}""#, escape_json(k), escape_json(v)))
+        .collect();
     let meta_json = format!(r#""__metadata__":{{{}}}"#, meta_entries.join(","));
 
     let mut offset = 0usize;
@@ -303,8 +348,10 @@ pub fn serialize_with_metadata(
         let entry = format!(
             r#""{}":{{"dtype":"F32","shape":[{},{}],"data_offsets":[{},{}]}}"#,
             escape_json(name),
-            t.rows, t.cols,
-            offset, offset + n_bytes,
+            t.rows,
+            t.cols,
+            offset,
+            offset + n_bytes,
         );
         entries.push(entry);
         offset += n_bytes;
@@ -325,7 +372,10 @@ pub fn serialize_with_metadata(
     out
 }
 
-fn parse_header_with_metadata(header: &str, data: &[u8]) -> io::Result<(
+fn parse_header_with_metadata(
+    header: &str,
+    data: &[u8],
+) -> io::Result<(
     std::collections::HashMap<String, Tensor>,
     std::collections::HashMap<String, String>,
 )> {
@@ -334,25 +384,40 @@ fn parse_header_with_metadata(header: &str, data: &[u8]) -> io::Result<(
     Ok((tensors, metadata))
 }
 
-pub fn deserialize_with_metadata(bytes: &[u8]) -> io::Result<(
+pub fn deserialize_with_metadata(
+    bytes: &[u8],
+) -> io::Result<(
     std::collections::HashMap<String, Tensor>,
     std::collections::HashMap<String, String>,
 )> {
     if bytes.len() < 8 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "fichier trop court"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "fichier trop court",
+        ));
     }
     let header_size_bytes: [u8; 8] = bytes[0..8].try_into().expect("header size slice");
     let header_size_u64 = u64::from_le_bytes(header_size_bytes);
-    let header_size = usize::try_from(header_size_u64)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "header_size overflow sur cette plateforme"))?;
+    let header_size = usize::try_from(header_size_u64).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size overflow sur cette plateforme",
+        )
+    })?;
     if header_size > MAX_HEADER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("header trop grand : {} bytes (max {})", header_size, MAX_HEADER_SIZE),
+            format!(
+                "header trop grand : {} bytes (max {})",
+                header_size, MAX_HEADER_SIZE
+            ),
         ));
     }
     if 8 + header_size > bytes.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "header_size invalide"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size invalide",
+        ));
     }
     let header = std::str::from_utf8(&bytes[8..8 + header_size])
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -369,9 +434,10 @@ pub fn serialize_state_dict(
     state: &std::collections::HashMap<String, Tensor>,
     metadata: &std::collections::HashMap<String, String>,
 ) -> Vec<u8> {
-    let meta_entries: Vec<String> = metadata.iter().map(|(k, v)| {
-        format!(r#""{}":"{}""#, escape_json(k), escape_json(v))
-    }).collect();
+    let meta_entries: Vec<String> = metadata
+        .iter()
+        .map(|(k, v)| format!(r#""{}":"{}""#, escape_json(k), escape_json(v)))
+        .collect();
     let meta_json = format!(r#""__metadata__":{{{}}}"#, meta_entries.join(","));
 
     let mut keys: Vec<&String> = state.keys().collect();
@@ -387,8 +453,10 @@ pub fn serialize_state_dict(
         let entry = format!(
             r#""{}":{{"dtype":"F32","shape":[{},{}],"data_offsets":[{},{}]}}"#,
             escape_json(name),
-            t.rows, t.cols,
-            offset, offset + n_bytes,
+            t.rows,
+            t.cols,
+            offset,
+            offset + n_bytes,
         );
         entries.push(entry);
         offset += n_bytes;
@@ -408,25 +476,40 @@ pub fn serialize_state_dict(
     out
 }
 
-pub fn deserialize_state_dict(bytes: &[u8]) -> io::Result<(
+pub fn deserialize_state_dict(
+    bytes: &[u8],
+) -> io::Result<(
     std::collections::HashMap<String, Tensor>,
     std::collections::HashMap<String, String>,
 )> {
     if bytes.len() < 8 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "fichier trop court"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "fichier trop court",
+        ));
     }
     let header_size_bytes: [u8; 8] = bytes[0..8].try_into().expect("header size slice");
     let header_size_u64 = u64::from_le_bytes(header_size_bytes);
-    let header_size = usize::try_from(header_size_u64)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "header_size overflow sur cette plateforme"))?;
+    let header_size = usize::try_from(header_size_u64).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size overflow sur cette plateforme",
+        )
+    })?;
     if header_size > MAX_HEADER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("header trop grand : {} bytes (max {})", header_size, MAX_HEADER_SIZE),
+            format!(
+                "header trop grand : {} bytes (max {})",
+                header_size, MAX_HEADER_SIZE
+            ),
         ));
     }
     if 8 + header_size > bytes.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "header_size invalide"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size invalide",
+        ));
     }
     let header = std::str::from_utf8(&bytes[8..8 + header_size])
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -468,9 +551,9 @@ pub fn load_state_dict<P: AsRef<Path>>(
 mod tests {
     use super::*;
     use crate::autodiff::reverse::Tape;
-    use crate::nn::{Linear, ReLU, Sequential, Module};
     use crate::nn::init::{KaimingNormal, Zeros};
     use crate::nn::rng::PcgEngine;
+    use crate::nn::{Linear, Module, ReLU, Sequential};
 
     #[test]
     fn test_safetensors_header_roundtrip() {
@@ -534,9 +617,18 @@ mod tests {
     #[test]
     fn round_trip_multi_tensor() {
         let tensors = vec![
-            ("fc1.weight".to_string(), Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2)),
-            ("fc1.bias".to_string(),   Tensor::from_vec(vec![0.1, 0.2], 1, 2)),
-            ("fc2.weight".to_string(), Tensor::from_vec(vec![5.0; 6], 2, 3)),
+            (
+                "fc1.weight".to_string(),
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2),
+            ),
+            (
+                "fc1.bias".to_string(),
+                Tensor::from_vec(vec![0.1, 0.2], 1, 2),
+            ),
+            (
+                "fc2.weight".to_string(),
+                Tensor::from_vec(vec![5.0; 6], 2, 3),
+            ),
         ];
         let bytes = serialize(&tensors);
         let loaded = deserialize(&bytes).unwrap();
@@ -550,9 +642,10 @@ mod tests {
     fn file_round_trip() {
         let dir = std::env::temp_dir();
         let path = dir.join("test_scirust_safetensors.safetensors");
-        let tensors = vec![
-            ("test".to_string(), Tensor::from_vec(vec![3.14, 2.71, 1.41, 1.73], 2, 2)),
-        ];
+        let tensors = vec![(
+            "test".to_string(),
+            Tensor::from_vec(vec![3.14, 2.71, 1.41, 1.73], 2, 2),
+        )];
         save_safetensors(&tensors, &path).unwrap();
         let loaded = load_safetensors(&path).unwrap();
         let t = &loaded["test"];
@@ -584,13 +677,19 @@ mod tests {
     fn round_trip_with_metadata_escaped_values() {
         let t = Tensor::from_vec(vec![0.5], 1, 1);
         let mut meta = std::collections::HashMap::new();
-        meta.insert("description".to_string(), r#"quote "test" value"#.to_string());
+        meta.insert(
+            "description".to_string(),
+            r#"quote "test" value"#.to_string(),
+        );
 
         let bytes = serialize_with_metadata(&[("x".into(), t.clone())], &meta);
         let (loaded, loaded_meta) = deserialize_with_metadata(&bytes).unwrap();
 
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded_meta.get("description").unwrap(), r#"quote "test" value"#);
+        assert_eq!(
+            loaded_meta.get("description").unwrap(),
+            r#"quote "test" value"#
+        );
     }
 
     #[test]
@@ -603,8 +702,14 @@ mod tests {
 
     fn make_test_state_dict() -> std::collections::HashMap<String, Tensor> {
         let mut state = std::collections::HashMap::new();
-        state.insert("weight".to_string(), Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3));
-        state.insert("bias".to_string(), Tensor::from_vec(vec![0.1, 0.2, 0.3], 1, 3));
+        state.insert(
+            "weight".to_string(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3),
+        );
+        state.insert(
+            "bias".to_string(),
+            Tensor::from_vec(vec![0.1, 0.2, 0.3], 1, 3),
+        );
         state
     }
 
@@ -661,8 +766,10 @@ mod tests {
 
         let bytes1 = serialize_state_dict(&state, &std::collections::HashMap::new());
         let bytes2 = serialize_state_dict(&state, &std::collections::HashMap::new());
-        assert_eq!(bytes1, bytes2,
-            "Saves consécutifs doivent produire des bytes identiques");
+        assert_eq!(
+            bytes1, bytes2,
+            "Saves consécutifs doivent produire des bytes identiques"
+        );
     }
 
     #[test]
@@ -699,7 +806,13 @@ mod tests {
 
         assert_eq!(out1.len(), out2.len());
         for i in 0..out1.len() {
-            assert!((out1[i] - out2[i]).abs() < 1e-5, "inference mismatch at {}: {} vs {}", i, out1[i], out2[i]);
+            assert!(
+                (out1[i] - out2[i]).abs() < 1e-5,
+                "inference mismatch at {}: {} vs {}",
+                i,
+                out1[i],
+                out2[i]
+            );
         }
 
         let _ = std::fs::remove_file(&path);
@@ -719,7 +832,10 @@ fn extract_metadata(header: &str) -> std::collections::HashMap<String, String> {
         let b = obj.as_bytes();
         let mut j = 0;
         while j < b.len() {
-            if b[j] != b'"' { j += 1; continue; }
+            if b[j] != b'"' {
+                j += 1;
+                continue;
+            }
             let ks = j + 1;
             let ke = match find_unescaped_quote(&b[ks..]).map(|p| ks + p) {
                 Some(p) => p,
@@ -728,9 +844,13 @@ fn extract_metadata(header: &str) -> std::collections::HashMap<String, String> {
             let k = &obj[ks..ke];
             j = ke + 1;
 
-            while j < b.len() && (b[j] == b' ' || b[j] == b':') { j += 1; }
+            while j < b.len() && (b[j] == b' ' || b[j] == b':') {
+                j += 1;
+            }
 
-            if j >= b.len() || b[j] != b'"' { break; }
+            if j >= b.len() || b[j] != b'"' {
+                break;
+            }
             let vs = j + 1;
             let ve = match find_unescaped_quote(&b[vs..]).map(|p| vs + p) {
                 Some(p) => p,

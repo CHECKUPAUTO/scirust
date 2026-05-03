@@ -24,8 +24,10 @@ use std::fmt;
 
 /// Computational device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Device { Cpu, Gpu }
-
+pub enum Device {
+    Cpu,
+    Gpu,
+}
 
 // ================================================================== //
 //  Type d'erreur principal                                            //
@@ -35,22 +37,22 @@ pub enum Device { Cpu, Gpu }
 pub enum SciRustError {
     /// Shapes incompatibles entre opérandes
     ShapeMismatch {
-        op:        &'static str,
-        expected:  (usize, usize),
-        got:       (usize, usize),
+        op: &'static str,
+        expected: (usize, usize),
+        got: (usize, usize),
     },
     /// Tenseurs sur des devices différents
     DeviceMismatch {
-        op:        &'static str,
-        expected:  Device,
-        got:       Device,
+        op: &'static str,
+        expected: Device,
+        got: Device,
     },
     /// Tenseur sur le mauvais device pour cette op
     WrongDevice {
-        op:        &'static str,
-        expected:  Device,
-        got:       Device,
-        hint:      &'static str,
+        op: &'static str,
+        expected: Device,
+        got: Device,
+        hint: &'static str,
     },
     /// Configuration invalide (hyperparamètres, dimensions)
     InvalidConfig(String),
@@ -61,15 +63,12 @@ pub enum SciRustError {
     /// I/O sur fichiers (datasets, checkpoints)
     IoError(std::io::Error),
     /// Format de fichier corrompu ou invalide
-    InvalidFormat {
-        what:     &'static str,
-        details:  String,
-    },
+    InvalidFormat { what: &'static str, details: String },
     /// Index hors bornes (tape, dataset, batch)
     IndexOutOfBounds {
-        what:     &'static str,
-        index:    usize,
-        bound:    usize,
+        what: &'static str,
+        index: usize,
+        bound: usize,
     },
 }
 
@@ -77,23 +76,41 @@ impl fmt::Display for SciRustError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SciRustError::ShapeMismatch { op, expected, got } => {
-                write!(f, "shape mismatch in '{op}': expected {:?}, got {:?}",
-                       expected, got)
+                write!(
+                    f,
+                    "shape mismatch in '{op}': expected {:?}, got {:?}",
+                    expected, got
+                )
             }
             SciRustError::DeviceMismatch { op, expected, got } => {
-                write!(f, "device mismatch in '{op}': expected {:?}, got {:?} \
-                          (use to_cpu/to_gpu to align)", expected, got)
+                write!(
+                    f,
+                    "device mismatch in '{op}': expected {:?}, got {:?} \
+                          (use to_cpu/to_gpu to align)",
+                    expected, got
+                )
             }
-            SciRustError::WrongDevice { op, expected, got, hint } => {
-                write!(f, "wrong device for '{op}': expected {:?}, got {:?} — {hint}",
-                       expected, got)
+            SciRustError::WrongDevice {
+                op,
+                expected,
+                got,
+                hint,
+            } => {
+                write!(
+                    f,
+                    "wrong device for '{op}': expected {:?}, got {:?} — {hint}",
+                    expected, got
+                )
             }
             SciRustError::InvalidConfig(msg) => {
                 write!(f, "invalid configuration: {msg}")
             }
             SciRustError::GpuNotAvailable => {
-                write!(f, "GPU requested but no GPU adapter available — \
-                          rebuild with --features wgpu and ensure a compatible adapter is present")
+                write!(
+                    f,
+                    "GPU requested but no GPU adapter available — \
+                          rebuild with --features wgpu and ensure a compatible adapter is present"
+                )
             }
             SciRustError::GpuError(msg) => {
                 write!(f, "GPU error: {msg}")
@@ -121,7 +138,9 @@ impl std::error::Error for SciRustError {
 }
 
 impl From<std::io::Error> for SciRustError {
-    fn from(e: std::io::Error) -> Self { SciRustError::IoError(e) }
+    fn from(e: std::io::Error) -> Self {
+        SciRustError::IoError(e)
+    }
 }
 
 // ================================================================== //
@@ -135,9 +154,7 @@ pub type Result<T> = std::result::Result<T, SciRustError>;
 // ================================================================== //
 
 /// Vérifie que deux shapes sont identiques. Renvoie ShapeMismatch sinon.
-pub fn check_shape(op: &'static str, expected: (usize, usize),
-                   got: (usize, usize)) -> Result<()>
-{
+pub fn check_shape(op: &'static str, expected: (usize, usize), got: (usize, usize)) -> Result<()> {
     if expected != got {
         Err(SciRustError::ShapeMismatch { op, expected, got })
     } else {
@@ -170,7 +187,9 @@ mod tests {
     #[test]
     fn shape_mismatch_displays_clearly() {
         let e = SciRustError::ShapeMismatch {
-            op: "matmul", expected: (2, 3), got: (2, 4)
+            op: "matmul",
+            expected: (2, 3),
+            got: (2, 4),
         };
         let s = format!("{}", e);
         assert!(s.contains("matmul"));

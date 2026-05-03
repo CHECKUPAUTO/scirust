@@ -14,6 +14,12 @@ pub struct PatternMemory {
     pub patterns: Vec<(Vec<f64>, f64)>,
 }
 
+impl Default for PatternMemory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternMemory {
     pub fn new() -> Self {
         Self {
@@ -50,6 +56,7 @@ fn gauss_elim(a: &mut [Vec<f64>], b: &mut [f64]) -> Option<()> {
         for row in (col + 1)..n {
             let factor = a[row][col] / pivot;
             // Eliminate column `col` in this row
+            #[allow(clippy::needless_range_loop)]
             for k in col..n {
                 a[row][k] -= factor * a[col][k];
             }
@@ -316,15 +323,11 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
 
 pub mod tensor {
     pub mod device {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
         pub enum Device {
+            #[default]
             Cpu,
             Gpu,
-        }
-        impl Default for Device {
-            fn default() -> Self {
-                Device::Cpu
-            }
         }
     }
 }
@@ -347,7 +350,11 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect(); // y = 2x + 1
         let (slope, intercept) = linear_regression(&x, &y);
         assert!(approx_eq(slope, 2.0, 1e-10), "slope = {}", slope);
-        assert!(approx_eq(intercept, 1.0, 1e-10), "intercept = {}", intercept);
+        assert!(
+            approx_eq(intercept, 1.0, 1e-10),
+            "intercept = {}",
+            intercept
+        );
     }
 
     #[test]

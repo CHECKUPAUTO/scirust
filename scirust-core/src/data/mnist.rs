@@ -18,11 +18,11 @@
 // mais via l'extension uniquement (pas de décompression intégrée — l'utilisateur
 // doit gunzip avant).
 
+use crate::autodiff::reverse::Tensor;
+use crate::data::{Dataset, InMemoryDataset};
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
-use crate::autodiff::reverse::Tensor;
-use crate::data::{Dataset, InMemoryDataset};
 
 const MAGIC_IMAGES: u32 = 0x00000803;
 const MAGIC_LABELS: u32 = 0x00000801;
@@ -42,8 +42,10 @@ pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, 
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;
     if magic != MAGIC_IMAGES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData,
-                   format!("magic image incorrect : 0x{magic:08x}, attendu 0x{MAGIC_IMAGES:08x}")));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("magic image incorrect : 0x{magic:08x}, attendu 0x{MAGIC_IMAGES:08x}"),
+        ));
     }
     let n = read_be_u32(&mut f)? as usize;
     let h = read_be_u32(&mut f)? as usize;
@@ -63,8 +65,10 @@ pub fn load_idx_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;
     if magic != MAGIC_LABELS {
-        return Err(io::Error::new(io::ErrorKind::InvalidData,
-                   format!("magic label incorrect : 0x{magic:08x}, attendu 0x{MAGIC_LABELS:08x}")));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("magic label incorrect : 0x{magic:08x}, attendu 0x{MAGIC_LABELS:08x}"),
+        ));
     }
     let n = read_be_u32(&mut f)? as usize;
     let mut labels = vec![0u8; n];
@@ -77,12 +81,12 @@ pub fn load_idx_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 // ================================================================== //
 
 pub struct MnistDataset {
-    pub n:       usize,
-    pub h:       usize,
-    pub w:       usize,
+    pub n: usize,
+    pub h: usize,
+    pub w: usize,
     pub n_classes: usize,
     /// Images aplaties en (N, H·W) row-major, normalisées
-    pub images:  Vec<f32>,
+    pub images: Vec<f32>,
     /// Labels en one-hot (N, n_classes)
     pub labels_one_hot: Vec<f32>,
     /// Labels bruts (N,) pour eval / accuracy
@@ -95,8 +99,10 @@ impl MnistDataset {
         let (images, n, h, w) = load_idx_images(images_path)?;
         let labels_raw = load_idx_labels(labels_path)?;
         if labels_raw.len() != n {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                       format!("incohérence : {} images vs {} labels", n, labels_raw.len())));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("incohérence : {} images vs {} labels", n, labels_raw.len()),
+            ));
         }
 
         let n_classes = (*labels_raw.iter().max().unwrap_or(&0) as usize) + 1;
@@ -107,7 +113,10 @@ impl MnistDataset {
         }
 
         Ok(Self {
-            n, h, w, n_classes,
+            n,
+            h,
+            w,
+            n_classes,
             images,
             labels_one_hot: one_hot,
             labels_raw,
@@ -116,8 +125,12 @@ impl MnistDataset {
 
     /// Conversion en InMemoryDataset standard (pour DataLoader).
     pub fn into_in_memory(self) -> InMemoryDataset {
-        InMemoryDataset::new(self.images, self.labels_one_hot,
-                             self.h * self.w, self.n_classes)
+        InMemoryDataset::new(
+            self.images,
+            self.labels_one_hot,
+            self.h * self.w,
+            self.n_classes,
+        )
     }
 
     /// Sous-échantillonnage : utile pour iter rapide ou test rapide.
@@ -128,7 +141,8 @@ impl MnistDataset {
         InMemoryDataset::new(
             self.images[..actual * xdim].to_vec(),
             self.labels_one_hot[..actual * ydim].to_vec(),
-            xdim, ydim,
+            xdim,
+            ydim,
         )
     }
 }
@@ -136,12 +150,11 @@ impl MnistDataset {
 impl MnistDataset {
     pub fn get(&self, idx: usize) -> (Tensor, Tensor) {
         let xdim = self.h * self.w;
-        let x = Tensor::from_vec(
-            self.images[idx * xdim..(idx + 1) * xdim].to_vec(), 1, xdim,
-        );
+        let x = Tensor::from_vec(self.images[idx * xdim..(idx + 1) * xdim].to_vec(), 1, xdim);
         let y = Tensor::from_vec(
             self.labels_one_hot[idx * self.n_classes..(idx + 1) * self.n_classes].to_vec(),
-            1, self.n_classes,
+            1,
+            self.n_classes,
         );
         (x, y)
     }
@@ -154,7 +167,9 @@ impl Dataset for MnistDataset {
         let y = &self.labels_one_hot[idx * self.n_classes..(idx + 1) * self.n_classes];
         (x, y)
     }
-    fn n_samples(&self) -> usize { self.n }
+    fn n_samples(&self) -> usize {
+        self.n
+    }
 }
 
 // ================================================================== //
@@ -185,8 +200,7 @@ mod tests {
 
     #[test]
     fn load_synthetic_idx() {
-        let dir = std::env::temp_dir().join(format!("scirust_idx_test_{}",
-                                            std::process::id()));
+        let dir = std::env::temp_dir().join(format!("scirust_idx_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let img_path = dir.join("img.idx");
         let lbl_path = dir.join("lbl.idx");
@@ -199,7 +213,7 @@ mod tests {
         assert_eq!(mnist.n, 5);
         assert_eq!((mnist.h, mnist.w), (4, 4));
         // Pixels normalisés : 128 / 255 ≈ 0.502
-        assert!((mnist.images[0] - 128.0/255.0).abs() < 1e-5);
+        assert!((mnist.images[0] - 128.0 / 255.0).abs() < 1e-5);
 
         // One-hot : ligne 2 (label 2) doit avoir 1.0 en index 2, 0 ailleurs
         assert_eq!(mnist.labels_one_hot[2 * 10 + 2], 1.0);
@@ -211,8 +225,7 @@ mod tests {
 
     #[test]
     fn rejects_wrong_magic() {
-        let dir = std::env::temp_dir().join(format!("scirust_idx_bad_{}",
-                                            std::process::id()));
+        let dir = std::env::temp_dir().join(format!("scirust_idx_bad_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("bad.idx");
         let mut f = File::create(&path).unwrap();
@@ -225,8 +238,7 @@ mod tests {
 
     #[test]
     fn dataset_get_returns_normalized_tensor() {
-        let dir = std::env::temp_dir().join(format!("scirust_idx_norm_{}",
-                                            std::process::id()));
+        let dir = std::env::temp_dir().join(format!("scirust_idx_norm_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let img_path = dir.join("img.idx");
         let lbl_path = dir.join("lbl.idx");

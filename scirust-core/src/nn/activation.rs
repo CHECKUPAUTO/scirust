@@ -14,11 +14,15 @@ use crate::nn::module::Module;
 pub struct ReLU;
 
 impl ReLU {
-    pub fn new() -> Self { ReLU }
+    pub fn new() -> Self {
+        ReLU
+    }
 }
 
 impl Default for ReLU {
-    fn default() -> Self { ReLU }
+    fn default() -> Self {
+        ReLU
+    }
 }
 
 impl Module for ReLU {
@@ -26,7 +30,9 @@ impl Module for ReLU {
         input.relu()
     }
 
-    fn parameter_indices(&self) -> Vec<usize> { Vec::new() }
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
     fn sync(&mut self, _tape: &Tape) {}
 }
 
@@ -35,11 +41,15 @@ impl Module for ReLU {
 pub struct Sigmoid;
 
 impl Sigmoid {
-    pub fn new() -> Self { Sigmoid }
+    pub fn new() -> Self {
+        Sigmoid
+    }
 }
 
 impl Default for Sigmoid {
-    fn default() -> Self { Sigmoid }
+    fn default() -> Self {
+        Sigmoid
+    }
 }
 
 impl Module for Sigmoid {
@@ -47,7 +57,9 @@ impl Module for Sigmoid {
         input.sigmoid()
     }
 
-    fn parameter_indices(&self) -> Vec<usize> { Vec::new() }
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
     fn sync(&mut self, _tape: &Tape) {}
 }
 
@@ -66,11 +78,15 @@ pub struct Softmax {
 }
 
 impl Softmax {
-    pub fn new(axis: u8) -> Self { Softmax { axis } }
+    pub fn new(axis: u8) -> Self {
+        Softmax { axis }
+    }
 }
 
 impl Default for Softmax {
-    fn default() -> Self { Softmax { axis: 1 } }
+    fn default() -> Self {
+        Softmax { axis: 1 }
+    }
 }
 
 impl Module for Softmax {
@@ -78,7 +94,9 @@ impl Module for Softmax {
         input.softmax(self.axis)
     }
 
-    fn parameter_indices(&self) -> Vec<usize> { Vec::new() }
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
     fn sync(&mut self, _tape: &Tape) {}
 }
 
@@ -98,11 +116,15 @@ pub struct LogSoftmax {
 }
 
 impl LogSoftmax {
-    pub fn new(axis: u8) -> Self { LogSoftmax { axis } }
+    pub fn new(axis: u8) -> Self {
+        LogSoftmax { axis }
+    }
 }
 
 impl Default for LogSoftmax {
-    fn default() -> Self { LogSoftmax { axis: 1 } }
+    fn default() -> Self {
+        LogSoftmax { axis: 1 }
+    }
 }
 
 impl Module for LogSoftmax {
@@ -110,7 +132,9 @@ impl Module for LogSoftmax {
         input.log_softmax(self.axis)
     }
 
-    fn parameter_indices(&self) -> Vec<usize> { Vec::new() }
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
     fn sync(&mut self, _tape: &Tape) {}
 }
 
@@ -156,7 +180,11 @@ mod tests {
         let y = act.forward(&tape, x);
         let v = tape.value(y.idx());
         let sum: f32 = v.data.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "softmax should sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "softmax should sum to 1, got {}",
+            sum
+        );
     }
 
     #[test]
@@ -166,8 +194,11 @@ mod tests {
         let x = tape.input(Tensor::from_vec(vec![1000.0, 999.0, 998.0], 1, 3));
         let y = act.forward(&tape, x);
         let v = tape.value(y.idx());
-        assert!(v.data.iter().all(|f| f.is_finite()),
-            "softmax should be finite with large logits, got {:?}", v.data);
+        assert!(
+            v.data.iter().all(|f| f.is_finite()),
+            "softmax should be finite with large logits, got {:?}",
+            v.data
+        );
         let sum: f32 = v.data.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
     }
@@ -180,8 +211,11 @@ mod tests {
         let y = act.forward(&tape, x);
         let v = tape.value(y.idx());
         // log(softmax) values should be <= 0
-        assert!(v.data.iter().all(|f| *f <= 0.0),
-            "log_softmax values should be <= 0, got {:?}", v.data);
+        assert!(
+            v.data.iter().all(|f| *f <= 0.0),
+            "log_softmax values should be <= 0, got {:?}",
+            v.data
+        );
     }
 
     #[test]
@@ -191,8 +225,11 @@ mod tests {
         let x = tape.input(Tensor::from_vec(vec![1000.0, 999.0, 998.0], 1, 3));
         let y = act.forward(&tape, x);
         let v = tape.value(y.idx());
-        assert!(v.data.iter().all(|f| f.is_finite()),
-            "log_softmax should be finite with large logits, got {:?}", v.data);
+        assert!(
+            v.data.iter().all(|f| f.is_finite()),
+            "log_softmax should be finite with large logits, got {:?}",
+            v.data
+        );
     }
 
     #[test]
@@ -207,7 +244,10 @@ mod tests {
         let loss = y.hadamard(weights).sum();
         loss.backward();
         let g = tape.grad(x.idx());
-        assert!(g.data.iter().all(|v| v.abs() > 1e-6), "softmax gradient is zero");
+        assert!(
+            g.data.iter().all(|v| v.abs() > 1e-6),
+            "softmax gradient is zero"
+        );
     }
 
     #[test]
@@ -219,6 +259,9 @@ mod tests {
         let loss = y.sum();
         loss.backward();
         let g = tape.grad(x.idx());
-        assert!(g.data.iter().all(|v| v.abs() > 1e-6), "log_softmax gradient is zero");
+        assert!(
+            g.data.iter().all(|v| v.abs() > 1e-6),
+            "log_softmax gradient is zero"
+        );
     }
 }

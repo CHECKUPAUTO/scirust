@@ -7,52 +7,77 @@
 //
 // Critère de succès : > 90% accuracy sur test set (ou subset rapide).
 
-use scirust_core::autodiff::reverse::{Tape};
 use scirust_core::autodiff::optim::{Adam, Optimizer};
-use scirust_core::nn::{Module, Sequential, Linear, ReLU, PcgEngine, KaimingNormal, Zeros, CrossEntropyLoss, Loss};
-use scirust_core::data::{MnistDataset, DataLoader};
+use scirust_core::autodiff::reverse::Tape;
+use scirust_core::data::{DataLoader, MnistDataset};
+use scirust_core::nn::{
+    CrossEntropyLoss, KaimingNormal, Linear, Loss, Module, PcgEngine, ReLU, Sequential, Zeros,
+};
 
 fn main() {
     println!("=== SciRust v11.1 — MNIST Classifier ===\n");
 
     // -------- Chargement MNIST -------- //
-    let data_dir = std::env::var("MNIST_DIR").unwrap_or_else(|_| "/root/scirust/data/mnist".to_string());
+    let data_dir =
+        std::env::var("MNIST_DIR").unwrap_or_else(|_| "/root/scirust/data/mnist".to_string());
     println!("Chargement MNIST depuis {}...", data_dir);
 
     let train = MnistDataset::load_idx(
         format!("{}/train-images-idx3-ubyte", data_dir),
         format!("{}/train-labels-idx1-ubyte", data_dir),
-    ).expect("Échec chargement train MNIST");
+    )
+    .expect("Échec chargement train MNIST");
 
     let test = MnistDataset::load_idx(
         format!("{}/t10k-images-idx3-ubyte", data_dir),
         format!("{}/t10k-labels-idx1-ubyte", data_dir),
-    ).expect("Échec chargement test MNIST");
+    )
+    .expect("Échec chargement test MNIST");
 
     println!("Train : {} images {}x{}", train.n, train.h, train.w);
     println!("Test  : {} images {}x{}\n", test.n, test.h, test.w);
 
     // Sous-échantillonnage rapide pour test (optionnel)
     let max_train = std::env::var("MNIST_MAX_TRAIN")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(train.n);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(train.n);
     let max_test = std::env::var("MNIST_MAX_TEST")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(test.n);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(test.n);
 
     let train_small = train.subsample(max_train);
     let test_small = test.subsample(max_test);
 
-    println!("Utilisé : {} train, {} test\n", train_small.n_samples(), test_small.n_samples());
+    println!(
+        "Utilisé : {} train, {} test\n",
+        train_small.n_samples(),
+        test_small.n_samples()
+    );
 
     // -------- Modèle : MLP 784→256→10 -------- //
-    let input_dim = train.h * train.w;  // 784
+    let input_dim = train.h * train.w; // 784
     let hidden_dim = 256;
     let n_classes = 10;
 
     let mut rng = PcgEngine::new(42);
     let mut model = Sequential::new()
-        .add(Linear::new(input_dim, hidden_dim, &KaimingNormal, &Zeros, &mut rng))
+        .add(Linear::new(
+            input_dim,
+            hidden_dim,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        ))
         .add(ReLU::new())
-        .add(Linear::new(hidden_dim, n_classes, &KaimingNormal, &Zeros, &mut rng));
+        .add(Linear::new(
+            hidden_dim,
+            n_classes,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        ));
 
     let loss_fn = CrossEntropyLoss::new();
     let mut opt = Adam::new(0.001);
@@ -60,8 +85,14 @@ fn main() {
     let batch_size = 64;
     let n_epochs = 5;
 
-    println!("Architecture : Linear({}→{}) → ReLU → Linear({}→{})", input_dim, hidden_dim, hidden_dim, n_classes);
-    println!("Entraînement : {} epochs, batch={}, Adam(lr=0.001)\n", n_epochs, batch_size);
+    println!(
+        "Architecture : Linear({}→{}) → ReLU → Linear({}→{})",
+        input_dim, hidden_dim, hidden_dim, n_classes
+    );
+    println!(
+        "Entraînement : {} epochs, batch={}, Adam(lr=0.001)\n",
+        n_epochs, batch_size
+    );
 
     // -------- Boucle d'entraînement -------- //
     let mut train_loader = DataLoader::new(train_small, batch_size, true, 42);
@@ -89,7 +120,12 @@ fn main() {
         }
 
         let avg_loss = epoch_loss / n_batches as f32;
-        println!("  Epoch {:>2} : loss = {:.4} ({} batches)", epoch + 1, avg_loss, n_batches);
+        println!(
+            "  Epoch {:>2} : loss = {:.4} ({} batches)",
+            epoch + 1,
+            avg_loss,
+            n_batches
+        );
     }
 
     // -------- Évaluation -------- //
@@ -123,7 +159,9 @@ fn main() {
                 .map(|(idx, _)| idx)
                 .unwrap_or(0);
 
-            if pred_class == true_class { correct += 1; }
+            if pred_class == true_class {
+                correct += 1;
+            }
             total += 1;
         }
     }
@@ -136,7 +174,10 @@ fn main() {
         println!("\n✅ SUCCÈS — SciRust v11.1 classifie MNIST correctement.");
         std::process::exit(0);
     } else if accuracy >= 85.0 {
-        println!("\n⚠️  PARTIEL — {:.2}% est acceptable mais < 90%. Augmenter epochs ou lr.", accuracy);
+        println!(
+            "\n⚠️  PARTIEL — {:.2}% est acceptable mais < 90%. Augmenter epochs ou lr.",
+            accuracy
+        );
         std::process::exit(0);
     } else {
         println!("\n❌ ÉCHEC — Convergence insuffisante. Vérifier lr, architecture, ou données.");

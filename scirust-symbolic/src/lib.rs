@@ -4,9 +4,9 @@
 //! This replaces the missing scirust_symbolic / scirust_reasoning / scirust_learning
 //! crates with a single inline module.
 
-use std::fmt;
 use std::collections::HashMap;
-use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::fmt;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 // ── Expression tree ──
 
@@ -111,7 +111,9 @@ impl Neg for Expr {
 }
 
 impl From<f64> for Expr {
-    fn from(c: f64) -> Self { Expr::Const(c) }
+    fn from(c: f64) -> Self {
+        Expr::Const(c)
+    }
 }
 
 // ── Parsing ──
@@ -150,7 +152,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
                 i += 1;
             }
-            let num: f64 = input[start..i].parse().map_err(|_| format!("Bad number: {}", &input[start..i]))?;
+            let num: f64 = input[start..i]
+                .parse()
+                .map_err(|_| format!("Bad number: {}", &input[start..i]))?;
             tokens.push(Token::Num(num));
             continue;
         }
@@ -301,42 +305,30 @@ pub fn simplify(expr: &Expr) -> Expr {
                 _ => Expr::Pow(Box::new(sa), Box::new(sb)),
             }
         }
-        Expr::Sin(a) => {
-            match simplify(a) {
-                Expr::Const(c) => Expr::Const(c.sin()),
-                sa => Expr::Sin(Box::new(sa)),
-            }
-        }
-        Expr::Cos(a) => {
-            match simplify(a) {
-                Expr::Const(c) => Expr::Const(c.cos()),
-                sa => Expr::Cos(Box::new(sa)),
-            }
-        }
-        Expr::Exp(a) => {
-            match simplify(a) {
-                Expr::Const(c) => Expr::Const(c.exp()),
-                sa => Expr::Exp(Box::new(sa)),
-            }
-        }
-        Expr::Ln(a) => {
-            match simplify(a) {
-                Expr::Const(c) if c > 0.0 => Expr::Const(c.ln()),
-                sa => Expr::Ln(Box::new(sa)),
-            }
-        }
-        Expr::Sqrt(a) => {
-            match simplify(a) {
-                Expr::Const(c) if c >= 0.0 => Expr::Const(c.sqrt()),
-                sa => Expr::Sqrt(Box::new(sa)),
-            }
-        }
-        Expr::Abs(a) => {
-            match simplify(a) {
-                Expr::Const(c) => Expr::Const(c.abs()),
-                sa => Expr::Abs(Box::new(sa)),
-            }
-        }
+        Expr::Sin(a) => match simplify(a) {
+            Expr::Const(c) => Expr::Const(c.sin()),
+            sa => Expr::Sin(Box::new(sa)),
+        },
+        Expr::Cos(a) => match simplify(a) {
+            Expr::Const(c) => Expr::Const(c.cos()),
+            sa => Expr::Cos(Box::new(sa)),
+        },
+        Expr::Exp(a) => match simplify(a) {
+            Expr::Const(c) => Expr::Const(c.exp()),
+            sa => Expr::Exp(Box::new(sa)),
+        },
+        Expr::Ln(a) => match simplify(a) {
+            Expr::Const(c) if c > 0.0 => Expr::Const(c.ln()),
+            sa => Expr::Ln(Box::new(sa)),
+        },
+        Expr::Sqrt(a) => match simplify(a) {
+            Expr::Const(c) if c >= 0.0 => Expr::Const(c.sqrt()),
+            sa => Expr::Sqrt(Box::new(sa)),
+        },
+        Expr::Abs(a) => match simplify(a) {
+            Expr::Const(c) => Expr::Const(c.abs()),
+            sa => Expr::Abs(Box::new(sa)),
+        },
     }
 }
 
@@ -347,7 +339,11 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
     match expr {
         Expr::Const(_) => Expr::Const(0.0),
         Expr::Var(v) => {
-            if v == var { Expr::Const(1.0) } else { Expr::Const(0.0) }
+            if v == var {
+                Expr::Const(1.0)
+            } else {
+                Expr::Const(0.0)
+            }
         }
         Expr::Add(a, b) => diff(a, var) + diff(b, var),
         Expr::Sub(a, b) => diff(a, var) - diff(b, var),
@@ -357,8 +353,7 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
         }
         Expr::Div(a, b) => {
             // (f'g - fg') / g^2
-            let num = diff(a, var).clone() * b.as_ref().clone()
-                - a.as_ref().clone() * diff(b, var);
+            let num = diff(a, var).clone() * b.as_ref().clone() - a.as_ref().clone() * diff(b, var);
             let den = Expr::Pow(b.clone(), Box::new(Expr::Const(2.0)));
             num / den
         }
@@ -379,7 +374,7 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
                         Box::new(expr.clone()),
                         Box::new(
                             diff(b, var) * Expr::Ln(a.clone())
-                                + b.as_ref().clone() * diff(a, var) / a.as_ref().clone()
+                                + b.as_ref().clone() * diff(a, var) / a.as_ref().clone(),
                         ),
                     )
                 }
@@ -427,15 +422,18 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
 pub fn eval(expr: &Expr, vars: &HashMap<String, f64>) -> Result<f64, String> {
     match expr {
         Expr::Const(c) => Ok(*c),
-        Expr::Var(v) => {
-            vars.get(v).copied().ok_or_else(|| format!("Undefined variable: {v}"))
-        }
+        Expr::Var(v) => vars
+            .get(v)
+            .copied()
+            .ok_or_else(|| format!("Undefined variable: {v}")),
         Expr::Add(a, b) => Ok(eval(a, vars)? + eval(b, vars)?),
         Expr::Sub(a, b) => Ok(eval(a, vars)? - eval(b, vars)?),
         Expr::Mul(a, b) => Ok(eval(a, vars)? * eval(b, vars)?),
         Expr::Div(a, b) => {
             let den = eval(b, vars)?;
-            if den == 0.0 { return Err("Division by zero".into()); }
+            if den == 0.0 {
+                return Err("Division by zero".into());
+            }
             Ok(eval(a, vars)? / den)
         }
         Expr::Neg(a) => Ok(-eval(a, vars)?),
@@ -445,12 +443,16 @@ pub fn eval(expr: &Expr, vars: &HashMap<String, f64>) -> Result<f64, String> {
         Expr::Exp(a) => Ok(eval(a, vars)?.exp()),
         Expr::Ln(a) => {
             let v = eval(a, vars)?;
-            if v <= 0.0 { return Err("ln of non-positive number".into()); }
+            if v <= 0.0 {
+                return Err("ln of non-positive number".into());
+            }
             Ok(v.ln())
         }
         Expr::Sqrt(a) => {
             let v = eval(a, vars)?;
-            if v < 0.0 { return Err("sqrt of negative number".into()); }
+            if v < 0.0 {
+                return Err("sqrt of negative number".into());
+            }
             Ok(v.sqrt())
         }
         Expr::Abs(a) => Ok(eval(a, vars)?.abs()),
@@ -474,7 +476,9 @@ pub fn solve_quadratic(expr: &Expr, var: &str) -> Vec<f64> {
             return vec![];
         }
     }
-    if vals.len() != 3 { return vec![]; }
+    if vals.len() != 3 {
+        return vec![];
+    }
 
     // Solve the 3x3 system: a*0+b*0+c=vals[0], a+b+c=vals[1], a-b+c=vals[2]
     let c = vals[0];
@@ -485,12 +489,16 @@ pub fn solve_quadratic(expr: &Expr, var: &str) -> Vec<f64> {
 
     if a.abs() < 1e-12 {
         // Linear: bx + c = 0
-        if b.abs() < 1e-12 { return vec![]; }
+        if b.abs() < 1e-12 {
+            return vec![];
+        }
         return vec![-c / b];
     }
 
     let disc = b * b - 4.0 * a * c;
-    if disc < -1e-12 { return vec![]; }
+    if disc < -1e-12 {
+        return vec![];
+    }
     let disc = disc.max(0.0);
     let sqrt_disc = disc.sqrt();
     let mut roots = vec![(-b + sqrt_disc) / (2.0 * a), (-b - sqrt_disc) / (2.0 * a)];
@@ -511,7 +519,9 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
     let v1 = eval(expr, &vars1).ok()?;
 
     let slope = v1 - v0;
-    if slope.abs() < 1e-15 { return None; }
+    if slope.abs() < 1e-15 {
+        return None;
+    }
     Some(-v0 / slope)
 }
 
@@ -519,7 +529,7 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
 
 /// Check if two expressions are equivalent by evaluating at random points.
 pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
-    let vars = vec!["x", "y", "z", "u", "v", "w"];
+    let vars = ["x", "y", "z", "u", "v", "w"];
     for i in 0..20 {
         let mut bindings = HashMap::new();
         for (j, v) in vars.iter().enumerate() {
@@ -528,7 +538,9 @@ pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
         }
         match (eval(a, &bindings), eval(b, &bindings)) {
             (Ok(va), Ok(vb)) => {
-                if (va - vb).abs() > 1e-8 { return false; }
+                if (va - vb).abs() > 1e-8 {
+                    return false;
+                }
             }
             _ => return false,
         }
@@ -565,16 +577,17 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
         Expr::Pow(a, _) => {
             if let Expr::Sin(inner) = a.as_ref() {
                 // sin²(x) → (1 - cos(2x)) / 2
-                let cos_2x = Expr::Cos(Box::new(
-                    Expr::Mul(Box::new(Expr::Const(2.0)), inner.clone()),
-                ));
-                return Expr::Sub(Box::new(Expr::Const(1.0)), Box::new(cos_2x))
-                    / Expr::Const(2.0);
+                let cos_2x = Expr::Cos(Box::new(Expr::Mul(
+                    Box::new(Expr::Const(2.0)),
+                    inner.clone(),
+                )));
+                return Expr::Sub(Box::new(Expr::Const(1.0)), Box::new(cos_2x)) / Expr::Const(2.0);
             }
             if let Expr::Cos(inner) = a.as_ref() {
-                let cos_2x = Expr::Cos(Box::new(
-                    Expr::Mul(Box::new(Expr::Const(2.0)), inner.clone()),
-                ));
+                let cos_2x = Expr::Cos(Box::new(Expr::Mul(
+                    Box::new(Expr::Const(2.0)),
+                    inner.clone(),
+                )));
                 return (Expr::Const(1.0) + cos_2x) / Expr::Const(2.0);
             }
             expr.clone()
@@ -588,15 +601,22 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
 pub struct Optimizer {
     pub lr: f64,
     pub momentum: f64,
+    #[allow(dead_code)]
     velocity: HashMap<usize, f64>,
 }
 
 impl Optimizer {
     pub fn new(lr: f64, _max_iter: usize) -> Self {
-        Self { lr, momentum: 0.9, velocity: HashMap::new() }
+        Self {
+            lr,
+            momentum: 0.9,
+            velocity: HashMap::new(),
+        }
     }
 
-    pub fn set_momentum(&mut self, m: f64) { self.momentum = m; }
+    pub fn set_momentum(&mut self, m: f64) {
+        self.momentum = m;
+    }
 }
 
 // ── Pattern discovery / polynomial fit ──
@@ -637,13 +657,21 @@ pub fn polynomial_fit(xs: &[f64], ys: &[f64], degree: usize) -> Result<Vec<f64>,
     // Gaussian elimination
     for col in 0..k {
         let pivot = vtv[col * k + col];
-        if pivot.abs() < 1e-15 { return Err("Singular matrix".into()); }
-        for j in 0..k { vtv[col * k + j] /= pivot; }
+        if pivot.abs() < 1e-15 {
+            return Err("Singular matrix".into());
+        }
+        for j in 0..k {
+            vtv[col * k + j] /= pivot;
+        }
         vty[col] /= pivot;
         for row in 0..k {
-            if row == col { continue; }
+            if row == col {
+                continue;
+            }
             let factor = vtv[row * k + col];
-            for j in 0..k { vtv[row * k + j] -= factor * vtv[col * k + j]; }
+            for j in 0..k {
+                vtv[row * k + j] -= factor * vtv[col * k + j];
+            }
             vty[row] -= factor * vty[col];
         }
     }
@@ -653,19 +681,27 @@ pub fn polynomial_fit(xs: &[f64], ys: &[f64], degree: usize) -> Result<Vec<f64>,
 /// Simple linear regression.
 pub fn linear_regression(xs: &[f64], ys: &[f64]) -> Result<(f64, f64), String> {
     let coeffs = polynomial_fit(xs, ys, 1)?;
-    if coeffs.len() < 2 { return Err("Fit failed".into()); }
+    if coeffs.len() < 2 {
+        return Err("Fit failed".into());
+    }
     Ok((coeffs[0], coeffs[1])) // (intercept, slope)
 }
 
 /// Discover patterns in a time series (basic: detect trend).
 pub fn discover_patterns(data: &[f64]) -> Vec<String> {
-    if data.len() < 3 { return vec![]; }
+    if data.len() < 3 {
+        return vec![];
+    }
     let mut patterns = Vec::new();
     let mut increasing = 0;
     let mut decreasing = 0;
     for w in data.windows(2) {
-        if w[1] > w[0] { increasing += 1; }
-        if w[1] < w[0] { decreasing += 1; }
+        if w[1] > w[0] {
+            increasing += 1;
+        }
+        if w[1] < w[0] {
+            decreasing += 1;
+        }
     }
     let total = (data.len() - 1) as f64;
     if increasing as f64 / total > 0.7 {
@@ -686,10 +722,24 @@ pub struct PatternMemory {
     patterns: HashMap<String, Vec<f64>>,
 }
 
+impl Default for PatternMemory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternMemory {
-    pub fn new() -> Self { Self { patterns: HashMap::new() } }
-    pub fn store(&mut self, name: &str, data: Vec<f64>) { self.patterns.insert(name.to_string(), data); }
-    pub fn recall(&self, name: &str) -> Option<&[f64]> { self.patterns.get(name).map(|v| v.as_slice()) }
+    pub fn new() -> Self {
+        Self {
+            patterns: HashMap::new(),
+        }
+    }
+    pub fn store(&mut self, name: &str, data: Vec<f64>) {
+        self.patterns.insert(name.to_string(), data);
+    }
+    pub fn recall(&self, name: &str) -> Option<&[f64]> {
+        self.patterns.get(name).map(|v| v.as_slice())
+    }
 }
 
 // ── Dual numbers for autodiff ──
@@ -703,9 +753,21 @@ pub struct Dual {
 }
 
 impl Dual {
-    pub fn new(primal: f64, tangent: f64) -> Self { Self { primal, tangent } }
-    pub fn primal(c: f64) -> Self { Self { primal: c, tangent: 0.0 } }
-    pub fn var(v: f64) -> Self { Self { primal: v, tangent: 1.0 } }
+    pub fn new(primal: f64, tangent: f64) -> Self {
+        Self { primal, tangent }
+    }
+    pub fn primal(c: f64) -> Self {
+        Self {
+            primal: c,
+            tangent: 0.0,
+        }
+    }
+    pub fn var(v: f64) -> Self {
+        Self {
+            primal: v,
+            tangent: 1.0,
+        }
+    }
 
     pub fn sin(self) -> Self {
         Self {
@@ -721,7 +783,10 @@ impl Dual {
     }
     pub fn exp(self) -> Self {
         let e = self.primal.exp();
-        Self { primal: e, tangent: e * self.tangent }
+        Self {
+            primal: e,
+            tangent: e * self.tangent,
+        }
     }
     pub fn ln(self) -> Self {
         Self {
@@ -731,7 +796,10 @@ impl Dual {
     }
     pub fn sqrt(self) -> Self {
         let s = self.primal.sqrt();
-        Self { primal: s, tangent: self.tangent / (2.0 * s) }
+        Self {
+            primal: s,
+            tangent: self.tangent / (2.0 * s),
+        }
     }
     pub fn abs(self) -> Self {
         Self {
@@ -741,23 +809,31 @@ impl Dual {
     }
     pub fn powf(self, other: Self) -> Self {
         let v = self.primal.powf(other.primal);
-        let d = v * (other.tangent * self.primal.ln()
-            + other.primal * self.tangent / self.primal);
-        Self { primal: v, tangent: d }
+        let d = v * (other.tangent * self.primal.ln() + other.primal * self.tangent / self.primal);
+        Self {
+            primal: v,
+            tangent: d,
+        }
     }
 }
 
 impl Add for Dual {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
-        Self { primal: self.primal + rhs.primal, tangent: self.tangent + rhs.tangent }
+        Self {
+            primal: self.primal + rhs.primal,
+            tangent: self.tangent + rhs.tangent,
+        }
     }
 }
 
 impl Sub for Dual {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self {
-        Self { primal: self.primal - rhs.primal, tangent: self.tangent - rhs.tangent }
+        Self {
+            primal: self.primal - rhs.primal,
+            tangent: self.tangent - rhs.tangent,
+        }
     }
 }
 
@@ -785,7 +861,10 @@ impl Div for Dual {
 impl Neg for Dual {
     type Output = Self;
     fn neg(self) -> Self {
-        Self { primal: -self.primal, tangent: -self.tangent }
+        Self {
+            primal: -self.primal,
+            tangent: -self.tangent,
+        }
     }
 }
 
@@ -793,33 +872,46 @@ impl Neg for Dual {
 
 pub mod ops {
     pub fn add_f32(a: &[f32], b: &[f32], out: &mut [f32]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) { out[i] = a[i] + b[i]; }
+        for i in 0..a.len().min(b.len()).min(out.len()) {
+            out[i] = a[i] + b[i];
+        }
     }
     pub fn mul_f32(a: &[f32], b: &[f32], out: &mut [f32]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) { out[i] = a[i] * b[i]; }
+        for i in 0..a.len().min(b.len()).min(out.len()) {
+            out[i] = a[i] * b[i];
+        }
     }
     pub fn add_f64(a: &[f64], b: &[f64], out: &mut [f64]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) { out[i] = a[i] + b[i]; }
+        for i in 0..a.len().min(b.len()).min(out.len()) {
+            out[i] = a[i] + b[i];
+        }
     }
     pub fn mul_f64(a: &[f64], b: &[f64], out: &mut [f64]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) { out[i] = a[i] * b[i]; }
+        for i in 0..a.len().min(b.len()).min(out.len()) {
+            out[i] = a[i] * b[i];
+        }
     }
 }
 
-pub fn simd_add_one(data: &mut [f32]) { for x in data { *x += 1.0; } }
+pub fn simd_add_one(data: &mut [f32]) {
+    for x in data {
+        *x += 1.0;
+    }
+}
 
 // ── GPU dispatch stub ──
 
 pub mod dispatch {
     pub fn gpu_or_cpu<F, G, T>(_on_gpu: F, on_cpu: G) -> T
-    where F: FnOnce() -> T, G: FnOnce() -> T
+    where
+        F: FnOnce() -> T,
+        G: FnOnce() -> T,
     {
         on_cpu()
     }
 }
 
 // ── IA Bridge stubs ──
-
 
 pub struct Pipeline {
     vars: HashMap<String, f64>,
@@ -834,8 +926,18 @@ pub struct PipelineOutput {
     pub rust_code: String,
 }
 
+impl Default for Pipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pipeline {
-    pub fn new() -> Self { Self { vars: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            vars: HashMap::new(),
+        }
+    }
     pub fn with_vars(mut self, vars: HashMap<String, f64>) -> Self {
         self.vars = vars;
         self
@@ -882,9 +984,7 @@ pub fn parse_natural(input: &str) -> NaturalCommand {
 
 // ── Autodiff macros stub ──
 
-pub mod macros_stub {
-
-}
+pub mod macros_stub {}
 
 // ── Derivative helpers for prelude ──
 

@@ -16,14 +16,14 @@
 //     pour parameter_indices et sync.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
-use crate::nn::module::Module;
 use crate::nn::init::Initializer;
+use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
 
 pub struct Linear {
-    pub weight: Tensor,                  // (in_features, out_features)
-    pub bias:   Tensor,                  // (1, out_features)
-    pub in_features:  usize,
+    pub weight: Tensor, // (in_features, out_features)
+    pub bias: Tensor,   // (1, out_features)
+    pub in_features: usize,
     pub out_features: usize,
     last_w_idx: Option<usize>,
     last_b_idx: Option<usize>,
@@ -31,19 +31,36 @@ pub struct Linear {
 
 impl Linear {
     pub fn new<W: Initializer, B: Initializer>(
-        in_features:  usize,
+        in_features: usize,
         out_features: usize,
-        w_init:       &W,
-        b_init:       &B,
-        rng:          &mut PcgEngine,
+        w_init: &W,
+        b_init: &B,
+        rng: &mut PcgEngine,
     ) -> Self {
         let mut weight = Tensor::zeros(in_features, out_features);
         w_init.fill(&mut weight, in_features, out_features, rng);
         let mut bias = Tensor::zeros(1, out_features);
         b_init.fill(&mut bias, in_features, out_features, rng);
         Self {
-            weight, bias, in_features, out_features,
-            last_w_idx: None, last_b_idx: None,
+            weight,
+            bias,
+            in_features,
+            out_features,
+            last_w_idx: None,
+            last_b_idx: None,
+        }
+    }
+}
+
+impl Clone for Linear {
+    fn clone(&self) -> Self {
+        Self {
+            weight: self.weight.clone(),
+            bias: self.bias.clone(),
+            in_features: self.in_features,
+            out_features: self.out_features,
+            last_w_idx: None,
+            last_b_idx: None,
         }
     }
 }
@@ -59,14 +76,22 @@ impl Module for Linear {
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_w_idx { v.push(i); }
-        if let Some(i) = self.last_b_idx { v.push(i); }
+        if let Some(i) = self.last_w_idx {
+            v.push(i);
+        }
+        if let Some(i) = self.last_b_idx {
+            v.push(i);
+        }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_w_idx { self.weight = tape.value(i); }
-        if let Some(i) = self.last_b_idx { self.bias   = tape.value(i); }
+        if let Some(i) = self.last_w_idx {
+            self.weight = tape.value(i);
+        }
+        if let Some(i) = self.last_b_idx {
+            self.bias = tape.value(i);
+        }
     }
 
     fn state_dict(&self) -> std::collections::HashMap<String, Tensor> {
@@ -76,14 +101,29 @@ impl Module for Linear {
         map
     }
 
-    fn load_state_dict(&mut self, sd: &std::collections::HashMap<String, Tensor>) -> Result<(), String> {
-        let w = sd.get("weight").ok_or_else(|| "missing key: weight".to_string())?;
-        let b = sd.get("bias").ok_or_else(|| "missing key: bias".to_string())?;
+    fn load_state_dict(
+        &mut self,
+        sd: &std::collections::HashMap<String, Tensor>,
+    ) -> Result<(), String> {
+        let w = sd
+            .get("weight")
+            .ok_or_else(|| "missing key: weight".to_string())?;
+        let b = sd
+            .get("bias")
+            .ok_or_else(|| "missing key: bias".to_string())?;
         if w.shape() != (self.in_features, self.out_features) {
-            return Err(format!("weight shape mismatch: expected {:?}, got {:?}", (self.in_features, self.out_features), w.shape()));
+            return Err(format!(
+                "weight shape mismatch: expected {:?}, got {:?}",
+                (self.in_features, self.out_features),
+                w.shape()
+            ));
         }
         if b.shape() != (1, self.out_features) {
-            return Err(format!("bias shape mismatch: expected {:?}, got {:?}", (1, self.out_features), b.shape()));
+            return Err(format!(
+                "bias shape mismatch: expected {:?}, got {:?}",
+                (1, self.out_features),
+                b.shape()
+            ));
         }
         self.weight = w.clone();
         self.bias = b.clone();
@@ -101,7 +141,7 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         let lin = Linear::new(4, 8, &KaimingNormal, &Zeros, &mut rng);
         assert_eq!(lin.weight.shape(), (4, 8));
-        assert_eq!(lin.bias.shape(),   (1, 8));
+        assert_eq!(lin.bias.shape(), (1, 8));
     }
 
     #[test]
@@ -109,7 +149,7 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         let mut lin = Linear::new(3, 5, &KaimingNormal, &Zeros, &mut rng);
         let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![1.0; 6], 2, 3));   // batch=2, in=3
+        let x = tape.input(Tensor::from_vec(vec![1.0; 6], 2, 3)); // batch=2, in=3
         let y = lin.forward(&tape, x);
         assert_eq!(y.shape(), (2, 5));
     }
@@ -122,10 +162,10 @@ mod tests {
         lin.bias = Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3);
 
         let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![5.0, 7.0,  9.0, 11.0], 2, 2));
+        let x = tape.input(Tensor::from_vec(vec![5.0, 7.0, 9.0, 11.0], 2, 2));
         let y = lin.forward(&tape, x);
         let v = tape.value(y.idx());
-        assert_eq!(v.data, vec![1.0, 2.0, 3.0,  1.0, 2.0, 3.0]);
+        assert_eq!(v.data, vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -225,6 +265,9 @@ mod tests {
         // missing bias
         let res = lin.load_state_dict(&sd);
         assert!(res.is_err(), "expected error for missing bias");
-        assert!(res.unwrap_err().contains("bias"), "error should mention missing key");
+        assert!(
+            res.unwrap_err().contains("bias"),
+            "error should mention missing key"
+        );
     }
 }

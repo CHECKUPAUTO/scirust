@@ -31,7 +31,9 @@ pub trait LrSchedule: Send + Sync {
 
 // Les Box<dyn LrSchedule> peuvent eux-mêmes être schedulers
 impl<T: LrSchedule + ?Sized> LrSchedule for Box<T> {
-    fn lr_at(&self, step: usize) -> f32 { (**self).lr_at(step) }
+    fn lr_at(&self, step: usize) -> f32 {
+        (**self).lr_at(step)
+    }
 }
 
 // ================================================================== //
@@ -45,11 +47,15 @@ pub struct ConstantLr {
 }
 
 impl ConstantLr {
-    pub fn new(lr: f32) -> Self { Self { lr } }
+    pub fn new(lr: f32) -> Self {
+        Self { lr }
+    }
 }
 
 impl LrSchedule for ConstantLr {
-    fn lr_at(&self, _step: usize) -> f32 { self.lr }
+    fn lr_at(&self, _step: usize) -> f32 {
+        self.lr
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -59,15 +65,19 @@ impl LrSchedule for ConstantLr {
 /// → /10 toutes les 30 epochs.
 #[derive(Clone, Debug)]
 pub struct StepLr {
-    pub initial:   f32,
-    pub decay:     f32,
+    pub initial: f32,
+    pub decay: f32,
     pub step_size: usize,
 }
 
 impl StepLr {
     pub fn new(initial: f32, decay: f32, step_size: usize) -> Self {
         assert!(step_size > 0, "StepLr: step_size > 0 requis");
-        Self { initial, decay, step_size }
+        Self {
+            initial,
+            decay,
+            step_size,
+        }
     }
 }
 
@@ -85,7 +95,7 @@ impl LrSchedule for StepLr {
 #[derive(Clone, Debug)]
 pub struct ExponentialLr {
     pub initial: f32,
-    pub gamma:   f32,
+    pub gamma: f32,
 }
 
 impl ExponentialLr {
@@ -114,22 +124,31 @@ impl LrSchedule for ExponentialLr {
 #[derive(Clone, Debug)]
 pub struct CosineAnnealing {
     pub initial: f32,
-    pub min_lr:  f32,
-    pub period:  usize,
+    pub min_lr: f32,
+    pub period: usize,
 }
 
 impl CosineAnnealing {
     pub fn new(initial: f32, min_lr: f32, period: usize) -> Self {
         assert!(period > 0, "CosineAnnealing: period > 0 requis");
-        assert!(min_lr <= initial, "CosineAnnealing: min_lr <= initial requis");
-        Self { initial, min_lr, period }
+        assert!(
+            min_lr <= initial,
+            "CosineAnnealing: min_lr <= initial requis"
+        );
+        Self {
+            initial,
+            min_lr,
+            period,
+        }
     }
 }
 
 impl LrSchedule for CosineAnnealing {
     fn lr_at(&self, step: usize) -> f32 {
-        if step >= self.period { return self.min_lr; }
-        let progress = step as f32 / self.period as f32;   // [0, 1]
+        if step >= self.period {
+            return self.min_lr;
+        }
+        let progress = step as f32 / self.period as f32; // [0, 1]
         let cos_factor = 0.5 * (1.0 + (std::f32::consts::PI * progress).cos());
         self.min_lr + (self.initial - self.min_lr) * cos_factor
     }
@@ -146,18 +165,25 @@ impl LrSchedule for CosineAnnealing {
 /// au démarrage.
 #[derive(Clone, Debug)]
 pub struct WarmupCosine {
-    pub base:         f32,
-    pub min_lr:       f32,
+    pub base: f32,
+    pub min_lr: f32,
     pub warmup_steps: usize,
-    pub total_steps:  usize,
+    pub total_steps: usize,
 }
 
 impl WarmupCosine {
     pub fn new(base: f32, min_lr: f32, warmup_steps: usize, total_steps: usize) -> Self {
-        assert!(warmup_steps < total_steps,
-                "WarmupCosine: warmup_steps < total_steps requis");
+        assert!(
+            warmup_steps < total_steps,
+            "WarmupCosine: warmup_steps < total_steps requis"
+        );
         assert!(min_lr <= base);
-        Self { base, min_lr, warmup_steps, total_steps }
+        Self {
+            base,
+            min_lr,
+            warmup_steps,
+            total_steps,
+        }
     }
 }
 
@@ -170,7 +196,9 @@ impl LrSchedule for WarmupCosine {
             // Cosine de base à min_lr sur le reste
             let post = step - self.warmup_steps;
             let period = self.total_steps - self.warmup_steps;
-            if post >= period { return self.min_lr; }
+            if post >= period {
+                return self.min_lr;
+            }
             let progress = post as f32 / period as f32;
             let cos_factor = 0.5 * (1.0 + (std::f32::consts::PI * progress).cos());
             self.min_lr + (self.base - self.min_lr) * cos_factor
@@ -196,27 +224,32 @@ impl LrSchedule for WarmupCosine {
 ///       sched.step(val_loss);   // → met à jour le LR si plateau
 ///   }
 pub struct ReduceOnPlateau {
-    initial:        f32,
-    pub factor:     f32,
-    pub patience:   usize,
-    pub min_lr:     f32,
-    current:        f32,
-    best_loss:      f32,
-    n_bad_epochs:   usize,
+    initial: f32,
+    pub factor: f32,
+    pub patience: usize,
+    pub min_lr: f32,
+    current: f32,
+    best_loss: f32,
+    n_bad_epochs: usize,
 }
 
 impl ReduceOnPlateau {
     pub fn new(initial: f32, factor: f32, patience: usize, min_lr: f32) -> Self {
         assert!(factor > 0.0 && factor < 1.0, "factor ∈ (0, 1)");
         Self {
-            initial, factor, patience, min_lr,
+            initial,
+            factor,
+            patience,
+            min_lr,
             current: initial,
             best_loss: f32::INFINITY,
             n_bad_epochs: 0,
         }
     }
 
-    pub fn current_lr(&self) -> f32 { self.current }
+    pub fn current_lr(&self) -> f32 {
+        self.current
+    }
 
     /// Appelle ça à chaque fin d'epoch avec la val_loss observée.
     /// Renvoie le nouveau LR.
@@ -262,27 +295,27 @@ mod tests {
     #[test]
     fn step_lr_decays_at_boundaries() {
         let s = StepLr::new(0.1, 0.1, 30);
-        assert!((s.lr_at(0)   - 0.1   ).abs() < 1e-7);
-        assert!((s.lr_at(29)  - 0.1   ).abs() < 1e-7);
-        assert!((s.lr_at(30)  - 0.01  ).abs() < 1e-7);
-        assert!((s.lr_at(60)  - 0.001 ).abs() < 1e-7);
-        assert!((s.lr_at(90)  - 0.0001).abs() < 1e-7);
+        assert!((s.lr_at(0) - 0.1).abs() < 1e-7);
+        assert!((s.lr_at(29) - 0.1).abs() < 1e-7);
+        assert!((s.lr_at(30) - 0.01).abs() < 1e-7);
+        assert!((s.lr_at(60) - 0.001).abs() < 1e-7);
+        assert!((s.lr_at(90) - 0.0001).abs() < 1e-7);
     }
 
     #[test]
     fn exponential_decays_smoothly() {
         let s = ExponentialLr::new(1.0, 0.9);
-        assert!((s.lr_at(0)  - 1.0).abs()       < 1e-6);
-        assert!((s.lr_at(1)  - 0.9).abs()       < 1e-6);
+        assert!((s.lr_at(0) - 1.0).abs() < 1e-6);
+        assert!((s.lr_at(1) - 0.9).abs() < 1e-6);
         assert!((s.lr_at(10) - 0.9_f32.powi(10)).abs() < 1e-6);
     }
 
     #[test]
     fn cosine_starts_at_initial_ends_at_min() {
         let s = CosineAnnealing::new(0.1, 0.001, 100);
-        assert!((s.lr_at(0)   - 0.1  ).abs() < 1e-5);
+        assert!((s.lr_at(0) - 0.1).abs() < 1e-5);
         assert!((s.lr_at(100) - 0.001).abs() < 1e-5);
-        assert!((s.lr_at(200) - 0.001).abs() < 1e-5);  // post-period clamp
+        assert!((s.lr_at(200) - 0.001).abs() < 1e-5); // post-period clamp
         // Au milieu, on est à peu près à mi-chemin
         let mid = s.lr_at(50);
         assert!(mid > 0.04 && mid < 0.06, "mid lr = {mid}");
@@ -294,7 +327,10 @@ mod tests {
         let mut prev = f32::INFINITY;
         for step in 0..=100 {
             let lr = s.lr_at(step);
-            assert!(lr <= prev + 1e-7, "non-monotonic at step {step}: {prev} → {lr}");
+            assert!(
+                lr <= prev + 1e-7,
+                "non-monotonic at step {step}: {prev} → {lr}"
+            );
             prev = lr;
         }
     }
@@ -317,20 +353,22 @@ mod tests {
         // Le LR juste avant et juste après warmup doivent être proches
         let s = WarmupCosine::new(0.1, 0.001, 100, 1000);
         let just_before = s.lr_at(99);
-        let just_after  = s.lr_at(100);
-        assert!((just_after - just_before).abs() < 0.01,
-                "discontinuité au transition warmup→cosine : {just_before} vs {just_after}");
+        let just_after = s.lr_at(100);
+        assert!(
+            (just_after - just_before).abs() < 0.01,
+            "discontinuité au transition warmup→cosine : {just_before} vs {just_after}"
+        );
     }
 
     #[test]
     fn reduce_on_plateau_reduces_after_patience() {
         let mut s = ReduceOnPlateau::new(0.1, 0.5, 3, 0.0);
         // Loss qui augmente / stagne pendant > patience
-        s.step(1.0);   // best = 1.0
+        s.step(1.0); // best = 1.0
         assert_eq!(s.current_lr(), 0.1);
-        s.step(1.1);   // pire → 1 bad
-        s.step(1.05);  // pire → 2 bad
-        s.step(1.05);  // pire → 3 bad → réduit
+        s.step(1.1); // pire → 1 bad
+        s.step(1.05); // pire → 2 bad
+        s.step(1.05); // pire → 3 bad → réduit
         assert!((s.current_lr() - 0.05).abs() < 1e-7);
     }
 
@@ -338,9 +376,9 @@ mod tests {
     fn reduce_on_plateau_resets_on_improvement() {
         let mut s = ReduceOnPlateau::new(0.1, 0.5, 2, 0.0);
         s.step(1.0);
-        s.step(1.5);   // 1 bad
-        s.step(0.5);   // amélioration → reset
-        s.step(0.6);   // 1 bad
+        s.step(1.5); // 1 bad
+        s.step(0.5); // amélioration → reset
+        s.step(0.6); // 1 bad
         // Pas de réduction encore car la patience a été reset
         assert_eq!(s.current_lr(), 0.1);
     }

@@ -3,6 +3,7 @@ members = [
     "examples/mnist_classifier",
     "examples/quickstart_v2",
     "examples/cifar10_classifier",
+    "examples/transformer_demo",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",

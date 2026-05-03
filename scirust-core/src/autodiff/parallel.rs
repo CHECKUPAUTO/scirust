@@ -5,8 +5,8 @@
 // behind Arc<RwLock> for safe sharing across threads.
 // Gradients are stored as scalar f64 values (summed from full tensor grads).
 
+use super::reverse::{Node, Op, SavedData, Tensor};
 use std::sync::{Arc, RwLock};
-use super::reverse::{Node, Op, Tensor, SavedData};
 
 /// A Send + Sync tape wrapper.
 ///
@@ -37,9 +37,18 @@ impl ParallelTape {
     /// Initialises the corresponding value slot with zeros
     /// and the gradient slot with 0.0.
     pub fn alloc_node(&self, node: Node) -> usize {
-        let mut nodes = self.nodes.write().expect("ParallelTape nodes lock poisoned");
-        let mut vals = self.values.write().expect("ParallelTape values lock poisoned");
-        let mut grads = self.grads.write().expect("ParallelTape grads lock poisoned");
+        let mut nodes = self
+            .nodes
+            .write()
+            .expect("ParallelTape nodes lock poisoned");
+        let mut vals = self
+            .values
+            .write()
+            .expect("ParallelTape values lock poisoned");
+        let mut grads = self
+            .grads
+            .write()
+            .expect("ParallelTape grads lock poisoned");
         let idx = nodes.len();
         let (r, c) = node.shape;
         nodes.push(node);
@@ -50,7 +59,10 @@ impl ParallelTape {
 
     /// Set the forward value of node `idx`.
     pub fn set_value(&self, idx: usize, data: &[f32]) {
-        let mut vals = self.values.write().expect("ParallelTape values lock poisoned");
+        let mut vals = self
+            .values
+            .write()
+            .expect("ParallelTape values lock poisoned");
         let len = vals[idx].data.len();
         assert_eq!(data.len(), len, "set_value size mismatch");
         vals[idx].data.copy_from_slice(data);
@@ -58,7 +70,10 @@ impl ParallelTape {
 
     /// Get the forward value of node `idx`.
     pub fn value(&self, idx: usize) -> Tensor {
-        self.values.read().expect("ParallelTape values lock poisoned")[idx].clone()
+        self.values
+            .read()
+            .expect("ParallelTape values lock poisoned")[idx]
+            .clone()
     }
 
     /// Get the scalar gradient of node `idx`.
@@ -68,12 +83,18 @@ impl ParallelTape {
 
     /// Return all scalar gradients.
     pub fn grads(&self) -> Vec<f64> {
-        self.grads.read().expect("ParallelTape grads lock poisoned").clone()
+        self.grads
+            .read()
+            .expect("ParallelTape grads lock poisoned")
+            .clone()
     }
 
     /// Return the number of nodes.
     pub fn num_nodes(&self) -> usize {
-        self.nodes.read().expect("ParallelTape nodes lock poisoned").len()
+        self.nodes
+            .read()
+            .expect("ParallelTape nodes lock poisoned")
+            .len()
     }
 
     /// Run backward from `output_idx`, computing scalar gradients
@@ -83,9 +104,17 @@ impl ParallelTape {
     /// tensor gradient).
     pub fn backward(&self, output_idx: usize) {
         let nodes = self.nodes.read().expect("ParallelTape nodes lock poisoned");
-        let values = self.values.read().expect("ParallelTape values lock poisoned");
+        let values = self
+            .values
+            .read()
+            .expect("ParallelTape values lock poisoned");
         let n = nodes.len();
-        assert!(output_idx < n, "backward: idx {} out of bounds ({} nodes)", output_idx, n);
+        assert!(
+            output_idx < n,
+            "backward: idx {} out of bounds ({} nodes)",
+            output_idx,
+            n
+        );
 
         // ---- full tensor gradients (local, not shared) ----
         let mut t_grads: Vec<Tensor> = (0..n)
@@ -199,7 +228,7 @@ impl ParallelTape {
                         }
                         t_grads[b] = t_grads[b].add(&db);
                     } else {
-                        t_grads[b] = t_grads[b].add(&g.hadamard(&av));
+                        t_grads[b] = t_grads[b].add(&g.hadamard(av));
                     }
                 }
                 Op::DivBroadcast(a, b) => {
@@ -211,7 +240,8 @@ impl ParallelTape {
                         let mut db = Tensor::zeros(1, bv.cols);
                         for r in 0..g.rows {
                             for c in 0..g.cols {
-                                db.data[c] += g.data[r * g.cols + c] * (-av.data[r * av.cols + c] / (bv.data[c] * bv.data[c]));
+                                db.data[c] += g.data[r * g.cols + c]
+                                    * (-av.data[r * av.cols + c] / (bv.data[c] * bv.data[c]));
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
@@ -219,12 +249,15 @@ impl ParallelTape {
                         let mut db = Tensor::zeros(bv.rows, 1);
                         for r in 0..g.rows {
                             for c in 0..g.cols {
-                                db.data[r] += g.data[r * g.cols + c] * (-av.data[r * av.cols + c] / (bv.data[r] * bv.data[r]));
+                                db.data[r] += g.data[r * g.cols + c]
+                                    * (-av.data[r * av.cols + c] / (bv.data[r] * bv.data[r]));
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
                     } else {
-                        t_grads[b] = t_grads[b].sub(&g.hadamard(&av.hadamard(&bv.reciprocal().hadamard(&bv.reciprocal()))));
+                        t_grads[b] = t_grads[b].sub(
+                            &g.hadamard(&av.hadamard(&bv.reciprocal().hadamard(&bv.reciprocal()))),
+                        );
                     }
                 }
 
@@ -312,7 +345,11 @@ impl ParallelTape {
                     let mean = av.mean_axis(axis);
                     let diff = av.sub(&mean.broadcast_to(av.rows, av.cols));
                     let two_over_n = 2.0 / n;
-                    t_grads[a] = t_grads[a].add(&g.scale(two_over_n).broadcast_to(av.rows, av.cols).hadamard(&diff));
+                    t_grads[a] = t_grads[a].add(
+                        &g.scale(two_over_n)
+                            .broadcast_to(av.rows, av.cols)
+                            .hadamard(&diff),
+                    );
                 }
                 Op::MaxAxis(a, axis) => {
                     let av = &values[a];
@@ -367,7 +404,10 @@ impl ParallelTape {
                     } else if av.rows == 1 && av.cols == 1 {
                         Tensor::from_vec(vec![g.sum()], 1, 1)
                     } else {
-                        panic!("Broadcast backward: unsupported shape ({},{}) -> ({},{})", av.rows, av.cols, rows, cols);
+                        panic!(
+                            "Broadcast backward: unsupported shape ({},{}) -> ({},{})",
+                            av.rows, av.cols, rows, cols
+                        );
                     };
                     t_grads[input] = t_grads[input].add(&g_sum);
                 }
@@ -376,7 +416,10 @@ impl ParallelTape {
                     t_grads[a] = t_grads[a].add(&g.transpose());
                 }
 
-                Op::Concat { input_indices, row_counts } => {
+                Op::Concat {
+                    input_indices,
+                    row_counts,
+                } => {
                     let cols = nodes[input_indices[0]].shape.1;
                     let mut off = 0;
                     for k in 0..3 {
@@ -393,7 +436,11 @@ impl ParallelTape {
                         off += n;
                     }
                 }
-                Op::Slice { input_idx, start, len } => {
+                Op::Slice {
+                    input_idx,
+                    start,
+                    len,
+                } => {
                     let c = values[input_idx].cols;
                     for r in 0..len {
                         for col in 0..c {
@@ -401,7 +448,11 @@ impl ParallelTape {
                         }
                     }
                 }
-                Op::SliceCols { input_idx, start, len } => {
+                Op::SliceCols {
+                    input_idx,
+                    start,
+                    len,
+                } => {
                     let c = values[input_idx].cols;
                     for r in 0..values[input_idx].rows {
                         for col in 0..len {
@@ -410,7 +461,10 @@ impl ParallelTape {
                     }
                 }
 
-                Op::Embedding { table_idx, n_tokens: _ } => {
+                Op::Embedding {
+                    table_idx,
+                    n_tokens: _,
+                } => {
                     let vocab = values[table_idx].rows;
                     let d = values[table_idx].cols;
                     if let SavedData::Indices(ref indices) = nodes[i].saved {
@@ -425,7 +479,11 @@ impl ParallelTape {
                         }
                     }
                 }
-                Op::Linear { input_idx, weight_idx, bias_idx } => {
+                Op::Linear {
+                    input_idx,
+                    weight_idx,
+                    bias_idx,
+                } => {
                     let iv = &values[input_idx];
                     let wv = &values[weight_idx];
                     t_grads[input_idx] = t_grads[input_idx].add(&g.matmul(&wv.transpose()));
@@ -443,17 +501,29 @@ impl ParallelTape {
                         for c in 0..av.cols {
                             let col_in_seq = c % seq_len;
                             let row_in_seq = r % seq_len;
-                            mask.data[r * av.cols + c] = if col_in_seq > row_in_seq { 0.0 } else { 1.0 };
+                            mask.data[r * av.cols + c] =
+                                if col_in_seq > row_in_seq { 0.0 } else { 1.0 };
                         }
                     }
                     t_grads[input_idx] = t_grads[input_idx].add(&g.hadamard(&mask));
                 }
-                Op::Dropout { input_idx, mask_idx, .. } => {
+                Op::Dropout {
+                    input_idx,
+                    mask_idx,
+                    ..
+                } => {
                     let mv = &values[mask_idx];
                     t_grads[input_idx] = t_grads[input_idx].add(&g.hadamard(mv));
                     t_grads[mask_idx] = t_grads[mask_idx].add(&g.hadamard(&values[input_idx]));
                 }
-                Op::MaxPool2d { input_idx, c, h, w, kernel, stride } => {
+                Op::MaxPool2d {
+                    input_idx,
+                    c,
+                    h,
+                    w,
+                    kernel,
+                    stride,
+                } => {
                     let av = &values[input_idx];
                     let h_out = (h - kernel) / stride + 1;
                     let w_out = (w - kernel) / stride + 1;
@@ -478,7 +548,10 @@ impl ParallelTape {
                                             }
                                         }
                                     }
-                                    let idx_out = b * c * h_out * w_out + ch * h_out * w_out + oh * w_out + ow;
+                                    let idx_out = b * c * h_out * w_out
+                                        + ch * h_out * w_out
+                                        + oh * w_out
+                                        + ow;
                                     let idx_in_max = b * c * h * w + ch * h * w + mh * w + mw;
                                     grad_in.data[idx_in_max] += g.data[idx_out];
                                 }
@@ -487,21 +560,42 @@ impl ParallelTape {
                     }
                     t_grads[input_idx] = t_grads[input_idx].add(&grad_in);
                 }
-                Op::BatchNorm { input_idx, gamma_idx, beta_idx } => {
+                Op::BatchNorm {
+                    input_idx,
+                    gamma_idx,
+                    beta_idx,
+                } => {
                     let gv = &values[gamma_idx];
                     let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
                     t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
                     t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
                 }
-                Op::LayerNorm { input_idx, gamma_idx, beta_idx, .. } => {
+                Op::LayerNorm {
+                    input_idx,
+                    gamma_idx,
+                    beta_idx,
+                    ..
+                } => {
                     let gv = &values[gamma_idx];
                     let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
                     t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
                     t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
                 }
-                Op::Conv2dForward { input, weight, bias, batch, in_c, h, w, out_c, kernel, stride, pad } => {
+                Op::Conv2dForward {
+                    input,
+                    weight,
+                    bias,
+                    batch,
+                    in_c,
+                    h,
+                    w,
+                    out_c,
+                    kernel,
+                    stride,
+                    pad,
+                } => {
                     let input_t = &values[input];
                     let weight_t = &values[weight];
                     let h_out = (h + 2 * pad - kernel) / stride + 1;
@@ -513,8 +607,10 @@ impl ParallelTape {
                             for oc in 0..out_c {
                                 for oh in 0..h_out {
                                     for ow in 0..w_out {
-                                        let out_idx =
-                                            b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
+                                        let out_idx = b_i * out_c * h_out * w_out
+                                            + oc * h_out * w_out
+                                            + oh * w_out
+                                            + ow;
                                         db.data[oc] += g.data[out_idx];
                                     }
                                 }
@@ -529,25 +625,39 @@ impl ParallelTape {
                         for oc in 0..out_c {
                             for oh in 0..h_out {
                                 for ow in 0..w_out {
-                                    let out_idx =
-                                        b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
+                                    let out_idx = b_i * out_c * h_out * w_out
+                                        + oc * h_out * w_out
+                                        + oh * w_out
+                                        + ow;
                                     let grad_out = g.data[out_idx];
                                     for ic in 0..in_c {
                                         for kh in 0..kernel {
                                             for kw in 0..kernel {
-                                                let ih = oh as isize * stride as isize + kh as isize - pad as isize;
-                                                let iw = ow as isize * stride as isize + kw as isize - pad as isize;
-                                                if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                                let ih = oh as isize * stride as isize
+                                                    + kh as isize
+                                                    - pad as isize;
+                                                let iw = ow as isize * stride as isize
+                                                    + kw as isize
+                                                    - pad as isize;
+                                                if ih >= 0
+                                                    && ih < h as isize
+                                                    && iw >= 0
+                                                    && iw < w as isize
+                                                {
                                                     let ih_u = ih as usize;
                                                     let iw_u = iw as usize;
-                                                    let in_idx =
-                                                        b_i * in_c * h * w + ic * h * w + ih_u * w + iw_u;
+                                                    let in_idx = b_i * in_c * h * w
+                                                        + ic * h * w
+                                                        + ih_u * w
+                                                        + iw_u;
                                                     let w_idx = oc * in_c * kernel * kernel
                                                         + ic * kernel * kernel
                                                         + kh * kernel
                                                         + kw;
-                                                    dw.data[w_idx] += grad_out * input_t.data[in_idx];
-                                                    dx.data[in_idx] += grad_out * weight_t.data[w_idx];
+                                                    dw.data[w_idx] +=
+                                                        grad_out * input_t.data[in_idx];
+                                                    dx.data[in_idx] +=
+                                                        grad_out * weight_t.data[w_idx];
                                                 }
                                             }
                                         }
@@ -567,7 +677,10 @@ impl ParallelTape {
 
         // ---- reduce tensor grads to scalar f64 ----
         {
-            let mut grads = self.grads.write().expect("ParallelTape grads lock poisoned");
+            let mut grads = self
+                .grads
+                .write()
+                .expect("ParallelTape grads lock poisoned");
             for i in 0..n {
                 grads[i] = t_grads[i].sum() as f64;
             }
@@ -576,7 +689,10 @@ impl ParallelTape {
 
     /// Reset all gradients to zero.
     pub fn reset(&self) {
-        let mut grads = self.grads.write().expect("ParallelTape grads lock poisoned");
+        let mut grads = self
+            .grads
+            .write()
+            .expect("ParallelTape grads lock poisoned");
         for g in grads.iter_mut() {
             *g = 0.0;
         }
@@ -615,7 +731,10 @@ mod tests {
             saved: SavedData::None,
         });
         let y = tape.alloc_node(Node {
-            op: Op::Scale { input: x, scalar: 2.0 },
+            op: Op::Scale {
+                input: x,
+                scalar: 2.0,
+            },
             shape: (1, 1),
             saved: SavedData::None,
         });
@@ -650,8 +769,16 @@ mod tests {
         tape.set_value(y, &[8.0]);
 
         tape.backward(y);
-        assert!((tape.grad(a) - 1.0).abs() < 1e-6, "grad a = {}", tape.grad(a));
-        assert!((tape.grad(b) - 1.0).abs() < 1e-6, "grad b = {}", tape.grad(b));
+        assert!(
+            (tape.grad(a) - 1.0).abs() < 1e-6,
+            "grad a = {}",
+            tape.grad(a)
+        );
+        assert!(
+            (tape.grad(b) - 1.0).abs() < 1e-6,
+            "grad b = {}",
+            tape.grad(b)
+        );
     }
 
     #[test]
@@ -679,8 +806,16 @@ mod tests {
         tape.set_value(y, &[12.0]);
 
         tape.backward(y);
-        assert!((tape.grad(a) - 4.0).abs() < 1e-6, "grad a = {}", tape.grad(a));
-        assert!((tape.grad(b) - 3.0).abs() < 1e-6, "grad b = {}", tape.grad(b));
+        assert!(
+            (tape.grad(a) - 4.0).abs() < 1e-6,
+            "grad a = {}",
+            tape.grad(a)
+        );
+        assert!(
+            (tape.grad(b) - 3.0).abs() < 1e-6,
+            "grad b = {}",
+            tape.grad(b)
+        );
     }
 
     #[test]
@@ -692,7 +827,9 @@ mod tests {
         let seq = Tape::new();
         let sx = seq.input(Tensor::from_vec(vec![3.0], 1, 1));
         let sx_idx = sx.idx();
-        let sy = sx.scale(2.0).add(seq.input(Tensor::from_vec(vec![1.0], 1, 1)));
+        let sy = sx
+            .scale(2.0)
+            .add(seq.input(Tensor::from_vec(vec![1.0], 1, 1)));
         sy.backward();
         let seq_grad: f64 = seq.grad(sx_idx).sum() as f64;
 
@@ -709,7 +846,10 @@ mod tests {
             saved: SavedData::None,
         });
         let ps = p.alloc_node(Node {
-            op: Op::Scale { input: px, scalar: 2.0 },
+            op: Op::Scale {
+                input: px,
+                scalar: 2.0,
+            },
             shape: (1, 1),
             saved: SavedData::None,
         });
@@ -745,7 +885,10 @@ mod tests {
         });
         tape.set_value(x, &[1.0]);
         let y = tape.alloc_node(Node {
-            op: Op::Scale { input: x, scalar: 2.0 },
+            op: Op::Scale {
+                input: x,
+                scalar: 2.0,
+            },
             shape: (1, 1),
             saved: SavedData::None,
         });

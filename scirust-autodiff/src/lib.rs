@@ -1,4 +1,4 @@
-use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Dual number for forward-mode automatic differentiation.
 ///
@@ -253,7 +253,13 @@ impl Dual {
     pub fn abs(self) -> Dual {
         Dual {
             value: self.value.abs(),
-            deriv: if self.value > 0.0 { self.deriv } else if self.value < 0.0 { -self.deriv } else { 0.0 },
+            deriv: if self.value > 0.0 {
+                self.deriv
+            } else if self.value < 0.0 {
+                -self.deriv
+            } else {
+                0.0
+            },
         }
     }
 }
@@ -313,7 +319,7 @@ mod tests {
         let x = Dual::var(std::f64::consts::PI / 2.0);
         let y = x.sin();
         assert!((y.val() - 1.0).abs() < 1e-12);
-        assert!((y.grad() - 0.0).abs() < 1e-12);  // cos(π/2) = 0
+        assert!((y.grad() - 0.0).abs() < 1e-12); // cos(π/2) = 0
     }
 
     #[test]

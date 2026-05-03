@@ -14,7 +14,7 @@
 // Les paramètres sont la concaténation des paramètres de tous les sous-modules.
 // sync() propage à tous les sous-modules.
 
-use crate::autodiff::reverse::{Tape, Var, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::module::Module;
 
 pub struct Sequential {
@@ -26,6 +26,7 @@ impl Sequential {
         Self { layers: Vec::new() }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add<M: Module + 'static>(mut self, module: M) -> Self {
         self.layers.push(Box::new(module));
         self
@@ -40,12 +41,18 @@ impl Sequential {
         Self { layers }
     }
 
-    pub fn len(&self) -> usize { self.layers.len() }
-    pub fn is_empty(&self) -> bool { self.layers.is_empty() }
+    pub fn len(&self) -> usize {
+        self.layers.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
 }
 
 impl Default for Sequential {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Module for Sequential {
@@ -82,13 +89,22 @@ impl Module for Sequential {
         map
     }
 
-    fn load_state_dict(&mut self, state: &std::collections::HashMap<String, Tensor>) -> Result<(), String> {
-        let mut grouped: std::collections::HashMap<usize, std::collections::HashMap<String, Tensor>> = std::collections::HashMap::new();
+    fn load_state_dict(
+        &mut self,
+        state: &std::collections::HashMap<String, Tensor>,
+    ) -> Result<(), String> {
+        let mut grouped: std::collections::HashMap<
+            usize,
+            std::collections::HashMap<String, Tensor>,
+        > = std::collections::HashMap::new();
         for (k, v) in state {
-            if let Some((idx_str, rest)) = k.split_once('.') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    grouped.entry(idx).or_default().insert(rest.to_string(), v.clone());
-                }
+            if let Some((idx_str, rest)) = k.split_once('.')
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                grouped
+                    .entry(idx)
+                    .or_default()
+                    .insert(rest.to_string(), v.clone());
             }
         }
         for (i, layer) in self.layers.iter_mut().enumerate() {
@@ -103,8 +119,8 @@ impl Module for Sequential {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::autodiff::reverse::{Tape, Tensor};
     use crate::autodiff::optim::{Adam, Optimizer};
+    use crate::autodiff::reverse::{Tape, Tensor};
     use crate::nn::activation::{ReLU, Sigmoid};
     use crate::nn::init::{KaimingNormal, Zeros};
     use crate::nn::linear::Linear;
@@ -232,12 +248,16 @@ mod tests {
         let mut correct = 0;
         for i in 0..4 {
             let predicted_class = if final_predictions[i] > 0.5 { 1.0 } else { 0.0 };
-            if (predicted_class - targets[i]).abs() < 0.01 { correct += 1; }
+            if (predicted_class - targets[i]).abs() < 0.01 {
+                correct += 1;
+            }
         }
 
-        assert_eq!(correct, 4,
+        assert_eq!(
+            correct, 4,
             "MLP n'a pas appris XOR. Prédictions: {:?}, targets: {:?}",
-            final_predictions, targets);
+            final_predictions, targets
+        );
     }
 
     #[test]
@@ -262,9 +282,13 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         let mut layers: Vec<Box<dyn Module>> = Vec::new();
         for _ in 0..11 {
-            layers.push(Box::new(
-                Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng)
-            ));
+            layers.push(Box::new(Linear::new(
+                2,
+                2,
+                &KaimingNormal,
+                &Zeros,
+                &mut rng,
+            )));
         }
         let seq = Sequential::from_layers(layers);
 
@@ -277,9 +301,13 @@ mod tests {
         let mut rng2 = PcgEngine::new(99);
         let mut layers2: Vec<Box<dyn Module>> = Vec::new();
         for _ in 0..11 {
-            layers2.push(Box::new(
-                Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng2)
-            ));
+            layers2.push(Box::new(Linear::new(
+                2,
+                2,
+                &KaimingNormal,
+                &Zeros,
+                &mut rng2,
+            )));
         }
         let mut seq2 = Sequential::from_layers(layers2);
         seq2.load_state_dict(&state).unwrap();
@@ -287,13 +315,7 @@ mod tests {
         // Les poids du layer 1 dans seq2 doivent venir du layer 1 de seq,
         // pas du layer 10.
         let s2_state = seq2.state_dict();
-        assert_eq!(
-            s2_state["1.weight"].data,
-            state["1.weight"].data
-        );
-        assert_eq!(
-            s2_state["10.weight"].data,
-            state["10.weight"].data
-        );
+        assert_eq!(s2_state["1.weight"].data, state["1.weight"].data);
+        assert_eq!(s2_state["10.weight"].data, state["10.weight"].data);
     }
 }

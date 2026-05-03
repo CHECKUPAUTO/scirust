@@ -122,6 +122,13 @@ MIT
 
 ## Contributing
 
-PRs welcome. Please run `cargo test --workspace` before submitting.
+PRs welcome. Please run the full quality gate before submitting:
+
+```bash
+cargo check --workspace --lib
+cargo clippy --workspace --lib -- -D warnings
+cargo test --workspace --lib
+```
+
 For features touching the autograd tape, include a comparison against
 PyTorch numerical gradients in your tests.

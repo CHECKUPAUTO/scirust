@@ -7,7 +7,7 @@
 // L'utilisateur choisit le backend à la compilation ou à l'exécution.
 // À terme : BlasBackend pourra déléguer à matrixmultiply/netlib.
 
-use crate::matrix::view::{MatrixView, MatrixViewMut, MatrixShape};
+use crate::matrix::view::{MatrixShape, MatrixView, MatrixViewMut};
 
 // ------------------------------------------------------------------ //
 //  Trait central                                                       //
@@ -26,11 +26,7 @@ pub trait SimdBackend: Send + Sync {
 
     /// GEMV : y = alpha * A * x + beta * y
     /// A : (m × k), x : (k,), y : (m,)
-    fn sgemv_f32(
-        &self,
-        alpha: f32, a: MatrixView<f32>, x: &[f32],
-        beta:  f32, y: &mut [f32],
-    );
+    fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]);
 
     /// GEMM : C = alpha * A * B + beta * C
     /// A : (m × k), B : (k × n), C : (m × n)
@@ -39,7 +35,7 @@ pub trait SimdBackend: Send + Sync {
         alpha: f32,
         a: MatrixView<f32>,
         b: MatrixView<f32>,
-        beta:  f32,
+        beta: f32,
         c: MatrixViewMut<f32>,
     );
 
@@ -56,7 +52,9 @@ pub trait SimdBackend: Send + Sync {
 pub struct ScalarBackend;
 
 impl SimdBackend for ScalarBackend {
-    fn name(&self) -> &'static str { "scalar" }
+    fn name(&self) -> &'static str {
+        "scalar"
+    }
 
     #[inline]
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
@@ -96,8 +94,12 @@ impl SimdBackend for ScalarBackend {
     }
 
     fn sgemm_f32(
-        &self, alpha: f32, a: MatrixView<f32>, b: MatrixView<f32>,
-        beta: f32, mut c: MatrixViewMut<f32>,
+        &self,
+        alpha: f32,
+        a: MatrixView<f32>,
+        b: MatrixView<f32>,
+        beta: f32,
+        mut c: MatrixViewMut<f32>,
     ) {
         let (m, k) = a.shape();
         let (_k, n) = b.shape();
@@ -116,7 +118,9 @@ impl SimdBackend for ScalarBackend {
     }
 
     fn relu_f32(&self, v: &mut [f32]) {
-        for x in v.iter_mut() { *x = x.max(0.0); }
+        for x in v.iter_mut() {
+            *x = x.max(0.0);
+        }
     }
 }
 
@@ -129,7 +133,9 @@ pub struct PortableSimdBackend;
 
 #[cfg(feature = "portable-simd")]
 impl SimdBackend for PortableSimdBackend {
-    fn name(&self) -> &'static str { "portable-simd" }
+    fn name(&self) -> &'static str {
+        "portable-simd"
+    }
 
     #[inline]
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
@@ -159,10 +165,16 @@ impl SimdBackend for PortableSimdBackend {
         let (pre_x, mid_x, _) = x.as_simd::<4>();
         let (pre_y, mid_y, suf_y) = y.as_simd_mut::<4>();
 
-        for (yi, xi) in pre_y.iter_mut().zip(pre_x.iter()) { *yi += alpha * xi; }
-        for (vy, vx) in mid_y.iter_mut().zip(mid_x.iter()) { *vy = splat.mul_add(*vx, *vy); }
+        for (yi, xi) in pre_y.iter_mut().zip(pre_x.iter()) {
+            *yi += alpha * xi;
+        }
+        for (vy, vx) in mid_y.iter_mut().zip(mid_x.iter()) {
+            *vy = splat.mul_add(*vx, *vy);
+        }
         let offset = pre_x.len() + mid_x.len() * 4;
-        for (yi, xi) in suf_y.iter_mut().zip(x[offset..].iter()) { *yi += alpha * xi; }
+        for (yi, xi) in suf_y.iter_mut().zip(x[offset..].iter()) {
+            *yi += alpha * xi;
+        }
     }
 
     #[inline]
@@ -186,8 +198,12 @@ impl SimdBackend for PortableSimdBackend {
     }
 
     fn sgemm_f32(
-        &self, alpha: f32, a: MatrixView<f32>, b: MatrixView<f32>,
-        beta: f32, mut c: MatrixViewMut<f32>,
+        &self,
+        alpha: f32,
+        a: MatrixView<f32>,
+        b: MatrixView<f32>,
+        beta: f32,
+        mut c: MatrixViewMut<f32>,
     ) {
         // GEMM par blocs (tiling L1) + SIMD sur les produits scalaires internes
         // Taille de bloc : 64 éléments ≈ ligne de cache typique
@@ -199,7 +215,9 @@ impl SimdBackend for PortableSimdBackend {
         // Pré-scale C par beta
         for i in 0..m {
             if let Some(row) = c.row_slice_mut(i) {
-                for x in row.iter_mut() { *x *= beta; }
+                for x in row.iter_mut() {
+                    *x *= beta;
+                }
             }
         }
 
@@ -231,12 +249,18 @@ impl SimdBackend for PortableSimdBackend {
     }
 
     fn relu_f32(&self, v: &mut [f32]) {
-        use std::simd::{f32x8, SimdFloat};
+        use std::simd::{SimdFloat, f32x8};
         let zero = f32x8::splat(0.0);
         let (pre, mid, suf) = v.as_simd_mut::<8>();
-        for x in pre.iter_mut()  { *x = x.max(0.0); }
-        for vx in mid.iter_mut() { *vx = vx.simd_max(zero); }
-        for x in suf.iter_mut()  { *x = x.max(0.0); }
+        for x in pre.iter_mut() {
+            *x = x.max(0.0);
+        }
+        for vx in mid.iter_mut() {
+            *vx = vx.simd_max(zero);
+        }
+        for x in suf.iter_mut() {
+            *x = x.max(0.0);
+        }
     }
 }
 
@@ -247,10 +271,14 @@ impl SimdBackend for PortableSimdBackend {
 /// Renvoie le backend le plus performant disponible à la compilation.
 pub fn best_backend() -> &'static dyn SimdBackend {
     #[cfg(feature = "portable-simd")]
-    { &PortableSimdBackend }
+    {
+        &PortableSimdBackend
+    }
 
     #[cfg(not(feature = "portable-simd"))]
-    { &ScalarBackend }
+    {
+        &ScalarBackend
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -261,7 +289,9 @@ mod tests {
     use super::*;
     use crate::matrix::view::{MatrixView, MatrixViewMut};
 
-    fn backend() -> &'static dyn SimdBackend { &ScalarBackend }
+    fn backend() -> &'static dyn SimdBackend {
+        &ScalarBackend
+    }
 
     #[test]
     fn test_saxpy() {
@@ -286,10 +316,10 @@ mod tests {
     fn test_sgemm_identity() {
         // I * A = A
         let id = vec![1.0f32, 0.0, 0.0, 1.0]; // 2x2 identité
-        let a  = vec![3.0f32, 4.0, 5.0, 6.0];
+        let a = vec![3.0f32, 4.0, 5.0, 6.0];
         let mut c = vec![0.0f32; 4];
         let ia = MatrixView::from_slice(&id, 2, 2);
-        let av = MatrixView::from_slice(&a,  2, 2);
+        let av = MatrixView::from_slice(&a, 2, 2);
         let cv = MatrixViewMut::from_slice(&mut c, 2, 2);
         backend().sgemm_f32(1.0, ia, av, 0.0, cv);
         assert!((c[0] - 3.0).abs() < 1e-6);

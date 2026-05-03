@@ -7,12 +7,15 @@
 
 pub struct PcgEngine {
     state: u64,
-    inc:   u64,
+    inc: u64,
 }
 
 impl PcgEngine {
     pub fn new(seed: u64) -> Self {
-        let mut rng = Self { state: 0, inc: (seed << 1) | 1 };
+        let mut rng = Self {
+            state: 0,
+            inc: (seed << 1) | 1,
+        };
         rng.next_u32();
         rng.state = rng.state.wrapping_add(seed);
         rng.next_u32();
@@ -22,7 +25,9 @@ impl PcgEngine {
     /// Tire un u32 pseudo-aléatoire.
     pub fn next_u32(&mut self) -> u32 {
         let oldstate = self.state;
-        self.state = oldstate.wrapping_mul(6364136223846793005).wrapping_add(self.inc);
+        self.state = oldstate
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(self.inc);
         let xorshifted = (((oldstate >> 18) ^ oldstate) >> 27) as u32;
         let rot = (oldstate >> 59) as u32;
         (xorshifted >> rot) | (xorshifted << ((rot.wrapping_neg()) & 31))

@@ -15,11 +15,7 @@
 
 #[cfg(feature = "portable-simd")]
 pub mod simd_ops {
-    use std::simd::{
-        f32x8, f64x4,
-        SimdFloat, StdFloat,
-        num::SimdFloat as _,
-    };
+    use std::simd::{f32x8, f64x4, num::SimdFloat as _, SimdFloat, StdFloat};
 
     // ------------------------------------------------------------------ //
     //  ADDITION                                                            //
@@ -29,10 +25,14 @@ pub mod simd_ops {
     /// Traite 8 éléments par cycle SIMD, scalaire pour le reste.
     #[inline]
     pub fn add_f32_inplace(dst: &mut [f32], src: &[f32]) {
-        assert_eq!(dst.len(), src.len(), "add_f32_inplace: longueurs différentes");
+        assert_eq!(
+            dst.len(),
+            src.len(),
+            "add_f32_inplace: longueurs différentes"
+        );
 
         let (pre, mid_dst, suf_dst) = dst.as_simd_mut::<8>();
-        let (_, mid_src, _)         = src.as_simd::<8>();
+        let (_, mid_src, _) = src.as_simd::<8>();
 
         // Prologue scalaire (alignement)
         for (d, s) in pre.iter_mut().zip(src.iter()) {
@@ -57,12 +57,18 @@ pub mod simd_ops {
         assert_eq!(dst.len(), src.len());
 
         let (pre, mid_dst, suf_dst) = dst.as_simd_mut::<4>();
-        let (_, mid_src, _)         = src.as_simd::<4>();
+        let (_, mid_src, _) = src.as_simd::<4>();
 
-        for (d, s) in pre.iter_mut().zip(src.iter()) { *d += s; }
-        for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter()) { *vd += vs; }
+        for (d, s) in pre.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
+        for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter()) {
+            *vd += vs;
+        }
         let offset = pre.len() + mid_dst.len() * 4;
-        for (d, s) in suf_dst.iter_mut().zip(src[offset..].iter()) { *d += s; }
+        for (d, s) in suf_dst.iter_mut().zip(src[offset..].iter()) {
+            *d += s;
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -74,18 +80,30 @@ pub mod simd_ops {
     pub fn scale_f32(v: &mut [f32], alpha: f32) {
         let splat = f32x8::splat(alpha);
         let (pre, mid, suf) = v.as_simd_mut::<8>();
-        for x in pre.iter_mut()  { *x *= alpha; }
-        for vx in mid.iter_mut() { *vx *= splat; }
-        for x in suf.iter_mut()  { *x *= alpha; }
+        for x in pre.iter_mut() {
+            *x *= alpha;
+        }
+        for vx in mid.iter_mut() {
+            *vx *= splat;
+        }
+        for x in suf.iter_mut() {
+            *x *= alpha;
+        }
     }
 
     #[inline]
     pub fn scale_f64(v: &mut [f64], alpha: f64) {
         let splat = f64x4::splat(alpha);
         let (pre, mid, suf) = v.as_simd_mut::<4>();
-        for x in pre.iter_mut()  { *x *= alpha; }
-        for vx in mid.iter_mut() { *vx *= splat; }
-        for x in suf.iter_mut()  { *x *= alpha; }
+        for x in pre.iter_mut() {
+            *x *= alpha;
+        }
+        for vx in mid.iter_mut() {
+            *vx *= splat;
+        }
+        for x in suf.iter_mut() {
+            *x *= alpha;
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -101,7 +119,7 @@ pub mod simd_ops {
         let mut acc = f32x8::splat(0.0);
 
         let (pre_a, mid_a, suf_a) = a.as_simd::<8>();
-        let (_, mid_b, _)         = b.as_simd::<8>();
+        let (_, mid_b, _) = b.as_simd::<8>();
 
         // Prologue
         let mut scalar_acc = 0.0f32;
@@ -130,13 +148,19 @@ pub mod simd_ops {
 
         let mut acc = f64x4::splat(0.0);
         let (pre_a, mid_a, suf_a) = a.as_simd::<4>();
-        let (_, mid_b, _)         = b.as_simd::<4>();
+        let (_, mid_b, _) = b.as_simd::<4>();
 
         let mut scalar_acc = 0.0f64;
-        for (x, y) in pre_a.iter().zip(b.iter()) { scalar_acc += x * y; }
-        for (va, vb) in mid_a.iter().zip(mid_b.iter()) { acc += va * vb; }
+        for (x, y) in pre_a.iter().zip(b.iter()) {
+            scalar_acc += x * y;
+        }
+        for (va, vb) in mid_a.iter().zip(mid_b.iter()) {
+            acc += va * vb;
+        }
         let offset = pre_a.len() + mid_a.len() * 4;
-        for (x, y) in suf_a.iter().zip(b[offset..].iter()) { scalar_acc += x * y; }
+        for (x, y) in suf_a.iter().zip(b[offset..].iter()) {
+            scalar_acc += x * y;
+        }
 
         scalar_acc + acc.reduce_sum()
     }
@@ -155,7 +179,9 @@ pub mod simd_ops {
         let (_, mid_b, _) = b.as_simd::<8>();
         let (_, mid_c, _) = c.as_simd::<8>();
 
-        for i in 0..pre.len() { pre[i] = a[i] * b[i] + c[i]; }
+        for i in 0..pre.len() {
+            pre[i] = a[i] * b[i] + c[i];
+        }
 
         for i in 0..mid_dst.len() {
             // mul_add est mappé sur VFMADD quand disponible
@@ -189,9 +215,15 @@ pub mod simd_ops {
     pub fn relu_f32(v: &mut [f32]) {
         let zero = f32x8::splat(0.0);
         let (pre, mid, suf) = v.as_simd_mut::<8>();
-        for x in pre.iter_mut()  { *x = x.max(0.0); }
-        for vx in mid.iter_mut() { *vx = vx.simd_max(zero); }
-        for x in suf.iter_mut()  { *x = x.max(0.0); }
+        for x in pre.iter_mut() {
+            *x = x.max(0.0);
+        }
+        for vx in mid.iter_mut() {
+            *vx = vx.simd_max(zero);
+        }
+        for x in suf.iter_mut() {
+            *x = x.max(0.0);
+        }
     }
 }
 
@@ -202,19 +234,27 @@ pub mod simd_ops {
 pub mod simd_ops {
     #[inline]
     pub fn add_f32_inplace(dst: &mut [f32], src: &[f32]) {
-        for (d, s) in dst.iter_mut().zip(src.iter()) { *d += s; }
+        for (d, s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
     }
     #[inline]
     pub fn add_f64_inplace(dst: &mut [f64], src: &[f64]) {
-        for (d, s) in dst.iter_mut().zip(src.iter()) { *d += s; }
+        for (d, s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
     }
     #[inline]
     pub fn scale_f32(v: &mut [f32], alpha: f32) {
-        for x in v.iter_mut() { *x *= alpha; }
+        for x in v.iter_mut() {
+            *x *= alpha;
+        }
     }
     #[inline]
     pub fn scale_f64(v: &mut [f64], alpha: f64) {
-        for x in v.iter_mut() { *x *= alpha; }
+        for x in v.iter_mut() {
+            *x *= alpha;
+        }
     }
     #[inline]
     pub fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
@@ -226,16 +266,24 @@ pub mod simd_ops {
     }
     #[inline]
     pub fn fma_f32(dst: &mut [f32], a: &[f32], b: &[f32], c: &[f32]) {
-        for i in 0..dst.len() { dst[i] = a[i] * b[i] + c[i]; }
+        for i in 0..dst.len() {
+            dst[i] = a[i] * b[i] + c[i];
+        }
     }
     #[inline]
     pub fn normalize_f32(v: &mut [f32]) {
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > f32::EPSILON { for x in v.iter_mut() { *x /= norm; } }
+        if norm > f32::EPSILON {
+            for x in v.iter_mut() {
+                *x /= norm;
+            }
+        }
     }
     #[inline]
     pub fn relu_f32(v: &mut [f32]) {
-        for x in v.iter_mut() { *x = x.max(0.0); }
+        for x in v.iter_mut() {
+            *x = x.max(0.0);
+        }
     }
 }
 
@@ -249,7 +297,7 @@ mod tests {
     #[test]
     fn test_add_f32_inplace() {
         let mut dst = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-        let src     = vec![0.5f32; 9];
+        let src = vec![0.5f32; 9];
         add_f32_inplace(&mut dst, &src);
         for (i, x) in dst.iter().enumerate() {
             assert!((x - (i as f32 + 1.5)).abs() < 1e-6, "add_f32 failed at {i}");

@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn};
+use syn::{FnArg, ItemFn, parse_macro_input};
 
 /// Attribute macro that generates architecture-specific SIMD variants of a free
 /// function and a runtime dispatcher.

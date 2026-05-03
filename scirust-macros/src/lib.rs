@@ -20,7 +20,11 @@ impl VisitMut for ArgReplacer {
             }
         }
         // Replace float literals with Dual::primal(literal)
-        if let Expr::Lit(ExprLit { lit: Lit::Float(lit_float), .. }) = expr {
+        if let Expr::Lit(ExprLit {
+            lit: Lit::Float(lit_float),
+            ..
+        }) = expr
+        {
             let val = &lit_float.base10_parse::<f64>().unwrap();
             let lit_str = format!("{:.}", val);
             *expr = syn::parse_quote! {
@@ -110,7 +114,9 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut arg_map_dx = std::collections::HashMap::new();
             arg_map_dx.insert(arg1.clone(), dual1.clone());
             arg_map_dx.insert(arg2.clone(), dual2.clone());
-            let mut replacer_dx = ArgReplacer { arg_map: arg_map_dx };
+            let mut replacer_dx = ArgReplacer {
+                arg_map: arg_map_dx,
+            };
             let mut body_dx = input_fn.block.clone();
             replacer_dx.visit_block_mut(&mut body_dx);
 
@@ -118,7 +124,9 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut arg_map_dy = std::collections::HashMap::new();
             arg_map_dy.insert(arg1.clone(), dual1.clone());
             arg_map_dy.insert(arg2.clone(), dual2.clone());
-            let mut replacer_dy = ArgReplacer { arg_map: arg_map_dy };
+            let mut replacer_dy = ArgReplacer {
+                arg_map: arg_map_dy,
+            };
             let mut body_dy = input_fn.block.clone();
             replacer_dy.visit_block_mut(&mut body_dy);
 
@@ -153,7 +161,9 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
             arg_map.insert(a3.clone(), d3.clone());
 
             let make_body = |_active: usize| {
-                let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
+                let mut replacer = ArgReplacer {
+                    arg_map: arg_map.clone(),
+                };
                 let mut body = input_fn.block.clone();
                 replacer.visit_block_mut(&mut body);
                 body
@@ -197,7 +207,9 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
             arg_map.insert(a4.clone(), d4.clone());
 
             let make_body = || {
-                let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
+                let mut replacer = ArgReplacer {
+                    arg_map: arg_map.clone(),
+                };
                 let mut body = input_fn.block.clone();
                 replacer.visit_block_mut(&mut body);
                 body

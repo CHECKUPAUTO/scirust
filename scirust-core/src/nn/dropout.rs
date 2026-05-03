@@ -112,8 +112,11 @@ mod tests {
         let v = tape.value(y.idx());
         // Chaque élément est soit 0 soit 2.0 * scale = 4.0
         for &val in &v.data {
-            assert!(val == 0.0 || (val - 4.0).abs() < 1e-5,
-                "Dropout output should be 0 or 4.0, got {}", val);
+            assert!(
+                val == 0.0 || (val - 4.0).abs() < 1e-5,
+                "Dropout output should be 0 or 4.0, got {}",
+                val
+            );
         }
     }
 
@@ -136,11 +139,15 @@ mod tests {
         let scale = 1.0 / (1.0 - 0.5);
         for i in 0..10 {
             if v.data[i] != 0.0 {
-                assert!((g.data[i] - scale).abs() < 1e-5,
-                    "grad[{}] should be scale={}, got {}", i, scale, g.data[i]);
+                assert!(
+                    (g.data[i] - scale).abs() < 1e-5,
+                    "grad[{}] should be scale={}, got {}",
+                    i,
+                    scale,
+                    g.data[i]
+                );
             } else {
-                assert_eq!(g.data[i], 0.0,
-                    "grad[{}] should be 0 where mask is 0", i);
+                assert_eq!(g.data[i], 0.0, "grad[{}] should be 0 where mask is 0", i);
             }
         }
     }

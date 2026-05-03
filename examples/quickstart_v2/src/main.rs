@@ -33,11 +33,10 @@
 // Si tu modifies ce fichier, préserve l'invariant "4/4 sur la tâche XOR
 // classification" comme oracle de non-régression.
 
-use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::autodiff::optim::{Adam, Optimizer};
+use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::nn::{
-    Module, Sequential, Linear, ReLU, PcgEngine,
-    KaimingNormal, Zeros, CrossEntropyLoss, Loss,
+    CrossEntropyLoss, KaimingNormal, Linear, Loss, Module, PcgEngine, ReLU, Sequential, Zeros,
 };
 
 fn main() {
@@ -46,10 +45,10 @@ fn main() {
     // -------- Dataset XOR-classification -------- //
     // 4 points 2D, 2 classes.
     let inputs: [[f32; 2]; 4] = [
-        [0.0, 0.0],   // classe 0 (diagonale)
-        [1.0, 1.0],   // classe 0
-        [0.0, 1.0],   // classe 1 (antidiagonale)
-        [1.0, 0.0],   // classe 1
+        [0.0, 0.0], // classe 0 (diagonale)
+        [1.0, 1.0], // classe 0
+        [0.0, 1.0], // classe 1 (antidiagonale)
+        [1.0, 0.0], // classe 1
     ];
     let labels: [usize; 4] = [0, 0, 1, 1];
 
@@ -116,14 +115,22 @@ fn main() {
         let scores = tape.value(logits.idx());
 
         // argmax sur 2 classes
-        let pred_class = if scores.data[0] > scores.data[1] { 0 } else { 1 };
+        let pred_class = if scores.data[0] > scores.data[1] {
+            0
+        } else {
+            1
+        };
         let true_class = labels[i];
-        let mark = if pred_class == true_class { correct += 1; "✓" } else { "✗" };
+        let mark = if pred_class == true_class {
+            correct += 1;
+            "✓"
+        } else {
+            "✗"
+        };
 
         println!(
             "  ({:.0}, {:.0}) → logits=[{:.2}, {:.2}] → pred={} (vrai={}) {}",
-            x_arr[0], x_arr[1], scores.data[0], scores.data[1],
-            pred_class, true_class, mark,
+            x_arr[0], x_arr[1], scores.data[0], scores.data[1], pred_class, true_class, mark,
         );
     }
 

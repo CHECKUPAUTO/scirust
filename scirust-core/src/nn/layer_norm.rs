@@ -5,31 +5,34 @@
 // Calcule mean et variance par ligne, puis normalise : (x - mean) / sqrt(var + eps)
 // puis scale par gamma et shift par beta.
 
-use std::collections::HashMap;
 use crate::autodiff::reverse::{Tape, Tensor, Var};
-use crate::nn::module::Module;
 use crate::nn::init::Initializer;
+use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
+use std::collections::HashMap;
 
 pub struct LayerNorm {
-    pub name:      String,
-    pub gamma:     Tensor,
-    pub beta:      Tensor,
-    pub eps:       f32,
-    last_g_idx:    Option<usize>,
-    last_b_idx:    Option<usize>,
+    pub name: String,
+    pub gamma: Tensor,
+    pub beta: Tensor,
+    pub eps: f32,
+    last_g_idx: Option<usize>,
+    last_b_idx: Option<usize>,
 }
 
 impl LayerNorm {
     pub fn new(d_model: usize, eps: f32, init: &dyn Initializer, rng: &mut PcgEngine) -> Self {
         let mut gamma = Tensor::zeros(1, d_model);
-        let mut beta  = Tensor::zeros(1, d_model);
+        let mut beta = Tensor::zeros(1, d_model);
         init.fill(&mut gamma, 1, d_model, rng);
         init.fill(&mut beta, 1, d_model, rng);
         Self {
             name: "layer_norm".into(),
-            gamma, beta, eps,
-            last_g_idx: None, last_b_idx: None,
+            gamma,
+            beta,
+            eps,
+            last_g_idx: None,
+            last_b_idx: None,
         }
     }
 
@@ -44,9 +47,10 @@ impl Clone for LayerNorm {
         Self {
             name: self.name.clone(),
             gamma: self.gamma.clone(),
-            beta:  self.beta.clone(),
-            eps:   self.eps,
-            last_g_idx: None, last_b_idx: None,
+            beta: self.beta.clone(),
+            eps: self.eps,
+            last_g_idx: None,
+            last_b_idx: None,
         }
     }
 }
@@ -62,14 +66,22 @@ impl Module for LayerNorm {
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_g_idx { v.push(i); }
-        if let Some(i) = self.last_b_idx { v.push(i); }
+        if let Some(i) = self.last_g_idx {
+            v.push(i);
+        }
+        if let Some(i) = self.last_b_idx {
+            v.push(i);
+        }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_g_idx { self.gamma = tape.value(i); }
-        if let Some(i) = self.last_b_idx { self.beta  = tape.value(i); }
+        if let Some(i) = self.last_g_idx {
+            self.gamma = tape.value(i);
+        }
+        if let Some(i) = self.last_b_idx {
+            self.beta = tape.value(i);
+        }
     }
 
     fn state_dict(&self) -> HashMap<String, Tensor> {
@@ -80,12 +92,14 @@ impl Module for LayerNorm {
     }
 
     fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> std::result::Result<(), String> {
-        let g = sd.get(&format!("{}/gamma", self.name))
+        let g = sd
+            .get(&format!("{}/gamma", self.name))
             .ok_or_else(|| format!("missing key: {}/gamma", self.name))?;
-        let b = sd.get(&format!("{}/beta", self.name))
+        let b = sd
+            .get(&format!("{}/beta", self.name))
             .ok_or_else(|| format!("missing key: {}/beta", self.name))?;
         if g.shape() != (1, self.gamma.cols) {
-            return Err(format!("gamma shape mismatch"));
+            return Err("gamma shape mismatch".to_string());
         }
         self.gamma = g.clone();
         self.beta = b.clone();

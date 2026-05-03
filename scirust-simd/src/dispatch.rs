@@ -7,10 +7,10 @@
 // La détection se fait une seule fois (OnceLock) et le résultat est
 // caché. Coût d'un appel : un load atomique.
 
-use std::sync::OnceLock;
-use crate::matrix::backend::{SimdBackend, ScalarBackend};
 #[cfg(feature = "portable_simd")]
 use crate::matrix::backend::PortableSimdBackend;
+use crate::matrix::backend::{ScalarBackend, SimdBackend};
+use std::sync::OnceLock;
 
 // ------------------------------------------------------------------ //
 //  Énumération des backends disponibles                               //
@@ -29,11 +29,11 @@ pub enum BackendKind {
 impl BackendKind {
     pub fn label(self) -> &'static str {
         match self {
-            BackendKind::Scalar       => "scalar",
-            BackendKind::Sse2         => "x86_64/SSE2",
-            BackendKind::Avx2         => "x86_64/AVX2",
-            BackendKind::Avx512       => "x86_64/AVX-512",
-            BackendKind::Neon         => "aarch64/NEON",
+            BackendKind::Scalar => "scalar",
+            BackendKind::Sse2 => "x86_64/SSE2",
+            BackendKind::Avx2 => "x86_64/AVX2",
+            BackendKind::Avx512 => "x86_64/AVX-512",
+            BackendKind::Neon => "aarch64/NEON",
             BackendKind::PortableSimd => "portable_simd",
         }
     }
@@ -52,7 +52,9 @@ pub fn detect_backend() -> BackendKind {
         // Si l'utilisateur a compilé avec portable-simd, on l'utilise
         // (le compilateur émet déjà les bonnes instructions).
         #[cfg(feature = "portable-simd")]
-        { return BackendKind::PortableSimd; }
+        {
+            return BackendKind::PortableSimd;
+        }
 
         // Détection runtime x86_64
         #[cfg(target_arch = "x86_64")]
@@ -89,9 +91,9 @@ pub fn runtime_backend() -> &'static dyn SimdBackend {
         BackendKind::PortableSimd => &PortableSimdBackend,
 
         #[cfg(target_arch = "x86_64")]
-        BackendKind::Avx2  => &Avx2Backend,
+        BackendKind::Avx2 => &Avx2Backend,
         #[cfg(target_arch = "x86_64")]
-        BackendKind::Sse2  => &Sse2Backend,
+        BackendKind::Sse2 => &Sse2Backend,
         #[cfg(target_arch = "x86_64")]
         BackendKind::Avx512 => &Avx2Backend, // fallback Avx2 tant qu'on n'a pas écrit le 512
 
@@ -115,13 +117,22 @@ pub fn print_capabilities() {
         println!("  - AVX      : {}", std::is_x86_feature_detected!("avx"));
         println!("  - AVX2     : {}", std::is_x86_feature_detected!("avx2"));
         println!("  - FMA      : {}", std::is_x86_feature_detected!("fma"));
-        println!("  - AVX-512F : {}", std::is_x86_feature_detected!("avx512f"));
+        println!(
+            "  - AVX-512F : {}",
+            std::is_x86_feature_detected!("avx512f")
+        );
     }
 
     #[cfg(target_arch = "aarch64")]
     {
-        println!("  - NEON : {}", std::arch::is_aarch64_feature_detected!("neon"));
-        println!("  - SVE  : {}", std::arch::is_aarch64_feature_detected!("sve"));
+        println!(
+            "  - NEON : {}",
+            std::arch::is_aarch64_feature_detected!("neon")
+        );
+        println!(
+            "  - SVE  : {}",
+            std::arch::is_aarch64_feature_detected!("sve")
+        );
     }
 }
 
@@ -136,7 +147,9 @@ pub struct Avx2Backend;
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Avx2Backend {
-    fn name(&self) -> &'static str { "avx2" }
+    fn name(&self) -> &'static str {
+        "avx2"
+    }
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         ScalarBackend.saxpy_f32(alpha, x, y)
     }
@@ -149,15 +162,24 @@ impl SimdBackend for Avx2Backend {
     fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
         ScalarBackend.ddot_f64(x, y)
     }
-    fn sgemv_f32(&self, alpha: f32, a: crate::matrix::view::MatrixView<f32>,
-                 x: &[f32], beta: f32, y: &mut [f32]) {
+    fn sgemv_f32(
+        &self,
+        alpha: f32,
+        a: crate::matrix::view::MatrixView<f32>,
+        x: &[f32],
+        beta: f32,
+        y: &mut [f32],
+    ) {
         ScalarBackend.sgemv_f32(alpha, a, x, beta, y)
     }
-    fn sgemm_f32(&self, alpha: f32,
-                 a: crate::matrix::view::MatrixView<f32>,
-                 b: crate::matrix::view::MatrixView<f32>,
-                 beta: f32,
-                 c: crate::matrix::view::MatrixViewMut<f32>) {
+    fn sgemm_f32(
+        &self,
+        alpha: f32,
+        a: crate::matrix::view::MatrixView<f32>,
+        b: crate::matrix::view::MatrixView<f32>,
+        beta: f32,
+        c: crate::matrix::view::MatrixViewMut<f32>,
+    ) {
         ScalarBackend.sgemm_f32(alpha, a, b, beta, c)
     }
     fn relu_f32(&self, v: &mut [f32]) {
@@ -171,20 +193,44 @@ pub struct Sse2Backend;
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Sse2Backend {
-    fn name(&self) -> &'static str { "sse2" }
-    fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) { ScalarBackend.saxpy_f32(a, x, y); }
-    fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) { ScalarBackend.daxpy_f64(a, x, y); }
-    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 { ScalarBackend.sdot_f32(x, y) }
-    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 { ScalarBackend.ddot_f64(x, y) }
-    fn sgemv_f32(&self, a: f32, m: crate::matrix::view::MatrixView<f32>, x: &[f32], b: f32, y: &mut [f32]) {
+    fn name(&self) -> &'static str {
+        "sse2"
+    }
+    fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) {
+        ScalarBackend.saxpy_f32(a, x, y);
+    }
+    fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) {
+        ScalarBackend.daxpy_f64(a, x, y);
+    }
+    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
+        ScalarBackend.sdot_f32(x, y)
+    }
+    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
+        ScalarBackend.ddot_f64(x, y)
+    }
+    fn sgemv_f32(
+        &self,
+        a: f32,
+        m: crate::matrix::view::MatrixView<f32>,
+        x: &[f32],
+        b: f32,
+        y: &mut [f32],
+    ) {
         ScalarBackend.sgemv_f32(a, m, x, b, y);
     }
-    fn sgemm_f32(&self, a: f32, ma: crate::matrix::view::MatrixView<f32>,
-                 mb: crate::matrix::view::MatrixView<f32>, b: f32,
-                 mc: crate::matrix::view::MatrixViewMut<f32>) {
+    fn sgemm_f32(
+        &self,
+        a: f32,
+        ma: crate::matrix::view::MatrixView<f32>,
+        mb: crate::matrix::view::MatrixView<f32>,
+        b: f32,
+        mc: crate::matrix::view::MatrixViewMut<f32>,
+    ) {
         ScalarBackend.sgemm_f32(a, ma, mb, b, mc);
     }
-    fn relu_f32(&self, v: &mut [f32]) { ScalarBackend.relu_f32(v); }
+    fn relu_f32(&self, v: &mut [f32]) {
+        ScalarBackend.relu_f32(v);
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -192,7 +238,9 @@ pub struct NeonBackend;
 
 #[cfg(target_arch = "aarch64")]
 impl SimdBackend for NeonBackend {
-    fn name(&self) -> &'static str { "neon" }
+    fn name(&self) -> &'static str {
+        "neon"
+    }
     fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) {
         unsafe { Self::saxpy_neon(a, x, y) }
     }
@@ -206,25 +254,47 @@ impl SimdBackend for NeonBackend {
             let yp = y.as_mut_ptr().add(c * 4);
             let xv = vld1q_f32(xp);
             let yv = vld1q_f32(yp);
-            let result = vfmaq_f32(yv, alpha_v, xv);  // FMA NEON
+            let result = vfmaq_f32(yv, alpha_v, xv); // FMA NEON
             vst1q_f32(yp, result);
         }
         let start = chunks * 4;
-        for i in start..x.len() { y[i] += alpha * x[i]; }
+        for i in start..x.len() {
+            y[i] += alpha * x[i];
+        }
     }
 
-    fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) { ScalarBackend.daxpy_f64(a, x, y); }
-    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 { ScalarBackend.sdot_f32(x, y) }
-    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 { ScalarBackend.ddot_f64(x, y) }
-    fn sgemv_f32(&self, a: f32, m: crate::matrix::view::MatrixView<f32>, x: &[f32], b: f32, y: &mut [f32]) {
+    fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) {
+        ScalarBackend.daxpy_f64(a, x, y);
+    }
+    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
+        ScalarBackend.sdot_f32(x, y)
+    }
+    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
+        ScalarBackend.ddot_f64(x, y)
+    }
+    fn sgemv_f32(
+        &self,
+        a: f32,
+        m: crate::matrix::view::MatrixView<f32>,
+        x: &[f32],
+        b: f32,
+        y: &mut [f32],
+    ) {
         ScalarBackend.sgemv_f32(a, m, x, b, y);
     }
-    fn sgemm_f32(&self, a: f32, ma: crate::matrix::view::MatrixView<f32>,
-                 mb: crate::matrix::view::MatrixView<f32>, b: f32,
-                 mc: crate::matrix::view::MatrixViewMut<f32>) {
+    fn sgemm_f32(
+        &self,
+        a: f32,
+        ma: crate::matrix::view::MatrixView<f32>,
+        mb: crate::matrix::view::MatrixView<f32>,
+        b: f32,
+        mc: crate::matrix::view::MatrixViewMut<f32>,
+    ) {
         ScalarBackend.sgemm_f32(a, ma, mb, b, mc);
     }
-    fn relu_f32(&self, v: &mut [f32]) { ScalarBackend.relu_f32(v); }
+    fn relu_f32(&self, v: &mut [f32]) {
+        ScalarBackend.relu_f32(v);
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -237,9 +307,15 @@ mod tests {
     #[test]
     fn detection_returns_something() {
         let kind = detect_backend();
-        assert!(matches!(kind,
-            BackendKind::Scalar | BackendKind::Sse2 | BackendKind::Avx2
-            | BackendKind::Avx512 | BackendKind::Neon | BackendKind::PortableSimd));
+        assert!(matches!(
+            kind,
+            BackendKind::Scalar
+                | BackendKind::Sse2
+                | BackendKind::Avx2
+                | BackendKind::Avx512
+                | BackendKind::Neon
+                | BackendKind::PortableSimd
+        ));
     }
 
     #[test]

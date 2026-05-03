@@ -9,20 +9,15 @@ Cargo.lock.bak
 *.backup*
 *.stub.bak
 
+# Patch/backup directories
+soullink-node-patched/
+
 # IDE
 .vscode/
 .idea/
 
 # OS
 .DS_Store
-
-# MNIST data files (downloaded on demand)
-data/mnist/
-mnist/
-
-# MNIST data files
-data/mnist/
-mnist/
 
 # MNIST data files (downloaded on demand)
 data/mnist/

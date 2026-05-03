@@ -50,7 +50,9 @@ pub struct Zeros;
 
 impl Initializer for Zeros {
     fn fill(&self, t: &mut Tensor, _fan_in: usize, _fan_out: usize, _rng: &mut PcgEngine) {
-        for x in t.data.iter_mut() { *x = 0.0; }
+        for x in t.data.iter_mut() {
+            *x = 0.0;
+        }
     }
 }
 
@@ -61,7 +63,9 @@ pub struct SmallNormal {
 }
 
 impl SmallNormal {
-    pub fn new(std: f32) -> Self { Self { std } }
+    pub fn new(std: f32) -> Self {
+        Self { std }
+    }
 }
 
 impl Initializer for SmallNormal {
@@ -82,7 +86,10 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         KaimingNormal.fill(&mut t, 16, 8, &mut rng);
         let max_abs: f32 = t.data.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        assert!(max_abs > 0.01, "Kaiming produced near-zero values: max_abs = {max_abs}");
+        assert!(
+            max_abs > 0.01,
+            "Kaiming produced near-zero values: max_abs = {max_abs}"
+        );
     }
 
     #[test]
@@ -92,12 +99,13 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         KaimingNormal.fill(&mut t, fan_in, 100, &mut rng);
         let mean: f32 = t.data.iter().sum::<f32>() / t.data.len() as f32;
-        let var: f32 = t.data.iter().map(|x| (x - mean).powi(2)).sum::<f32>()
-                       / t.data.len() as f32;
+        let var: f32 = t.data.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / t.data.len() as f32;
         let expected_std = (2.0 / fan_in as f32).sqrt();
         let actual_std = var.sqrt();
-        assert!((actual_std - expected_std).abs() / expected_std < 0.1,
-            "Kaiming std: expected {expected_std}, got {actual_std}");
+        assert!(
+            (actual_std - expected_std).abs() / expected_std < 0.1,
+            "Kaiming std: expected {expected_std}, got {actual_std}"
+        );
     }
 
     #[test]
@@ -117,7 +125,10 @@ mod tests {
         XavierUniform.fill(&mut t, fan_in, fan_out, &mut rng);
         let bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         for &x in &t.data {
-            assert!(x.abs() <= bound + 1e-5, "Xavier value out of bounds: {x} > {bound}");
+            assert!(
+                x.abs() <= bound + 1e-5,
+                "Xavier value out of bounds: {x} > {bound}"
+            );
         }
     }
 }
