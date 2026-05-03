@@ -21,6 +21,7 @@ impl InMemoryDataset {
     }
     pub fn n_samples(&self) -> usize { self.n }
     pub fn len(&self) -> usize { self.n }
+    pub fn is_empty(&self) -> bool { self.n == 0 }
     pub fn get(&self, idx: usize) -> (&[f32], &[f32]) { self.sample(idx) }
     pub fn x_features(&self) -> usize { self.x_dim }
     pub fn subsample(&self, n: usize, _seed: u64) -> Self {
@@ -41,6 +42,7 @@ pub trait Dataset {
     fn sample(&self, idx: usize) -> (&[f32], &[f32]);
     fn n_samples(&self) -> usize;
     fn len(&self) -> usize { self.n_samples() }
+    fn is_empty(&self) -> bool { self.len() == 0 }
 }
 
 impl Dataset for InMemoryDataset {

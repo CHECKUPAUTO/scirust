@@ -21,6 +21,7 @@ pub mod linear;
 pub mod activation;
 pub mod sequential;
 pub mod loss;
+pub mod dropout;
 
 // Re-exports pour confort
 pub use module::Module;
@@ -30,3 +31,4 @@ pub use linear::Linear;
 pub use activation::{ReLU, Sigmoid};
 pub use sequential::Sequential;
 pub use loss::{Loss, MseLoss, CrossEntropyLoss, NllLoss};
+pub use dropout::Dropout;

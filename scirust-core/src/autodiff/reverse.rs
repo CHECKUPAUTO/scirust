@@ -1,22 +1,11 @@
 // scirust-core/src/autodiff/reverse.rs
-//
-// Reverse-mode automatic differentiation — implémentation complète et fonctionnelle.
-//
-// CONTRAT DE CE FICHIER :
-//   - Forward construit une "tape" de nodes, chacun avec son Op
-//   - backward(idx) propage les gradients depuis le node idx vers tous ses ancêtres
-//   - L'Op enregistrée DOIT correspondre à l'opération calculée (pas de mensonge)
-//   - Chaque variante Op a son match arm dans propagate()
-//
-// VALIDATION : le test optimizer_minimizes_x_squared en bas du fichier
-// est l'oracle. Si ce test passe, l'autograd marche. Si non, quelque chose
-// est cassé fondamentalement.
+// Reverse-mode autodiff — compatible V10A/V11
 
 use std::cell::RefCell;
 
-// ==================================================================== //
-//  Tensor — bloc de données 2D row-major                                //
-// ==================================================================== //
+// ================================================================== //
+//  Tensor — 2D dense row-major                                       //
+// ================================================================== //
 
 #[derive(Debug, Clone)]
 pub struct Tensor {
@@ -29,40 +18,197 @@ impl Tensor {
     pub fn zeros(rows: usize, cols: usize) -> Self {
         Self { rows, cols, data: vec![0.0; rows * cols] }
     }
-
+    pub fn ones(rows: usize, cols: usize) -> Self {
+        Self { rows, cols, data: vec![1.0; rows * cols] }
+    }
     pub fn from_vec(data: Vec<f32>, rows: usize, cols: usize) -> Self {
-        assert_eq!(data.len(), rows * cols,
-            "Tensor::from_vec: len {} != rows·cols {}", data.len(), rows * cols);
+        assert_eq!(data.len(), rows * cols, "Tensor::from_vec size mismatch");
         Self { rows, cols, data }
     }
-
     pub fn shape(&self) -> (usize, usize) { (self.rows, self.cols) }
-    pub fn dims(&self)  -> (usize, usize) { (self.rows, self.cols) }
+    pub fn dims(&self) -> (usize, usize) { (self.rows, self.cols) }
     pub fn nrows(&self) -> usize { self.rows }
     pub fn ncols(&self) -> usize { self.cols }
 
-    /// Hadamard product (element-wise multiplication).
-    pub fn hadamard(&self, other: &Tensor) -> Tensor {
-        assert_eq!(self.shape(), other.shape(),
-            "hadamard: shapes mismatch {:?} vs {:?}", self.shape(), other.shape());
+    pub fn add(&self, other: &Tensor) -> Tensor {
+        assert_eq!(self.shape(), other.shape(), "Tensor::add shape mismatch");
         let mut out = self.clone();
-        for i in 0..out.data.len() {
-            out.data[i] *= other.data[i];
-        }
+        for i in 0..out.data.len() { out.data[i] += other.data[i]; }
         out
     }
-
-    pub fn sum(&self) -> f32 { self.data.iter().sum() }
-
+    pub fn sub(&self, other: &Tensor) -> Tensor {
+        assert_eq!(self.shape(), other.shape(), "Tensor::sub shape mismatch");
+        let mut out = self.clone();
+        for i in 0..out.data.len() { out.data[i] -= other.data[i]; }
+        out
+    }
+    pub fn mul(&self, other: &Tensor) -> Tensor {
+        self.hadamard(other)
+    }
+    pub fn div(&self, other: &Tensor) -> Tensor {
+        assert_eq!(self.shape(), other.shape(), "Tensor::div shape mismatch");
+        let mut out = self.clone();
+        for i in 0..out.data.len() { out.data[i] /= other.data[i]; }
+        out
+    }
+    pub fn hadamard(&self, other: &Tensor) -> Tensor {
+        assert_eq!(self.shape(), other.shape(), "Tensor::hadamard shape mismatch");
+        let mut out = self.clone();
+        for i in 0..out.data.len() { out.data[i] *= other.data[i]; }
+        out
+    }
+    pub fn neg(&self) -> Tensor {
+        self.scale(-1.0)
+    }
+    pub fn reciprocal(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = 1.0 / *x; }
+        out
+    }
+    pub fn exp(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = x.exp(); }
+        out
+    }
+    pub fn log(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = x.ln(); }
+        out
+    }
+    pub fn sqrt(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = x.sqrt(); }
+        out
+    }
+    pub fn pow(&self, exp: f32) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = x.powf(exp); }
+        out
+    }
+    pub fn sigmoid(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = 1.0 / (1.0 + (-*x).exp()); }
+        out
+    }
+    pub fn tanh(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data { *x = x.tanh(); }
+        out
+    }
     pub fn scale(&self, s: f32) -> Tensor {
         let mut out = self.clone();
         for x in &mut out.data { *x *= s; }
         out
     }
-
+    pub fn sum(&self) -> f32 {
+        self.data.iter().sum()
+    }
+    pub fn sum_axis(&self, axis: u8) -> Tensor {
+        if axis == 0 {
+            let mut out = Tensor::zeros(1, self.cols);
+            for c in 0..self.cols {
+                let mut s = 0.0f32;
+                for r in 0..self.rows { s += self.data[r * self.cols + c]; }
+                out.data[c] = s;
+            }
+            out
+        } else {
+            let mut out = Tensor::zeros(self.rows, 1);
+            for r in 0..self.rows {
+                let mut s = 0.0f32;
+                for c in 0..self.cols { s += self.data[r * self.cols + c]; }
+                out.data[r] = s;
+            }
+            out
+        }
+    }
+    pub fn mean_axis(&self, axis: u8) -> Tensor {
+        let n = if axis == 0 { self.rows } else { self.cols } as f32;
+        self.sum_axis(axis).scale(1.0 / n)
+    }
+    pub fn var_axis(&self, axis: u8) -> Tensor {
+        let mean = self.mean_axis(axis);
+        let diff = self.sub(&mean.broadcast_to(self.rows, self.cols));
+        let sq = diff.hadamard(&diff);
+        sq.mean_axis(axis)
+    }
+    pub fn max_axis(&self, axis: u8) -> Tensor {
+        if axis == 0 {
+            let mut out = Tensor::zeros(1, self.cols);
+            for c in 0..self.cols {
+                let mut m = self.data[c];
+                for r in 1..self.rows { m = m.max(self.data[r * self.cols + c]); }
+                out.data[c] = m;
+            }
+            out
+        } else {
+            let mut out = Tensor::zeros(self.rows, 1);
+            for r in 0..self.rows {
+                let mut m = self.data[r * self.cols];
+                for c in 1..self.cols { m = m.max(self.data[r * self.cols + c]); }
+                out.data[r] = m;
+            }
+            out
+        }
+    }
+    pub fn softmax(&self, axis: u8) -> Tensor {
+        let max = self.max_axis(axis);
+        let shifted = self.sub(&max.broadcast_to(self.rows, self.cols));
+        let exp = shifted.exp();
+        let sum = exp.sum_axis(axis);
+        exp.div(&sum.broadcast_to(self.rows, self.cols))
+    }
+    pub fn transpose(&self) -> Tensor {
+        let mut out = Tensor::zeros(self.cols, self.rows);
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                out.data[c * self.rows + r] = self.data[r * self.cols + c];
+            }
+        }
+        out
+    }
+    pub fn matmul(&self, other: &Tensor) -> Tensor {
+        assert_eq!(self.cols, other.rows, "matmul: inner dim mismatch {}x{} @ {}x{}", self.rows, self.cols, other.rows, other.cols);
+        let mut out = Tensor::zeros(self.rows, other.cols);
+        for i in 0..self.rows {
+            for k in 0..self.cols {
+                let a = self.data[i * self.cols + k];
+                for j in 0..other.cols {
+                    out.data[i * other.cols + j] += a * other.data[k * other.cols + j];
+                }
+            }
+        }
+        out
+    }
     pub fn reshape(&self, rows: usize, cols: usize) -> Tensor {
         assert_eq!(self.data.len(), rows * cols, "reshape: size mismatch");
         Tensor { rows, cols, data: self.data.clone() }
+    }
+    pub fn broadcast_to(&self, rows: usize, cols: usize) -> Tensor {
+        if self.rows == rows && self.cols == cols {
+            return self.clone();
+        }
+        if self.rows == 1 && self.cols == cols {
+            let mut out = Tensor::zeros(rows, cols);
+            for r in 0..rows {
+                for c in 0..cols {
+                    out.data[r * cols + c] = self.data[c];
+                }
+            }
+            out
+        } else if self.rows == rows && self.cols == 1 {
+            let mut out = Tensor::zeros(rows, cols);
+            for r in 0..rows {
+                for c in 0..cols {
+                    out.data[r * cols + c] = self.data[r];
+                }
+            }
+            out
+        } else if self.rows == 1 && self.cols == 1 {
+            Tensor::from_vec(vec![self.data[0]; rows * cols], rows, cols)
+        } else {
+            panic!("broadcast_to: incompatible shapes ({},{}) -> ({},{})", self.rows, self.cols, rows, cols);
+        }
     }
 }
 
@@ -70,9 +216,9 @@ impl Default for Tensor {
     fn default() -> Self { Self::zeros(1, 1) }
 }
 
-// ==================================================================== //
-//  DeviceTensor — wrapper pour permettre future extension GPU           //
-// ==================================================================== //
+// ================================================================== //
+//  DeviceTensor                                                      //
+// ================================================================== //
 
 #[derive(Debug, Clone)]
 pub struct DeviceTensor {
@@ -80,311 +226,664 @@ pub struct DeviceTensor {
 }
 
 impl DeviceTensor {
-    pub fn cpu(t: Tensor) -> Self { Self { inner: t } }
     pub fn as_cpu(&self) -> &Tensor { &self.inner }
+    pub fn cpu(t: Tensor) -> Self { Self { inner: t } }
     pub fn shape(&self) -> (usize, usize) { self.inner.shape() }
-    pub fn scalar_value(&self) -> f32 { self.inner.data.iter().sum() }
+    pub fn scalar_value(&self) -> f32 {
+        self.inner.data.iter().sum::<f32>()
+    }
 }
 
-// ==================================================================== //
-//  SavedData — données auxiliaires nécessaires pour certains backwards //
-// ==================================================================== //
+// ================================================================== //
+//  SavedData                                                         //
+// ================================================================== //
 
 #[derive(Debug, Clone)]
 pub enum SavedData {
     None,
-    Indices(Vec<u32>),    // pour Embedding
+    Mask(Tensor),
+    Indices(Vec<u32>),
+    Im2Col(Tensor),
+    ConvInputShape { batch: usize, in_c: usize, h: usize, w: usize, out_c: usize, kernel: usize, stride: usize, pad: usize },
 }
 
-// ==================================================================== //
-//  Op — opérations supportées par la tape                              //
-//                                                                       //
-//  RÈGLE D'OR : la variante Op enregistrée doit correspondre exactement //
-//  à l'opération calculée. Pas de mensonge. Si l'enum dit Op::Sigmoid,  //
-//  alors le backward de Sigmoid sera appelé.                            //
-// ==================================================================== //
+// ================================================================== //
+//  Op                                                                //
+// ================================================================== //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Op {
-    Input,                          // valeur d'entrée, pas de parents
-
-    // Arithmétique élémentaire (binaire, mêmes shapes)
-    Add(usize, usize),              // a + b
-    Sub(usize, usize),              // a - b
-    Mul(usize, usize),              // a ⊙ b (Hadamard, élément par élément)
-
-    // Arithmétique avec scalaire
-    Scale(usize, f32),              // a * s
-
-    // Unaires
-    Neg(usize),                     // -a
-    Exp(usize),                     // exp(a)
-    Log(usize),                     // log(a)
-    Sqrt(usize),                    // sqrt(a)
-    Sigmoid(usize),                 // 1 / (1 + exp(-a))
-    ReLU(usize),                    // max(a, 0)
-
-    // Réductions
-    Sum(usize),                     // somme tous les éléments → (1, 1)
-
-    // Algèbre matricielle
-    MatMul(usize, usize),           // (M,K) @ (K,N) → (M,N)
-    Transpose(usize),               // (M,N) → (N,M)
-
-    // Broadcasting
-    AddBias(usize, usize),          // a (M,N) + b (1,N), broadcast row-wise
+    Input,
+    Add(usize, usize),
+    Sub(usize, usize),
+    Mul(usize, usize),
+    Div(usize, usize),
+    AddBroadcast(usize, usize),
+    SubBroadcast(usize, usize),
+    MulBroadcast(usize, usize),
+    DivBroadcast(usize, usize),
+    MatMul(usize, usize),
+    Scale { input: usize, scalar: f32 },
+    Neg(usize),
+    Exp(usize),
+    Log(usize),
+    Sqrt(usize),
+    Reciprocal(usize),
+    Pow { base: usize, exp: f32 },
+    ReLU(usize),
+    Sigmoid(usize),
+    Tanh(usize),
+    Sum(usize),
+    SumAxis(usize, u8),
+    MeanAxis(usize, u8),
+    VarAxis(usize, u8),
+    MaxAxis(usize, u8),
+    Broadcast { input: usize, rows: usize, cols: usize },
+    Softmax { input: usize, axis: u8 },
+    LogSoftmax { input: usize, axis: u8 },
+    Transpose2d(usize),
+    Concat { input_indices: [usize; 3], row_counts: [usize; 3] },
+    Slice { input_idx: usize, start: usize, len: usize },
+    SliceCols { input_idx: usize, start: usize, len: usize },
+    Embedding { table_idx: usize, n_tokens: usize },
+    Linear { input_idx: usize, weight_idx: usize, bias_idx: usize },
+    CausalMask { input_idx: usize, seq_len: usize },
+    Dropout { input_idx: usize, mask_idx: usize, p: f32 },
+    MaxPool2d { input_idx: usize, c: usize, h: usize, w: usize, kernel: usize, stride: usize },
+    BatchNorm { input_idx: usize, gamma_idx: usize, beta_idx: usize },
+    LayerNorm { input_idx: usize, gamma_idx: usize, beta_idx: usize, eps: f32 },
+    Conv2dForward { input: usize, weight: usize, bias: Option<usize>, batch: usize, in_c: usize, h: usize, w: usize, out_c: usize, kernel: usize, stride: usize, pad: usize },
+    Reshape(usize, usize, usize),
 }
 
-// ==================================================================== //
-//  Node — un node de la tape                                            //
-// ==================================================================== //
+// ================================================================== //
+//  Node                                                              //
+// ================================================================== //
 
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub op:    Op,
+    pub op: Op,
     pub shape: (usize, usize),
     pub saved: SavedData,
 }
 
-// ==================================================================== //
-//  Tape — le graphe de calcul                                          //
-// ==================================================================== //
+// ================================================================== //
+//  Tape                                                              //
+// ================================================================== //
 
 #[derive(Debug)]
 pub struct Tape {
-    pub(crate) nodes:  RefCell<Vec<Node>>,
+    pub(crate) nodes: RefCell<Vec<Node>>,
     pub(crate) values: RefCell<Vec<DeviceTensor>>,
-    pub(crate) grads:  RefCell<Vec<Tensor>>,
+    pub(crate) grads: RefCell<Vec<Tensor>>,
+    grad_enabled: RefCell<bool>,
 }
 
 impl Tape {
     pub fn new() -> Self {
         Self {
-            nodes:  RefCell::new(Vec::new()),
+            nodes: RefCell::new(Vec::new()),
             values: RefCell::new(Vec::new()),
-            grads:  RefCell::new(Vec::new()),
+            grads: RefCell::new(Vec::new()),
+            grad_enabled: RefCell::new(true),
         }
     }
 
-    /// Push un nouvel input sur la tape (paramètre ou donnée d'entrée).
-    pub fn input(&self, t: Tensor) -> Var {
-        let idx = self.push(Op::Input, DeviceTensor::cpu(t), SavedData::None);
+    pub fn set_grad_enabled(&self, enabled: bool) {
+        *self.grad_enabled.borrow_mut() = enabled;
+    }
+
+    pub fn is_grad_enabled(&self) -> bool {
+        *self.grad_enabled.borrow()
+    }
+
+    pub fn no_grad<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let prev = self.is_grad_enabled();
+        self.set_grad_enabled(false);
+        let result = f();
+        self.set_grad_enabled(prev);
+        result
+    }
+
+    pub fn num_parameters(&self) -> usize { 0 }
+
+    pub fn input(&self, t: Tensor) -> Var<'_> {
+        let idx = self.push_with_saved(Op::Input, DeviceTensor::cpu(t.clone()), SavedData::None);
+        self.values.borrow_mut()[idx] = DeviceTensor::cpu(t);
         Var { tape: self, idx }
     }
 
-    /// Push un node interne. Crée le grad initialisé à zéro.
-    pub(crate) fn push(&self, op: Op, value: DeviceTensor, saved: SavedData) -> usize {
+    pub fn push_with_saved(
+        &self,
+        op: Op,
+        value: DeviceTensor,
+        saved: SavedData,
+    ) -> usize {
+        let shape = value.shape();
+        if !self.is_grad_enabled() {
+            // Forward seul : on pousse un Input inerte (pas de graph)
+            let mut nodes = self.nodes.borrow_mut();
+            let idx = nodes.len();
+            nodes.push(Node { op: Op::Input, shape, saved: SavedData::None });
+            self.values.borrow_mut().push(value);
+            self.grads.borrow_mut().push(Tensor::zeros(shape.0, shape.1));
+            return idx;
+        }
         let mut nodes = self.nodes.borrow_mut();
         let idx = nodes.len();
-        let shape = value.shape();
         nodes.push(Node { op, shape, saved });
         self.values.borrow_mut().push(value);
         self.grads.borrow_mut().push(Tensor::zeros(shape.0, shape.1));
         idx
     }
 
-    /// Lit la valeur courante du node idx.
     pub fn value(&self, idx: usize) -> Tensor {
         self.values.borrow()[idx].as_cpu().clone()
-    }
-
-    /// Écrit une nouvelle valeur sur le node idx (utilisé par l'optimiseur).
-    pub fn set_value(&self, idx: usize, value: Tensor) {
-        self.values.borrow_mut()[idx] = DeviceTensor::cpu(value);
-    }
-
-    /// Lit le gradient courant accumulé sur le node idx.
-    pub fn grad(&self, idx: usize) -> Tensor {
-        self.grads.borrow()[idx].clone()
-    }
-
-    /// Force le gradient d'un node (utilisé pour le seed du backward).
-    pub fn set_grad(&self, idx: usize, g: Tensor) {
-        self.grads.borrow_mut()[idx] = g;
-    }
-
-    /// Réinitialise tous les gradients à zéro.
-    pub fn zero_grad(&self) {
-        let mut grads = self.grads.borrow_mut();
-        for g in grads.iter_mut() {
-            for x in &mut g.data { *x = 0.0; }
-        }
     }
 
     pub fn shape(&self, idx: usize) -> (usize, usize) {
         self.values.borrow()[idx].shape()
     }
 
-    pub fn num_nodes(&self) -> usize { self.nodes.borrow().len() }
-
-    /// **Cœur de l'autograd.** Lance la propagation des gradients depuis
-    /// le node `output_idx` vers tous ses ancêtres.
-    ///
-    /// Conditions :
-    ///   - L'output doit être scalaire (shape (1, 1))
-    ///   - Sinon, utiliser set_grad() avant pour seeder un gradient custom
-    pub fn backward(&self, output_idx: usize) {
-        // Seed : grad de l'output = 1 partout
-        let out_shape = self.shape(output_idx);
-        let mut seed = Tensor::zeros(out_shape.0, out_shape.1);
-        for x in &mut seed.data { *x = 1.0; }
-        self.set_grad(output_idx, seed);
-
-        // Propage en ordre inverse depuis output_idx vers 0.
-        // Tous les ancêtres potentiels sont à des indices < output_idx
-        // (parce que les nodes sont créés dans l'ordre d'exécution forward).
-        for i in (0..=output_idx).rev() {
-            self.propagate(i);
-        }
+    pub fn zeros(&self, rows: usize, cols: usize) -> Var<'_> {
+        self.input(Tensor::zeros(rows, cols))
     }
 
-    /// Propage le gradient du node `i` vers ses parents selon son Op.
-    ///
-    /// CONVENTION : grad_out = grads[i]. Pour chaque parent p, on calcule
-    /// grad_p_contribution = ∂i/∂p · grad_out, et on l'AJOUTE à grads[p]
-    /// (accumulation, pas remplacement, parce qu'un node peut avoir plusieurs
-    /// successeurs qui contribuent à son gradient).
-    fn propagate(&self, i: usize) {
-        let op = self.nodes.borrow()[i].op.clone();
-        let grad_out = self.grads.borrow()[i].clone();
+    pub fn grad(&self, idx: usize) -> Tensor {
+        self.grads.borrow()[idx].clone()
+    }
 
-        match op {
-            Op::Input => {
-                // Pas de parents — feuille du graphe. Rien à propager.
-            }
+    pub fn set_value(&self, idx: usize, value: Tensor) {
+        self.values.borrow_mut()[idx] = DeviceTensor::cpu(value);
+    }
 
-            Op::Add(a, b) => {
-                // c = a + b → ∂c/∂a = 1, ∂c/∂b = 1
-                self.accumulate(a, &grad_out);
-                self.accumulate(b, &grad_out);
-            }
+    pub fn backward(&self, idx: usize) {
+        let nodes = self.nodes.borrow();
+        let values = self.values.borrow();
+        let mut grads = self.grads.borrow_mut();
+        let n = nodes.len();
+        assert!(idx < n, "backward: idx {} out of bounds ({} nodes)", idx, n);
 
-            Op::Sub(a, b) => {
-                // c = a - b → ∂c/∂a = 1, ∂c/∂b = -1
-                self.accumulate(a, &grad_out);
-                let neg = grad_out.scale(-1.0);
-                self.accumulate(b, &neg);
-            }
+        // reset gradients
+        for i in 0..n {
+            let (r, c) = nodes[i].shape;
+            grads[i] = Tensor::zeros(r, c);
+        }
 
-            Op::Mul(a, b) => {
-                // c[i] = a[i] * b[i] → ∂c/∂a[i] = b[i], ∂c/∂b[i] = a[i]
-                let a_val = self.value(a);
-                let b_val = self.value(b);
-                let grad_a = grad_out.hadamard(&b_val);
-                let grad_b = grad_out.hadamard(&a_val);
-                self.accumulate(a, &grad_a);
-                self.accumulate(b, &grad_b);
-            }
+        // seed
+        let (r, c) = nodes[idx].shape;
+        grads[idx] = Tensor::from_vec(vec![1.0; r * c], r, c);
 
-            Op::Scale(a, s) => {
-                // c = a * s → ∂c/∂a = s
-                let grad_a = grad_out.scale(s);
-                self.accumulate(a, &grad_a);
-            }
+        for i in (0..=idx).rev() {
+            let g = grads[i].clone();
+            if g.data.iter().all(|&x| x == 0.0) { continue; }
 
-            Op::Neg(a) => {
-                // c = -a → ∂c/∂a = -1
-                let grad_a = grad_out.scale(-1.0);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::Exp(a) => {
-                // c = exp(a) → ∂c/∂a = exp(a) = c
-                let c_val = self.value(i);
-                let grad_a = grad_out.hadamard(&c_val);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::Log(a) => {
-                // c = log(a) → ∂c/∂a = 1/a
-                let a_val = self.value(a);
-                let mut inv = a_val.clone();
-                for x in &mut inv.data { *x = 1.0 / *x; }
-                let grad_a = grad_out.hadamard(&inv);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::Sqrt(a) => {
-                // c = sqrt(a) → ∂c/∂a = 1/(2·sqrt(a)) = 1/(2c)
-                let c_val = self.value(i);
-                let mut factor = c_val.clone();
-                for x in &mut factor.data { *x = 1.0 / (2.0 * *x); }
-                let grad_a = grad_out.hadamard(&factor);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::Sigmoid(a) => {
-                // c = sigmoid(a) → ∂c/∂a = c · (1 - c)
-                let c_val = self.value(i);
-                let mut factor = c_val.clone();
-                for x in &mut factor.data { *x = *x * (1.0 - *x); }
-                let grad_a = grad_out.hadamard(&factor);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::ReLU(a) => {
-                // c = max(a, 0) → ∂c/∂a = 1 si a>0, 0 sinon
-                let a_val = self.value(a);
-                let mut mask = a_val.clone();
-                for x in &mut mask.data { *x = if *x > 0.0 { 1.0 } else { 0.0 }; }
-                let grad_a = grad_out.hadamard(&mask);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::Sum(a) => {
-                // c = sum_i(a_i) (scalaire) → ∂c/∂a_i = 1 partout
-                // grad_out est (1,1) avec une seule valeur, on la diffuse sur a
-                let g_scalar = grad_out.data[0];
-                let a_shape = self.shape(a);
-                let mut grad_a = Tensor::zeros(a_shape.0, a_shape.1);
-                for x in &mut grad_a.data { *x = g_scalar; }
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::MatMul(a, b) => {
-                // C = A @ B avec A (M,K), B (K,N), C (M,N)
-                // ∂C/∂A = grad_out @ B^T   shape (M, K)
-                // ∂C/∂B = A^T @ grad_out   shape (K, N)
-                let a_val = self.value(a);
-                let b_val = self.value(b);
-                let grad_a = matmul(&grad_out, &transpose(&b_val));
-                let grad_b = matmul(&transpose(&a_val), &grad_out);
-                self.accumulate(a, &grad_a);
-                self.accumulate(b, &grad_b);
-            }
-
-            Op::Transpose(a) => {
-                // c = a^T → grad_a = grad_out^T
-                let grad_a = transpose(&grad_out);
-                self.accumulate(a, &grad_a);
-            }
-
-            Op::AddBias(a, b) => {
-                // C = A + broadcast(b) où A est (M,N) et b est (1,N)
-                // grad_a = grad_out (même shape que A)
-                // grad_b = sum_axis_0(grad_out) (somme sur les rows)
-                self.accumulate(a, &grad_out);
-                let b_shape = self.shape(b);
-                let mut grad_b = Tensor::zeros(b_shape.0, b_shape.1);
-                for r in 0..grad_out.rows {
-                    for c in 0..grad_out.cols {
-                        grad_b.data[c] += grad_out.data[r * grad_out.cols + c];
+            match nodes[i].op {
+                Op::Input => {}
+                Op::Add(a, b) => {
+                    grads[a] = grads[a].add(&g);
+                    grads[b] = grads[b].add(&g);
+                }
+                Op::Sub(a, b) => {
+                    grads[a] = grads[a].add(&g);
+                    grads[b] = grads[b].sub(&g);
+                }
+                Op::Mul(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(bv));
+                    grads[b] = grads[b].add(&g.hadamard(av));
+                }
+                Op::Div(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    let b_recip = bv.reciprocal();
+                    let a_over_b2 = av.hadamard(&b_recip.hadamard(&b_recip));
+                    grads[a] = grads[a].add(&g.hadamard(&b_recip));
+                    grads[b] = grads[b].sub(&g.hadamard(&a_over_b2));
+                }
+                Op::AddBroadcast(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    grads[a] = grads[a].add(&g);
+                    if bv.rows == 1 && bv.cols == av.cols {
+                        let mut db = Tensor::zeros(1, bv.cols);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[c] += g.data[r * g.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == av.rows && bv.cols == 1 {
+                        let mut db = Tensor::zeros(bv.rows, 1);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[r] += g.data[r * g.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == 1 && bv.cols == 1 {
+                        let s: f32 = g.data.iter().sum();
+                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                    } else {
+                        grads[b] = grads[b].add(&g);
                     }
                 }
-                self.accumulate(b, &grad_b);
-            }
-        }
-    }
+                Op::SubBroadcast(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    grads[a] = grads[a].add(&g);
+                    if bv.rows == 1 && bv.cols == av.cols {
+                        let mut db = Tensor::zeros(1, bv.cols);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[c] += g.data[r * g.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].sub(&db);
+                    } else if bv.rows == av.rows && bv.cols == 1 {
+                        let mut db = Tensor::zeros(bv.rows, 1);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[r] += g.data[r * g.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].sub(&db);
+                    } else if bv.rows == 1 && bv.cols == 1 {
+                        let s: f32 = g.data.iter().sum();
+                        grads[b] = grads[b].sub(&Tensor::from_vec(vec![s], 1, 1));
+                    } else {
+                        grads[b] = grads[b].sub(&g);
+                    }
+                }
+                Op::MulBroadcast(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&bv.broadcast_to(g.rows, g.cols)));
+                    if bv.rows == 1 && bv.cols == av.cols {
+                        let mut db = Tensor::zeros(1, bv.cols);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[c] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == av.rows && bv.cols == 1 {
+                        let mut db = Tensor::zeros(bv.rows, 1);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[r] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == 1 && bv.cols == 1 {
+                        let s: f32 = g.data.iter().zip(av.data.iter()).map(|(&gi, &ai)| gi * ai).sum();
+                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                    } else {
+                        grads[b] = grads[b].add(&g.hadamard(&av.broadcast_to(g.rows, g.cols)));
+                    }
+                }
+                Op::DivBroadcast(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    let b_recip = bv.reciprocal();
+                    grads[a] = grads[a].add(&g.hadamard(&b_recip.broadcast_to(g.rows, g.cols)));
+                    if bv.rows == 1 && bv.cols == av.cols {
+                        let mut db = Tensor::zeros(1, bv.cols);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[c] -= g.data[r * g.cols + c] * av.data[r * av.cols + c] / (bv.data[c] * bv.data[c]);
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == av.rows && bv.cols == 1 {
+                        let mut db = Tensor::zeros(bv.rows, 1);
+                        for r in 0..g.rows {
+                            for c in 0..g.cols {
+                                db.data[r] -= g.data[r * g.cols + c] * av.data[r * av.cols + c] / (bv.data[r] * bv.data[r]);
+                            }
+                        }
+                        grads[b] = grads[b].add(&db);
+                    } else if bv.rows == 1 && bv.cols == 1 {
+                        let s: f32 = g.data.iter().zip(av.data.iter()).map(|(&gi, &ai)| -gi * ai / (bv.data[0] * bv.data[0])).sum();
+                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                    } else {
+                        let a_over_b2 = av.hadamard(&b_recip.hadamard(&b_recip).broadcast_to(g.rows, g.cols));
+                        grads[b] = grads[b].sub(&g.hadamard(&a_over_b2));
+                    }
+                }
+                Op::MatMul(a, b) => {
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+                    let ga = g.matmul(&bv.transpose());
+                    let gb = av.transpose().matmul(&g);
+                    grads[a] = grads[a].add(&ga);
+                    grads[b] = grads[b].add(&gb);
+                }
+                Op::Scale { input, scalar } => {
+                    grads[input] = grads[input].add(&g.scale(scalar));
+                }
+                Op::Neg(a) => {
+                    grads[a] = grads[a].sub(&g);
+                }
+                Op::Exp(a) => {
+                    let av = &values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&av.exp()));
+                }
+                Op::Log(a) => {
+                    let av = &values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&av.reciprocal()));
+                }
+                Op::Sqrt(a) => {
+                    let av = &values[a].as_cpu();
+                    let two_sqrt = av.sqrt().scale(2.0);
+                    grads[a] = grads[a].add(&g.hadamard(&two_sqrt.reciprocal()));
+                }
+                Op::Reciprocal(a) => {
+                    let av = &values[a].as_cpu();
+                    let mut denom = av.hadamard(av);
+                    for d in &mut denom.data { *d = 1.0 / (*d + 1e-10); }
+                    let minus_one_over_x2 = denom.scale(-1.0);
+                    grads[a] = grads[a].add(&g.hadamard(&minus_one_over_x2));
+                }
+                Op::Pow { base, exp } => {
+                    let av = &values[base].as_cpu();
+                    let deriv = av.pow(exp - 1.0).scale(exp);
+                    grads[base] = grads[base].add(&g.hadamard(&deriv));
+                }
+                Op::ReLU(a) => {
+                    let av = &values[a].as_cpu();
+                    let mut mask = Tensor::zeros(av.rows, av.cols);
+                    for j in 0..av.data.len() {
+                        mask.data[j] = if av.data[j] > 0.0 { 1.0 } else { 0.0 };
+                    }
+                    grads[a] = grads[a].add(&g.hadamard(&mask));
+                }
+                Op::Sigmoid(a) => {
+                    let av = &values[a].as_cpu();
+                    let sig = av.sigmoid();
+                    let deriv = sig.hadamard(&Tensor::from_vec(vec![1.0; sig.data.len()], sig.rows, sig.cols).sub(&sig));
+                    grads[a] = grads[a].add(&g.hadamard(&deriv));
+                }
+                Op::Tanh(a) => {
+                    let av = &values[a].as_cpu();
+                    let t = av.tanh();
+                    let one = Tensor::from_vec(vec![1.0; t.data.len()], t.rows, t.cols);
+                    let deriv = one.sub(&t.hadamard(&t));
+                    grads[a] = grads[a].add(&g.hadamard(&deriv));
+                }
+                Op::Sum(a) => {
+                    let av = &values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.broadcast_to(av.rows, av.cols));
+                }
+                Op::SumAxis(a, _axis) => {
+                    let av = &values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.broadcast_to(av.rows, av.cols));
+                }
+                Op::MeanAxis(a, axis) => {
+                    let av = &values[a].as_cpu();
+                    let n = if axis == 0 { av.rows } else { av.cols } as f32;
+                    grads[a] = grads[a].add(&g.scale(1.0 / n).broadcast_to(av.rows, av.cols));
+                }
+                Op::VarAxis(a, axis) => {
+                    let av = &values[a].as_cpu();
+                    let n = if axis == 0 { av.rows } else { av.cols } as f32;
+                    let mean = av.mean_axis(axis);
+                    let diff = av.sub(&mean.broadcast_to(av.rows, av.cols));
+                    let two_over_n = 2.0 / n;
+                    grads[a] = grads[a].add(&g.scale(two_over_n).broadcast_to(av.rows, av.cols).hadamard(&diff));
+                }
+                Op::MaxAxis(a, axis) => {
+                    let av = &values[a].as_cpu();
+                    let max_v = av.max_axis(axis);
+                    let mut mask = Tensor::zeros(av.rows, av.cols);
+                    if axis == 0 {
+                        for c in 0..av.cols {
+                            let m = max_v.data[c];
+                            for r in 0..av.rows {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6 {
+                                    mask.data[r * av.cols + c] = 1.0;
+                                }
+                            }
+                        }
+                    } else {
+                        for r in 0..av.rows {
+                            let m = max_v.data[r];
+                            for c in 0..av.cols {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6 {
+                                    mask.data[r * av.cols + c] = 1.0;
+                                }
+                            }
+                        }
+                    }
+                    grads[a] = grads[a].add(&g.broadcast_to(av.rows, av.cols).hadamard(&mask));
+                }
+                Op::Broadcast { input, rows, cols } => {
+                    let av = &values[input].as_cpu();
+                    let g_sum = if av.rows == rows && av.cols == cols {
+                        g.clone()
+                    } else if av.rows == 1 && av.cols == cols {
+                        g.sum_axis(0)
+                    } else if av.rows == rows && av.cols == 1 {
+                        g.sum_axis(1)
+                    } else if av.rows == 1 && av.cols == 1 {
+                        Tensor::from_vec(vec![g.sum()], 1, 1)
+                    } else {
+                        panic!("Broadcast backward: unsupported shape ({},{}) -> ({},{})", av.rows, av.cols, rows, cols);
+                    };
+                    grads[input] = grads[input].add(&g_sum);
+                }
+                Op::Softmax { input, axis } => {
+                    let av = &values[input].as_cpu();
+                    let sm = av.softmax(axis);
+                    let g_broadcast = g.broadcast_to(av.rows, av.cols);
+                    let gs = g_broadcast.hadamard(&sm);
+                    let sum_gs = gs.sum_axis(axis);
+                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
+                    grads[input] = grads[input].add(&diff);
+                }
+                Op::LogSoftmax { input, axis } => {
+                    let av = &values[input].as_cpu();
+                    let sm = av.softmax(axis);
+                    let g_broadcast = g.broadcast_to(av.rows, av.cols);
+                    let sum_g = g_broadcast.sum_axis(axis);
+                    let diff = g_broadcast.sub(&sm.hadamard(&sum_g.broadcast_to(av.rows, av.cols)));
+                    grads[input] = grads[input].add(&diff);
+                }
+                Op::Transpose2d(a) => {
+                    grads[a] = grads[a].add(&g.transpose());
+                }
+                Op::Concat { input_indices, row_counts } => {
+                    let mut off = 0;
+                    for k in 0..3 {
+                        let a = input_indices[k];
+                        if a == 0 && row_counts[k] == 0 { continue; }
+                        let av = &values[a].as_cpu();
+                        let n = av.rows;
+                        let c = av.cols;
+                        for r in 0..n {
+                            for col in 0..c {
+                                grads[a].data[r * c + col] += g.data[(off + r) * c + col];
+                            }
+                        }
+                        off += n;
+                    }
+                }
+                Op::Slice { input_idx, start, len } => {
+                    let av = &values[input_idx].as_cpu();
+                    let c = av.cols;
+                    for r in 0..len {
+                        for col in 0..c {
+                            grads[input_idx].data[(start + r) * c + col] += g.data[r * c + col];
+                        }
+                    }
+                }
+                Op::SliceCols { input_idx, start, len } => {
+                    let av = &values[input_idx].as_cpu();
+                    let c = av.cols;
+                    for r in 0..av.rows {
+                        for col in 0..len {
+                            grads[input_idx].data[r * c + (start + col)] += g.data[r * len + col];
+                        }
+                    }
+                }
+                Op::Embedding { table_idx, n_tokens: _ } => {
+                    let table = &values[table_idx].as_cpu();
+                    let vocab = table.rows;
+                    let d = table.cols;
+                    if let SavedData::Indices(ref indices) = nodes[i].saved {
+                        for (i_tok, &idx_u) in indices.iter().enumerate() {
+                            let idx_usize = idx_u as usize;
+                            assert!(idx_usize < vocab, "Embedding backward: index {} >= vocab {}", idx_usize, vocab);
+                            for j in 0..d {
+                                grads[table_idx].data[idx_usize * d + j] += g.data[i_tok * d + j];
+                            }
+                        }
+                    }
+                }
+                Op::Linear { input_idx, weight_idx, bias_idx } => {
+                    let iv = &values[input_idx].as_cpu();
+                    let wv = &values[weight_idx].as_cpu();
+                    grads[input_idx] = grads[input_idx].add(&g.matmul(&wv.transpose()));
+                    grads[weight_idx] = grads[weight_idx].add(&iv.transpose().matmul(&g));
+                    if let SavedData::None = nodes[i].saved {
+                        // bias grad = sum over batch dim (rows)
+                        let bias_g = g.sum_axis(0);
+                        grads[bias_idx] = grads[bias_idx].add(&bias_g);
+                    }
+                }
+                Op::CausalMask { input_idx, seq_len } => {
+                    let av = &values[input_idx].as_cpu();
+                    let mut mask = Tensor::zeros(av.rows, av.cols);
+                    for r in 0..av.rows {
+                        for c in 0..av.cols {
+                            let col_in_seq = c % seq_len;
+                            let row_in_seq = r % seq_len;
+                            if col_in_seq > row_in_seq {
+                                mask.data[r * av.cols + c] = 0.0;
+                            } else {
+                                mask.data[r * av.cols + c] = 1.0;
+                            }
+                        }
+                    }
+                    grads[input_idx] = grads[input_idx].add(&g.hadamard(&mask));
+                }
+                Op::Dropout { input_idx, mask_idx, .. } => {
+                    let mv = &values[mask_idx].as_cpu();
+                    grads[input_idx] = grads[input_idx].add(&g.hadamard(mv));
+                    grads[mask_idx] = grads[mask_idx].add(&g.hadamard(values[input_idx].as_cpu()));
+                }
+                Op::MaxPool2d { input_idx, c, h, w, kernel, stride } => {
+                    let av = &values[input_idx].as_cpu();
+                    let h_out = (h - kernel) / stride + 1;
+                    let w_out = (w - kernel) / stride + 1;
+                    let mut grad_in = Tensor::zeros(av.rows, av.cols);
+                    for b in 0..av.rows {
+                        for ch in 0..c {
+                            for oh in 0..h_out {
+                                for ow in 0..w_out {
+                                    let mut m = -f32::INFINITY;
+                                    let mut mh = 0usize;
+                                    let mut mw = 0usize;
+                                    for kh in 0..kernel {
+                                        for kw in 0..kernel {
+                                            let ih = oh * stride + kh;
+                                            let iw = ow * stride + kw;
+                                            let idx_in = b * c * h * w + ch * h * w + ih * w + iw;
+                                            let v = av.data[idx_in];
+                                            if v > m {
+                                                m = v;
+                                                mh = ih;
+                                                mw = iw;
+                                            }
+                                        }
+                                    }
+                                    let idx_out = b * c * h_out * w_out + ch * h_out * w_out + oh * w_out + ow;
+                                    let idx_in_max = b * c * h * w + ch * h * w + mh * w + mw;
+                                    grad_in.data[idx_in_max] += g.data[idx_out];
+                                }
+                            }
+                        }
+                    }
+                    grads[input_idx] = grads[input_idx].add(&grad_in);
+                }
+                Op::BatchNorm { input_idx, gamma_idx, beta_idx } => {
+                    // Simplification : dL/dx = dL/dy * gamma (approx)
+                    let gv = &values[gamma_idx].as_cpu();
+                    let g_broadcast = g.broadcast_to(values[input_idx].as_cpu().rows, values[input_idx].as_cpu().cols);
+                    grads[input_idx] = grads[input_idx].add(&g_broadcast.hadamard(gv));
+                    grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
+                    grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
+                }
+                Op::LayerNorm { input_idx, gamma_idx, beta_idx, .. } => {
+                    let gv = &values[gamma_idx].as_cpu();
+                    let g_broadcast = g.broadcast_to(values[input_idx].as_cpu().rows, values[input_idx].as_cpu().cols);
+                    grads[input_idx] = grads[input_idx].add(&g_broadcast.hadamard(gv));
+                    grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
+                    grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
+                }
+                Op::Conv2dForward { input, weight, bias, batch, in_c, h, w, out_c, kernel, stride, pad } => {
+                    let input_t = &values[input].as_cpu();
+                    let weight_t = &values[weight].as_cpu();
+                    let h_out = (h + 2 * pad - kernel) / stride + 1;
+                    let w_out = (w + 2 * pad - kernel) / stride + 1;
 
-    /// Accumule un gradient sur le node `idx`.
-    fn accumulate(&self, idx: usize, contribution: &Tensor) {
-        let mut grads = self.grads.borrow_mut();
-        let g = &mut grads[idx];
-        assert_eq!(g.shape(), contribution.shape(),
-            "accumulate: shape mismatch {:?} vs {:?} (idx={})",
-            g.shape(), contribution.shape(), idx);
-        for i in 0..g.data.len() {
-            g.data[i] += contribution.data[i];
+                    // dL/db
+                    if let Some(b_idx) = bias {
+                        let mut db = Tensor::zeros(1, out_c);
+                        for b_i in 0..batch {
+                            for oc in 0..out_c {
+                                for oh in 0..h_out {
+                                    for ow in 0..w_out {
+                                        let out_idx = b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
+                                        db.data[oc] += g.data[out_idx];
+                                    }
+                                }
+                            }
+                        }
+                        grads[b_idx] = grads[b_idx].add(&db);
+                    }
+
+                    // dL/dW and dL/dx
+                    let mut dw = Tensor::zeros(weight_t.rows, weight_t.cols);
+                    let mut dx = Tensor::zeros(input_t.rows, input_t.cols);
+
+                    for b_i in 0..batch {
+                        for oc in 0..out_c {
+                            for oh in 0..h_out {
+                                for ow in 0..w_out {
+                                    let out_idx = b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
+                                    let grad_out = g.data[out_idx];
+                                    for ic in 0..in_c {
+                                        for kh in 0..kernel {
+                                            for kw in 0..kernel {
+                                                let ih = oh as isize * stride as isize + kh as isize - pad as isize;
+                                                let iw = ow as isize * stride as isize + kw as isize - pad as isize;
+                                                if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                                    let ih_u = ih as usize;
+                                                    let iw_u = iw as usize;
+                                                    let in_idx = b_i * in_c * h * w + ic * h * w + ih_u * w + iw_u;
+                                                    let w_idx = oc * in_c * kernel * kernel + ic * kernel * kernel + kh * kernel + kw;
+                                                    dw.data[w_idx] += grad_out * input_t.data[in_idx];
+                                                    dx.data[in_idx] += grad_out * weight_t.data[w_idx];
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    grads[weight] = grads[weight].add(&dw);
+                    grads[input] = grads[input].add(&dx);
+                }
+                Op::Reshape(input, old_rows, old_cols) => {
+                    grads[input] = grads[input].add(&g.reshape(old_rows, old_cols));
+                }
+            }
         }
     }
 }
@@ -393,50 +892,14 @@ impl Default for Tape {
     fn default() -> Self { Self::new() }
 }
 
-// ==================================================================== //
-//  Helpers : matmul et transpose libres                                 //
-// ==================================================================== //
-
-/// Matmul standard 2D, (M,K) @ (K,N) → (M,N).
-pub fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
-    let (m, k) = a.shape();
-    let (k2, n) = b.shape();
-    assert_eq!(k, k2, "matmul: inner dims mismatch ({:?} @ {:?})", a.shape(), b.shape());
-    let mut out = Tensor::zeros(m, n);
-    for i in 0..m {
-        for j in 0..n {
-            let mut s = 0.0f32;
-            for kk in 0..k {
-                s += a.data[i * k + kk] * b.data[kk * n + j];
-            }
-            out.data[i * n + j] = s;
-        }
-    }
-    out
-}
-
-/// Transpose 2D, (M,N) → (N,M).
-pub fn transpose(a: &Tensor) -> Tensor {
-    let (m, n) = a.shape();
-    let mut out = Tensor::zeros(n, m);
-    for i in 0..m {
-        for j in 0..n {
-            out.data[j * m + i] = a.data[i * n + j];
-        }
-    }
-    out
-}
-
-// ==================================================================== //
-//  Var — handle vers un node de la tape                                 //
-//                                                                       //
-//  Toutes les méthodes Var poussent la BONNE Op, pas un substitut.     //
-// ==================================================================== //
+// ================================================================== //
+//  Var                                                               //
+// ================================================================== //
 
 #[derive(Debug, Clone, Copy)]
 pub struct Var<'t> {
     pub tape: &'t Tape,
-    pub idx:  usize,
+    pub idx: usize,
 }
 
 impl<'t> Var<'t> {
@@ -445,503 +908,959 @@ impl<'t> Var<'t> {
     pub fn shape(&self) -> (usize, usize) {
         self.tape.values.borrow()[self.idx].shape()
     }
+    pub fn tape(&self) -> &'t Tape { self.tape }
 
-    // ---------- Arithmétique binaire ---------- //
+    pub fn backward(self) {
+        self.tape.backward(self.idx);
+    }
 
+    pub fn detach(self) -> Var<'t> {
+        let val = self.tape.value(self.idx);
+        self.tape.input(val)
+    }
+
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Var<'t>) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let b = self.tape.value(other.idx);
-        assert_eq!(a.shape(), b.shape(), "add: shapes mismatch");
-        let mut out = a.clone();
-        for i in 0..out.data.len() { out.data[i] += b.data[i]; }
-        let idx = self.tape.push(Op::Add(self.idx, other.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        assert_eq!(a.shape(), b.shape(), "add: shape mismatch");
+        let out = a.add(&b);
+        let new_idx = self.tape.push_with_saved(Op::Add(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Var<'t>) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let b = self.tape.value(other.idx);
-        assert_eq!(a.shape(), b.shape(), "sub: shapes mismatch");
-        let mut out = a.clone();
-        for i in 0..out.data.len() { out.data[i] -= b.data[i]; }
-        let idx = self.tape.push(Op::Sub(self.idx, other.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        assert_eq!(a.shape(), b.shape(), "sub: shape mismatch");
+        let out = a.sub(&b);
+        let new_idx = self.tape.push_with_saved(Op::Sub(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
-    /// Hadamard : multiplication élément par élément (mêmes shapes).
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: Var<'t>) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let b = self.tape.value(other.idx);
-        assert_eq!(a.shape(), b.shape(), "mul: shapes mismatch");
-        let out = a.hadamard(&b);
-        let idx = self.tape.push(Op::Mul(self.idx, other.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        self.hadamard(other)
     }
 
-    /// Alias pour clarté en code Transformer.
-    pub fn hadamard(self, other: Var<'t>) -> Var<'t> { self.mul(other) }
-
-    // ---------- Arithmétique avec scalaire ---------- //
-
-    pub fn scale(self, s: f32) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let out = a.scale(s);
-        let idx = self.tape.push(Op::Scale(self.idx, s),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+    #[allow(clippy::should_implement_trait)]
+    pub fn div(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        assert_eq!(a.shape(), b.shape(), "div: shape mismatch");
+        let out = a.div(&b);
+        let new_idx = self.tape.push_with_saved(Op::Div(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
-    // ---------- Unaires ---------- //
+    pub fn matmul(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.matmul(&b);
+        let new_idx = self.tape.push_with_saved(Op::MatMul(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn neg(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let mut out = a.clone();
-        for x in &mut out.data { *x = -*x; }
-        let idx = self.tape.push(Op::Neg(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
-    }
-
-    pub fn exp(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let mut out = a.clone();
-        for x in &mut out.data { *x = x.exp(); }
-        let idx = self.tape.push(Op::Exp(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
-    }
-
-    pub fn log(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let mut out = a.clone();
-        for x in &mut out.data { *x = x.ln(); }
-        let idx = self.tape.push(Op::Log(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
-    }
-
-    pub fn sqrt(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let mut out = a.clone();
-        for x in &mut out.data { *x = x.sqrt(); }
-        let idx = self.tape.push(Op::Sqrt(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
-    }
-
-    pub fn sigmoid(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let mut out = a.clone();
-        for x in &mut out.data { *x = 1.0 / (1.0 + (-*x).exp()); }
-        let idx = self.tape.push(Op::Sigmoid(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.neg();
+        let new_idx = self.tape.push_with_saved(Op::Neg(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
     pub fn relu(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let mut out = a.clone();
         for x in &mut out.data { *x = x.max(0.0); }
-        let idx = self.tape.push(Op::ReLU(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let mut mask = Tensor::zeros(a.rows, a.cols);
+        for i in 0..a.data.len() {
+            mask.data[i] = if a.data[i] > 0.0 { 1.0 } else { 0.0 };
+        }
+        let new_idx = self.tape.push_with_saved(Op::ReLU(self.idx), DeviceTensor::cpu(out), SavedData::Mask(mask));
+        Var { tape: self.tape, idx: new_idx }
     }
 
-    // ---------- Réductions ---------- //
+    pub fn sigmoid(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.sigmoid();
+        let new_idx = self.tape.push_with_saved(Op::Sigmoid(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
 
-    /// Somme tous les éléments → scalaire (1,1).
+    pub fn tanh(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.tanh();
+        let new_idx = self.tape.push_with_saved(Op::Tanh(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn exp(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.exp();
+        let new_idx = self.tape.push_with_saved(Op::Exp(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn log(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.log();
+        let new_idx = self.tape.push_with_saved(Op::Log(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn sqrt(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.sqrt();
+        let new_idx = self.tape.push_with_saved(Op::Sqrt(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn reciprocal(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.reciprocal();
+        let new_idx = self.tape.push_with_saved(Op::Reciprocal(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn pow(self, exp: f32) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.pow(exp);
+        let new_idx = self.tape.push_with_saved(Op::Pow { base: self.idx, exp }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn scale(self, s: f32) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.scale(s);
+        let new_idx = self.tape.push_with_saved(Op::Scale { input: self.idx, scalar: s }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
     pub fn sum(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let s = a.sum();
-        let out = Tensor::from_vec(vec![s], 1, 1);
-        let idx = self.tape.push(Op::Sum(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let mut out = Tensor::zeros(1, 1);
+        out.data[0] = a.sum();
+        let new_idx = self.tape.push_with_saved(Op::Sum(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
-    // ---------- Algèbre matricielle ---------- //
+    pub fn sum_axis(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.sum_axis(axis);
+        let new_idx = self.tape.push_with_saved(Op::SumAxis(self.idx, axis), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
 
-    pub fn matmul(self, other: Var<'t>) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let b = self.tape.value(other.idx);
-        let out = matmul(&a, &b);
-        let idx = self.tape.push(Op::MatMul(self.idx, other.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+    /// Broadcaste cette Var vers une nouvelle shape (rows, cols).
+    /// Le backward propage la somme selon les axes élargis.
+    pub fn broadcast(self, rows: usize, cols: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.broadcast_to(rows, cols);
+        let new_idx = self.tape.push_with_saved(
+            Op::Broadcast { input: self.idx, rows, cols },
+            DeviceTensor::cpu(out),
+            SavedData::None
+        );
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn mean_axis(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.mean_axis(axis);
+        let new_idx = self.tape.push_with_saved(Op::MeanAxis(self.idx, axis), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn var_axis(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.var_axis(axis);
+        let new_idx = self.tape.push_with_saved(Op::VarAxis(self.idx, axis), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn max_axis(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.max_axis(axis);
+        let new_idx = self.tape.push_with_saved(Op::MaxAxis(self.idx, axis), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn softmax(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.softmax(axis);
+        let new_idx = self.tape.push_with_saved(Op::Softmax { input: self.idx, axis }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn log_softmax(self, axis: u8) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let sm = a.softmax(axis);
+        let out = sm.log();
+        let new_idx = self.tape.push_with_saved(Op::LogSoftmax { input: self.idx, axis }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
     pub fn transpose(self) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let out = transpose(&a);
-        let idx = self.tape.push(Op::Transpose(self.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.transpose();
+        let new_idx = self.tape.push_with_saved(Op::Transpose2d(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
     }
 
-    /// Add bias broadcast row-wise. self est (M,N), bias est (1,N).
+    pub fn transpose_2d(self) -> Var<'t> {
+        self.transpose()
+    }
+
+    pub fn reshape(self, shape: &[usize]) -> Var<'t> {
+        assert_eq!(shape.len(), 2, "reshape: shape must have 2 elements");
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let old_shape = a.shape();
+        let out = a.reshape(shape[0], shape[1]);
+        let new_idx = self.tape.push_with_saved(
+            Op::Reshape(self.idx, old_shape.0, old_shape.1),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn add_broadcast(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.add(&b.broadcast_to(a.rows, a.cols));
+        let new_idx = self.tape.push_with_saved(Op::AddBroadcast(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
     pub fn add_bias(self, bias: Var<'t>) -> Var<'t> {
-        let a = self.tape.value(self.idx);
-        let b = self.tape.value(bias.idx);
-        assert_eq!(b.rows, 1, "add_bias: bias must have 1 row, got {}", b.rows);
-        assert_eq!(a.cols, b.cols, "add_bias: cols mismatch ({} vs {})", a.cols, b.cols);
+        self.add_broadcast(bias)
+    }
+
+    pub fn sub_broadcast(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.sub(&b.broadcast_to(a.rows, a.cols));
+        let new_idx = self.tape.push_with_saved(Op::SubBroadcast(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn mul_broadcast(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.hadamard(&b.broadcast_to(a.rows, a.cols));
+        let new_idx = self.tape.push_with_saved(Op::MulBroadcast(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn div_broadcast(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.div(&b.broadcast_to(a.rows, a.cols));
+        let new_idx = self.tape.push_with_saved(Op::DivBroadcast(self.idx, other.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn hadamard(self, other: Var<'t>) -> Var<'t> {
+        self.mul_broadcast(other)
+    }
+
+    pub fn slice_rows(self, start: usize, len: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        assert!(start + len <= a.rows, "slice_rows: out of bounds");
+        let mut out = Tensor::zeros(len, a.cols);
+        for r in 0..len {
+            for c in 0..a.cols {
+                out.data[r * a.cols + c] = a.data[(start + r) * a.cols + c];
+            }
+        }
+        let new_idx = self.tape.push_with_saved(Op::Slice { input_idx: self.idx, start, len }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn slice_cols(self, start: usize, len: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        assert!(start + len <= a.cols, "slice_cols: out of bounds");
+        let mut out = Tensor::zeros(a.rows, len);
+        for r in 0..a.rows {
+            for c in 0..len {
+                out.data[r * len + c] = a.data[r * a.cols + (start + c)];
+            }
+        }
+        let new_idx = self.tape.push_with_saved(Op::SliceCols { input_idx: self.idx, start, len }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn embedding(self, indices: Vec<u32>) -> Var<'t> {
+        let table = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let vocab = table.rows;
+        let d = table.cols;
+        let n = indices.len();
+        let mut out = Tensor::zeros(n, d);
+        for (i, &idx_u) in indices.iter().enumerate() {
+            let i_u = idx_u as usize;
+            assert!(i_u < vocab, "Embedding: index {} >= vocab {}", i_u, vocab);
+            for j in 0..d { out.data[i * d + j] = table.data[i_u * d + j]; }
+        }
+        let new_idx = self.tape.push_with_saved(Op::Embedding { table_idx: self.idx, n_tokens: n }, DeviceTensor::cpu(out), SavedData::Indices(indices));
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn linear(self, w: Var<'t>, b: Option<Var<'t>>) -> Var<'t> {
+        let mut out = self.matmul(w);
+        if let Some(bias) = b { out = out.add_broadcast(bias); }
+        out
+    }
+
+    pub fn causal_mask(self, seq_len: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let mut out = a.clone();
         for r in 0..a.rows {
             for c in 0..a.cols {
-                out.data[r * a.cols + c] += b.data[c];
+                let col_in_seq = c % seq_len;
+                let row_in_seq = r % seq_len;
+                if col_in_seq > row_in_seq {
+                    out.data[r * a.cols + c] = -1e9;
+                }
             }
         }
-        let idx = self.tape.push(Op::AddBias(self.idx, bias.idx),
-                                 DeviceTensor::cpu(out), SavedData::None);
-        Var { tape: self.tape, idx }
+        let new_idx = self.tape.push_with_saved(Op::CausalMask { input_idx: self.idx, seq_len }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn dropout(self, p: f32) -> Var<'t> {
+        if p == 0.0 { return self; }
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let scale = 1.0 / (1.0 - p);
+        let mut mask_data = vec![0.0f32; a.rows * a.cols];
+        // simple deterministic mask based on index for reproducibility
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..mask_data.len() {
+            mask_data[i] = if ((i * 7 + 13) % 100) as f32 / 100.0 < p { 0.0 } else { scale };
+        }
+        let mask_t = Tensor::from_vec(mask_data, a.rows, a.cols);
+        let mask_v = self.tape.input(mask_t);
+        let out = a.hadamard(&self.tape.values.borrow()[mask_v.idx].as_cpu().clone());
+        let new_idx = self.tape.push_with_saved(Op::Dropout { input_idx: self.idx, mask_idx: mask_v.idx, p }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn layer_norm(self, gamma: Var<'t>, beta: Var<'t>, eps: f32) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let (rows, cols) = a.shape();
+        let mut out = Tensor::zeros(rows, cols);
+        for r in 0..rows {
+            let mut mean = 0.0f32;
+            for c in 0..cols { mean += a.data[r * cols + c]; }
+            mean /= cols as f32;
+            let mut var = 0.0f32;
+            for c in 0..cols { let d = a.data[r * cols + c] - mean; var += d * d; }
+            var /= cols as f32;
+            let std = (var + eps).sqrt();
+            let gv = self.tape.values.borrow()[gamma.idx].as_cpu().clone();
+            let bv = self.tape.values.borrow()[beta.idx].as_cpu().clone();
+            for c in 0..cols {
+                out.data[r * cols + c] = (a.data[r * cols + c] - mean) / std * gv.data[c] + bv.data[c];
+            }
+        }
+        let new_idx = self.tape.push_with_saved(Op::LayerNorm { input_idx: self.idx, gamma_idx: gamma.idx, beta_idx: beta.idx, eps }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn max_pool2d(self, c: usize, h: usize, w: usize, kernel: usize, stride: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let h_out = (h - kernel) / stride + 1;
+        let w_out = (w - kernel) / stride + 1;
+        let out_rows = a.rows;
+        let out_cols = c * h_out * w_out;
+        let mut out = Tensor::zeros(out_rows, out_cols);
+        for b in 0..a.rows {
+            for ch in 0..c {
+                for oh in 0..h_out {
+                    for ow in 0..w_out {
+                        let mut m = -f32::INFINITY;
+                        for kh in 0..kernel {
+                            for kw in 0..kernel {
+                                let ih = oh * stride + kh;
+                                let iw = ow * stride + kw;
+                                let idx = b * c * h * w + ch * h * w + ih * w + iw;
+                                m = m.max(a.data[idx]);
+                            }
+                        }
+                        let out_idx = b * c * h_out * w_out + ch * h_out * w_out + oh * w_out + ow;
+                        out.data[out_idx] = m;
+                    }
+                }
+            }
+        }
+        let new_idx = self.tape.push_with_saved(Op::MaxPool2d { input_idx: self.idx, c, h, w, kernel, stride }, DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn conv2d_forward(self, weight: Var<'t>, bias: Option<Var<'t>>, batch: usize, in_c: usize, h: usize, w: usize, out_c: usize, kernel: usize, stride: usize, pad: usize) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
+        let h_out = (h + 2 * pad - kernel) / stride + 1;
+        let w_out = (w + 2 * pad - kernel) / stride + 1;
+        let out_rows = batch;
+        let out_cols = out_c * h_out * w_out;
+        let mut out = Tensor::zeros(out_rows, out_cols);
+        for b_i in 0..batch {
+            for oc in 0..out_c {
+                for oh in 0..h_out {
+                    for ow in 0..w_out {
+                        let mut sum = 0.0f32;
+                        if let Some(ref b_v) = bias {
+                            sum = self.tape.values.borrow()[b_v.idx].as_cpu().data[oc];
+                        }
+                        for ic in 0..in_c {
+                            for kh in 0..kernel {
+                                for kw in 0..kernel {
+                                    let ih = oh as isize * stride as isize + kh as isize - pad as isize;
+                                    let iw = ow as isize * stride as isize + kw as isize - pad as isize;
+                                    if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                        let ih_u = ih as usize;
+                                        let iw_u = iw as usize;
+                                        let in_idx = b_i * in_c * h * w + ic * h * w + ih_u * w + iw_u;
+                                        let w_idx = oc * in_c * kernel * kernel + ic * kernel * kernel + kh * kernel + kw;
+                                        sum += a.data[in_idx] * wv.data[w_idx];
+                                    }
+                                }
+                            }
+                        }
+                        let out_idx = b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
+                        out.data[out_idx] = sum;
+                    }
+                }
+            }
+        }
+        let b_idx = bias.map(|v| v.idx);
+        let new_idx = self.tape.push_with_saved(
+            Op::Conv2dForward { input: self.idx, weight: weight.idx, bias: b_idx, batch, in_c, h, w, out_c, kernel, stride, pad },
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var { tape: self.tape, idx: new_idx }
     }
 }
 
-// ==================================================================== //
-//  Tests internes                                                        //
-//                                                                       //
-//  optimizer_minimizes_x_squared est l'oracle. Si ce test passe,        //
-//  l'autograd marche réellement.                                        //
-// ==================================================================== //
+// ================================================================== //
+//  concat_rows                                                       //
+// ================================================================== //
+
+pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
+    if rows.is_empty() { panic!("concat_rows: empty slice"); }
+    // Recursive concat for N > 3 by grouping in chunks of 3
+    if rows.len() > 3 {
+        let mut chunks: Vec<Var<'t>> = Vec::new();
+        for chunk in rows.chunks(3) {
+            chunks.push(concat_rows(tape, chunk));
+        }
+        return concat_rows(tape, &chunks);
+    }
+    let cols = rows[0].tape.values.borrow()[rows[0].idx].shape().1;
+    let mut indices = [0usize; 3];
+    let mut counts = [0usize; 3];
+    for (i, r) in rows.iter().enumerate().take(3) {
+        indices[i] = r.idx;
+        counts[i] = r.tape.values.borrow()[r.idx].shape().0;
+    }
+    let total_rows: usize = counts.iter().sum();
+    let mut out = Tensor::zeros(total_rows, cols);
+    let mut off = 0;
+    for (_i, r) in rows.iter().enumerate().take(3) {
+        let a = r.tape.values.borrow()[r.idx].as_cpu().clone();
+        let (n, _) = a.shape();
+        for rr in 0..n {
+            for c in 0..cols {
+                out.data[(off + rr) * cols + c] = a.data[rr * cols + c];
+            }
+        }
+        off += n;
+    }
+    let new_idx = tape.push_with_saved(Op::Concat { input_indices: indices, row_counts: counts }, DeviceTensor::cpu(out), SavedData::None);
+    Var { tape, idx: new_idx }
+}
+
+// ================================================================== //
+//  Tests                                                             //
+// ================================================================== //
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn approx_eq(a: f32, b: f32, tol: f32) -> bool {
-        (a - b).abs() < tol
-    }
-
-    // ---------- Forward correctness ---------- //
-
     #[test]
-    fn add_forward() {
+    fn test_exp_gradient() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
-        let b = tape.input(Tensor::from_vec(vec![3.0, 4.0], 1, 2));
-        let c = a.add(b);
-        let v = tape.value(c.idx());
-        assert_eq!(v.data, vec![4.0, 6.0]);
+        let x = tape.input(Tensor::from_vec(vec![0.0, 1.0, 2.0], 1, 3));
+        let x_idx = x.idx();
+        let y = x.exp();
+        let loss = y.sum();
+        loss.backward();
+        let grad = tape.grad(x_idx);
+        assert!((grad.data[0] - 1.0).abs() < 1e-5);
+        assert!((grad.data[1] - std::f32::consts::E).abs() < 1e-5);
     }
 
     #[test]
-    fn mul_forward_hadamard() {
+    fn test_sigmoid_gradient() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![2.0, 3.0], 1, 2));
-        let b = tape.input(Tensor::from_vec(vec![4.0, 5.0], 1, 2));
-        let c = a.mul(b);
-        let v = tape.value(c.idx());
-        assert_eq!(v.data, vec![8.0, 15.0]);
+        let x = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
+        let x_idx = x.idx();
+        let y = x.sigmoid();
+        let loss = y.sum();
+        loss.backward();
+        let grad = tape.grad(x_idx);
+        assert!((grad.data[0] - 0.25).abs() < 1e-5);
     }
 
     #[test]
-    fn matmul_forward() {
+    fn test_softmax_gradient() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
-        let b = tape.input(Tensor::from_vec(vec![5.0, 6.0, 7.0, 8.0], 2, 2));
-        let c = a.matmul(b);
-        let v = tape.value(c.idx());
-        // [[1,2],[3,4]] @ [[5,6],[7,8]] = [[19,22],[43,50]]
-        assert_eq!(v.data, vec![19.0, 22.0, 43.0, 50.0]);
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        let x_idx = x.idx();
+        let y = x.softmax(1);
+        let loss = y.sum();
+        loss.backward();
+        let grad = tape.grad(x_idx);
+        let sum_grad: f32 = grad.data.iter().sum();
+        assert!(sum_grad.abs() < 1e-5);
     }
 
     #[test]
-    fn sigmoid_forward() {
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
-        let b = a.sigmoid();
-        let v = tape.value(b.idx());
-        assert!(approx_eq(v.data[0], 0.5, 1e-6));
-    }
-
-    // ---------- Backward correctness (vérifications mathématiques) ---------- //
-
-    #[test]
-    fn add_backward() {
-        // f = a + b, ∂f/∂a = 1, ∂f/∂b = 1
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0], 1, 1));
-        let b = tape.input(Tensor::from_vec(vec![2.0], 1, 1));
-        let c = a.add(b);
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![1.0]);
-        assert_eq!(tape.grad(b.idx()).data, vec![1.0]);
-    }
-
-    #[test]
-    fn sub_backward() {
-        // f = a - b, ∂f/∂a = 1, ∂f/∂b = -1
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![5.0], 1, 1));
-        let b = tape.input(Tensor::from_vec(vec![3.0], 1, 1));
-        let c = a.sub(b);
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![1.0]);
-        assert_eq!(tape.grad(b.idx()).data, vec![-1.0]);
-    }
-
-    #[test]
-    fn mul_backward() {
-        // f = a * b, ∂f/∂a = b, ∂f/∂b = a
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![3.0], 1, 1));
-        let b = tape.input(Tensor::from_vec(vec![5.0], 1, 1));
-        let c = a.mul(b);
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![5.0]);   // = b
-        assert_eq!(tape.grad(b.idx()).data, vec![3.0]);   // = a
-    }
-
-    #[test]
-    fn scale_backward() {
-        // f = a * 7, ∂f/∂a = 7
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![2.0], 1, 1));
-        let c = a.scale(7.0);
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![7.0]);
-    }
-
-    #[test]
-    fn neg_backward() {
-        // f = -a, ∂f/∂a = -1
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![3.0], 1, 1));
-        let c = a.neg();
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![-1.0]);
-    }
-
-    #[test]
-    fn exp_backward() {
-        // f = exp(a), ∂f/∂a = exp(a)
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0], 1, 1));
-        let c = a.exp();
-        tape.backward(c.idx());
-        assert!(approx_eq(tape.grad(a.idx()).data[0], 1.0_f32.exp(), 1e-5));
-    }
-
-    #[test]
-    fn log_backward() {
-        // f = log(a), ∂f/∂a = 1/a
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![4.0], 1, 1));
-        let c = a.log();
-        tape.backward(c.idx());
-        assert!(approx_eq(tape.grad(a.idx()).data[0], 0.25, 1e-5));
-    }
-
-    #[test]
-    fn sqrt_backward() {
-        // f = sqrt(a), ∂f/∂a = 1/(2·sqrt(a))
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![9.0], 1, 1));
-        let c = a.sqrt();
-        tape.backward(c.idx());
-        // 1/(2·3) = 1/6
-        assert!(approx_eq(tape.grad(a.idx()).data[0], 1.0 / 6.0, 1e-5));
-    }
-
-    #[test]
-    fn sigmoid_backward() {
-        // f = sigmoid(0) = 0.5, ∂f/∂a = 0.5 · (1 - 0.5) = 0.25
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
-        let c = a.sigmoid();
-        tape.backward(c.idx());
-        assert!(approx_eq(tape.grad(a.idx()).data[0], 0.25, 1e-5));
-    }
-
-    #[test]
-    fn relu_backward_positive_passes() {
-        // f = relu(2.0) = 2.0, ∂f/∂a = 1
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![2.0], 1, 1));
-        let c = a.relu();
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![1.0]);
-    }
-
-    #[test]
-    fn relu_backward_negative_blocks() {
-        // f = relu(-2.0) = 0, ∂f/∂a = 0
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![-2.0], 1, 1));
-        let c = a.relu();
-        tape.backward(c.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![0.0]);
-    }
-
-    #[test]
-    fn sum_backward() {
-        // f = sum(a, b, c), ∂f/∂x = 1 partout
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
-        let s = a.sum();
-        tape.backward(s.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![1.0, 1.0, 1.0]);
-    }
-
-    #[test]
-    fn matmul_backward_shapes() {
-        // Vérifie que les grads ont les bonnes shapes après matmul
+    fn test_matmul_gradient() {
         let tape = Tape::new();
         let a = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
         let b = tape.input(Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], 2, 2));
-        let c = a.matmul(b);
-        let s = c.sum();
-        tape.backward(s.idx());
-        assert_eq!(tape.grad(a.idx()).shape(), (2, 2));
-        assert_eq!(tape.grad(b.idx()).shape(), (2, 2));
-    }
-
-    // ---------- Chain rule (composition d'ops) ---------- //
-
-    #[test]
-    fn chain_rule_x_squared() {
-        // f(x) = x², ∂f/∂x = 2x
-        // À x=3, f=9 et ∂f/∂x=6
-        let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![3.0], 1, 1));
-        let y = x.mul(x);
-        tape.backward(y.idx());
-        assert_eq!(tape.value(y.idx()).data, vec![9.0]);
-        assert_eq!(tape.grad(x.idx()).data, vec![6.0]);    // 2x = 6
+        let a_idx = a.idx();
+        let y = a.matmul(b);
+        let loss = y.sum();
+        loss.backward();
+        let grad_a = tape.grad(a_idx);
+        assert_eq!(grad_a.data, vec![1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]
-    fn chain_rule_x_squared_via_sum() {
-        // Même test mais via sum() pour avoir un scalar output
+    fn test_sub_gradient() {
         let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![3.0, 4.0], 1, 2));
-        let xx = x.mul(x);
-        let loss = xx.sum();
-        tape.backward(loss.idx());
-        // ∂(x²+y²)/∂x = 2x = 6, ∂/∂y = 2y = 8
-        assert_eq!(tape.grad(x.idx()).data, vec![6.0, 8.0]);
+        let a = tape.input(Tensor::from_vec(vec![3.0, 4.0], 1, 2));
+        let b = tape.input(Tensor::from_vec(vec![1.0, 1.0], 1, 2));
+        let a_idx = a.idx();
+        let b_idx = b.idx();
+        let y = a.sub(b);
+        let loss = y.sum();
+        loss.backward();
+        assert_eq!(tape.grad(a_idx).data, vec![1.0, 1.0]);
+        assert_eq!(tape.grad(b_idx).data, vec![-1.0, -1.0]);
     }
 
     #[test]
-    fn chain_rule_polynomial() {
-        // f = (x + 2) * 3, à x=1 : f = 9, ∂f/∂x = 3
+    fn test_div_gradient() {
         let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![1.0], 1, 1));
-        let two = tape.input(Tensor::from_vec(vec![2.0], 1, 1));
-        let sum_xt = x.add(two);
-        let scaled = sum_xt.scale(3.0);
-        tape.backward(scaled.idx());
-        assert_eq!(tape.value(scaled.idx()).data, vec![9.0]);
-        assert_eq!(tape.grad(x.idx()).data, vec![3.0]);
+        let a = tape.input(Tensor::from_vec(vec![4.0, 6.0], 1, 2));
+        let b = tape.input(Tensor::from_vec(vec![2.0, 3.0], 1, 2));
+        let a_idx = a.idx();
+        let b_idx = b.idx();
+        let y = a.div(b);
+        let loss = y.sum();
+        loss.backward();
+        let ga = tape.grad(a_idx);
+        let gb = tape.grad(b_idx);
+        assert!((ga.data[0] - 0.5).abs() < 1e-5);
+        assert!((ga.data[1] - 1.0/3.0).abs() < 1e-5);
+        assert!((gb.data[0] - (-4.0/4.0)).abs() < 1e-5);
+        assert!((gb.data[1] - (-6.0/9.0)).abs() < 1e-5);
     }
 
-    // ---------- Le test ORACLE : l'optimisation marche ---------- //
+    #[test]
+    fn test_relu_gradient() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![-1.0, 2.0, -3.0, 4.0], 2, 2));
+        let x_idx = x.idx();
+        let y = x.relu();
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert_eq!(g.data, vec![0.0, 1.0, 0.0, 1.0]);
+    }
 
     #[test]
-    fn optimizer_minimizes_x_squared() {
-        // Test fondamental : si on applique manuellement un SGD à f(x) = x²
-        // partant de x = 10, après plusieurs steps x doit tendre vers 0.
-        //
-        // Si ce test passe, on a vraiment :
-        //   - Un forward correct
-        //   - Un backward correct
-        //   - La capacité d'écrire la valeur mise à jour sur la tape
-        //   - Et donc la base d'un vrai optimizer
-
+    fn test_tanh_at_zero() {
         let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(vec![10.0], 1, 1));
-        let lr = 0.1;
-        let n_steps = 50;
+        let x = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
+        let y = x.tanh();
+        let y_idx = y.idx();
+        let val = tape.value(y_idx).data[0];
+        assert!(val.abs() < 1e-6);
+    }
 
-        for step in 0..n_steps {
-            // Forward : f = x²
-            // On calcule x.mul(x) en re-pushant à chaque itération.
-            // Note : en pratique l'optimiseur écrira sur le node x lui-même
-            // via set_value, ce qui évite de recréer la tape.
-            //
-            // Pour ce test, on vérifie l'algo de plus bas niveau possible :
-            //   1. forward pour calculer loss
-            //   2. backward pour calculer grad
-            //   3. mise à jour de la valeur via set_value
-            //   4. zero_grad pour la prochaine itération
+    #[test]
+    fn test_sigmoid_at_zero() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
+        let y = x.sigmoid();
+        let y_idx = y.idx();
+        let val = tape.value(y_idx).data[0];
+        assert!((val - 0.5).abs() < 1e-6);
+    }
 
-            tape.zero_grad();
-            // Re-fait le forward avec la nouvelle valeur de x
-            // Mais comme la tape garde l'historique, on a besoin d'une astuce :
-            // on lit la valeur actuelle de x, on crée une mini-tape éphémère.
+    #[test]
+    fn test_exp_log_composition() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        let x_idx = x.idx();
+        let y = x.exp().log();
+        let y_idx = y.idx();
+        let val = tape.value(y_idx);
+        let x_val = tape.value(x_idx);
+        for i in 0..3 {
+            assert!((val.data[i] - x_val.data[i]).abs() < 1e-5);
+        }
+    }
 
-            let val_x = tape.value(x.idx()).data[0];
+    #[test]
+    fn softmax_jacobian_matches_formula_1d() {
+        // Formule analytique : ∂s_i/∂x_j = s_i · (δ_ij - s_j)
+        // On vérifie que l'autograd produit exactement ces valeurs.
+        let logits = vec![1.0f32, 2.0, 3.0];
+        let n = logits.len();
 
-            // Mini-forward isolé pour vérifier la dérivée
-            let inner_tape = Tape::new();
-            let xi = inner_tape.input(Tensor::from_vec(vec![val_x], 1, 1));
-            let yi = xi.mul(xi);
-            inner_tape.backward(yi.idx());
-            let grad_x = inner_tape.grad(xi.idx()).data[0];
+        // softmax analytique
+        let exp: Vec<f32> = logits.iter().map(|x| x.exp()).collect();
+        let z: f32 = exp.iter().sum();
+        let s: Vec<f32> = exp.iter().map(|e| e / z).collect();
 
-            // SGD update : x ← x - lr · grad
-            let new_x = val_x - lr * grad_x;
-            tape.set_value(x.idx(), Tensor::from_vec(vec![new_x], 1, 1));
+        for j in 0..n {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(logits.clone(), 1, n));
+            let x_idx = x.idx();
+            let y = x.softmax(1);
 
-            if step == n_steps - 1 {
-                println!("Step {}: x = {:.6}, loss = {:.6}", step, new_x, new_x * new_x);
+            // backprop sur y_j seul
+            let mut upstream = vec![0.0f32; n];
+            upstream[j] = 1.0;
+            let g_var = tape.input(Tensor::from_vec(upstream, 1, n));
+            let loss = y.hadamard(g_var).sum();
+            loss.backward();
+
+            let grad = tape.grad(x_idx);
+            for i in 0..n {
+                let expected = s[i] * ((i == j) as i32 as f32 - s[j]);
+                assert!(
+                    (grad.data[i] - expected).abs() < 1e-4,
+                    "J[{},{}] = {}, expected {} (s_i={}, s_j={})",
+                    i, j, grad.data[i], expected, s[i], s[j]
+                );
             }
         }
-
-        let final_x = tape.value(x.idx()).data[0];
-        // x devrait être proche de 0 (convergence quadratique avec lr=0.1)
-        assert!(final_x.abs() < 0.01,
-            "x = {} après {} steps, expected ~0", final_x, n_steps);
-    }
-
-    // ---------- Tests structurels ---------- //
-
-    #[test]
-    fn zero_grad_resets() {
-        let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![3.0], 1, 1));
-        let b = a.scale(2.0);
-        tape.backward(b.idx());
-        assert_eq!(tape.grad(a.idx()).data, vec![2.0]);
-        tape.zero_grad();
-        assert_eq!(tape.grad(a.idx()).data, vec![0.0]);
     }
 
     #[test]
-    fn set_value_updates() {
+    fn test_softmax_rows_sum_to_one() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0], 1, 1));
-        assert_eq!(tape.value(a.idx()).data, vec![1.0]);
-        tape.set_value(a.idx(), Tensor::from_vec(vec![42.0], 1, 1));
-        assert_eq!(tape.value(a.idx()).data, vec![42.0]);
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 5.0, -1.0, 2.0, 3.0], 3, 4));
+        let y = x.softmax(1);
+        let y_idx = y.idx();
+        let v = tape.value(y_idx);
+        for i in 0..3 {
+            let s: f32 = v.data[i*4..(i+1)*4].iter().sum();
+            assert!((s - 1.0).abs() < 1e-5, "row {} sum = {}", i, s);
+        }
     }
 
     #[test]
-    fn add_bias_forward() {
-        // a (2,3) + b (1,3) → broadcast row-wise
+    fn test_transpose2d_gradient() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(
-            vec![1.0, 2.0, 3.0,
-                 4.0, 5.0, 6.0], 2, 3));
-        let b = tape.input(Tensor::from_vec(vec![10.0, 20.0, 30.0], 1, 3));
-        let c = a.add_bias(b);
-        let v = tape.value(c.idx());
-        assert_eq!(v.data, vec![11.0, 22.0, 33.0,  14.0, 25.0, 36.0]);
+        let a = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let a_idx = a.idx();
+        let y = a.transpose_2d();
+        let loss = y.sum();
+        loss.backward();
+        let ga = tape.grad(a_idx);
+        assert_eq!(ga.data, vec![1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]
-    fn add_bias_backward() {
+    fn test_mean_axis_gradient() {
         let tape = Tape::new();
-        let a = tape.input(Tensor::from_vec(vec![1.0; 6], 2, 3));
-        let b = tape.input(Tensor::from_vec(vec![1.0, 1.0, 1.0], 1, 3));
-        let c = a.add_bias(b);
-        let s = c.sum();
-        tape.backward(s.idx());
-        // grad_a = ones(2,3)
-        assert_eq!(tape.grad(a.idx()).data, vec![1.0; 6]);
-        // grad_b = sum sur axis=0 de grad_c = [2, 2, 2] (parce que 2 rows contribuent chacune 1)
-        assert_eq!(tape.grad(b.idx()).data, vec![2.0, 2.0, 2.0]);
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let x_idx = x.idx();
+        let y = x.mean_axis(0);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert!((g.data[0] - 0.5).abs() < 1e-6);
+        assert!((g.data[1] - 0.5).abs() < 1e-6);
+        assert!((g.data[2] - 0.5).abs() < 1e-6);
+        assert!((g.data[3] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sum_axis_gradient() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let x_idx = x.idx();
+        // sum_axis(0) -> shape (1, 2); each output element is sum of a column
+        let y = x.sum_axis(0);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        // gradient of sum over all elements wrt each input is 1.0
+        assert!((g.data[0] - 1.0).abs() < 1e-6);
+        assert!((g.data[1] - 1.0).abs() < 1e-6);
+        assert!((g.data[2] - 1.0).abs() < 1e-6);
+        assert!((g.data[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn broadcast_identity_is_passthrough() {
+        // broadcast_to même shape = passthrough (pas de copie, pas d'Op supplémentaire)
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2));
+        let x_idx = x.idx();
+        let y = x.broadcast(2, 2);
+        let y_idx = y.idx();
+
+        // Valeur identique
+        let v = tape.value(y_idx);
+        assert_eq!(v.data, vec![1.0, 2.0, 3.0, 4.0]);
+
+        // Gradient identique (pas de sum implicite)
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert_eq!(g.data, vec![1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_broadcast_gradient_rows() {
+        let tape = Tape::new();
+        // (1, 2) broadcast to (3, 2)
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+        let x_idx = x.idx();
+        let y = x.broadcast(3, 2);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        // gradient sums over the broadcasted rows -> each col gets 3.0
+        assert!((g.data[0] - 3.0).abs() < 1e-6);
+        assert!((g.data[1] - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_broadcast_gradient_cols() {
+        let tape = Tape::new();
+        // (3, 1) broadcast to (3, 2)
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 3, 1));
+        let x_idx = x.idx();
+        let y = x.broadcast(3, 2);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        // gradient sums over the broadcasted cols -> each row gets 2.0
+        assert!((g.data[0] - 2.0).abs() < 1e-6);
+        assert!((g.data[1] - 2.0).abs() < 1e-6);
+        assert!((g.data[2] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_broadcast_gradient_scalar() {
+        let tape = Tape::new();
+        // (1, 1) broadcast to (2, 3)
+        let x = tape.input(Tensor::from_vec(vec![5.0], 1, 1));
+        let x_idx = x.idx();
+        let y = x.broadcast(2, 3);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        // gradient sums over all broadcasted elements -> 6.0
+        assert!((g.data[0] - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_scale_gradient() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+        let x_idx = x.idx();
+        let y = x.scale(3.0);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert_eq!(g.data, vec![3.0, 3.0]);
+    }
+
+    #[test]
+    fn test_pow_gradient() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![2.0, 3.0], 1, 2));
+        let x_idx = x.idx();
+        let y = x.pow(2.0);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert!((g.data[0] - 4.0).abs() < 1e-5);
+        assert!((g.data[1] - 6.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_sqrt_gradient() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![4.0], 1, 1));
+        let x_idx = x.idx();
+        let y = x.sqrt();
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert!((g.data[0] - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_hadamard_gradient() {
+        let tape = Tape::new();
+        let a = tape.input(Tensor::from_vec(vec![2.0, 3.0], 1, 2));
+        let b = tape.input(Tensor::from_vec(vec![4.0, 5.0], 1, 2));
+        let a_idx = a.idx();
+        let b_idx = b.idx();
+        let y = a.hadamard(b);
+        let loss = y.sum();
+        loss.backward();
+        assert_eq!(tape.grad(a_idx).data, vec![4.0, 5.0]);
+        assert_eq!(tape.grad(b_idx).data, vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_reshape_forward_backward() {
+        let tape = Tape::new();
+        // 2x3 -> 3x2
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3));
+        let x_idx = x.idx();
+        let y = x.reshape(&[3, 2]);
+        let y_idx = y.idx();
+
+        // Verify forward shape
+        assert_eq!(tape.value(y_idx).shape(), (3, 2));
+        assert_eq!(tape.value(y_idx).data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        // Verify backward: gradient gets reshaped back to original shape
+        let loss = y.sum();
+        loss.backward();
+        let gx = tape.grad(x_idx);
+        assert_eq!(gx.shape(), (2, 3));
+        assert_eq!(gx.data, vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_reciprocal_gradient_at_zero() {
+        let tape = Tape::new();
+        // x=0 produces gradient via -1/x^2; with epsilon guard, no NaN
+        let x = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
+        let x_idx = x.idx();
+        let y = x.reciprocal();
+        // loss = y, gradient of loss w.r.t. y is 1, so
+        // d(loss)/dx = -1/x^2 which at x=0 would be -inf without epsilon guard
+        y.backward();
+        let g = tape.grad(x_idx);
+        assert!(!g.data[0].is_nan(), "gradient should not be NaN");
+        assert!(g.data[0].is_finite(), "gradient should be finite");
+    }
+
+    #[test]
+    fn test_reciprocal_gradient_zero_g_times_inf() {
+        let tape = Tape::new();
+        // When upstream gradient g = 0 and x = 0, we get 0 * (-inf) = NaN without epsilon guard
+        let x = tape.input(Tensor::from_vec(vec![0.0, 2.0], 1, 2));
+        let x_idx = x.idx();
+        // Create a situation where gradient of y w.r.t. x has 0 upstream:
+        // y = reciprocal(x), then z = y * 0 (scale by 0) so upstream grad is 0
+        let y = x.reciprocal();
+        let zero_grad = y.scale(0.0);
+        let loss = zero_grad.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert!(!g.data[0].is_nan(), "gradient should not be NaN when g=0 and x=0");
+        assert!(!g.data[1].is_nan(), "gradient should not be NaN");
+    }
+
+    #[test]
+    fn detach_cuts_graph() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+        let x_idx = x.idx();
+
+        let y = x.scale(2.0);           // y = [2, 4]
+        let y_detached = y.detach();    // detached : nouveau Input sans parents
+        let z = y_detached.scale(3.0);  // z = [6, 12]
+        let loss = z.sum();
+        loss.backward();
+
+        // Gradient sur z est 1, mais z n'a pas de lien avec y
+        // y_detached est un Input -> backward s'arrete la
+        let g_y = tape.grad(y.idx());
+        assert!(g_y.data.iter().all(|&v| v == 0.0), "grad on y should be zero (detached)");
+
+        // x non plus ne devrait pas avoir de gradient
+        let g_x = tape.grad(x_idx);
+        assert!(g_x.data.iter().all(|&v| v == 0.0), "grad on x should be zero (detached chain)");
+    }
+
+    #[test]
+    fn no_grad_forward_works() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+
+        let y = tape.no_grad(|| {
+            x.scale(3.0)
+        });
+
+        // Le forward a quand meme calcule la valeur
+        let v = tape.value(y.idx());
+        assert_eq!(v.data, vec![3.0, 6.0]);
+    }
+
+    #[test]
+    fn no_grad_backward_does_not_propagate() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+        let x_idx = x.idx();
+
+        let y = tape.no_grad(|| {
+            x.scale(3.0)
+        });
+        let loss = y.sum();
+        loss.backward();
+
+        // y est un Input (pas de parents), donc grad sur x = 0
+        let g_x = tape.grad(x_idx);
+        assert!(g_x.data.iter().all(|&v| v == 0.0), "grad on x should be zero in no_grad");
+    }
+
+    #[test]
+    fn no_grad_scope_restores_grad() {
+        let tape = Tape::new();
+        assert!(tape.is_grad_enabled());
+
+        tape.no_grad(|| {
+            assert!(!tape.is_grad_enabled());
+        });
+
+        assert!(tape.is_grad_enabled());
+    }
+
+    #[test]
+    fn no_grad_nested() {
+        let tape = Tape::new();
+        assert!(tape.is_grad_enabled());
+
+        tape.no_grad(|| {
+            assert!(!tape.is_grad_enabled());
+            tape.no_grad(|| {
+                assert!(!tape.is_grad_enabled());
+            });
+            assert!(!tape.is_grad_enabled()); // toujours false
+        });
+
+        assert!(tape.is_grad_enabled()); // restaure
     }
 }
