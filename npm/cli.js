@@ -126,7 +126,7 @@ async function update() {
     // Check latest commit on remote
     try {
         const apiData = await httpGetJSON(`${REPO_API}/branches/feat/portable-simd-and-views`);
-        const latestSha = apiData.commit.sha.substring(0, 7);
+        const latestSha = (apiData.commit?.sha || apiData.sha || '').substring(0, 7);
 
         const localSha = runSilent(`cd "${SRC_DIR}" && git rev-parse --short HEAD`);
 
