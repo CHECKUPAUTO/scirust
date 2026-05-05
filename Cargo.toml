@@ -27,7 +27,6 @@ members = [
     "scirust-learning",
     "scirust-symbolic",
     "scirust-reasoning",
-    "turboquant",
 ]
 exclude = [
     "soullink-node-patched",
