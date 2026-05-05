@@ -28,6 +28,7 @@ impl MaxPool2d {
         }
     }
 
+    #[must_use]
     pub fn input_shape(mut self, c: usize, h: usize, w: usize) -> Self {
         self.cached_c = Some(c);
         self.cached_h = Some(h);
@@ -53,10 +54,7 @@ impl Module for MaxPool2d {
     fn state_dict(&self) -> HashMap<String, Tensor> {
         HashMap::new()
     }
-    fn load_state_dict(
-        &mut self,
-        _sd: &HashMap<String, Tensor>,
-    ) -> std::result::Result<(), String> {
+    fn load_state_dict(&mut self, _sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         Ok(())
     }
 }
@@ -89,5 +87,39 @@ mod tests {
         y.backward();
         let g = tape.grad(x.idx());
         assert_eq!(g.data, vec![0.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn maxpool_multi_channel() {
+        let mut pool = MaxPool2d::new(2, 2).input_shape(2, 4, 4);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(
+            (1..=32).map(|x| x as f32).collect(),
+            1,
+            32,
+        ));
+        let y = pool.forward(&tape, x);
+        let yt = tape.value(y.idx());
+        assert_eq!(yt.shape(), (1, 8));
+        // Each 2x2 window max for each channel
+        // Channel 1: [6,8,14,16], Channel 2: [22,24,30,32]
+        assert_eq!(yt.data, vec![6.0, 8.0, 14.0, 16.0, 22.0, 24.0, 30.0, 32.0]);
+    }
+
+    #[test]
+    fn maxpool_stride_smaller_than_kernel() {
+        let mut pool = MaxPool2d::new(3, 1).input_shape(1, 4, 4);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(
+            (1..=16).map(|x| x as f32).collect(),
+            1,
+            16,
+        ));
+        let y = pool.forward(&tape, x);
+        let yt = tape.value(y.idx());
+        // 4x4 with 3x3 kernel and stride 1 → 2x2 output
+        assert_eq!(yt.shape(), (1, 4));
+        // Max of each 3x3 window
+        assert_eq!(yt.data, vec![11.0, 12.0, 15.0, 16.0]);
     }
 }

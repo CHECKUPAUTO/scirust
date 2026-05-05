@@ -13,6 +13,7 @@
 //   im2col output     : (in_C·K·K, B·H_out·W_out)
 
 use crate::autodiff::reverse::Tensor;
+use crate::error::Result;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Padding {
@@ -48,22 +49,24 @@ impl ConvConfig {
         (self.w + 2 * self.pad() - self.kernel) / self.stride + 1
     }
 
-    pub fn check(&self) -> Result<(), String> {
+    pub fn check(&self) -> Result<()> {
         if self.kernel == 0 {
-            return Err("kernel doit être > 0".into());
+            crate::bail!("kernel doit être > 0");
         }
         if self.stride == 0 {
-            return Err("stride doit être > 0".into());
+            crate::bail!("stride doit être > 0");
         }
         let pad = self.pad();
         if self.h + 2 * pad < self.kernel {
-            return Err(format!(
+            crate::bail!(
                 "input trop petit pour ce kernel : H={}, K={}, pad={}",
-                self.h, self.kernel, pad
-            ));
+                self.h,
+                self.kernel,
+                pad
+            );
         }
         if self.w + 2 * pad < self.kernel {
-            return Err("input trop petit en largeur".to_string());
+            crate::bail!("input trop petit en largeur");
         }
         Ok(())
     }
@@ -236,7 +239,7 @@ mod tests {
         let input = Tensor::from_vec(data.clone(), 1, 16);
         let cols = im2col(&input, &cfg);
         assert_eq!(cols.shape(), (9, 4));
-        let col0: Vec<f32> = (0..9).map(|r| cols.data[r * 4 + 0]).collect();
+        let col0: Vec<f32> = (0..9).map(|r| cols.data[r * 4]).collect();
         assert_eq!(col0, vec![1.0, 2.0, 3.0, 5.0, 6.0, 7.0, 9.0, 10.0, 11.0]);
         let col3: Vec<f32> = (0..9).map(|r| cols.data[r * 4 + 3]).collect();
         assert_eq!(
@@ -261,7 +264,7 @@ mod tests {
         let input = Tensor::from_vec(data, 1, 9);
         let cols = im2col(&input, &cfg);
         assert_eq!(cols.shape(), (9, 9));
-        let col0: Vec<f32> = (0..9).map(|r| cols.data[r * 9 + 0]).collect();
+        let col0: Vec<f32> = (0..9).map(|r| cols.data[r * 9]).collect();
         assert_eq!(col0, vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 4.0, 5.0]);
     }
 
@@ -320,7 +323,7 @@ mod tests {
         let input = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0], 2, 4);
         let cols = im2col(&input, &cfg);
         assert_eq!(cols.shape(), (4, 2));
-        let c0: Vec<f32> = (0..4).map(|r| cols.data[r * 2 + 0]).collect();
+        let c0: Vec<f32> = (0..4).map(|r| cols.data[r * 2]).collect();
         assert_eq!(c0, vec![1.0, 2.0, 3.0, 4.0]);
         let c1: Vec<f32> = (0..4).map(|r| cols.data[r * 2 + 1]).collect();
         assert_eq!(c1, vec![10.0, 20.0, 30.0, 40.0]);

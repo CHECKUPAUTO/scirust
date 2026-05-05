@@ -48,9 +48,21 @@ pub struct NaturalCommand {
 }
 
 pub fn parse_natural(text: &str) -> NaturalCommand {
+    let lower = text.to_lowercase();
+    let (action, expr) = if lower.contains("solve") || lower.contains("résoudre") {
+        ("solve".to_string(), Some(text.to_string()))
+    } else if lower.contains("derive") || lower.contains("dérivée") {
+        ("derive".to_string(), Some(text.to_string()))
+    } else if lower.contains("simplify") || lower.contains("simplifie") {
+        ("simplify".to_string(), Some(text.to_string()))
+    } else if lower.contains("eval") || lower.contains("évalue") || lower.contains("calcule") {
+        ("evaluate".to_string(), Some(text.to_string()))
+    } else {
+        ("unknown".to_string(), Some(text.to_string()))
+    };
     NaturalCommand {
-        action: text.to_string(),
-        expression: None,
+        action,
+        expression: expr,
         variables: None,
     }
 }

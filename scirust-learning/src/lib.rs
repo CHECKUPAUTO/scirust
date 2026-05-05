@@ -282,7 +282,7 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
                 in_low = true;
                 in_high = false;
                 regime_start = idx;
-            } else if (*vol <= high_threshold || *vol >= low_threshold) && (in_high || in_low) {
+            } else if (in_high && *vol <= high_threshold) || (in_low && *vol >= low_threshold) {
                 // Regime ended
                 let regime_type = if in_high { "high" } else { "low" };
                 signals.push(format!(

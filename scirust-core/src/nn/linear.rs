@@ -104,7 +104,7 @@ impl Module for Linear {
     fn load_state_dict(
         &mut self,
         sd: &std::collections::HashMap<String, Tensor>,
-    ) -> Result<(), String> {
+    ) -> crate::error::Result<()> {
         let w = sd
             .get("weight")
             .ok_or_else(|| "missing key: weight".to_string())?;
@@ -112,18 +112,18 @@ impl Module for Linear {
             .get("bias")
             .ok_or_else(|| "missing key: bias".to_string())?;
         if w.shape() != (self.in_features, self.out_features) {
-            return Err(format!(
+            return Err(crate::error::SciRustError::InvalidConfig(format!(
                 "weight shape mismatch: expected {:?}, got {:?}",
                 (self.in_features, self.out_features),
                 w.shape()
-            ));
+            )));
         }
         if b.shape() != (1, self.out_features) {
-            return Err(format!(
+            return Err(crate::error::SciRustError::InvalidConfig(format!(
                 "bias shape mismatch: expected {:?}, got {:?}",
                 (1, self.out_features),
                 b.shape()
-            ));
+            )));
         }
         self.weight = w.clone();
         self.bias = b.clone();
@@ -266,7 +266,7 @@ mod tests {
         let res = lin.load_state_dict(&sd);
         assert!(res.is_err(), "expected error for missing bias");
         assert!(
-            res.unwrap_err().contains("bias"),
+            format!("{}", res.unwrap_err()).contains("bias"),
             "error should mention missing key"
         );
     }

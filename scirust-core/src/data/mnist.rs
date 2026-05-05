@@ -217,7 +217,7 @@ mod tests {
 
         // One-hot : ligne 2 (label 2) doit avoir 1.0 en index 2, 0 ailleurs
         assert_eq!(mnist.labels_one_hot[2 * 10 + 2], 1.0);
-        assert_eq!(mnist.labels_one_hot[2 * 10 + 0], 0.0);
+        assert_eq!(mnist.labels_one_hot[2 * 10], 0.0);
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&dir);

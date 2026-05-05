@@ -18,12 +18,12 @@
 
 #![cfg(feature = "cuda")]
 
-use cust::prelude::*;
 use cust::launch;
+use cust::prelude::*;
 use std::sync::OnceLock;
 
 use scirust_core::matrix::backend::SimdBackend;
-use scirust_core::matrix::view::{MatrixView, MatrixViewMut, MatrixShape};
+use scirust_core::matrix::view::{MatrixShape, MatrixView, MatrixViewMut};
 
 // ------------------------------------------------------------------ //
 //  PTX inline — kernels compilés à part dans cuda/kernels/*.cu        //
@@ -76,7 +76,7 @@ DONE:
 // ------------------------------------------------------------------ //
 
 struct CudaCtx {
-    _ctx:   Context,
+    _ctx: Context,
     module_saxpy: Module,
     stream: Stream,
 }
@@ -90,7 +90,11 @@ fn ctx() -> &'static CudaCtx {
         let ctx = Context::new(device).expect("CUDA context");
         let module = Module::from_ptx(SAXPY_PTX, &[]).expect("PTX saxpy");
         let stream = Stream::new(StreamFlags::NON_BLOCKING, None).expect("stream");
-        CudaCtx { _ctx: ctx, module_saxpy: module, stream }
+        CudaCtx {
+            _ctx: ctx,
+            module_saxpy: module,
+            stream,
+        }
     })
 }
 
@@ -111,7 +115,9 @@ impl CudaBackend {
 }
 
 impl SimdBackend for CudaBackend {
-    fn name(&self) -> &'static str { "cuda" }
+    fn name(&self) -> &'static str {
+        "cuda"
+    }
 
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         let ctx = ctx();
@@ -121,7 +127,7 @@ impl SimdBackend for CudaBackend {
 
         let func = ctx.module_saxpy.get_function("saxpy").expect("saxpy fn");
         let block = 256u32;
-        let grid  = (n + block - 1) / block;
+        let grid = (n + block - 1) / block;
 
         unsafe {
             launch!(func<<<grid, block, 0, ctx.stream>>>(
@@ -129,7 +135,8 @@ impl SimdBackend for CudaBackend {
                 x_dev.as_device_ptr(),
                 y_dev.as_device_ptr(),
                 n
-            )).expect("launch saxpy");
+            ))
+            .expect("launch saxpy");
         }
         ctx.stream.synchronize().expect("sync");
         y_dev.copy_to(y).expect("download y");
@@ -137,7 +144,9 @@ impl SimdBackend for CudaBackend {
 
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
         // TODO : kernel f64 (PTX similaire avec .f64). Fallback CPU pour l'instant.
-        for (yi, xi) in y.iter_mut().zip(x.iter()) { *yi += alpha * xi; }
+        for (yi, xi) in y.iter_mut().zip(x.iter()) {
+            *yi += alpha * xi;
+        }
     }
 
     fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
@@ -149,8 +158,7 @@ impl SimdBackend for CudaBackend {
         x.iter().zip(y.iter()).map(|(a, b)| a * b).sum()
     }
 
-    fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32],
-                 beta: f32, y: &mut [f32]) {
+    fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
         // TODO : cuBLAS SGEMV ou kernel custom (1 thread = 1 row de A)
         let (m, k) = a.shape();
         for i in 0..m {
@@ -160,8 +168,14 @@ impl SimdBackend for CudaBackend {
         }
     }
 
-    fn sgemm_f32(&self, alpha: f32, a: MatrixView<f32>, b: MatrixView<f32>,
-                 beta: f32, mut c: MatrixViewMut<f32>) {
+    fn sgemm_f32(
+        &self,
+        alpha: f32,
+        a: MatrixView<f32>,
+        b: MatrixView<f32>,
+        beta: f32,
+        mut c: MatrixViewMut<f32>,
+    ) {
         // TODO : cuBLAS SGEMM (le bon choix en pratique) ou kernel tiled custom
         // (algorithme naïf 1 thread = 1 cell C[i,j])
         let (m, k) = a.shape();
@@ -169,7 +183,9 @@ impl SimdBackend for CudaBackend {
         for i in 0..m {
             for j in 0..n {
                 let mut acc = 0.0f32;
-                for p in 0..k { acc += a[(i, p)] * b[(p, j)]; }
+                for p in 0..k {
+                    acc += a[(i, p)] * b[(p, j)];
+                }
                 c[(i, j)] = alpha * acc + beta * c[(i, j)];
             }
         }
@@ -177,7 +193,9 @@ impl SimdBackend for CudaBackend {
 
     fn relu_f32(&self, v: &mut [f32]) {
         // TODO : kernel max(x, 0) (très simple en CUDA)
-        for x in v.iter_mut() { *x = x.max(0.0); }
+        for x in v.iter_mut() {
+            *x = x.max(0.0);
+        }
     }
 }
 
@@ -190,7 +208,9 @@ pub struct CudaBackend;
 
 #[cfg(not(feature = "cuda"))]
 impl CudaBackend {
-    pub fn try_init() -> Option<Self> { None }
+    pub fn try_init() -> Option<Self> {
+        None
+    }
 }
 
 // ------------------------------------------------------------------ //

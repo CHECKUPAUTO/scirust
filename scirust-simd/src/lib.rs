@@ -12,7 +12,7 @@
 //! * Stable manual SIMD kernels for `f32`/`f64` using `core::arch` with runtime
 //!   feature detection and scalar fallback.
 
-#![cfg_attr(feature = "portable_simd", feature(portable_simd))]
+#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
 
 pub mod portable;
 pub use portable::simd_ops;
@@ -23,7 +23,7 @@ pub use scirust_simd_macros::simd;
 // Nightly portable_simd generic API
 // =============================================================================
 
-#[cfg(feature = "portable_simd")]
+#[cfg(feature = "portable-simd")]
 pub mod generic {
     use std::simd::{LaneCount, Simd, SimdElement, SupportedLaneCount};
 
@@ -277,6 +277,7 @@ pub fn scalar_zip<T: Copy>(a: &[T], b: &[T], output: &mut [T], f: impl Fn(T, T) 
 /// Convenience function: add 1.0 to every element of a `f64` slice.
 /// Uses AVX2/SSE2 when available, falls back to scalar loop.
 pub fn simd_add_one(data: &mut [f64]) {
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::*;
     let n = data.len();
     let mut i = 0;

@@ -271,16 +271,8 @@ impl TensorND {
         if ndim_self > ndim_target {
             return false;
         }
-        // Aligner à droite
-        let offset = ndim_target - ndim_self;
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..ndim_target {
-            let self_dim = if i < offset {
-                1
-            } else {
-                self.shape[i - offset]
-            };
-            let target_dim = target_shape[i];
+        // Aligner à droite et vérifier les dimensions correspondantes
+        for (&self_dim, &target_dim) in self.shape.iter().rev().zip(target_shape.iter().rev()) {
             if self_dim != target_dim && self_dim != 1 {
                 return false;
             }

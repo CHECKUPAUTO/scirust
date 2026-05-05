@@ -159,7 +159,7 @@ impl Module for BatchNorm1d {
         map
     }
 
-    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> std::result::Result<(), String> {
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         let g = sd
             .get(&format!("{}.gamma", self.name))
             .ok_or_else(|| format!("missing key: {}.gamma", self.name))?;
@@ -174,7 +174,7 @@ impl Module for BatchNorm1d {
             .ok_or_else(|| format!("missing key: {}.running_var", self.name))?;
 
         if g.shape() != (1, self.gamma.cols) {
-            return Err("gamma shape mismatch".to_string());
+            crate::bail!("gamma shape mismatch");
         }
         self.gamma = g.clone();
         self.beta = b.clone();
@@ -254,5 +254,35 @@ mod tests {
         let bn = BatchNorm1d::new(8);
         let sd = bn.state_dict();
         assert_eq!(sd.len(), 4);
+    }
+
+    #[test]
+    fn batch_norm_gradient_flows() {
+        let mut bn = BatchNorm1d::new(3);
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3));
+        let x_idx = x.idx();
+        let y = bn.forward(&tape, x);
+        // Use a weighted sum to get non-zero gradients
+        let weights = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3));
+        let loss = y.hadamard(weights).sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        assert!(g.data.iter().any(|&v| v.abs() > 1e-6));
+    }
+
+    #[test]
+    fn state_dict_round_trip() {
+        let mut bn1 = BatchNorm1d::new(4);
+        bn1.gamma = Tensor::from_vec(vec![2.0; 4], 1, 4);
+        bn1.beta = Tensor::from_vec(vec![1.0; 4], 1, 4);
+        let sd = bn1.state_dict();
+
+        let mut bn2 = BatchNorm1d::new(4);
+        bn2.load_state_dict(&sd).unwrap();
+        assert_eq!(bn2.gamma.data, bn1.gamma.data);
+        assert_eq!(bn2.beta.data, bn1.beta.data);
+        assert_eq!(bn2.running_mean.data, bn1.running_mean.data);
+        assert_eq!(bn2.running_var.data, bn1.running_var.data);
     }
 }

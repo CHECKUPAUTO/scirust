@@ -17,9 +17,9 @@
 
 #![cfg(feature = "wgpu")]
 
+use scirust_core::autodiff::reverse::Tensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use scirust_core::autodiff::reverse::Tensor;
 
 // ================================================================== //
 //  GpuTensor                                                          //
@@ -27,14 +27,20 @@ use scirust_core::autodiff::reverse::Tensor;
 
 pub struct GpuTensor {
     pub buffer: Arc<wgpu::Buffer>,
-    pub rows:   usize,
-    pub cols:   usize,
+    pub rows: usize,
+    pub cols: usize,
 }
 
 impl GpuTensor {
-    pub fn shape(&self) -> (usize, usize) { (self.rows, self.cols) }
-    pub fn len(&self) -> usize { self.rows * self.cols }
-    pub fn byte_size(&self) -> u64 { (self.len() * 4) as u64 }
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+    pub fn len(&self) -> usize {
+        self.rows * self.cols
+    }
+    pub fn byte_size(&self) -> u64 {
+        (self.len() * 4) as u64
+    }
 }
 
 // ================================================================== //
@@ -43,27 +49,30 @@ impl GpuTensor {
 
 pub struct GpuContext {
     pub device: wgpu::Device,
-    pub queue:  wgpu::Queue,
+    pub queue: wgpu::Queue,
     // Pipelines compilés une fois et réutilisés
     pub relu_pipeline: wgpu::ComputePipeline,
-    pub relu_bgl:      wgpu::BindGroupLayout,
+    pub relu_bgl: wgpu::BindGroupLayout,
     pub axpy_pipeline: wgpu::ComputePipeline,
-    pub axpy_bgl:      wgpu::BindGroupLayout,
+    pub axpy_bgl: wgpu::BindGroupLayout,
 }
 
 impl GpuContext {
     pub fn try_init() -> Option<Arc<Self>> {
         pollster::block_on(async {
             let instance = wgpu::Instance::default();
-            let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }).await?;
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await?;
 
-            let (device, queue) = adapter.request_device(
-                &wgpu::DeviceDescriptor::default(), None,
-            ).await.ok()?;
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default(), None)
+                .await
+                .ok()?;
 
             // ----- Pipeline ReLU ----- //
             let relu_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -106,27 +115,38 @@ impl GpuContext {
             });
 
             Some(Arc::new(GpuContext {
-                device, queue,
-                relu_pipeline, relu_bgl,
-                axpy_pipeline, axpy_bgl,
+                device,
+                queue,
+                relu_pipeline,
+                relu_bgl,
+                axpy_pipeline,
+                axpy_bgl,
             }))
         })
     }
 }
 
-fn make_storage_bgl(device: &wgpu::Device, label: &str, n: u32, read_only: bool)
-    -> wgpu::BindGroupLayout
-{
-    let entries: Vec<_> = (0..n).map(|i| wgpu::BindGroupLayoutEntry {
-        binding: i, visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only },
-            has_dynamic_offset: false, min_binding_size: None,
-        },
-        count: None,
-    }).collect();
+fn make_storage_bgl(
+    device: &wgpu::Device,
+    label: &str,
+    n: u32,
+    read_only: bool,
+) -> wgpu::BindGroupLayout {
+    let entries: Vec<_> = (0..n)
+        .map(|i| wgpu::BindGroupLayoutEntry {
+            binding: i,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        })
+        .collect();
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(label), entries: &entries,
+        label: Some(label),
+        entries: &entries,
     })
 }
 
@@ -135,26 +155,32 @@ fn make_axpy_bgl(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         label: Some("axpy_bgl"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
-                binding: 0, visibility: wgpu::ShaderStages::COMPUTE,
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false, min_binding_size: None,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 1, visibility: wgpu::ShaderStages::COMPUTE,
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false, min_binding_size: None,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 2, visibility: wgpu::ShaderStages::COMPUTE,
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false, min_binding_size: None,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
                 count: None,
             },
@@ -178,7 +204,7 @@ fn relu_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 const AXPY_WGSL: &str = r#"
-struct Params { alpha: f32, n: u32, _pad: vec2<u32> };
+struct Params { alpha: f32, n: u32, _pad: vec2<u32> }
 @group(0) @binding(0) var<storage, read>       x: array<f32>;
 @group(0) @binding(1) var<storage, read_write> y: array<f32>;
 @group(0) @binding(2) var<uniform>             p: Params;
@@ -198,14 +224,20 @@ fn axpy_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 impl GpuTensor {
     /// Upload CPU → GPU (allocation + copy unique).
     pub fn from_cpu(ctx: &GpuContext, t: &Tensor) -> Self {
-        let buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_tensor"),
-            contents: bytemuck::cast_slice(&t.data),
-            usage: wgpu::BufferUsages::STORAGE
-                 | wgpu::BufferUsages::COPY_SRC
-                 | wgpu::BufferUsages::COPY_DST,
-        });
-        Self { buffer: Arc::new(buf), rows: t.rows, cols: t.cols }
+        let buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_tensor"),
+                contents: bytemuck::cast_slice(&t.data),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
+        Self {
+            buffer: Arc::new(buf),
+            rows: t.rows,
+            cols: t.cols,
+        }
     }
 
     /// Download GPU → CPU. Bloquant.
@@ -222,7 +254,9 @@ impl GpuTensor {
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         ctx.device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().expect("map_async");
 
@@ -239,9 +273,10 @@ impl GpuTensor {
         let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("relu_bg"),
             layout: &ctx.relu_bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.buffer.as_entire_binding() },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.buffer.as_entire_binding(),
+            }],
         });
         let mut enc = ctx.device.create_command_encoder(&Default::default());
         {
@@ -259,20 +294,39 @@ impl GpuTensor {
         assert_eq!(self.shape(), other.shape());
         #[repr(C)]
         #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct Params { alpha: f32, n: u32, _pad: [u32; 2] }
-        let params = Params { alpha, n: self.len() as u32, _pad: [0; 2] };
-        let params_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("axpy_params"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        struct Params {
+            alpha: f32,
+            n: u32,
+            _pad: [u32; 2],
+        }
+        let params = Params {
+            alpha,
+            n: self.len() as u32,
+            _pad: [0; 2],
+        };
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("axpy_params"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axpy_bg"),
             layout: &ctx.axpy_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: other.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: other.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
         let mut enc = ctx.device.create_command_encoder(&Default::default());
@@ -292,14 +346,18 @@ impl GpuTensor {
             label: Some("gpu_clone"),
             size: self.byte_size(),
             usage: wgpu::BufferUsages::STORAGE
-                 | wgpu::BufferUsages::COPY_SRC
-                 | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut enc = ctx.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&self.buffer, 0, &buf, 0, self.byte_size());
         ctx.queue.submit(Some(enc.finish()));
-        Self { buffer: Arc::new(buf), rows: self.rows, cols: self.cols }
+        Self {
+            buffer: Arc::new(buf),
+            rows: self.rows,
+            cols: self.cols,
+        }
     }
 }
 
@@ -313,5 +371,7 @@ pub struct GpuTensor;
 pub struct GpuContext;
 #[cfg(not(feature = "wgpu"))]
 impl GpuContext {
-    pub fn try_init() -> Option<std::sync::Arc<Self>> { None }
+    pub fn try_init() -> Option<std::sync::Arc<Self>> {
+        None
+    }
 }

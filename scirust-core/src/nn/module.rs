@@ -20,6 +20,7 @@
 // génériques sur le lifetime.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use std::collections::HashMap;
 
 pub trait Module {
@@ -44,7 +45,7 @@ pub trait Module {
 
     /// Load parameters from a state dict produced by `state_dict()`.
     /// Each module implementation should match parameter names and shapes.
-    fn load_state_dict(&mut self, _sd: &HashMap<String, Tensor>) -> Result<(), String> {
+    fn load_state_dict(&mut self, _sd: &HashMap<String, Tensor>) -> Result<()> {
         Ok(())
     }
 }

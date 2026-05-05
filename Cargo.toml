@@ -1,3 +1,16 @@
+[package]
+name = "scirust"
+version = "0.13.0"
+edition = "2024"
+description = "SciRust — Industrial-grade deep learning framework in pure Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/CHECKUPAUTO/scirust"
+
+[dependencies]
+scirust-core = { path = "scirust-core" }
+scirust-simd = { path = "scirust-simd" }
+scirust-symbolic = { path = "scirust-symbolic" }
+
 [workspace]
 members = [
     "examples/mnist_classifier",

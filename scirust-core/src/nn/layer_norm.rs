@@ -92,7 +92,7 @@ impl Module for LayerNorm {
         map
     }
 
-    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> std::result::Result<(), String> {
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         let g = sd
             .get(&format!("{}/gamma", self.name))
             .ok_or_else(|| format!("missing key: {}/gamma", self.name))?;
@@ -100,7 +100,7 @@ impl Module for LayerNorm {
             .get(&format!("{}/beta", self.name))
             .ok_or_else(|| format!("missing key: {}/beta", self.name))?;
         if g.shape() != (1, self.gamma.cols) {
-            return Err("gamma shape mismatch".to_string());
+            crate::bail!("gamma shape mismatch");
         }
         self.gamma = g.clone();
         self.beta = b.clone();
@@ -148,11 +148,14 @@ mod tests {
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
         let x_idx = x.idx();
-        let y = ln.forward(&tape, x).sum();
+        // Use (y · w).sum() with non-uniform w to avoid degenerate zero-gradient
+        // when g is uniform (sum of zero-mean layer_norm output has zero derivative)
+        let w = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        let y = ln.forward(&tape, x).hadamard(w).sum();
         y.backward();
         let g = tape.grad(x_idx);
-        // Gradient existe et n'est pas nul partout
-        assert!(g.data.iter().any(|&v| v.abs() > 1e-6));
+        assert!(g.data.iter().any(|&v| v.abs() > 1e-6),
+            "gradient should be non-zero: got {:?}", g.data);
     }
 
     #[test]

@@ -544,6 +544,52 @@ pub fn load_state_dict<P: AsRef<Path>>(
     deserialize_state_dict(&buf)
 }
 
+/// Extract the `__metadata__` section from a safetensors JSON header.
+fn extract_metadata(header: &str) -> std::collections::HashMap<String, String> {
+    let mut meta = std::collections::HashMap::new();
+    let needle = r#""__metadata__":"#;
+    if let Some(start) = header.find(needle) {
+        let brace_start = start + needle.len();
+        let bytes = header.as_bytes();
+        let obj_end = skip_balanced(bytes, brace_start, b'{', b'}');
+        let obj = &header[brace_start..obj_end];
+
+        let b = obj.as_bytes();
+        let mut j = 0;
+        while j < b.len() {
+            if b[j] != b'"' {
+                j += 1;
+                continue;
+            }
+            let ks = j + 1;
+            let ke = match find_unescaped_quote(&b[ks..]).map(|p| ks + p) {
+                Some(p) => p,
+                None => break,
+            };
+            let k = &obj[ks..ke];
+            j = ke + 1;
+
+            while j < b.len() && (b[j] == b' ' || b[j] == b':') {
+                j += 1;
+            }
+
+            if j >= b.len() || b[j] != b'"' {
+                break;
+            }
+            let vs = j + 1;
+            let ve = match find_unescaped_quote(&b[vs..]).map(|p| vs + p) {
+                Some(p) => p,
+                None => break,
+            };
+            let v = &obj[vs..ve];
+            j = ve + 1;
+
+            meta.insert(unescape_json(k), unescape_json(v));
+        }
+    }
+    meta
+}
+
 // ================================================================== //
 //  Tests                                                              //
 // ================================================================== //
@@ -644,12 +690,12 @@ mod tests {
         let path = dir.join("test_scirust_safetensors.safetensors");
         let tensors = vec![(
             "test".to_string(),
-            Tensor::from_vec(vec![3.14, 2.71, 1.41, 1.73], 2, 2),
+            Tensor::from_vec(vec![3.13, 2.71, 1.41, 1.73], 2, 2),
         )];
         save_safetensors(&tensors, &path).unwrap();
         let loaded = load_safetensors(&path).unwrap();
         let t = &loaded["test"];
-        assert!((t.data[0] - 3.14).abs() < 1e-6);
+        assert!((t.data[0] - 3.13).abs() < 1e-6);
         assert!((t.data[3] - 1.73).abs() < 1e-6);
         let _ = std::fs::remove_file(&path);
     }
@@ -817,50 +863,4 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
-}
-
-/// Extract the `__metadata__` section from a safetensors JSON header.
-fn extract_metadata(header: &str) -> std::collections::HashMap<String, String> {
-    let mut meta = std::collections::HashMap::new();
-    let needle = r#""__metadata__":"#;
-    if let Some(start) = header.find(needle) {
-        let brace_start = start + needle.len();
-        let bytes = header.as_bytes();
-        let obj_end = skip_balanced(bytes, brace_start, b'{', b'}');
-        let obj = &header[brace_start..obj_end];
-
-        let b = obj.as_bytes();
-        let mut j = 0;
-        while j < b.len() {
-            if b[j] != b'"' {
-                j += 1;
-                continue;
-            }
-            let ks = j + 1;
-            let ke = match find_unescaped_quote(&b[ks..]).map(|p| ks + p) {
-                Some(p) => p,
-                None => break,
-            };
-            let k = &obj[ks..ke];
-            j = ke + 1;
-
-            while j < b.len() && (b[j] == b' ' || b[j] == b':') {
-                j += 1;
-            }
-
-            if j >= b.len() || b[j] != b'"' {
-                break;
-            }
-            let vs = j + 1;
-            let ve = match find_unescaped_quote(&b[vs..]).map(|p| vs + p) {
-                Some(p) => p,
-                None => break,
-            };
-            let v = &obj[vs..ve];
-            j = ve + 1;
-
-            meta.insert(unescape_json(k), unescape_json(v));
-        }
-    }
-    meta
 }

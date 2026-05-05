@@ -6,9 +6,13 @@ edition = "2024"
 [dependencies]
 rayon = { version = "1.10", optional = true }
 cudarc = { version = "0.14", optional = true, features = ["driver"] }
+wgpu = { version = "0.20", optional = true }
+pollster = { version = "0.3", optional = true }
+bytemuck = { version = "1", optional = true }
+scirust-core = { path = "../scirust-core", optional = true }
 
 [features]
 default = ["cpu-fallback"]
 cpu-fallback = ["rayon"]
 cuda = ["dep:cudarc"]
-wgpu = []
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]

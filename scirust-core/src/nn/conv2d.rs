@@ -194,22 +194,22 @@ impl Module for Conv2d {
         map
     }
 
-    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> std::result::Result<(), String> {
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         let w = sd
             .get(&format!("{}.weight", self.name))
             .ok_or_else(|| format!("missing key: {}.weight", self.name))?;
         let kk = self.kernel * self.kernel;
         if w.shape() != (self.out_c, self.in_c * kk) {
-            return Err(format!(
+            crate::bail!(
                 "weight shape mismatch: expected {:?}, got {:?}",
                 (self.out_c, self.in_c * kk),
                 w.shape()
-            ));
+            );
         }
         self.weight = w.clone();
         if let Some(b) = sd.get(&format!("{}.bias", self.name)) {
             if b.shape() != (1, self.out_c) {
-                return Err("bias shape mismatch".to_string());
+                crate::bail!("bias shape mismatch");
             }
             self.bias = Some(b.clone());
         }

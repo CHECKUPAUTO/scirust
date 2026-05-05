@@ -19,10 +19,10 @@ pub mod dispatch {
     }
 }
 
-pub mod wgpu_backend;
+pub mod cuda_backend;
 #[cfg(feature = "cuda")]
 pub mod cuda_turboquant;
-pub mod cuda_backend;
+pub mod wgpu_backend;
 
 pub mod gpu_tensor;
 

@@ -1,6 +1,7 @@
 // scirust-core/src/autodiff/reverse.rs
 // Reverse-mode autodiff — compatible V10A/V11
 
+use crate::nn::rng::PcgEngine;
 use std::cell::RefCell;
 
 // ================================================================== //
@@ -33,15 +34,19 @@ impl Tensor {
         assert_eq!(data.len(), rows * cols, "Tensor::from_vec size mismatch");
         Self { rows, cols, data }
     }
+    #[inline]
     pub fn shape(&self) -> (usize, usize) {
         (self.rows, self.cols)
     }
+    #[inline]
     pub fn dims(&self) -> (usize, usize) {
         (self.rows, self.cols)
     }
+    #[inline]
     pub fn nrows(&self) -> usize {
         self.rows
     }
+    #[inline]
     pub fn ncols(&self) -> usize {
         self.cols
     }
@@ -278,16 +283,36 @@ impl Tensor {
 impl std::ops::Index<(usize, usize)> for Tensor {
     type Output = f32;
     fn index(&self, (row, col): (usize, usize)) -> &f32 {
-        assert!(row < self.rows, "row {} out of bounds (rows={})", row, self.rows);
-        assert!(col < self.cols, "col {} out of bounds (cols={})", col, self.cols);
+        assert!(
+            row < self.rows,
+            "row {} out of bounds (rows={})",
+            row,
+            self.rows
+        );
+        assert!(
+            col < self.cols,
+            "col {} out of bounds (cols={})",
+            col,
+            self.cols
+        );
         &self.data[row * self.cols + col]
     }
 }
 
 impl std::ops::IndexMut<(usize, usize)> for Tensor {
     fn index_mut(&mut self, (row, col): (usize, usize)) -> &mut f32 {
-        assert!(row < self.rows, "row {} out of bounds (rows={})", row, self.rows);
-        assert!(col < self.cols, "col {} out of bounds (cols={})", col, self.cols);
+        assert!(
+            row < self.rows,
+            "row {} out of bounds (rows={})",
+            row,
+            self.rows
+        );
+        assert!(
+            col < self.cols,
+            "col {} out of bounds (cols={})",
+            col,
+            self.cols
+        );
         &mut self.data[row * self.cols + col]
     }
 }
@@ -342,6 +367,10 @@ pub enum SavedData {
         stride: usize,
         pad: usize,
     },
+    /// Cached normalized input (x-μ)/σ for LayerNorm backward
+    LayerNormNormed(Tensor),
+    /// Cached normalized input for BatchNorm backward
+    BatchNormNormed(Tensor),
 }
 
 // ================================================================== //
@@ -565,6 +594,37 @@ impl Tape {
 
     pub fn grad(&self, idx: usize) -> Tensor {
         self.grads.borrow()[idx].clone()
+    }
+
+    /// Clipping par valeur : chaque element du gradient est borne dans [-max, max].
+    pub fn clip_grad_value(&self, max: f32) {
+        let mut grads = self.grads.borrow_mut();
+        for g in grads.iter_mut() {
+            for v in g.data.iter_mut() {
+                *v = v.clamp(-max, max);
+            }
+        }
+    }
+
+    /// Clipping par norme globale (Pascanu et al., 2013) :
+    /// si ||g|| > max_norm, on rescale tous les gradients par max_norm / ||g||.
+    pub fn clip_grad_norm(&self, max_norm: f32) {
+        let mut grads = self.grads.borrow_mut();
+        let mut total_norm_sq = 0.0f32;
+        for g in grads.iter() {
+            for v in g.data.iter() {
+                total_norm_sq += v * v;
+            }
+        }
+        let total_norm = total_norm_sq.sqrt();
+        if total_norm > max_norm && total_norm > 1e-12 {
+            let scale = max_norm / total_norm;
+            for g in grads.iter_mut() {
+                for v in g.data.iter_mut() {
+                    *v *= scale;
+                }
+            }
+        }
     }
 
     pub fn set_value(&self, idx: usize, value: Tensor) {
@@ -1051,14 +1111,42 @@ impl Tape {
                     gamma_idx,
                     beta_idx,
                 } => {
-                    // Simplification : dL/dx = dL/dy * gamma (approx)
-                    let gv = &values[gamma_idx].as_cpu();
-                    let g_broadcast = g.broadcast_to(
-                        values[input_idx].as_cpu().rows,
-                        values[input_idx].as_cpu().cols,
-                    );
-                    let gv_broadcast = gv.broadcast_to(g_broadcast.rows, g_broadcast.cols);
-                    grads[input_idx] = grads[input_idx].add(&g_broadcast.hadamard(&gv_broadcast));
+                    // Analytic backward for BatchNorm (same as LayerNorm but per-channel):
+                    // y = gamma * (x - mu)/sigma + beta
+                    // dL/dx = (gamma / sigma) * (dL/dy - mean(dL/dy) - x_norm * mean(dL/dy * x_norm))
+                    //
+                    // Approximation: dL/dx = gamma * (dL/dy - mean(dL/dy)) / sigma
+                    // Full fix requires caching x_norm in SavedData::BatchNormNormed.
+                    let input = &values[input_idx].as_cpu();
+                    let (rows, cols) = input.shape();
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    let g_v = &values[gamma_idx].as_cpu();
+
+                    for r in 0..rows {
+                        let mut mean = 0.0f32;
+                        let mut var = 0.0f32;
+                        for c in 0..cols {
+                            mean += input.data[r * cols + c];
+                        }
+                        mean /= cols as f32;
+                        for c in 0..cols {
+                            let d = input.data[r * cols + c] - mean;
+                            var += d * d;
+                        }
+                        var = var / cols as f32 + 1e-5f32;
+                        let sigma = var.sqrt();
+
+                        let mut g_mean = 0.0f32;
+                        for c in 0..cols {
+                            g_mean += g.data[r * cols + c];
+                        }
+                        g_mean /= cols as f32;
+
+                        for c in 0..cols {
+                            grad_x.data[r * cols + c] = g_v.data[c] * (g.data[r * cols + c] - g_mean) / sigma;
+                        }
+                    }
+                    grads[input_idx] = grads[input_idx].add(&grad_x);
                     grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
                 }
@@ -1066,15 +1154,84 @@ impl Tape {
                     input_idx,
                     gamma_idx,
                     beta_idx,
-                    ..
+                    eps: _eps,
                 } => {
-                    let gv = &values[gamma_idx].as_cpu();
-                    let g_broadcast = g.broadcast_to(
-                        values[input_idx].as_cpu().rows,
-                        values[input_idx].as_cpu().cols,
-                    );
-                    let gv_broadcast = gv.broadcast_to(g_broadcast.rows, g_broadcast.cols);
-                    grads[input_idx] = grads[input_idx].add(&g_broadcast.hadamard(&gv_broadcast));
+                    // Analytic backward for LayerNorm using cached normalized input:
+                    // y = gamma * x_norm + beta,  where x_norm = (x - mu)/sigma
+                    // dL/dbeta = sum(dL/dy, axis=0)
+                    // dL/dgamma = sum(dL/dy * x_norm, axis=0)
+                    // dL/dx = (gamma / sigma) * (dL/dy - mean(dL/dy, axis=1) - x_norm * mean(dL/dy * x_norm, axis=1))
+                    let x_norm = match &nodes[i].saved {
+                        SavedData::LayerNormNormed(t) => Some(t),
+                        _ => None,
+                    };
+                    let input = &values[input_idx].as_cpu();
+                    let (rows, cols) = input.shape();
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    let g_v = &values[gamma_idx].as_cpu();
+                    let n = cols as f32;
+
+                    if let Some(norm) = x_norm {
+                        // Full analytic backward with cached x_norm
+                        for r in 0..rows {
+                            let mut g_mean = 0.0f32;
+                            let mut gxnorm_mean = 0.0f32;
+                            for c in 0..cols {
+                                g_mean += g.data[r * cols + c];
+                                gxnorm_mean += g.data[r * cols + c] * norm.data[r * cols + c];
+                            }
+                            g_mean /= n;
+                            gxnorm_mean /= n;
+
+                            // Recompute sigma
+                            let mut mean = 0.0f32;
+                            let mut var = 0.0f32;
+                            for c in 0..cols {
+                                mean += input.data[r * cols + c];
+                            }
+                            mean /= n;
+                            for c in 0..cols {
+                                let d = input.data[r * cols + c] - mean;
+                                var += d * d;
+                            }
+                            var /= n;
+
+                            // Use safe epsilon for numerical stability
+                            let eps_val = if var < 1e-12 { 1e-6 } else { 0.0 };
+                            let sigma = (var + eps_val).sqrt();
+
+                            for c in 0..cols {
+                                grad_x.data[r * cols + c] = (g_v.data[c] / sigma)
+                                    * (g.data[r * cols + c] - g_mean - norm.data[r * cols + c] * gxnorm_mean);
+                            }
+                        }
+                    } else {
+                        // Fallback: approximate backward (no cached normed)
+                        for r in 0..rows {
+                            let mut mean = 0.0f32;
+                            let mut var = 0.0f32;
+                            for c in 0..cols {
+                                mean += input.data[r * cols + c];
+                            }
+                            mean /= n;
+                            for c in 0..cols {
+                                let d = input.data[r * cols + c] - mean;
+                                var += d * d;
+                            }
+                            var /= n;
+                            let eps_val = if var < 1e-12 { 1e-6 } else { 0.0 };
+                            let sigma = (var + eps_val).sqrt();
+                            let mut g_mean = 0.0f32;
+                            for c in 0..cols {
+                                g_mean += g.data[r * cols + c];
+                            }
+                            g_mean /= n;
+                            for c in 0..cols {
+                                grad_x.data[r * cols + c] = g_v.data[c] * (g.data[r * cols + c] - g_mean) / sigma;
+                            }
+                        }
+                    }
+                    grads[input_idx] = grads[input_idx].add(&grad_x);
                     grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
                 }
@@ -1195,12 +1352,15 @@ impl<'t> Var<'t> {
     pub fn new(tape: &'t Tape, idx: usize) -> Self {
         Self { tape, idx }
     }
+    #[inline]
     pub fn idx(&self) -> usize {
         self.idx
     }
+    #[inline]
     pub fn shape(&self) -> (usize, usize) {
         self.tape.values.borrow()[self.idx].shape()
     }
+    #[inline]
     pub fn tape(&self) -> &'t Tape {
         self.tape
     }
@@ -1305,8 +1465,8 @@ impl<'t> Var<'t> {
             *x = x.max(0.0);
         }
         let mut mask = Tensor::zeros(a.rows, a.cols);
-        for i in 0..a.data.len() {
-            mask.data[i] = if a.data[i] > 0.0 { 1.0 } else { 0.0 };
+        for (m, val) in mask.data.iter_mut().zip(&a.data) {
+            *m = if *val > 0.0 { 1.0 } else { 0.0 };
         }
         let new_idx = self.tape.push_with_saved(
             Op::ReLU(self.idx),
@@ -1740,12 +1900,12 @@ impl<'t> Var<'t> {
     pub fn causal_mask(self, seq_len: usize) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let mut out = a.clone();
-        for r in 0..a.rows {
-            for c in 0..a.cols {
+        for (r, row) in out.data.chunks_exact_mut(a.cols).enumerate() {
+            let row_in_seq = r % seq_len;
+            for (c, val) in row.iter_mut().enumerate() {
                 let col_in_seq = c % seq_len;
-                let row_in_seq = r % seq_len;
                 if col_in_seq > row_in_seq {
-                    out.data[r * a.cols + c] = -1e9;
+                    *val = -1e9;
                 }
             }
         }
@@ -1770,14 +1930,9 @@ impl<'t> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let scale = 1.0 / (1.0 - p);
         let mut mask_data = vec![0.0f32; a.rows * a.cols];
-        // simple deterministic mask based on index for reproducibility
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..mask_data.len() {
-            mask_data[i] = if ((i * 7 + 13) % 100) as f32 / 100.0 < p {
-                0.0
-            } else {
-                scale
-            };
+        let mut rng = PcgEngine::new(42);
+        for item in mask_data.iter_mut() {
+            *item = if rng.float() < p { 0.0 } else { scale };
         }
         let mask_t = Tensor::from_vec(mask_data, a.rows, a.cols);
         let mask_v = self.tape.input(mask_t);
@@ -1801,6 +1956,7 @@ impl<'t> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let (rows, cols) = a.shape();
         let mut out = Tensor::zeros(rows, cols);
+        let mut normed = Tensor::zeros(rows, cols);
         for r in 0..rows {
             let mut mean = 0.0f32;
             for c in 0..cols {
@@ -1817,8 +1973,9 @@ impl<'t> Var<'t> {
             let gv = self.tape.values.borrow()[gamma.idx].as_cpu().clone();
             let bv = self.tape.values.borrow()[beta.idx].as_cpu().clone();
             for c in 0..cols {
-                out.data[r * cols + c] =
-                    (a.data[r * cols + c] - mean) / std * gv.data[c] + bv.data[c];
+                let norm_val = (a.data[r * cols + c] - mean) / std;
+                out.data[r * cols + c] = norm_val * gv.data[c] + bv.data[c];
+                normed.data[r * cols + c] = norm_val;
             }
         }
         let new_idx = self.tape.push_with_saved(
@@ -1829,7 +1986,7 @@ impl<'t> Var<'t> {
                 eps,
             },
             DeviceTensor::cpu(out),
-            SavedData::None,
+            SavedData::LayerNormNormed(normed),
         );
         Var {
             tape: self.tape,
@@ -2586,8 +2743,44 @@ mod tests {
         let y = x.softmax(1);
         let v = tape.value(y.idx());
         let sum: f32 = v.data.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "softmax should sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "softmax should sum to 1, got {}",
+            sum
+        );
         // Check no NaN/Inf
         assert!(v.data.iter().all(|x| x.is_finite()));
+    }
+
+    #[test]
+    fn causal_mask_blocks_future_tokens() {
+        let tape = Tape::new();
+        // 2 sequences of length 3 each: shape (2, 3)
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3));
+        let y = x.causal_mask(3);
+        let v = tape.value(y.idx());
+        // Row 0: positions [0,1,2] — future positions 1,2 should be -1e9
+        assert!((v.data[0] - 1.0).abs() < 1e-6);
+        assert!((v.data[1] - (-1e9)).abs() < 1e-3);
+        assert!((v.data[2] - (-1e9)).abs() < 1e-3);
+        // Row 1: positions [0,1,2] — only position 2 is future
+        assert!((v.data[3] - 4.0).abs() < 1e-6);
+        assert!((v.data[4] - 5.0).abs() < 1e-6);
+        assert!((v.data[5] - (-1e9)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn causal_mask_gradient_flows() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        let x_idx = x.idx();
+        let y = x.causal_mask(3);
+        let loss = y.sum();
+        loss.backward();
+        let g = tape.grad(x_idx);
+        // Only first element is unmasked, so only its grad is 1.0
+        assert!((g.data[0] - 1.0).abs() < 1e-6);
+        assert!((g.data[1] - 0.0).abs() < 1e-6);
+        assert!((g.data[2] - 0.0).abs() < 1e-6);
     }
 }

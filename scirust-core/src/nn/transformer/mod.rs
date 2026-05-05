@@ -19,8 +19,10 @@
 
 pub mod attention;
 pub mod block;
+pub mod decoder;
 pub mod encoder;
 
 pub use attention::MultiHeadAttention;
 pub use block::TransformerBlock;
+pub use decoder::{TransformerDecoder, TransformerDecoderBlock};
 pub use encoder::TransformerEncoder;

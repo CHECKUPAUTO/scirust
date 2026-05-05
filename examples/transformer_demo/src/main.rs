@@ -12,13 +12,10 @@
 //   -> Mean pooling sur la sequence
 //   -> Linear (d_model -> 2) -> CrossEntropyLoss
 
-use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::autodiff::optim::{Adam, Optimizer};
-use scirust_core::nn::{
-    Module, Linear, CrossEntropyLoss, Loss,
-    KaimingNormal, Zeros, PcgEngine,
-};
+use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::nn::transformer::TransformerEncoder;
+use scirust_core::nn::{CrossEntropyLoss, KaimingNormal, Linear, Loss, Module, PcgEngine, Zeros};
 use scirust_core::tensor::tensor3d::{Tensor3D, Var3D};
 
 const SEQ_LEN: usize = 16;
@@ -36,15 +33,22 @@ fn generate_batch(batch_size: usize, seq_len: usize, rng: &mut PcgEngine) -> (Te
         let mut sum = 0usize;
         for t in 0..seq_len {
             let val = if rng.float() > 0.5 { 1.0 } else { 0.0 };
-            if val > 0.5 { sum += 1; }
+            if val > 0.5 {
+                sum += 1;
+            }
             let idx = b * seq_len * 2 + t * 2;
-            x_data[idx]     = 1.0 - val; // one-hot : [P(0), P(1)]
+            x_data[idx] = 1.0 - val; // one-hot : [P(0), P(1)]
             x_data[idx + 1] = val;
         }
         let label = if sum > seq_len / 2 { 1 } else { 0 };
         y_data[b * 2 + label] = 1.0;
     }
-    let x = Tensor3D::new(Tensor::from_vec(x_data, batch_size * seq_len, 2), batch_size, seq_len, 2);
+    let x = Tensor3D::new(
+        Tensor::from_vec(x_data, batch_size * seq_len, 2),
+        batch_size,
+        seq_len,
+        2,
+    );
     let y = Tensor::from_vec(y_data, batch_size, 2);
     (x, y)
 }
@@ -86,8 +90,14 @@ fn main() {
     // Modules
     let mut embed = Linear::new(2, D_MODEL, &KaimingNormal, &Zeros, &mut rng);
     let mut encoder = TransformerEncoder::new(
-        N_LAYERS, D_MODEL, N_HEADS, D_FF, false,
-        &KaimingNormal, &Zeros, &mut rng,
+        N_LAYERS,
+        D_MODEL,
+        N_HEADS,
+        D_FF,
+        false,
+        &KaimingNormal,
+        &Zeros,
+        &mut rng,
     );
     let mut classifier = Linear::new(D_MODEL, 2, &KaimingNormal, &Zeros, &mut rng);
 
@@ -134,7 +144,11 @@ fn main() {
             epoch_loss += tape.value(loss.idx()).data[0];
         }
         if (epoch + 1) % 5 == 0 || epoch == 0 {
-            println!("  Epoch {:>2} : loss = {:.4}", epoch + 1, epoch_loss / BATCHES_PER_EPOCH as f32);
+            println!(
+                "  Epoch {:>2} : loss = {:.4}",
+                epoch + 1,
+                epoch_loss / BATCHES_PER_EPOCH as f32
+            );
         }
     }
 
@@ -159,8 +173,14 @@ fn main() {
             let p0 = scores.data[b * 2];
             let p1 = scores.data[b * 2 + 1];
             let pred = if p1 > p0 { 1 } else { 0 };
-            let true_class = if y2d.data[b * 2 + 1] > y2d.data[b * 2] { 1 } else { 0 };
-            if pred == true_class { correct += 1; }
+            let true_class = if y2d.data[b * 2 + 1] > y2d.data[b * 2] {
+                1
+            } else {
+                0
+            };
+            if pred == true_class {
+                correct += 1;
+            }
             total += 1;
         }
     }
@@ -182,7 +202,9 @@ fn main() {
 fn mean_pool<'a>(
     tape: &'a Tape,
     flat: scirust_core::autodiff::reverse::Var<'a>,
-    batch: usize, seq_len: usize, _d_model: usize,
+    batch: usize,
+    seq_len: usize,
+    _d_model: usize,
 ) -> scirust_core::autodiff::reverse::Var<'a> {
     let inv = 1.0 / seq_len as f32;
     let mut data = vec![0.0f32; batch * (batch * seq_len)];

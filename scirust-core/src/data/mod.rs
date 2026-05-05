@@ -53,6 +53,46 @@ impl InMemoryDataset {
         }
         Self::new(x, y, self.x_dim, self.y_dim)
     }
+
+    /// Split aleatoire train / val. `train_ratio` dans [0, 1].
+    /// Ex: `split_train_val(0.8, 42)` renvoie 80% train, 20% val.
+    pub fn split_train_val(&self, train_ratio: f32, seed: u64) -> (Self, Self) {
+        assert!(
+            (0.0..=1.0).contains(&train_ratio),
+            "train_ratio must be in [0, 1]"
+        );
+        let n_train = (self.n as f32 * train_ratio).round() as usize;
+        let n_train = n_train.min(self.n).max(1);
+
+        // Shuffle deterministe via PCG
+        let mut indices: Vec<usize> = (0..self.n).collect();
+        let mut rng = crate::nn::rng::PcgEngine::new(seed);
+        for i in (1..indices.len()).rev() {
+            let j = (rng.next_u32() as usize) % (i + 1);
+            indices.swap(i, j);
+        }
+
+        let mut x_train = Vec::with_capacity(n_train * self.x_dim);
+        let mut y_train = Vec::with_capacity(n_train * self.y_dim);
+        let mut x_val = Vec::with_capacity((self.n - n_train) * self.x_dim);
+        let mut y_val = Vec::with_capacity((self.n - n_train) * self.y_dim);
+
+        for (pos, &idx) in indices.iter().enumerate() {
+            let (xi, yi) = self.sample(idx);
+            if pos < n_train {
+                x_train.extend_from_slice(xi);
+                y_train.extend_from_slice(yi);
+            } else {
+                x_val.extend_from_slice(xi);
+                y_val.extend_from_slice(yi);
+            }
+        }
+
+        (
+            Self::new(x_train, y_train, self.x_dim, self.y_dim),
+            Self::new(x_val, y_val, self.x_dim, self.y_dim),
+        )
+    }
 }
 
 pub trait Dataset {

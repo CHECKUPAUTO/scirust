@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(lbls, vec![0, 5, 9]);
         assert_eq!(imgs.len(), 3 * 3072);
         // Pixel normalisé : valeur / 255
-        assert!((imgs[0] - ((0 * 7) % 256) as f32 / 255.0).abs() < 1e-6);
+        assert!(imgs[0].abs() < 1e-6);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

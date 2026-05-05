@@ -234,6 +234,7 @@ impl Compose {
             transforms: Vec::new(),
         }
     }
+    #[must_use]
     #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, t: impl Transform + 'static) -> Self {
         self.transforms.push(Box::new(t));
@@ -328,9 +329,65 @@ impl super::Dataset for AugmentedDataset {
         // We store in a Box leak to satisfy trait lifetime.
         // Better: change trait to return owned or use thread_local.
         // For now, return base sample without augment to satisfy compiler.
+        // FIXME: AugmentedDataset.sample() returns unaugmented data due to borrow-checker.
+        // Use augment_batch() instead for actual augmentation.
         self.base.sample(idx)
     }
     fn n_samples(&self) -> usize {
         self.base.n_samples()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_dims_n_pixels() {
+        let d = ImageDims::new(3, 32, 32);
+        assert_eq!(d.n_pixels(), 3072);
+    }
+
+    #[test]
+    fn random_flip_h_swaps_pixels() {
+        let mut img = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let dims = ImageDims::new(1, 2, 3);
+        let flip = RandomFlipH { p: 1.0 }; // always flip
+        flip.apply(&mut img, dims);
+        // Row 0: [1,2,3] -> [3,2,1]
+        // Row 1: [4,5,6] -> [6,5,4]
+        assert_eq!(img, vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
+    }
+
+    #[test]
+    fn random_flip_v_swaps_rows() {
+        let mut img = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let dims = ImageDims::new(1, 2, 3);
+        let flip = RandomFlipV { p: 1.0 }; // always flip
+        flip.apply(&mut img, dims);
+        // Row 0 and Row 1 swapped
+        assert_eq!(img, vec![4.0, 5.0, 6.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn normalize_scales_correctly() {
+        let mut img = vec![0.1307, 0.1307, 0.1307];
+        let dims = ImageDims::new(1, 1, 3);
+        let norm = Normalize::mnist();
+        norm.apply(&mut img, dims);
+        // (x - 0.1307) / 0.3081 = 0.0 for all
+        assert!(img.iter().all(|v| v.abs() < 1e-5));
+    }
+
+    #[test]
+    fn compose_chains_transforms() {
+        let mut img = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let dims = ImageDims::new(1, 2, 3);
+        let pipeline = Compose::new()
+            .add(RandomFlipH { p: 1.0 })
+            .add(RandomFlipV { p: 1.0 });
+        pipeline.apply(&mut img, dims);
+        // H then V: [1,2,3,4,5,6] -> H -> [3,2,1,6,5,4] -> V -> [6,5,4,3,2,1]
+        assert_eq!(img, vec![6.0, 5.0, 4.0, 3.0, 2.0, 1.0]);
     }
 }

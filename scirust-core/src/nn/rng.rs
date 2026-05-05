@@ -70,7 +70,7 @@ mod tests {
         let mut rng = PcgEngine::new(123);
         for _ in 0..1000 {
             let x = rng.float();
-            assert!(x >= 0.0 && x < 1.0, "float out of range: {x}");
+            assert!((0.0..1.0).contains(&x), "float out of range: {x}");
         }
     }
 
@@ -90,5 +90,26 @@ mod tests {
         // Mean should be close to 0, var close to 1
         assert!(mean.abs() < 0.05, "mean = {mean}");
         assert!((var - 1.0).abs() < 0.1, "var = {var}");
+    }
+
+    #[test]
+    fn float_signed_in_range() {
+        let mut rng = PcgEngine::new(99);
+        for _ in 0..1000 {
+            let x = rng.float_signed();
+            assert!((-1.0..1.0).contains(&x), "float_signed out of range: {x}");
+        }
+    }
+
+    #[test]
+    fn different_seeds_produce_different_streams() {
+        let mut a = PcgEngine::new(1);
+        let mut b = PcgEngine::new(2);
+        let seq_a: Vec<u32> = (0..10).map(|_| a.next_u32()).collect();
+        let seq_b: Vec<u32> = (0..10).map(|_| b.next_u32()).collect();
+        assert_ne!(
+            seq_a, seq_b,
+            "different seeds should produce different sequences"
+        );
     }
 }

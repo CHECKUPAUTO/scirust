@@ -36,6 +36,7 @@ impl Tensor3D {
 }
 
 /// Variable 3D sur la tape.
+#[derive(Debug, Clone, Copy)]
 pub struct Var3D<'t> {
     pub var: Var<'t>,
     pub batch: usize,

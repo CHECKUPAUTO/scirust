@@ -1,7 +1,6 @@
 pub mod io;
 pub mod nn;
 pub use scirust_autodiff::*;
-pub use scirust_gpu::dispatch;
 pub use scirust_macros::autodiff;
 pub use scirust_simd::*;
 
@@ -32,3 +31,14 @@ pub use symbolic::{
     parse, parse_natural, polynomial_fit, prove_equal, simd_add_one, simplify, solve_linear,
     solve_quadratic, to_rust_code,
 };
+
+pub mod dispatch {
+    /// GPU or CPU fallback — dispatches work sequentially (rayon optional).
+    /// When rayon is available, use par_chunks_mut for parallel execution.
+    pub fn gpu_or_cpu<F>(data: &mut [f32], kernel: F)
+    where
+        F: Fn(&mut [f32]),
+    {
+        kernel(data);
+    }
+}

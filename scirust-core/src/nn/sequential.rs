@@ -94,7 +94,7 @@ impl Module for Sequential {
     fn load_state_dict(
         &mut self,
         state: &std::collections::HashMap<String, Tensor>,
-    ) -> Result<(), String> {
+    ) -> crate::error::Result<()> {
         let mut grouped: std::collections::HashMap<
             usize,
             std::collections::HashMap<String, Tensor>,

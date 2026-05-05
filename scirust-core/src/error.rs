@@ -143,6 +143,18 @@ impl From<std::io::Error> for SciRustError {
     }
 }
 
+impl From<String> for SciRustError {
+    fn from(s: String) -> Self {
+        SciRustError::InvalidConfig(s)
+    }
+}
+
+impl From<&str> for SciRustError {
+    fn from(s: &str) -> Self {
+        SciRustError::InvalidConfig(s.to_string())
+    }
+}
+
 // ================================================================== //
 //  Type Result alias                                                  //
 // ================================================================== //

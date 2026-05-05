@@ -20,9 +20,9 @@
 
 #![cfg(feature = "wgpu")]
 
+use crate::gpu_tensor::{GpuContext, GpuTensor};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use crate::gpu_tensor::{GpuTensor, GpuContext};
 
 // ================================================================== //
 //  Shader WGSL — SGEMM tuilée                                         //
@@ -39,7 +39,7 @@ struct Dims {
     n: u32,
     k: u32,
     _pad: u32,
-};
+}
 
 @group(0) @binding(0) var<storage, read>       a: array<f32>;  // (m, k) row-major
 @group(0) @binding(1) var<storage, read>       b: array<f32>;  // (k, n) row-major
@@ -111,7 +111,7 @@ fn sgemm_tiled(
 
 pub struct SgemmPipeline {
     pub pipeline: wgpu::ComputePipeline,
-    pub bgl:      wgpu::BindGroupLayout,
+    pub bgl: wgpu::BindGroupLayout,
 }
 
 impl SgemmPipeline {
@@ -126,37 +126,45 @@ impl SgemmPipeline {
             entries: &[
                 // a (read-only)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0, visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false, min_binding_size: None,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
                 // b (read-only)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1, visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false, min_binding_size: None,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
                 // c (read-write)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2, visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false, min_binding_size: None,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
                 // dims (uniform)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3, visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false, min_binding_size: None,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -189,7 +197,7 @@ impl SgemmPipeline {
 /// C = A × B, sur GPU, A:(m,k), B:(k,n), C:(m,n).
 /// Toutes les matrices doivent être en row-major contigu.
 pub fn sgemm_gpu(
-    ctx:      &GpuContext,
+    ctx: &GpuContext,
     pipeline: &SgemmPipeline,
     a: &GpuTensor,
     b: &GpuTensor,
@@ -202,23 +210,47 @@ pub fn sgemm_gpu(
 
     #[repr(C)]
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    struct Dims { m: u32, n: u32, k: u32, _pad: u32 }
-    let dims = Dims { m: m as u32, n: n as u32, k: k_a as u32, _pad: 0 };
+    struct Dims {
+        m: u32,
+        n: u32,
+        k: u32,
+        _pad: u32,
+    }
+    let dims = Dims {
+        m: m as u32,
+        n: n as u32,
+        k: k_a as u32,
+        _pad: 0,
+    };
 
-    let dims_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sgemm_dims"),
-        contents: bytemuck::bytes_of(&dims),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let dims_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("sgemm_dims"),
+            contents: bytemuck::bytes_of(&dims),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("sgemm_bg"),
         layout: &pipeline.bgl,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: a.buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: b.buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: c.buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: dims_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: a.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: c.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: dims_buf.as_entire_binding(),
+            },
         ],
     });
 
@@ -284,8 +316,12 @@ mod tests {
         }
 
         for i in 0..6 {
-            assert!((c_result.data[i] - expected[i]).abs() < 1e-3,
-                    "mismatch at {i}: gpu={} cpu={}", c_result.data[i], expected[i]);
+            assert!(
+                (c_result.data[i] - expected[i]).abs() < 1e-3,
+                "mismatch at {i}: gpu={} cpu={}",
+                c_result.data[i],
+                expected[i]
+            );
         }
     }
 }

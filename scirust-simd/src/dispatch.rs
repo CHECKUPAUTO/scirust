@@ -7,7 +7,7 @@
 // La détection se fait une seule fois (OnceLock) et le résultat est
 // caché. Coût d'un appel : un load atomique.
 
-#[cfg(feature = "portable_simd")]
+#[cfg(feature = "portable-simd")]
 use crate::matrix::backend::PortableSimdBackend;
 use crate::matrix::backend::{ScalarBackend, SimdBackend};
 use std::sync::OnceLock;
@@ -147,90 +147,217 @@ pub struct Avx2Backend;
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Avx2Backend {
-    fn name(&self) -> &'static str {
-        "avx2"
-    }
-    fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
-        ScalarBackend.saxpy_f32(alpha, x, y)
-    }
-    fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
-        ScalarBackend.daxpy_f64(alpha, x, y)
-    }
-    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
-        ScalarBackend.sdot_f32(x, y)
-    }
-    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
-        ScalarBackend.ddot_f64(x, y)
-    }
-    fn sgemv_f32(
-        &self,
-        alpha: f32,
-        a: crate::matrix::view::MatrixView<f32>,
-        x: &[f32],
-        beta: f32,
-        y: &mut [f32],
-    ) {
+    fn name(&self) -> &'static str { "avx2" }
+    fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) { unsafe { saxpy_f32_avx2(alpha, x, y) } }
+    fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) { unsafe { daxpy_f64_avx2(alpha, x, y) } }
+    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 { unsafe { sdot_f32_avx2(x, y) } }
+    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 { unsafe { ddot_f64_avx2(x, y) } }
+    fn sgemv_f32(&self, alpha: f32, a: crate::matrix::view::MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
         ScalarBackend.sgemv_f32(alpha, a, x, beta, y)
     }
-    fn sgemm_f32(
-        &self,
-        alpha: f32,
-        a: crate::matrix::view::MatrixView<f32>,
-        b: crate::matrix::view::MatrixView<f32>,
-        beta: f32,
-        c: crate::matrix::view::MatrixViewMut<f32>,
-    ) {
+    fn sgemm_f32(&self, alpha: f32, a: crate::matrix::view::MatrixView<f32>, b: crate::matrix::view::MatrixView<f32>, beta: f32, c: crate::matrix::view::MatrixViewMut<f32>) {
         ScalarBackend.sgemm_f32(alpha, a, b, beta, c)
     }
-    fn relu_f32(&self, v: &mut [f32]) {
-        ScalarBackend.relu_f32(v)
-    }
+    fn relu_f32(&self, v: &mut [f32]) { unsafe { relu_f32_avx2(v) } }
 }
 
-// SSE2 backend (squelette — ressemble à AVX2 mais avec _mm_*)
+// ---- AVX2 kernel free functions ----
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn saxpy_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let alpha8 = _mm256_set1_ps(alpha);
+    let n = x.len(); let mut i = 0;
+    while i + 8 <= n {
+        let xv = _mm256_loadu_ps(x.as_ptr().add(i));
+        let yv = _mm256_loadu_ps(y.as_ptr().add(i));
+        _mm256_storeu_ps(y.as_mut_ptr().add(i), _mm256_fmadd_ps(alpha8, xv, yv));
+        i += 8;
+    }
+    for j in i..n { y[j] += alpha * x[j]; }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn daxpy_f64_avx2(alpha: f64, x: &[f64], y: &mut [f64]) {
+    use core::arch::x86_64::*;
+    let alpha4 = _mm256_set1_pd(alpha);
+    let n = x.len(); let mut i = 0;
+    while i + 4 <= n {
+        let xv = _mm256_loadu_pd(x.as_ptr().add(i));
+        let yv = _mm256_loadu_pd(y.as_ptr().add(i));
+        _mm256_storeu_pd(y.as_mut_ptr().add(i), _mm256_fmadd_pd(alpha4, xv, yv));
+        i += 4;
+    }
+    for j in i..n { y[j] += alpha * x[j]; }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn sdot_f32_avx2(x: &[f32], y: &[f32]) -> f32 {
+    use core::arch::x86_64::*;
+    let n = x.len(); let mut acc = _mm256_setzero_ps(); let mut i = 0;
+    while i + 8 <= n {
+        acc = _mm256_fmadd_ps(_mm256_loadu_ps(x.as_ptr().add(i)), _mm256_loadu_ps(y.as_ptr().add(i)), acc);
+        i += 8;
+    }
+    let mut tmp = [0.0f32; 8]; _mm256_storeu_ps(tmp.as_mut_ptr(), acc);
+    let mut sum: f32 = tmp.iter().sum();
+    for j in i..n { sum += x[j] * y[j]; }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn ddot_f64_avx2(x: &[f64], y: &[f64]) -> f64 {
+    use core::arch::x86_64::*;
+    let n = x.len(); let mut acc = _mm256_setzero_pd(); let mut i = 0;
+    while i + 4 <= n {
+        acc = _mm256_fmadd_pd(_mm256_loadu_pd(x.as_ptr().add(i)), _mm256_loadu_pd(y.as_ptr().add(i)), acc);
+        i += 4;
+    }
+    let mut tmp = [0.0f64; 4]; _mm256_storeu_pd(tmp.as_mut_ptr(), acc);
+    let mut sum: f64 = tmp.iter().sum();
+    for j in i..n { sum += x[j] * y[j]; }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn relu_f32_avx2(v: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let zero = _mm256_setzero_ps(); let n = v.len(); let mut i = 0;
+    while i + 8 <= n {
+        _mm256_storeu_ps(v.as_mut_ptr().add(i), _mm256_max_ps(_mm256_loadu_ps(v.as_ptr().add(i)), zero));
+        i += 8;
+    }
+    for x in &mut v[i..n] { *x = x.max(0.0); }
+}
+
+
+
+// SSE2 backend — real SIMD using _mm_* intrinsics (4-wide f32, 2-wide f64)
 #[cfg(target_arch = "x86_64")]
 pub struct Sse2Backend;
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Sse2Backend {
-    fn name(&self) -> &'static str {
-        "sse2"
-    }
+    fn name(&self) -> &'static str { "sse2" }
+
     fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) {
-        ScalarBackend.saxpy_f32(a, x, y);
+        unsafe { saxpy_f32_sse2(a, x, y) }
     }
     fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) {
-        ScalarBackend.daxpy_f64(a, x, y);
+        unsafe { daxpy_f64_sse2(a, x, y) }
     }
     fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
-        ScalarBackend.sdot_f32(x, y)
+        unsafe { sdot_f32_sse2(x, y) }
     }
     fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
-        ScalarBackend.ddot_f64(x, y)
+        unsafe { ddot_f64_sse2(x, y) }
     }
-    fn sgemv_f32(
-        &self,
-        a: f32,
-        m: crate::matrix::view::MatrixView<f32>,
-        x: &[f32],
-        b: f32,
-        y: &mut [f32],
-    ) {
+    fn sgemv_f32(&self, a: f32, m: crate::matrix::view::MatrixView<f32>, x: &[f32], b: f32, y: &mut [f32]) {
         ScalarBackend.sgemv_f32(a, m, x, b, y);
     }
-    fn sgemm_f32(
-        &self,
-        a: f32,
-        ma: crate::matrix::view::MatrixView<f32>,
-        mb: crate::matrix::view::MatrixView<f32>,
-        b: f32,
-        mc: crate::matrix::view::MatrixViewMut<f32>,
-    ) {
+    fn sgemm_f32(&self, a: f32, ma: crate::matrix::view::MatrixView<f32>, mb: crate::matrix::view::MatrixView<f32>, b: f32, mc: crate::matrix::view::MatrixViewMut<f32>) {
         ScalarBackend.sgemm_f32(a, ma, mb, b, mc);
     }
     fn relu_f32(&self, v: &mut [f32]) {
-        ScalarBackend.relu_f32(v);
+        unsafe { relu_f32_sse2(v) }
     }
+}
+
+// ---- SSE2 kernel free functions (target_feature) ----
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn saxpy_f32_sse2(alpha: f32, x: &[f32], y: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let a4 = _mm_set1_ps(alpha);
+    let n = x.len();
+    let mut i = 0;
+    while i + 4 <= n {
+        let xv = _mm_loadu_ps(x.as_ptr().add(i));
+        let yv = _mm_loadu_ps(y.as_ptr().add(i));
+        let r = _mm_add_ps(_mm_mul_ps(a4, xv), yv);
+        _mm_storeu_ps(y.as_mut_ptr().add(i), r);
+        i += 4;
+    }
+    for j in i..n { y[j] += alpha * x[j]; }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn daxpy_f64_sse2(alpha: f64, x: &[f64], y: &mut [f64]) {
+    use core::arch::x86_64::*;
+    let a2 = _mm_set1_pd(alpha);
+    let n = x.len();
+    let mut i = 0;
+    while i + 2 <= n {
+        let xv = _mm_loadu_pd(x.as_ptr().add(i));
+        let yv = _mm_loadu_pd(y.as_ptr().add(i));
+        let r = _mm_add_pd(_mm_mul_pd(a2, xv), yv);
+        _mm_storeu_pd(y.as_mut_ptr().add(i), r);
+        i += 2;
+    }
+    for j in i..n { y[j] += alpha * x[j]; }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn sdot_f32_sse2(x: &[f32], y: &[f32]) -> f32 {
+    use core::arch::x86_64::*;
+    let n = x.len();
+    let mut acc = _mm_setzero_ps();
+    let mut i = 0;
+    while i + 4 <= n {
+        let xv = _mm_loadu_ps(x.as_ptr().add(i));
+        let yv = _mm_loadu_ps(y.as_ptr().add(i));
+        acc = _mm_add_ps(acc, _mm_mul_ps(xv, yv));
+        i += 4;
+    }
+    let mut tmp = [0.0f32; 4];
+    _mm_storeu_ps(tmp.as_mut_ptr(), acc);
+    let mut sum: f32 = tmp.iter().sum();
+    for j in i..n { sum += x[j] * y[j]; }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn ddot_f64_sse2(x: &[f64], y: &[f64]) -> f64 {
+    use core::arch::x86_64::*;
+    let n = x.len();
+    let mut acc = _mm_setzero_pd();
+    let mut i = 0;
+    while i + 2 <= n {
+        let xv = _mm_loadu_pd(x.as_ptr().add(i));
+        let yv = _mm_loadu_pd(y.as_ptr().add(i));
+        acc = _mm_add_pd(acc, _mm_mul_pd(xv, yv));
+        i += 2;
+    }
+    let mut tmp = [0.0f64; 2];
+    _mm_storeu_pd(tmp.as_mut_ptr(), acc);
+    let mut sum: f64 = tmp.iter().sum();
+    for j in i..n { sum += x[j] * y[j]; }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn relu_f32_sse2(v: &mut [f32]) {
+    use core::arch::x86_64::*;
+    let zero = _mm_setzero_ps();
+    let n = v.len();
+    let mut i = 0;
+    while i + 4 <= n {
+        let xv = _mm_loadu_ps(v.as_ptr().add(i));
+        let r = _mm_max_ps(xv, zero);
+        _mm_storeu_ps(v.as_mut_ptr().add(i), r);
+        i += 4;
+    }
+    for x in &mut v[i..n] { *x = x.max(0.0); }
 }
 
 #[cfg(target_arch = "aarch64")]
