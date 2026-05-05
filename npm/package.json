@@ -1,0 +1,42 @@
+{
+  "name": "scirust",
+  "version": "0.13.0",
+  "description": "SciRust — Industrial-grade deep learning framework in pure Rust. CLI installer and updater.",
+  "main": "cli.js",
+  "bin": {
+    "scirust-install": "./cli.js",
+    "scirust-update": "./cli.js"
+  },
+  "scripts": {
+    "install": "node cli.js install",
+    "update": "node cli.js update",
+    "postinstall": "node cli.js postinstall"
+  },
+  "keywords": [
+    "scirust",
+    "deep-learning",
+    "machine-learning",
+    "rust",
+    "autodiff",
+    "gpu",
+    "simd",
+    "pytorch",
+    "tensor"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CHECKUPAUTO/scirust.git"
+  },
+  "author": "SciRust Contributors",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": ["linux", "darwin"],
+  "files": [
+    "cli.js",
+    "install.sh",
+    "update.sh",
+    "README.md"
+  ]
+}
