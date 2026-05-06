@@ -325,6 +325,55 @@ impl ParallelTape {
                     let deriv = ones.sub(&t.hadamard(&t));
                     t_grads[a] = t_grads[a].add(&g.hadamard(&deriv));
                 }
+                Op::Sin(a) => {
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].cos()));
+                }
+                Op::Cos(a) => {
+                    t_grads[a] = t_grads[a].sub(&g.hadamard(&values[a].sin()));
+                }
+                Op::Tan(a) => {
+                    let cos_v = values[a].cos();
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&cos_v.hadamard(&cos_v).reciprocal()));
+                }
+                Op::Sinh(a) => {
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].cosh()));
+                }
+                Op::Cosh(a) => {
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].sinh()));
+                }
+                Op::Log10(a) => {
+                    let ln10 = std::f32::consts::LN_10;
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].reciprocal().scale(1.0 / ln10)));
+                }
+                Op::Asin(a) => {
+                    let av = &values[a];
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.sub(&av.hadamard(av)).sqrt();
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Acos(a) => {
+                    let av = &values[a];
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.sub(&av.hadamard(av)).sqrt();
+                    t_grads[a] = t_grads[a].sub(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Atan(a) => {
+                    let av = &values[a];
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.add(&av.hadamard(av));
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Atan2(a, b) => {
+                    let yv = &values[a];
+                    let xv = &values[b];
+                    let denom = xv.hadamard(xv).add(&yv.hadamard(yv));
+                    let mut denom_safe = denom.clone();
+                    for d in &mut denom_safe.data {
+                        *d += 1e-10;
+                    }
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&xv.hadamard(&denom_safe.reciprocal())));
+                    t_grads[b] = t_grads[b].sub(&g.hadamard(&yv.hadamard(&denom_safe.reciprocal())));
+                }
 
                 Op::Sum(a) => {
                     let av = &values[a];

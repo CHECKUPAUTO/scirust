@@ -142,6 +142,77 @@ impl Tensor {
         }
         out
     }
+    pub fn sin(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.sin();
+        }
+        out
+    }
+    pub fn cos(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.cos();
+        }
+        out
+    }
+    pub fn tan(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.tan();
+        }
+        out
+    }
+    pub fn sinh(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.sinh();
+        }
+        out
+    }
+    pub fn cosh(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.cosh();
+        }
+        out
+    }
+    pub fn log10(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.log10();
+        }
+        out
+    }
+    pub fn asin(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.asin();
+        }
+        out
+    }
+    pub fn acos(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.acos();
+        }
+        out
+    }
+    pub fn atan(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data {
+            *x = x.atan();
+        }
+        out
+    }
+    pub fn atan2(&self, x: &Tensor) -> Tensor {
+        assert_eq!(self.shape(), x.shape(), "atan2: shape mismatch");
+        let mut out = self.clone();
+        for i in 0..self.data.len() {
+            out.data[i] = self.data[i].atan2(x.data[i]);
+        }
+        out
+    }
     pub fn scale(&self, s: f32) -> Tensor {
         let mut out = self.clone();
         for x in &mut out.data {
@@ -398,6 +469,16 @@ pub enum Op {
     Log(usize),
     Sqrt(usize),
     Reciprocal(usize),
+    Sin(usize),
+    Cos(usize),
+    Tan(usize),
+    Sinh(usize),
+    Cosh(usize),
+    Log10(usize),
+    Asin(usize),
+    Acos(usize),
+    Atan(usize),
+    Atan2(usize, usize),
     Pow {
         base: usize,
         exp: f32,
@@ -836,6 +917,64 @@ impl Tape {
                     }
                     let minus_one_over_x2 = denom.scale(-1.0);
                     grads[a] = grads[a].add(&g.hadamard(&minus_one_over_x2));
+                }
+                Op::Sin(a) => {
+                    let av = values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&av.cos()));
+                }
+                Op::Cos(a) => {
+                    let av = values[a].as_cpu();
+                    grads[a] = grads[a].sub(&g.hadamard(&av.sin()));
+                }
+                Op::Tan(a) => {
+                    let av = values[a].as_cpu();
+                    let cos_v = av.cos();
+                    grads[a] = grads[a].add(&g.hadamard(&cos_v.hadamard(&cos_v).reciprocal()));
+                }
+                Op::Sinh(a) => {
+                    let av = values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&av.cosh()));
+                }
+                Op::Cosh(a) => {
+                    let av = values[a].as_cpu();
+                    grads[a] = grads[a].add(&g.hadamard(&av.sinh()));
+                }
+                Op::Log10(a) => {
+                    let av = values[a].as_cpu();
+                    let ln10 = std::f32::consts::LN_10;
+                    grads[a] = grads[a].add(&g.hadamard(&av.reciprocal().scale(1.0 / ln10)));
+                }
+                Op::Asin(a) => {
+                    let av = values[a].as_cpu();
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.sub(&av.hadamard(av)).sqrt();
+                    grads[a] = grads[a].add(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Acos(a) => {
+                    let av = values[a].as_cpu();
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.sub(&av.hadamard(av)).sqrt();
+                    grads[a] = grads[a].sub(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Atan(a) => {
+                    let av = values[a].as_cpu();
+                    let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
+                    let denom = ones.add(&av.hadamard(av));
+                    grads[a] = grads[a].add(&g.hadamard(&denom.reciprocal()));
+                }
+                Op::Atan2(a, b) => {
+                    let yv = values[a].as_cpu();
+                    let xv = values[b].as_cpu();
+                    let denom = xv.hadamard(xv).add(&yv.hadamard(yv));
+                    // add epsilon guard element-wise for numerical stability at (0,0)
+                    let mut denom_safe = denom.clone();
+                    for d in &mut denom_safe.data {
+                        *d += 1e-10;
+                    }
+                    let deriv_y = xv.hadamard(&denom_safe.reciprocal());
+                    let deriv_x = yv.hadamard(&denom_safe.reciprocal()).neg();
+                    grads[a] = grads[a].add(&g.hadamard(&deriv_y));
+                    grads[b] = grads[b].add(&g.hadamard(&deriv_x));
                 }
                 Op::Pow { base, exp } => {
                     let av = &values[base].as_cpu();
@@ -1503,6 +1642,99 @@ impl<'t> Var<'t> {
             tape: self.tape,
             idx: new_idx,
         }
+    }
+
+    pub fn sin(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.sin();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Sin(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn cos(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.cos();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Cos(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn tan(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.tan();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Tan(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn sinh(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.sinh();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Sinh(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn cosh(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.cosh();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Cosh(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn log10(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.log10();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Log10(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn asin(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.asin();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Asin(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn acos(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.acos();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Acos(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn atan(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.atan();
+        let new_idx =
+            self.tape
+                .push_with_saved(Op::Atan(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var { tape: self.tape, idx: new_idx }
+    }
+
+    pub fn atan2(self, x: Var<'t>) -> Var<'t> {
+        let y_val = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let x_val = self.tape.values.borrow()[x.idx].as_cpu().clone();
+        let out = y_val.atan2(&x_val);
+        let new_idx = self.tape.push_with_saved(
+            Op::Atan2(self.idx, x.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var { tape: self.tape, idx: new_idx }
     }
 
     pub fn exp(self) -> Var<'t> {
