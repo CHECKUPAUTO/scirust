@@ -34,6 +34,7 @@ fn matmul_scalar(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
 fn main() {
     // 1. AutoDiff exact (forward-mode Dual)
     println!("=== SciRust Exact AutoDiff (Forward-Mode Dual) ===");
+    println!("square(3.0)                  = {}", square(3.0));
     println!("grad of square at 3.0        = {}", square_grad(3.0));
     println!("expected: 6.0");
     println!("grad of square at 0.0        = {}", square_grad(0.0));
@@ -41,15 +42,17 @@ fn main() {
     println!("grad of square at -2.0       = {}", square_grad(-2.0));
     println!("expected: -4.0");
 
+    println!("rosenbrock(1.0, 1.0)         = {}", rosenbrock(1.0, 1.0));
     let (dx, dy) = rosenbrock_grad(1.0, 1.0);
-    println!("\ngrad of rosenbrock at (1,1)  = ({}, {})", dx, dy);
+    println!("grad of rosenbrock at (1,1)  = ({}, {})", dx, dy);
     println!("expected: (0, 0)");
     let (dx2, dy2) = rosenbrock_grad(0.0, 0.0);
     println!("grad of rosenbrock at (0,0)  = ({}, {})", dx2, dy2);
     println!("expected: (-2, 0)");
 
+    println!("\nneural_activation(1.0)       = {}", neural_activation(1.0));
     let da = neural_activation_grad(1.0);
-    println!("\ngrad of neural_activation at 1.0 = {}", da);
+    println!("grad of neural_activation at 1.0 = {}", da);
     println!("(analytical derivative of exp(sin(x))/(1+x^2))");
 
     // 2. SIMD demo

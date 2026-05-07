@@ -1,4 +1,5 @@
 use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::cell::RefCell;
 
 /// Dual number for forward-mode automatic differentiation.
 ///
@@ -259,6 +260,100 @@ impl Dual {
 }
 
 // ---------------------------------------------------------------------------
+// Reverse-mode AutoDiff
+// ---------------------------------------------------------------------------
+
+/// A node in the computation graph for reverse-mode AD.
+#[derive(Debug)]
+pub struct Node {
+    pub value: f64,
+    pub grad: f64,
+    pub deps: Vec<(usize, f64)>, // (index_in_tape, partial_derivative)
+}
+
+/// Tape (Wengert list) for reverse-mode AD.
+pub struct Tape {
+    pub nodes: RefCell<Vec<Node>>,
+}
+
+impl Tape {
+    pub fn new() -> Self {
+        Tape {
+            nodes: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn var(&self, value: f64) -> Var<'_> {
+        let mut nodes = self.nodes.borrow_mut();
+        let idx = nodes.len();
+        nodes.push(Node {
+            value,
+            grad: 0.0,
+            deps: Vec::new(),
+        });
+        Var { tape: self, idx }
+    }
+
+    pub fn backward(&self, out_idx: usize) {
+        let mut nodes = self.nodes.borrow_mut();
+        for node in nodes.iter_mut() {
+            node.grad = 0.0;
+        }
+        nodes[out_idx].grad = 1.0;
+
+        for i in (0..nodes.len()).rev() {
+            let grad = nodes[i].grad;
+            let deps = nodes[i].deps.clone();
+            for (dep_idx, partial) in deps {
+                nodes[dep_idx].grad += grad * partial;
+            }
+        }
+    }
+}
+
+/// A variable in reverse-mode AD.
+#[derive(Clone, Copy)]
+pub struct Var<'a> {
+    pub tape: &'a Tape,
+    pub idx: usize,
+}
+
+impl<'a> Var<'a> {
+    pub fn value(&self) -> f64 {
+        self.tape.nodes.borrow()[self.idx].value
+    }
+
+    pub fn grad(&self) -> f64 {
+        self.tape.nodes.borrow()[self.idx].grad
+    }
+
+    fn push_op(&self, value: f64, deps: Vec<(usize, f64)>) -> Var<'a> {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        let idx = nodes.len();
+        nodes.push(Node {
+            value,
+            grad: 0.0,
+            deps,
+        });
+        Var { tape: self.tape, idx }
+    }
+}
+
+impl<'a> Add for Var<'a> {
+    type Output = Var<'a>;
+    fn add(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() + rhs.value(), vec![(self.idx, 1.0), (rhs.idx, 1.0)])
+    }
+}
+
+impl<'a> Mul for Var<'a> {
+    type Output = Var<'a>;
+    fn mul(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() * rhs.value(), vec![(self.idx, rhs.value()), (rhs.idx, self.value())])
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Utility: gradient extraction helpers
 // ---------------------------------------------------------------------------
 
@@ -330,5 +425,19 @@ mod tests {
         // d/dx(x² + sin(x)) = 2x + cos(x) = 2 + cos(1) ≈ 2.5403
         let expected = 2.0 + 1.0f64.cos();
         assert!((d - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_reverse_mode_simple() {
+        let tape = Tape::new();
+        let x = tape.var(3.0);
+        let y = tape.var(2.0);
+        let z = x * x + x * y;
+        // z = x^2 + xy
+        // dz/dx = 2x + y = 2(3) + 2 = 8
+        // dz/dy = x = 3
+        tape.backward(z.idx);
+        assert_eq!(x.grad(), 8.0);
+        assert_eq!(y.grad(), 3.0);
     }
 }

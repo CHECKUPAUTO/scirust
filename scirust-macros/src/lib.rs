@@ -21,13 +21,20 @@ impl VisitMut for ArgReplacer {
         }
         // Replace float literals with Dual::primal(literal)
         if let Expr::Lit(ExprLit { lit: Lit::Float(lit_float), .. }) = expr {
-            let val = &lit_float.base10_parse::<f64>().unwrap();
-            let lit_str = format!("{:.}", val);
-            *expr = syn::parse_quote! {
-                scirust_autodiff::Dual::primal(#lit_str.parse::<f64>().unwrap())
-            };
-            return;
+            if let Ok(val) = lit_float.base10_parse::<f64>() {
+                *expr = syn::parse_quote! {
+                    scirust_autodiff::Dual::primal(#val)
+                };
+                return;
+            }
         }
+        // Handle integer literals
+        // CAUTION: Some integers might be used in context where Dual is not expected (like .powi(2))
+        // We need to be careful. In MIR this is easier, but in AST we don't know the context easily.
+        // However, for scientific code, many ints are meant to be primals.
+        // Let's try to only convert them if they are not inside a method call that expects i32.
+        // This is hard to do perfectly in AST.
+
         syn::visit_mut::visit_expr_mut(self, expr);
     }
 }
@@ -39,7 +46,7 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_name = &sig.ident;
 
     // Collect argument info: (ident, type_is_f64)
-    let mut arg_info: Vec<(Ident, bool)> = Vec::new();
+    let mut arg_names = Vec::new();
     for arg in &sig.inputs {
         match arg {
             FnArg::Typed(PatType { pat, ty, .. }) => {
@@ -49,184 +56,86 @@ pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     } else {
                         false
                     };
-                    arg_info.push((pat_ident.ident.clone(), is_f64));
+                    if !is_f64 {
+                        return syn::Error::new_spanned(ty, "autodiff currently only supports f64 arguments")
+                            .to_compile_error()
+                            .into();
+                    }
+                    arg_names.push(pat_ident.ident.clone());
                 } else {
-                    panic!("autodiff only supports simple identifier arguments");
+                    return syn::Error::new_spanned(pat, "autodiff only supports simple identifier arguments")
+                        .to_compile_error()
+                        .into();
                 }
             }
             FnArg::Receiver(_) => {
-                panic!("autodiff does not support `self` parameters");
+                return syn::Error::new_spanned(arg, "autodiff does not support `self` parameters")
+                    .to_compile_error()
+                    .into();
             }
         }
     }
 
-    let num_args = arg_info.len();
-    if num_args == 0 || num_args > 4 {
-        panic!("autodiff supports functions with 1 to 4 f64 arguments");
-    }
-
-    // Check all args are f64
-    for (_, is_f64) in &arg_info {
-        if !is_f64 {
-            panic!("autodiff currently only supports f64 arguments");
-        }
+    if arg_names.is_empty() {
+        return syn::Error::new_spanned(&sig.ident, "autodiff requires at least one argument")
+            .to_compile_error()
+            .into();
     }
 
     let vis = &input_fn.vis;
     let grad_fn_name = format_ident!("{}_grad", fn_name);
+    let dual_names: Vec<_> = arg_names.iter().map(|name| format_ident!("{}_dual", name)).collect();
 
-    match num_args {
-        1 => {
-            let arg_name = &arg_info[0].0;
-            let dual_name = format_ident!("{}_dual", arg_name);
-
-            let mut arg_map = std::collections::HashMap::new();
-            arg_map.insert(arg_name.clone(), dual_name.clone());
-
-            let mut replacer = ArgReplacer { arg_map };
-            let mut body = input_fn.block.clone();
-            replacer.visit_block_mut(&mut body);
-
-            let expanded = quote! {
-                #input_fn
-
-                #vis fn #grad_fn_name(#arg_name: f64) -> f64 {
-                    use scirust_autodiff::Dual;
-                    let #dual_name = Dual::var(#arg_name);
-                    let result = #body;
-                    result.grad()
-                }
-            };
-
-            TokenStream::from(expanded)
-        }
-        2 => {
-            let arg1 = &arg_info[0].0;
-            let arg2 = &arg_info[1].0;
-            let dual1 = format_ident!("{}_dual", arg1);
-            let dual2 = format_ident!("{}_dual", arg2);
-
-            // dx: arg1 is active, arg2 is passive
-            let mut arg_map_dx = std::collections::HashMap::new();
-            arg_map_dx.insert(arg1.clone(), dual1.clone());
-            arg_map_dx.insert(arg2.clone(), dual2.clone());
-            let mut replacer_dx = ArgReplacer { arg_map: arg_map_dx };
-            let mut body_dx = input_fn.block.clone();
-            replacer_dx.visit_block_mut(&mut body_dx);
-
-            // dy: arg1 is passive, arg2 is active
-            let mut arg_map_dy = std::collections::HashMap::new();
-            arg_map_dy.insert(arg1.clone(), dual1.clone());
-            arg_map_dy.insert(arg2.clone(), dual2.clone());
-            let mut replacer_dy = ArgReplacer { arg_map: arg_map_dy };
-            let mut body_dy = input_fn.block.clone();
-            replacer_dy.visit_block_mut(&mut body_dy);
-
-            let expanded = quote! {
-                #input_fn
-
-                #vis fn #grad_fn_name(#arg1: f64, #arg2: f64) -> (f64, f64) {
-                    use scirust_autodiff::Dual;
-                    let #dual1 = Dual::var(#arg1);
-                    let #dual2 = Dual::primal(#arg2);
-                    let result_dx = #body_dx;
-                    let #dual1 = Dual::primal(#arg1);
-                    let #dual2 = Dual::var(#arg2);
-                    let result_dy = #body_dy;
-                    (result_dx.grad(), result_dy.grad())
-                }
-            };
-
-            TokenStream::from(expanded)
-        }
-        3 => {
-            let a1 = &arg_info[0].0;
-            let a2 = &arg_info[1].0;
-            let a3 = &arg_info[2].0;
-            let d1 = format_ident!("{}_dual", a1);
-            let d2 = format_ident!("{}_dual", a2);
-            let d3 = format_ident!("{}_dual", a3);
-
-            let mut arg_map = std::collections::HashMap::new();
-            arg_map.insert(a1.clone(), d1.clone());
-            arg_map.insert(a2.clone(), d2.clone());
-            arg_map.insert(a3.clone(), d3.clone());
-
-            let make_body = |active: usize| {
-                let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
-                let mut body = input_fn.block.clone();
-                replacer.visit_block_mut(&mut body);
-                body
-            };
-
-            let body_dx = make_body(0);
-            let body_dy = make_body(1);
-            let body_dz = make_body(2);
-
-            let expanded = quote! {
-                #input_fn
-
-                #vis fn #grad_fn_name(#a1: f64, #a2: f64, #a3: f64) -> (f64, f64, f64) {
-                    use scirust_autodiff::Dual;
-                    let #d1 = Dual::var(#a1); let #d2 = Dual::primal(#a2); let #d3 = Dual::primal(#a3);
-                    let result_dx = #body_dx;
-                    let #d1 = Dual::primal(#a1); let #d2 = Dual::var(#a2); let #d3 = Dual::primal(#a3);
-                    let result_dy = #body_dy;
-                    let #d1 = Dual::primal(#a1); let #d2 = Dual::primal(#a2); let #d3 = Dual::var(#a3);
-                    let result_dz = #body_dz;
-                    (result_dx.grad(), result_dy.grad(), result_dz.grad())
-                }
-            };
-
-            TokenStream::from(expanded)
-        }
-        4 => {
-            let a1 = &arg_info[0].0;
-            let a2 = &arg_info[1].0;
-            let a3 = &arg_info[2].0;
-            let a4 = &arg_info[3].0;
-            let d1 = format_ident!("{}_dual", a1);
-            let d2 = format_ident!("{}_dual", a2);
-            let d3 = format_ident!("{}_dual", a3);
-            let d4 = format_ident!("{}_dual", a4);
-
-            let mut arg_map = std::collections::HashMap::new();
-            arg_map.insert(a1.clone(), d1.clone());
-            arg_map.insert(a2.clone(), d2.clone());
-            arg_map.insert(a3.clone(), d3.clone());
-            arg_map.insert(a4.clone(), d4.clone());
-
-            let make_body = || {
-                let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
-                let mut body = input_fn.block.clone();
-                replacer.visit_block_mut(&mut body);
-                body
-            };
-
-            let b_dx = make_body();
-            let b_dy = make_body();
-            let b_dz = make_body();
-            let b_dw = make_body();
-
-            let expanded = quote! {
-                #input_fn
-
-                #vis fn #grad_fn_name(#a1: f64, #a2: f64, #a3: f64, #a4: f64) -> (f64, f64, f64, f64) {
-                    use scirust_autodiff::Dual;
-                    let #d1 = Dual::var(#a1); let #d2 = Dual::primal(#a2); let #d3 = Dual::primal(#a3); let #d4 = Dual::primal(#a4);
-                    let r_dx = #b_dx;
-                    let #d1 = Dual::primal(#a1); let #d2 = Dual::var(#a2); let #d3 = Dual::primal(#a3); let #d4 = Dual::primal(#a4);
-                    let r_dy = #b_dy;
-                    let #d1 = Dual::primal(#a1); let #d2 = Dual::primal(#a2); let #d3 = Dual::var(#a3); let #d4 = Dual::primal(#a4);
-                    let r_dz = #b_dz;
-                    let #d1 = Dual::primal(#a1); let #d2 = Dual::primal(#a2); let #d3 = Dual::primal(#a3); let #d4 = Dual::var(#a4);
-                    let r_dw = #b_dw;
-                    (r_dx.grad(), r_dy.grad(), r_dz.grad(), r_dw.grad())
-                }
-            };
-
-            TokenStream::from(expanded)
-        }
-        _ => unreachable!(),
+    let mut arg_map = std::collections::HashMap::new();
+    for (name, dual) in arg_names.iter().zip(dual_names.iter()) {
+        arg_map.insert(name.clone(), dual.clone());
     }
+
+    let mut transformed_bodies = Vec::new();
+    for i in 0..arg_names.len() {
+        let mut replacer = ArgReplacer { arg_map: arg_map.clone() };
+        let mut body = input_fn.block.clone();
+        replacer.visit_block_mut(&mut body);
+
+        let dual_inits = dual_names.iter().enumerate().map(|(j, dname)| {
+            let aname = &arg_names[j];
+            if i == j {
+                quote! { let #dname = scirust_autodiff::Dual::var(#aname); }
+            } else {
+                quote! { let #dname = scirust_autodiff::Dual::primal(#aname); }
+            }
+        });
+
+        transformed_bodies.push(quote! {
+            {
+                #(#dual_inits)*
+                let result: scirust_autodiff::Dual = #body;
+                result.grad()
+            }
+        });
+    }
+
+    let inputs = &sig.inputs;
+    let return_type = if arg_names.len() == 1 {
+        quote! { f64 }
+    } else {
+        let types = vec![quote! { f64 }; arg_names.len()];
+        quote! { (#(#types),*) }
+    };
+
+    let return_value = if arg_names.len() == 1 {
+        quote! { #(#transformed_bodies)* }
+    } else {
+        quote! { (#(#transformed_bodies),*) }
+    };
+
+    let expanded = quote! {
+        #input_fn
+
+        #vis fn #grad_fn_name(#inputs) -> #return_type {
+            #return_value
+        }
+    };
+
+    TokenStream::from(expanded)
 }
