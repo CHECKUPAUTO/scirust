@@ -337,6 +337,29 @@ impl<'a> Var<'a> {
         });
         Var { tape: self.tape, idx }
     }
+
+    pub fn powi(self, n: i32) -> Var<'a> {
+        let val = self.value().powi(n);
+        let deriv = n as f64 * self.value().powi(n - 1);
+        self.push_op(val, vec![(self.idx, deriv)])
+    }
+
+    pub fn exp(self) -> Var<'a> {
+        let val = self.value().exp();
+        self.push_op(val, vec![(self.idx, val)])
+    }
+
+    pub fn sin(self) -> Var<'a> {
+        let val = self.value().sin();
+        let deriv = self.value().cos();
+        self.push_op(val, vec![(self.idx, deriv)])
+    }
+
+    pub fn cos(self) -> Var<'a> {
+        let val = self.value().cos();
+        let deriv = -self.value().sin();
+        self.push_op(val, vec![(self.idx, deriv)])
+    }
 }
 
 impl<'a> Add for Var<'a> {
@@ -346,10 +369,34 @@ impl<'a> Add for Var<'a> {
     }
 }
 
+impl<'a> Sub for Var<'a> {
+    type Output = Var<'a>;
+    fn sub(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() - rhs.value(), vec![(self.idx, 1.0), (rhs.idx, -1.0)])
+    }
+}
+
 impl<'a> Mul for Var<'a> {
     type Output = Var<'a>;
     fn mul(self, rhs: Var<'a>) -> Var<'a> {
         self.push_op(self.value() * rhs.value(), vec![(self.idx, rhs.value()), (rhs.idx, self.value())])
+    }
+}
+
+impl<'a> Div for Var<'a> {
+    type Output = Var<'a>;
+    fn div(self, rhs: Var<'a>) -> Var<'a> {
+        let val = self.value() / rhs.value();
+        let d_lhs = 1.0 / rhs.value();
+        let d_rhs = -self.value() / (rhs.value() * rhs.value());
+        self.push_op(val, vec![(self.idx, d_lhs), (rhs.idx, d_rhs)])
+    }
+}
+
+impl<'a> Neg for Var<'a> {
+    type Output = Var<'a>;
+    fn neg(self) -> Var<'a> {
+        self.push_op(-self.value(), vec![(self.idx, -1.0)])
     }
 }
 
@@ -439,5 +486,20 @@ mod tests {
         tape.backward(z.idx);
         assert_eq!(x.grad(), 8.0);
         assert_eq!(y.grad(), 3.0);
+    }
+
+    #[test]
+    fn test_reverse_mode_complex() {
+        let tape = Tape::new();
+        let x = tape.var(1.0);
+        let y = (x.sin() * x.exp()) / x.powi(2);
+        // d/dx(sin(x)e^x / x^2)
+        // = ( (cos(x)e^x + sin(x)e^x)x^2 - 2x sin(x)e^x ) / x^4
+        // at x=1:
+        // = ( (cos(1)e + sin(1)e) - 2 sin(1)e ) / 1
+        // = e * (cos(1) - sin(1))
+        tape.backward(y.idx);
+        let expected = 1.0f64.exp() * (1.0f64.cos() - 1.0f64.sin());
+        assert!((x.grad() - expected).abs() < 1e-10);
     }
 }

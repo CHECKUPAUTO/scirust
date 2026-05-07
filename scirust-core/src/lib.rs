@@ -48,6 +48,33 @@ impl Tensor {
             shape: self.shape.clone(),
         }
     }
+
+    /// Matrix multiplication for 2D tensors.
+    pub fn matmul(&self, rhs: &Tensor) -> Tensor {
+        assert_eq!(self.shape.len(), 2, "LHS must be 2D for matmul");
+        assert_eq!(rhs.shape.len(), 2, "RHS must be 2D for matmul");
+        let m = self.shape[0];
+        let k = self.shape[1];
+        let n = rhs.shape[1];
+        assert_eq!(k, rhs.shape[0], "Inner dimensions must match for matmul");
+
+        let mut out_data = vec![0.0; m * n];
+        unsafe {
+            matrixmultiply::dgemm(
+                m, k, n,
+                1.0,
+                self.data.as_ptr(), k as isize, 1,
+                rhs.data.as_ptr(), n as isize, 1,
+                0.0,
+                out_data.as_mut_ptr(), n as isize, 1,
+            );
+        }
+
+        Tensor {
+            data: out_data,
+            shape: vec![m, n],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -69,5 +96,16 @@ mod tests {
         let t2 = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
         let t3 = t1.mul(&t2);
         assert_eq!(t3.data, vec![5.0, 12.0, 21.0, 32.0]);
+    }
+
+    #[test]
+    fn test_tensor_matmul() {
+        // [1 2]   [5 6]   [1*5+2*7 1*6+2*8]   [19 22]
+        // [3 4] * [7 8] = [3*5+4*7 3*6+4*8] = [43 50]
+        let t1 = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let t2 = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
+        let t3 = t1.matmul(&t2);
+        assert_eq!(t3.data, vec![19.0, 22.0, 43.0, 50.0]);
+        assert_eq!(t3.shape, vec![2, 2]);
     }
 }

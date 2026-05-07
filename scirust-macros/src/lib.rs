@@ -11,8 +11,8 @@ struct ArgReplacer {
 impl VisitMut for ArgReplacer {
     fn visit_expr_mut(&mut self, expr: &mut Expr) {
         if let Expr::Path(expr_path) = expr {
-            if expr_path.path.get_ident().is_some() {
-                let ident = expr_path.path.get_ident().unwrap();
+            if expr_path.path.leading_colon.is_none() && expr_path.path.segments.len() == 1 {
+                let ident = &expr_path.path.segments[0].ident;
                 if let Some(new_ident) = self.arg_map.get(ident) {
                     expr_path.path = syn::parse_quote!(#new_ident);
                     return;
@@ -28,20 +28,17 @@ impl VisitMut for ArgReplacer {
                 return;
             }
         }
-        // Handle integer literals
-        // CAUTION: Some integers might be used in context where Dual is not expected (like .powi(2))
-        // We need to be careful. In MIR this is easier, but in AST we don't know the context easily.
-        // However, for scientific code, many ints are meant to be primals.
-        // Let's try to only convert them if they are not inside a method call that expects i32.
-        // This is hard to do perfectly in AST.
-
         syn::visit_mut::visit_expr_mut(self, expr);
     }
 }
 
 #[proc_macro_attribute]
 pub fn autodiff(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input_fn = parse_macro_input!(item as ItemFn);
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+
+    // Remove #[autodiff] from the input function to avoid infinite recursion
+    input_fn.attrs.retain(|attr| !attr.path().is_ident("autodiff"));
+
     let sig = &input_fn.sig;
     let fn_name = &sig.ident;
 
