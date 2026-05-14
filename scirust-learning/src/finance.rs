@@ -108,6 +108,37 @@ pub fn macd(data: &[f64], fast_period: usize, slow_period: usize, signal_period:
     results
 }
 
+/// Kelly Criterion for position sizing
+/// win_prob: probability of winning (0.0 to 1.0)
+/// win_loss_ratio: ratio of average win to average loss (b in formula)
+/// Returns the fraction of the capital to bet.
+pub fn kelly_criterion(win_prob: f64, win_loss_ratio: f64) -> f64 {
+    if win_loss_ratio <= 0.0 {
+        return 0.0;
+    }
+    let f = (win_prob * (win_loss_ratio + 1.0) - 1.0) / win_loss_ratio;
+    f.max(0.0)
+}
+
+/// Value at Risk (VaR) using the historical simulation method
+/// data: historical returns
+/// confidence_level: e.g., 0.95 for 95% confidence
+pub fn value_at_risk(returns: &[f64], confidence_level: f64) -> f64 {
+    if returns.is_empty() {
+        return 0.0;
+    }
+    let mut sorted_returns = returns.to_vec();
+    sorted_returns.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let alpha = 1.0 - confidence_level;
+    let index = ((alpha * sorted_returns.len() as f64) + 1e-10).floor() as usize;
+
+    if index >= sorted_returns.len() {
+        return 0.0;
+    }
+    -sorted_returns[index]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +192,27 @@ mod tests {
             assert!(s.abs() < 1e-10);
             assert!(h.abs() < 1e-10);
         }
+    }
+
+    #[test]
+    fn test_kelly_criterion() {
+        // Example: win_prob = 0.6, win_loss_ratio = 1.0 (even money)
+        // f = (0.6 * (1 + 1) - 1) / 1 = (1.2 - 1) / 1 = 0.2
+        let f = kelly_criterion(0.6, 1.0);
+        assert!((f - 0.2).abs() < 1e-10);
+
+        // Negative expectation should return 0
+        let f_neg = kelly_criterion(0.4, 1.0);
+        assert_eq!(f_neg, 0.0);
+    }
+
+    #[test]
+    fn test_value_at_risk() {
+        let returns = vec![-0.05, -0.02, 0.01, 0.03, 0.05, -0.10, 0.02, 0.04, -0.01, 0.01];
+        // Sorted: [-0.10, -0.05, -0.02, -0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.04, 0.05]
+        // Len = 10. confidence = 0.90 => alpha = 0.10. Index = floor(0.1 * 10) = 1
+        // returns[1] = -0.05. VaR = 0.05
+        let var = value_at_risk(&returns, 0.90);
+        assert!((var - 0.05).abs() < 1e-10);
     }
 }
