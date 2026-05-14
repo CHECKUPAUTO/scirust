@@ -21,6 +21,7 @@ pub mod attention;
 pub mod block;
 pub mod decoder;
 pub mod encoder;
+pub mod mini_llm;
 
 pub use attention::MultiHeadAttention;
 pub use block::TransformerBlock;
