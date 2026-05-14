@@ -42,7 +42,125 @@ pub trait SimdBackend: Send + Sync {
     /// ReLU in-place
     fn relu_f32(&self, v: &mut [f32]);
 
+    /// Décomposition de Cholesky : A = L * L^T (A doit être symétrique définie positive)
+    /// Remplace A par sa partie triangulaire inférieure L.
+    fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()>;
+
     fn name(&self) -> &'static str;
+}
+
+// ------------------------------------------------------------------ //
+//  BlasBackend — backend utilisant BLAS (OpenBLAS/MKL)                //
+// ------------------------------------------------------------------ //
+
+#[cfg(feature = "blas")]
+pub struct BlasBackend;
+
+#[cfg(feature = "blas")]
+impl SimdBackend for BlasBackend {
+    fn name(&self) -> &'static str {
+        "blas"
+    }
+
+    #[inline]
+    fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
+        unsafe {
+            blas::saxpy(x.len() as i32, alpha, x, 1, y, 1);
+        }
+    }
+
+    #[inline]
+    fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
+        unsafe {
+            blas::daxpy(x.len() as i32, alpha, x, 1, y, 1);
+        }
+    }
+
+    #[inline]
+    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
+        unsafe { blas::sdot(x.len() as i32, x, 1, y, 1) }
+    }
+
+    #[inline]
+    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
+        unsafe { blas::ddot(x.len() as i32, x, 1, y, 1) }
+    }
+
+    fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
+        let (m, k) = a.shape();
+        assert_eq!(x.len(), k);
+        assert_eq!(y.len(), m);
+
+        // BLAS needs contiguous storage.
+        if a.col_stride() == 1 {
+            unsafe {
+                blas::sgemv(
+                    b'T',
+                    k as i32,
+                    m as i32,
+                    alpha,
+                    std::slice::from_raw_parts(a.as_ptr(), m * a.row_stride()),
+                    a.row_stride() as i32,
+                    x,
+                    1,
+                    beta,
+                    y,
+                    1,
+                );
+            }
+        } else {
+            // Fallback for non-contiguous views
+            ScalarBackend.sgemv_f32(alpha, a, x, beta, y);
+        }
+    }
+
+    fn sgemm_f32(
+        &self,
+        alpha: f32,
+        a: MatrixView<f32>,
+        b: MatrixView<f32>,
+        beta: f32,
+        mut c: MatrixViewMut<f32>,
+    ) {
+        let (m, k) = a.shape();
+        let (_k, n) = b.shape();
+        assert_eq!(k, _k);
+        assert_eq!(c.shape(), (m, n));
+
+        if a.col_stride() == 1 && b.col_stride() == 1 && c.col_stride() == 1 {
+            unsafe {
+                blas::sgemm(
+                    b'N',
+                    b'N',
+                    n as i32,
+                    m as i32,
+                    k as i32,
+                    alpha,
+                    std::slice::from_raw_parts(b.as_ptr(), b.rows() * b.row_stride()),
+                    b.row_stride() as i32,
+                    std::slice::from_raw_parts(a.as_ptr(), a.rows() * a.row_stride()),
+                    a.row_stride() as i32,
+                    beta,
+                    std::slice::from_raw_parts_mut(c.as_mut_ptr(), c.rows() * c.row_stride()),
+                    c.row_stride() as i32,
+                );
+            }
+        } else {
+            ScalarBackend.sgemm_f32(alpha, a, b, beta, c);
+        }
+    }
+
+    fn relu_f32(&self, v: &mut [f32]) {
+        for x in v.iter_mut() {
+            if *x < 0.0 {
+                *x = 0.0;
+            }
+        }
+    }
+
+    fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
+        ScalarBackend.cholesky_f64(a)
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -106,6 +224,44 @@ impl SimdBackend for ScalarBackend {
         assert_eq!(k, _k);
         assert_eq!(c.shape(), (m, n));
 
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+
+            // Safety check for parallelization:
+            // We need to ensure c is contiguous for the simple pointer arithmetic used.
+            if c.col_stride() == 1 {
+                // Wrap MatrixView to ensure they are moved and accessible
+                #[derive(Copy, Clone)]
+                struct SendView<'a>(MatrixView<'a, f32>);
+                unsafe impl<'a> Send for SendView<'a> {}
+                unsafe impl<'a> Sync for SendView<'a> {}
+
+                let ptr_c_raw = c.as_mut_ptr() as usize;
+                let view_a = SendView(a);
+                let view_b = SendView(b);
+                let row_stride_c = c.row_stride();
+
+                (0..m).into_par_iter().for_each(move |i| {
+                    let a = view_a.0;
+                    let b = view_b.0;
+                    unsafe {
+                        let row_c_ptr = (ptr_c_raw as *mut f32).add(i * row_stride_c);
+                        for j in 0..n {
+                            let mut acc = 0.0f32;
+                            for p in 0..k {
+                                acc += a[(i, p)] * b[(p, j)];
+                            }
+                            let val_c = row_c_ptr.add(j);
+                            *val_c = alpha * acc + beta * *val_c;
+                        }
+                    }
+                });
+                return;
+            }
+        }
+
+        // Sequential fallback
         for i in 0..m {
             for j in 0..n {
                 let mut acc = 0.0f32;
@@ -121,6 +277,34 @@ impl SimdBackend for ScalarBackend {
         for x in v.iter_mut() {
             *x = x.max(0.0);
         }
+    }
+
+    fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
+        let n = a.len();
+        for i in 0..n {
+            for j in 0..=i {
+                let mut sum = a[i][j];
+                for k in 0..j {
+                    sum -= a[i][k] * a[j][k];
+                }
+
+                if i == j {
+                    if sum <= 0.0 {
+                        return None; // Non définie positive
+                    }
+                    a[i][j] = sum.sqrt();
+                } else {
+                    a[i][j] = sum / a[j][j];
+                }
+            }
+        }
+        // Nettoyage de la partie supérieure
+        for i in 0..n {
+            for j in (i + 1)..n {
+                a[i][j] = 0.0;
+            }
+        }
+        Some(())
     }
 }
 
@@ -262,6 +446,10 @@ impl SimdBackend for PortableSimdBackend {
             *x = x.max(0.0);
         }
     }
+
+    fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
+        ScalarBackend.cholesky_f64(a)
+    }
 }
 
 // ------------------------------------------------------------------ //
@@ -270,12 +458,17 @@ impl SimdBackend for PortableSimdBackend {
 
 /// Renvoie le backend le plus performant disponible à la compilation.
 pub fn best_backend() -> &'static dyn SimdBackend {
-    #[cfg(feature = "portable-simd")]
+    #[cfg(feature = "blas")]
+    {
+        &BlasBackend
+    }
+
+    #[cfg(all(not(feature = "blas"), feature = "portable-simd"))]
     {
         &PortableSimdBackend
     }
 
-    #[cfg(not(feature = "portable-simd"))]
+    #[cfg(all(not(feature = "blas"), not(feature = "portable-simd")))]
     {
         &ScalarBackend
     }
@@ -324,5 +517,21 @@ mod tests {
         backend().sgemm_f32(1.0, ia, av, 0.0, cv);
         assert!((c[0] - 3.0).abs() < 1e-6);
         assert!((c[3] - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cholesky() {
+        // A = [[4, 12, -16], [12, 37, -43], [-16, -43, 98]]
+        // L = [[2, 0, 0], [6, 1, 0], [-8, 5, 3]]
+        let mut a = vec![
+            vec![4.0, 12.0, -16.0],
+            vec![12.0, 37.0, -43.0],
+            vec![-16.0, -43.0, 98.0],
+        ];
+        backend().cholesky_f64(&mut a).unwrap();
+
+        assert_eq!(a[0], vec![2.0, 0.0, 0.0]);
+        assert_eq!(a[1], vec![6.0, 1.0, 0.0]);
+        assert_eq!(a[2], vec![-8.0, 5.0, 3.0]);
     }
 }
