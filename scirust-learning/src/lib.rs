@@ -3,7 +3,10 @@
 //! Provides lightweight regression and pattern-detection utilities
 //! that depend only on `std` and `serde`.
 
+pub mod control;
+pub mod finance;
 pub mod pattern_miner;
+pub mod time_series;
 
 use serde::{Deserialize, Serialize};
 
