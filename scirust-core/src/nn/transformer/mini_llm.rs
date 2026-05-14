@@ -8,7 +8,7 @@ use crate::nn::module::Module;
 use crate::nn::positional_encoding::PositionalEncoding;
 use crate::nn::rng::PcgEngine;
 use crate::nn::transformer::encoder::TransformerEncoder;
-use crate::tensor::tensor3d::{Tensor3D, Var3D};
+use crate::tensor::tensor3d::Var3D;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone)]
@@ -120,6 +120,39 @@ impl MiniLLM {
                 let idx = i * c + j;
                 let v = if idx < vals.data.len() { vals.data[idx] } else { 0.0 };
                 out.data[i * self.config.vocab_size + j] = if v.is_finite() { v } else { 0.0 };
+            }
+        }
+        out
+    }
+
+    /// Forward pass returning hidden states (after LayerNorm, before lm_head).
+    /// Returns Tensor of shape (seq_len, d_model).
+    pub fn forward_hidden(&mut self, input_ids: &[usize]) -> Tensor {
+        let seq_len = input_ids.len().max(1);
+        let tape = Tape::new();
+
+        let mut data = vec![0.0f32; seq_len];
+        for (i, &id) in input_ids.iter().enumerate() {
+            data[i] = id as f32;
+        }
+        let t = tape.input(Tensor::from_vec(data, seq_len, 1));
+
+        let embedded = self.embed.forward(&tape, t);
+        let positioned = self.pos_enc.forward(&tape, embedded, seq_len);
+        let x_3d = Var3D::from_var(positioned, 1, seq_len, self.config.d_model);
+        let enc_3d = self.encoder.forward_3d(&tape, x_3d);
+        let n = self.ln_f.forward(&tape, enc_3d.var);
+
+        // Extract hidden states from tape
+        let (r, c) = n.shape();
+        let nrows = r.min(seq_len);
+        let mut out = Tensor::zeros(nrows.max(1), self.config.d_model);
+        let vals = tape.value(n.idx());
+        for i in 0..nrows {
+            for j in 0..self.config.d_model.min(c) {
+                let idx = i * c + j;
+                let v = if idx < vals.data.len() { vals.data[idx] } else { 0.0 };
+                out.data[i * self.config.d_model + j] = if v.is_finite() { v } else { 0.0 };
             }
         }
         out

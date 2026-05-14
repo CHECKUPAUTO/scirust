@@ -17,6 +17,7 @@ pub mod autodiff;
 // pub mod lazy;
 
 pub mod data;
+pub mod embed;
 pub mod tensor;
 
 pub mod error;
