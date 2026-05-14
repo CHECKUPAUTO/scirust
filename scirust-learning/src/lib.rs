@@ -95,6 +95,17 @@ fn gauss_elim(a: &mut [Vec<f64>], b: &mut [f64]) -> Option<()> {
 /// Returns an empty vector when either input is empty, the two slices have
 /// different lengths, or the system is singular (e.g. not enough distinct
 /// points).
+///
+/// # Exemple
+/// ```
+/// use scirust_learning::polynomial_fit;
+/// let x = vec![0.0, 1.0, 2.0];
+/// let y = vec![1.0, 2.0, 5.0]; // y = x^2 + 1
+/// let coeffs = polynomial_fit(&x, &y, 2);
+/// assert!((coeffs[0] - 1.0).abs() < 1e-10);
+/// assert!((coeffs[1] - 0.0).abs() < 1e-10);
+/// assert!((coeffs[2] - 1.0).abs() < 1e-10);
+/// ```
 pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
     if x.is_empty() || y.is_empty() || x.len() != y.len() {
         return vec![];
@@ -153,6 +164,16 @@ pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
 /// Returns `(slope, intercept)`.
 /// Returns `(0.0, 0.0)` when there are fewer than 2 points or slices have
 /// different lengths.
+///
+/// # Exemple
+/// ```
+/// use scirust_learning::linear_regression;
+/// let x = vec![1.0, 2.0, 3.0];
+/// let y = vec![2.0, 4.0, 6.0];
+/// let (slope, intercept) = linear_regression(&x, &y);
+/// assert!((slope - 2.0).abs() < 1e-10);
+/// assert!(intercept.abs() < 1e-10);
+/// ```
 pub fn linear_regression(x: &[f64], y: &[f64]) -> (f64, f64) {
     if x.len() < 2 || y.len() < 2 || x.len() != y.len() {
         return (0.0, 0.0);

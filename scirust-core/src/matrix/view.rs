@@ -53,6 +53,21 @@ unsafe impl<'a, T: Sync> Send for MatrixView<'a, T> {}
 unsafe impl<'a, T: Sync> Sync for MatrixView<'a, T> {}
 
 impl<'a, T> MatrixView<'a, T> {
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn row_stride(&self) -> usize {
+        self.row_stride
+    }
+
+    #[inline]
+    pub fn col_stride(&self) -> usize {
+        self.col_stride
+    }
+
     /// Crée une vue row-major standard sur un slice.
     /// Précondition : data.len() >= rows * cols
     #[inline]
@@ -190,6 +205,44 @@ pub struct MatrixViewMut<'a, T> {
 unsafe impl<'a, T: Send> Send for MatrixViewMut<'a, T> {}
 
 impl<'a, T> MatrixViewMut<'a, T> {
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr as *const T
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn row_stride(&self) -> usize {
+        self.row_stride
+    }
+
+    #[inline]
+    pub fn col_stride(&self) -> usize {
+        self.col_stride
+    }
+
+    #[inline]
+    pub unsafe fn from_raw_parts(
+        ptr: *mut T,
+        rows: usize,
+        cols: usize,
+        row_stride: usize,
+        col_stride: usize,
+    ) -> Self {
+        Self {
+            ptr,
+            rows,
+            cols,
+            row_stride,
+            col_stride,
+            _marker: PhantomData,
+        }
+    }
+
     #[inline]
     pub fn from_slice(data: &'a mut [T], rows: usize, cols: usize) -> Self {
         assert!(data.len() >= rows * cols);
