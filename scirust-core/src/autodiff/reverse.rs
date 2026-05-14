@@ -54,18 +54,26 @@ impl Tensor {
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::add shape mismatch");
         let mut out = self.clone();
-        for (a, b) in out.data.iter_mut().zip(&other.data) {
+        out.add_assign(other);
+        out
+    }
+    pub fn add_assign(&mut self, other: &Tensor) {
+        assert_eq!(self.shape(), other.shape(), "Tensor::add_assign shape mismatch");
+        for (a, b) in self.data.iter_mut().zip(&other.data) {
             *a += b;
         }
-        out
     }
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::sub shape mismatch");
         let mut out = self.clone();
-        for (a, b) in out.data.iter_mut().zip(&other.data) {
+        out.sub_assign(other);
+        out
+    }
+    pub fn sub_assign(&mut self, other: &Tensor) {
+        assert_eq!(self.shape(), other.shape(), "Tensor::sub_assign shape mismatch");
+        for (a, b) in self.data.iter_mut().zip(&other.data) {
             *a -= b;
         }
-        out
     }
     pub fn mul(&self, other: &Tensor) -> Tensor {
         self.hadamard(other)
@@ -85,10 +93,18 @@ impl Tensor {
             "Tensor::hadamard shape mismatch"
         );
         let mut out = self.clone();
-        for (a, b) in out.data.iter_mut().zip(&other.data) {
+        out.hadamard_assign(other);
+        out
+    }
+    pub fn hadamard_assign(&mut self, other: &Tensor) {
+        assert_eq!(
+            self.shape(),
+            other.shape(),
+            "Tensor::hadamard_assign shape mismatch"
+        );
+        for (a, b) in self.data.iter_mut().zip(&other.data) {
             *a *= b;
         }
-        out
     }
     pub fn neg(&self) -> Tensor {
         self.scale(-1.0)
@@ -226,12 +242,11 @@ impl Tensor {
     pub fn sum_axis(&self, axis: u8) -> Tensor {
         if axis == 0 {
             let mut out = Tensor::zeros(1, self.cols);
-            for c in 0..self.cols {
-                let mut s = 0.0f32;
-                for r in 0..self.rows {
-                    s += self.data[r * self.cols + c];
+            for r in 0..self.rows {
+                let row_off = r * self.cols;
+                for c in 0..self.cols {
+                    out.data[c] += self.data[row_off + c];
                 }
-                out.data[c] = s;
             }
             out
         } else {
@@ -259,12 +274,14 @@ impl Tensor {
     pub fn max_axis(&self, axis: u8) -> Tensor {
         if axis == 0 {
             let mut out = Tensor::zeros(1, self.cols);
-            for c in 0..self.cols {
-                let mut m = self.data[c];
+            if self.rows > 0 {
+                out.data.copy_from_slice(&self.data[0..self.cols]);
                 for r in 1..self.rows {
-                    m = m.max(self.data[r * self.cols + c]);
+                    let row_off = r * self.cols;
+                    for c in 0..self.cols {
+                        out.data[c] = out.data[c].max(self.data[row_off + c]);
+                    }
                 }
-                out.data[c] = m;
             }
             out
         } else {
@@ -738,101 +755,107 @@ impl Tape {
             match nodes[i].op {
                 Op::Input => {}
                 Op::Add(a, b) => {
-                    grads[a] = grads[a].add(&g);
-                    grads[b] = grads[b].add(&g);
+                    grads[a].add_assign(&g);
+                    grads[b].add_assign(&g);
                 }
                 Op::Sub(a, b) => {
-                    grads[a] = grads[a].add(&g);
-                    grads[b] = grads[b].sub(&g);
+                    grads[a].add_assign(&g);
+                    grads[b].sub_assign(&g);
                 }
                 Op::Mul(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(bv));
-                    grads[b] = grads[b].add(&g.hadamard(av));
+                    grads[a].add_assign(&g.hadamard(bv));
+                    grads[b].add_assign(&g.hadamard(av));
                 }
                 Op::Div(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
                     let b_recip = bv.reciprocal();
                     let a_over_b2 = av.hadamard(&b_recip.hadamard(&b_recip));
-                    grads[a] = grads[a].add(&g.hadamard(&b_recip));
-                    grads[b] = grads[b].sub(&g.hadamard(&a_over_b2));
+                    grads[a].add_assign(&g.hadamard(&b_recip));
+                    grads[b].sub_assign(&g.hadamard(&a_over_b2));
                 }
                 Op::AddBroadcast(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    grads[a] = grads[a].add(&g);
+                    grads[a].add_assign(&g);
                     if bv.rows == 1 && bv.cols == av.cols {
                         let mut db = Tensor::zeros(1, bv.cols);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[c] += g.data[r * g.cols + c];
+                                db.data[c] += g.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == av.rows && bv.cols == 1 {
                         let mut db = Tensor::zeros(bv.rows, 1);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[r] += g.data[r * g.cols + c];
+                                db.data[r] += g.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == 1 && bv.cols == 1 {
                         let s: f32 = g.data.iter().sum();
-                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
                     } else {
-                        grads[b] = grads[b].add(&g);
+                        grads[b].add_assign(&g);
                     }
                 }
                 Op::SubBroadcast(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    grads[a] = grads[a].add(&g);
+                    grads[a].add_assign(&g);
                     if bv.rows == 1 && bv.cols == av.cols {
                         let mut db = Tensor::zeros(1, bv.cols);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[c] += g.data[r * g.cols + c];
+                                db.data[c] += g.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].sub(&db);
+                        grads[b].sub_assign(&db);
                     } else if bv.rows == av.rows && bv.cols == 1 {
                         let mut db = Tensor::zeros(bv.rows, 1);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[r] += g.data[r * g.cols + c];
+                                db.data[r] += g.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].sub(&db);
+                        grads[b].sub_assign(&db);
                     } else if bv.rows == 1 && bv.cols == 1 {
                         let s: f32 = g.data.iter().sum();
-                        grads[b] = grads[b].sub(&Tensor::from_vec(vec![s], 1, 1));
+                        grads[b].sub_assign(&Tensor::from_vec(vec![s], 1, 1));
                     } else {
-                        grads[b] = grads[b].sub(&g);
+                        grads[b].sub_assign(&g);
                     }
                 }
                 Op::MulBroadcast(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&bv.broadcast_to(g.rows, g.cols)));
+                    grads[a].add_assign(&g.hadamard(&bv.broadcast_to(g.rows, g.cols)));
                     if bv.rows == 1 && bv.cols == av.cols {
                         let mut db = Tensor::zeros(1, bv.cols);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[c] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
+                                db.data[c] += g.data[off + c] * av.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == av.rows && bv.cols == 1 {
                         let mut db = Tensor::zeros(bv.rows, 1);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[r] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
+                                db.data[r] += g.data[off + c] * av.data[off + c];
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == 1 && bv.cols == 1 {
                         let s: f32 = g
                             .data
@@ -840,34 +863,36 @@ impl Tape {
                             .zip(av.data.iter())
                             .map(|(&gi, &ai)| gi * ai)
                             .sum();
-                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
                     } else {
-                        grads[b] = grads[b].add(&g.hadamard(&av.broadcast_to(g.rows, g.cols)));
+                        grads[b].add_assign(&g.hadamard(&av.broadcast_to(g.rows, g.cols)));
                     }
                 }
                 Op::DivBroadcast(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
                     let b_recip = bv.reciprocal();
-                    grads[a] = grads[a].add(&g.hadamard(&b_recip.broadcast_to(g.rows, g.cols)));
+                    grads[a].add_assign(&g.hadamard(&b_recip.broadcast_to(g.rows, g.cols)));
                     if bv.rows == 1 && bv.cols == av.cols {
                         let mut db = Tensor::zeros(1, bv.cols);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[c] -= g.data[r * g.cols + c] * av.data[r * av.cols + c]
+                                db.data[c] -= g.data[off + c] * av.data[off + c]
                                     / (bv.data[c] * bv.data[c]);
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == av.rows && bv.cols == 1 {
                         let mut db = Tensor::zeros(bv.rows, 1);
                         for r in 0..g.rows {
+                            let off = r * g.cols;
                             for c in 0..g.cols {
-                                db.data[r] -= g.data[r * g.cols + c] * av.data[r * av.cols + c]
+                                db.data[r] -= g.data[off + c] * av.data[off + c]
                                     / (bv.data[r] * bv.data[r]);
                             }
                         }
-                        grads[b] = grads[b].add(&db);
+                        grads[b].add_assign(&db);
                     } else if bv.rows == 1 && bv.cols == 1 {
                         let s: f32 = g
                             .data
@@ -875,11 +900,11 @@ impl Tape {
                             .zip(av.data.iter())
                             .map(|(&gi, &ai)| -gi * ai / (bv.data[0] * bv.data[0]))
                             .sum();
-                        grads[b] = grads[b].add(&Tensor::from_vec(vec![s], 1, 1));
+                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
                     } else {
                         let a_over_b2 =
                             av.hadamard(&b_recip.hadamard(&b_recip).broadcast_to(g.rows, g.cols));
-                        grads[b] = grads[b].sub(&g.hadamard(&a_over_b2));
+                        grads[b].sub_assign(&g.hadamard(&a_over_b2));
                     }
                 }
                 Op::MatMul(a, b) => {
@@ -887,22 +912,23 @@ impl Tape {
                     let bv = &values[b].as_cpu();
                     let ga = g.matmul(&bv.transpose());
                     let gb = av.transpose().matmul(&g);
-                    grads[a] = grads[a].add(&ga);
-                    grads[b] = grads[b].add(&gb);
+                    grads[a].add_assign(&ga);
+                    grads[b].add_assign(&gb);
                 }
                 Op::Scale { input, scalar } => {
-                    grads[input] = grads[input].add(&g.scale(scalar));
+                    grads[input].add_assign(&g.scale(scalar));
                 }
                 Op::Neg(a) => {
-                    grads[a] = grads[a].sub(&g);
+                    grads[a].sub_assign(&g);
                 }
                 Op::Exp(a) => {
-                    let av = &values[a].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&av.exp()));
+                    // dL/dx = g * exp(x) = g * value(node_i)
+                    let val = &values[i].as_cpu();
+                    grads[a].add_assign(&g.hadamard(val));
                 }
                 Op::Log(a) => {
                     let av = &values[a].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&av.reciprocal()));
+                    grads[a].add_assign(&g.hadamard(&av.reciprocal()));
                 }
                 Op::Sqrt(a) => {
                     let av = &values[a].as_cpu();
@@ -983,26 +1009,28 @@ impl Tape {
                 }
                 Op::ReLU(a) => {
                     let av = &values[a].as_cpu();
-                    let mut mask = Tensor::zeros(av.rows, av.cols);
+                    let ga = &mut grads[a];
                     for j in 0..av.data.len() {
-                        mask.data[j] = if av.data[j] > 0.0 { 1.0 } else { 0.0 };
+                        if av.data[j] > 0.0 {
+                            ga.data[j] += g.data[j];
+                        }
                     }
-                    grads[a] = grads[a].add(&g.hadamard(&mask));
                 }
                 Op::Sigmoid(a) => {
-                    let av = &values[a].as_cpu();
-                    let sig = av.sigmoid();
-                    let deriv = sig.hadamard(
-                        &Tensor::from_vec(vec![1.0; sig.data.len()], sig.rows, sig.cols).sub(&sig),
-                    );
-                    grads[a] = grads[a].add(&g.hadamard(&deriv));
+                    // dL/dx = g * sig(x) * (1 - sig(x)) = g * val * (1 - val)
+                    let sig = &values[i].as_cpu();
+                    for j in 0..sig.data.len() {
+                        let s = sig.data[j];
+                        grads[a].data[j] += g.data[j] * s * (1.0 - s);
+                    }
                 }
                 Op::Tanh(a) => {
-                    let av = &values[a].as_cpu();
-                    let t = av.tanh();
-                    let one = Tensor::from_vec(vec![1.0; t.data.len()], t.rows, t.cols);
-                    let deriv = one.sub(&t.hadamard(&t));
-                    grads[a] = grads[a].add(&g.hadamard(&deriv));
+                    // dL/dx = g * (1 - tanh(x)^2) = g * (1 - val^2)
+                    let t = &values[i].as_cpu();
+                    for j in 0..t.data.len() {
+                        let val = t.data[j];
+                        grads[a].data[j] += g.data[j] * (1.0 - val * val);
+                    }
                 }
                 Op::Sum(a) => {
                     let av = &values[a].as_cpu();
@@ -1198,8 +1226,29 @@ impl Tape {
                     ..
                 } => {
                     let mv = &values[mask_idx].as_cpu();
-                    grads[input_idx] = grads[input_idx].add(&g.hadamard(mv));
-                    grads[mask_idx] = grads[mask_idx].add(&g.hadamard(values[input_idx].as_cpu()));
+                    let iv = &values[input_idx].as_cpu();
+                    if input_idx == mask_idx {
+                        let gi = &mut grads[input_idx];
+                        for j in 0..gi.data.len() {
+                            gi.data[j] += g.data[j] * (mv.data[j] + iv.data[j]);
+                        }
+                    } else if input_idx < mask_idx {
+                        let (left, right) = grads.split_at_mut(mask_idx);
+                        let gi = &mut left[input_idx];
+                        let gm = &mut right[0];
+                        for j in 0..gi.data.len() {
+                            gi.data[j] += g.data[j] * mv.data[j];
+                            gm.data[j] += g.data[j] * iv.data[j];
+                        }
+                    } else {
+                        let (left, right) = grads.split_at_mut(input_idx);
+                        let gm = &mut left[mask_idx];
+                        let gi = &mut right[0];
+                        for j in 0..gi.data.len() {
+                            gi.data[j] += g.data[j] * mv.data[j];
+                            gm.data[j] += g.data[j] * iv.data[j];
+                        }
+                    }
                 }
                 Op::MaxPool2d {
                     input_idx,
@@ -2406,6 +2455,21 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tensor_in_place_ops() {
+        let mut a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Tensor::from_vec(vec![0.5, 1.5, 2.5, 3.5], 2, 2);
+
+        a.add_assign(&b);
+        assert_eq!(a.data, vec![1.5, 3.5, 5.5, 7.5]);
+
+        a.sub_assign(&b);
+        assert_eq!(a.data, vec![1.0, 2.0, 3.0, 4.0]);
+
+        a.hadamard_assign(&b);
+        assert_eq!(a.data, vec![0.5, 3.0, 7.5, 14.0]);
+    }
 
     #[test]
     fn test_exp_gradient() {
