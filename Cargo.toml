@@ -10,6 +10,11 @@ repository = "https://github.com/CHECKUPAUTO/scirust"
 scirust-core = { path = "scirust-core" }
 scirust-simd = { path = "scirust-simd" }
 scirust-symbolic = { path = "scirust-symbolic" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
 
 [workspace]
 members = [

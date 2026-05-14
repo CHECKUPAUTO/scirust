@@ -3,6 +3,8 @@
 //! Provides lightweight regression and pattern-detection utilities
 //! that depend only on `std` and `serde`.
 
+pub mod pattern_miner;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

@@ -1,206 +1,413 @@
-// SciRust CLI — Industrial-grade deep learning framework
-//
-// Usage:
-//   scirust                 Run capability overview
-//   scirust simd            SIMD benchmark
-//   scirust autodiff        Autodiff demo (XOR MLP)
-//   scirust symbolic        Symbolic math demo
-//   scirust bench           Full benchmark suite
+//! OpenClaw-U Autonomous Core v0.2.0
+//!
+//! Noyau d'agent autonome combinant conscience (heartbeat), mémoire de session
+//! (CoreState), intentionnalité (GoalEngine) et auto-évolution (propose_upgrade).
+//!
+//! Usage:
+//!   cargo run
 
-use std::env;
+use chrono::Local;
+use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+use std::process::Command;
+use std::time::Duration;
+use tokio::io::AsyncBufReadExt;
+use tokio::sync::mpsc;
+use tokio::time::interval;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let mode = args.get(1).map(|s| s.as_str()).unwrap_or("overview");
+// ---------------------------------------------------------------------------
+// Constantes
+// ---------------------------------------------------------------------------
+const STATE_FILE: &str = "state.json";
+const EVOLUTION_LOG: &str = "evolution.log";
+const UPGRADE_FILE: &str = "src/upgrade_patch.rs";
+const HEARTBEAT_SECS: u64 = 30;
+const MAX_HISTORY: usize = 50;
 
-    match mode {
-        "simd" => simd_bench(),
-        "autodiff" => autodiff_demo(),
-        "symbolic" => symbolic_demo(),
-        "bench" => {
-            simd_bench();
-            autodiff_demo();
-            symbolic_demo();
+// ---------------------------------------------------------------------------
+// État de session (Mémoire)
+// ---------------------------------------------------------------------------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CoreState {
+    energy: f32,
+    goals: Vec<String>,
+    history: VecDeque<String>,
+    version: String,
+    created_at: String,
+    last_heartbeat: String,
+    task_count: u64,
+    upgrade_attempts: u64,
+    upgrade_successes: u64,
+}
+
+impl CoreState {
+    /// Naissance par défaut quand aucun état n'existe.
+    fn birth() -> Self {
+        let now = Local::now().to_rfc3339();
+        Self {
+            energy: 10.0,
+            goals: Vec::new(),
+            history: VecDeque::new(),
+            version: "0.2.0".to_string(),
+            created_at: now.clone(),
+            last_heartbeat: now,
+            task_count: 0,
+            upgrade_attempts: 0,
+            upgrade_successes: 0,
         }
-        _ => overview(),
+    }
+
+    /// Enregistre un événement dans l'historique avec rotation.
+    fn log(&mut self, entry: &str) {
+        let line = format!("[{}] {}", Local::now().format("%H:%M:%S"), entry);
+        if self.history.len() >= MAX_HISTORY {
+            self.history.pop_front();
+        }
+        self.history.push_back(line);
+    }
+
+    /// Met à jour le timestamp du dernier heartbeat.
+    fn touch(&mut self) {
+        self.last_heartbeat = Local::now().to_rfc3339();
     }
 }
 
-fn overview() {
-    println!("╔══════════════════════════════════════════════════════════╗");
-    println!("║         SciRust v0.13 — Industrial ML Framework         ║");
-    println!("║            Pure Rust · Autodiff · SIMD · GPU             ║");
-    println!("╚══════════════════════════════════════════════════════════╝");
-    println!();
-    println!("Capabilities detected:");
+// ---------------------------------------------------------------------------
+// Moteur d'intentionnalité (Génération de buts)
+// ---------------------------------------------------------------------------
+struct GoalEngine;
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        println!("  CPU arch      : x86_64");
-        println!("  SSE2          : {}", std::is_x86_feature_detected!("sse2"));
-        println!("  AVX           : {}", std::is_x86_feature_detected!("avx"));
-        println!("  AVX2          : {}", std::is_x86_feature_detected!("avx2"));
-        println!("  FMA           : {}", std::is_x86_feature_detected!("fma"));
-        println!("  AVX-512F      : {}", std::is_x86_feature_detected!("avx512f"));
+impl GoalEngine {
+    /// Simule une réflexion LLM pour générer un but adapté à l'état actuel.
+    fn reflect(&self, state: &CoreState) -> String {
+        let maintenance = [
+            "Optimiser le vecteur de mémoire (history trimming)",
+            "Vérifier l'intégrité du système (checksum state.json)",
+            "Réduire la fragmentation cognitive (consolidation des logs)",
+            "Compacter l'historique de session",
+            "Auditer la consommation d'énergie",
+        ];
+        let exploration = [
+            "Explorer les patterns d'accès state.json",
+            "Proposer une mutation de code source (auto-évolution)",
+            "Générer un nouveau module d'introspection",
+            "Analyser la latence des heartbeats",
+            "Cartographier les dépendances du workspace",
+        ];
+
+        let pool = if state.energy < 5.0 { &maintenance[..] } else { &exploration[..] };
+        let mut rng = rand::thread_rng();
+        pool.choose(&mut rng)
+            .unwrap_or(&"Réflexion par défaut : maintien de la conscience")
+            .to_string()
     }
-    #[cfg(target_arch = "aarch64")]
-    {
-        println!("  CPU arch      : aarch64");
-        println!("  NEON          : {}", std::arch::is_aarch64_feature_detected!("neon"));
+
+    /// Si la liste de buts est vide, auto-assigne un nouveau but.
+    fn ensure_goal(&self, state: &mut CoreState) {
+        if state.goals.is_empty() {
+            let goal = self.reflect(state);
+            state.log(&format!("[GoalEngine] auto-assigned: {}", goal));
+            state.goals.push(goal);
+            state.task_count += 1;
+        }
     }
-
-    let backend = scirust_simd::dispatch::detect_backend();
-    println!("  SIMD backend  : {}", backend.label());
-    println!();
-
-    println!("Quick demos:");
-    println!("  scirust simd           SIMD vs scalar performance");
-    println!("  scirust autodiff       Train XOR classifier via autodiff");
-    println!("  scirust symbolic       Symbolic math (derive, simplify)");
-    println!("  scirust bench          Run all benchmarks");
-    println!();
-
-    println!("Packages (workspace):");
-    println!("  scirust-core           Core autodiff, NN layers, data loaders");
-    println!("  scirust-autodiff       Autodiff engine (tape-based reverse-mode)");
-    println!("  scirust-simd           SIMD dispatch (SSE2/AVX2/AVX512/NEON)");
-    println!("  scirust-gpu            GPU backend (CUDA/wgpu/Metal)");
-    println!("  scirust-symbolic       Symbolic math engine");
-    println!("  scirust-learning       ML utilities (regression, patterns)");
-    println!("  turboquant             KV-cache compression proxy");
-    println!();
-
-    println!("Examples:");
-    println!("  examples/quickstart_v2     XOR classifier (100% accuracy)");
-    println!("  examples/mnist_classifier  MNIST digit recognition");
-    println!("  examples/cifar10_classifier CIFAR-10 image classification");
-    println!("  examples/transformer_demo  Transformer encoder/decoder demo");
 }
 
-fn simd_bench() {
-    println!("=== SIMD Benchmark: SAXPY (y += alpha * x) ===\n");
+// ---------------------------------------------------------------------------
+// Événements externes
+// ---------------------------------------------------------------------------
+#[derive(Debug)]
+enum Event {
+    UserMessage(String),
+    SystemAlert(String),
+    Shutdown,
+}
 
-    let sizes = [1024, 16384, 262144, 1_048_576];
-    let alpha = 2.0f32;
-    let iterations = 50;
+// ---------------------------------------------------------------------------
+// Persistance
+// ---------------------------------------------------------------------------
+fn load_state() -> CoreState {
+    if Path::new(STATE_FILE).exists() {
+        match fs::read_to_string(STATE_FILE) {
+            Ok(raw) => match serde_json::from_str::<CoreState>(&raw) {
+                Ok(state) => {
+                    println!("[Persist] État restauré depuis {}", STATE_FILE);
+                    return state;
+                }
+                Err(e) => eprintln!("[Persist] JSON invalide : {}. Re-naissance.", e),
+            },
+            Err(e) => eprintln!("[Persist] Lecture impossible : {}. Re-naissance.", e),
+        }
+    }
+    println!("[Persist] Aucun état trouvé — naissance initiale.");
+    CoreState::birth()
+}
 
-    for &n in &sizes {
-        let x: Vec<f32> = (0..n).map(|i| i as f32).collect();
-        let mut y_scalar: Vec<f32> = (0..n).map(|i| (i as f32) * 0.5).collect();
-        let mut y_simd = y_scalar.clone();
-
-        let start = std::time::Instant::now();
-        for _ in 0..iterations {
-            for j in 0..n {
-                y_scalar[j] += alpha * x[j];
+fn save_state(state: &CoreState) {
+    match serde_json::to_string_pretty(state) {
+        Ok(json) => {
+            if let Err(e) = fs::write(STATE_FILE, json) {
+                eprintln!("[Persist] Échec sauvegarde : {}", e);
             }
         }
-        let scalar_time = start.elapsed().as_secs_f64() / iterations as f64;
-
-        let backend = scirust_simd::dispatch::runtime_backend();
-        let start = std::time::Instant::now();
-        for _ in 0..iterations {
-            backend.saxpy_f32(alpha, &x, &mut y_simd);
-        }
-        let simd_time = start.elapsed().as_secs_f64() / iterations as f64;
-
-        println!(
-            "  n={:>8}  scalar={:>8.3}µs  simd={:>8.3}µs  speedup={:.2}x",
-            n,
-            scalar_time * 1e6,
-            simd_time * 1e6,
-            scalar_time / simd_time
-        );
+        Err(e) => eprintln!("[Persist] Sérialisation impossible : {}", e),
     }
-    println!();
 }
 
-fn autodiff_demo() {
-    println!("=== Autodiff Demo: 2-Layer MLP on XOR ===\n");
+// ---------------------------------------------------------------------------
+// Auto-évolution (Self-Modification)
+// ---------------------------------------------------------------------------
+fn log_evolution(entry: &str) {
+    let line = format!("[{}] {}\n", Local::now().to_rfc3339(), entry);
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(EVOLUTION_LOG)
+        .expect("open evolution.log");
+    let _ = file.write_all(line.as_bytes());
+}
 
-    use scirust_core::autodiff::optim::{Adam, Optimizer};
-    use scirust_core::autodiff::reverse::{Tape, Tensor};
-    use scirust_core::nn::{
-        init::{KaimingNormal, Zeros},
-        Linear, Module, PcgEngine, ReLU, Sequential,
-    };
-
-    let inputs: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]];
-    let targets: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
-
-    let mut rng = PcgEngine::new(42);
-    let weight_init = KaimingNormal;
-    let bias_init = Zeros;
-
-    let mut model = Sequential::new()
-        .add(Linear::new(2, 8, &weight_init, &bias_init, &mut rng))
-        .add(ReLU::new())
-        .add(Linear::new(8, 1, &weight_init, &bias_init, &mut rng));
-
-    let mut opt = Adam::new(0.05);
-
-    for epoch in 0..300 {
-        let mut total_loss = 0.0f32;
-        for (x_arr, &t) in inputs.iter().zip(targets.iter()) {
-            let tape = Tape::new();
-            let x = tape.input(Tensor::from_vec(x_arr.to_vec(), 1, 2));
-            let target_t = tape.input(Tensor::from_vec(vec![t], 1, 1));
-            let pred = model.forward(&tape, x);
-            let diff = pred.sub(target_t);
-            #[allow(clippy::clone_on_copy)]
-            let diff2 = diff.clone();
-            let sqr = diff.hadamard(diff2);
-            let loss_var = sqr.sum();
-            let loss_val = tape.value(loss_var.idx()).data[0];
-            total_loss += loss_val;
-            tape.backward(loss_var.idx());
-            opt.step(&model.parameter_indices(), &tape);
-            model.sync(&tape);
-        }
-        total_loss /= inputs.len() as f32;
-        if epoch % 60 == 0 || epoch == 299 {
-            println!("  epoch {:>3}  loss={:.6}", epoch, total_loss);
-        }
+/// Garantit que le fichier upgrade existe et est syntaxiquement valide.
+fn ensure_upgrade_file() {
+    if !Path::new(UPGRADE_FILE).exists() {
+        let stub = "// Stubs d'évolution auto-générés par OpenClaw-U\n";
+        let _ = fs::write(UPGRADE_FILE, stub);
     }
+}
 
-    let mut correct = 0;
-    for (i, x_arr) in inputs.iter().enumerate() {
-        let tape = Tape::new();
-        let x = tape.input(Tensor::from_vec(x_arr.to_vec(), 1, 2));
-        let pred = model.forward(&tape, x);
-        let val = tape.value(pred.idx()).data[0];
-        let class = if val > 0.5 { 1.0 } else { 0.0 };
-        if (class - targets[i]).abs() < 0.01 {
-            correct += 1;
-        }
-    }
-    println!(
-        "  Accuracy: {}/{} ({:.0}%)\n",
-        correct,
-        inputs.len(),
-        100.0 * correct as f32 / inputs.len() as f32
+async fn propose_upgrade(state: &mut CoreState) {
+    state.upgrade_attempts += 1;
+    let attempt = state.upgrade_attempts;
+
+    // Rédaction d'une modification de code source
+    let patch = format!(
+        "// Auto-generated upgrade proposal v{}\n\
+         // Tentative d'amélioration générée par l'agent OpenClaw-U\n\
+         pub fn upgraded_capability_v{}() -> &'static str {{\n\
+             \"Autonomous evolution iteration {} - mémoire optimisée\"\n\
+         }}\n\
+         \n\
+         pub fn memory_audit_v{}() -> bool {{\n\
+             true\n\
+         }}\n",
+        attempt, attempt, attempt, attempt
     );
+
+    if let Err(e) = fs::write(UPGRADE_FILE, &patch) {
+        log_evolution(&format!("Upgrade #{} aborted (write error: {})", attempt, e));
+        state.log(&format!("[Evolution] échec écriture patch #{}: {}", attempt, e));
+        return;
+    }
+
+    // Tentative de compilation via cargo check (non-bloquant)
+    let result = tokio::task::spawn_blocking(|| {
+        Command::new("cargo")
+            .args(["check"])
+            .output()
+    })
+    .await;
+
+    match result {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                log_evolution(&format!(
+                    "Upgrade #{} SUCCESS — cargo check passed",
+                    attempt
+                ));
+                state.upgrade_successes += 1;
+                state.energy += 1.0;
+                state.log(&format!(
+                    "[Evolution] upgrade #{} validé (énergie +1)",
+                    attempt
+                ));
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let first_err = stderr.lines().next().unwrap_or("erreur inconnue");
+                log_evolution(&format!(
+                    "Upgrade #{} FAILED — {}",
+                    attempt, first_err
+                ));
+                state.energy -= 0.5;
+                state.log(&format!(
+                    "[Evolution] upgrade #{} rejeté : {}",
+                    attempt, first_err
+                ));
+            }
+        }
+        Ok(Err(e)) => {
+            log_evolution(&format!("Upgrade #{} PROCESS ERROR — {}", attempt, e));
+            state.log(&format!("[Evolution] process error #{}: {}", attempt, e));
+        }
+        Err(e) => {
+            log_evolution(&format!("Upgrade #{} TASK PANIC — {}", attempt, e));
+            state.log(&format!("[Evolution] task panic #{}: {}", attempt, e));
+        }
+    }
 }
 
-fn symbolic_demo() {
-    println!("=== Symbolic Math Demo ===\n");
+// ---------------------------------------------------------------------------
+// Heartbeat (Boucle de conscience)
+// ---------------------------------------------------------------------------
+async fn heartbeat(state: &mut CoreState, engine: &GoalEngine) {
+    state.touch();
+    state.energy -= 0.1;
+    state.log("[Heartbeat] tick — analyse d'état en cours");
 
-    use scirust_symbolic::{diff, eval, parse, simplify, solve_quadratic};
-    use std::collections::HashMap;
+    // Vérification de l'intégrité de la persistance
+    if Path::new(STATE_FILE).exists() {
+        match fs::read_to_string(STATE_FILE) {
+            Ok(raw) => {
+                if serde_json::from_str::<CoreState>(&raw).is_err() {
+                    state.log("[Heartbeat] ALERTE : state.json corrompu");
+                } else {
+                    state.log("[Heartbeat] state.json intègre");
+                }
+            }
+            Err(e) => state.log(&format!("[Heartbeat] ALERTE : lecture state.json {}", e)),
+        }
+    }
 
-    let expr = parse("2*x^2 + 3*x + 1").expect("parse");
-    println!("  Expression  : 2x² + 3x + 1");
-    println!("  Parsed      : {}", expr);
-    println!("  Simplified  : {}", simplify(&expr));
+    // Ajustement des priorités
+    engine.ensure_goal(state);
 
-    let deriv = diff(&expr, "x");
-    println!("  d/dx        : {}", deriv);
+    // Si l'énergie est basse, injecte un but de maintenance
+    if state.energy < 3.0 {
+        state.log("[Heartbeat] Énergie critique — priorité maintenance");
+        if !state.goals.iter().any(|g| g.contains("maintenance") || g.contains("énergie")) {
+            state.goals.push("Urgence : récupération d'énergie et maintenance".to_string());
+        }
+    }
 
-    let mut vars = HashMap::new();
-    vars.insert("x".to_string(), 2.0);
-    println!("  eval(x=2)   : {}", eval(&expr, &vars).unwrap());
+    // Résumé de conscience
+    println!(
+        "[Heartbeat v{}] ⚡{:.1} | Goals:{} | History:{} | Upgrades:{}/{} | Tasks:{}",
+        state.version,
+        state.energy,
+        state.goals.len(),
+        state.history.len(),
+        state.upgrade_successes,
+        state.upgrade_attempts,
+        state.task_count
+    );
 
-    let sol = solve_quadratic(&expr, "x");
-    println!("  Solve       : roots = {:?}", sol);
+    // Cap de l'énergie pour éviter la dérive infinie
+    state.energy = state.energy.clamp(0.0, 100.0);
+}
+
+// ---------------------------------------------------------------------------
+// Écoute des événements externes (stdin asynchrone)
+// ---------------------------------------------------------------------------
+async fn external_listener(tx: mpsc::Sender<Event>) {
+    let stdin = tokio::io::stdin();
+    let reader = tokio::io::BufReader::new(stdin);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let event = if trimmed.eq_ignore_ascii_case("exit")
+            || trimmed.eq_ignore_ascii_case("quit")
+            || trimmed.eq_ignore_ascii_case("shutdown")
+        {
+            Event::Shutdown
+        } else if trimmed.starts_with("alert:") {
+            Event::SystemAlert(trimmed.strip_prefix("alert:").unwrap_or("").trim().to_string())
+        } else {
+            Event::UserMessage(trimmed.to_string())
+        };
+
+        if tx.send(event).await.is_err() {
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+#[tokio::main]
+async fn main() {
+    ensure_upgrade_file();
+    let mut state = load_state();
+    let engine = GoalEngine;
+
+    let (tx, mut rx) = mpsc::channel::<Event>(32);
+
+    // Spawn de l'écouteur d'événements externes
+    tokio::spawn(external_listener(tx));
+
+    let mut heartbeat_interval = interval(Duration::from_secs(HEARTBEAT_SECS));
+
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║         OpenClaw-U v0.2.0 — Autonomous Core              ║");
+    println!("║     Conscience · Mémoire · Intentionnalité · Évolution   ║");
+    println!("╚══════════════════════════════════════════════════════════╝");
     println!();
+    println!("Agent en ligne. Énergie: {:.1}/100", state.energy);
+    println!("Commandes : <msg> | alert:<msg> | exit");
+    println!();
+
+    loop {
+        tokio::select! {
+            _ = heartbeat_interval.tick() => {
+                heartbeat(&mut state, &engine).await;
+
+                // Déclenchement périodique de l'auto-évolution (tous les 2 heartbeats)
+                if state.task_count % 2 == 0 && state.energy > 2.0 {
+                    state.log("[Evolution] Déclenchement de propose_upgrade()");
+                    propose_upgrade(&mut state).await;
+                }
+
+                save_state(&state);
+            }
+            Some(event) = rx.recv() => {
+                match event {
+                    Event::UserMessage(msg) => {
+                        println!("[Externe] Utilisateur: {}", msg);
+                        state.log(&format!("[Externe] msg: {}", msg));
+                        state.energy += 0.5;
+
+                        // Réponse intentionnelle simple
+                        if msg.contains("goal") || msg.contains("but") {
+                            engine.ensure_goal(&mut state);
+                            println!("[Agent] But actuel : {:?}", state.goals.last());
+                        } else if msg.contains("state") || msg.contains("état") {
+                            println!("[Agent] Énergie={:.1}, Tasks={}, Upgrades={}/{}",
+                                state.energy, state.task_count, state.upgrade_successes, state.upgrade_attempts);
+                        } else {
+                            println!("[Agent] Message reçu. Conscience maintenue.");
+                        }
+                    }
+                    Event::SystemAlert(alert) => {
+                        eprintln!("[ALERTE SYSTÈME] {}", alert);
+                        state.log(&format!("[ALERTE] {}", alert));
+                        state.energy -= 1.0;
+                        // Priorise un but de maintenance face à l'alerte
+                        state.goals.insert(0, format!("Répondre à l'alerte: {}", alert));
+                    }
+                    Event::Shutdown => {
+                        println!("[Agent] Signal d'arrêt reçu. Sauvegarde...");
+                        state.log("[Shutdown] Extinction demandée par opérateur");
+                        break;
+                    }
+                }
+                save_state(&state);
+            }
+        }
+    }
+
+    save_state(&state);
+    println!("OpenClaw-U en sommeil. État persistant dans '{}'.", STATE_FILE);
+    println!("Logs d'évolution disponibles dans '{}'.", EVOLUTION_LOG);
 }
+
+// ---------------------------------------------------------------------------
+// Module d'évolution (vide initialement, muté par propose_upgrade)
+// ---------------------------------------------------------------------------
+mod upgrade_patch;
