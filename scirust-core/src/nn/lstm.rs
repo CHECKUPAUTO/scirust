@@ -41,7 +41,7 @@ impl LSTM {
         bias: bool,
         rng: &mut PcgEngine,
     ) -> Self {
-        let scale = (2.0 / (4.0 * hidden_size as f32)).sqrt();
+        let scale = (1.0 / hidden_size as f32).sqrt(); // Xavier standard pour LSTM
         let mut w_ih = Tensor::zeros(4 * hidden_size, input_size);
         let mut w_hh = Tensor::zeros(4 * hidden_size, hidden_size);
         for x in w_ih.data.iter_mut() {

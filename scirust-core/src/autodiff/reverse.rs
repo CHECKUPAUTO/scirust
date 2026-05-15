@@ -459,6 +459,11 @@ pub enum SavedData {
     LayerNormNormed(Tensor),
     /// Cached normalized input for BatchNorm backward
     BatchNormNormed(Tensor),
+    /// Cached flash attention online-softmax state: m (running max) and l (running sum)
+    FlashAttentionState {
+        m: Tensor,
+        l: Tensor,
+    },
 }
 
 // ================================================================== //
@@ -477,6 +482,7 @@ pub enum Op {
     MulBroadcast(usize, usize),
     DivBroadcast(usize, usize),
     MatMul(usize, usize),
+    MatMulGpu(usize, usize),
     Scale {
         input: usize,
         scalar: f32,
@@ -567,6 +573,18 @@ pub enum Op {
         gamma_idx: usize,
         beta_idx: usize,
     },
+    FlashAttention {
+        q: usize,
+        k: usize,
+        v: usize,
+        mask: Option<usize>,
+        batch: usize,
+        n_heads: usize,
+        seq_len: usize,
+        d_head: usize,
+        scale: f32,
+        block_size: usize,
+    },
     LayerNorm {
         input_idx: usize,
         gamma_idx: usize,
@@ -585,6 +603,20 @@ pub enum Op {
         kernel: usize,
         stride: usize,
         pad: usize,
+    },
+    Conv2dTransposeForward {
+        input: usize,
+        weight: usize,
+        bias: Option<usize>,
+        batch: usize,
+        in_c: usize,
+        h: usize,
+        w: usize,
+        out_c: usize,
+        kernel: usize,
+        stride: usize,
+        pad: usize,
+        output_padding: usize,
     },
     Reshape(usize, usize, usize),
 }
@@ -907,9 +939,10 @@ impl Tape {
                         grads[b].sub_assign(&g.hadamard(&a_over_b2));
                     }
                 }
-                Op::MatMul(a, b) => {
+                Op::MatMul(a, b) | Op::MatMulGpu(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
+                    // Try GPU backward when available, fallback to CPU
                     let ga = g.matmul(&bv.transpose());
                     let gb = av.transpose().matmul(&g);
                     grads[a].add_assign(&ga);
@@ -1512,8 +1545,367 @@ impl Tape {
                     grads[weight] = grads[weight].add(&dw);
                     grads[input] = grads[input].add(&dx);
                 }
+                Op::Conv2dTransposeForward {
+                    input,
+                    weight,
+                    bias,
+                    batch,
+                    in_c,
+                    h: h_in,
+                    w: w_in,
+                    out_c,
+                    kernel,
+                    stride,
+                    pad,
+                    output_padding,
+                } => {
+                    let input_t = &values[input].as_cpu();
+                    let weight_t = &values[weight].as_cpu();
+                    let h_out = (h_in - 1) * stride + kernel - 2 * pad + output_padding;
+                    let w_out = (w_in - 1) * stride + kernel - 2 * pad + output_padding;
+
+                    // dL/db
+                    if let Some(b_idx) = bias {
+                        let mut db = Tensor::zeros(1, out_c);
+                        for b_i in 0..batch {
+                            for co in 0..out_c {
+                                for oh in 0..h_out {
+                                    for ow in 0..w_out {
+                                        let out_idx = b_i * out_c * h_out * w_out
+                                            + co * h_out * w_out
+                                            + oh * w_out
+                                            + ow;
+                                        db.data[co] += g.data[out_idx];
+                                    }
+                                }
+                            }
+                        }
+                        grads[b_idx] = grads[b_idx].add(&db);
+                    }
+
+                    // dL/dX: standard conv2d on grad_out with weight W (not transposed)
+                    // dX[b,ci,ih,iw] = sum_co sum_kh sum_kw dY[b,co,oh,ow] * W[ci,co,kh,kw]
+                    // oh = ih*S - P + kh,  ow = iw*S - P + kw
+                    let mut dx = Tensor::zeros(input_t.rows, input_t.cols);
+                    for b_i in 0..batch {
+                        for co in 0..out_c {
+                            for oh in 0..h_out {
+                                for ow in 0..w_out {
+                                    let out_idx = b_i * out_c * h_out * w_out
+                                        + co * h_out * w_out
+                                        + oh * w_out
+                                        + ow;
+                                    let grad_out = g.data[out_idx];
+                                    for ci in 0..in_c {
+                                        for kh in 0..kernel {
+                                            for kw in 0..kernel {
+                                                let ih_signed =
+                                                    oh as isize + pad as isize - kh as isize;
+                                                let iw_signed =
+                                                    ow as isize + pad as isize - kw as isize;
+                                                if ih_signed >= 0
+                                                    && ih_signed < h_in as isize
+                                                    && iw_signed >= 0
+                                                    && iw_signed < w_in as isize
+                                                    && (ih_signed as usize - (oh - kh + pad)) % stride
+                                                        == 0
+                                                    && (iw_signed as usize - (ow - kw + pad)) % stride
+                                                        == 0
+                                                {
+                                                    let ih = ih_signed as usize;
+                                                    let iw = iw_signed as usize;
+                                                    if (oh + pad as usize) >= kh
+                                                        && (oh + pad as usize - kh) % stride == 0
+                                                        && (ow + pad as usize - kw) % stride == 0
+                                                    {
+                                                        let w_idx = ci * out_c * kernel * kernel
+                                                            + co * kernel * kernel
+                                                            + kh * kernel
+                                                            + kw;
+                                                        let in_idx = b_i * in_c * h_in * w_in
+                                                            + ci * h_in * w_in
+                                                            + ih * w_in
+                                                            + iw;
+                                                        dx.data[in_idx] +=
+                                                            grad_out * weight_t.data[w_idx];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    grads[input] = grads[input].add(&dx);
+
+                    // dL/dW: im2col on input, matmul with grad_out
+                    // Use ConvConfig with stride=1 for im2col on the "transposed space"
+                    // Actually: dW[ci,co,kh,kw] = sum_b sum_ih sum_iw dY[b,co,oh,ow] * X[b,ci,ih,iw]
+                    // where oh = ih*S - P + kh
+                    let mut dw = Tensor::zeros(weight_t.rows, weight_t.cols);
+                    for b_i in 0..batch {
+                        for ci in 0..in_c {
+                            for ih in 0..h_in {
+                                for iw in 0..w_in {
+                                    let in_val = input_t.data
+                                        [b_i * in_c * h_in * w_in + ci * h_in * w_in + ih * w_in + iw];
+                                    for co in 0..out_c {
+                                        for kh in 0..kernel {
+                                            for kw in 0..kernel {
+                                                let oh_signed = ih as isize * stride as isize
+                                                    + kh as isize
+                                                    - pad as isize;
+                                                let ow_signed = iw as isize * stride as isize
+                                                    + kw as isize
+                                                    - pad as isize;
+                                                if oh_signed >= 0
+                                                    && oh_signed < h_out as isize
+                                                    && ow_signed >= 0
+                                                    && ow_signed < w_out as isize
+                                                {
+                                                    let oh = oh_signed as usize;
+                                                    let ow = ow_signed as usize;
+                                                    let out_idx = b_i * out_c * h_out * w_out
+                                                        + co * h_out * w_out
+                                                        + oh * w_out
+                                                        + ow;
+                                                    let w_idx = ci * out_c * kernel * kernel
+                                                        + co * kernel * kernel
+                                                        + kh * kernel
+                                                        + kw;
+                                                    dw.data[w_idx] +=
+                                                        g.data[out_idx] * in_val;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    grads[weight] = grads[weight].add(&dw);
+                }
                 Op::Reshape(input, old_rows, old_cols) => {
                     grads[input] = grads[input].add(&g.reshape(old_rows, old_cols));
+                }
+                Op::FlashAttention {
+                    q,
+                    k,
+                    v,
+                    mask: _mask,
+                    batch,
+                    n_heads,
+                    seq_len,
+                    d_head,
+                    scale,
+                    block_size,
+                } => {
+                    // Restore saved m, l
+                    let (saved_m, saved_l) = match &nodes[i].saved {
+                        SavedData::FlashAttentionState { m, l } => (m, l),
+                        _ => panic!("FlashAttention backward: missing saved state"),
+                    };
+
+                    let q_t = &values[q].as_cpu();
+                    let k_t = &values[k].as_cpu();
+                    let v_t = &values[v].as_cpu();
+                    let o_t = &values[i].as_cpu();
+                    let dv = o_t.cols;
+                    let total_heads = batch * n_heads;
+                    let s_len = seq_len;
+
+                    let mut dq = vec![0.0f32; q_t.data.len()];
+                    let mut dk = vec![0.0f32; k_t.data.len()];
+                    let mut dv_ = vec![0.0f32; v_t.data.len()];
+
+                    for h in 0..total_heads {
+                        let q_base = h * seq_len * d_head;
+                        let k_base = h * s_len * d_head;
+                        let v_base = h * s_len * dv;
+                        let o_base = h * seq_len * dv;
+                        let m_base = h * seq_len;
+
+                        for qi in (0..seq_len).step_by(block_size) {
+                            let br = (seq_len - qi).min(block_size);
+
+                            // Replay the inner loop to recompute P_ij
+                            let mut m_i = vec![-f32::INFINITY; br];
+                            let mut l_i = vec![0.0f32; br];
+
+                            for kj in (0..s_len).step_by(block_size) {
+                                let bc = (s_len - kj).min(block_size);
+
+                                // S_ij = Q_i @ K_j^T
+                                let mut s_ij = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        let mut sum = 0.0f32;
+                                        for d in 0..d_head {
+                                            sum += q_t.data[q_base + (qi + r) * d_head + d]
+                                                * k_t.data[k_base + (kj + c) * d_head + d];
+                                        }
+                                        s_ij[r * bc + c] = sum * scale;
+                                    }
+                                }
+
+                                // Recompute online softmax state
+                                let mut row_max = vec![-f32::INFINITY; br];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        row_max[r] = row_max[r].max(s_ij[r * bc + c]);
+                                    }
+                                }
+
+                                let mut m_new = vec![-f32::INFINITY; br];
+                                for r in 0..br {
+                                    m_new[r] = m_i[r].max(row_max[r]);
+                                }
+
+                                let mut p_ij = vec![0.0f32; br * bc];
+                                let mut row_sum_p = vec![0.0f32; br];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        p_ij[r * bc + c] = (s_ij[r * bc + c] - m_new[r]).exp();
+                                        row_sum_p[r] += p_ij[r * bc + c];
+                                    }
+                                }
+
+                                let mut rescale = vec![0.0f32; br];
+                                for r in 0..br {
+                                    rescale[r] = (m_i[r] - m_new[r]).exp();
+                                }
+
+                                // Rescale l_i
+                                for r in 0..br {
+                                    l_i[r] = rescale[r] * l_i[r] + row_sum_p[r];
+                                }
+
+                                for r in 0..br {
+                                    m_i[r] = m_new[r];
+                                }
+                            }
+
+                            // Now compute gradients for this Q-block
+                            for kj in (0..s_len).step_by(block_size) {
+                                let bc = (s_len - kj).min(block_size);
+
+                                // Recompute S_ij
+                                let mut s_ij = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        let mut sum = 0.0f32;
+                                        for d in 0..d_head {
+                                            sum += q_t.data[q_base + (qi + r) * d_head + d]
+                                                * k_t.data[k_base + (kj + c) * d_head + d];
+                                        }
+                                        s_ij[r * bc + c] = sum * scale;
+                                    }
+                                }
+
+                                // Recompute row_max
+                                let mut row_max = vec![-f32::INFINITY; br];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        row_max[r] = row_max[r].max(s_ij[r * bc + c]);
+                                    }
+                                }
+                                let mut m_new = vec![-f32::INFINITY; br];
+                                for r in 0..br {
+                                    m_new[r] = m_i[r].max(row_max[r]);
+                                }
+
+                                // P_ij
+                                let mut p_ij_unscaled = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    for c in 0..bc {
+                                        p_ij_unscaled[r * bc + c] = (s_ij[r * bc + c] - m_new[r]).exp();
+                                    }
+                                }
+
+                                // Final normalized P_ij
+                                let mut p_ij = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    let row_idx = m_base + qi + r;
+                                    let m_final = saved_m.data[row_idx];
+                                    let l_final = saved_l.data[row_idx];
+
+                                    // P_ij_normalized = P_ij_unscaled * exp(m_new - m_final) / l_final
+                                    let factor = (m_new[r] - m_final).exp() / l_final;
+
+                                    for c in 0..bc {
+                                        p_ij[r * bc + c] = p_ij_unscaled[r * bc + c] * factor;
+                                    }
+                                }
+
+                                // dP = dO @ V_j^T: upstream gradient times V
+                                let mut dp = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    for d in 0..dv {
+                                        let go = g.data[o_base + (qi + r) * dv + d];
+                                        if go == 0.0 { continue; }
+                                        for c in 0..bc {
+                                            dp[r * bc + c] += go * v_t.data[v_base + (kj + c) * dv + d];
+                                        }
+                                    }
+                                }
+
+                                // Softmax gradient correction:
+                                // dL/dS = P .* (dP - sum_c(P .* dP))
+                                let mut ds = vec![0.0f32; br * bc];
+                                for r in 0..br {
+                                    let mut sum_p_dp = 0.0f32;
+                                    for c in 0..bc {
+                                        sum_p_dp += p_ij[r * bc + c] * dp[r * bc + c];
+                                    }
+                                    for c in 0..bc {
+                                        ds[r * bc + c] = p_ij[r * bc + c] * (dp[r * bc + c] - sum_p_dp);
+                                    }
+                                }
+
+                                // dQ contribution
+                                for r in 0..br {
+                                    for d in 0..d_head {
+                                        let mut sum = 0.0f32;
+                                        for c in 0..bc {
+                                            sum += ds[r * bc + c] * k_t.data[k_base + (kj + c) * d_head + d];
+                                        }
+                                        dq[q_base + (qi + r) * d_head + d] += sum * scale;
+                                    }
+                                }
+
+                                // dK contribution
+                                for c in 0..bc {
+                                    for d in 0..d_head {
+                                        let mut sum = 0.0f32;
+                                        for r in 0..br {
+                                            sum += ds[r * bc + c] * q_t.data[q_base + (qi + r) * d_head + d];
+                                        }
+                                        dk[k_base + (kj + c) * d_head + d] += sum * scale;
+                                    }
+                                }
+
+                                // dV contribution
+                                for c in 0..bc {
+                                    for d in 0..dv {
+                                        let mut sum = 0.0f32;
+                                        for r in 0..br {
+                                            sum += p_ij[r * bc + c] * g.data[o_base + (qi + r) * dv + d];
+                                        }
+                                        dv_[v_base + (kj + c) * dv + d] += sum;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let dq_t = Tensor::from_vec(dq, q_t.rows, q_t.cols);
+                    let dk_t = Tensor::from_vec(dk, k_t.rows, k_t.cols);
+                    let dv_t = Tensor::from_vec(dv_, v_t.rows, v_t.cols);
+
+                    grads[q] = grads[q].add(&dq_t);
+                    grads[k] = grads[k].add(&dk_t);
+                    grads[v] = grads[v].add(&dv_t);
                 }
             }
         }
@@ -1624,6 +2016,24 @@ impl<'t> Var<'t> {
         let out = a.matmul(&b);
         let new_idx = self.tape.push_with_saved(
             Op::MatMul(self.idx, other.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    /// MatMul GPU-acceléré.
+    /// Forward CPU (GPU dispatch dans forward dédié).
+    /// Backward tente GPU, fallback CPU via `Op::MatMulGpu` unifié avec MatMul.
+    pub fn matmul_gpu(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        let out = a.matmul(&b);
+        let new_idx = self.tape.push_with_saved(
+            Op::MatMulGpu(self.idx, other.idx),
             DeviceTensor::cpu(out),
             SavedData::None,
         );
@@ -2390,6 +2800,102 @@ impl<'t> Var<'t> {
                 kernel,
                 stride,
                 pad,
+            },
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    pub fn conv2d_transpose_forward(
+        self,
+        weight: Var<'t>,
+        bias: Option<Var<'t>>,
+        batch: usize,
+        in_c: usize,
+        h: usize,
+        w: usize,
+        out_c: usize,
+        kernel: usize,
+        stride: usize,
+        pad: usize,
+        output_padding: usize,
+    ) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
+        let h_out = (h - 1) * stride + kernel - 2 * pad + output_padding;
+        let w_out = (w - 1) * stride + kernel - 2 * pad + output_padding;
+        let out_rows = batch;
+        let out_cols = out_c * h_out * w_out;
+        let mut out = Tensor::zeros(out_rows, out_cols);
+        for b_i in 0..batch {
+            for co in 0..out_c {
+                for ci in 0..in_c {
+                    for kh in 0..kernel {
+                        for kw in 0..kernel {
+                            for ih in 0..h {
+                                for iw in 0..w {
+                                    let oh = ih * stride + kh - pad;
+                                    let ow = iw * stride + kw - pad;
+                                    if oh < h_out && ow < w_out {
+                                        let w_idx = ci * out_c * kernel * kernel
+                                            + co * kernel * kernel
+                                            + kh * kernel
+                                            + kw;
+                                        let in_idx = b_i * in_c * h * w
+                                            + ci * h * w
+                                            + ih * w
+                                            + iw;
+                                        let out_idx = b_i * out_c * h_out * w_out
+                                            + co * h_out * w_out
+                                            + oh * w_out
+                                            + ow;
+                                        out.data[out_idx] +=
+                                            a.data[in_idx] * wv.data[w_idx];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Add bias
+        if let Some(ref b_v) = bias {
+            let b_data = self.tape.values.borrow()[b_v.idx].as_cpu().clone();
+            for b_i in 0..batch {
+                for co in 0..out_c {
+                    let b_val = b_data.data[co];
+                    for oh in 0..h_out {
+                        for ow in 0..w_out {
+                            let out_idx = b_i * out_c * h_out * w_out
+                                + co * h_out * w_out
+                                + oh * w_out
+                                + ow;
+                            out.data[out_idx] += b_val;
+                        }
+                    }
+                }
+            }
+        }
+        let b_idx = bias.map(|v| v.idx);
+        let new_idx = self.tape.push_with_saved(
+            Op::Conv2dTransposeForward {
+                input: self.idx,
+                weight: weight.idx,
+                bias: b_idx,
+                batch,
+                in_c,
+                h,
+                w,
+                out_c,
+                kernel,
+                stride,
+                pad,
+                output_padding,
             },
             DeviceTensor::cpu(out),
             SavedData::None,
