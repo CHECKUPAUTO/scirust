@@ -7,6 +7,17 @@ edition = "2024"
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-macros = { path = "../scirust-macros" }
 scirust-simd = { path = "../scirust-simd" }
-scirust-gpu = { path = "../scirust-gpu" }
 scirust-gpu-macros = { path = "../scirust-gpu-macros" }
-matrixmultiply = "0.3"
+rand = "0.9"
+ndarray = "0.16"
+blas = { version = "0.22", optional = true }
+blas-src = { version = "0.10", optional = true }
+rayon = { version = "1.8", optional = true }
+matrixmultiply = "0.3.10"
+
+[features]
+default = []
+portable-simd = ["scirust-simd/portable-simd"]
+blas = ["dep:blas", "dep:blas-src"]
+blas-openblas = ["blas", "blas-src/openblas"]
+blas-mkl = ["blas", "blas-src/intel-mkl"]
