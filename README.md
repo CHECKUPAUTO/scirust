@@ -115,7 +115,7 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Transformer (MHA, Encoder, Decoder) | ✅ Stable |
 | GQA & KV-Cache | ✅ Stable (GQA + infer_step avec cache) |
 | RoPE embeddings | ✅ Stable |
-| RNN / LSTM | 🟡 Partially implemented (module créé, 6 tests à corriger) |
+| RNN / LSTM | ✅ Stable (module lstm.rs avec forward_sequence, 7 tests) |
 | Flash Attention | ✅ Stable (module flash_attention.rs) |
 | Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
 | Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |

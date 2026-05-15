@@ -26,7 +26,6 @@ pub struct MultiHeadAttention {
     pub w_o: Linear,
     pub causal: bool,
     pub name: String,
-    /// KV cache for incremental inference.
     pub kv_cache: RefCell<Option<(Tensor, Tensor)>>,
 }
 
@@ -234,6 +233,48 @@ impl MultiHeadAttention {
         accumulator.unwrap()
     }
 
+    /// Inférence incrémentale avec KV-Cache (mode token unique).
+    pub fn infer_step<'t>(&mut self, tape: &'t Tape, x_token: Var<'t>, _pos: usize) -> Var<'t> {
+        let q = self.w_q.forward(tape, x_token.clone());
+        let k = self.w_k.forward(tape, x_token.clone());
+        let v = self.w_v.forward(tape, x_token);
+        let (k_cached, v_cached) = {
+            let mut cache = self.kv_cache.borrow_mut();
+            match cache.as_mut() {
+                Some((ck, cv)) => {
+                    let kd = tape.value(k.idx());
+                    let vd = tape.value(v.idx());
+                    let mut nk = ck.data.clone(); nk.extend(&kd.data);
+                    let mut nv = cv.data.clone(); nv.extend(&vd.data);
+                    *ck = Tensor::from_vec(nk, ck.rows + 1, ck.cols);
+                    *cv = Tensor::from_vec(nv, cv.rows + 1, cv.cols);
+                    (tape.input(ck.clone()), tape.input(cv.clone()))
+                }
+                None => {
+                    let kd = tape.value(k.idx());
+                    let vd = tape.value(v.idx());
+                    *cache = Some((kd, vd));
+                    (k, v)
+                }
+            }
+        };
+        let h_n = self.n_heads; let d_h = self.d_head;
+        let scale = 1.0 / (d_h as f32).sqrt();
+        let mut heads = Vec::with_capacity(h_n);
+        for h in 0..h_n {
+            let qh = q.clone().slice_cols(h * d_h, d_h);
+            let kh = k_cached.clone().slice_cols(h * d_h, d_h);
+            let vh = v_cached.clone().slice_cols(h * d_h, d_h);
+            heads.push(qh.matmul(kh.transpose_2d()).scale(scale).softmax(1).matmul(vh));
+        }
+        let mut acc: Option<Var> = None;
+        for (h, hd) in heads.iter().enumerate() {
+            let pd = hd.matmul(build_pad_matrix(tape, h, d_h, self.d_model));
+            acc = Some(match acc { None => pd, Some(a) => a.add(pd) });
+        }
+        self.w_o.forward(tape, acc.unwrap())
+    }
+
     pub fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         v.extend(self.w_q.parameter_indices());
@@ -328,48 +369,6 @@ impl MultiHeadAttention {
         Ok(())
     }
 }
-
-    /// Inférence incrémentale avec KV-Cache.
-    pub fn infer_step<'t>(&self, tape: &'t Tape, x_token: Var<'t>, _pos: usize) -> Var<'t> {
-        let q = self.w_q.forward(tape, x_token.clone());
-        let k = self.w_k.forward(tape, x_token.clone());
-        let v = self.w_v.forward(tape, x_token);
-        let (k_cached, v_cached) = {
-            let mut cache = self.kv_cache.borrow_mut();
-            match cache.as_mut() {
-                Some((ck, cv)) => {
-                    let kd = tape.value(k.idx());
-                    let vd = tape.value(v.idx());
-                    let mut nk = ck.data.clone(); nk.extend(&kd.data);
-                    let mut nv = cv.data.clone(); nv.extend(&vd.data);
-                    *ck = Tensor::from_vec(nk, ck.rows + 1, ck.cols);
-                    *cv = Tensor::from_vec(nv, cv.rows + 1, cv.cols);
-                    (tape.input(ck.clone()), tape.input(cv.clone()))
-                }
-                None => {
-                    let kd = tape.value(k.idx());
-                    let vd = tape.value(v.idx());
-                    *cache = Some((kd, vd));
-                    (k, v)
-                }
-            }
-        };
-        let h_n = self.n_heads; let d_h = self.d_head;
-        let scale = 1.0 / (d_h as f32).sqrt();
-        let mut heads = Vec::with_capacity(h_n);
-        for h in 0..h_n {
-            let qh = q.clone().slice_cols(h * d_h, d_h);
-            let kh = k_cached.clone().slice_cols(h * d_h, d_h);
-            let vh = v_cached.clone().slice_cols(h * d_h, d_h);
-            heads.push(qh.matmul(kh.transpose_2d()).scale(scale).softmax(1).matmul(vh));
-        }
-        let mut acc: Option<Var> = None;
-        for (h, hd) in heads.iter().enumerate() {
-            let pd = hd.matmul(build_pad_matrix(tape, h, d_h, self.d_model));
-            acc = Some(match acc { None => pd, Some(a) => a.add(pd) });
-        }
-        self.w_o.forward(tape, acc.unwrap())
-    }
 
 /// pad[i, j] = 1 si j == h*d_h + i, sinon 0. Shape (d_h, d_model).
 fn build_pad_matrix<'t>(tape: &'t Tape, h: usize, d_h: usize, d_model: usize) -> Var<'t> {
