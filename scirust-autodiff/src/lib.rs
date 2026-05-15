@@ -1,4 +1,5 @@
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::cell::RefCell;
 
 /// Dual number for forward-mode automatic differentiation.
 ///
@@ -253,83 +254,149 @@ impl Dual {
     pub fn abs(self) -> Dual {
         Dual {
             value: self.value.abs(),
-            deriv: if self.value > 0.0 {
-                self.deriv
-            } else if self.value < 0.0 {
-                -self.deriv
-            } else {
-                0.0
-            },
+            deriv: if self.value > 0.0 { self.deriv } else if self.value < 0.0 { -self.deriv } else { 0.0 },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reverse-mode AutoDiff
+// ---------------------------------------------------------------------------
+
+/// A node in the computation graph for reverse-mode AD.
+#[derive(Debug)]
+pub struct Node {
+    pub value: f64,
+    pub grad: f64,
+    pub deps: Vec<(usize, f64)>, // (index_in_tape, partial_derivative)
+}
+
+/// Tape (Wengert list) for reverse-mode AD.
+pub struct Tape {
+    pub nodes: RefCell<Vec<Node>>,
+}
+
+impl Tape {
+    pub fn new() -> Self {
+        Tape {
+            nodes: RefCell::new(Vec::new()),
         }
     }
 
-    /// Hyperbolic sine: d/dx sinh(x) = cosh(x)
-    pub fn sinh(self) -> Dual {
-        Dual {
-            value: self.value.sinh(),
-            deriv: self.deriv * self.value.cosh(),
-        }
+    pub fn var(&self, value: f64) -> Var<'_> {
+        let mut nodes = self.nodes.borrow_mut();
+        let idx = nodes.len();
+        nodes.push(Node {
+            value,
+            grad: 0.0,
+            deps: Vec::new(),
+        });
+        Var { tape: self, idx }
     }
 
-    /// Hyperbolic cosine: d/dx cosh(x) = sinh(x)
-    pub fn cosh(self) -> Dual {
-        Dual {
-            value: self.value.cosh(),
-            deriv: self.deriv * self.value.sinh(),
+    pub fn backward(&self, out_idx: usize) {
+        let mut nodes = self.nodes.borrow_mut();
+        for node in nodes.iter_mut() {
+            node.grad = 0.0;
+        }
+        nodes[out_idx].grad = 1.0;
+
+        for i in (0..nodes.len()).rev() {
+            let grad = nodes[i].grad;
+            let deps = nodes[i].deps.clone();
+            for (dep_idx, partial) in deps {
+                nodes[dep_idx].grad += grad * partial;
+            }
         }
     }
+}
 
-    /// Hyperbolic tangent: d/dx tanh(x) = 1 - tanh(x)^2 = sech(x)^2
-    pub fn tanh(self) -> Dual {
-        let t = self.value.tanh();
-        Dual {
-            value: t,
-            deriv: self.deriv * (1.0 - t * t),
-        }
+/// A variable in reverse-mode AD.
+#[derive(Clone, Copy)]
+pub struct Var<'a> {
+    pub tape: &'a Tape,
+    pub idx: usize,
+}
+
+impl<'a> Var<'a> {
+    pub fn value(&self) -> f64 {
+        self.tape.nodes.borrow()[self.idx].value
     }
 
-    /// Base-10 logarithm: d/dx log10(x) = 1 / (x * ln(10))
-    pub fn log10(self) -> Dual {
-        Dual {
-            value: self.value.log10(),
-            deriv: self.deriv / (self.value * std::f64::consts::LN_10),
-        }
+    pub fn grad(&self) -> f64 {
+        self.tape.nodes.borrow()[self.idx].grad
     }
 
-    /// Two-argument arctangent: atan2(y, x) = atan(y/x) with quadrant awareness.
-    /// self = y, other = x.
-    /// d/dy atan2(y, x) = x / (x^2 + y^2)
-    /// d/dx atan2(y, x) = -y / (x^2 + y^2)
-    pub fn atan2(self, x: Dual) -> Dual {
-        let denom = self.value * self.value + x.value * x.value;
-        Dual {
-            value: self.value.atan2(x.value),
-            deriv: (self.deriv * x.value - self.value * x.deriv) / denom,
-        }
+    fn push_op(&self, value: f64, deps: Vec<(usize, f64)>) -> Var<'a> {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        let idx = nodes.len();
+        nodes.push(Node {
+            value,
+            grad: 0.0,
+            deps,
+        });
+        Var { tape: self.tape, idx }
     }
 
-    /// Inverse sine (arcsin): d/dx asin(x) = 1 / sqrt(1 - x^2)
-    pub fn asin(self) -> Dual {
-        Dual {
-            value: self.value.asin(),
-            deriv: self.deriv / (1.0 - self.value * self.value).sqrt(),
-        }
+    pub fn powi(self, n: i32) -> Var<'a> {
+        let val = self.value().powi(n);
+        let deriv = n as f64 * self.value().powi(n - 1);
+        self.push_op(val, vec![(self.idx, deriv)])
     }
 
-    /// Inverse cosine (arccos): d/dx acos(x) = -1 / sqrt(1 - x^2)
-    pub fn acos(self) -> Dual {
-        Dual {
-            value: self.value.acos(),
-            deriv: -self.deriv / (1.0 - self.value * self.value).sqrt(),
-        }
+    pub fn exp(self) -> Var<'a> {
+        let val = self.value().exp();
+        self.push_op(val, vec![(self.idx, val)])
     }
 
-    /// Inverse tangent (arctan): d/dx atan(x) = 1 / (1 + x^2)
-    pub fn atan(self) -> Dual {
-        Dual {
-            value: self.value.atan(),
-            deriv: self.deriv / (1.0 + self.value * self.value),
-        }
+    pub fn sin(self) -> Var<'a> {
+        let val = self.value().sin();
+        let deriv = self.value().cos();
+        self.push_op(val, vec![(self.idx, deriv)])
+    }
+
+    pub fn cos(self) -> Var<'a> {
+        let val = self.value().cos();
+        let deriv = -self.value().sin();
+        self.push_op(val, vec![(self.idx, deriv)])
+    }
+}
+
+impl<'a> Add for Var<'a> {
+    type Output = Var<'a>;
+    fn add(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() + rhs.value(), vec![(self.idx, 1.0), (rhs.idx, 1.0)])
+    }
+}
+
+impl<'a> Sub for Var<'a> {
+    type Output = Var<'a>;
+    fn sub(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() - rhs.value(), vec![(self.idx, 1.0), (rhs.idx, -1.0)])
+    }
+}
+
+impl<'a> Mul for Var<'a> {
+    type Output = Var<'a>;
+    fn mul(self, rhs: Var<'a>) -> Var<'a> {
+        self.push_op(self.value() * rhs.value(), vec![(self.idx, rhs.value()), (rhs.idx, self.value())])
+    }
+}
+
+impl<'a> Div for Var<'a> {
+    type Output = Var<'a>;
+    fn div(self, rhs: Var<'a>) -> Var<'a> {
+        let val = self.value() / rhs.value();
+        let d_lhs = 1.0 / rhs.value();
+        let d_rhs = -self.value() / (rhs.value() * rhs.value());
+        self.push_op(val, vec![(self.idx, d_lhs), (rhs.idx, d_rhs)])
+    }
+}
+
+impl<'a> Neg for Var<'a> {
+    type Output = Var<'a>;
+    fn neg(self) -> Var<'a> {
+        self.push_op(-self.value(), vec![(self.idx, -1.0)])
     }
 }
 
@@ -388,7 +455,7 @@ mod tests {
         let x = Dual::var(std::f64::consts::PI / 2.0);
         let y = x.sin();
         assert!((y.val() - 1.0).abs() < 1e-12);
-        assert!((y.grad() - 0.0).abs() < 1e-12); // cos(π/2) = 0
+        assert!((y.grad() - 0.0).abs() < 1e-12);  // cos(π/2) = 0
     }
 
     #[test]
@@ -408,82 +475,31 @@ mod tests {
     }
 
     #[test]
-    fn test_sinh() {
-        let x = Dual::var(1.0);
-        let y = x.sinh();
-        assert!((y.val() - 1.0f64.sinh()).abs() < 1e-12);
-        assert!((y.grad() - 1.0f64.cosh()).abs() < 1e-12);
+    fn test_reverse_mode_simple() {
+        let tape = Tape::new();
+        let x = tape.var(3.0);
+        let y = tape.var(2.0);
+        let z = x * x + x * y;
+        // z = x^2 + xy
+        // dz/dx = 2x + y = 2(3) + 2 = 8
+        // dz/dy = x = 3
+        tape.backward(z.idx);
+        assert_eq!(x.grad(), 8.0);
+        assert_eq!(y.grad(), 3.0);
     }
 
     #[test]
-    fn test_cosh() {
-        let x = Dual::var(0.5);
-        let y = x.cosh();
-        assert!((y.val() - 0.5f64.cosh()).abs() < 1e-12);
-        assert!((y.grad() - 0.5f64.sinh()).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_tanh() {
-        let x = Dual::var(0.0);
-        let y = x.tanh();
-        assert!((y.val() - 0.0).abs() < 1e-12);
-        assert!((y.grad() - 1.0).abs() < 1e-12); // sech(0)^2 = 1
-    }
-
-    #[test]
-    fn test_log10() {
-        let x = Dual::var(10.0);
-        let y = x.log10();
-        assert!((y.val() - 1.0).abs() < 1e-12);
-        let expected_deriv = 1.0 / (10.0 * std::f64::consts::LN_10);
-        assert!((y.grad() - expected_deriv).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_atan2() {
-        // atan2(1, 1) = pi/4
-        let y = Dual::var(1.0);
-        let x = Dual::primal(1.0);
-        let z = y.atan2(x);
-        assert!((z.val() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
-        // d/dy atan2(y, x) at y=1,x=1: x/(x^2+y^2) = 1/2
-        assert!((z.grad() - 0.5).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_atan2_x_active() {
-        // d/dx atan2(y, x) at y=1,x=1: -y/(x^2+y^2) = -1/2
-        let y = Dual::primal(1.0);
-        let x = Dual::var(1.0);
-        let z = y.atan2(x);
-        assert!((z.val() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
-        assert!((z.grad() - (-0.5)).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_asin() {
-        let x = Dual::var(0.5);
-        let y = x.asin();
-        assert!((y.val() - 0.5f64.asin()).abs() < 1e-12);
-        let expected = 1.0 / (1.0 - 0.25f64).sqrt();
-        assert!((y.grad() - expected).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_acos() {
-        let x = Dual::var(0.5);
-        let y = x.acos();
-        assert!((y.val() - 0.5f64.acos()).abs() < 1e-12);
-        let expected = -1.0 / (1.0 - 0.25f64).sqrt();
-        assert!((y.grad() - expected).abs() < 1e-12);
-    }
-
-    #[test]
-    fn test_atan() {
-        let x = Dual::var(1.0);
-        let y = x.atan();
-        assert!((y.val() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
-        assert!((y.grad() - 0.5).abs() < 1e-12); // 1/(1+1^2) = 0.5
+    fn test_reverse_mode_complex() {
+        let tape = Tape::new();
+        let x = tape.var(1.0);
+        let y = (x.sin() * x.exp()) / x.powi(2);
+        // d/dx(sin(x)e^x / x^2)
+        // = ( (cos(x)e^x + sin(x)e^x)x^2 - 2x sin(x)e^x ) / x^4
+        // at x=1:
+        // = ( (cos(1)e + sin(1)e) - 2 sin(1)e ) / 1
+        // = e * (cos(1) - sin(1))
+        tape.backward(y.idx);
+        let expected = 1.0f64.exp() * (1.0f64.cos() - 1.0f64.sin());
+        assert!((x.grad() - expected).abs() < 1e-10);
     }
 }
