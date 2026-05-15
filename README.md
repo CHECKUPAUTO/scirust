@@ -111,8 +111,12 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Dropout | ✅ Stable |
 | Data parallelism (CPU multithread) | ✅ Stable |
 | GPU forward (wgpu) | ✅ Stable |
-| GPU backward | 🟡 Partial (matmul backward still on CPU) |
-| RNN / LSTM / Transformer | ❌ Not yet |
+| GPU backward | ✅ Stable (bolt-opt-autodiff) |
+| Transformer (MHA, Encoder, Decoder) | ✅ Stable |
+| GQA & KV-Cache | 🟡 Partially implemented |
+| RoPE embeddings | 🟡 Planned |
+| RNN / LSTM | ❌ Not yet |
+| Flash Attention | ❌ Not yet |
 | Conv2dTranspose | ❌ Not yet |
 | Mixed precision (fp16) | ❌ Not yet |
 
