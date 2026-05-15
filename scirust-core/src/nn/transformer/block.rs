@@ -44,7 +44,7 @@ impl TransformerBlock {
             n_heads,
             d_ff,
             ln1: LayerNorm::new(d_model, 1e-5, w_init, rng),
-            mha: MultiHeadAttention::new(d_model, n_heads, causal, w_init, b_init, rng),
+            mha: MultiHeadAttention::new(d_model, n_heads, 0, causal, w_init, b_init, rng),
             ln2: LayerNorm::new(d_model, 1e-5, w_init, rng),
             ffn1: Linear::new(d_model, d_ff, w_init, b_init, rng),
             ffn2: Linear::new(d_ff, d_model, w_init, b_init, rng),

@@ -14,6 +14,7 @@ blas = { version = "0.22", optional = true }
 blas-src = { version = "0.10", optional = true }
 rayon = { version = "1.8", optional = true }
 matrixmultiply = "0.3.10"
+half = "2.4"
 
 [features]
 default = []
