@@ -113,8 +113,8 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | GPU forward (wgpu) | ✅ Stable |
 | GPU backward | ✅ Stable (bolt-opt-autodiff) |
 | Transformer (MHA, Encoder, Decoder) | ✅ Stable |
-| GQA & KV-Cache | 🟡 Partially implemented |
-| RoPE embeddings | 🟡 Planned |
+| GQA & KV-Cache | 🟡 Partially implemented (GQA structure ready, KV cache pending) |
+| RoPE embeddings | ✅ Stable (module rope.rs intégré dans attention) |
 | RNN / LSTM | ❌ Not yet |
 | Flash Attention | ❌ Not yet |
 | Conv2dTranspose | ❌ Not yet |
