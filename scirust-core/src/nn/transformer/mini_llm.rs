@@ -52,7 +52,7 @@ pub struct MiniLLMConfig {
 
 impl Default for MiniLLMConfig {
     fn default() -> Self {
-        Self { vocab_size: 256, d_model: 128, n_heads: 4, n_layers: 4, d_ff: 512, max_seq_len: 256 }
+        Self { vocab_size: 256, d_model: 128, n_heads: 4, n_layers: 4, d_ff: 512, max_seq_len: 125_000 }
     }
 }
 
