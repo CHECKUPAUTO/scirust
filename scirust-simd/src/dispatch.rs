@@ -369,25 +369,7 @@ impl SimdBackend for NeonBackend {
         "neon"
     }
     fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) {
-        unsafe { Self::saxpy_neon(a, x, y) }
-    }
-    #[target_feature(enable = "neon")]
-    unsafe fn saxpy_neon(alpha: f32, x: &[f32], y: &mut [f32]) {
-        use std::arch::aarch64::*;
-        let alpha_v = vdupq_n_f32(alpha);
-        let chunks = x.len() / 4;
-        for c in 0..chunks {
-            let xp = x.as_ptr().add(c * 4);
-            let yp = y.as_mut_ptr().add(c * 4);
-            let xv = vld1q_f32(xp);
-            let yv = vld1q_f32(yp);
-            let result = vfmaq_f32(yv, alpha_v, xv); // FMA NEON
-            vst1q_f32(yp, result);
-        }
-        let start = chunks * 4;
-        for i in start..x.len() {
-            y[i] += alpha * x[i];
-        }
+        ScalarBackend.saxpy_f32(a, x, y);
     }
 
     fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) {

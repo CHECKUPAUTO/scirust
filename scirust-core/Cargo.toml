@@ -15,9 +15,12 @@ blas-src = { version = "0.10", optional = true }
 rayon = { version = "1.8", optional = true }
 matrixmultiply = "0.3.10"
 half = "2.4"
+num-bigint = "0.4"
+num-traits = "0.2"
 
 [features]
 default = []
+gpu = []
 portable-simd = ["scirust-simd/portable-simd"]
 blas = ["dep:blas", "dep:blas-src"]
 blas-openblas = ["blas", "blas-src/openblas"]
