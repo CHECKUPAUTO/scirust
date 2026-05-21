@@ -1,0 +1,19 @@
+[package]
+name = "scirust-evo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SciRust Evolutionary Algorithms — GA, CMA-ES, OpenES, NSGA-II"
+
+[dependencies]
+rand = { workspace = true }
+rand_distr = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Tests

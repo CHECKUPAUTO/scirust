@@ -1,0 +1,30 @@
+[package]
+name = "scirust-burn-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Inference-only adapter between Burn neural networks and SciRust non-gradient algorithms"
+readme = "README.md"
+keywords = ["burn", "rust-ml", "evolutionary", "inference", "scirust"]
+categories = ["science"]
+
+[dependencies]
+burn = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# burn-ndarray pour les tests d'intégration et benchmarks (CPU sans CUDA)
+burn-ndarray = { workspace = true }
+# burn complet activé pour les modules nn::* dans les tests
+burn = { workspace = true, features = ["std", "ndarray"] }
+
+[[bench]]
+name = "forward"
+harness = false  # on utilise std::time::Instant, pas criterion (moins de deps en phase 0)
+
+[[example]]
+name = "eval_population"
+path = "examples/eval_population.rs"

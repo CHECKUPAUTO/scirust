@@ -17,8 +17,6 @@ matrixmultiply = "0.3.10"
 num-bigint = "0.4"
 num-traits = "0.2"
 half = "2.4"
-num-bigint = "0.4"
-num-traits = "0.2"
 
 [features]
 default = []
