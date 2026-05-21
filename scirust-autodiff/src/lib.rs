@@ -276,6 +276,12 @@ pub struct Tape {
     pub nodes: RefCell<Vec<Node>>,
 }
 
+impl Default for Tape {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tape {
     pub fn new() -> Self {
         Tape {
