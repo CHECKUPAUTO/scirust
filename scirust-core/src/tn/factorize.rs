@@ -38,7 +38,7 @@ fn prime_factors(mut n: usize) -> Vec<usize> {
 ///
 /// # Examples
 /// ```
-/// use scirust_tn::factorize::auto_factorize;
+/// use scirust_core::tn::factorize::auto_factorize;
 /// assert_eq!(auto_factorize(768, 3).iter().product::<usize>(), 768);
 /// assert_eq!(auto_factorize(1, 3), vec![1, 1, 1]);
 /// ```

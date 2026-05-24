@@ -1,8 +1,7 @@
 //! Benchmark skeleton: measure memory + reconstruction error + decomposition
 //! time for transformer-style FFN projections.
 //!
-//! Run with `cargo run --release --example transformer_compress --features core`
-//! (after copying this to `examples/transformer_compress.rs`) or enable as a
+//! Run with `cargo run --release -p transformer_compress` or enable as a
 //! proper criterion bench in `Cargo.toml`. The current Cargo.toml has the
 //! `[[bench]]` section commented; uncomment it once `criterion` is added as
 //! a dev-dependency.
@@ -10,10 +9,7 @@
 //! Intended to run on the Jetson Thor for realistic numbers. CPU-only here
 //! since Phase 1 doesn't yet wire to scirust-gpu / cudarc.
 
-#![cfg(feature = "core")]
-
-use scirust_core::nn::Linear;
-use scirust_tn::{tt_decompose, tt_decompose_auto};
+use scirust_core::nn::{Linear, tt_decompose, tt_decompose_auto};
 use std::time::Instant;
 
 fn frob_norm(a: &[f32]) -> f32 {
@@ -70,7 +66,7 @@ fn bench_one(in_features: usize, out_features: usize, n_factors: usize, max_rank
 }
 
 fn main() {
-    println!("=== scirust-tn: transformer FFN compression bench ===\n");
+    println!("=== SciRust: transformer FFN compression bench ===\n");
 
     // Typical transformer FFN shapes (small models, scaled down for fast bench)
     // GPT-2 small style FFN: 768 -> 3072

@@ -17,6 +17,10 @@ matrixmultiply = "0.3.10"
 num-bigint = "0.4"
 num-traits = "0.2"
 half = "2.4"
+nalgebra = "0.33"
+
+[dev-dependencies]
+approx = "0.5"
 
 [features]
 default = []

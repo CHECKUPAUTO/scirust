@@ -5,10 +5,9 @@
 //! The Phase 1 forward path uses `reconstruct_weight()` internally, so this
 //! test exercises the full pipeline that `forward()` relies on.
 
-#![cfg(feature = "core")]
-
-use scirust_core::nn::Linear;
-use scirust_tn::{auto_factorize, tt_decompose, tt_decompose_auto};
+use crate::nn::Linear;
+use crate::nn::{tt_decompose, tt_decompose_auto};
+use crate::tn::factorize::auto_factorize;
 
 fn frob_err(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
@@ -22,8 +21,8 @@ fn frob_norm(a: &[f32]) -> f32 {
 fn ttlinear_matches_linear_full_rank() {
     let in_features = 48;
     let out_features = 96;
-    let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-    let mut linear = Linear::new(in_features, out_features, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+    let mut rng = crate::nn::rng::PcgEngine::new(42);
+    let mut linear = Linear::new(in_features, out_features, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
     for i in 0..in_features {
         for j in 0..out_features {
             linear.weight.data[i * out_features + j] = ((i * 7 + j * 3) as f32).sin();
@@ -44,8 +43,8 @@ fn ttlinear_matches_linear_full_rank() {
 
 #[test]
 fn ttlinear_auto_factorize_works() {
-    let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-    let linear = Linear::new(64, 128, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+    let mut rng = crate::nn::rng::PcgEngine::new(42);
+    let linear = Linear::new(64, 128, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
     let tt = tt_decompose_auto(&linear, 3, 16, 1e-4);
     assert_eq!(tt.in_dims.iter().product::<usize>(), 64);
     assert_eq!(tt.out_dims.iter().product::<usize>(), 128);
@@ -67,8 +66,8 @@ fn auto_factorize_balanced() {
 fn ttlinear_compression_reports() {
     let in_features = 64;
     let out_features = 64;
-    let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-    let mut linear = Linear::new(in_features, out_features, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+    let mut rng = crate::nn::rng::PcgEngine::new(42);
+    let mut linear = Linear::new(in_features, out_features, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
     // Synthetic low-rank weight: 2 outer products
     for i in 0..in_features {
         for j in 0..out_features {

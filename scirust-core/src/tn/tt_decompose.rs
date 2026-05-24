@@ -14,7 +14,7 @@
 //! each `(I_k, O_k)` pair is grouped into a single mode of size `I_k * O_k`,
 //! and finally TT-SVD'd. Each core has logical shape `(r_k, I_k * O_k, r_{k+1})`.
 
-use crate::ops::svd::truncated_svd;
+use crate::tn::ops::svd::truncated_svd;
 use crate::tensor::TensorND;
 
 /// A complete TT decomposition: `d` cores plus their ranks.
@@ -68,7 +68,7 @@ pub fn tt_decompose_tensor(t: &TensorND, max_rank: usize, tolerance: f32) -> TTC
 
     // Edge case: single-mode tensor, just wrap as one core.
     if d == 1 {
-        let core = TensorND::new(vec![1, mode_dims[0], 1], t.data.clone());
+        let core = TensorND::new(t.data.clone(), vec![1, mode_dims[0], 1]);
         cores.push(core);
         return TTCores { cores, ranks, mode_dims };
     }
@@ -92,7 +92,7 @@ pub fn tt_decompose_tensor(t: &TensorND, max_rank: usize, tolerance: f32) -> TTC
         let r_k = ranks[k];
         let n_k = mode_dims[k];
         debug_assert_eq!(rows, r_k * n_k);
-        cores.push(TensorND::new(vec![r_k, n_k, r_next], svd.u));
+        cores.push(TensorND::new(svd.u, vec![r_k, n_k, r_next]));
 
         // Residual = diag(s) @ V^T, of shape (r_{k+1}, cols)
         let mut residual = vec![0.0f32; r_next * cols];
@@ -112,7 +112,7 @@ pub fn tt_decompose_tensor(t: &TensorND, max_rank: usize, tolerance: f32) -> TTC
     let r_last = ranks[d - 1];
     let n_last = mode_dims[d - 1];
     debug_assert_eq!(work.len(), r_last * n_last);
-    cores.push(TensorND::new(vec![r_last, n_last, 1], work));
+    cores.push(TensorND::new(work, vec![r_last, n_last, 1]));
 
     TTCores { cores, ranks, mode_dims }
 }
@@ -227,7 +227,7 @@ fn interleave_weight(w: &[f32], in_dims: &[usize], out_dims: &[usize]) -> Tensor
         t[target_flat] = w[i * out_features + j];
     }
 
-    TensorND::new(target_shape, t)
+    TensorND::new(t, target_shape)
 }
 
 /// Inverse of `interleave_weight`: from a tensor of shape
@@ -299,7 +299,7 @@ pub fn tt_decompose_matrix(
     // Group each (I_k, O_k) pair into a single mode of size I_k * O_k.
     let d = in_dims.len();
     let combined_shape: Vec<usize> = (0..d).map(|k| in_dims[k] * out_dims[k]).collect();
-    let combined = interleaved.reshape(combined_shape);
+    let combined = interleaved.reshape(&combined_shape).expect("reshape failed in tt_decompose_matrix");
 
     tt_decompose_tensor(&combined, max_rank, tolerance)
 }
@@ -359,7 +359,8 @@ mod tests {
     #[test]
     fn test_tt_decompose_2mode_full_rank() {
         // 2-mode tensor = matrix; TT with full rank should be exact.
-        let t = TensorND::new(vec![3, 4], (1..=12).map(|x| x as f32).collect());
+        let data: Vec<f32> = (1..=12).map(|x| x as f32).collect();
+        let t = TensorND::new(data, vec![3, 4]);
         let tt = tt_decompose_tensor(&t, 100, 0.0);
         assert_eq!(tt.cores.len(), 2);
         let recon = reconstruct_tensor(&tt);
@@ -380,7 +381,7 @@ mod tests {
                 }
             }
         }
-        let t = TensorND::new(vec![3, 4, 2], data);
+        let t = TensorND::new(data, vec![3, 4, 2]);
         let tt = tt_decompose_tensor(&t, 100, 1e-6);
         // Outer-product tensors are TT-rank 1.
         assert_eq!(tt.ranks, vec![1, 1, 1, 1]);
@@ -394,7 +395,7 @@ mod tests {
         let data: Vec<f32> = (0..2 * 3 * 4)
             .map(|i| ((i * 7 + 3) % 17) as f32 - 8.0)
             .collect();
-        let t = TensorND::new(vec![2, 3, 4], data);
+        let t = TensorND::new(data, vec![2, 3, 4]);
         let tt = tt_decompose_tensor(&t, 100, 0.0);
         let recon = reconstruct_tensor(&tt);
         let err = frob_err(&t.data, &recon);

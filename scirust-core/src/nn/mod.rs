@@ -35,6 +35,7 @@ pub mod rng;
 pub mod rope;
 pub mod sequential;
 pub mod transformer;
+pub mod tt_linear;
 
 // Re-exports pour confort
 pub use activation::{ReLU, Sigmoid};
@@ -55,3 +56,4 @@ pub use residual::ResidualBlock;
 pub use rng::PcgEngine;
 pub use sequential::Sequential;
 pub use transformer::{MultiHeadAttention, TransformerBlock, TransformerEncoder};
+pub use tt_linear::{tt_decompose, tt_decompose_auto, TTLinear};

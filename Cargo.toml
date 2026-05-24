@@ -23,6 +23,7 @@ members = [
     "examples/quickstart_v2",
     "examples/cifar10_classifier",
     "examples/transformer_demo",
+    "examples/transformer_compress",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -33,7 +34,6 @@ members = [
     "scirust-learning",
     "scirust-symbolic",
     "scirust-reasoning",
-    "scirust-tn",
 ]
 exclude = [
     "soullink-node-patched",

@@ -32,12 +32,12 @@
 //! equivalent) lands in scirust-core, the forward becomes `d` sequential
 //! matmuls of much smaller shape with native autograd.
 
-use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
-use scirust_core::nn::Module;
-use scirust_core::nn::Linear;
+use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::nn::Module;
+use crate::nn::Linear;
 
-use crate::factorize::{auto_factorize, check_factorization};
-use crate::tt::decompose::{reconstruct_matrix, tt_decompose_matrix, TTCores};
+use crate::tn::factorize::{auto_factorize, check_factorization};
+use crate::tn::tt_decompose::{reconstruct_matrix, tt_decompose_matrix, TTCores};
 
 /// A `Linear` layer compressed as a Tensor-Train decomposition.
 ///
@@ -95,7 +95,7 @@ impl TTLinear {
                 let r_k = self.ranks[k];
                 let n_k = self.in_dims[k] * self.out_dims[k];
                 let r_next = self.ranks[k + 1];
-                crate::tensor::TensorND::new(vec![r_k, n_k, r_next], c.data.clone())
+                crate::tensor::TensorND::new(c.data.clone(), vec![r_k, n_k, r_next])
             })
             .collect();
         let mode_dims: Vec<usize> = (0..self.in_dims.len())
@@ -324,8 +324,8 @@ mod tests {
 
     #[test]
     fn test_tt_decompose_reconstructs_weight() {
-        let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-        let mut linear = Linear::new(6, 4, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+        let mut rng = crate::nn::rng::PcgEngine::new(42);
+        let mut linear = Linear::new(6, 4, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
         // Fill weight with a non-trivial pattern.
         for i in 0..6 {
             for j in 0..4 {
@@ -340,8 +340,8 @@ mod tests {
 
     #[test]
     fn test_tt_decompose_auto() {
-        let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-        let mut linear = Linear::new(8, 16, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+        let mut rng = crate::nn::rng::PcgEngine::new(42);
+        let mut linear = Linear::new(8, 16, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
         for i in 0..(8 * 16) {
             linear.weight.data[i] = ((i as f32) * 0.13).cos();
         }
@@ -355,8 +355,8 @@ mod tests {
 
     #[test]
     fn test_compression_ratio() {
-        let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-        let linear = Linear::new(16, 16, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+        let mut rng = crate::nn::rng::PcgEngine::new(42);
+        let linear = Linear::new(16, 16, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
         // The default weight is all-zeros so compression won't be meaningful
         // but the formula must be well-defined.
         let tt = tt_decompose_auto(&linear, 2, 4, 0.0);
@@ -367,8 +367,8 @@ mod tests {
 
     #[test]
     fn test_parameter_indices() {
-        let mut rng = scirust_core::nn::rng::PcgEngine::new(42);
-        let linear = Linear::new(6, 4, &scirust_core::nn::init::Zeros, &scirust_core::nn::init::Zeros, &mut rng);
+        let mut rng = crate::nn::rng::PcgEngine::new(42);
+        let linear = Linear::new(6, 4, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
         let mut tt = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
         let tape = Tape::new();
         let _ = tt.forward(&tape, tape.input(Tensor { rows: 1, cols: 6, data: vec![0.0; 6] }));
