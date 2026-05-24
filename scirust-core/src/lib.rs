@@ -19,6 +19,10 @@ pub mod autodiff;
 pub mod data;
 pub mod embed;
 pub mod tensor;
+pub mod tn;
+
+#[cfg(test)]
+mod tests;
 
 pub mod error;
 
