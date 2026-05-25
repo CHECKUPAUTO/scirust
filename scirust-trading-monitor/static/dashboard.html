@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>scirust trading observation</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg-0: #0b0e14;
+  --bg-1: #121620;
+  --bg-2: #1a1f2c;
+  --border: #2a3142;
+  --text: #d5d9e2;
+  --text-dim: #7d8597;
+  --text-dimmer: #4a5165;
+  --accent: #61afef;
+  --green: #56c596;
+  --red: #e06c75;
+  --yellow: #e5c07b;
+  --purple: #c678dd;
+  --orange: #d19a66;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  font-size: 13px;
+  background: var(--bg-0);
+  color: var(--text);
+  overflow: hidden;
+}
+body { display: flex; flex-direction: column; }
+
+header {
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  font-size: 12px;
+}
+header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+header h1 .dim { color: var(--text-dim); font-weight: 400; }
+.kv-row { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+.kv { display: flex; gap: 6px; align-items: baseline; }
+.kv .k { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.kv .v { font-family: var(--mono); font-weight: 600; }
+.status {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-dim);
+}
+.led { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dimmer); }
+.led.live { background: var(--green); box-shadow: 0 0 8px rgba(86, 197, 150, 0.6); }
+.led.dead { background: var(--red); }
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 1fr;
+  grid-template-rows: 1fr auto;
+  gap: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.panel {
+  background: var(--bg-0);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.panel-header {
+  padding: 6px 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.panel-header .count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dimmer);
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.panel-body::-webkit-scrollbar { width: 6px; }
+.panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* News feed */
+.event {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  background: var(--bg-1);
+  border-left: 3px solid var(--text-dimmer);
+  border-radius: 2px;
+  font-size: 12px;
+  animation: slideIn 0.2s ease-out;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.event.l-structural { border-left-color: var(--text-dim); }
+.event.l-semantic { border-left-color: var(--accent); }
+.event.l-contextual { border-left-color: var(--purple); }
+.event-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px; font-size: 10px;
+}
+.event-source { font-family: var(--mono); color: var(--accent); }
+.event-time { color: var(--text-dimmer); font-family: var(--mono); }
+.event-text { color: var(--text); line-height: 1.4; }
+.event-tags {
+  margin-top: 4px;
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+.tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  border-radius: 2px;
+  font-family: var(--mono);
+}
+.event-score {
+  font-family: var(--mono); font-size: 10px;
+  margin-top: 4px;
+}
+.event-score .label { color: var(--text-dimmer); }
+.event-score .pos { color: var(--green); }
+.event-score .neg { color: var(--red); }
+.event-score .neu { color: var(--text-dim); }
+
+/* Decisions */
+.decision {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  background: var(--bg-1);
+  border-left: 3px solid var(--text-dimmer);
+  border-radius: 2px;
+  font-size: 12px;
+  animation: slideIn 0.2s ease-out;
+}
+.decision.a-open { border-left-color: var(--green); }
+.decision.a-close { border-left-color: var(--orange); }
+.decision.a-no_trade { border-left-color: var(--red); }
+.decision.a-hold { border-left-color: var(--text-dimmer); }
+.dec-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.dec-action {
+  font-family: var(--mono); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.dec-action.a-open { color: var(--green); }
+.dec-action.a-close { color: var(--orange); }
+.dec-action.a-no_trade { color: var(--red); }
+.dec-action.a-hold { color: var(--text-dim); }
+.dec-symbol { font-family: var(--mono); color: var(--text-dim); font-size: 10px; }
+.dec-detail {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-dim); margin-bottom: 2px;
+}
+.dec-detail strong { color: var(--text); }
+.dec-explanation {
+  font-size: 11px; color: var(--text-dim); margin-top: 4px;
+  line-height: 1.4;
+}
+.dec-pills {
+  display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px;
+}
+.pill-gate { background: rgba(224, 108, 117, 0.15); color: var(--red); padding: 1px 6px; border-radius: 2px; font-size: 10px; font-family: var(--mono); }
+.pill-bias { background: rgba(229, 192, 123, 0.15); color: var(--yellow); padding: 1px 6px; border-radius: 2px; font-size: 10px; font-family: var(--mono); }
+
+/* Market state */
+.market-card {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--bg-1);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.market-card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 6px;
+}
+.market-symbol { font-weight: 700; font-size: 13px; color: var(--text); }
+.market-mid { font-size: 16px; font-weight: 600; }
+.market-mid.up { color: var(--green); }
+.market-mid.down { color: var(--red); }
+.market-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  color: var(--text-dim);
+}
+.market-rows .label { font-size: 10px; }
+.market-rows .val { color: var(--text); }
+.market-rows .val.imb-pos { color: var(--green); }
+.market-rows .val.imb-neg { color: var(--red); }
+
+/* Performance footer panel */
+.perf {
+  grid-column: 1 / -1;
+  background: var(--bg-0);
+  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  font-size: 11px;
+  max-height: 160px;
+  overflow: auto;
+}
+.perf h3 {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-dim); margin-bottom: 4px; font-weight: 600;
+}
+table.perf-table { width: 100%; border-collapse: collapse; font-family: var(--mono); }
+table.perf-table th, table.perf-table td { text-align: right; padding: 2px 6px; }
+table.perf-table th:first-child, table.perf-table td:first-child {
+  text-align: left; color: var(--text-dim);
+}
+table.perf-table th {
+  color: var(--text-dimmer); font-weight: 400; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+table.perf-table tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.win { color: var(--green); }
+.win.bad { color: var(--red); }
+
+.empty {
+  color: var(--text-dimmer); padding: 12px; text-align: center;
+  font-style: italic; font-size: 11px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>scirust trading <span class="dim">/ observation</span></h1>
+  <div class="kv-row">
+    <div class="kv"><span class="k">equity</span><span class="v" id="eq">—</span></div>
+    <div class="kv"><span class="k">realized</span><span class="v" id="real">—</span></div>
+    <div class="kv"><span class="k">unrealized</span><span class="v" id="unreal">—</span></div>
+    <div class="kv"><span class="k">exposure</span><span class="v" id="expo">—</span></div>
+    <div class="kv"><span class="k">positions</span><span class="v" id="poscnt">—</span></div>
+    <div class="kv"><span class="k">decisions 7d</span><span class="v" id="dec7d">—</span></div>
+    <div class="kv"><span class="k">win rate</span><span class="v" id="winrate">—</span></div>
+  </div>
+  <div class="status">
+    <span class="led" id="led-news"></span>news
+    <span class="led" id="led-market"></span>market
+    <span class="led" id="led-decisions"></span>decisions
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-header">
+      <span>news</span>
+      <span class="count" id="news-count">0</span>
+    </div>
+    <div class="panel-body" id="news-feed">
+      <div class="empty">waiting for events…</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <span>decisions</span>
+      <span class="count" id="dec-count">0</span>
+    </div>
+    <div class="panel-body" id="decisions-feed">
+      <div class="empty">waiting for shadow decisions…</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <span>market</span>
+      <span class="count" id="market-count">0</span>
+    </div>
+    <div class="panel-body" id="market-feed">
+      <div class="empty">waiting for market state…</div>
+    </div>
+  </section>
+
+  <section class="perf">
+    <div>
+      <h3>by gate</h3>
+      <table class="perf-table" id="t-gate">
+        <thead><tr><th>gate</th><th>n</th><th>win</th><th>mean bps</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3>by bias</h3>
+      <table class="perf-table" id="t-bias">
+        <thead><tr><th>bias</th><th>n</th><th>win</th><th>mean bps</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3>by symbol</h3>
+      <table class="perf-table" id="t-sym">
+        <thead><tr><th>symbol</th><th>n</th><th>win</th><th>mean bps</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const MAX_EVENTS = 60;
+const MAX_DECISIONS = 60;
+const MAX_MARKET_CARDS = 6;
+const MARKET_CARDS = new Map(); // symbol → element
+const MARKET_LAST_MID = new Map();
+let newsCount = 0, decCount = 0, marketCount = 0;
+
+function fmt(n, digits = 2) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(digits) + "B";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(digits) + "M";
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(digits) + "k";
+  return Number(n).toFixed(digits);
+}
+function fmtSigned(n, digits = 1) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  const v = Number(n);
+  return (v >= 0 ? "+" : "") + v.toFixed(digits);
+}
+function timeOf(d) {
+  if (!d) return "";
+  try { return new Date(d).toISOString().slice(11, 19); } catch (e) { return ""; }
+}
+function setLed(id, alive) {
+  const el = document.getElementById(id);
+  if (el) el.className = "led " + (alive ? "live" : "dead");
+}
+
+// ─── News stream ────────────────────────────────────────────────────────
+function renderEvent(e) {
+  const feed = document.getElementById("news-feed");
+  const empty = feed.querySelector(".empty");
+  if (empty) empty.remove();
+  const div = document.createElement("div");
+  const lvl = (e.enrichment || "structural").toLowerCase();
+  div.className = "event l-" + lvl;
+  const pol = e.polarity;
+  const mag = e.magnitude;
+  const tagsHtml = (e.tags || [])
+    .slice(0, 6)
+    .map(t => `<span class="tag">${escapeHtml(t)}</span>`)
+    .join("");
+  let scoreLine = "";
+  if (pol !== null && pol !== undefined) {
+    const cls = pol > 0.1 ? "pos" : pol < -0.1 ? "neg" : "neu";
+    scoreLine = `<div class="event-score"><span class="label">pol</span> <span class="${cls}">${fmtSigned(pol, 2)}</span>` +
+      (mag !== null && mag !== undefined ? ` <span class="label">mag</span> ${fmt(mag, 2)}` : "") +
+      (e.semantic_confidence ? ` <span class="label">conf</span> ${fmt(e.semantic_confidence, 2)}` : "") +
+      `</div>`;
+  }
+  const summary = e.semantic_summary || e.raw_text || "";
+  div.innerHTML = `
+    <div class="event-head">
+      <span class="event-source">${escapeHtml(String(e.source || "?"))}</span>
+      <span class="event-time">${timeOf(e.detected_at)}</span>
+    </div>
+    <div class="event-text">${escapeHtml(truncate(summary, 240))}</div>
+    ${tagsHtml ? `<div class="event-tags">${tagsHtml}</div>` : ""}
+    ${scoreLine}
+  `;
+  feed.insertBefore(div, feed.firstChild);
+  while (feed.children.length > MAX_EVENTS) feed.lastChild.remove();
+  newsCount++;
+  document.getElementById("news-count").textContent = newsCount;
+}
+
+// ─── Decisions stream ────────────────────────────────────────────────────
+function renderDecision(d) {
+  const feed = document.getElementById("decisions-feed");
+  const empty = feed.querySelector(".empty");
+  if (empty) empty.remove();
+  const a = d.action || {};
+  const kind = (a.kind || "hold").toLowerCase();
+  const div = document.createElement("div");
+  div.className = "decision a-" + kind;
+
+  let detailLine = "";
+  if (kind === "open") {
+    detailLine = `<div class="dec-detail">${a.side} <strong>qty=${fmt(a.quantity, 6)}</strong> ` +
+      `notional=${fmt(a.notional_quote, 2)} ` +
+      (a.max_hold_seconds ? `hold≤${a.max_hold_seconds}s ` : "") +
+      (a.stop_loss_bps ? `stop@${fmt(a.stop_loss_bps, 1)}bps` : "") +
+      `</div>`;
+  } else if (kind === "close") {
+    detailLine = `<div class="dec-detail">${a.side} qty=${fmt(a.quantity, 6)} (${a.reason})</div>`;
+  }
+
+  const r = d.reasoning || {};
+  const gates = (r.gates_evaluated || [])
+    .filter(g => g.triggered)
+    .map(g => `<span class="pill-gate">${escapeHtml(g.name)}</span>`)
+    .join("");
+  const biases = (r.biases_applied || [])
+    .filter(b => b.applied)
+    .map(b => `<span class="pill-bias">${escapeHtml(b.name)}</span>`)
+    .join("");
+
+  div.innerHTML = `
+    <div class="dec-head">
+      <span class="dec-action a-${kind}">${kind.replace("_", " ")}</span>
+      <span class="dec-symbol">${escapeHtml(symbolStr(d.symbol))} · ${timeOf(d.timestamp)}</span>
+    </div>
+    ${detailLine}
+    <div class="dec-explanation">${escapeHtml(truncate(r.explanation || "", 240))}</div>
+    ${gates || biases ? `<div class="dec-pills">${gates}${biases}</div>` : ""}
+  `;
+  feed.insertBefore(div, feed.firstChild);
+  while (feed.children.length > MAX_DECISIONS) feed.lastChild.remove();
+  decCount++;
+  document.getElementById("dec-count").textContent = decCount;
+}
+
+function symbolStr(s) {
+  if (!s) return "?";
+  if (typeof s === "string") return s;
+  return (s.base || "?") + "/" + (s.quote || "?");
+}
+
+// ─── Market stream ───────────────────────────────────────────────────────
+function renderMarket(m) {
+  const sym = symbolStr(m.symbol);
+  const feed = document.getElementById("market-feed");
+  let card = MARKET_CARDS.get(sym);
+  if (!card) {
+    const empty = feed.querySelector(".empty");
+    if (empty) empty.remove();
+    card = document.createElement("div");
+    card.className = "market-card";
+    feed.appendChild(card);
+    MARKET_CARDS.set(sym, card);
+    while (feed.children.length > MAX_MARKET_CARDS) {
+      const removed = feed.firstChild;
+      // Trouve la clé correspondant à cet élément
+      for (const [k, v] of MARKET_CARDS.entries()) {
+        if (v === removed) { MARKET_CARDS.delete(k); break; }
+      }
+      removed.remove();
+    }
+  }
+  const prev = MARKET_LAST_MID.get(sym);
+  const midClass = prev === undefined ? "" : (m.mid > prev ? "up" : m.mid < prev ? "down" : "");
+  MARKET_LAST_MID.set(sym, m.mid);
+  const imb5 = m.imbalance_5 || 0;
+  const flow = m.flow_imbalance_1min || 0;
+  card.innerHTML = `
+    <div class="market-card-head">
+      <span class="market-symbol">${escapeHtml(sym)}</span>
+      <span class="market-mid ${midClass}">${fmt(m.mid, 2)}</span>
+    </div>
+    <div class="market-rows">
+      <div><span class="label">spread</span> <span class="val">${fmt(m.spread_bps, 2)} bps</span></div>
+      <div><span class="label">vol</span> <span class="val">${fmt(m.realized_vol_pct, 1)}%</span></div>
+      <div><span class="label">imb-5</span> <span class="val ${imb5 > 0.05 ? "imb-pos" : imb5 < -0.05 ? "imb-neg" : ""}">${fmtSigned(imb5, 3)}</span></div>
+      <div><span class="label">flow</span> <span class="val ${flow > 0.1 ? "imb-pos" : flow < -0.1 ? "imb-neg" : ""}">${fmtSigned(flow, 2)}</span></div>
+      <div><span class="label">vol 1m</span> <span class="val">${fmt(m.volume_1min, 2)}</span></div>
+      <div><span class="label">trades</span> <span class="val">${m.trade_count_1min || 0}</span></div>
+    </div>
+  `;
+  marketCount++;
+  document.getElementById("market-count").textContent = marketCount;
+}
+
+// ─── Polling ─────────────────────────────────────────────────────────────
+async function pollPortfolio() {
+  try {
+    const r = await fetch("/api/portfolio");
+    if (!r.ok) {
+      document.getElementById("eq").textContent = "—";
+      return;
+    }
+    const p = await r.json();
+    document.getElementById("eq").textContent = fmt(p.equity_quote, 2);
+    document.getElementById("real").textContent = fmtSigned(p.realized_pnl, 2);
+    document.getElementById("unreal").textContent = fmtSigned(p.total_unrealized_pnl, 2);
+    document.getElementById("expo").textContent = fmt(p.total_exposure, 2);
+    document.getElementById("poscnt").textContent = p.position_count;
+  } catch (e) { /* server may be starting */ }
+}
+
+async function pollStats() {
+  try {
+    const r = await fetch("/api/decisions/stats");
+    if (r.ok) {
+      const s = await r.json();
+      document.getElementById("dec7d").textContent = s.total;
+    }
+    const p = await fetch("/api/performance");
+    if (p.ok) {
+      const perf = await p.json();
+      const wr = perf.outcomes_count > 0 ? (perf.win_rate * 100).toFixed(1) + "%" : "—";
+      const el = document.getElementById("winrate");
+      el.textContent = wr;
+      el.className = "v " + (perf.outcomes_count > 0 && perf.win_rate < 0.5 ? "neg" : "");
+      renderBreakdown("t-gate", perf.by_gate);
+      renderBreakdown("t-bias", perf.by_bias);
+      renderBreakdown("t-sym", perf.by_symbol);
+    }
+  } catch (e) { /* skip */ }
+}
+
+function renderBreakdown(tableId, group) {
+  const tbody = document.getElementById(tableId).querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!group) return;
+  const entries = Object.entries(group)
+    .sort((a, b) => (b[1].mean_return_bps || 0) - (a[1].mean_return_bps || 0));
+  if (entries.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color:var(--text-dimmer);font-style:italic;">no data</td></tr>`;
+    return;
+  }
+  for (const [name, st] of entries) {
+    const wrPct = (st.win_rate * 100).toFixed(0) + "%";
+    const wrCls = st.win_rate >= 0.5 ? "win" : "win bad";
+    const mean = fmtSigned(st.mean_return_bps, 1);
+    const meanCls = st.mean_return_bps >= 0 ? "pos" : "neg";
+    tbody.innerHTML += `<tr>
+      <td>${escapeHtml(name)}</td>
+      <td>${st.n}</td>
+      <td class="${wrCls}">${wrPct}</td>
+      <td class="${meanCls}">${mean}</td>
+    </tr>`;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+function truncate(s, n) {
+  s = String(s);
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// ─── Connect SSE ─────────────────────────────────────────────────────────
+function connect(path, eventName, handler, ledId) {
+  const es = new EventSource(path);
+  es.addEventListener("open", () => setLed(ledId, true));
+  es.addEventListener("error", () => setLed(ledId, false));
+  es.addEventListener(eventName, (e) => {
+    try { handler(JSON.parse(e.data)); }
+    catch (err) { console.warn("parse err on", eventName, err); }
+  });
+  return es;
+}
+
+connect("/stream/news", "news", renderEvent, "led-news");
+connect("/stream/market", "market", renderMarket, "led-market");
+connect("/stream/decisions", "decision", renderDecision, "led-decisions");
+
+// Periodic polls
+pollPortfolio();
+pollStats();
+setInterval(pollPortfolio, 2000);
+setInterval(pollStats, 5000);
+</script>
+</body>
+</html>

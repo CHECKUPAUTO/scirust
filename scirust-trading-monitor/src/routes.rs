@@ -3,16 +3,20 @@
 use crate::sse;
 use crate::state::MonitorState;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{header, StatusCode};
+use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use scirust_trading_persistence::OutcomeConfig;
 use serde::{Deserialize, Serialize};
 
+const DASHBOARD_HTML: &str = include_str!("../static/dashboard.html");
+
 pub fn build_router(state: MonitorState) -> Router {
     Router::new()
+        // Dashboard UI
+        .route("/", get(dashboard))
         // SSE streams
         .route("/stream/market", get(sse::stream_market))
         .route("/stream/news", get(sse::stream_news))
@@ -26,6 +30,13 @@ pub fn build_router(state: MonitorState) -> Router {
         .route("/api/performance", get(performance_stats))
         .route("/api/portfolio", get(portfolio_snapshot))
         .with_state(state)
+}
+
+async fn dashboard() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        Html(DASHBOARD_HTML),
+    )
 }
 
 // ─── Health ─────────────────────────────────────────────────────────────────
@@ -389,5 +400,28 @@ mod tests {
         assert!(parse_category("MACRO").is_some()); // case-insensitive
         assert!(parse_category("on_chain").is_some());
         assert!(parse_category("bogus").is_none());
+    }
+
+    #[tokio::test]
+    async fn dashboard_route_serves_html() {
+        let state = make_state();
+        let router = build_router(state);
+        let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let headers = resp.headers().clone();
+        assert!(headers
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("text/html"));
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&body_bytes).unwrap();
+        assert!(html.contains("scirust trading"));
+        assert!(html.contains("/stream/news"));
+        assert!(html.contains("/api/portfolio"));
     }
 }
