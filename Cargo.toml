@@ -33,7 +33,13 @@ members = [
     "scirust-core",
     "scirust-learning",
     "scirust-symbolic",
-    "scirust-reasoning",
+    "scirust-reasoning", "scirust-trading-core", "scirust-trading-engine", "scirust-trading-observer", "scirust-trading-persistence", "scirust-trading-news", "scirust-trading-monitor",
+    "scirust-trading-monitor"
+    "scirust-trading-news"
+    "scirust-trading-persistence"
+    "scirust-trading-observer"
+    "scirust-trading-engine"
+    "scirust-trading-core"
 ]
 exclude = [
     "soullink-node-patched",
