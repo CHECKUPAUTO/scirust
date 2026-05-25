@@ -70,5 +70,11 @@ exclude = [
     "scirust-trading-observer",
     "scirust-trading-persistence",
     "scirust-trading-news",
+    "scirust-trading-monitor",
     "scirust-trading-monitor",]
-resolver = "3"
+    "scirust-trading-news",
+
+    "scirust-trading-persistence",r
+    "scirust-trading-observer",e
+    "scirust-trading-engine",s
+    "scirust-trading-core",olver = "3"
