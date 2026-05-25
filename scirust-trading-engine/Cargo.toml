@@ -1,0 +1,10 @@
+[package]
+name = "scirust-trading-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "macros", "rt", "rt-multi-thread", "time"] }
+async-trait = "0.1"
+tracing = "0.1"
+scirust-trading-core = { path = "../scirust-trading-core" }

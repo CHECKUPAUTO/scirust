@@ -33,7 +33,15 @@ members = [
     "scirust-core",
     "scirust-learning",
     "scirust-symbolic",
-    "scirust-reasoning", "scirust-trading-core", "scirust-trading-engine", "scirust-trading-observer", "scirust-trading-persistence", "scirust-trading-news", "scirust-trading-monitor",
+    "scirust-reasoning", "scirust-trading-core", "scirust-trading-engine", "scirust-trading-observer", "scirust-trading-persistence", "scirust-trading-news", "scirust-trading-news
+    "scirust-trading-observer
+    "scirust-trading-persistence
+    "scirust-trading-engine
+    "scirust-trading-monitor",
+    "scirust-trading-news
+    "scirust-trading-observer
+    "scirust-trading-persistence
+    "scirust-trading-engine
     "scirust-trading-monitor"
     "scirust-trading-news"
     "scirust-trading-persistence"
@@ -56,5 +64,11 @@ exclude = [
     "examples/v11_pattern_classifier",
     "examples/simd_views_demo",
     "examples/benchmarks",
-]
+
+    "scirust-trading-core",
+    "scirust-trading-engine",
+    "scirust-trading-observer",
+    "scirust-trading-persistence",
+    "scirust-trading-news",
+    "scirust-trading-monitor",]
 resolver = "3"
