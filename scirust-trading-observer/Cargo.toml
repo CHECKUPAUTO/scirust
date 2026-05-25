@@ -1,6 +1,0 @@
-[package]
-name = "scirust-trading-observer"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
