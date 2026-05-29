@@ -93,15 +93,22 @@ async fn recent_events(
     State(state): State<MonitorState>,
     Query(q): Query<RecentEventsQuery>,
 ) -> impl IntoResponse {
+    // 🛡️ Sentinel: Enforce max limit to prevent DoS via large resource requests
+    let limit = q.limit.min(100);
+
     let category = q.category.as_deref().and_then(parse_category);
     let min_enrich = q.min_enrichment.as_deref().and_then(parse_enrichment);
     match state
         .api
-        .recent_events(q.limit, category, min_enrich)
+        .recent_events(limit, category, min_enrich)
         .await
     {
         Ok(events) => Ok(Json(events)),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            // 🛡️ Sentinel: Log internal error and return generic message to prevent info leakage
+            tracing::error!("Failed to fetch recent events: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal Database Error"))
+        }
     }
 }
 
@@ -144,9 +151,16 @@ async fn recent_decisions(
     State(state): State<MonitorState>,
     Query(q): Query<RecentDecisionsQuery>,
 ) -> impl IntoResponse {
-    match state.api.recent_decisions(q.limit, q.action.as_deref()).await {
+    // 🛡️ Sentinel: Enforce max limit to prevent DoS
+    let limit = q.limit.min(100);
+
+    match state.api.recent_decisions(limit, q.action.as_deref()).await {
         Ok(d) => Ok(Json(d)),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            // 🛡️ Sentinel: Prevent information leakage in error response
+            tracing::error!("Failed to fetch recent decisions: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal Database Error"))
+        }
     }
 }
 
@@ -187,7 +201,10 @@ async fn decision_stats(
             window_from: from,
             window_to: to,
         })),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            tracing::error!("Failed to fetch decision stats: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal Database Error"))
+        }
     }
 }
 
@@ -230,7 +247,10 @@ async fn performance_stats(
         .await
     {
         Ok(o) => o,
-        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            tracing::error!("Failed to compute outcomes: {e}");
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal Database Error".to_string()));
+        }
     };
     let stats = state.api.aggregate_stats(&outcomes);
     let by_gate = serde_json::to_value(&serialize_group_map(&stats.by_gate)).unwrap_or_default();

@@ -33,21 +33,13 @@ members = [
     "scirust-core",
     "scirust-learning",
     "scirust-symbolic",
-    "scirust-reasoning", "scirust-trading-core", "scirust-trading-engine", "scirust-trading-observer", "scirust-trading-persistence", "scirust-trading-news", "scirust-trading-news
-    "scirust-trading-observer
-    "scirust-trading-persistence
-    "scirust-trading-engine
+    "scirust-reasoning",
+    "scirust-trading-core",
+    "scirust-trading-engine",
+    "scirust-trading-observer",
+    "scirust-trading-persistence",
+    "scirust-trading-news",
     "scirust-trading-monitor",
-    "scirust-trading-news
-    "scirust-trading-observer
-    "scirust-trading-persistence
-    "scirust-trading-engine
-    "scirust-trading-monitor"
-    "scirust-trading-news"
-    "scirust-trading-persistence"
-    "scirust-trading-observer"
-    "scirust-trading-engine"
-    "scirust-trading-core"
 ]
 exclude = [
     "soullink-node-patched",
@@ -64,17 +56,5 @@ exclude = [
     "examples/v11_pattern_classifier",
     "examples/simd_views_demo",
     "examples/benchmarks",
-
-    "scirust-trading-core",
-    "scirust-trading-engine",
-    "scirust-trading-observer",
-    "scirust-trading-persistence",
-    "scirust-trading-news",
-    "scirust-trading-monitor",
-    "scirust-trading-monitor",]
-    "scirust-trading-news",
-
-    "scirust-trading-persistence",r
-    "scirust-trading-observer",e
-    "scirust-trading-engine",s
-    "scirust-trading-core",olver = "3"
+]
+resolver = "2"
