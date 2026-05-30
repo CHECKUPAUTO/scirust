@@ -306,6 +306,33 @@ impl TensorND {
             self.shape[1],
         ))
     }
+
+    /// Mode-`k` unfolding: rows = product of `shape[..k]`, cols = product of `shape[k..]`.
+    /// Returns a clone of the data because row-major data preserves the unfolding layout.
+    ///
+    /// Example: shape `[2, 3, 4]`, unfold at `k=1` gives a `(2, 12)` matrix.
+    pub fn unfold(&self, k: usize) -> (usize, usize, Vec<f32>) {
+        assert!(k <= self.shape.len(), "unfold index {k} out of bounds");
+        let rows: usize = self.shape[..k].iter().product::<usize>().max(1);
+        let cols: usize = self.shape[k..].iter().product::<usize>().max(1);
+        debug_assert_eq!(rows * cols, self.data.len());
+        (rows, cols, self.data.clone())
+    }
+
+    /// Maximum absolute element value (used for tolerance checks).
+    pub fn abs_max(&self) -> f32 {
+        self.data.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()))
+    }
+
+    /// Frobenius norm: sqrt(sum of squares).
+    pub fn frob_norm(&self) -> f32 {
+        self.data.iter().map(|x| x * x).sum::<f32>().sqrt()
+    }
+
+    /// Construct from a 2D matrix in row-major order: `data[i * cols + j]` = element `(i, j)`.
+    pub fn from_matrix(rows: usize, cols: usize, data: Vec<f32>) -> Self {
+        Self::new(data, vec![rows, cols])
+    }
 }
 
 // ------------------------------------------------------------------

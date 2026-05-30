@@ -1,7 +1,7 @@
 [package]
 name = "scirust"
 version = "0.13.0"
-edition = "2024"
+edition = "2021"
 description = "SciRust — Industrial-grade deep learning framework in pure Rust"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/CHECKUPAUTO/scirust"
@@ -23,6 +23,7 @@ members = [
     "examples/quickstart_v2",
     "examples/cifar10_classifier",
     "examples/transformer_demo",
+    "examples/transformer_compress",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -34,6 +35,12 @@ members = [
     "scirust-symbolic",
     "scirust-solvers",
     "scirust-reasoning",
+    "scirust-trading-core",
+    "scirust-trading-engine",
+    "scirust-trading-observer",
+    "scirust-trading-persistence",
+    "scirust-trading-news",
+    "scirust-trading-monitor",
 ]
 exclude = [
     "soullink-node-patched",
@@ -51,4 +58,4 @@ exclude = [
     "examples/simd_views_demo",
     "examples/benchmarks",
 ]
-resolver = "3"
+resolver = "2"

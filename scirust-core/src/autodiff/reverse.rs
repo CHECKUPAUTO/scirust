@@ -3,6 +3,7 @@
 
 use crate::nn::rng::PcgEngine;
 use std::cell::RefCell;
+use matrixmultiply::sgemm;
 
 // ================================================================== //
 //  Tensor — 2D dense row-major                                       //
@@ -964,11 +965,34 @@ impl Tape {
                 Op::MatMul(a, b) | Op::MatMulGpu(a, b) => {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    // Try GPU backward when available, fallback to CPU
-                    let ga = g.matmul(&bv.transpose());
-                    let gb = av.transpose().matmul(&g);
-                    grads[a].add_assign(&ga);
-                    grads[b].add_assign(&gb);
+
+                    // ga = g @ b.T
+                    // (M x N) @ (K x N).T -> (M x K)
+                    let ga = &mut grads[a];
+                    unsafe {
+                        sgemm(
+                            g.rows, g.cols, bv.rows,
+                            1.0,
+                            g.data.as_ptr(), g.cols as isize, 1,
+                            bv.data.as_ptr(), 1, bv.cols as isize, // Transposed stride
+                            1.0,
+                            ga.data.as_mut_ptr(), ga.cols as isize, 1,
+                        );
+                    }
+
+                    // gb = a.T @ g
+                    // (M x K).T @ (M x N) -> (K x N)
+                    let gb = &mut grads[b];
+                    unsafe {
+                        sgemm(
+                            av.cols, av.rows, g.cols,
+                            1.0,
+                            av.data.as_ptr(), 1, av.cols as isize, // Transposed stride
+                            g.data.as_ptr(), g.cols as isize, 1,
+                            1.0,
+                            gb.data.as_mut_ptr(), gb.cols as isize, 1,
+                        );
+                    }
                 }
                 Op::Scale { input, scalar } => {
                     grads[input].add_assign(&g.scale(scalar));
@@ -1251,12 +1275,42 @@ impl Tape {
                 } => {
                     let iv = &values[input_idx].as_cpu();
                     let wv = &values[weight_idx].as_cpu();
-                    grads[input_idx] = grads[input_idx].add(&g.matmul(&wv.transpose()));
-                    grads[weight_idx] = grads[weight_idx].add(&iv.transpose().matmul(&g));
+
+                    // d_input = g @ w.T
+                    let gi = &mut grads[input_idx];
+                    unsafe {
+                        sgemm(
+                            g.rows, g.cols, wv.rows,
+                            1.0,
+                            g.data.as_ptr(), g.cols as isize, 1,
+                            wv.data.as_ptr(), 1, wv.cols as isize,
+                            1.0,
+                            gi.data.as_mut_ptr(), gi.cols as isize, 1,
+                        );
+                    }
+
+                    // d_weight = input.T @ g
+                    let gw = &mut grads[weight_idx];
+                    unsafe {
+                        sgemm(
+                            iv.cols, iv.rows, g.cols,
+                            1.0,
+                            iv.data.as_ptr(), 1, iv.cols as isize,
+                            g.data.as_ptr(), g.cols as isize, 1,
+                            1.0,
+                            gw.data.as_mut_ptr(), gw.cols as isize, 1,
+                        );
+                    }
+
                     if let SavedData::None = nodes[i].saved {
                         // bias grad = sum over batch dim (rows)
-                        let bias_g = g.sum_axis(0);
-                        grads[bias_idx] = grads[bias_idx].add(&bias_g);
+                        let gb = &mut grads[bias_idx];
+                        for r in 0..g.rows {
+                            let off = r * g.cols;
+                            for c in 0..g.cols {
+                                gb.data[c] += g.data[off + c];
+                            }
+                        }
                     }
                 }
                 Op::CausalMask { input_idx, seq_len } => {
