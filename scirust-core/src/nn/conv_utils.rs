@@ -181,6 +181,67 @@ pub fn col2im(cols: &Tensor, cfg: &ConvConfig) -> Tensor {
     out
 }
 
+
+/// im2col avec pad explicite (usize), pour usage interne par conv2d_forward.
+pub fn im2col_raw(input: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usize, s: usize, pad: usize) -> Tensor {
+    let h_out = (h + 2 * pad - k) / s + 1;
+    let w_out = (w + 2 * pad - k) / s + 1;
+    let chw = c * h * w;
+    let n_cols = b * h_out * w_out;
+    let mut out = Tensor::zeros(c * k * k, n_cols);
+    for c_idx in 0..c {
+        for kh in 0..k {
+            for kw in 0..k {
+                let row = (c_idx * k + kh) * k + kw;
+                for bi in 0..b {
+                    for ho in 0..h_out {
+                        for wo in 0..w_out {
+                            let col = bi * h_out * w_out + ho * w_out + wo;
+                            let ih = (ho * s + kh) as isize - pad as isize;
+                            let iw = (wo * s + kw) as isize - pad as isize;
+                            if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                let src = bi * chw + c_idx * h * w + ih as usize * w + iw as usize;
+                                out.data[row * n_cols + col] = input.data[src];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// col2im avec pad explicite (usize). Accumule les contributions chevauchantes.
+pub fn col2im_raw(cols: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usize, s: usize, pad: usize) -> Tensor {
+    let h_out = (h + 2 * pad - k) / s + 1;
+    let w_out = (w + 2 * pad - k) / s + 1;
+    let chw = c * h * w;
+    let n_cols = b * h_out * w_out;
+    let mut out = Tensor::zeros(b, chw);
+    for c_idx in 0..c {
+        for kh in 0..k {
+            for kw in 0..k {
+                let row = (c_idx * k + kh) * k + kw;
+                for bi in 0..b {
+                    for ho in 0..h_out {
+                        for wo in 0..w_out {
+                            let col = bi * h_out * w_out + ho * w_out + wo;
+                            let ih = (ho * s + kh) as isize - pad as isize;
+                            let iw = (wo * s + kw) as isize - pad as isize;
+                            if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                                let dst = bi * chw + c_idx * h * w + ih as usize * w + iw as usize;
+                                out.data[dst] += cols.data[row * n_cols + col];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
