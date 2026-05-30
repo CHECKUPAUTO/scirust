@@ -1,3 +1,9 @@
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/d43f2809-f174-4d1d-b070-cd42b5ce54bc" />
+
+
+
+
+
 # SciRust 🦀
 
 > A pure-Rust deep learning framework — SIMD CPU, tiled GPU compute via WGSL,
