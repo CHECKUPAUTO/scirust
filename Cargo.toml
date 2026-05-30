@@ -32,6 +32,7 @@ members = [
     "scirust-core",
     "scirust-learning",
     "scirust-symbolic",
+    "scirust-solvers",
     "scirust-reasoning",
 ]
 exclude = [

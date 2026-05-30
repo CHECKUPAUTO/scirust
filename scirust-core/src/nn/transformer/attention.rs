@@ -4,7 +4,6 @@
 // (Transpose2D, Concat, SliceCols) ajoutees en v11.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var, concat_rows};
-use crate::nn::rope::rope_apply;
 use crate::nn::init::Initializer;
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;
@@ -293,6 +292,7 @@ impl MultiHeadAttention {
 
     /// GQA: répète les têtes KV pour correspondre au nombre de têtes Q.
     /// Si num_kv_heads == num_heads, c'est un no-op (MHA standard).
+    #[allow(dead_code)]
     fn repeat_kv_heads(&self, x: Tensor, _seq_len: usize, _d_head: usize) -> Tensor {
         let repeat = self.n_heads / self.num_kv_heads;
         if repeat <= 1 {

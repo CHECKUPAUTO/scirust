@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+thiserror = "2"
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-macros = { path = "../scirust-macros" }
 scirust-simd = { path = "../scirust-simd" }
@@ -19,7 +20,7 @@ num-traits = "0.2"
 half = "2.4"
 
 [features]
-default = []
+default = ["rayon"]
 gpu = []
 portable-simd = ["scirust-simd/portable-simd"]
 blas = ["dep:blas", "dep:blas-src"]

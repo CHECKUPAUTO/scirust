@@ -319,16 +319,38 @@ impl Tensor {
             self.rows, self.cols, other.rows, other.cols
         );
         let mut out = Tensor::zeros(self.rows, other.cols);
+        let n = other.cols;
+        let kd = self.cols;
+
+        #[cfg(feature = "rayon")]
+        {
+            if self.rows >= 32 {
+                use rayon::prelude::*;
+                out.data.par_chunks_mut(n).enumerate().for_each(|(i, orow)| {
+                    let arow = &self.data[i * kd..(i + 1) * kd];
+                    for k in 0..kd {
+                        let a = arow[k];
+                        let brow = &other.data[k * n..(k + 1) * n];
+                        for j in 0..n {
+                            orow[j] += a * brow[j];
+                        }
+                    }
+                });
+                return out;
+            }
+        }
+
         for i in 0..self.rows {
-            for k in 0..self.cols {
-                let a = self.data[i * self.cols + k];
-                for j in 0..other.cols {
-                    out.data[i * other.cols + j] += a * other.data[k * other.cols + j];
+            for k in 0..kd {
+                let a = self.data[i * kd + k];
+                for j in 0..n {
+                    out.data[i * n + j] += a * other.data[k * n + j];
                 }
             }
         }
         out
     }
+
     pub fn reshape(&self, rows: usize, cols: usize) -> Tensor {
         assert_eq!(self.data.len(), rows * cols, "reshape: size mismatch");
         Tensor {
@@ -2838,9 +2860,11 @@ impl<'t> Var<'t> {
                         for kw in 0..kernel {
                             for ih in 0..h {
                                 for iw in 0..w {
-                                    let oh = ih * stride + kh - pad;
-                                    let ow = iw * stride + kw - pad;
-                                    if oh < h_out && ow < w_out {
+                                    let oh = (ih * stride) as isize + kh as isize - pad as isize;
+                                    let ow = (iw * stride) as isize + kw as isize - pad as isize;
+                                    if oh >= 0 && ow >= 0 && (oh as usize) < h_out && (ow as usize) < w_out {
+                                        let oh = oh as usize;
+                                        let ow = ow as usize;
                                         let w_idx = ci * out_c * kernel * kernel
                                             + co * kernel * kernel
                                             + kh * kernel
