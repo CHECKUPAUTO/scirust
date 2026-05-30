@@ -2767,31 +2767,29 @@ impl<'t> Var<'t> {
     ) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
+        let bias_data: Option<Vec<f32>> =
+            bias.as_ref().map(|b_v| self.tape.values.borrow()[b_v.idx].as_cpu().data.clone());
         let h_out = (h + 2 * pad - kernel) / stride + 1;
         let w_out = (w + 2 * pad - kernel) / stride + 1;
-        let out_rows = batch;
-        let out_cols = out_c * h_out * w_out;
-        let mut out = Tensor::zeros(out_rows, out_cols);
-        for b_i in 0..batch {
+        let mut out = Tensor::zeros(batch, out_c * h_out * w_out);
+        let img_out = out_c * h_out * w_out;
+        let img_in = in_c * h * w;
+
+        let fill = |b_i: usize, oimg: &mut [f32]| {
             for oc in 0..out_c {
                 for oh in 0..h_out {
                     for ow in 0..w_out {
-                        let mut sum = 0.0f32;
-                        if let Some(ref b_v) = bias {
-                            sum = self.tape.values.borrow()[b_v.idx].as_cpu().data[oc];
-                        }
+                        let mut sum = match &bias_data {
+                            Some(bd) => bd[oc],
+                            None => 0.0f32,
+                        };
                         for ic in 0..in_c {
                             for kh in 0..kernel {
                                 for kw in 0..kernel {
-                                    let ih =
-                                        oh as isize * stride as isize + kh as isize - pad as isize;
-                                    let iw =
-                                        ow as isize * stride as isize + kw as isize - pad as isize;
+                                    let ih = oh as isize * stride as isize + kh as isize - pad as isize;
+                                    let iw = ow as isize * stride as isize + kw as isize - pad as isize;
                                     if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
-                                        let ih_u = ih as usize;
-                                        let iw_u = iw as usize;
-                                        let in_idx =
-                                            b_i * in_c * h * w + ic * h * w + ih_u * w + iw_u;
+                                        let in_idx = b_i * img_in + ic * h * w + ih as usize * w + iw as usize;
                                         let w_idx = oc * in_c * kernel * kernel
                                             + ic * kernel * kernel
                                             + kh * kernel
@@ -2801,36 +2799,37 @@ impl<'t> Var<'t> {
                                 }
                             }
                         }
-                        let out_idx =
-                            b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
-                        out.data[out_idx] = sum;
+                        oimg[oc * h_out * w_out + oh * w_out + ow] = sum;
                     }
                 }
             }
+        };
+
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            out.data.par_chunks_mut(img_out).enumerate().for_each(|(b_i, oimg)| fill(b_i, oimg));
         }
+        #[cfg(not(feature = "rayon"))]
+        {
+            for b_i in 0..batch {
+                let s = b_i * img_out;
+                fill(b_i, &mut out.data[s..s + img_out]);
+            }
+        }
+
         let b_idx = bias.map(|v| v.idx);
         let new_idx = self.tape.push_with_saved(
             Op::Conv2dForward {
-                input: self.idx,
-                weight: weight.idx,
-                bias: b_idx,
-                batch,
-                in_c,
-                h,
-                w,
-                out_c,
-                kernel,
-                stride,
-                pad,
+                input: self.idx, weight: weight.idx, bias: b_idx,
+                batch, in_c, h, w, out_c, kernel, stride, pad,
             },
             DeviceTensor::cpu(out),
             SavedData::None,
         );
-        Var {
-            tape: self.tape,
-            idx: new_idx,
-        }
+        Var { tape: self.tape, idx: new_idx }
     }
+
 
     pub fn conv2d_transpose_forward(
         self,
