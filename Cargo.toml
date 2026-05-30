@@ -33,6 +33,7 @@ members = [
     "scirust-core",
     "scirust-learning",
     "scirust-symbolic",
+    "scirust-solvers",
     "scirust-reasoning",
     "scirust-trading-core",
     "scirust-trading-engine",

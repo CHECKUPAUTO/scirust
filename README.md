@@ -120,6 +120,72 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
 | Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |
 
+## Architecture — Recent Refactoring (2026-05)
+
+### SciRust Workspace Structure
+
+```
+scirust/
+├── scirust-core/        # Core: autodiff, tensor, nn, compute backend
+├── scirust-simd/        # SIMD kernels (portable, AVX2, NEON)
+├── scirust-gpu/         # GPU backends (wgpu, CUDA)
+├── scirust-learning/    # Learning algorithms (RL, control, finance)
+├── scirust-reasoning/   # Symbolic reasoning, prob逻辑
+├── scirust-symbolic/    # Symbolic computation
+├── scirust-autodiff/    # Autodiff implementations (tape, forward, reverse)
+├── scirust-bridge/      # FFI bridges (Python, Ollama)
+├── scirust-gpu-macros/ # GPU proc-macros
+├── scirust-simd-macros/ # SIMD proc-macros
+└── scirust-macros/      # Common proc-macros
+```
+
+### Soullink-Node Refactoring
+
+The `soullink-node` crate has been reorganized:
+
+```
+soullink-node/
+├── soullink-node/       # Main brain implementation (v6.0)
+│   ├── src/
+│   │   ├── brain.rs             # Core brain (33K neurons, modules)
+│   │   ├── neuron.rs            # Neuron struct + dynamics
+│   │   ├── synapse.rs           # Synapse struct + STDP
+│   │   ├── ssm_cortex.rs        # Mamba SSM encode/forward/decode
+│   │   ├── meta_cortex.rs       # Self-model MLP + closed-loop control
+│   │   ├── evolution.rs         # Genome, fitness, Pareto, checkpoint
+│   │   ├── self_modify/         # Auto-code-modify engine
+│   │   ├── script_engine.rs     # Rhai sandbox
+│   │   └── ... (other modules)
+│   ├── Cargo.toml
+│   └── Cargo.lock
+├── soullink-ssm/        # Mamba-style SSM implementation
+├── hnn/                 # Hybrid Neural Network modules
+├── jepa/                # JEPA (Joint Embedding Predictive Architecture)
+└── integration-tests/   # E2E integration tests
+```
+
+### Deleted Crates (archived or moved)
+
+- `scirust-burn-bridge/` — Burn ↔ SciRust inference bridge
+- `scirust-distributed/` — Distributed computing (moved to mesh networking)
+- `scirust-genetic/` — Genetic algorithms (integrated into evolution engine)
+- `scirust-inference/` — Inference layers (merged into scirust-core)
+- `scirust-jit/` — JIT compilation (replaced by scirust-rustc-driver)
+- `scirust-probability/` — Probabilistic models (moved to scirust-learning)
+- `scirust-quantum/` — Quantum circuits (archived)
+- `scirust-web/` — WASM bindings (moved to separate project)
+
+### Migration Notes
+
+If you have code using deleted modules:
+
+1. **Evolution** → Use `soullink-node::evolution::EvolutionEngine`
+2. **Self-modify** → Use `soullink-node::self_modify::SelfModifyEngine`
+3. **Script engine** → Use `soullink-node::script_engine::ScriptEngine`
+4. **Inference** → Use `scirust-core::nn` modules
+
+See the individual crate READMEs for migration guides.
+
 ## License
 
 MIT

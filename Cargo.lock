@@ -2358,6 +2358,7 @@ dependencies = [
  "scirust-gpu-macros",
  "scirust-macros",
  "scirust-simd",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2421,6 +2422,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "scirust-solvers"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "scirust-autodiff",
+ "scirust-symbolic",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

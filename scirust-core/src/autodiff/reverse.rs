@@ -320,18 +320,38 @@ impl Tensor {
             self.rows, self.cols, other.rows, other.cols
         );
         let mut out = Tensor::zeros(self.rows, other.cols);
-        unsafe {
-            sgemm(
-                self.rows, self.cols, other.cols,
-                1.0,
-                self.data.as_ptr(), self.cols as isize, 1,
-                other.data.as_ptr(), other.cols as isize, 1,
-                0.0,
-                out.data.as_mut_ptr(), out.cols as isize, 1,
-            );
+        let n = other.cols;
+        let kd = self.cols;
+
+        #[cfg(feature = "rayon")]
+        {
+            if self.rows >= 32 {
+                use rayon::prelude::*;
+                out.data.par_chunks_mut(n).enumerate().for_each(|(i, orow)| {
+                    let arow = &self.data[i * kd..(i + 1) * kd];
+                    for k in 0..kd {
+                        let a = arow[k];
+                        let brow = &other.data[k * n..(k + 1) * n];
+                        for j in 0..n {
+                            orow[j] += a * brow[j];
+                        }
+                    }
+                });
+                return out;
+            }
+        }
+
+        for i in 0..self.rows {
+            for k in 0..kd {
+                let a = self.data[i * kd + k];
+                for j in 0..n {
+                    out.data[i * n + j] += a * other.data[k * n + j];
+                }
+            }
         }
         out
     }
+
     pub fn reshape(&self, rows: usize, cols: usize) -> Tensor {
         assert_eq!(self.data.len(), rows * cols, "reshape: size mismatch");
         Tensor {
@@ -1525,80 +1545,52 @@ impl Tape {
                     stride,
                     pad,
                 } => {
-                    let input_t = &values[input].as_cpu();
-                    let weight_t = &values[weight].as_cpu();
+                    let input_t = values[input].as_cpu().clone();
+                    let weight_t = values[weight].as_cpu().clone();
                     let h_out = (h + 2 * pad - kernel) / stride + 1;
                     let w_out = (w + 2 * pad - kernel) / stride + 1;
+                    let hw = h_out * w_out;
+                    let n = batch * hw;
 
-                    // dL/db
+                    // Réorganise g (batch, out_c*hw) -> dout (out_c, N)
+                    let mut dout = Tensor::zeros(out_c, n);
+                    for bi in 0..batch {
+                        for oc in 0..out_c {
+                            let src = bi * out_c * hw + oc * hw;
+                            let dst = oc * n + bi * hw;
+                            for p in 0..hw {
+                                dout.data[dst + p] = g.data[src + p];
+                            }
+                        }
+                    }
+
+                    // db[oc] : somme sur (bi,oh,ow) -> bit-exact
                     if let Some(b_idx) = bias {
                         let mut db = Tensor::zeros(1, out_c);
-                        for b_i in 0..batch {
-                            for oc in 0..out_c {
-                                for oh in 0..h_out {
-                                    for ow in 0..w_out {
-                                        let out_idx = b_i * out_c * h_out * w_out
-                                            + oc * h_out * w_out
-                                            + oh * w_out
-                                            + ow;
-                                        db.data[oc] += g.data[out_idx];
-                                    }
-                                }
+                        for oc in 0..out_c {
+                            let mut acc = 0.0f32;
+                            for nn in 0..n {
+                                acc += dout.data[oc * n + nn];
                             }
+                            db.data[oc] = acc;
                         }
                         grads[b_idx] = grads[b_idx].add(&db);
                     }
 
-                    // dL/dW and dL/dx
-                    let mut dw = Tensor::zeros(weight_t.rows, weight_t.cols);
-                    let mut dx = Tensor::zeros(input_t.rows, input_t.cols);
+                    // col = im2col(input) : (in_c*k*k, N)
+                    let col = crate::nn::conv_utils::im2col_raw(
+                        &input_t, batch, in_c, h, w, kernel, stride, pad,
+                    );
 
-                    for b_i in 0..batch {
-                        for oc in 0..out_c {
-                            for oh in 0..h_out {
-                                for ow in 0..w_out {
-                                    let out_idx = b_i * out_c * h_out * w_out
-                                        + oc * h_out * w_out
-                                        + oh * w_out
-                                        + ow;
-                                    let grad_out = g.data[out_idx];
-                                    for ic in 0..in_c {
-                                        for kh in 0..kernel {
-                                            for kw in 0..kernel {
-                                                let ih = oh as isize * stride as isize
-                                                    + kh as isize
-                                                    - pad as isize;
-                                                let iw = ow as isize * stride as isize
-                                                    + kw as isize
-                                                    - pad as isize;
-                                                if ih >= 0
-                                                    && ih < h as isize
-                                                    && iw >= 0
-                                                    && iw < w as isize
-                                                {
-                                                    let ih_u = ih as usize;
-                                                    let iw_u = iw as usize;
-                                                    let in_idx = b_i * in_c * h * w
-                                                        + ic * h * w
-                                                        + ih_u * w
-                                                        + iw_u;
-                                                    let w_idx = oc * in_c * kernel * kernel
-                                                        + ic * kernel * kernel
-                                                        + kh * kernel
-                                                        + kw;
-                                                    dw.data[w_idx] +=
-                                                        grad_out * input_t.data[in_idx];
-                                                    dx.data[in_idx] +=
-                                                        grad_out * weight_t.data[w_idx];
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // dW = dout @ col^T  (matmul parallèle) -> bit-exact
+                    let dw = dout.matmul(&col.transpose());
                     grads[weight] = grads[weight].add(&dw);
+
+                    // dcol = W^T @ dout ; dx = col2im(dcol)
+                    let dcol = weight_t.transpose().matmul(&dout);
+                    let dx = crate::nn::conv_utils::col2im_raw(
+                        &dcol, batch, in_c, h, w, kernel, stride, pad,
+                    );
                     grads[input] = grads[input].add(&dx);
                 }
                 Op::Conv2dTransposeForward {
@@ -2801,31 +2793,29 @@ impl<'t> Var<'t> {
     ) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
+        let bias_data: Option<Vec<f32>> =
+            bias.as_ref().map(|b_v| self.tape.values.borrow()[b_v.idx].as_cpu().data.clone());
         let h_out = (h + 2 * pad - kernel) / stride + 1;
         let w_out = (w + 2 * pad - kernel) / stride + 1;
-        let out_rows = batch;
-        let out_cols = out_c * h_out * w_out;
-        let mut out = Tensor::zeros(out_rows, out_cols);
-        for b_i in 0..batch {
+        let mut out = Tensor::zeros(batch, out_c * h_out * w_out);
+        let img_out = out_c * h_out * w_out;
+        let img_in = in_c * h * w;
+
+        let fill = |b_i: usize, oimg: &mut [f32]| {
             for oc in 0..out_c {
                 for oh in 0..h_out {
                     for ow in 0..w_out {
-                        let mut sum = 0.0f32;
-                        if let Some(ref b_v) = bias {
-                            sum = self.tape.values.borrow()[b_v.idx].as_cpu().data[oc];
-                        }
+                        let mut sum = match &bias_data {
+                            Some(bd) => bd[oc],
+                            None => 0.0f32,
+                        };
                         for ic in 0..in_c {
                             for kh in 0..kernel {
                                 for kw in 0..kernel {
-                                    let ih =
-                                        oh as isize * stride as isize + kh as isize - pad as isize;
-                                    let iw =
-                                        ow as isize * stride as isize + kw as isize - pad as isize;
+                                    let ih = oh as isize * stride as isize + kh as isize - pad as isize;
+                                    let iw = ow as isize * stride as isize + kw as isize - pad as isize;
                                     if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
-                                        let ih_u = ih as usize;
-                                        let iw_u = iw as usize;
-                                        let in_idx =
-                                            b_i * in_c * h * w + ic * h * w + ih_u * w + iw_u;
+                                        let in_idx = b_i * img_in + ic * h * w + ih as usize * w + iw as usize;
                                         let w_idx = oc * in_c * kernel * kernel
                                             + ic * kernel * kernel
                                             + kh * kernel
@@ -2835,36 +2825,37 @@ impl<'t> Var<'t> {
                                 }
                             }
                         }
-                        let out_idx =
-                            b_i * out_c * h_out * w_out + oc * h_out * w_out + oh * w_out + ow;
-                        out.data[out_idx] = sum;
+                        oimg[oc * h_out * w_out + oh * w_out + ow] = sum;
                     }
                 }
             }
+        };
+
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            out.data.par_chunks_mut(img_out).enumerate().for_each(|(b_i, oimg)| fill(b_i, oimg));
         }
+        #[cfg(not(feature = "rayon"))]
+        {
+            for b_i in 0..batch {
+                let s = b_i * img_out;
+                fill(b_i, &mut out.data[s..s + img_out]);
+            }
+        }
+
         let b_idx = bias.map(|v| v.idx);
         let new_idx = self.tape.push_with_saved(
             Op::Conv2dForward {
-                input: self.idx,
-                weight: weight.idx,
-                bias: b_idx,
-                batch,
-                in_c,
-                h,
-                w,
-                out_c,
-                kernel,
-                stride,
-                pad,
+                input: self.idx, weight: weight.idx, bias: b_idx,
+                batch, in_c, h, w, out_c, kernel, stride, pad,
             },
             DeviceTensor::cpu(out),
             SavedData::None,
         );
-        Var {
-            tape: self.tape,
-            idx: new_idx,
-        }
+        Var { tape: self.tape, idx: new_idx }
     }
+
 
     pub fn conv2d_transpose_forward(
         self,
@@ -2894,9 +2885,11 @@ impl<'t> Var<'t> {
                         for kw in 0..kernel {
                             for ih in 0..h {
                                 for iw in 0..w {
-                                    let oh = ih * stride + kh - pad;
-                                    let ow = iw * stride + kw - pad;
-                                    if oh < h_out && ow < w_out {
+                                    let oh = (ih * stride) as isize + kh as isize - pad as isize;
+                                    let ow = (iw * stride) as isize + kw as isize - pad as isize;
+                                    if oh >= 0 && ow >= 0 && (oh as usize) < h_out && (ow as usize) < w_out {
+                                        let oh = oh as usize;
+                                        let ow = ow as usize;
                                         let w_idx = ci * out_c * kernel * kernel
                                             + co * kernel * kernel
                                             + kh * kernel
