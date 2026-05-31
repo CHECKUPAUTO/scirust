@@ -1,8 +1,12 @@
 //! scirust-runtime : runtime d'inference deterministe.
-//! Garantie #1 (keystone) : poids figes -> inference bit-exact rejouable.
-//! Format SRT1 : cles triees => octets disque deterministes (artefact hashable, auditable).
+//! #1 keystone : poids figes -> inference bit-exact rejouable.
+//! SRT1 : cles triees => octets disque deterministes (artefact hashable).
+//! Manifeste : reconstruction generique de n'importe quel Sequential.
 
 use scirust_core::autodiff::reverse::Tensor;
+use scirust_core::nn::{
+    Conv2d, KaimingNormal, Linear, MaxPool2d, Padding, PcgEngine, ReLU, Sequential, Zeros,
+};
 use std::collections::HashMap;
 use std::io;
 
@@ -84,4 +88,94 @@ pub fn fnv_bytes(data: &[u8]) -> u64 {
         fp = fp.wrapping_mul(0x100000001b3);
     }
     fp
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LayerSpec {
+    Linear { in_f: usize, out_f: usize },
+    Relu,
+    Conv2d { in_c: usize, out_c: usize, kernel: usize, stride: usize, same: bool, in_h: usize, in_w: usize },
+    MaxPool2d { kernel: usize, stride: usize, c: usize, h: usize, w: usize },
+}
+
+pub fn build_model(specs: &[LayerSpec]) -> Sequential {
+    let mut rng = PcgEngine::new(0); // poids ecrases par load_state_dict ; seul le shape compte
+    let mut m = Sequential::new();
+    for s in specs {
+        m = match *s {
+            LayerSpec::Linear { in_f, out_f } => {
+                m.add(Linear::new(in_f, out_f, &KaimingNormal, &Zeros, &mut rng))
+            }
+            LayerSpec::Relu => m.add(ReLU::new()),
+            LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => {
+                let pad = if same { Padding::Same } else { Padding::Valid };
+                m.add(
+                    Conv2d::new(in_c, out_c, kernel, stride, pad, &KaimingNormal, Some(&Zeros), &mut rng)
+                        .input_dims(in_h, in_w),
+                )
+            }
+            LayerSpec::MaxPool2d { kernel, stride, c, h, w } => {
+                m.add(MaxPool2d::new(kernel, stride).input_shape(c, h, w))
+            }
+        };
+    }
+    m
+}
+
+pub fn write_manifest(specs: &[LayerSpec]) -> String {
+    let mut s = String::new();
+    for sp in specs {
+        match *sp {
+            LayerSpec::Linear { in_f, out_f } => s.push_str(&format!("linear {in_f} {out_f}\n")),
+            LayerSpec::Relu => s.push_str("relu\n"),
+            LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => s.push_str(&format!(
+                "conv2d {in_c} {out_c} {kernel} {stride} {} {in_h} {in_w}\n",
+                if same { "same" } else { "valid" }
+            )),
+            LayerSpec::MaxPool2d { kernel, stride, c, h, w } => {
+                s.push_str(&format!("maxpool2d {kernel} {stride} {c} {h} {w}\n"))
+            }
+        }
+    }
+    s
+}
+
+pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
+    let mut out = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let t: Vec<&str> = line.split_whitespace().collect();
+        let ln = i + 1;
+        let num = |s: &str| s.parse::<usize>().map_err(|_| format!("ligne {ln}: nombre invalide '{s}'"));
+        let spec = match t[0] {
+            "linear" => LayerSpec::Linear { in_f: num(t[1])?, out_f: num(t[2])? },
+            "relu" => LayerSpec::Relu,
+            "conv2d" => LayerSpec::Conv2d {
+                in_c: num(t[1])?,
+                out_c: num(t[2])?,
+                kernel: num(t[3])?,
+                stride: num(t[4])?,
+                same: match t[5] {
+                    "same" => true,
+                    "valid" => false,
+                    x => return Err(format!("ligne {ln}: padding '{x}'")),
+                },
+                in_h: num(t[6])?,
+                in_w: num(t[7])?,
+            },
+            "maxpool2d" => LayerSpec::MaxPool2d {
+                kernel: num(t[1])?,
+                stride: num(t[2])?,
+                c: num(t[3])?,
+                h: num(t[4])?,
+                w: num(t[5])?,
+            },
+            other => return Err(format!("ligne {ln}: couche inconnue '{other}'")),
+        };
+        out.push(spec);
+    }
+    Ok(out)
 }

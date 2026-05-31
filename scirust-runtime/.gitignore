@@ -1,3 +1,4 @@
 /target
 *.srt
+*.manifest
 Cargo.lock
