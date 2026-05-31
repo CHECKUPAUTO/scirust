@@ -61,9 +61,13 @@ pub mod dispatch {
 pub mod error;
 pub mod quantize;
 pub mod quant_train;
+#[cfg(feature = "legacy-cust")]
 pub mod cuda_backend;
-#[cfg(feature = "cuda")]
+#[cfg(feature = "legacy-cust")]
 pub mod cuda_turboquant;
 pub mod wgpu_backend;
 pub mod gpu_tensor;
 pub mod gpu_gemm;
+
+#[cfg(feature = "cuda")]
+pub mod cublas;
