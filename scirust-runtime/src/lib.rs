@@ -1,11 +1,11 @@
 //! scirust-runtime : runtime d'inference deterministe.
-//! #1 keystone : poids figes -> inference bit-exact rejouable.
 //! SRT1 : cles triees => octets disque deterministes (artefact hashable).
 //! Manifeste : reconstruction generique de n'importe quel Sequential.
 
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_core::nn::{
-    Conv2d, KaimingNormal, Linear, MaxPool2d, Padding, PcgEngine, ReLU, Sequential, Zeros,
+    Conv2d, KaimingNormal, LayerNorm, Linear, MaxPool2d, Padding, PcgEngine, ReLU, Sequential,
+    Sigmoid, Zeros,
 };
 use std::collections::HashMap;
 use std::io;
@@ -94,6 +94,8 @@ pub fn fnv_bytes(data: &[u8]) -> u64 {
 pub enum LayerSpec {
     Linear { in_f: usize, out_f: usize },
     Relu,
+    Sigmoid,
+    LayerNorm { d_model: usize, eps: f32 },
     Conv2d { in_c: usize, out_c: usize, kernel: usize, stride: usize, same: bool, in_h: usize, in_w: usize },
     MaxPool2d { kernel: usize, stride: usize, c: usize, h: usize, w: usize },
 }
@@ -107,6 +109,10 @@ pub fn build_model(specs: &[LayerSpec]) -> Sequential {
                 m.add(Linear::new(in_f, out_f, &KaimingNormal, &Zeros, &mut rng))
             }
             LayerSpec::Relu => m.add(ReLU::new()),
+            LayerSpec::Sigmoid => m.add(Sigmoid::new()),
+            LayerSpec::LayerNorm { d_model, eps } => {
+                m.add(LayerNorm::new(d_model, eps, &Zeros, &mut rng))
+            }
             LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => {
                 let pad = if same { Padding::Same } else { Padding::Valid };
                 m.add(
@@ -128,6 +134,8 @@ pub fn write_manifest(specs: &[LayerSpec]) -> String {
         match *sp {
             LayerSpec::Linear { in_f, out_f } => s.push_str(&format!("linear {in_f} {out_f}\n")),
             LayerSpec::Relu => s.push_str("relu\n"),
+            LayerSpec::Sigmoid => s.push_str("sigmoid\n"),
+            LayerSpec::LayerNorm { d_model, eps } => s.push_str(&format!("layernorm {d_model} {eps}\n")),
             LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => s.push_str(&format!(
                 "conv2d {in_c} {out_c} {kernel} {stride} {} {in_h} {in_w}\n",
                 if same { "same" } else { "valid" }
@@ -149,10 +157,13 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
         }
         let t: Vec<&str> = line.split_whitespace().collect();
         let ln = i + 1;
-        let num = |s: &str| s.parse::<usize>().map_err(|_| format!("ligne {ln}: nombre invalide '{s}'"));
+        let num = |s: &str| s.parse::<usize>().map_err(|_| format!("ligne {ln}: entier invalide '{s}'"));
+        let numf = |s: &str| s.parse::<f32>().map_err(|_| format!("ligne {ln}: flottant invalide '{s}'"));
         let spec = match t[0] {
             "linear" => LayerSpec::Linear { in_f: num(t[1])?, out_f: num(t[2])? },
             "relu" => LayerSpec::Relu,
+            "sigmoid" => LayerSpec::Sigmoid,
+            "layernorm" => LayerSpec::LayerNorm { d_model: num(t[1])?, eps: numf(t[2])? },
             "conv2d" => LayerSpec::Conv2d {
                 in_c: num(t[1])?,
                 out_c: num(t[2])?,
