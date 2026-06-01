@@ -198,3 +198,74 @@ mod tests_quant_linear {
         );
     }
 }
+
+// ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
+
+/// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
+#[cfg(target_arch = "aarch64")]
+unsafe fn dot_i8_neon(a: *const i8, b: *const i8, k: usize) -> i32 {
+    use std::arch::aarch64::*;
+    unsafe {
+        let mut acc = vdupq_n_s32(0);
+        let mut kk = 0usize;
+        while kk + 16 <= k {
+            let va = vld1q_s8(a.add(kk));
+            let vb = vld1q_s8(b.add(kk));
+            let lo = vmull_s8(vget_low_s8(va), vget_low_s8(vb));
+            let hi = vmull_s8(vget_high_s8(va), vget_high_s8(vb));
+            acc = vpadalq_s16(acc, lo);
+            acc = vpadalq_s16(acc, hi);
+            kk += 16;
+        }
+        let mut sum = vaddvq_s32(acc);
+        while kk < k {
+            sum += (*a.add(kk)) as i32 * (*b.add(kk)) as i32;
+            kk += 1;
+        }
+        sum
+    }
+}
+
+/// Matmul int8 accelere NEON (aarch64). b est transpose en interne pour des acces
+/// contigus. Resultat i32 strictement identique a matmul_int8 (somme entiere =>
+/// independante de l'ordre), donc deterministe et bit-exact vs le scalaire.
+#[cfg(target_arch = "aarch64")]
+pub fn matmul_int8_neon(a: &[i8], b: &[i8], m: usize, k: usize, n: usize) -> Vec<i32> {
+    let mut bt = vec![0i8; n * k];
+    for kk in 0..k {
+        for j in 0..n {
+            bt[j * k + kk] = b[kk * n + j];
+        }
+    }
+    let mut out = vec![0i32; m * n];
+    for i in 0..m {
+        let arow = a[i * k..i * k + k].as_ptr();
+        for j in 0..n {
+            let brow = bt[j * k..j * k + k].as_ptr();
+            out[i * n + j] = unsafe { dot_i8_neon(arow, brow, k) };
+        }
+    }
+    out
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod tests_neon {
+    use super::*;
+
+    #[test]
+    fn neon_matches_scalar_bit_exact() {
+        let (m, k, n) = (7usize, 50usize, 9usize); // k % 16 != 0 -> teste le tail
+        let mut s: u64 = 0x1234;
+        let mut nxt = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((s >> 56) as i64 - 128) as i8
+        };
+        let a: Vec<i8> = (0..m * k).map(|_| nxt()).collect();
+        let b: Vec<i8> = (0..k * n).map(|_| nxt()).collect();
+        assert_eq!(
+            matmul_int8(&a, &b, m, k, n),
+            matmul_int8_neon(&a, &b, m, k, n),
+            "NEON != scalaire (doit etre bit-exact)"
+        );
+    }
+}
