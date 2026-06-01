@@ -37,15 +37,8 @@ members = [
     "scirust-symreg",
     "scirust-solvers",
     "scirust-reasoning",
-    "scirust-trading-core",
-    "scirust-trading-engine",
-    "scirust-trading-observer",
-    "scirust-trading-persistence",
-    "scirust-trading-news",
-    "scirust-trading-monitor",
 ]
 exclude = [
-    "soullink-node-patched",
     "scirust-rustc-driver",
     "examples/demo",
     "examples/v2_features_demo",
