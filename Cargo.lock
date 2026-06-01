@@ -2472,6 +2472,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-symreg"
+version = "0.1.0"
+dependencies = [
+ "scirust-symbolic",
+]
+
+[[package]]
 name = "scirust-trading-core"
 version = "0.1.0"
 dependencies = [
