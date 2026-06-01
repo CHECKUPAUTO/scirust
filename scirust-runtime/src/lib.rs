@@ -198,3 +198,4 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
     }
     Ok(out)
 }
+pub mod quant;
