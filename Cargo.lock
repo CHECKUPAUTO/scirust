@@ -2409,6 +2409,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-runtime"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+]
+
+[[package]]
 name = "scirust-simd"
 version = "0.1.0"
 dependencies = [
