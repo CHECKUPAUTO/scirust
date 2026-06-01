@@ -3,7 +3,7 @@ name = "scirust"
 version = "0.13.0"
 edition = "2021"
 description = "SciRust — Industrial-grade deep learning framework in pure Rust"
-license = "MIT OR Apache-2.0"
+license-file = "LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"
 
 [dependencies]

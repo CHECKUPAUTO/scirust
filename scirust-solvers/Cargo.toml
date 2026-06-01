@@ -3,7 +3,7 @@ name = "scirust-solvers"
 version = "0.1.0"
 edition = "2021"
 description = "Equation, ODE, optimization and quadrature solvers built on scirust-autodiff"
-license = "MIT OR Apache-2.0"
+license-file = "../LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"
 
 [dependencies]
