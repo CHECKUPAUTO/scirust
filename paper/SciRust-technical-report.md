@@ -15,7 +15,7 @@ Repository: https://github.com/CHECKUPAUTO/scirust
 
 We present **SciRust**, a deep learning framework written in pure Rust that
 combines a runtime library with a transpiler layer (procedural-macro attributes
-for differentiation, vectorization, and accelerator targeting), and three
+for differentiation, vectorization, and accelerator targeting), and four
 capabilities built and validated on it. The first is a portable GPU and Tensor
 Core path: the pure-Rust core ports to an NVIDIA Jetson Thor (aarch64) without
 modification, and a cuBLAS-backed matrix-multiply, validated against a CPU oracle,
@@ -24,7 +24,10 @@ reaches roughly 63 TFLOPS in BF16. The second is a hybrid genetic-gradient
 constants — from data, using the framework's own symbolic differentiation to fit
 constants. The third is a **deterministic inference runtime** offering bit-exact,
 bounded-latency, auditable inference, generic over architecture via a plain-text
-manifest. A single methodological throughline connects them: every primitive is
+manifest. The fourth is a deterministic int8 quantization stack for embedded inference: a
+portable integer inference path, bit-exact across threads and reproducible
+bit-for-bit under fixed-point requantization, that shrinks model weights roughly
+fourfold. A single methodological throughline connects them: every primitive is
 accepted only after its output matches a reference oracle, and reproducibility is
 treated as a first-class, measured property — in several cases bit-for-bit.
 Against the framework's baseline (255 passing tests; MNIST 97.70%), these
@@ -329,7 +332,78 @@ deterministic). The honest boundary: transformer layers use a three-dimensional
 forward and would require a separate runtime path; convolution throughput is bounded
 by the pure-Rust kernel; and absolute batch=1 latency is overhead-bound.
 
-## 7. Discussion
+## 7. Deterministic int8 quantization for embedded inference
+
+### 7.1 Positioning
+
+The deterministic runtime of Section 6 targets edge and regulated deployment, where
+memory and energy are scarce and behaviour must be auditable. Eight-bit integer
+inference is the natural next step, but only if the properties that made the runtime
+trustworthy survive the move to low precision. We therefore built the quantization
+stack in the pure portable core (no GPU dependency) and held it to the same contract:
+every quantized primitive is accepted only against a reference oracle, and determinism
+is measured rather than assumed — bit-for-bit wherever the arithmetic permits.
+
+### 7.2 Weight-only and dynamic int8: a free fourfold
+
+The first scheme is dynamic W8A8: activations are quantized per tensor at run time,
+weights per output channel, the product accumulates in i32, and a single
+requantization returns f32. On the trained MNIST MLP this is lossless — the f32
+baseline scores 97.73% (fingerprint 0xc96d25fa658f5611) and the int8 model 97.74% —
+while the weights shrink from 813 KB to 204 KB (3.98x). The int8 fingerprint
+0xc3730f7c204455ba is identical under RAYON_NUM_THREADS of 1, 4, and 16: the integer
+matmul accumulates each output cell in a single thread, so the structural determinism
+argument of Section 6.2 carries over unchanged.
+
+### 7.3 Static calibration and full-integer requantization
+
+To remove per-call activation statistics, activation scales were calibrated once on a
+held-out sample; int8 activations are then carried between layers with i32 bias and an
+integer ReLU. This static pipeline scores 97.71% with fingerprint 0xa9b9a102c7cea67b,
+thread-invariant. The floating-point requantization in the hot path was then replaced
+by a gemmlowp-style integer requantization — a fixed-point multiplier in
+[2^30, 2^31) and a per-channel right shift — which reproduces the calibrated model
+bit-for-bit (same 97.71%, same 0xa9b9a102c7cea67b). The inference path is now integer
+end-to-end, with no floating-point in the loop and no parallel reduction, so it is
+deterministic by construction.
+
+### 7.4 Per-channel quantization of convolutions
+
+The per-channel scheme extends to the convolutional network (per row for Conv2d
+weights, per column for Linear). A fake-quantized round-trip reproduces the f32 oracle
+0x1381e4b51d0eeba4 and preserves the arg-max on all 32 test inputs, with the 4.28 MB
+filter set shrinking to 1.07 MB (3.99x). A true integer direct convolution was then
+validated: an f32 mirror of the integer indexing matches the framework's convolution
+forward bit-for-bit, and the int8 convolution agrees with the f32 oracle to within
+max-abs 2.8e-2. As in Section 6, relative error is read with care — near logit
+cancellations a large relative error coexists with a negligible absolute one, so
+absolute error and preserved arg-max are the load-bearing metrics.
+
+### 7.5 A portable quantized artifact
+
+The calibrated full-integer model was promoted to a first-class artifact, QSR1: a
+self-describing byte format holding per-layer dimensions, the calibrated input scale,
+per-channel weight scales, int8 weights, and i32 bias, with deterministic, hashable
+bytes. Written, reloaded from the file alone, and replayed, it reproduces
+0xa9b9a102c7cea67b at 97.71% from 205 KB versus the 814 KB f32 artifact (3.96x).
+Exposed through a small library API (a quantized model with save, load, and infer), a
+round-trip through the library reproduces the fingerprint bit-for-bit; because QSR1 is
+self-describing it subsumes the plain-text manifest for quantized models.
+
+### 7.6 An integer kernel and separable convolutions
+
+The portable scalar integer matmul is the correctness reference. An aarch64 NEON kernel
+— widening multiply-accumulate with i32 accumulation, the right-hand operand
+transposed for contiguous access — is bit-exact against it (integer summation is
+order-independent) and about ten times faster (64x784x256: 9592 us scalar versus 963 us
+NEON). Two MobileNet-style blocks complete the embedded operator set: an int8 depthwise
+convolution, whose f32 mirror matches a per-channel convolution oracle bit-for-bit and
+whose int8 output agrees to max-abs 2.0e-2, and an int8 pointwise 1x1 convolution, whose
+f32 mirror matches a 1x1 convolution oracle bit-for-bit and agrees to max-abs 1.8e-2.
+Composed, they form a separable convolution entirely in deterministic int8, each half
+validated against the framework, with every weight tensor four times smaller.
+
+## 8. Discussion
 
 Two observations recur across the contributions. First, the discipline did the
 load-bearing work: because every primitive was accepted only against an oracle —
@@ -343,9 +417,12 @@ would have been missed by asserting rather than measuring. A third, unifying poi
 reproducibility, treated as a property to be engineered and measured rather than
 hoped for, became a product feature in its own right — the deterministic runtime's
 central guarantee is exactly the bit-exactness the framework's testing discipline
-already depended on.
+already depended on. The int8 quantization stack extended exactly this contract: its integer
+inference path is thread-invariant by the same single-thread per-cell reduction
+argument, and a fixed-point requantization reproduces the calibrated model
+bit-for-bit, so determinism carried down to low precision without new machinery.
 
-## 8. Limitations
+## 9. Limitations
 
 The framework is a research artifact and not production-grade. Convolution lacks an
 im2col-plus-BLAS or GPU path and is therefore slow in absolute throughput; the GPU
@@ -353,18 +430,25 @@ backend is validated for compute correctness but not yet wired into training; an
 deterministic runtime is inference-only over a two-dimensional layer set, with
 transformer support requiring a separate three-dimensional path. Determinism is
 scoped to a fixed binary and architecture. The symbolic engine is a stochastic search
-on a modest primitive set, and several contributions are single-session results.
+on a modest primitive set, and several contributions are single-session results. The int8 quantization is post-training rather than quantization-aware; its
+no-accuracy-loss result is established on the MNIST MLP, while the convolutional
+quantizers are validated for fidelity and determinism on synthetic inputs rather
+than for accuracy on a labeled image benchmark, and no on-device (no_std)
+microcontroller deployment is yet demonstrated.
 None of these undercut the measured results; they bound what those results should be
 taken to mean.
 
-## 9. Conclusion
+## 10. Conclusion
 
 SciRust is a pure-Rust deep learning framework — a hybrid runtime and transpiler — on
-which three capabilities were built and validated: a portable GPU and Tensor Core
+which four capabilities were built and validated: a portable GPU and Tensor Core
 path reaching ~63 TFLOPS in BF16; a hybrid genetic-gradient symbolic regression
 engine that recovers known laws from data using the framework's own symbolic
-differentiation; and a deterministic inference runtime providing bit-exact,
-bounded-latency, auditable inference, generic over architecture. The throughline is
+differentiation; a deterministic inference runtime providing bit-exact, bounded-latency,
+auditable inference, generic over architecture; and a deterministic int8
+quantization stack giving a portable, thread-invariant integer inference path for
+embedded deployment, with fixed-point requantization that reproduces the
+calibrated model bit-for-bit and weight tensors roughly four times smaller. The throughline is
 methodological: each contribution was accepted only after matching an oracle,
 reproducibility was measured rather than assumed — in several cases bit-for-bit — and
 the most useful findings were the ones the measurements forced against expectation.
