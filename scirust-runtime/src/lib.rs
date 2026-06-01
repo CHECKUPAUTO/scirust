@@ -4,8 +4,8 @@
 
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_core::nn::{
-    Conv2d, KaimingNormal, LayerNorm, Linear, MaxPool2d, Padding, PcgEngine, ReLU, Sequential,
-    Sigmoid, Zeros,
+    BatchNorm2d, Conv2d, KaimingNormal, LayerNorm, Linear, MaxPool2d, Padding, PcgEngine, ReLU,
+    Sequential, Sigmoid, Zeros,
 };
 use std::collections::HashMap;
 use std::io;
@@ -96,6 +96,7 @@ pub enum LayerSpec {
     Relu,
     Sigmoid,
     LayerNorm { d_model: usize, eps: f32 },
+    BatchNorm2d { channels: usize },
     Conv2d { in_c: usize, out_c: usize, kernel: usize, stride: usize, same: bool, in_h: usize, in_w: usize },
     MaxPool2d { kernel: usize, stride: usize, c: usize, h: usize, w: usize },
 }
@@ -112,6 +113,11 @@ pub fn build_model(specs: &[LayerSpec]) -> Sequential {
             LayerSpec::Sigmoid => m.add(Sigmoid::new()),
             LayerSpec::LayerNorm { d_model, eps } => {
                 m.add(LayerNorm::new(d_model, eps, &Zeros, &mut rng))
+            }
+            LayerSpec::BatchNorm2d { channels } => {
+                let mut bn = BatchNorm2d::new(channels);
+                bn.set_training(false); // inference : stats glissantes, deterministe par echantillon
+                m.add(bn)
             }
             LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => {
                 let pad = if same { Padding::Same } else { Padding::Valid };
@@ -136,6 +142,7 @@ pub fn write_manifest(specs: &[LayerSpec]) -> String {
             LayerSpec::Relu => s.push_str("relu\n"),
             LayerSpec::Sigmoid => s.push_str("sigmoid\n"),
             LayerSpec::LayerNorm { d_model, eps } => s.push_str(&format!("layernorm {d_model} {eps}\n")),
+            LayerSpec::BatchNorm2d { channels } => s.push_str(&format!("batchnorm2d {channels}\n")),
             LayerSpec::Conv2d { in_c, out_c, kernel, stride, same, in_h, in_w } => s.push_str(&format!(
                 "conv2d {in_c} {out_c} {kernel} {stride} {} {in_h} {in_w}\n",
                 if same { "same" } else { "valid" }
@@ -164,6 +171,7 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
             "relu" => LayerSpec::Relu,
             "sigmoid" => LayerSpec::Sigmoid,
             "layernorm" => LayerSpec::LayerNorm { d_model: num(t[1])?, eps: numf(t[2])? },
+            "batchnorm2d" => LayerSpec::BatchNorm2d { channels: num(t[1])? },
             "conv2d" => LayerSpec::Conv2d {
                 in_c: num(t[1])?,
                 out_c: num(t[2])?,
