@@ -39,6 +39,7 @@ members = [
     "scirust-reasoning",
     "scirust-bridge",
     "scirust-evo",
+    "scirust-edge",
 ]
 exclude = [
     "scirust-rustc-driver",
