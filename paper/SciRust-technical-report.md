@@ -4,11 +4,6 @@
 Independent researcher · contact@checkupauto.fr
 Repository: https://github.com/CHECKUPAUTO/scirust
 
-> Draft note (remove before submission). Defaults pending confirmation:
-> target length ~6000 words; technical-report tonality. Bracketed [...] items
-> are placeholders for the author to fill (full name, affiliation). All
-> quantitative figures are measured values reported by the runs they describe.
-
 ---
 
 ## Abstract
@@ -435,7 +430,7 @@ no-accuracy-loss result is established on the MNIST MLP, while the convolutional
 quantizers are validated for fidelity and determinism on synthetic inputs rather
 than for accuracy on a labeled image benchmark, and no on-device (no_std)
 microcontroller deployment is yet demonstrated.
-None of these undercut the measured results; they bound what those results should be
+The repository also includes an evolutionary-optimization module; of its algorithms only the multi-objective NSGA-II is validated here, recovering the ZDT1 Pareto front to within about 1e-3, while the simplified single-objective optimizers converge on convex landscapes but not on hard multimodal functions. None of these undercut the measured results; they bound what those results should be
 taken to mean.
 
 ## 10. Conclusion
