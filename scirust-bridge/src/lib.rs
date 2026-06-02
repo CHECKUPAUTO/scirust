@@ -1,7 +1,6 @@
 //! IA Bridge (NLP → math pipeline) stub.
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use scirust_symbolic::Expr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineOutput {
