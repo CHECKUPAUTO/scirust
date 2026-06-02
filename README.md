@@ -21,6 +21,28 @@ modify it, and trust it.
 It's not the fastest framework on the planet. It's the one you can **fully
 understand**, modify safely, and extend without crossing language boundaries.
 
+## Positioning
+
+A research artifact: a pure-Rust deep-learning and scientific-computing stack built and
+validated from scratch — a runtime plus a transpiler layer — rather than a wrapper
+over libtorch or ONNX. The guiding discipline is that every primitive is accepted only
+after its output matches a reference oracle, with reproducibility measured rather than
+assumed (in several cases bit-for-bit). SciRust is not a production competitor to PyTorch,
+Burn, or candle; it is a framework you can read, modify, and trust, with its claims backed
+by measurements.
+
+## Validated capabilities
+
+Every result below is reproduced by code in this repository and documented in the
+technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
+
+- **Deep-learning core + reverse-mode autodiff** — 255 passing tests; an MLP reaches 97.70% on MNIST.
+- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reaches ~63 TFLOPS.
+- **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
+- **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
+- **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
+- **Evolutionary optimization** (`scirust-evo`) — NSGA-II recovers the ZDT1 Pareto front to within ~1e-3; the simplified single-objective optimizers are honest about their limits (see the report).
+
 ## What's in it?
 
 ```
@@ -127,75 +149,19 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
 | Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |
 
-## Architecture — Recent Refactoring (2026-05)
+## Relationship to SoulLink
 
-### SciRust Workspace Structure
-
-```
-scirust/
-├── scirust-core/        # Core: autodiff, tensor, nn, compute backend
-├── scirust-simd/        # SIMD kernels (portable, AVX2, NEON)
-├── scirust-gpu/         # GPU backends (wgpu, CUDA)
-├── scirust-learning/    # Learning algorithms (RL, control, finance)
-├── scirust-reasoning/   # Symbolic reasoning, prob逻辑
-├── scirust-symbolic/    # Symbolic computation
-├── scirust-autodiff/    # Autodiff implementations (tape, forward, reverse)
-├── scirust-bridge/      # FFI bridges (Python, Ollama)
-├── scirust-gpu-macros/ # GPU proc-macros
-├── scirust-simd-macros/ # SIMD proc-macros
-└── scirust-macros/      # Common proc-macros
-```
-
-### Soullink-Node Refactoring
-
-The `soullink-node` crate has been reorganized:
-
-```
-soullink-node/
-├── soullink-node/       # Main brain implementation (v6.0)
-│   ├── src/
-│   │   ├── brain.rs             # Core brain (33K neurons, modules)
-│   │   ├── neuron.rs            # Neuron struct + dynamics
-│   │   ├── synapse.rs           # Synapse struct + STDP
-│   │   ├── ssm_cortex.rs        # Mamba SSM encode/forward/decode
-│   │   ├── meta_cortex.rs       # Self-model MLP + closed-loop control
-│   │   ├── evolution.rs         # Genome, fitness, Pareto, checkpoint
-│   │   ├── self_modify/         # Auto-code-modify engine
-│   │   ├── script_engine.rs     # Rhai sandbox
-│   │   └── ... (other modules)
-│   ├── Cargo.toml
-│   └── Cargo.lock
-├── soullink-ssm/        # Mamba-style SSM implementation
-├── hnn/                 # Hybrid Neural Network modules
-├── jepa/                # JEPA (Joint Embedding Predictive Architecture)
-└── integration-tests/   # E2E integration tests
-```
-
-### Deleted Crates (archived or moved)
-
-- `scirust-burn-bridge/` — Burn ↔ SciRust inference bridge
-- `scirust-distributed/` — Distributed computing (moved to mesh networking)
-- `scirust-genetic/` — Genetic algorithms (integrated into evolution engine)
-- `scirust-inference/` — Inference layers (merged into scirust-core)
-- `scirust-jit/` — JIT compilation (replaced by scirust-rustc-driver)
-- `scirust-probability/` — Probabilistic models (moved to scirust-learning)
-- `scirust-quantum/` — Quantum circuits (archived)
-- `scirust-web/` — WASM bindings (moved to separate project)
-
-### Migration Notes
-
-If you have code using deleted modules:
-
-1. **Evolution** → Use `soullink-node::evolution::EvolutionEngine`
-2. **Self-modify** → Use `soullink-node::self_modify::SelfModifyEngine`
-3. **Script engine** → Use `soullink-node::script_engine::ScriptEngine`
-4. **Inference** → Use `scirust-core::nn` modules
-
-See the individual crate READMEs for migration guides.
+Parts of SciRust were developed with the assistance of **SoulLink**, a separate autonomous
+agent system maintained outside this repository. SoulLink is not a component of the
+framework, is not required to build or use it, and lives in its own project. SciRust stands
+on its own as the deep-learning and scientific-computing framework described here.
 
 ## License
 
-MIT
+SciRust is **source-available** and dual-licensed: free for noncommercial and personal use
+under the **PolyForm Noncommercial 1.0.0** license, with a separate **commercial license**
+available. See [`LICENSE.md`](LICENSE.md) and [`LICENSING.md`](LICENSING.md). This is not an
+OSI-approved open-source license.
 
 ## Contributing
 
