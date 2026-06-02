@@ -2,6 +2,7 @@
 // Reverse-mode autodiff — compatible V10A/V11
 
 use crate::nn::rng::PcgEngine;
+use crate::nn::conv_utils::im2col_raw;
 use std::cell::RefCell;
 use matrixmultiply::sgemm;
 
@@ -320,34 +321,23 @@ impl Tensor {
             self.rows, self.cols, other.rows, other.cols
         );
         let mut out = Tensor::zeros(self.rows, other.cols);
-        let n = other.cols;
-        let kd = self.cols;
-
-        #[cfg(feature = "rayon")]
-        {
-            if self.rows >= 32 {
-                use rayon::prelude::*;
-                out.data.par_chunks_mut(n).enumerate().for_each(|(i, orow)| {
-                    let arow = &self.data[i * kd..(i + 1) * kd];
-                    for k in 0..kd {
-                        let a = arow[k];
-                        let brow = &other.data[k * n..(k + 1) * n];
-                        for j in 0..n {
-                            orow[j] += a * brow[j];
-                        }
-                    }
-                });
-                return out;
-            }
-        }
-
-        for i in 0..self.rows {
-            for k in 0..kd {
-                let a = self.data[i * kd + k];
-                for j in 0..n {
-                    out.data[i * n + j] += a * other.data[k * n + j];
-                }
-            }
+        unsafe {
+            sgemm(
+                self.rows,
+                self.cols,
+                other.cols,
+                1.0,
+                self.data.as_ptr(),
+                self.cols as isize,
+                1,
+                other.data.as_ptr(),
+                other.cols as isize,
+                1,
+                0.0,
+                out.data.as_mut_ptr(),
+                out.cols as isize,
+                1,
+            );
         }
         out
     }
@@ -2793,54 +2783,35 @@ impl<'t> Var<'t> {
     ) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
-        let bias_data: Option<Vec<f32>> =
-            bias.as_ref().map(|b_v| self.tape.values.borrow()[b_v.idx].as_cpu().data.clone());
         let h_out = (h + 2 * pad - kernel) / stride + 1;
         let w_out = (w + 2 * pad - kernel) / stride + 1;
-        let mut out = Tensor::zeros(batch, out_c * h_out * w_out);
-        let img_out = out_c * h_out * w_out;
-        let img_in = in_c * h * w;
+        let hw = h_out * w_out;
 
-        let fill = |b_i: usize, oimg: &mut [f32]| {
+        // im2col result: (in_c * K * K, batch * h_out * w_out)
+        let col = im2col_raw(&a, batch, in_c, h, w, kernel, stride, pad);
+
+        // weight matrix: (out_c, in_c * K * K)
+        // output matrix: (out_c, batch * h_out * w_out)
+        let mut out_2d = wv.matmul(&col);
+
+        // bias add if present
+        if let Some(b_v) = bias {
+            let bv = self.tape.values.borrow()[b_v.idx].as_cpu().clone();
             for oc in 0..out_c {
-                for oh in 0..h_out {
-                    for ow in 0..w_out {
-                        let mut sum = match &bias_data {
-                            Some(bd) => bd[oc],
-                            None => 0.0f32,
-                        };
-                        for ic in 0..in_c {
-                            for kh in 0..kernel {
-                                for kw in 0..kernel {
-                                    let ih = oh as isize * stride as isize + kh as isize - pad as isize;
-                                    let iw = ow as isize * stride as isize + kw as isize - pad as isize;
-                                    if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
-                                        let in_idx = b_i * img_in + ic * h * w + ih as usize * w + iw as usize;
-                                        let w_idx = oc * in_c * kernel * kernel
-                                            + ic * kernel * kernel
-                                            + kh * kernel
-                                            + kw;
-                                        sum += a.data[in_idx] * wv.data[w_idx];
-                                    }
-                                }
-                            }
-                        }
-                        oimg[oc * h_out * w_out + oh * w_out + ow] = sum;
-                    }
+                let b_val = bv.data[oc];
+                for i in 0..(batch * hw) {
+                    out_2d.data[oc * (batch * hw) + i] += b_val;
                 }
             }
-        };
-
-        #[cfg(feature = "rayon")]
-        {
-            use rayon::prelude::*;
-            out.data.par_chunks_mut(img_out).enumerate().for_each(|(b_i, oimg)| fill(b_i, oimg));
         }
-        #[cfg(not(feature = "rayon"))]
-        {
-            for b_i in 0..batch {
-                let s = b_i * img_out;
-                fill(b_i, &mut out.data[s..s + img_out]);
+
+        // Reorganize to (batch, out_c * h_out * w_out) for final Tensor
+        let mut out = Tensor::zeros(batch, out_c * hw);
+        for bi in 0..batch {
+            for oc in 0..out_c {
+                let src_off = oc * (batch * hw) + bi * hw;
+                let dst_off = bi * (out_c * hw) + oc * hw;
+                out.data[dst_off..dst_off + hw].copy_from_slice(&out_2d.data[src_off..src_off + hw]);
             }
         }
 
