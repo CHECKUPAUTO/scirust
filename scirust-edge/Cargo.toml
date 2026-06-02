@@ -8,3 +8,6 @@ repository = "https://github.com/CHECKUPAUTO/scirust"
 
 [dependencies]
 libm = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

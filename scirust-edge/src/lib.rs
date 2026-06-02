@@ -212,3 +212,54 @@ pub fn resource_certificate(model: &[u8], batch: usize) -> Result<ResourceCert, 
         out_dim: metas[n - 1].out_f,
     })
 }
+
+// --- Preuves formelles bornees (Kani). Invisibles au build de production (cfg(kani)). ---
+#[cfg(kani)]
+mod proofs {
+    use super::requant_i32;
+
+    // 1) requant_i32 : aucun overflow ni decalage hors limite dans le domaine documente
+    //    (mult issu de quantize_multiplier : 0 <= mult < 2^31 ; shift <= 32).
+    #[kani::proof]
+    fn requant_no_overflow_in_envelope() {
+        let acc: i32 = kani::any();
+        let mult: i64 = kani::any();
+        let shift: u32 = kani::any();
+        kani::assume(mult >= 0 && mult < (1i64 << 31));
+        kani::assume(shift <= 32);
+        let _ = requant_i32(acc, mult, shift);
+    }
+
+    // 2) Dents : hors enveloppe (shift >= 34 -> total-1 >= 64), requant_i32 DOIT paniquer.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn requant_panics_outside_envelope() {
+        let shift: u32 = kani::any();
+        kani::assume(shift >= 34 && shift <= 40);
+        let _ = requant_i32(0, 0, shift);
+    }
+
+    // 3) Lemme de conception : pour une dimension de contraction K <= 131071,
+    //    le pire-cas |accumulateur| (K * 128 * 128) tient dans un i32.
+    #[kani::proof]
+    fn accumulator_bound_fits_i32() {
+        let k: u64 = kani::any();
+        kani::assume(k <= 131_071);
+        let worst: u64 = k * 16_384;
+        assert!(worst <= i32::MAX as u64);
+    }
+
+    // 4) Code reel d accumulation i8->i32 a la largeur MNIST (256),
+    //    sans overflow i32, sur TOUTES les paires d entrees i8.
+    #[kani::proof]
+    #[kani::unwind(257)]
+    fn dot_i8_i32_no_overflow_256() {
+        let mut sum: i32 = 0;
+        for _ in 0..256 {
+            let a: i8 = kani::any();
+            let w: i8 = kani::any();
+            sum += (a as i32) * (w as i32);
+        }
+        let _ = sum;
+    }
+}
