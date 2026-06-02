@@ -1927,6 +1927,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-edge"
+version = "0.1.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "scirust-evo"
 version = "0.1.0"
 dependencies = [
@@ -1989,6 +1996,7 @@ name = "scirust-runtime"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
+ "scirust-edge",
 ]
 
 [[package]]
