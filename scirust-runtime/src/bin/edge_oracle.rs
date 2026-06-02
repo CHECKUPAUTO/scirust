@@ -1,4 +1,4 @@
-// ORACLE : scirust_edge::infer (no_std) doit reproduire QModel::infer (std) bit-pour-bit.
+// ORACLE + CERTIFICAT : scirust_edge no_std vs std, et bornes de ressources statiques.
 use scirust_runtime::quant::{QLayer, QLinear, QModel};
 use scirust_runtime::{fnv_fold_f32, fnv_init};
 
@@ -12,7 +12,6 @@ impl R {
         z ^ (z >> 31)
     }
 }
-
 fn lin(r: &mut R, in_f: usize, out_f: usize, s_in: f32, relu: bool) -> QLayer {
     let scales = (0..out_f).map(|_| 0.001 + (r.n() % 100) as f32 / 50000.0).collect();
     let w_q = (0..in_f * out_f).map(|_| ((r.n() % 255) as i32 - 127) as i8).collect();
@@ -29,16 +28,14 @@ fn main() {
 
     let std_out = model.infer(&input, b);
 
-    let (na, nacc, nout) = scirust_edge::buffer_requirements(&bytes, b).expect("buffer_requirements");
+    let (na, nacc, nout) = scirust_edge::buffer_requirements(&bytes, b).expect("req");
     let mut act_a = vec![0i8; na];
     let mut act_b = vec![0i8; na];
     let mut acc = vec![0i32; nacc];
     let mut out = vec![0.0f32; nout];
     let m = scirust_edge::infer(&bytes, &input, b, &mut act_a, &mut act_b, &mut acc, &mut out).expect("edge infer");
     let edge_out = &out[..m];
-
-    let same = std_out.len() == edge_out.len()
-        && std_out.iter().zip(edge_out).all(|(x, y)| x.to_bits() == y.to_bits());
+    let same = std_out.len() == edge_out.len() && std_out.iter().zip(edge_out).all(|(x, y)| x.to_bits() == y.to_bits());
 
     println!();
     println!("=== ORACLE no_std vs std (QSR1) ===");
@@ -46,5 +43,20 @@ fn main() {
     println!("fp std      : {:#018x}", fnv_fold_f32(fnv_init(), &std_out));
     println!("fp no_std   : {:#018x}", fnv_fold_f32(fnv_init(), edge_out));
     println!("bit-identique std vs no_std : {}", if same { "OUI" } else { "NON" });
-    println!("buffers      : act={} i8 (x2), acc={} i32, out={} f32 (sans allocation cote MCU)", na, nacc, nout);
+
+    let cert = scirust_edge::resource_certificate(&bytes, b).expect("cert");
+    println!();
+    println!("=== CERTIFICAT DE RESSOURCES (statique, sans execution) ===");
+    println!("artefact (flash)  : {} o", cert.flash_artifact_bytes);
+    println!("scratch RAM total : {} o   (act {} o x2 + acc {} o + out {} o)", cert.scratch_ram_bytes, cert.act_bytes_each, cert.acc_bytes, cert.out_bytes);
+    println!("MAC entiers (exact, deterministe) : {}", cert.mac_count);
+    println!("couches {}   dim sortie {}", cert.layers, cert.out_dim);
+
+    let ok_exact = scirust_edge::infer(&bytes, &input, b, &mut act_a, &mut act_b, &mut acc, &mut out).is_ok();
+    let too_small = scirust_edge::infer(&bytes, &input, b, &mut act_a[..cert.act_bytes_each - 1], &mut act_b, &mut acc, &mut out);
+    let tight = matches!(too_small, Err(scirust_edge::EdgeError::BufferTooSmall));
+    println!("borne RAM verifiee : suffisante={}  serree(-1o -> BufferTooSmall)={}", ok_exact, tight);
+
+    let mac_check = (b * d0 * d1 + b * d1 * d2) as u64;
+    println!("MAC attendu (b*d0*d1 + b*d1*d2) = {}  -> {}", mac_check, if mac_check == cert.mac_count { "concorde" } else { "DIVERGE" });
 }
