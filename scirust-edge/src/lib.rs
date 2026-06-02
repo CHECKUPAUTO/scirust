@@ -172,3 +172,43 @@ pub fn infer(
     }
     Err(EdgeError::EmptyModel)
 }
+
+/// Certificat de ressources calcule statiquement depuis l artefact QSR1,
+/// sans executer l inference. Valeurs exactes et bornees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceCert {
+    pub layers: usize,
+    pub batch: usize,
+    pub flash_artifact_bytes: usize,
+    pub scratch_ram_bytes: usize,
+    pub act_bytes_each: usize,
+    pub acc_bytes: usize,
+    pub out_bytes: usize,
+    pub mac_count: u64,
+    pub out_dim: usize,
+}
+
+pub fn resource_certificate(model: &[u8], batch: usize) -> Result<ResourceCert, EdgeError> {
+    let mut metas = [Meta::default(); MAX_LAYERS];
+    let n = parse(model, &mut metas)?;
+    let (na, nacc, nout) = buffer_requirements(model, batch)?;
+    let act_bytes_each = na;
+    let acc_bytes = nacc * 4;
+    let out_bytes = nout * 4;
+    let scratch_ram_bytes = act_bytes_each * 2 + acc_bytes + out_bytes;
+    let mut mac: u64 = 0;
+    for m in &metas[..n] {
+        mac += batch as u64 * m.in_f as u64 * m.out_f as u64;
+    }
+    Ok(ResourceCert {
+        layers: n,
+        batch,
+        flash_artifact_bytes: model.len(),
+        scratch_ram_bytes,
+        act_bytes_each,
+        acc_bytes,
+        out_bytes,
+        mac_count: mac,
+        out_dim: metas[n - 1].out_f,
+    })
+}
