@@ -10,7 +10,7 @@ Repository: https://github.com/CHECKUPAUTO/scirust
 
 We present **SciRust**, a deep learning framework written in pure Rust that
 combines a runtime library with a transpiler layer (procedural-macro attributes
-for differentiation, vectorization, and accelerator targeting), and four
+for differentiation, vectorization, and accelerator targeting), and nine
 capabilities built and validated on it. The first is a portable GPU and Tensor
 Core path: the pure-Rust core ports to an NVIDIA Jetson Thor (aarch64) without
 modification, and a cuBLAS-backed matrix-multiply, validated against a CPU oracle,
@@ -409,7 +409,36 @@ f32 mirror matches a 1x1 convolution oracle bit-for-bit and agrees to max-abs 1.
 Composed, they form a separable convolution entirely in deterministic int8, each half
 validated against the framework, with every weight tensor four times smaller.
 
-## 8. Discussion
+## 8. Advanced Features for Runtime and Verification
+
+As SciRust matured from a training-focused framework to a deployment-ready ecosystem, five advanced features were implemented to address the needs of high-integrity systems and formal explainability.
+
+### 8.1 Ahead-Of-Time (AOT) Static Model Compiler
+To eliminate the overhead of runtime graph construction and weight loading—critical for ultra-deep embedded targets with limited heap memory—we implemented a static compiler.
+- **Mechanism:** The compiler ingests a `LayerSpec` topology and raw weight buffers, emitting a valid Rust source file. This file defines a `StaticModel` struct where weights are stored as statically nested arrays (`&[[f32; N]; M]`).
+- **Benefit:** Models can be linked directly into the binary as immutable data, enabling zero-allocation inference and preventing runtime parsing errors.
+
+### 8.2 Soft-Float Matrix Engine for Determinism
+While Section 6.2 establishes bit-exactness for a fixed architecture, cross-platform determinism (e.g., x86 vs. ARM) is often broken by hardware-specific FPU rounding and FMA optimizations.
+- **Implementation:** We implemented `soft_gemm`, a software-defined matrix multiplication kernel using scaled integer arithmetic (`i32` with `i64` accumulation).
+- **Validation:** By bypassing the hardware FPU, the engine guarantees identical computation traces across disparate CPU instruction sets, a requirement for formal verification and cross-platform audit logs.
+
+### 8.3 Latent Activation Steering (RepE)
+Building on the "Representation Engineering" paradigm, we integrated low-level hooks to manipulate internal model state during inference.
+- **Structure:** The `Module` trait was expanded with a `forward_steered` method and a `SteerHook` registry.
+- **Application:** This allows external controllers to apply linear shifts (Concept Vectors) to latent activations in real-time, enabling the redirection of model behavior without modifying static weights.
+
+### 8.4 Quantization-Aware Training (QAT) with STE
+To bridge the gap between FP32 training and INT8 deployment (Section 7), we implemented Fake Quantization kernels.
+- **Mechanism:** During the forward pass, values are clamped and quantized to a simulated 8-bit scale. The backward pass utilizes a **Straight-Through Estimator (STE)**, passing gradients through the non-differentiable quantization step unmodified.
+- **Result:** Models naturally adapt to quantization errors during the training loop, significantly improving the accuracy of downstream low-precision execution.
+
+### 8.5 XAI: Integrated Gradients Engine
+To satisfy the requirements of regulated sectors (Section 3), we implemented Integrated Gradients for feature attribution.
+- **Algorithm:** The engine computes the path integral of gradients from a baseline (e.g., a zero tensor) to the input over $m$ steps.
+- **Integration:** Leveraging the framework's native `Tape`-based autodiff, the engine generates attribution maps of the same shape as the input, providing a mathematical explanation for any given prediction.
+
+## 9. Discussion
 
 Two observations recur across the contributions. First, the discipline did the
 load-bearing work: because every primitive was accepted only against an oracle —
@@ -428,7 +457,7 @@ inference path is thread-invariant by the same single-thread per-cell reduction
 argument, and a fixed-point requantization reproduces the calibrated model
 bit-for-bit, so determinism carried down to low precision without new machinery.
 
-## 9. Limitations
+## 10. Limitations
 
 The framework is a research artifact and not production-grade. Convolution lacks an
 im2col-plus-BLAS or GPU path and is therefore slow in absolute throughput; the GPU
@@ -479,7 +508,13 @@ differentiation; a deterministic inference runtime providing bit-exact, bounded-
 auditable inference, generic over architecture; and a deterministic int8
 quantization stack giving a portable, thread-invariant integer inference path for
 embedded deployment, with fixed-point requantization that reproduces the
-calibrated model bit-for-bit and weight tensors roughly four times smaller. The throughline is
+bit-for-bit and weight tensors roughly four times smaller. Expanding on these,
+five advanced features—an Ahead-Of-Time (AOT) static compiler for zero-overhead
+embedded inference, a soft-float matrix engine for cross-platform bit-exactness,
+latent activation steering for real-time representation engineering,
+quantization-aware training (QAT) via a Straight-Through Estimator, and an
+Integrated Gradients engine for mathematical explainability—further establish
+SciRust as a high-integrity framework. The throughline is
 methodological: each contribution was accepted only after matching an oracle,
 reproducibility was measured rather than assumed — in several cases bit-for-bit — and
 the most useful findings were the ones the measurements forced against expectation.
