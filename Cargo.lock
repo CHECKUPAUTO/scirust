@@ -2022,6 +2022,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-neuro-symbolic"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rand 0.8.6",
+ "scirust-core",
+ "scirust-symbolic",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "scirust-reasoning"
 version = "0.1.0"
 dependencies = [

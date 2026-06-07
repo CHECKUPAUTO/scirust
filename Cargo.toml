@@ -45,6 +45,7 @@ members = [
     "scirust-events-models",
     "scirust-events-runtime",
     "scirust-events-examples",
+    "scirust-neuro-symbolic",
 ]
 exclude = [
     "scirust-rustc-driver",
