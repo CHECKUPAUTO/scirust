@@ -7,6 +7,7 @@ pub use scirust_simd::*;
 pub mod matrix {
     pub mod backend;
     pub mod view;
+    pub mod soft;
 }
 
 pub mod autodiff;
@@ -50,3 +51,5 @@ pub mod dispatch {
 pub mod compute_backend;
 pub mod quantization;
 pub mod homomorphic;
+pub mod aot;
+pub mod xai;
