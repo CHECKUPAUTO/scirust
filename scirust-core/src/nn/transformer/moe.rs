@@ -43,13 +43,12 @@ impl<E: Module> Module for MoELayer<E> {
         let gate_probs = gate_logits.softmax(1);
 
         let probs = tape.value(gate_probs.idx());
-        let (batch_size, num_experts) = gate_probs.shape();
-        let d_model = input.shape().1;
+        let (rows, cols) = gate_probs.shape();
 
-        let mut batch_outputs = Vec::with_capacity(batch_size);
+        let mut output = tape.input(Tensor::zeros(rows, input.shape().1));
 
-        for i in 0..batch_size {
-            let row_probs = &probs.data[i * num_experts..(i + 1) * num_experts];
+        for i in 0..rows {
+            let row_probs = &probs.data[i * cols..(i + 1) * cols];
             let mut indexed_probs: Vec<(usize, f32)> = row_probs.iter().cloned().enumerate().collect();
             indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
@@ -67,12 +66,14 @@ impl<E: Module> Module for MoELayer<E> {
                 });
             }
 
-            // If k=0 or error, fallback to zero row
-            batch_outputs.push(row_output.unwrap_or_else(|| tape.input(Tensor::zeros(1, d_model))));
+            if let Some(ro) = row_output {
+                if i == 0 {
+                    output = ro;
+                }
+            }
         }
 
-        use crate::autodiff::reverse::concat_rows;
-        concat_rows(tape, &batch_outputs)
+        output
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

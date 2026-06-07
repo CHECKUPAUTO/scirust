@@ -2025,6 +2025,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-neuro-symbolic"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rand 0.8.6",
+ "scirust-core",
+ "scirust-symbolic",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "scirust-reasoning"
 version = "0.1.0"
 dependencies = [
@@ -2080,49 +2093,6 @@ name = "scirust-symreg"
 version = "0.1.0"
 dependencies = [
  "scirust-symbolic",
-]
-
-[[package]]
-name = "scirust-tensor-compile"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-contraction",
- "scirust-tensor-core",
-]
-
-[[package]]
-name = "scirust-tensor-contraction"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
- "scirust-tensor-einsum",
-]
-
-[[package]]
-name = "scirust-tensor-core"
-version = "0.1.0"
-
-[[package]]
-name = "scirust-tensor-einsum"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
-]
-
-[[package]]
-name = "scirust-tensor-examples"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
- "scirust-tensor-einsum",
-]
-
-[[package]]
-name = "scirust-tensor-runtime"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-compile",
- "scirust-tensor-core",
 ]
 
 [[package]]

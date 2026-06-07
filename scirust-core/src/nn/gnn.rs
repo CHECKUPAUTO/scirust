@@ -1,4 +1,4 @@
-use crate::autodiff::reverse::{Tape, Var};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::init::Initializer;
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;

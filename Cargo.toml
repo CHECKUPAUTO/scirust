@@ -46,12 +46,7 @@ members = [
     "scirust-events-models",
     "scirust-events-runtime",
     "scirust-events-examples",
-    "scirust-tensor-core",
-    "scirust-tensor-einsum",
-    "scirust-tensor-contraction",
-    "scirust-tensor-compile",
-    "scirust-tensor-runtime",
-    "scirust-tensor-examples",
+    "scirust-neuro-symbolic",
 ]
 exclude = [
     "scirust-rustc-driver",

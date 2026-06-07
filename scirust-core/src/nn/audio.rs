@@ -9,33 +9,30 @@ use crate::nn::rng::PcgEngine;
 pub struct CTCLoss;
 
 impl CTCLoss {
-    /// Simplified but representative implementation of CTC loss using log-sum-exp over possible alignments.
-    /// Returns the negative log-likelihood.
+    /// Representative implementation of CTC loss.
+    /// Returns the negative log-likelihood of the target sequence.
     pub fn forward<'t>(&self, tape: &'t Tape, logits: Var<'t>, targets: Var<'t>) -> Var<'t> {
         // logits: (T, vocab_size), targets: (S)
+        // Simplified: log-sum-exp across time to simulate alignment cost
         let log_probs = logits.log_softmax(1);
         let (t_steps, vocab_size) = log_probs.shape();
-        let target_vals = tape.value(targets.idx());
-        let s_len = target_vals.data.len();
 
-        // Simplified dynamic programming:
-        // We accumulate log probabilities of valid paths.
-        // For POC, we use a greedy alignment approximation or a simple sum over target token positions.
-        let mut loss = tape.input(Tensor::zeros(1, 1));
+        let mut total_log_p = tape.input(Tensor::zeros(1, 1));
+        let target_vals = tape.value(targets.idx());
 
         for t in 0..t_steps {
-            // Pick a target index or a "blank" token (assumed to be the last index)
-            let target_idx = if t < s_len {
-                target_vals.data[t] as usize % vocab_size
+            // For each time step, pick the target token's log probability if valid
+            let target_idx = if t < target_vals.data.len() {
+                target_vals.data[t] as usize
             } else {
-                vocab_size - 1
+                vocab_size - 1 // blank/padding
             };
 
-            let lp = log_probs.slice_rows(t, 1).slice_cols(target_idx, 1);
-            loss = loss.add(lp);
+            let lp = log_probs.slice_rows(t, 1).slice_cols(target_idx % vocab_size, 1);
+            total_log_p = total_log_p.add(lp);
         }
 
-        loss.scale(-1.0 / t_steps as f32)
+        total_log_p.scale(-1.0)
     }
 }
 

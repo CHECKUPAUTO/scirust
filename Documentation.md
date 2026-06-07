@@ -185,3 +185,25 @@ Das Modul `scirust-events` ermöglicht die Analyse von Datenströmen zur determi
 
 ### 11. 事件检测 (scirust-events) [ZH-CN]
 `scirust-events` 模块提供了一套用于确定性地检测和分类数据流（时间序列、日志、信号）中事件的工具。专为对可重现性有严格要求的关键任务应用而设计。
+
+## 15. Neuro-Symbolique Avancé (scirust-neuro-symbolic)
+
+La crate `scirust-neuro-symbolic` introduit des capacités de raisonnement hybride au sein de SciRust, combinant la puissance de l'apprentissage profond avec la rigueur de la logique symbolique.
+
+### Modules inclus :
+- **Symbolic Regression** : Recherche de lois mathématiques guidée par des réseaux de neurones.
+- **Logic Programming** : Moteur Datalog pour le raisonnement sur des faits et des règles.
+- **SAT/SMT Solvers** : Interfaces pour la résolution de problèmes de satisfaisabilité formelle.
+- **Knowledge Graphs** : Représentation et raisonnement sur des graphes de connaissances.
+- **Differentiable Reasoning** : Couches de logique floue différentiables (T-norms) intégrées aux tenseurs.
+
+**Exemple de raisonnement flou :**
+```rust
+use scirust_neuro_symbolic::neural::DifferentiableLogicLayer;
+use scirust_core::autodiff::reverse::Tensor;
+
+let layer = DifferentiableLogicLayer::new("LogicLayer");
+let a = Tensor::from_vec(vec![0.8], 1, 1);
+let b = Tensor::from_vec(vec![0.7], 1, 1);
+let result = layer.fuzzy_and(&a, &b); // 0.56
+```

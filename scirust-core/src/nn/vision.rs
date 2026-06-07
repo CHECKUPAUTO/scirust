@@ -80,18 +80,32 @@ impl Module for ResNet {
             }
         }
 
-        // Optimized Global Average Pooling (GAP)
-        // Instead of looping over channels, we reshape and use mean_axis if possible.
-        // x shape: (batch, C * H * W). We want (batch, C).
+        // Global Average Pooling (GAP)
         let (batch, total_features) = x.shape();
         let spatial_dim = total_features / self.out_channels;
 
-        // Reshape (batch, C * H * W) -> (batch * C, H * W)
-        let reshaped = x.reshape(&[batch * self.out_channels, spatial_dim]);
-        // Mean across spatial dimensions: (batch * C, 1)
-        let pooled_flat = reshaped.mean_axis(1);
-        // Final pool: (batch, C)
-        let pooled = pooled_flat.reshape(&[batch, self.out_channels]);
+        let mut gap_parts = Vec::with_capacity(batch);
+        for b in 0..batch {
+            let sample = x.slice_rows(b, 1);
+            // Average across spatial dimension for each channel
+            // In flattened format (batch, C*H*W), we need to average groups of size spatial_dim
+            let mut channels = Vec::with_capacity(self.out_channels);
+            for c in 0..self.out_channels {
+                let start = c * spatial_dim;
+                let channel_avg = sample.slice_cols(start, spatial_dim).sum().scale(1.0 / spatial_dim as f32);
+                channels.push(channel_avg);
+            }
+            // Workaround: Use concat_rows then transpose if needed,
+            // but since we want (1, out_channels), we can just concat_rows if we reshape?
+            // Actually concat_rows returns (N, cols). If rows are (1, 1), it returns (N, 1).
+            // We want (1, out_channels).
+            use crate::autodiff::reverse::concat_rows;
+            let channel_vec = concat_rows(tape, &channels); // (out_channels, 1)
+            gap_parts.push(channel_vec.transpose_2d()); // (1, out_channels)
+        }
+
+        use crate::autodiff::reverse::concat_rows;
+        let pooled = concat_rows(tape, &gap_parts);
 
         self.fc.forward(tape, pooled)
     }

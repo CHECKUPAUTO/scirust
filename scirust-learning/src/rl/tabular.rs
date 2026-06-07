@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use super::{Agent, Env};
 use rand::Rng;
 
 pub struct TabularAgent<S, A> {

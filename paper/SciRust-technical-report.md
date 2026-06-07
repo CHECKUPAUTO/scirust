@@ -559,3 +559,19 @@ where $\tau$ is a calibrated threshold.
 
 ### 14.3 Results and Metrics
 Expected performance on the Numenta Anomaly Benchmark (NAB) targets an F1-score of $>0.85$ with zero bit-drift across multiple threads. The use of QSR1 int8 quantization is expected to reduce latency by $3\times$ on edge ARM processors while maintaining an MSE bit-closeness of $<10^{-4}$ compared to the f32 oracle.
+
+## 12. Advanced Neuro-Symbolic Integration
+
+### 12.1 Overview
+We introduce `scirust-neuro-symbolic`, a crate dedicated to hybrid AI architectures. It bridges the gap between connectionist models (tensors) and symbolic logic (rules/solvers).
+
+### 12.2 Differentiable Logic
+By implementing fuzzy logic operators (Product T-norm) as tensor operations, we allow logic constraints to be integrated directly into the gradient descent optimization path.
+$$ \text{AND}(a, b) = a \cdot b $$
+$$ \text{OR}(a, b) = a + b - a \cdot b $$
+
+### 12.3 Formal Solvers and E-Graphs
+The crate provides a CDCL SAT solver and an E-Graph engine for equality saturation, enabling symbolic simplification and formal verification of neural network properties or synthesized programs.
+
+### 12.4 Conclusion
+The addition of neuro-symbolic capabilities positions SciRust as a versatile platform for AGI research, enabling models that can both learn from data and reason over structured knowledge.
