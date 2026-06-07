@@ -632,6 +632,11 @@ pub enum Op {
         output_padding: usize,
     },
     Reshape(usize, usize, usize),
+    FakeQuantize {
+        input: usize,
+        scale: f32,
+        zero_point: i32,
+    },
 }
 
 // ================================================================== //
@@ -1727,6 +1732,10 @@ impl Tape {
                 Op::Reshape(input, old_rows, old_cols) => {
                     grads[input] = grads[input].add(&g.reshape(old_rows, old_cols));
                 }
+                Op::FakeQuantize { input, .. } => {
+                    // Straight-Through Estimator (STE): pass gradients through unmodified
+                    grads[input].add_assign(&g);
+                }
                 Op::FlashAttention {
                     q,
                     k,
@@ -2000,6 +2009,30 @@ impl<'t> Var<'t> {
         let out = a.add(&b);
         let new_idx = self.tape.push_with_saved(
             Op::Add(self.idx, other.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    pub fn fake_quantize_ste(self, scale: f32, zero_point: i32) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let mut out_data = vec![0.0f32; a.data.len()];
+        for (i, &x) in a.data.iter().enumerate() {
+            let q = (x / scale).round() + zero_point as f32;
+            let q_clamped = q.clamp(-128.0, 127.0);
+            out_data[i] = (q_clamped - zero_point as f32) * scale;
+        }
+        let out = Tensor::from_vec(out_data, a.rows, a.cols);
+        let new_idx = self.tape.push_with_saved(
+            Op::FakeQuantize {
+                input: self.idx,
+                scale,
+                zero_point,
+            },
             DeviceTensor::cpu(out),
             SavedData::None,
         );

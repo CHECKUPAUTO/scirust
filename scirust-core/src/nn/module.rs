@@ -23,11 +23,26 @@ use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::error::Result;
 use std::collections::HashMap;
 
+pub struct SteerHook {
+    pub target_layer: String,
+    pub shift: Tensor,
+}
+
 pub trait Module {
     /// Forward pass : push les ops sur la tape, retourne la Var sortie.
     /// Doit aussi enregistrer en interne les indices des paramètres
     /// entraînables (utilisé par parameter_indices ensuite).
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t>;
+
+    fn forward_steered<'t>(
+        &mut self,
+        tape: &'t Tape,
+        input: Var<'t>,
+        _hook: Option<&SteerHook>,
+    ) -> Var<'t> {
+        // Default implementation delegates to forward if no hook or not handled
+        self.forward(tape, input)
+    }
 
     /// Indices des paramètres entraînables sur la dernière tape vue.
     /// Ne fonctionne que si forward a été appelé d'abord.
