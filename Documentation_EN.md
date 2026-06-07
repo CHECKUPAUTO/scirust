@@ -42,11 +42,10 @@ SciRust covers a wide range of modern techniques:
 - **Evolutionary Optimization**: Using nature-inspired algorithms (like NSGA-II) to solve complex problems.
 - **int8 Quantization**: Shrinking model size by 4x to fit on small processors without losing accuracy.
 - **GPU Acceleration**: Harnessing the power of graphics cards via WebGPU (wgpu) or NVIDIA Tensor Cores (cuBLAS).
-- **AOT (Ahead-Of-Time) Compiler**: Eliminate runtime overhead for ultra-deep embedded targets by compiling models directly into immutable Rust source code.
-- **Soft-Float Matrix Engine**: Guarantee strict bit-for-bit determinism across different architectures (x86 vs ARM) via software-defined fixed-point emulation.
-- **Latent Activation Steering (RepE)**: Intercept and manipulate hidden activations in real-time to steer agent behavior.
-- **Quantization-Aware Training (QAT)**: Incorporate low-precision simulators (Fake Quantization) with STE (Straight-Through Estimator) to optimize models for INT8 deployment.
-- **XAI Engine (Integrated Gradients)**: Generate feature attribution maps to mathematically explain network predictions.
+- **Physics-Informed Neural Networks (PINN)**: Integration of physical laws (differential equations) directly into the loss function for modeling complex phenomena.
+- **Formal Invariant Contracts**: Mathematical guarantees (absence of NaN/Inf, value bounds) for critical applications (medical, aerospace).
+- **CSR Tensors and SpMM Kernels**: Memory and computation optimization for sparse models on embedded targets.
+- **Secure Enclave Execution (TEE)**: Hardened #![no_std] compatible runtime for isolated execution (TrustZone/SGX) without OS allocator.
 
 ## 5. Command Guide
 
@@ -105,7 +104,33 @@ fn main() {
 }
 ```
 
-## 7. Conclusion
+## 7. scirust-tensor — Tensor Algebra and Graph Optimization
+
+The `scirust-tensor` module introduces a high-level abstraction layer for manipulating complex tensors while ensuring maximum performance through graph compilation.
+
+### Why use scirust-tensor?
+- **Einsum**: Write complex operations (Multi-Head Attention, Contractions) in a single, readable line of code.
+- **Operator Fusion**: Reduce memory access by merging activations and biases directly into the computation kernels.
+- **Guaranteed Determinism**: Like all of SciRust, every calculation is bit-for-bit reproducible.
+
+### Example: Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Einstein signature for attention: Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Add this to your `Cargo.toml`:
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Conclusion
 
 SciRust is the framework of choice for those who prioritize **understanding** and **rigor** over raw speed or the ease of Python. It is a powerful tool for building trustworthy AI, from research to embedded systems.
 

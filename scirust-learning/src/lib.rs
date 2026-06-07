@@ -5,6 +5,7 @@
 
 pub mod control;
 pub mod finance;
+pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
 pub mod time_series;

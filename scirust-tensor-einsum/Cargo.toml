@@ -1,0 +1,7 @@
+[package]
+name = "scirust-tensor-einsum"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-tensor-core = { path = "../scirust-tensor-core" }

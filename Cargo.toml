@@ -24,6 +24,7 @@ members = [
     "examples/cifar10_classifier",
     "examples/transformer_demo",
     "examples/transformer_compress",
+    "examples/sentiment_demo",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -40,6 +41,10 @@ members = [
     "scirust-bridge",
     "scirust-evo",
     "scirust-edge",
+    "scirust-events-core",
+    "scirust-events-models",
+    "scirust-events-runtime",
+    "scirust-events-examples",
 ]
 exclude = [
     "scirust-rustc-driver",

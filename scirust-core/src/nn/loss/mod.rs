@@ -12,10 +12,12 @@
 pub mod cross_entropy;
 pub mod mse;
 pub mod nll;
+pub mod pinn;
 
 pub use cross_entropy::CrossEntropyLoss;
 pub use mse::MseLoss;
 pub use nll::NllLoss;
+pub use pinn::PinnLossEvaluator;
 
 use crate::autodiff::reverse::{Tape, Var};
 

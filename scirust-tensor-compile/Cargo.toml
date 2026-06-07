@@ -1,0 +1,8 @@
+[package]
+name = "scirust-tensor-compile"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-tensor-core = { path = "../scirust-tensor-core" }
+scirust-tensor-contraction = { path = "../scirust-tensor-contraction" }
