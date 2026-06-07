@@ -1,0 +1,9 @@
+[package]
+name = "scirust-events-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-events-core = { path = "../scirust-events-core" }
+scirust-runtime = { path = "../scirust-runtime" }
+scirust-core = { path = "../scirust-core" }

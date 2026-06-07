@@ -487,3 +487,17 @@ The next steps follow directly: a GPU-accelerated forward path reusing the valid
 cuBLAS backend for dense layers, a three-dimensional inference path for
 attention-based models, and supply-chain pinning to extend the runtime's auditability
 from its weights to its build.
+
+## 11. Deterministic Event Detection and Classification
+
+### 11.1 Motivation
+Real-time event detection in critical systems (e.g., neuroprosthetics or industrial control) requires not only high accuracy but also absolute determinism for auditability and certification. Current frameworks often rely on non-deterministic parallel reduction or stochastic sampling, which is unsuitable for high-stakes environments.
+
+### 11.2 Methodology
+We introduce a streaming architecture based on deterministic sliding windows. Each window $W$ of size $N$ is transformed into a tensor $T \in \mathbb{R}^{1 \times N}$. Event detection is formulated as a score function $S(T) \to [0, 1]$.
+For classification, we utilize the framework's core MLP and CNN layers, frozen into the SRT1 format.
+$$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
+where $\tau$ is a calibrated threshold.
+
+### 11.3 Results and Metrics
+Expected performance on the Numenta Anomaly Benchmark (NAB) targets an F1-score of $>0.85$ with zero bit-drift across multiple threads. The use of QSR1 int8 quantization is expected to reduce latency by $3\times$ on edge ARM processors while maintaining an MSE bit-closeness of $<10^{-4}$ compared to the f32 oracle.
