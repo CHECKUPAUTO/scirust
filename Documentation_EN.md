@@ -104,7 +104,33 @@ fn main() {
 }
 ```
 
-## 7. Conclusion
+## 7. scirust-tensor — Tensor Algebra and Graph Optimization
+
+The `scirust-tensor` module introduces a high-level abstraction layer for manipulating complex tensors while ensuring maximum performance through graph compilation.
+
+### Why use scirust-tensor?
+- **Einsum**: Write complex operations (Multi-Head Attention, Contractions) in a single, readable line of code.
+- **Operator Fusion**: Reduce memory access by merging activations and biases directly into the computation kernels.
+- **Guaranteed Determinism**: Like all of SciRust, every calculation is bit-for-bit reproducible.
+
+### Example: Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Einstein signature for attention: Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Add this to your `Cargo.toml`:
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Conclusion
 
 SciRust is the framework of choice for those who prioritize **understanding** and **rigor** over raw speed or the ease of Python. It is a powerful tool for building trustworthy AI, from research to embedded systems.
 
