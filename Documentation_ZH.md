@@ -100,7 +100,33 @@ fn main() {
 }
 ```
 
-## 7. 结论
+## 7. scirust-tensor — 张量代数与图优化
+
+`scirust-tensor` 模块引入了一个高级抽象层，用于操作复杂的张量，同时通过图编译确保最佳性能。
+
+### 为什么使用 scirust-tensor？
+- **Einsum**：仅需一行易读的代码即可编写复杂的运算（如 Multi-Head Attention、张量收缩）。
+- **算子融合 (Operator Fusion)**：通过将激活函数和偏置直接合并到计算内核中来减少内存访问。
+- **保证确定性**：与 SciRust 的所有组件一样，每次计算都是位对位 (bit-for-bit) 可复现的。
+
+### 示例：多头注意力机制 (Multi-Head Attention)
+```rust
+use scirust_tensor_einsum::einsum;
+
+// 注意力机制的爱因斯坦求和约定：Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### 安装
+在您的 `Cargo.toml` 中添加以下内容：
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. 结论
 
 对于那些将 **理解** 和 **严谨性** 置于原始速度或 Python 的便利性之上的人来说，SciRust 是首选框架。它是构建值得信赖的人工智能（从研究到嵌入式系统）的强大工具。
 

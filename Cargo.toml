@@ -41,6 +41,12 @@ members = [
     "scirust-bridge",
     "scirust-evo",
     "scirust-edge",
+    "scirust-tensor-core",
+    "scirust-tensor-einsum",
+    "scirust-tensor-contraction",
+    "scirust-tensor-compile",
+    "scirust-tensor-runtime",
+    "scirust-tensor-examples",
 ]
 exclude = [
     "scirust-rustc-driver",
