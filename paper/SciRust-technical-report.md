@@ -323,7 +323,10 @@ LayerNorm, BatchNorm2d, Conv2d, and MaxPool2d, each shown to persist and reconst
 bit-exactly; parametric normalization layers were validated with care (LayerNorm
 affine parameters and BatchNorm2d running statistics both survive the round-trip,
 with BatchNorm2d forced into evaluation mode so inference is per-sample
-deterministic). The honest boundary: transformer layers use a three-dimensional
+deterministic). Advanced features like **Formal Invariant Contracts** through
+`CertifiedModule<M, C>` and **Secure Enclave Runtime** support for #![no_std]
+targets further extend the runtime's applicability to high-integrity environments.
+The honest boundary: transformer layers use a three-dimensional
 forward and would require a separate runtime path; convolution throughput is bounded
 by the pure-Rust kernel; and absolute batch=1 latency is overhead-bound.
 
@@ -385,7 +388,15 @@ Exposed through a small library API (a quantized model with save, load, and infe
 round-trip through the library reproduces the fingerprint bit-for-bit; because QSR1 is
 self-describing it subsumes the plain-text manifest for quantized models.
 
-### 7.6 An integer kernel and separable convolutions
+### 7.6 CSR Tensors and Sparse SpMM Kernels
+
+To further optimize memory consumption on edge targets, SciRust implements a
+`CsrTensor` structure and an associated Sparse Matrix-Matrix Multiplication
+(SpMM) kernel. This allows for the storage and computation of sparse models
+without the overhead of dense representations, effectively bypassing the
+memory wall on constrained devices.
+
+### 7.7 An integer kernel and separable convolutions
 
 The portable scalar integer matmul is the correctness reference. An aarch64 NEON kernel
 — widening multiply-accumulate with i32 accumulation, the right-hand operand
@@ -425,7 +436,10 @@ backend is validated for compute correctness but not yet wired into training; an
 deterministic runtime is inference-only over a two-dimensional layer set, with
 transformer support requiring a separate three-dimensional path. Determinism is
 scoped to a fixed binary and architecture. The symbolic engine is a stochastic search
-on a modest primitive set, and several contributions are single-session results. The int8 quantization is post-training rather than quantization-aware; its
+on a modest primitive set, and several contributions are single-session results.
+The newly introduced **PINN (Physics-Informed Neural Networks)** loss evaluator
+enables the integration of symbolic physical residuals into the AD optimization path.
+The int8 quantization is post-training rather than quantization-aware;
 no-accuracy-loss result is established on the MNIST MLP, while the convolutional
 quantizers are validated for fidelity and determinism on synthetic inputs rather
 than for accuracy on a labeled image benchmark, and no on-device (no_std)

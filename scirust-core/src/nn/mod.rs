@@ -15,6 +15,7 @@
 // parallel) sont dans nn/.legacy/ et non exposés.
 
 pub mod activation;
+pub mod certified;
 pub mod batch_norm;
 pub mod batch_norm_2d;
 pub mod conv2d;
@@ -39,6 +40,7 @@ pub mod tt_linear;
 
 // Re-exports pour confort
 pub use activation::{ReLU, Sigmoid};
+pub use certified::{CertifiedModule, ValueBoundedContract, Contract};
 pub use batch_norm::BatchNorm1d;
 pub use batch_norm_2d::BatchNorm2d;
 pub use conv_utils::{ConvConfig, Padding};

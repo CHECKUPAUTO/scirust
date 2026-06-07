@@ -42,6 +42,10 @@ SciRust covers a wide range of modern techniques:
 - **Evolutionary Optimization**: Using nature-inspired algorithms (like NSGA-II) to solve complex problems.
 - **int8 Quantization**: Shrinking model size by 4x to fit on small processors without losing accuracy.
 - **GPU Acceleration**: Harnessing the power of graphics cards via WebGPU (wgpu) or NVIDIA Tensor Cores (cuBLAS).
+- **Physics-Informed Neural Networks (PINN)**: Integration of physical laws (differential equations) directly into the loss function for modeling complex phenomena.
+- **Formal Invariant Contracts**: Mathematical guarantees (absence of NaN/Inf, value bounds) for critical applications (medical, aerospace).
+- **CSR Tensors and SpMM Kernels**: Memory and computation optimization for sparse models on embedded targets.
+- **Secure Enclave Execution (TEE)**: Hardened #![no_std] compatible runtime for isolated execution (TrustZone/SGX) without OS allocator.
 
 ## 5. Command Guide
 
