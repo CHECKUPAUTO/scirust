@@ -8,6 +8,7 @@ pub mod matrix {
     pub mod backend;
     pub mod view;
     pub mod soft;
+    pub mod csr;
 }
 
 pub mod autodiff;
