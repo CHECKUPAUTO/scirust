@@ -1885,6 +1885,7 @@ dependencies = [
  "scirust-core",
  "scirust-learning",
  "scirust-simd",
+ "scirust-solvers",
  "scirust-symbolic",
  "serde",
  "serde_json",
@@ -1917,7 +1918,8 @@ dependencies = [
  "ndarray",
  "num-bigint",
  "num-traits",
- "rand 0.9.4",
+ "rand 0.8.6",
+ "rand_distr 0.4.3",
  "rayon",
  "scirust-autodiff",
  "scirust-gpu-macros",
@@ -2007,6 +2009,7 @@ name = "scirust-learning"
 version = "0.1.0"
 dependencies = [
  "fastrand",
+ "rand 0.8.6",
  "scirust-core",
  "serde",
  "serde_json",
@@ -2090,49 +2093,6 @@ name = "scirust-symreg"
 version = "0.1.0"
 dependencies = [
  "scirust-symbolic",
-]
-
-[[package]]
-name = "scirust-tensor-compile"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-contraction",
- "scirust-tensor-core",
-]
-
-[[package]]
-name = "scirust-tensor-contraction"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
- "scirust-tensor-einsum",
-]
-
-[[package]]
-name = "scirust-tensor-core"
-version = "0.1.0"
-
-[[package]]
-name = "scirust-tensor-einsum"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
-]
-
-[[package]]
-name = "scirust-tensor-examples"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-core",
- "scirust-tensor-einsum",
-]
-
-[[package]]
-name = "scirust-tensor-runtime"
-version = "0.1.0"
-dependencies = [
- "scirust-tensor-compile",
- "scirust-tensor-core",
 ]
 
 [[package]]

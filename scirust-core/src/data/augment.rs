@@ -130,7 +130,7 @@ impl RandomCrop {
 
 impl Transform for RandomCrop {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
-        use rand::random_range;
+        use rand::{thread_rng, Rng};
         let padded_h = dims.h + 2 * self.pad;
         let padded_w = dims.w + 2 * self.pad;
         let mut padded = vec![0.0f32; dims.c * padded_h * padded_w];
@@ -147,8 +147,8 @@ impl Transform for RandomCrop {
             }
         }
 
-        let top = random_range(0..=padded_h - self.crop_h);
-        let left = random_range(0..=padded_w - self.crop_w);
+        let top = thread_rng().gen_range(0..=padded_h - self.crop_h);
+        let left = thread_rng().gen_range(0..=padded_w - self.crop_w);
 
         let mut out = vec![0.0f32; dims.c * self.crop_h * self.crop_w];
         for c in 0..dims.c {

@@ -1,5 +1,7 @@
 //! Time series forecasting and event prediction.
 
+pub mod nbeats;
+
 /// Simple Exponential Smoothing (SES)
 /// Formula: s_t = alpha * x_t + (1 - alpha) * s_{t-1}
 pub fn simple_exponential_smoothing(data: &[f64], alpha: f64) -> Vec<f64> {
