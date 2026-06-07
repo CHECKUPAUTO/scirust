@@ -42,10 +42,11 @@ SciRust 涵盖了广泛的现代技术：
 - **进化优化**：使用受自然启发的算法（如 NSGA-II）解决复杂问题。
 - **int8 量化**：将模型大小缩小 4 倍，以在不损失精度的情况下适应小型处理器。
 - **GPU 加速**：通过 WebGPU (wgpu) 或 NVIDIA Tensor Cores (cuBLAS) 利用显卡的性能。
-- **物理信息神经网络 (PINN)**：将物理定律（微分方程）直接集成到损失函数中，用于建模复杂现象。
-- **形式不变性契约**：为关键应用（医疗、航空航天）提供数学保证（无 NaN/Inf、数值边界）。
-- **CSR 张量和 SpMM 内核**：针对嵌入式目标的稀疏模型进行内存和计算优化。
-- **安全飞地执行 (TEE)**：适用于隔离执行 (TrustZone/SGX) 的增强型 #![no_std] 兼容运行时，无需 OS 分配器。
+- **AOT (Ahead-Of-Time) 编译器**：通过将模型直接编译为不可变的 Rust 源代码，消除超深度嵌入式目标的运行时开销。
+- **Soft-Float 矩阵引擎**：通过软件定义的定点模拟，保证不同架构（x86 与 ARM）之间严格的位级确定性。
+- **潜藏激活引导 (RepE)**：实时拦截和操纵隐藏层激活，以引导智能体行为。
+- **量化感知训练 (QAT)**：集成低精度模拟器（伪量化）和 STE（直通估计器），优化 INT8 部署模型。
+- **XAI 引擎 (积分梯度)**：生成特征归因图，从数学上解释网络预测。
 
 ## 5. 命令指南
 
@@ -104,7 +105,33 @@ fn main() {
 }
 ```
 
-## 7. 结论
+## 7. scirust-tensor — 张量代数与图优化
+
+`scirust-tensor` 模块引入了一个高级抽象层，用于操作复杂的张量，同时通过图编译确保最佳性能。
+
+### 为什么使用 scirust-tensor？
+- **Einsum**：仅需一行易读的代码即可编写复杂的运算（如 Multi-Head Attention、张量收缩）。
+- **算子融合 (Operator Fusion)**：通过将激活函数和偏置直接合并到计算内核中来减少内存访问。
+- **保证确定性**：与 SciRust 的所有组件一样，每次计算都是位对位 (bit-for-bit) 可复现的。
+
+### 示例：多头注意力机制 (Multi-Head Attention)
+```rust
+use scirust_tensor_einsum::einsum;
+
+// 注意力机制的爱因斯坦求和约定：Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### 安装
+在您的 `Cargo.toml` 中添加以下内容：
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. 结论
 
 对于那些将 **理解** 和 **严谨性** 置于原始速度或 Python 的便利性之上的人来说，SciRust 是首选框架。它是构建值得信赖的人工智能（从研究到嵌入式系统）的强大工具。
 

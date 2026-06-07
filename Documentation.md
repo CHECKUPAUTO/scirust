@@ -104,9 +104,76 @@ fn main() {
 }
 ```
 
-## 7. Conclusion
+## 7. scirust-tensor — Algèbre Tensorielle et Optimisation de Graphe
+
+Le module `scirust-tensor` introduit une couche d'abstraction de haut niveau pour manipuler des tenseurs complexes tout en garantissant des performances maximales via la compilation de graphe.
+
+### Pourquoi utiliser scirust-tensor ?
+- **Einsum** : Écrivez des opérations complexes (Multi-Head Attention, Contrractions) en une seule ligne de code lisible.
+- **Fusion d'Opérateurs** : Réduisez les accès mémoire en fusionnant les activations et les biais directement dans les kernels de calcul.
+- **Déterminisme Garanti** : Comme tout SciRust, chaque calcul est reproductible bit-à-bit.
+
+### Exemple : Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Signature Einstein pour l'attention : Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Ajoutez ceci à votre `Cargo.toml` :
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Conclusion
 
 SciRust est le framework de choix pour ceux qui privilégient la **compréhension** et la **rigueur** sur la vitesse brute ou la facilité de Python. C'est un outil puissant pour bâtir une IA de confiance, de la recherche à l'embarqué.
 
 ---
 *Pour plus de détails techniques, consultez le rapport complet dans `paper/SciRust-technical-report.md`.*
+
+## 11. Détection d'Événements (scirust-events)
+
+Le module `scirust-events` permet d'analyser des flux de données (séries temporelles, logs, signaux) pour détecter et classifier des événements de manière déterministe. Il est conçu pour les applications critiques où la reproductibilité est essentielle.
+
+**Exemple d'utilisation :**
+
+```rust
+use scirust_events_core::{EventStream, EventDetector};
+use scirust_events_models::SpikeDetector;
+use scirust_events_runtime::EventRuntime;
+
+fn main() {
+    let data = vec![0.1, 0.2, 1.5, 0.3, 0.1]; // Signal avec un spike
+    let mut stream = EventStream::new(data, 3, 1);
+    let detector = SpikeDetector::new(1.0, 0.5);
+    let runtime = EventRuntime::new(Box::new(detector));
+
+    let events = runtime.process_all(&mut stream);
+    for e in events {
+        println!("Événement détecté à t={}: {}", e.timestamp, e.confidence);
+    }
+}
+```
+
+- **Cas d'usage** : Surveillance industrielle, détection d'anomalies réseau, analyse de spikes neuronaux.
+- **Garantie** : Déterminisme bit-à-bit sur le score d'anomalie.
+
+---
+
+### 11. Event Detection (scirust-events) [EN]
+The `scirust-events` module provides tools to analyze data streams (time series, logs, signals) to detect and classify events deterministically. It is built for mission-critical applications where reproducibility is mandatory.
+
+### 11. Detección de Eventos (scirust-events) [ES]
+El módulo `scirust-events` permite analizar flujos de datos para detectar y clasificar eventos de forma determinista. Diseñado para aplicaciones críticas donde la reproducibilidad es fundamental.
+
+### 11. Ereigniserkennung (scirust-events) [DE]
+Das Modul `scirust-events` ermöglicht die Analyse von Datenströmen zur deterministischen Erkennung und Klassifizierung von Ereignissen. Entwickelt für kritische Anwendungen.
+
+### 11. 事件检测 (scirust-events) [ZH-CN]
+`scirust-events` 模块提供了一套用于确定性地检测和分类数据流（时间序列、日志、信号）中事件的工具。专为对可重现性有严格要求的关键任务应用而设计。

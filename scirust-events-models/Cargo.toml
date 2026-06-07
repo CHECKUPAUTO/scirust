@@ -1,0 +1,9 @@
+[package]
+name = "scirust-events-models"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-events-core = { path = "../scirust-events-core" }
+scirust-core = { path = "../scirust-core" }
+scirust-learning = { path = "../scirust-learning" }

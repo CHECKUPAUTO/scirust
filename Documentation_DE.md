@@ -42,10 +42,11 @@ SciRust deckt ein breites Spektrum moderner Techniken ab:
 - **Evolutionäre Optimierung**: Verwendung von von der Natur inspirierten Algorithmen (wie NSGA-II) zur Lösung komplexer Probleme.
 - **int8-Quantisierung**: Verringerung der Modellgröße um das Vierfache, um auf kleine Prozessoren zu passen, ohne an Genauigkeit zu verlieren.
 - **GPU-Beschleunigung**: Nutzung der Leistung von Grafikkarten über WebGPU (wgpu) oder NVIDIA Tensor Cores (cuBLAS).
-- **Physics-Informed Neural Networks (PINN)**: Integration physikalischer Gesetze (Differentialgleichungen) direkt in die Verlustfunktion zur Modellierung komplexer Phänomene.
-- **Formale Invarianten-Verträge**: Mathematische Garantien (Fehlen von NaN/Inf, Wertegrenzen) für kritische Anwendungen (Medizin, Luft- und Raumfahrt).
-- **CSR-Tensoren und SpMM-Kernel**: Speicher- und Rechenoptimierung für dünnbesetzte Modelle auf Embedded-Targets.
-- **Secure Enclave Execution (TEE)**: Gehärtete, #![no_std]-kompatible Runtime für isolierte Ausführung (TrustZone/SGX) ohne OS-Allocator.
+- **AOT (Ahead-Of-Time)-Compiler**: Eliminierung des Runtime-Overheads für ultra-tiefe eingebettete Ziele durch direktes Kompilieren von Modellen in unveränderlichen Rust-Quellcode.
+- **Soft-Float-Matrix-Engine**: Gewährleistung eines strikten bit-genauen Determinismus über verschiedene Architekturen (x86 vs. ARM) hinweg durch softwaredefinierte Festkomma-Emulation.
+- **Latente Aktivierungssteuerung (RepE)**: Abfangen und Manipulieren versteckter Aktivierungen in Echtzeit, um das Verhalten von Agenten zu steuern.
+- **Quantisierungsbewusstes Training (QAT)**: Integration von Simulatoren mit geringer Präzision (Fake Quantization) und STE (Straight-Through Estimator) zur Optimierung von Modellen für den INT8-Einsatz.
+- **XAI-Engine (Integrated Gradients)**: Erstellung von Feature-Attributionskarten zur mathematischen Erklärung von Netzwerkvorhersagen.
 
 ## 5. Befehlsübersicht
 
@@ -104,7 +105,33 @@ fn main() {
 }
 ```
 
-## 7. Fazit
+## 7. scirust-tensor — Tensor-Algebra und Graph-Optimierung
+
+Das Modul `scirust-tensor` führt eine High-Level-Abstraktionsschicht zur Manipulation komplexer Tensoren ein und gewährleistet gleichzeitig maximale Performance durch Graph-Kompilierung.
+
+### Warum scirust-tensor verwenden?
+- **Einsum**: Schreiben Sie komplexe Operationen (Multi-Head Attention, Kontraktionen) in einer einzigen, lesbaren Codezeile.
+- **Operator Fusion**: Reduzieren Sie den Speicherzugriff, indem Sie Aktivierungen und Biases direkt in die Berechnungs-Kernels integrieren.
+- **Garantierter Determinismus**: Wie bei ganz SciRust ist jede Berechnung Bit-für-Bit reproduzierbar.
+
+### Beispiel: Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Einstein-Signatur für Attention: Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Fügen Sie dies zu Ihrer `Cargo.toml` hinzu:
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Fazit
 
 SciRust ist das Framework der Wahl für alle, die **Verständnis** und **Strenge** über rohe Geschwindigkeit oder die Einfachheit von Python stellen. Es ist ein leistungsstarkes Werkzeug für den Aufbau vertrauenswürdiger KI, von der Forschung bis hin zu eingebetteten Systemen.
 

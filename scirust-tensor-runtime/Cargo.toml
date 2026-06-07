@@ -1,0 +1,8 @@
+[package]
+name = "scirust-tensor-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-tensor-core = { path = "../scirust-tensor-core" }
+scirust-tensor-compile = { path = "../scirust-tensor-compile" }

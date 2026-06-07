@@ -310,7 +310,7 @@ mod tests {
             }).collect());
         }
         let front: Vec<&MoIndividual> = pop.iter().filter(|ind| ind.rank == 1).collect();
-        assert!(!front.is_empty(), "Pareto front trouvé");
+        assert!(!front.is_empty(), "Pareto front not found");
     }
 
     #[test]

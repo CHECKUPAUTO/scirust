@@ -1,0 +1,8 @@
+[package]
+name = "scirust-events-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+serde = { version = "1", features = ["derive"] }
