@@ -1934,6 +1934,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-events-core"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
+name = "scirust-events-examples"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-events-models",
+ "scirust-events-runtime",
+]
+
+[[package]]
+name = "scirust-events-models"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-learning",
+]
+
+[[package]]
+name = "scirust-events-runtime"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-runtime",
+]
+
+[[package]]
 name = "scirust-evo"
 version = "0.1.0"
 dependencies = [
