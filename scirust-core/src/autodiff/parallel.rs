@@ -721,6 +721,9 @@ impl ParallelTape {
                 Op::Reshape(input_idx, old_rows, old_cols) => {
                     t_grads[input_idx] = t_grads[input_idx].add(&g.reshape(old_rows, old_cols));
                 }
+                Op::FakeQuantize { input, .. } => {
+                    t_grads[input] = t_grads[input].add(&g);
+                }
                 Op::FlashAttention { .. } => {
                     // FlashAttention backward non implémenté en parallèle
                     // Le forward séquentiel gère la backward pass complète

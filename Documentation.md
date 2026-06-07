@@ -42,6 +42,11 @@ SciRust couvre un large éventail de techniques modernes :
 - **Optimisation Évolutionnaire** : Utiliser des algorithmes inspirés de la nature (comme NSGA-II) pour résoudre des problèmes complexes.
 - **Quantification int8** : Diviser par 4 la taille des modèles pour les faire tenir sur de petits processeurs sans perdre en précision.
 - **Accélération GPU** : Utiliser la puissance des cartes graphiques via WebGPU (wgpu) ou NVIDIA Tensor Cores (cuBLAS).
+- **Compilateur AOT (Ahead-Of-Time)** : Éliminer le surcoût d'exécution pour les cibles embarquées ultra-profondes en compilant les modèles directement en code source Rust immuable.
+- **Moteur Matrix Soft-Float** : Garantir un déterminisme bit-à-bit strict à travers différentes architectures (x86 vs ARM) via une émulation logicielle en virgule fixe.
+- **Pilotage d'Activations Latentes (RepE)** : Intercepter et manipuler les activations cachées en temps réel pour orienter le comportement des agents.
+- **Entraînement Sensible à la Quantification (QAT)** : Intégrer des simulateurs de précision réduite (Fake Quantization) avec STE (Straight-Through Estimator) pour optimiser les modèles avant leur déploiement en INT8.
+- **Moteur XAI (Integrated Gradients)** : Générer des cartes d'attribution de caractéristiques pour expliquer mathématiquement les prédictions du réseau.
 
 ## 5. Guide des Commandes
 

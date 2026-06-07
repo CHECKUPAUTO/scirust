@@ -42,6 +42,11 @@ SciRust covers a wide range of modern techniques:
 - **Evolutionary Optimization**: Using nature-inspired algorithms (like NSGA-II) to solve complex problems.
 - **int8 Quantization**: Shrinking model size by 4x to fit on small processors without losing accuracy.
 - **GPU Acceleration**: Harnessing the power of graphics cards via WebGPU (wgpu) or NVIDIA Tensor Cores (cuBLAS).
+- **AOT (Ahead-Of-Time) Compiler**: Eliminate runtime overhead for ultra-deep embedded targets by compiling models directly into immutable Rust source code.
+- **Soft-Float Matrix Engine**: Guarantee strict bit-for-bit determinism across different architectures (x86 vs ARM) via software-defined fixed-point emulation.
+- **Latent Activation Steering (RepE)**: Intercept and manipulate hidden activations in real-time to steer agent behavior.
+- **Quantization-Aware Training (QAT)**: Incorporate low-precision simulators (Fake Quantization) with STE (Straight-Through Estimator) to optimize models for INT8 deployment.
+- **XAI Engine (Integrated Gradients)**: Generate feature attribution maps to mathematically explain network predictions.
 
 ## 5. Command Guide
 
