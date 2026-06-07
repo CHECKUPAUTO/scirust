@@ -38,6 +38,14 @@ SciRust is particularly useful in fields where precision, security, and small so
 SciRust covers a wide range of modern techniques:
 
 - **Deep Learning**: Building neural networks (MLP, CNN, Transformers) with automatic differentiation (autograd).
+- **Reinforcement Learning (RL)**: Full stack support for Tabular Q-Learning, DQN, and PPO with clipping.
+- **Advanced Computer Vision**: ResNet-18/34 architectures and Vision Transformer (ViT) with global pooling.
+- **Generative AI (VAE)**: Variational Autoencoders with reparameterization trick for latent generation.
+- **Transformers and MoE**: Mixture of Experts layers with Top-k routing for model scalability.
+- **Graph Neural Networks (GNN)**: Graph Convolutional Networks (GCN) for structured data.
+- **Speech AI and Audio**: Audio encoders and CTC loss function for speech recognition.
+- **PEFT Adaptation (LoRA)**: Low-Rank Adaptation for efficient fine-tuning of pre-trained models.
+- **Advanced Scientific Computing**: 1D FEM (Finite Element Method) solver for physical equations.
 - **Symbolic Regression**: Discovering mathematical formulas (e.g., `f(x) = sin(x) + x^2`) from observations.
 - **Evolutionary Optimization**: Using nature-inspired algorithms (like NSGA-II) to solve complex problems.
 - **int8 Quantization**: Shrinking model size by 4x to fit on small processors without losing accuracy.

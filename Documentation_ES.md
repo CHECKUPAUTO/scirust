@@ -21,8 +21,8 @@ En muchos frameworks, ejecutar el mismo cálculo dos veces puede dar resultados 
 ### Auditabilidad
 Como todo está en Rust, es fácil verificar que el código hace exactamente lo que dice. No hay "cajas negras" de software.
 
-### Oráculos de Validación
-Cada función matemática en SciRust se valida contra un "oráculo" (una referencia de confianza). No asumimos que el resultado es correcto, lo medimos.
+### Oracles de Validación
+Cada función matemática en SciRust se valida contra un "oracle" (una referencia de confianza). No asumimos que el resultado es correcto, lo medimos.
 
 ## 3. Dominios de Aplicación
 
@@ -38,6 +38,14 @@ SciRust es particularmente útil en áreas donde la precisión, la seguridad y e
 SciRust cubre una amplia gama de técnicas modernas:
 
 - **Aprendizaje Profundo (Deep Learning)**: Construcción de redes neuronales (MLP, CNN, Transformers) con diferenciación automática (autograd).
+- **Aprendizaje por Refuerzo (RL)**: Soporte completo para Tabular Q-Learning, DQN y PPO con clipping.
+- **Visión Artificial Avanzada**: Arquitecturas ResNet-18/34 y Vision Transformer (ViT) con pooling global.
+- **IA Generativa (VAE)**: Auto-encodeadores variacionales con truco de reparametrización para generación latente.
+- **Transformers y MoE**: Capas de Mixture of Experts con enrutamiento Top-k para escalabilidad de modelos.
+- **Redes Neuronales de Grafos (GNN)**: Graph Convolutional Networks (GCN) para datos estructurados.
+- **Speech AI y Audio**: Codificadores de audio y función de pérdida CTC para reconocimiento de voz.
+- **Adaptación PEFT (LoRA)**: Low-Rank Adaptation para un ajuste eficiente de modelos pre-entrenados.
+- **Computación Científica Avanzada**: Solucionador FEM (Método de Elementos Finitos) 1D para ecuaciones físicas.
 - **Regresión Simbólica**: Descubrimiento de fórmulas matemáticas (ej: `f(x) = sin(x) + x^2`) a partir de observaciones.
 - **Optimización Evolutiva**: Uso de algoritmos inspirados en la naturaleza (como NSGA-II) para resolver problemas complejos.
 - **Cuantización int8**: Dividir por 4 el tamaño de los modelos para que quepan en procesadores pequeños sin perder precisión.

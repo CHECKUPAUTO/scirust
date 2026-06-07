@@ -282,15 +282,15 @@ is to ship a pinned artifact and replay it identically on its target.
 For reproducibility across deployments, frozen weights must round-trip without loss.
 We defined a small format, **SRT1**, writing each tensor as
 (key, rows, cols, f32 little-endian) with keys sorted, so the on-disk bytes are
-deterministic and the artifact has a stable hash. The load-bearing golden test —
-serialize, construct a fresh differently-seeded model, reload, run forward — must
-reproduce the original fingerprint. It does: a differently-seeded model differs
-before loading and reproduces 0xde2d807686e4b47e bit-for-bit after. Exercised on a
-real trained model, the MLP trained on MNIST (loss 0.2615 -> 0.0377) and frozen to
-an 814 KB artifact reloads to **97.73%** test accuracy with test-logit fingerprint
-0xc96d25fa658f5611 stable across processes. This closes the thesis end-to-end:
-train once, freeze, and the runtime replays an accurate, bit-exact inference on every
-invocation.
+deterministic and the artifact has a hashable stable hash. The load-bearing golden
+test — serialize, construct a fresh differently-seeded model, reload, run
+forward — must reproduce the original fingerprint. It does: a differently-seeded
+model differs before loading and reproduces 0xde2d807686e4b47e bit-for-bit after.
+Exercised on a real trained model, the MLP trained on MNIST (loss 0.2615 -> 0.0377)
+and frozen to an 814 KB artifact reloads to **97.73%** test accuracy with test-logit
+fingerprint 0xc96d25fa658f5611 stable across processes. This closes the thesis
+end-to-end: train once, freeze, and the runtime replays an accurate, bit-exact
+inference on every invocation.
 
 ### 6.4 Bounded latency
 
@@ -438,7 +438,30 @@ To satisfy the requirements of regulated sectors (Section 3), we implemented Int
 - **Algorithm:** The engine computes the path integral of gradients from a baseline (e.g., a zero tensor) to the input over $m$ steps.
 - **Integration:** Leveraging the framework's native `Tape`-based autodiff, the engine generates attribution maps of the same shape as the input, providing a mathematical explanation for any given prediction.
 
-## 9. Discussion
+## 9. Modern AI Families Expansion
+
+To move beyond basic MLP and CNN architectures, we expanded SciRust with foundational support for several modern AI domains, maintaining strict pure-Rust and deterministic constraints.
+
+### 9.1 Advanced Reinforcement Learning: DQN and PPO
+We implemented a Reinforcement Learning stack in `scirust-learning`.
+- **Algorithms:** Support for Tabular Q-Learning/SARSA and Deep Q-Networks (DQN). Furthermore, we implemented **Proximal Policy Optimization (PPO)** using a clipped objective to ensure stable policy updates.
+- **Determinism:** Agent interactions and memory sampling are enforced using seeded `PcgEngine` instances, ensuring reproducible training trajectories.
+
+### 9.2 Computer Vision: ResNet and Vision Transformers
+Two major architectures were added to `scirust-core`:
+- **ResNet-18/34:** Modular implementation using `ResidualBlock` and a **Global Average Pooling (GAP)** step to handle varying input resolutions.
+- **Vision Transformer (ViT):** Implementation of patch projection via 2D convolutions followed by a Transformer encoder. Features are aggregated across the sequence dimension for classification.
+
+### 9.3 Generative AI and Transformers
+- **Variational Autoencoders (VAE):** Implementation of the reparameterization trick using `PcgEngine`-derived Gaussian noise and an analytical KL divergence loss.
+- **Mixture of Experts (MoE):** A modular MoE layer supporting **Top-k routing** and additive expert aggregation, enabling model scaling without linear compute cost growth.
+
+### 9.4 Specialized Architectures
+- **Graph Neural Networks (GNN):** Basic **Graph Convolutional Network (GCN)** layers supporting sparse-dense adjacency matrix multiplications.
+- **Speech AI:** Audio encoders and a representative **CTC Loss** implementation for temporal sequence alignment.
+- **PEFT (LoRA):** Low-Rank Adaptation for Linear layers, allowing frozen backbone models to be fine-tuned via small rank-r matrices.
+
+## 10. Discussion
 
 Two observations recur across the contributions. First, the discipline did the
 load-bearing work: because every primitive was accepted only against an oracle —
@@ -457,7 +480,7 @@ inference path is thread-invariant by the same single-thread per-cell reduction
 argument, and a fixed-point requantization reproduces the calibrated model
 bit-for-bit, so determinism carried down to low precision without new machinery.
 
-## 10. Limitations
+## 11. Limitations
 
 The framework is a research artifact and not production-grade. Convolution lacks an
 im2col-plus-BLAS or GPU path and is therefore slow in absolute throughput; the GPU
@@ -476,29 +499,29 @@ microcontroller deployment is yet demonstrated.
 The repository also includes an evolutionary-optimization module; of its algorithms only the multi-objective NSGA-II is validated here, recovering the ZDT1 Pareto front to within about 1e-3, while the simplified single-objective optimizers converge on convex landscapes but not on hard multimodal functions. None of these undercut the measured results; they bound what those results should be
 taken to mean.
 
-## 10. High-Level Tensor Algebra and Graph Compilation: scirust-tensor
+## 12. High-Level Tensor Algebra and Graph Compilation: scirust-tensor
 
-### 10.1 Motivation and Context
+### 12.1 Motivation and Context
 While the core of SciRust provides robust primitives for deep learning, complex architectures like Transformers require more flexible tensor manipulations than simple matrix multiplications. Current state-of-the-art frameworks (JAX, PyTorch) rely on optimized `einsum` and graph compilers (XLA) to reduce memory overhead. To bridge this gap while maintaining SciRust's pure-Rust and deterministic DNA, we introduced `scirust-tensor`.
 
-### 10.2 Methodology: Einsum and Contraction Planning
+### 12.2 Methodology: Einsum and Contraction Planning
 The module implements an optimized `einsum` parser and a **contraction planner**. For a given tensor contraction expression:
 $$C_{i,l} = \sum_{j,k} A_{i,j,k} \cdot B_{k,j,l}$$
 The planner evaluates the optimal execution path. For multi-tensor contractions, it uses a greedy approach to minimize the total number of floating-point operations (FLOPs).
 
-### 10.3 Graph Optimization and Operator Fusion
+### 12.3 Graph Optimization and Operator Fusion
 A major contribution of this module is the **operator fusion** engine. In standard runtimes, sequential operations like `MatMul -> BiasAdd -> ReLU` involve multiple memory passes and intermediate buffers. `scirust-tensor` compiles these into a single **fused kernel**, reducing memory bandwidth pressure.
 The optimization pipeline includes:
 - **Redundancy Elimination**: Removing identity transpositions.
 - **Stride-based Permutation**: Integrating axis permutations into the GEMM kernel strides to eliminate explicit data copies.
 
-### 10.4 Results and Determinism
+### 12.4 Results and Determinism
 By using a fixed reduction order in all tensor contractions, we ensure bit-for-bit identical results across different thread counts. Preliminary benchmarks show that operator fusion reduces peak memory usage by up to 35% on deep Transformer blocks, while maintaining a strict deterministic fingerprint. The module is fully compatible with the **SRT1** inference runtime and the **QSR1** int8 quantization stack.
 
-### 10.5 Limitations
+### 12.5 Limitations
 The graph compiler is currently restricted to static shapes. Dynamic shape support and JIT-compilation of kernels for arbitrary fusion patterns remain as future work.
 
-## 11. Conclusion
+## 13. Conclusion
 
 SciRust is a pure-Rust deep learning framework — a hybrid runtime and transpiler — on
 which four capabilities were built and validated: a portable GPU and Tensor Core
@@ -514,7 +537,7 @@ embedded inference, a soft-float matrix engine for cross-platform bit-exactness,
 latent activation steering for real-time representation engineering,
 quantization-aware training (QAT) via a Straight-Through Estimator, and an
 Integrated Gradients engine for mathematical explainability—further establish
-SciRust as a high-integrity framework. The throughline is
+SciRust as a high-integrity framework. The addition of **Modern AI Families** (RL, CV, Generative, GNN) further broadens the scope of the framework toward a unified pure-Rust AI stack. The throughline is
 methodological: each contribution was accepted only after matching an oracle,
 reproducibility was measured rather than assumed — in several cases bit-for-bit — and
 the most useful findings were the ones the measurements forced against expectation.
@@ -523,18 +546,18 @@ cuBLAS backend for dense layers, a three-dimensional inference path for
 attention-based models, and supply-chain pinning to extend the runtime's auditability
 from its weights to its build.
 
-## 11. Deterministic Event Detection and Classification
+## 14. Deterministic Event Detection and Classification
 
-### 11.1 Motivation
+### 14.1 Motivation
 Real-time event detection in critical systems (e.g., neuroprosthetics or industrial control) requires not only high accuracy but also absolute determinism for auditability and certification. Current frameworks often rely on non-deterministic parallel reduction or stochastic sampling, which is unsuitable for high-stakes environments.
 
-### 11.2 Methodology
+### 14.2 Methodology
 We introduce a streaming architecture based on deterministic sliding windows. Each window $W$ of size $N$ is transformed into a tensor $T \in \mathbb{R}^{1 \times N}$. Event detection is formulated as a score function $S(T) \to [0, 1]$.
 For classification, we utilize the framework's core MLP and CNN layers, frozen into the SRT1 format.
 $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 where $\tau$ is a calibrated threshold.
 
-### 11.3 Results and Metrics
+### 14.3 Results and Metrics
 Expected performance on the Numenta Anomaly Benchmark (NAB) targets an F1-score of $>0.85$ with zero bit-drift across multiple threads. The use of QSR1 int8 quantization is expected to reduce latency by $3\times$ on edge ARM processors while maintaining an MSE bit-closeness of $<10^{-4}$ compared to the f32 oracle.
 
 ## 12. Advanced Neuro-Symbolic Integration

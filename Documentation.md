@@ -38,6 +38,14 @@ SciRust est particulièrement utile dans les domaines où la précision, la séc
 SciRust couvre un large éventail de techniques modernes :
 
 - **Apprentissage Profond (Deep Learning)** : Construction de réseaux de neurones (MLP, CNN, Transformers) avec différenciation automatique (autograd).
+- **Renforcement par Apprentissage (RL)** : Support complet pour le Q-Learning tabulaire, DQN et PPO avec clipping.
+- **Computer Vision Avancée** : Architectures ResNet-18/34 et Vision Transformer (ViT) avec pooling global.
+- **Modèles Génératifs (VAE)** : Auto-encodeurs variationnels avec trick de reparamétrage pour la génération latente.
+- **Transformers et MoE** : Couches Mixture of Experts avec routage Top-k pour l'extensibilité des modèles.
+- **Graphes (GNN)** : Réseaux de neurones convolutifs sur graphes (GCN) pour données structurées.
+- **Speech AI et Audio** : Encodeurs audio et fonction de perte CTC pour la reconnaissance de la parole.
+- **Adaptation PEFT (LoRA)** : Low-Rank Adaptation pour un ajustement efficace des modèles pré-entraînés.
+- **Calcul Scientifique Avancé** : Solveur FEM (Méthode des Éléments Finis) 1D pour les équations physiques.
 - **Régression Symbolique** : Découvrir des formules mathématiques (ex: `f(x) = sin(x) + x^2`) à partir d'observations.
 - **Optimisation Évolutionnaire** : Utiliser des algorithmes inspirés de la nature (comme NSGA-II) pour résoudre des problèmes complexes.
 - **Quantification int8** : Diviser par 4 la taille des modèles pour les faire tenir sur de petits processeurs sans perdre en précision.
@@ -91,9 +99,9 @@ fn main() {
 
     // Création d'un modèle simple
     let mut model = Sequential::new()
-        .push(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
-        .push(ReLU)
-        .push(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
+        .add(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
+        .add(ReLU::new())
+        .add(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
 
     // Entraînement sur une boucle
     for epoch in 0..100 {
@@ -170,7 +178,7 @@ fn main() {
 The `scirust-events` module provides tools to analyze data streams (time series, logs, signals) to detect and classify events deterministically. It is built for mission-critical applications where reproducibility is mandatory.
 
 ### 11. Detección de Eventos (scirust-events) [ES]
-El módulo `scirust-events` permite analizar flujos de datos para detectar y clasificar eventos de forma determinista. Diseñado para aplicaciones críticas donde la reproducibilidad es fundamental.
+El módulo `scirust-events` permite analizar flujos de datos para detectar y clasificar eventos de forma determinista. Diseñado para aplicaciones críticas donde la reproductibilidad es fundamental.
 
 ### 11. Ereigniserkennung (scirust-events) [DE]
 Das Modul `scirust-events` ermöglicht die Analyse von Datenströmen zur deterministischen Erkennung und Klassifizierung von Ereignissen. Entwickelt für kritische Anwendungen.
