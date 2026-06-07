@@ -24,6 +24,7 @@ members = [
     "examples/cifar10_classifier",
     "examples/transformer_demo",
     "examples/transformer_compress",
+    "examples/sentiment_demo",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
