@@ -40,6 +40,10 @@ members = [
     "scirust-bridge",
     "scirust-evo",
     "scirust-edge",
+    "scirust-events-core",
+    "scirust-events-models",
+    "scirust-events-runtime",
+    "scirust-events-examples",
 ]
 exclude = [
     "scirust-rustc-driver",
