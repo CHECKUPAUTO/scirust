@@ -1913,6 +1913,7 @@ dependencies = [
  "blas",
  "blas-src",
  "half",
+ "libc",
  "matrixmultiply",
  "nalgebra",
  "ndarray",
@@ -2057,6 +2058,7 @@ dependencies = [
 name = "scirust-simd"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "scirust-simd-macros",
 ]
 
