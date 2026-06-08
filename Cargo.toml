@@ -34,6 +34,7 @@ members = [
     "scirust-gpu-macros",
     "scirust-core",
     "scirust-runtime",
+    "scirust-embedded",
     "scirust-learning",
     "scirust-symbolic",
     "scirust-symreg",
