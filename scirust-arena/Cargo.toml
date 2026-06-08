@@ -1,0 +1,16 @@
+[package]
+name = "scirust-arena"
+version = "0.1.0"
+edition = "2021"
+description = "SciRust deterministic arena allocators for SSM sequences and zero-GC inference"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "arena_bench"
+harness = false

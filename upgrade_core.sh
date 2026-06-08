@@ -1,3 +1,10 @@
+#!/bin/bash
+# Script de mutation pour OpenClaw-U Core v0.3.0 -> Pivot SciRust
+
+echo "[+] Évolution du noyau autonome vers v0.3.0..."
+
+# Réécriture du main.rs avec I/O asynchrones et pipeline de génération SciRust
+cat << 'RUST' > src/main.rs
 //! OpenClaw-U Autonomous Core v0.3.0
 //! Noyau d'évolution asynchrone orienté bootstrap de SciRust
 
@@ -274,3 +281,15 @@ async fn main() {
     }
     save_state(&state).await;
 }
+RUST
+
+# Mise à jour des déclarations de modules pour que le compilateur accepte les nouveaux fichiers
+cat << 'RUST' > src/upgrade_patch.rs
+pub mod tensor;
+pub mod simd_backend;
+RUST
+
+echo "[+] Nettoyage et validation de l'environnement..."
+cargo check
+
+echo "[+] Terminé ! Lancez 'cargo run' pour voir l'agent forger SciRust."

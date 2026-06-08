@@ -1,1 +1,2 @@
-// Stub évolution OpenClaw-U
+pub mod tensor;
+pub mod simd_backend;
