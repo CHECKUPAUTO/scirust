@@ -57,3 +57,4 @@ pub use rng::PcgEngine;
 pub use sequential::Sequential;
 pub use transformer::{MultiHeadAttention, TransformerBlock, TransformerEncoder};
 pub use tt_linear::{tt_decompose, tt_decompose_auto, TTLinear};
+pub mod im2col_hpc; pub use im2col_hpc::im2col_hpc;
