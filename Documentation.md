@@ -138,14 +138,7 @@ scirust-tensor-core = { path = "scirust-tensor-core" }
 scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
 ```
 
-## 8. Conclusion
-
-SciRust est le framework de choix pour ceux qui privilégient la **compréhension** et la **rigueur** sur la vitesse brute ou la facilité de Python. C'est un outil puissant pour bâtir une IA de confiance, de la recherche à l'embarqué.
-
----
-*Pour plus de détails techniques, consultez le rapport complet dans `paper/SciRust-technical-report.md`.*
-
-## 11. Détection d'Événements (scirust-events)
+## 8. Détection d'Événements (scirust-events)
 
 Le module `scirust-events` permet d'analyser des flux de données (séries temporelles, logs, signaux) pour détecter et classifier des événements de manière déterministe. Il est conçu pour les applications critiques où la reproductibilité est essentielle.
 
@@ -174,19 +167,19 @@ fn main() {
 
 ---
 
-### 11. Event Detection (scirust-events) [EN]
+### 8. Event Detection (scirust-events) [EN]
 The `scirust-events` module provides tools to analyze data streams (time series, logs, signals) to detect and classify events deterministically. It is built for mission-critical applications where reproducibility is mandatory.
 
-### 11. Detección de Eventos (scirust-events) [ES]
+### 8. Detección de Eventos (scirust-events) [ES]
 El módulo `scirust-events` permite analizar flujos de datos para detectar y clasificar eventos de forma determinista. Diseñado para aplicaciones críticas donde la reproductibilidad es fundamental.
 
-### 11. Ereigniserkennung (scirust-events) [DE]
+### 8. Ereigniserkennung (scirust-events) [DE]
 Das Modul `scirust-events` ermöglicht die Analyse von Datenströmen zur deterministischen Erkennung und Klassifizierung von Ereignissen. Entwickelt für kritische Anwendungen.
 
-### 11. 事件检测 (scirust-events) [ZH-CN]
+### 8. 事件检测 (scirust-events) [ZH-CN]
 `scirust-events` 模块提供了一套用于确定性地检测和分类数据流（时间序列、日志、信号）中事件的工具。专为对可重现性有严格要求的关键任务应用而设计。
 
-## 15. Neuro-Symbolique Avancé (scirust-neuro-symbolic)
+## 9. Neuro-Symbolique Avancé (scirust-neuro-symbolic)
 
 La crate `scirust-neuro-symbolic` introduit des capacités de raisonnement hybride au sein de SciRust, combinant la puissance de l'apprentissage profond avec la rigueur de la logique symbolique.
 
@@ -207,3 +200,10 @@ let a = Tensor::from_vec(vec![0.8], 1, 1);
 let b = Tensor::from_vec(vec![0.7], 1, 1);
 let result = layer.fuzzy_and(&a, &b); // 0.56
 ```
+
+## 10. Conclusion
+
+SciRust est le framework de choix pour ceux qui privilégient la **compréhension** et la **rigueur** sur la vitesse brute ou la facilité de Python. C'est un outil puissant pour bâtir une IA de confiance, de la recherche à l'embarqué.
+
+---
+*Pour plus de détails techniques, consultez le rapport complet dans `paper/SciRust-technical-report.md`.*

@@ -1,5 +1,11 @@
+#![feature(portable_simd)]
+
 pub mod io;
 pub mod nn;
+// Local cache-aware SIMD tiling kernels. This module lives at
+// `scirust-core/src/simd/` and is referenced as `crate::simd::tiling::matmul_tiled_f32`
+// by `tensor/tiling.rs`; it must be declared here or the crate fails to build.
+pub mod simd;
 pub use scirust_autodiff::*;
 pub use scirust_macros::autodiff;
 pub use scirust_simd::*;

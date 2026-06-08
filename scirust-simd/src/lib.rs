@@ -406,6 +406,11 @@ fn has_sve() -> bool {
     }
 }
 
+#[cfg(not(target_arch = "aarch64"))]
+fn has_sve() -> bool {
+    false
+}
+
 /// Convenience: add 1.0 to every element of a `f64` slice.
 pub fn simd_add_one(data: &mut [f64]) {
     #[cfg(target_arch = "x86_64")]

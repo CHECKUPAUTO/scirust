@@ -89,6 +89,6 @@ fn main() {
     println!("NSGA-II sur ZDT1 (front connu f2=1-sqrt(f1)) : front rank-1 = {} points", fs);
     println!("  distance au front connu : moyenne={:.3e}  max={:.3e}", gd_mean, gd_max);
     println!();
-    println!("Note: optimiseurs stochastiques (thread_rng) -> best/moyenne sur {} runs;", runs);
-    println!("reproductibilite a graine fixe = refactor seedable separe (non requis pour l'oracle).");
+    println!("Note: optimiseurs a graine fixe (StdRng seedable) -> deterministes/reproductibles;");
+    println!("les {} runs partagent la meme graine par defaut (utiliser *::seeded(s) pour varier).", runs);
 }
