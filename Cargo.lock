@@ -1424,6 +1424,7 @@ dependencies = [
  "scirust-core",
  "scirust-learning",
  "scirust-simd",
+ "scirust-solvers",
  "scirust-symbolic",
  "serde",
  "serde_json",
@@ -1456,7 +1457,8 @@ dependencies = [
  "ndarray",
  "num-bigint",
  "num-traits",
- "rand 0.9.4",
+ "rand 0.8.6",
+ "rand_distr 0.4.3",
  "rayon",
  "scirust-autodiff",
  "scirust-gpu-macros",
@@ -1473,8 +1475,40 @@ dependencies = [
 ]
 
 [[package]]
-name = "scirust-embedded"
+name = "scirust-events-core"
 version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
+name = "scirust-events-examples"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-events-models",
+ "scirust-events-runtime",
+]
+
+[[package]]
+name = "scirust-events-models"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-learning",
+]
+
+[[package]]
+name = "scirust-events-runtime"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-events-core",
+ "scirust-runtime",
+]
 
 [[package]]
 name = "scirust-evo"
@@ -1508,6 +1542,8 @@ name = "scirust-learning"
 version = "0.1.0"
 dependencies = [
  "fastrand",
+ "rand 0.8.6",
+ "scirust-core",
  "serde",
  "serde_json",
 ]
@@ -1519,6 +1555,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "scirust-neuro-symbolic"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rand 0.8.6",
+ "scirust-core",
+ "scirust-symbolic",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1590,6 +1639,14 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+
+[[package]]
+name = "sentiment_demo"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-learning",
+]
 
 [[package]]
 name = "serde"

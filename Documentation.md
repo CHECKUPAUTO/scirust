@@ -38,10 +38,22 @@ SciRust est particulièrement utile dans les domaines où la précision, la séc
 SciRust couvre un large éventail de techniques modernes :
 
 - **Apprentissage Profond (Deep Learning)** : Construction de réseaux de neurones (MLP, CNN, Transformers) avec différenciation automatique (autograd).
+- **Renforcement par Apprentissage (RL)** : Support complet pour le Q-Learning tabulaire, DQN et PPO avec clipping.
+- **Computer Vision Avancée** : Architectures ResNet-18/34 et Vision Transformer (ViT) avec pooling global.
+- **Modèles Génératifs (VAE)** : Auto-encodeurs variationnels avec trick de reparamétrage pour la génération latente.
+- **Transformers et MoE** : Couches Mixture of Experts avec routage Top-k pour l'extensibilité des modèles.
+- **Graphes (GNN)** : Réseaux de neurones convolutifs sur graphes (GCN) pour données structurées.
+- **Speech AI et Audio** : Encodeurs audio et fonction de perte CTC pour la reconnaissance de la parole.
+- **Adaptation PEFT (LoRA)** : Low-Rank Adaptation pour un ajustement efficace des modèles pré-entraînés.
+- **Calcul Scientifique Avancé** : Solveur FEM (Méthode des Éléments Finis) 1D pour les équations physiques.
 - **Régression Symbolique** : Découvrir des formules mathématiques (ex: `f(x) = sin(x) + x^2`) à partir d'observations.
 - **Optimisation Évolutionnaire** : Utiliser des algorithmes inspirés de la nature (comme NSGA-II) pour résoudre des problèmes complexes.
 - **Quantification int8** : Diviser par 4 la taille des modèles pour les faire tenir sur de petits processeurs sans perdre en précision.
 - **Accélération GPU** : Utiliser la puissance des cartes graphiques via WebGPU (wgpu) ou NVIDIA Tensor Cores (cuBLAS).
+- **Physics-Informed Neural Networks (PINN)** : Intégration de lois physiques (équations différentielles) directement dans la fonction de perte pour modéliser des phénomènes complexes.
+- **Contrats d'Invariants Formels** : Garanties mathématiques (absence de NaN/Inf, bornes de valeurs) pour les applications critiques (médical, aérospatial).
+- **Tenseurs CSR et Noyaux SpMM** : Optimisation de la mémoire et des calculs pour les modèles creux sur cibles embarquées.
+- **Exécution en Enclave Sécurisée (TEE)** : Runtime durci compatible #![no_std] pour exécution isolée (TrustZone/SGX) sans allocateur OS.
 
 ## 5. Guide des Commandes
 
@@ -87,9 +99,9 @@ fn main() {
 
     // Création d'un modèle simple
     let mut model = Sequential::new()
-        .push(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
-        .push(ReLU)
-        .push(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
+        .add(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
+        .add(ReLU::new())
+        .add(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
 
     // Entraînement sur une boucle
     for epoch in 0..100 {
@@ -100,9 +112,98 @@ fn main() {
 }
 ```
 
-## 7. Conclusion
+## 7. scirust-tensor — Algèbre Tensorielle et Optimisation de Graphe
+
+Le module `scirust-tensor` introduit une couche d'abstraction de haut niveau pour manipuler des tenseurs complexes tout en garantissant des performances maximales via la compilation de graphe.
+
+### Pourquoi utiliser scirust-tensor ?
+- **Einsum** : Écrivez des opérations complexes (Multi-Head Attention, Contrractions) en une seule ligne de code lisible.
+- **Fusion d'Opérateurs** : Réduisez les accès mémoire en fusionnant les activations et les biais directement dans les kernels de calcul.
+- **Déterminisme Garanti** : Comme tout SciRust, chaque calcul est reproductible bit-à-bit.
+
+### Exemple : Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Signature Einstein pour l'attention : Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Ajoutez ceci à votre `Cargo.toml` :
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Conclusion
 
 SciRust est le framework de choix pour ceux qui privilégient la **compréhension** et la **rigueur** sur la vitesse brute ou la facilité de Python. C'est un outil puissant pour bâtir une IA de confiance, de la recherche à l'embarqué.
 
 ---
 *Pour plus de détails techniques, consultez le rapport complet dans `paper/SciRust-technical-report.md`.*
+
+## 11. Détection d'Événements (scirust-events)
+
+Le module `scirust-events` permet d'analyser des flux de données (séries temporelles, logs, signaux) pour détecter et classifier des événements de manière déterministe. Il est conçu pour les applications critiques où la reproductibilité est essentielle.
+
+**Exemple d'utilisation :**
+
+```rust
+use scirust_events_core::{EventStream, EventDetector};
+use scirust_events_models::SpikeDetector;
+use scirust_events_runtime::EventRuntime;
+
+fn main() {
+    let data = vec![0.1, 0.2, 1.5, 0.3, 0.1]; // Signal avec un spike
+    let mut stream = EventStream::new(data, 3, 1);
+    let detector = SpikeDetector::new(1.0, 0.5);
+    let runtime = EventRuntime::new(Box::new(detector));
+
+    let events = runtime.process_all(&mut stream);
+    for e in events {
+        println!("Événement détecté à t={}: {}", e.timestamp, e.confidence);
+    }
+}
+```
+
+- **Cas d'usage** : Surveillance industrielle, détection d'anomalies réseau, analyse de spikes neuronaux.
+- **Garantie** : Déterminisme bit-à-bit sur le score d'anomalie.
+
+---
+
+### 11. Event Detection (scirust-events) [EN]
+The `scirust-events` module provides tools to analyze data streams (time series, logs, signals) to detect and classify events deterministically. It is built for mission-critical applications where reproducibility is mandatory.
+
+### 11. Detección de Eventos (scirust-events) [ES]
+El módulo `scirust-events` permite analizar flujos de datos para detectar y clasificar eventos de forma determinista. Diseñado para aplicaciones críticas donde la reproductibilidad es fundamental.
+
+### 11. Ereigniserkennung (scirust-events) [DE]
+Das Modul `scirust-events` ermöglicht die Analyse von Datenströmen zur deterministischen Erkennung und Klassifizierung von Ereignissen. Entwickelt für kritische Anwendungen.
+
+### 11. 事件检测 (scirust-events) [ZH-CN]
+`scirust-events` 模块提供了一套用于确定性地检测和分类数据流（时间序列、日志、信号）中事件的工具。专为对可重现性有严格要求的关键任务应用而设计。
+
+## 15. Neuro-Symbolique Avancé (scirust-neuro-symbolic)
+
+La crate `scirust-neuro-symbolic` introduit des capacités de raisonnement hybride au sein de SciRust, combinant la puissance de l'apprentissage profond avec la rigueur de la logique symbolique.
+
+### Modules inclus :
+- **Symbolic Regression** : Recherche de lois mathématiques guidée par des réseaux de neurones.
+- **Logic Programming** : Moteur Datalog pour le raisonnement sur des faits et des règles.
+- **SAT/SMT Solvers** : Interfaces pour la résolution de problèmes de satisfaisabilité formelle.
+- **Knowledge Graphs** : Représentation et raisonnement sur des graphes de connaissances.
+- **Differentiable Reasoning** : Couches de logique floue différentiables (T-norms) intégrées aux tenseurs.
+
+**Exemple de raisonnement flou :**
+```rust
+use scirust_neuro_symbolic::neural::DifferentiableLogicLayer;
+use scirust_core::autodiff::reverse::Tensor;
+
+let layer = DifferentiableLogicLayer::new("LogicLayer");
+let a = Tensor::from_vec(vec![0.8], 1, 1);
+let b = Tensor::from_vec(vec![0.7], 1, 1);
+let result = layer.fuzzy_and(&a, &b); // 0.56
+```

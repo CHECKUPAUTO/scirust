@@ -29,7 +29,7 @@ SciRust 中的每个数学函数都根据“验证预言机”（受信任的参
 SciRust 在精度、安全性和小型软件占用空间至关重要的领域特别有用：
 
 - **嵌入式系统 (Edge AI)**：得益于其低占用空间和量化能力（减小模型大小），它可以在小型设备上完美运行。
-- **受监管行业（航空航天、医疗、金融）**：出于安全或合规性原因，每个 AI 决策都必须是可复现且可解释的。
+- **受监管行业（航空航天、医疗、金融）**：出于安全或合规性原因，每个 AI决策都必须是可复现且可解释的。
 - **科学研究**：通过符号回归从数据中发现数学规律。
 - **安全审计**：适用于需要认证其整个计算链的公司。
 
@@ -38,10 +38,23 @@ SciRust 在精度、安全性和小型软件占用空间至关重要的领域特
 SciRust 涵盖了广泛的现代技术：
 
 - **深度学习**：构建具有自动微分 (autograd) 功能的神经网络（MLP、CNN、Transformers）。
+- **强化学习 (RL)**: 提供对 Tabular Q-Learning、DQN 和带有 Clipping 的 PPO 的完整栈支持。
+- **先进计算机视觉**: 支持 ResNet-18/34 架构和带有全局池化 (Global Pooling) 的 Vision Transformer (ViT)。
+- **生成式 AI (VAE)**: 带有用于潜空间生成的重参数化技巧 (Reparameterization Trick) 的变分自编码器。
+- **Transformers 和 MoE**: 带有用于模型可扩展性的 Top-k 路由的混合专家 (Mixture of Experts) 层。
+- **图神经网络 (GNN)**: 用于结构化数据的图卷积网络 (GCN)。
+- **语音 AI 与音频**: 用于语音识别的音频编码器和 CTC 损失函数。
+- **PEFT 适配 (LoRA)**: 用于高效微调预训练模型的低秩适配 (Low-Rank Adaptation)。
+- **先进科学计算**: 用于物理方程的 1D FEM (有限元法) 求解器。
 - **符号回归**：从观察中发现数学公式（例如 `f(x) = sin(x) + x^2`）。
 - **进化优化**：使用受自然启发的算法（如 NSGA-II）解决复杂问题。
 - **int8 量化**：将模型大小缩小 4 倍，以在不损失精度的情况下适应小型处理器。
 - **GPU 加速**：通过 WebGPU (wgpu) 或 NVIDIA Tensor Cores (cuBLAS) 利用显卡的性能。
+- **AOT (Ahead-Of-Time) 编译器**：通过将模型直接编译为不可变的 Rust 源代码，消除超深度嵌入式目标的运行时开销。
+- **Soft-Float 矩阵引擎**：通过软件定义的定点模拟，保证不同架构（x86 与 ARM）之间严格的位级确定性。
+- **潜藏激活引导 (RepE)**：实时拦截和操纵隐藏层激活，以引导智能体行为。
+- **量化感知训练 (QAT)**：集成低精度模拟器（伪量化）和 STE（直通估计器），优化 INT8 部署模型。
+- **XAI 引擎 (积分梯度)**：生成特征归因图，从数学上解释网络预测。
 
 ## 5. 命令指南
 
@@ -100,7 +113,33 @@ fn main() {
 }
 ```
 
-## 7. 结论
+## 7. scirust-tensor — 张量代数与图优化
+
+`scirust-tensor` 模块引入了一个高级抽象层，用于操作复杂的张量，同时通过图编译确保最佳性能。
+
+### 为什么使用 scirust-tensor？
+- **Einsum**：仅需一行易读的代码即可编写复杂的运算（如 Multi-Head Attention、张量收缩）。
+- **算子融合 (Operator Fusion)**：通过将激活函数和偏置直接合并到计算内核中来减少内存访问。
+- **保证确定性**：与 SciRust 的所有组件一样，每次计算都是位对位 (bit-for-bit) 可复现的。
+
+### 示例：多头注意力机制 (Multi-Head Attention)
+```rust
+use scirust_tensor_einsum::einsum;
+
+// 注意力机制的爱因斯坦求和约定：Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### 安装
+在您的 `Cargo.toml` 中添加以下内容：
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. 结论
 
 对于那些将 **理解** 和 **严谨性** 置于原始速度或 Python 的便利性之上的人来说，SciRust 是首选框架。它是构建值得信赖的人工智能（从研究到嵌入式系统）的强大工具。
 

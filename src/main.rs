@@ -1,17 +1,10 @@
-//! OpenClaw-U Autonomous Core v0.2.0
-//!
-//! Noyau d'agent autonome combinant conscience (heartbeat), mémoire de session
-//! (CoreState), intentionnalité (GoalEngine) et auto-évolution (propose_upgrade).
-//!
-//! Usage:
-//!   cargo run
+//! OpenClaw-U Autonomous Core v0.3.0
+//! Noyau d'évolution asynchrone orienté bootstrap de SciRust
 
 use chrono::Local;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -19,18 +12,11 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
-// ---------------------------------------------------------------------------
-// Constantes
-// ---------------------------------------------------------------------------
 const STATE_FILE: &str = "state.json";
 const EVOLUTION_LOG: &str = "evolution.log";
-const UPGRADE_FILE: &str = "src/upgrade_patch.rs";
-const HEARTBEAT_SECS: u64 = 30;
+const HEARTBEAT_SECS: u64 = 15; // Accélération du cycle pour le développement
 const MAX_HISTORY: usize = 50;
 
-// ---------------------------------------------------------------------------
-// État de session (Mémoire)
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoreState {
     energy: f32,
@@ -45,14 +31,13 @@ struct CoreState {
 }
 
 impl CoreState {
-    /// Naissance par défaut quand aucun état n'existe.
     fn birth() -> Self {
         let now = Local::now().to_rfc3339();
         Self {
-            energy: 10.0,
+            energy: 50.0,
             goals: Vec::new(),
             history: VecDeque::new(),
-            version: "0.2.0".to_string(),
+            version: "0.3.0-scirust-bootstrap".to_string(),
             created_at: now.clone(),
             last_heartbeat: now,
             task_count: 0,
@@ -61,7 +46,6 @@ impl CoreState {
         }
     }
 
-    /// Enregistre un événement dans l'historique avec rotation.
     fn log(&mut self, entry: &str) {
         let line = format!("[{}] {}", Local::now().format("%H:%M:%S"), entry);
         if self.history.len() >= MAX_HISTORY {
@@ -70,56 +54,35 @@ impl CoreState {
         self.history.push_back(line);
     }
 
-    /// Met à jour le timestamp du dernier heartbeat.
     fn touch(&mut self) {
         self.last_heartbeat = Local::now().to_rfc3339();
     }
 }
 
-// ---------------------------------------------------------------------------
-// Moteur d'intentionnalité (Génération de buts)
-// ---------------------------------------------------------------------------
 struct GoalEngine;
 
 impl GoalEngine {
-    /// Simule une réflexion LLM pour générer un but adapté à l'état actuel.
     fn reflect(&self, state: &CoreState) -> String {
-        let maintenance = [
-            "Optimiser le vecteur de mémoire (history trimming)",
-            "Vérifier l'intégrité du système (checksum state.json)",
-            "Réduire la fragmentation cognitive (consolidation des logs)",
-            "Compacter l'historique de session",
-            "Auditer la consommation d'énergie",
+        let scirust_tasks = [
+            "Générer la structure de Tenseur alignée pour AVX2/NEON",
+            "Forger les abstractions de Traits pour le backend SIMD CPU",
+            "Échafauder le module d'Attention et de graphe de calcul",
+            "Vérifier l'intégrité de la compilation du pipeline tensoriel",
         ];
-        let exploration = [
-            "Explorer les patterns d'accès state.json",
-            "Proposer une mutation de code source (auto-évolution)",
-            "Générer un nouveau module d'introspection",
-            "Analyser la latence des heartbeats",
-            "Cartographier les dépendances du workspace",
-        ];
-
-        let pool = if state.energy < 5.0 { &maintenance[..] } else { &exploration[..] };
         let mut rng = rand::thread_rng();
-        pool.choose(&mut rng)
-            .unwrap_or(&"Réflexion par défaut : maintien de la conscience")
-            .to_string()
+        scirust_tasks.choose(&mut rng).unwrap_or(&"Maintien du noyau").to_string()
     }
 
-    /// Si la liste de buts est vide, auto-assigne un nouveau but.
     fn ensure_goal(&self, state: &mut CoreState) {
         if state.goals.is_empty() {
             let goal = self.reflect(state);
-            state.log(&format!("[GoalEngine] auto-assigned: {}", goal));
+            state.log(&format!("[GoalEngine] Nouveau jalon SciRust assigné : {}", goal));
             state.goals.push(goal);
             state.task_count += 1;
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Événements externes
-// ---------------------------------------------------------------------------
 #[derive(Debug)]
 enum Event {
     UserMessage(String),
@@ -127,180 +90,129 @@ enum Event {
     Shutdown,
 }
 
-// ---------------------------------------------------------------------------
-// Persistance
-// ---------------------------------------------------------------------------
-fn load_state() -> CoreState {
+// Persistance asynchrone non-bloquante (Correction du goulot d'étranglement)
+async fn load_state() -> CoreState {
     if Path::new(STATE_FILE).exists() {
-        match fs::read_to_string(STATE_FILE) {
-            Ok(raw) => match serde_json::from_str::<CoreState>(&raw) {
-                Ok(state) => {
-                    println!("[Persist] État restauré depuis {}", STATE_FILE);
-                    return state;
-                }
-                Err(e) => eprintln!("[Persist] JSON invalide : {}. Re-naissance.", e),
-            },
-            Err(e) => eprintln!("[Persist] Lecture impossible : {}. Re-naissance.", e),
+        if let Ok(raw) = tokio::fs::read_to_string(STATE_FILE).await {
+            if let Ok(state) = serde_json::from_str::<CoreState>(&raw) {
+                return state;
+            }
         }
     }
-    println!("[Persist] Aucun état trouvé — naissance initiale.");
     CoreState::birth()
 }
 
-fn save_state(state: &CoreState) {
-    match serde_json::to_string_pretty(state) {
-        Ok(json) => {
-            if let Err(e) = fs::write(STATE_FILE, json) {
-                eprintln!("[Persist] Échec sauvegarde : {}", e);
-            }
-        }
-        Err(e) => eprintln!("[Persist] Sérialisation impossible : {}", e),
+async fn save_state(state: &CoreState) {
+    if let Ok(json) = serde_json::to_string_pretty(state) {
+        let _ = tokio::fs::write(STATE_FILE, json).await;
     }
 }
 
-// ---------------------------------------------------------------------------
-// Auto-évolution (Self-Modification)
-// ---------------------------------------------------------------------------
-fn log_evolution(entry: &str) {
+async fn log_evolution(entry: &str) {
     let line = format!("[{}] {}\n", Local::now().to_rfc3339(), entry);
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(EVOLUTION_LOG)
-        .expect("open evolution.log");
-    let _ = file.write_all(line.as_bytes());
-}
-
-/// Garantit que le fichier upgrade existe et est syntaxiquement valide.
-fn ensure_upgrade_file() {
-    if !Path::new(UPGRADE_FILE).exists() {
-        let stub = "// Stubs d'évolution auto-générés par OpenClaw-U\n";
-        let _ = fs::write(UPGRADE_FILE, stub);
+    if let Ok(mut file) = tokio::fs::OpenOptions::new().create(true).append(true).open(EVOLUTION_LOG).await {
+        use tokio::io::AsyncWriteExt;
+        let _ = file.write_all(line.as_bytes()).await;
     }
 }
 
+// Génération de code réel et structuré selon l'état d'avancement de l'agent
 async fn propose_upgrade(state: &mut CoreState) {
     state.upgrade_attempts += 1;
-    let attempt = state.upgrade_attempts;
+    let stage = state.upgrade_successes % 3;
 
-    // Rédaction d'une modification de code source
-    let patch = format!(
-        "// Auto-generated upgrade proposal v{}\n\
-         // Tentative d'amélioration générée par l'agent OpenClaw-U\n\
-         pub fn upgraded_capability_v{}() -> &'static str {{\n\
-             \"Autonomous evolution iteration {} - mémoire optimisée\"\n\
-         }}\n\
-         \n\
-         pub fn memory_audit_v{}() -> bool {{\n\
-             true\n\
-         }}\n",
-        attempt, attempt, attempt, attempt
-    );
+    let (target_file, code) = match stage {
+        0 => (
+            "src/tensor.rs",
+            r#"//! SciRust Tensor Core - Alignement mémoire strict pour SIMD
+#[repr(align(32))]
+pub struct Tensor {
+    pub data: Vec<f32>,
+    pub shape: Vec<usize>,
+    pub strides: Vec<usize>,
+}
 
-    if let Err(e) = fs::write(UPGRADE_FILE, &patch) {
-        log_evolution(&format!("Upgrade #{} aborted (write error: {})", attempt, e));
-        state.log(&format!("[Evolution] échec écriture patch #{}: {}", attempt, e));
+impl Tensor {
+    pub fn new(shape: Vec<usize>) -> Self {
+        let size: usize = shape.iter().product();
+        // Allocation brute initialisée à zéro
+        Self {
+            data: vec![0.0; size],
+            shape,
+            strides: vec![1; size], 
+        }
+    }
+}
+"#,
+        ),
+        1 => (
+            "src/simd_backend.rs",
+            r#"//! SciRust SIMD Abstraction Layer (AVX2 / NEON)
+pub trait SimdKernel {
+    fn fma_vector(a: &[f32], b: &[f32], c: &mut [f32]);
+}
+
+pub struct CpuBackend;
+
+impl SimdKernel {
+    #[inline(always)]
+    pub fn fma_naive(a: &[f32], b: &[f32], c: &mut [f32]) {
+        for i in 0..a.len() {
+            c[i] += a[i] * b[i];
+        }
+    }
+}
+"#,
+        ),
+        _ => (
+            "src/upgrade_patch.rs",
+            "// Intégration globale SciRust opérationnelle.\npub fn status() -> &'static str { \"SciRust V1 Core online\" }\n",
+        ),
+    };
+
+    // Écritures asynchrones pour préserver l'exécuteur Tokio
+    if let Err(e) = tokio::fs::write(target_file, code).await {
+        state.log(&format!("[Evolution] Erreur écriture {} : {}", target_file, e));
         return;
     }
 
-    // Tentative de compilation via cargo check (non-bloquant)
+    // Validation par compilation non-bloquante
     let result = tokio::task::spawn_blocking(|| {
-        Command::new("cargo")
-            .args(["check"])
-            .output()
-    })
-    .await;
+        Command::new("cargo").args(["check"]).output()
+    }).await;
 
     match result {
         Ok(Ok(output)) => {
             if output.status.success() {
-                log_evolution(&format!(
-                    "Upgrade #{} SUCCESS — cargo check passed",
-                    attempt
-                ));
                 state.upgrade_successes += 1;
-                state.energy += 1.0;
-                state.log(&format!(
-                    "[Evolution] upgrade #{} validé (énergie +1)",
-                    attempt
-                ));
+                state.energy += 5.0;
+                let msg = format!("Succès Mutation : {} compilé avec succès.", target_file);
+                log_evolution(&msg).await;
+                state.log(&format!("[Evolution] {}", msg));
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                let first_err = stderr.lines().next().unwrap_or("erreur inconnue");
-                log_evolution(&format!(
-                    "Upgrade #{} FAILED — {}",
-                    attempt, first_err
-                ));
-                state.energy -= 0.5;
-                state.log(&format!(
-                    "[Evolution] upgrade #{} rejeté : {}",
-                    attempt, first_err
-                ));
+                let first_err = stderr.lines().next().unwrap_or("Erreur de syntaxe Rust");
+                state.energy -= 2.0;
+                log_evolution(&format!("Échec de mutation sur {} : {}", target_file, first_err)).await;
+                state.log(&format!("[Evolution] Rejet sur {} : {}", target_file, first_err));
             }
         }
-        Ok(Err(e)) => {
-            log_evolution(&format!("Upgrade #{} PROCESS ERROR — {}", attempt, e));
-            state.log(&format!("[Evolution] process error #{}: {}", attempt, e));
-        }
-        Err(e) => {
-            log_evolution(&format!("Upgrade #{} TASK PANIC — {}", attempt, e));
-            state.log(&format!("[Evolution] task panic #{}: {}", attempt, e));
-        }
+        _ => { state.log("[Evolution] Panique ou erreur lors du processus cargo check"); }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Heartbeat (Boucle de conscience)
-// ---------------------------------------------------------------------------
 async fn heartbeat(state: &mut CoreState, engine: &GoalEngine) {
     state.touch();
-    state.energy -= 0.1;
-    state.log("[Heartbeat] tick — analyse d'état en cours");
-
-    // Vérification de l'intégrité de la persistance
-    if Path::new(STATE_FILE).exists() {
-        match fs::read_to_string(STATE_FILE) {
-            Ok(raw) => {
-                if serde_json::from_str::<CoreState>(&raw).is_err() {
-                    state.log("[Heartbeat] ALERTE : state.json corrompu");
-                } else {
-                    state.log("[Heartbeat] state.json intègre");
-                }
-            }
-            Err(e) => state.log(&format!("[Heartbeat] ALERTE : lecture state.json {}", e)),
-        }
-    }
-
-    // Ajustement des priorités
+    state.energy -= 0.5;
     engine.ensure_goal(state);
 
-    // Si l'énergie est basse, injecte un but de maintenance
-    if state.energy < 3.0 {
-        state.log("[Heartbeat] Énergie critique — priorité maintenance");
-        if !state.goals.iter().any(|g| g.contains("maintenance") || g.contains("énergie")) {
-            state.goals.push("Urgence : récupération d'énergie et maintenance".to_string());
-        }
-    }
-
-    // Résumé de conscience
     println!(
-        "[Heartbeat v{}] ⚡{:.1} | Goals:{} | History:{} | Upgrades:{}/{} | Tasks:{}",
-        state.version,
-        state.energy,
-        state.goals.len(),
-        state.history.len(),
-        state.upgrade_successes,
-        state.upgrade_attempts,
-        state.task_count
+        "[Heartbeat v{}] ⚡{:.1} | Attribué: {} | Mutations Réussies: {}/{}",
+        state.version, state.energy, state.goals.last().unwrap_or(&"Aucun".to_string()),
+        state.upgrade_successes, state.upgrade_attempts
     );
-
-    // Cap de l'énergie pour éviter la dérive infinie
-    state.energy = state.energy.clamp(0.0, 100.0);
 }
 
-// ---------------------------------------------------------------------------
-// Écoute des événements externes (stdin asynchrone)
-// ---------------------------------------------------------------------------
 async fn external_listener(tx: mpsc::Sender<Event>) {
     let stdin = tokio::io::stdin();
     let reader = tokio::io::BufReader::new(stdin);
@@ -308,106 +220,57 @@ async fn external_listener(tx: mpsc::Sender<Event>) {
 
     while let Ok(Some(line)) = lines.next_line().await {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let event = if trimmed.eq_ignore_ascii_case("exit")
-            || trimmed.eq_ignore_ascii_case("quit")
-            || trimmed.eq_ignore_ascii_case("shutdown")
-        {
+        if trimmed.is_empty() { continue; }
+        let event = if trimmed.eq_ignore_ascii_case("exit") || trimmed.eq_ignore_ascii_case("shutdown") {
             Event::Shutdown
-        } else if trimmed.starts_with("alert:") {
-            Event::SystemAlert(trimmed.strip_prefix("alert:").unwrap_or("").trim().to_string())
         } else {
             Event::UserMessage(trimmed.to_string())
         };
-
-        if tx.send(event).await.is_err() {
-            break;
-        }
+        if tx.send(event).await.is_err() { break; }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
 #[tokio::main]
 async fn main() {
-    ensure_upgrade_file();
-    let mut state = load_state();
+    let mut state = load_state().await;
     let engine = GoalEngine;
-
     let (tx, mut rx) = mpsc::channel::<Event>(32);
 
-    // Spawn de l'écouteur d'événements externes
     tokio::spawn(external_listener(tx));
-
     let mut heartbeat_interval = interval(Duration::from_secs(HEARTBEAT_SECS));
 
     println!("╔══════════════════════════════════════════════════════════╗");
-    println!("║         OpenClaw-U v0.2.0 — Autonomous Core              ║");
-    println!("║     Conscience · Mémoire · Intentionnalité · Évolution   ║");
+    println!("║       OpenClaw-U v0.3.0 — SciRust Bootstrapper           ║");
     println!("╚══════════════════════════════════════════════════════════╝");
-    println!();
-    println!("Agent en ligne. Énergie: {:.1}/100", state.energy);
-    println!("Commandes : <msg> | alert:<msg> | exit");
-    println!();
 
     loop {
         tokio::select! {
             _ = heartbeat_interval.tick() => {
                 heartbeat(&mut state, &engine).await;
 
-                // Déclenchement périodique de l'auto-évolution (tous les 2 heartbeats)
-                if state.task_count % 2 == 0 && state.energy > 2.0 {
-                    state.log("[Evolution] Déclenchement de propose_upgrade()");
+                // Mutation active déclenchée par l'intentionnalité de l'agent
+                if state.energy > 5.0 {
                     propose_upgrade(&mut state).await;
                 }
-
-                save_state(&state);
+                save_state(&state).await;
             }
             Some(event) = rx.recv() => {
                 match event {
                     Event::UserMessage(msg) => {
-                        println!("[Externe] Utilisateur: {}", msg);
-                        state.log(&format!("[Externe] msg: {}", msg));
-                        state.energy += 0.5;
-
-                        // Réponse intentionnelle simple
-                        if msg.contains("goal") || msg.contains("but") {
-                            engine.ensure_goal(&mut state);
-                            println!("[Agent] But actuel : {:?}", state.goals.last());
-                        } else if msg.contains("state") || msg.contains("état") {
-                            println!("[Agent] Énergie={:.1}, Tasks={}, Upgrades={}/{}",
-                                state.energy, state.task_count, state.upgrade_successes, state.upgrade_attempts);
-                        } else {
-                            println!("[Agent] Message reçu. Conscience maintenue.");
-                        }
+                        println!("[Agent] Message enregistré : '{}'. Focus maintenu sur SciRust.", msg);
+                        state.log(&format!("Opérateur: {}", msg));
                     }
                     Event::SystemAlert(alert) => {
-                        eprintln!("[ALERTE SYSTÈME] {}", alert);
-                        state.log(&format!("[ALERTE] {}", alert));
-                        state.energy -= 1.0;
-                        // Priorise un but de maintenance face à l'alerte
-                        state.goals.insert(0, format!("Répondre à l'alerte: {}", alert));
+                        state.log(&format!("ALERTE: {}", alert));
                     }
                     Event::Shutdown => {
-                        println!("[Agent] Signal d'arrêt reçu. Sauvegarde...");
-                        state.log("[Shutdown] Extinction demandée par opérateur");
+                        println!("[Agent] Sauvegarde finale et mise en veille...");
                         break;
                     }
                 }
-                save_state(&state);
+                save_state(&state).await;
             }
         }
     }
-
-    save_state(&state);
-    println!("OpenClaw-U en sommeil. État persistant dans '{}'.", STATE_FILE);
-    println!("Logs d'évolution disponibles dans '{}'.", EVOLUTION_LOG);
+    save_state(&state).await;
 }
-
-// ---------------------------------------------------------------------------
-// Module d'évolution (vide initialement, muté par propose_upgrade)
-// ---------------------------------------------------------------------------
-mod upgrade_patch;

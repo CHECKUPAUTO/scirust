@@ -9,7 +9,7 @@ SciRust ist eine Forschungs- und Entwicklungsplattform für Künstliche Intellig
 **Warum ist das wichtig?**
 - **Vollständige Transparenz**: Sie können jede Zeile des Rechencodes lesen, von der Netzwerkschicht bis zum mathematischen Kernel.
 - **Sicherheit und Zuverlässigkeit**: Profitiert von den Speicher- und Sicherheitsgarantien von Rust.
-- **Unabhängigkeit**: Keine komplexen externen Abhängigkeiten (FFI) erforderlich.
+- **Independenz**: Keine komplexen externen Abhängigkeiten (FFI) erforderlich.
 
 ## 2. Philosophie und Hauptvorteile
 
@@ -38,10 +38,20 @@ SciRust ist besonders nützlich in Bereichen, in denen Präzision, Sicherheit un
 SciRust deckt ein breites Spektrum moderner Techniken ab:
 
 - **Deep Learning**: Aufbau neuronaler Netze (MLP, CNN, Transformer) mit automatischer Differenzierung (Autograd).
+- **Reinforcement Learning (RL)**: Vollständige Stack-Unterstützung für Tabular Q-Learning, DQN und PPO mit Clipping.
+- **Fortgeschrittene Computer Vision**: ResNet-18/34 Architekturen und Vision Transformer (ViT) mit Global Pooling.
+- **Generative KI (VAE)**: Variationale Autoencoder mit Reparametrisierungstrick für latente Generierung.
+- **Transformer und MoE**: Mixture of Experts-Layer mit Top-k-Routing für Modellskalierbarkeit.
+- **Graph Neural Networks (GNN)**: Graph Convolutional Networks (GCN) für strukturierte Daten.
+- **Speech AI und Audio**: Audio-Encoder und CTC-Loss-Funktion für Spracherkennung.
+- **PEFT-Anpassung (LoRA)**: Low-Rank Adaptation für effizientes Fine-Tuning von vortrainierten Modellen.
+- **Fortgeschrittenes wissenschaftliches Rechnen**: 1D-FEM (Finite-Elemente-Methode) Solver für physikalische Gleichungen.
 - **Symbolische Regression**: Entdeckung mathematischer Formeln (z. B. `f(x) = sin(x) + x^2`) aus Beobachtungen.
 - **Evolutionäre Optimierung**: Verwendung von von der Natur inspirierten Algorithmen (wie NSGA-II) zur Lösung komplexer Probleme.
 - **int8-Quantisierung**: Verringerung der Modellgröße um das Vierfache, um auf kleine Prozessoren zu passen, ohne an Genauigkeit zu verlieren.
 - **GPU-Beschleunigung**: Nutzung der Leistung von Grafikkarten über WebGPU (wgpu) oder NVIDIA Tensor Cores (cuBLAS).
+- **Physics-Informed Neural Networks (PINN)**: Integration von physikalischen Gesetzen (Differenzialgleichungen) direkt in die Loss-Funktion.
+- **Formale Invarianten-Verträge**: Mathematische Garantien (Fehlen von NaN/Inf) für kritische Anwendungen.
 
 ## 5. Befehlsübersicht
 
@@ -100,7 +110,33 @@ fn main() {
 }
 ```
 
-## 7. Fazit
+## 7. scirust-tensor — Tensor-Algebra und Graph-Optimierung
+
+Das Modul `scirust-tensor` führt eine High-Level-Abstraktionsschicht zur Manipulation komplexer Tensoren ein und gewährleistet gleichzeitig maximale Performance durch Graph-Kompilierung.
+
+### Warum scirust-tensor verwenden?
+- **Einsum**: Schreiben Sie komplexe Operationen (Multi-Head Attention, Kontraktionen) in einer einzigen, lesbaren Codezeile.
+- **Operator Fusion**: Reduzieren Sie den Speicherzugriff, indem Sie Aktivierungen und Biases direkt in die Berechnungs-Kernels integrieren.
+- **Garantierter Determinismus**: Wie bei ganz SciRust ist jede Berechnung Bit-für-Bit reproduzierbar.
+
+### Beispiel: Multi-Head Attention
+```rust
+use scirust_tensor_einsum::einsum;
+
+// Einstein-Signatur für Attention: Batch, Heads, SeqLen, Dim
+// (b, h, i, d) , (b, h, j, d) -> (b, h, i, j)
+let attention_scores = einsum("bhid,bhjd->bhij", &[&queries, &keys]).unwrap();
+```
+
+### Installation
+Fügen Sie dies zu Ihrer `Cargo.toml` hinzu:
+```toml
+[dependencies]
+scirust-tensor-core = { path = "scirust-tensor-core" }
+scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
+```
+
+## 8. Fazit
 
 SciRust ist das Framework der Wahl für alle, die **Verständnis** und **Strenge** über rohe Geschwindigkeit oder die Einfachheit von Python stellen. Es ist ein leistungsstarkes Werkzeug für den Aufbau vertrauenswürdiger KI, von der Forschung bis hin zu eingebetteten Systemen.
 

@@ -11,6 +11,7 @@ scirust-core = { path = "scirust-core" }
 scirust-simd = { path = "scirust-simd" }
 scirust-symbolic = { path = "scirust-symbolic" }
 scirust-learning = { path = "scirust-learning" }
+scirust-solvers = { path = "scirust-solvers" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,6 +25,7 @@ members = [
     "examples/cifar10_classifier",
     "examples/transformer_demo",
     "examples/transformer_compress",
+    "examples/sentiment_demo",
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd-macros",
@@ -41,6 +43,11 @@ members = [
     "scirust-bridge",
     "scirust-evo",
     "scirust-edge",
+    "scirust-events-core",
+    "scirust-events-models",
+    "scirust-events-runtime",
+    "scirust-events-examples",
+    "scirust-neuro-symbolic",
 ]
 exclude = [
     "scirust-rustc-driver",

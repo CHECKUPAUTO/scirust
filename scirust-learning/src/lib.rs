@@ -5,8 +5,10 @@
 
 pub mod control;
 pub mod finance;
+pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
+pub mod rl;
 pub mod time_series;
 
 use serde::{Deserialize, Serialize};

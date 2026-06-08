@@ -26,6 +26,7 @@ pub mod optimize;
 pub mod polynomial;
 pub mod quadrature;
 pub mod roots;
+pub mod scientific;
 pub mod solve;
 
 pub use linalg::Matrix;

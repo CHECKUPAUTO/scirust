@@ -200,3 +200,4 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
 }
 pub mod quant;
 pub mod proof;
+pub mod enclave;
