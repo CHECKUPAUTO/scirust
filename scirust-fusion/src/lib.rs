@@ -12,21 +12,18 @@
 //! ## Exemple
 //!
 //! ```
-//! use scirust_fusion::FusionPipeline;
+//! use scirust_fusion::{FusionPipeline, OpGraph, OpKind};
 //!
+//! // Build a small forward graph: y = ReLU(x @ W)
+//! let mut graph = OpGraph::new();
+//! let x = graph.add_input(OpKind::Input, None);
+//! let w = graph.add_input(OpKind::Input, None);
+//! let mm = graph.add_binary(OpKind::MatMul, x, w, None);
+//! let _y = graph.add_unary(OpKind::ReLU, mm, None);
+//!
+//! // Detect and fuse canonical patterns (e.g. MatMul → ReLU).
 //! let pipeline = FusionPipeline::new();
-//!
-//! // Définir un motif à fusionner
-//! let mut graph = pipeline.build_graph();
-//! graph.add_op(Op::MatMul, 0, 1);   // y = x @ W
-//! graph.add_op(Op::SiLU, 2);         // y = silu(y)
-//! graph.add_op(Op::LayerNorm, 3, 4); // y = layernorm(y, gamma, beta)
-//!
-//! // Fusionner
-//! let fused = pipeline.fuse(&graph).unwrap();
-//!
-//! // Exécuter le noyau fusionné
-//! fused.execute(&inputs, &mut output);
+//! let _fused = pipeline.fuse(&mut graph);
 //! ```
 
 mod fusion;
@@ -34,7 +31,7 @@ mod graph;
 mod kernel;
 mod patterns;
 
-pub use fusion::FusionPipeline;
-pub use graph::{FusedOp, OpGraph};
-pub use kernel::FusedKernel;
+pub use fusion::{FusionPipeline, KernelType};
+pub use graph::{FusedOp, OpGraph, OpKind};
+pub use kernel::{FusedKernel, KernelParams};
 pub use patterns::FusionPatterns;
