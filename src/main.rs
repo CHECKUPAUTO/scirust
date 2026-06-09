@@ -1,5 +1,12 @@
-//! OpenClaw-U Autonomous Core v0.3.0
-//! Noyau d'évolution asynchrone orienté bootstrap de SciRust
+//! # OpenClaw-U Autonomous Core (bundled experimental binary)
+//!
+//! Noyau d'évolution asynchrone orienté bootstrap. **Ce binaire est une démo
+//! expérimentale d'agent autonome** livrée avec le dépôt ; il n'est **pas** un
+//! composant du framework de deep learning SciRust (voir `src/lib.rs` pour la
+//! bibliothèque `scirust`). Il n'est requis ni pour construire ni pour utiliser
+//! le framework.
+//!
+//! Usage : `cargo run --bin openclaw-u`
 
 use chrono::Local;
 use rand::seq::SliceRandom;

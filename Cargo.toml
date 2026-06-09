@@ -18,6 +18,13 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 
+# The framework itself is exposed as the `scirust` library (src/lib.rs).
+# The bundled autonomous-agent demo (src/main.rs, "OpenClaw-U") is a separate,
+# clearly-named binary — it is NOT part of the deep-learning framework.
+[[bin]]
+name = "openclaw-u"
+path = "src/main.rs"
+
 [workspace]
 members = [
     "examples/mnist_classifier",
@@ -48,10 +55,22 @@ members = [
     "scirust-events-runtime",
     "scirust-events-examples",
     "scirust-neuro-symbolic",
+    "scirust-arena",
+    "scirust-fusion",
+    "scirust-tn",
+    "scirust-tensor-core",
+    "scirust-tensor-einsum",
+    "scirust-tensor-contraction",
+    "scirust-tensor-compile",
+    "scirust-tensor-runtime",
+    "scirust-tensor-examples",
 ]
 exclude = [
     "scirust-rustc-driver",
     "examples/simd_views_demo",
     "examples/benchmarks",
+    # Requires `[workspace.dependencies] burn` and the heavy external `burn`
+    # crate; kept out of the default workspace build.
+    "scirust-burn-bridge",
 ]
 resolver = "2"

@@ -149,12 +149,18 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
 | Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |
 
-## Relationship to SoulLink
+## Package layout: framework library vs. bundled agent
 
-Parts of SciRust were developed with the assistance of **SoulLink**, a separate autonomous
-agent system maintained outside this repository. SoulLink is not a component of the
-framework, is not required to build or use it, and lives in its own project. SciRust stands
-on its own as the deep-learning and scientific-computing framework described here.
+The `scirust` package exposes the framework as a **library** (`src/lib.rs`), re-exporting
+the member crates under `scirust::{core, simd, symbolic, learning, solvers}`. The
+deep-learning and scientific-computing capabilities described here live in those crates.
+
+The repository also bundles a small **experimental autonomous-agent binary**,
+`openclaw-u` (`src/main.rs`, run with `cargo run --bin openclaw-u`). It is *not* a
+component of the framework, is not required to build or use it, and can be ignored
+entirely. Parts of the repository were developed with the assistance of **SoulLink**, a
+separate agent system maintained outside this repository; like OpenClaw-U, it is not part
+of the framework.
 
 ## License
 

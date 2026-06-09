@@ -72,7 +72,7 @@ impl FusionPipeline {
             let op = graph.op(node);
 
             // Chercher un successeur qui peut être fusionné
-            let fused = self.try_extend(group, graph, node, visited);
+            let fused = self.try_extend(&group, graph, node, visited);
 
             if fused {
                 group.push(node);
@@ -127,11 +127,14 @@ impl FusionPipeline {
     /// Essaie d'étendre le groupe de fusion avec un nœud.
     fn try_extend(
         &self,
-        group: Vec<usize>,
+        group: &[usize],
         graph: &OpGraph,
         node: usize,
-        visited: &mut [bool],
+        _visited: &mut [bool],
     ) -> bool {
+        if group.is_empty() {
+            return false;
+        }
         let group_op = graph.op(*group.last().unwrap());
         let node_op = graph.op(node);
 
@@ -159,73 +162,48 @@ impl FusionPipeline {
             outputs.push(idx);
         }
 
-        FusedKernel {
-            kernel_type,
-            group: group.to_vec(),
-            inputs,
-            outputs,
-        }
+        FusedKernel::new(kernel_type, group.to_vec(), inputs, outputs)
     }
 
     /// Détermine le type de kernel à générer.
     fn determine_kernel_type(&self, group: &[usize], graph: &OpGraph) -> KernelType {
         let kinds: Vec<OpKind> = group.iter().map(|&i| graph.op(i).kind).collect();
 
-        // Pattern: MatMul → SiLU
-        if matches_pattern(&kinds, &[OpKind::MatMul | OpKind::Linear, OpKind::SiLU]) {
+        // In a pattern, `OpKind::MatMul` matches MatMul *or* Linear and
+        // `OpKind::LayerNorm` matches LayerNorm *or* LayerNormFused — see
+        // `matches_pattern` below.
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU]) {
             return KernelType::MatmulSilu;
         }
-
-        // Pattern: MatMul → SiLU → LayerNorm (MLP block)
-        if matches_pattern(&kinds, &[
-            OpKind::MatMul | OpKind::Linear,
-            OpKind::SiLU,
-            OpKind::LayerNorm | OpKind::LayerNormFused,
-        ]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU, OpKind::LayerNorm]) {
             return KernelType::MatmulSiluLayerNorm;
         }
-
-        // Pattern: MatMul → LayerNorm (pre-LN)
-        if matches_pattern(&kinds, &[
-            OpKind::MatMul | OpKind::Linear,
-            OpKind::LayerNorm | OpKind::LayerNormFused,
-        ]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::LayerNorm]) {
             return KernelType::MatmulLayerNorm;
         }
-
-        // Pattern: MatMul → ReLU
-        if matches_pattern(&kinds, &[OpKind::MatMul | OpKind::Linear, OpKind::ReLU]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::ReLU]) {
             return KernelType::MatmulRelu;
         }
-
-        // Pattern: MatMul → MatMul → Add (two-layer MLP with residual)
-        if matches_pattern(&kinds, &[
-            OpKind::MatMul | OpKind::Linear,
-            OpKind::MatMul | OpKind::Linear,
-            OpKind::Add,
-        ]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::MatMul, OpKind::Add]) {
             return KernelType::TwoLayerMlp;
         }
-
-        // Pattern: SsmStep → SsmStep (SSM sequence scan)
         if matches_pattern(&kinds, &[OpKind::SsmStep, OpKind::SsmStep]) {
             return KernelType::SsmScan;
         }
-
-        // Pattern: LayerNorm → Activation (post-LN)
-        if matches_pattern(&kinds, &[
-            OpKind::LayerNorm | OpKind::LayerNormFused,
-            OpKind::SiLU | OpKind::Gelu | OpKind::GELU_Approx | OpKind::ReLU,
-        ]) {
+        // LayerNorm → activation (any of SiLU / Gelu / GELU_Approx / ReLU).
+        if kinds.len() == 2
+            && matches!(kinds[0], OpKind::LayerNorm | OpKind::LayerNormFused)
+            && matches!(
+                kinds[1],
+                OpKind::SiLU | OpKind::Gelu | OpKind::GELU_Approx | OpKind::ReLU
+            )
+        {
             return KernelType::LayerNormActivation;
         }
-
-        // Pattern: MatMul → Scale (weight scaling)
-        if matches_pattern(&kinds, &[OpKind::MatMul | OpKind::Linear, OpKind::Scale]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::Scale]) {
             return KernelType::MatmulScale;
         }
 
-        // Defaut: kernel non fusionne
         KernelType::Identity
     }
 }

@@ -1,22 +1,34 @@
 //! # AlignedVec — Vec avec alignement garanti
 //!
-//! Alternative à `Vec<T>` avec des garanties d'alignement strictes.
-//! Utile pour les passes SIMD qui nécessitent des pointeurs alignés.
+//! Alternative à `Vec<T>` avec des garanties d'alignement strictes (128 octets,
+//! la largeur de ligne de cache / vecteur SIMD sur les plateformes cibles).
+//! Le backing est un `Vec<Block>` où `Block` est `#[repr(align(128))]`, ce qui
+//! garantit que le pointeur de base est réellement aligné.
 
-use super::{align_up, MIN_ALIGN_BYTES};
+use super::MIN_ALIGN_BYTES;
 
-/// Un buffer de données brutes avec alignement garanti sur ALIGNMENT bytes.
-///
-/// Contrairement à `Vec<u8>`, la mémoire est allouée avec un alignement
-/// suffisant pour stocker n'importe quel type SIMD sur toutes les plateformes cibles.
+/// Bloc de 128 octets, aligné sur 128 — force l'alignement du buffer sous-jacent.
+#[repr(C, align(128))]
+#[derive(Clone, Copy)]
+struct Block([u8; 128]);
+
+/// Un buffer de données brutes avec alignement garanti sur 128 octets.
 #[derive(Debug)]
 pub struct AlignedVec {
-    /// Données brutes (non-Send car utilisé pour transmutes vers T).
-    data: Vec<u8>,
+    /// Backing aligné (chaque `Block` fait 128 octets, aligné sur 128).
+    blocks: Vec<Block>,
     /// Alignement requis (toujours >= 16).
     alignment: usize,
-    /// Nombre d'éléments de type T (informationnelle).
+    /// Nombre d'éléments de type T.
     len: usize,
+    /// Octets effectivement utilisés (`len * size_of::<T>()`).
+    byte_len: usize,
+}
+
+impl std::fmt::Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Block(128B)")
+    }
 }
 
 unsafe impl Send for AlignedVec {}
@@ -30,15 +42,13 @@ impl AlignedVec {
     {
         let alignment = std::mem::align_of::<T>().max(16).max(MIN_ALIGN_BYTES);
         let byte_len = len * std::mem::size_of::<T>();
-        let aligned_len = align_up(byte_len);
-
-        // Allouer avec alignement via vec
-        let mut data = vec![0u8; aligned_len];
-
+        let n_blocks = byte_len.div_ceil(128).max(1);
+        let blocks = vec![Block([0u8; 128]); n_blocks];
         Self {
-            data,
+            blocks,
             alignment,
             len,
+            byte_len,
         }
     }
 
@@ -50,6 +60,16 @@ impl AlignedVec {
         let mut vec = Self::new::<T>(len);
         vec.fill(val);
         vec
+    }
+
+    #[inline]
+    fn byte_ptr(&self) -> *const u8 {
+        self.blocks.as_ptr() as *const u8
+    }
+
+    #[inline]
+    fn byte_ptr_mut(&mut self) -> *mut u8 {
+        self.blocks.as_mut_ptr() as *mut u8
     }
 
     /// Retourne un slice mutable de type T, aligné.
@@ -64,7 +84,7 @@ impl AlignedVec {
             self.alignment,
             std::mem::align_of::<T>()
         );
-        let ptr = self.data.as_mut_ptr() as *mut T;
+        let ptr = self.byte_ptr_mut() as *mut T;
         unsafe { std::slice::from_raw_parts_mut(ptr, self.len) }
     }
 
@@ -80,7 +100,7 @@ impl AlignedVec {
             self.alignment,
             std::mem::align_of::<T>()
         );
-        let ptr = self.data.as_ptr() as *const T;
+        let ptr = self.byte_ptr() as *const T;
         unsafe { std::slice::from_raw_parts(ptr, self.len) }
     }
 
@@ -94,54 +114,53 @@ impl AlignedVec {
         }
     }
 
-    /// Retourne le pointeur brut (aligné).
+    /// Pointeur brut (aligné sur 128 octets).
     #[inline]
     pub fn as_ptr(&self) -> *const u8 {
-        self.data.as_ptr()
+        self.byte_ptr()
     }
 
-    /// Retourne un pointeur mutable brut (aligné).
+    /// Pointeur mutable brut (aligné sur 128 octets).
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
+        self.byte_ptr_mut()
     }
 
-    /// Retourne l'alignement en bytes.
+    /// Alignement en octets.
     #[inline]
     pub fn alignment(&self) -> usize {
         self.alignment
     }
 
-    /// Retourne la longueur en bytes.
+    /// Longueur en octets effectivement utilisés.
     #[inline]
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.byte_len
     }
 
-    /// Vérifie que le pointeur est aligné sur ALIGNMENT.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.byte_len == 0
+    }
+
+    /// Vérifie que le pointeur est aligné sur 128 octets.
     #[inline]
     pub fn is_aligned(&self) -> bool {
-        self.data.as_ptr() as usize & (MIN_ALIGN_BYTES - 1) == 0
+        self.byte_ptr() as usize & (MIN_ALIGN_BYTES - 1) == 0
     }
 }
 
 impl<T: Copy> From<AlignedVec> for Vec<T> {
     fn from(vec: AlignedVec) -> Self {
-        let ptr = vec.data.as_ptr() as *const T;
-        let len = vec.len;
-        unsafe { Vec::from_raw_parts(ptr, len, vec.len) }
+        vec.as_slice::<T>().to_vec()
     }
 }
 
-impl<T: Copy> Into<AlignedVec> for Vec<T> {
-    fn into(self) -> AlignedVec {
-        let alignment = std::mem::align_of::<T>().max(16);
-        let data = self.into_bytes();
-        AlignedVec {
-            data,
-            alignment,
-            len: self.len(),
-        }
+impl<T: Copy> From<Vec<T>> for AlignedVec {
+    fn from(v: Vec<T>) -> Self {
+        let mut av = AlignedVec::new::<T>(v.len());
+        av.as_mut_slice::<T>().copy_from_slice(&v);
+        av
     }
 }
 
@@ -152,12 +171,6 @@ pub trait ToAligned<T: Copy>: Sized {
 
 impl<T: Copy> ToAligned<T> for Vec<T> {
     fn to_aligned(self) -> AlignedVec {
-        let alignment = std::mem::align_of::<T>().max(16);
-        let bytes = self.into_bytes();
-        AlignedVec {
-            data: bytes,
-            alignment,
-            len: self.len(),
-        }
+        AlignedVec::from(self)
     }
 }

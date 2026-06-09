@@ -54,7 +54,6 @@ pub enum OpKind {
     AvgPool2d,
     Dropout,
     Dropout2d,
-    Linear,
 
     // Mamba/SSM specific
     SsmInit,
@@ -160,7 +159,7 @@ pub struct OpGraph {
     /// Liste des opérations.
     ops: Vec<FusedOp>,
     /// Topological sort order (mise à jour lors de la construction).
-    topo_order: Vec<usize>,
+    pub topo_order: Vec<usize>,
 }
 
 impl OpGraph {
