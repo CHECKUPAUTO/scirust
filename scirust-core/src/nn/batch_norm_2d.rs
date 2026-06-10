@@ -58,23 +58,29 @@ impl BatchNorm2d {
     ) -> (Vec<f32>, Vec<f32>) {
         let inv_n = 1.0 / n_spatial as f32;
         let mut mean = vec![0.0f32; c];
-        for i in 0..n_spatial {
-            for j in 0..c {
+        for i in 0..n_spatial
+        {
+            for j in 0..c
+            {
                 mean[j] += input_data[i * c + j];
             }
         }
-        for v in mean.iter_mut() {
+        for v in mean.iter_mut()
+        {
             *v *= inv_n;
         }
 
         let mut var = vec![0.0f32; c];
-        for i in 0..n_spatial {
-            for j in 0..c {
+        for i in 0..n_spatial
+        {
+            for j in 0..c
+            {
                 let d = input_data[i * c + j] - mean[j];
                 var[j] += d * d;
             }
         }
-        for v in var.iter_mut() {
+        for v in var.iter_mut()
+        {
             *v *= inv_n;
         }
         (mean, var)
@@ -82,7 +88,8 @@ impl BatchNorm2d {
 
     fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32]) {
         let alpha = self.momentum;
-        for j in 0..self.num_channels {
+        for j in 0..self.num_channels
+        {
             self.running_mean.data[j] =
                 (1.0 - alpha) * self.running_mean.data[j] + alpha * batch_mean[j];
             self.running_var.data[j] =
@@ -111,7 +118,8 @@ impl Module for BatchNorm2d {
         self.last_g_idx = Some(gamma_v.idx());
         self.last_b_idx = Some(beta_v.idx());
 
-        if self.training {
+        if self.training
+        {
             let input_t = tape.value(reshaped.idx());
             let (batch_mean, batch_var) =
                 self.compute_batch_stats(&input_t.data, n_spatial, self.num_channels);
@@ -119,54 +127,60 @@ impl Module for BatchNorm2d {
 
             let inv_n = 1.0 / n_spatial as f32;
             let mu = reshaped.sum_axis(0).scale(inv_n);
-            let centered = reshaped.add_broadcast(mu.neg());
-            let centered_sq = centered.hadamard(centered);
+            let centered = reshaped.try_add_broadcast(mu.neg()).unwrap();
+            let centered_sq = centered.try_hadamard(centered).unwrap();
             let var = centered_sq.sum_axis(0).scale(inv_n);
             let eps_t = tape.input(Tensor::from_vec(
                 vec![self.eps; self.num_channels],
                 1,
                 self.num_channels,
             ));
-            let std = var.add(eps_t).sqrt();
+            let std = var.try_add(eps_t).unwrap().sqrt();
             let inv_std = std.reciprocal();
-            let x_hat = centered.mul_broadcast(inv_std);
-            let scaled = x_hat.mul_broadcast(gamma_v);
-            let out = scaled.add_broadcast(beta_v);
+            let x_hat = centered.try_mul_broadcast(inv_std).unwrap();
+            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
+            let out = scaled.try_add_broadcast(beta_v).unwrap();
             // Reshape back
             out.reshape(&[n, total_features])
-        } else {
+        }
+        else
+        {
             let rmean_v = tape.input(self.running_mean.clone());
-            let centered = reshaped.add_broadcast(rmean_v.neg());
+            let centered = reshaped.try_add_broadcast(rmean_v.neg()).unwrap();
             let eps_t = tape.input(Tensor::from_vec(
                 vec![self.eps; self.num_channels],
                 1,
                 self.num_channels,
             ));
             let rvar_v = tape.input(self.running_var.clone());
-            let std = rvar_v.add(eps_t).sqrt();
-            let x_hat = centered.mul_broadcast(std.reciprocal());
-            let scaled = x_hat.mul_broadcast(gamma_v);
-            let out = scaled.add_broadcast(beta_v);
+            let std = rvar_v.try_add(eps_t).unwrap().sqrt();
+            let x_hat = centered.try_mul_broadcast(std.reciprocal()).unwrap();
+            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
+            let out = scaled.try_add_broadcast(beta_v).unwrap();
             out.reshape(&[n, total_features])
         }
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             v.push(i);
         }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             self.gamma = tape.value(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             self.beta = tape.value(i);
         }
     }

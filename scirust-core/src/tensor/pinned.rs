@@ -31,7 +31,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
 /// Erreur de pinning.
@@ -45,7 +45,8 @@ pub enum PinError {
 
 impl std::fmt::Display for PinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match self
+        {
             PinError::AllocationFailed => write!(f, "Memory pinning failed: allocation error"),
             PinError::LockFailed => write!(f, "Memory pinning failed: mlock() failed"),
             PinError::UnsupportedPlatform => write!(f, "Platform not supported for memory pinning"),
@@ -78,7 +79,8 @@ impl PinnedBuffer {
     ///
     /// L'alignement est de `align_of::<T>().max(128)` bytes.
     pub fn new<T>(len: usize) -> Result<Self, PinError> {
-        if len == 0 {
+        if len == 0
+        {
             return Err(PinError::SizeTooLarge(0));
         }
 
@@ -91,7 +93,8 @@ impl PinnedBuffer {
 
         // Allouer avec l'alignement requis
         let ptr = unsafe { alloc(layout) };
-        if ptr.is_null() {
+        if ptr.is_null()
+        {
             return Err(PinError::AllocationFailed);
         }
 
@@ -182,7 +185,8 @@ impl PinnedBuffer {
 impl Drop for PinnedBuffer {
     fn drop(&mut self) {
         unsafe {
-            if self.pinned {
+            if self.pinned
+            {
                 libc::munlock(self.ptr as *const std::ffi::c_void, self.len_bytes);
             }
             dealloc(self.ptr, self.layout);
@@ -208,7 +212,8 @@ impl PinnedPool {
         let mut buffers = Vec::with_capacity(capacity);
         let mut free_indices = Vec::with_capacity(capacity);
 
-        for _ in 0..capacity {
+        for _ in 0..capacity
+        {
             buffers.push(None);
             free_indices.push(buffers.len() - 1);
         }
@@ -227,7 +232,13 @@ impl PinnedPool {
         T: Copy,
     {
         let idx = self.free_indices.pop().ok_or(PinError::AllocationFailed)?;
-        let buf = PinnedBuffer::new::<T>(self.buffers[idx].as_ref().ok_or(PinError::AllocationFailed)?.len_bytes() / std::mem::size_of::<T>())?;
+        let buf = PinnedBuffer::new::<T>(
+            self.buffers[idx]
+                .as_ref()
+                .ok_or(PinError::AllocationFailed)?
+                .len_bytes()
+                / std::mem::size_of::<T>(),
+        )?;
         self.buffers[idx] = Some(buf);
         Ok(PooledBuffer {
             pool: std::ptr::null_mut(),

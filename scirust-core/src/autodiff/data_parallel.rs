@@ -12,14 +12,17 @@ impl GradientAggregator {
     /// `grads` is a slice of per-worker gradient vectors (each of length N).
     /// Returns a single vector of length N where result[j] = sum_i grads[i][j].
     pub fn reduce_sum(grads: &[Vec<f64>]) -> Vec<f64> {
-        if grads.is_empty() {
+        if grads.is_empty()
+        {
             return Vec::new();
         }
         let n = grads[0].len();
         let mut result = vec![0.0; n];
-        for worker_grads in grads {
+        for worker_grads in grads
+        {
             debug_assert_eq!(worker_grads.len(), n, "reduce_sum: length mismatch");
-            for (j, &v) in worker_grads.iter().enumerate() {
+            for (j, &v) in worker_grads.iter().enumerate()
+            {
                 result[j] += v;
             }
         }
@@ -31,12 +34,14 @@ impl GradientAggregator {
     /// `grads` is a slice of per-worker gradient vectors (each of length N).
     /// Returns a single vector of length N where result[j] = mean_i grads[i][j].
     pub fn reduce_mean(grads: &[Vec<f64>]) -> Vec<f64> {
-        if grads.is_empty() {
+        if grads.is_empty()
+        {
             return Vec::new();
         }
         let n_workers = grads.len() as f64;
         let mut result = Self::reduce_sum(grads);
-        for v in &mut result {
+        for v in &mut result
+        {
             *v /= n_workers;
         }
         result
@@ -78,7 +83,8 @@ impl DataParallelTrainer {
         F: Fn(&ParallelTape, usize) -> Vec<f64>,
     {
         let mut all_grads: Vec<Vec<f64>> = Vec::with_capacity(self.n_workers);
-        for i in 0..self.n_workers {
+        for i in 0..self.n_workers
+        {
             let grads = batch_fn(&self.tapes[i], i);
             all_grads.push(grads);
         }
@@ -280,9 +286,12 @@ mod tests {
         // Mean: [3,3]
         let mut trainer = DataParallelTrainer::new(2);
         let avg_grads = trainer.train_batch(|tape, worker| {
-            let x_vals: Vec<f32> = if worker == 0 {
+            let x_vals: Vec<f32> = if worker == 0
+            {
                 vec![1.0, 2.0]
-            } else {
+            }
+            else
+            {
                 vec![4.0, 5.0]
             };
             let x = tape.alloc_node(Node {

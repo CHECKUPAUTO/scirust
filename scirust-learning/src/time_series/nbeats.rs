@@ -22,7 +22,8 @@ impl NBeatsBlock {
     ) -> Self {
         let mut fc_stack = Vec::new();
         fc_stack.push(Linear::new(input_dim, hidden_dim, w_init, b_init, rng));
-        for _ in 0..3 {
+        for _ in 0..3
+        {
             fc_stack.push(Linear::new(hidden_dim, hidden_dim, w_init, b_init, rng));
         }
 
@@ -38,7 +39,8 @@ impl NBeatsBlock {
 
     pub fn forward_both<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> (Var<'t>, Var<'t>) {
         let mut h = input;
-        for fc in &mut self.fc_stack {
+        for fc in &mut self.fc_stack
+        {
             h = fc.forward(tape, h).relu();
         }
         let backcast = self.backcast_head.forward(tape, h.clone());
@@ -50,7 +52,8 @@ impl NBeatsBlock {
 impl Module for NBeatsBlock {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let mut h = input;
-        for fc in &mut self.fc_stack {
+        for fc in &mut self.fc_stack
+        {
             h = fc.forward(tape, h).relu();
         }
 
@@ -60,7 +63,8 @@ impl Module for NBeatsBlock {
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        for fc in &self.fc_stack {
+        for fc in &self.fc_stack
+        {
             v.extend(fc.parameter_indices());
         }
         v.extend(self.backcast_head.parameter_indices());
@@ -69,7 +73,8 @@ impl Module for NBeatsBlock {
     }
 
     fn sync(&mut self, tape: &Tape) {
-        for fc in &mut self.fc_stack {
+        for fc in &mut self.fc_stack
+        {
             fc.sync(tape);
         }
         self.backcast_head.sync(tape);

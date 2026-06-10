@@ -9,5 +9,5 @@
 pub mod dopri5;
 pub mod rk4;
 
-pub use dopri5::{dopri5, OdeOutput};
+pub use dopri5::{OdeOutput, dopri5};
 pub use rk4::rk4_fixed;

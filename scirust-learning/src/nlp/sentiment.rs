@@ -1,7 +1,7 @@
-use scirust_core::autodiff::reverse::{Tape, Var};
-use scirust_core::nn::{Embedding, Linear, Module, PcgEngine};
 use crate::nlp::tokenization::Tokenizer;
 use scirust_core::autodiff::reverse::Tensor;
+use scirust_core::autodiff::reverse::{Tape, Var};
+use scirust_core::nn::{Embedding, Linear, Module, PcgEngine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SentimentPolarity {
@@ -33,7 +33,13 @@ impl SentimentPipeline {
     ) -> Self {
         let vocab_size = tokenizer.vocab_size();
         let embed = Embedding::new(vocab_size, embed_dim, &scirust_core::nn::KaimingNormal, rng);
-        let classifier = Linear::new(embed_dim, 2, &scirust_core::nn::KaimingNormal, &scirust_core::nn::Zeros, rng);
+        let classifier = Linear::new(
+            embed_dim,
+            2,
+            &scirust_core::nn::KaimingNormal,
+            &scirust_core::nn::Zeros,
+            rng,
+        );
 
         Self {
             embed,
@@ -48,7 +54,8 @@ impl SentimentPipeline {
         let actual_len = tokens.len().min(self.max_seq_len);
         tokens.truncate(self.max_seq_len);
         let pad_id = self.tokenizer.pad_id();
-        while tokens.len() < self.max_seq_len {
+        while tokens.len() < self.max_seq_len
+        {
             tokens.push(pad_id);
         }
 
@@ -73,7 +80,8 @@ impl SentimentPipeline {
 
         // Création d'un masque de pooling : 1/L pour les tokens réels, 0 pour le padding
         let mut mask = vec![0.0f32; self.max_seq_len];
-        for i in 0..actual_len {
+        for i in 0..actual_len
+        {
             mask[i] = inv_len;
         }
 
@@ -93,13 +101,16 @@ impl SentimentPipeline {
         let prob0 = p0 / sum;
         let prob1 = p1 / sum;
 
-        if prob1 > prob0 {
+        if prob1 > prob0
+        {
             SentimentResult {
                 polarity: SentimentPolarity::Positive,
                 confidence: prob1,
                 logits: logits.data.clone(),
             }
-        } else {
+        }
+        else
+        {
             SentimentResult {
                 polarity: SentimentPolarity::Negative,
                 confidence: prob0,

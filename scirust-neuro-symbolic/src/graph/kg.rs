@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use crate::core::Reasoner;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Entity(pub String);
@@ -46,7 +46,8 @@ impl KnowledgeGraph {
         let subject = Entity(s.to_string());
         let relation = Relation(r.to_string());
 
-        self.triples.iter()
+        self.triples
+            .iter()
             .filter(|t| t.subject == subject && t.relation == relation)
             .map(|t| t.object.clone())
             .collect()

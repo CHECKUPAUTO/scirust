@@ -30,7 +30,8 @@ pub enum Expr {
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Expr::Const(c) => write!(f, "{c}"),
             Expr::Var(v) => write!(f, "{v}"),
             Expr::Add(a, b) => write!(f, "({} + {})", a, b),
@@ -54,7 +55,8 @@ impl fmt::Display for Expr {
 impl Add for Expr {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
-        match (&self, &rhs) {
+        match (&self, &rhs)
+        {
             (Expr::Const(a), Expr::Const(b)) => Expr::Const(a + b),
             (Expr::Const(0.0), _) => rhs,
             (_, Expr::Const(0.0)) => self,
@@ -66,7 +68,8 @@ impl Add for Expr {
 impl Sub for Expr {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self {
-        match (&self, &rhs) {
+        match (&self, &rhs)
+        {
             (Expr::Const(a), Expr::Const(b)) => Expr::Const(a - b),
             (_, Expr::Const(0.0)) => self,
             _ => Expr::Sub(Box::new(self), Box::new(rhs)),
@@ -77,7 +80,8 @@ impl Sub for Expr {
 impl Mul for Expr {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self {
-        match (&self, &rhs) {
+        match (&self, &rhs)
+        {
             (Expr::Const(0.0), _) | (_, Expr::Const(0.0)) => Expr::Const(0.0),
             (Expr::Const(1.0), _) => rhs,
             (_, Expr::Const(1.0)) => self,
@@ -90,7 +94,8 @@ impl Mul for Expr {
 impl Div for Expr {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
-        match (&self, &rhs) {
+        match (&self, &rhs)
+        {
             (Expr::Const(0.0), _) => Expr::Const(0.0),
             (_, Expr::Const(1.0)) => self,
             (Expr::Const(a), Expr::Const(b)) if *b != 0.0 => Expr::Const(a / b),
@@ -102,7 +107,8 @@ impl Div for Expr {
 impl Neg for Expr {
     type Output = Self;
     fn neg(self) -> Self {
-        match &self {
+        match &self
+        {
             Expr::Const(c) => Expr::Const(-c),
             Expr::Neg(a) => *a.clone(),
             _ => Expr::Neg(Box::new(self)),
@@ -141,15 +147,19 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
-    while i < chars.len() {
+    while i < chars.len()
+    {
         let c = chars[i];
-        if c.is_whitespace() {
+        if c.is_whitespace()
+        {
             i += 1;
             continue;
         }
-        if c.is_ascii_digit() || c == '.' {
+        if c.is_ascii_digit() || c == '.'
+        {
             let start = i;
-            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.')
+            {
                 i += 1;
             }
             let num: f64 = input[start..i]
@@ -158,9 +168,11 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             tokens.push(Token::Num(num));
             continue;
         }
-        if c.is_alphabetic() || c == '_' {
+        if c.is_alphabetic() || c == '_'
+        {
             let start = i;
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_')
+            {
                 i += 1;
             }
             let ident = &input[start..i];
@@ -168,7 +180,8 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             tokens.push(Token::Ident(ident.to_string()));
             continue;
         }
-        match c {
+        match c
+        {
             '+' => tokens.push(Token::Plus),
             '-' => tokens.push(Token::Minus),
             '*' => tokens.push(Token::Star),
@@ -189,18 +202,22 @@ fn parse_expr(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
 
 fn parse_add_sub(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
     let (mut lhs, mut pos) = parse_mul_div(tokens, pos)?;
-    while pos < tokens.len() {
-        match tokens[pos] {
-            Token::Plus => {
+    while pos < tokens.len()
+    {
+        match tokens[pos]
+        {
+            Token::Plus =>
+            {
                 let (rhs, new_pos) = parse_mul_div(tokens, pos + 1)?;
                 lhs = lhs + rhs;
                 pos = new_pos;
-            }
-            Token::Minus => {
+            },
+            Token::Minus =>
+            {
                 let (rhs, new_pos) = parse_mul_div(tokens, pos + 1)?;
                 lhs = lhs - rhs;
                 pos = new_pos;
-            }
+            },
             _ => break,
         }
     }
@@ -209,18 +226,22 @@ fn parse_add_sub(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> 
 
 fn parse_mul_div(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
     let (mut lhs, mut pos) = parse_pow(tokens, pos)?;
-    while pos < tokens.len() {
-        match tokens[pos] {
-            Token::Star => {
+    while pos < tokens.len()
+    {
+        match tokens[pos]
+        {
+            Token::Star =>
+            {
                 let (rhs, new_pos) = parse_pow(tokens, pos + 1)?;
                 lhs = lhs * rhs;
                 pos = new_pos;
-            }
-            Token::Slash => {
+            },
+            Token::Slash =>
+            {
                 let (rhs, new_pos) = parse_pow(tokens, pos + 1)?;
                 lhs = lhs / rhs;
                 pos = new_pos;
-            }
+            },
             _ => break,
         }
     }
@@ -229,7 +250,8 @@ fn parse_mul_div(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> 
 
 fn parse_pow(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
     let (mut base, mut pos) = parse_unary(tokens, pos)?;
-    while pos < tokens.len() && tokens[pos] == Token::Caret {
+    while pos < tokens.len() && tokens[pos] == Token::Caret
+    {
         let (exp, new_pos) = parse_unary(tokens, pos + 1)?;
         base = Expr::Pow(Box::new(base), Box::new(exp));
         pos = new_pos;
@@ -238,7 +260,8 @@ fn parse_pow(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
 }
 
 fn parse_unary(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
-    if pos < tokens.len() && tokens[pos] == Token::Minus {
+    if pos < tokens.len() && tokens[pos] == Token::Minus
+    {
         let (inner, new_pos) = parse_unary(tokens, pos + 1)?;
         return Ok((-inner, new_pos));
     }
@@ -246,20 +269,26 @@ fn parse_unary(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
 }
 
 fn parse_atom(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
-    if pos >= tokens.len() {
+    if pos >= tokens.len()
+    {
         return Err("Unexpected end of expression".into());
     }
-    match &tokens[pos] {
+    match &tokens[pos]
+    {
         Token::Num(n) => Ok((Expr::Const(*n), pos + 1)),
-        Token::Ident(name) => {
+        Token::Ident(name) =>
+        {
             let func = name.as_str();
             // Function call: f(expr)
-            if pos + 1 < tokens.len() && tokens[pos + 1] == Token::LParen {
+            if pos + 1 < tokens.len() && tokens[pos + 1] == Token::LParen
+            {
                 let (arg, after) = parse_expr(tokens, pos + 2)?;
-                if after >= tokens.len() || tokens[after] != Token::RParen {
+                if after >= tokens.len() || tokens[after] != Token::RParen
+                {
                     return Err(format!("Expected ')' after {func}("));
                 }
-                let expr = match func {
+                let expr = match func
+                {
                     "sin" => Expr::Sin(Box::new(arg)),
                     "cos" => Expr::Cos(Box::new(arg)),
                     "exp" => Expr::Exp(Box::new(arg)),
@@ -269,17 +298,21 @@ fn parse_atom(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
                     _ => return Err(format!("Unknown function: {func}")),
                 };
                 Ok((expr, after + 1))
-            } else {
+            }
+            else
+            {
                 Ok((Expr::Var(name.clone()), pos + 1))
             }
-        }
-        Token::LParen => {
+        },
+        Token::LParen =>
+        {
             let (inner, after) = parse_expr(tokens, pos + 1)?;
-            if after >= tokens.len() || tokens[after] != Token::RParen {
+            if after >= tokens.len() || tokens[after] != Token::RParen
+            {
                 return Err("Expected ')'".into());
             }
             Ok((inner, after + 1))
-        }
+        },
         other => Err(format!("Unexpected token: {other:?}")),
     }
 }
@@ -288,44 +321,53 @@ fn parse_atom(tokens: &[Token], pos: usize) -> Result<(Expr, usize), String> {
 
 /// Simplify an expression (constant folding + algebraic identities).
 pub fn simplify(expr: &Expr) -> Expr {
-    match expr {
+    match expr
+    {
         Expr::Const(_) | Expr::Var(_) => expr.clone(),
         Expr::Add(a, b) => simplify(&simplify(a)) + simplify(&simplify(b)),
         Expr::Sub(a, b) => simplify(&simplify(a)) - simplify(&simplify(b)),
         Expr::Mul(a, b) => simplify(&simplify(a)) * simplify(&simplify(b)),
         Expr::Div(a, b) => simplify(&simplify(a)) / simplify(&simplify(b)),
         Expr::Neg(a) => -simplify(&simplify(a)),
-        Expr::Pow(a, b) => {
+        Expr::Pow(a, b) =>
+        {
             let sa = simplify(a);
             let sb = simplify(b);
-            match (&sa, &sb) {
+            match (&sa, &sb)
+            {
                 (Expr::Const(c), Expr::Const(n)) => Expr::Const(c.powf(*n)),
                 (_, Expr::Const(0.0)) => Expr::Const(1.0),
                 (_, Expr::Const(1.0)) => sa.clone(),
                 _ => Expr::Pow(Box::new(sa), Box::new(sb)),
             }
-        }
-        Expr::Sin(a) => match simplify(a) {
+        },
+        Expr::Sin(a) => match simplify(a)
+        {
             Expr::Const(c) => Expr::Const(c.sin()),
             sa => Expr::Sin(Box::new(sa)),
         },
-        Expr::Cos(a) => match simplify(a) {
+        Expr::Cos(a) => match simplify(a)
+        {
             Expr::Const(c) => Expr::Const(c.cos()),
             sa => Expr::Cos(Box::new(sa)),
         },
-        Expr::Exp(a) => match simplify(a) {
+        Expr::Exp(a) => match simplify(a)
+        {
             Expr::Const(c) => Expr::Const(c.exp()),
             sa => Expr::Exp(Box::new(sa)),
         },
-        Expr::Ln(a) => match simplify(a) {
+        Expr::Ln(a) => match simplify(a)
+        {
             Expr::Const(c) if c > 0.0 => Expr::Const(c.ln()),
             sa => Expr::Ln(Box::new(sa)),
         },
-        Expr::Sqrt(a) => match simplify(a) {
+        Expr::Sqrt(a) => match simplify(a)
+        {
             Expr::Const(c) if c >= 0.0 => Expr::Const(c.sqrt()),
             sa => Expr::Sqrt(Box::new(sa)),
         },
-        Expr::Abs(a) => match simplify(a) {
+        Expr::Abs(a) => match simplify(a)
+        {
             Expr::Const(c) => Expr::Const(c.abs()),
             sa => Expr::Abs(Box::new(sa)),
         },
@@ -336,37 +378,48 @@ pub fn simplify(expr: &Expr) -> Expr {
 
 /// Symbolically differentiate expr with respect to var.
 pub fn diff(expr: &Expr, var: &str) -> Expr {
-    match expr {
+    match expr
+    {
         Expr::Const(_) => Expr::Const(0.0),
-        Expr::Var(v) => {
-            if v == var {
+        Expr::Var(v) =>
+        {
+            if v == var
+            {
                 Expr::Const(1.0)
-            } else {
+            }
+            else
+            {
                 Expr::Const(0.0)
             }
-        }
+        },
         Expr::Add(a, b) => diff(a, var) + diff(b, var),
         Expr::Sub(a, b) => diff(a, var) - diff(b, var),
-        Expr::Mul(a, b) => {
+        Expr::Mul(a, b) =>
+        {
             // f'g + fg'
             diff(a, var).clone() * b.as_ref().clone() + a.as_ref().clone() * diff(b, var)
-        }
-        Expr::Div(a, b) => {
+        },
+        Expr::Div(a, b) =>
+        {
             // (f'g - fg') / g^2
             let num = diff(a, var).clone() * b.as_ref().clone() - a.as_ref().clone() * diff(b, var);
             let den = Expr::Pow(b.clone(), Box::new(Expr::Const(2.0)));
             num / den
-        }
+        },
         Expr::Neg(a) => -diff(a, var),
-        Expr::Pow(a, b) => {
-            match b.as_ref() {
-                Expr::Const(n) => {
+        Expr::Pow(a, b) =>
+        {
+            match b.as_ref()
+            {
+                Expr::Const(n) =>
+                {
                     // x^n → n * x^(n-1) * x'
                     let coef = Expr::Const(*n);
                     let pow = Expr::Pow(a.clone(), Box::new(Expr::Const(n - 1.0)));
                     coef * pow * diff(a, var)
-                }
-                _ => {
+                },
+                _ =>
+                {
                     // General case: treat as exp(b * ln(a))
                     // derivative = a^b * (b' * ln(a) + b * a' / a)
                     // Stub: fall back to unsimplified form
@@ -377,29 +430,34 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
                                 + b.as_ref().clone() * diff(a, var) / a.as_ref().clone(),
                         ),
                     )
-                }
+                },
             }
-        }
-        Expr::Sin(a) => {
+        },
+        Expr::Sin(a) =>
+        {
             // d/dx sin(u) = cos(u) * du
             Expr::Mul(Box::new(Expr::Cos(a.clone())), Box::new(diff(a, var)))
-        }
-        Expr::Cos(a) => {
+        },
+        Expr::Cos(a) =>
+        {
             // d/dx cos(u) = -sin(u) * du
             Expr::Mul(
                 Box::new(Expr::Neg(Box::new(Expr::Sin(a.clone())))),
                 Box::new(diff(a, var)),
             )
-        }
-        Expr::Exp(a) => {
+        },
+        Expr::Exp(a) =>
+        {
             // d/dx e^u = e^u * du
             Expr::Mul(Box::new(expr.clone()), Box::new(diff(a, var)))
-        }
-        Expr::Ln(a) => {
+        },
+        Expr::Ln(a) =>
+        {
             // d/dx ln(u) = (1/u) * du
             Expr::Div(Box::new(diff(a, var)), a.clone())
-        }
-        Expr::Sqrt(a) => {
+        },
+        Expr::Sqrt(a) =>
+        {
             // d/dx sqrt(u) = du / (2*sqrt(u))
             Expr::Div(
                 Box::new(diff(a, var)),
@@ -408,11 +466,12 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
                     Box::new(expr.clone()),
                 )),
             )
-        }
-        Expr::Abs(a) => {
+        },
+        Expr::Abs(a) =>
+        {
             // d/dx |u| = sign(u) * du  (stub: just du)
             diff(a, var)
-        }
+        },
     }
 }
 
@@ -420,7 +479,8 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
 
 /// Numerically evaluate an expression with given variable bindings.
 pub fn eval(expr: &Expr, vars: &HashMap<String, f64>) -> Result<f64, String> {
-    match expr {
+    match expr
+    {
         Expr::Const(c) => Ok(*c),
         Expr::Var(v) => vars
             .get(v)
@@ -429,32 +489,38 @@ pub fn eval(expr: &Expr, vars: &HashMap<String, f64>) -> Result<f64, String> {
         Expr::Add(a, b) => Ok(eval(a, vars)? + eval(b, vars)?),
         Expr::Sub(a, b) => Ok(eval(a, vars)? - eval(b, vars)?),
         Expr::Mul(a, b) => Ok(eval(a, vars)? * eval(b, vars)?),
-        Expr::Div(a, b) => {
+        Expr::Div(a, b) =>
+        {
             let den = eval(b, vars)?;
-            if den == 0.0 {
+            if den == 0.0
+            {
                 return Err("Division by zero".into());
             }
             Ok(eval(a, vars)? / den)
-        }
+        },
         Expr::Neg(a) => Ok(-eval(a, vars)?),
         Expr::Pow(a, b) => Ok(eval(a, vars)?.powf(eval(b, vars)?)),
         Expr::Sin(a) => Ok(eval(a, vars)?.sin()),
         Expr::Cos(a) => Ok(eval(a, vars)?.cos()),
         Expr::Exp(a) => Ok(eval(a, vars)?.exp()),
-        Expr::Ln(a) => {
+        Expr::Ln(a) =>
+        {
             let v = eval(a, vars)?;
-            if v <= 0.0 {
+            if v <= 0.0
+            {
                 return Err("ln of non-positive number".into());
             }
             Ok(v.ln())
-        }
-        Expr::Sqrt(a) => {
+        },
+        Expr::Sqrt(a) =>
+        {
             let v = eval(a, vars)?;
-            if v < 0.0 {
+            if v < 0.0
+            {
                 return Err("sqrt of negative number".into());
             }
             Ok(v.sqrt())
-        }
+        },
         Expr::Abs(a) => Ok(eval(a, vars)?.abs()),
     }
 }
@@ -467,16 +533,21 @@ pub fn solve_quadratic(expr: &Expr, var: &str) -> Vec<f64> {
     // Extract coefficients by evaluating at 3 points
     let points = [0.0_f64, 1.0, -1.0];
     let mut vals = Vec::new();
-    for &x in &points {
+    for &x in &points
+    {
         let mut vars = HashMap::new();
         vars.insert(var.to_string(), x);
-        if let Ok(v) = eval(expr, &vars) {
+        if let Ok(v) = eval(expr, &vars)
+        {
             vals.push(v);
-        } else {
+        }
+        else
+        {
             return vec![];
         }
     }
-    if vals.len() != 3 {
+    if vals.len() != 3
+    {
         return vec![];
     }
 
@@ -487,16 +558,19 @@ pub fn solve_quadratic(expr: &Expr, var: &str) -> Vec<f64> {
     let a = (a_plus_b + a_minus_b) / 2.0;
     let b = (a_plus_b - a_minus_b) / 2.0;
 
-    if a.abs() < 1e-12 {
+    if a.abs() < 1e-12
+    {
         // Linear: bx + c = 0
-        if b.abs() < 1e-12 {
+        if b.abs() < 1e-12
+        {
             return vec![];
         }
         return vec![-c / b];
     }
 
     let disc = b * b - 4.0 * a * c;
-    if disc < -1e-12 {
+    if disc < -1e-12
+    {
         return vec![];
     }
     let disc = disc.max(0.0);
@@ -519,7 +593,8 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
     let v1 = eval(expr, &vars1).ok()?;
 
     let slope = v1 - v0;
-    if slope.abs() < 1e-15 {
+    if slope.abs() < 1e-15
+    {
         return None;
     }
     Some(-v0 / slope)
@@ -530,18 +605,23 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
 /// Check if two expressions are equivalent by evaluating at random points.
 pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
     let vars = ["x", "y", "z", "u", "v", "w"];
-    for i in 0..20 {
+    for i in 0..20
+    {
         let mut bindings = HashMap::new();
-        for (j, v) in vars.iter().enumerate() {
+        for (j, v) in vars.iter().enumerate()
+        {
             let val = ((i * 7919 + j * 6271 + 127) as f64 / 1000.0) % 20.0 - 10.0;
             bindings.insert(v.to_string(), val);
         }
-        match (eval(a, &bindings), eval(b, &bindings)) {
-            (Ok(va), Ok(vb)) => {
-                if (va - vb).abs() > 1e-8 {
+        match (eval(a, &bindings), eval(b, &bindings))
+        {
+            (Ok(va), Ok(vb)) =>
+            {
+                if (va - vb).abs() > 1e-8
+                {
                     return false;
                 }
-            }
+            },
             _ => return false,
         }
     }
@@ -552,7 +632,8 @@ pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
 
 /// Generate Rust code for evaluating the expression.
 pub fn to_rust_code(expr: &Expr) -> String {
-    match expr {
+    match expr
+    {
         Expr::Const(c) => c.to_string(),
         Expr::Var(v) => v.clone(),
         Expr::Add(a, b) => format!("({} + {})", to_rust_code(a), to_rust_code(b)),
@@ -573,9 +654,12 @@ pub fn to_rust_code(expr: &Expr) -> String {
 // ── Apply trigonometric identities ──
 
 pub fn apply_trig_identity(expr: &Expr) -> Expr {
-    match expr {
-        Expr::Pow(a, _) => {
-            if let Expr::Sin(inner) = a.as_ref() {
+    match expr
+    {
+        Expr::Pow(a, _) =>
+        {
+            if let Expr::Sin(inner) = a.as_ref()
+            {
                 // sin²(x) → (1 - cos(2x)) / 2
                 let cos_2x = Expr::Cos(Box::new(Expr::Mul(
                     Box::new(Expr::Const(2.0)),
@@ -583,7 +667,8 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
                 )));
                 return Expr::Sub(Box::new(Expr::Const(1.0)), Box::new(cos_2x)) / Expr::Const(2.0);
             }
-            if let Expr::Cos(inner) = a.as_ref() {
+            if let Expr::Cos(inner) = a.as_ref()
+            {
                 let cos_2x = Expr::Cos(Box::new(Expr::Mul(
                     Box::new(Expr::Const(2.0)),
                     inner.clone(),
@@ -591,7 +676,7 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
                 return (Expr::Const(1.0) + cos_2x) / Expr::Const(2.0);
             }
             expr.clone()
-        }
+        },
         _ => expr.clone(),
     }
 }
@@ -624,15 +709,18 @@ impl Optimizer {
 /// Simple polynomial fit using least squares.
 pub fn polynomial_fit(xs: &[f64], ys: &[f64], degree: usize) -> Result<Vec<f64>, String> {
     let n = xs.len();
-    if n != ys.len() || n == 0 {
+    if n != ys.len() || n == 0
+    {
         return Err("Empty or mismatched inputs".into());
     }
     let k = degree + 1;
     // Vandermonde matrix
     let mut v = Vec::with_capacity(n * k);
-    for &x in xs {
+    for &x in xs
+    {
         let mut pow = 1.0;
-        for _ in 0..k {
+        for _ in 0..k
+        {
             v.push(pow);
             pow *= x;
         }
@@ -640,36 +728,46 @@ pub fn polynomial_fit(xs: &[f64], ys: &[f64], degree: usize) -> Result<Vec<f64>,
     // Normal equations: (V^T V) a = V^T y
     let mut vtv = vec![0.0_f64; k * k];
     let mut vty = vec![0.0_f64; k];
-    for i in 0..k {
-        for j in 0..k {
+    for i in 0..k
+    {
+        for j in 0..k
+        {
             let mut s = 0.0;
-            for row in 0..n {
+            for row in 0..n
+            {
                 s += v[row * k + i] * v[row * k + j];
             }
             vtv[i * k + j] = s;
         }
         let mut s = 0.0;
-        for row in 0..n {
+        for row in 0..n
+        {
             s += v[row * k + i] * ys[row];
         }
         vty[i] = s;
     }
     // Gaussian elimination
-    for col in 0..k {
+    for col in 0..k
+    {
         let pivot = vtv[col * k + col];
-        if pivot.abs() < 1e-15 {
+        if pivot.abs() < 1e-15
+        {
             return Err("Singular matrix".into());
         }
-        for j in 0..k {
+        for j in 0..k
+        {
             vtv[col * k + j] /= pivot;
         }
         vty[col] /= pivot;
-        for row in 0..k {
-            if row == col {
+        for row in 0..k
+        {
+            if row == col
+            {
                 continue;
             }
             let factor = vtv[row * k + col];
-            for j in 0..k {
+            for j in 0..k
+            {
                 vtv[row * k + j] -= factor * vtv[col * k + j];
             }
             vty[row] -= factor * vty[col];
@@ -681,7 +779,8 @@ pub fn polynomial_fit(xs: &[f64], ys: &[f64], degree: usize) -> Result<Vec<f64>,
 /// Simple linear regression.
 pub fn linear_regression(xs: &[f64], ys: &[f64]) -> Result<(f64, f64), String> {
     let coeffs = polynomial_fit(xs, ys, 1)?;
-    if coeffs.len() < 2 {
+    if coeffs.len() < 2
+    {
         return Err("Fit failed".into());
     }
     Ok((coeffs[0], coeffs[1])) // (intercept, slope)
@@ -689,29 +788,37 @@ pub fn linear_regression(xs: &[f64], ys: &[f64]) -> Result<(f64, f64), String> {
 
 /// Discover patterns in a time series (basic: detect trend).
 pub fn discover_patterns(data: &[f64]) -> Vec<String> {
-    if data.len() < 3 {
+    if data.len() < 3
+    {
         return vec![];
     }
     let mut patterns = Vec::new();
     let mut increasing = 0;
     let mut decreasing = 0;
-    for w in data.windows(2) {
-        if w[1] > w[0] {
+    for w in data.windows(2)
+    {
+        if w[1] > w[0]
+        {
             increasing += 1;
         }
-        if w[1] < w[0] {
+        if w[1] < w[0]
+        {
             decreasing += 1;
         }
     }
     let total = (data.len() - 1) as f64;
-    if increasing as f64 / total > 0.7 {
+    if increasing as f64 / total > 0.7
+    {
         patterns.push("trend_upward".to_string());
-    } else if decreasing as f64 / total > 0.7 {
+    }
+    else if decreasing as f64 / total > 0.7
+    {
         patterns.push("trend_downward".to_string());
     }
     let mean: f64 = data.iter().sum::<f64>() / data.len() as f64;
     let var: f64 = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / data.len() as f64;
-    if var.sqrt() / mean.abs().max(1e-8) < 0.05 {
+    if var.sqrt() / mean.abs().max(1e-8) < 0.05
+    {
         patterns.push("stable".to_string());
     }
     patterns
@@ -872,29 +979,34 @@ impl Neg for Dual {
 
 pub mod ops {
     pub fn add_f32(a: &[f32], b: &[f32], out: &mut [f32]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) {
+        for i in 0..a.len().min(b.len()).min(out.len())
+        {
             out[i] = a[i] + b[i];
         }
     }
     pub fn mul_f32(a: &[f32], b: &[f32], out: &mut [f32]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) {
+        for i in 0..a.len().min(b.len()).min(out.len())
+        {
             out[i] = a[i] * b[i];
         }
     }
     pub fn add_f64(a: &[f64], b: &[f64], out: &mut [f64]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) {
+        for i in 0..a.len().min(b.len()).min(out.len())
+        {
             out[i] = a[i] + b[i];
         }
     }
     pub fn mul_f64(a: &[f64], b: &[f64], out: &mut [f64]) {
-        for i in 0..a.len().min(b.len()).min(out.len()) {
+        for i in 0..a.len().min(b.len()).min(out.len())
+        {
             out[i] = a[i] * b[i];
         }
     }
 }
 
 pub fn simd_add_one(data: &mut [f32]) {
-    for x in data {
+    for x in data
+    {
         *x += 1.0;
     }
 }
@@ -973,11 +1085,16 @@ pub enum NaturalCommand {
 
 pub fn parse_natural(input: &str) -> NaturalCommand {
     let lower = input.to_lowercase();
-    if lower.contains("solve") || lower.contains("résous") || lower.contains("résoudre") {
+    if lower.contains("solve") || lower.contains("résous") || lower.contains("résoudre")
+    {
         NaturalCommand::Solve(input.to_string())
-    } else if lower.contains("derive") || lower.contains("dérive") || lower.contains("dérivée") {
+    }
+    else if lower.contains("derive") || lower.contains("dérive") || lower.contains("dérivée")
+    {
         NaturalCommand::Derive(input.to_string())
-    } else {
+    }
+    else
+    {
         NaturalCommand::Evaluate(input.to_string())
     }
 }

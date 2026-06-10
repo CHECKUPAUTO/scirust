@@ -28,8 +28,14 @@ impl PatchEmbedding {
         rng: &mut PcgEngine,
     ) -> Self {
         let projection = crate::nn::conv2d::Conv2d::new(
-            in_channels, embed_dim, patch_size, patch_size,
-            crate::nn::conv_utils::Padding::Valid, w_init, Some(b_init), rng
+            in_channels,
+            embed_dim,
+            patch_size,
+            patch_size,
+            crate::nn::conv_utils::Padding::Valid,
+            w_init,
+            Some(b_init),
+            rng,
         );
         Self { projection }
     }
@@ -49,10 +55,10 @@ impl ViT {
         b_init: &B,
         rng: &mut PcgEngine,
     ) -> Self {
-        let patch_embed = PatchEmbedding::new(in_channels, d_model, patch_size, w_init, b_init, rng);
-        let encoder = TransformerEncoder::new(
-            n_layers, d_model, n_heads, d_ff, false, w_init, b_init, rng
-        );
+        let patch_embed =
+            PatchEmbedding::new(in_channels, d_model, patch_size, w_init, b_init, rng);
+        let encoder =
+            TransformerEncoder::new(n_layers, d_model, n_heads, d_ff, false, w_init, b_init, rng);
         let head = Linear::new(d_model, num_classes, w_init, b_init, rng);
 
         Self {
@@ -73,12 +79,15 @@ impl Module for ViT {
 
         // Skip transformer for small tests to avoid LayerNorm dimension mismatch
         // unless we can ensure d_model matches what transformer expects.
-        if seq_len == 1 {
+        if seq_len == 1
+        {
             use crate::tensor::tensor3d::Var3D;
             let x_3d = Var3D::from_var(patches, batch, seq_len, self.d_model);
             let encoded = self.encoder.forward_3d(tape, x_3d);
             self.head.forward(tape, encoded.var)
-        } else {
+        }
+        else
+        {
             // Simplified return for POC
             let dummy = tape.input(Tensor::zeros(batch, self.d_model));
             self.head.forward(tape, dummy)

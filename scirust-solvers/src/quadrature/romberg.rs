@@ -11,24 +11,28 @@ pub fn romberg<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, tol: f64, max_levels: us
     // Niveau 0 : trapèze simple
     r[0][0] = 0.5 * (b - a) * (f(a) + f(b));
 
-    for i in 1..max_levels {
+    for i in 1..max_levels
+    {
         // Trapèze composé avec 2^i intervalles
         let n = 1usize << (i - 1); // nombre de NOUVEAUX points
         let h = (b - a) / (1usize << i) as f64;
         let mut sum = 0.0;
-        for k in 0..n {
+        for k in 0..n
+        {
             sum += f(a + (2 * k + 1) as f64 * h);
         }
         r[i][0] = 0.5 * r[i - 1][0] + h * sum;
 
         // Extrapolation de Richardson
-        for j in 1..=i {
+        for j in 1..=i
+        {
             let denom = (1usize << (2 * j)) as f64 - 1.0;
             r[i][j] = r[i][j - 1] + (r[i][j - 1] - r[i - 1][j - 1]) / denom;
         }
 
         // Convergence : différence entre deux niveaux d'extrapolation
-        if i >= 2 && (r[i][i] - r[i - 1][i - 1]).abs() < tol {
+        if i >= 2 && (r[i][i] - r[i - 1][i - 1]).abs() < tol
+        {
             return r[i][i];
         }
     }

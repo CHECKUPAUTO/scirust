@@ -1,7 +1,7 @@
+use scirust_core::autodiff::reverse::Tensor;
 use scirust_neuro_symbolic::core::Reasoner;
 use scirust_neuro_symbolic::logic::DatalogEngine;
 use scirust_neuro_symbolic::neural::DifferentiableLogicLayer;
-use scirust_core::autodiff::reverse::Tensor;
 
 #[test]
 fn test_hybrid_workflow() {

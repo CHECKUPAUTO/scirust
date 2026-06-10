@@ -277,12 +277,14 @@ mod tests {
 
     #[test]
     fn sgemm_gpu_correctness_or_skip() {
-        let ctx = match GpuContext::try_init() {
+        let ctx = match GpuContext::try_init()
+        {
             Some(c) => c,
-            None => {
+            None =>
+            {
                 eprintln!("[skip] aucun GPU compatible wgpu");
                 return;
-            }
+            },
         };
 
         let pipeline = SgemmPipeline::build(&ctx.device);
@@ -305,17 +307,21 @@ mod tests {
 
         // Référence CPU
         let mut expected = vec![0.0f32; 6];
-        for i in 0..3 {
-            for j in 0..2 {
+        for i in 0..3
+        {
+            for j in 0..2
+            {
                 let mut acc = 0.0;
-                for p in 0..4 {
+                for p in 0..4
+                {
                     acc += a_data[i * 4 + p] * b_data[p * 2 + j];
                 }
                 expected[i * 2 + j] = acc;
             }
         }
 
-        for i in 0..6 {
+        for i in 0..6
+        {
             assert!(
                 (c_result.data[i] - expected[i]).abs() < 1e-3,
                 "mismatch at {i}: gpu={} cpu={}",

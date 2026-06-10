@@ -1,17 +1,19 @@
+use scirust_core::autodiff::optim::Adam;
 use scirust_core::autodiff::reverse::{Tape, Tensor};
-use scirust_core::nn::{PcgEngine, KaimingNormal, Zeros, Module, Linear, Sequential, ReLU, VAE, ViT, GCN};
-use scirust_core::nn::vision::ResNet;
-use scirust_core::nn::transformer::MoELayer;
 use scirust_core::nn::audio::{AudioEncoder, CTCLoss};
 use scirust_core::nn::peft::LoRALinear;
+use scirust_core::nn::transformer::MoELayer;
+use scirust_core::nn::vision::ResNet;
+use scirust_core::nn::{
+    GCN, KaimingNormal, Linear, Module, PcgEngine, ReLU, Sequential, VAE, ViT, Zeros,
+};
 use scirust_learning::nlp::bpe::BpeTokenizer;
 use scirust_learning::nlp::tokenization::Tokenizer;
-use scirust_learning::rl::tabular::TabularAgent;
 use scirust_learning::rl::deep::DQNAgent;
 use scirust_learning::rl::ppo::PPOAgent;
+use scirust_learning::rl::tabular::TabularAgent;
 use scirust_learning::time_series::nbeats::NBeatsBlock;
 use scirust_solvers::scientific::FemSolver1D;
-use scirust_core::autodiff::optim::Adam;
 
 #[test]
 fn test_bpe_integration() {
@@ -34,9 +36,15 @@ fn test_resnet_forward() {
 #[test]
 fn test_moe_forward() {
     let mut rng = PcgEngine::new(42);
-    let mut moe = MoELayer::new(8, 4, 2,
+    let mut moe = MoELayer::new(
+        8,
+        4,
+        2,
         || Linear::new(8, 8, &KaimingNormal, &Zeros, &mut PcgEngine::new(0)),
-        &KaimingNormal, &Zeros, &mut rng);
+        &KaimingNormal,
+        &Zeros,
+        &mut rng,
+    );
     let tape = Tape::new();
     let x = tape.input(Tensor::zeros(1, 8));
     let out = moe.forward(&tape, x);
@@ -46,7 +54,14 @@ fn test_moe_forward() {
 #[test]
 fn test_tabular_rl_update() {
     let mut agent = TabularAgent::new(0.1, 0.9, 0.1);
-    agent.update_q(&"state1", &"action1", 1.0, &"state2", &["action1", "action2"], false);
+    agent.update_q(
+        &"state1",
+        &"action1",
+        1.0,
+        &"state2",
+        &["action1", "action2"],
+        false,
+    );
     assert!(agent.get_q(&"state1", &"action1") > 0.0);
 }
 
@@ -86,7 +101,7 @@ fn test_vit_forward() {
     let mut rng = PcgEngine::new(42);
     let mut model = ViT::new(8, 4, 3, 10, 16, 2, 2, 32, &KaimingNormal, &Zeros, &mut rng);
     let tape = Tape::new();
-    let x = tape.input(Tensor::zeros(1, 3*8*8));
+    let x = tape.input(Tensor::zeros(1, 3 * 8 * 8));
     let out = model.forward(&tape, x);
     assert_eq!(out.shape(), (1, 10));
 }
@@ -109,7 +124,11 @@ fn test_gcn_forward() {
     let mut model = GCN::new(&[4, 8, 2], &KaimingNormal, &Zeros, &mut rng);
     let tape = Tape::new();
     let x = tape.input(Tensor::zeros(3, 4));
-    let adj = tape.input(Tensor::from_vec(vec![1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0], 3, 3));
+    let adj = tape.input(Tensor::from_vec(
+        vec![1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0],
+        3,
+        3,
+    ));
     let out = model.forward(&tape, x, adj);
     assert_eq!(out.shape(), (3, 2));
 }

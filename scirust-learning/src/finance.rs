@@ -3,7 +3,8 @@
 /// Exponential Moving Average (EMA)
 /// Formula: EMA_t = Price_t * (2/(N+1)) + EMA_{t-1} * (1 - 2/(N+1))
 pub fn ema(data: &[f64], period: usize) -> Vec<f64> {
-    if data.is_empty() || period == 0 {
+    if data.is_empty() || period == 0
+    {
         return vec![];
     }
     let mut ema_values = Vec::with_capacity(data.len());
@@ -12,7 +13,8 @@ pub fn ema(data: &[f64], period: usize) -> Vec<f64> {
     let mut current_ema = data[0];
     ema_values.push(current_ema);
 
-    for &price in data.iter().skip(1) {
+    for &price in data.iter().skip(1)
+    {
         current_ema = price * alpha + current_ema * (1.0 - alpha);
         ema_values.push(current_ema);
     }
@@ -22,18 +24,23 @@ pub fn ema(data: &[f64], period: usize) -> Vec<f64> {
 /// Relative Strength Index (RSI)
 /// period: typically 14
 pub fn rsi(data: &[f64], period: usize) -> Vec<f64> {
-    if data.len() <= period {
+    if data.len() <= period
+    {
         return vec![];
     }
     let mut rsi_values = vec![0.0; data.len()];
     let mut gains = 0.0;
     let mut losses = 0.0;
 
-    for i in 1..=period {
+    for i in 1..=period
+    {
         let diff = data[i] - data[i - 1];
-        if diff >= 0.0 {
+        if diff >= 0.0
+        {
             gains += diff;
-        } else {
+        }
+        else
+        {
             losses -= diff;
         }
     }
@@ -41,23 +48,37 @@ pub fn rsi(data: &[f64], period: usize) -> Vec<f64> {
     let mut avg_gain = gains / period as f64;
     let mut avg_loss = losses / period as f64;
 
-    if avg_loss == 0.0 {
+    if avg_loss == 0.0
+    {
         rsi_values[period] = 100.0;
-    } else {
+    }
+    else
+    {
         let rs = avg_gain / avg_loss;
         rsi_values[period] = 100.0 - (100.0 / (1.0 + rs));
     }
 
-    for i in (period + 1)..data.len() {
+    for i in (period + 1)..data.len()
+    {
         let diff = data[i] - data[i - 1];
-        let (gain, loss) = if diff >= 0.0 { (diff, 0.0) } else { (0.0, -diff) };
+        let (gain, loss) = if diff >= 0.0
+        {
+            (diff, 0.0)
+        }
+        else
+        {
+            (0.0, -diff)
+        };
 
         avg_gain = (avg_gain * (period as f64 - 1.0) + gain) / period as f64;
         avg_loss = (avg_loss * (period as f64 - 1.0) + loss) / period as f64;
 
-        if avg_loss == 0.0 {
+        if avg_loss == 0.0
+        {
             rsi_values[i] = 100.0;
-        } else {
+        }
+        else
+        {
             let rs = avg_gain / avg_loss;
             rsi_values[i] = 100.0 - (100.0 / (1.0 + rs));
         }
@@ -69,15 +90,21 @@ pub fn rsi(data: &[f64], period: usize) -> Vec<f64> {
 /// Bollinger Bands
 /// Returns (Upper Band, Middle Band, Lower Band)
 pub fn bollinger_bands(data: &[f64], period: usize, k: f64) -> Vec<(f64, f64, f64)> {
-    if data.len() < period {
+    if data.len() < period
+    {
         return vec![];
     }
     let mut results = Vec::with_capacity(data.len() - period + 1);
 
-    for i in 0..=(data.len() - period) {
+    for i in 0..=(data.len() - period)
+    {
         let window = &data[i..(i + period)];
         let middle_band: f64 = window.iter().sum::<f64>() / period as f64;
-        let variance: f64 = window.iter().map(|&x| (x - middle_band).powi(2)).sum::<f64>() / period as f64;
+        let variance: f64 = window
+            .iter()
+            .map(|&x| (x - middle_band).powi(2))
+            .sum::<f64>()
+            / period as f64;
         let std_dev = variance.sqrt();
         results.push((
             middle_band + k * std_dev,
@@ -90,19 +117,26 @@ pub fn bollinger_bands(data: &[f64], period: usize, k: f64) -> Vec<(f64, f64, f6
 
 /// Moving Average Convergence Divergence (MACD)
 /// Returns (MACD Line, Signal Line, Histogram)
-pub fn macd(data: &[f64], fast_period: usize, slow_period: usize, signal_period: usize) -> Vec<(f64, f64, f64)> {
+pub fn macd(
+    data: &[f64],
+    fast_period: usize,
+    slow_period: usize,
+    signal_period: usize,
+) -> Vec<(f64, f64, f64)> {
     let ema_fast = ema(data, fast_period);
     let ema_slow = ema(data, slow_period);
 
     let mut macd_line = Vec::with_capacity(data.len());
-    for (f, s) in ema_fast.iter().zip(ema_slow.iter()) {
+    for (f, s) in ema_fast.iter().zip(ema_slow.iter())
+    {
         macd_line.push(f - s);
     }
 
     let signal_line = ema(&macd_line, signal_period);
     let mut results = Vec::with_capacity(data.len());
 
-    for (m, s) in macd_line.iter().zip(signal_line.iter()) {
+    for (m, s) in macd_line.iter().zip(signal_line.iter())
+    {
         results.push((*m, *s, *m - *s));
     }
     results
@@ -113,7 +147,8 @@ pub fn macd(data: &[f64], fast_period: usize, slow_period: usize, signal_period:
 /// win_loss_ratio: ratio of average win to average loss (b in formula)
 /// Returns the fraction of the capital to bet.
 pub fn kelly_criterion(win_prob: f64, win_loss_ratio: f64) -> f64 {
-    if win_loss_ratio <= 0.0 {
+    if win_loss_ratio <= 0.0
+    {
         return 0.0;
     }
     let f = (win_prob * (win_loss_ratio + 1.0) - 1.0) / win_loss_ratio;
@@ -124,7 +159,8 @@ pub fn kelly_criterion(win_prob: f64, win_loss_ratio: f64) -> f64 {
 /// data: historical returns
 /// confidence_level: e.g., 0.95 for 95% confidence
 pub fn value_at_risk(returns: &[f64], confidence_level: f64) -> f64 {
-    if returns.is_empty() {
+    if returns.is_empty()
+    {
         return 0.0;
     }
     let mut sorted_returns = returns.to_vec();
@@ -133,7 +169,8 @@ pub fn value_at_risk(returns: &[f64], confidence_level: f64) -> f64 {
     let alpha = 1.0 - confidence_level;
     let index = ((alpha * sorted_returns.len() as f64) + 1e-10).floor() as usize;
 
-    if index >= sorted_returns.len() {
+    if index >= sorted_returns.len()
+    {
         return 0.0;
     }
     -sorted_returns[index]
@@ -159,7 +196,10 @@ mod tests {
 
     #[test]
     fn test_rsi() {
-        let data = vec![44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03, 45.61, 46.28, 46.28, 46.00];
+        let data = vec![
+            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03,
+            45.61, 46.28, 46.28, 46.00,
+        ];
         let period = 14;
         let result = rsi(&data, period);
         assert_eq!(result.len(), 2);
@@ -187,7 +227,8 @@ mod tests {
         let result = macd(&data, 12, 26, 9);
         assert_eq!(result.len(), 30);
         // Constant data should result in 0 MACD
-        for (m, s, h) in result {
+        for (m, s, h) in result
+        {
             assert!(m.abs() < 1e-10);
             assert!(s.abs() < 1e-10);
             assert!(h.abs() < 1e-10);
@@ -208,7 +249,9 @@ mod tests {
 
     #[test]
     fn test_value_at_risk() {
-        let returns = vec![-0.05, -0.02, 0.01, 0.03, 0.05, -0.10, 0.02, 0.04, -0.01, 0.01];
+        let returns = vec![
+            -0.05, -0.02, 0.01, 0.03, 0.05, -0.10, 0.02, 0.04, -0.01, 0.01,
+        ];
         // Sorted: [-0.10, -0.05, -0.02, -0.01, 0.01, 0.01, 0.02, 0.02, 0.03, 0.04, 0.05]
         // Len = 10. confidence = 0.90 => alpha = 0.10. Index = floor(0.1 * 10) = 1
         // returns[1] = -0.05. VaR = 0.05

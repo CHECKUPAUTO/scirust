@@ -48,7 +48,14 @@ impl MultiHeadAttention {
             d_model,
             n_heads,
             d_head,
-            num_kv_heads: if num_kv_heads > 0 { num_kv_heads } else { n_heads },
+            num_kv_heads: if num_kv_heads > 0
+            {
+                num_kv_heads
+            }
+            else
+            {
+                n_heads
+            },
             use_rope: false,
             rope_theta: 10000.0,
             w_q: Linear::new(d_model, d_model, w_init, b_init, rng),
@@ -115,56 +122,61 @@ impl MultiHeadAttention {
         let d_h = self.d_head;
         let scale = 1.0 / (d_h as f32).sqrt();
 
-        // Etape 1 : split par head via slice_cols
         let mut q_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
         let mut k_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
         let mut v_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for h in 0..h_n {
-            q_per_head.push(q.slice_cols(h * d_h, d_h));
-            k_per_head.push(k.slice_cols(h * d_h, d_h));
-            v_per_head.push(v.slice_cols(h * d_h, d_h));
+        for h in 0..h_n
+        {
+            q_per_head.push(q.try_slice_cols(h * d_h, d_h).unwrap());
+            k_per_head.push(k.try_slice_cols(h * d_h, d_h).unwrap());
+            v_per_head.push(v.try_slice_cols(h * d_h, d_h).unwrap());
         }
 
-        // Etape 2 : pour chaque (h, b), calcule l'attention
         let mut head_outputs: Vec<Vec<Var<'t>>> =
             (0..h_n).map(|_| Vec::with_capacity(batch)).collect();
-        for h in 0..h_n {
-            let q_h = q_per_head[h];
-            let k_h = k_per_head[h];
-            let v_h = v_per_head[h];
-            for b in 0..batch {
-                let q_hb = q_h.slice_rows(b * seq_len, seq_len);
-                let k_hb = k_h.slice_rows(b * seq_len, seq_len);
-                let v_hb = v_h.slice_rows(b * seq_len, seq_len);
+        for h in 0..h_n
+        {
+            let q_h = &q_per_head[h];
+            let k_h = &k_per_head[h];
+            let v_h = &v_per_head[h];
+            for b in 0..batch
+            {
+                let q_hb = q_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
+                let k_hb = k_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
+                let v_hb = v_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
 
                 let k_hb_t = k_hb.transpose_2d();
-                let scores = q_hb.matmul(k_hb_t);
+                let scores = q_hb.try_matmul(k_hb_t).unwrap();
                 let scaled = scores.scale(scale);
-                let pre_softmax = if self.causal {
+                let pre_softmax = if self.causal
+                {
                     scaled.causal_mask(seq_len)
-                } else {
+                }
+                else
+                {
                     scaled
                 };
-                let attn = pre_softmax.softmax(1);
-                let out_hb = attn.matmul(v_hb);
+                let attn = pre_softmax.try_softmax(1).unwrap();
+                let out_hb = attn.try_matmul(v_hb).unwrap();
                 head_outputs[h].push(out_hb);
             }
         }
 
-        // Etape 3a : concat batch-wise par head
         let mut head_full: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for outputs in &head_outputs {
+        for outputs in &head_outputs
+        {
             head_full.push(concat_rows(tape, outputs));
         }
 
-        // Etape 3b : padding par colonnes via matmul + somme
         let mut accumulator: Option<Var<'t>> = None;
-        for (h, head) in head_full.iter().enumerate() {
+        for (h, head) in head_full.iter().enumerate()
+        {
             let pad = build_pad_matrix(tape, h, d_h, self.d_model);
-            let padded = head.matmul(pad);
-            accumulator = Some(match accumulator {
+            let padded = head.try_matmul(pad).unwrap();
+            accumulator = Some(match accumulator
+            {
                 None => padded,
-                Some(acc) => acc.add(padded),
+                Some(acc) => acc.try_add(padded).unwrap(),
             });
         }
         accumulator.unwrap()
@@ -188,7 +200,8 @@ impl MultiHeadAttention {
         let mut q_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
         let mut k_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
         let mut v_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for h in 0..h_n {
+        for h in 0..h_n
+        {
             q_per_head.push(q.slice_cols(h * d_h, d_h));
             k_per_head.push(k.slice_cols(h * d_h, d_h));
             v_per_head.push(v.slice_cols(h * d_h, d_h));
@@ -196,11 +209,13 @@ impl MultiHeadAttention {
 
         let mut head_outputs: Vec<Vec<Var<'t>>> =
             (0..h_n).map(|_| Vec::with_capacity(batch)).collect();
-        for h in 0..h_n {
+        for h in 0..h_n
+        {
             let q_h = q_per_head[h];
             let k_h = k_per_head[h];
             let v_h = v_per_head[h];
-            for b in 0..batch {
+            for b in 0..batch
+            {
                 let q_hb = q_h.slice_rows(b * q_seq_len, q_seq_len);
                 let k_hb = k_h.slice_rows(b * kv_seq_len, kv_seq_len);
                 let v_hb = v_h.slice_rows(b * kv_seq_len, kv_seq_len);
@@ -216,15 +231,18 @@ impl MultiHeadAttention {
         }
 
         let mut head_full: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for outputs in &head_outputs {
+        for outputs in &head_outputs
+        {
             head_full.push(concat_rows(tape, outputs));
         }
 
         let mut accumulator: Option<Var<'t>> = None;
-        for (h, head) in head_full.iter().enumerate() {
+        for (h, head) in head_full.iter().enumerate()
+        {
             let pad = build_pad_matrix(tape, h, d_h, self.d_model);
             let padded = head.matmul(pad);
-            accumulator = Some(match accumulator {
+            accumulator = Some(match accumulator
+            {
                 None => padded,
                 Some(acc) => acc.add(padded),
             });
@@ -239,37 +257,54 @@ impl MultiHeadAttention {
         let v = self.w_v.forward(tape, x_token);
         let (k_cached, v_cached) = {
             let mut cache = self.kv_cache.borrow_mut();
-            match cache.as_mut() {
-                Some((ck, cv)) => {
+            match cache.as_mut()
+            {
+                Some((ck, cv)) =>
+                {
                     let kd = tape.value(k.idx());
                     let vd = tape.value(v.idx());
-                    let mut nk = ck.data.clone(); nk.extend(&kd.data);
-                    let mut nv = cv.data.clone(); nv.extend(&vd.data);
+                    let mut nk = ck.data.clone();
+                    nk.extend(&kd.data);
+                    let mut nv = cv.data.clone();
+                    nv.extend(&vd.data);
                     *ck = Tensor::from_vec(nk, ck.rows + 1, ck.cols);
                     *cv = Tensor::from_vec(nv, cv.rows + 1, cv.cols);
                     (tape.input(ck.clone()), tape.input(cv.clone()))
-                }
-                None => {
+                },
+                None =>
+                {
                     let kd = tape.value(k.idx());
                     let vd = tape.value(v.idx());
                     *cache = Some((kd, vd));
                     (k, v)
-                }
+                },
             }
         };
-        let h_n = self.n_heads; let d_h = self.d_head;
+        let h_n = self.n_heads;
+        let d_h = self.d_head;
         let scale = 1.0 / (d_h as f32).sqrt();
         let mut heads = Vec::with_capacity(h_n);
-        for h in 0..h_n {
+        for h in 0..h_n
+        {
             let qh = q.clone().slice_cols(h * d_h, d_h);
             let kh = k_cached.clone().slice_cols(h * d_h, d_h);
             let vh = v_cached.clone().slice_cols(h * d_h, d_h);
-            heads.push(qh.matmul(kh.transpose_2d()).scale(scale).softmax(1).matmul(vh));
+            heads.push(
+                qh.matmul(kh.transpose_2d())
+                    .scale(scale)
+                    .softmax(1)
+                    .matmul(vh),
+            );
         }
         let mut acc: Option<Var> = None;
-        for (h, hd) in heads.iter().enumerate() {
+        for (h, hd) in heads.iter().enumerate()
+        {
             let pd = hd.matmul(build_pad_matrix(tape, h, d_h, self.d_model));
-            acc = Some(match acc { None => pd, Some(a) => a.add(pd) });
+            acc = Some(match acc
+            {
+                None => pd,
+                Some(a) => a.add(pd),
+            });
         }
         self.w_o.forward(tape, acc.unwrap())
     }
@@ -295,11 +330,13 @@ impl MultiHeadAttention {
     #[allow(dead_code)]
     fn repeat_kv_heads(&self, x: Tensor, _seq_len: usize, _d_head: usize) -> Tensor {
         let repeat = self.n_heads / self.num_kv_heads;
-        if repeat <= 1 {
+        if repeat <= 1
+        {
             return x;
         }
         let mut parts = Vec::with_capacity(repeat);
-        for _ in 0..repeat {
+        for _ in 0..repeat
+        {
             parts.push(x.clone());
         }
         // TODO: remplacer par Tensor::cat quand elle sera implementee
@@ -308,7 +345,8 @@ impl MultiHeadAttention {
         let x_data = &parts[0].data;
         let _kv_len = x_data.len() / self.num_kv_heads;
         let mut out = Vec::with_capacity(x_data.len() * repeat);
-        for _ in 0..repeat {
+        for _ in 0..repeat
+        {
             out.extend_from_slice(x_data);
         }
         // Attention : shape approximative, a revoir avec cat.
@@ -373,7 +411,8 @@ impl MultiHeadAttention {
 /// pad[i, j] = 1 si j == h*d_h + i, sinon 0. Shape (d_h, d_model).
 fn build_pad_matrix<'t>(tape: &'t Tape, h: usize, d_h: usize, d_model: usize) -> Var<'t> {
     let mut data = vec![0.0f32; d_h * d_model];
-    for i in 0..d_h {
+    for i in 0..d_h
+    {
         let j = h * d_h + i;
         data[i * d_model + j] = 1.0;
     }

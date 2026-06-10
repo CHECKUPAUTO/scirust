@@ -32,9 +32,11 @@ pub enum SolveResult {
 impl SolveResult {
     /// Renvoie un Vec<f64> des racines réelles, quelle que soit la variante.
     pub fn real_roots(&self) -> Vec<f64> {
-        match self {
+        match self
+        {
             SolveResult::AllReal(v) => v.clone(),
-            SolveResult::AllComplex(v) => v.iter()
+            SolveResult::AllComplex(v) => v
+                .iter()
                 .filter(|(_, im)| im.abs() < 1e-6)
                 .map(|(re, _)| *re)
                 .collect(),
@@ -53,7 +55,8 @@ impl SolveResult {
 pub fn solve(expr: &Expr, var: &str, bindings: HashMap<String, f64>) -> SolverResult<SolveResult> {
     let _ = bindings; // pour le cas polynomial on n'évalue pas — on extrait les coefs
     // 1) Tente l'extraction polynomiale
-    if let Some(coeffs) = extract_polynomial_coeffs(expr, var) {
+    if let Some(coeffs) = extract_polynomial_coeffs(expr, var)
+    {
         return solve_polynomial(&coeffs);
     }
     Err(SolverError::InvalidInput(format!(
@@ -110,62 +113,78 @@ where
 /// Résout un polynôme par les méthodes les plus adaptées.
 fn solve_polynomial(coeffs: &[f64]) -> SolverResult<SolveResult> {
     let p = Polynomial::new(coeffs.to_vec());
-    match p.degree() {
-        0 => {
+    match p.degree()
+    {
+        0 =>
+        {
             // Constante non nulle → pas de racine
-            if p.coeffs[0].abs() < 1e-15 {
+            if p.coeffs[0].abs() < 1e-15
+            {
                 // 0 = 0 : techniquement tout x est solution. On renvoie []
                 Ok(SolveResult::AllReal(vec![]))
-            } else {
+            }
+            else
+            {
                 Err(SolverError::InvalidInput(format!(
                     "Polynôme constant non nul {} = 0 sans solution",
                     p.coeffs[0]
                 )))
             }
-        }
-        1 => {
+        },
+        1 =>
+        {
             // a + bx = 0  →  x = -a/b
             let a = p.coeffs[0];
             let b = p.coeffs[1];
-            if b.abs() < 1e-30 {
+            if b.abs() < 1e-30
+            {
                 return Err(SolverError::Singular { row: 0, pivot: b });
             }
             Ok(SolveResult::AllReal(vec![-a / b]))
-        }
-        2 => {
+        },
+        2 =>
+        {
             // ax² + bx + c = 0
             let c = p.coeffs[0];
             let b = p.coeffs[1];
             let a = p.coeffs[2];
             let disc = b * b - 4.0 * a * c;
-            if disc >= 0.0 {
+            if disc >= 0.0
+            {
                 let sq = disc.sqrt();
                 let mut x1 = (-b - sq) / (2.0 * a);
                 let mut x2 = (-b + sq) / (2.0 * a);
-                if x1 > x2 {
+                if x1 > x2
+                {
                     std::mem::swap(&mut x1, &mut x2);
                 }
                 Ok(SolveResult::AllReal(vec![x1, x2]))
-            } else {
+            }
+            else
+            {
                 let sq = (-disc).sqrt();
                 let re = -b / (2.0 * a);
                 let im = sq / (2.0 * a);
                 Ok(SolveResult::AllComplex(vec![(re, -im), (re, im)]))
             }
-        }
-        _ => {
+        },
+        _ =>
+        {
             // Degré 3+ : Durand-Kerner
             let all = crate::polynomial::roots::roots(&p)?;
             // Sépare réelles/complexes
             let any_complex = all.iter().any(|(_, im)| im.abs() > 1e-6);
-            if any_complex {
+            if any_complex
+            {
                 Ok(SolveResult::AllComplex(all))
-            } else {
+            }
+            else
+            {
                 let mut reals: Vec<f64> = all.into_iter().map(|(re, _)| re).collect();
                 reals.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 Ok(SolveResult::AllReal(reals))
             }
-        }
+        },
     }
 }
 
@@ -202,15 +221,18 @@ mod tests {
         // x² + 1 = 0  →  ±i
         let e = sym::parse("x^2 + 1").unwrap();
         let r = solve(&e, "x", HashMap::new()).unwrap();
-        match r {
-            SolveResult::AllComplex(roots) => {
+        match r
+        {
+            SolveResult::AllComplex(roots) =>
+            {
                 assert_eq!(roots.len(), 2);
                 // |im| = 1 pour les deux
-                for (re, im) in &roots {
+                for (re, im) in &roots
+                {
                     assert!(re.abs() < 1e-10);
                     assert!((im.abs() - 1.0).abs() < 1e-10);
                 }
-            }
+            },
             _ => panic!("expected complex roots, got {:?}", r),
         }
     }

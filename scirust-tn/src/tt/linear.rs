@@ -36,8 +36,8 @@ use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
 use scirust_core::nn::Module;
 use scirust_core::nn::Linear;
 
-use crate::factorize::{auto_factorize, check_factorization};
-use crate::tt::decompose::{reconstruct_matrix, tt_decompose_matrix, TTCores};
+use scirust_core::tn::factorize::{auto_factorize, check_factorization};
+use scirust_core::tn::tt_decompose::{reconstruct_matrix, tt_decompose_matrix, TTCores};
 
 /// A `Linear` layer compressed as a Tensor-Train decomposition.
 ///
@@ -87,7 +87,7 @@ impl TTLinear {
     /// Reconstruct the dense weight matrix (used by the Phase 1 forward and
     /// for diagnostics).
     pub fn reconstruct_weight(&self) -> Tensor {
-        let core_tnd: Vec<crate::tensor::TensorND> = self
+        let core_tnd: Vec<scirust_core::tensor::tensor_nd::TensorND> = self
             .cores
             .iter()
             .enumerate()
@@ -95,7 +95,10 @@ impl TTLinear {
                 let r_k = self.ranks[k];
                 let n_k = self.in_dims[k] * self.out_dims[k];
                 let r_next = self.ranks[k + 1];
-                crate::tensor::TensorND::new(vec![r_k, n_k, r_next], c.data.clone())
+                scirust_core::tensor::tensor_nd::TensorND::new(
+                    c.data.clone(),
+                    vec![r_k, n_k, r_next],
+                )
             })
             .collect();
         let mode_dims: Vec<usize> = (0..self.in_dims.len())
@@ -154,14 +157,8 @@ impl TTLinear {
     /// Ensure the cores and bias are registered on the tape. Idempotent within
     /// a single tape (re-registers only if `core_indices` is empty).
     fn register_params(&mut self, tape: &Tape) {
-        if self.core_indices.is_empty() {
-            self.core_indices = self.cores.iter().map(|c| tape.input(c.clone())).collect();
-        }
-        if self.bias_idx.is_none() {
-            if let Some(b) = &self.bias {
-                self.bias_idx = Some(tape.input(b.clone()));
-            }
-        }
+        self.core_indices = self.cores.iter().map(|c| tape.input(c.clone()).idx()).collect();
+        self.bias_idx = self.bias.as_ref().map(|b| tape.input(b.clone()).idx());
     }
 }
 
@@ -179,14 +176,13 @@ impl Module for TTLinear {
         // See module docstring for the training implications.
 
         let w_dense = self.reconstruct_weight();
-        let w_idx = tape.input(w_dense);
-        let w_var = Var::new(tape, w_idx);
+        let w_var = tape.input(w_dense);
 
-        let out = input.matmul(w_var);
+        let out = input.try_matmul(w_var).unwrap();
 
         if let Some(b_idx) = self.bias_idx {
             let b_var = Var::new(tape, b_idx);
-            out.add(b_var)
+            out.try_add(b_var).unwrap()
         } else {
             out
         }
@@ -310,6 +306,8 @@ pub fn tt_decompose_auto(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scirust_core::nn::init::Zeros;
+    use scirust_core::nn::PcgEngine;
 
     fn frob_err(a: &[f32], b: &[f32]) -> f32 {
         a.iter()
@@ -323,10 +321,14 @@ mod tests {
         a.iter().map(|x| x * x).sum::<f32>().sqrt()
     }
 
+    fn make_linear(rows: usize, cols: usize) -> Linear {
+        let mut rng = PcgEngine::new(42);
+        Linear::new(rows, cols, &Zeros, &Zeros, &mut rng)
+    }
+
     #[test]
     fn test_tt_decompose_reconstructs_weight() {
-        let mut linear = Linear::new(6, 4);
-        // Fill weight with a non-trivial pattern.
+        let mut linear = make_linear(6, 4);
         for i in 0..6 {
             for j in 0..4 {
                 linear.weight.data[i * 4 + j] = ((i * 4 + j) as f32).sin();
@@ -340,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_tt_decompose_auto() {
-        let mut linear = Linear::new(8, 16);
+        let mut linear = make_linear(8, 16);
         for i in 0..(8 * 16) {
             linear.weight.data[i] = ((i as f32) * 0.13).cos();
         }
@@ -354,9 +356,7 @@ mod tests {
 
     #[test]
     fn test_compression_ratio() {
-        let linear = Linear::new(16, 16);
-        // The default weight is all-zeros so compression won't be meaningful
-        // but the formula must be well-defined.
+        let linear = make_linear(16, 16);
         let tt = tt_decompose_auto(&linear, 2, 4, 0.0);
         let ratio = tt.compression_ratio();
         assert!(ratio.is_finite());
@@ -365,12 +365,11 @@ mod tests {
 
     #[test]
     fn test_parameter_indices() {
-        let linear = Linear::new(6, 4);
+        let linear = make_linear(6, 4);
         let mut tt = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
         let tape = Tape::new();
-        let _ = tt.forward(&tape, tape.input(Tensor { rows: 1, cols: 6, data: vec![0.0; 6] }));
+        let _ = tt.forward(&tape, tape.input(Tensor::from_vec(vec![0.0; 6], 1, 6)));
         let idx = tt.parameter_indices();
-        // d cores + 1 bias
         assert_eq!(idx.len(), tt.cores.len() + 1);
     }
 }

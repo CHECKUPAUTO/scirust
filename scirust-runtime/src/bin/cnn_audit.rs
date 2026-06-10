@@ -9,7 +9,8 @@ use scirust_runtime::{fnv_bytes, fnv_fold_f32, fnv_init, load_weights, save_weig
 fn synth(n: usize, cols: usize, seed: u64) -> Tensor {
     let mut s = seed;
     let mut data = Vec::with_capacity(n * cols);
-    for _ in 0..n * cols {
+    for _ in 0..n * cols
+    {
         s = s.wrapping_add(0x9e3779b97f4a7c15);
         let mut z = s;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -24,14 +25,32 @@ fn build_cnn(seed: u64) -> Sequential {
     let mut rng = PcgEngine::new(seed);
     Sequential::new()
         .add(
-            Conv2d::new(3, 32, 3, 1, Padding::Same, &KaimingNormal, Some(&Zeros), &mut rng)
-                .input_dims(32, 32),
+            Conv2d::new(
+                3,
+                32,
+                3,
+                1,
+                Padding::Same,
+                &KaimingNormal,
+                Some(&Zeros),
+                &mut rng,
+            )
+            .input_dims(32, 32),
         )
         .add(ReLU::new())
         .add(MaxPool2d::new(2, 2).input_shape(32, 32, 32))
         .add(
-            Conv2d::new(32, 64, 3, 1, Padding::Same, &KaimingNormal, Some(&Zeros), &mut rng)
-                .input_dims(16, 16),
+            Conv2d::new(
+                32,
+                64,
+                3,
+                1,
+                Padding::Same,
+                &KaimingNormal,
+                Some(&Zeros),
+                &mut rng,
+            )
+            .input_dims(16, 16),
         )
         .add(ReLU::new())
         .add(MaxPool2d::new(2, 2).input_shape(64, 16, 16))
@@ -58,9 +77,15 @@ fn main() {
     let f2 = fp_of(&mut m, &x);
     let f3 = fp_of(&mut m, &x);
     let det = f1 == f2 && f2 == f3;
-    if bench {
-        println!("CNN forward x3 : {:#018x} / {:#018x} / {:#018x} -> {}",
-            f1, f2, f3, if det { "BIT-EXACT" } else { "DIVERGE" });
+    if bench
+    {
+        println!(
+            "CNN forward x3 : {:#018x} / {:#018x} / {:#018x} -> {}",
+            f1,
+            f2,
+            f3,
+            if det { "BIT-EXACT" } else { "DIVERGE" }
+        );
     }
     assert!(det, "CNN forward non deterministe");
 
@@ -75,8 +100,13 @@ fn main() {
     b.load_state_dict(&sd).expect("load_state_dict");
     let f_post = fp_of(&mut b, &x);
     assert_eq!(f_post, f1, "reload CNN NON bit-exact");
-    if bench {
-        println!("artefact CNN   : {} octets, hash {:#018x}", file.len(), fnv_bytes(&file));
+    if bench
+    {
+        println!(
+            "artefact CNN   : {} octets, hash {:#018x}",
+            file.len(),
+            fnv_bytes(&file)
+        );
         println!("fp(B pre-load) : {:#018x} (different)", f_pre);
         println!("fp(B post-load): {:#018x} (== A bit-exact)", f_post);
     }
@@ -84,13 +114,16 @@ fn main() {
     println!("EMPREINTE CNN  = {:#018x}", f1);
 
     // 3. Latence sur archi lourde
-    if bench {
-        for _ in 0..5 {
+    if bench
+    {
+        for _ in 0..5
+        {
             let _ = fp_of(&mut m, &x);
         }
         let iters = 80usize;
         let mut lat: Vec<u64> = Vec::with_capacity(iters);
-        for _ in 0..iters {
+        for _ in 0..iters
+        {
             let t = std::time::Instant::now();
             let _ = fp_of(&mut m, &x);
             lat.push(t.elapsed().as_nanos() as u64);
@@ -100,8 +133,12 @@ fn main() {
         let pc = |q: f64| lat[(((lat.len() - 1) as f64) * q).round() as usize];
         println!(
             "Latence CNN batch={} : p50 {:.1}us  p99 {:.1}us  p99/p50 {:.2}x  ({:.0} batch/s, {:.0} ech/s)",
-            n, us(pc(0.5)), us(pc(0.99)), pc(0.99) as f64 / pc(0.5) as f64,
-            1.0e9 / pc(0.5) as f64, 1.0e9 / pc(0.5) as f64 * n as f64
+            n,
+            us(pc(0.5)),
+            us(pc(0.99)),
+            pc(0.99) as f64 / pc(0.5) as f64,
+            1.0e9 / pc(0.5) as f64,
+            1.0e9 / pc(0.5) as f64 * n as f64
         );
     }
 }

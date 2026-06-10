@@ -40,7 +40,8 @@ impl EGraph {
 
     /// Add an expression to the E-Graph and return its E-class ID.
     pub fn add_expr(&mut self, expr: &Expr) -> usize {
-        let node = match expr {
+        let node = match expr
+        {
             Expr::Const(c) => ENode::Const(c.to_string()),
             Expr::Var(v) => ENode::Var(v.clone()),
             Expr::Add(a, b) => self.binop("+", a, b),

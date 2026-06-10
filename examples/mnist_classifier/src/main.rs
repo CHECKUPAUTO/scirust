@@ -97,13 +97,15 @@ fn main() {
     // -------- Boucle d'entraînement -------- //
     let mut train_loader = DataLoader::new(train_small, batch_size, true, 42);
 
-    for epoch in 0..n_epochs {
+    for epoch in 0..n_epochs
+    {
         let mut epoch_loss = 0.0;
         let mut n_batches = 0;
 
         train_loader.shuffle_epoch(epoch as u64);
 
-        for (x_batch, y_batch) in train_loader.iter() {
+        for (x_batch, y_batch) in train_loader.iter()
+        {
             let tape = Tape::new();
             let x = tape.input(x_batch);
             let target = tape.input(y_batch);
@@ -135,18 +137,22 @@ fn main() {
 
     let mut test_loader = DataLoader::new(test_small, batch_size, false, 42);
 
-    for (x_batch, y_batch) in test_loader.iter() {
+    for (x_batch, y_batch) in test_loader.iter()
+    {
         let tape = Tape::new();
         let x = tape.input(x_batch);
         let logits = model.forward(&tape, x);
         let scores = tape.value(logits.idx());
 
         let (bs, _) = scores.shape();
-        for i in 0..bs {
+        for i in 0..bs
+        {
             let mut max_score = scores.data[i * n_classes];
             let mut pred_class = 0usize;
-            for c in 1..n_classes {
-                if scores.data[i * n_classes + c] > max_score {
+            for c in 1..n_classes
+            {
+                if scores.data[i * n_classes + c] > max_score
+                {
                     max_score = scores.data[i * n_classes + c];
                     pred_class = c;
                 }
@@ -159,7 +165,8 @@ fn main() {
                 .map(|(idx, _)| idx)
                 .unwrap_or(0);
 
-            if pred_class == true_class {
+            if pred_class == true_class
+            {
                 correct += 1;
             }
             total += 1;
@@ -170,16 +177,21 @@ fn main() {
     println!("\n=== RÉSULTAT ===");
     println!("  Accuracy : {:.2}% ({}/{})", accuracy, correct, total);
 
-    if accuracy >= 90.0 {
+    if accuracy >= 90.0
+    {
         println!("\n✅ SUCCÈS — SciRust v11.1 classifie MNIST correctement.");
         std::process::exit(0);
-    } else if accuracy >= 85.0 {
+    }
+    else if accuracy >= 85.0
+    {
         println!(
             "\n⚠️  PARTIEL — {:.2}% est acceptable mais < 90%. Augmenter epochs ou lr.",
             accuracy
         );
         std::process::exit(0);
-    } else {
+    }
+    else
+    {
         println!("\n❌ ÉCHEC — Convergence insuffisante. Vérifier lr, architecture, ou données.");
         std::process::exit(1);
     }

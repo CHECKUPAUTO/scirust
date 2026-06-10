@@ -10,11 +10,9 @@ use tracing::warn;
 const PIVOT_EPS: f64 = 1e-15;
 
 fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
-    if !value.is_finite() {
-        return Err(SolverError::NanDetected {
-            iter: 0,
-            value,
-        });
+    if !value.is_finite()
+    {
+        return Err(SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
 }
@@ -26,10 +24,13 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
     let n = a.ensure_square()?;
     let mut l = Matrix::zeros(n, n);
 
-    for i in 0..n {
-        for j in 0..=i {
+    for i in 0..n
+    {
+        for j in 0..=i
+        {
             let mut s = 0.0;
-            for k in 0..j {
+            for k in 0..j
+            {
                 let lik = l[(i, k)];
                 let ljk = l[(j, k)];
                 check_finite(lik, &format!("l[{i},{k}] Cholesky"))?;
@@ -39,9 +40,11 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
             let aij = a[(i, j)];
             check_finite(aij, &format!("a[{i},{j}] Cholesky"))?;
 
-            if i == j {
+            if i == j
+            {
                 let val = aij - s;
-                if val <= 0.0 {
+                if val <= 0.0
+                {
                     warn!(
                         target: "solver",
                         "Cholesky failed: a[{i},{i}] - s = {:.3e} <= 0 (not SPD)",
@@ -52,9 +55,12 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
                 let root = val.sqrt();
                 check_finite(root, &format!("sqrt Cholesky [{i},{i}]"))?;
                 l[(i, j)] = root;
-            } else {
+            }
+            else
+            {
                 let ljj = l[(j, j)];
-                if ljj.abs() < PIVOT_EPS {
+                if ljj.abs() < PIVOT_EPS
+                {
                     warn!(
                         target: "solver",
                         "Cholesky: l[{j},{j}] = {:.3e} near-zero at row {} — not SPD",
@@ -74,26 +80,31 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
 /// Résout A · x = b sachant A = L·L^T, en deux passes triangulaires.
 pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
     let n = l.rows();
-    if b.len() != n {
+    if b.len() != n
+    {
         return Err(SolverError::DimensionMismatch {
             expected: n,
             got: b.len(),
         });
     }
     // Vérifier que b est fini
-    for (i, &bi) in b.iter().enumerate() {
+    for (i, &bi) in b.iter().enumerate()
+    {
         check_finite(bi, &format!("b[{i}]"))?;
     }
 
     // L · y = b (substitution avant)
     let mut y = vec![0.0; n];
-    for i in 0..n {
+    for i in 0..n
+    {
         let mut s = b[i];
-        for j in 0..i {
+        for j in 0..i
+        {
             s -= l[(i, j)] * y[j];
         }
         let diag = l[(i, i)];
-        if diag.abs() < PIVOT_EPS {
+        if diag.abs() < PIVOT_EPS
+        {
             return Err(SolverError::Singular {
                 row: i,
                 pivot: diag,
@@ -104,13 +115,16 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
     }
     // L^T · x = y (substitution arrière)
     let mut x = vec![0.0; n];
-    for i in (0..n).rev() {
+    for i in (0..n).rev()
+    {
         let mut s = y[i];
-        for j in (i + 1)..n {
+        for j in (i + 1)..n
+        {
             s -= l[(j, i)] * x[j];
         }
         let diag = l[(i, i)];
-        if diag.abs() < PIVOT_EPS {
+        if diag.abs() < PIVOT_EPS
+        {
             return Err(SolverError::Singular {
                 row: i,
                 pivot: diag,
@@ -140,8 +154,10 @@ mod tests {
         assert_relative_eq!(l[(2, 2)], 3.0, epsilon = 1e-10);
         let lt = l.transpose();
         let prod = l.matmul(&lt)?;
-        for i in 0..3 {
-            for j in 0..3 {
+        for i in 0..3
+        {
+            for j in 0..3
+            {
                 assert_relative_eq!(prod[(i, j)], a[(i, j)], epsilon = 1e-10);
             }
         }
@@ -159,7 +175,8 @@ mod tests {
         let l = cholesky_decompose(a.clone())?;
         let x = solve_cholesky(&l, &b)?;
         let ax = a.matvec(&x)?;
-        for (axi, bi) in ax.iter().zip(&b) {
+        for (axi, bi) in ax.iter().zip(&b)
+        {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-9);
         }
         Ok(())

@@ -25,7 +25,8 @@ impl<E: Module> MoELayer<E> {
     ) -> Self {
         let gate = Linear::new(d_model, num_experts, w_init, b_init, rng);
         let mut experts = Vec::new();
-        for _ in 0..num_experts {
+        for _ in 0..num_experts
+        {
             experts.push(expert_factory());
         }
         Self {
@@ -40,34 +41,40 @@ impl<E: Module> MoELayer<E> {
 impl<E: Module> Module for MoELayer<E> {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let gate_logits = self.gate.forward(tape, input.clone());
-        let gate_probs = gate_logits.softmax(1);
+        let gate_probs = gate_logits.try_softmax(1).unwrap();
 
         let probs = tape.value(gate_probs.idx());
         let (rows, cols) = gate_probs.shape();
 
         let mut output = tape.input(Tensor::zeros(rows, input.shape().1));
 
-        for i in 0..rows {
+        for i in 0..rows
+        {
             let row_probs = &probs.data[i * cols..(i + 1) * cols];
-            let mut indexed_probs: Vec<(usize, f32)> = row_probs.iter().cloned().enumerate().collect();
+            let mut indexed_probs: Vec<(usize, f32)> =
+                row_probs.iter().cloned().enumerate().collect();
             indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
             let top_k = &indexed_probs[0..self.k];
             let mut row_output: Option<Var> = None;
 
-            for &(expert_idx, prob) in top_k {
-                let input_row = input.slice_rows(i, 1);
+            for &(expert_idx, prob) in top_k
+            {
+                let input_row = input.try_slice_rows(i, 1).unwrap();
                 let expert_out = self.experts[expert_idx].forward(tape, input_row);
                 let weighted = expert_out.scale(prob);
 
-                row_output = Some(match row_output {
+                row_output = Some(match row_output
+                {
                     None => weighted,
-                    Some(acc) => acc.add(weighted),
+                    Some(acc) => acc.try_add(weighted).unwrap(),
                 });
             }
 
-            if let Some(ro) = row_output {
-                if i == 0 {
+            if let Some(ro) = row_output
+            {
+                if i == 0
+                {
                     output = ro;
                 }
             }
@@ -79,7 +86,8 @@ impl<E: Module> Module for MoELayer<E> {
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         v.extend(self.gate.parameter_indices());
-        for expert in &self.experts {
+        for expert in &self.experts
+        {
             v.extend(expert.parameter_indices());
         }
         v
@@ -87,16 +95,22 @@ impl<E: Module> Module for MoELayer<E> {
 
     fn sync(&mut self, tape: &Tape) {
         self.gate.sync(tape);
-        for expert in &mut self.experts {
+        for expert in &mut self.experts
+        {
             expert.sync(tape);
         }
     }
 
     fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
-        for (k, v) in self.gate.state_dict() { map.insert(format!("gate.{}", k), v); }
-        for (i, expert) in self.experts.iter().enumerate() {
-            for (k, v) in expert.state_dict() {
+        for (k, v) in self.gate.state_dict()
+        {
+            map.insert(format!("gate.{}", k), v);
+        }
+        for (i, expert) in self.experts.iter().enumerate()
+        {
+            for (k, v) in expert.state_dict()
+            {
                 map.insert(format!("expert{}.{}", i, k), v);
             }
         }

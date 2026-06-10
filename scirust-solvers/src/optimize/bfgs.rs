@@ -9,12 +9,13 @@
 //! - Plus de `.unwrap()` sur matvec (remplacé par produit manuel)
 
 use crate::linalg::{self, Matrix};
-use crate::{ConvergenceInfo, SolverError, SolverResult, Solution, Tolerance};
+use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use scirust_autodiff::Dual;
 use tracing::warn;
 
 fn check_finite(v: f64, label: &str) -> Result<(), SolverError> {
-    if !v.is_finite() {
+    if !v.is_finite()
+    {
         return Err(SolverError::NanDetected { iter: 0, value: v });
     }
     Ok(())
@@ -31,10 +32,15 @@ where
     let mut buf = vec![Dual::primal(0.0); n];
 
     let eval_fg = |x: &[f64], buf: &mut [Dual], grad: &mut [f64]| -> f64 {
-        for i in 0..n { buf[i] = Dual::primal(x[i]); }
+        for i in 0..n
+        {
+            buf[i] = Dual::primal(x[i]);
+        }
         let fx = f(buf).value;
-        for j in 0..n {
-            for i in 0..n {
+        for j in 0..n
+        {
+            for i in 0..n
+            {
                 buf[i] = Dual::new(x[i], if i == j { 1.0 } else { 0.0 });
             }
             grad[j] = f(buf).deriv;
@@ -43,28 +49,36 @@ where
     };
 
     // Vérifier que x0 est fini
-    for (i, &xi) in x.iter().enumerate() {
+    for (i, &xi) in x.iter().enumerate()
+    {
         check_finite(xi, &format!("x0[{i}]"))?;
     }
 
     let mut fx = eval_fg(&x, &mut buf, &mut grad);
-    for gi in &grad { check_finite(*gi, "grad[0]")?; }
+    for gi in &grad
+    {
+        check_finite(*gi, "grad[0]")?;
+    }
 
     let mut h = Matrix::identity(n);
     let mut last_gnorm = linalg::norm_inf(&grad);
 
-    for k in 0..tol.max_iter {
+    for k in 0..tol.max_iter
+    {
         let gnorm = linalg::norm_inf(&grad);
         last_gnorm = gnorm;
-        if gnorm < tol.abs {
+        if gnorm < tol.abs
+        {
             return Ok(Solution::new(x, k, gnorm));
         }
 
         // Direction p = -H · g (produit manuel, pas de matvec avec unwrap)
         let mut p = vec![0.0; n];
-        for i in 0..n {
+        for i in 0..n
+        {
             let mut s = 0.0;
-            for j in 0..n {
+            for j in 0..n
+            {
                 s += h[(i, j)] * grad[j];
             }
             p[i] = -s;
@@ -73,10 +87,14 @@ where
 
         // Vérifier que p est une direction de descente
         let dir_deriv: f64 = linalg::dot(&grad, &p);
-        if dir_deriv >= 0.0 {
+        if dir_deriv >= 0.0
+        {
             warn!(target: "solver", "BFGS: H lost positive-definiteness at iteration {k} — resetting to I");
             h = Matrix::identity(n);
-            for i in 0..n { p[i] = -grad[i]; }
+            for i in 0..n
+            {
+                p[i] = -grad[i];
+            }
         }
 
         // Line search backtracking Armijo
@@ -86,17 +104,26 @@ where
         let mut x_new = vec![0.0; n];
         let mut grad_new = vec![0.0; n];
         let mut fx_new;
-        loop {
-            for i in 0..n { x_new[i] = x[i] + alpha * p[i]; }
+        loop
+        {
+            for i in 0..n
+            {
+                x_new[i] = x[i] + alpha * p[i];
+            }
             fx_new = eval_fg(&x_new, &mut buf, &mut grad_new);
 
-            for gi in &grad_new { check_finite(*gi, "grad_new")?; }
+            for gi in &grad_new
+            {
+                check_finite(*gi, "grad_new")?;
+            }
 
-            if fx_new <= fx + c1 * alpha * dir_deriv_g {
+            if fx_new <= fx + c1 * alpha * dir_deriv_g
+            {
                 break;
             }
             alpha *= 0.5;
-            if alpha < 1e-20 {
+            if alpha < 1e-20
+            {
                 warn!(target: "solver", "BFGS: backtracking underflow at iteration {k}");
                 return Err(SolverError::StepUnderflow { step: alpha });
             }
@@ -105,7 +132,8 @@ where
         // Mises à jour BFGS
         let mut s_vec = vec![0.0; n];
         let mut y_vec = vec![0.0; n];
-        for i in 0..n {
+        for i in 0..n
+        {
             s_vec[i] = x_new[i] - x[i];
             y_vec[i] = grad_new[i] - grad[i];
             check_finite(s_vec[i], &format!("s[{i}]"))?;
@@ -114,15 +142,20 @@ where
 
         let sy: f64 = linalg::dot(&s_vec, &y_vec);
 
-        if sy > 1e-12 {
+        if sy > 1e-12
+        {
             let rho = 1.0 / sy;
             check_finite(rho, "rho")?;
 
             // Hy = H · y (produit manuel)
             let mut hy = vec![0.0; n];
-            for i in 0..n {
+            for i in 0..n
+            {
                 let mut sum = 0.0;
-                for j in 0..n { sum += h[(i, j)] * y_vec[j]; }
+                for j in 0..n
+                {
+                    sum += h[(i, j)] * y_vec[j];
+                }
                 hy[i] = sum;
                 check_finite(hy[i], &format!("hy[{i}]"))?;
             }
@@ -134,15 +167,19 @@ where
             let factor = rho * (1.0 + rho * yhy);
             check_finite(factor, "factor")?;
 
-            for i in 0..n {
-                for j in 0..n {
-                    let delta = -rho * (s_vec[i] * hy[j] + hy[i] * s_vec[j])
-                        + factor * s_vec[i] * s_vec[j];
+            for i in 0..n
+            {
+                for j in 0..n
+                {
+                    let delta =
+                        -rho * (s_vec[i] * hy[j] + hy[i] * s_vec[j]) + factor * s_vec[i] * s_vec[j];
                     h[(i, j)] += delta;
                     check_finite(h[(i, j)], &format!("h[{i},{j}]"))?;
                 }
             }
-        } else {
+        }
+        else
+        {
             warn!(target: "solver", "BFGS: sy={sy:.3e} too small at iteration {k} — skipping Hessian update");
         }
 
@@ -169,7 +206,8 @@ mod tests {
             |x: &[Dual]| (x[0] - 3.0) * (x[0] - 3.0) + (x[1] + 1.0) * (x[1] + 1.0),
             vec![0.0, 0.0],
             Tolerance::default(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_relative_eq!(s.value[0], 3.0, epsilon = 1e-8);
         assert_relative_eq!(s.value[1], -1.0, epsilon = 1e-8);
     }
@@ -184,7 +222,8 @@ mod tests {
             },
             vec![-1.2, 1.0],
             Tolerance::default(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_relative_eq!(s.value[0], 1.0, epsilon = 1e-6);
         assert_relative_eq!(s.value[1], 1.0, epsilon = 1e-6);
         assert!(s.info.iterations < 100);
@@ -200,7 +239,8 @@ mod tests {
             },
             vec![1.0, 1.0],
             Tolerance::default(),
-        ).unwrap();
+        )
+        .unwrap();
         let v = (s.value[0] - 3.0).powi(2) + (s.value[1] - 2.0).powi(2);
         assert!(v < 1e-8, "didn't reach (3,2): {:?}", s.value);
     }

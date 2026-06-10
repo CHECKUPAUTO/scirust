@@ -1,0 +1,20 @@
+# rustfmt.toml — SciRust formatting configuration
+
+# Indentation
+indent_style = "Block"
+tab_spaces = 4
+hard_tabs = false
+
+# Line width
+max_width = 100
+
+# Braces
+brace_style = "SameLineWhere"
+control_brace_style = "AlwaysNextLine"
+match_block_trailing_comma = true
+
+# Version
+style_edition = "2024"
+
+# Nightly features (portable_simd requires nightly)
+unstable_features = true

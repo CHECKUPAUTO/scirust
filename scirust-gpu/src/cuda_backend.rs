@@ -144,7 +144,8 @@ impl SimdBackend for CudaBackend {
 
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
         // TODO : kernel f64 (PTX similaire avec .f64). Fallback CPU pour l'instant.
-        for (yi, xi) in y.iter_mut().zip(x.iter()) {
+        for (yi, xi) in y.iter_mut().zip(x.iter())
+        {
             *yi += alpha * xi;
         }
     }
@@ -161,7 +162,8 @@ impl SimdBackend for CudaBackend {
     fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
         // TODO : cuBLAS SGEMV ou kernel custom (1 thread = 1 row de A)
         let (m, k) = a.shape();
-        for i in 0..m {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot: f32 = row.iter().zip(x.iter()).map(|(a, b)| a * b).sum();
             y[i] = alpha * dot + beta * y[i];
@@ -180,10 +182,13 @@ impl SimdBackend for CudaBackend {
         // (algorithme naïf 1 thread = 1 cell C[i,j])
         let (m, k) = a.shape();
         let (_, n) = b.shape();
-        for i in 0..m {
-            for j in 0..n {
+        for i in 0..m
+        {
+            for j in 0..n
+            {
                 let mut acc = 0.0f32;
-                for p in 0..k {
+                for p in 0..k
+                {
                     acc += a[(i, p)] * b[(p, j)];
                 }
                 c[(i, j)] = alpha * acc + beta * c[(i, j)];
@@ -193,7 +198,8 @@ impl SimdBackend for CudaBackend {
 
     fn relu_f32(&self, v: &mut [f32]) {
         // TODO : kernel max(x, 0) (très simple en CUDA)
-        for x in v.iter_mut() {
+        for x in v.iter_mut()
+        {
             *x = x.max(0.0);
         }
     }
@@ -222,16 +228,19 @@ mod tests {
 
     #[test]
     fn cuda_init_or_skip() {
-        match CudaBackend::try_init() {
-            Some(b) => {
+        match CudaBackend::try_init()
+        {
+            Some(b) =>
+            {
                 let x = vec![1.0f32, 2.0, 3.0, 4.0];
                 let mut y = vec![0.0f32; 4];
                 b.saxpy_f32(2.0, &x, &mut y);
                 assert_eq!(y, vec![2.0, 4.0, 6.0, 8.0]);
-            }
-            None => {
+            },
+            None =>
+            {
                 eprintln!("[skip] aucun GPU CUDA disponible");
-            }
+            },
         }
     }
 }

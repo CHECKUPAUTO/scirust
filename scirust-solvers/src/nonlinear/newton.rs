@@ -11,23 +11,20 @@
 //!   - `newton_system_jac` : F et J fournies séparément
 
 use crate::linalg::{self, Matrix};
-use crate::{ConvergenceInfo, SolverError, SolverResult, Solution, Tolerance};
+use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use scirust_autodiff::Dual;
 use tracing::warn;
 
 fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
-    if !value.is_finite() {
+    if !value.is_finite()
+    {
         return Err(SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
 }
 
 /// Newton multivarié avec jacobienne automatique via dual numbers.
-pub fn newton_system<F>(
-    f: F,
-    x0: Vec<f64>,
-    tol: Tolerance,
-) -> SolverResult<Solution<Vec<f64>>>
+pub fn newton_system<F>(f: F, x0: Vec<f64>, tol: Tolerance) -> SolverResult<Solution<Vec<f64>>>
 where
     F: Fn(&[Dual], &mut [Dual]),
 {
@@ -39,18 +36,23 @@ where
     let mut jac = Matrix::zeros(n, n);
     let mut last_res = f64::INFINITY;
 
-    for k in 0..tol.max_iter {
+    for k in 0..tol.max_iter
+    {
         // Évalue F et J colonne par colonne via Dual
-        for j in 0..n {
-            for i in 0..n {
+        for j in 0..n
+        {
+            for i in 0..n
+            {
                 buf_in[i] = Dual::new(x[i], if i == j { 1.0 } else { 0.0 });
             }
             f(&buf_in, &mut buf_out);
-            for i in 0..n {
+            for i in 0..n
+            {
                 let deriv = buf_out[i].deriv;
                 check_finite(deriv, &format!("J[{i},{j}] Newton k={k}"))?;
                 jac[(i, j)] = deriv;
-                if j == 0 {
+                if j == 0
+                {
                     let val = buf_out[i].value;
                     check_finite(val, &format!("fx[{i}] Newton k={k}"))?;
                     fx[i] = val;
@@ -60,7 +62,8 @@ where
 
         let res = linalg::norm_inf(&fx);
         last_res = res;
-        if res < tol.abs {
+        if res < tol.abs
+        {
             return Ok(Solution::new(x, k, res));
         }
 
@@ -71,12 +74,14 @@ where
             e
         })?;
 
-        for (i, &d) in delta.iter().enumerate() {
+        for (i, &d) in delta.iter().enumerate()
+        {
             check_finite(d, &format!("delta[{i}] Newton k={k}"))?;
         }
 
         let step_norm = linalg::norm_inf(&delta);
-        if step_norm < 1e-16 {
+        if step_norm < 1e-16
+        {
             warn!(target: "solver", "Newton: step underflow {step_norm:.3e} at iteration {k}");
             return Err(SolverError::StepUnderflow { step: step_norm });
         }
@@ -90,28 +95,34 @@ where
         let mut best_x = x.clone();
         let mut backtrack_success = false;
 
-        for _ in 0..8 {
-            for i in 0..n {
+        for _ in 0..8
+        {
+            for i in 0..n
+            {
                 x_candidate[i] = x[i] + lambda * delta[i];
                 check_finite(x_candidate[i], &format!("x_cand[{i}] lambda={lambda}"))?;
             }
             // Évaluer F au candidat via Dual
-            for i in 0..n {
+            for i in 0..n
+            {
                 buf_in[i] = Dual::primal(x_candidate[i]);
             }
             f(&buf_in, &mut buf_out);
-            for i in 0..n {
+            for i in 0..n
+            {
                 fx_candidate[i] = buf_out[i].value;
             }
             let cand_res = linalg::norm_inf(&fx_candidate);
 
-            if cand_res < best_fx_norm {
+            if cand_res < best_fx_norm
+            {
                 best_fx_norm = cand_res;
                 best_x.copy_from_slice(&x_candidate);
                 backtrack_success = true;
             }
 
-            if cand_res < res {
+            if cand_res < res
+            {
                 // Pas acceptable
                 x.copy_from_slice(&x_candidate);
                 fx.copy_from_slice(&fx_candidate);
@@ -121,15 +132,18 @@ where
             lambda *= 0.5;
         }
 
-        if !backtrack_success {
+        if !backtrack_success
+        {
             warn!(target: "solver", "Newton: backtracking failed at iteration {k}, using best candidate");
             x.copy_from_slice(&best_x);
             // Évaluer fx au best_x
-            for i in 0..n {
+            for i in 0..n
+            {
                 buf_in[i] = Dual::primal(best_x[i]);
             }
             f(&buf_in, &mut buf_out);
-            for i in 0..n {
+            for i in 0..n
+            {
                 fx[i] = buf_out[i].value;
             }
         }
@@ -137,9 +151,11 @@ where
         let final_norm = linalg::norm_inf(&fx);
         let final_step = linalg::norm_inf(&delta);
 
-        if final_norm < tol.abs || final_step < tol.abs + tol.rel * linalg::norm_inf(&x) {
+        if final_norm < tol.abs || final_step < tol.abs + tol.rel * linalg::norm_inf(&x)
+        {
             // Dernière évaluation propre
-            for i in 0..n {
+            for i in 0..n
+            {
                 buf_in[i] = Dual::primal(x[i]);
             }
             f(&buf_in, &mut buf_out);
@@ -170,19 +186,26 @@ where
     let mut fx = vec![0.0; n];
     let mut j_mat = Matrix::zeros(n, n);
 
-    for k in 0..tol.max_iter {
+    for k in 0..tol.max_iter
+    {
         f(&x, &mut fx);
-        for fi in &fx { check_finite(*fi, &format!("fx J Newton k={k}"))?; }
+        for fi in &fx
+        {
+            check_finite(*fi, &format!("fx J Newton k={k}"))?;
+        }
 
         let res = linalg::norm_inf(&fx);
-        if res < tol.abs {
+        if res < tol.abs
+        {
             return Ok(Solution::new(x, k, res));
         }
 
         jac(&x, &mut j_mat);
         // Vérifier que J est finie
-        for i in 0..n {
-            for j in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
                 check_finite(j_mat[(i, j)], &format!("J[{i},{j}] Newton k={k}"))?;
             }
         }
@@ -193,22 +216,26 @@ where
             e
         })?;
 
-        for (i, &d) in delta.iter().enumerate() {
+        for (i, &d) in delta.iter().enumerate()
+        {
             check_finite(d, &format!("delta[{i}] Newton(J) k={k}"))?;
         }
 
         let step_norm = linalg::norm_inf(&delta);
-        if step_norm < 1e-16 {
+        if step_norm < 1e-16
+        {
             warn!(target: "solver", "Newton(J): step underflow {step_norm:.3e} at iteration {k}");
             return Err(SolverError::StepUnderflow { step: step_norm });
         }
 
-        for i in 0..n {
+        for i in 0..n
+        {
             x[i] += delta[i];
             check_finite(x[i], &format!("x[{i}] Newton(J) k={k}"))?;
         }
 
-        if step_norm < tol.abs + tol.rel * linalg::norm_inf(&x) {
+        if step_norm < tol.abs + tol.rel * linalg::norm_inf(&x)
+        {
             f(&x, &mut fx);
             return Ok(Solution::new(x, k + 1, linalg::norm_inf(&fx)));
         }

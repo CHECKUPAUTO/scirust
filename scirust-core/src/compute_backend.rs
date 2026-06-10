@@ -29,8 +29,10 @@ pub type BackendResult<T> = Result<T, BackendError>;
 
 /// Vérifie qu'un slice ne contient ni NaN ni Inf.
 fn check_finite_slice(data: &[f32], _label: &str) -> BackendResult<()> {
-    for (i, &v) in data.iter().enumerate() {
-        if !v.is_finite() {
+    for (i, &v) in data.iter().enumerate()
+    {
+        if !v.is_finite()
+        {
             return Err(BackendError::NanDetected { idx: i, value: v });
         }
     }
@@ -56,7 +58,8 @@ impl ComputeBackend for CpuFallback {
         check_finite_slice(kernel, "kernel")?;
         check_finite_slice(data, "data")?;
 
-        if kernel.is_empty() {
+        if kernel.is_empty()
+        {
             return Err(BackendError::Internal("empty kernel".into()));
         }
 
@@ -64,18 +67,22 @@ impl ComputeBackend for CpuFallback {
         let mut out = vec![0.0f32; data.len()];
         let half_k = kernel.len() / 2;
 
-        for i in 0..data.len() {
+        for i in 0..data.len()
+        {
             let mut sum = 0.0f64; // accumuler en f64 pour réduire overflow
-            for (j, &k) in kernel.iter().enumerate() {
+            for (j, &k) in kernel.iter().enumerate()
+            {
                 let idx = i as isize + j as isize - half_k as isize;
-                if idx >= 0 && (idx as usize) < data.len() {
+                if idx >= 0 && (idx as usize) < data.len()
+                {
                     let product = data[idx as usize] as f64 * k as f64;
                     sum += product;
                 }
             }
 
             // Vérifier overflow avant cast
-            if !sum.is_finite() || sum.abs() > f32::MAX as f64 {
+            if !sum.is_finite() || sum.abs() > f32::MAX as f64
+            {
                 return Err(BackendError::Overflow {
                     idx: i,
                     value: sum as f32,
@@ -115,14 +122,16 @@ pub fn get_backend() -> BackendResult<Box<dyn ComputeBackend>> {
     #[cfg(feature = "gpu")]
     {
         let cuda = CudaBackend;
-        if cuda.is_available() {
+        if cuda.is_available()
+        {
             return Ok(Box::new(cuda));
         }
     }
 
     // Fallback CPU
     let cpu = CpuFallback;
-    if cpu.is_available() {
+    if cpu.is_available()
+    {
         return Ok(Box::new(cpu));
     }
 
@@ -156,7 +165,10 @@ mod tests {
         let data = vec![1.0, 2.0, 3.0];
         let result = backend.execute_kernel(&kernel, &data);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BackendError::NanDetected { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            BackendError::NanDetected { .. }
+        ));
     }
 
     #[test]
@@ -164,6 +176,9 @@ mod tests {
         let cuda = CudaBackend;
         let result = cuda.execute_kernel(&[1.0], &[2.0]);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BackendError::UnsupportedBackend));
+        assert!(matches!(
+            result.unwrap_err(),
+            BackendError::UnsupportedBackend
+        ));
     }
 }

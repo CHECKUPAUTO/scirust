@@ -162,11 +162,14 @@ impl<'a, T> MatrixView<'a, T> {
 
     /// Slice contiguë sur une ligne (uniquement si col_stride == 1)
     pub fn row_slice(&self, r: usize) -> Option<&'a [T]> {
-        if self.col_stride == 1 {
+        if self.col_stride == 1
+        {
             Some(unsafe {
                 std::slice::from_raw_parts(self.ptr.add(r * self.row_stride), self.cols)
             })
-        } else {
+        }
+        else
+        {
             None
         }
     }
@@ -303,11 +306,14 @@ impl<'a, T> MatrixViewMut<'a, T> {
 
     /// Slice contiguë mutable sur une ligne (uniquement si col_stride == 1)
     pub fn row_slice_mut(&mut self, r: usize) -> Option<&mut [T]> {
-        if self.col_stride == 1 {
+        if self.col_stride == 1
+        {
             Some(unsafe {
                 std::slice::from_raw_parts_mut(self.ptr.add(r * self.row_stride), self.cols)
             })
-        } else {
+        }
+        else
+        {
             None
         }
     }

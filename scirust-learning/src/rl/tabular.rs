@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::hash::Hash;
 use super::{Agent, Env};
 use rand::Rng;
+use std::collections::HashMap;
+use std::hash::Hash;
 
 pub struct TabularAgent<S, A> {
     pub q_table: HashMap<(S, A), f64>,
@@ -25,15 +25,22 @@ where
     }
 
     pub fn get_q(&self, state: &S, action: &A) -> f64 {
-        *self.q_table.get(&(state.clone(), action.clone())).unwrap_or(&0.0)
+        *self
+            .q_table
+            .get(&(state.clone(), action.clone()))
+            .unwrap_or(&0.0)
     }
 
     pub fn act_epsilon_greedy<R: Rng + ?Sized>(&self, state: &S, actions: &[A], rng: &mut R) -> A {
-        if rng.gen_bool(self.epsilon) {
+        if rng.gen_bool(self.epsilon)
+        {
             let idx = rng.gen_range(0..actions.len());
             actions[idx].clone()
-        } else {
-            actions.iter()
+        }
+        else
+        {
+            actions
+                .iter()
                 .max_by(|a1, a2| {
                     let q1 = self.get_q(state, a1);
                     let q2 = self.get_q(state, a2);
@@ -53,10 +60,14 @@ where
         next_actions: &[A],
         done: bool,
     ) {
-        let max_next_q = if done || next_actions.is_empty() {
+        let max_next_q = if done || next_actions.is_empty()
+        {
             0.0
-        } else {
-            next_actions.iter()
+        }
+        else
+        {
+            next_actions
+                .iter()
                 .map(|a| self.get_q(next_state, a))
                 .fold(f64::NEG_INFINITY, f64::max)
         };

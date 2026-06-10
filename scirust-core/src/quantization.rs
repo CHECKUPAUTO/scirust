@@ -21,24 +21,20 @@ pub fn dequantize_tensor(int8: &[i8], scale: f32) -> Vec<f32> {
 
 /// Calcule un scale optimal pour quantification symétrique.
 pub fn compute_scale(fp32: &[f32]) -> f32 {
-    let max_abs = fp32
-        .iter()
-        .map(|&x| x.abs())
-        .fold(0.0f32, f32::max);
-    if max_abs == 0.0 {
-        1.0
-    } else {
-        max_abs / 127.0
-    }
+    let max_abs = fp32.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
+    if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 }
 }
 
 /// Matmul int8 × int8 → i32.
 pub fn matmul_int8(a: &[i8], b: &[i8], m: usize, k: usize, n: usize) -> Vec<i32> {
     let mut result = vec![0i32; m * n];
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut sum = 0i32;
-            for kk in 0..k {
+            for kk in 0..k
+            {
                 sum += a[i * k + kk] as i32 * b[kk * n + j] as i32;
             }
             result[i * n + j] = sum;
@@ -58,7 +54,8 @@ mod tests {
         let quantized = quantize_tensor(&original, scale);
         let recovered = dequantize_tensor(&quantized, scale);
 
-        for (orig, rec) in original.iter().zip(recovered.iter()) {
+        for (orig, rec) in original.iter().zip(recovered.iter())
+        {
             let error = (orig - rec).abs();
             assert!(error < scale * 1.5, "error {} exceeds threshold", error);
         }
@@ -95,19 +92,24 @@ pub fn quantize_per_channel(
     out_features: usize,
 ) -> (Vec<i8>, Vec<f32>) {
     let mut scales = vec![1.0f32; out_features];
-    for o in 0..out_features {
+    for o in 0..out_features
+    {
         let mut max_abs = 0.0f32;
-        for i in 0..in_features {
+        for i in 0..in_features
+        {
             let v = weight[i * out_features + o].abs();
-            if v > max_abs {
+            if v > max_abs
+            {
                 max_abs = v;
             }
         }
         scales[o] = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
     }
     let mut q = vec![0i8; in_features * out_features];
-    for i in 0..in_features {
-        for o in 0..out_features {
+    for i in 0..in_features
+    {
+        for o in 0..out_features
+        {
             let val = (weight[i * out_features + o] / scales[o]).round();
             q[i * out_features + o] = val.clamp(-128.0, 127.0) as i8;
         }
@@ -134,8 +136,10 @@ pub fn quantized_linear_forward(
     let x_q = quantize_tensor(input, scale_in);
     let acc = matmul_int8(&x_q, w_q, batch, in_features, out_features);
     let mut out = vec![0.0f32; batch * out_features];
-    for b in 0..batch {
-        for o in 0..out_features {
+    for b in 0..batch
+    {
+        for o in 0..out_features
+        {
             out[b * out_features + o] =
                 acc[b * out_features + o] as f32 * scale_in * w_scales[o] + bias[o];
         }
@@ -167,10 +171,13 @@ mod tests_quant_linear {
         let bias: Vec<f32> = vec![0.01, -0.02, 0.03];
         let input: Vec<f32> = vec![0.5, -0.3, 0.8, 0.1, -0.2, 0.4, 0.0, 0.6];
         let mut reference = vec![0.0f32; batch * out_f];
-        for b in 0..batch {
-            for o in 0..out_f {
+        for b in 0..batch
+        {
+            for o in 0..out_f
+            {
                 let mut s = 0.0f32;
-                for i in 0..in_f {
+                for i in 0..in_f
+                {
                     s += input[b * in_f + i] * weight[i * out_f + o];
                 }
                 reference[b * out_f + o] = s + bias[o];
@@ -178,7 +185,8 @@ mod tests_quant_linear {
         }
         let (w_q, w_scales) = quantize_per_channel(&weight, in_f, out_f);
         let out = quantized_linear_forward(&input, batch, in_f, &w_q, &w_scales, &bias, out_f);
-        for (r, o) in reference.iter().zip(out.iter()) {
+        for (r, o) in reference.iter().zip(out.iter())
+        {
             assert!((r - o).abs() < 0.05, "ecart trop grand: ref={} q={}", r, o);
         }
     }
@@ -208,7 +216,8 @@ unsafe fn dot_i8_neon(a: *const i8, b: *const i8, k: usize) -> i32 {
     unsafe {
         let mut acc = vdupq_n_s32(0);
         let mut kk = 0usize;
-        while kk + 16 <= k {
+        while kk + 16 <= k
+        {
             let va = vld1q_s8(a.add(kk));
             let vb = vld1q_s8(b.add(kk));
             let lo = vmull_s8(vget_low_s8(va), vget_low_s8(vb));
@@ -218,7 +227,8 @@ unsafe fn dot_i8_neon(a: *const i8, b: *const i8, k: usize) -> i32 {
             kk += 16;
         }
         let mut sum = vaddvq_s32(acc);
-        while kk < k {
+        while kk < k
+        {
             sum += (*a.add(kk)) as i32 * (*b.add(kk)) as i32;
             kk += 1;
         }
@@ -232,15 +242,19 @@ unsafe fn dot_i8_neon(a: *const i8, b: *const i8, k: usize) -> i32 {
 #[cfg(target_arch = "aarch64")]
 pub fn matmul_int8_neon(a: &[i8], b: &[i8], m: usize, k: usize, n: usize) -> Vec<i32> {
     let mut bt = vec![0i8; n * k];
-    for kk in 0..k {
-        for j in 0..n {
+    for kk in 0..k
+    {
+        for j in 0..n
+        {
             bt[j * k + kk] = b[kk * n + j];
         }
     }
     let mut out = vec![0i32; m * n];
-    for i in 0..m {
+    for i in 0..m
+    {
         let arow = a[i * k..i * k + k].as_ptr();
-        for j in 0..n {
+        for j in 0..n
+        {
             let brow = bt[j * k..j * k + k].as_ptr();
             out[i * n + j] = unsafe { dot_i8_neon(arow, brow, k) };
         }

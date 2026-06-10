@@ -1,7 +1,8 @@
 [package]
 name = "scirust-rustc-driver"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+rust-version = "1.85"
 authors = ["SciRust Team"]
 description = "Custom rustc driver for SciRust scientific computing extensions"
 publish = false

@@ -39,13 +39,15 @@ fn main() {
     let sample1 = l1.iter().next().map(|(x, _)| x).expect(">=1 echantillon");
 
     let mut sink = 0.0f32;
-    for _ in 0..300 {
+    for _ in 0..300
+    {
         sink += run_once(&mut model, &sample1);
     }
 
     let n = 5000usize;
     let mut lat: Vec<u64> = Vec::with_capacity(n);
-    for _ in 0..n {
+    for _ in 0..n
+    {
         let t = Instant::now();
         sink += run_once(&mut model, &sample1);
         lat.push(t.elapsed().as_nanos() as u64);
@@ -64,21 +66,31 @@ fn main() {
     println!("  p99    : {:>8.2} us", us(p99));
     println!("  p99.9  : {:>8.2} us", us(percentile(&lat, 0.999)));
     println!("  max    : {:>8.2} us", us(*lat.last().unwrap()));
-    println!("  p99/p50: {:>8.2}x   (indicateur de queue)", p99 as f64 / p50 as f64);
+    println!(
+        "  p99/p50: {:>8.2}x   (indicateur de queue)",
+        p99 as f64 / p50 as f64
+    );
     println!("  debit  : {:>8.0} inf/s (1/p50)", 1.0e9 / p50 as f64);
 
     let mut l64 = DataLoader::new(test.subsample(256), 64, false, 42);
     let sample64 = l64.iter().next().map(|(x, _)| x).expect("batch64");
-    for _ in 0..50 {
+    for _ in 0..50
+    {
         sink += run_once(&mut model, &sample64);
     }
     let m = 1000usize;
     let t = Instant::now();
-    for _ in 0..m {
+    for _ in 0..m
+    {
         sink += run_once(&mut model, &sample64);
     }
     let el = t.elapsed().as_secs_f64();
     println!("=== Debit batch=64 ===");
-    println!("  {:.0} echantillons/s ({} batches / {:.3}s)", (m * 64) as f64 / el, m, el);
+    println!(
+        "  {:.0} echantillons/s ({} batches / {:.3}s)",
+        (m * 64) as f64 / el,
+        m,
+        el
+    );
     println!("(sink={:.3}, anti-DCE)", sink);
 }

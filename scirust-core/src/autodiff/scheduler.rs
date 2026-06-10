@@ -145,7 +145,8 @@ impl CosineAnnealing {
 
 impl LrSchedule for CosineAnnealing {
     fn lr_at(&self, step: usize) -> f32 {
-        if step >= self.period {
+        if step >= self.period
+        {
             return self.min_lr;
         }
         let progress = step as f32 / self.period as f32; // [0, 1]
@@ -189,14 +190,18 @@ impl WarmupCosine {
 
 impl LrSchedule for WarmupCosine {
     fn lr_at(&self, step: usize) -> f32 {
-        if step < self.warmup_steps {
+        if step < self.warmup_steps
+        {
             // Linéaire de 0 à base
             self.base * (step as f32 / self.warmup_steps as f32)
-        } else {
+        }
+        else
+        {
             // Cosine de base à min_lr sur le reste
             let post = step - self.warmup_steps;
             let period = self.total_steps - self.warmup_steps;
-            if post >= period {
+            if post >= period
+            {
                 return self.min_lr;
             }
             let progress = post as f32 / period as f32;
@@ -254,12 +259,16 @@ impl ReduceOnPlateau {
     /// Appelle ça à chaque fin d'epoch avec la val_loss observée.
     /// Renvoie le nouveau LR.
     pub fn step(&mut self, val_loss: f32) -> f32 {
-        if val_loss < self.best_loss {
+        if val_loss < self.best_loss
+        {
             self.best_loss = val_loss;
             self.n_bad_epochs = 0;
-        } else {
+        }
+        else
+        {
             self.n_bad_epochs += 1;
-            if self.n_bad_epochs >= self.patience {
+            if self.n_bad_epochs >= self.patience
+            {
                 self.current = (self.current * self.factor).max(self.min_lr);
                 self.n_bad_epochs = 0;
             }
@@ -287,7 +296,8 @@ mod tests {
     #[test]
     fn constant_lr() {
         let s = ConstantLr::new(0.05);
-        for step in [0, 1, 100, 10000] {
+        for step in [0, 1, 100, 10000]
+        {
             assert_eq!(s.lr_at(step), 0.05);
         }
     }
@@ -325,7 +335,8 @@ mod tests {
     fn cosine_monotonic_decreasing_in_period() {
         let s = CosineAnnealing::new(1.0, 0.0, 100);
         let mut prev = f32::INFINITY;
-        for step in 0..=100 {
+        for step in 0..=100
+        {
             let lr = s.lr_at(step);
             assert!(
                 lr <= prev + 1e-7,

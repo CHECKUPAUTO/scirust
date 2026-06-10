@@ -13,7 +13,8 @@ fn build_model(seed: u64) -> Sequential {
 
 fn fingerprint(model: &mut Sequential, batches: &[Tensor]) -> u64 {
     let mut fp = fnv_init();
-    for x in batches {
+    for x in batches
+    {
         let tape = Tape::new();
         let v = tape.input(x.clone());
         let logits = model.forward(&tape, v);
@@ -52,7 +53,10 @@ fn main() {
     let mut b = build_model(999);
     let fp_b_pre = fingerprint(&mut b, &batches);
     println!("fp(B, seed=999, pre-load)  = {:#018x}", fp_b_pre);
-    assert_ne!(fp_b_pre, GOLDEN, "B == A sans load : le test ne prouve rien");
+    assert_ne!(
+        fp_b_pre, GOLDEN,
+        "B == A sans load : le test ne prouve rien"
+    );
 
     let sd = load_weights(path).expect("load_weights");
     b.load_state_dict(&sd).expect("load_state_dict");

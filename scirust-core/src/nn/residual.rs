@@ -55,7 +55,8 @@ impl ResidualBlock {
         let conv2 = Conv2d::new(out_c, out_c, 3, 1, Padding::Same, w_init, Some(b_init), rng);
         let bn2 = BatchNorm2d::new(out_c).with_name("rb_bn2");
 
-        let (shortcut_conv, shortcut_bn) = if in_c != out_c || stride != 1 {
+        let (shortcut_conv, shortcut_bn) = if in_c != out_c || stride != 1
+        {
             let sc = Conv2d::new(
                 in_c,
                 out_c,
@@ -68,7 +69,9 @@ impl ResidualBlock {
             );
             let sb = BatchNorm2d::new(out_c).with_name("rb_sc_bn");
             (Some(sc), Some(sb))
-        } else {
+        }
+        else
+        {
             (None, None)
         };
 
@@ -97,10 +100,12 @@ impl ResidualBlock {
         self.conv1 = self.conv1.input_dims(h, w);
         // conv2 reçoit la sortie de conv1 ; on laisse conv2 auto-inférer
         // sauf si stride=1 (mêmes dims)
-        if self.stride == 1 {
+        if self.stride == 1
+        {
             self.conv2 = self.conv2.input_dims(h, w);
         }
-        if let Some(ref mut sc) = self.shortcut_conv {
+        if let Some(ref mut sc) = self.shortcut_conv
+        {
             self.shortcut_conv = Some(sc.clone().input_dims(h, w));
         }
         self
@@ -117,15 +122,18 @@ impl Module for ResidualBlock {
         let h2 = self.bn2.forward(tape, h2);
 
         // Shortcut
-        let shortcut = if let Some(ref mut sc) = self.shortcut_conv {
+        let shortcut = if let Some(ref mut sc) = self.shortcut_conv
+        {
             let s = sc.forward(tape, input);
             self.shortcut_bn.as_mut().unwrap().forward(tape, s)
-        } else {
+        }
+        else
+        {
             input
         };
 
         // Residual + ReLU final
-        let out = h2.add(shortcut);
+        let out = h2.try_add(shortcut).unwrap();
         out.relu()
     }
 
@@ -135,10 +143,12 @@ impl Module for ResidualBlock {
         v.extend(self.bn1.parameter_indices());
         v.extend(self.conv2.parameter_indices());
         v.extend(self.bn2.parameter_indices());
-        if let Some(ref sc) = self.shortcut_conv {
+        if let Some(ref sc) = self.shortcut_conv
+        {
             v.extend(sc.parameter_indices());
         }
-        if let Some(ref sb) = self.shortcut_bn {
+        if let Some(ref sb) = self.shortcut_bn
+        {
             v.extend(sb.parameter_indices());
         }
         v
@@ -149,10 +159,12 @@ impl Module for ResidualBlock {
         self.bn1.sync(tape);
         self.conv2.sync(tape);
         self.bn2.sync(tape);
-        if let Some(ref mut sc) = self.shortcut_conv {
+        if let Some(ref mut sc) = self.shortcut_conv
+        {
             sc.sync(tape);
         }
-        if let Some(ref mut sb) = self.shortcut_bn {
+        if let Some(ref mut sb) = self.shortcut_bn
+        {
             sb.sync(tape);
         }
     }
@@ -160,25 +172,33 @@ impl Module for ResidualBlock {
     fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
         let _p = &self.name;
-        for (k, v) in self.conv1.state_dict() {
+        for (k, v) in self.conv1.state_dict()
+        {
             map.insert(format!("{_p}.{k}"), v);
         }
-        for (k, v) in self.bn1.state_dict() {
+        for (k, v) in self.bn1.state_dict()
+        {
             map.insert(format!("{_p}.{k}"), v);
         }
-        for (k, v) in self.conv2.state_dict() {
+        for (k, v) in self.conv2.state_dict()
+        {
             map.insert(format!("{_p}.{k}"), v);
         }
-        for (k, v) in self.bn2.state_dict() {
+        for (k, v) in self.bn2.state_dict()
+        {
             map.insert(format!("{_p}.{k}"), v);
         }
-        if let Some(ref sc) = self.shortcut_conv {
-            for (k, v) in sc.state_dict() {
+        if let Some(ref sc) = self.shortcut_conv
+        {
+            for (k, v) in sc.state_dict()
+            {
                 map.insert(format!("{_p}.shortcut.{k}"), v);
             }
         }
-        if let Some(ref sb) = self.shortcut_bn {
-            for (k, v) in sb.state_dict() {
+        if let Some(ref sb) = self.shortcut_bn
+        {
+            for (k, v) in sb.state_dict()
+            {
                 map.insert(format!("{_p}.shortcut_bn.{k}"), v);
             }
         }
@@ -190,10 +210,12 @@ impl Module for ResidualBlock {
         self.bn1.load_state_dict(sd)?;
         self.conv2.load_state_dict(sd)?;
         self.bn2.load_state_dict(sd)?;
-        if let Some(ref mut sc) = self.shortcut_conv {
+        if let Some(ref mut sc) = self.shortcut_conv
+        {
             sc.load_state_dict(sd)?;
         }
-        if let Some(ref mut sb) = self.shortcut_bn {
+        if let Some(ref mut sb) = self.shortcut_bn
+        {
             sb.load_state_dict(sd)?;
         }
         Ok(())

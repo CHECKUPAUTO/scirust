@@ -38,12 +38,14 @@ impl Conv2d {
         bias_init: Option<&B>,
         rng: &mut PcgEngine,
     ) -> Result<Self> {
-        if in_c == 0 || out_c == 0 {
+        if in_c == 0 || out_c == 0
+        {
             return Err(SciRustError::InvalidConfig(format!(
                 "Conv2d: in_c={in_c} out_c={out_c}, doivent être > 0"
             )));
         }
-        if kernel == 0 || stride == 0 {
+        if kernel == 0 || stride == 0
+        {
             return Err(SciRustError::InvalidConfig(format!(
                 "Conv2d: kernel={kernel} stride={stride}, doivent être > 0"
             )));
@@ -117,9 +119,11 @@ impl Conv2d {
 impl Module for Conv2d {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         let (b, total_features) = input.shape();
-        let (h, w) = match (self.cached_h, self.cached_w) {
+        let (h, w) = match (self.cached_h, self.cached_w)
+        {
             (Some(h), Some(w)) => (h, w),
-            _ => {
+            _ =>
+            {
                 let per_channel = total_features / self.in_c;
                 let side = (per_channel as f64).sqrt() as usize;
                 assert_eq!(
@@ -128,7 +132,7 @@ impl Module for Conv2d {
                     "Conv2d: utiliser .input_dims(h, w) pour des images non carrées"
                 );
                 (side, side)
-            }
+            },
         };
         self.cached_h = Some(h);
         self.cached_w = Some(w);
@@ -151,7 +155,7 @@ impl Module for Conv2d {
         self.last_w_idx = Some(weight_v.idx());
         self.last_b_idx = bias_v.as_ref().map(|v| v.idx());
 
-        input.conv2d_forward(
+        input.try_conv2d_forward(
             weight_v,
             bias_v,
             b,
@@ -163,24 +167,29 @@ impl Module for Conv2d {
             self.stride,
             cfg.pad(),
         )
+        .unwrap()
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_w_idx {
+        if let Some(i) = self.last_w_idx
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             v.push(i);
         }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_w_idx {
+        if let Some(i) = self.last_w_idx
+        {
             self.weight = tape.value(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             self.bias = Some(tape.value(i));
         }
     }
@@ -188,7 +197,8 @@ impl Module for Conv2d {
     fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
         map.insert(format!("{}.weight", self.name), self.weight.clone());
-        if let Some(b) = &self.bias {
+        if let Some(b) = &self.bias
+        {
             map.insert(format!("{}.bias", self.name), b.clone());
         }
         map
@@ -199,7 +209,8 @@ impl Module for Conv2d {
             .get(&format!("{}.weight", self.name))
             .ok_or_else(|| format!("missing key: {}.weight", self.name))?;
         let kk = self.kernel * self.kernel;
-        if w.shape() != (self.out_c, self.in_c * kk) {
+        if w.shape() != (self.out_c, self.in_c * kk)
+        {
             crate::bail!(
                 "weight shape mismatch: expected {:?}, got {:?}",
                 (self.out_c, self.in_c * kk),
@@ -207,8 +218,10 @@ impl Module for Conv2d {
             );
         }
         self.weight = w.clone();
-        if let Some(b) = sd.get(&format!("{}.bias", self.name)) {
-            if b.shape() != (1, self.out_c) {
+        if let Some(b) = sd.get(&format!("{}.bias", self.name))
+        {
+            if b.shape() != (1, self.out_c)
+            {
                 crate::bail!("bias shape mismatch");
             }
             self.bias = Some(b.clone());

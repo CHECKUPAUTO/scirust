@@ -1,5 +1,5 @@
-use thiserror::Error;
 use scirust_core::autodiff::reverse::Tensor;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ReasoningError {

@@ -1,18 +1,14 @@
 //! Benchmark skeleton: measure memory + reconstruction error + decomposition
 //! time for transformer-style FFN projections.
 //!
-//! Run with `cargo run --release --example transformer_compress --features core`
-//! (after copying this to `examples/transformer_compress.rs`) or enable as a
-//! proper criterion bench in `Cargo.toml`. The current Cargo.toml has the
-//! `[[bench]]` section commented; uncomment it once `criterion` is added as
-//! a dev-dependency.
+//! Run with `cargo run --release --example transformer_compress`
 //!
 //! Intended to run on the Jetson Thor for realistic numbers. CPU-only here
 //! since Phase 1 doesn't yet wire to scirust-gpu / cudarc.
 
-#![cfg(feature = "core")]
-
+use scirust_core::nn::init::Zeros;
 use scirust_core::nn::Linear;
+use scirust_core::nn::PcgEngine;
 use scirust_tn::{tt_decompose, tt_decompose_auto};
 use std::time::Instant;
 
@@ -39,9 +35,14 @@ fn fill_weight(linear: &mut Linear, seed: u32) {
     }
 }
 
+fn make_linear(in_features: usize, out_features: usize) -> Linear {
+    let mut rng = PcgEngine::new(42);
+    Linear::new(in_features, out_features, &Zeros, &Zeros, &mut rng)
+}
+
 /// Bench one (in, out, n_factors, max_rank) configuration.
 fn bench_one(in_features: usize, out_features: usize, n_factors: usize, max_rank: usize, tol: f32) {
-    let mut linear = Linear::new(in_features, out_features);
+    let mut linear = make_linear(in_features, out_features);
     fill_weight(&mut linear, 42);
 
     let t0 = Instant::now();

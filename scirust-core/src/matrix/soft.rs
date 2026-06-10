@@ -14,10 +14,13 @@ pub fn soft_gemm(
     k: usize,
 ) {
     // Isolated from FPU: strictly integer arithmetic
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut acc = 0i64;
-            for p in 0..k {
+            for p in 0..k
+            {
                 // Using i64 for intermediate accumulation to prevent overflow
                 acc += a[i * k + p] as i64 * b[p * n + j] as i64;
             }

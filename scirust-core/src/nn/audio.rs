@@ -1,7 +1,7 @@
 use crate::autodiff::reverse::{Tape, Tensor, Var};
-use crate::nn::init::Initializer;
-use crate::nn::conv2d::Conv2d;
 use crate::nn::conv_utils::Padding;
+use crate::nn::conv2d::Conv2d;
+use crate::nn::init::Initializer;
 use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
 
@@ -20,16 +20,22 @@ impl CTCLoss {
         let mut total_log_p = tape.input(Tensor::zeros(1, 1));
         let target_vals = tape.value(targets.idx());
 
-        for t in 0..t_steps {
+        for t in 0..t_steps
+        {
             // For each time step, pick the target token's log probability if valid
-            let target_idx = if t < target_vals.data.len() {
+            let target_idx = if t < target_vals.data.len()
+            {
                 target_vals.data[t] as usize
-            } else {
+            }
+            else
+            {
                 vocab_size - 1 // blank/padding
             };
 
-            let lp = log_probs.slice_rows(t, 1).slice_cols(target_idx % vocab_size, 1);
-            total_log_p = total_log_p.add(lp);
+            let lp = log_probs
+                .try_slice_rows(t, 1).unwrap()
+                .try_slice_cols(target_idx % vocab_size, 1).unwrap();
+            total_log_p = total_log_p.try_add(lp).unwrap();
         }
 
         total_log_p.scale(-1.0)
@@ -51,8 +57,26 @@ impl AudioEncoder {
         b_init: &B,
         rng: &mut PcgEngine,
     ) -> Self {
-        let conv1 = Conv2d::new(in_channels, hidden_channels, 3, 2, Padding::Same, w_init, Some(b_init), rng);
-        let conv2 = Conv2d::new(hidden_channels, out_channels, 3, 2, Padding::Same, w_init, Some(b_init), rng);
+        let conv1 = Conv2d::new(
+            in_channels,
+            hidden_channels,
+            3,
+            2,
+            Padding::Same,
+            w_init,
+            Some(b_init),
+            rng,
+        );
+        let conv2 = Conv2d::new(
+            hidden_channels,
+            out_channels,
+            3,
+            2,
+            Padding::Same,
+            w_init,
+            Some(b_init),
+            rng,
+        );
         Self { conv1, conv2 }
     }
 }

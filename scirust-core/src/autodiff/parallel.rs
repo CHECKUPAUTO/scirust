@@ -128,267 +128,346 @@ impl ParallelTape {
         }
 
         // ---- reverse pass ----
-        for i in (0..=output_idx).rev() {
+        for i in (0..=output_idx).rev()
+        {
             let g = t_grads[i].clone();
             // skip dead gradients
-            if g.data.iter().all(|&x| x == 0.0) {
+            if g.data.iter().all(|&x| x == 0.0)
+            {
                 continue;
             }
 
-            match nodes[i].op {
-                Op::Input => {}
+            match nodes[i].op
+            {
+                Op::Input =>
+                {},
 
-                Op::Add(a, b) => {
+                Op::Add(a, b) =>
+                {
                     t_grads[a] = t_grads[a].add(&g);
                     t_grads[b] = t_grads[b].add(&g);
-                }
-                Op::Sub(a, b) => {
+                },
+                Op::Sub(a, b) =>
+                {
                     t_grads[a] = t_grads[a].add(&g);
                     t_grads[b] = t_grads[b].sub(&g);
-                }
-                Op::Mul(a, b) => {
+                },
+                Op::Mul(a, b) =>
+                {
                     t_grads[a] = t_grads[a].add(&g.hadamard(&values[b]));
                     t_grads[b] = t_grads[b].add(&g.hadamard(&values[a]));
-                }
-                Op::Div(a, b) => {
+                },
+                Op::Div(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     let b_recip = bv.reciprocal();
                     let a_over_b2 = av.hadamard(&b_recip.hadamard(&b_recip));
                     t_grads[a] = t_grads[a].add(&g.hadamard(&b_recip));
                     t_grads[b] = t_grads[b].sub(&g.hadamard(&a_over_b2));
-                }
+                },
 
-                Op::AddBroadcast(a, b) => {
+                Op::AddBroadcast(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     t_grads[a] = t_grads[a].add(&g);
-                    if bv.rows == 1 && bv.cols == av.cols {
+                    if bv.rows == 1 && bv.cols == av.cols
+                    {
                         let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[c] += g.data[r * g.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else if bv.rows == av.rows && bv.cols == 1 {
+                    }
+                    else if bv.rows == av.rows && bv.cols == 1
+                    {
                         let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[r] += g.data[r * g.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else {
+                    }
+                    else
+                    {
                         t_grads[b] = t_grads[b].add(&g);
                     }
-                }
-                Op::SubBroadcast(a, b) => {
+                },
+                Op::SubBroadcast(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     t_grads[a] = t_grads[a].add(&g);
-                    if bv.rows == 1 && bv.cols == av.cols {
+                    if bv.rows == 1 && bv.cols == av.cols
+                    {
                         let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[c] += g.data[r * g.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].sub(&db);
-                    } else if bv.rows == av.rows && bv.cols == 1 {
+                    }
+                    else if bv.rows == av.rows && bv.cols == 1
+                    {
                         let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[r] += g.data[r * g.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].sub(&db);
-                    } else {
+                    }
+                    else
+                    {
                         t_grads[b] = t_grads[b].sub(&g);
                     }
-                }
-                Op::MulBroadcast(a, b) => {
+                },
+                Op::MulBroadcast(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     t_grads[a] = t_grads[a].add(&g.hadamard(&bv.broadcast_to(g.rows, g.cols)));
-                    if bv.rows == 1 && bv.cols == av.cols {
+                    if bv.rows == 1 && bv.cols == av.cols
+                    {
                         let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[c] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else if bv.rows == av.rows && bv.cols == 1 {
+                    }
+                    else if bv.rows == av.rows && bv.cols == 1
+                    {
                         let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[r] += g.data[r * g.cols + c] * av.data[r * av.cols + c];
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else {
+                    }
+                    else
+                    {
                         t_grads[b] = t_grads[b].add(&g.hadamard(av));
                     }
-                }
-                Op::DivBroadcast(a, b) => {
+                },
+                Op::DivBroadcast(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     let b_recip = bv.reciprocal();
                     t_grads[a] = t_grads[a].add(&g.hadamard(&b_recip.broadcast_to(g.rows, g.cols)));
-                    if bv.rows == 1 && bv.cols == av.cols {
+                    if bv.rows == 1 && bv.cols == av.cols
+                    {
                         let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[c] += g.data[r * g.cols + c]
                                     * (-av.data[r * av.cols + c] / (bv.data[c] * bv.data[c]));
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else if bv.rows == av.rows && bv.cols == 1 {
+                    }
+                    else if bv.rows == av.rows && bv.cols == 1
+                    {
                         let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows {
-                            for c in 0..g.cols {
+                        for r in 0..g.rows
+                        {
+                            for c in 0..g.cols
+                            {
                                 db.data[r] += g.data[r * g.cols + c]
                                     * (-av.data[r * av.cols + c] / (bv.data[r] * bv.data[r]));
                             }
                         }
                         t_grads[b] = t_grads[b].add(&db);
-                    } else {
+                    }
+                    else
+                    {
                         t_grads[b] = t_grads[b].sub(
                             &g.hadamard(&av.hadamard(&bv.reciprocal().hadamard(&bv.reciprocal()))),
                         );
                     }
-                }
+                },
 
-                Op::MatMul(a, b) | Op::MatMulGpu(a, b) => {
+                Op::MatMul(a, b) | Op::MatMulGpu(a, b) =>
+                {
                     let av = &values[a];
                     let bv = &values[b];
                     let ga = g.matmul(&bv.transpose());
                     let gb = av.transpose().matmul(&g);
                     t_grads[a] = t_grads[a].add(&ga);
                     t_grads[b] = t_grads[b].add(&gb);
-                }
+                },
 
-                Op::Scale { input, scalar } => {
+                Op::Scale { input, scalar } =>
+                {
                     t_grads[input] = t_grads[input].add(&g.scale(scalar));
-                }
-                Op::Neg(a) => {
+                },
+                Op::Neg(a) =>
+                {
                     t_grads[a] = t_grads[a].sub(&g);
-                }
-                Op::Exp(a) => {
+                },
+                Op::Exp(a) =>
+                {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.hadamard(&av.exp()));
-                }
-                Op::Log(a) => {
+                },
+                Op::Log(a) =>
+                {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.hadamard(&av.reciprocal()));
-                }
-                Op::Sqrt(a) => {
+                },
+                Op::Sqrt(a) =>
+                {
                     let av = &values[a];
                     let two_sqrt = av.sqrt().scale(2.0);
                     t_grads[a] = t_grads[a].add(&g.hadamard(&two_sqrt.reciprocal()));
-                }
-                Op::Reciprocal(a) => {
+                },
+                Op::Reciprocal(a) =>
+                {
                     let av = &values[a];
                     let mut denom = av.hadamard(av);
-                    for d in &mut denom.data {
+                    for d in &mut denom.data
+                    {
                         *d = 1.0 / (*d + 1e-10);
                     }
                     let minus_one_over_x2 = denom.scale(-1.0);
                     t_grads[a] = t_grads[a].add(&g.hadamard(&minus_one_over_x2));
-                }
-                Op::Pow { base, exp } => {
+                },
+                Op::Pow { base, exp } =>
+                {
                     let av = &values[base];
                     let deriv = av.pow(exp - 1.0).scale(exp);
                     t_grads[base] = t_grads[base].add(&g.hadamard(&deriv));
-                }
-                Op::ReLU(a) => {
+                },
+                Op::ReLU(a) =>
+                {
                     let av = &values[a];
                     let mut mask = Tensor::zeros(av.rows, av.cols);
-                    for j in 0..av.data.len() {
+                    for j in 0..av.data.len()
+                    {
                         mask.data[j] = if av.data[j] > 0.0 { 1.0 } else { 0.0 };
                     }
                     t_grads[a] = t_grads[a].add(&g.hadamard(&mask));
-                }
-                Op::Sigmoid(a) => {
+                },
+                Op::Sigmoid(a) =>
+                {
                     let av = &values[a];
                     let sig = av.sigmoid();
                     let ones = Tensor::from_vec(vec![1.0f32; sig.data.len()], sig.rows, sig.cols);
                     let deriv = sig.hadamard(&ones.sub(&sig));
                     t_grads[a] = t_grads[a].add(&g.hadamard(&deriv));
-                }
-                Op::Tanh(a) => {
+                },
+                Op::Tanh(a) =>
+                {
                     let av = &values[a];
                     let t = av.tanh();
                     let ones = Tensor::from_vec(vec![1.0f32; t.data.len()], t.rows, t.cols);
                     let deriv = ones.sub(&t.hadamard(&t));
                     t_grads[a] = t_grads[a].add(&g.hadamard(&deriv));
-                }
-                Op::Sin(a) => {
+                },
+                Op::Sin(a) =>
+                {
                     t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].cos()));
-                }
-                Op::Cos(a) => {
+                },
+                Op::Cos(a) =>
+                {
                     t_grads[a] = t_grads[a].sub(&g.hadamard(&values[a].sin()));
-                }
-                Op::Tan(a) => {
+                },
+                Op::Tan(a) =>
+                {
                     let cos_v = values[a].cos();
                     t_grads[a] = t_grads[a].add(&g.hadamard(&cos_v.hadamard(&cos_v).reciprocal()));
-                }
-                Op::Sinh(a) => {
+                },
+                Op::Sinh(a) =>
+                {
                     t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].cosh()));
-                }
-                Op::Cosh(a) => {
+                },
+                Op::Cosh(a) =>
+                {
                     t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].sinh()));
-                }
-                Op::Log10(a) => {
+                },
+                Op::Log10(a) =>
+                {
                     let ln10 = std::f32::consts::LN_10;
-                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[a].reciprocal().scale(1.0 / ln10)));
-                }
-                Op::Asin(a) => {
+                    t_grads[a] =
+                        t_grads[a].add(&g.hadamard(&values[a].reciprocal().scale(1.0 / ln10)));
+                },
+                Op::Asin(a) =>
+                {
                     let av = &values[a];
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.sub(&av.hadamard(av)).sqrt();
                     t_grads[a] = t_grads[a].add(&g.hadamard(&denom.reciprocal()));
-                }
-                Op::Acos(a) => {
+                },
+                Op::Acos(a) =>
+                {
                     let av = &values[a];
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.sub(&av.hadamard(av)).sqrt();
                     t_grads[a] = t_grads[a].sub(&g.hadamard(&denom.reciprocal()));
-                }
-                Op::Atan(a) => {
+                },
+                Op::Atan(a) =>
+                {
                     let av = &values[a];
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.add(&av.hadamard(av));
                     t_grads[a] = t_grads[a].add(&g.hadamard(&denom.reciprocal()));
-                }
-                Op::Atan2(a, b) => {
+                },
+                Op::Atan2(a, b) =>
+                {
                     let yv = &values[a];
                     let xv = &values[b];
                     let denom = xv.hadamard(xv).add(&yv.hadamard(yv));
                     let mut denom_safe = denom.clone();
-                    for d in &mut denom_safe.data {
+                    for d in &mut denom_safe.data
+                    {
                         *d += 1e-10;
                     }
-                    t_grads[a] = t_grads[a].add(&g.hadamard(&xv.hadamard(&denom_safe.reciprocal())));
-                    t_grads[b] = t_grads[b].sub(&g.hadamard(&yv.hadamard(&denom_safe.reciprocal())));
-                }
+                    t_grads[a] =
+                        t_grads[a].add(&g.hadamard(&xv.hadamard(&denom_safe.reciprocal())));
+                    t_grads[b] =
+                        t_grads[b].sub(&g.hadamard(&yv.hadamard(&denom_safe.reciprocal())));
+                },
 
-                Op::Sum(a) => {
+                Op::Sum(a) =>
+                {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.broadcast_to(av.rows, av.cols));
-                }
-                Op::SumAxis(a, _axis) => {
+                },
+                Op::SumAxis(a, _axis) =>
+                {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.broadcast_to(av.rows, av.cols));
-                }
-                Op::MeanAxis(a, axis) => {
+                },
+                Op::MeanAxis(a, axis) =>
+                {
                     let av = &values[a];
                     let n = if axis == 0 { av.rows } else { av.cols } as f32;
                     t_grads[a] = t_grads[a].add(&g.scale(1.0 / n).broadcast_to(av.rows, av.cols));
-                }
-                Op::VarAxis(a, axis) => {
+                },
+                Op::VarAxis(a, axis) =>
+                {
                     let av = &values[a];
                     let n = if axis == 0 { av.rows } else { av.cols } as f32;
                     let mean = av.mean_axis(axis);
@@ -399,33 +478,44 @@ impl ParallelTape {
                             .broadcast_to(av.rows, av.cols)
                             .hadamard(&diff),
                     );
-                }
-                Op::MaxAxis(a, axis) => {
+                },
+                Op::MaxAxis(a, axis) =>
+                {
                     let av = &values[a];
                     let max_v = av.max_axis(axis);
                     let mut mask = Tensor::zeros(av.rows, av.cols);
-                    if axis == 0 {
-                        for c in 0..av.cols {
+                    if axis == 0
+                    {
+                        for c in 0..av.cols
+                        {
                             let m = max_v.data[c];
-                            for r in 0..av.rows {
-                                if (av.data[r * av.cols + c] - m).abs() < 1e-6 {
+                            for r in 0..av.rows
+                            {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6
+                                {
                                     mask.data[r * av.cols + c] = 1.0;
                                 }
                             }
                         }
-                    } else {
-                        for r in 0..av.rows {
+                    }
+                    else
+                    {
+                        for r in 0..av.rows
+                        {
                             let m = max_v.data[r];
-                            for c in 0..av.cols {
-                                if (av.data[r * av.cols + c] - m).abs() < 1e-6 {
+                            for c in 0..av.cols
+                            {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6
+                                {
                                     mask.data[r * av.cols + c] = 1.0;
                                 }
                             }
                         }
                     }
                     t_grads[a] = t_grads[a].add(&g.broadcast_to(av.rows, av.cols).hadamard(&mask));
-                }
-                Op::Softmax { input, axis } => {
+                },
+                Op::Softmax { input, axis } =>
+                {
                     let av = &values[input];
                     let sm = av.softmax(axis);
                     let g_broadcast = g.broadcast_to(av.rows, av.cols);
@@ -433,121 +523,154 @@ impl ParallelTape {
                     let sum_gs = gs.sum_axis(axis);
                     let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
                     t_grads[input] = t_grads[input].add(&diff);
-                }
-                Op::LogSoftmax { input, axis } => {
+                },
+                Op::LogSoftmax { input, axis } =>
+                {
                     let av = &values[input];
                     let sm = av.softmax(axis);
                     let g_broadcast = g.broadcast_to(av.rows, av.cols);
                     let sum_g = g_broadcast.sum_axis(axis);
                     let diff = g_broadcast.sub(&sm.hadamard(&sum_g.broadcast_to(av.rows, av.cols)));
                     t_grads[input] = t_grads[input].add(&diff);
-                }
-                Op::Broadcast { input, rows, cols } => {
+                },
+                Op::Broadcast { input, rows, cols } =>
+                {
                     let av = &values[input];
-                    let g_sum = if av.rows == rows && av.cols == cols {
+                    let g_sum = if av.rows == rows && av.cols == cols
+                    {
                         g.clone()
-                    } else if av.rows == 1 && av.cols == cols {
+                    }
+                    else if av.rows == 1 && av.cols == cols
+                    {
                         g.sum_axis(0)
-                    } else if av.rows == rows && av.cols == 1 {
+                    }
+                    else if av.rows == rows && av.cols == 1
+                    {
                         g.sum_axis(1)
-                    } else if av.rows == 1 && av.cols == 1 {
+                    }
+                    else if av.rows == 1 && av.cols == 1
+                    {
                         Tensor::from_vec(vec![g.sum()], 1, 1)
-                    } else {
+                    }
+                    else
+                    {
                         panic!(
                             "Broadcast backward: unsupported shape ({},{}) -> ({},{})",
                             av.rows, av.cols, rows, cols
                         );
                     };
                     t_grads[input] = t_grads[input].add(&g_sum);
-                }
+                },
 
-                Op::Transpose2d(a) => {
+                Op::Transpose2d(a) =>
+                {
                     t_grads[a] = t_grads[a].add(&g.transpose());
-                }
+                },
 
                 Op::Concat {
                     input_indices,
                     row_counts,
-                } => {
+                } =>
+                {
                     let cols = nodes[input_indices[0]].shape.1;
                     let mut off = 0;
-                    for k in 0..3 {
+                    for k in 0..3
+                    {
                         let a = input_indices[k];
-                        if a == 0 && row_counts[k] == 0 {
+                        if a == 0 && row_counts[k] == 0
+                        {
                             continue;
                         }
                         let n = row_counts[k];
-                        for r in 0..n {
-                            for c in 0..cols {
+                        for r in 0..n
+                        {
+                            for c in 0..cols
+                            {
                                 t_grads[a].data[r * cols + c] += g.data[(off + r) * cols + c];
                             }
                         }
                         off += n;
                     }
-                }
+                },
                 Op::Slice {
                     input_idx,
                     start,
                     len,
-                } => {
+                } =>
+                {
                     let c = values[input_idx].cols;
-                    for r in 0..len {
-                        for col in 0..c {
+                    for r in 0..len
+                    {
+                        for col in 0..c
+                        {
                             t_grads[input_idx].data[(start + r) * c + col] += g.data[r * c + col];
                         }
                     }
-                }
+                },
                 Op::SliceCols {
                     input_idx,
                     start,
                     len,
-                } => {
+                } =>
+                {
                     let c = values[input_idx].cols;
-                    for r in 0..values[input_idx].rows {
-                        for col in 0..len {
+                    for r in 0..values[input_idx].rows
+                    {
+                        for col in 0..len
+                        {
                             t_grads[input_idx].data[r * c + (start + col)] += g.data[r * len + col];
                         }
                     }
-                }
+                },
 
                 Op::Embedding {
                     table_idx,
                     n_tokens: _,
-                } => {
+                } =>
+                {
                     let vocab = values[table_idx].rows;
                     let d = values[table_idx].cols;
-                    if let SavedData::Indices(ref indices) = nodes[i].saved {
-                        for (i_tok, &idx_u) in indices.iter().enumerate() {
+                    if let SavedData::Indices(ref indices) = nodes[i].saved
+                    {
+                        for (i_tok, &idx_u) in indices.iter().enumerate()
+                        {
                             let idx_usize = idx_u as usize;
-                            if idx_usize >= vocab {
+                            if idx_usize >= vocab
+                            {
                                 continue; // safety guard
                             }
-                            for j in 0..d {
+                            for j in 0..d
+                            {
                                 t_grads[table_idx].data[idx_usize * d + j] += g.data[i_tok * d + j];
                             }
                         }
                     }
-                }
+                },
                 Op::Linear {
                     input_idx,
                     weight_idx,
                     bias_idx,
-                } => {
+                } =>
+                {
                     let iv = &values[input_idx];
                     let wv = &values[weight_idx];
                     t_grads[input_idx] = t_grads[input_idx].add(&g.matmul(&wv.transpose()));
                     t_grads[weight_idx] = t_grads[weight_idx].add(&iv.transpose().matmul(&g));
                     // bias grad = sum over rows (only if no saved data)
-                    if matches!(nodes[i].saved, SavedData::None) {
+                    if matches!(nodes[i].saved, SavedData::None)
+                    {
                         let bias_g = g.sum_axis(0);
                         t_grads[bias_idx] = t_grads[bias_idx].add(&bias_g);
                     }
-                }
-                Op::CausalMask { input_idx, seq_len } => {
+                },
+                Op::CausalMask { input_idx, seq_len } =>
+                {
                     let av = &values[input_idx];
                     let mut mask = Tensor::zeros(av.rows, av.cols);
-                    for r in 0..av.rows {
-                        for c in 0..av.cols {
+                    for r in 0..av.rows
+                    {
+                        for c in 0..av.cols
+                        {
                             let col_in_seq = c % seq_len;
                             let row_in_seq = r % seq_len;
                             mask.data[r * av.cols + c] =
@@ -555,16 +678,17 @@ impl ParallelTape {
                         }
                     }
                     t_grads[input_idx] = t_grads[input_idx].add(&g.hadamard(&mask));
-                }
+                },
                 Op::Dropout {
                     input_idx,
                     mask_idx,
                     ..
-                } => {
+                } =>
+                {
                     let mv = &values[mask_idx];
                     t_grads[input_idx] = t_grads[input_idx].add(&g.hadamard(mv));
                     t_grads[mask_idx] = t_grads[mask_idx].add(&g.hadamard(&values[input_idx]));
-                }
+                },
                 Op::MaxPool2d {
                     input_idx,
                     c,
@@ -572,25 +696,33 @@ impl ParallelTape {
                     w,
                     kernel,
                     stride,
-                } => {
+                } =>
+                {
                     let av = &values[input_idx];
                     let h_out = (h - kernel) / stride + 1;
                     let w_out = (w - kernel) / stride + 1;
                     let mut grad_in = Tensor::zeros(av.rows, av.cols);
-                    for b in 0..av.rows {
-                        for ch in 0..c {
-                            for oh in 0..h_out {
-                                for ow in 0..w_out {
+                    for b in 0..av.rows
+                    {
+                        for ch in 0..c
+                        {
+                            for oh in 0..h_out
+                            {
+                                for ow in 0..w_out
+                                {
                                     let mut m = -f32::INFINITY;
                                     let mut mh = 0usize;
                                     let mut mw = 0usize;
-                                    for kh in 0..kernel {
-                                        for kw in 0..kernel {
+                                    for kh in 0..kernel
+                                    {
+                                        for kw in 0..kernel
+                                        {
                                             let ih = oh * stride + kh;
                                             let iw = ow * stride + kw;
                                             let idx_in = b * c * h * w + ch * h * w + ih * w + iw;
                                             let v = av.data[idx_in];
-                                            if v > m {
+                                            if v > m
+                                            {
                                                 m = v;
                                                 mh = ih;
                                                 mw = iw;
@@ -608,30 +740,32 @@ impl ParallelTape {
                         }
                     }
                     t_grads[input_idx] = t_grads[input_idx].add(&grad_in);
-                }
+                },
                 Op::BatchNorm {
                     input_idx,
                     gamma_idx,
                     beta_idx,
-                } => {
+                } =>
+                {
                     let gv = &values[gamma_idx];
                     let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
                     t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
                     t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
-                }
+                },
                 Op::LayerNorm {
                     input_idx,
                     gamma_idx,
                     beta_idx,
                     ..
-                } => {
+                } =>
+                {
                     let gv = &values[gamma_idx];
                     let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
                     t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
                     t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
-                }
+                },
                 Op::Conv2dForward {
                     input,
                     weight,
@@ -644,18 +778,24 @@ impl ParallelTape {
                     kernel,
                     stride,
                     pad,
-                } => {
+                } =>
+                {
                     let input_t = &values[input];
                     let weight_t = &values[weight];
                     let h_out = (h + 2 * pad - kernel) / stride + 1;
                     let w_out = (w + 2 * pad - kernel) / stride + 1;
 
-                    if let Some(b_idx) = bias {
+                    if let Some(b_idx) = bias
+                    {
                         let mut db = Tensor::zeros(1, out_c);
-                        for b_i in 0..batch {
-                            for oc in 0..out_c {
-                                for oh in 0..h_out {
-                                    for ow in 0..w_out {
+                        for b_i in 0..batch
+                        {
+                            for oc in 0..out_c
+                            {
+                                for oh in 0..h_out
+                                {
+                                    for ow in 0..w_out
+                                    {
                                         let out_idx = b_i * out_c * h_out * w_out
                                             + oc * h_out * w_out
                                             + oh * w_out
@@ -670,18 +810,25 @@ impl ParallelTape {
 
                     let mut dw = Tensor::zeros(weight_t.rows, weight_t.cols);
                     let mut dx = Tensor::zeros(input_t.rows, input_t.cols);
-                    for b_i in 0..batch {
-                        for oc in 0..out_c {
-                            for oh in 0..h_out {
-                                for ow in 0..w_out {
+                    for b_i in 0..batch
+                    {
+                        for oc in 0..out_c
+                        {
+                            for oh in 0..h_out
+                            {
+                                for ow in 0..w_out
+                                {
                                     let out_idx = b_i * out_c * h_out * w_out
                                         + oc * h_out * w_out
                                         + oh * w_out
                                         + ow;
                                     let grad_out = g.data[out_idx];
-                                    for ic in 0..in_c {
-                                        for kh in 0..kernel {
-                                            for kw in 0..kernel {
+                                    for ic in 0..in_c
+                                    {
+                                        for kh in 0..kernel
+                                        {
+                                            for kw in 0..kernel
+                                            {
                                                 let ih = oh as isize * stride as isize
                                                     + kh as isize
                                                     - pad as isize;
@@ -717,20 +864,28 @@ impl ParallelTape {
                     }
                     t_grads[weight] = t_grads[weight].add(&dw);
                     t_grads[input] = t_grads[input].add(&dx);
-                }
-                Op::Reshape(input_idx, old_rows, old_cols) => {
+                },
+                Op::Reshape(input_idx, old_rows, old_cols) =>
+                {
                     t_grads[input_idx] = t_grads[input_idx].add(&g.reshape(old_rows, old_cols));
-                }
-                Op::FakeQuantize { input, .. } => {
+                },
+                Op::FakeQuantize { input, .. } =>
+                {
                     t_grads[input] = t_grads[input].add(&g);
-                }
-                Op::FlashAttention { .. } => {
+                },
+                Op::FlashAttention { .. } =>
+                {
                     // FlashAttention backward non implémenté en parallèle
                     // Le forward séquentiel gère la backward pass complète
-                }
-                Op::Conv2dTransposeForward { .. } => {
+                },
+                Op::Conv2dTransposeForward { .. } =>
+                {
                     // Conv2dTranspose backward non implémenté en parallèle
-                }
+                },
+                Op::TtContract { .. } =>
+                {
+                    // TtContract backward non implémenté en parallèle
+                },
             }
         }
 
@@ -740,7 +895,8 @@ impl ParallelTape {
                 .grads
                 .write()
                 .expect("ParallelTape grads lock poisoned");
-            for i in 0..n {
+            for i in 0..n
+            {
                 grads[i] = t_grads[i].sum() as f64;
             }
         }
@@ -752,7 +908,8 @@ impl ParallelTape {
             .grads
             .write()
             .expect("ParallelTape grads lock poisoned");
-        for g in grads.iter_mut() {
+        for g in grads.iter_mut()
+        {
             *g = 0.0;
         }
     }

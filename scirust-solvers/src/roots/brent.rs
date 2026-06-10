@@ -10,14 +10,15 @@
 //!
 //! Référence : Brent, *Algorithms for Minimization Without Derivatives*, 1973.
 
-use crate::{ConvergenceInfo, SolverError, SolverResult, Solution, Tolerance};
+use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
 /// Compteur d'oscillation : si l'interpolation stagne, on force bissection.
 const MAX_OSCILLATION: u32 = 5;
 
 fn check_finite(v: f64, label: &str) -> Result<(), SolverError> {
-    if !v.is_finite() {
+    if !v.is_finite()
+    {
         return Err(SolverError::NanDetected { iter: 0, value: v });
     }
     Ok(())
@@ -35,13 +36,21 @@ pub fn brent<F: Fn(f64) -> f64>(
     check_finite(fa, "fa")?;
     check_finite(fb, "fb")?;
 
-    if fa.signum() == fb.signum() && fa != 0.0 && fb != 0.0 {
+    if fa.signum() == fb.signum() && fa != 0.0 && fb != 0.0
+    {
         return Err(SolverError::NoSignChange { a, b, fa, fb });
     }
-    if fa == 0.0 { return Ok(Solution::new(a, 0, 0.0)); }
-    if fb == 0.0 { return Ok(Solution::new(b, 0, 0.0)); }
+    if fa == 0.0
+    {
+        return Ok(Solution::new(a, 0, 0.0));
+    }
+    if fb == 0.0
+    {
+        return Ok(Solution::new(b, 0, 0.0));
+    }
 
-    if fa.abs() < fb.abs() {
+    if fa.abs() < fb.abs()
+    {
         std::mem::swap(&mut a, &mut b);
         std::mem::swap(&mut fa, &mut fb);
     }
@@ -53,37 +62,49 @@ pub fn brent<F: Fn(f64) -> f64>(
 
     let mut oscillation_count = 0u32;
 
-    for k in 0..tol.max_iter {
-        if fc.signum() == fb.signum() {
+    for k in 0..tol.max_iter
+    {
+        if fc.signum() == fb.signum()
+        {
             c = a;
             fc = fa;
             d = b - a;
             e = d;
         }
-        if fc.abs() < fb.abs() {
-            a = b; b = c; c = a;
-            fa = fb; fb = fc; fc = fa;
+        if fc.abs() < fb.abs()
+        {
+            a = b;
+            b = c;
+            c = a;
+            fa = fb;
+            fb = fc;
+            fc = fa;
         }
 
         let tol_act = 2.0 * f64::EPSILON * b.abs() + 0.5 * tol.abs;
         let m = 0.5 * (c - b);
-        if m.abs() <= tol_act || fb == 0.0 {
+        if m.abs() <= tol_act || fb == 0.0
+        {
             return Ok(Solution::new(b, k, fb.abs()));
         }
 
         let mut use_bisection = false;
 
         // Tente interpolation si la condition de Brent le permet
-        if e.abs() >= tol_act && fa.abs() > fb.abs() {
+        if e.abs() >= tol_act && fa.abs() > fb.abs()
+        {
             let s = fb / fa;
             let (mut p, mut q): (f64, f64);
             check_finite(s, "s")?;
 
-            if a == c {
+            if a == c
+            {
                 // Sécante
                 p = 2.0 * m * s;
                 q = 1.0 - s;
-            } else {
+            }
+            else
+            {
                 // Interpolation quadratique inverse
                 let qq = fa / fc;
                 let r = fb / fc;
@@ -96,27 +117,43 @@ pub fn brent<F: Fn(f64) -> f64>(
             check_finite(p, "p")?;
             check_finite(q, "q")?;
 
-            if p > 0.0 { q = -q; } else { p = -p; }
+            if p > 0.0
+            {
+                q = -q;
+            }
+            else
+            {
+                p = -p;
+            }
 
             // Vérifier que la division par q est sûre
-            if q.abs() < tol_act * 1e-10 {
+            if q.abs() < tol_act * 1e-10
+            {
                 use_bisection = true;
-            } else if 2.0 * p < (3.0 * m * q - (tol_act * q).abs()).min((e * q).abs()) {
+            }
+            else if 2.0 * p < (3.0 * m * q - (tol_act * q).abs()).min((e * q).abs())
+            {
                 e = d;
                 d = p / q;
                 check_finite(d, "d=p/q")?;
                 oscillation_count = 0;
-            } else {
+            }
+            else
+            {
                 use_bisection = true;
             }
-        } else {
+        }
+        else
+        {
             use_bisection = true;
         }
 
         // Détection d'oscillation stérile — forcer bissection
-        if use_bisection {
+        if use_bisection
+        {
             oscillation_count += 1;
-            if oscillation_count >= MAX_OSCILLATION {
+            if oscillation_count >= MAX_OSCILLATION
+            {
                 warn!(
                     target: "solver",
                     "Brent: oscillation detected ({oscillation_count} consecutive bisections), forcing pure bisection step"
@@ -125,7 +162,9 @@ pub fn brent<F: Fn(f64) -> f64>(
                 d = m;
                 e = d;
                 oscillation_count = 0;
-            } else {
+            }
+            else
+            {
                 d = m;
                 e = d;
             }
@@ -134,7 +173,18 @@ pub fn brent<F: Fn(f64) -> f64>(
         a = b;
         fa = fb;
 
-        let step = if d.abs() > tol_act { d } else if m > 0.0 { tol_act } else { -tol_act };
+        let step = if d.abs() > tol_act
+        {
+            d
+        }
+        else if m > 0.0
+        {
+            tol_act
+        }
+        else
+        {
+            -tol_act
+        };
         check_finite(step, "step")?;
         b += step;
         check_finite(b, "b")?;
@@ -163,7 +213,13 @@ mod tests {
 
     #[test]
     fn brent_cubic_fast() {
-        let s = brent(|x| x.powi(3) - 2.0 * x - 5.0, 2.0, 3.0, Tolerance::default()).unwrap();
+        let s = brent(
+            |x| x.powi(3) - 2.0 * x - 5.0,
+            2.0,
+            3.0,
+            Tolerance::default(),
+        )
+        .unwrap();
         assert_relative_eq!(s.value, 2.094_551_481_542_326_6, epsilon = 1e-12);
         assert!(s.info.iterations < 20);
     }

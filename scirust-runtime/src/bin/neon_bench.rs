@@ -17,9 +17,13 @@ fn main() {
     let exact = matmul_int8(&a, &b, m, k, n) == matmul_int8_neon(&a, &b, m, k, n);
 
     let bench = |f: &dyn Fn() -> Vec<i32>, iters: usize| -> f64 {
-        for _ in 0..5 { let _ = f(); }
+        for _ in 0..5
+        {
+            let _ = f();
+        }
         let mut lat = Vec::with_capacity(iters);
-        for _ in 0..iters {
+        for _ in 0..iters
+        {
             let t = Instant::now();
             let _ = f();
             lat.push(t.elapsed().as_nanos() as u64);
@@ -32,8 +36,14 @@ fn main() {
     let p_neon = bench(&|| matmul_int8_neon(&a, &b, m, k, n), iters);
 
     println!();
-    println!("=== BENCH matmul_int8 scalaire vs NEON ({}x{}x{}) ===", m, k, n);
-    println!("bit-exact (scal == neon) : {}", if exact { "OUI" } else { "NON" });
+    println!(
+        "=== BENCH matmul_int8 scalaire vs NEON ({}x{}x{}) ===",
+        m, k, n
+    );
+    println!(
+        "bit-exact (scal == neon) : {}",
+        if exact { "OUI" } else { "NON" }
+    );
     println!("scalaire p50 : {:.1} us", p_scal);
     println!("NEON     p50 : {:.1} us  (transpose de b incluse)", p_neon);
     println!("speedup      : {:.2}x", p_scal / p_neon);

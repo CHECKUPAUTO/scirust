@@ -11,7 +11,8 @@
 use crate::SolverResult;
 
 fn check_finite(value: f64, label: &str) -> Result<(), crate::SolverError> {
-    if !value.is_finite() {
+    if !value.is_finite()
+    {
         return Err(crate::SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
@@ -36,39 +37,67 @@ where
     let mut k4 = vec![0.0; n];
     let mut ytmp = vec![0.0; n];
 
-    for _ in 0..nsteps {
+    for _ in 0..nsteps
+    {
         let h_act = if t + h > t_end { t_end - t } else { h };
-        if h_act <= 0.0 {
+        if h_act <= 0.0
+        {
             break;
         }
 
         f(t, &y, &mut k1);
-        if k1.iter().any(|v| !v.is_finite()) { break; }
+        if k1.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
 
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + 0.5 * h_act * k1[i];
         }
-        if ytmp.iter().any(|v| !v.is_finite()) { break; }
+        if ytmp.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
         f(t + 0.5 * h_act, &ytmp, &mut k2);
-        if k2.iter().any(|v| !v.is_finite()) { break; }
+        if k2.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
 
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + 0.5 * h_act * k2[i];
         }
-        if ytmp.iter().any(|v| !v.is_finite()) { break; }
+        if ytmp.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
         f(t + 0.5 * h_act, &ytmp, &mut k3);
-        if k3.iter().any(|v| !v.is_finite()) { break; }
+        if k3.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
 
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + h_act * k3[i];
         }
-        if ytmp.iter().any(|v| !v.is_finite()) { break; }
+        if ytmp.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
         f(t + h_act, &ytmp, &mut k4);
-        if k4.iter().any(|v| !v.is_finite()) { break; }
+        if k4.iter().any(|v| !v.is_finite())
+        {
+            break;
+        }
 
-        for i in 0..n {
+        for i in 0..n
+        {
             y[i] += h_act / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
-            if !y[i].is_finite() {
+            if !y[i].is_finite()
+            {
                 // NaN détecté après mise à jour — on stoppe proprement
                 break;
             }

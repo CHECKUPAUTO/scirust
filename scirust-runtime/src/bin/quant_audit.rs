@@ -8,8 +8,10 @@ use scirust_runtime::{fnv_fold_f32, fnv_init, load_weights};
 fn argmax(row: &[f32]) -> usize {
     let mut best = row[0];
     let mut bi = 0usize;
-    for (i, &v) in row.iter().enumerate().skip(1) {
-        if v > best {
+    for (i, &v) in row.iter().enumerate().skip(1)
+    {
+        if v > best
+        {
             best = v;
             bi = i;
         }
@@ -37,18 +39,22 @@ fn main() {
     println!("Cles du state_dict :");
     let mut keys: Vec<_> = sd.keys().cloned().collect();
     keys.sort();
-    for k in &keys {
+    for k in &keys
+    {
         let (r, c) = sd[k].shape();
         println!("  {:<14} ({}, {})", k, r, c);
     }
     let (mut w1, mut b1, mut w2, mut b2) = (None, None, None, None);
-    for (_k, t) in &sd {
-        match t.shape() {
+    for (_k, t) in &sd
+    {
+        match t.shape()
+        {
             (784, 256) => w1 = Some(t.clone()),
             (1, 256) => b1 = Some(t.clone()),
             (256, 10) => w2 = Some(t.clone()),
             (1, 10) => b2 = Some(t.clone()),
-            _ => {}
+            _ =>
+            {},
         }
     }
     let w1 = w1.expect("poids Linear1 (784,256)");
@@ -64,7 +70,8 @@ fn main() {
     let mut fp_f32 = fnv_init();
     let mut fp_int8 = fnv_init();
 
-    for (xb, yb) in loader.iter() {
+    for (xb, yb) in loader.iter()
+    {
         let (bs, _) = xb.shape();
 
         let tape = Tape::new();
@@ -78,12 +85,15 @@ fn main() {
         let logits_q = quantized_linear_forward(&h_relu, bs, 256, &w2q, &w2s, &b2.data, 10);
         fp_int8 = fnv_fold_f32(fp_int8, &logits_q);
 
-        for i in 0..bs {
+        for i in 0..bs
+        {
             let tc = argmax(&yb.data[i * 10..(i + 1) * 10]);
-            if argmax(&scores.data[i * 10..(i + 1) * 10]) == tc {
+            if argmax(&scores.data[i * 10..(i + 1) * 10]) == tc
+            {
                 correct_f32 += 1;
             }
-            if argmax(&logits_q[i * 10..(i + 1) * 10]) == tc {
+            if argmax(&logits_q[i * 10..(i + 1) * 10]) == tc
+            {
                 correct_int8 += 1;
             }
             total += 1;
@@ -99,12 +109,21 @@ fn main() {
 
     println!();
     println!("=== AUDIT int8 (MNIST test, {} echantillons) ===", total);
-    println!("Accuracy f32 (oracle) : {:.2}% ({}/{})", acc_f32, correct_f32, total);
-    println!("Accuracy int8         : {:.2}% ({}/{})", acc_int8, correct_int8, total);
+    println!(
+        "Accuracy f32 (oracle) : {:.2}% ({}/{})",
+        acc_f32, correct_f32, total
+    );
+    println!(
+        "Accuracy int8         : {:.2}% ({}/{})",
+        acc_int8, correct_int8, total
+    );
     println!("Delta                 : {:+.2} points", acc_int8 - acc_f32);
     println!();
     println!("Poids f32  : {} octets", bytes_f32);
-    println!("Poids int8 : {} octets (poids + scales per-channel)", bytes_int8);
+    println!(
+        "Poids int8 : {} octets (poids + scales per-channel)",
+        bytes_int8
+    );
     println!("Reduction  : {:.2}x", ratio);
     println!();
     println!("Empreinte logits f32  : {:#018x}", fp_f32);

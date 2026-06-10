@@ -9,8 +9,12 @@ pub fn run_example() {
     let mut runtime = EventRuntime::new(Box::new(detector));
 
     let events = runtime.process_all(&mut stream);
-    for e in events {
-        println!("Event (EN: {}, FR: {}) at t={} confidence={}", e.label_en, e.label_fr, e.timestamp, e.confidence);
+    for e in events
+    {
+        println!(
+            "Event (EN: {}, FR: {}) at t={} confidence={}",
+            e.label_en, e.label_fr, e.timestamp, e.confidence
+        );
     }
 }
 

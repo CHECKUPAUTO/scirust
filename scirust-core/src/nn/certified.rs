@@ -1,4 +1,4 @@
-use crate::autodiff::reverse::{Tape, Var, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::Module;
 use std::marker::PhantomData;
 
@@ -11,26 +11,34 @@ pub trait Contract {
 /// A contract that ensures values stay within [MIN, MAX] range.
 pub struct ValueBoundedContract<const MIN_BITS: i32, const MAX_BITS: i32>;
 
-impl<const MIN_BITS: i32, const MAX_BITS: i32> Contract for ValueBoundedContract<MIN_BITS, MAX_BITS> {
+impl<const MIN_BITS: i32, const MAX_BITS: i32> Contract
+    for ValueBoundedContract<MIN_BITS, MAX_BITS>
+{
     fn validate(t: &Tensor) -> Option<Tensor> {
         let min = MIN_BITS as f32;
         let max = MAX_BITS as f32;
         let mut violated = false;
         let mut clean_data = t.data.clone();
 
-        for x in clean_data.iter_mut() {
-            if *x < min || *x > max || x.is_nan() || x.is_infinite() {
+        for x in clean_data.iter_mut()
+        {
+            if *x < min || *x > max || x.is_nan() || x.is_infinite()
+            {
                 *x = x.clamp(min, max);
-                if x.is_nan() || x.is_infinite() {
+                if x.is_nan() || x.is_infinite()
+                {
                     *x = 0.0; // Predictable fallback
                 }
                 violated = true;
             }
         }
 
-        if violated {
+        if violated
+        {
             Some(Tensor::from_vec(clean_data, t.rows, t.cols))
-        } else {
+        }
+        else
+        {
             None
         }
     }
@@ -55,9 +63,12 @@ impl<M: Module, C: Contract> Module for CertifiedModule<M, C> {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         // 1. Enforce contract on input
         let input_val = tape.value(input.idx());
-        let validated_input = if let Some(safe_input) = C::validate(&input_val) {
+        let validated_input = if let Some(safe_input) = C::validate(&input_val)
+        {
             tape.input(safe_input)
-        } else {
+        }
+        else
+        {
             input
         };
 
@@ -66,9 +77,12 @@ impl<M: Module, C: Contract> Module for CertifiedModule<M, C> {
 
         // 3. Enforce contract on output
         let output_val = tape.value(output.idx());
-        if let Some(safe_output) = C::validate(&output_val) {
+        if let Some(safe_output) = C::validate(&output_val)
+        {
             tape.input(safe_output)
-        } else {
+        }
+        else
+        {
             output
         }
     }

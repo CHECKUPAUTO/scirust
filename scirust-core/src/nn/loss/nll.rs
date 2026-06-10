@@ -48,7 +48,7 @@ impl Loss for NllLoss {
         let (batch, _n_classes) = pred.shape();
 
         // -sum(target ⊙ pred) / batch
-        let prod = target.hadamard(pred);
+        let prod = target.try_hadamard(pred).unwrap();
         prod.sum().scale(-1.0 / batch as f32)
     }
 }

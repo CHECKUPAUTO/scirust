@@ -28,7 +28,8 @@ const MAX_FACTOR: f64 = 5.0;
 const MAX_STEPS: usize = 100_000;
 
 fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
-    if !value.is_finite() {
+    if !value.is_finite()
+    {
         return Err(SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
@@ -107,11 +108,15 @@ where
 {
     use dp_coeffs::*;
     let n = y0.len();
-    if t_end <= t0 {
+    if t_end <= t0
+    {
         return Err(SolverError::InvalidInput("t_end must be > t0".into()));
     }
-    if n == 0 {
-        return Err(SolverError::InvalidInput("system dimension must be > 0".into()));
+    if n == 0
+    {
+        return Err(SolverError::InvalidInput(
+            "system dimension must be > 0".into(),
+        ));
     }
 
     let mut t = t0;
@@ -139,82 +144,98 @@ where
 
     f(t, &y, &mut k1);
 
-    for _ in 0..MAX_STEPS {
-        if t >= t_end {
+    for _ in 0..MAX_STEPS
+    {
+        if t >= t_end
+        {
             break;
         }
-        if t + h > t_end {
+        if t + h > t_end
+        {
             h = t_end - t;
         }
 
         // k2
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + h * A21 * k1[i];
             check_finite(ytmp[i], &format!("ytmp k2[{i}]"))?;
         }
         f(t + C2 * h, &ytmp, &mut k2);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k2[i], &format!("k2[{i}]"))?;
         }
 
         // k3
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + h * (A31 * k1[i] + A32 * k2[i]);
             check_finite(ytmp[i], &format!("ytmp k3[{i}]"))?;
         }
         f(t + C3 * h, &ytmp, &mut k3);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k3[i], &format!("k3[{i}]"))?;
         }
 
         // k4
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + h * (A41 * k1[i] + A42 * k2[i] + A43 * k3[i]);
             check_finite(ytmp[i], &format!("ytmp k4[{i}]"))?;
         }
         f(t + C4 * h, &ytmp, &mut k4);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k4[i], &format!("k4[{i}]"))?;
         }
 
         // k5
-        for i in 0..n {
+        for i in 0..n
+        {
             ytmp[i] = y[i] + h * (A51 * k1[i] + A52 * k2[i] + A53 * k3[i] + A54 * k4[i]);
             check_finite(ytmp[i], &format!("ytmp k5[{i}]"))?;
         }
         f(t + C5 * h, &ytmp, &mut k5);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k5[i], &format!("k5[{i}]"))?;
         }
 
         // k6
-        for i in 0..n {
-            ytmp[i] = y[i]
-                + h * (A61 * k1[i] + A62 * k2[i] + A63 * k3[i] + A64 * k4[i] + A65 * k5[i]);
+        for i in 0..n
+        {
+            ytmp[i] =
+                y[i] + h * (A61 * k1[i] + A62 * k2[i] + A63 * k3[i] + A64 * k4[i] + A65 * k5[i]);
             check_finite(ytmp[i], &format!("ytmp k6[{i}]"))?;
         }
         f(t + h, &ytmp, &mut k6);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k6[i], &format!("k6[{i}]"))?;
         }
 
         // y_new à l'ordre 5
-        for i in 0..n {
-            ynew[i] = y[i]
-                + h * (B1 * k1[i] + B3 * k3[i] + B4 * k4[i] + B5 * k5[i] + B6 * k6[i]);
+        for i in 0..n
+        {
+            ynew[i] = y[i] + h * (B1 * k1[i] + B3 * k3[i] + B4 * k4[i] + B5 * k5[i] + B6 * k6[i]);
             check_finite(ynew[i], &format!("ynew[{i}]"))?;
         }
 
         // k7 (FSAL)
         f(t + h, &ynew, &mut k7);
-        for i in 0..n {
+        for i in 0..n
+        {
             check_finite(k7[i], &format!("k7[{i}]"))?;
         }
 
         // Estimateur d'erreur normalisé
         let mut err_norm = 0.0_f64;
-        for i in 0..n {
-            let err = h * (E1 * k1[i] + E3 * k3[i] + E4 * k4[i] + E5 * k5[i] + E6 * k6[i] + E7 * k7[i]);
+        for i in 0..n
+        {
+            let err =
+                h * (E1 * k1[i] + E3 * k3[i] + E4 * k4[i] + E5 * k5[i] + E6 * k6[i] + E7 * k7[i]);
             check_finite(err, &format!("err[{i}]"))?;
             let sc = atol.max(1e-15) + rtol * y[i].abs().max(ynew[i].abs());
             err_norm += (err / sc).powi(2);
@@ -222,7 +243,8 @@ where
         err_norm = (err_norm / n as f64).sqrt();
         check_finite(err_norm, "err_norm")?;
 
-        if err_norm <= 1.0 {
+        if err_norm <= 1.0
+        {
             // Accepté → backup le bon état
             last_good_t = t + h;
             last_good_y.copy_from_slice(&ynew);
@@ -234,21 +256,27 @@ where
             out_t.push(t);
             out_y.push(y.clone());
 
-            let factor = if err_norm == 0.0 {
+            let factor = if err_norm == 0.0
+            {
                 MAX_FACTOR
-            } else {
+            }
+            else
+            {
                 (SAFETY * err_norm.powf(-0.2)).clamp(MIN_FACTOR, MAX_FACTOR)
             };
             check_finite(factor, "factor_accept")?;
             h *= factor;
-        } else {
+        }
+        else
+        {
             // Rejeté — réduction agressive
             rejected += 1;
             let factor = (SAFETY * err_norm.powf(-0.2)).clamp(MIN_FACTOR, MAX_FACTOR);
             check_finite(factor, "factor_reject")?;
             h *= factor;
 
-            if h < MIN_STEP {
+            if h < MIN_STEP
+            {
                 warn!(
                     target: "solver",
                     "DOPRI5: step underflow h={:.3e} at t={} — restoring backup from t={}",
@@ -263,7 +291,8 @@ where
                 });
             }
 
-            if rejected > MAX_REJECTIONS {
+            if rejected > MAX_REJECTIONS
+            {
                 warn!(
                     target: "solver",
                     "DOPRI5: too many consecutive rejections ({}) at t={} — aborting",
@@ -277,7 +306,8 @@ where
         }
     }
 
-    if t < t_end {
+    if t < t_end
+    {
         return Err(SolverError::IntegrationFailed(format!(
             "max steps ({}) reached at t={}, t_end={}",
             MAX_STEPS, t, t_end
@@ -301,7 +331,12 @@ mod tests {
     fn exponential_decay_adaptive() {
         let r = dopri5(
             |_, y, dy| dy[0] = -y[0],
-            0.0, 5.0, vec![1.0], 1e-8, 1e-10, 0.1,
+            0.0,
+            5.0,
+            vec![1.0],
+            1e-8,
+            1e-10,
+            0.1,
         )
         .unwrap();
         assert_relative_eq!(r.t[r.t.len() - 1], 5.0, epsilon = 1e-10);
@@ -316,7 +351,12 @@ mod tests {
                 dy[0] = y[1];
                 dy[1] = mu * (1.0 - y[0] * y[0]) * y[1] - y[0];
             },
-            0.0, 10.0, vec![2.0, 0.0], 1e-6, 1e-9, 0.1,
+            0.0,
+            10.0,
+            vec![2.0, 0.0],
+            1e-6,
+            1e-9,
+            0.1,
         )
         .unwrap();
         assert!(r.accepted > 0);
@@ -330,15 +370,17 @@ mod tests {
                 dy[0] = y[1];
                 dy[1] = -9.81 * y[0].sin();
             },
-            0.0, 10.0, vec![0.5, 0.0], 1e-8, 1e-10, 0.05,
+            0.0,
+            10.0,
+            vec![0.5, 0.0],
+            1e-8,
+            1e-10,
+            0.05,
         )
         .unwrap();
         let e0 = 0.5_f64.cos().mul_add(-9.81, 9.81);
         let last = &r.y[r.y.len() - 1];
         let e = last[1].powi(2) / 2.0 + 9.81 * (1.0 - last[0].cos());
-        assert!(
-            (e - e0).abs() / e0 < 1e-6,
-            "energy drift: e0={e0}, e={e}"
-        );
+        assert!((e - e0).abs() / e0 < 1e-6, "energy drift: e0={e0}, e={e}");
     }
 }

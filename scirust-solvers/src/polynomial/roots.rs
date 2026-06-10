@@ -15,13 +15,17 @@ use crate::{SolverError, SolverResult};
 /// Renvoie un Vec<(re, im)> de longueur `degree`.
 pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<Vec<(f64, f64)>> {
     let n = p.degree();
-    if n == 0 {
+    if n == 0
+    {
         return Ok(Vec::new());
     }
     // Normalise pour que le coefficient dominant vaille 1
     let lead = *p.coeffs.last().unwrap();
-    if lead.abs() < 1e-30 {
-        return Err(SolverError::InvalidInput("leading coefficient is zero".into()));
+    if lead.abs() < 1e-30
+    {
+        return Err(SolverError::InvalidInput(
+            "leading coefficient is zero".into(),
+        ));
     }
     let monic: Vec<f64> = p.coeffs.iter().map(|c| c / lead).collect();
 
@@ -30,7 +34,8 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
     let mut z: Vec<(f64, f64)> = Vec::with_capacity(n);
     let base = (0.4_f64, 0.9_f64);
     let theta_step = 2.0 * std::f64::consts::PI / n as f64;
-    for i in 0..n {
+    for i in 0..n
+    {
         let angle = theta_step * i as f64;
         let r = base.0.hypot(base.1);
         let phi = base.1.atan2(base.0);
@@ -41,7 +46,8 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
     // Évaluation de p(z) (complexe) par Horner
     let eval_complex = |z: (f64, f64)| -> (f64, f64) {
         let mut acc = (0.0_f64, 0.0_f64);
-        for &c in monic.iter().rev() {
+        for &c in monic.iter().rev()
+        {
             // acc = acc * z + c
             let (ar, ai) = acc;
             let (zr, zi) = z;
@@ -52,15 +58,19 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
         acc
     };
 
-    for _ in 0..max_iter {
+    for _ in 0..max_iter
+    {
         let mut max_step = 0.0_f64;
-        for i in 0..n {
+        for i in 0..n
+        {
             // Calcule p(z_i)
             let pz = eval_complex(z[i]);
             // Calcule le produit Π_{j != i} (z_i - z_j)
             let mut denom = (1.0_f64, 0.0_f64);
-            for j in 0..n {
-                if i == j {
+            for j in 0..n
+            {
+                if i == j
+                {
                     continue;
                 }
                 let dr = z[i].0 - z[j].0;
@@ -70,7 +80,8 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
                 denom = (or_ * dr - oi * di, or_ * di + oi * dr);
             }
             let dmag = denom.0.hypot(denom.1);
-            if dmag < 1e-30 {
+            if dmag < 1e-30
+            {
                 continue; // racines confondues — saute cette itération
             }
             // step = p(z) / denom  (division complexe)
@@ -81,7 +92,8 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
             let step_mag = nr.hypot(ni);
             max_step = max_step.max(step_mag);
         }
-        if max_step < tol {
+        if max_step < tol
+        {
             return Ok(z);
         }
     }
@@ -171,12 +183,15 @@ mod tests {
     fn degree_5() {
         // (x-1)(x-2)(x-3)(x-4)(x-5)
         let mut p = Polynomial::from_descending(vec![1.0, -1.0]);
-        for k in 2..=5 {
+        for k in 2..=5
+        {
             // Multiplie p par (x - k)
             let q = Polynomial::from_descending(vec![1.0, -(k as f64)]);
             let mut new_coeffs = vec![0.0; p.coeffs.len() + q.coeffs.len() - 1];
-            for (i, &a) in p.coeffs.iter().enumerate() {
-                for (j, &b) in q.coeffs.iter().enumerate() {
+            for (i, &a) in p.coeffs.iter().enumerate()
+            {
+                for (j, &b) in q.coeffs.iter().enumerate()
+                {
                     new_coeffs[i + j] += a * b;
                 }
             }
@@ -184,7 +199,8 @@ mod tests {
         }
         let r = real_roots(&p, 1e-5).unwrap();
         assert_eq!(r.len(), 5);
-        for (i, expected) in (1..=5).enumerate() {
+        for (i, expected) in (1..=5).enumerate()
+        {
             assert_relative_eq!(r[i], expected as f64, epsilon = 1e-4);
         }
     }

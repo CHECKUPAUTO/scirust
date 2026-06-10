@@ -17,14 +17,11 @@ pub fn simpson_adaptive<F: Fn(f64) -> f64>(
     tol: f64,
     max_depth: usize,
 ) -> SolverResult<f64> {
-    if a == b {
+    if a == b
+    {
         return Ok(0.0);
     }
-    let (a, b, sign) = if a < b {
-        (a, b, 1.0)
-    } else {
-        (b, a, -1.0)
-    };
+    let (a, b, sign) = if a < b { (a, b, 1.0) } else { (b, a, -1.0) };
     let fa = f(a);
     let fb = f(b);
     let m = 0.5 * (a + b);
@@ -60,9 +57,12 @@ fn recurse<F: Fn(f64) -> f64>(
     let right = simpson_step(m, b, fm, fb, frm);
     let sum = left + right;
     let err = (sum - whole) / 15.0; // estimateur de Richardson
-    if depth == 0 || err.abs() < tol {
+    if depth == 0 || err.abs() < tol
+    {
         sum + err
-    } else {
+    }
+    else
+    {
         let half_tol = tol * 0.5;
         recurse(f, a, m, fa, fm, flm, left, half_tol, depth - 1)
             + recurse(f, m, b, fm, fb, frm, right, half_tol, depth - 1)
@@ -78,7 +78,8 @@ pub fn simpson_adaptive_strict<F: Fn(f64) -> f64>(
     tol: f64,
     max_depth: usize,
 ) -> SolverResult<f64> {
-    if max_depth == 0 {
+    if max_depth == 0
+    {
         return Err(SolverError::InvalidInput("max_depth must be > 0".into()));
     }
     simpson_adaptive(f, a, b, tol, max_depth)

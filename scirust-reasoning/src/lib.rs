@@ -32,11 +32,13 @@ impl Optimizer {
         let h = 1e-8;
         let mut x = x0;
 
-        for _ in 0..self.max_iterations {
+        for _ in 0..self.max_iterations
+        {
             // Central finite-difference gradient
             let grad = (f(x + h) - f(x - h)) / (2.0 * h);
             let x_new = x - self.learning_rate * grad;
-            if (x_new - x).abs() < self.tolerance {
+            if (x_new - x).abs() < self.tolerance
+            {
                 return x_new;
             }
             x = x_new;
@@ -48,9 +50,12 @@ impl Optimizer {
 
 /// Solve a linear equation `a*x + b = 0`.
 pub fn solve_linear(a: f64, b: f64) -> Result<f64, String> {
-    if a == 0.0 {
+    if a == 0.0
+    {
         Err("no solution: a == 0".into())
-    } else {
+    }
+    else
+    {
         Ok(-b / a)
     }
 }
@@ -59,11 +64,13 @@ pub fn solve_linear(a: f64, b: f64) -> Result<f64, String> {
 ///
 /// Returns the two real roots.  Errors if `a == 0` or the discriminant is negative.
 pub fn solve_quadratic(a: f64, b: f64, c: f64) -> Result<(f64, f64), String> {
-    if a == 0.0 {
+    if a == 0.0
+    {
         return Err("a must be non-zero".into());
     }
     let disc = b * b - 4.0 * a * c;
-    if disc < 0.0 {
+    if disc < 0.0
+    {
         return Err("no real solutions".into());
     }
     let sqrt_disc = disc.sqrt();
@@ -75,11 +82,13 @@ pub fn solve_quadratic(a: f64, b: f64, c: f64) -> Result<(f64, f64), String> {
 ///
 /// Returns `true` if all sampled evaluations agree within `1e-8`.
 pub fn prove_equal(a: &str, b: &str) -> bool {
-    let expr_a = match scirust_symbolic::parse(a) {
+    let expr_a = match scirust_symbolic::parse(a)
+    {
         Ok(e) => e,
         Err(_) => return false,
     };
-    let expr_b = match scirust_symbolic::parse(b) {
+    let expr_b = match scirust_symbolic::parse(b)
+    {
         Ok(e) => e,
         Err(_) => return false,
     };
@@ -90,21 +99,25 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
     collect_vars(&expr_b, &mut vars_set);
     let vars: Vec<&String> = vars_set.iter().collect();
 
-    if vars.is_empty() {
+    if vars.is_empty()
+    {
         // Both are constant expressions — evaluate once and compare.
         let empty_map = HashMap::new();
         match (
             scirust_symbolic::eval(&expr_a, &empty_map),
             scirust_symbolic::eval(&expr_b, &empty_map),
-        ) {
+        )
+        {
             (Ok(va), Ok(vb)) => return (va - vb).abs() < 1e-8,
             _ => return false,
         }
     }
 
-    for i in 0..20 {
+    for i in 0..20
+    {
         let mut bindings = HashMap::new();
-        for (j, v) in vars.iter().enumerate() {
+        for (j, v) in vars.iter().enumerate()
+        {
             let val = ((i * 7919 + j * 6271 + 127) as f64 / 1000.0) % 20.0 - 10.0;
             bindings.insert((*v).clone(), val);
         }
@@ -112,12 +125,15 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
         match (
             scirust_symbolic::eval(&expr_a, &bindings),
             scirust_symbolic::eval(&expr_b, &bindings),
-        ) {
-            (Ok(va), Ok(vb)) => {
-                if (va - vb).abs() > 1e-8 {
+        )
+        {
+            (Ok(va), Ok(vb)) =>
+            {
+                if (va - vb).abs() > 1e-8
+                {
                     return false;
                 }
-            }
+            },
             _ => return false,
         }
     }
@@ -128,24 +144,29 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
 /// Recursively collect all variable names from an expression tree.
 fn collect_vars(expr: &scirust_symbolic::Expr, vars: &mut HashSet<String>) {
     use scirust_symbolic::Expr;
-    match expr {
-        Expr::Var(v) => {
+    match expr
+    {
+        Expr::Var(v) =>
+        {
             vars.insert(v.clone());
-        }
-        Expr::Const(_) => {}
-        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Pow(a, b) => {
+        },
+        Expr::Const(_) =>
+        {},
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Pow(a, b) =>
+        {
             collect_vars(a, vars);
             collect_vars(b, vars);
-        }
+        },
         Expr::Neg(a)
         | Expr::Sin(a)
         | Expr::Cos(a)
         | Expr::Exp(a)
         | Expr::Ln(a)
         | Expr::Sqrt(a)
-        | Expr::Abs(a) => {
+        | Expr::Abs(a) =>
+        {
             collect_vars(a, vars);
-        }
+        },
     }
 }
 
@@ -164,11 +185,15 @@ pub fn apply_trig_identity(expr: &str) -> String {
     let mut result = String::with_capacity(n);
 
     let mut i = 0;
-    while i < n {
+    while i < n
+    {
         // Check for "sin("
-        if i + 4 <= n && &bytes[i..i + 4] == b"sin(" {
-            if let Some(close) = matching_paren(expr, i + 3) {
-                if close + 2 < n && &bytes[close + 1..close + 3] == b"^2" {
+        if i + 4 <= n && &bytes[i..i + 4] == b"sin("
+        {
+            if let Some(close) = matching_paren(expr, i + 3)
+            {
+                if close + 2 < n && &bytes[close + 1..close + 3] == b"^2"
+                {
                     let inner = &expr[i + 4..close];
                     result.push_str("(1-cos(2*");
                     result.push_str(inner);
@@ -179,9 +204,12 @@ pub fn apply_trig_identity(expr: &str) -> String {
             }
         }
         // Check for "cos("
-        if i + 4 <= n && &bytes[i..i + 4] == b"cos(" {
-            if let Some(close) = matching_paren(expr, i + 3) {
-                if close + 2 < n && &bytes[close + 1..close + 3] == b"^2" {
+        if i + 4 <= n && &bytes[i..i + 4] == b"cos("
+        {
+            if let Some(close) = matching_paren(expr, i + 3)
+            {
+                if close + 2 < n && &bytes[close + 1..close + 3] == b"^2"
+                {
                     let inner = &expr[i + 4..close];
                     result.push_str("(1+cos(2*");
                     result.push_str(inner);
@@ -201,26 +229,27 @@ pub fn apply_trig_identity(expr: &str) -> String {
 /// Find the matching closing parenthesis for the opening paren at `open_idx`.
 fn matching_paren(s: &str, open_idx: usize) -> Option<usize> {
     let bytes = s.as_bytes();
-    if open_idx >= bytes.len() || bytes[open_idx] != b'(' {
+    if open_idx >= bytes.len() || bytes[open_idx] != b'('
+    {
         return None;
     }
     let mut depth: u32 = 1;
     let mut i = open_idx + 1;
-    while i < bytes.len() && depth > 0 {
-        match bytes[i] {
+    while i < bytes.len() && depth > 0
+    {
+        match bytes[i]
+        {
             b'(' => depth += 1,
             b')' => depth -= 1,
-            _ => {}
+            _ =>
+            {},
         }
-        if depth > 0 {
+        if depth > 0
+        {
             i += 1;
         }
     }
-    if depth == 0 {
-        Some(i)
-    } else {
-        None
-    }
+    if depth == 0 { Some(i) } else { None }
 }
 
 #[cfg(test)]

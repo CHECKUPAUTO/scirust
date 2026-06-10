@@ -1,8 +1,8 @@
 // scirust-core/src/tests/test_steer.rs
 #[cfg(test)]
 mod tests {
-    use crate::nn::module::{Module, SteerHook};
     use crate::autodiff::reverse::{Tape, Tensor, Var};
+    use crate::nn::module::{Module, SteerHook};
 
     struct MockLayer {
         name: String,
@@ -22,8 +22,10 @@ mod tests {
             hook: Option<&SteerHook>,
         ) -> Var<'t> {
             let mut out = self.forward(tape, input);
-            if let Some(h) = hook {
-                if h.target_layer == self.name {
+            if let Some(h) = hook
+            {
+                if h.target_layer == self.name
+                {
                     let shift_var = tape.input(h.shift.clone());
                     out = out.add_broadcast(shift_var);
                 }
@@ -31,7 +33,9 @@ mod tests {
             out
         }
 
-        fn parameter_indices(&self) -> Vec<usize> { vec![self.weight_idx] }
+        fn parameter_indices(&self) -> Vec<usize> {
+            vec![self.weight_idx]
+        }
         fn sync(&mut self, _tape: &Tape) {}
     }
 

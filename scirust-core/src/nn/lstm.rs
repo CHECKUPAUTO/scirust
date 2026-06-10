@@ -13,7 +13,7 @@
 //   - b_hh   : (1, 4 * hidden_size) — broadcast row-wise
 //   - output : (seq_len * batch, hidden_size)
 
-use crate::autodiff::reverse::{concat_rows, Tape, Tensor, Var};
+use crate::autodiff::reverse::{Tape, Tensor, Var, concat_rows};
 use crate::nn::rng::PcgEngine;
 
 pub struct LSTM {
@@ -35,27 +35,27 @@ impl LSTM {
     ///
     /// Les poids sont initialisés avec une distribution uniforme sur
     /// [-scale, scale] où scale = sqrt(2 / (4 * hidden_size)).
-    pub fn new(
-        input_size: usize,
-        hidden_size: usize,
-        bias: bool,
-        rng: &mut PcgEngine,
-    ) -> Self {
+    pub fn new(input_size: usize, hidden_size: usize, bias: bool, rng: &mut PcgEngine) -> Self {
         let scale = (1.0 / hidden_size as f32).sqrt(); // Xavier standard pour LSTM
         let mut w_ih = Tensor::zeros(4 * hidden_size, input_size);
         let mut w_hh = Tensor::zeros(4 * hidden_size, hidden_size);
-        for x in w_ih.data.iter_mut() {
+        for x in w_ih.data.iter_mut()
+        {
             *x = rng.float_signed() * scale;
         }
-        for x in w_hh.data.iter_mut() {
+        for x in w_hh.data.iter_mut()
+        {
             *x = rng.float_signed() * scale;
         }
-        let (b_ih, b_hh) = if bias {
+        let (b_ih, b_hh) = if bias
+        {
             (
                 Some(Tensor::zeros(1, 4 * hidden_size)),
                 Some(Tensor::zeros(1, 4 * hidden_size)),
             )
-        } else {
+        }
+        else
+        {
             (None, None)
         };
         Self {
@@ -111,30 +111,42 @@ impl LSTM {
 
         let mut outputs: Vec<Var<'t>> = Vec::with_capacity(seq_len);
 
-        for t in 0..seq_len {
+        for t in 0..seq_len
+        {
             let x_t = input
                 .clone()
-                .slice_rows(t * batch_size, (t + 1) * batch_size);
+                .try_slice_rows(t * batch_size, (t + 1) * batch_size)
+                .unwrap();
 
             // gates = x_t @ W_ih^T + h @ W_hh^T + b_ih + b_hh
-            let mut gates = x_t.matmul(w_ih_t.clone()).add(h.matmul(w_hh_t.clone()));
-            if let Some(ref bi) = b_ih {
-                gates = gates.add_bias(bi.clone());
+            let mut gates = x_t
+                .try_matmul(w_ih_t.clone())
+                .unwrap()
+                .try_add(h.try_matmul(w_hh_t.clone()).unwrap())
+                .unwrap();
+            if let Some(ref bi) = b_ih
+            {
+                gates = gates.try_add_bias(bi.clone()).unwrap();
             }
-            if let Some(ref bh) = b_hh {
-                gates = gates.add_bias(bh.clone());
+            if let Some(ref bh) = b_hh
+            {
+                gates = gates.try_add_bias(bh.clone()).unwrap();
             }
 
             // Split en 4 portes (input, forget, cell, output)
             let d = self.hidden_size;
-            let i_gate = gates.clone().slice_cols(0, d).sigmoid();
-            let f_gate = gates.clone().slice_cols(d, d).sigmoid();
-            let g_gate = gates.clone().slice_cols(2 * d, d).tanh();
-            let o_gate = gates.slice_cols(3 * d, d).sigmoid();
+            let i_gate = gates.clone().try_slice_cols(0, d).unwrap().sigmoid();
+            let f_gate = gates.clone().try_slice_cols(d, d).unwrap().sigmoid();
+            let g_gate = gates.clone().try_slice_cols(2 * d, d).unwrap().tanh();
+            let o_gate = gates.try_slice_cols(3 * d, d).unwrap().sigmoid();
 
             // c = f ⊙ c + i ⊙ g
-            c = f_gate.hadamard(c).add(i_gate.hadamard(g_gate));
-            h = o_gate.hadamard(c.clone().tanh());
+            c = f_gate
+                .try_hadamard(c)
+                .unwrap()
+                .try_add(i_gate.try_hadamard(g_gate).unwrap())
+                .unwrap();
+            h = o_gate.try_hadamard(c.clone().tanh()).unwrap();
 
             outputs.push(h.clone());
         }
@@ -144,32 +156,40 @@ impl LSTM {
 
     pub fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_w_ih {
+        if let Some(i) = self.last_w_ih
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_w_hh {
+        if let Some(i) = self.last_w_hh
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_ih {
+        if let Some(i) = self.last_b_ih
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_hh {
+        if let Some(i) = self.last_b_hh
+        {
             v.push(i);
         }
         v
     }
 
     pub fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_w_ih {
+        if let Some(i) = self.last_w_ih
+        {
             self.w_ih = tape.value(i);
         }
-        if let Some(i) = self.last_w_hh {
+        if let Some(i) = self.last_w_hh
+        {
             self.w_hh = tape.value(i);
         }
-        if let Some(i) = self.last_b_ih {
+        if let Some(i) = self.last_b_ih
+        {
             self.b_ih = Some(tape.value(i));
         }
-        if let Some(i) = self.last_b_hh {
+        if let Some(i) = self.last_b_hh
+        {
             self.b_hh = Some(tape.value(i));
         }
     }
@@ -202,10 +222,10 @@ mod test_lstm {
     fn lstm_creation_shapes() {
         let mut rng = PcgEngine::new(42);
         let lstm = LSTM::new(10, 16, true, &mut rng);
-        assert_eq!(lstm.w_ih.rows, 64);  // 4 * 16
-        assert_eq!(lstm.w_ih.cols, 10);  // input_size
-        assert_eq!(lstm.w_hh.rows, 64);  // 4 * 16
-        assert_eq!(lstm.w_hh.cols, 16);  // hidden_size
+        assert_eq!(lstm.w_ih.rows, 64); // 4 * 16
+        assert_eq!(lstm.w_ih.cols, 10); // input_size
+        assert_eq!(lstm.w_hh.rows, 64); // 4 * 16
+        assert_eq!(lstm.w_hh.cols, 16); // hidden_size
         assert!(lstm.has_bias);
         assert!(lstm.b_ih.is_some());
         assert!(lstm.b_hh.is_some());
@@ -226,7 +246,7 @@ mod test_lstm {
         let mut rng = PcgEngine::new(42);
         let mut lstm = LSTM::new(5, 8, true, &mut rng);
         let tape = Tape::new();
-        let x = tape.input(Tensor::zeros(6, 5));  // seq_len=3, batch=2
+        let x = tape.input(Tensor::zeros(6, 5)); // seq_len=3, batch=2
         let out = lstm.forward_sequence(&tape, x, 3, 2);
         assert_eq!(out.shape(), (6, 8));
     }
@@ -273,7 +293,11 @@ mod test_lstm {
         let x = tape.input(Tensor::zeros(4, 10));
         let _ = lstm.forward_sequence(&tape, x, 2, 2);
         let idxs = lstm.parameter_indices();
-        assert_eq!(idxs.len(), 4, "bias LSTM should track 4 params: w_ih, w_hh, b_ih, b_hh");
+        assert_eq!(
+            idxs.len(),
+            4,
+            "bias LSTM should track 4 params: w_ih, w_hh, b_ih, b_hh"
+        );
     }
 
     #[test]

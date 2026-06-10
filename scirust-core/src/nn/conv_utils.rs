@@ -35,7 +35,8 @@ pub struct ConvConfig {
 
 impl ConvConfig {
     pub fn pad(&self) -> usize {
-        match self.padding {
+        match self.padding
+        {
             Padding::Valid => 0,
             Padding::Same => (self.kernel - 1) / 2,
         }
@@ -50,14 +51,17 @@ impl ConvConfig {
     }
 
     pub fn check(&self) -> Result<()> {
-        if self.kernel == 0 {
+        if self.kernel == 0
+        {
             crate::bail!("kernel doit être > 0");
         }
-        if self.stride == 0 {
+        if self.stride == 0
+        {
             crate::bail!("stride doit être > 0");
         }
         let pad = self.pad();
-        if self.h + 2 * pad < self.kernel {
+        if self.h + 2 * pad < self.kernel
+        {
             crate::bail!(
                 "input trop petit pour ce kernel : H={}, K={}, pad={}",
                 self.h,
@@ -65,7 +69,8 @@ impl ConvConfig {
                 pad
             );
         }
-        if self.w + 2 * pad < self.kernel {
+        if self.w + 2 * pad < self.kernel
+        {
             crate::bail!("input trop petit en largeur");
         }
         Ok(())
@@ -98,14 +103,20 @@ pub fn im2col(input: &Tensor, cfg: &ConvConfig) -> Tensor {
 
     let mut out = Tensor::zeros(ckk, n_cols);
 
-    for c_idx in 0..c {
-        for kh in 0..k {
-            for kw in 0..k {
+    for c_idx in 0..c
+    {
+        for kh in 0..k
+        {
+            for kw in 0..k
+            {
                 let row = (c_idx * k + kh) * k + kw;
-                for bi in 0..b {
-                    for ho in 0..h_out {
+                for bi in 0..b
+                {
+                    for ho in 0..h_out
+                    {
                         let h_in = ho * s + kh;
-                        for wo in 0..w_out {
+                        for wo in 0..w_out
+                        {
                             let w_in = wo * s + kw;
                             let col = bi * h_out * w_out + ho * w_out + wo;
                             let in_h_signed = h_in as isize - pad as isize;
@@ -150,14 +161,20 @@ pub fn col2im(cols: &Tensor, cfg: &ConvConfig) -> Tensor {
 
     let mut out = Tensor::zeros(b, chw);
 
-    for c_idx in 0..c {
-        for kh in 0..k {
-            for kw in 0..k {
+    for c_idx in 0..c
+    {
+        for kh in 0..k
+        {
+            for kw in 0..k
+            {
                 let row = (c_idx * k + kh) * k + kw;
-                for bi in 0..b {
-                    for ho in 0..h_out {
+                for bi in 0..b
+                {
+                    for ho in 0..h_out
+                    {
                         let h_in = ho * s + kh;
-                        for wo in 0..w_out {
+                        for wo in 0..w_out
+                        {
                             let w_in = wo * s + kw;
                             let col = bi * h_out * w_out + ho * w_out + wo;
                             let in_h_signed = h_in as isize - pad as isize;
@@ -181,9 +198,17 @@ pub fn col2im(cols: &Tensor, cfg: &ConvConfig) -> Tensor {
     out
 }
 
-
 /// im2col avec pad explicite (usize), pour usage interne par conv2d_forward.
-pub fn im2col_raw(input: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usize, s: usize, pad: usize) -> Tensor {
+pub fn im2col_raw(
+    input: &Tensor,
+    b: usize,
+    c: usize,
+    h: usize,
+    w: usize,
+    k: usize,
+    s: usize,
+    pad: usize,
+) -> Tensor {
     let h_out = (h + 2 * pad - k) / s + 1;
     let w_out = (w + 2 * pad - k) / s + 1;
     let chw = c * h * w;
@@ -194,13 +219,17 @@ pub fn im2col_raw(input: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usi
         let rem = row % (k * k);
         let kh = rem / k;
         let kw = rem % k;
-        for bi in 0..b {
-            for ho in 0..h_out {
-                for wo in 0..w_out {
+        for bi in 0..b
+        {
+            for ho in 0..h_out
+            {
+                for wo in 0..w_out
+                {
                     let col = bi * h_out * w_out + ho * w_out + wo;
                     let ih = (ho * s + kh) as isize - pad as isize;
                     let iw = (wo * s + kw) as isize - pad as isize;
-                    if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                    if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize
+                    {
                         let src = bi * chw + c_idx * h * w + ih as usize * w + iw as usize;
                         orow[col] = input.data[src];
                     }
@@ -211,11 +240,15 @@ pub fn im2col_raw(input: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usi
     #[cfg(feature = "rayon")]
     {
         use rayon::prelude::*;
-        out.data.par_chunks_mut(n_cols).enumerate().for_each(|(row, orow)| fill(row, orow));
+        out.data
+            .par_chunks_mut(n_cols)
+            .enumerate()
+            .for_each(|(row, orow)| fill(row, orow));
     }
     #[cfg(not(feature = "rayon"))]
     {
-        for row in 0..(c * k * k) {
+        for row in 0..(c * k * k)
+        {
             let st = row * n_cols;
             fill(row, &mut out.data[st..st + n_cols]);
         }
@@ -224,23 +257,38 @@ pub fn im2col_raw(input: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usi
 }
 
 /// col2im avec pad explicite (usize). Accumule les contributions chevauchantes.
-pub fn col2im_raw(cols: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usize, s: usize, pad: usize) -> Tensor {
+pub fn col2im_raw(
+    cols: &Tensor,
+    b: usize,
+    c: usize,
+    h: usize,
+    w: usize,
+    k: usize,
+    s: usize,
+    pad: usize,
+) -> Tensor {
     let h_out = (h + 2 * pad - k) / s + 1;
     let w_out = (w + 2 * pad - k) / s + 1;
     let chw = c * h * w;
     let n_cols = b * h_out * w_out;
     let mut out = Tensor::zeros(b, chw);
     let accum = |bi: usize, oimg: &mut [f32]| {
-        for c_idx in 0..c {
-            for kh in 0..k {
-                for kw in 0..k {
+        for c_idx in 0..c
+        {
+            for kh in 0..k
+            {
+                for kw in 0..k
+                {
                     let row = (c_idx * k + kh) * k + kw;
-                    for ho in 0..h_out {
-                        for wo in 0..w_out {
+                    for ho in 0..h_out
+                    {
+                        for wo in 0..w_out
+                        {
                             let col = bi * h_out * w_out + ho * w_out + wo;
                             let ih = (ho * s + kh) as isize - pad as isize;
                             let iw = (wo * s + kw) as isize - pad as isize;
-                            if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize {
+                            if ih >= 0 && ih < h as isize && iw >= 0 && iw < w as isize
+                            {
                                 let dst = c_idx * h * w + ih as usize * w + iw as usize;
                                 oimg[dst] += cols.data[row * n_cols + col];
                             }
@@ -253,11 +301,15 @@ pub fn col2im_raw(cols: &Tensor, b: usize, c: usize, h: usize, w: usize, k: usiz
     #[cfg(feature = "rayon")]
     {
         use rayon::prelude::*;
-        out.data.par_chunks_mut(chw).enumerate().for_each(|(bi, oimg)| accum(bi, oimg));
+        out.data
+            .par_chunks_mut(chw)
+            .enumerate()
+            .for_each(|(bi, oimg)| accum(bi, oimg));
     }
     #[cfg(not(feature = "rayon"))]
     {
-        for bi in 0..b {
+        for bi in 0..b
+        {
             let st = bi * chw;
             accum(bi, &mut out.data[st..st + chw]);
         }

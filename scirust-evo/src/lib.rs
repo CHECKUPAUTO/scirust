@@ -26,7 +26,10 @@ pub struct Individual {
 
 impl Individual {
     pub fn new(genome: Vec<f64>) -> Self {
-        Self { genome, fitness: f64::NEG_INFINITY }
+        Self {
+            genome,
+            fitness: f64::NEG_INFINITY,
+        }
     }
 }
 
@@ -61,7 +64,10 @@ impl GeneticAlgorithm {
     pub fn evolve<F>(&self, population: &mut Vec<Individual>, fitness_fn: F
     ) where F: Fn(&[Individual]) -> Vec<f64> {
         let fitnesses = fitness_fn(population);
-        for (i, fit) in fitnesses.iter().enumerate() { population[i].fitness = *fit; }
+        for (i, fit) in fitnesses.iter().enumerate()
+        {
+            population[i].fitness = *fit;
+        }
         population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let mut new_pop = population[..self.elitism].to_vec();
         let mut rng = self.rng.borrow_mut();
@@ -71,9 +77,15 @@ impl GeneticAlgorithm {
             let mut child = if rng.gen::<f64>() < self.crossover_rate {
                 let point = rng.gen_range(0..p1.genome.len());
                 let mut g = p1.genome[..point].to_vec();
-                g.extend_from_slice(&p2.genome[point..]); Individual::new(g)
-            } else { p1.clone() };
-            if rng.gen::<f64>() < self.mutation_rate {
+                g.extend_from_slice(&p2.genome[point..]);
+                Individual::new(g)
+            }
+            else
+            {
+                p1.clone()
+            };
+            if rng.gen::<f64>() < self.mutation_rate
+            {
                 let normal = Normal::new(0.0, 0.5).unwrap();
                 for gene in &mut child.genome {
                     *gene += normal.sample(&mut *rng);
@@ -82,7 +94,8 @@ impl GeneticAlgorithm {
             }
             new_pop.push(child);
         }
-        population.clear(); population.extend(new_pop);
+        population.clear();
+        population.extend(new_pop);
     }
     pub fn init_pop(&self, dims: usize) -> Vec<Individual> {
         let mut rng = self.rng.borrow_mut();
@@ -164,18 +177,32 @@ impl OpenEs {
             let eps: Vec<f64> = (0..self.dims).map(|_| normal.sample(&mut *rng)).collect();
             let perturbed: Vec<f64> = theta.iter().zip(&eps).map(|(t, e)| (t + self.sigma * e).clamp(self.bounds.0, self.bounds.1)).collect();
             let r = fitness_fn(&perturbed);
-            noise.push(eps); rewards.push(r);
+            noise.push(eps);
+            rewards.push(r);
         }
         let mr = rewards.iter().sum::<f64>() / rewards.len() as f64;
-        let sr = (rewards.iter().map(|r| (r - mr).powi(2)).sum::<f64>() / rewards.len() as f64).sqrt().max(1e-8);
+        let sr = (rewards.iter().map(|r| (r - mr).powi(2)).sum::<f64>() / rewards.len() as f64)
+            .sqrt()
+            .max(1e-8);
         let mut grad = vec![0.0; self.dims];
-        for i in 0..self.pop_size {
+        for i in 0..self.pop_size
+        {
             let adv = (rewards[i] - mr) / sr;
-            for j in 0..self.dims { grad[j] += adv * noise[i][j]; }
+            for j in 0..self.dims
+            {
+                grad[j] += adv * noise[i][j];
+            }
         }
         let f = self.alpha / (self.pop_size as f64 * self.sigma);
-        for j in 0..self.dims { theta[j] += f * grad[j]; theta[j] = theta[j].clamp(self.bounds.0, self.bounds.1); }
-        *rewards.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
+        for j in 0..self.dims
+        {
+            theta[j] += f * grad[j];
+            theta[j] = theta[j].clamp(self.bounds.0, self.bounds.1);
+        }
+        *rewards
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap()
     }
 }
 
@@ -192,7 +219,14 @@ pub struct MoIndividual {
 }
 
 impl MoIndividual {
-    pub fn new(genome: Vec<f64>) -> Self { Self { genome, objectives: Vec::new(), rank: 0, crowding_distance: 0.0 } }
+    pub fn new(genome: Vec<f64>) -> Self {
+        Self {
+            genome,
+            objectives: Vec::new(),
+            rank: 0,
+            crowding_distance: 0.0,
+        }
+    }
 }
 
 pub struct Nsga2 {
@@ -209,9 +243,16 @@ impl Default for Nsga2 {
 
 fn dominates(a: &MoIndividual, b: &MoIndividual) -> bool {
     let mut at_least_one = false;
-    for (ai, bi) in a.objectives.iter().zip(&b.objectives) {
-        if ai > bi { return false; }
-        if ai < bi { at_least_one = true; }
+    for (ai, bi) in a.objectives.iter().zip(&b.objectives)
+    {
+        if ai > bi
+        {
+            return false;
+        }
+        if ai < bi
+        {
+            at_least_one = true;
+        }
     }
     at_least_one
 }
@@ -226,7 +267,10 @@ impl Nsga2 {
     ) where F: Fn(&[MoIndividual]) -> Vec<Vec<f64>> {
         // Evaluate + rank the current population so selection sees valid ranks.
         let objs = objectives_fn(population);
-        for (i, obj) in objs.iter().enumerate() { population[i].objectives = obj.clone(); }
+        for (i, obj) in objs.iter().enumerate()
+        {
+            population[i].objectives = obj.clone();
+        }
         self.non_dominated_sort(population);
         self.crowding_distance(population);
 
@@ -257,30 +301,76 @@ impl Nsga2 {
     }
     fn non_dominated_sort(&self, pop: &mut [MoIndividual]) {
         let n = pop.len();
-        let mut dc = vec![0; n]; let mut dom = vec![Vec::new(); n];
-        for i in 0..n { for j in 0..n { if i == j { continue; }
-            if dominates(&pop[i], &pop[j]) { dom[i].push(j); } else if dominates(&pop[j], &pop[i]) { dc[i] += 1; }
-        }}
+        let mut dc = vec![0; n];
+        let mut dom = vec![Vec::new(); n];
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                if i == j
+                {
+                    continue;
+                }
+                if dominates(&pop[i], &pop[j])
+                {
+                    dom[i].push(j);
+                }
+                else if dominates(&pop[j], &pop[i])
+                {
+                    dc[i] += 1;
+                }
+            }
+        }
         let mut cf: Vec<usize> = (0..n).filter(|i| dc[*i] == 0).collect();
-        for &i in &cf { pop[i].rank = 1; }
+        for &i in &cf
+        {
+            pop[i].rank = 1;
+        }
         let mut rank = 1;
-        while !cf.is_empty() {
+        while !cf.is_empty()
+        {
             let mut nf = Vec::new();
-            for &i in &cf { for &j in &dom[i] { dc[j] -= 1; if dc[j] == 0 { pop[j].rank = rank + 1; nf.push(j); } } }
-            rank += 1; cf = nf;
+            for &i in &cf
+            {
+                for &j in &dom[i]
+                {
+                    dc[j] -= 1;
+                    if dc[j] == 0
+                    {
+                        pop[j].rank = rank + 1;
+                        nf.push(j);
+                    }
+                }
+            }
+            rank += 1;
+            cf = nf;
         }
     }
     fn crowding_distance(&self, pop: &mut [MoIndividual]) {
-        let no = pop[0].objectives.len(); let n = pop.len();
-        for ind in pop.iter_mut() { ind.crowding_distance = 0.0; }
-        for m in 0..no {
+        let no = pop[0].objectives.len();
+        let n = pop.len();
+        for ind in pop.iter_mut()
+        {
+            ind.crowding_distance = 0.0;
+        }
+        for m in 0..no
+        {
             let mut idx: Vec<usize> = (0..n).collect();
-            idx.sort_by(|a, b| pop[*a].objectives[m].partial_cmp(&pop[*b].objectives[m]).unwrap());
+            idx.sort_by(|a, b| {
+                pop[*a].objectives[m]
+                    .partial_cmp(&pop[*b].objectives[m])
+                    .unwrap()
+            });
             pop[idx[0]].crowding_distance = f64::INFINITY;
-            pop[idx[n-1]].crowding_distance = f64::INFINITY;
-            let fmin = pop[idx[0]].objectives[m]; let fmax = pop[idx[n-1]].objectives[m];
+            pop[idx[n - 1]].crowding_distance = f64::INFINITY;
+            let fmin = pop[idx[0]].objectives[m];
+            let fmax = pop[idx[n - 1]].objectives[m];
             let range = (fmax - fmin).max(1e-10);
-            for i in 1..(n-1) { pop[idx[i]].crowding_distance += (pop[idx[i+1]].objectives[m] - pop[idx[i-1]].objectives[m]) / range; }
+            for i in 1..(n - 1)
+            {
+                pop[idx[i]].crowding_distance +=
+                    (pop[idx[i + 1]].objectives[m] - pop[idx[i - 1]].objectives[m]) / range;
+            }
         }
     }
     fn tournament_select(pop: &[MoIndividual], rng: &mut StdRng) -> MoIndividual {
@@ -304,10 +394,15 @@ impl Nsga2 {
 // Benchmarks
 // ============================================================
 
-pub fn sphere(x: &[f64]) -> f64 { x.iter().map(|xi| xi * xi).sum() }
+pub fn sphere(x: &[f64]) -> f64 {
+    x.iter().map(|xi| xi * xi).sum()
+}
 pub fn rastrigin(x: &[f64]) -> f64 {
     let n = x.len() as f64;
-    let s: f64 = x.iter().map(|xi| xi * xi - 10.0 * (2.0 * std::f64::consts::PI * xi).cos()).sum();
+    let s: f64 = x
+        .iter()
+        .map(|xi| xi * xi - 10.0 * (2.0 * std::f64::consts::PI * xi).cos())
+        .sum();
     10.0 * n + s
 }
 
@@ -324,7 +419,12 @@ mod tests {
         let mut ga = GeneticAlgorithm::default();
         ga.pop_size = 50;
         let mut pop = ga.init_pop(10);
-        for _ in 0..100 { ga.evolve(&mut pop, |inds| inds.iter().map(|ind| -sphere(&ind.genome)).collect()); }
+        for _ in 0..100
+        {
+            ga.evolve(&mut pop, |inds| {
+                inds.iter().map(|ind| -sphere(&ind.genome)).collect()
+            });
+        }
         pop.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         assert!(pop[0].fitness > -1.0, "GA converge");
     }
@@ -333,7 +433,10 @@ mod tests {
     fn cmaes_sphere() {
         let mut cma = CmaEs::new(10);
         let mut theta = vec![2.0; 10];
-        for _ in 0..50 { cma.step(&mut theta, |x| -sphere(x)); }
+        for _ in 0..50
+        {
+            cma.step(&mut theta, |x| -sphere(x));
+        }
         assert!(-sphere(&theta) > -2.0, "CMA-ES converge");
     }
 
@@ -342,7 +445,14 @@ mod tests {
         let openes = OpenEs::new(10);
         let mut theta = vec![2.0; 10];
         let mut best = f64::NEG_INFINITY;
-        for _ in 0..100 { let r = openes.step(&mut theta, |x| -sphere(x)); if r > best { best = r; } }
+        for _ in 0..100
+        {
+            let r = openes.step(&mut theta, |x| -sphere(x));
+            if r > best
+            {
+                best = r;
+            }
+        }
         assert!(best > -5.0, "OpenES converge");
     }
 
@@ -351,14 +461,19 @@ mod tests {
         let mut nsga = Nsga2::default();
         nsga.pop_size = 50;
         let mut pop = nsga.init_pop(10);
-        for _ in 0..50 {
-            nsga.evolve(&mut pop, |inds| inds.iter().map(|ind| {
-                let x = &ind.genome;
-                let f1 = x[0].clamp(0.0, 1.0); // clamp pour éviter division par zéro
-                let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
-                let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
-                vec![f1, g * h]
-            }).collect());
+        for _ in 0..50
+        {
+            nsga.evolve(&mut pop, |inds| {
+                inds.iter()
+                    .map(|ind| {
+                        let x = &ind.genome;
+                        let f1 = x[0].clamp(0.0, 1.0); // clamp pour éviter division par zéro
+                        let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
+                        let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
+                        vec![f1, g * h]
+                    })
+                    .collect()
+            });
         }
         let front: Vec<&MoIndividual> = pop.iter().filter(|ind| ind.rank == 1).collect();
         assert!(!front.is_empty(), "Pareto front not found");

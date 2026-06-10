@@ -1,11 +1,11 @@
-pub mod core;
-pub mod symbolic;
-pub mod logic;
-pub mod graph;
-pub mod sat_smt;
 pub mod constraint;
+pub mod core;
+pub mod graph;
+pub mod logic;
 pub mod neural;
-pub mod theorem;
 pub mod probabilistic;
+pub mod sat_smt;
+pub mod symbolic;
+pub mod theorem;
 
-pub use crate::core::{ReasoningError, Result, Reasoner};
+pub use crate::core::{Reasoner, ReasoningError, Result};

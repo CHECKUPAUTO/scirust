@@ -15,11 +15,9 @@ use tracing::warn;
 const FINITE_EPS: f64 = 1e-15;
 
 fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
-    if !value.is_finite() {
-        return Err(SolverError::NanDetected {
-            iter: 0,
-            value,
-        });
+    if !value.is_finite()
+    {
+        return Err(SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
 }
@@ -39,8 +37,10 @@ impl Qr {
     pub fn r(&self) -> Matrix {
         let p = self.m.min(self.n);
         let mut r = Matrix::zeros(p, self.n);
-        for i in 0..p {
-            for j in i..self.n {
+        for i in 0..p
+        {
+            for j in i..self.n
+            {
                 r[(i, j)] = self.data[(i, j)];
             }
         }
@@ -53,25 +53,31 @@ impl Qr {
         // Q = H_1 · H_2 · ... · H_p
         // On applique chaque H_k à droite de Q via "appliquer à chaque colonne".
         let p = self.tau.len();
-        for k in (0..p).rev() {
+        for k in (0..p).rev()
+        {
             let tau_k = self.tau[k];
-            if tau_k == 0.0 {
+            if tau_k == 0.0
+            {
                 continue;
             }
             // v = (1, data[k+1..m, k]) — vecteur de Householder
             let mut v = vec![0.0; self.m - k];
             v[0] = 1.0;
-            for i in (k + 1)..self.m {
+            for i in (k + 1)..self.m
+            {
                 v[i - k] = self.data[(i, k)];
             }
             // Pour chaque colonne j de Q (lignes k..m), Q' = Q - tau * v * v^T · Q
-            for j in 0..self.m {
+            for j in 0..self.m
+            {
                 let mut dot = 0.0;
-                for i in k..self.m {
+                for i in k..self.m
+                {
                     dot += v[i - k] * q[(i, j)];
                 }
                 let s = tau_k * dot;
-                for i in k..self.m {
+                for i in k..self.m
+                {
                     q[(i, j)] -= s * v[i - k];
                 }
             }
@@ -84,7 +90,8 @@ impl Qr {
 pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
     let m = a.rows();
     let n = a.cols();
-    if m < n {
+    if m < n
+    {
         return Err(SolverError::InvalidInput(format!(
             "QR requires m >= n, got {}x{}",
             m, n
@@ -93,10 +100,12 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
     let p = m.min(n);
     let mut tau = vec![0.0; p];
 
-    for k in 0..p {
+    for k in 0..p
+    {
         // Calcule la norme de a[k..m, k]
         let mut sigma_sq = 0.0;
-        for i in k..m {
+        for i in k..m
+        {
             let aik = a[(i, k)];
             check_finite(aik, &format!("a[{i},{k}] in QR sigma"))?;
             sigma_sq += aik * aik;
@@ -104,7 +113,8 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         check_finite(sigma_sq, &format!("sigma_sq QR k={k}"))?;
 
         let sigma = sigma_sq.sqrt();
-        if sigma < FINITE_EPS {
+        if sigma < FINITE_EPS
+        {
             // Colonne déjà à zéro → R[k,k] = 0, on saute le pivot
             tau[k] = 0.0;
             continue;
@@ -112,7 +122,8 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         let akk = a[(k, k)];
         let alpha = if akk >= 0.0 { -sigma } else { sigma };
         let diff = akk - alpha;
-        if diff.abs() < FINITE_EPS {
+        if diff.abs() < FINITE_EPS
+        {
             tau[k] = 0.0;
             a[(k, k)] = alpha;
             continue;
@@ -123,7 +134,8 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         tau[k] = tau_k;
 
         // Normalise v[1..] dans la colonne k
-        for i in (k + 1)..m {
+        for i in (k + 1)..m
+        {
             let normalized = a[(i, k)] / diff;
             check_finite(normalized, &format!("v_norm QR k={k},i={i}"))?;
             a[(i, k)] = normalized;
@@ -131,15 +143,18 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         a[(k, k)] = alpha;
 
         // Applique H_k = I - tau · v · v^T aux colonnes k+1..n
-        for j in (k + 1)..n {
+        for j in (k + 1)..n
+        {
             let mut dot = a[(k, j)];
-            for i in (k + 1)..m {
+            for i in (k + 1)..m
+            {
                 dot += a[(i, k)] * a[(i, j)];
             }
             let s = tau_k * dot;
             check_finite(s, &format!("s QR k={k},j={j}"))?;
             a[(k, j)] -= s;
-            for i in (k + 1)..m {
+            for i in (k + 1)..m
+            {
                 let updated = a[(i, j)] - s * a[(i, k)];
                 check_finite(updated, &format!("a_upd QR k={k},i={i},j={j}"))?;
                 a[(i, j)] = updated;
@@ -155,7 +170,8 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
 /// - Si m = n et A inversible : solution exacte du système carré
 /// - Si m > n : solution au sens des moindres carrés (régression linéaire)
 pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
-    if b.len() != qr.m {
+    if b.len() != qr.m
+    {
         return Err(SolverError::DimensionMismatch {
             expected: qr.m,
             got: b.len(),
@@ -163,39 +179,47 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
     }
 
     // Vérifier que b est fini
-    for (i, &bi) in b.iter().enumerate() {
+    for (i, &bi) in b.iter().enumerate()
+    {
         check_finite(bi, &format!("b[{i}]"))?;
     }
 
     // y = Q^T · b (en appliquant les H_k dans l'ordre)
     let mut y = b.to_vec();
     let p = qr.tau.len();
-    for k in 0..p {
+    for k in 0..p
+    {
         let tau_k = qr.tau[k];
-        if tau_k == 0.0 {
+        if tau_k == 0.0
+        {
             continue;
         }
         let mut dot = y[k];
-        for i in (k + 1)..qr.m {
+        for i in (k + 1)..qr.m
+        {
             dot += qr.data[(i, k)] * y[i];
         }
         let s = tau_k * dot;
         check_finite(s, &format!("s Q^T·b k={k}"))?;
         y[k] -= s;
-        for i in (k + 1)..qr.m {
+        for i in (k + 1)..qr.m
+        {
             y[i] -= s * qr.data[(i, k)];
         }
     }
 
     // Résout R · x = y[0..n] par substitution arrière
     let mut x = vec![0.0; qr.n];
-    for i in (0..qr.n).rev() {
+    for i in (0..qr.n).rev()
+    {
         let mut s = y[i];
-        for j in (i + 1)..qr.n {
+        for j in (i + 1)..qr.n
+        {
             s -= qr.data[(i, j)] * x[j];
         }
         let pivot = qr.data[(i, i)];
-        if pivot.abs() < FINITE_EPS {
+        if pivot.abs() < FINITE_EPS
+        {
             warn!(
                 target: "solver",
                 "QR back-substitution: near-singular pivot {:.3e} at row {} — restoring backup",
@@ -221,7 +245,8 @@ mod tests {
         let qr = qr_decompose(a.clone())?;
         let x = solve_qr_least_squares(&qr, &b)?;
         let ax = a.matvec(&x)?;
-        for (axi, bi) in ax.iter().zip(&b) {
+        for (axi, bi) in ax.iter().zip(&b)
+        {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-9);
         }
         Ok(())
@@ -232,7 +257,8 @@ mod tests {
         let xs = [0.0_f64, 1.0, 2.0, 3.0, 4.0];
         let ys = [1.05_f64, 2.97, 5.02, 6.99, 9.01];
         let mut data = Vec::with_capacity(10);
-        for &x in &xs {
+        for &x in &xs
+        {
             data.push(x);
             data.push(1.0);
         }

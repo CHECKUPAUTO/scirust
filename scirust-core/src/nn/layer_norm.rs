@@ -67,20 +67,24 @@ impl Module for LayerNorm {
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             v.push(i);
         }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             self.gamma = tape.value(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             self.beta = tape.value(i);
         }
     }
@@ -99,7 +103,8 @@ impl Module for LayerNorm {
         let b = sd
             .get(&format!("{}/beta", self.name))
             .ok_or_else(|| format!("missing key: {}/beta", self.name))?;
-        if g.shape() != (1, self.gamma.cols) {
+        if g.shape() != (1, self.gamma.cols)
+        {
             crate::bail!("gamma shape mismatch");
         }
         self.gamma = g.clone();
@@ -154,8 +159,11 @@ mod tests {
         let y = ln.forward(&tape, x).hadamard(w).sum();
         y.backward();
         let g = tape.grad(x_idx);
-        assert!(g.data.iter().any(|&v| v.abs() > 1e-6),
-            "gradient should be non-zero: got {:?}", g.data);
+        assert!(
+            g.data.iter().any(|&v| v.abs() > 1e-6),
+            "gradient should be non-zero: got {:?}",
+            g.data
+        );
     }
 
     #[test]

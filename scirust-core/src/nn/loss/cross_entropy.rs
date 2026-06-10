@@ -40,7 +40,8 @@ impl CrossEntropyLoss {
         );
 
         let mut mask_data = vec![0.0f32; batch * n_classes];
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let label = target_indices.data[b] as usize;
             assert!(
                 label < n_classes,
@@ -72,19 +73,21 @@ impl Loss for CrossEntropyLoss {
         // 1) Calcul du max par row (en CPU, traite comme constante)
         let pred_t = tape.value(pred.idx());
         let mut max_per_row = vec![0.0f32; batch];
-        for (r, row) in pred_t.data.chunks_exact(n_classes).enumerate() {
+        for (r, row) in pred_t.data.chunks_exact(n_classes).enumerate()
+        {
             max_per_row[r] = row.iter().copied().fold(row[0], f32::max);
         }
 
         // 2) Construction d'un tenseur "max broadcaste" (batch, n_classes)
         let mut max_broadcast_data = vec![0.0f32; batch * n_classes];
-        for (r, chunk) in max_broadcast_data.chunks_exact_mut(n_classes).enumerate() {
+        for (r, chunk) in max_broadcast_data.chunks_exact_mut(n_classes).enumerate()
+        {
             chunk.fill(max_per_row[r]);
         }
         let max_var = tape.input(Tensor::from_vec(max_broadcast_data, batch, n_classes));
 
         // 3) shifted = pred - max (numeriquement stable)
-        let shifted = pred.sub(max_var);
+        let shifted = pred.try_sub(max_var).unwrap();
 
         // 4) exp_shifted = exp(shifted)
         let exp_shifted = shifted.exp();
@@ -99,10 +102,10 @@ impl Loss for CrossEntropyLoss {
         let log_z_broadcast = log_z.broadcast(batch, n_classes); // (batch, n_classes)
 
         // 8) log_softmax = shifted - log_z_broadcast
-        let log_softmax = shifted.sub(log_z_broadcast);
+        let log_softmax = shifted.try_sub(log_z_broadcast).unwrap();
 
         // 9) ce = -sum(target ⊙ log_softmax) / batch  (mean par sample)
-        let prod = target.hadamard(log_softmax);
+        let prod = target.try_hadamard(log_softmax).unwrap();
 
         prod.sum().scale(-1.0 / batch as f32)
     }
@@ -191,7 +194,8 @@ mod tests {
         let z = e1 + e2 + e3;
         let s = [e1 / z, e2 / z, e3 / z];
         let expected_grad = [s[0] - 0.0, s[1] - 1.0, s[2] - 0.0];
-        for (i, &expected) in expected_grad.iter().enumerate() {
+        for (i, &expected) in expected_grad.iter().enumerate()
+        {
             assert!(
                 (g.data[i] - expected).abs() < 1e-3,
                 "grad[{}] = {}, expected {} (softmax - target)",

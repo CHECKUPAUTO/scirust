@@ -26,7 +26,8 @@ pub unsafe extern "C" fn safe_enclave_infer(
     dims: EnclaveLayout,
 ) -> i32 {
     // 1. Parameter Validation
-    if weight_ptr.is_null() || input_ptr.is_null() || output_ptr.is_null() {
+    if weight_ptr.is_null() || input_ptr.is_null() || output_ptr.is_null()
+    {
         return -1;
     }
 
@@ -34,19 +35,23 @@ pub unsafe extern "C" fn safe_enclave_infer(
     // Computes Output = Input * Weight.T (+ Bias)
     // Assuming Weight is (out_features, in_features) in row-major.
 
-    for b in 0..dims.batch {
-        for o in 0..dims.out_features {
+    for b in 0..dims.batch
+    {
+        for o in 0..dims.out_features
+        {
             let mut acc = 0.0f32;
 
             // Dot product between input row and weight row
-            for i in 0..dims.in_features {
+            for i in 0..dims.in_features
+            {
                 let input_val = *input_ptr.add(b * dims.in_features + i);
                 let weight_val = *weight_ptr.add(o * dims.in_features + i);
                 acc += input_val * weight_val;
             }
 
             // Add bias if provided
-            if dims.has_bias && !bias_ptr.is_null() {
+            if dims.has_bias && !bias_ptr.is_null()
+            {
                 acc += *bias_ptr.add(o);
             }
 
@@ -83,10 +88,6 @@ impl EnclaveRuntime {
             )
         };
 
-        if res == 0 {
-            Ok(())
-        } else {
-            Err(res)
-        }
+        if res == 0 { Ok(()) } else { Err(res) }
     }
 }

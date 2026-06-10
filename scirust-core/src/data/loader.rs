@@ -27,9 +27,11 @@ impl<D: Dataset> DataLoader<D> {
 
     pub fn shuffle_epoch(&mut self, epoch: u64) {
         self.epoch = epoch;
-        if self.shuffle {
+        if self.shuffle
+        {
             let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed.wrapping_add(epoch));
-            for i in (1..self.indices.len()).rev() {
+            for i in (1..self.indices.len()).rev()
+            {
                 let j = (rng.next_u32() as usize) % (i + 1);
                 self.indices.swap(i, j);
             }
@@ -73,7 +75,8 @@ impl<'a, D: Dataset> Iterator for DataLoaderIter<'a, D> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let n = self.loader.dataset.n_samples();
-        if self.pos >= n {
+        if self.pos >= n
+        {
             return None;
         }
         let end = (self.pos + self.loader.batch_size).min(n);
@@ -82,7 +85,8 @@ impl<'a, D: Dataset> Iterator for DataLoaderIter<'a, D> {
         let y_dim = self.loader.dataset.sample(0).1.len();
         let mut x_data = Vec::with_capacity(bs * x_dim);
         let mut y_data = Vec::with_capacity(bs * y_dim);
-        for i in self.pos..end {
+        for i in self.pos..end
+        {
             let idx = self.loader.indices[i];
             let (x, y) = self.loader.dataset.sample(idx);
             x_data.extend_from_slice(x);

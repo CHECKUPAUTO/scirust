@@ -12,7 +12,9 @@ pub struct SatSolver {
 
 impl SatSolver {
     pub fn new() -> Self {
-        Self { clauses: Vec::new() }
+        Self {
+            clauses: Vec::new(),
+        }
     }
 
     pub fn add_clause(&mut self, clause: Clause) {

@@ -52,7 +52,8 @@ impl EmbeddingEngine {
     /// moyenne sur tous les tokens → vecteur 128-dim normalisé L2.
     pub fn embed(&mut self, text: &str) -> Vec<f32> {
         let ids = self.llm.tokenizer.encode(text);
-        if ids.is_empty() {
+        if ids.is_empty()
+        {
             // Chaîne vide: retourne un vecteur nul (non-NaN)
             return vec![0.0f32; self.llm.config.d_model];
         }
@@ -62,11 +63,14 @@ impl EmbeddingEngine {
         let d_model = hidden.ncols();
         let mut mean = vec![0.0f32; d_model];
         let len_f = seq_len as f32;
-        for i in 0..seq_len {
+        for i in 0..seq_len
+        {
             let base = i * d_model;
-            for j in 0..d_model {
+            for j in 0..d_model
+            {
                 let v = hidden.data[base + j];
-                if v.is_finite() {
+                if v.is_finite()
+                {
                     mean[j] += v / len_f;
                 }
             }
@@ -93,9 +97,11 @@ impl EmbeddingEngine {
 /// Normalisation L2 in-place.
 fn l2_normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm > f32::EPSILON {
+    if norm > f32::EPSILON
+    {
         let inv = 1.0 / norm;
-        for x in v.iter_mut() {
+        for x in v.iter_mut()
+        {
             *x *= inv;
         }
     }
@@ -109,9 +115,14 @@ mod tests {
     fn test_embed_returns_128_dims() {
         let mut engine = EmbeddingEngine::new(&["hello world test"]);
         let vec = engine.embed("hello");
-        assert_eq!(vec.len(), 128, "embedding dimension should be 128 (default d_model)");
+        assert_eq!(
+            vec.len(),
+            128,
+            "embedding dimension should be 128 (default d_model)"
+        );
         // Vérifie que ce n'est pas NaN
-        for &v in &vec {
+        for &v in &vec
+        {
             assert!(!v.is_nan(), "NaN in embedding vector");
         }
     }
@@ -135,7 +146,8 @@ mod tests {
         let texts = vec!["hello".to_string(), "world".to_string(), "test".to_string()];
         let results = engine.embed_batch(&texts);
         assert_eq!(results.len(), 3, "batch should return 3 embeddings");
-        for (i, v) in results.iter().enumerate() {
+        for (i, v) in results.iter().enumerate()
+        {
             assert_eq!(v.len(), 128, "embedding {} should be 128-dim", i);
         }
     }
@@ -144,8 +156,13 @@ mod tests {
     fn test_embed_empty_string() {
         let mut engine = EmbeddingEngine::new(&["hello"]);
         let vec = engine.embed("");
-        assert_eq!(vec.len(), 128, "empty string should still return 128-dim vector");
-        for &v in &vec {
+        assert_eq!(
+            vec.len(),
+            128,
+            "empty string should still return 128-dim vector"
+        );
+        for &v in &vec
+        {
             assert!(!v.is_nan(), "NaN in empty-string embedding");
             assert!(v.is_finite(), "non-finite in empty-string embedding");
         }
@@ -156,7 +173,10 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![1.0, 0.0, 0.0];
         let sim = EmbeddingEngine::cosine_similarity(&a, &b);
-        assert!((sim - 1.0).abs() < 1e-6, "identical vectors should have similarity 1.0");
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "identical vectors should have similarity 1.0"
+        );
     }
 
     #[test]

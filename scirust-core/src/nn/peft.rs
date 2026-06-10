@@ -40,7 +40,13 @@ impl LoRALinear {
     pub fn from_linear(base: Linear, rank: usize, alpha: f32, rng: &mut PcgEngine) -> Self {
         let in_features = base.in_features;
         let out_features = base.out_features;
-        let lora_a = Linear::new(in_features, rank, &crate::nn::init::KaimingNormal, &Zeros, rng);
+        let lora_a = Linear::new(
+            in_features,
+            rank,
+            &crate::nn::init::KaimingNormal,
+            &Zeros,
+            rng,
+        );
         let lora_b = Linear::new(rank, out_features, &Zeros, &Zeros, rng);
         Self {
             base,
@@ -57,7 +63,7 @@ impl Module for LoRALinear {
         let lora_h = self.lora_a.forward(tape, input);
         let lora_out = self.lora_b.forward(tape, lora_h);
 
-        base_out.add(lora_out.scale(self.scale))
+        base_out.try_add(lora_out.scale(self.scale)).unwrap()
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

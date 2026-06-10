@@ -1,0 +1,18 @@
+# clippy.toml — SciRust linting configuration
+# This config uses clippy's config format (not cargo's allow/deny/warn)
+# For lint levels, use RUSTFLAGS or #![allow(...)] in code instead
+
+# Allow specific patterns common in ML code
+# These are configured via RUSTFLAGS in CI or per-crate
+
+# Clippy configuration options (from --explain output)
+# For scientific computing, we allow certain patterns:
+# - many_single_char_names: i, j, k, n, m common in math loops
+# - similar_names: x, y, z, dx, dy common in math
+# - cast_possible_truncation: usize <-> f32 conversions
+# - indexing_slicing: common in tensor operations
+
+# Use clippy's own configuration options
+# Example:
+# cognitive-complexity-threshold = 25
+# max-fn-params-bools = 3

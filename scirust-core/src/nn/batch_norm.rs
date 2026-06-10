@@ -53,23 +53,29 @@ impl BatchNorm1d {
     fn compute_batch_stats(&self, input_data: &[f32], n: usize, f: usize) -> (Vec<f32>, Vec<f32>) {
         let inv_n = 1.0 / n as f32;
         let mut mean = vec![0.0f32; f];
-        for i in 0..n {
-            for j in 0..f {
+        for i in 0..n
+        {
+            for j in 0..f
+            {
                 mean[j] += input_data[i * f + j];
             }
         }
-        for v in mean.iter_mut() {
+        for v in mean.iter_mut()
+        {
             *v *= inv_n;
         }
 
         let mut var = vec![0.0f32; f];
-        for i in 0..n {
-            for j in 0..f {
+        for i in 0..n
+        {
+            for j in 0..f
+            {
                 let d = input_data[i * f + j] - mean[j];
                 var[j] += d * d;
             }
         }
-        for v in var.iter_mut() {
+        for v in var.iter_mut()
+        {
             *v *= inv_n;
         }
         (mean, var)
@@ -77,7 +83,8 @@ impl BatchNorm1d {
 
     fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32]) {
         let alpha = self.momentum;
-        for j in 0..self.running_mean.cols {
+        for j in 0..self.running_mean.cols
+        {
             self.running_mean.data[j] =
                 (1.0 - alpha) * self.running_mean.data[j] + alpha * batch_mean[j];
             self.running_var.data[j] =
@@ -96,50 +103,57 @@ impl Module for BatchNorm1d {
         self.last_g_idx = Some(gamma_v.idx());
         self.last_b_idx = Some(beta_v.idx());
 
-        if self.training {
+        if self.training
+        {
             let input_t = tape.value(input.idx());
             let (batch_mean, batch_var) = self.compute_batch_stats(&input_t.data, n, f);
             self.update_running_stats(&batch_mean, &batch_var);
 
             let mu = input.sum_axis(0).scale(inv_n);
             let mu_neg = mu.neg();
-            let centered = input.add_broadcast(mu_neg);
-            let centered_sq = centered.hadamard(centered);
+            let centered = input.try_add_broadcast(mu_neg).unwrap();
+            let centered_sq = centered.try_hadamard(centered).unwrap();
             let var = centered_sq.sum_axis(0).scale(inv_n);
             let eps_t = tape.input(Tensor::from_vec(vec![self.eps; f], 1, f));
-            let std = var.add(eps_t).sqrt();
+            let std = var.try_add(eps_t).unwrap().sqrt();
             let inv_std = std.reciprocal();
-            let x_hat = centered.mul_broadcast(inv_std);
-            let scaled = x_hat.mul_broadcast(gamma_v);
-            scaled.add_broadcast(beta_v)
-        } else {
+            let x_hat = centered.try_mul_broadcast(inv_std).unwrap();
+            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
+            scaled.try_add_broadcast(beta_v).unwrap()
+        }
+        else
+        {
             let rmean_v = tape.input(self.running_mean.clone());
             let rvar_v = tape.input(self.running_var.clone());
-            let centered = input.add_broadcast(rmean_v.neg());
+            let centered = input.try_add_broadcast(rmean_v.neg()).unwrap();
             let eps_t = tape.input(Tensor::from_vec(vec![self.eps; f], 1, f));
-            let std = rvar_v.add(eps_t).sqrt();
-            let x_hat = centered.mul_broadcast(std.reciprocal());
-            let scaled = x_hat.mul_broadcast(gamma_v);
-            scaled.add_broadcast(beta_v)
+            let std = rvar_v.try_add(eps_t).unwrap().sqrt();
+            let x_hat = centered.try_mul_broadcast(std.reciprocal()).unwrap();
+            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
+            scaled.try_add_broadcast(beta_v).unwrap()
         }
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             v.push(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             v.push(i);
         }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_g_idx {
+        if let Some(i) = self.last_g_idx
+        {
             self.gamma = tape.value(i);
         }
-        if let Some(i) = self.last_b_idx {
+        if let Some(i) = self.last_b_idx
+        {
             self.beta = tape.value(i);
         }
     }
@@ -173,7 +187,8 @@ impl Module for BatchNorm1d {
             .get(&format!("{}.running_var", self.name))
             .ok_or_else(|| format!("missing key: {}.running_var", self.name))?;
 
-        if g.shape() != (1, self.gamma.cols) {
+        if g.shape() != (1, self.gamma.cols)
+        {
             crate::bail!("gamma shape mismatch");
         }
         self.gamma = g.clone();
@@ -218,7 +233,8 @@ mod tests {
         ));
         let y = bn.forward(&tape, x);
         let yt = tape.value(y.idx());
-        for j in 0..3 {
+        for j in 0..3
+        {
             let mean: f32 = (0..4).map(|i| yt.data[i * 3 + j]).sum::<f32>() / 4.0;
             assert!(mean.abs() < 1e-4, "col {j} mean = {mean}");
         }
