@@ -12,9 +12,11 @@ pub fn rope_apply(x: &Tensor, offset: usize, theta: f32) -> Tensor {
     // 1. Construire les tenseurs cos/sin
     let mut cos_data = vec![0.0; seq_len * half_dim];
     let mut sin_data = vec![0.0; seq_len * half_dim];
-    for pos_idx in 0..seq_len {
+    for pos_idx in 0..seq_len
+    {
         let pos = (pos_idx + offset) as f32;
-        for j in 0..half_dim {
+        for j in 0..half_dim
+        {
             let freq = theta.powf(-2.0 * j as f32 / dim as f32);
             let angle = pos * freq;
             cos_data[pos_idx * half_dim + j] = angle.cos();
@@ -27,8 +29,10 @@ pub fn rope_apply(x: &Tensor, offset: usize, theta: f32) -> Tensor {
     // 2. Extraire paires/impaires
     let mut even_data = vec![0.0; seq_len * half_dim];
     let mut odd_data = vec![0.0; seq_len * half_dim];
-    for i in 0..seq_len {
-        for j in 0..half_dim {
+    for i in 0..seq_len
+    {
+        for j in 0..half_dim
+        {
             even_data[i * half_dim + j] = x.data[i * dim + 2 * j];
             odd_data[i * half_dim + j] = x.data[i * dim + 2 * j + 1];
         }
@@ -47,8 +51,10 @@ pub fn rope_apply(x: &Tensor, offset: usize, theta: f32) -> Tensor {
 
     // 4. Réassembler
     let mut rotated = vec![0.0; seq_len * dim];
-    for i in 0..seq_len {
-        for j in 0..half_dim {
+    for i in 0..seq_len
+    {
+        for j in 0..half_dim
+        {
             rotated[i * dim + 2 * j] = even_rot.data[i * half_dim + j];
             rotated[i * dim + 2 * j + 1] = odd_rot.data[i * half_dim + j];
         }

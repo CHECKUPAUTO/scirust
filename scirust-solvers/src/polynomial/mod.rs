@@ -25,10 +25,12 @@ impl Polynomial {
     /// Crée un polynôme depuis ses coefficients (degré croissant).
     /// Trim les zéros de fin pour normaliser le degré.
     pub fn new(mut coeffs: Vec<f64>) -> Self {
-        while coeffs.len() > 1 && coeffs.last() == Some(&0.0) {
+        while coeffs.len() > 1 && coeffs.last() == Some(&0.0)
+        {
             coeffs.pop();
         }
-        if coeffs.is_empty() {
+        if coeffs.is_empty()
+        {
             coeffs.push(0.0);
         }
         Self { coeffs }
@@ -48,7 +50,8 @@ impl Polynomial {
     /// Évaluation par schéma de Horner (numériquement stable).
     pub fn eval(&self, x: f64) -> f64 {
         let mut acc = 0.0;
-        for &c in self.coeffs.iter().rev() {
+        for &c in self.coeffs.iter().rev()
+        {
             acc = acc * x + c;
         }
         acc
@@ -56,10 +59,12 @@ impl Polynomial {
 
     /// Dérivée formelle : p'(x).
     pub fn deriv(&self) -> Polynomial {
-        if self.degree() == 0 {
+        if self.degree() == 0
+        {
             return Polynomial::new(vec![0.0]);
         }
-        let coeffs: Vec<f64> = self.coeffs
+        let coeffs: Vec<f64> = self
+            .coeffs
             .iter()
             .enumerate()
             .skip(1)

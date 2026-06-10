@@ -8,15 +8,15 @@
 use crate::{SolverError, SolverResult};
 use std::fmt;
 
-pub mod lu;
-pub mod qr;
 pub mod cholesky;
 pub mod iterative;
+pub mod lu;
+pub mod qr;
 
-pub use lu::{Lu, lu_decompose, solve, solve_lu};
-pub use qr::{Qr, qr_decompose, solve_qr_least_squares};
 pub use cholesky::{cholesky_decompose, solve_cholesky};
 pub use iterative::conjugate_gradient;
+pub use lu::{Lu, lu_decompose, solve, solve_lu};
+pub use qr::{Qr, qr_decompose, solve_qr_least_squares};
 
 // ─── Matrix dense row-major ─────────────────────────────────────────────────
 
@@ -42,8 +42,10 @@ impl Matrix {
     /// Crée une matrice depuis une lambda `(i,j) -> f64`.
     pub fn from_fn<F: FnMut(usize, usize) -> f64>(rows: usize, cols: usize, mut f: F) -> Self {
         let mut data = Vec::with_capacity(rows * cols);
-        for i in 0..rows {
-            for j in 0..cols {
+        for i in 0..rows
+        {
+            for j in 0..cols
+            {
                 data.push(f(i, j));
             }
         }
@@ -62,7 +64,8 @@ impl Matrix {
     /// Matrice identité n×n.
     pub fn identity(n: usize) -> Self {
         let mut m = Self::zeros(n, n);
-        for i in 0..n {
+        for i in 0..n
+        {
             m[(i, i)] = 1.0;
         }
         m
@@ -77,12 +80,24 @@ impl Matrix {
         }
     }
 
-    pub fn rows(&self) -> usize { self.rows }
-    pub fn cols(&self) -> usize { self.cols }
-    pub fn shape(&self) -> (usize, usize) { (self.rows, self.cols) }
-    pub fn is_square(&self) -> bool { self.rows == self.cols }
-    pub fn data(&self) -> &[f64] { &self.data }
-    pub fn data_mut(&mut self) -> &mut [f64] { &mut self.data }
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+    pub fn is_square(&self) -> bool {
+        self.rows == self.cols
+    }
+    pub fn data(&self) -> &[f64] {
+        &self.data
+    }
+    pub fn data_mut(&mut self) -> &mut [f64] {
+        &mut self.data
+    }
 
     /// Accès direct ligne sous forme slice.
     #[inline]
@@ -97,11 +112,13 @@ impl Matrix {
     }
 
     pub fn swap_rows(&mut self, i: usize, j: usize) {
-        if i == j {
+        if i == j
+        {
             return;
         }
         let cols = self.cols;
-        for k in 0..cols {
+        for k in 0..cols
+        {
             self.data.swap(i * cols + k, j * cols + k);
         }
     }
@@ -109,8 +126,10 @@ impl Matrix {
     /// Transposée (alloue une nouvelle matrice).
     pub fn transpose(&self) -> Self {
         let mut out = Self::zeros(self.cols, self.rows);
-        for i in 0..self.rows {
-            for j in 0..self.cols {
+        for i in 0..self.rows
+        {
+            for j in 0..self.cols
+            {
                 out[(j, i)] = self[(i, j)];
             }
         }
@@ -119,20 +138,25 @@ impl Matrix {
 
     /// Produit matriciel naïf O(n³).
     pub fn matmul(&self, other: &Self) -> SolverResult<Self> {
-        if self.cols != other.rows {
+        if self.cols != other.rows
+        {
             return Err(SolverError::DimensionMismatch {
                 expected: self.cols,
                 got: other.rows,
             });
         }
         let mut out = Self::zeros(self.rows, other.cols);
-        for i in 0..self.rows {
-            for k in 0..self.cols {
+        for i in 0..self.rows
+        {
+            for k in 0..self.cols
+            {
                 let aik = self[(i, k)];
-                if aik == 0.0 {
+                if aik == 0.0
+                {
                     continue;
                 }
-                for j in 0..other.cols {
+                for j in 0..other.cols
+                {
                     out[(i, j)] += aik * other[(k, j)];
                 }
             }
@@ -142,17 +166,20 @@ impl Matrix {
 
     /// `y = A * x` pour x un slice ; vérifie les dimensions.
     pub fn matvec(&self, x: &[f64]) -> SolverResult<Vec<f64>> {
-        if self.cols != x.len() {
+        if self.cols != x.len()
+        {
             return Err(SolverError::DimensionMismatch {
                 expected: self.cols,
                 got: x.len(),
             });
         }
         let mut y = vec![0.0; self.rows];
-        for i in 0..self.rows {
+        for i in 0..self.rows
+        {
             let mut acc = 0.0;
             let row = self.row(i);
-            for j in 0..self.cols {
+            for j in 0..self.cols
+            {
                 acc += row[j] * x[j];
             }
             y[i] = acc;
@@ -167,7 +194,8 @@ impl Matrix {
 
     /// Vérifie qu'une matrice est carrée, sinon erreur.
     pub fn ensure_square(&self) -> SolverResult<usize> {
-        if self.rows != self.cols {
+        if self.rows != self.cols
+        {
             return Err(SolverError::NotSquare {
                 rows: self.rows,
                 cols: self.cols,
@@ -179,14 +207,17 @@ impl Matrix {
     /// Déterminant via LU (signe inclus). Renvoie 0.0 si singulière.
     pub fn determinant(&self) -> SolverResult<f64> {
         let n = self.ensure_square()?;
-        match lu_decompose(self.clone()) {
-            Ok(lu) => {
+        match lu_decompose(self.clone())
+        {
+            Ok(lu) =>
+            {
                 let mut det = if lu.swap_count % 2 == 0 { 1.0 } else { -1.0 };
-                for i in 0..n {
+                for i in 0..n
+                {
                     det *= lu.lu[(i, i)];
                 }
                 Ok(det)
-            }
+            },
             Err(SolverError::Singular { .. }) => Ok(0.0),
             Err(e) => Err(e),
         }
@@ -198,11 +229,13 @@ impl Matrix {
         let lu = lu_decompose(self.clone())?;
         let mut inv = Self::zeros(n, n);
         let mut e = vec![0.0; n];
-        for j in 0..n {
+        for j in 0..n
+        {
             e.fill(0.0);
             e[j] = 1.0;
             let x = solve_lu(&lu, &e)?;
-            for i in 0..n {
+            for i in 0..n
+            {
                 inv[(i, j)] = x[i];
             }
         }
@@ -231,10 +264,13 @@ impl std::ops::IndexMut<(usize, usize)> for Matrix {
 
 impl fmt::Display for Matrix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for i in 0..self.rows {
+        for i in 0..self.rows
+        {
             write!(f, "[")?;
-            for j in 0..self.cols {
-                if j > 0 {
+            for j in 0..self.cols
+            {
+                if j > 0
+                {
                     write!(f, ", ")?;
                 }
                 write!(f, "{:>10.4}", self[(i, j)])?;
@@ -268,7 +304,8 @@ pub fn dot(a: &[f64], b: &[f64]) -> f64 {
 /// `y += alpha * x`.
 #[inline]
 pub fn axpy(alpha: f64, x: &[f64], y: &mut [f64]) {
-    for (yi, xi) in y.iter_mut().zip(x) {
+    for (yi, xi) in y.iter_mut().zip(x)
+    {
         *yi += alpha * xi;
     }
 }

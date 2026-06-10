@@ -22,16 +22,18 @@ fn main() {
         .unwrap_or_else(|_| "/root/scirust/data/cifar-10-batches-bin".to_string());
     println!("Chargement CIFAR-10 depuis {}...", data_dir);
 
-    let dataset = match Cifar10Dataset::load(&data_dir) {
+    let dataset = match Cifar10Dataset::load(&data_dir)
+    {
         Ok(ds) => ds,
-        Err(e) => {
+        Err(e) =>
+        {
             println!("Échec chargement CIFAR-10 : {}", e);
             println!(
                 "Veuillez télécharger CIFAR-10 depuis https://www.cs.toronto.edu/~kriz/cifar.html"
             );
             println!("et extraire dans {} (ou définir CIFAR10_DIR)", data_dir);
             std::process::exit(1);
-        }
+        },
     };
 
     println!("Train : {} images 32×32×3", dataset.n_train);
@@ -110,13 +112,15 @@ fn main() {
     // -------- Boucle d'entraînement -------- //
     let mut train_loader = DataLoader::new(train_ds, batch_size, true, 42);
 
-    for epoch in 0..n_epochs {
+    for epoch in 0..n_epochs
+    {
         let mut epoch_loss = 0.0;
         let mut n_batches = 0;
 
         train_loader.shuffle_epoch(epoch as u64);
 
-        for (x_batch, y_batch) in train_loader.iter() {
+        for (x_batch, y_batch) in train_loader.iter()
+        {
             let tape = Tape::new();
             let x = tape.input(x_batch);
             let target = tape.input(y_batch);
@@ -148,18 +152,22 @@ fn main() {
 
     let mut test_loader = DataLoader::new(test_ds, batch_size, false, 42);
 
-    for (x_batch, y_batch) in test_loader.iter() {
+    for (x_batch, y_batch) in test_loader.iter()
+    {
         let tape = Tape::new();
         let x = tape.input(x_batch);
         let logits = model.forward(&tape, x);
         let scores = tape.value(logits.idx());
 
         let (bs, _) = scores.shape();
-        for i in 0..bs {
+        for i in 0..bs
+        {
             let mut max_score = scores.data[i * 10];
             let mut pred_class = 0usize;
-            for c in 1..10 {
-                if scores.data[i * 10 + c] > max_score {
+            for c in 1..10
+            {
+                if scores.data[i * 10 + c] > max_score
+                {
                     max_score = scores.data[i * 10 + c];
                     pred_class = c;
                 }
@@ -172,7 +180,8 @@ fn main() {
                 .map(|(idx, _)| idx)
                 .unwrap_or(0);
 
-            if pred_class == true_class {
+            if pred_class == true_class
+            {
                 correct += 1;
             }
             total += 1;
@@ -183,16 +192,21 @@ fn main() {
     println!("\n=== RÉSULTAT ===");
     println!("  Accuracy : {:.2}% ({}/{})", accuracy, correct, total);
 
-    if accuracy >= 60.0 {
+    if accuracy >= 60.0
+    {
         println!("\n✅ SUCCÈS — SciRust v11.4 classifie CIFAR-10 correctement.");
         std::process::exit(0);
-    } else if accuracy >= 50.0 {
+    }
+    else if accuracy >= 50.0
+    {
         println!(
             "\n⚠️  PARTIEL — {:.2}% est acceptable mais < 60%. Augmenter epochs ou lr.",
             accuracy
         );
         std::process::exit(0);
-    } else {
+    }
+    else
+    {
         println!("\n❌ ÉCHEC — Convergence insuffisante. Vérifier lr, architecture, ou données.");
         std::process::exit(1);
     }

@@ -10,8 +10,10 @@ use scirust_core::nn::loss::CrossEntropyLoss;
 use scirust_core::nn::module::Module;
 use scirust_core::nn::Loss;
 use scirust_core::nn::Linear;
+use scirust_core::nn::tt_decompose;
 use scirust_core::nn::init::{KaimingNormal, Zeros};
 use scirust_core::nn::rng::PcgEngine;
+use scirust_core::tn::factorize::auto_factorize;
 
 // ------------------------------------------------------------------ //
 //  Bench sum_axis                                                      //
@@ -143,5 +145,53 @@ fn bench_matmul(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_sum_axis, bench_broadcast, bench_softmax, bench_linear_forward, bench_cross_entropy, bench_matmul);
+// ------------------------------------------------------------------ //
+//  Bench TT-Linear forward vs dense Linear                            //
+// ------------------------------------------------------------------ //
+fn bench_tt_linear_forward(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tt_linear_forward");
+    let mut rng = PcgEngine::new(42);
+
+    // Sizes: (in_features, out_features, ndims, max_rank)
+    // ndims controls how many factors in the TT decomposition
+    let configs: &[(usize, usize, usize, usize)] = &[
+        (48, 96, 2, 4),    // small, rank 4
+        (256, 128, 2, 8),  // medium, rank 8
+        (512, 512, 2, 16), // large, rank 16
+    ];
+
+    for &(in_f, out_f, ndims, max_rank) in configs {
+        let mut linear = Linear::new(in_f, out_f, &KaimingNormal, &Zeros, &mut rng);
+        let in_dims = auto_factorize(in_f, ndims);
+        let out_dims = auto_factorize(out_f, ndims);
+        let tt = tt_decompose(&linear, &in_dims, &out_dims, max_rank, 0.0);
+
+        group.bench_with_input(
+            BenchmarkId::new("linear", format!("{}x{}", in_f, out_f)),
+            &(in_f, out_f),
+            |b, _| {
+                b.iter(|| {
+                    let tape = Tape::new();
+                    let x = tape.input(Tensor::from_vec(vec![0.5f32; 64 * in_f], 64, in_f));
+                    black_box(&mut linear).forward(&tape, x);
+                })
+            }
+        );
+        group.bench_with_input(
+            BenchmarkId::new("tt_linear", format!("{}x{}_r{}", in_f, out_f, max_rank)),
+            &(in_f, out_f),
+            |b, _| {
+                let mut tt = tt.clone();
+                b.iter(|| {
+                    let tape = Tape::new();
+                    let x = tape.input(Tensor::from_vec(vec![0.5f32; 64 * in_f], 64, in_f));
+                    black_box(&mut tt).forward(&tape, x);
+                })
+            }
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_sum_axis, bench_broadcast, bench_softmax, bench_linear_forward, bench_tt_linear_forward, bench_cross_entropy, bench_matmul);
 criterion_main!(benches);

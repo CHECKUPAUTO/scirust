@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use scirust_symbolic::Expr;
+use std::collections::{HashMap, HashSet};
 
 /// E-Graph for equality saturation.
 #[derive(Default)]
@@ -42,67 +42,83 @@ impl EGraph {
 
     /// Add an expression to the E-Graph and return its E-class ID.
     pub fn add_expr(&mut self, expr: &Expr) -> usize {
-        let node = match expr {
+        let node = match expr
+        {
             Expr::Const(c) => ENode::Const(c.to_string()),
             Expr::Var(v) => ENode::Var(v.clone()),
-            Expr::Add(a, b) => {
+            Expr::Add(a, b) =>
+            {
                 let id1 = self.add_expr(a);
                 let id2 = self.add_expr(b);
                 ENode::Op("+".to_string(), vec![id1, id2])
-            }
-            Expr::Sub(a, b) => {
+            },
+            Expr::Sub(a, b) =>
+            {
                 let id1 = self.add_expr(a);
                 let id2 = self.add_expr(b);
                 ENode::Op("-".to_string(), vec![id1, id2])
-            }
-            Expr::Mul(a, b) => {
+            },
+            Expr::Mul(a, b) =>
+            {
                 let id1 = self.add_expr(a);
                 let id2 = self.add_expr(b);
                 ENode::Op("*".to_string(), vec![id1, id2])
-            }
-            Expr::Div(a, b) => {
+            },
+            Expr::Div(a, b) =>
+            {
                 let id1 = self.add_expr(a);
                 let id2 = self.add_expr(b);
                 ENode::Op("/".to_string(), vec![id1, id2])
-            }
-            Expr::Pow(a, b) => {
+            },
+            Expr::Pow(a, b) =>
+            {
                 let id1 = self.add_expr(a);
                 let id2 = self.add_expr(b);
                 ENode::Op("^".to_string(), vec![id1, id2])
-            }
-            Expr::Neg(a) => {
+            },
+            Expr::Neg(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("neg".to_string(), vec![id])
-            }
-            Expr::Sin(a) => {
+            },
+            Expr::Sin(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("sin".to_string(), vec![id])
-            }
-            Expr::Cos(a) => {
+            },
+            Expr::Cos(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("cos".to_string(), vec![id])
-            }
-            Expr::Exp(a) => {
+            },
+            Expr::Exp(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("exp".to_string(), vec![id])
-            }
-            Expr::Ln(a) => {
+            },
+            Expr::Ln(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("ln".to_string(), vec![id])
-            }
-            Expr::Sqrt(a) => {
+            },
+            Expr::Sqrt(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("sqrt".to_string(), vec![id])
-            }
-            Expr::Abs(a) => {
+            },
+            Expr::Abs(a) =>
+            {
                 let id = self.add_expr(a);
                 ENode::Op("abs".to_string(), vec![id])
-            }
+            },
         };
 
-        if let Some(&id) = self.memo.get(&node) {
+        if let Some(&id) = self.memo.get(&node)
+        {
             id
-        } else {
+        }
+        else
+        {
             let id = self.next_id;
             self.next_id += 1;
             let mut class = EClass {

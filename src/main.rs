@@ -48,7 +48,8 @@ impl CoreState {
 
     fn log(&mut self, entry: &str) {
         let line = format!("[{}] {}", Local::now().format("%H:%M:%S"), entry);
-        if self.history.len() >= MAX_HISTORY {
+        if self.history.len() >= MAX_HISTORY
+        {
             self.history.pop_front();
         }
         self.history.push_back(line);
@@ -70,13 +71,20 @@ impl GoalEngine {
             "Vérifier l'intégrité de la compilation du pipeline tensoriel",
         ];
         let mut rng = rand::thread_rng();
-        scirust_tasks.choose(&mut rng).unwrap_or(&"Maintien du noyau").to_string()
+        scirust_tasks
+            .choose(&mut rng)
+            .unwrap_or(&"Maintien du noyau")
+            .to_string()
     }
 
     fn ensure_goal(&self, state: &mut CoreState) {
-        if state.goals.is_empty() {
+        if state.goals.is_empty()
+        {
             let goal = self.reflect(state);
-            state.log(&format!("[GoalEngine] Nouveau jalon SciRust assigné : {}", goal));
+            state.log(&format!(
+                "[GoalEngine] Nouveau jalon SciRust assigné : {}",
+                goal
+            ));
             state.goals.push(goal);
             state.task_count += 1;
         }
@@ -92,9 +100,12 @@ enum Event {
 
 // Persistance asynchrone non-bloquante (Correction du goulot d'étranglement)
 async fn load_state() -> CoreState {
-    if Path::new(STATE_FILE).exists() {
-        if let Ok(raw) = tokio::fs::read_to_string(STATE_FILE).await {
-            if let Ok(state) = serde_json::from_str::<CoreState>(&raw) {
+    if Path::new(STATE_FILE).exists()
+    {
+        if let Ok(raw) = tokio::fs::read_to_string(STATE_FILE).await
+        {
+            if let Ok(state) = serde_json::from_str::<CoreState>(&raw)
+            {
                 return state;
             }
         }
@@ -103,14 +114,20 @@ async fn load_state() -> CoreState {
 }
 
 async fn save_state(state: &CoreState) {
-    if let Ok(json) = serde_json::to_string_pretty(state) {
+    if let Ok(json) = serde_json::to_string_pretty(state)
+    {
         let _ = tokio::fs::write(STATE_FILE, json).await;
     }
 }
 
 async fn log_evolution(entry: &str) {
     let line = format!("[{}] {}\n", Local::now().to_rfc3339(), entry);
-    if let Ok(mut file) = tokio::fs::OpenOptions::new().create(true).append(true).open(EVOLUTION_LOG).await {
+    if let Ok(mut file) = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(EVOLUTION_LOG)
+        .await
+    {
         use tokio::io::AsyncWriteExt;
         let _ = file.write_all(line.as_bytes()).await;
     }
@@ -121,7 +138,8 @@ async fn propose_upgrade(state: &mut CoreState) {
     state.upgrade_attempts += 1;
     let stage = state.upgrade_successes % 3;
 
-    let (target_file, code) = match stage {
+    let (target_file, code) = match stage
+    {
         0 => (
             "src/tensor.rs",
             r#"//! SciRust Tensor Core - Alignement mémoire strict pour SIMD
@@ -171,33 +189,51 @@ impl SimdKernel {
     };
 
     // Écritures asynchrones pour préserver l'exécuteur Tokio
-    if let Err(e) = tokio::fs::write(target_file, code).await {
-        state.log(&format!("[Evolution] Erreur écriture {} : {}", target_file, e));
+    if let Err(e) = tokio::fs::write(target_file, code).await
+    {
+        state.log(&format!(
+            "[Evolution] Erreur écriture {} : {}",
+            target_file, e
+        ));
         return;
     }
 
     // Validation par compilation non-bloquante
-    let result = tokio::task::spawn_blocking(|| {
-        Command::new("cargo").args(["check"]).output()
-    }).await;
+    let result =
+        tokio::task::spawn_blocking(|| Command::new("cargo").args(["check"]).output()).await;
 
-    match result {
-        Ok(Ok(output)) => {
-            if output.status.success() {
+    match result
+    {
+        Ok(Ok(output)) =>
+        {
+            if output.status.success()
+            {
                 state.upgrade_successes += 1;
                 state.energy += 5.0;
                 let msg = format!("Succès Mutation : {} compilé avec succès.", target_file);
                 log_evolution(&msg).await;
                 state.log(&format!("[Evolution] {}", msg));
-            } else {
+            }
+            else
+            {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let first_err = stderr.lines().next().unwrap_or("Erreur de syntaxe Rust");
                 state.energy -= 2.0;
-                log_evolution(&format!("Échec de mutation sur {} : {}", target_file, first_err)).await;
-                state.log(&format!("[Evolution] Rejet sur {} : {}", target_file, first_err));
+                log_evolution(&format!(
+                    "Échec de mutation sur {} : {}",
+                    target_file, first_err
+                ))
+                .await;
+                state.log(&format!(
+                    "[Evolution] Rejet sur {} : {}",
+                    target_file, first_err
+                ));
             }
-        }
-        _ => { state.log("[Evolution] Panique ou erreur lors du processus cargo check"); }
+        },
+        _ =>
+        {
+            state.log("[Evolution] Panique ou erreur lors du processus cargo check");
+        },
     }
 }
 
@@ -208,8 +244,11 @@ async fn heartbeat(state: &mut CoreState, engine: &GoalEngine) {
 
     println!(
         "[Heartbeat v{}] ⚡{:.1} | Attribué: {} | Mutations Réussies: {}/{}",
-        state.version, state.energy, state.goals.last().unwrap_or(&"Aucun".to_string()),
-        state.upgrade_successes, state.upgrade_attempts
+        state.version,
+        state.energy,
+        state.goals.last().unwrap_or(&"Aucun".to_string()),
+        state.upgrade_successes,
+        state.upgrade_attempts
     );
 }
 
@@ -218,15 +257,26 @@ async fn external_listener(tx: mpsc::Sender<Event>) {
     let reader = tokio::io::BufReader::new(stdin);
     let mut lines = reader.lines();
 
-    while let Ok(Some(line)) = lines.next_line().await {
+    while let Ok(Some(line)) = lines.next_line().await
+    {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
-        let event = if trimmed.eq_ignore_ascii_case("exit") || trimmed.eq_ignore_ascii_case("shutdown") {
+        if trimmed.is_empty()
+        {
+            continue;
+        }
+        let event = if trimmed.eq_ignore_ascii_case("exit")
+            || trimmed.eq_ignore_ascii_case("shutdown")
+        {
             Event::Shutdown
-        } else {
+        }
+        else
+        {
             Event::UserMessage(trimmed.to_string())
         };
-        if tx.send(event).await.is_err() { break; }
+        if tx.send(event).await.is_err()
+        {
+            break;
+        }
     }
 }
 
@@ -243,7 +293,8 @@ async fn main() {
     println!("║       OpenClaw-U v0.3.0 — SciRust Bootstrapper           ║");
     println!("╚══════════════════════════════════════════════════════════╝");
 
-    loop {
+    loop
+    {
         tokio::select! {
             _ = heartbeat_interval.tick() => {
                 heartbeat(&mut state, &engine).await;

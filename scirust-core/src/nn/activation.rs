@@ -91,7 +91,7 @@ impl Default for Softmax {
 
 impl Module for Softmax {
     fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        input.softmax(self.axis)
+        input.try_softmax(self.axis).unwrap()
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -129,7 +129,7 @@ impl Default for LogSoftmax {
 
 impl Module for LogSoftmax {
     fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        input.log_softmax(self.axis)
+        input.try_log_softmax(self.axis).unwrap()
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

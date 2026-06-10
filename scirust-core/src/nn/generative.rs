@@ -45,10 +45,13 @@ impl VAE {
         let std = logvar.scale(0.5).exp();
         let (rows, cols) = mu.shape();
         let mut eps_data = vec![0.0f32; rows * cols];
-        for e in &mut eps_data { *e = self.rng.normal(0.0, 1.0); }
+        for e in &mut eps_data
+        {
+            *e = self.rng.normal(0.0, 1.0);
+        }
 
         let eps = tape.input(Tensor::from_vec(eps_data, rows, cols));
-        mu.add(std.hadamard(eps))
+        mu.try_add(std.try_hadamard(eps).unwrap()).unwrap()
     }
 
     pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>) -> (Var<'t>, Var<'t>, Var<'t>) {
@@ -66,9 +69,15 @@ impl VAE {
     pub fn kl_loss<'t>(&self, tape: &'t Tape, mu: Var<'t>, logvar: Var<'t>) -> Var<'t> {
         let (rows, cols) = mu.shape();
         let ones = tape.input(Tensor::from_vec(vec![1.0; rows * cols], rows, cols));
-        let mu_sq = mu.hadamard(mu.clone());
+        let mu_sq = mu.try_hadamard(mu.clone()).unwrap();
         let exp_logvar = logvar.clone().exp();
-        let sum_term = ones.add(logvar).sub(mu_sq).sub(exp_logvar);
+        let sum_term = ones
+            .try_add(logvar)
+            .unwrap()
+            .try_sub(mu_sq)
+            .unwrap()
+            .try_sub(exp_logvar)
+            .unwrap();
         sum_term.sum().scale(-0.5)
     }
 }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use super::tokenization::Tokenizer;
+use std::collections::HashMap;
 
 /// Byte Pair Encoding (BPE) Tokenizer for SciRust.
 pub struct BpeTokenizer {
@@ -13,7 +13,12 @@ impl BpeTokenizer {
     pub fn new(vocab: HashMap<String, u32>, merges: Vec<(String, String)>) -> Self {
         let unk_id = *vocab.get("<UNK>").unwrap_or(&0);
         let pad_id = *vocab.get("<PAD>").unwrap_or(&1);
-        Self { vocab, merges, unk_id, pad_id }
+        Self {
+            vocab,
+            merges,
+            unk_id,
+            pad_id,
+        }
     }
 
     /// Train the BPE tokenizer on a corpus.
@@ -25,10 +30,13 @@ impl BpeTokenizer {
         // Initial characters as base vocabulary
         let mut current_vocab_size = 2;
         let mut char_counts = HashMap::new();
-        for text in texts {
-            for c in text.chars() {
+        for text in texts
+        {
+            for c in text.chars()
+            {
                 let s = c.to_string();
-                if !vocab.contains_key(&s) && current_vocab_size < vocab_size {
+                if !vocab.contains_key(&s) && current_vocab_size < vocab_size
+                {
                     vocab.insert(s.clone(), current_vocab_size as u32);
                     current_vocab_size += 1;
                 }
@@ -38,46 +46,62 @@ impl BpeTokenizer {
 
         // Simplistic BPE training loop
         let mut merges = Vec::new();
-        let mut words: Vec<Vec<String>> = texts.iter()
+        let mut words: Vec<Vec<String>> = texts
+            .iter()
             .map(|t| t.chars().map(|c| c.to_string()).collect())
             .collect();
 
-        while vocab.len() < vocab_size {
+        while vocab.len() < vocab_size
+        {
             let mut pair_counts = HashMap::new();
-            for word in &words {
-                for i in 0..word.len().saturating_sub(1) {
-                    let pair = (word[i].clone(), word[i+1].clone());
+            for word in &words
+            {
+                for i in 0..word.len().saturating_sub(1)
+                {
+                    let pair = (word[i].clone(), word[i + 1].clone());
                     *pair_counts.entry(pair).or_insert(0) += 1;
                 }
             }
 
-            if pair_counts.is_empty() { break; }
+            if pair_counts.is_empty()
+            {
+                break;
+            }
 
-            let best_pair = pair_counts.into_iter()
+            let best_pair = pair_counts
+                .into_iter()
                 .max_by_key(|&(_, count)| count)
                 .map(|(pair, _)| pair);
 
-            if let Some((p1, p2)) = best_pair {
+            if let Some((p1, p2)) = best_pair
+            {
                 let new_token = format!("{}{}", p1, p2);
                 merges.push((p1.clone(), p2.clone()));
                 vocab.insert(new_token.clone(), vocab.len() as u32);
 
                 // Apply merge
-                for word in &mut words {
+                for word in &mut words
+                {
                     let mut new_word = Vec::new();
                     let mut i = 0;
-                    while i < word.len() {
-                        if i + 1 < word.len() && word[i] == p1 && word[i+1] == p2 {
+                    while i < word.len()
+                    {
+                        if i + 1 < word.len() && word[i] == p1 && word[i + 1] == p2
+                        {
                             new_word.push(new_token.clone());
                             i += 2;
-                        } else {
+                        }
+                        else
+                        {
                             new_word.push(word[i].clone());
                             i += 1;
                         }
                     }
                     *word = new_word;
                 }
-            } else {
+            }
+            else
+            {
                 break;
             }
         }
@@ -86,9 +110,8 @@ impl BpeTokenizer {
     }
 
     pub fn decode(&self, ids: &[u32]) -> String {
-        let rev_vocab: HashMap<u32, String> = self.vocab.iter()
-            .map(|(s, &id)| (id, s.clone()))
-            .collect();
+        let rev_vocab: HashMap<u32, String> =
+            self.vocab.iter().map(|(s, &id)| (id, s.clone())).collect();
 
         ids.iter()
             .map(|id| rev_vocab.get(id).cloned().unwrap_or_else(|| "".to_string()))
@@ -100,15 +123,20 @@ impl Tokenizer for BpeTokenizer {
     fn tokenize(&self, text: &str) -> Vec<u32> {
         let mut tokens: Vec<String> = text.chars().map(|c| c.to_string()).collect();
 
-        for (p1, p2) in &self.merges {
+        for (p1, p2) in &self.merges
+        {
             let new_token = format!("{}{}", p1, p2);
             let mut new_tokens = Vec::new();
             let mut i = 0;
-            while i < tokens.len() {
-                if i + 1 < tokens.len() && tokens[i] == *p1 && tokens[i+1] == *p2 {
+            while i < tokens.len()
+            {
+                if i + 1 < tokens.len() && tokens[i] == *p1 && tokens[i + 1] == *p2
+                {
                     new_tokens.push(new_token.clone());
                     i += 2;
-                } else {
+                }
+                else
+                {
                     new_tokens.push(tokens[i].clone());
                     i += 1;
                 }
@@ -116,7 +144,8 @@ impl Tokenizer for BpeTokenizer {
             tokens = new_tokens;
         }
 
-        tokens.iter()
+        tokens
+            .iter()
             .map(|s| *self.vocab.get(s).unwrap_or(&self.unk_id))
             .collect()
     }

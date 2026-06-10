@@ -1,6 +1,6 @@
+use scirust_core::autodiff::optim::{Adam, Optimizer};
 use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::nn::Module;
-use scirust_core::autodiff::optim::{Optimizer, Adam};
 use scirust_core::nn::rng::PcgEngine;
 
 /// Deep Q-Network (DQN) Agent.
@@ -25,7 +25,15 @@ pub struct Transition {
 }
 
 impl<M: Module> DQNAgent<M> {
-    pub fn new(model: M, target_model: M, optimizer: Adam, gamma: f64, epsilon: f64, batch_size: usize, seed: u64) -> Self {
+    pub fn new(
+        model: M,
+        target_model: M,
+        optimizer: Adam,
+        gamma: f64,
+        epsilon: f64,
+        batch_size: usize,
+        seed: u64,
+    ) -> Self {
         Self {
             model,
             target_model,
@@ -39,14 +47,18 @@ impl<M: Module> DQNAgent<M> {
     }
 
     pub fn act(&mut self, state: &Tensor, action_dim: usize) -> usize {
-        if self.rng.float() < self.epsilon as f32 {
+        if self.rng.float() < self.epsilon as f32
+        {
             (self.rng.next_u32() as usize) % action_dim
-        } else {
+        }
+        else
+        {
             let tape = Tape::new();
             let s_var = tape.input(state.clone());
             let q_values = self.model.forward(&tape, s_var);
             let vals = tape.value(q_values.idx());
-            vals.data.iter()
+            vals.data
+                .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                 .map(|(i, _)| i)
@@ -56,17 +68,22 @@ impl<M: Module> DQNAgent<M> {
 
     pub fn remember(&mut self, transition: Transition) {
         self.memory.push(transition);
-        if self.memory.len() > 10000 {
+        if self.memory.len() > 10000
+        {
             self.memory.remove(0);
         }
     }
 
     pub fn train_step(&mut self) {
-        if self.memory.len() < self.batch_size { return; }
+        if self.memory.len() < self.batch_size
+        {
+            return;
+        }
 
         // Fisher-Yates shuffle for sampling (deterministic)
         let mut indices: Vec<usize> = (0..self.memory.len()).collect();
-        for i in (1..indices.len()).rev() {
+        for i in (1..indices.len()).rev()
+        {
             let j = (self.rng.next_u32() as usize) % (i + 1);
             indices.swap(i, j);
         }
@@ -75,18 +92,26 @@ impl<M: Module> DQNAgent<M> {
         let tape = Tape::new();
         let mut total_loss = tape.input(Tensor::from_vec(vec![0.0], 1, 1));
 
-        for &idx in batch_indices {
+        for &idx in batch_indices
+        {
             let t = &self.memory[idx];
             let s_var = tape.input(t.state.clone());
             let q_values = self.model.forward(&tape, s_var);
 
-            let target = if t.done {
+            let target = if t.done
+            {
                 t.reward as f32
-            } else {
+            }
+            else
+            {
                 let ns_var = tape.input(t.next_state.clone());
                 let next_q_values = self.target_model.forward(&tape, ns_var);
                 let next_vals = tape.value(next_q_values.idx());
-                let max_next_q = next_vals.data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let max_next_q = next_vals
+                    .data
+                    .iter()
+                    .cloned()
+                    .fold(f32::NEG_INFINITY, f32::max);
                 (t.reward as f32) + (self.gamma as f32) * max_next_q
             };
 

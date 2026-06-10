@@ -1,15 +1,18 @@
 // Palier 3 : Sigmoid + LayerNorm dans le manifeste. Round-trip SRT1 bit-exact.
 use scirust_core::autodiff::reverse::{Tape, Tensor};
-use scirust_core::nn::{KaimingNormal, LayerNorm, Linear, Module, PcgEngine, Sequential, Sigmoid, Zeros};
+use scirust_core::nn::{
+    KaimingNormal, LayerNorm, Linear, Module, PcgEngine, Sequential, Sigmoid, Zeros,
+};
 use scirust_runtime::{
-    build_model, fnv_fold_f32, fnv_init, load_weights, parse_manifest, save_weights, write_manifest,
-    LayerSpec,
+    LayerSpec, build_model, fnv_fold_f32, fnv_init, load_weights, parse_manifest, save_weights,
+    write_manifest,
 };
 
 fn synth(n: usize, cols: usize, seed: u64) -> Tensor {
     let mut s = seed;
     let mut data = Vec::with_capacity(n * cols);
-    for _ in 0..n * cols {
+    for _ in 0..n * cols
+    {
         s = s.wrapping_add(0x9e3779b97f4a7c15);
         let mut z = s;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -47,21 +50,28 @@ fn main() {
 
     let spec = vec![
         LayerSpec::Linear { in_f: 8, out_f: 16 },
-        LayerSpec::LayerNorm { d_model: 16, eps: 1e-5 },
+        LayerSpec::LayerNorm {
+            d_model: 16,
+            eps: 1e-5,
+        },
         LayerSpec::Sigmoid,
         LayerSpec::Linear { in_f: 16, out_f: 4 },
     ];
     let manifest = write_manifest(&spec);
     print!("--- manifeste ---\n{}-----------------\n", manifest);
     std::fs::write("layers.manifest", &manifest).unwrap();
-    let parsed = parse_manifest(&std::fs::read_to_string("layers.manifest").unwrap()).expect("parse");
+    let parsed =
+        parse_manifest(&std::fs::read_to_string("layers.manifest").unwrap()).expect("parse");
     let mut gen = build_model(&parsed);
-    gen.load_state_dict(&load_weights("layers.srt").expect("load")).expect("lsd");
+    gen.load_state_dict(&load_weights("layers.srt").expect("load"))
+        .expect("lsd");
     let f_gen = fp_forward(&mut gen, &x);
 
     println!("hardcode  : {:#018x}", f1);
     println!("manifeste : {:#018x}", f_gen);
     println!("equivalent: {}", f1 == f_gen);
     assert_eq!(f1, f_gen, "Sigmoid+LayerNorm via manifeste NON equivalent");
-    println!("\nOK : Sigmoid + LayerNorm supportes (persistance gamma/beta + reconstruction bit-exact).");
+    println!(
+        "\nOK : Sigmoid + LayerNorm supportes (persistance gamma/beta + reconstruction bit-exact)."
+    );
 }

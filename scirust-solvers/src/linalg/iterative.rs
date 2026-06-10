@@ -11,7 +11,7 @@
 //! - Dérive surveillée : si résidu croît brutalement → rollback + log
 
 use crate::linalg::{axpy, dot, norm2};
-use crate::{ConvergenceInfo, SolverError, SolverResult, Solution, Tolerance};
+use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
 /// Valeur minimale pour un pivot (évite division par zéro).
@@ -22,11 +22,9 @@ const DIVERGENCE_RATIO: f64 = 10.0;
 
 /// Vérifie qu'un scalaire n'est ni NaN ni Inf.
 fn check_finite(value: f64, label: &str, iter: usize) -> Result<(), SolverError> {
-    if !value.is_finite() {
-        return Err(SolverError::NanDetected {
-            iter,
-            value,
-        });
+    if !value.is_finite()
+    {
+        return Err(SolverError::NanDetected { iter, value });
     }
     Ok(())
 }
@@ -45,7 +43,8 @@ where
     F: Fn(&[f64], &mut [f64]),
 {
     let n = b.len();
-    if x0.len() != n {
+    if x0.len() != n
+    {
         return Err(SolverError::DimensionMismatch {
             expected: n,
             got: x0.len(),
@@ -53,14 +52,16 @@ where
     }
 
     // Vérifier que les entrées sont finies
-    for (i, &bi) in b.iter().enumerate() {
+    for (i, &bi) in b.iter().enumerate()
+    {
         check_finite(bi, "b", 0)?;
     }
 
     let mut x = x0;
     let mut r = vec![0.0; n];
     matvec(&x, &mut r);
-    for i in 0..n {
+    for i in 0..n
+    {
         r[i] = b[i] - r[i];
         check_finite(r[i], "r[0]", 0)?;
     }
@@ -76,12 +77,15 @@ where
     let mut best_res = last_res;
 
     let mut ap = vec![0.0; n];
-    for k in 0..tol.max_iter {
+    for k in 0..tol.max_iter
+    {
         matvec(&p, &mut ap);
 
         // Vérifier NaN dans ap
-        for (i, &api) in ap.iter().enumerate() {
-            if !api.is_finite() {
+        for (i, &api) in ap.iter().enumerate()
+        {
+            if !api.is_finite()
+            {
                 warn!(
                     target: "solver",
                     "NaN/Inf in matvec result at iteration {}, component {}: value={:.3e} — restoring backup",
@@ -97,16 +101,14 @@ where
         let pap = dot(&p, &ap);
         check_finite(pap, "pap", k)?;
 
-        if pap.abs() < PIVOT_EPS {
+        if pap.abs() < PIVOT_EPS
+        {
             warn!(
                 target: "solver",
                 "Conjugate gradient stalled: p^T·A·p = {:.3e} at iteration {} — restoring backup",
                 pap, k
             );
-            return Err(SolverError::Singular {
-                row: k,
-                pivot: pap,
-            });
+            return Err(SolverError::Singular { row: k, pivot: pap });
         }
 
         let alpha = rs_old / pap;
@@ -121,7 +123,8 @@ where
         let res = rs_new.sqrt();
 
         // Détection de divergence
-        if res > best_res * DIVERGENCE_RATIO && k > 2 {
+        if res > best_res * DIVERGENCE_RATIO && k > 2
+        {
             warn!(
                 target: "solver",
                 "Divergence detected at CG iteration {}: residual jumped from {:.3e} to {:.3e} — restoring backup (best was {:.3e})",
@@ -139,12 +142,14 @@ where
         last_res = res;
 
         // Mettre à jour le backup si on s'améliore
-        if res < best_res {
+        if res < best_res
+        {
             best_x.copy_from_slice(&x);
             best_res = res;
         }
 
-        if res < tol.abs + tol.rel * b_norm {
+        if res < tol.abs + tol.rel * b_norm
+        {
             return Ok(Solution {
                 value: x,
                 info: ConvergenceInfo {
@@ -158,7 +163,8 @@ where
         let beta = rs_new / rs_old;
         check_finite(beta, "beta", k)?;
 
-        for i in 0..n {
+        for i in 0..n
+        {
             p[i] = r[i] + beta * p[i];
         }
         rs_old = rs_new;
@@ -188,9 +194,11 @@ mod tests {
         let n = 5;
         let mat = {
             let mut m = Matrix::zeros(n, n);
-            for i in 0..n {
+            for i in 0..n
+            {
                 m[(i, i)] = 4.0;
-                if i > 0 {
+                if i > 0
+                {
                     m[(i, i - 1)] = -1.0;
                     m[(i - 1, i)] = -1.0;
                 }
@@ -211,7 +219,8 @@ mod tests {
         .unwrap();
         // Vérif A·x ≈ b
         let ax = mat.matvec(&sol.value).unwrap();
-        for (axi, bi) in ax.iter().zip(&b) {
+        for (axi, bi) in ax.iter().zip(&b)
+        {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-8);
         }
         // CG converge en ≤ n itérations sur matrice n×n SPD

@@ -2,6 +2,7 @@
 name = "scirust"
 version = "0.13.0"
 edition = "2021"
+rust-version = "1.85"
 description = "SciRust — Industrial-grade deep learning framework in pure Rust"
 license-file = "LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"
@@ -47,10 +48,19 @@ members = [
     "scirust-events-runtime",
     "scirust-events-examples",
     "scirust-neuro-symbolic",
+    "scirust-tn",
 ]
 exclude = [
     "scirust-rustc-driver",
     "examples/simd_views_demo",
     "examples/benchmarks",
+    "scirust-tensor-core",
+    "scirust-tensor-einsum",
+    "scirust-tensor-contraction",
+    "scirust-tensor-compile",
+    "scirust-tensor-runtime",
+    "scirust-tensor-examples",
+    "scirust-fusion",
+    "scirust-bridge",
 ]
 resolver = "2"

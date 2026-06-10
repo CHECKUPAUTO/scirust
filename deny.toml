@@ -1,0 +1,97 @@
+# deny.toml — cargo-deny configuration for SciRust
+# License: PolyForm Noncommercial 1.0.0 + commercial
+
+[advisories]
+# Ignore specific advisories if needed
+ignore = []
+
+[licenses]
+# Allow the project's own license
+allow = [
+    "PolyForm-Noncommercial-1.0.0",
+]
+
+# Allow common permissive licenses in dependencies
+allow-osi-approved = true
+allow-fsf-libre = true
+
+# Unclear or problematic licenses
+deny = [
+    "AGPL-3.0",
+    "GPL-3.0",
+    "LGPL-3.0",
+    "SSPL-1.0",
+    "Commons-Clause-1.0",
+]
+
+# Clarify license for dependencies with ambiguous licenses
+clarify = {
+    "matrixmultiply" = "Apache-2.0",
+    "wgpu" = "Apache-2.0 OR MIT",
+    "cudarc" = "MIT",
+    "half" = "MIT",
+    "nalgebra" = "Apache-2.0 OR MIT",
+    "ndarray" = "MIT",
+    "rand" = "MIT",
+    "serde" = "MIT",
+    "thiserror" = "MIT",
+    "bytemuck" = "Apache-2.0 OR MIT",
+    "pollster" = "Apache-2.0 OR MIT",
+    "sha2" = "MIT OR Apache-2.0",
+    "libm" = "MIT",
+}
+
+[bans]
+# Deny specific crates or versions
+deny = {
+    # No specific bans currently
+}
+
+# Allow multiple versions of the same crate if semver compatible
+multiple-versions = "allow"
+
+# Wildcard allow for development dependencies
+wildcards = { allow = ["dev", "build"] }
+
+[licenses.private]
+# Private crates that don't publish to crates.io
+ignore = [
+    "scirust",
+    "scirust-core",
+    "scirust-autodiff",
+    "scirust-simd",
+    "scirust-simd-macros",
+    "scirust-gpu",
+    "scirust-gpu-macros",
+    "scirust-macros",
+    "scirust-runtime",
+    "scirust-learning",
+    "scirust-symbolic",
+    "scirust-symreg",
+    "scirust-solvers",
+    "scirust-reasoning",
+    "scirust-bridge",
+    "scirust-evo",
+    "scirust-edge",
+    "scirust-events-core",
+    "scirust-events-models",
+    "scirust-events-runtime",
+    "scirust-events-examples",
+    "scirust-neuro-symbolic",
+    "scirust-arena",
+    "scirust-fusion",
+    "scirust-rustc-driver",
+    "scirust-tensor-core",
+    "scirust-tensor-einsum",
+    "scirust-tensor-contraction",
+    "scirust-tensor-compile",
+    "scirust-tensor-runtime",
+    "scirust-tensor-examples",
+    "scirust-tn",
+    "scirust-burn-bridge",
+]
+
+[sources]
+# Only allow crates.io
+allow-unknown-registry = false
+allow-unknown-git = false

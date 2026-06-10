@@ -11,6 +11,6 @@ pub mod gauss;
 pub mod romberg;
 pub mod simpson;
 
-pub use gauss::{gauss_legendre, GaussOrder};
+pub use gauss::{GaussOrder, gauss_legendre};
 pub use romberg::romberg;
 pub use simpson::simpson_adaptive;

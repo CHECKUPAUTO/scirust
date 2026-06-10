@@ -1,4 +1,4 @@
-use crate::core::{Result, Reasoner, DifferentiableReasoner};
+use crate::core::{DifferentiableReasoner, Reasoner, Result};
 use scirust_core::autodiff::reverse::Tensor;
 
 /// Differentiable reasoning layer.
@@ -35,7 +35,8 @@ impl Reasoner for DifferentiableLogicLayer {
 
 impl DifferentiableReasoner for DifferentiableLogicLayer {
     fn forward(&self, inputs: &[Tensor]) -> Result<Tensor> {
-        if inputs.is_empty() {
+        if inputs.is_empty()
+        {
             return Err(crate::core::ReasoningError::Neural("No inputs".to_string()));
         }
         Ok(inputs[0].clone())

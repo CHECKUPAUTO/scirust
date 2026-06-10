@@ -15,9 +15,13 @@ fn main() {
     let weight = tape.input(Tensor::zeros(out_c, in_c * k * k));
 
     let t = Instant::now();
-    for _ in 0..10 {
+    for _ in 0..10
+    {
         let _ = x.conv2d_forward(weight, None, batch, in_c, h, w, out_c, k, 1, 1);
     }
     let ms = t.elapsed().as_secs_f64() * 1000.0 / 10.0;
-    println!("Conv2d forward ({}x{}x{}x{} -> {} filters): {:.2} ms/forward", batch, in_c, h, w, out_c, ms);
+    println!(
+        "Conv2d forward ({}x{}x{}x{} -> {} filters): {:.2} ms/forward",
+        batch, in_c, h, w, out_c, ms
+    );
 }

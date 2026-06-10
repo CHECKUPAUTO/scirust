@@ -25,19 +25,23 @@ impl PidController {
     /// Update the PID controller with the current error and current time.
     /// Returns the control output.
     pub fn update(&mut self, error: f64, current_time: f64) -> f64 {
-        let dt = match self.prev_time {
+        let dt = match self.prev_time
+        {
             Some(t) => current_time - t,
             None => 0.0,
         };
 
-        if dt > 0.0 {
+        if dt > 0.0
+        {
             self.integral += error * dt;
             let derivative = (error - self.prev_error) / dt;
             let output = self.kp * error + self.ki * self.integral + self.kd * derivative;
             self.prev_error = error;
             self.prev_time = Some(current_time);
             output
-        } else {
+        }
+        else
+        {
             self.prev_time = Some(current_time);
             self.prev_error = error;
             self.kp * error
@@ -65,7 +69,12 @@ pub struct KalmanFilter1D {
 
 impl KalmanFilter1D {
     pub fn new(initial_x: f64, initial_p: f64, q: f64, r: f64) -> Self {
-        Self { x: initial_x, p: initial_p, q, r }
+        Self {
+            x: initial_x,
+            p: initial_p,
+            q,
+            r,
+        }
     }
 
     /// Prediction step
@@ -121,8 +130,10 @@ impl KalmanFilter {
         // x = F * x
         let n = self.x.len();
         let mut new_x = vec![0.0; n];
-        for i in 0..n {
-            for j in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
                 new_x[i] += self.f[i][j] * self.x[j];
             }
         }
@@ -130,23 +141,31 @@ impl KalmanFilter {
 
         // P = F * P * F^T + Q
         let mut fp = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                for k in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                for k in 0..n
+                {
                     fp[i][j] += self.f[i][k] * self.p[k][j];
                 }
             }
         }
         let mut fpf_t = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                for k in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                for k in 0..n
+                {
                     fpf_t[i][j] += fp[i][k] * self.f[j][k]; // F^T means f[j][k] instead of f[k][j]
                 }
             }
         }
-        for i in 0..n {
-            for j in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
                 self.p[i][j] = fpf_t[i][j] + self.q[i][j];
             }
         }
@@ -159,9 +178,11 @@ impl KalmanFilter {
 
         // y = z - H * x (innovation)
         let mut y = vec![0.0; m];
-        for i in 0..m {
+        for i in 0..m
+        {
             let mut hx = 0.0;
-            for j in 0..n {
+            for j in 0..n
+            {
                 hx += self.h[i][j] * self.x[j];
             }
             y[i] = z[i] - hx;
@@ -169,17 +190,23 @@ impl KalmanFilter {
 
         // S = H * P * H^T + R
         let mut hp = vec![vec![0.0; n]; m];
-        for i in 0..m {
-            for j in 0..n {
-                for k in 0..n {
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                for k in 0..n
+                {
                     hp[i][j] += self.h[i][k] * self.p[k][j];
                 }
             }
         }
         let mut s = vec![vec![0.0; m]; m];
-        for i in 0..m {
-            for j in 0..m {
-                for k in 0..n {
+        for i in 0..m
+        {
+            for j in 0..m
+            {
+                for k in 0..n
+                {
                     s[i][j] += hp[i][k] * self.h[j][k];
                 }
                 s[i][j] += self.r[i][j];
@@ -188,34 +215,43 @@ impl KalmanFilter {
 
         // K = P * H^T * S^-1
         // For simplicity in this implementation, we only support 1D measurements for now or simple inversion
-        if m == 1 {
+        if m == 1
+        {
             let s_inv = 1.0 / s[0][0];
             let mut k = vec![0.0; n];
-            for i in 0..n {
+            for i in 0..n
+            {
                 let mut ph_t = 0.0;
-                for j in 0..n {
+                for j in 0..n
+                {
                     ph_t += self.p[i][j] * self.h[0][j];
                 }
                 k[i] = ph_t * s_inv;
             }
 
             // x = x + K * y
-            for i in 0..n {
+            for i in 0..n
+            {
                 self.x[i] += k[i] * y[0];
             }
 
             // P = (I - K * H) * P
             let mut kh = vec![vec![0.0; n]; n];
-            for i in 0..n {
-                for j in 0..n {
+            for i in 0..n
+            {
+                for j in 0..n
+                {
                     kh[i][j] = k[i] * self.h[0][j];
                 }
             }
             let mut new_p = vec![vec![0.0; n]; n];
-            for i in 0..n {
-                for j in 0..n {
+            for i in 0..n
+            {
+                for j in 0..n
+                {
                     let mut khp = 0.0;
-                    for k_idx in 0..n {
+                    for k_idx in 0..n
+                    {
                         khp += kh[i][k_idx] * self.p[k_idx][j];
                     }
                     new_p[i][j] = self.p[i][j] - khp;
@@ -256,7 +292,8 @@ mod tests {
         assert!(state1 > 0.0 && state1 < 10.0);
 
         // After many measurements, state should approach 10.0
-        for _ in 0..100 {
+        for _ in 0..100
+        {
             kf.predict();
             kf.update(10.0);
         }

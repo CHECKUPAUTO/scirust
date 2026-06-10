@@ -1,5 +1,5 @@
+use crate::core::{Reasoner, Result};
 use std::collections::HashSet;
-use crate::core::{Result, Reasoner};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Fact {

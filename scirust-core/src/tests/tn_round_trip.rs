@@ -1,12 +1,16 @@
 //! Integration tests: matrix → TT decomposition → reconstructed matrix.
 
+use crate::tensor::TensorND;
 use crate::tn::tt_decompose::{
     reconstruct_matrix, reconstruct_tensor, tt_decompose_matrix, tt_decompose_tensor,
 };
-use crate::tensor::TensorND;
 
 fn frob_err(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f32>()
+        .sqrt()
 }
 
 fn frob_norm(a: &[f32]) -> f32 {
@@ -37,9 +41,12 @@ fn tensor_outer_product_yields_rank_one() {
     let w = [2.0f32, 0.5];
 
     let mut data = vec![0.0f32; 4 * 3 * 2];
-    for i in 0..4 {
-        for j in 0..3 {
-            for k in 0..2 {
+    for i in 0..4
+    {
+        for j in 0..3
+        {
+            for k in 0..2
+            {
                 data[(i * 3 + j) * 2 + k] = u[i] * v[j] * w[k];
             }
         }
@@ -78,12 +85,14 @@ fn matrix_truncation_error_bound() {
     let out_features = 32;
     let mut w = vec![0.0f32; in_features * out_features];
     // Sum of a few outer products → effective rank ~3
-    for r in 0..3 {
-        for i in 0..in_features {
-            for j in 0..out_features {
-                w[i * out_features + j] +=
-                    ((i as f32) * (r as f32 + 1.0) * 0.1).sin()
-                        * ((j as f32) * (r as f32 + 1.0) * 0.13).cos();
+    for r in 0..3
+    {
+        for i in 0..in_features
+        {
+            for j in 0..out_features
+            {
+                w[i * out_features + j] += ((i as f32) * (r as f32 + 1.0) * 0.1).sin()
+                    * ((j as f32) * (r as f32 + 1.0) * 0.13).cos();
             }
         }
     }
@@ -100,5 +109,8 @@ fn matrix_truncation_error_bound() {
     let err_low = frob_err(&w, &rec_low) / frob_norm(&w);
 
     // Higher rank should be no worse than lower rank.
-    assert!(err_high <= err_low + 1e-4, "high {err_high} > low {err_low}");
+    assert!(
+        err_high <= err_low + 1e-4,
+        "high {err_high} > low {err_low}"
+    );
 }

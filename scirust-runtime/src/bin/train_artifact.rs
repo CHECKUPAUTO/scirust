@@ -34,11 +34,13 @@ fn main() {
     let mut loader = DataLoader::new(train_small, 64, true, 42);
     let n_epochs = 5;
 
-    for epoch in 0..n_epochs {
+    for epoch in 0..n_epochs
+    {
         let mut epoch_loss = 0.0;
         let mut n = 0;
         loader.shuffle_epoch(epoch as u64);
-        for (xb, yb) in loader.iter() {
+        for (xb, yb) in loader.iter()
+        {
             let tape = Tape::new();
             let x = tape.input(xb);
             let t = tape.input(yb);
@@ -50,7 +52,11 @@ fn main() {
             epoch_loss += tape.value(loss.idx()).data[0];
             n += 1;
         }
-        println!("  epoch {:>2} : loss = {:.4}", epoch + 1, epoch_loss / n as f32);
+        println!(
+            "  epoch {:>2} : loss = {:.4}",
+            epoch + 1,
+            epoch_loss / n as f32
+        );
     }
 
     save_weights(&model.state_dict(), "mnist_mlp.srt").expect("save_weights");

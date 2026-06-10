@@ -33,16 +33,19 @@ impl ResNet {
         let mut in_c = 64;
         let mut out_c = 64;
 
-        for (i, &count) in block_counts.iter().enumerate() {
+        for (i, &count) in block_counts.iter().enumerate()
+        {
             let stride = if i == 0 { 1 } else { 2 };
             let mut layer = Vec::new();
             layer.push(ResidualBlock::new(in_c, out_c, stride, w_init, b_init, rng));
-            for _ in 1..count {
+            for _ in 1..count
+            {
                 layer.push(ResidualBlock::new(out_c, out_c, 1, w_init, b_init, rng));
             }
             layers.push(layer);
             in_c = out_c;
-            if i < block_counts.len() - 1 {
+            if i < block_counts.len() - 1
+            {
                 out_c *= 2;
             }
         }
@@ -59,11 +62,21 @@ impl ResNet {
         }
     }
 
-    pub fn resnet18<W: Initializer, B: Initializer>(num_classes: usize, w_init: &W, b_init: &B, rng: &mut PcgEngine) -> Self {
+    pub fn resnet18<W: Initializer, B: Initializer>(
+        num_classes: usize,
+        w_init: &W,
+        b_init: &B,
+        rng: &mut PcgEngine,
+    ) -> Self {
         Self::new(&[2, 2, 2, 2], num_classes, w_init, b_init, rng)
     }
 
-    pub fn resnet34<W: Initializer, B: Initializer>(num_classes: usize, w_init: &W, b_init: &B, rng: &mut PcgEngine) -> Self {
+    pub fn resnet34<W: Initializer, B: Initializer>(
+        num_classes: usize,
+        w_init: &W,
+        b_init: &B,
+        rng: &mut PcgEngine,
+    ) -> Self {
         Self::new(&[3, 4, 6, 3], num_classes, w_init, b_init, rng)
     }
 }
@@ -74,8 +87,10 @@ impl Module for ResNet {
         x = self.bn1.forward(tape, x);
         x = x.relu();
 
-        for layer in &mut self.layers {
-            for block in layer {
+        for layer in &mut self.layers
+        {
+            for block in layer
+            {
                 x = block.forward(tape, x);
             }
         }
@@ -85,14 +100,19 @@ impl Module for ResNet {
         let spatial_dim = total_features / self.out_channels;
 
         let mut gap_parts = Vec::with_capacity(batch);
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let sample = x.slice_rows(b, 1);
             // Average across spatial dimension for each channel
             // In flattened format (batch, C*H*W), we need to average groups of size spatial_dim
             let mut channels = Vec::with_capacity(self.out_channels);
-            for c in 0..self.out_channels {
+            for c in 0..self.out_channels
+            {
                 let start = c * spatial_dim;
-                let channel_avg = sample.slice_cols(start, spatial_dim).sum().scale(1.0 / spatial_dim as f32);
+                let channel_avg = sample
+                    .slice_cols(start, spatial_dim)
+                    .sum()
+                    .scale(1.0 / spatial_dim as f32);
                 channels.push(channel_avg);
             }
             // Workaround: Use concat_rows then transpose if needed,
@@ -114,8 +134,10 @@ impl Module for ResNet {
         let mut v = Vec::new();
         v.extend(self.conv1.parameter_indices());
         v.extend(self.bn1.parameter_indices());
-        for layer in &self.layers {
-            for block in layer {
+        for layer in &self.layers
+        {
+            for block in layer
+            {
                 v.extend(block.parameter_indices());
             }
         }
@@ -126,8 +148,10 @@ impl Module for ResNet {
     fn sync(&mut self, tape: &Tape) {
         self.conv1.sync(tape);
         self.bn1.sync(tape);
-        for layer in &mut self.layers {
-            for block in layer {
+        for layer in &mut self.layers
+        {
+            for block in layer
+            {
                 block.sync(tape);
             }
         }
@@ -136,16 +160,28 @@ impl Module for ResNet {
 
     fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
-        for (k, v) in self.conv1.state_dict() { map.insert(format!("conv1.{}", k), v); }
-        for (k, v) in self.bn1.state_dict() { map.insert(format!("bn1.{}", k), v); }
-        for (i, layer) in self.layers.iter().enumerate() {
-            for (j, block) in layer.iter().enumerate() {
-                for (k, v) in block.state_dict() {
+        for (k, v) in self.conv1.state_dict()
+        {
+            map.insert(format!("conv1.{}", k), v);
+        }
+        for (k, v) in self.bn1.state_dict()
+        {
+            map.insert(format!("bn1.{}", k), v);
+        }
+        for (i, layer) in self.layers.iter().enumerate()
+        {
+            for (j, block) in layer.iter().enumerate()
+            {
+                for (k, v) in block.state_dict()
+                {
                     map.insert(format!("layer{}.{}.{}", i, j, k), v);
                 }
             }
         }
-        for (k, v) in self.fc.state_dict() { map.insert(format!("fc.{}", k), v); }
+        for (k, v) in self.fc.state_dict()
+        {
+            map.insert(format!("fc.{}", k), v);
+        }
         map
     }
 }

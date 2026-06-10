@@ -25,7 +25,8 @@ pub struct KaimingNormal;
 impl Initializer for KaimingNormal {
     fn fill(&self, t: &mut Tensor, fan_in: usize, _fan_out: usize, rng: &mut PcgEngine) {
         let std = (2.0 / fan_in as f32).sqrt();
-        for x in t.data.iter_mut() {
+        for x in t.data.iter_mut()
+        {
             *x = rng.normal(0.0, std);
         }
     }
@@ -38,7 +39,8 @@ pub struct XavierUniform;
 impl Initializer for XavierUniform {
     fn fill(&self, t: &mut Tensor, fan_in: usize, fan_out: usize, rng: &mut PcgEngine) {
         let bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
-        for x in t.data.iter_mut() {
+        for x in t.data.iter_mut()
+        {
             *x = rng.float_signed() * bound;
         }
     }
@@ -50,7 +52,8 @@ pub struct Zeros;
 
 impl Initializer for Zeros {
     fn fill(&self, t: &mut Tensor, _fan_in: usize, _fan_out: usize, _rng: &mut PcgEngine) {
-        for x in t.data.iter_mut() {
+        for x in t.data.iter_mut()
+        {
             *x = 0.0;
         }
     }
@@ -70,7 +73,8 @@ impl SmallNormal {
 
 impl Initializer for SmallNormal {
     fn fill(&self, t: &mut Tensor, _fan_in: usize, _fan_out: usize, rng: &mut PcgEngine) {
-        for x in t.data.iter_mut() {
+        for x in t.data.iter_mut()
+        {
             *x = rng.normal(0.0, self.std);
         }
     }
@@ -124,7 +128,8 @@ mod tests {
         let mut rng = PcgEngine::new(42);
         XavierUniform.fill(&mut t, fan_in, fan_out, &mut rng);
         let bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
-        for &x in &t.data {
+        for &x in &t.data
+        {
             assert!(
                 x.abs() <= bound + 1e-5,
                 "Xavier value out of bounds: {x} > {bound}"

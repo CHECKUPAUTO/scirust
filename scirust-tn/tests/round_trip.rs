@@ -1,9 +1,9 @@
 //! Integration tests: matrix → TT decomposition → reconstructed matrix.
 
-use scirust_tn::tt::decompose::{
+use scirust_core::tensor::tensor_nd::TensorND;
+use scirust_core::tn::tt_decompose::{
     reconstruct_matrix, reconstruct_tensor, tt_decompose_matrix, tt_decompose_tensor,
 };
-use scirust_tn::TensorND;
 
 fn frob_err(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
@@ -21,7 +21,7 @@ fn tensor_3mode_full_rank_round_trip() {
     let data: Vec<f32> = (0..n)
         .map(|i| ((i * 37) as f32 * 0.0173).sin() + (i as f32) * 0.01)
         .collect();
-    let t = TensorND::new(shape, data.clone());
+    let t = TensorND::new(data.clone(), shape);
 
     let tt = tt_decompose_tensor(&t, 1000, 0.0);
     let recon = reconstruct_tensor(&tt);
@@ -44,7 +44,7 @@ fn tensor_outer_product_yields_rank_one() {
             }
         }
     }
-    let t = TensorND::new(vec![4, 3, 2], data.clone());
+    let t = TensorND::new(data.clone(), vec![4, 3, 2]);
     let tt = tt_decompose_tensor(&t, 100, 1e-6);
     assert_eq!(tt.ranks, vec![1, 1, 1, 1]);
     let recon = reconstruct_tensor(&tt);

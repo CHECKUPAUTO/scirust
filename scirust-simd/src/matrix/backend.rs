@@ -37,13 +37,15 @@ impl SimdBackend for ScalarBackend {
     }
 
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
-        for i in 0..x.len() {
+        for i in 0..x.len()
+        {
             y[i] += alpha * x[i];
         }
     }
 
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
-        for i in 0..x.len() {
+        for i in 0..x.len()
+        {
             y[i] += alpha * x[i];
         }
     }
@@ -59,7 +61,8 @@ impl SimdBackend for ScalarBackend {
     #[allow(clippy::needless_range_loop)]
     fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
         let m = a.rows();
-        for i in 0..m {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot: f32 = row.iter().zip(x).map(|(a, b)| a * b).sum();
             y[i] = alpha * dot + beta * y[i];
@@ -78,7 +81,8 @@ impl SimdBackend for ScalarBackend {
     }
 
     fn relu_f32(&self, v: &mut [f32]) {
-        for x in v {
+        for x in v
+        {
             *x = x.max(0.0);
         }
     }

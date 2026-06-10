@@ -17,14 +17,17 @@
 fn prime_factors(mut n: usize) -> Vec<usize> {
     let mut factors = Vec::new();
     let mut p = 2usize;
-    while p * p <= n {
-        while n % p == 0 {
+    while p * p <= n
+    {
+        while n % p == 0
+        {
             factors.push(p);
             n /= p;
         }
         p += 1;
     }
-    if n > 1 {
+    if n > 1
+    {
         factors.push(n);
     }
     factors
@@ -46,10 +49,12 @@ pub fn auto_factorize(n: usize, d: usize) -> Vec<usize> {
     assert!(d > 0, "auto_factorize: d must be > 0");
     assert!(n > 0, "auto_factorize: n must be > 0");
 
-    if d == 1 {
+    if d == 1
+    {
         return vec![n];
     }
-    if n == 1 {
+    if n == 1
+    {
         return vec![1; d];
     }
 
@@ -60,7 +65,8 @@ pub fn auto_factorize(n: usize, d: usize) -> Vec<usize> {
     // Greedy bin packing: at each step, multiply the next prime into the bin
     // with the smallest current value. This naturally balances the factors.
     let mut bins = vec![1usize; d];
-    for p in primes {
+    for p in primes
+    {
         let i = (0..d).min_by_key(|&i| bins[i]).unwrap();
         bins[i] *= p;
     }

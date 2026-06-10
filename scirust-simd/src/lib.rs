@@ -1,6 +1,3 @@
-
-
-
 //! # SciRust SIMD — Auto-vectorization utilities
 //!
 //! This crate provides:
@@ -21,26 +18,28 @@
 //!
 //! ## Runtime dispatch
 //!
-//! The `simd_map` function automatically selects the best backend:
+//! The `ops` module provides stable SIMD kernels with automatic backend selection:
 //! ```
-//! // Detect platform and dispatch
-//! use scirust_simd::simd_map;
+//! use scirust_simd::ops::add_f32;
 //!
 //! let input = vec![1.0f32, 2.0, 3.0, 4.0];
+//! let other = vec![10.0f32, 20.0, 30.0, 40.0];
 //! let mut output = vec![0.0f32; 4];
-//! simd_map::<f32, 4>(&input, &mut output, |v| v + Simd::splat(1.0));
+//! add_f32(&input, &other, &mut output);
+//! assert_eq!(output, vec![11.0, 22.0, 33.0, 44.0]);
 //! ```
 
 #![feature(portable_simd)]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
-
 // Guard de compatibilité multi-architecture injecté pour ARM64 / Jetson Pipeline
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 #[allow(unused_macros)]
 macro_rules! is_x86_feature_detected {
-    ($feat:expr) => { false };
+    ($feat:expr) => {
+        false
+    };
 }
 
 pub mod portable;
@@ -69,7 +68,8 @@ pub mod generic {
         let mut in_chunks = input.chunks_exact(N);
         let mut out_chunks = output.chunks_exact_mut(N);
 
-        for (in_chunk, out_chunk) in in_chunks.by_ref().zip(out_chunks.by_ref()) {
+        for (in_chunk, out_chunk) in in_chunks.by_ref().zip(out_chunks.by_ref())
+        {
             let v = Simd::<T, N>::from_slice(in_chunk);
             let r = f(v);
             r.copy_to_slice(out_chunk);
@@ -77,7 +77,8 @@ pub mod generic {
 
         let in_rem = in_chunks.remainder();
         let out_rem = out_chunks.into_remainder();
-        for (i, &x) in in_rem.iter().enumerate() {
+        for (i, &x) in in_rem.iter().enumerate()
+        {
             let s = Simd::<T, N>::splat(x);
             let r = f(s);
             out_rem[i] = r[0];
@@ -112,7 +113,8 @@ pub mod generic {
         let a_rem = a_chunks.remainder();
         let b_rem = b_chunks.remainder();
         let out_rem = out_chunks.into_remainder();
-        for i in 0..a_rem.len() {
+        for i in 0..a_rem.len()
+        {
             let sa = Simd::<T, N>::splat(a_rem[i]);
             let sb = Simd::<T, N>::splat(b_rem[i]);
             let r = f(sa, sb);
@@ -140,16 +142,21 @@ pub mod ops {
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                while i + 8 <= n {
+            if std::arch::is_x86_feature_detected!("avx2")
+            {
+                while i + 8 <= n
+                {
                     let va = _mm256_loadu_ps(a.as_ptr().add(i));
                     let vb = _mm256_loadu_ps(b.as_ptr().add(i));
                     let vr = _mm256_add_ps(va, vb);
                     _mm256_storeu_ps(out.as_mut_ptr().add(i), vr);
                     i += 8;
                 }
-            } else if std::arch::is_x86_feature_detected!("sse2") {
-                while i + 4 <= n {
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                while i + 4 <= n
+                {
                     let va = _mm_loadu_ps(a.as_ptr().add(i));
                     let vb = _mm_loadu_ps(b.as_ptr().add(i));
                     let vr = _mm_add_ps(va, vb);
@@ -159,7 +166,8 @@ pub mod ops {
             }
         }
 
-        while i < n {
+        while i < n
+        {
             out[i] = a[i] + b[i];
             i += 1;
         }
@@ -174,16 +182,21 @@ pub mod ops {
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                while i + 8 <= n {
+            if std::arch::is_x86_feature_detected!("avx2")
+            {
+                while i + 8 <= n
+                {
                     let va = _mm256_loadu_ps(a.as_ptr().add(i));
                     let vb = _mm256_loadu_ps(b.as_ptr().add(i));
                     let vr = _mm256_mul_ps(va, vb);
                     _mm256_storeu_ps(out.as_mut_ptr().add(i), vr);
                     i += 8;
                 }
-            } else if std::arch::is_x86_feature_detected!("sse2") {
-                while i + 4 <= n {
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                while i + 4 <= n
+                {
                     let va = _mm_loadu_ps(a.as_ptr().add(i));
                     let vb = _mm_loadu_ps(b.as_ptr().add(i));
                     let vr = _mm_mul_ps(va, vb);
@@ -193,7 +206,8 @@ pub mod ops {
             }
         }
 
-        while i < n {
+        while i < n
+        {
             out[i] = a[i] * b[i];
             i += 1;
         }
@@ -208,16 +222,21 @@ pub mod ops {
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                while i + 4 <= n {
+            if std::arch::is_x86_feature_detected!("avx2")
+            {
+                while i + 4 <= n
+                {
                     let va = _mm256_loadu_pd(a.as_ptr().add(i));
                     let vb = _mm256_loadu_pd(b.as_ptr().add(i));
                     let vr = _mm256_add_pd(va, vb);
                     _mm256_storeu_pd(out.as_mut_ptr().add(i), vr);
                     i += 4;
                 }
-            } else if std::arch::is_x86_feature_detected!("sse2") {
-                while i + 2 <= n {
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                while i + 2 <= n
+                {
                     let va = _mm_loadu_pd(a.as_ptr().add(i));
                     let vb = _mm_loadu_pd(b.as_ptr().add(i));
                     let vr = _mm_add_pd(va, vb);
@@ -227,7 +246,8 @@ pub mod ops {
             }
         }
 
-        while i < n {
+        while i < n
+        {
             out[i] = a[i] + b[i];
             i += 1;
         }
@@ -242,16 +262,21 @@ pub mod ops {
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
-            if std::arch::is_x86_feature_detected!("avx2") {
-                while i + 4 <= n {
+            if std::arch::is_x86_feature_detected!("avx2")
+            {
+                while i + 4 <= n
+                {
                     let va = _mm256_loadu_pd(a.as_ptr().add(i));
                     let vb = _mm256_loadu_pd(b.as_ptr().add(i));
                     let vr = _mm256_mul_pd(va, vb);
                     _mm256_storeu_pd(out.as_mut_ptr().add(i), vr);
                     i += 4;
                 }
-            } else if std::arch::is_x86_feature_detected!("sse2") {
-                while i + 2 <= n {
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                while i + 2 <= n
+                {
                     let va = _mm_loadu_pd(a.as_ptr().add(i));
                     let vb = _mm_loadu_pd(b.as_ptr().add(i));
                     let vr = _mm_mul_pd(va, vb);
@@ -261,7 +286,8 @@ pub mod ops {
             }
         }
 
-        while i < n {
+        while i < n
+        {
             out[i] = a[i] * b[i];
             i += 1;
         }
@@ -275,7 +301,8 @@ pub mod ops {
 /// Generic scalar map — always works, never uses SIMD.
 pub fn scalar_map<T: Copy>(input: &[T], output: &mut [T], f: impl Fn(T) -> T) {
     assert_eq!(input.len(), output.len());
-    for (i, &x) in input.iter().enumerate() {
+    for (i, &x) in input.iter().enumerate()
+    {
         output[i] = f(x);
     }
 }
@@ -284,7 +311,8 @@ pub fn scalar_map<T: Copy>(input: &[T], output: &mut [T], f: impl Fn(T) -> T) {
 pub fn scalar_zip<T: Copy>(a: &[T], b: &[T], output: &mut [T], f: impl Fn(T, T) -> T) {
     assert_eq!(a.len(), b.len());
     assert_eq!(a.len(), output.len());
-    for i in 0..a.len() {
+    for i in 0..a.len()
+    {
         output[i] = f(a[i], b[i]);
     }
 }
@@ -336,20 +364,24 @@ mod sve_fns {
 pub fn detect_simd_backend() -> SimdBackend {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx512f") {
+        if is_x86_feature_detected!("avx512f")
+        {
             return SimdBackend::Avx512;
         }
-        if is_x86_feature_detected!("avx2") {
+        if is_x86_feature_detected!("avx2")
+        {
             return SimdBackend::Avx2;
         }
-        if is_x86_feature_detected!("sse2") {
+        if is_x86_feature_detected!("sse2")
+        {
             return SimdBackend::Sse2;
         }
     }
 
     #[cfg(target_arch = "aarch64")]
     {
-        if has_sve() {
+        if has_sve()
+        {
             return SimdBackend::Sve;
         }
         return SimdBackend::Neon;
@@ -373,7 +405,8 @@ pub enum SimdBackend {
 impl SimdBackend {
     /// Returns the vector width in f32 elements.
     pub fn lane_width(&self) -> usize {
-        match self {
+        match self
+        {
             SimdBackend::Avx512 => 16,
             SimdBackend::Avx2 | SimdBackend::Sse2 => 4,
             SimdBackend::Neon => 4,
@@ -384,12 +417,19 @@ impl SimdBackend {
 
     /// Returns true if this backend is available.
     pub fn available(&self) -> bool {
-        match self {
-            SimdBackend::Avx512 => cfg!(target_arch = "x86_64") && is_x86_feature_detected!("avx512f"),
+        match self
+        {
+            SimdBackend::Avx512 =>
+            {
+                cfg!(target_arch = "x86_64") && is_x86_feature_detected!("avx512f")
+            },
             SimdBackend::Avx2 => cfg!(target_arch = "x86_64") && is_x86_feature_detected!("avx2"),
             SimdBackend::Sse2 => cfg!(target_arch = "x86_64") && is_x86_feature_detected!("sse2"),
             SimdBackend::Neon => cfg!(target_arch = "aarch64"),
-            SimdBackend::Sve => cfg!(target_arch = "aarch64") && has_sve(),
+            #[cfg(target_arch = "aarch64")]
+            SimdBackend::Sve => has_sve(),
+            #[cfg(not(target_arch = "aarch64"))]
+            SimdBackend::Sve => false,
             SimdBackend::Scalar => true,
         }
     }
@@ -415,17 +455,22 @@ pub fn simd_add_one(data: &mut [f64]) {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     unsafe {
-        if std::arch::is_x86_feature_detected!("avx2") {
+        if std::arch::is_x86_feature_detected!("avx2")
+        {
             let one = _mm256_set1_pd(1.0);
-            while i + 4 <= n {
+            while i + 4 <= n
+            {
                 let va = _mm256_loadu_pd(data.as_ptr().add(i));
                 let vr = _mm256_add_pd(va, one);
                 _mm256_storeu_pd(data.as_mut_ptr().add(i), vr);
                 i += 4;
             }
-        } else if std::arch::is_x86_feature_detected!("sse2") {
+        }
+        else if std::arch::is_x86_feature_detected!("sse2")
+        {
             let one = _mm_set1_pd(1.0);
-            while i + 2 <= n {
+            while i + 2 <= n
+            {
                 let va = _mm_loadu_pd(data.as_ptr().add(i));
                 let vr = _mm_add_pd(va, one);
                 _mm_storeu_pd(data.as_mut_ptr().add(i), vr);
@@ -434,7 +479,8 @@ pub fn simd_add_one(data: &mut [f64]) {
         }
     }
 
-    while i < n {
+    while i < n
+    {
         data[i] += 1.0;
         i += 1;
     }
@@ -486,6 +532,6 @@ mod tests {
     }
 }
 
-pub mod dispatch;
 pub mod complex;
+pub mod dispatch;
 pub mod matrix;

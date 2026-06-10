@@ -36,10 +36,12 @@ pub fn expr_to_closure(
 pub fn extract_polynomial_coeffs(expr: &Expr, var: &str) -> Option<Vec<f64>> {
     let coeffs = expand_poly(expr, var)?;
     let mut c = coeffs;
-    while c.len() > 1 && c.last() == Some(&0.0) {
+    while c.len() > 1 && c.last() == Some(&0.0)
+    {
         c.pop();
     }
-    if c.is_empty() {
+    if c.is_empty()
+    {
         c.push(0.0);
     }
     Some(c)
@@ -49,50 +51,64 @@ pub fn extract_polynomial_coeffs(expr: &Expr, var: &str) -> Option<Vec<f64>> {
 /// par `e` en `var`. L'index est le degré.
 fn expand_poly(e: &Expr, var: &str) -> Option<Vec<f64>> {
     use Expr::*;
-    match e {
+    match e
+    {
         Const(c) => Some(vec![*c]),
-        Var(name) => {
-            if name == var {
+        Var(name) =>
+        {
+            if name == var
+            {
                 Some(vec![0.0, 1.0])
-            } else {
+            }
+            else
+            {
                 None
             }
-        }
+        },
         Add(a, b) => Some(add_poly(expand_poly(a, var)?, expand_poly(b, var)?)),
-        Sub(a, b) => {
+        Sub(a, b) =>
+        {
             let pa = expand_poly(a, var)?;
             let pb = expand_poly(b, var)?;
             Some(add_poly(pa, neg_poly(pb)))
-        }
+        },
         Neg(a) => Some(neg_poly(expand_poly(a, var)?)),
-        Mul(a, b) => {
+        Mul(a, b) =>
+        {
             let pa = expand_poly(a, var)?;
             let pb = expand_poly(b, var)?;
             Some(mul_poly(&pa, &pb))
-        }
-        Pow(base, exp) => {
+        },
+        Pow(base, exp) =>
+        {
             // L'exposant doit être un entier positif constant
-            let n = match **exp {
+            let n = match **exp
+            {
                 Const(c) if c.fract() == 0.0 && c >= 0.0 => c as usize,
                 _ => return None,
             };
             let pb = expand_poly(base, var)?;
             let mut acc = vec![1.0];
-            for _ in 0..n {
+            for _ in 0..n
+            {
                 acc = mul_poly(&acc, &pb);
             }
             Some(acc)
-        }
-        Div(a, b) => {
+        },
+        Div(a, b) =>
+        {
             // Division par une constante uniquement
             let pa = expand_poly(a, var)?;
             let pb = expand_poly(b, var)?;
-            if pb.len() == 1 && pb[0] != 0.0 {
+            if pb.len() == 1 && pb[0] != 0.0
+            {
                 Some(pa.iter().map(|c| c / pb[0]).collect())
-            } else {
+            }
+            else
+            {
                 None
             }
-        }
+        },
         Sin(_) | Cos(_) | Exp(_) | Ln(_) | Sqrt(_) | Abs(_) => None,
     }
 }
@@ -100,29 +116,35 @@ fn expand_poly(e: &Expr, var: &str) -> Option<Vec<f64>> {
 fn add_poly(mut a: Vec<f64>, b: Vec<f64>) -> Vec<f64> {
     let n = a.len().max(b.len());
     a.resize(n, 0.0);
-    for (i, &v) in b.iter().enumerate() {
+    for (i, &v) in b.iter().enumerate()
+    {
         a[i] += v;
     }
     a
 }
 
 fn neg_poly(mut a: Vec<f64>) -> Vec<f64> {
-    for v in &mut a {
+    for v in &mut a
+    {
         *v = -*v;
     }
     a
 }
 
 fn mul_poly(a: &[f64], b: &[f64]) -> Vec<f64> {
-    if a.is_empty() || b.is_empty() {
+    if a.is_empty() || b.is_empty()
+    {
         return vec![0.0];
     }
     let mut out = vec![0.0; a.len() + b.len() - 1];
-    for (i, &ai) in a.iter().enumerate() {
-        if ai == 0.0 {
+    for (i, &ai) in a.iter().enumerate()
+    {
+        if ai == 0.0
+        {
             continue;
         }
-        for (j, &bj) in b.iter().enumerate() {
+        for (j, &bj) in b.iter().enumerate()
+        {
             out[i + j] += ai * bj;
         }
     }

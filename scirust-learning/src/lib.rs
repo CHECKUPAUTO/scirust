@@ -46,26 +46,32 @@ impl PatternMemory {
 fn gauss_elim(a: &mut [Vec<f64>], b: &mut [f64]) -> Option<()> {
     let n = a.len();
     // Forward elimination
-    for col in 0..n {
+    for col in 0..n
+    {
         // Partial pivoting: find row with largest absolute value in this col
         let mut best = col;
-        for row in (col + 1)..n {
-            if a[row][col].abs() > a[best][col].abs() {
+        for row in (col + 1)..n
+        {
+            if a[row][col].abs() > a[best][col].abs()
+            {
                 best = row;
             }
         }
-        if a[best][col].abs() < 1e-15 {
+        if a[best][col].abs() < 1e-15
+        {
             return None; // singular
         }
         a.swap(col, best);
         b.swap(col, best);
 
         let pivot = a[col][col];
-        for row in (col + 1)..n {
+        for row in (col + 1)..n
+        {
             let factor = a[row][col] / pivot;
             // Eliminate column `col` in this row
             #[allow(clippy::needless_range_loop)]
-            for k in col..n {
+            for k in col..n
+            {
                 a[row][k] -= factor * a[col][k];
             }
             b[row] -= factor * b[col];
@@ -73,10 +79,12 @@ fn gauss_elim(a: &mut [Vec<f64>], b: &mut [f64]) -> Option<()> {
     }
 
     // Back substitution
-    for col in (0..n).rev() {
+    for col in (0..n).rev()
+    {
         let pivot = a[col][col];
         let mut sum = b[col];
-        for k in (col + 1)..n {
+        for k in (col + 1)..n
+        {
             sum -= a[col][k] * b[k];
         }
         b[col] = sum / pivot;
@@ -109,14 +117,16 @@ fn gauss_elim(a: &mut [Vec<f64>], b: &mut [f64]) -> Option<()> {
 /// assert!((coeffs[2] - 1.0).abs() < 1e-10);
 /// ```
 pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
-    if x.is_empty() || y.is_empty() || x.len() != y.len() {
+    if x.is_empty() || y.is_empty() || x.len() != y.len()
+    {
         return vec![];
     }
     let n = x.len();
     let d = degree + 1; // number of coefficients
 
     // If we have fewer points than coefficients the system is under-determined.
-    if n < d {
+    if n < d
+    {
         return vec![];
     }
 
@@ -126,10 +136,12 @@ pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
     // We work with the Gram matrix G = A^T * A  (d x d) and rhs = A^T * y.
     // Pre-compute powers of each x to avoid repeated pow() calls.
     let mut powers: Vec<Vec<f64>> = Vec::with_capacity(n);
-    for &xi in x {
+    for &xi in x
+    {
         let mut row = Vec::with_capacity(d);
         let mut p = 1.0;
-        for _ in 0..d {
+        for _ in 0..d
+        {
             row.push(p);
             p *= xi;
         }
@@ -139,18 +151,22 @@ pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
     // G[k][l] = sum_i x[i]^(k+l)
     let mut g: Vec<Vec<f64>> = vec![vec![0.0; d]; d];
     let mut rhs: Vec<f64> = vec![0.0; d];
-    for i in 0..n {
+    for i in 0..n
+    {
         let yi = y[i];
-        for k in 0..d {
+        for k in 0..d
+        {
             rhs[k] += powers[i][k] * yi;
-            for l in 0..d {
+            for l in 0..d
+            {
                 g[k][l] += powers[i][k] * powers[i][l];
             }
         }
     }
 
     let mut coeffs = rhs;
-    if gauss_elim(&mut g, &mut coeffs).is_none() {
+    if gauss_elim(&mut g, &mut coeffs).is_none()
+    {
         return vec![];
     }
     coeffs
@@ -177,7 +193,8 @@ pub fn polynomial_fit(x: &[f64], y: &[f64], degree: usize) -> Vec<f64> {
 /// assert!(intercept.abs() < 1e-10);
 /// ```
 pub fn linear_regression(x: &[f64], y: &[f64]) -> (f64, f64) {
-    if x.len() < 2 || y.len() < 2 || x.len() != y.len() {
+    if x.len() < 2 || y.len() < 2 || x.len() != y.len()
+    {
         return (0.0, 0.0);
     }
     let n = x.len() as f64;
@@ -186,13 +203,15 @@ pub fn linear_regression(x: &[f64], y: &[f64]) -> (f64, f64) {
 
     let mut cov = 0.0;
     let mut var = 0.0;
-    for i in 0..x.len() {
+    for i in 0..x.len()
+    {
         let dx = x[i] - mean_x;
         let dy = y[i] - mean_y;
         cov += dx * dy;
         var += dx * dx;
     }
-    if var.abs() < 1e-15 {
+    if var.abs() < 1e-15
+    {
         return (0.0, mean_y);
     }
     let slope = cov / var;
@@ -213,20 +232,23 @@ pub fn linear_regression(x: &[f64], y: &[f64]) -> (f64, f64) {
 ///
 /// Each detected pattern is returned as a human-readable string.
 pub fn discover_patterns(data: &[f64]) -> Vec<String> {
-    if data.len() < 10 {
+    if data.len() < 10
+    {
         return vec!["Insufficient data: need at least 10 points".to_string()];
     }
     let mut signals: Vec<String> = Vec::new();
 
     // ---------- helper: simple moving average ----------
     let sma = |period: usize| -> Vec<f64> {
-        if period == 0 || period > data.len() {
+        if period == 0 || period > data.len()
+        {
             return vec![];
         }
         let mut result = Vec::with_capacity(data.len() - period + 1);
         let mut sum: f64 = data[..period].iter().sum();
         result.push(sum / period as f64);
-        for i in period..data.len() {
+        for i in period..data.len()
+        {
             sum += data[i] - data[i - period];
             result.push(sum / period as f64);
         }
@@ -248,9 +270,11 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
     // short_ma at index (i - short_period + 1) corresponds to the same window end as
     // long_ma at index (i - long_period + 1).
     let offset_short = long_period - short_period; // how far ahead short_ma is
-    for i in 0..(long_ma.len().saturating_sub(1)) {
+    for i in 0..(long_ma.len().saturating_sub(1))
+    {
         let idx_short = i + offset_short;
-        if idx_short == 0 || idx_short >= short_ma.len() {
+        if idx_short == 0 || idx_short >= short_ma.len()
+        {
             continue;
         }
         let prev_short = short_ma[idx_short - 1];
@@ -262,12 +286,15 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
         let curr_diff = curr_short - curr_long;
 
         // Crossing: sign of diff changed
-        if prev_diff.is_sign_negative() && curr_diff.is_sign_positive() {
+        if prev_diff.is_sign_negative() && curr_diff.is_sign_positive()
+        {
             signals.push(format!(
                 "MA crossover (bullish) at index {}: short MA crossed above long MA",
                 long_period + i
             ));
-        } else if prev_diff.is_sign_positive() && curr_diff.is_sign_negative() {
+        }
+        else if prev_diff.is_sign_positive() && curr_diff.is_sign_negative()
+        {
             signals.push(format!(
                 "MA crossover (bearish) at index {}: short MA crossed below long MA",
                 long_period + i
@@ -277,7 +304,8 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
 
     // ---------- Volatility regime detection ----------
     let n = data.len();
-    if n >= 20 {
+    if n >= 20
+    {
         // Compute overall standard deviation
         let mean: f64 = data.iter().sum::<f64>() / n as f64;
         let variance: f64 = data.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
@@ -286,7 +314,8 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
 
         // Compute rolling volatility (standard deviation over sliding windows)
         let mut rolling_vol: Vec<f64> = Vec::new();
-        for w_start in 0..=(n - window) {
+        for w_start in 0..=(n - window)
+        {
             let slice = &data[w_start..w_start + window];
             let m: f64 = slice.iter().sum::<f64>() / window as f64;
             let v: f64 = slice.iter().map(|v| (v - m).powi(2)).sum::<f64>() / window as f64;
@@ -301,17 +330,23 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
         let mut in_low = false;
         let mut regime_start = 0;
 
-        for (i, vol) in rolling_vol.iter().enumerate() {
+        for (i, vol) in rolling_vol.iter().enumerate()
+        {
             let idx = window / 2 + i; // centre of the window
-            if *vol > high_threshold && !in_high {
+            if *vol > high_threshold && !in_high
+            {
                 in_high = true;
                 in_low = false;
                 regime_start = idx;
-            } else if *vol < low_threshold && !in_low {
+            }
+            else if *vol < low_threshold && !in_low
+            {
                 in_low = true;
                 in_high = false;
                 regime_start = idx;
-            } else if (in_high && *vol <= high_threshold) || (in_low && *vol >= low_threshold) {
+            }
+            else if (in_high && *vol <= high_threshold) || (in_low && *vol >= low_threshold)
+            {
                 // Regime ended
                 let regime_type = if in_high { "high" } else { "low" };
                 signals.push(format!(
@@ -324,13 +359,16 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
         }
 
         // Close any open regime at the end of the series
-        if in_high {
+        if in_high
+        {
             signals.push(format!(
                 "Volatility regime (high) from index {} to {} (ongoing)",
                 regime_start,
                 n - 1
             ));
-        } else if in_low {
+        }
+        else if in_low
+        {
             signals.push(format!(
                 "Volatility regime (low) from index {} to {} (ongoing)",
                 regime_start,
@@ -339,7 +377,8 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
         }
     }
 
-    if signals.is_empty() {
+    if signals.is_empty()
+    {
         signals.push("No significant patterns detected".to_string());
     }
 

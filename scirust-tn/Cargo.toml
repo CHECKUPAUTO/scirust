@@ -1,25 +1,18 @@
 [package]
 name = "scirust-tn"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+rust-version = "1.85"
 description = "Tensor Network primitives for SciRust: Tensor-Train decomposition, MPS, DMRG"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/CHECKUPAUTO/scirust"
 
 [features]
-# Default = standalone algorithmic core (TT-SVD, decomposition, ops).
-# No scirust-core dependency, fully self-contained.
 default = []
-
-# Activate to enable `TTLinear` (impl scirust_core::nn::Module) and other
-# autograd-integrated layers. Requires scirust-core in the workspace.
-core = ["dep:scirust-core"]
 
 [dependencies]
 nalgebra = "0.33"
-
-# Optional integration with scirust-core (autograd, Module, Var, Tape).
-scirust-core = { path = "../scirust-core", optional = true }
+scirust-core = { path = "../scirust-core" }
 
 [dev-dependencies]
 approx = "0.5"
@@ -28,9 +21,7 @@ approx = "0.5"
 name = "scirust_tn"
 path = "src/lib.rs"
 
-# The transformer_compress example requires `--features core` because it
-# benches against scirust_core::nn::Linear. Run with:
-#   cargo run --release --example transformer_compress --features core
 [[example]]
 name = "transformer_compress"
-required-features = ["core"]
+required-features = []
+

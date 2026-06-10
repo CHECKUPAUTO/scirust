@@ -39,7 +39,8 @@ impl MaxPool2d {
 
 impl Module for MaxPool2d {
     fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        let (c, h, w) = match (self.cached_c, self.cached_h, self.cached_w) {
+        let (c, h, w) = match (self.cached_c, self.cached_h, self.cached_w)
+        {
             (Some(c), Some(h), Some(w)) => (c, h, w),
             _ => panic!("MaxPool2d: utiliser .input_shape(c, h, w) avant le forward"),
         };

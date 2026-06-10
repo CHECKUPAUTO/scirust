@@ -34,7 +34,8 @@ impl TransformerEncoder {
         rng: &mut PcgEngine,
     ) -> Self {
         let mut blocks = Vec::with_capacity(n_layers);
-        for i in 0..n_layers {
+        for i in 0..n_layers
+        {
             let block = TransformerBlock::new(d_model, n_heads, d_ff, causal, w_init, b_init, rng)
                 .with_name(&format!("enc_block_{i}"));
             blocks.push(block);
@@ -51,7 +52,8 @@ impl TransformerEncoder {
 
     pub fn forward_3d<'t>(&mut self, tape: &'t Tape, x: Var3D<'t>) -> Var3D<'t> {
         let mut h = x;
-        for block in self.blocks.iter_mut() {
+        for block in self.blocks.iter_mut()
+        {
             h = block.forward_3d(tape, h);
         }
         let ln_out = self.final_ln.forward(tape, h.as_var());
@@ -60,7 +62,8 @@ impl TransformerEncoder {
 
     pub fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        for b in &self.blocks {
+        for b in &self.blocks
+        {
             v.extend(b.parameter_indices());
         }
         v.extend(self.final_ln.parameter_indices());
@@ -68,7 +71,8 @@ impl TransformerEncoder {
     }
 
     pub fn sync(&mut self, tape: &Tape) {
-        for b in self.blocks.iter_mut() {
+        for b in self.blocks.iter_mut()
+        {
             b.sync(tape);
         }
         self.final_ln.sync(tape);
@@ -76,12 +80,15 @@ impl TransformerEncoder {
 
     pub fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
-        for b in &self.blocks {
-            for (k, v) in b.state_dict() {
+        for b in &self.blocks
+        {
+            for (k, v) in b.state_dict()
+            {
                 map.insert(k, v);
             }
         }
-        for (k, v) in self.final_ln.state_dict() {
+        for (k, v) in self.final_ln.state_dict()
+        {
             map.insert(k, v);
         }
         map
@@ -89,7 +96,8 @@ impl TransformerEncoder {
 
     pub fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         self.final_ln.load_state_dict(sd)?;
-        for b in self.blocks.iter_mut() {
+        for b in self.blocks.iter_mut()
+        {
             b.load_state_dict(sd)?;
         }
         Ok(())

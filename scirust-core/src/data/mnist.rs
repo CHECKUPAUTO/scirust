@@ -41,7 +41,8 @@ fn read_be_u32<R: Read>(r: &mut R) -> io::Result<u32> {
 pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, usize, usize)> {
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;
-    if magic != MAGIC_IMAGES {
+    if magic != MAGIC_IMAGES
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("magic image incorrect : 0x{magic:08x}, attendu 0x{MAGIC_IMAGES:08x}"),
@@ -64,7 +65,8 @@ pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, 
 pub fn load_idx_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;
-    if magic != MAGIC_LABELS {
+    if magic != MAGIC_LABELS
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("magic label incorrect : 0x{magic:08x}, attendu 0x{MAGIC_LABELS:08x}"),
@@ -98,7 +100,8 @@ impl MnistDataset {
     pub fn load_idx<P: AsRef<Path>>(images_path: P, labels_path: P) -> io::Result<Self> {
         let (images, n, h, w) = load_idx_images(images_path)?;
         let labels_raw = load_idx_labels(labels_path)?;
-        if labels_raw.len() != n {
+        if labels_raw.len() != n
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("incohérence : {} images vs {} labels", n, labels_raw.len()),
@@ -108,7 +111,8 @@ impl MnistDataset {
         let n_classes = (*labels_raw.iter().max().unwrap_or(&0) as usize) + 1;
         let n_classes = n_classes.max(10); // MNIST = 10 classes même si max < 9
         let mut one_hot = vec![0.0f32; n * n_classes];
-        for (i, &lbl) in labels_raw.iter().enumerate() {
+        for (i, &lbl) in labels_raw.iter().enumerate()
+        {
             one_hot[i * n_classes + lbl as usize] = 1.0;
         }
 

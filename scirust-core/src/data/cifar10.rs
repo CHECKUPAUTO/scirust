@@ -29,7 +29,8 @@ pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<
 
     let record_size = 3073;
     let n = raw.len() / record_size;
-    if raw.len() % record_size != 0 {
+    if raw.len() % record_size != 0
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -43,11 +44,13 @@ pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<
     let mut images = vec![0.0f32; n * CIFAR10_IMAGE_SIZE];
     let mut labels = vec![0u8; n];
 
-    for i in 0..n {
+    for i in 0..n
+    {
         let off = i * record_size;
         labels[i] = raw[off];
         // Normalisation : uint8 [0,255] → f32 [0,1]
-        for j in 0..CIFAR10_IMAGE_SIZE {
+        for j in 0..CIFAR10_IMAGE_SIZE
+        {
             images[i * CIFAR10_IMAGE_SIZE + j] = raw[off + 1 + j] as f32 / 255.0;
         }
     }
@@ -73,7 +76,8 @@ impl Cifar10Dataset {
         let mut train_images = Vec::new();
         let mut train_labels_raw = Vec::new();
 
-        for i in 1..=5 {
+        for i in 1..=5
+        {
             let path = dir.join(format!("data_batch_{}.bin", i));
             let (imgs, lbls) = load_cifar10_batch(&path)?;
             train_images.extend_from_slice(&imgs);
@@ -82,7 +86,8 @@ impl Cifar10Dataset {
 
         let n_train = train_labels_raw.len();
         let mut train_one_hot = vec![0.0f32; n_train * CIFAR10_N_CLASSES];
-        for (i, &lbl) in train_labels_raw.iter().enumerate() {
+        for (i, &lbl) in train_labels_raw.iter().enumerate()
+        {
             train_one_hot[i * CIFAR10_N_CLASSES + lbl as usize] = 1.0;
         }
 
@@ -90,7 +95,8 @@ impl Cifar10Dataset {
         let (test_images, test_labels_raw) = load_cifar10_batch(&test_path)?;
         let n_test = test_labels_raw.len();
         let mut test_one_hot = vec![0.0f32; n_test * CIFAR10_N_CLASSES];
-        for (i, &lbl) in test_labels_raw.iter().enumerate() {
+        for (i, &lbl) in test_labels_raw.iter().enumerate()
+        {
             test_one_hot[i * CIFAR10_N_CLASSES + lbl as usize] = 1.0;
         }
 
@@ -152,9 +158,11 @@ mod tests {
 
     fn make_synthetic_batch(n: usize, labels: &[u8]) -> Vec<u8> {
         let mut data = Vec::with_capacity(n * 3073);
-        for i in 0..n {
+        for i in 0..n
+        {
             data.push(labels[i % labels.len()]);
-            for _ in 0..3072 {
+            for _ in 0..3072
+            {
                 data.push(((i * 7) % 256) as u8);
             }
         }
@@ -183,7 +191,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("scirust_cifar10_full_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
-        for i in 1..=5 {
+        for i in 1..=5
+        {
             let path = dir.join(format!("data_batch_{}.bin", i));
             let mut f = File::create(&path).unwrap();
             f.write_all(&make_synthetic_batch(10, &[i as u8])).unwrap();

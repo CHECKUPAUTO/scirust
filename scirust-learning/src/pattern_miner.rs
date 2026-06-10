@@ -4,8 +4,8 @@
 //! sin, cos, exp, log), fits each to data via linear regression, and
 //! ranks them by score (R² / complexity).
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
@@ -44,49 +44,50 @@ pub enum ExprNode {
 impl ExprNode {
     /// Evaluate the expression tree for a given x.
     pub fn eval(&self, x: f64) -> f64 {
-        match self {
+        match self
+        {
             ExprNode::X => x,
             ExprNode::Const(c) => *c,
             ExprNode::Add(a, b) => a.eval(x) + b.eval(x),
             ExprNode::Sub(a, b) => a.eval(x) - b.eval(x),
             ExprNode::Mul(a, b) => a.eval(x) * b.eval(x),
-            ExprNode::Div(a, b) => {
+            ExprNode::Div(a, b) =>
+            {
                 let d = b.eval(x);
-                if d.abs() < 1e-15 {
-                    0.0
-                } else {
-                    a.eval(x) / d
-                }
-            }
+                if d.abs() < 1e-15 { 0.0 } else { a.eval(x) / d }
+            },
             ExprNode::Sin(a) => a.eval(x).sin(),
             ExprNode::Cos(a) => a.eval(x).cos(),
             ExprNode::Exp(a) => a.eval(x).exp(),
-            ExprNode::Log(a) => {
+            ExprNode::Log(a) =>
+            {
                 let v = a.eval(x);
-                if v <= 0.0 {
-                    0.0
-                } else {
-                    v.ln()
-                }
-            }
-            ExprNode::Pow2(a) => {
+                if v <= 0.0 { 0.0 } else { v.ln() }
+            },
+            ExprNode::Pow2(a) =>
+            {
                 let v = a.eval(x);
                 v * v
-            }
+            },
         }
     }
 
     /// Pretty-print the expression as a string.
     pub fn to_string(&self) -> String {
-        match self {
+        match self
+        {
             ExprNode::X => "x".into(),
-            ExprNode::Const(c) => {
-                if *c == c.trunc() {
+            ExprNode::Const(c) =>
+            {
+                if *c == c.trunc()
+                {
                     format!("{}", *c as i64)
-                } else {
+                }
+                else
+                {
                     format!("{:.4}", c)
                 }
-            }
+            },
             ExprNode::Add(a, b) => format!("({}+{})", a.to_string(), b.to_string()),
             ExprNode::Sub(a, b) => format!("({}-{})", a.to_string(), b.to_string()),
             ExprNode::Mul(a, b) => format!("({}*{})", a.to_string(), b.to_string()),
@@ -101,7 +102,8 @@ impl ExprNode {
 
     /// Return the node count (a proxy for formula complexity).
     pub fn complexity(&self) -> usize {
-        match self {
+        match self
+        {
             ExprNode::X | ExprNode::Const(_) => 1,
             ExprNode::Add(a, b)
             | ExprNode::Sub(a, b)
@@ -170,7 +172,8 @@ impl PatternMiner {
     ///
     /// Returns discovered patterns sorted by score descending.
     pub fn mine(&self, series: &[f64]) -> Vec<DiscoveredPattern> {
-        if series.len() < 3 {
+        if series.len() < 3
+        {
             return vec![];
         }
 
@@ -179,7 +182,8 @@ impl PatternMiner {
 
         let data_hash = {
             let mut hasher = DefaultHasher::new();
-            for &v in series {
+            for &v in series
+            {
                 v.to_bits().hash(&mut hasher);
             }
             hasher.finish()
@@ -189,9 +193,11 @@ impl PatternMiner {
         let mut results: Vec<DiscoveredPattern> = Vec::new();
         let mut seen_exprs: HashSet<String> = HashSet::new();
 
-        for expr in &candidates {
+        for expr in &candidates
+        {
             let expr_str = expr.to_string();
-            if !seen_exprs.insert(expr_str.clone()) {
+            if !seen_exprs.insert(expr_str.clone())
+            {
                 continue; // skip duplicates
             }
 
@@ -208,20 +214,27 @@ impl PatternMiner {
                 .sum();
             let ss_tot: f64 = series.iter().map(|y| (y - mean_y).powi(2)).sum();
 
-            let r_squared = if ss_tot.abs() < 1e-15 {
+            let r_squared = if ss_tot.abs() < 1e-15
+            {
                 1.0
-            } else {
+            }
+            else
+            {
                 (1.0 - ss_res / ss_tot).clamp(0.0, 1.0)
             };
 
-            if r_squared < 0.01 {
+            if r_squared < 0.01
+            {
                 continue;
             }
 
             let complexity = expr.complexity();
-            let score = if complexity > 0 && r_squared.is_finite() {
+            let score = if complexity > 0 && r_squared.is_finite()
+            {
                 r_squared / complexity as f64
-            } else {
+            }
+            else
+            {
                 0.0
             };
 
@@ -249,7 +262,8 @@ impl PatternMiner {
     /// Results are merged and sorted by score globally.
     pub fn mine_multi(&self, series_list: &[&[f64]]) -> Vec<DiscoveredPattern> {
         let mut all: Vec<DiscoveredPattern> = Vec::new();
-        for &series in series_list {
+        for &series in series_list
+        {
             all.extend(self.mine(series));
         }
         all.sort_by(|a, b| {
@@ -270,7 +284,8 @@ fn is_constant(node: &ExprNode) -> bool {
 }
 
 fn is_zero(node: &ExprNode) -> bool {
-    match node {
+    match node
+    {
         ExprNode::Const(c) => c.abs() < 1e-15,
         _ => false,
     }
@@ -279,7 +294,8 @@ fn is_zero(node: &ExprNode) -> bool {
 /// Generate every distinct expression tree up to `max_depth` using the
 /// available operations and terminal nodes.
 fn generate_expressions(max_depth: usize) -> Vec<ExprNode> {
-    if max_depth == 0 {
+    if max_depth == 0
+    {
         return vec![ExprNode::X];
     }
 
@@ -292,43 +308,40 @@ fn generate_expressions(max_depth: usize) -> Vec<ExprNode> {
     exprs[0].push(ExprNode::Const(2.0));
     exprs[0].push(ExprNode::Const(-1.0));
 
-    for depth in 1..=max_depth {
+    for depth in 1..=max_depth
+    {
         // --- Unary ops on depth-1 expressions ---
-        for prev in &exprs[depth - 1].clone() {
+        for prev in &exprs[depth - 1].clone()
+        {
             exprs[depth].push(ExprNode::Sin(Box::new(prev.clone())));
             exprs[depth].push(ExprNode::Cos(Box::new(prev.clone())));
             exprs[depth].push(ExprNode::Exp(Box::new(prev.clone())));
-            if !is_constant(prev) {
+            if !is_constant(prev)
+            {
                 exprs[depth].push(ExprNode::Log(Box::new(prev.clone())));
             }
             exprs[depth].push(ExprNode::Pow2(Box::new(prev.clone())));
         }
 
         // --- Binary ops combining shallower depths ---
-        for d1 in 0..depth {
+        for d1 in 0..depth
+        {
             let d2 = depth - 1 - d1;
-            if d2 > max_depth {
+            if d2 > max_depth
+            {
                 continue;
             }
-            for e1 in &exprs[d1].clone() {
-                for e2 in &exprs[d2].clone() {
-                    exprs[depth].push(ExprNode::Add(
-                        Box::new(e1.clone()),
-                        Box::new(e2.clone()),
-                    ));
-                    exprs[depth].push(ExprNode::Sub(
-                        Box::new(e1.clone()),
-                        Box::new(e2.clone()),
-                    ));
-                    exprs[depth].push(ExprNode::Mul(
-                        Box::new(e1.clone()),
-                        Box::new(e2.clone()),
-                    ));
-                    if !is_zero(e2) {
-                        exprs[depth].push(ExprNode::Div(
-                            Box::new(e1.clone()),
-                            Box::new(e2.clone()),
-                        ));
+            for e1 in &exprs[d1].clone()
+            {
+                for e2 in &exprs[d2].clone()
+                {
+                    exprs[depth].push(ExprNode::Add(Box::new(e1.clone()), Box::new(e2.clone())));
+                    exprs[depth].push(ExprNode::Sub(Box::new(e1.clone()), Box::new(e2.clone())));
+                    exprs[depth].push(ExprNode::Mul(Box::new(e1.clone()), Box::new(e2.clone())));
+                    if !is_zero(e2)
+                    {
+                        exprs[depth]
+                            .push(ExprNode::Div(Box::new(e1.clone()), Box::new(e2.clone())));
                     }
                 }
             }
@@ -336,7 +349,8 @@ fn generate_expressions(max_depth: usize) -> Vec<ExprNode> {
     }
 
     let mut all: Vec<ExprNode> = Vec::new();
-    for d in exprs {
+    for d in exprs
+    {
         all.extend(d);
     }
     all
@@ -353,7 +367,8 @@ mod tests {
     /// Helper: hash a data slice.
     fn hash_data(data: &[f64]) -> u64 {
         let mut hasher = DefaultHasher::new();
-        for &v in data {
+        for &v in data
+        {
             v.to_bits().hash(&mut hasher);
         }
         hasher.finish()
@@ -368,7 +383,9 @@ mod tests {
         let noise_level = 0.15;
         let mut rng = fastrand::Rng::new();
         // Generate y = sin(x) where x_i = i (the miner evaluates at x=i)
-        let y: Vec<f64> = (0..n).map(|i| (i as f64).sin() + noise_level * (rng.f64() - 0.5)).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| (i as f64).sin() + noise_level * (rng.f64() - 0.5))
+            .collect();
 
         let miner = PatternMiner::new(3);
         let results = miner.mine(&y);
@@ -457,7 +474,8 @@ mod tests {
         let x_result = results.iter().find(|p| p.expression == "x");
         let sin_result = results.iter().find(|p| p.expression.contains("sin"));
 
-        if let (Some(xp), Some(sp)) = (x_result, sin_result) {
+        if let (Some(xp), Some(sp)) = (x_result, sin_result)
+        {
             assert!(
                 xp.score > sp.score,
                 "on linear data, 'x' ({}) should score higher than 'sin' ({})",
@@ -496,12 +514,18 @@ mod tests {
 
         assert!(results.len() >= 2, "should produce at least 2 patterns");
         // Filter out NaN scores before checking sort order
-        let valid_scores: Vec<f64> = results.iter().map(|p| p.score).filter(|s| !s.is_nan()).collect();
-        for w in valid_scores.windows(2) {
+        let valid_scores: Vec<f64> = results
+            .iter()
+            .map(|p| p.score)
+            .filter(|s| !s.is_nan())
+            .collect();
+        for w in valid_scores.windows(2)
+        {
             assert!(
                 w[0] + 1e-9 >= w[1],
                 "mine_multi scores should be sorted descending, got {} >= {}",
-                w[0], w[1]
+                w[0],
+                w[1]
             );
         }
 

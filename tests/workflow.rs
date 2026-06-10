@@ -19,10 +19,7 @@ fn test_full_workflow() {
 
     // 4. Matrix operations (Core)
     let backend = best_backend();
-    let a = vec![
-        vec![2.0, 1.0],
-        vec![1.0, 2.0],
-    ];
+    let a = vec![vec![2.0, 1.0], vec![1.0, 2.0]];
     let mut l = a.clone();
     backend.cholesky_f64(&mut l).unwrap();
 

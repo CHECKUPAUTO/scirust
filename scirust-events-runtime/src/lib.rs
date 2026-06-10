@@ -1,6 +1,6 @@
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_events_core::{Event, EventDetector, EventStream};
-use scirust_runtime::{save_weights, load_weights};
+use scirust_runtime::{load_weights, save_weights};
 use std::collections::HashMap;
 use std::io;
 
@@ -19,9 +19,11 @@ impl EventRuntime {
         let mut events = Vec::new();
         let mut count = 0;
 
-        while let Some(window) = stream.next_window() {
+        while let Some(window) = stream.next_window()
+        {
             let (score, en, fr) = self.detector.detect(&window);
-            if score >= 1.0 {
+            if score >= 1.0
+            {
                 events.push(Event {
                     id: count,
                     timestamp: stream.current_offset as f64,
@@ -37,7 +39,11 @@ impl EventRuntime {
     }
 
     /// Sauvegarde l'état du détecteur au format SRT1.
-    pub fn save_detector_state(&self, path: &str, params: &HashMap<String, Tensor>) -> io::Result<()> {
+    pub fn save_detector_state(
+        &self,
+        path: &str,
+        params: &HashMap<String, Tensor>,
+    ) -> io::Result<()> {
         save_weights(params, path)
     }
 

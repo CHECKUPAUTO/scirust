@@ -2,6 +2,7 @@
 name = "scirust-core"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 
 [dependencies]
 thiserror = "2"
@@ -9,6 +10,7 @@ scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-macros = { path = "../scirust-macros" }
 scirust-simd = { path = "../scirust-simd" }
 scirust-gpu-macros = { path = "../scirust-gpu-macros" }
+
 rand = "0.8"
 rand_distr = "0.4"
 ndarray = "0.16"

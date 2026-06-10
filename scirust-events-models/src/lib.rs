@@ -11,19 +11,26 @@ pub struct SpikeDetector {
 
 impl SpikeDetector {
     pub fn new(threshold: f32, alpha: f32) -> Self {
-        Self { threshold, alpha, ema: 0.0 }
+        Self {
+            threshold,
+            alpha,
+            ema: 0.0,
+        }
     }
 }
 
 impl EventDetector for SpikeDetector {
     fn detect(&mut self, window: &Tensor) -> (f32, String, String) {
-        if window.data.is_empty() {
+        if window.data.is_empty()
+        {
             return (0.0, "none".into(), "aucun".into());
         }
 
         let mut max_val = 0.0f32;
-        for &x in &window.data {
-            if x > max_val {
+        for &x in &window.data
+        {
+            if x > max_val
+            {
                 max_val = x;
             }
         }
@@ -31,10 +38,17 @@ impl EventDetector for SpikeDetector {
         // Mise à jour de l'EMA pour un seuillage adaptatif ou lissage
         self.ema = self.alpha * max_val + (1.0 - self.alpha) * self.ema;
 
-        if self.ema > self.threshold {
+        if self.ema > self.threshold
+        {
             (1.0, "spike".into(), "pic".into())
-        } else {
-            (self.ema / self.threshold, "background".into(), "bruit".into())
+        }
+        else
+        {
+            (
+                self.ema / self.threshold,
+                "background".into(),
+                "bruit".into(),
+            )
         }
     }
 }
@@ -48,7 +62,11 @@ pub struct EventClassifier {
 
 impl EventClassifier {
     pub fn new(model: Sequential, labels_en: Vec<String>, labels_fr: Vec<String>) -> Self {
-        Self { model, labels_en, labels_fr }
+        Self {
+            model,
+            labels_en,
+            labels_fr,
+        }
     }
 }
 
@@ -62,15 +80,25 @@ impl EventDetector for EventClassifier {
         // Recherche de l'index du max (argmax)
         let mut max_idx = 0;
         let mut max_val = -f32::INFINITY;
-        for (i, &val) in output.data.iter().enumerate() {
-            if val > max_val {
+        for (i, &val) in output.data.iter().enumerate()
+        {
+            if val > max_val
+            {
                 max_val = val;
                 max_idx = i;
             }
         }
 
-        let en = self.labels_en.get(max_idx).cloned().unwrap_or_else(|| "unknown".into());
-        let fr = self.labels_fr.get(max_idx).cloned().unwrap_or_else(|| "inconnu".into());
+        let en = self
+            .labels_en
+            .get(max_idx)
+            .cloned()
+            .unwrap_or_else(|| "unknown".into());
+        let fr = self
+            .labels_fr
+            .get(max_idx)
+            .cloned()
+            .unwrap_or_else(|| "inconnu".into());
 
         (max_val, en, fr)
     }
@@ -80,7 +108,7 @@ impl EventDetector for EventClassifier {
 mod tests {
     use super::*;
     use scirust_core::autodiff::reverse::Tensor;
-    use scirust_core::nn::{Linear, ReLU, PcgEngine, KaimingNormal, Zeros};
+    use scirust_core::nn::{KaimingNormal, Linear, PcgEngine, ReLU, Zeros};
 
     #[test]
     fn test_spike_detector_ema() {
@@ -110,7 +138,7 @@ mod tests {
         let mut classifier = EventClassifier::new(
             model,
             vec!["A".into(), "B".into()],
-            vec!["Alpha".into(), "Beta".into()]
+            vec!["Alpha".into(), "Beta".into()],
         );
 
         let data = vec![1.0, 0.5];

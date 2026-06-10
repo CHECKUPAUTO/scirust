@@ -92,19 +92,19 @@ impl TransformerDecoderBlock {
         let ln1_out = self.ln1.forward(tape, x_3d.as_var());
         let ln1_3d = Var3D::from_var(ln1_out, batch, seq_len, d_model);
         let self_attn_out = self.self_attn.forward_3d(tape, ln1_3d);
-        let x1 = x_3d.as_var().add(self_attn_out.as_var());
+        let x1 = x_3d.as_var().try_add(self_attn_out.as_var()).unwrap();
 
         // 2) Cross-attention
         let ln2_out = self.ln2.forward(tape, x1);
         let ln2_3d = Var3D::from_var(ln2_out, batch, seq_len, d_model);
         let cross_attn_out = self.cross_attn.forward_3d_cross(tape, ln2_3d, encoder_out);
-        let x2 = x1.add(cross_attn_out.as_var());
+        let x2 = x1.try_add(cross_attn_out.as_var()).unwrap();
 
         // 3) FFN
         let ln3_out = self.ln3.forward(tape, x2);
         let h_ff = self.ffn1.forward(tape, ln3_out).relu();
         let ffn_out = self.ffn2.forward(tape, h_ff);
-        let x3 = x2.add(ffn_out);
+        let x3 = x2.try_add(ffn_out).unwrap();
 
         Var3D::from_var(x3, batch, seq_len, d_model)
     }
@@ -133,19 +133,24 @@ impl TransformerDecoderBlock {
 
     pub fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
-        for (k, v) in self.ln1.state_dict() {
+        for (k, v) in self.ln1.state_dict()
+        {
             map.insert(k, v);
         }
-        for (k, v) in self.self_attn.state_dict() {
+        for (k, v) in self.self_attn.state_dict()
+        {
             map.insert(k, v);
         }
-        for (k, v) in self.ln2.state_dict() {
+        for (k, v) in self.ln2.state_dict()
+        {
             map.insert(k, v);
         }
-        for (k, v) in self.cross_attn.state_dict() {
+        for (k, v) in self.cross_attn.state_dict()
+        {
             map.insert(k, v);
         }
-        for (k, v) in self.ln3.state_dict() {
+        for (k, v) in self.ln3.state_dict()
+        {
             map.insert(k, v);
         }
         map.insert(
@@ -229,7 +234,8 @@ impl TransformerDecoder {
         rng: &mut PcgEngine,
     ) -> Self {
         let mut blocks = Vec::with_capacity(n_layers);
-        for i in 0..n_layers {
+        for i in 0..n_layers
+        {
             let block = TransformerDecoderBlock::new(d_model, n_heads, d_ff, w_init, b_init, rng)
                 .with_name(&format!("dec_block_{i}"));
             blocks.push(block);
@@ -251,7 +257,8 @@ impl TransformerDecoder {
         encoder_out: Var3D<'t>,
     ) -> Var3D<'t> {
         let mut h = x;
-        for block in self.blocks.iter_mut() {
+        for block in self.blocks.iter_mut()
+        {
             h = block.forward_3d(tape, h, encoder_out);
         }
         let ln_out = self.final_ln.forward(tape, h.as_var());
@@ -260,7 +267,8 @@ impl TransformerDecoder {
 
     pub fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        for b in &self.blocks {
+        for b in &self.blocks
+        {
             v.extend(b.parameter_indices());
         }
         v.extend(self.final_ln.parameter_indices());
@@ -268,7 +276,8 @@ impl TransformerDecoder {
     }
 
     pub fn sync(&mut self, tape: &Tape) {
-        for b in self.blocks.iter_mut() {
+        for b in self.blocks.iter_mut()
+        {
             b.sync(tape);
         }
         self.final_ln.sync(tape);
@@ -276,12 +285,15 @@ impl TransformerDecoder {
 
     pub fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
-        for b in &self.blocks {
-            for (k, v) in b.state_dict() {
+        for b in &self.blocks
+        {
+            for (k, v) in b.state_dict()
+            {
                 map.insert(k, v);
             }
         }
-        for (k, v) in self.final_ln.state_dict() {
+        for (k, v) in self.final_ln.state_dict()
+        {
             map.insert(k, v);
         }
         map
@@ -289,7 +301,8 @@ impl TransformerDecoder {
 
     pub fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
         self.final_ln.load_state_dict(sd)?;
-        for b in self.blocks.iter_mut() {
+        for b in self.blocks.iter_mut()
+        {
             b.load_state_dict(sd)?;
         }
         Ok(())

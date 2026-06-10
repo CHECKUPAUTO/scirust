@@ -35,8 +35,8 @@ impl Loss for MseLoss {
         let (rows, cols) = pred.shape();
         let n = (rows * cols) as f32;
 
-        let diff = pred.sub(target); // pred - target
-        let sq = diff.hadamard(diff); // (pred - target)²
+        let diff = pred.try_sub(target).unwrap(); // pred - target
+        let sq = diff.try_hadamard(diff).unwrap(); // (pred - target)²
         let s = sq.sum(); // somme
         s.scale(1.0 / n) // / N
     }

@@ -13,12 +13,14 @@ pub enum QuantError {
 
 impl fmt::Display for QuantError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             QuantError::Io(msg) => write!(f, "IO error: {}", msg),
             QuantError::InvalidFormat(msg) => write!(f, "Invalid format: {}", msg),
-            QuantError::ShapeMismatch { expected, got } => {
+            QuantError::ShapeMismatch { expected, got } =>
+            {
                 write!(f, "Shape mismatch: expected {}, got {}", expected, got)
-            }
+            },
         }
     }
 }

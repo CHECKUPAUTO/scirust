@@ -1,17 +1,21 @@
 // scirust-core/src/tests/test_aot.rs
 #[cfg(test)]
 mod tests {
-    use crate::aot::{generate_static_pipeline, LayerSpec};
+    use crate::aot::{LayerSpec, generate_static_pipeline};
 
     #[test]
     fn test_aot_generation_basic() {
         let layers = vec![
-            LayerSpec::Linear { in_features: 2, out_features: 3 },
+            LayerSpec::Linear {
+                in_features: 2,
+                out_features: 3,
+            },
             LayerSpec::ReLU,
         ];
         let weights = vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6];
         let mut bytes = Vec::new();
-        for w in weights {
+        for w in weights
+        {
             bytes.extend_from_slice(&w.to_le_bytes());
         }
 

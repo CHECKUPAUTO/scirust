@@ -30,12 +30,14 @@ pub fn simd(_args: TokenStream, input: TokenStream) -> TokenStream {
     let arg_names: Vec<_> = sig
         .inputs
         .iter()
-        .map(|arg| match arg {
+        .map(|arg| match arg
+        {
             FnArg::Receiver(_) => quote!(self),
-            FnArg::Typed(pat_type) => {
+            FnArg::Typed(pat_type) =>
+            {
                 let pat = &pat_type.pat;
                 quote!(#pat)
-            }
+            },
         })
         .collect();
 

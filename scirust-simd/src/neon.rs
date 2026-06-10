@@ -18,6 +18,23 @@
 //! - Add/Mul: 1 cycle latency, 4 lanes
 //! - VMLA (vector multiply-accumulate): 1 cycle, 4 lanes
 //! - Latence cache L2: ~12 cycles (48ns)
+//!
+//! ## Safety
+//!
+//! All functions in this module use `core::arch::aarch64` intrinsics which are `unsafe`.
+//! Safety invariants upheld:
+//! - **Pointer validity**: All slices come from safe Rust `&[f32]` / `&mut [f32]`, guaranteeing
+//!   valid, aligned, non-null pointers for the slice length. The `as_ptr().add(i)` arithmetic
+//!   stays within bounds because loop conditions (`i + 4 <= n`) ensure we never read/write
+//!   past the slice ends.
+//! - **Alignment**: NEON `vld1q_f32`/`vst1q_f32` support unaligned access (LDR/STR Q registers).
+//!   No alignment requirement beyond 1 byte, so `as_ptr().add(i)` is always valid.
+//! - **Lifetime**: The borrowed slices outlive the function call; no pointers escape.
+//! - **No UB**: All intrinsics are called with valid memory, correct element counts (multiples of 4
+//!   in the vectorized loop), and proper scalar fallback for remainders.
+//!
+//! Each `unsafe` block is therefore sound when the caller respects the slice length contracts
+//! (enforced by the `assert_eq!` preconditions).
 
 use std::arch::aarch64::*;
 

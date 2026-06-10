@@ -60,7 +60,8 @@ fn main() {
     };
 
     println!("Dataset:");
-    for (i, x) in inputs.iter().enumerate() {
+    for (i, x) in inputs.iter().enumerate()
+    {
         println!("  ({:.0}, {:.0}) → classe {}", x[0], x[1], labels[i]);
     }
 
@@ -79,10 +80,12 @@ fn main() {
 
     // -------- Boucle d'entraînement -------- //
     let mut last_avg_loss = 0.0;
-    for epoch in 0..n_epochs {
+    for epoch in 0..n_epochs
+    {
         let mut epoch_loss = 0.0;
 
-        for (x_arr, &label) in inputs.iter().zip(labels.iter()) {
+        for (x_arr, &label) in inputs.iter().zip(labels.iter())
+        {
             let tape = Tape::new();
             let x = tape.input(Tensor::from_vec(x_arr.to_vec(), 1, 2));
             let target = tape.input(Tensor::from_vec(to_one_hot(label), 1, 2));
@@ -100,7 +103,8 @@ fn main() {
         let avg = epoch_loss / 4.0;
         last_avg_loss = avg;
 
-        if epoch == 0 || (epoch + 1) % 100 == 0 {
+        if epoch == 0 || (epoch + 1) % 100 == 0
+        {
             println!("  Epoch {:>4} : loss = {:.6}", epoch + 1, avg);
         }
     }
@@ -108,23 +112,30 @@ fn main() {
     // -------- Évaluation -------- //
     println!("\nÉvaluation finale :");
     let mut correct = 0;
-    for (i, x_arr) in inputs.iter().enumerate() {
+    for (i, x_arr) in inputs.iter().enumerate()
+    {
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(x_arr.to_vec(), 1, 2));
         let logits = model.forward(&tape, x);
         let scores = tape.value(logits.idx());
 
         // argmax sur 2 classes
-        let pred_class = if scores.data[0] > scores.data[1] {
+        let pred_class = if scores.data[0] > scores.data[1]
+        {
             0
-        } else {
+        }
+        else
+        {
             1
         };
         let true_class = labels[i];
-        let mark = if pred_class == true_class {
+        let mark = if pred_class == true_class
+        {
             correct += 1;
             "✓"
-        } else {
+        }
+        else
+        {
             "✗"
         };
 
@@ -139,11 +150,14 @@ fn main() {
     println!("  Loss finale : {:.6}", last_avg_loss);
     println!("  Précision   : {}/4", correct);
 
-    if correct == 4 {
+    if correct == 4
+    {
         println!("\n✅ SUCCÈS — Le MLP a appris la tâche non-linéaire.");
         println!("   SciRust v11.1 entraîne réellement des modèles ML.");
         std::process::exit(0);
-    } else {
+    }
+    else
+    {
         println!("\n❌ ÉCHEC — Convergence incomplète ({}/4).", correct);
         println!("   Causes possibles :");
         println!("   - Hyperparamètres (lr, epochs, init seed)");

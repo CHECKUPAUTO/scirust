@@ -12,13 +12,14 @@ pub fn integrated_gradients<F>(
     model_fn: F,
 ) -> Tensor
 where
-    F: for<'t> Fn(&Var<'t>) -> Var<'t>
+    F: for<'t> Fn(&Var<'t>) -> Var<'t>,
 {
     let mut total_gradients = Tensor::zeros(input.rows, input.cols);
     let diff = input.sub(baseline);
     let step_size = 1.0 / steps as f32;
 
-    for i in 0..=steps {
+    for i in 0..=steps
+    {
         let alpha = i as f32 * step_size;
         let tape = Tape::new();
 

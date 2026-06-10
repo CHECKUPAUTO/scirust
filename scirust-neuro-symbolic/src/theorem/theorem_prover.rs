@@ -1,4 +1,4 @@
-use crate::core::{Result, Reasoner};
+use crate::core::{Reasoner, Result};
 
 pub struct NeuralTheoremProver {
     pub iterations: usize,

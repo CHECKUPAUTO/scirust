@@ -74,63 +74,74 @@ pub enum SciRustError {
 
 impl fmt::Display for SciRustError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SciRustError::ShapeMismatch { op, expected, got } => {
+        match self
+        {
+            SciRustError::ShapeMismatch { op, expected, got } =>
+            {
                 write!(
                     f,
                     "shape mismatch in '{op}': expected {:?}, got {:?}",
                     expected, got
                 )
-            }
-            SciRustError::DeviceMismatch { op, expected, got } => {
+            },
+            SciRustError::DeviceMismatch { op, expected, got } =>
+            {
                 write!(
                     f,
                     "device mismatch in '{op}': expected {:?}, got {:?} \
                           (use to_cpu/to_gpu to align)",
                     expected, got
                 )
-            }
+            },
             SciRustError::WrongDevice {
                 op,
                 expected,
                 got,
                 hint,
-            } => {
+            } =>
+            {
                 write!(
                     f,
                     "wrong device for '{op}': expected {:?}, got {:?} — {hint}",
                     expected, got
                 )
-            }
-            SciRustError::InvalidConfig(msg) => {
+            },
+            SciRustError::InvalidConfig(msg) =>
+            {
                 write!(f, "invalid configuration: {msg}")
-            }
-            SciRustError::GpuNotAvailable => {
+            },
+            SciRustError::GpuNotAvailable =>
+            {
                 write!(
                     f,
                     "GPU requested but no GPU adapter available — \
                           rebuild with --features wgpu and ensure a compatible adapter is present"
                 )
-            }
-            SciRustError::GpuError(msg) => {
+            },
+            SciRustError::GpuError(msg) =>
+            {
                 write!(f, "GPU error: {msg}")
-            }
-            SciRustError::IoError(e) => {
+            },
+            SciRustError::IoError(e) =>
+            {
                 write!(f, "I/O error: {e}")
-            }
-            SciRustError::InvalidFormat { what, details } => {
+            },
+            SciRustError::InvalidFormat { what, details } =>
+            {
                 write!(f, "invalid {what} format: {details}")
-            }
-            SciRustError::IndexOutOfBounds { what, index, bound } => {
+            },
+            SciRustError::IndexOutOfBounds { what, index, bound } =>
+            {
                 write!(f, "{what} index out of bounds: {index} >= {bound}")
-            }
+            },
         }
     }
 }
 
 impl std::error::Error for SciRustError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
+        match self
+        {
             SciRustError::IoError(e) => Some(e),
             _ => None,
         }
@@ -167,18 +178,38 @@ pub type Result<T> = std::result::Result<T, SciRustError>;
 
 /// Vérifie que deux shapes sont identiques. Renvoie ShapeMismatch sinon.
 pub fn check_shape(op: &'static str, expected: (usize, usize), got: (usize, usize)) -> Result<()> {
-    if expected != got {
+    if expected != got
+    {
         Err(SciRustError::ShapeMismatch { op, expected, got })
-    } else {
+    }
+    else
+    {
+        Ok(())
+    }
+}
+
+/// Vérifie que les dimensions internes d'un matmul concordent (a.cols == b.rows).
+pub fn check_inner_dim(op: &'static str, a_cols: usize, b_rows: usize) -> Result<()> {
+    if a_cols != b_rows
+    {
+        Err(SciRustError::InvalidConfig(format!(
+            "matmul '{op}': inner dim mismatch {a_cols} != {b_rows}"
+        )))
+    }
+    else
+    {
         Ok(())
     }
 }
 
 /// Vérifie que le device courant correspond à celui attendu.
 pub fn check_device(op: &'static str, expected: Device, got: Device) -> Result<()> {
-    if expected != got {
+    if expected != got
+    {
         Err(SciRustError::DeviceMismatch { op, expected, got })
-    } else {
+    }
+    else
+    {
         Ok(())
     }
 }

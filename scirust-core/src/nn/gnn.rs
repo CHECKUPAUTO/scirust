@@ -26,7 +26,7 @@ impl GCNLayer {
     /// H' = ReLU(A @ H @ W)
     pub fn forward_with_adj<'t>(&mut self, tape: &'t Tape, h: Var<'t>, adj: Var<'t>) -> Var<'t> {
         let wh = self.linear.forward(tape, h);
-        adj.matmul(wh).relu()
+        adj.try_matmul(wh).unwrap().relu()
     }
 }
 
@@ -42,15 +42,17 @@ impl GCN {
         rng: &mut PcgEngine,
     ) -> Self {
         let mut layers = Vec::new();
-        for i in 0..dims.len() - 1 {
-            layers.push(GCNLayer::new(dims[i], dims[i+1], w_init, b_init, rng));
+        for i in 0..dims.len() - 1
+        {
+            layers.push(GCNLayer::new(dims[i], dims[i + 1], w_init, b_init, rng));
         }
         Self { layers }
     }
 
     pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>, adj: Var<'t>) -> Var<'t> {
         let mut h = x;
-        for layer in &mut self.layers {
+        for layer in &mut self.layers
+        {
             h = layer.forward_with_adj(tape, h, adj.clone());
         }
         h

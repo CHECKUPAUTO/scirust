@@ -1,4 +1,4 @@
-use crate::autodiff::reverse::{Tape, Var, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::Module;
 
 /// Evaluator for Physics-Informed Neural Networks (PINN).
@@ -16,11 +16,7 @@ impl<'a, M: Module> PinnLossEvaluator<'a, M> {
 
     /// Computes the PDE residual for the heat equation: du/dt - alpha * d^2u/dx^2 = 0
     /// inputs: (batch, 2) where col 0 is x and col 1 is t
-    pub fn compute_heat_residual<'t>(
-        &mut self,
-        tape: &'t Tape,
-        coords: Var<'t>,
-    ) -> Var<'t> {
+    pub fn compute_heat_residual<'t>(&mut self, tape: &'t Tape, coords: Var<'t>) -> Var<'t> {
         // 1. Forward pass to get model output u
         let u = self.model.forward(tape, coords);
 
@@ -44,7 +40,7 @@ impl<'a, M: Module> PinnLossEvaluator<'a, M> {
         // 4. Heat equation residual: R = du/dt - alpha * d2u/dx2
         let alpha_var = tape.input(Tensor::from_vec(vec![self.alpha], 1, 1));
         let term2 = d2u_dx2.mul_broadcast(alpha_var);
-        du_dt.sub(term2)
+        du_dt.try_sub(term2).unwrap()
     }
 
     /// Internal helper to push gradient computation onto the tape.
@@ -68,14 +64,13 @@ impl<'a, M: Module> PinnLossEvaluator<'a, M> {
         let u = self.model.forward(tape, coords);
 
         // Data loss (MSE)
-        let diff = u.sub(targets);
-        let data_loss = diff.hadamard(diff).mean_axis(0).sum();
+        let diff = u.try_sub(targets).unwrap();
+        let data_loss = diff.try_hadamard(diff).unwrap().mean_axis(0).sum();
 
-        // PDE residual loss
         let residual = self.compute_heat_residual(tape, coords);
-        let pde_loss = residual.hadamard(residual).mean_axis(0).sum();
+        let pde_loss = residual.try_hadamard(residual).unwrap().mean_axis(0).sum();
 
         let lambda_var = tape.input(Tensor::from_vec(vec![lambda], 1, 1));
-        data_loss.add(pde_loss.mul_broadcast(lambda_var))
+        data_loss.try_add(pde_loss.try_mul_broadcast(lambda_var).unwrap()).unwrap()
     }
 }

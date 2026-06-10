@@ -203,15 +203,18 @@ impl SimdBackend for WgpuBackend {
     }
 
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
-        let ctx = match try_ctx() {
+        let ctx = match try_ctx()
+        {
             Some(c) => c,
-            None => {
+            None =>
+            {
                 // Fallback CPU si init wgpu a échoué
-                for (yi, xi) in y.iter_mut().zip(x.iter()) {
+                for (yi, xi) in y.iter_mut().zip(x.iter())
+                {
                     *yi += alpha * xi;
                 }
                 return;
-            }
+            },
         };
 
         let n = x.len() as u32;
@@ -308,7 +311,8 @@ impl SimdBackend for WgpuBackend {
     // Les méthodes restantes : fallback CPU pour l'instant.
     // À implémenter en suivant le pattern saxpy ci-dessus.
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
-        for (yi, xi) in y.iter_mut().zip(x.iter()) {
+        for (yi, xi) in y.iter_mut().zip(x.iter())
+        {
             *yi += alpha * xi;
         }
     }
@@ -320,7 +324,8 @@ impl SimdBackend for WgpuBackend {
     }
     fn sgemv_f32(&self, alpha: f32, a: MatrixView<f32>, x: &[f32], beta: f32, y: &mut [f32]) {
         let (m, _) = a.shape();
-        for i in 0..m {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot: f32 = row.iter().zip(x.iter()).map(|(a, b)| a * b).sum();
             y[i] = alpha * dot + beta * y[i];
@@ -336,10 +341,13 @@ impl SimdBackend for WgpuBackend {
     ) {
         let (m, k) = a.shape();
         let (_, n) = b.shape();
-        for i in 0..m {
-            for j in 0..n {
+        for i in 0..m
+        {
+            for j in 0..n
+            {
                 let mut acc = 0.0f32;
-                for p in 0..k {
+                for p in 0..k
+                {
                     acc += a[(i, p)] * b[(p, j)];
                 }
                 c[(i, j)] = alpha * acc + beta * c[(i, j)];
@@ -348,7 +356,8 @@ impl SimdBackend for WgpuBackend {
     }
     fn relu_f32(&self, v: &mut [f32]) {
         // TODO : utiliser le pipeline relu_pipeline déjà créé
-        for x in v.iter_mut() {
+        for x in v.iter_mut()
+        {
             *x = x.max(0.0);
         }
     }

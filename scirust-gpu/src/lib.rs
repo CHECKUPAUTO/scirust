@@ -8,14 +8,22 @@ pub mod dispatch {
 
     impl GpuData for Vec<f32> {
         type Elem = f32;
-        fn as_slice(&self) -> &[f32] { self }
-        fn as_mut_slice(&mut self) -> &mut [f32] { self }
+        fn as_slice(&self) -> &[f32] {
+            self
+        }
+        fn as_mut_slice(&mut self) -> &mut [f32] {
+            self
+        }
     }
 
     impl GpuData for [f32] {
         type Elem = f32;
-        fn as_slice(&self) -> &[f32] { self }
-        fn as_mut_slice(&mut self) -> &mut [f32] { self }
+        fn as_slice(&self) -> &[f32] {
+            self
+        }
+        fn as_mut_slice(&mut self) -> &mut [f32] {
+            self
+        }
     }
 
     #[cfg(feature = "cpu-fallback")]
@@ -24,9 +32,12 @@ pub mod dispatch {
         F: Fn(&mut [f32]) + Sync,
     {
         // For very small workloads, don't bother with rayon overhead
-        if data.len() < 1024 {
+        if data.len() < 1024
+        {
             kernel(data);
-        } else {
+        }
+        else
+        {
             use rayon::prelude::*;
             data.par_chunks_mut(1024).for_each(|chunk| {
                 kernel(chunk);
@@ -58,16 +69,16 @@ pub mod dispatch {
     }
 }
 
-pub mod error;
-pub mod quantize;
-pub mod quant_train;
 #[cfg(feature = "legacy-cust")]
 pub mod cuda_backend;
-#[cfg(feature = "legacy-cust")]
-pub mod cuda_turboquant;
-pub mod wgpu_backend;
-pub mod gpu_tensor;
+pub mod error;
+pub mod quant_train;
+pub mod quantize;
+// #[cfg(feature = "legacy-cust")]
+// pub mod cuda_turboquant; // file missing
 pub mod gpu_gemm;
+pub mod gpu_tensor;
+pub mod wgpu_backend;
 
 #[cfg(feature = "cuda")]
 pub mod cublas;

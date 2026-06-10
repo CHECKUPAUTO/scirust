@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 pub mod io;
 pub mod nn;
 pub use scirust_autodiff::*;
@@ -6,9 +8,9 @@ pub use scirust_simd::*;
 
 pub mod matrix {
     pub mod backend;
-    pub mod view;
-    pub mod soft;
     pub mod csr;
+    pub mod soft;
+    pub mod view;
 }
 
 pub mod autodiff;
@@ -20,6 +22,7 @@ pub mod autodiff;
 
 pub mod data;
 pub mod embed;
+pub mod simd;
 pub mod tensor;
 pub mod tn;
 
@@ -49,8 +52,8 @@ pub mod dispatch {
         kernel(data);
     }
 }
-pub mod compute_backend;
-pub mod quantization;
-pub mod homomorphic;
 pub mod aot;
+pub mod compute_backend;
+pub mod homomorphic;
+pub mod quantization;
 pub mod xai;

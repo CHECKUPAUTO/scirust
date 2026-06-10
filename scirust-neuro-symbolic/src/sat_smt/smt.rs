@@ -1,4 +1,4 @@
-use crate::core::{Result, Reasoner};
+use crate::core::{Reasoner, Result};
 
 pub enum SmtExpr {
     Const(f64),

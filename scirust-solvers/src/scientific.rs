@@ -22,18 +22,19 @@ impl FemSolver1D {
         let mut k = vec![vec![0.0; n]; n];
         let mut f = vec![0.0; n];
 
-        for i in 1..n-1 {
-            k[i][i-1] = -1.0 / h;
+        for i in 1..n - 1
+        {
+            k[i][i - 1] = -1.0 / h;
             k[i][i] = 2.0 / h;
-            k[i][i+1] = -1.0 / h;
+            k[i][i + 1] = -1.0 / h;
             f[i] = source_term * h;
         }
 
         // Boundary conditions (enforced by setting identity in matrix)
         k[0][0] = 1.0;
         f[0] = 0.0;
-        k[n-1][n-1] = 1.0;
-        f[n-1] = 0.0;
+        k[n - 1][n - 1] = 1.0;
+        f[n - 1] = 0.0;
 
         // Solve the linear system K * u = f (using Gaussian elimination from scirust-learning/lib.rs logic if it were available here)
         // Since we are in solvers, we'll use a local simple Thomas algorithm for tri-diagonal systems
@@ -48,23 +49,32 @@ impl FemSolver1D {
         let mut c = vec![0.0; n]; // super-diagonal
         let mut d = f;
 
-        for i in 0..n {
+        for i in 0..n
+        {
             b[i] = k[i][i];
-            if i > 0 { a[i] = k[i][i-1]; }
-            if i < n - 1 { c[i] = k[i][i+1]; }
+            if i > 0
+            {
+                a[i] = k[i][i - 1];
+            }
+            if i < n - 1
+            {
+                c[i] = k[i][i + 1];
+            }
         }
 
         // Forward sweep
-        for i in 1..n {
-            let m = a[i] / b[i-1];
-            b[i] = b[i] - m * c[i-1];
-            d[i] = d[i] - m * d[i-1];
+        for i in 1..n
+        {
+            let m = a[i] / b[i - 1];
+            b[i] = b[i] - m * c[i - 1];
+            d[i] = d[i] - m * d[i - 1];
         }
 
         // Back substitution
-        u[n-1] = d[n-1] / b[n-1];
-        for i in (0..n-1).rev() {
-            u[i] = (d[i] - c[i] * u[i+1]) / b[i];
+        u[n - 1] = d[n - 1] / b[n - 1];
+        for i in (0..n - 1).rev()
+        {
+            u[i] = (d[i] - c[i] * u[i + 1]) / b[i];
         }
 
         u

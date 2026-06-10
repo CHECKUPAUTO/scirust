@@ -31,7 +31,8 @@ impl EventStream {
     }
 
     pub fn next_window(&mut self) -> Option<Tensor> {
-        if self.current_offset + self.window_size > self.data.len() {
+        if self.current_offset + self.window_size > self.data.len()
+        {
             return None;
         }
         let chunk = &self.data[self.current_offset..self.current_offset + self.window_size];

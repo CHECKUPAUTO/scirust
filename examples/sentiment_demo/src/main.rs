@@ -51,9 +51,11 @@ fn main() {
 
     // 4. Entraînement
     println!("\nEntraînement en cours...");
-    for epoch in 0..100 {
+    for epoch in 0..100
+    {
         let mut total_loss = 0.0;
-        for (text, label) in &train_data {
+        for (text, label) in &train_data
+        {
             let tape = Tape::new();
             let logits = pipeline.forward(&tape, text);
 
@@ -69,8 +71,13 @@ fn main() {
 
             total_loss += tape.value(loss.idx()).data[0];
         }
-        if (epoch + 1) % 20 == 0 {
-            println!("  Époque {}/100, Loss: {:.4}", epoch + 1, total_loss / train_data.len() as f32);
+        if (epoch + 1) % 20 == 0
+        {
+            println!(
+                "  Époque {}/100, Loss: {:.4}",
+                epoch + 1,
+                total_loss / train_data.len() as f32
+            );
         }
     }
 
@@ -85,14 +92,20 @@ fn main() {
         "Terrible bugs",
     ];
 
-    for text in test_sentences {
+    for text in test_sentences
+    {
         let result = pipeline.predict(text);
-        let sentiment_str = match result.polarity {
+        let sentiment_str = match result.polarity
+        {
             SentimentPolarity::Positive => "POSITIF",
             SentimentPolarity::Negative => "NÉGATIF",
             _ => "NEUTRE",
         };
         println!("Texte: \"{}\"", text);
-        println!("  Sentiment: {} (confiance: {:.2}%)", sentiment_str, result.confidence * 100.0);
+        println!(
+            "  Sentiment: {} (confiance: {:.2}%)",
+            sentiment_str,
+            result.confidence * 100.0
+        );
     }
 }

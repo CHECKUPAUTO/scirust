@@ -6,11 +6,12 @@
 //! - Détection de stagnation : `|x2 - x1| < 1e-16` → StepUnderflow
 //! - check_finite sur f(x0), f(x1), x2
 
-use crate::{ConvergenceInfo, SolverError, SolverResult, Solution, Tolerance};
+use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
 fn check_finite(v: f64, label: &str) -> Result<(), SolverError> {
-    if !v.is_finite() {
+    if !v.is_finite()
+    {
         return Err(SolverError::NanDetected { iter: 0, value: v });
     }
     Ok(())
@@ -28,13 +29,16 @@ pub fn secant<F: Fn(f64) -> f64>(
     check_finite(f0, "f(x0)")?;
     check_finite(f1, "f(x1)")?;
 
-    for k in 0..tol.max_iter {
-        if f1.abs() < tol.abs {
+    for k in 0..tol.max_iter
+    {
+        if f1.abs() < tol.abs
+        {
             return Ok(Solution::new(x1, k, f1.abs()));
         }
 
         let denom = f1 - f0;
-        if denom.abs() < 1e-30 {
+        if denom.abs() < 1e-30
+        {
             warn!(
                 target: "solver",
                 "Secant: denominator {:.3e} near-zero at iteration {} — aborting",
@@ -48,7 +52,8 @@ pub fn secant<F: Fn(f64) -> f64>(
 
         let step = (x2 - x1).abs();
 
-        if step < 1e-16 {
+        if step < 1e-16
+        {
             warn!(
                 target: "solver",
                 "Secant: step underflow {:.3e} at iteration {}",
@@ -57,7 +62,8 @@ pub fn secant<F: Fn(f64) -> f64>(
             return Err(SolverError::StepUnderflow { step });
         }
 
-        if step < tol.abs + tol.rel * x2.abs() {
+        if step < tol.abs + tol.rel * x2.abs()
+        {
             let f2 = f(x2);
             return Ok(Solution::new(x2, k + 1, f2.abs()));
         }
@@ -82,7 +88,13 @@ mod tests {
 
     #[test]
     fn secant_cubic() {
-        let s = secant(|x| x.powi(3) - 2.0 * x - 5.0, 2.0, 3.0, Tolerance::default()).unwrap();
+        let s = secant(
+            |x| x.powi(3) - 2.0 * x - 5.0,
+            2.0,
+            3.0,
+            Tolerance::default(),
+        )
+        .unwrap();
         assert_relative_eq!(s.value, 2.094_551_481_542_326_6, epsilon = 1e-10);
     }
 

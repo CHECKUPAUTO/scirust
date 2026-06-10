@@ -9,40 +9,25 @@
 //! reduce the parameter count from `in * out` down to `O(d * I * O * r^2)`,
 //! often a 10-100× compression on transformer-style FFN projections.
 //!
-//! ## Phase 1: inference-focused
+//! ## Phase 2: on-tape contraction with gradient flow
 //!
-//! The forward pass **reconstructs the dense weight matrix** `W` from the
-//! cores at each call, then performs `x @ W + b` through `Var::matmul`. This
-//! gives correct outputs and preserves the **memory** savings (the persistent
-//! parameter state is just the cores) but **not the compute** savings — the
-//! reconstruction cost is comparable to a standard matmul.
-//!
-//! ### Training limitation in Phase 1
-//!
-//! Because `W` is reconstructed outside the tape and registered as a fresh
-//! leaf, the gradient of the loss w.r.t. `W` is computed but **does not flow
-//! back into the cores**. As a result, Phase 1 supports:
-//! - **Inference**: pass-through compression of a pre-trained `Linear`.
-//! - **Re-decomposition training loops**: train a dense `Linear`, then
-//!   re-call `tt_decompose` periodically to refresh the TT representation.
-//!
-//! For full TT-aware training (autograd through the cores), Phase 2 needs a
-//! tensor permutation operator on `Var` to handle the in/out de-interleaving
-//! inherent in the Novikov 2015 TT-Linear layout. Once `Var::permute` (or
-//! equivalent) lands in scirust-core, the forward becomes `d` sequential
-//! matmuls of much smaller shape with native autograd.
+//! The forward pass reconstructs the dense weight matrix `W` from the cores
+//! and computes `x @ W + b` through a single fused `Op::TtContract` node.
+//! The backward computes exact gradients through the reconstruction, flowing
+//! back into each core via interleaved gradient projection.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
-use crate::nn::Module;
 use crate::nn::Linear;
+use crate::nn::Module;
 
 use crate::tn::factorize::{auto_factorize, check_factorization};
-use crate::tn::tt_decompose::{reconstruct_matrix, tt_decompose_matrix, TTCores};
+use crate::tn::tt_decompose::{TTCores, reconstruct_matrix, tt_decompose_matrix};
 
 /// A `Linear` layer compressed as a Tensor-Train decomposition.
 ///
 /// Implements [`Module`] so it is a drop-in replacement for `Linear` in any
 /// `Sequential` or custom forward chain.
+#[derive(Clone)]
 pub struct TTLinear {
     /// Factorization of `in_features = ∏ in_dims`.
     pub in_dims: Vec<usize>,
@@ -101,9 +86,17 @@ impl TTLinear {
         let mode_dims: Vec<usize> = (0..self.in_dims.len())
             .map(|k| self.in_dims[k] * self.out_dims[k])
             .collect();
-        let tt = TTCores { cores: core_tnd, ranks: self.ranks.clone(), mode_dims };
+        let tt = TTCores {
+            cores: core_tnd,
+            ranks: self.ranks.clone(),
+            mode_dims,
+        };
         let w_flat = reconstruct_matrix(&tt, &self.in_dims, &self.out_dims);
-        Tensor { rows: self.in_features, cols: self.out_features, data: w_flat }
+        Tensor {
+            rows: self.in_features,
+            cols: self.out_features,
+            data: w_flat,
+        }
     }
 
     /// Build a `TTLinear` directly from already-computed cores (advanced API).
@@ -116,12 +109,17 @@ impl TTLinear {
         bias: Option<Tensor>,
     ) -> Self {
         let d = in_dims.len();
-        assert_eq!(out_dims.len(), d, "in_dims and out_dims must have the same length");
+        assert_eq!(
+            out_dims.len(),
+            d,
+            "in_dims and out_dims must have the same length"
+        );
         assert_eq!(ranks.len(), d + 1, "ranks must have length d+1");
         assert_eq!(ranks[0], 1, "ranks[0] must be 1");
         assert_eq!(ranks[d], 1, "ranks[d] must be 1");
         assert_eq!(cores.len(), d, "need {d} cores");
-        for k in 0..d {
+        for k in 0..d
+        {
             let expected_rows = ranks[k] * in_dims[k] * out_dims[k];
             let expected_cols = ranks[k + 1];
             assert_eq!(
@@ -151,49 +149,36 @@ impl TTLinear {
         }
     }
 
-    /// Ensure the cores and bias are registered on the tape. Idempotent within
-    /// a single tape (re-registers only if `core_indices` is empty).
+    /// Register cores and bias as fresh inputs on the tape.
+    /// Called every forward() to ensure indices are valid for the current tape.
     fn register_params(&mut self, tape: &Tape) {
-        if self.core_indices.is_empty() {
-            self.core_indices = self.cores.iter().map(|c| tape.input(c.clone()).idx()).collect();
-        }
-        if self.bias_idx.is_none() {
-            if let Some(b) = &self.bias {
-                self.bias_idx = Some(tape.input(b.clone()).idx());
-            }
-        }
+        self.core_indices = self
+            .cores
+            .iter()
+            .map(|c| tape.input(c.clone()).idx())
+            .collect();
+        self.bias_idx = self.bias.as_ref().map(|b| tape.input(b.clone()).idx());
     }
 }
+
 
 impl Module for TTLinear {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         self.register_params(tape);
 
-        // Phase 1 path: reconstruct W densely from the cores, then standard matmul.
-        //
-        // The chained-matmul approach (contracting cores on-tape) produces the
-        // interleaved tensor (I_0, O_0, I_1, O_1, ..., I_{d-1}, O_{d-1}), which
-        // requires a permutation to become (I_0, ..., I_{d-1}, O_0, ..., O_{d-1})
-        // = (in, out). Until `Var::permute` exists in scirust-core, we cannot
-        // express that de-interleaving on the tape. So we reconstruct W off-tape.
-        // See module docstring for the training implications.
-
-        let w_dense = self.reconstruct_weight();
-        let w_var = tape.input(w_dense);
-
-        let out = input.matmul(w_var);
-
-        if let Some(b_idx) = self.bias_idx {
-            let b_var = Var::new(tape, b_idx);
-            out.add(b_var)
-        } else {
-            out
+        let mut core_vars: Vec<Var<'t>> = Vec::new();
+        for &idx in &self.core_indices {
+            core_vars.push(Var::new(tape, idx));
         }
+        let b_var = self.bias_idx.map(|idx| Var::new(tape, idx));
+
+        input.tt_contract(core_vars, b_var, self.in_dims.clone(), self.out_dims.clone(), self.ranks.clone())
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut idx = self.core_indices.clone();
-        if let Some(b) = self.bias_idx {
+        if let Some(b) = self.bias_idx
+        {
             idx.push(b);
         }
         idx
@@ -202,12 +187,15 @@ impl Module for TTLinear {
     fn sync(&mut self, tape: &Tape) {
         // Pull updated values back from the tape into our local cores so the
         // next forward sees the post-optimizer-step parameters.
-        if self.core_indices.len() == self.cores.len() {
-            for (k, &idx) in self.core_indices.iter().enumerate() {
+        if self.core_indices.len() == self.cores.len()
+        {
+            for (k, &idx) in self.core_indices.iter().enumerate()
+            {
                 self.cores[k] = tape.value(idx);
             }
         }
-        if let (Some(b_idx), Some(_)) = (self.bias_idx, &self.bias) {
+        if let (Some(b_idx), Some(_)) = (self.bias_idx, &self.bias)
+        {
             self.bias = Some(tape.value(b_idx));
         }
     }
@@ -251,15 +239,13 @@ pub fn tt_decompose(
         out_dims.iter().product::<usize>(),
         linear.out_features
     );
-    assert_eq!(in_dims.len(), out_dims.len(), "in/out_dims must have the same length");
-
-    let tt = tt_decompose_matrix(
-        &linear.weight.data,
-        in_dims,
-        out_dims,
-        max_rank,
-        tolerance,
+    assert_eq!(
+        in_dims.len(),
+        out_dims.len(),
+        "in/out_dims must have the same length"
     );
+
+    let tt = tt_decompose_matrix(&linear.weight.data, in_dims, out_dims, max_rank, tolerance);
 
     // Convert each TensorND core (shape (r_k, I_k * O_k, r_{k+1})) into the
     // 2D Tensor representation (r_k * I_k * O_k, r_{k+1}) expected by TTLinear.
@@ -271,7 +257,11 @@ pub fn tt_decompose(
             let r_k = tt.ranks[k];
             let n_k = in_dims[k] * out_dims[k];
             let r_next = tt.ranks[k + 1];
-            Tensor { rows: r_k * n_k, cols: r_next, data: c.data.clone() }
+            Tensor {
+                rows: r_k * n_k,
+                cols: r_next,
+                data: c.data.clone(),
+            }
         })
         .collect();
 
@@ -325,10 +315,18 @@ mod tests {
     #[test]
     fn test_tt_decompose_reconstructs_weight() {
         let mut rng = crate::nn::rng::PcgEngine::new(42);
-        let mut linear = Linear::new(6, 4, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
+        let mut linear = Linear::new(
+            6,
+            4,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut rng,
+        );
         // Fill weight with a non-trivial pattern.
-        for i in 0..6 {
-            for j in 0..4 {
+        for i in 0..6
+        {
+            for j in 0..4
+            {
                 linear.weight.data[i * 4 + j] = ((i * 4 + j) as f32).sin();
             }
         }
@@ -341,8 +339,15 @@ mod tests {
     #[test]
     fn test_tt_decompose_auto() {
         let mut rng = crate::nn::rng::PcgEngine::new(42);
-        let mut linear = Linear::new(8, 16, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
-        for i in 0..(8 * 16) {
+        let mut linear = Linear::new(
+            8,
+            16,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut rng,
+        );
+        for i in 0..(8 * 16)
+        {
             linear.weight.data[i] = ((i as f32) * 0.13).cos();
         }
         let tt = tt_decompose_auto(&linear, 2, 100, 0.0);
@@ -356,7 +361,13 @@ mod tests {
     #[test]
     fn test_compression_ratio() {
         let mut rng = crate::nn::rng::PcgEngine::new(42);
-        let linear = Linear::new(16, 16, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
+        let linear = Linear::new(
+            16,
+            16,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut rng,
+        );
         // The default weight is all-zeros so compression won't be meaningful
         // but the formula must be well-defined.
         let tt = tt_decompose_auto(&linear, 2, 4, 0.0);
@@ -368,12 +379,91 @@ mod tests {
     #[test]
     fn test_parameter_indices() {
         let mut rng = crate::nn::rng::PcgEngine::new(42);
-        let linear = Linear::new(6, 4, &crate::nn::init::Zeros, &crate::nn::init::Zeros, &mut rng);
+        let linear = Linear::new(
+            6,
+            4,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut rng,
+        );
         let mut tt = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
         let tape = Tape::new();
-        let _ = tt.forward(&tape, tape.input(Tensor { rows: 1, cols: 6, data: vec![0.0; 6] }));
+        let _ = tt.forward(
+            &tape,
+            tape.input(Tensor {
+                rows: 1,
+                cols: 6,
+                data: vec![0.0; 6],
+            }),
+        );
         let idx = tt.parameter_indices();
-        // d cores + 1 bias
         assert_eq!(idx.len(), tt.cores.len() + 1);
+    }
+
+    #[test]
+    fn tt_forward_matches_dense_structured() {
+        // Use structured (low TT-rank) weights: separable function that
+        // the rank-3 TT decomposition can reproduce accurately.
+        let outer = 12;
+        let inner = 8;
+        let in_dims = vec![3, 4];
+        let out_dims = vec![2, 4];
+        let tt_rank = 3;
+
+        let mut linear = Linear::new(
+            outer, inner,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut crate::nn::rng::PcgEngine::new(42),
+        );
+        for i in 0..outer {
+            for j in 0..inner {
+                linear.weight.data[i * inner + j] = ((i * inner + j) as f32).sin();
+            }
+        }
+
+        let mut tt = tt_decompose(&linear, &in_dims, &out_dims, tt_rank, 0.0);
+        let tape = Tape::new();
+        let batch = 4;
+
+        for batch_idx in 0..5 {
+            let input_data: Vec<f32> = (0..batch * outer)
+                .map(|k| ((k + batch_idx * 37) as f32).cos()).collect();
+            let input_t = Tensor { rows: batch, cols: outer, data: input_data.clone() };
+
+            let dense_out = linear.forward(&tape, tape.input(input_t.clone()));
+            let tt_out = tt.forward(&tape, tape.input(input_t));
+
+            let dense_t = tape.value(dense_out.idx());
+            let tt_t = tape.value(tt_out.idx());
+            let rel = frob_err(&dense_t.data, &tt_t.data) / (frob_norm(&dense_t.data) + 1e-12);
+            assert!(rel < 1e-3, "TT forward rel error exceeds threshold: {rel}");
+        }
+    }
+
+    #[test]
+    fn tt_backward_gradient_flows() {
+        let mut linear = Linear::new(
+            6, 4,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut crate::nn::rng::PcgEngine::new(42),
+        );
+        for i in 0..(6 * 4) {
+            linear.weight.data[i] = ((i as f32) * 0.13).cos();
+        }
+        let mut tt = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
+        let tape = Tape::new();
+
+        let x = tape.input(Tensor { rows: 2, cols: 6, data: vec![0.5; 12] });
+        let y = tt.forward(&tape, x);
+        let loss = y.sum();
+        tape.backward(loss.idx());
+
+        for (i, idx) in tt.parameter_indices().iter().enumerate() {
+            let grad = tape.grad(*idx);
+            assert!(grad.data.iter().any(|&g| g.abs() > 1e-6),
+                "core {i} (idx {idx}) has zero gradient");
+        }
     }
 }

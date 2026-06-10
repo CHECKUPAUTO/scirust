@@ -31,8 +31,8 @@ pub mod solve;
 
 pub use linalg::Matrix;
 
-use thiserror::Error;
 use std::fmt::Debug;
+use thiserror::Error;
 
 /// Erreur unifiée pour tous les solveurs.
 #[derive(Debug, Clone, Error)]
@@ -71,11 +71,7 @@ pub enum SolverError {
     NanDetected { iter: usize, value: f64 },
 
     #[error("divergence detected: residual grew from {from:.3e} to {to:.3e} at iteration {iter}")]
-    Divergence {
-        iter: usize,
-        from: f64,
-        to: f64,
-    },
+    Divergence { iter: usize, from: f64, to: f64 },
 
     #[error("backup state restored after anomaly at iteration {iter}: {reason}")]
     BackupRestored { iter: usize, reason: String },
@@ -136,11 +132,7 @@ impl Default for Tolerance {
 
 impl Tolerance {
     pub fn new(abs: f64, rel: f64, max_iter: usize) -> Self {
-        Self {
-            abs,
-            rel,
-            max_iter,
-        }
+        Self { abs, rel, max_iter }
     }
 
     /// Test : `|residual| <= abs + rel * |reference|`.

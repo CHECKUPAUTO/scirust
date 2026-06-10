@@ -46,7 +46,8 @@ impl InMemoryDataset {
         let n = n.min(self.n);
         let mut x = Vec::with_capacity(n * self.x_dim);
         let mut y = Vec::with_capacity(n * self.y_dim);
-        for i in 0..n {
+        for i in 0..n
+        {
             let (xi, yi) = self.sample(i);
             x.extend_from_slice(xi);
             y.extend_from_slice(yi);
@@ -67,7 +68,8 @@ impl InMemoryDataset {
         // Shuffle deterministe via PCG
         let mut indices: Vec<usize> = (0..self.n).collect();
         let mut rng = crate::nn::rng::PcgEngine::new(seed);
-        for i in (1..indices.len()).rev() {
+        for i in (1..indices.len()).rev()
+        {
             let j = (rng.next_u32() as usize) % (i + 1);
             indices.swap(i, j);
         }
@@ -77,12 +79,16 @@ impl InMemoryDataset {
         let mut x_val = Vec::with_capacity((self.n - n_train) * self.x_dim);
         let mut y_val = Vec::with_capacity((self.n - n_train) * self.y_dim);
 
-        for (pos, &idx) in indices.iter().enumerate() {
+        for (pos, &idx) in indices.iter().enumerate()
+        {
             let (xi, yi) = self.sample(idx);
-            if pos < n_train {
+            if pos < n_train
+            {
                 x_train.extend_from_slice(xi);
                 y_train.extend_from_slice(yi);
-            } else {
+            }
+            else
+            {
                 x_val.extend_from_slice(xi);
                 y_val.extend_from_slice(yi);
             }

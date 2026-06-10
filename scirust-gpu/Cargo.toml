@@ -1,7 +1,8 @@
 [package]
 name = "scirust-gpu"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+rust-version = "1.85"
 
 [dependencies]
 rayon = { version = "1.10", optional = true }

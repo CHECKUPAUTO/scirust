@@ -28,18 +28,22 @@ fn main() {
     let mut total = 0usize;
     let mut fp = fnv_init();
 
-    for (xb, yb) in loader.iter() {
+    for (xb, yb) in loader.iter()
+    {
         let tape = Tape::new();
         let v = tape.input(xb);
         let logits = model.forward(&tape, v);
         let scores = tape.value(logits.idx());
         fp = fnv_fold_f32(fp, &scores.data);
         let (bs, _) = scores.shape();
-        for i in 0..bs {
+        for i in 0..bs
+        {
             let mut best = scores.data[i * 10];
             let mut pc = 0usize;
-            for c in 1..10 {
-                if scores.data[i * 10 + c] > best {
+            for c in 1..10
+            {
+                if scores.data[i * 10 + c] > best
+                {
                     best = scores.data[i * 10 + c];
                     pc = c;
                 }
@@ -50,7 +54,8 @@ fn main() {
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .map(|(j, _)| j)
                 .unwrap_or(0);
-            if pc == tc {
+            if pc == tc
+            {
                 correct += 1;
             }
             total += 1;
@@ -63,9 +68,6 @@ fn main() {
         correct,
         total
     );
-    println!(
-        "Empreinte test logits    : {:#018x}",
-        fp
-    );
+    println!("Empreinte test logits    : {:#018x}", fp);
     println!("  (relance le binaire : meme empreinte => inference reproductible inter-process)");
 }

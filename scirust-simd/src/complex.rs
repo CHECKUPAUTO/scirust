@@ -87,21 +87,25 @@ pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
     let (pre, mid_dst, suf_dst) = dst_f.as_simd_mut::<8>();
     let (_, mid_src, _) = src_f.as_simd::<8>();
 
-    for (d, s) in pre.iter_mut().zip(src_f.iter()) {
+    for (d, s) in pre.iter_mut().zip(src_f.iter())
+    {
         *d += s;
     }
-    for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter()) {
+    for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter())
+    {
         *vd += vs;
     }
     let offset = pre.len() + mid_dst.len() * 8;
-    for (d, s) in suf_dst.iter_mut().zip(src_f[offset..].iter()) {
+    for (d, s) in suf_dst.iter_mut().zip(src_f[offset..].iter())
+    {
         *d += s;
     }
 }
 
 #[cfg(not(feature = "portable-simd"))]
 pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
-    for (d, s) in dst.iter_mut().zip(src.iter()) {
+    for (d, s) in dst.iter_mut().zip(src.iter())
+    {
         d.re += s.re;
         d.im += s.im;
     }
@@ -141,7 +145,8 @@ pub fn complex_mul_f32(dst: &mut [Complex<f32>], a: &[Complex<f32>], b: &[Comple
 
     // 4 complexes traités par cycle SIMD (= 8 lanes f32)
     let chunks = a.len() / 4;
-    for c in 0..chunks {
+    for c in 0..chunks
+    {
         let av = f32x8::from_slice(&a_f[c * 8..]);
         let bv = f32x8::from_slice(&b_f[c * 8..]);
 
@@ -162,14 +167,16 @@ pub fn complex_mul_f32(dst: &mut [Complex<f32>], a: &[Complex<f32>], b: &[Comple
     }
 
     // Reste scalaire
-    for i in (chunks * 4)..a.len() {
+    for i in (chunks * 4)..a.len()
+    {
         dst[i] = a[i].mul(b[i]);
     }
 }
 
 #[cfg(not(feature = "portable-simd"))]
 pub fn complex_mul_f32(dst: &mut [Complex<f32>], a: &[Complex<f32>], b: &[Complex<f32>]) {
-    for i in 0..a.len() {
+    for i in 0..a.len()
+    {
         dst[i] = a[i].mul(b[i]);
     }
 }
@@ -200,7 +207,8 @@ pub fn complex_dot_hermitian_f32(a: &[Complex<f32>], b: &[Complex<f32>]) -> Comp
         let sign = f32x8::from_array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]);
 
         let chunks = a.len() / 4;
-        for c in 0..chunks {
+        for c in 0..chunks
+        {
             let av = f32x8::from_slice(&a_f[c * 8..]);
             let bv = f32x8::from_slice(&b_f[c * 8..]);
 
@@ -225,7 +233,8 @@ pub fn complex_dot_hermitian_f32(a: &[Complex<f32>], b: &[Complex<f32>]) -> Comp
         let mut im_total = acc_im.reduce_sum();
 
         // Reste scalaire
-        for i in (chunks * 4)..a.len() {
+        for i in (chunks * 4)..a.len()
+        {
             re_total += a[i].re * b[i].re + a[i].im * b[i].im;
             im_total += a[i].im * b[i].re - a[i].re * b[i].im;
         }
@@ -237,7 +246,8 @@ pub fn complex_dot_hermitian_f32(a: &[Complex<f32>], b: &[Complex<f32>]) -> Comp
     {
         let mut re = 0.0f32;
         let mut im = 0.0f32;
-        for i in 0..a.len() {
+        for i in 0..a.len()
+        {
             re += a[i].re * b[i].re + a[i].im * b[i].im;
             im += a[i].im * b[i].re - a[i].re * b[i].im;
         }
@@ -258,13 +268,16 @@ pub fn complex_norm_l2_f32(v: &[Complex<f32>]) -> f32 {
         let mut acc = f32x8::splat(0.0);
         let (pre, mid, suf) = v_f.as_simd::<8>();
         let mut scalar_acc = 0.0f32;
-        for x in pre {
+        for x in pre
+        {
             scalar_acc += x * x;
         }
-        for vx in mid {
+        for vx in mid
+        {
             acc += vx * vx;
         }
-        for x in suf {
+        for x in suf
+        {
             scalar_acc += x * x;
         }
         (scalar_acc + acc.reduce_sum()).sqrt()
@@ -290,7 +303,8 @@ mod tests {
         let mut dst = vec![Complex::new(1.0f32, 2.0); 5];
         let src = vec![Complex::new(3.0f32, -1.0); 5];
         complex_add_f32(&mut dst, &src);
-        for c in &dst {
+        for c in &dst
+        {
             assert!((c.re - 4.0).abs() < 1e-6);
             assert!((c.im - 1.0).abs() < 1e-6);
         }
@@ -319,7 +333,8 @@ mod tests {
         let mut dst = vec![Complex::ZERO; 4];
         complex_mul_f32(&mut dst, &a, &b);
 
-        for i in 0..4 {
+        for i in 0..4
+        {
             let expected = a[i].mul(b[i]);
             assert!(
                 (dst[i].re - expected.re).abs() < 1e-4,

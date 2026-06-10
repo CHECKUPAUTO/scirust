@@ -26,7 +26,14 @@ pub fn generate_keypair(_bit_size: u64) -> (PaillierPublicKey, PaillierPrivateKe
     let g = &n + BigUint::one();
     let mu = mod_inverse(&lambda, &n).unwrap_or_else(BigUint::one);
 
-    (PaillierPublicKey { n: n.clone(), g, nn }, PaillierPrivateKey { lambda, mu, n })
+    (
+        PaillierPublicKey {
+            n: n.clone(),
+            g,
+            nn,
+        },
+        PaillierPrivateKey { lambda, mu, n },
+    )
 }
 
 pub fn encrypt(plain: &BigUint, pk: &PaillierPublicKey) -> BigUint {
@@ -47,10 +54,17 @@ pub fn add_encrypted(a: &BigUint, b: &BigUint, pk: &PaillierPublicKey) -> BigUin
 }
 
 fn mod_inverse(a: &BigUint, m: &BigUint) -> Option<BigUint> {
-    if a.is_zero() || m.is_zero() { return None; }
+    if a.is_zero() || m.is_zero()
+    {
+        return None;
+    }
     let mut x = BigUint::one();
-    while &x < m {
-        if (&x * a) % m == BigUint::one() { return Some(x); }
+    while &x < m
+    {
+        if (&x * a) % m == BigUint::one()
+        {
+            return Some(x);
+        }
         x += BigUint::one();
     }
     None

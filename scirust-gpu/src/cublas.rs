@@ -28,7 +28,8 @@ pub fn matmul_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32
 
     HANDLE.with(|h| {
         let mut slot = h.borrow_mut();
-        if slot.is_none() {
+        if slot.is_none()
+        {
             let ctx = CudaContext::new(0).expect("init contexte CUDA");
             let stream = ctx.default_stream();
             let blas = CudaBlas::new(stream.clone()).expect("init cuBLAS");
@@ -68,10 +69,13 @@ mod tests {
 
     fn matmul_cpu(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
         let mut c = vec![0.0f32; m * n];
-        for i in 0..m {
-            for kk in 0..k {
+        for i in 0..m
+        {
+            for kk in 0..k
+            {
                 let av = a[i * k + kk];
-                for j in 0..n {
+                for j in 0..n
+                {
                     c[i * n + j] += av * b[kk * n + j];
                 }
             }
@@ -86,14 +90,18 @@ mod tests {
     fn errs(g: &[f32], c: &[f32]) -> (f32, f32) {
         let mut max_abs = 0.0f32;
         let mut max_rel = 0.0f32;
-        for (x, y) in g.iter().zip(c) {
+        for (x, y) in g.iter().zip(c)
+        {
             let e = (x - y).abs();
-            if e > max_abs {
+            if e > max_abs
+            {
                 max_abs = e;
             }
-            if y.abs() > 1e-2 {
+            if y.abs() > 1e-2
+            {
                 let r = e / y.abs();
-                if r > max_rel {
+                if r > max_rel
+                {
                     max_rel = r;
                 }
             }
@@ -107,7 +115,12 @@ mod tests {
         let a: Vec<f32> = (0..m * k).map(|i| ((i % 13) as f32 - 6.0) * 0.1).collect();
         let b: Vec<f32> = (0..k * n).map(|i| ((i % 7) as f32 - 3.0) * 0.1).collect();
         let (ma, mr) = errs(&matmul_f32(&a, &b, m, k, n), &matmul_cpu(&a, &b, m, k, n));
-        assert!(ma < 1e-2 && mr < 1e-3, "carre 512: abs={:.2e} rel={:.2e}", ma, mr);
+        assert!(
+            ma < 1e-2 && mr < 1e-3,
+            "carre 512: abs={:.2e} rel={:.2e}",
+            ma,
+            mr
+        );
     }
 
     #[test]
@@ -117,6 +130,11 @@ mod tests {
         let a: Vec<f32> = (0..m * k).map(|i| ((i % 5) as f32 - 2.0) * 0.2).collect();
         let b: Vec<f32> = (0..k * n).map(|i| ((i % 9) as f32 - 4.0) * 0.05).collect();
         let (ma, mr) = errs(&matmul_f32(&a, &b, m, k, n), &matmul_cpu(&a, &b, m, k, n));
-        assert!(ma < 1e-2 && mr < 1e-3, "non-carre 64x128x32: abs={:.2e} rel={:.2e}", ma, mr);
+        assert!(
+            ma < 1e-2 && mr < 1e-3,
+            "non-carre 64x128x32: abs={:.2e} rel={:.2e}",
+            ma,
+            mr
+        );
     }
 }

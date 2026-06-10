@@ -1,13 +1,13 @@
-//! Integration test (requires `--features core`):
-//! after TT-decomposing a Linear layer, the TTLinear's reconstructed weight
-//! should agree with the original within the SVD truncation tolerance.
+//! Integration test: after TT-decomposing a Linear layer, the TTLinear's
+//! reconstructed weight should agree with the original within the SVD
+//! truncation tolerance.
 //!
 //! The Phase 1 forward path uses `reconstruct_weight()` internally, so this
 //! test exercises the full pipeline that `forward()` relies on.
 
-#![cfg(feature = "core")]
-
+use scirust_core::nn::init::Zeros;
 use scirust_core::nn::Linear;
+use scirust_core::nn::PcgEngine;
 use scirust_tn::{auto_factorize, tt_decompose, tt_decompose_auto};
 
 fn frob_err(a: &[f32], b: &[f32]) -> f32 {
@@ -18,11 +18,16 @@ fn frob_norm(a: &[f32]) -> f32 {
     a.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
+fn make_linear(in_features: usize, out_features: usize) -> Linear {
+    let mut rng = PcgEngine::new(42);
+    Linear::new(in_features, out_features, &Zeros, &Zeros, &mut rng)
+}
+
 #[test]
 fn ttlinear_matches_linear_full_rank() {
     let in_features = 48;
     let out_features = 96;
-    let mut linear = Linear::new(in_features, out_features);
+    let mut linear = make_linear(in_features, out_features);
     for i in 0..in_features {
         for j in 0..out_features {
             linear.weight.data[i * out_features + j] = ((i * 7 + j * 3) as f32).sin();
@@ -43,7 +48,7 @@ fn ttlinear_matches_linear_full_rank() {
 
 #[test]
 fn ttlinear_auto_factorize_works() {
-    let linear = Linear::new(64, 128);
+    let linear = make_linear(64, 128);
     let tt = tt_decompose_auto(&linear, 3, 16, 1e-4);
     assert_eq!(tt.in_dims.iter().product::<usize>(), 64);
     assert_eq!(tt.out_dims.iter().product::<usize>(), 128);
@@ -65,7 +70,7 @@ fn auto_factorize_balanced() {
 fn ttlinear_compression_reports() {
     let in_features = 64;
     let out_features = 64;
-    let mut linear = Linear::new(in_features, out_features);
+    let mut linear = make_linear(in_features, out_features);
     // Synthetic low-rank weight: 2 outer products
     for i in 0..in_features {
         for j in 0..out_features {

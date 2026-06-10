@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::core::Reasoner;
+use std::collections::HashMap;
 
 pub struct CspSolver {
     pub domains: HashMap<String, Vec<i32>>,

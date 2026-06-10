@@ -12,4 +12,4 @@ pub mod symbolic_bridge;
 pub mod unified;
 
 pub use symbolic_bridge::{expr_to_closure, extract_polynomial_coeffs};
-pub use unified::{solve, solve_in_interval, SolveResult};
+pub use unified::{SolveResult, solve, solve_in_interval};

@@ -1,4 +1,4 @@
-use crate::core::{Result, Reasoner};
+use crate::core::{Reasoner, Result};
 
 pub struct ProbabilisticLogic {
     pub confidence_threshold: f64,
@@ -6,7 +6,9 @@ pub struct ProbabilisticLogic {
 
 impl ProbabilisticLogic {
     pub fn new(threshold: f64) -> Self {
-        Self { confidence_threshold: threshold }
+        Self {
+            confidence_threshold: threshold,
+        }
     }
 
     pub fn infer_probability(&self, _event: &str) -> Result<f64> {

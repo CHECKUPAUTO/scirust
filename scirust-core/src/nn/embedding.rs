@@ -61,7 +61,8 @@ impl Module for Embedding {
         let input_t = tape.value(input.idx());
         let n = input_t.rows * input_t.cols;
         let mut indices = Vec::with_capacity(n);
-        for i in 0..n {
+        for i in 0..n
+        {
             let idx = input_t.data[i] as u32;
             assert!(
                 (idx as usize) < self.vocab_size,
@@ -79,14 +80,16 @@ impl Module for Embedding {
 
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        if let Some(i) = self.last_w_idx {
+        if let Some(i) = self.last_w_idx
+        {
             v.push(i);
         }
         v
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_w_idx {
+        if let Some(i) = self.last_w_idx
+        {
             self.weight = tape.value(i);
         }
     }
@@ -101,7 +104,8 @@ impl Module for Embedding {
         let w = sd
             .get(&format!("{}.weight", self.name))
             .ok_or_else(|| format!("missing key: {}.weight", self.name))?;
-        if w.shape() != (self.vocab_size, self.embedding_dim) {
+        if w.shape() != (self.vocab_size, self.embedding_dim)
+        {
             return Err(format!(
                 "weight shape mismatch: expected {:?}, got {:?}",
                 (self.vocab_size, self.embedding_dim),

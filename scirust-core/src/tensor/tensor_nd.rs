@@ -91,7 +91,8 @@ impl TensorND {
             indices.len()
         );
         let mut off = 0usize;
-        for (i, &idx) in indices.iter().enumerate() {
+        for (i, &idx) in indices.iter().enumerate()
+        {
             assert!(
                 idx < self.shape[i],
                 "index {} out of bounds for axis {} (dim {})",
@@ -118,7 +119,8 @@ impl TensorND {
     // ------------------------------------------------------------------
     pub fn reshape(&self, new_shape: &[usize]) -> Result<Self, String> {
         let new_numel: usize = new_shape.iter().product();
-        if new_numel != self.numel() {
+        if new_numel != self.numel()
+        {
             return Err(format!(
                 "reshape: cannot reshape {:?} (numel={}) into {:?} (numel={})",
                 self.shape,
@@ -139,7 +141,8 @@ impl TensorND {
     }
 
     pub fn flatten_from(&self, start_axis: usize) -> Result<Self, String> {
-        if start_axis > self.ndim() {
+        if start_axis > self.ndim()
+        {
             return Err(format!(
                 "flatten_from: start_axis {} > ndim {}",
                 start_axis,
@@ -155,7 +158,8 @@ impl TensorND {
     //  Transpose (permutation d'axes)
     // ------------------------------------------------------------------
     pub fn transpose(&self, axes: &[usize]) -> Result<Self, String> {
-        if axes.len() != self.ndim() {
+        if axes.len() != self.ndim()
+        {
             return Err(format!(
                 "transpose: axes len {} != ndim {}",
                 axes.len(),
@@ -163,15 +167,18 @@ impl TensorND {
             ));
         }
         let mut seen = vec![false; self.ndim()];
-        for &a in axes {
-            if a >= self.ndim() {
+        for &a in axes
+        {
+            if a >= self.ndim()
+            {
                 return Err(format!(
                     "transpose: axis {} out of bounds (ndim {})",
                     a,
                     self.ndim()
                 ));
             }
-            if seen[a] {
+            if seen[a]
+            {
                 return Err(format!("transpose: axis {} appears twice", a));
             }
             seen[a] = true;
@@ -187,16 +194,19 @@ impl TensorND {
         let mut new_indices = vec![0usize; ndim];
         let mut old_indices = vec![0usize; ndim];
         #[allow(clippy::needless_range_loop)]
-        for flat_idx in 0..new_numel {
+        for flat_idx in 0..new_numel
+        {
             // Convertir flat_idx en indices dans le nouveau tenseur
             let mut rem = flat_idx;
-            for i in 0..ndim {
+            for i in 0..ndim
+            {
                 new_indices[i] = rem / new_strides[i];
                 rem %= new_strides[i];
             }
 
             // Trouver l'indice original
-            for i in 0..ndim {
+            for i in 0..ndim
+            {
                 old_indices[axes[i]] = new_indices[i];
             }
 
@@ -215,7 +225,8 @@ impl TensorND {
     //  Slice sur un axe
     // ------------------------------------------------------------------
     pub fn slice_axis(&self, axis: usize, start: usize, end: usize) -> Result<Self, String> {
-        if axis >= self.ndim() {
+        if axis >= self.ndim()
+        {
             return Err(format!(
                 "slice_axis: axis {} out of bounds (ndim {})",
                 axis,
@@ -223,7 +234,8 @@ impl TensorND {
             ));
         }
         let dim = self.shape[axis];
-        if start > end || end > dim {
+        if start > end || end > dim
+        {
             return Err(format!(
                 "slice_axis: invalid range [{}, {}) for axis {} (dim {})",
                 start, end, axis, dim
@@ -242,9 +254,11 @@ impl TensorND {
         let mut new_indices = vec![0usize; ndim];
         let mut old_indices = vec![0usize; ndim];
         #[allow(clippy::needless_range_loop)]
-        for flat_idx in 0..new_numel {
+        for flat_idx in 0..new_numel
+        {
             let mut rem = flat_idx;
-            for i in 0..ndim {
+            for i in 0..ndim
+            {
                 new_indices[i] = rem / new_strides[i];
                 rem %= new_strides[i];
             }
@@ -268,12 +282,15 @@ impl TensorND {
     pub fn can_broadcast_to(&self, target_shape: &[usize]) -> bool {
         let ndim_self = self.ndim();
         let ndim_target = target_shape.len();
-        if ndim_self > ndim_target {
+        if ndim_self > ndim_target
+        {
             return false;
         }
         // Aligner à droite et vérifier les dimensions correspondantes
-        for (&self_dim, &target_dim) in self.shape.iter().rev().zip(target_shape.iter().rev()) {
-            if self_dim != target_dim && self_dim != 1 {
+        for (&self_dim, &target_dim) in self.shape.iter().rev().zip(target_shape.iter().rev())
+        {
+            if self_dim != target_dim && self_dim != 1
+            {
                 return false;
             }
         }
@@ -293,7 +310,8 @@ impl TensorND {
     }
 
     pub fn to_tensor_2d(&self) -> Result<Tensor, String> {
-        if self.ndim() != 2 {
+        if self.ndim() != 2
+        {
             return Err(format!(
                 "to_tensor_2d: expected ndim==2, got ndim=={} (shape {:?})",
                 self.ndim(),
@@ -341,7 +359,8 @@ impl TensorND {
 fn compute_strides(shape: &[usize]) -> Vec<usize> {
     let ndim = shape.len();
     let mut strides = vec![1usize; ndim];
-    for i in (0..ndim - 1).rev() {
+    for i in (0..ndim - 1).rev()
+    {
         strides[i] = strides[i + 1] * shape[i + 1];
     }
     strides

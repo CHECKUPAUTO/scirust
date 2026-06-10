@@ -13,11 +13,9 @@ use tracing::warn;
 const PIVOT_EPS: f64 = 1e-14;
 
 fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
-    if !value.is_finite() {
-        return Err(SolverError::NanDetected {
-            iter: 0,
-            value,
-        });
+    if !value.is_finite()
+    {
+        return Err(SolverError::NanDetected { iter: 0, value });
     }
     Ok(())
 }
@@ -40,19 +38,23 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
     let mut piv = (0..n).collect::<Vec<_>>();
     let mut swap_count = 0;
 
-    for k in 0..n {
+    for k in 0..n
+    {
         // Pivot partiel
         let mut max_idx = k;
         let mut max_val = a[(k, k)].abs();
-        for i in (k + 1)..n {
+        for i in (k + 1)..n
+        {
             let v = a[(i, k)].abs();
             check_finite(v, &format!("LU pivot a[{i},{k}]"))?;
-            if v > max_val {
+            if v > max_val
+            {
                 max_val = v;
                 max_idx = i;
             }
         }
-        if max_val < PIVOT_EPS {
+        if max_val < PIVOT_EPS
+        {
             warn!(
                 target: "solver",
                 "LU: singular matrix at column {k}, max pivot candidate = {max_val:.3e}",
@@ -62,7 +64,8 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
                 pivot: a[(k, k)],
             });
         }
-        if max_idx != k {
+        if max_idx != k
+        {
             a.swap_rows(k, max_idx);
             piv.swap(k, max_idx);
             swap_count += 1;
@@ -70,11 +73,13 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
 
         // Élimination
         let pivot = a[(k, k)];
-        for i in (k + 1)..n {
+        for i in (k + 1)..n
+        {
             let factor = a[(i, k)] / pivot;
             check_finite(factor, &format!("LU factor L[{i},{k}]"))?;
             a[(i, k)] = factor;
-            for j in (k + 1)..n {
+            for j in (k + 1)..n
+            {
                 let aij = a[(i, j)] - factor * a[(k, j)];
                 check_finite(aij, &format!("LU update a[{i},{j}]"))?;
                 a[(i, j)] = aij;
@@ -92,40 +97,48 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
 /// Résout L·U·x = P·b avec une factorisation déjà calculée.
 pub fn solve_lu(lu: &Lu, b: &[f64]) -> SolverResult<Vec<f64>> {
     let n = lu.lu.rows();
-    if b.len() != n {
+    if b.len() != n
+    {
         return Err(SolverError::DimensionMismatch {
             expected: n,
             got: b.len(),
         });
     }
 
-    for (i, &bi) in b.iter().enumerate() {
+    for (i, &bi) in b.iter().enumerate()
+    {
         check_finite(bi, &format!("b[{i}] LU"))?;
     }
 
     // Applique la permutation : b' = P·b
     let mut x = vec![0.0; n];
-    for i in 0..n {
+    for i in 0..n
+    {
         x[i] = b[lu.piv[i]];
     }
 
     // Substitution avant : L·y = b'
-    for i in 0..n {
+    for i in 0..n
+    {
         let mut s = x[i];
-        for j in 0..i {
+        for j in 0..i
+        {
             s -= lu.lu[(i, j)] * x[j];
         }
         x[i] = s;
     }
 
     // Substitution arrière : U·x = y
-    for i in (0..n).rev() {
+    for i in (0..n).rev()
+    {
         let mut s = x[i];
-        for j in (i + 1)..n {
+        for j in (i + 1)..n
+        {
             s -= lu.lu[(i, j)] * x[j];
         }
         let pivot = lu.lu[(i, i)];
-        if pivot.abs() < PIVOT_EPS {
+        if pivot.abs() < PIVOT_EPS
+        {
             warn!(
                 target: "solver",
                 "LU back-substitution: near-singular pivot {pivot:.3e} at row {i}",
@@ -166,16 +179,14 @@ mod tests {
             4,
             4,
             vec![
-                0.0, 2.0, 0.0, 1.0,
-                2.0, 2.0, 3.0, 2.0,
-                4.0, -3.0, 0.0, 1.0,
-                6.0, 1.0, -6.0, -5.0,
+                0.0, 2.0, 0.0, 1.0, 2.0, 2.0, 3.0, 2.0, 4.0, -3.0, 0.0, 1.0, 6.0, 1.0, -6.0, -5.0,
             ],
         );
         let b = vec![0.0, -2.0, -7.0, 6.0];
         let x = solve(a.clone(), &b)?;
         let ax = a.matvec(&x)?;
-        for (axi, bi) in ax.iter().zip(&b) {
+        for (axi, bi) in ax.iter().zip(&b)
+        {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-10);
         }
         Ok(())
@@ -183,27 +194,21 @@ mod tests {
 
     #[test]
     fn determinant_3x3() -> SolverResult<()> {
-        let a = Matrix::from_row_major(
-            3,
-            3,
-            vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 1.0, 0.0, 6.0],
-        );
+        let a = Matrix::from_row_major(3, 3, vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 1.0, 0.0, 6.0]);
         assert_relative_eq!(a.determinant()?, 22.0, epsilon = 1e-12);
         Ok(())
     }
 
     #[test]
     fn inverse_3x3() -> SolverResult<()> {
-        let a = Matrix::from_row_major(
-            3,
-            3,
-            vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 1.0, 0.0, 6.0],
-        );
+        let a = Matrix::from_row_major(3, 3, vec![1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 1.0, 0.0, 6.0]);
         let inv = a.inverse()?;
         let prod = a.matmul(&inv)?;
         let id = Matrix::identity(3);
-        for i in 0..3 {
-            for j in 0..3 {
+        for i in 0..3
+        {
+            for j in 0..3
+            {
                 assert_relative_eq!(prod[(i, j)], id[(i, j)], epsilon = 1e-10);
             }
         }

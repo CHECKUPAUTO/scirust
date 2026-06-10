@@ -67,7 +67,8 @@ impl Sgd {
 
 impl Optimizer for Sgd {
     fn step(&mut self, params: &[usize], tape: &Tape) {
-        for &idx in params {
+        for &idx in params
+        {
             let mut value = tape.value(idx);
             let grad = tape.grad(idx);
             assert_eq!(
@@ -82,10 +83,12 @@ impl Optimizer for Sgd {
                 .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
 
-            for i in 0..value.data.len() {
+            for i in 0..value.data.len()
+            {
                 let mut g = grad.data[i];
                 // Weight decay (L2 regularization)
-                if self.weight_decay > 0.0 {
+                if self.weight_decay > 0.0
+                {
                     g += self.weight_decay * value.data[i];
                 }
                 // Momentum : v = momentum * v + g
@@ -157,7 +160,8 @@ impl Optimizer for Adam {
         let bc1 = 1.0 - self.beta1.powi(self.t as i32); // bias correction 1
         let bc2 = 1.0 - self.beta2.powi(self.t as i32); // bias correction 2
 
-        for &idx in params {
+        for &idx in params
+        {
             let mut value = tape.value(idx);
             let grad = tape.grad(idx);
             assert_eq!(
@@ -176,9 +180,11 @@ impl Optimizer for Adam {
                 .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
 
-            for i in 0..value.data.len() {
+            for i in 0..value.data.len()
+            {
                 let mut g = grad.data[i];
-                if self.weight_decay > 0.0 {
+                if self.weight_decay > 0.0
+                {
                     g += self.weight_decay * value.data[i];
                 }
 
@@ -267,7 +273,8 @@ mod tests {
         let mut opt_no_mom = Sgd::new(lr);
         let mut opt_with_mom = Sgd::new(lr).with_momentum(0.9);
 
-        for _ in 0..3 {
+        for _ in 0..3
+        {
             // Sans momentum
             let tape = Tape::new();
             let xv = tape.input(Tensor::from_vec(vec![x_no_mom], 1, 1));
@@ -348,7 +355,8 @@ mod tests {
         let mut x_value = 0.0_f32;
         let mut opt = Adam::new(lr);
 
-        for _step in 0..n_steps {
+        for _step in 0..n_steps
+        {
             // Tape éphémère par step (la tape accumule les nodes sinon).
             // Le paramètre vit dans une variable Rust normale et est ré-injecté
             // à chaque itération.
@@ -385,7 +393,8 @@ mod tests {
         let mut params = [0.0_f32, 0.0_f32];
         let mut opt = Adam::new(lr);
 
-        for _ in 0..n_steps {
+        for _ in 0..n_steps
+        {
             let tape = Tape::new();
             let x = tape.input(Tensor::from_vec(vec![params[0], params[1]], 1, 2));
             let t = tape.input(Tensor::from_vec(vec![target[0], target[1]], 1, 2));

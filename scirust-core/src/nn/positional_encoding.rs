@@ -20,12 +20,17 @@ pub struct PositionalEncoding {
 impl PositionalEncoding {
     pub fn new(d_model: usize, max_seq_len: usize) -> Self {
         let mut pe = Tensor::zeros(max_seq_len, d_model);
-        for pos in 0..max_seq_len {
-            for i in 0..d_model {
+        for pos in 0..max_seq_len
+        {
+            for i in 0..d_model
+            {
                 let div = 10000_f32.powf(2.0 * (i / 2) as f32 / d_model as f32);
-                let val = if i % 2 == 0 {
+                let val = if i % 2 == 0
+                {
                     (pos as f32 / div).sin()
-                } else {
+                }
+                else
+                {
                     (pos as f32 / div).cos()
                 };
                 pe.data[pos * d_model + i] = val;
@@ -57,15 +62,18 @@ impl PositionalEncoding {
 
         // Construire le PE broadcasté (batch*seq_len, d_model)
         let mut broadcasted = vec![0.0f32; total_rows * d];
-        for b in 0..batch {
-            for pos in 0..seq_len {
-                for i in 0..d {
+        for b in 0..batch
+        {
+            for pos in 0..seq_len
+            {
+                for i in 0..d
+                {
                     broadcasted[(b * seq_len + pos) * d + i] = self.pe.data[pos * d + i];
                 }
             }
         }
         let pe_var = tape.input(Tensor::from_vec(broadcasted, total_rows, d));
-        input.add(pe_var)
+        input.try_add(pe_var).unwrap()
     }
 
     /// Variante pour input 3D (B, T, D) via Var3D.
@@ -123,7 +131,8 @@ mod tests {
     #[test]
     fn pe_values_in_range() {
         let pe = PositionalEncoding::new(16, 32);
-        for &v in &pe.pe.data {
+        for &v in &pe.pe.data
+        {
             assert!((-1.0..=1.0).contains(&v), "PE value out of [-1, 1]: {}", v);
         }
     }
@@ -139,20 +148,23 @@ mod tests {
 
         assert_eq!(yt.shape(), (6, 4));
         // Les 2 premières lignes (batch 0, pos 0 et 1) doivent matcher pe[0..2]
-        for i in 0..4 {
+        for i in 0..4
+        {
             assert!(
                 (yt.data[i] - pe.pe.data[i]).abs() < 1e-6,
                 "batch0 pos0 mismatch at dim {i}"
             );
         }
-        for i in 0..4 {
+        for i in 0..4
+        {
             assert!(
                 (yt.data[4 + i] - pe.pe.data[4 + i]).abs() < 1e-6,
                 "batch0 pos1 mismatch at dim {i}"
             );
         }
         // batch 1 doit avoir les mêmes PE que batch 0
-        for i in 0..4 {
+        for i in 0..4
+        {
             assert!(
                 (yt.data[12 + i] - pe.pe.data[i]).abs() < 1e-6,
                 "batch1 pos0 mismatch at dim {i}"
@@ -180,7 +192,8 @@ mod tests {
         loss.backward();
         let g = tape.grad(x.idx());
         // grad = 1 partout car loss = sum(y) et y = x + pe(const)
-        for &v in &g.data {
+        for &v in &g.data
+        {
             assert!((v - 1.0).abs() < 1e-6, "gradient should be 1, got {}", v);
         }
     }

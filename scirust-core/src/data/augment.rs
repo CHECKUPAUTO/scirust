@@ -62,14 +62,18 @@ impl RandomFlipH {
 impl Transform for RandomFlipH {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
         use rand::random;
-        if random::<f32>() >= self.p {
+        if random::<f32>() >= self.p
+        {
             return;
         }
-        for c in 0..dims.c {
+        for c in 0..dims.c
+        {
             let c_off = c * dims.h * dims.w;
-            for y in 0..dims.h {
+            for y in 0..dims.h
+            {
                 let row_off = c_off + y * dims.w;
-                for x in 0..dims.w / 2 {
+                for x in 0..dims.w / 2
+                {
                     let a = row_off + x;
                     let b = row_off + (dims.w - 1 - x);
                     img.swap(a, b);
@@ -94,15 +98,19 @@ impl RandomFlipV {
 impl Transform for RandomFlipV {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
         use rand::random;
-        if random::<f32>() >= self.p {
+        if random::<f32>() >= self.p
+        {
             return;
         }
-        for c in 0..dims.c {
+        for c in 0..dims.c
+        {
             let c_off = c * dims.h * dims.w;
-            for y in 0..dims.h / 2 {
+            for y in 0..dims.h / 2
+            {
                 let row_a = c_off + y * dims.w;
                 let row_b = c_off + (dims.h - 1 - y) * dims.w;
-                for x in 0..dims.w {
+                for x in 0..dims.w
+                {
                     img.swap(row_a + x, row_b + x);
                 }
             }
@@ -130,16 +138,19 @@ impl RandomCrop {
 
 impl Transform for RandomCrop {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
-        use rand::{thread_rng, Rng};
+        use rand::{Rng, thread_rng};
         let padded_h = dims.h + 2 * self.pad;
         let padded_w = dims.w + 2 * self.pad;
         let mut padded = vec![0.0f32; dims.c * padded_h * padded_w];
 
-        for c in 0..dims.c {
+        for c in 0..dims.c
+        {
             let c_in = c * dims.h * dims.w;
             let c_out = c * padded_h * padded_w;
-            for y in 0..dims.h {
-                for x in 0..dims.w {
+            for y in 0..dims.h
+            {
+                for x in 0..dims.w
+                {
                     let py = y + self.pad;
                     let px = x + self.pad;
                     padded[c_out + py * padded_w + px] = img[c_in + y * dims.w + x];
@@ -151,11 +162,14 @@ impl Transform for RandomCrop {
         let left = thread_rng().gen_range(0..=padded_w - self.crop_w);
 
         let mut out = vec![0.0f32; dims.c * self.crop_h * self.crop_w];
-        for c in 0..dims.c {
+        for c in 0..dims.c
+        {
             let c_out = c * self.crop_h * self.crop_w;
             let c_pad = c * padded_h * padded_w;
-            for y in 0..self.crop_h {
-                for x in 0..self.crop_w {
+            for y in 0..self.crop_h
+            {
+                for x in 0..self.crop_w
+                {
                     let src = c_pad + (top + y) * padded_w + (left + x);
                     out[c_out + y * self.crop_w + x] = padded[src];
                 }
@@ -187,9 +201,11 @@ impl Transform for Normalize {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
         assert_eq!(self.mean.len(), dims.c);
         assert_eq!(self.std.len(), dims.c);
-        for c in 0..dims.c {
+        for c in 0..dims.c
+        {
             let c_off = c * dims.h * dims.w;
-            for i in 0..(dims.h * dims.w) {
+            for i in 0..(dims.h * dims.w)
+            {
                 img[c_off + i] = (img[c_off + i] - self.mean[c]) / self.std[c];
             }
         }
@@ -211,7 +227,8 @@ impl AddGaussianNoise {
 impl Transform for AddGaussianNoise {
     fn apply(&self, img: &mut [f32], _dims: ImageDims) {
         use rand::random;
-        for x in img.iter_mut() {
+        for x in img.iter_mut()
+        {
             let noise: f32 = random::<f32>() * 2.0 - 1.0;
             *x += noise * self.std;
         }
@@ -250,7 +267,8 @@ impl Default for Compose {
 
 impl Transform for Compose {
     fn apply(&self, img: &mut [f32], dims: ImageDims) {
-        for t in &self.transforms {
+        for t in &self.transforms
+        {
             t.apply(img, dims);
         }
     }
@@ -301,7 +319,8 @@ impl AugmentedDataset {
     pub fn sample(&self, idx: usize) -> (Vec<f32>, &[f32]) {
         let (x, y) = self.base.sample(idx);
         let mut x_aug = x.to_vec();
-        for t in &self.transforms {
+        for t in &self.transforms
+        {
             t.apply(&mut x_aug, self.dims);
         }
         (x_aug, y)
@@ -322,7 +341,8 @@ impl super::Dataset for AugmentedDataset {
     fn sample(&self, idx: usize) -> (&[f32], &[f32]) {
         let (x, _y) = self.base.sample(idx);
         let mut x_aug = x.to_vec();
-        for t in &self.transforms {
+        for t in &self.transforms
+        {
             t.apply(&mut x_aug, self.dims);
         }
         // Note: this returns refs to local vec — not safe for trait.

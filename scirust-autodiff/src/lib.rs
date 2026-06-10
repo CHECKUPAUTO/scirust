@@ -1,5 +1,5 @@
-use std::ops::{Add, Sub, Mul, Div, Neg};
 use std::cell::RefCell;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Dual number for forward-mode automatic differentiation.
 ///
@@ -254,7 +254,18 @@ impl Dual {
     pub fn abs(self) -> Dual {
         Dual {
             value: self.value.abs(),
-            deriv: if self.value > 0.0 { self.deriv } else if self.value < 0.0 { -self.deriv } else { 0.0 },
+            deriv: if self.value > 0.0
+            {
+                self.deriv
+            }
+            else if self.value < 0.0
+            {
+                -self.deriv
+            }
+            else
+            {
+                0.0
+            },
         }
     }
 }
@@ -302,15 +313,18 @@ impl Tape {
 
     pub fn backward(&self, out_idx: usize) {
         let mut nodes = self.nodes.borrow_mut();
-        for node in nodes.iter_mut() {
+        for node in nodes.iter_mut()
+        {
             node.grad = 0.0;
         }
         nodes[out_idx].grad = 1.0;
 
-        for i in (0..nodes.len()).rev() {
+        for i in (0..nodes.len()).rev()
+        {
             let grad = nodes[i].grad;
             let deps = nodes[i].deps.clone();
-            for (dep_idx, partial) in deps {
+            for (dep_idx, partial) in deps
+            {
                 nodes[dep_idx].grad += grad * partial;
             }
         }
@@ -341,7 +355,10 @@ impl<'a> Var<'a> {
             grad: 0.0,
             deps,
         });
-        Var { tape: self.tape, idx }
+        Var {
+            tape: self.tape,
+            idx,
+        }
     }
 
     pub fn powi(self, n: i32) -> Var<'a> {
@@ -371,21 +388,30 @@ impl<'a> Var<'a> {
 impl<'a> Add for Var<'a> {
     type Output = Var<'a>;
     fn add(self, rhs: Var<'a>) -> Var<'a> {
-        self.push_op(self.value() + rhs.value(), vec![(self.idx, 1.0), (rhs.idx, 1.0)])
+        self.push_op(
+            self.value() + rhs.value(),
+            vec![(self.idx, 1.0), (rhs.idx, 1.0)],
+        )
     }
 }
 
 impl<'a> Sub for Var<'a> {
     type Output = Var<'a>;
     fn sub(self, rhs: Var<'a>) -> Var<'a> {
-        self.push_op(self.value() - rhs.value(), vec![(self.idx, 1.0), (rhs.idx, -1.0)])
+        self.push_op(
+            self.value() - rhs.value(),
+            vec![(self.idx, 1.0), (rhs.idx, -1.0)],
+        )
     }
 }
 
 impl<'a> Mul for Var<'a> {
     type Output = Var<'a>;
     fn mul(self, rhs: Var<'a>) -> Var<'a> {
-        self.push_op(self.value() * rhs.value(), vec![(self.idx, rhs.value()), (rhs.idx, self.value())])
+        self.push_op(
+            self.value() * rhs.value(),
+            vec![(self.idx, rhs.value()), (rhs.idx, self.value())],
+        )
     }
 }
 
@@ -461,7 +487,7 @@ mod tests {
         let x = Dual::var(std::f64::consts::PI / 2.0);
         let y = x.sin();
         assert!((y.val() - 1.0).abs() < 1e-12);
-        assert!((y.grad() - 0.0).abs() < 1e-12);  // cos(π/2) = 0
+        assert!((y.grad() - 0.0).abs() < 1e-12); // cos(π/2) = 0
     }
 
     #[test]
