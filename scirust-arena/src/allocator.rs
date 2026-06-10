@@ -33,9 +33,18 @@ impl std::fmt::Display for ArenaError {
 
 impl std::error::Error for ArenaError {}
 
-/// Un bloc de mémoire pré-alloué et aligné.
+/// Bloc de 128 octets, aligné sur 128 — force l'alignement du backing.
+#[repr(C, align(128))]
+#[derive(Clone, Copy)]
+struct AlignedBlock([u8; 128]);
+
+/// Un bloc de mémoire pré-alloué et aligné sur 128 octets.
 struct MemoryBlock {
-    /// Pointeur brut vers le bloc (aligné sur ALIGNMENT).
+    /// Backing **possédé** (chaque bloc fait 128 octets, aligné sur 128).
+    /// Conserver ce `Vec` est ce qui garde `ptr` valide — l'oublier provoquait
+    /// un use-after-free (le buffer était libéré dès la fin de `allocate`).
+    backing: Vec<AlignedBlock>,
+    /// Pointeur brut vers le bloc (aligné sur 128).
     ptr: *mut u8,
     /// Taille totale du bloc en bytes.
     capacity: usize,
@@ -45,46 +54,42 @@ unsafe impl Send for MemoryBlock {}
 unsafe impl Sync for MemoryBlock {}
 
 impl MemoryBlock {
-    /// Alloue un bloc de mémoire de taille minimale `min_bytes`, aligné sur ALIGNMENT.
-    /// La mémoire est initialisée à zéro.
+    /// Alloue un bloc de mémoire de taille minimale `min_bytes`, aligné sur 128.
+    /// La mémoire est initialisée à zéro et **possédée** par le bloc.
     fn allocate(min_bytes: usize) -> Result<Self, ArenaError> {
         if min_bytes == 0 {
             return Err(ArenaError::ZeroSized);
         }
 
-        // Aligner la demande sur ALIGNMENT
-        let aligned_size = align_up(min_bytes);
+        let aligned_size = align_up(min_bytes); // multiple de 128
+        let n_blocks = (aligned_size / 128).max(1);
+        let mut backing = vec![AlignedBlock([0u8; 128]); n_blocks];
+        let ptr = backing.as_mut_ptr() as *mut u8;
 
-        // Utilisation de Vec avec alignement garanti via align_to
-        let mut bytes = vec![0u8; aligned_size];
-        let ptr = bytes.as_mut_ptr();
-
-        // Pinning: marquer la mémoire comme pinned via mlock si possible
+        // Pinning best-effort via mlock (ignoré si non disponible / sandbox).
         #[cfg(unix)]
         unsafe {
             use libc::{mlock, munlock};
-            // Vérifier que mlock est lié (souvent non disponible en environnement sandbox)
-            // On ignore l'erreur car mlock peut échouer sans CAP_IPC_LOCK
             let _ = mlock(ptr as *const std::ffi::c_void, aligned_size);
             let _ = munlock(ptr as *const std::ffi::c_void, aligned_size);
         }
 
         Ok(Self {
+            backing,
             ptr,
-            capacity: aligned_size,
+            capacity: n_blocks * 128,
         })
     }
 
     #[inline]
     fn remaining(&self) -> usize {
-        unsafe { self.capacity }
+        self.capacity
     }
 }
 
 impl Drop for MemoryBlock {
     fn drop(&mut self) {
-        // Vec gère le deallocation automatiquement
-        // On ne fait rien de spécial ici
+        // `backing` (Vec) libère automatiquement la mémoire possédée.
     }
 }
 
@@ -185,8 +190,9 @@ impl PinnedArena {
             *elem = T::default();
         }
 
-        self.offset = aligned_offset + n * elem_size;
-        self.allocated_bytes += aligned_offset - self.offset + n * elem_size;
+        let new_offset = aligned_offset + n * elem_size;
+        self.allocated_bytes += new_offset - self.offset; // self.offset is still the old value
+        self.offset = new_offset;
         self.alloc_count += 1;
 
         Ok(slice)
@@ -198,7 +204,7 @@ impl PinnedArena {
     #[inline]
     pub fn alloc_slice_fill<T>(&mut self, n: usize, val: T) -> Result<&mut [T], ArenaError>
     where
-        T: Copy,
+        T: Copy + Default,
     {
         let slice = self.alloc_slice(n)?;
         for elem in slice.iter_mut() {
@@ -221,9 +227,9 @@ impl PinnedArena {
     #[inline]
     pub fn alloc_with<T>(&mut self, val: T) -> Result<&mut T, ArenaError>
     where
-        T: Copy,
+        T: Copy + Default,
     {
-        self.alloc_slice_fill(1, val)
+        self.alloc_slice_fill(1, val).map(|s| &mut s[0])
     }
 
     /// Réinitialise l'arène — toutes les allocations deviennent invalides en O(1).

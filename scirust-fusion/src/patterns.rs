@@ -149,7 +149,7 @@ impl FusionPatterns {
     }
 
     /// Vérifie si la séquence d'opérations correspond à un motif.
-    pub fn match_sequence(&self, ops: &[OpKind]) -> Option<&'static FusionPattern> {
+    pub fn match_sequence(&self, ops: &[OpKind]) -> Option<&FusionPattern> {
         for pattern in &self.patterns {
             if pattern.ops.len() == ops.len() {
                 let all_match = pattern.ops.iter().zip(ops.iter()).all(|(matcher, op)| {

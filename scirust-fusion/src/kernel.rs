@@ -387,3 +387,27 @@ impl Default for KernelParams {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matmul_relu_kernel_computes_relu_of_matmul() {
+        let mut k = FusedKernel::new(KernelType::MatmulRelu, vec![0, 1], vec![], vec![]);
+        k.params = KernelParams {
+            in_features: 2,
+            out_features: 2,
+            tile_size: 64,
+            eps: 1e-5,
+        };
+        // x: (1x2) = [1, 2]; W: (2x2) row-major [k*out+o] = [[1, 0], [0, -1]]
+        let x = [1.0f32, 2.0];
+        let w = [1.0f32, 0.0, 0.0, -1.0];
+        let mut out = [0.0f32; 2];
+        k.execute(&[&x, &w], &mut out);
+        // y0 = relu(1*1 + 2*0) = 1 ; y1 = relu(1*0 + 2*(-1)) = relu(-2) = 0
+        assert_eq!(out, [1.0, 0.0]);
+        assert_eq!(k.op_count(), 2);
+    }
+}

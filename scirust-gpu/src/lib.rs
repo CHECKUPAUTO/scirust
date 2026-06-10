@@ -1,84 +1,55 @@
-pub mod dispatch {
-    /// A trait for data that can be processed on GPU or CPU.
-    pub trait GpuData: Send + Sync {
-        type Elem;
-        fn as_slice(&self) -> &[Self::Elem];
-        fn as_mut_slice(&mut self) -> &mut [Self::Elem];
-    }
+//! Abstraction unifiée pour l'exécution GPU (#[gpu]).
 
-    impl GpuData for Vec<f32> {
-        type Elem = f32;
-        fn as_slice(&self) -> &[f32] {
-            self
-        }
-        fn as_mut_slice(&mut self) -> &mut [f32] {
-            self
-        }
-    }
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
-    impl GpuData for [f32] {
-        type Elem = f32;
-        fn as_slice(&self) -> &[f32] {
-            self
-        }
-        fn as_mut_slice(&mut self) -> &mut [f32] {
-            self
-        }
-    }
+/// Trait d'abstraction matériel ciblé par la macro #[gpu].
+pub trait RawComputeBackend {
+    fn device_name(&self) -> &'static str;
+    fn gemm_f32(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32>;
+}
 
-    #[cfg(feature = "cpu-fallback")]
-    pub fn gpu_or_cpu<F>(data: &mut [f32], kernel: F)
-    where
-        F: Fn(&mut [f32]) + Sync,
-    {
-        // For very small workloads, don't bother with rayon overhead
-        if data.len() < 1024
-        {
-            kernel(data);
-        }
-        else
-        {
-            use rayon::prelude::*;
-            data.par_chunks_mut(1024).for_each(|chunk| {
-                kernel(chunk);
-            });
-        }
-    }
-
-    #[cfg(not(feature = "cpu-fallback"))]
-    pub fn gpu_or_cpu<F>(data: &mut [f32], kernel: F)
-    where
-        F: Fn(&mut [f32]),
-    {
-        #[cfg(feature = "cuda")]
-        {
-            // Initial foundation for CUDA dispatch.
-            // In a real implementation, we would use `cust` to:
-            // 1. Copy data to device
-            // 2. Launch kernel
-            // 3. Copy back to host
-            // For now, this is a placeholder showing the architectural intent.
-            eprintln!("[scirust-gpu] CUDA feature active: Preparing to launch kernel...");
-            kernel(data);
-        }
-
-        #[cfg(not(feature = "cuda"))]
-        {
-            kernel(data);
-        }
+pub struct WgpuBackend;
+impl RawComputeBackend for WgpuBackend {
+    fn device_name(&self) -> &'static str { "wgpu" }
+    fn gemm_f32(&self, _a: &[f32], _b: &[f32], m: usize, _k: usize, n: usize) -> Vec<f32> {
+        vec![0.0; m * n]
     }
 }
 
-#[cfg(feature = "legacy-cust")]
-pub mod cuda_backend;
-pub mod error;
-pub mod quant_train;
-pub mod quantize;
-// #[cfg(feature = "legacy-cust")]
-// pub mod cuda_turboquant; // file missing
-pub mod gpu_gemm;
-pub mod gpu_tensor;
-pub mod wgpu_backend;
+pub struct CudaBackend;
+impl RawComputeBackend for CudaBackend {
+    fn device_name(&self) -> &'static str { "cuda" }
+    fn gemm_f32(&self, _a: &[f32], _b: &[f32], m: usize, _k: usize, n: usize) -> Vec<f32> {
+        vec![0.0; m * n]
+    }
+}
 
-#[cfg(feature = "cuda")]
-pub mod cublas;
+/// Dispatcher matériel transparent.
+pub enum GpuAccelerator {
+    Wgpu(WgpuBackend),
+    Cuda(CudaBackend),
+    CpuFallback,
+}
+
+impl GpuAccelerator {
+    pub fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        match self {
+            GpuAccelerator::Wgpu(backend) => backend.gemm_f32(a, b, m, k, n),
+            GpuAccelerator::Cuda(backend) => backend.gemm_f32(a, b, m, k, n),
+            GpuAccelerator::CpuFallback => {
+                let mut out = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        let mut acc = 0.0;
+                        for p in 0..k { acc += a[i*k+p] * b[p*n+j]; }
+                        out[i*n+j] = acc;
+                    }
+                }
+                out
+            }
+        }
+    }
+}

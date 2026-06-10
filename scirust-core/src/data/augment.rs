@@ -280,11 +280,21 @@ impl Transform for Compose {
 
 use super::InMemoryDataset;
 
-/// Wrapper Dataset qui applique des transforms à la volée.
+/// Wrapper Dataset qui applique des transforms.
+///
+/// L'implémentation du trait `Dataset` doit renvoyer `&[f32]` (durée de vie liée
+/// à `&self`), ce qui interdit d'augmenter à la volée dans `sample()` (la donnée
+/// augmentée serait locale). On **précalcule** donc les entrées augmentées une
+/// fois à la construction (`aug_x`) ; `Dataset::sample` renvoie une référence
+/// vers cette donnée augmentée. Pour une augmentation fraîche à chaque appel,
+/// utiliser la méthode inhérente `sample()` (qui renvoie un `Vec` possédé) ou
+/// `augment_batch()`.
 pub struct AugmentedDataset {
     pub base: InMemoryDataset,
     pub transforms: Vec<Box<dyn Transform>>,
     pub dims: ImageDims,
+    /// Entrées augmentées précalculées (une par échantillon de `base`).
+    aug_x: Vec<Vec<f32>>,
 }
 
 impl AugmentedDataset {
@@ -293,10 +303,12 @@ impl AugmentedDataset {
         transforms: Vec<Box<dyn Transform>>,
         dims: ImageDims,
     ) -> Self {
+        let aug_x = Self::precompute(&base, &transforms, dims);
         Self {
             base,
             transforms,
             dims,
+            aug_x,
         }
     }
     pub fn from_pipeline(
@@ -306,11 +318,33 @@ impl AugmentedDataset {
         h: usize,
         w: usize,
     ) -> Self {
+        let dims = ImageDims::new(_channels, h, w);
+        let transforms = pipeline.transforms;
+        let aug_x = Self::precompute(&base, &transforms, dims);
         Self {
             base,
-            transforms: pipeline.transforms,
-            dims: ImageDims::new(_channels, h, w),
+            transforms,
+            dims,
+            aug_x,
         }
+    }
+
+    /// Applique les transforms à chaque échantillon de `base` une fois.
+    fn precompute(
+        base: &InMemoryDataset,
+        transforms: &[Box<dyn Transform>],
+        dims: ImageDims,
+    ) -> Vec<Vec<f32>> {
+        (0..base.n_samples())
+            .map(|i| {
+                let (x, _y) = base.sample(i);
+                let mut x_aug = x.to_vec();
+                for t in transforms {
+                    t.apply(&mut x_aug, dims);
+                }
+                x_aug
+            })
+            .collect()
     }
     pub fn with_seed(self, _seed: u64) -> Self {
         self
@@ -339,19 +373,10 @@ impl AugmentedDataset {
 
 impl super::Dataset for AugmentedDataset {
     fn sample(&self, idx: usize) -> (&[f32], &[f32]) {
-        let (x, _y) = self.base.sample(idx);
-        let mut x_aug = x.to_vec();
-        for t in &self.transforms
-        {
-            t.apply(&mut x_aug, self.dims);
-        }
-        // Note: this returns refs to local vec — not safe for trait.
-        // We store in a Box leak to satisfy trait lifetime.
-        // Better: change trait to return owned or use thread_local.
-        // For now, return base sample without augment to satisfy compiler.
-        // FIXME: AugmentedDataset.sample() returns unaugmented data due to borrow-checker.
-        // Use augment_batch() instead for actual augmentation.
-        self.base.sample(idx)
+        // Renvoie l'entrée augmentée précalculée (durée de vie liée à `&self`),
+        // et le label d'origine inchangé.
+        let (_x, y) = self.base.sample(idx);
+        (&self.aug_x[idx], y)
     }
     fn n_samples(&self) -> usize {
         self.base.n_samples()
@@ -377,6 +402,20 @@ mod tests {
         // Row 0: [1,2,3] -> [3,2,1]
         // Row 1: [4,5,6] -> [6,5,4]
         assert_eq!(img, vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
+    }
+
+    #[test]
+    fn dataset_trait_sample_returns_augmented_data() {
+        // Regression: the `Dataset::sample` impl used to return the *unaugmented*
+        // base sample (FIXME workaround). It must now return augmented data.
+        use crate::data::Dataset;
+        let base = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![0.0], 6, 1);
+        let dims = ImageDims::new(1, 2, 3);
+        let transforms: Vec<Box<dyn Transform>> = vec![Box::new(RandomFlipH { p: 1.0 })];
+        let ds = AugmentedDataset::new(base, transforms, dims);
+        let ds_ref: &dyn Dataset = &ds;
+        let (x, _y) = ds_ref.sample(0);
+        assert_eq!(x, &[3.0, 2.0, 1.0, 6.0, 5.0, 4.0], "Dataset::sample must return augmented (flipped) data");
     }
 
     #[test]

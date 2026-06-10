@@ -521,7 +521,37 @@ By using a fixed reduction order in all tensor contractions, we ensure bit-for-b
 ### 12.5 Limitations
 The graph compiler is currently restricted to static shapes. Dynamic shape support and JIT-compilation of kernels for arbitrary fusion patterns remain as future work.
 
-## 13. Conclusion
+## 13. Deterministic Event Detection and Classification
+
+### 13.1 Motivation
+Real-time event detection in critical systems (e.g., neuroprosthetics or industrial control) requires not only high accuracy but also absolute determinism for auditability and certification. Current frameworks often rely on non-deterministic parallel reduction or stochastic sampling, which is unsuitable for high-stakes environments.
+
+### 13.2 Methodology
+We introduce a streaming architecture based on deterministic sliding windows. Each window $W$ of size $N$ is transformed into a tensor $T \in \mathbb{R}^{1 \times N}$. Event detection is formulated as a score function $S(T) \to [0, 1]$.
+For classification, we utilize the framework's core MLP and CNN layers, frozen into the SRT1 format.
+$$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
+where $\tau$ is a calibrated threshold.
+
+### 13.3 Results and Metrics
+Expected performance on the Numenta Anomaly Benchmark (NAB) targets an F1-score of $>0.85$ with zero bit-drift across multiple threads. The use of QSR1 int8 quantization is expected to reduce latency by $3\times$ on edge ARM processors while maintaining an MSE bit-closeness of $<10^{-4}$ compared to the f32 oracle.
+
+## 14. Advanced Neuro-Symbolic Integration
+
+### 14.1 Overview
+We introduce `scirust-neuro-symbolic`, a crate dedicated to hybrid AI architectures. It bridges the gap between connectionist models (tensors) and symbolic logic (rules/solvers).
+
+### 14.2 Differentiable Logic
+By implementing fuzzy logic operators (Product T-norm) as tensor operations, we allow logic constraints to be integrated directly into the gradient descent optimization path.
+$$ \text{AND}(a, b) = a \cdot b $$
+$$ \text{OR}(a, b) = a + b - a \cdot b $$
+
+### 14.3 Formal Solvers and E-Graphs
+The crate provides a CDCL SAT solver and an E-Graph engine for equality saturation, enabling symbolic simplification and formal verification of neural network properties or synthesized programs.
+
+### 14.4 Conclusion
+The addition of neuro-symbolic capabilities positions SciRust as a versatile platform for AGI research, enabling models that can both learn from data and reason over structured knowledge.
+
+## 15. Conclusion
 
 SciRust is a pure-Rust deep learning framework — a hybrid runtime and transpiler — on
 which four capabilities were built and validated: a portable GPU and Tensor Core
@@ -545,33 +575,3 @@ The next steps follow directly: a GPU-accelerated forward path reusing the valid
 cuBLAS backend for dense layers, a three-dimensional inference path for
 attention-based models, and supply-chain pinning to extend the runtime's auditability
 from its weights to its build.
-
-## 14. Deterministic Event Detection and Classification
-
-### 14.1 Motivation
-Real-time event detection in critical systems (e.g., neuroprosthetics or industrial control) requires not only high accuracy but also absolute determinism for auditability and certification. Current frameworks often rely on non-deterministic parallel reduction or stochastic sampling, which is unsuitable for high-stakes environments.
-
-### 14.2 Methodology
-We introduce a streaming architecture based on deterministic sliding windows. Each window $W$ of size $N$ is transformed into a tensor $T \in \mathbb{R}^{1 \times N}$. Event detection is formulated as a score function $S(T) \to [0, 1]$.
-For classification, we utilize the framework's core MLP and CNN layers, frozen into the SRT1 format.
-$$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
-where $\tau$ is a calibrated threshold.
-
-### 14.3 Results and Metrics
-Expected performance on the Numenta Anomaly Benchmark (NAB) targets an F1-score of $>0.85$ with zero bit-drift across multiple threads. The use of QSR1 int8 quantization is expected to reduce latency by $3\times$ on edge ARM processors while maintaining an MSE bit-closeness of $<10^{-4}$ compared to the f32 oracle.
-
-## 12. Advanced Neuro-Symbolic Integration
-
-### 12.1 Overview
-We introduce `scirust-neuro-symbolic`, a crate dedicated to hybrid AI architectures. It bridges the gap between connectionist models (tensors) and symbolic logic (rules/solvers).
-
-### 12.2 Differentiable Logic
-By implementing fuzzy logic operators (Product T-norm) as tensor operations, we allow logic constraints to be integrated directly into the gradient descent optimization path.
-$$ \text{AND}(a, b) = a \cdot b $$
-$$ \text{OR}(a, b) = a + b - a \cdot b $$
-
-### 12.3 Formal Solvers and E-Graphs
-The crate provides a CDCL SAT solver and an E-Graph engine for equality saturation, enabling symbolic simplification and formal verification of neural network properties or synthesized programs.
-
-### 12.4 Conclusion
-The addition of neuro-symbolic capabilities positions SciRust as a versatile platform for AGI research, enabling models that can both learn from data and reason over structured knowledge.

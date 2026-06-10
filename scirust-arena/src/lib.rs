@@ -16,11 +16,11 @@
 //! ```
 //! use scirust_arena::PinnedArena;
 //!
-//! let arena = PinnedArena::new::<f32>(1 << 20); // 1 MB
+//! let mut arena = PinnedArena::new(1 << 20); // 1 MB
 //!
 //! // O(1) allocations
-//! let x = arena.alloc_slice_fill(768, 0.0);
-//! let y = arena.alloc_slice_fill(768, 0.0);
+//! let x = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
+//! let y = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
 //!
 //! // Reset — toutes les allocations deviennent invalides en O(1)
 //! arena.reset();
