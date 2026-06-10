@@ -6,10 +6,10 @@
 //! - Détection de colinéarité : si centroid == worst, on réinitialise le simplex
 //! - Plus de `.unwrap()` sur `partial_cmp`
 
-use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
+use crate::{Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
-fn check_finite(v: f64, label: &str) -> Result<(), SolverError> {
+fn check_finite(v: f64, _label: &str) -> Result<(), SolverError> {
     if !v.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value: v });

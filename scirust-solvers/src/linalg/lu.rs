@@ -12,7 +12,7 @@ use tracing::warn;
 
 const PIVOT_EPS: f64 = 1e-14;
 
-fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });

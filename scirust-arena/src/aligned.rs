@@ -165,6 +165,7 @@ impl<T: Copy> From<Vec<T>> for AlignedVec {
 }
 
 /// Extension pour `Vec<T>`: convertir en AlignedVec.
+#[allow(dead_code)]
 pub trait ToAligned<T: Copy>: Sized {
     fn to_aligned(self) -> AlignedVec;
 }

@@ -8,12 +8,12 @@
 //! - Réinitialisation de la jacobienne si singulière (DF)
 
 use crate::linalg::{self, Matrix};
-use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
+use crate::{Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
 const JACOBIAN_H: f64 = 1e-7;
 
-fn check_finite(value: f64, label: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64, _label: &str) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });

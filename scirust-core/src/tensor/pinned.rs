@@ -255,6 +255,7 @@ impl PinnedPool {
 }
 
 /// Buffer emprunté du pool.
+#[allow(dead_code)]
 pub struct PooledBuffer {
     pool: *mut (),
     idx: usize,

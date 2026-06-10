@@ -21,7 +21,7 @@ const PIVOT_EPS: f64 = 1e-30;
 const DIVERGENCE_RATIO: f64 = 10.0;
 
 /// Vérifie qu'un scalaire n'est ni NaN ni Inf.
-fn check_finite(value: f64, label: &str, iter: usize) -> Result<(), SolverError> {
+fn check_finite(value: f64, _label: &str, iter: usize) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter, value });
@@ -52,7 +52,7 @@ where
     }
 
     // Vérifier que les entrées sont finies
-    for (i, &bi) in b.iter().enumerate()
+    for (_i, &bi) in b.iter().enumerate()
     {
         check_finite(bi, "b", 0)?;
     }

@@ -27,7 +27,7 @@ const MAX_FACTOR: f64 = 5.0;
 
 const MAX_STEPS: usize = 100_000;
 
-fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });

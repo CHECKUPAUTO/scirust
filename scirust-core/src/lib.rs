@@ -18,15 +18,12 @@ pub mod matrix {
 }
 
 pub mod autodiff;
-// pub mod optim;
-// pub mod scheduler;
-// pub mod reverse;
+pub mod optim;
 
-// pub mod lazy;
+
 
 pub mod data;
 pub mod embed;
-pub mod simd;
 pub mod tensor;
 pub mod tn;
 
@@ -61,3 +58,10 @@ pub mod compute_backend;
 pub mod homomorphic;
 pub mod quantization;
 pub mod xai;
+pub mod checkpoint;
+
+pub mod amp;
+pub mod distributed;
+pub mod dp;
+pub mod logging;
+pub mod pruning;

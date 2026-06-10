@@ -11,11 +11,11 @@
 //!   - `newton_system_jac` : F et J fournies séparément
 
 use crate::linalg::{self, Matrix};
-use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
+use crate::{Solution, SolverError, SolverResult, Tolerance};
 use scirust_autodiff::Dual;
 use tracing::warn;
 
-fn check_finite(value: f64, location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });

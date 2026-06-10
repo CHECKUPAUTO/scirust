@@ -8,9 +8,8 @@
 //! y_{n+1} = y_n + h/6 · (k1 + 2 k2 + 2 k3 + k4)
 //! ```
 
-use crate::SolverResult;
 
-fn check_finite(value: f64, label: &str) -> Result<(), crate::SolverError> {
+fn check_finite(value: f64, _label: &str) -> Result<(), crate::SolverError> {
     if !value.is_finite()
     {
         return Err(crate::SolverError::NanDetected { iter: 0, value });

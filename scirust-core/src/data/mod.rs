@@ -122,6 +122,7 @@ impl Dataset for InMemoryDataset {
 }
 
 pub mod augment;
+pub mod dataloader;
 pub mod cifar10;
 pub mod loader;
 pub mod mnist;

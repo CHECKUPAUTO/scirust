@@ -25,7 +25,7 @@ bit-for-bit under fixed-point requantization, that shrinks model weights roughly
 fourfold. A single methodological throughline connects them: every primitive is
 accepted only after its output matches a reference oracle, and reproducibility is
 treated as a first-class, measured property — in several cases bit-for-bit.
-Against the framework's baseline (255 passing tests; MNIST 97.70%), these
+Against the framework's baseline (579 passing tests; MNIST 97.70%), these
 contributions establish SciRust as a substantive, reproducible research artifact.
 
 ---
@@ -70,7 +70,7 @@ hybrid runtime-plus-transpiler rather than a fixed runtime alone. The CPU numeri
 are pure Rust with no mandatory BLAS dependency, which — as Section 4 shows — is
 precisely what made cross-architecture portability straightforward.
 
-The framework's baseline validation comprises **255 passing tests** and several
+The framework's baseline validation comprises **579 passing tests** and several
 end-to-end demonstrations: MNIST classification at **97.70%** with bit-identical
 loss curves across epochs (the strongest non-regression signal the project uses), a
 transformer reaching **100%** on a synthetic majority-vote task, and a CIFAR-10

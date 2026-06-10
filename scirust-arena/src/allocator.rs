@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # PinnedArena — Allocator par bump pointer deterministe
 //!
 //! L'allocation se fait par simple incrémentation d'un pointeur (bump pointer),

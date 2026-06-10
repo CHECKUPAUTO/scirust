@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 //! # FusionPipeline — Pipeline de détection et génération de kernels fusionnés
 //!
 //! Le pipeline prend un `OpGraph` (graphe de dépendance) et:

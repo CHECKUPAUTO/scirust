@@ -65,6 +65,8 @@ members = [
     "scirust-tensor-compile",
     "scirust-tensor-runtime",
     "scirust-tensor-examples",
+    "scirust-onnx",
+    "scirust-nas",
 ]
 exclude = [
     "scirust-rustc-driver",

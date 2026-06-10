@@ -22,7 +22,7 @@ impl TensorND {
     //  Constructeurs
     // ------------------------------------------------------------------
     pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
-        let numel = shape.iter().product();
+        let numel: usize = shape.iter().product();
         assert_eq!(
             data.len(),
             numel,
@@ -39,7 +39,7 @@ impl TensorND {
     }
 
     pub fn zeros(shape: &[usize]) -> Self {
-        let numel = shape.iter().product();
+        let numel: usize = shape.iter().product();
         Self {
             data: vec![0.0; numel],
             shape: shape.to_vec(),
@@ -48,7 +48,7 @@ impl TensorND {
     }
 
     pub fn ones(shape: &[usize]) -> Self {
-        let numel = shape.iter().product();
+        let numel: usize = shape.iter().product();
         Self {
             data: vec![1.0; numel],
             shape: shape.to_vec(),

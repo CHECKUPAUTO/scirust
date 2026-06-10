@@ -61,7 +61,8 @@ pub struct AdamW {
     beta1: f32,            // Default: 0.9 (exponential decay for mean)
     beta2: f32,            // Default: 0.999 (exponential decay for variance)
     epsilon: f32,          // Default: 1e-8
-    weight_decay: f32,     // Default: 0.01 (decoupled weight decay)
+    #[allow(dead_code)]
+    pub weight_decay: f32,     // Default: 0.01 (decoupled weight decay)
     m: HashMap<String, Vec<f32>>,  // First moment (mean)
     v: HashMap<String, Vec<f32>>,  // Second moment (variance)
     t: u32,                // Timestep for bias correction
@@ -120,7 +121,8 @@ pub struct LAMB {
     beta1: f32,
     beta2: f32,
     epsilon: f32,
-    weight_decay: f32,
+    #[allow(dead_code)]
+    pub weight_decay: f32,
     m: HashMap<String, Vec<f32>>,
     v: HashMap<String, Vec<f32>>,
     t: u32,

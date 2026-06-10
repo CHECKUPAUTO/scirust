@@ -36,7 +36,7 @@ by measurements.
 Every result below is reproduced by code in this repository and documented in the
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
-- **Deep-learning core + reverse-mode autodiff** — 255 passing tests; an MLP reaches 97.70% on MNIST.
+- **Deep-learning core + reverse-mode autodiff** — 579 passing tests; an MLP reaches 97.70% on MNIST.
 - **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reaches ~63 TFLOPS.
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
@@ -148,6 +148,19 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Flash Attention | ✅ Stable (module flash_attention.rs) |
 | Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
 | Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |
+| Checkpointing (save/resume training) | ✅ New |
+| DataLoader (batching, shuffle, prefetch) | ✅ New |
+| ONNX export | ✅ New |
+| Automatic Mixed Precision (AMP) | ✅ New |
+| Differential Privacy (DP-SGD) | ✅ New |
+| Model pruning (magnitude, structured, LTH) | ✅ New |
+| Distributed training (all-reduce) | ✅ New |
+| TensorBoard / CSV logging | ✅ New |
+| Neural Architecture Search (NAS) | ✅ New |
+| Advanced optimizers (RMSprop, AdamW, LAMB) | ✅ New |
+| Fused ops (matmul+SiLU, matmul+GELU, etc.) | ✅ New |
+| HPC im2col (cache-aware) | ✅ New |
+
 
 ## Package layout: framework library vs. bundled agent
 

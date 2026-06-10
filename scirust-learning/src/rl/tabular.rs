@@ -1,4 +1,3 @@
-use super::{Agent, Env};
 use rand::Rng;
 use std::collections::HashMap;
 use std::hash::Hash;

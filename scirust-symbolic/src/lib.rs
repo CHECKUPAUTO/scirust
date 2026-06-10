@@ -469,8 +469,11 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
         },
         Expr::Abs(a) =>
         {
-            // d/dx |u| = sign(u) * du  (stub: just du)
-            diff(a, var)
+            // d/dx |u| = sign(u) * du  where sign(u) = u / |u|
+            Expr::Mul(
+                Box::new(Expr::Div(a.clone(), Box::new(Expr::Abs(a.clone())))),
+                Box::new(diff(a, var)),
+            )
         },
     }
 }

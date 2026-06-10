@@ -68,7 +68,7 @@ scirust-core = { path = "..." }
 
 ### Compiler et Tester
 - **Vérifier le projet** : `cargo check --workspace`
-- **Lancer tous les tests** (plus de 250 tests valident le framework) : `cargo test --workspace`
+- **Lancer tous les tests** (plus de 550 tests valident le framework) : `cargo test --workspace`
 - **Compiler en mode optimisé** (recommandé pour l'IA) : `cargo build --release`
 - **Activer le support GPU** : Ajoutez `--features wgpu` à vos commandes.
 
@@ -201,7 +201,44 @@ let b = Tensor::from_vec(vec![0.7], 1, 1);
 let result = layer.fuzzy_and(&a, &b); // 0.56
 ```
 
-## 10. Conclusion
+
+
+## 11. Nouvelles Fonctionnalités (v0.14-dev)
+
+### Checkpointing & Reprise d'Entraînement
+Sauvegarde et restauration complète de l'état d'entraînement (poids + optimiseur + époque). Format JSON interopérable.
+
+### DataLoader avec Batch/Shuffle/Prefetch
+Itérateur de mini-batch avec mélange Fisher-Yates déterministe, seeds reproductibles, et option drop_last.
+
+### ONNX Export
+Export des modèles au format ONNX (JSON intermédiaire) pour interopérabilité avec ONNX Runtime, Netron, et les chaînes de déploiement.
+
+### Automatic Mixed Precision (AMP)
+Entraînement en précision mixte FP16/BF16 avec loss scaling dynamique et détection d'overflow.
+
+### Differential Privacy (DP-SGD)
+Protection de la vie privée via clipping des gradients + bruit gaussien calibré. Moments accountant pour le suivi du budget (ε, δ).
+
+### Model Pruning
+Élagage par magnitude, structuré (colonnes/lignes), et Lottery Ticket Hypothesis avec rewinding.
+
+### Distributed Training
+Primitives all-reduce en ring topology pour l'entraînement data-parallèle multi-processus.
+
+### TensorBoard Logging
+Enregistrement de métriques au format CSV et TensorBoard pour visualisation en temps réel.
+
+### Neural Architecture Search (NAS)
+Recherche évolutionnaire d'architectures sur l'espace (couches, dimensions, activations) avec optimisation multi-objectif.
+
+### Optimiseurs Avancés
+RMSprop, AdamW (weight decay découplé), et LAMB (Layer-wise Adaptive Moments) désormais accessibles.
+
+### Opérations Fusionnées
+Kernels matmul+SiLU, matmul+GELU, matmul+LayerNorm en un seul passage mémoire pour réduire la pression sur la bande passante.
+
+## 12. Conclusion
 
 SciRust est le framework de choix pour ceux qui privilégient la **compréhension** et la **rigueur** sur la vitesse brute ou la facilité de Python. C'est un outil puissant pour bâtir une IA de confiance, de la recherche à l'embarqué.
 

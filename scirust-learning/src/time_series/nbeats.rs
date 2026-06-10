@@ -1,4 +1,4 @@
-use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
+use scirust_core::autodiff::reverse::{Tape, Var};
 use scirust_core::nn::init::Initializer;
 use scirust_core::nn::linear::Linear;
 use scirust_core::nn::module::Module;

@@ -1,5 +1,5 @@
 use scirust_core::autodiff::optim::{Adam, Optimizer};
-use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
+use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::nn::Module;
 
 /// PPO (Proximal Policy Optimization) agent logic.

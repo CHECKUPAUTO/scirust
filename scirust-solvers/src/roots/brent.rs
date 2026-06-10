@@ -10,13 +10,13 @@
 //!
 //! Référence : Brent, *Algorithms for Minimization Without Derivatives*, 1973.
 
-use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
+use crate::{Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
 /// Compteur d'oscillation : si l'interpolation stagne, on force bissection.
 const MAX_OSCILLATION: u32 = 5;
 
-fn check_finite(v: f64, label: &str) -> Result<(), SolverError> {
+fn check_finite(v: f64, _label: &str) -> Result<(), SolverError> {
     if !v.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value: v });

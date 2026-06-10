@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+scirust-symbolic = { path = "../scirust-symbolic" }
 thiserror = "2"
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-macros = { path = "../scirust-macros" }
