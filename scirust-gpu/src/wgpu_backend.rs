@@ -355,7 +355,7 @@ impl SimdBackend for WgpuBackend {
         }
     }
     fn relu_f32(&self, v: &mut [f32]) {
-        // TODO : utiliser le pipeline relu_pipeline déjà créé
+        // CPU fallback — TODO: dispatch via relu_pipeline (already created at init)
         for x in v.iter_mut()
         {
             *x = x.max(0.0);

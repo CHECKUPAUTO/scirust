@@ -142,4 +142,53 @@ mod tests {
         assert_eq!(slice[0], 1.0);
         assert_eq!(slice[99], 1.0);
     }
+
+    #[test]
+    fn test_aligned_vec_new_fill() {
+        use crate::AlignedVec;
+
+        let vec = AlignedVec::new_fill::<f64>(32, std::f64::consts::PI);
+
+        assert!(vec.is_aligned());
+        let slice = vec.as_slice::<f64>();
+        assert_eq!(slice.len(), 32);
+        for &v in slice.iter() {
+            assert!((v - std::f64::consts::PI).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn test_aligned_vec_as_mut_slice() {
+        use crate::AlignedVec;
+
+        let mut vec = AlignedVec::new::<i32>(16);
+        {
+            let slice = vec.as_mut_slice::<i32>();
+            for (i, v) in slice.iter_mut().enumerate() {
+                *v = i as i32;
+            }
+        }
+        let slice = vec.as_slice::<i32>();
+        for (i, &v) in slice.iter().enumerate() {
+            assert_eq!(v, i as i32);
+        }
+    }
+
+    #[test]
+    fn test_arena_new_for_type() {
+        let arena = PinnedArena::new_for_type::<f32>(1024);
+        // Must be large enough for 1024 f32 (4096 bytes)
+        assert!(arena.capacity() >= 4096);
+        assert!(arena.capacity() % 128 == 0);
+    }
+
+    #[test]
+    fn test_arena_alloc_with() {
+        let mut arena = PinnedArena::new(4096);
+        let val: &mut f64 = arena.alloc_with(42.0).unwrap();
+        assert_eq!(*val, 42.0);
+        // Modify through the reference
+        *val = 99.0;
+        assert_eq!(*val, 99.0);
+    }
 }

@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn dataset_trait_sample_returns_augmented_data() {
         // Regression: the `Dataset::sample` impl used to return the *unaugmented*
-        // base sample (FIXME workaround). It must now return augmented data.
+        // base sample. It must now return augmented data.
         use crate::data::Dataset;
         let base = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![0.0], 6, 1);
         let dims = ImageDims::new(1, 2, 3);
