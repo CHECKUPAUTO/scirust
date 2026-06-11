@@ -6,7 +6,7 @@
 //! 2. Regroupe les nœuds compatibles
 //! 3. Génère un `FusedKernel` pour chaque groupe
 
-use crate::graph::{FusedOp, OpGraph, OpKind};
+use crate::graph::{OpGraph, OpKind};
 use crate::kernel::FusedKernel;
 use crate::patterns::FusionPatterns;
 
@@ -35,20 +35,26 @@ impl FusionPipeline {
         let mut visited = vec![false; graph.len()];
 
         // Parcourir le graphe topologiquement
-        for &root in &graph.topo_order {
-            if visited[root] {
+        for &root in &graph.topo_order
+        {
+            if visited[root]
+            {
                 continue;
             }
 
             // Essayer de fusionner à partir de ce nœud
-            if let Some(kernel) = self.try_fuse_from(graph, &mut visited, root) {
+            if let Some(kernel) = self.try_fuse_from(graph, &mut visited, root)
+            {
                 fused_kernels.push(kernel);
             }
         }
 
-        if fused_kernels.is_empty() {
+        if fused_kernels.is_empty()
+        {
             None
-        } else {
+        }
+        else
+        {
             Some(fused_kernels)
         }
     }
@@ -64,42 +70,51 @@ impl FusionPipeline {
         let mut group = Vec::new();
         let mut stack = vec![root];
 
-        while let Some(node) = stack.pop() {
-            if visited[node] {
+        while let Some(node) = stack.pop()
+        {
+            if visited[node]
+            {
                 continue;
             }
 
             // Essayer de prolonger la fusion avec les voisins
-            let op = graph.op(node);
+            let _op = graph.op(node);
 
             // Chercher un successeur qui peut être fusionné
             let fused = self.try_extend(&group, graph, node, visited);
 
-            if fused {
+            if fused
+            {
                 group.push(node);
                 visited[node] = true;
                 continue;
             }
 
             // Sinon, ajouter ce nœud comme kernel standalone
-            if !group.is_empty() && group.len() >= 2 {
+            if !group.is_empty() && group.len() >= 2
+            {
                 let kernel = self.build_kernel(graph, &group);
                 return Some(kernel);
             }
 
             // Check if this node can be the start of a fusion group
             // by looking at its successors
-            for next in self.find_fusable_successors(graph, node) {
-                if !visited[next] {
+            for next in self.find_fusable_successors(graph, node)
+            {
+                if !visited[next]
+                {
                     stack.push(next);
                 }
             }
         }
 
         // Si le groupe a au moins 2 nœuds, construire le kernel
-        if group.len() >= 2 {
+        if group.len() >= 2
+        {
             Some(self.build_kernel(graph, &group))
-        } else {
+        }
+        else
+        {
             None
         }
     }
@@ -109,7 +124,8 @@ impl FusionPipeline {
         let op = graph.op(node);
 
         // Trouver tous les nœuds qui ont `node` comme input
-        graph.sorted_ops()
+        graph
+            .sorted_ops()
             .iter()
             .enumerate()
             .filter_map(|(idx, other_op)| {
@@ -118,7 +134,9 @@ impl FusionPipeline {
                     && self.patterns.is_pattern(op.kind, other_op.kind)
                 {
                     Some(idx)
-                } else {
+                }
+                else
+                {
                     None
                 }
             })
@@ -133,7 +151,8 @@ impl FusionPipeline {
         node: usize,
         _visited: &mut [bool],
     ) -> bool {
-        if group.is_empty() {
+        if group.is_empty()
+        {
             return false;
         }
         let group_op = graph.op(*group.last().unwrap());
@@ -152,11 +171,14 @@ impl FusionPipeline {
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();
 
-        for &idx in group {
+        for &idx in group
+        {
             let op = graph.op(idx);
-            for &input in &op.inputs {
+            for &input in &op.inputs
+            {
                 // Only add if not already in group
-                if !group.contains(&input) && !inputs.contains(&input) {
+                if !group.contains(&input) && !inputs.contains(&input)
+                {
                     inputs.push(input);
                 }
             }
@@ -173,35 +195,42 @@ impl FusionPipeline {
         // In a pattern, `OpKind::MatMul` matches MatMul *or* Linear and
         // `OpKind::LayerNorm` matches LayerNorm *or* LayerNormFused — see
         // `matches_pattern` below.
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU])
+        {
             return KernelType::MatmulSilu;
         }
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU, OpKind::LayerNorm]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::SiLU, OpKind::LayerNorm])
+        {
             return KernelType::MatmulSiluLayerNorm;
         }
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::LayerNorm]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::LayerNorm])
+        {
             return KernelType::MatmulLayerNorm;
         }
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::ReLU]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::ReLU])
+        {
             return KernelType::MatmulRelu;
         }
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::MatMul, OpKind::Add]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::MatMul, OpKind::Add])
+        {
             return KernelType::TwoLayerMlp;
         }
-        if matches_pattern(&kinds, &[OpKind::SsmStep, OpKind::SsmStep]) {
+        if matches_pattern(&kinds, &[OpKind::SsmStep, OpKind::SsmStep])
+        {
             return KernelType::SsmScan;
         }
-        // LayerNorm → activation (any of SiLU / Gelu / GELU_Approx / ReLU).
+        // LayerNorm → activation (any of SiLU / Gelu / GeluApprox / ReLU).
         if kinds.len() == 2
             && matches!(kinds[0], OpKind::LayerNorm | OpKind::LayerNormFused)
             && matches!(
                 kinds[1],
-                OpKind::SiLU | OpKind::Gelu | OpKind::GELU_Approx | OpKind::ReLU
+                OpKind::SiLU | OpKind::Gelu | OpKind::GeluApprox | OpKind::ReLU
             )
         {
             return KernelType::LayerNormActivation;
         }
-        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::Scale]) {
+        if matches_pattern(&kinds, &[OpKind::MatMul, OpKind::Scale])
+        {
             return KernelType::MatmulScale;
         }
 
@@ -211,21 +240,24 @@ impl FusionPipeline {
 
 /// Vérifie si une liste de types d'op correspond à un motif.
 fn matches_pattern(kinds: &[OpKind], pattern: &[OpKind]) -> bool {
-    if kinds.len() != pattern.len() {
+    if kinds.len() != pattern.len()
+    {
         return false;
     }
 
     // Utiliser l'appariement de motifs avec wildcards
-    kinds.iter().zip(pattern.iter()).all(|(a, b)| match b {
+    kinds.iter().zip(pattern.iter()).all(|(a, b)| match b
+    {
         OpKind::MatMul | OpKind::Linear => matches!(a, OpKind::MatMul | OpKind::Linear),
         OpKind::SiLU => *a == OpKind::SiLU,
         OpKind::ReLU => *a == OpKind::ReLU,
-        OpKind::Gelu | OpKind::GELU_Approx => matches!(a, OpKind::Gelu | OpKind::GELU_Approx),
+        OpKind::Gelu | OpKind::GeluApprox => matches!(a, OpKind::Gelu | OpKind::GeluApprox),
         OpKind::Sigmoid => *a == OpKind::Sigmoid,
         OpKind::Tanh => *a == OpKind::Tanh,
-        OpKind::LayerNorm | OpKind::LayerNormFused => {
+        OpKind::LayerNorm | OpKind::LayerNormFused =>
+        {
             matches!(a, OpKind::LayerNorm | OpKind::LayerNormFused)
-        }
+        },
         OpKind::RMSNorm => *a == OpKind::RMSNorm,
         OpKind::SsmStep => *a == OpKind::SsmStep,
         OpKind::Add => *a == OpKind::Add,

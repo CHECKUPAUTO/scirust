@@ -28,28 +28,32 @@ struct Linear {
 }
 
 fn linearize(expr: &SmtExpr) -> Result<Linear> {
-    match expr {
+    match expr
+    {
         SmtExpr::Const(c) => Ok(Linear {
             coeffs: HashMap::new(),
             constant: *c,
         }),
-        SmtExpr::Var(v) => {
+        SmtExpr::Var(v) =>
+        {
             let mut coeffs = HashMap::new();
             coeffs.insert(v.clone(), 1.0);
             Ok(Linear {
                 coeffs,
                 constant: 0.0,
             })
-        }
-        SmtExpr::Add(a, b) => {
+        },
+        SmtExpr::Add(a, b) =>
+        {
             let mut la = linearize(a)?;
             let lb = linearize(b)?;
-            for (k, v) in lb.coeffs {
+            for (k, v) in lb.coeffs
+            {
                 *la.coeffs.entry(k).or_insert(0.0) += v;
             }
             la.constant += lb.constant;
             Ok(la)
-        }
+        },
         SmtExpr::Eq(_, _) => Err(ReasoningError::Solver(
             "nested equalities are not supported".into(),
         )),
@@ -63,29 +67,35 @@ impl SmtInterface {
 
     /// Decides satisfiability of a single linear equality constraint.
     pub fn check_sat(&self, expr: &SmtExpr) -> Result<bool> {
-        let (lhs, rhs) = match expr {
+        let (lhs, rhs) = match expr
+        {
             SmtExpr::Eq(a, b) => (a, b),
-            _ => {
+            _ =>
+            {
                 return Err(ReasoningError::Solver(
                     "check_sat expects a top-level equality (Eq)".into(),
-                ))
-            }
+                ));
+            },
         };
         let la = linearize(lhs)?;
         let lb = linearize(rhs)?;
 
         // Move everything to one side: (la - lb) = 0.
         let mut coeffs = la.coeffs;
-        for (k, v) in lb.coeffs {
+        for (k, v) in lb.coeffs
+        {
             *coeffs.entry(k).or_insert(0.0) -= v;
         }
         let rhs_const = lb.constant - la.constant;
 
         let all_zero = coeffs.values().all(|c| c.abs() < 1e-12);
-        if all_zero {
+        if all_zero
+        {
             // 0 = rhs_const ⇒ satisfiable iff rhs_const == 0
             Ok(rhs_const.abs() < 1e-12)
-        } else {
+        }
+        else
+        {
             // At least one free variable ⇒ always satisfiable.
             Ok(true)
         }

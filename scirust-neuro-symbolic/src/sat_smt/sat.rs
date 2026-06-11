@@ -26,9 +26,12 @@ impl SatSolver {
     pub fn solve(&self) -> Result<Option<Vec<bool>>> {
         let n = self.num_vars();
         let mut assign: Vec<Option<bool>> = vec![None; n + 1];
-        if dpll(&self.clauses, &mut assign) {
+        if dpll(&self.clauses, &mut assign)
+        {
             Ok(Some((1..=n).map(|v| assign[v].unwrap_or(false)).collect()))
-        } else {
+        }
+        else
+        {
             Ok(None)
         }
     }
@@ -52,61 +55,76 @@ impl Default for SatSolver {
 /// DPLL with unit propagation. `assign` is indexed by variable id (1-based).
 fn dpll(clauses: &[Clause], assign: &mut Vec<Option<bool>>) -> bool {
     // --- Unit propagation to a fixpoint ---
-    loop {
+    loop
+    {
         let mut progressed = false;
-        for clause in clauses {
+        for clause in clauses
+        {
             let mut unassigned: Option<Literal> = None;
             let mut unassigned_count = 0usize;
             let mut satisfied = false;
-            for &lit in clause {
+            for &lit in clause
+            {
                 let v = lit.unsigned_abs() as usize;
-                match assign[v] {
-                    Some(b) if b == (lit > 0) => {
+                match assign[v]
+                {
+                    Some(b) if b == (lit > 0) =>
+                    {
                         satisfied = true;
                         break;
-                    }
-                    Some(_) => {}
-                    None => {
+                    },
+                    Some(_) =>
+                    {},
+                    None =>
+                    {
                         unassigned = Some(lit);
                         unassigned_count += 1;
-                    }
+                    },
                 }
             }
-            if satisfied {
+            if satisfied
+            {
                 continue;
             }
-            if unassigned_count == 0 {
+            if unassigned_count == 0
+            {
                 return false; // conflict: clause fully assigned and false
             }
-            if unassigned_count == 1 {
+            if unassigned_count == 1
+            {
                 let lit = unassigned.unwrap();
                 assign[lit.unsigned_abs() as usize] = Some(lit > 0);
                 progressed = true;
             }
         }
-        if !progressed {
+        if !progressed
+        {
             break;
         }
     }
 
     // --- Pick the next unassigned variable ---
     let next = (1..assign.len()).find(|&v| assign[v].is_none());
-    match next {
+    match next
+    {
         None => clauses.iter().all(|c| {
             c.iter()
                 .any(|&lit| assign[lit.unsigned_abs() as usize] == Some(lit > 0))
         }),
-        Some(v) => {
-            for val in [true, false] {
+        Some(v) =>
+        {
+            for val in [true, false]
+            {
                 let mut branch = assign.clone();
                 branch[v] = Some(val);
-                if dpll(clauses, &mut branch) {
+                if dpll(clauses, &mut branch)
+                {
                     *assign = branch;
                     return true;
                 }
             }
             false
-        }
+        },
     }
 }
 

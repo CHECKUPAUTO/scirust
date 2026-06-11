@@ -14,8 +14,10 @@ pub fn einsum(pattern: &str, inputs: &[&TensorND]) -> Result<TensorND, String> {
 
     // Determine the extent of every index label and check consistency.
     let mut sizes: BTreeMap<char, usize> = BTreeMap::new();
-    for (spec, t) in in_specs.iter().zip(inputs.iter()) {
-        if spec.len() != t.shape.len() {
+    for (spec, t) in in_specs.iter().zip(inputs.iter())
+    {
+        if spec.len() != t.shape.len()
+        {
             return Err(format!(
                 "operand '{}' has rank {} but tensor has rank {}",
                 spec.iter().collect::<String>(),
@@ -23,20 +25,28 @@ pub fn einsum(pattern: &str, inputs: &[&TensorND]) -> Result<TensorND, String> {
                 t.shape.len()
             ));
         }
-        for (p, &lab) in spec.iter().enumerate() {
+        for (p, &lab) in spec.iter().enumerate()
+        {
             let d = t.shape[p];
-            match sizes.get(&lab) {
-                Some(&prev) if prev != d => {
-                    return Err(format!("index '{lab}' has inconsistent sizes {prev} and {d}"))
-                }
-                _ => {
+            match sizes.get(&lab)
+            {
+                Some(&prev) if prev != d =>
+                {
+                    return Err(format!(
+                        "index '{lab}' has inconsistent sizes {prev} and {d}"
+                    ));
+                },
+                _ =>
+                {
                     sizes.insert(lab, d);
-                }
+                },
             }
         }
     }
-    for &lab in &out_spec {
-        if !sizes.contains_key(&lab) {
+    for &lab in &out_spec
+    {
+        if !sizes.contains_key(&lab)
+        {
             return Err(format!("output index '{lab}' does not appear in any input"));
         }
     }
@@ -46,8 +56,11 @@ pub fn einsum(pattern: &str, inputs: &[&TensorND]) -> Result<TensorND, String> {
     let mut label_order: Vec<char> = out_spec.clone();
     label_order.extend(sizes.keys().copied().filter(|l| !out_set.contains(l)));
     let dims: Vec<usize> = label_order.iter().map(|l| sizes[l]).collect();
-    let label_pos: BTreeMap<char, usize> =
-        label_order.iter().enumerate().map(|(i, &l)| (l, i)).collect();
+    let label_pos: BTreeMap<char, usize> = label_order
+        .iter()
+        .enumerate()
+        .map(|(i, &l)| (l, i))
+        .collect();
 
     let out_shape: Vec<usize> = out_spec.iter().map(|l| sizes[l]).collect();
     let out_strides = row_major_strides(&out_shape);
@@ -56,17 +69,21 @@ pub fn einsum(pattern: &str, inputs: &[&TensorND]) -> Result<TensorND, String> {
 
     let total: usize = dims.iter().product::<usize>().max(1);
     let mut idx = vec![0usize; label_order.len()];
-    for _ in 0..total {
+    for _ in 0..total
+    {
         let mut prod = 1.0f32;
-        for (spec, t) in in_specs.iter().zip(inputs.iter()) {
+        for (spec, t) in in_specs.iter().zip(inputs.iter())
+        {
             let mut off = 0usize;
-            for (p, &lab) in spec.iter().enumerate() {
+            for (p, &lab) in spec.iter().enumerate()
+            {
                 off += idx[label_pos[&lab]] * t.strides[p];
             }
             prod *= t.data[off];
         }
         let mut o = 0usize;
-        for (p, &lab) in out_spec.iter().enumerate() {
+        for (p, &lab) in out_spec.iter().enumerate()
+        {
             o += idx[label_pos[&lab]] * out_strides[p];
         }
         out_data[o] += prod;
@@ -78,25 +95,31 @@ pub fn einsum(pattern: &str, inputs: &[&TensorND]) -> Result<TensorND, String> {
 
 fn parse_pattern(pattern: &str, n_inputs: usize) -> Result<(Vec<Vec<char>>, Vec<char>), String> {
     let pattern: String = pattern.chars().filter(|c| !c.is_whitespace()).collect();
-    let (lhs, rhs) = match pattern.split_once("->") {
+    let (lhs, rhs) = match pattern.split_once("->")
+    {
         Some((l, r)) => (l.to_string(), Some(r.to_string())),
         None => (pattern.clone(), None),
     };
     let in_specs: Vec<Vec<char>> = lhs.split(',').map(|s| s.chars().collect()).collect();
-    if in_specs.len() != n_inputs {
+    if in_specs.len() != n_inputs
+    {
         return Err(format!(
             "pattern declares {} operands but {} tensors were given",
             in_specs.len(),
             n_inputs
         ));
     }
-    let out_spec: Vec<char> = match rhs {
+    let out_spec: Vec<char> = match rhs
+    {
         Some(r) => r.chars().collect(),
-        None => {
+        None =>
+        {
             // Implicit mode: indices appearing exactly once, in sorted order.
             let mut counts: BTreeMap<char, usize> = BTreeMap::new();
-            for spec in &in_specs {
-                for &c in spec {
+            for spec in &in_specs
+            {
+                for &c in spec
+                {
                     *counts.entry(c).or_insert(0) += 1;
                 }
             }
@@ -105,7 +128,7 @@ fn parse_pattern(pattern: &str, n_inputs: usize) -> Result<(Vec<Vec<char>>, Vec<
                 .filter(|(_, n)| *n == 1)
                 .map(|(c, _)| c)
                 .collect()
-        }
+        },
     };
     Ok((in_specs, out_spec))
 }
@@ -113,19 +136,23 @@ fn parse_pattern(pattern: &str, n_inputs: usize) -> Result<(Vec<Vec<char>>, Vec<
 fn row_major_strides(shape: &[usize]) -> Vec<usize> {
     let ndim = shape.len();
     let mut s = vec![1usize; ndim];
-    if ndim <= 1 {
+    if ndim <= 1
+    {
         return s;
     }
-    for i in (0..ndim - 1).rev() {
+    for i in (0..ndim - 1).rev()
+    {
         s[i] = s[i + 1] * shape[i + 1];
     }
     s
 }
 
 fn increment(idx: &mut [usize], dims: &[usize]) {
-    for i in (0..idx.len()).rev() {
+    for i in (0..idx.len()).rev()
+    {
         idx[i] += 1;
-        if idx[i] < dims[i] {
+        if idx[i] < dims[i]
+        {
             return;
         }
         idx[i] = 0;

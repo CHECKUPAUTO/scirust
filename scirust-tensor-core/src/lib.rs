@@ -12,7 +12,10 @@ impl TensorND {
     /// Create a tensor from data and shape. Panics if `data.len()` does not match
     /// the product of `shape`.
     pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
-        let expected: usize = shape.iter().product::<usize>().max(if shape.is_empty() { 1 } else { 0 });
+        let expected: usize = shape
+            .iter()
+            .product::<usize>()
+            .max(if shape.is_empty() { 1 } else { 0 });
         assert_eq!(
             data.len(),
             expected,
@@ -21,12 +24,19 @@ impl TensorND {
             shape
         );
         let strides = compute_strides(&shape);
-        Self { data, shape, strides }
+        Self {
+            data,
+            shape,
+            strides,
+        }
     }
 
     /// Zero-filled tensor of the given shape.
     pub fn zeros(shape: Vec<usize>) -> Self {
-        let n: usize = shape.iter().product::<usize>().max(if shape.is_empty() { 1 } else { 0 });
+        let n: usize = shape
+            .iter()
+            .product::<usize>()
+            .max(if shape.is_empty() { 1 } else { 0 });
         Self::new(vec![0.0; n], shape)
     }
 
@@ -51,11 +61,7 @@ impl TensorND {
     /// Row-major flat offset of a multi-index.
     pub fn offset(&self, index: &[usize]) -> usize {
         debug_assert_eq!(index.len(), self.shape.len());
-        index
-            .iter()
-            .zip(&self.strides)
-            .map(|(i, s)| i * s)
-            .sum()
+        index.iter().zip(&self.strides).map(|(i, s)| i * s).sum()
     }
 
     /// Element at a multi-index.
@@ -65,8 +71,12 @@ impl TensorND {
 
     /// Reshape without copying data; errors if the element count changes.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<TensorND, String> {
-        let n: usize = new_shape.iter().product::<usize>().max(if new_shape.is_empty() { 1 } else { 0 });
-        if n != self.data.len() {
+        let n: usize = new_shape
+            .iter()
+            .product::<usize>()
+            .max(if new_shape.is_empty() { 1 } else { 0 });
+        if n != self.data.len()
+        {
             return Err(format!(
                 "reshape: {} elements cannot fit shape {:?}",
                 self.data.len(),
@@ -81,10 +91,12 @@ impl TensorND {
 fn compute_strides(shape: &[usize]) -> Vec<usize> {
     let ndim = shape.len();
     let mut strides = vec![1usize; ndim];
-    if ndim <= 1 {
+    if ndim <= 1
+    {
         return strides;
     }
-    for i in (0..ndim - 1).rev() {
+    for i in (0..ndim - 1).rev()
+    {
         strides[i] = strides[i + 1] * shape[i + 1];
     }
     strides

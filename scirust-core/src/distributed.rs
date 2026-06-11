@@ -16,8 +16,6 @@
 //! - No NCCL/RDMA — pure TCP, suitable for CPU clusters.
 
 use std::collections::HashMap;
-use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
 
 /// Distributed training context for a single worker.
 #[derive(Debug, Clone)]
@@ -64,9 +62,10 @@ impl DistributedContext {
 /// In single-worker mode, this is a no-op.
 pub fn all_reduce(
     ctx: &DistributedContext,
-    gradients: &mut HashMap<String, Vec<f32>>,
+    _gradients: &mut HashMap<String, Vec<f32>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if ctx.world_size <= 1 {
+    if ctx.world_size <= 1
+    {
         return Ok(()); // No-op for single worker
     }
 
@@ -100,7 +99,8 @@ pub fn all_reduce(
 
 /// Synchronize all workers at a barrier.
 pub fn barrier(ctx: &DistributedContext) -> Result<(), Box<dyn std::error::Error>> {
-    if ctx.world_size <= 1 {
+    if ctx.world_size <= 1
+    {
         return Ok(());
     }
     // Real implementation would coordinate via TCP.
@@ -110,13 +110,15 @@ pub fn barrier(ctx: &DistributedContext) -> Result<(), Box<dyn std::error::Error
 /// Broadcast a value from rank 0 to all workers.
 pub fn broadcast_f32(
     ctx: &DistributedContext,
-    value: &mut f32,
+    _value: &mut f32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if ctx.world_size <= 1 {
+    if ctx.world_size <= 1
+    {
         return Ok(());
     }
     // In production, rank 0 sends, others receive.
-    if ctx.rank != 0 {
+    if ctx.rank != 0
+    {
         // Receive from rank 0
         // *value = received_value;
     }

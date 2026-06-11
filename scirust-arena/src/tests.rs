@@ -11,7 +11,8 @@ mod tests {
 
         // Mesurer le temps d'allocation
         let start = std::time::Instant::now();
-        for _ in 0..1000 {
+        for _ in 0..1000
+        {
             let _slice = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
         }
         let elapsed = start.elapsed();
@@ -50,11 +51,7 @@ mod tests {
 
         // Vérifier que le compteur est remis à zéro
         assert_eq!(arena.alloc_count(), 0, "Reset must clear alloc count");
-        assert_eq!(
-            arena.allocated(),
-            0,
-            "Reset must clear allocated bytes"
-        );
+        assert_eq!(arena.allocated(), 0, "Reset must clear allocated bytes");
 
         // Réallouer doit réussir (même si l'arène est "pleine")
         let _slice2 = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
@@ -134,10 +131,7 @@ mod tests {
         let mut vec = AlignedVec::new::<f32>(100);
 
         // Vérifier alignement
-        assert!(
-            vec.is_aligned(),
-            "AlignedVec must be aligned on 128 bytes"
-        );
+        assert!(vec.is_aligned(), "AlignedVec must be aligned on 128 bytes");
 
         // Remplir
         vec.fill::<f32>(1.0);

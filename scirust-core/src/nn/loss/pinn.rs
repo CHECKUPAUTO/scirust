@@ -24,11 +24,7 @@ impl<'a, M: Module> PinnLossEvaluator<'a, M> {
     /// the parameter gradients remain exact via the tape.
     ///
     /// `coords`: (batch, 2) where column 0 is x and column 1 is t.
-    pub fn compute_heat_residual<'t>(
-        &mut self,
-        tape: &'t Tape,
-        coords: Var<'t>,
-    ) -> Var<'t> {
+    pub fn compute_heat_residual<'t>(&mut self, tape: &'t Tape, coords: Var<'t>) -> Var<'t> {
         let h = 1e-3_f32;
         let inv_2h = 1.0 / (2.0 * h);
         let inv_h2 = 1.0 / (h * h);
@@ -74,7 +70,9 @@ impl<'a, M: Module> PinnLossEvaluator<'a, M> {
         let pde_loss = residual.try_hadamard(residual).unwrap().mean_axis(0).sum();
 
         let lambda_var = tape.input(Tensor::from_vec(vec![lambda], 1, 1));
-        data_loss.try_add(pde_loss.try_mul_broadcast(lambda_var).unwrap()).unwrap()
+        data_loss
+            .try_add(pde_loss.try_mul_broadcast(lambda_var).unwrap())
+            .unwrap()
     }
 }
 
@@ -85,7 +83,8 @@ fn perturb_col(t: &Tensor, col: usize, h: f32) -> Tensor {
     let mut data = t.data.clone();
     let cols = t.cols;
     let mut i = col;
-    while i < data.len() {
+    while i < data.len()
+    {
         data[i] += h;
         i += cols;
     }
@@ -103,8 +102,7 @@ mod tests {
         // identically 0 for every input/model. The finite-difference residual
         // must instead reflect the model's actual derivatives.
         let mut rng = PcgEngine::new(7);
-        let mut model =
-            Sequential::new().add(Linear::new(2, 1, &KaimingNormal, &Zeros, &mut rng));
+        let mut model = Sequential::new().add(Linear::new(2, 1, &KaimingNormal, &Zeros, &mut rng));
         let mut pinn = PinnLossEvaluator::new(&mut model, 0.1);
 
         let tape = Tape::new();
@@ -113,7 +111,10 @@ mod tests {
         let residual = pinn.compute_heat_residual(&tape, coords);
         let r = tape.value(residual.idx());
 
-        assert!(r.data.iter().all(|v| v.is_finite()), "residual must be finite");
+        assert!(
+            r.data.iter().all(|v| v.is_finite()),
+            "residual must be finite"
+        );
         assert!(
             r.data.iter().any(|&v| v.abs() > 1e-6),
             "residual must reflect the model's t-derivative (was identically zero before the fix)"

@@ -155,19 +155,20 @@ impl Module for Conv2d {
         self.last_w_idx = Some(weight_v.idx());
         self.last_b_idx = bias_v.as_ref().map(|v| v.idx());
 
-        input.try_conv2d_forward(
-            weight_v,
-            bias_v,
-            b,
-            self.in_c,
-            h,
-            w,
-            self.out_c,
-            self.kernel,
-            self.stride,
-            cfg.pad(),
-        )
-        .unwrap()
+        input
+            .try_conv2d_forward(
+                weight_v,
+                bias_v,
+                b,
+                self.in_c,
+                h,
+                w,
+                self.out_c,
+                self.kernel,
+                self.stride,
+                cfg.pad(),
+            )
+            .unwrap()
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

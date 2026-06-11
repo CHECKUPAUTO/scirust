@@ -41,7 +41,10 @@ pub use conv_utils::{ConvConfig, Padding};
 pub use conv2d::Conv2d;
 pub use dropout::Dropout;
 pub use embedding::Embedding;
-pub use fused_ops::{FusedKernelOp, matmul_silu, matmul_relu, matmul_gelu, matmul_layernorm, matmul_silu_layernorm, matmul_scale};
+pub use fused_ops::{
+    FusedKernelOp, matmul_gelu, matmul_layernorm, matmul_relu, matmul_scale, matmul_silu,
+    matmul_silu_layernorm,
+};
 pub use generative::VAE;
 pub use gnn::{GCN, GCNLayer};
 pub use im2col_hpc::im2col_hpc;

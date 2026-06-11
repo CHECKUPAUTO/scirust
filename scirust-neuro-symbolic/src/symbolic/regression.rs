@@ -18,7 +18,8 @@ impl NeuralSymbolicRegression {
 
     /// Fit a linear model to `(x, y)` and return it as a symbolic expression.
     pub fn fit(&self, x: &[Vec<f64>], y: &[f64]) -> Result<Expr> {
-        if x.is_empty() || x.len() != y.len() {
+        if x.is_empty() || x.len() != y.len()
+        {
             return Err(ReasoningError::Symbolic(
                 "empty or mismatched training data".into(),
             ));
@@ -29,16 +30,20 @@ impl NeuralSymbolicRegression {
         // Normal equations: (AᵀA) b = Aᵀy
         let mut ata = vec![vec![0.0f64; p]; p];
         let mut aty = vec![0.0f64; p];
-        for (row, &yi) in x.iter().zip(y) {
+        for (row, &yi) in x.iter().zip(y)
+        {
             let mut feats = Vec::with_capacity(p);
             feats.push(1.0);
             feats.extend(row.iter().take(n_features).copied());
-            if feats.len() != p {
+            if feats.len() != p
+            {
                 return Err(ReasoningError::Symbolic("ragged feature rows".into()));
             }
-            for i in 0..p {
+            for i in 0..p
+            {
                 aty[i] += feats[i] * yi;
-                for k in 0..p {
+                for k in 0..p
+                {
                     ata[i][k] += feats[i] * feats[k];
                 }
             }
@@ -49,7 +54,8 @@ impl NeuralSymbolicRegression {
 
         // Build b0 + b1·x0 + b2·x1 + …
         let mut expr = Expr::Const(coeffs[0]);
-        for (j, &c) in coeffs.iter().enumerate().skip(1) {
+        for (j, &c) in coeffs.iter().enumerate().skip(1)
+        {
             let term = Expr::Mul(
                 Box::new(Expr::Const(c)),
                 Box::new(Expr::Var(format!("x{}", j - 1))),
@@ -63,26 +69,33 @@ impl NeuralSymbolicRegression {
 /// Solve `A x = b` by Gaussian elimination with partial pivoting.
 fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     let n = b.len();
-    for col in 0..n {
+    for col in 0..n
+    {
         // pivot
         let mut pivot = col;
-        for r in (col + 1)..n {
-            if a[r][col].abs() > a[pivot][col].abs() {
+        for r in (col + 1)..n
+        {
+            if a[r][col].abs() > a[pivot][col].abs()
+            {
                 pivot = r;
             }
         }
-        if a[pivot][col].abs() < 1e-12 {
+        if a[pivot][col].abs() < 1e-12
+        {
             return None; // singular
         }
         a.swap(col, pivot);
         b.swap(col, pivot);
         // eliminate
-        for r in 0..n {
-            if r == col {
+        for r in 0..n
+        {
+            if r == col
+            {
                 continue;
             }
             let factor = a[r][col] / a[col][col];
-            for c in col..n {
+            for c in col..n
+            {
                 a[r][c] -= factor * a[col][c];
             }
             b[r] -= factor * b[col];

@@ -37,16 +37,20 @@ impl RuleEngine {
     pub fn forward_chain(&self) -> Result<Vec<String>> {
         let mut known = self.facts.clone();
         let mut derived = Vec::new();
-        loop {
+        loop
+        {
             let mut changed = false;
-            for rule in &self.rules {
-                if !known.contains(&rule.head) && rule.body.iter().all(|b| known.contains(b)) {
+            for rule in &self.rules
+            {
+                if !known.contains(&rule.head) && rule.body.iter().all(|b| known.contains(b))
+                {
                     known.insert(rule.head.clone());
                     derived.push(rule.head.clone());
                     changed = true;
                 }
             }
-            if !changed {
+            if !changed
+            {
                 break;
             }
         }

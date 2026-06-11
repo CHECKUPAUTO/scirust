@@ -23,7 +23,8 @@ pub enum ElementwiseOp {
 impl ElementwiseOp {
     #[inline]
     fn eval(&self, x: f32) -> f32 {
-        match self {
+        match self
+        {
             ElementwiseOp::AddScalar(c) => x + c,
             ElementwiseOp::MulScalar(c) => x * c,
             ElementwiseOp::Relu => x.max(0.0),
@@ -102,11 +103,7 @@ mod tests {
         let fused = kernel.apply(&t);
 
         // Sequential reference: three separate passes.
-        let seq: Vec<f32> = t
-            .data
-            .iter()
-            .map(|&x| (x * 2.0 + 1.0).max(0.0))
-            .collect();
+        let seq: Vec<f32> = t.data.iter().map(|&x| (x * 2.0 + 1.0).max(0.0)).collect();
         assert_eq!(fused.data, seq);
         assert_eq!(fused.data, vec![0.0, 0.0, 3.0, 7.0]);
     }

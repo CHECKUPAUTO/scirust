@@ -447,6 +447,7 @@ fn has_sve() -> bool {
 }
 
 #[cfg(not(target_arch = "aarch64"))]
+#[allow(dead_code)]
 fn has_sve() -> bool {
     false
 }

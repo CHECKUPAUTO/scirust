@@ -28,7 +28,8 @@ impl ProgramSynthesis {
 
     /// Enumerative synthesis: find an expression in `x` matching the examples.
     pub fn synthesize_from_examples(&self, xs: &[f64], ys: &[f64]) -> Result<Expr> {
-        if xs.is_empty() || xs.len() != ys.len() {
+        if xs.is_empty() || xs.len() != ys.len()
+        {
             return Err(ReasoningError::Symbolic(
                 "empty or mismatched examples".into(),
             ));
@@ -51,31 +52,40 @@ impl ProgramSynthesis {
             Expr::Const(2.0),
             Expr::Const(-1.0),
         ];
-        for e in &pool {
-            if matches(e) {
+        for e in &pool
+        {
+            if matches(e)
+            {
                 return Ok(e.clone());
             }
         }
 
         let max_pool = (self.timeout_ms as usize).clamp(64, 2000);
-        for _ in 0..3 {
+        for _ in 0..3
+        {
             let current = pool.clone();
-            for i in 0..current.len() {
-                for j in 0..current.len() {
+            for i in 0..current.len()
+            {
+                for j in 0..current.len()
+                {
                     for cand in [
                         Expr::Add(Box::new(current[i].clone()), Box::new(current[j].clone())),
                         Expr::Sub(Box::new(current[i].clone()), Box::new(current[j].clone())),
                         Expr::Mul(Box::new(current[i].clone()), Box::new(current[j].clone())),
-                    ] {
-                        if matches(&cand) {
+                    ]
+                    {
+                        if matches(&cand)
+                        {
                             return Ok(scirust_symbolic::simplify(&cand));
                         }
-                        if pool.len() < max_pool {
+                        if pool.len() < max_pool
+                        {
                             pool.push(cand);
                         }
                     }
                 }
-                if pool.len() >= max_pool {
+                if pool.len() >= max_pool
+                {
                     break;
                 }
             }
@@ -104,7 +114,8 @@ mod tests {
         let ps = ProgramSynthesis::new(1000);
         let expr = ps.synthesize_from_examples(&xs, &ys).unwrap();
         // verify it reproduces the data
-        for (&x, &y) in xs.iter().zip(&ys) {
+        for (&x, &y) in xs.iter().zip(&ys)
+        {
             let mut m = std::collections::HashMap::new();
             m.insert("x".to_string(), x);
             assert!((scirust_symbolic::eval(&expr, &m).unwrap() - y).abs() < 1e-6);

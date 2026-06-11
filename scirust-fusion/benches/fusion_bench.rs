@@ -1,1 +1,2 @@
-fn main() { /* placeholder bench */ }
+fn main() { /* placeholder bench */
+}

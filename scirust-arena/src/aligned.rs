@@ -109,7 +109,8 @@ impl AlignedVec {
     where
         T: Copy,
     {
-        for elem in self.as_mut_slice::<T>().iter_mut() {
+        for elem in self.as_mut_slice::<T>().iter_mut()
+        {
             *elem = val;
         }
     }

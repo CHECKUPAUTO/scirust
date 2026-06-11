@@ -28,14 +28,14 @@
 
 #![cfg_attr(feature = "nightly", feature(ptr_metadata))]
 
-mod allocator;
 mod aligned;
+mod allocator;
 mod slab;
 #[cfg(test)]
 mod tests;
 
-pub use allocator::{ArenaError, PinnedArena};
 pub use aligned::AlignedVec;
+pub use allocator::{ArenaError, PinnedArena};
 pub use slab::{Slab, SlabHandle};
 
 // Re-export the maximum alignment constant

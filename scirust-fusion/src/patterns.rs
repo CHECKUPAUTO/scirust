@@ -25,7 +25,8 @@ pub enum OpKindMatcher {
 
 impl OpKindMatcher {
     pub fn matches(&self, kind: OpKind) -> bool {
-        match self {
+        match self
+        {
             OpKindMatcher::Exact(expected) => *expected == kind,
             OpKindMatcher::Any(kinds) => kinds.contains(&kind),
         }
@@ -92,8 +93,12 @@ impl FusionPatterns {
             ops: &[
                 OpKindMatcher::Any(&[OpKind::LayerNorm, OpKind::LayerNormFused]),
                 OpKindMatcher::Any(&[
-                    OpKind::SiLU, OpKind::Gelu, OpKind::GELU_Approx,
-                    OpKind::ReLU, OpKind::Sigmoid, OpKind::Tanh,
+                    OpKind::SiLU,
+                    OpKind::Gelu,
+                    OpKind::GeluApprox,
+                    OpKind::ReLU,
+                    OpKind::Sigmoid,
+                    OpKind::Tanh,
                 ]),
             ],
             memory_savings: 50.0,
@@ -150,12 +155,17 @@ impl FusionPatterns {
 
     /// Vérifie si la séquence d'opérations correspond à un motif.
     pub fn match_sequence(&self, ops: &[OpKind]) -> Option<&FusionPattern> {
-        for pattern in &self.patterns {
-            if pattern.ops.len() == ops.len() {
-                let all_match = pattern.ops.iter().zip(ops.iter()).all(|(matcher, op)| {
-                    matcher.matches(*op)
-                });
-                if all_match {
+        for pattern in &self.patterns
+        {
+            if pattern.ops.len() == ops.len()
+            {
+                let all_match = pattern
+                    .ops
+                    .iter()
+                    .zip(ops.iter())
+                    .all(|(matcher, op)| matcher.matches(*op));
+                if all_match
+                {
                     return Some(pattern);
                 }
             }
