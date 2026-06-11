@@ -81,7 +81,7 @@ pub fn matmul_gelu(
     out_features: usize,
 ) -> Vec<f32> {
     let mut output = vec![0.0f32; batch * out_features];
-    let sqrt_2_pi = 0.7978845608028654;
+    let sqrt_2_pi = 0.797_884_6_f32;
 
     for b in 0..batch {
         let x_off = b * in_features;
@@ -102,6 +102,7 @@ pub fn matmul_gelu(
     output
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn matmul_layernorm(
     x: &[f32],
     w: &[f32],
@@ -150,6 +151,7 @@ pub fn matmul_layernorm(
     output
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn matmul_silu_layernorm(
     x: &[f32],
     w1: &[f32],

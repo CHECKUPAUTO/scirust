@@ -53,7 +53,7 @@ impl GCN {
         let mut h = x;
         for layer in &mut self.layers
         {
-            h = layer.forward_with_adj(tape, h, adj.clone());
+            h = layer.forward_with_adj(tape, h, adj);
         }
         h
     }

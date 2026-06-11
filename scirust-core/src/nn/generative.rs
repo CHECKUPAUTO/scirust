@@ -56,9 +56,9 @@ impl VAE {
 
     pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>) -> (Var<'t>, Var<'t>, Var<'t>) {
         let h = self.encoder_fc.forward(tape, x).relu();
-        let mu = self.fc_mu.forward(tape, h.clone());
+        let mu = self.fc_mu.forward(tape, h);
         let logvar = self.fc_logvar.forward(tape, h);
-        let z = self.reparameterize(tape, mu.clone(), logvar.clone());
+        let z = self.reparameterize(tape, mu, logvar);
 
         let h_dec = self.decoder_fc.forward(tape, z).relu();
         let recon_x = self.decoder_out.forward(tape, h_dec).sigmoid();
@@ -69,8 +69,8 @@ impl VAE {
     pub fn kl_loss<'t>(&self, tape: &'t Tape, mu: Var<'t>, logvar: Var<'t>) -> Var<'t> {
         let (rows, cols) = mu.shape();
         let ones = tape.input(Tensor::from_vec(vec![1.0; rows * cols], rows, cols));
-        let mu_sq = mu.try_hadamard(mu.clone()).unwrap();
-        let exp_logvar = logvar.clone().exp();
+        let mu_sq = mu.try_hadamard(mu).unwrap();
+        let exp_logvar = logvar.exp();
         let sum_term = ones
             .try_add(logvar)
             .unwrap()

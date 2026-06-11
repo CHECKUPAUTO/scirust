@@ -103,6 +103,7 @@ impl TilingConfig {
     }
 
     #[cfg(target_arch = "aarch64")]
+    #[allow(dead_code)]
     fn has_sve() -> bool {
         unsafe {
             let hwcap = libc::getauxval(libc::AT_HWCAP);
@@ -111,6 +112,7 @@ impl TilingConfig {
     }
 
     #[cfg(not(target_arch = "aarch64"))]
+    #[allow(dead_code)]
     fn has_sve() -> bool {
         false
     }

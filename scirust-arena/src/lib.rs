@@ -26,7 +26,6 @@
 //! arena.reset();
 //! ```
 
-#![cfg_attr(feature = "nightly", feature(ptr_metadata))]
 
 mod allocator;
 mod aligned;

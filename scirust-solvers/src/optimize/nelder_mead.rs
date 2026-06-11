@@ -18,6 +18,7 @@ fn check_finite(v: f64, _label: &str) -> Result<(), SolverError> {
 }
 
 /// Calcule le centroïde (moyenne) d'un ensemble de points.
+#[allow(dead_code)]
 fn centroid(pts: &[Vec<f64>]) -> Vec<f64> {
     let n = pts[0].len();
     let m = pts.len() as f64;

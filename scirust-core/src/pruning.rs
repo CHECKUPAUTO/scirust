@@ -15,6 +15,7 @@
 //! // weights ≈ [0.5, 0.0, 0.0, 0.8, 0.0, 0.3]
 //! ```
 
+#[allow(unused_imports)]
 use crate::autodiff::reverse::Tensor;
 
 /// Pruning strategy.

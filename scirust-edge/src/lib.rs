@@ -78,10 +78,7 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
     if mult >= (1i64 << 31)
     {
         mult = 1i64 << 30;
-        if shift > 0
-        {
-            shift -= 1;
-        }
+        shift = shift.saturating_sub(1);
     }
     (mult, shift)
 }
@@ -105,7 +102,7 @@ fn parse(model: &[u8], metas: &mut [Meta; MAX_LAYERS]) -> Result<usize, EdgeErro
     {
         return Err(EdgeError::TooManyLayers);
     }
-    for i in 0..n
+    for m in metas.iter_mut().take(n)
     {
         if rd_u32(model, &mut p)? != 0
         {
@@ -136,7 +133,7 @@ fn parse(model: &[u8], metas: &mut [Meta; MAX_LAYERS]) -> Result<usize, EdgeErro
             return Err(EdgeError::Truncated);
         }
         p += nb * 4;
-        metas[i] = Meta {
+        *m = Meta {
             in_f,
             out_f,
             s_in,
@@ -200,15 +197,7 @@ pub fn infer(
     let s0 = metas[0].s_in;
     for idx in 0..batch * in0
     {
-        let mut q = libm::roundf(input[idx] / s0);
-        if q < -128.0
-        {
-            q = -128.0;
-        }
-        else if q > 127.0
-        {
-            q = 127.0;
-        }
+        let q = libm::roundf(input[idx] / s0).clamp(-128.0, 127.0);
         act_a[idx] = q as i8;
     }
     let mut cur_in_a = true;
@@ -261,14 +250,7 @@ pub fn infer(
                 {
                     r = 0;
                 }
-                if r > 127
-                {
-                    r = 127;
-                }
-                if r < -128
-                {
-                    r = -128;
-                }
+                r = r.clamp(-128, 127);
                 if cur_in_a
                 {
                     act_b[bi * l.out_f + o] = r as i8;

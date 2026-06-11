@@ -132,8 +132,8 @@ impl CmaEs {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let mut rng = self.rng.borrow_mut();
         let mut offspring: Vec<Individual> = (0..lambda).map(|_| {
-            let mut g = theta.clone();
-            for i in 0..dims { g[i] += normal.sample(&mut *rng) * sigma; g[i] = g[i].clamp(bounds.0, bounds.1); }
+            let mut g = theta.to_owned();
+            for val in g.iter_mut().take(dims) { *val += normal.sample(&mut *rng) * sigma; *val = val.clamp(bounds.0, bounds.1); }
             Individual::new(g)
         }).collect();
         let fitnesses = offspring.iter().map(|ind| fitness_fn(&ind.genome)).collect::<Vec<_>>();
@@ -141,7 +141,7 @@ impl CmaEs {
         offspring.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let w: Vec<f64> = (0..mu).map(|i| (mu as f64 - i as f64).max(0.0)).collect();
         let sw: f64 = w.iter().sum();
-        for i in 0..dims { theta[i] = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum(); }
+        for (i, val) in theta.iter_mut().enumerate().take(dims) { *val = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum(); }
         offspring
     }
 }
@@ -167,7 +167,7 @@ impl OpenEs {
     pub fn seeded(dims: usize, seed: u64) -> Self {
         Self { dims, pop_size: 4 + (3 * dims / 2), sigma: 0.1, alpha: 0.05, bounds: (-5.0, 5.0), rng: RefCell::new(StdRng::seed_from_u64(seed)) }
     }
-    pub fn step<F>(&self, theta: &mut Vec<f64>, fitness_fn: F
+    pub fn step<F>(&self, theta: &mut [f64], fitness_fn: F
     ) -> f64 where F: Fn(&[f64]) -> f64 {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let mut rng = self.rng.borrow_mut();
