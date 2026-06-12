@@ -1,7 +1,22 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-10
+> Dernière mise à jour : 2026-06-12
+
+## Session 2026-06-12 (audit + SOM tranche verticale)
+- Audit complet exécuté : voir `scirust_complete_audit_report.md`
+- Régression de merge réparée (sgemv AVX2/SSE2/NEON, arena slab) ; gates
+  check / clippy -D warnings / test / fmt tous verts en local
+- **655 tests workspace passent** (630 avant SOM, +25 SOM), 0 échec
+- SOM : tranche verticale réelle livrée (voir `scirust-som/README.md`) —
+  oracle d'ownership déterministe, tokenizer+vocab fermé, générateur de
+  dataset seedé, backbone TransformerEncoder réel (attention du core),
+  trainer bit-déterministe, éval vs oracle : ownership 83,7 % vs baseline
+  31,4 % (held-out seed 9042), visualizer markdown
+- Anciens stubs SOM remplacés : trainer/inference/symbolic/visualizer
+  n'étaient que des fichiers d'1 ligne ; le « Graph Transformer » (MLP
+  étiqueté) est devenu un vrai Transformer séquence — l'attention sur
+  graphe PCG reste un travail futur et est documentée comme telle
 
 ## HEAD
 - **Hash:** `cf738ae`

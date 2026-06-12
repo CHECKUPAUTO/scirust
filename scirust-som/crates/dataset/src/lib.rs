@@ -1,5 +1,13 @@
 //! Dataset Builder for SciRust Ownership Model (SOM).
 //! Converts PCG (Place Capability Graph) to labeled samples for ML.
+//!
+//! The [`generate`] module produces seeded random toy programs and turns
+//! them into per-token training samples labelled by the deterministic
+//! ownership oracle of `scirust-som-symbolic`.
+
+pub mod generate;
+
+pub use generate::{GeneratorConfig, ProgramGenerator, TrainingSample, build_training_set};
 
 use scirust_som_pcg::{Pcg, PcgEdge, PcgNode};
 use serde::{Deserialize, Serialize};

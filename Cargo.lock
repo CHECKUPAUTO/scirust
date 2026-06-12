@@ -1781,7 +1781,10 @@ dependencies = [
 name = "scirust-som-dataset"
 version = "0.1.0"
 dependencies = [
+ "scirust-core",
  "scirust-som-pcg",
+ "scirust-som-symbolic",
+ "scirust-som-tokenizer",
  "serde",
  "serde_json",
 ]
@@ -1789,13 +1792,21 @@ dependencies = [
 [[package]]
 name = "scirust-som-inference"
 version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-som-dataset",
+ "scirust-som-model",
+ "scirust-som-pcg",
+ "scirust-som-symbolic",
+ "scirust-som-tokenizer",
+ "scirust-som-trainer",
+]
 
 [[package]]
 name = "scirust-som-model"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
- "scirust-som-pcg",
 ]
 
 [[package]]
@@ -1809,6 +1820,10 @@ dependencies = [
 [[package]]
 name = "scirust-som-symbolic"
 version = "0.1.0"
+dependencies = [
+ "scirust-som-pcg",
+ "scirust-som-tokenizer",
+]
 
 [[package]]
 name = "scirust-som-tokenizer"
@@ -1821,10 +1836,21 @@ dependencies = [
 [[package]]
 name = "scirust-som-trainer"
 version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-som-dataset",
+ "scirust-som-model",
+ "scirust-som-tokenizer",
+]
 
 [[package]]
 name = "scirust-som-visualizer"
 version = "0.1.0"
+dependencies = [
+ "scirust-som-pcg",
+ "scirust-som-symbolic",
+ "scirust-som-tokenizer",
+]
 
 [[package]]
 name = "scirust-symbolic"

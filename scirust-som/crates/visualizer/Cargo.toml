@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+scirust-som-symbolic = { path = "../symbolic" }
+scirust-som-tokenizer = { path = "../tokenizer" }
+
+[dev-dependencies]
+scirust-som-pcg = { path = "../pcg" }

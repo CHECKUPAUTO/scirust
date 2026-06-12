@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+scirust-core = { path = "../../../scirust-core" }
+scirust-som-model = { path = "../model" }
+scirust-som-dataset = { path = "../dataset" }
+
+[dev-dependencies]
+scirust-som-tokenizer = { path = "../tokenizer" }

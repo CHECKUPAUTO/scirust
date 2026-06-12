@@ -5,4 +5,3 @@ edition = "2021"
 
 [dependencies]
 scirust-core = { path = "../../../scirust-core" }
-scirust-som-pcg = { path = "../pcg" }
