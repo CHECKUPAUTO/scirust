@@ -340,3 +340,71 @@ discipline autour du cœur qui décidera du reste.
 
 *Audit réalisé par exécution réelle des gates du projet le 2026-06-12.
 Correctifs associés livrés sur la branche `claude/great-pascal-5bmfcw`.*
+
+---
+
+# MISE À JOUR FIABILISATION — 2026-06-12 (fin de journée)
+
+État vérifié par exécution après les travaux de fiabilisation menés sur la
+branche `claude/great-pascal-5bmfcw` (commits `bdf4f3e` → ce commit).
+
+## A. Gates : tous verts, et reproductibles en CI
+
+| Gate | État | Note |
+|---|---|---|
+| `cargo fmt --all -- --check` | ✅ | |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ | élargi de `--lib` à `--all-targets` |
+| `cargo build` + `cargo test --workspace` | ✅ | **672 tests, 0 échec, 19 ignorés** |
+| `cargo check --target aarch64-unknown-linux-gnu --all-targets` | ✅ | nouveau gate multi-arch |
+| `cargo deny check` | ✅ | deny.toml réécrit (l'ancien était invalide), validé cargo-deny 0.19.8 |
+| `cargo doc --workspace --no-deps` | ✅ **0 warning** | 22 warnings rustdoc corrigés |
+
+La CI (`.github/workflows/ci.yml`) exécute exactement ces commandes ;
+`--all-features` (impossible à construire : blas-openblas ⊕ blas-mkl) a
+été retiré et documenté. Restant côté GitHub : protection de branche.
+
+## B. SOM : du langage jouet au Rust réel, sémantique typée
+
+- **Frontend `syn`** (`scirust-som-frontend`) : vrais fichiers `.rs` →
+  IR ; constructions non couvertes **signalées**, jamais devinées.
+- **CLI `som-analyze <file.rs>`** : table ownership/borrow/faute par
+  token, diagnostics (E0382/E0502/E0503-style), exit 1 si faute.
+- **Oracle type-aware** : sémantique Copy/move exacte sur le vocabulaire
+  de types de l'IR (`i32`/`f64`/`bool`/`*T`/`&T` copient ;
+  `String`/inconnus/`&mut T` déplacent), inférence locale des bindings
+  non annotés, faute « lecture sous `&mut` » ajoutée. La
+  sur-signalisation des types Copy relevée dans la v1 est **corrigée et
+  testée** (double usage d'`i32` légal, hérité sans annotation).
+- Métriques re-mesurées (held-out seed 9042, 850 tokens) : ownership
+  **87,3 %** (baseline 33,1 %), borrow 94,0 %, fautes 88,6 %.
+- Limites restantes, documentées : emprunts lexicaux (pas NLL), code
+  rectiligne (pas de branches), `let x = f();` non annoté = move
+  conservateur. Levée complète = chemin `scirust-rustc-driver`.
+
+## C. Véracité documentaire : README aligné sur le code
+
+Les claims GPU du README racine (« GPU forward/backward ✅ Stable »,
+« tiled WGSL compute », « 63 TFLOPS ») sont requalifiés **Archived — not
+wired**, avec renvoi au §5 du présent rapport. Le statut redevient
+conforme à la philosophie « claims backed by measurements ».
+
+## D. Documentation exhaustive
+
+- `docs/REFERENCE.md` (nouveau) : référence opérationnelle complète —
+  6 gates, tous les binaires (som-analyze, openclaw-u, 19 audits
+  runtime, 6 exemples), features, carte des crates, API SOM, sondes.
+- `rustdoc` : 0 warning ; `cargo doc --workspace --no-deps --open` est
+  la référence de fonctions faisant foi.
+- `scirust-som/README.md` : contrat sémantique typé + métriques à jour.
+
+## E. Risques résiduels (inchangés, à traiter ensuite)
+
+1. GPU : recâblage réel (mod + deps optionnelles) ou suppression des
+   sources archivées — décision produit à prendre.
+2. Protection de branche master (réglage GitHub, non scriptable d'ici).
+3. Doublon `scirust-autodiff` vs `core::autodiff` ; crates squelettes
+   (`events-*`, `edge`, `bridge`…) à archiver ou marquer expérimentales.
+4. SOM : NLL/branches via rustc-driver ; attention sur graphe PCG ;
+   persistance des poids (SRT1).
+
+FIN DE LA MISE À JOUR

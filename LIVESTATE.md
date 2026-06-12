@@ -3,6 +3,22 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-12 — volet 4 : fiabilisation industrielle
+- Oracle SOM type-aware : Copy/move exact (i32/f64/bool/*T/&T copient ;
+  String/&mut T déplacent), inférence locale, faute UseWhileMutBorrowed
+  (E0503-style) ; 3 nouveaux tests oracle + 3 tests bout-en-bout CLI sur
+  vrai Rust (double usage i32 légal, inférence, lecture sous &mut)
+- Métriques re-mesurées : ownership 87,3 % (baseline 33,1 %), borrow
+  94,0 %, fautes 88,6 % (held-out 9042, 850 tokens)
+- README racine : claims GPU requalifiés « Archived — not wired »
+  (véracité claims=code restaurée)
+- docs/REFERENCE.md : référence exhaustive commandes/binaires/API
+- rustdoc : 22 warnings corrigés → cargo doc --workspace : 0 warning
+- Audit : mise à jour fiabilisation ajoutée au rapport
+- Bilan final mesuré : **672 tests workspace, 0 échec, 19 ignorés** ;
+  7 vérifications vertes (fmt, clippy --all-targets, build, test,
+  cross-check aarch64, cargo-deny, rustdoc 0 warning)
+
 ## Session 2026-06-12 — volet 3 : SOM sur du VRAI Rust
 - `scirust-som-frontend` (nouveau) : parser `syn` (grammaire Rust réelle,
   stable) → abaisse un sous-ensemble vers l'IR de l'oracle. Couvre fn /

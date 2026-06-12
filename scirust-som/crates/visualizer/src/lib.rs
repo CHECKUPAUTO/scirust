@@ -71,24 +71,25 @@ mod tests {
 
     #[test]
     fn renders_states_and_diagnostics() {
-        // let x = 1; let y = x; let z = x;  → one use-after-move
+        // Owner-typed (move semantics): the second use of `x` is a
+        // use-after-move and must render as a FAULT.
         let ast = SomAst::Program(vec![Function {
             name: "main".to_string(),
             params: vec![],
             body: vec![
                 Statement::VarDecl {
                     name: "x".to_string(),
-                    ty: Type::Int,
-                    init: Some(Expression::Literal(Literal::Int(1))),
+                    ty: Type::Str,
+                    init: Some(Expression::Literal(Literal::Str("s".to_string()))),
                 },
                 Statement::VarDecl {
                     name: "y".to_string(),
-                    ty: Type::Int,
+                    ty: Type::Str,
                     init: Some(Expression::Variable("x".to_string())),
                 },
                 Statement::VarDecl {
                     name: "z".to_string(),
-                    ty: Type::Int,
+                    ty: Type::Str,
                     init: Some(Expression::Variable("x".to_string())),
                 },
             ],

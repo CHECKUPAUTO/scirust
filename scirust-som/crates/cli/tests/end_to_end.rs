@@ -68,3 +68,49 @@ fn end_to_end_is_deterministic() {
     let src = "fn h() { let a = String::new(); let b = a; let c = a; }";
     assert_eq!(faults(src), faults(src));
 }
+
+#[test]
+fn copy_types_double_use_is_legal() {
+    // i32 is Copy: rustc accepts this, and so does the type-aware oracle.
+    let src = r#"
+        fn calc(a: i32) {
+            let b: i32 = a;
+            let c: i32 = a;
+            let d: i32 = b + c;
+            drop(d);
+        }
+    "#;
+    assert!(
+        faults(src).is_empty(),
+        "Copy double-use must not fault: {:?}",
+        faults(src)
+    );
+}
+
+#[test]
+fn copy_inference_through_unannotated_let() {
+    // `let b = a;` with a: i32 inherits Copy-ness without an annotation.
+    let src = r#"
+        fn calc(a: i32) {
+            let b = a;
+            let c = a;
+            drop(b);
+            drop(c);
+        }
+    "#;
+    assert!(faults(src).is_empty(), "got {:?}", faults(src));
+}
+
+#[test]
+fn copy_read_under_mut_borrow_is_flagged() {
+    // E0503: cannot use `a` because it was mutably borrowed.
+    let src = r#"
+        fn calc(a: i32) {
+            let m = &mut a;
+            let b = a;
+            drop(m);
+            drop(b);
+        }
+    "#;
+    assert!(faults(src).contains(&FaultKind::UseWhileMutBorrowed));
+}

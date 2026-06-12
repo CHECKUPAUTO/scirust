@@ -30,7 +30,7 @@ pub enum SolveResult {
 }
 
 impl SolveResult {
-    /// Renvoie un Vec<f64> des racines réelles, quelle que soit la variante.
+    /// Renvoie un `Vec<f64>` des racines réelles, quelle que soit la variante.
     pub fn real_roots(&self) -> Vec<f64> {
         match self
         {

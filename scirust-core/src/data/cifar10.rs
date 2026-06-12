@@ -21,7 +21,7 @@ pub const CIFAR10_IMAGE_SIZE: usize = 32 * 32 * 3;
 pub const CIFAR10_N_CLASSES: usize = 10;
 
 /// Charge un seul fichier batch CIFAR-10.
-/// Renvoie (images, labels_raw) où images est un Vec<f32> normalisé [0,1].
+/// Renvoie (images, labels_raw) où images est un `Vec<f32>` normalisé `[0,1]`.
 pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<u8>)> {
     let mut f = File::open(path)?;
     let mut raw = Vec::new();

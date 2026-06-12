@@ -7,28 +7,48 @@
 //! for SOM training labels and the oracle against which the neural model is
 //! validated — no randomness, no floats, bit-stable output.
 //!
-//! ## Toy-language semantics (documented contract)
+//! ## Typed semantics (documented contract)
 //!
-//! - Every value has **move semantics** (think `String`, not `i32`): any
-//!   `Expression::Variable` occurrence moves the variable, matching the
-//!   `Moves` edges produced by [`scirust_som_pcg::PcgBuilder`].
-//! - `&x` / `&mut x` take borrows. A borrow granted in a `VarDecl`
-//!   initializer or `Assignment` RHS is *held* by the bound variable and
-//!   released when that variable is dropped, moved or reassigned. Borrows
-//!   granted in expression statements or `return` are temporary and end
-//!   with the statement.
-//! - Borrow rules: any number of shared borrows XOR one mutable borrow.
-//! - Bindings drop in reverse declaration order at the end of their scope;
-//!   moved-out bindings do not drop (their `Drop` token is labelled
-//!   `Moved`).
-//! - Assignment re-initializes: assigning to a moved variable makes it
-//!   `Owned` again (Rust re-initialization). Assigning to an undeclared
-//!   name implicitly declares it (and is flagged as a fault), mirroring the
-//!   PCG builder.
-//! - `return &x` escapes a borrow to a local and is flagged.
+//! The oracle is **type-aware**, matching Rust's Copy/move split on the
+//! IR's type vocabulary:
+//!
+//! - **Copy types** — `Int`, `Float`, `Bool`, `Unit`, raw pointers and
+//!   shared references `&T`: using the variable as a value *copies* it;
+//!   the variable stays usable. Copying while a `&mut` borrow is
+//!   outstanding is still a fault ([`FaultKind::UseWhileMutBorrowed`]).
+//! - **Move types** — `Str` (the stand-in for `String`/`Vec`/unknown
+//!   owner types) and `&mut T`: any value use *moves* the variable.
+//!   Unannotated bindings infer locally: from the source variable for
+//!   `let y = x;`, from the literal for `let n = 1;`, from the borrow kind
+//!   for `let r = &x;`; otherwise they default to **move** (conservative).
+//! - `&x` / `&mut x` take borrows: any number of shared XOR one mutable.
+//!   A borrow granted in a `VarDecl` initializer or `Assignment` RHS is
+//!   held by the bound variable and released when it drops, moves or is
+//!   reassigned; borrows in expression statements / `return` end with the
+//!   statement.
+//! - Bindings drop in reverse declaration order at scope end; moved-out
+//!   bindings do not drop (their `Drop` token is labelled `Moved`).
+//! - Assignment re-initializes: a moved variable becomes `Owned` again
+//!   (Rust re-initialization). Assigning to an undeclared name implicitly
+//!   declares it (flagged), mirroring the PCG builder.
+//! - `return &local` is flagged as an escaping borrow.
 
-use scirust_som_pcg::ast::{Expression, Function, SomAst, Statement};
+use scirust_som_pcg::ast::{Expression, Function, Literal, SomAst, Statement, Type};
 use scirust_som_tokenizer::SomToken;
+
+/// Whether values of `ty` have Copy semantics in the oracle's model.
+///
+/// Mirrors Rust for the IR's type vocabulary: scalars, `()`, raw pointers
+/// and shared references are `Copy`; `Str` (owner types) and `&mut T` are
+/// move-only.
+pub fn type_is_copy(ty: &Type) -> bool {
+    match ty
+    {
+        Type::Int | Type::Float | Type::Bool | Type::Unit | Type::Ptr(_) => true,
+        Type::Ref(_, mutable) => !mutable,
+        Type::Str => false,
+    }
+}
 
 // ---------------------------------------------------------------------
 // Label space
@@ -92,6 +112,8 @@ pub enum FaultKind {
     UseOfUndeclared,
     UseAfterMove,
     MoveWhileBorrowed,
+    /// Copying a `Copy` value while a `&mut` borrow on it is outstanding.
+    UseWhileMutBorrowed,
     BorrowOfMoved,
     BorrowConflict,
     AssignWhileBorrowed,
@@ -148,6 +170,8 @@ struct VarRecord {
     state: VarState,
     shared: u32,
     muted: bool,
+    /// Copy semantics (see [`type_is_copy`]): value uses copy, never move.
+    copyable: bool,
     /// Borrows this binding holds on other variables: (target id, is_mut).
     holds: Vec<(usize, bool)>,
 }
@@ -211,19 +235,42 @@ impl Interp {
         None
     }
 
-    fn declare(&mut self, name: &str) -> usize {
+    fn declare(&mut self, name: &str, copyable: bool) -> usize {
         let id = self.vars.len();
         self.vars.push(VarRecord {
             name: name.to_string(),
             state: VarState::Owned,
             shared: 0,
             muted: false,
+            copyable,
             holds: Vec::new(),
         });
         let frame = self.scopes.last_mut().expect("scope");
         frame.bindings.push((name.to_string(), id));
         frame.declared.push(id);
         id
+    }
+
+    /// Copy-ness of a new binding: explicit type wins; an unannotated
+    /// binding (`Str` is also the frontend's "unknown" marker) infers from
+    /// its initializer; anything else defaults to move (conservative).
+    fn binding_copyable(&self, ty: &Type, init: Option<&Expression>) -> bool {
+        if !matches!(ty, Type::Str)
+        {
+            return type_is_copy(ty);
+        }
+        match init
+        {
+            Some(Expression::Variable(src)) => self
+                .resolve(src)
+                .map(|id| self.vars[id].copyable)
+                .unwrap_or(false),
+            Some(Expression::Literal(Literal::Int(_)))
+            | Some(Expression::Literal(Literal::Float(_)))
+            | Some(Expression::Literal(Literal::Bool(_))) => true,
+            Some(Expression::Reference { mutable, .. }) => !mutable,
+            _ => false,
+        }
     }
 
     fn state_label(&self, id: usize) -> usize {
@@ -298,7 +345,7 @@ impl Interp {
         self.scopes.push(ScopeFrame::default());
         for param in &func.params
         {
-            self.declare(&param.name);
+            self.declare(&param.name, type_is_copy(&param.ty));
             self.emit(
                 SomToken::Param(param.name.clone()),
                 TokenLabel {
@@ -336,8 +383,12 @@ impl Interp {
     fn statement(&mut self, stmt: &Statement) {
         match stmt
         {
-            Statement::VarDecl { name, init, .. } =>
+            Statement::VarDecl { name, ty, init } =>
             {
+                // Copy-ness must read the *outer* environment (`let y = x;`
+                // inherits from the pre-existing `x`), so infer before the
+                // initializer's effects run.
+                let copyable = self.binding_copyable(ty, init.as_ref());
                 let temps = match init
                 {
                     Some(expr) => self.expression(expr, false),
@@ -345,7 +396,7 @@ impl Interp {
                 };
                 // The binding only becomes visible after its initializer
                 // ran, so `let x = x;` resolves the outer `x`.
-                let id = self.declare(name);
+                let id = self.declare(name, copyable);
                 self.vars[id].holds = temps;
                 self.emit(
                     SomToken::VarDecl(name.clone()),
@@ -392,7 +443,7 @@ impl Interp {
                     None =>
                     {
                         self.fault(lhs, FaultKind::AssignToUndeclared);
-                        let id = self.declare(lhs);
+                        let id = self.declare(lhs, false);
                         self.vars[id].holds = temps;
                         self.emit(
                             SomToken::Assign(lhs.clone()),
@@ -458,23 +509,37 @@ impl Interp {
                     Some(id) =>
                     {
                         let mut invalid = false;
-                        match self.vars[id].state
+                        if self.vars[id].copyable
                         {
-                            VarState::Moved | VarState::Dropped =>
+                            // Copy semantics: the value is duplicated, the
+                            // variable stays usable. Only reading through an
+                            // outstanding `&mut` borrow is a fault.
+                            if self.vars[id].muted
                             {
-                                self.fault(name, FaultKind::UseAfterMove);
+                                self.fault(name, FaultKind::UseWhileMutBorrowed);
                                 invalid = true;
-                            },
-                            VarState::Owned | VarState::Borrowed =>
+                            }
+                        }
+                        else
+                        {
+                            match self.vars[id].state
                             {
-                                if self.is_borrowed(id)
+                                VarState::Moved | VarState::Dropped =>
                                 {
-                                    self.fault(name, FaultKind::MoveWhileBorrowed);
+                                    self.fault(name, FaultKind::UseAfterMove);
                                     invalid = true;
-                                }
-                                self.release_holds(id);
-                                self.vars[id].state = VarState::Moved;
-                            },
+                                },
+                                VarState::Owned | VarState::Borrowed =>
+                                {
+                                    if self.is_borrowed(id)
+                                    {
+                                        self.fault(name, FaultKind::MoveWhileBorrowed);
+                                        invalid = true;
+                                    }
+                                    self.release_holds(id);
+                                    self.vars[id].state = VarState::Moved;
+                                },
+                            }
                         }
                         self.emit(
                             SomToken::Use(name.clone()),
@@ -590,7 +655,17 @@ mod tests {
     use scirust_som_pcg::ast::{BinaryOp, Literal, Type};
     use scirust_som_tokenizer::StructuredTokenizer;
 
+    /// Declare an owner-typed (move-semantics) binding.
     fn decl_lit(name: &str) -> Statement {
+        Statement::VarDecl {
+            name: name.to_string(),
+            ty: Type::Str,
+            init: Some(Expression::Literal(Literal::Str("s".to_string()))),
+        }
+    }
+
+    /// Declare a Copy-typed binding (`i64` semantics).
+    fn decl_copy(name: &str) -> Statement {
         Statement::VarDecl {
             name: name.to_string(),
             ty: Type::Int,
@@ -601,7 +676,7 @@ mod tests {
     fn decl_move(name: &str, from: &str) -> Statement {
         Statement::VarDecl {
             name: name.to_string(),
-            ty: Type::Int,
+            ty: Type::Str,
             init: Some(Expression::Variable(from.to_string())),
         }
     }
@@ -791,7 +866,7 @@ mod tests {
             decl_lit("a"),
             Statement::VarDecl {
                 name: "b".to_string(),
-                ty: Type::Int,
+                ty: Type::Str,
                 init: Some(Expression::BinaryOp {
                     left: Box::new(Expression::Variable("a".to_string())),
                     op: BinaryOp::Add,
@@ -840,5 +915,81 @@ mod tests {
         let a1 = OwnershipOracle::new().analyze(&ast);
         let a2 = OwnershipOracle::new().analyze(&ast);
         assert_eq!(format!("{a1:?}"), format!("{a2:?}"));
+    }
+    #[test]
+    fn copy_types_are_not_moved() {
+        // let a: i64 = 1; let b = a; let c = a;  → all legal, `a` stays Owned
+        let ast = program(vec![
+            decl_copy("a"),
+            Statement::VarDecl {
+                name: "b".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Variable("a".to_string())),
+            },
+            Statement::VarDecl {
+                name: "c".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Variable("a".to_string())),
+            },
+        ]);
+        let a = OwnershipOracle::new().analyze(&ast);
+        assert!(
+            a.diagnostics.is_empty(),
+            "copy uses must not fault: {:?}",
+            a.diagnostics
+        );
+        // Both uses of `a` are labelled Owned (copied, not moved).
+        for (t, l) in a.tokens.iter().zip(&a.labels)
+        {
+            if matches!(t, SomToken::Use(n) if n == "a")
+            {
+                assert_eq!(l.ownership, OWNERSHIP_OWNED);
+            }
+        }
+        // Unannotated `b`/`c` inherited Copy-ness from `a`.
+        assert_eq!(
+            label_of(&a, &SomToken::Drop("b".into())).ownership,
+            OWNERSHIP_DROPPED
+        );
+    }
+
+    #[test]
+    fn copy_use_under_mut_borrow_faults() {
+        // let a: i64 = 1; let m = &mut a; let b = a;  → E0503-style fault
+        let ast = program(vec![
+            decl_copy("a"),
+            decl_ref("m", "a", true),
+            Statement::VarDecl {
+                name: "b".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Variable("a".to_string())),
+            },
+        ]);
+        let a = OwnershipOracle::new().analyze(&ast);
+        assert!(
+            a.diagnostics
+                .iter()
+                .any(|d| d.kind == FaultKind::UseWhileMutBorrowed)
+        );
+    }
+
+    #[test]
+    fn copy_use_under_shared_borrow_is_legal() {
+        // let a: i64 = 1; let r = &a; let b = a;  → legal in Rust
+        let ast = program(vec![
+            decl_copy("a"),
+            decl_ref("r", "a", false),
+            Statement::VarDecl {
+                name: "b".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Variable("a".to_string())),
+            },
+        ]);
+        let a = OwnershipOracle::new().analyze(&ast);
+        assert!(
+            a.diagnostics.is_empty(),
+            "copy under shared borrow is legal: {:?}",
+            a.diagnostics
+        );
     }
 }

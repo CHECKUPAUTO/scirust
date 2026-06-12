@@ -47,11 +47,15 @@ scirust-som-cli        `som-analyze <file.rs>` — oracle analysis of real code
 scirust-som-visualizer markdown rendering of analyses
 ```
 
-## Toy-language semantics (the labelled contract)
+## Typed semantics (the labelled contract)
 
 Documented in `scirust-som-symbolic`; the highlights:
 
-- every value has move semantics (any variable use is a move);
+- **type-aware Copy/move**: `i32`/`f64`/`bool`/raw pointers/`&T` copy on
+  use (double use is legal, exactly like rustc); `String`/`Vec`/unknown
+  owner types/`&mut T` move on use. Unannotated `let` bindings infer
+  Copy-ness from their initializer; reading a Copy value under an
+  outstanding `&mut` borrow is flagged (E0503-style);
 - `&x` / `&mut x` borrows obey "N shared XOR 1 mutable";
 - borrows taken in `let r = &x` are held by `r` and released when `r`
   drops, moves or is reassigned;
@@ -71,10 +75,10 @@ runs in under a second in release mode:
 
 | metric | value |
 |---|---|
-| ownership accuracy (850 tokens) | **0.8365** |
-| — majority-class baseline | 0.3141 |
-| borrow accuracy | 0.9388 |
-| fault-detection accuracy | 0.8682 |
+| ownership accuracy (850 tokens) | **0.8729** |
+| — majority-class baseline | 0.3306 |
+| borrow accuracy | 0.9400 |
+| fault-detection accuracy | 0.8859 |
 
 Reproduce with:
 
@@ -100,21 +104,21 @@ approximated for every file:
   holder is never used again still counts as live. Borrow-conflict reports
   therefore match rustc when the borrow is genuinely used across the
   conflict, and may over-report otherwise.
-- **Copy types are over-approximated.** The oracle models uniform move
-  semantics — exact for `String`/`Vec`/`Box`, but `let b = a; let c = a;`
-  on `i32` is legal in Rust yet flagged as use-after-move here.
-  Distinguishing `Copy` needs type information (the `rustc`-driver path).
-  Use non-`Copy` types for faithful results.
+- **Copy/move is type-aware** (fixed): scalar, pointer and `&T` uses
+  copy; owner types and `&mut T` move; unannotated bindings infer from
+  their initializer. Remaining over-approximation: `let x = f();` with no
+  annotation defaults to move semantics (conservative) — full resolution
+  needs the type-resolved `rustc`-driver path.
 - **Straight-line code only.** `if`/`match`/loops/closures/macros are
   recorded as *unsupported* and skipped rather than lowered with invented
   branch-join semantics, so labels stay correct on what is analyzed.
 - **Method receivers** are treated as shared borrows (reported as an
   approximation), since `&self` vs by-value `self` is not syntactic.
 
-The deeper precision upgrade — `Copy`-awareness, NLL, and branch joins —
-is the `scirust-rustc-driver` (HIR/MIR) path, kept outside the default
-workspace; this `syn` frontend is the pragmatic real-Rust entry point that
-works today.
+The deeper precision upgrade — NLL borrows, branch joins, and
+call-return types — is the `scirust-rustc-driver` (HIR/MIR) path, kept
+outside the default workspace; this `syn` frontend is the pragmatic
+real-Rust entry point that works today.
 
 Other limits unchanged from the model itself:
 
@@ -131,11 +135,11 @@ Other limits unchanged from the model itself:
 |---|---|---|
 | pcg | 3 | PCG edges for move / borrow / scope-drop |
 | tokenizer | 4 | stream order, drops, vocab determinism + UNK overflow |
-| symbolic | 9 | every fault kind, drop labels, healing, tokenizer alignment, determinism |
+| symbolic | 12 | every fault kind incl. Copy semantics (legal double-use, E0503-style read under &mut, copy under & legal), drop labels, healing, tokenizer alignment, determinism |
 | frontend | 6 | real-Rust lowering: move, borrows, methods, impl/scopes, unsupported, determinism, syntax errors |
 | dataset | 4 | generator determinism, class coverage, vocab range |
 | model | 3 | shapes, bit-determinism, seed sensitivity |
 | trainer | 2 | loss decreases, bit-deterministic training |
 | inference | 4 (+1 probe) | deterministic eval, beats baseline, oracle-checked + **real-Rust** prediction |
-| cli (integration) | 4 | real `.rs` → oracle faults (use-after-move, borrow conflict), determinism |
+| cli (integration) | 7 | real `.rs` → oracle faults (use-after-move, borrow conflict, Copy legality, Copy inference, read-under-&mut), determinism |
 | visualizer | 2 | fault rendering, clean-program rendering |

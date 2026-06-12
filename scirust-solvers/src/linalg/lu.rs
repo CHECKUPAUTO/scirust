@@ -25,7 +25,7 @@ pub struct Lu {
     /// Matrice combinée : partie strictement inf = L (sans la diag = 1),
     /// partie sup + diag = U.
     pub lu: Matrix,
-    /// Permutation : ligne i de A originale → ligne piv[i] après pivot.
+    /// Permutation : ligne i de A originale → ligne `piv[i]` après pivot.
     pub piv: Vec<usize>,
     /// Nombre de swaps effectués (pour le signe du déterminant).
     pub swap_count: usize,

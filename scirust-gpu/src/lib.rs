@@ -1,11 +1,11 @@
-//! Abstraction unifiée pour l'exécution GPU (#[gpu]).
+//! Abstraction unifiée pour l'exécution GPU (`#[gpu]`).
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-/// Trait d'abstraction matériel ciblé par la macro #[gpu].
+/// Trait d'abstraction matériel ciblé par la macro `#[gpu]`.
 pub trait RawComputeBackend {
     fn device_name(&self) -> &'static str;
     fn gemm_f32(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32>;

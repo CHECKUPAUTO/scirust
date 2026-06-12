@@ -125,12 +125,14 @@ impl ProgramGenerator {
             0..=24 =>
             {
                 let name = self.fresh_or_reuse(names);
+                // Owner-typed value: keeps move semantics in the dataset.
                 Statement::VarDecl {
                     name,
-                    ty: Type::Int,
-                    init: Some(Expression::Literal(Literal::Int(
-                        (self.rng.next_u32() % 100) as i64,
-                    ))),
+                    ty: Type::Str,
+                    init: Some(Expression::Literal(Literal::Str(format!(
+                        "s{}",
+                        self.rng.next_u32() % 100
+                    )))),
                 }
             },
             25..=44 => match self.any_name(names)
@@ -140,7 +142,7 @@ impl ProgramGenerator {
                     let name = self.fresh_or_reuse(names);
                     Statement::VarDecl {
                         name,
-                        ty: Type::Int,
+                        ty: Type::Str,
                         init: Some(Expression::Variable(from)),
                     }
                 },
@@ -204,7 +206,7 @@ impl ProgramGenerator {
                     let name = self.fresh_or_reuse(names);
                     Statement::VarDecl {
                         name,
-                        ty: Type::Int,
+                        ty: Type::Str,
                         init: Some(Expression::BinaryOp {
                             left: Box::new(Expression::Variable(a)),
                             op: scirust_som_pcg::ast::BinaryOp::Add,
@@ -221,8 +223,8 @@ impl ProgramGenerator {
         let name = self.fresh_or_reuse(names);
         Statement::VarDecl {
             name,
-            ty: Type::Int,
-            init: Some(Expression::Literal(Literal::Int(0))),
+            ty: Type::Str,
+            init: Some(Expression::Literal(Literal::Str("s0".to_string()))),
         }
     }
 }

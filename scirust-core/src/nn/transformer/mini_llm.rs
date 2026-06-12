@@ -133,7 +133,7 @@ impl MiniLLM {
         }
     }
 
-    /// Forward [seq_len] → logits [seq_len, vocab_size]
+    /// Forward `[seq_len]` → logits `[seq_len, vocab_size]`
     pub fn forward(&mut self, input_ids: &[usize]) -> Tensor {
         let seq_len = input_ids.len().max(1);
         let tape = Tape::new();

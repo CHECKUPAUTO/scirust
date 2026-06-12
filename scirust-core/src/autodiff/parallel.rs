@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 
 /// A Send + Sync tape wrapper.
 ///
-/// - `nodes`     : the computation graph (Arc<RwLock> for thread-safety)
+/// - `nodes`     : the computation graph (`Arc<RwLock>` for thread-safety)
 /// - `values`    : forward tensor values (needed during backward)
 /// - `grads`     : scalar f64 gradients (one per node, set by backward())
 ///

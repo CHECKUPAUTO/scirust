@@ -21,13 +21,14 @@
 //!
 //! ## Honest boundaries (reported, never guessed silently)
 //!
-//! - **Copy types are over-approximated.** The oracle models *uniform move
-//!   semantics* (correct for `String`, `Vec`, `Box`, …). For `Copy` types
-//!   (`i32`, `bool`, …) `let b = a; let c = a;` is legal in Rust but the
-//!   oracle flags the second use as use-after-move, because distinguishing
-//!   `Copy` needs type information. Use non-`Copy` types for faithful
-//!   results; `Copy`-awareness is the next milestone (it needs the
-//!   `rustc`-driver / type-resolved path).
+//! - **Copy vs move is type-aware.** Declared types map to the IR
+//!   (`i32`/`f64`/`bool`/raw pointers/`&T` → Copy; `String`/`Vec`/unknown
+//!   paths/`&mut T` → move) and the oracle infers Copy-ness of
+//!   unannotated bindings from their initializer (source variable,
+//!   literal, or borrow kind). The remaining over-approximation: an
+//!   unannotated binding initialised by a *call* (`let x = f();`) defaults
+//!   to move semantics — conservative, and resolvable only with
+//!   type-resolved analysis (the `rustc`-driver path).
 //! - **Method receivers** (`x.foo()`) are treated as a shared borrow of
 //!   the receiver — recorded in [`Lowered::approximations`] — because
 //!   `&self` vs by-value `self` is not syntactically decidable.

@@ -37,7 +37,7 @@ fn read_be_u32<R: Read>(r: &mut R) -> io::Result<u32> {
     Ok(u32::from_be_bytes(buf))
 }
 
-/// Charge les images IDX. Renvoie (Vec<f32> normalisé [0,1], n, h, w).
+/// Charge les images IDX. Renvoie (`Vec<f32>` normalisé `[0,1]`, n, h, w).
 pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, usize, usize)> {
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;
@@ -61,7 +61,7 @@ pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, 
     Ok((data, n, h, w))
 }
 
-/// Charge les labels IDX. Renvoie Vec<u8> (chiffres 0..K-1).
+/// Charge les labels IDX. Renvoie `Vec<u8>` (chiffres 0..K-1).
 pub fn load_idx_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
     let magic = read_be_u32(&mut f)?;

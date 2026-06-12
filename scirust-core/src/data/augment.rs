@@ -23,7 +23,7 @@ pub trait Transform: Send + Sync + TransformClone {
     fn apply(&self, img: &mut [f32], dims: ImageDims);
 }
 
-/// Clone spécialisé pour Box<dyn Transform>.
+/// Clone spécialisé pour `Box<dyn Transform>`.
 pub trait TransformClone {
     fn clone_box(&self) -> Box<dyn Transform>;
 }
