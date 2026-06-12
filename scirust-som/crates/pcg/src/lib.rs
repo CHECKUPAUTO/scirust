@@ -63,104 +63,6 @@ impl Pcg {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ast::*;
-
-    #[test]
-    fn test_pcg_move() {
-        // x = 1; y = x;
-        let prog = SomAst::Program(vec![Function {
-            name: "test_move".to_string(),
-            params: vec![],
-            body: vec![
-                Statement::VarDecl {
-                    name: "x".to_string(),
-                    ty: Type::Int,
-                    init: Some(Expression::Literal(Literal::Int(1))),
-                },
-                Statement::VarDecl {
-                    name: "y".to_string(),
-                    ty: Type::Int,
-                    init: Some(Expression::Variable("x".to_string())),
-                },
-            ],
-        }]);
-
-        let mut builder = PcgBuilder::new();
-        builder.build(&prog);
-        let pcg = builder.pcg;
-
-        // Check for Move edge from x to y
-        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
-        let y_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "y")).unwrap();
-
-        assert!(pcg.edges.iter().any(|(f, t, e)| *f == x_idx && *t == y_idx && *e == PcgEdge::Moves));
-    }
-
-    #[test]
-    fn test_pcg_borrow() {
-        // x = 1; y = &x;
-        let prog = SomAst::Program(vec![Function {
-            name: "test_borrow".to_string(),
-            params: vec![],
-            body: vec![
-                Statement::VarDecl {
-                    name: "x".to_string(),
-                    ty: Type::Int,
-                    init: Some(Expression::Literal(Literal::Int(1))),
-                },
-                Statement::VarDecl {
-                    name: "y".to_string(),
-                    ty: Type::Ref(Box::new(Type::Int), false),
-                    init: Some(Expression::Reference { name: "x".to_string(), mutable: false }),
-                },
-            ],
-        }]);
-
-        let mut builder = PcgBuilder::new();
-        builder.build(&prog);
-        let pcg = builder.pcg;
-
-        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
-        let y_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "y")).unwrap();
-
-        // y borrows x
-        assert!(pcg.edges.iter().any(|(f, t, e)| *f == y_idx && *t == x_idx && *e == PcgEdge::Borrows));
-    }
-
-    #[test]
-    fn test_pcg_scope_drop() {
-        // { x = 1; }
-        let prog = SomAst::Program(vec![Function {
-            name: "test_scope".to_string(),
-            params: vec![],
-            body: vec![
-                Statement::Scope(vec![
-                    Statement::VarDecl {
-                        name: "x".to_string(),
-                        ty: Type::Int,
-                        init: Some(Expression::Literal(Literal::Int(1))),
-                    },
-                ]),
-            ],
-        }]);
-
-        let mut builder = PcgBuilder::new();
-        builder.build(&prog);
-        let pcg = builder.pcg;
-
-        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
-        let scope_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Region(name) if name.starts_with("scope_"))).unwrap();
-
-        // scope owns x
-        assert!(pcg.edges.iter().any(|(f, t, e)| *f == scope_idx && *t == x_idx && *e == PcgEdge::Owns));
-        // scope drops x
-        assert!(pcg.edges.iter().any(|(f, t, e)| *f == scope_idx && *t == x_idx && *e == PcgEdge::Drops));
-    }
-}
-
 pub struct PcgBuilder {
     pub pcg: Pcg,
     current_region: Option<usize>,
@@ -238,10 +140,8 @@ impl PcgBuilder {
                     self.process_statement(s);
                 }
 
-                // Simplified: all variables in scope are dropped at end of scope
                 for i in 0..self.pcg.nodes.len() {
                     if let PcgNode::Variable(_) = &self.pcg.nodes[i] {
-                        // Check if this variable is owned by the current scope
                         if self.pcg.edges.iter().any(|(f, t, e)| *f == scope_region && *t == i && *e == PcgEdge::Owns) {
                              self.pcg.add_edge(scope_region, i, PcgEdge::Drops);
                         }
@@ -251,8 +151,6 @@ impl PcgBuilder {
                 self.current_region = old_region;
             }
             ast::Statement::Expression(expr) => {
-                // Anonymous expression, might have effects
-                // We don't have a target node, so we use a dummy or just ignore if it's a literal
                 let dummy = self.pcg.add_node(PcgNode::MemoryLocation("temp".to_string()));
                 self.process_expression(dummy, expr);
             }
@@ -268,7 +166,6 @@ impl PcgBuilder {
         match expr {
             ast::Expression::Variable(name) => {
                 let src_node = self.pcg.add_node(PcgNode::Variable(name.clone()));
-                // Assignment from variable to variable is a Move (simplified)
                 self.pcg.add_edge(src_node, target_node, PcgEdge::Moves);
             }
             ast::Expression::Reference { name, mutable } => {
@@ -290,5 +187,96 @@ impl PcgBuilder {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::*;
+
+    #[test]
+    fn test_pcg_move() {
+        let prog = SomAst::Program(vec![Function {
+            name: "test_move".to_string(),
+            params: vec![],
+            body: vec![
+                Statement::VarDecl {
+                    name: "x".to_string(),
+                    ty: Type::Int,
+                    init: Some(Expression::Literal(Literal::Int(1))),
+                },
+                Statement::VarDecl {
+                    name: "y".to_string(),
+                    ty: Type::Int,
+                    init: Some(Expression::Variable("x".to_string())),
+                },
+            ],
+        }]);
+
+        let mut builder = PcgBuilder::new();
+        builder.build(&prog);
+        let pcg = builder.pcg;
+
+        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
+        let y_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "y")).unwrap();
+
+        assert!(pcg.edges.iter().any(|(f, t, e)| *f == x_idx && *t == y_idx && *e == PcgEdge::Moves));
+    }
+
+    #[test]
+    fn test_pcg_borrow() {
+        let prog = SomAst::Program(vec![Function {
+            name: "test_borrow".to_string(),
+            params: vec![],
+            body: vec![
+                Statement::VarDecl {
+                    name: "x".to_string(),
+                    ty: Type::Int,
+                    init: Some(Expression::Literal(Literal::Int(1))),
+                },
+                Statement::VarDecl {
+                    name: "y".to_string(),
+                    ty: Type::Int,
+                    init: Some(Expression::Reference { name: "x".to_string(), mutable: false }),
+                },
+            ],
+        }]);
+
+        let mut builder = PcgBuilder::new();
+        builder.build(&prog);
+        let pcg = builder.pcg;
+
+        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
+        let y_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "y")).unwrap();
+
+        assert!(pcg.edges.iter().any(|(f, t, e)| *f == y_idx && *t == x_idx && *e == PcgEdge::Borrows));
+    }
+
+    #[test]
+    fn test_pcg_scope_drop() {
+        let prog = SomAst::Program(vec![Function {
+            name: "test_scope".to_string(),
+            params: vec![],
+            body: vec![
+                Statement::Scope(vec![
+                    Statement::VarDecl {
+                        name: "x".to_string(),
+                        ty: Type::Int,
+                        init: Some(Expression::Literal(Literal::Int(1))),
+                    },
+                ]),
+            ],
+        }]);
+
+        let mut builder = PcgBuilder::new();
+        builder.build(&prog);
+        let pcg = builder.pcg;
+
+        let x_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Variable(name) if name == "x")).unwrap();
+        let scope_idx = pcg.nodes.iter().position(|n| matches!(n, PcgNode::Region(name) if name.starts_with("scope_"))).unwrap();
+
+        assert!(pcg.edges.iter().any(|(f, t, e)| *f == scope_idx && *t == x_idx && *e == PcgEdge::Owns));
+        assert!(pcg.edges.iter().any(|(f, t, e)| *f == scope_idx && *t == x_idx && *e == PcgEdge::Drops));
     }
 }

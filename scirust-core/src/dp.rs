@@ -130,8 +130,7 @@ fn compute_log_moment(alpha: f64, q: f64, sigma: f64) -> f64 {
     }
 
     // Upper bound: α * q^2 / (2 * σ^2) for small α and q
-    let moment = alpha * q * q / (2.0 * sigma * sigma);
-    moment
+    alpha * q * q / (2.0 * sigma * sigma)
 }
 
 /// Clip gradient vector to maximum L2 norm.

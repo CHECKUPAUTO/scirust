@@ -118,6 +118,7 @@ fn substitute(e: &Expr, names: &[String], vals: &[f64]) -> Expr {
 
 /// Fitte les constantes de `expr` (params nommes) aux donnees multi-variables
 /// par Adam, gradients via differentiation symbolique.
+#[allow(clippy::too_many_arguments)]
 pub fn fit_constants(
     expr: &Expr,
     params: &[&str],

@@ -199,6 +199,7 @@ pub fn col2im(cols: &Tensor, cfg: &ConvConfig) -> Tensor {
 }
 
 /// im2col avec pad explicite (usize), pour usage interne par conv2d_forward.
+#[allow(clippy::too_many_arguments)]
 pub fn im2col_raw(
     input: &Tensor,
     b: usize,
@@ -257,6 +258,7 @@ pub fn im2col_raw(
 }
 
 /// col2im avec pad explicite (usize). Accumule les contributions chevauchantes.
+#[allow(clippy::too_many_arguments)]
 pub fn col2im_raw(
     cols: &Tensor,
     b: usize,

@@ -217,7 +217,7 @@ impl SimdBackend for Avx2Backend {
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_avx2(row, x) };
-            y[i] = alpha * dot + beta * y[i];
+            *item = alpha * dot + beta * *item;
         }
     }
     fn sgemm_f32(
@@ -385,7 +385,7 @@ impl SimdBackend for Sse2Backend {
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_sse2(row, x) };
-            y[i] = alpha * dot + beta * y[i];
+            *item = alpha * dot + beta * *item;
         }
     }
     fn sgemm_f32(
@@ -549,7 +549,7 @@ impl SimdBackend for NeonBackend {
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_neon(row, x) };
-            y[i] = alpha * dot + beta * y[i];
+            *item = alpha * dot + beta * *item;
         }
     }
     fn sgemm_f32(

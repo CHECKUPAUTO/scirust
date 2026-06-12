@@ -52,7 +52,7 @@ where
     }
 
     // Vérifier que les entrées sont finies
-    for (_i, &bi) in b.iter().enumerate()
+    for &bi in b.iter()
     {
         check_finite(bi, "b", 0)?;
     }

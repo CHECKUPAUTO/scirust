@@ -18,11 +18,13 @@ impl Q16_16 {
     }
 
     #[inline(always)]
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Self) -> Self {
         Self(self.0.saturating_add(other.0))
     }
 
     #[inline(always)]
+    #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: Self) -> Self {
         let res = (self.0 as i64 * other.0 as i64) >> 16;
         Self(res as i32)
