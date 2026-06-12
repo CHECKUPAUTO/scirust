@@ -2,6 +2,7 @@
 name = "scirust-solvers"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Equation, ODE, optimization and quadrature solvers built on scirust-autodiff"
 license-file = "../LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"

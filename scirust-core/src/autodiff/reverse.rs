@@ -2096,8 +2096,10 @@ impl Tape {
                                         {
                                             for kw in 0..kernel
                                             {
-                                                let ih_signed = oh as isize + pad as isize - kh as isize;
-                                                let iw_signed = ow as isize + pad as isize - kw as isize;
+                                                let ih_signed =
+                                                    oh as isize + pad as isize - kh as isize;
+                                                let iw_signed =
+                                                    ow as isize + pad as isize - kw as isize;
                                                 if ih_signed >= 0
                                                     && ih_signed < (h_in * stride) as isize
                                                     && iw_signed >= 0
@@ -2115,7 +2117,8 @@ impl Tape {
                                                         + ci * h_in * w_in
                                                         + ih * w_in
                                                         + iw;
-                                                    dx.data[in_idx] += grad_out * weight_t.data[w_idx];
+                                                    dx.data[in_idx] +=
+                                                        grad_out * weight_t.data[w_idx];
                                                 }
                                             }
                                         }
@@ -2345,11 +2348,11 @@ impl Tape {
                     if let Some(b_idx) = bias_idx
                     {
                         let mut db = vec![0.0; g.cols];
-                        for j in 0..g.cols
+                        for (j, val) in db.iter_mut().enumerate().take(g.cols)
                         {
                             for i in 0..g.rows
                             {
-                                db[j] += g.data[i * g.cols + j];
+                                *val += g.data[i * g.cols + j];
                             }
                         }
                         let db_tensor = Tensor {
@@ -2465,7 +2468,7 @@ impl Tape {
                                 for r in 0..br
                                 {
                                     l_i[r] = rescale[r] * l_i[r] + row_sum_p[r];
-                                m_i[..br].copy_from_slice(&m_new[..br]);
+                                    m_i[..br].copy_from_slice(&m_new[..br]);
                                     m_i[r] = m_new[r];
                                 }
                             }

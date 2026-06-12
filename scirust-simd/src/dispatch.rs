@@ -213,7 +213,7 @@ impl SimdBackend for Avx2Backend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for i in 0..m
+        for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_avx2(row, x) };
@@ -381,7 +381,7 @@ impl SimdBackend for Sse2Backend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for i in 0..m
+        for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_sse2(row, x) };
@@ -545,7 +545,7 @@ impl SimdBackend for NeonBackend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for i in 0..m
+        for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_neon(row, x) };

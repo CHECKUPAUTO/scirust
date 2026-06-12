@@ -2,6 +2,7 @@
 name = "scirust-evo"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "SciRust Evolutionary Algorithms — GA, CMA-ES, OpenES, NSGA-II"
 license-file = "../LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"

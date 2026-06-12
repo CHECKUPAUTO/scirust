@@ -140,7 +140,7 @@ impl CmaEs {
             rng: RefCell::new(StdRng::seed_from_u64(seed)),
         }
     }
-    pub fn step<F>(&mut self, theta: &mut Vec<f64>, fitness_fn: F) -> Vec<Individual>
+    pub fn step<F>(&mut self, theta: &mut [f64], fitness_fn: F) -> Vec<Individual>
     where
         F: Fn(&[f64]) -> f64,
     {
@@ -150,11 +150,11 @@ impl CmaEs {
         let mut rng = self.rng.borrow_mut();
         let mut offspring: Vec<Individual> = (0..lambda)
             .map(|_| {
-                let mut g = theta.clone();
-                for i in 0..dims
+                let mut g = theta.to_vec();
+                for val in g.iter_mut().take(dims)
                 {
-                    g[i] += normal.sample(&mut *rng) * sigma;
-                    g[i] = g[i].clamp(bounds.0, bounds.1);
+                    *val += normal.sample(&mut *rng) * sigma;
+                    *val = val.clamp(bounds.0, bounds.1);
                 }
                 Individual::new(g)
             })
@@ -170,9 +170,9 @@ impl CmaEs {
         offspring.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let w: Vec<f64> = (0..mu).map(|i| (mu as f64 - i as f64).max(0.0)).collect();
         let sw: f64 = w.iter().sum();
-        for i in 0..dims
+        for (i, val) in theta.iter_mut().enumerate().take(dims)
         {
-            theta[i] = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum();
+            *val = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum();
         }
         offspring
     }
@@ -206,7 +206,7 @@ impl OpenEs {
             rng: RefCell::new(StdRng::seed_from_u64(seed)),
         }
     }
-    pub fn step<F>(&self, theta: &mut Vec<f64>, fitness_fn: F) -> f64
+    pub fn step<F>(&self, theta: &mut [f64], fitness_fn: F) -> f64
     where
         F: Fn(&[f64]) -> f64,
     {
@@ -510,8 +510,10 @@ mod tests {
 
     #[test]
     fn ga_sphere() {
-        let mut ga = GeneticAlgorithm::default();
-        ga.pop_size = 50;
+        let ga = GeneticAlgorithm {
+            pop_size: 50,
+            ..GeneticAlgorithm::default()
+        };
         let mut pop = ga.init_pop(10);
         for _ in 0..100
         {
@@ -552,8 +554,10 @@ mod tests {
 
     #[test]
     fn nsga2_zdt1() {
-        let mut nsga = Nsga2::default();
-        nsga.pop_size = 50;
+        let nsga = Nsga2 {
+            pop_size: 50,
+            ..Nsga2::default()
+        };
         let mut pop = nsga.init_pop(10);
         for _ in 0..50
         {

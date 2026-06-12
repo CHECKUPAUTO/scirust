@@ -99,7 +99,7 @@ impl<T: Copy, const N: usize> Slab<T, N> {
         self.next_version += 1;
 
         self.entries[index as usize].state = EntryState::Occupied {
-            _size: self.slot_size_bytes,
+            size: self.slot_size_bytes,
         };
         self.entries[index as usize].version = version;
         self.count += 1;

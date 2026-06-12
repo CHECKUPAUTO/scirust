@@ -2,6 +2,7 @@
 name = "scirust"
 version = "0.13.0"
 edition = "2021"
+publish = false
 rust-version = "1.85"
 description = "SciRust — Industrial-grade deep learning framework in pure Rust"
 license-file = "LICENSE.md"
@@ -74,6 +75,8 @@ members = [
     "scirust-som/crates/trainer",
     "scirust-som/crates/inference",
     "scirust-som/crates/symbolic",
+    "scirust-som/crates/frontend",
+    "scirust-som/crates/cli",
     "scirust-som/crates/visualizer",
 ]
 exclude = [

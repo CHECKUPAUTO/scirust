@@ -2,7 +2,7 @@
 //! trapèze. Converge à l'ordre 2k pour k niveaux d'extrapolation. Très
 //! efficace sur fonctions très lisses (analytiques).
 
-/// Intègre f sur [a,b] par Romberg. `max_levels` ~ 10-15 suffit en pratique.
+/// Intègre f sur `[a,b]` par Romberg. `max_levels` ~ 10-15 suffit en pratique.
 /// `tol` est la tolérance absolue sur l'erreur estimée (différence entre deux
 /// niveaux successifs).
 pub fn romberg<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, tol: f64, max_levels: usize) -> f64 {

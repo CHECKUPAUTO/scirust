@@ -157,7 +157,7 @@ impl<'a, T> MatrixView<'a, T> {
         unsafe { &*self.ptr.add(r * self.row_stride + c * self.col_stride) }
     }
 
-    /// Itérateur sur les lignes (chaque ligne est une MatrixView<T>)
+    /// Itérateur sur les lignes (chaque ligne est une `MatrixView<T>`)
     pub fn row_iter(&self) -> impl Iterator<Item = MatrixView<'a, T>> + '_ {
         (0..self.rows).map(move |r| self.row(r))
     }

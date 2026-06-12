@@ -9,7 +9,7 @@ pub fn simplex(c: &[f64], a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
     // Initial tableau
     let mut tableau = vec![vec![0.0; n + m + 1]; m + 1];
 
-        #[allow(clippy::needless_range_loop)]
+    #[allow(clippy::needless_range_loop)]
     for i in 0..m
     {
         #[allow(clippy::needless_range_loop)]
@@ -79,7 +79,7 @@ pub fn simplex(c: &[f64], a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
             if i != r
             {
                 let multiplier = tableau[i][pivot_col];
-        #[allow(clippy::needless_range_loop)]
+                #[allow(clippy::needless_range_loop)]
                 for j in 0..=(n + m)
                 {
                     tableau[i][j] -= multiplier * tableau[r][j];

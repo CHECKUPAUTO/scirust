@@ -20,7 +20,7 @@ fn test_bpe_integration() {
     let texts = vec!["the quick brown fox", "jumps over the lazy dog"];
     let tokenizer = BpeTokenizer::train(&texts, 50);
     let encoded = tokenizer.tokenize("the quick dog");
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]
@@ -174,7 +174,9 @@ fn test_flash_attention_forward_basic() {
     let k = tape.input(Tensor::zeros(total, d_head));
     let v = tape.input(Tensor::zeros(total, d_head));
     let scale = 1.0 / (d_head as f32).sqrt();
-    let out = flash_attention_forward(&tape, q, k, v, batch, n_heads, seq_len, d_head, scale, 2, false);
+    let out = flash_attention_forward(
+        &tape, q, k, v, batch, n_heads, seq_len, d_head, scale, 2, false,
+    );
     assert_eq!(out.shape(), (total, d_head));
 }
 
@@ -205,7 +207,8 @@ fn test_epsilon_greedy_explores_and_exploits() {
     // With epsilon=0.5, both actions should be reachable over many tries
     let actions = vec!["left", "right"];
     let mut counts = std::collections::HashMap::new();
-    for _ in 0..500 {
+    for _ in 0..500
+    {
         let a = agent.act_epsilon_greedy(&"s", &actions, &mut rng);
         *counts.entry(a).or_insert(0) += 1;
     }

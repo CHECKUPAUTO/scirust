@@ -66,7 +66,8 @@ mod tests {
         let large_values: Vec<f32> = vec![500.0, -500.0, 0.0];
         let scale = compute_scale(&large_values);
         let quantized = quantize_tensor(&large_values, scale);
-        assert!(quantized.iter().all(|&x| x >= -128 && x <= 127));
+        // Symmetric quantization maps ±max_abs to ±127 and zero to zero.
+        assert_eq!(quantized, vec![127, -127, 0]);
     }
 
     #[test]

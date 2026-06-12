@@ -318,8 +318,10 @@ mod tests {
     fn test_from_fn_identity() {
         let m = Matrix::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 0.0 });
         assert_eq!(m.shape(), (3, 3));
-        for i in 0..3 {
-            for j in 0..3 {
+        for i in 0..3
+        {
+            for j in 0..3
+            {
                 assert_eq!(m[(i, j)], if i == j { 1.0 } else { 0.0 });
             }
         }

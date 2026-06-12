@@ -1,5 +1,14 @@
 name: CI
 
+# Gates are the same commands documented in README.md / CLAUDE workflow:
+# they must stay runnable locally with identical results.
+#
+# Deliberately NOT using `--all-features`: in scirust-core the features
+# `blas-openblas` and `blas-mkl` are mutually exclusive backends of
+# blas-src and require system toolchains the runners do not have —
+# `--all-features` can never build. Feature-specific jobs can be added
+# explicitly when those paths get CI-grade setup.
+
 on:
   push:
     branches: [master, main, develop]
@@ -36,49 +45,69 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   build-test:
-    name: Build & Test (nightly)
+    name: Build & Test (nightly, x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build workspace
+        run: cargo build --workspace --all-targets
+      - name: Run tests
+        run: cargo test --workspace
+
+  # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
+  # A pure `cargo check` needs no cross linker and would have caught the
+  # 2026-06-12 sgemv merge regression on the NEON side.
+  cross-check-aarch64:
+    name: Cross-check (aarch64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rustfmt, clippy
+          targets: aarch64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Build workspace
-        run: cargo build --workspace --all-targets --all-features
-      - name: Run tests
-        run: cargo test --workspace --all-features
+      - name: Check workspace for aarch64
+        run: cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu
 
   deny:
     name: License & Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v1
       - name: Run cargo-deny
-        run: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
 
+  # Informational: coverage upload depends on external service/token and
+  # must not gate merges.
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Generate coverage
-        run: |
-          cargo install cargo-llvm-cov
-          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:

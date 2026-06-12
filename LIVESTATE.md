@@ -1,7 +1,83 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-10
+> Dernière mise à jour : 2026-06-12
+
+## Session 2026-06-12 — volet 4 : fiabilisation industrielle
+- Oracle SOM type-aware : Copy/move exact (i32/f64/bool/*T/&T copient ;
+  String/&mut T déplacent), inférence locale, faute UseWhileMutBorrowed
+  (E0503-style) ; 3 nouveaux tests oracle + 3 tests bout-en-bout CLI sur
+  vrai Rust (double usage i32 légal, inférence, lecture sous &mut)
+- Métriques re-mesurées : ownership 87,3 % (baseline 33,1 %), borrow
+  94,0 %, fautes 88,6 % (held-out 9042, 850 tokens)
+- README racine : claims GPU requalifiés « Archived — not wired »
+  (véracité claims=code restaurée)
+- docs/REFERENCE.md : référence exhaustive commandes/binaires/API
+- rustdoc : 22 warnings corrigés → cargo doc --workspace : 0 warning
+- Audit : mise à jour fiabilisation ajoutée au rapport
+- Bilan final mesuré : **672 tests workspace, 0 échec, 19 ignorés** ;
+  7 vérifications vertes (fmt, clippy --all-targets, build, test,
+  cross-check aarch64, cargo-deny, rustdoc 0 warning)
+
+## Session 2026-06-12 — volet 3 : SOM sur du VRAI Rust
+- `scirust-som-frontend` (nouveau) : parser `syn` (grammaire Rust réelle,
+  stable) → abaisse un sous-ensemble vers l'IR de l'oracle. Couvre fn /
+  let / move / &,&mut / blocs / return / appels / impl-méthodes ; signale
+  honnêtement ce qui est sauté (if/match/loops/closures/macros) ou
+  approximé (receveur de méthode = emprunt partagé). 6 tests.
+- `scirust-som-cli` (nouveau) : binaire `som-analyze <file.rs>` — analyse
+  d'ownership d'un vrai fichier Rust, table par token + diagnostics,
+  exit 1 si faute (utilisable comme linter). 4 tests d'intégration
+  bout-en-bout (vrai source Rust → oracle). Exemples dans
+  scirust-som/examples/ (use_after_move.rs détecté E0382, borrow_conflict.rs).
+- `inference::predict_rust_source` : entraîne sur synthétique, prédit sur
+  vrai Rust ; test bout-en-bout (accord modèle/oracle > 0,4 sur fichier réel).
+- Honnêteté documentée (README) : emprunts LEXICAUX (pas NLL,
+  conservateur) ; types Copy sur-signalés (uniform move) ; code
+  rectiligne seulement. La précision NLL/Copy/branches = chantier
+  rustc-driver (HIR/MIR), hors workspace.
+- SOM passe de 25 à 35 tests ; workspace ~665 tests, 6 gates verts.
+
+## Session 2026-06-12 — volet 2 : réparation CI
+- `.github/workflows/ci.yml` réécrit pour être réalisable :
+  - suppression de `--all-features` (blas-openblas et blas-mkl sont
+    mutuellement exclusifs → la CI ne pouvait JAMAIS compiler)
+  - nouveau job `cross-check-aarch64` (cargo check --target aarch64) :
+    type-vérifie tous les chemins NEON/SVE — la classe de bug du merge
+    du 12/06 devient détectable sur PR
+  - coverage passé en informatif (continue-on-error), cargo-llvm-cov
+    pré-compilé via taiki-e/install-action
+- `deny.toml` réécrit (l'ancien n'était pas du TOML valide → le job
+  License/Security échouait au parsing) ; validé en local avec
+  cargo-deny 0.19.8 : advisories/bans/licenses/sources tous ok ;
+  RUSTSEC-2024-0436 (`paste` unmaintained via nalgebra→simba) ignoré
+  avec justification — c'est l'alerte Dependabot ouverte
+- `publish = false` ajouté aux 51 manifestes (réalité : deps par chemin,
+  licence non-commerciale) — active l'exemption licences des crates
+  privées dans cargo-deny
+- Tous les warnings restants éliminés (RUSTFLAGS -D warnings tenable) ;
+  gate clippy étendu à --all-targets : 14 lints de code de test corrigés
+- Cross-check aarch64 a aussi révélé/réparé : test SVE cassé
+  (`sve_vector_length_elements` inexistante — modules sve/sve_fns en
+  ré-export circulaire vide) → implémentation réelle via `rdvl` (asm
+  stable, gardée par détection runtime)
+- Reste à faire côté GitHub (non scriptable depuis le repo) : protection
+  de branche master exigeant fmt/clippy/build-test/cross-check/deny
+
+## Session 2026-06-12 (audit + SOM tranche verticale)
+- Audit complet exécuté : voir `scirust_complete_audit_report.md`
+- Régression de merge réparée (sgemv AVX2/SSE2/NEON, arena slab) ; gates
+  check / clippy -D warnings / test / fmt tous verts en local
+- **655 tests workspace passent** (630 avant SOM, +25 SOM), 0 échec
+- SOM : tranche verticale réelle livrée (voir `scirust-som/README.md`) —
+  oracle d'ownership déterministe, tokenizer+vocab fermé, générateur de
+  dataset seedé, backbone TransformerEncoder réel (attention du core),
+  trainer bit-déterministe, éval vs oracle : ownership 83,7 % vs baseline
+  31,4 % (held-out seed 9042), visualizer markdown
+- Anciens stubs SOM remplacés : trainer/inference/symbolic/visualizer
+  n'étaient que des fichiers d'1 ligne ; le « Graph Transformer » (MLP
+  étiqueté) est devenu un vrai Transformer séquence — l'attention sur
+  graphe PCG reste un travail futur et est documentée comme telle
 
 ## HEAD
 - **Hash:** `cf738ae`

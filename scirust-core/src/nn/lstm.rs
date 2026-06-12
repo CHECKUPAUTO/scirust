@@ -114,7 +114,6 @@ impl LSTM {
         for t in 0..seq_len
         {
             let x_t = input
-
                 .try_slice_rows(t * batch_size, (t + 1) * batch_size)
                 .unwrap();
 

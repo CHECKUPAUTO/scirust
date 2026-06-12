@@ -26,7 +26,6 @@
 //! arena.reset();
 //! ```
 
-
 mod aligned;
 mod allocator;
 mod slab;

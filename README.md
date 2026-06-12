@@ -7,8 +7,9 @@
 
 # SciRust 🦀
 
-> A pure-Rust deep learning framework — SIMD CPU, tiled GPU compute via WGSL,
-> reverse-mode autograd, batch normalization, convolutions, and data parallelism.
+> A pure-Rust deep learning framework — SIMD CPU kernels, reverse-mode
+> autograd, batch normalization, convolutions, and data parallelism.
+> (GPU/WGSL kernels exist in-tree but are archived, not wired — see Status.)
 > No C++, no Python, no FFI — just Rust from top to bottom.
 
 ## Why?
@@ -36,8 +37,8 @@ by measurements.
 Every result below is reproduced by code in this repository and documented in the
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
-- **Deep-learning core + reverse-mode autodiff** — 579 passing tests; an MLP reaches 97.70% on MNIST.
-- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reaches ~63 TFLOPS.
+- **Deep-learning core + reverse-mode autodiff** — 672 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
+- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reached ~63 TFLOPS. ⚠ *Status: the kernels live in `scirust-gpu/src/` but are currently **not wired into the build** (no `mod` declarations, no `wgpu`/`cudarc` dependencies); the measurement is historical and not reproducible from the present workspace. See `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
@@ -47,7 +48,7 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 
 ```
 ✓ Reverse-mode autograd        ✓ Conv2d / MaxPool2d / BatchNorm1d
-✓ SIMD CPU kernels (AVX2/NEON) ✓ Tiled WGSL GPU compute (wgpu)
+✓ SIMD CPU kernels (AVX2/SSE2/NEON) ✓ Deterministic int8 quantization
 ✓ Adam / SGD optimizers        ✓ Data parallelism (1 tape per thread)
 ✓ Lazy graph compilation       ✓ MNIST IDX reader + DataLoader
 ✓ safetensors persistence      ✓ Pure Rust, no FFI
@@ -105,22 +106,21 @@ Add to your `Cargo.toml`:
 [dependencies]
 scirust-core = { path = "path/to/scirust-core" }
 
-# Optional: GPU support via wgpu
-scirust-gpu  = { path = "path/to/scirust-gpu", optional = true }
 ```
 
-Build with GPU support:
-```bash
-cargo build --features wgpu
-```
+> GPU note: `scirust-gpu` currently exposes CPU-validated stubs only; the
+> WGSL/cuBLAS kernels in its `src/` are archived and not part of the build
+> (`--features wgpu` compiles nothing extra). Re-wiring them is tracked in
+> the audit report.
 
 ## Architecture
 
 ```
 scirust-core/    Core compute, autograd, layers (~12k loc)
 scirust-simd/    SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/     WGSL kernels for wgpu (im2col, sgemm, elementwise)
-examples/        Quickstart, MNIST training, GPU benchmark
+scirust-gpu/     archived WGSL/cuBLAS kernels (not wired; see audit §5)
+scirust-som/     Ownership Model: real-Rust analyzer + Transformer pipeline
+examples/        Quickstart, MNIST training, benchmarks
 ```
 
 ## Documentation
@@ -129,6 +129,8 @@ examples/        Quickstart, MNIST training, GPU benchmark
 - [`docs/MNIST.md`](docs/MNIST.md) — Real MNIST training with data parallelism
 - [`docs/GPU.md`](docs/GPU.md) — Activate GPU routing for Conv2d
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
+- [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
+- [`scirust-som/README.md`](scirust-som/README.md) — Ownership Model (real-Rust analyzer)
 
 ## Status
 
@@ -139,8 +141,8 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | BatchNorm | ✅ Stable |
 | Dropout | ✅ Stable |
 | Data parallelism (CPU multithread) | ✅ Stable |
-| GPU forward (wgpu) | ✅ Stable |
-| GPU backward | ✅ Stable (bolt-opt-autodiff) |
+| GPU forward (wgpu) | ⚠ Archived — kernels present but not wired (see audit §5) |
+| GPU backward | ⚠ Archived — not wired (bolt-opt-autodiff) |
 | Transformer (MHA, Encoder, Decoder) | ✅ Stable |
 | GQA & KV-Cache | ✅ Stable (GQA + infer_step avec cache) |
 | RoPE embeddings | ✅ Stable |
@@ -160,6 +162,7 @@ examples/        Quickstart, MNIST training, GPU benchmark
 | Advanced optimizers (RMSprop, AdamW, LAMB) | ✅ New |
 | Fused ops (matmul+SiLU, matmul+GELU, etc.) | ✅ New |
 | HPC im2col (cache-aware) | ✅ New |
+| SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
 
 
 ## Package layout: framework library vs. bundled agent

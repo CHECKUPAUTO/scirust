@@ -1,4 +1,4 @@
-//! TT-Linear layer: a drop-in replacement for [`scirust_core::nn::Linear`]
+//! TT-Linear layer: a drop-in replacement for [`Linear`]
 //! whose weight matrix is stored as a Tensor-Train (TT) decomposition.
 //!
 //! ## Memory savings

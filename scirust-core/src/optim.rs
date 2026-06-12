@@ -204,7 +204,6 @@ mod tests {
     #[test]
     fn test_rmsprop() {
         let mut optimizer = RMSprop::new(0.01);
-        let mut params = vec![1.0, 2.0, 3.0];
         let grads = vec![0.1, 0.2, 0.3];
 
         optimizer.step("param_0", &grads);

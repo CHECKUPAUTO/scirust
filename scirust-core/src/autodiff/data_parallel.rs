@@ -10,7 +10,7 @@ impl GradientAggregator {
     /// Element-wise sum across workers.
     ///
     /// `grads` is a slice of per-worker gradient vectors (each of length N).
-    /// Returns a single vector of length N where result[j] = sum_i grads[i][j].
+    /// Returns a single vector of length N where `result[j] = sum_i grads[i][j]`.
     pub fn reduce_sum(grads: &[Vec<f64>]) -> Vec<f64> {
         if grads.is_empty()
         {
@@ -32,7 +32,7 @@ impl GradientAggregator {
     /// Element-wise mean across workers.
     ///
     /// `grads` is a slice of per-worker gradient vectors (each of length N).
-    /// Returns a single vector of length N where result[j] = mean_i grads[i][j].
+    /// Returns a single vector of length N where `result[j] = mean_i grads[i][j]`.
     pub fn reduce_mean(grads: &[Vec<f64>]) -> Vec<f64> {
         if grads.is_empty()
         {
