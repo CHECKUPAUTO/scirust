@@ -5,4 +5,4 @@
 
 pub mod linear;
 
-pub use linear::{tt_decompose, tt_decompose_auto, TTLinear};
+pub use linear::{TTLinear, tt_decompose, tt_decompose_auto};

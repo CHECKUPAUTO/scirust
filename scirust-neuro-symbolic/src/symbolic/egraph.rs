@@ -73,7 +73,8 @@ impl EGraph {
 
     fn add_node(&mut self, node: ENode) -> usize {
         let canon = self.canonicalize(&node);
-        if let Some(&id) = self.memo.get(&canon) {
+        if let Some(&id) = self.memo.get(&canon)
+        {
             return self.find(id);
         }
         let id = self.next_id;
@@ -93,11 +94,13 @@ impl EGraph {
     /// Find the canonical (root) class ID with path compression.
     pub fn find(&mut self, id: usize) -> usize {
         let mut root = id;
-        while self.uf[root] != root {
+        while self.uf[root] != root
+        {
             root = self.uf[root];
         }
         let mut cur = id;
-        while self.uf[cur] != root {
+        while self.uf[cur] != root
+        {
             let next = self.uf[cur];
             self.uf[cur] = root;
             cur = next;
@@ -109,16 +112,20 @@ impl EGraph {
     pub fn union(&mut self, id1: usize, id2: usize) {
         let a = self.find(id1);
         let b = self.find(id2);
-        if a == b {
+        if a == b
+        {
             return;
         }
         self.uf[a] = b;
-        if let Some(class_a) = self.classes.remove(&a) {
+        if let Some(class_a) = self.classes.remove(&a)
+        {
             let class_b = self.classes.get_mut(&b).expect("root class must exist");
-            for n in class_a.nodes {
+            for n in class_a.nodes
+            {
                 class_b.nodes.insert(n);
             }
-            for p in class_a.parents {
+            for p in class_a.parents
+            {
                 class_b.parents.insert(p);
             }
         }
@@ -130,10 +137,12 @@ impl EGraph {
     }
 
     fn canonicalize(&mut self, node: &ENode) -> ENode {
-        match node {
-            ENode::Op(op, children) => {
+        match node
+        {
+            ENode::Op(op, children) =>
+            {
                 ENode::Op(op.clone(), children.iter().map(|&c| self.find(c)).collect())
-            }
+            },
             other => other.clone(),
         }
     }
@@ -141,29 +150,38 @@ impl EGraph {
     /// Restore congruence closure: re-canonicalise every node and union any two
     /// classes that contain the same canonical node, iterating to a fixpoint.
     pub fn rebuild(&mut self) {
-        loop {
+        loop
+        {
             let mut seen: HashMap<ENode, usize> = HashMap::new();
             let mut to_union: Vec<(usize, usize)> = Vec::new();
             let roots: Vec<usize> = self.classes.keys().copied().collect();
-            for cid in roots {
+            for cid in roots
+            {
                 let nodes: Vec<ENode> = self.classes[&cid].nodes.iter().cloned().collect();
-                for node in nodes {
+                for node in nodes
+                {
                     let cnode = self.canonicalize(&node);
-                    match seen.get(&cnode) {
-                        Some(&other) if self.find(other) != self.find(cid) => {
+                    match seen.get(&cnode)
+                    {
+                        Some(&other) if self.find(other) != self.find(cid) =>
+                        {
                             to_union.push((other, cid));
-                        }
-                        Some(_) => {}
-                        None => {
+                        },
+                        Some(_) =>
+                        {},
+                        None =>
+                        {
                             seen.insert(cnode, cid);
-                        }
+                        },
                     }
                 }
             }
-            if to_union.is_empty() {
+            if to_union.is_empty()
+            {
                 break;
             }
-            for (a, b) in to_union {
+            for (a, b) in to_union
+            {
                 self.union(a, b);
             }
         }
@@ -171,10 +189,12 @@ impl EGraph {
         // Rebuild the memo table with canonical nodes / roots.
         self.memo.clear();
         let roots: Vec<usize> = self.classes.keys().copied().collect();
-        for cid in roots {
+        for cid in roots
+        {
             let nodes: Vec<ENode> = self.classes[&cid].nodes.iter().cloned().collect();
             let root = self.find(cid);
-            for node in nodes {
+            for node in nodes
+            {
                 let c = self.canonicalize(&node);
                 self.memo.insert(c, root);
             }

@@ -13,7 +13,9 @@ pub trait RawComputeBackend {
 
 pub struct WgpuBackend;
 impl RawComputeBackend for WgpuBackend {
-    fn device_name(&self) -> &'static str { "wgpu" }
+    fn device_name(&self) -> &'static str {
+        "wgpu"
+    }
     fn gemm_f32(&self, _a: &[f32], _b: &[f32], m: usize, _k: usize, n: usize) -> Vec<f32> {
         vec![0.0; m * n]
     }
@@ -21,7 +23,9 @@ impl RawComputeBackend for WgpuBackend {
 
 pub struct CudaBackend;
 impl RawComputeBackend for CudaBackend {
-    fn device_name(&self) -> &'static str { "cuda" }
+    fn device_name(&self) -> &'static str {
+        "cuda"
+    }
     fn gemm_f32(&self, _a: &[f32], _b: &[f32], m: usize, _k: usize, n: usize) -> Vec<f32> {
         vec![0.0; m * n]
     }
@@ -36,20 +40,27 @@ pub enum GpuAccelerator {
 
 impl GpuAccelerator {
     pub fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
-        match self {
+        match self
+        {
             GpuAccelerator::Wgpu(backend) => backend.gemm_f32(a, b, m, k, n),
             GpuAccelerator::Cuda(backend) => backend.gemm_f32(a, b, m, k, n),
-            GpuAccelerator::CpuFallback => {
+            GpuAccelerator::CpuFallback =>
+            {
                 let mut out = vec![0.0; m * n];
-                for i in 0..m {
-                    for j in 0..n {
+                for i in 0..m
+                {
+                    for j in 0..n
+                    {
                         let mut acc = 0.0;
-                        for p in 0..k { acc += a[i*k+p] * b[p*n+j]; }
-                        out[i*n+j] = acc;
+                        for p in 0..k
+                        {
+                            acc += a[i * k + p] * b[p * n + j];
+                        }
+                        out[i * n + j] = acc;
                     }
                 }
                 out
-            }
+            },
         }
     }
 }

@@ -147,5 +147,8 @@ fn main() {
     );
     println!();
     println!("Note: optimiseurs a graine fixe (StdRng seedable) -> deterministes/reproductibles;");
-    println!("les {} runs partagent la meme graine par defaut (utiliser *::seeded(s) pour varier).", runs);
+    println!(
+        "les {} runs partagent la meme graine par defaut (utiliser *::seeded(s) pour varier).",
+        runs
+    );
 }

@@ -23,7 +23,12 @@ pub struct FusedKernel {
 
 impl FusedKernel {
     /// Crée un nouveau kernel avec les paramètres par défaut.
-    pub fn new(kernel_type: KernelType, group: Vec<usize>, inputs: Vec<usize>, outputs: Vec<usize>) -> Self {
+    pub fn new(
+        kernel_type: KernelType,
+        group: Vec<usize>,
+        inputs: Vec<usize>,
+        outputs: Vec<usize>,
+    ) -> Self {
         Self {
             kernel_type,
             group,
@@ -37,46 +42,57 @@ impl FusedKernel {
     ///
     /// Les données intermédiaires restent dans les registres / stack.
     pub fn execute(&self, inputs: &[&[f32]], output: &mut [f32]) {
-        match self.kernel_type {
-            KernelType::MatmulSilu => {
+        match self.kernel_type
+        {
+            KernelType::MatmulSilu =>
+            {
                 // y = silu(x @ W)
                 // x: (batch, in), W: (in, out)
                 self.execute_matmul_silu(inputs, output);
-            }
-            KernelType::MatmulRelu => {
+            },
+            KernelType::MatmulRelu =>
+            {
                 // y = relu(x @ W)
                 self.execute_matmul_relu(inputs, output);
-            }
-            KernelType::MatmulSiluLayerNorm => {
+            },
+            KernelType::MatmulSiluLayerNorm =>
+            {
                 // y = layernorm(silu(x @ W))
                 self.execute_matmul_silu_layernorm(inputs, output);
-            }
-            KernelType::MatmulLayerNorm => {
+            },
+            KernelType::MatmulLayerNorm =>
+            {
                 // y = layernorm(x @ W)
                 self.execute_matmul_layernorm(inputs, output);
-            }
-            KernelType::MatmulScale => {
+            },
+            KernelType::MatmulScale =>
+            {
                 // y = (x @ W) * scale
                 self.execute_matmul_scale(inputs, output);
-            }
-            KernelType::TwoLayerMlp => {
+            },
+            KernelType::TwoLayerMlp =>
+            {
                 // y = x @ W1 @ W2 + x (residual)
                 self.execute_two_layer_mlp(inputs, output);
-            }
-            KernelType::LayerNormActivation => {
+            },
+            KernelType::LayerNormActivation =>
+            {
                 // y = act(layernorm(x))
                 self.execute_layernorm_activation(inputs, output);
-            }
-            KernelType::SsmScan => {
+            },
+            KernelType::SsmScan =>
+            {
                 // SSM scan — séquentiel, pas de fusion possible
                 unimplemented!("SsmScan kernel not yet implemented")
-            }
-            KernelType::Identity => {
+            },
+            KernelType::Identity =>
+            {
                 // Pas de fusion — copie simple
-                if inputs.len() == 1 {
+                if inputs.len() == 1
+                {
                     output.copy_from_slice(inputs[0]);
                 }
-            }
+            },
         }
     }
 
@@ -100,15 +116,18 @@ impl FusedKernel {
 
         // block_size = self.params.tile_size; // used by tiling variant
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
-            for out_row in 0..out_features {
+            for out_row in 0..out_features
+            {
                 // Accumuler dans un registre (scalar pour la demo)
                 let mut acc = 0.0f32;
 
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
 
@@ -131,13 +150,16 @@ impl FusedKernel {
         let in_features = self.params.in_features;
         let out_features = self.params.out_features;
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
-            for out_row in 0..out_features {
+            for out_row in 0..out_features
+            {
                 let mut acc = 0.0f32;
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
                 output[o_off + out_row] = acc.max(0.0);
@@ -160,15 +182,18 @@ impl FusedKernel {
         let out_features = self.params.out_features;
         let eps = self.params.eps;
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
             // Step 1: MatMul + SiLU (accumulated)
             let mut tmp = vec![0.0f32; out_features];
-            for out_row in 0..out_features {
+            for out_row in 0..out_features
+            {
                 let mut acc = 0.0f32;
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
                 tmp[out_row] = acc * (1.0 + (-acc).exp()).recip();
@@ -176,13 +201,15 @@ impl FusedKernel {
 
             // Step 2: LayerNorm (single pass for mean/var + normalize)
             let mut mean = 0.0f32;
-            for v in &tmp {
+            for v in &tmp
+            {
                 mean += v;
             }
             mean /= out_features as f32;
 
             let mut var = 0.0f32;
-            for v in &tmp {
+            for v in &tmp
+            {
                 let d = v - mean;
                 var += d * d;
             }
@@ -191,7 +218,8 @@ impl FusedKernel {
             let std = (var + eps).sqrt();
 
             // Normalize + scale/shift
-            for i in 0..out_features {
+            for i in 0..out_features
+            {
                 output[o_off + i] = (tmp[i] - mean) / std * gamma[i] + beta[i];
             }
         }
@@ -210,15 +238,18 @@ impl FusedKernel {
         let out_features = self.params.out_features;
         let eps = self.params.eps;
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
             // MatMul
             let mut tmp = vec![0.0f32; out_features];
-            for out_row in 0..out_features {
+            for out_row in 0..out_features
+            {
                 let mut acc = 0.0f32;
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
                 tmp[out_row] = acc;
@@ -226,19 +257,22 @@ impl FusedKernel {
 
             // LayerNorm
             let mut mean = 0.0f32;
-            for v in &tmp {
+            for v in &tmp
+            {
                 mean += v;
             }
             mean /= out_features as f32;
 
             let mut var = 0.0f32;
-            for v in &tmp {
+            for v in &tmp
+            {
                 let d = v - mean;
                 var += d * d;
             }
             var /= out_features as f32;
 
-            for i in 0..out_features {
+            for i in 0..out_features
+            {
                 output[o_off + i] = (tmp[i] - mean) / (var + eps).sqrt();
             }
         }
@@ -256,13 +290,16 @@ impl FusedKernel {
         let in_features = self.params.in_features;
         let out_features = self.params.out_features;
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
-            for out_row in 0..out_features {
+            for out_row in 0..out_features
+            {
                 let mut acc = 0.0f32;
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
                 output[o_off + out_row] = acc * scale[out_row];
@@ -283,24 +320,29 @@ impl FusedKernel {
         let in_features = self.params.in_features;
         let out_features = self.params.out_features;
 
-        for b in 0..batch {
+        for b in 0..batch
+        {
             let x_off = b * in_features;
             let o_off = b * out_features;
 
             // First layer
             let mut hidden_act = vec![0.0f32; hidden];
-            for h in 0..hidden {
+            for h in 0..hidden
+            {
                 let mut acc = 0.0f32;
-                for k in 0..in_features {
+                for k in 0..in_features
+                {
                     acc += x[x_off + k] * w1[k * hidden + h];
                 }
                 hidden_act[h] = acc; // no activation for demo
             }
 
             // Second layer + residual
-            for o in 0..out_features {
+            for o in 0..out_features
+            {
                 let mut acc = 0.0f32;
-                for h in 0..hidden {
+                for h in 0..hidden
+                {
                     acc += hidden_act[h] * w2[h * out_features + o];
                 }
                 output[o_off + o] = acc + x[x_off + o]; // residual
@@ -321,14 +363,16 @@ impl FusedKernel {
 
         // Mean
         let mut mean = 0.0f32;
-        for v in x.iter().take(d_model) {
+        for v in x.iter().take(d_model)
+        {
             mean += v;
         }
         mean /= d_model as f32;
 
         // Variance
         let mut var = 0.0f32;
-        for v in x.iter().take(d_model) {
+        for v in x.iter().take(d_model)
+        {
             let d = v - mean;
             var += d * d;
         }
@@ -337,12 +381,16 @@ impl FusedKernel {
         let std = (var + eps).sqrt();
 
         // Normalize + activation (SiLU for demo) + scale/shift
-        for i in 0..d_model {
+        for i in 0..d_model
+        {
             let normed = (x[i] - mean) / std;
             let act = normed * (1.0 + (-normed).exp()).recip();
-            output[i] = if !gamma.is_empty() {
+            output[i] = if !gamma.is_empty()
+            {
                 act * gamma[i] + beta[i]
-            } else {
+            }
+            else
+            {
                 act
             };
         }

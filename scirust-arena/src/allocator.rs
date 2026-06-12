@@ -12,7 +12,7 @@
 //! - Pas de fragmentation — allocation linéaire séquentielle
 //! - Pas de Drop — toutes les allocations sont dealloquées ensemble
 
-use super::{align_up, is_aligned, MIN_ALIGN_BYTES};
+use super::{MIN_ALIGN_BYTES, align_up, is_aligned};
 
 /// Erreurs possibles lors de l'allocation dans l'arène.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +25,8 @@ pub enum ArenaError {
 
 impl std::fmt::Display for ArenaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match self
+        {
             ArenaError::Overflow => write!(f, "Arena overflow: insufficient space"),
             ArenaError::ZeroSized => write!(f, "Zero-sized allocation not allowed"),
         }
@@ -58,7 +59,8 @@ impl MemoryBlock {
     /// Alloue un bloc de mémoire de taille minimale `min_bytes`, aligné sur 128.
     /// La mémoire est initialisée à zéro et **possédée** par le bloc.
     fn allocate(min_bytes: usize) -> Result<Self, ArenaError> {
-        if min_bytes == 0 {
+        if min_bytes == 0
+        {
             return Err(ArenaError::ZeroSized);
         }
 
@@ -142,9 +144,12 @@ impl PinnedArena {
         let alignment = std::mem::align_of::<T>().max(16);
         let total = num * elem_size;
         // Assurer un alignement minimal de ALIGNMENT
-        let size = if alignment >= MIN_ALIGN_BYTES {
+        let size = if alignment >= MIN_ALIGN_BYTES
+        {
             total
-        } else {
+        }
+        else
+        {
             align_up(total)
         };
         Self::new(size)
@@ -161,7 +166,8 @@ impl PinnedArena {
     where
         T: Copy + Default,
     {
-        if n == 0 {
+        if n == 0
+        {
             return Err(ArenaError::ZeroSized);
         }
 
@@ -173,7 +179,8 @@ impl PinnedArena {
 
         let required = aligned_offset + n * elem_size;
 
-        if required > self.block.capacity {
+        if required > self.block.capacity
+        {
             return Err(ArenaError::Overflow);
         }
 
@@ -182,12 +189,11 @@ impl PinnedArena {
 
         // Construire le slice mutable
         let slice_ptr = ptr as *mut T;
-        let slice = unsafe {
-            std::slice::from_raw_parts_mut(slice_ptr, n)
-        };
+        let slice = unsafe { std::slice::from_raw_parts_mut(slice_ptr, n) };
 
         // Initialiser à Default (pour T: Copy, c'est zero-initialization)
-        for elem in slice.iter_mut() {
+        for elem in slice.iter_mut()
+        {
             *elem = T::default();
         }
 
@@ -208,7 +214,8 @@ impl PinnedArena {
         T: Copy + Default,
     {
         let slice = self.alloc_slice(n)?;
-        for elem in slice.iter_mut() {
+        for elem in slice.iter_mut()
+        {
             *elem = val;
         }
         Ok(slice)
@@ -220,8 +227,7 @@ impl PinnedArena {
     where
         T: Copy + Default,
     {
-        self.alloc_slice::<T>(1)
-            .map(|s| &mut s[0])
+        self.alloc_slice::<T>(1).map(|s| &mut s[0])
     }
 
     /// Alloue de l'espace pour un seul élément, initialisé avec `val`.
@@ -246,7 +252,9 @@ impl PinnedArena {
     /// Retourne la quantité de mémoire restante dans l'arène.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.block.capacity.saturating_sub(align_up_to(self.offset, 16))
+        self.block
+            .capacity
+            .saturating_sub(align_up_to(self.offset, 16))
     }
 
     /// Retourne la quantité totale allouée.
@@ -296,5 +304,8 @@ impl Default for PinnedArena {
 
 /// Vérification au chargement — s'assurer que l'alignement est correct.
 const _: () = {
-    assert!(MIN_ALIGN_BYTES.is_power_of_two(), "ALIGNMENT must be power of 2");
+    assert!(
+        MIN_ALIGN_BYTES.is_power_of_two(),
+        "ALIGNMENT must be power of 2"
+    );
 };

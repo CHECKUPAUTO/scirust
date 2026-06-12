@@ -213,7 +213,8 @@ impl SimdBackend for Avx2Backend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for (i, item) in y.iter_mut().enumerate().take(m) {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_avx2(row, x) };
             *item = alpha * dot + beta * *item;
@@ -380,7 +381,8 @@ impl SimdBackend for Sse2Backend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for (i, item) in y.iter_mut().enumerate().take(m) {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_sse2(row, x) };
             *item = alpha * dot + beta * *item;
@@ -543,7 +545,8 @@ impl SimdBackend for NeonBackend {
         y: &mut [f32],
     ) {
         let m = a.rows();
-        for (i, item) in y.iter_mut().enumerate().take(m) {
+        for i in 0..m
+        {
             let row = a.row_slice(i).expect("row_slice");
             let dot = unsafe { sdot_f32_neon(row, x) };
             *item = alpha * dot + beta * *item;
@@ -594,7 +597,8 @@ unsafe fn sdot_f32_neon(x: &[f32], y: &[f32]) -> f32 {
     let mut acc = vdupq_n_f32(0.0);
     let n = x.len();
     let mut i = 0;
-    while i + 4 <= n {
+    while i + 4 <= n
+    {
         let xv = vld1q_f32(x.as_ptr().add(i));
         let yv = vld1q_f32(y.as_ptr().add(i));
         acc = vfmaq_f32(acc, xv, yv);
@@ -603,7 +607,8 @@ unsafe fn sdot_f32_neon(x: &[f32], y: &[f32]) -> f32 {
     let mut tmp = [0.0f32; 4];
     vst1q_f32(tmp.as_mut_ptr(), acc);
     let mut sum: f32 = tmp.iter().sum();
-    for j in i..n {
+    for j in i..n
+    {
         sum += x[j] * y[j];
     }
     sum
@@ -618,20 +623,22 @@ mod tests {
     use crate::matrix::view::MatrixView;
 
     fn available_backends() -> Vec<(&'static dyn SimdBackend, &'static str)> {
-        let mut v: Vec<(&'static dyn SimdBackend, &'static str)> =
-            vec![(&ScalarBackend, "scalar")];
+        let mut v: Vec<(&'static dyn SimdBackend, &'static str)> = vec![(&ScalarBackend, "scalar")];
         #[cfg(target_arch = "x86_64")]
         {
-            if std::is_x86_feature_detected!("avx2") {
+            if std::is_x86_feature_detected!("avx2")
+            {
                 v.push((&Avx2Backend, "avx2"));
             }
-            if std::is_x86_feature_detected!("sse2") {
+            if std::is_x86_feature_detected!("sse2")
+            {
                 v.push((&Sse2Backend, "sse2"));
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
-            if std::arch::is_aarch64_feature_detected!("neon") {
+            if std::arch::is_aarch64_feature_detected!("neon")
+            {
                 v.push((&NeonBackend, "neon"));
             }
         }
@@ -673,7 +680,8 @@ mod tests {
         let a_data = vec![1.0f32, 2.0, 3.0, 4.0];
         let x = vec![1.0f32, 1.0];
         let backends = available_backends();
-        for (b, name) in &backends {
+        for (b, name) in &backends
+        {
             let a = MatrixView::new(&a_data, 2, 2);
             let mut y = vec![0.0f32; 2];
             b.sgemv_f32(1.0, a, &x, 0.0, &mut y);
@@ -688,36 +696,46 @@ mod tests {
         let alphas = [1.0f32, -1.0, 0.5];
         let betas = [0.0f32, 1.0, -0.5];
 
-        for &m in &sizes {
-            for &k in &sizes {
+        for &m in &sizes
+        {
+            for &k in &sizes
+            {
                 let mut a_data = vec![0.0f32; m * k];
-                for i in 0..m {
-                    for j in 0..k {
+                for i in 0..m
+                {
+                    for j in 0..k
+                    {
                         a_data[i * k + j] = ((i * k + j) as f32) * 0.1 + 1.0;
                     }
                 }
                 let x: Vec<f32> = (0..k).map(|j| (j as f32) * 0.2 - 1.0).collect();
                 let y0: Vec<f32> = (0..m).map(|i| (i as f32) * 0.3 + 2.0).collect();
 
-                for &alpha in &alphas {
-                    for &beta in &betas {
+                for &alpha in &alphas
+                {
+                    for &beta in &betas
+                    {
                         let a = MatrixView::new(&a_data, m, k);
                         let mut expected = y0.clone();
                         ScalarBackend.sgemv_f32(alpha, a, &x, beta, &mut expected);
 
-                        for (backend, name) in &backends {
-                            if name == &"scalar" {
+                        for (backend, name) in &backends
+                        {
+                            if name == &"scalar"
+                            {
                                 continue;
                             }
                             let a = MatrixView::new(&a_data, m, k);
                             let mut result = y0.clone();
                             backend.sgemv_f32(alpha, a, &x, beta, &mut result);
-                            for i in 0..m {
+                            for i in 0..m
+                            {
                                 let diff = (result[i] - expected[i]).abs();
                                 assert!(
                                     diff < 1e-4,
                                     "[{name}] m={m} k={k} alpha={alpha} beta={beta} i={i}: expected={}, got={}",
-                                    expected[i], result[i]
+                                    expected[i],
+                                    result[i]
                                 );
                             }
                         }
@@ -733,8 +751,10 @@ mod tests {
         let m = 10;
         let k = 33;
         let mut a_data = vec![0.0f32; m * k];
-        for i in 0..m {
-            for j in 0..k {
+        for i in 0..m
+        {
+            for j in 0..k
+            {
                 a_data[i * k + j] = ((i * k + j) as f32).sin();
             }
         }
@@ -745,19 +765,23 @@ mod tests {
         let mut expected = y0.clone();
         ScalarBackend.sgemv_f32(0.75, a_ref, &x, -0.25, &mut expected);
 
-        for (backend, name) in &backends {
-            if name == &"scalar" {
+        for (backend, name) in &backends
+        {
+            if name == &"scalar"
+            {
                 continue;
             }
             let a = MatrixView::new(&a_data, m, k);
             let mut result = y0.clone();
             backend.sgemv_f32(0.75, a, &x, -0.25, &mut result);
-            for i in 0..m {
+            for i in 0..m
+            {
                 let diff = (result[i] - expected[i]).abs();
                 assert!(
                     diff < 1e-4,
                     "[{name}] wide matrix m={m} k={k} i={i}: expected={}, got={}",
-                    expected[i], result[i]
+                    expected[i],
+                    result[i]
                 );
             }
         }
@@ -769,8 +793,10 @@ mod tests {
         let m = 33;
         let k = 10;
         let mut a_data = vec![0.0f32; m * k];
-        for i in 0..m {
-            for j in 0..k {
+        for i in 0..m
+        {
+            for j in 0..k
+            {
                 a_data[i * k + j] = ((i * k + j) as f32).sin();
             }
         }
@@ -781,19 +807,23 @@ mod tests {
         let mut expected = y0.clone();
         ScalarBackend.sgemv_f32(1.5, a_ref, &x, 0.5, &mut expected);
 
-        for (backend, name) in &backends {
-            if name == &"scalar" {
+        for (backend, name) in &backends
+        {
+            if name == &"scalar"
+            {
                 continue;
             }
             let a = MatrixView::new(&a_data, m, k);
             let mut result = y0.clone();
             backend.sgemv_f32(1.5, a, &x, 0.5, &mut result);
-            for i in 0..m {
+            for i in 0..m
+            {
                 let diff = (result[i] - expected[i]).abs();
                 assert!(
                     diff < 1e-4,
                     "[{name}] tall matrix m={m} k={k} i={i}: expected={}, got={}",
-                    expected[i], result[i]
+                    expected[i],
+                    result[i]
                 );
             }
         }
@@ -803,10 +833,13 @@ mod tests {
     fn sgemv_non_power_of_two() {
         let backends = available_backends();
         let sizes = [(7, 9), (9, 7), (5, 17), (17, 5), (6, 10), (10, 6)];
-        for &(m, k) in &sizes {
+        for &(m, k) in &sizes
+        {
             let mut a_data = vec![0.0f32; m * k];
-            for i in 0..m {
-                for j in 0..k {
+            for i in 0..m
+            {
+                for j in 0..k
+                {
                     a_data[i * k + j] = ((i * k) as f32 + j as f32) * 0.01;
                 }
             }
@@ -817,19 +850,23 @@ mod tests {
             let mut expected = y0.clone();
             ScalarBackend.sgemv_f32(1.0, a_ref, &x, 0.0, &mut expected);
 
-            for (backend, name) in &backends {
-                if name == &"scalar" {
+            for (backend, name) in &backends
+            {
+                if name == &"scalar"
+                {
                     continue;
                 }
                 let a = MatrixView::new(&a_data, m, k);
                 let mut result = y0.clone();
                 backend.sgemv_f32(1.0, a, &x, 0.0, &mut result);
-                for i in 0..m {
+                for i in 0..m
+                {
                     let diff = (result[i] - expected[i]).abs();
                     assert!(
                         diff < 1e-4,
                         "[{name}] m={m} k={k} i={i}: expected={}, got={}",
-                        expected[i], result[i]
+                        expected[i],
+                        result[i]
                     );
                 }
             }

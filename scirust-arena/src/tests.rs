@@ -11,7 +11,8 @@ mod tests {
 
         // Mesurer le temps d'allocation
         let start = std::time::Instant::now();
-        for _ in 0..1000 {
+        for _ in 0..1000
+        {
             let _slice = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
         }
         let elapsed = start.elapsed();
@@ -50,11 +51,7 @@ mod tests {
 
         // Vérifier que le compteur est remis à zéro
         assert_eq!(arena.alloc_count(), 0, "Reset must clear alloc count");
-        assert_eq!(
-            arena.allocated(),
-            0,
-            "Reset must clear allocated bytes"
-        );
+        assert_eq!(arena.allocated(), 0, "Reset must clear allocated bytes");
 
         // Réallouer doit réussir (même si l'arène est "pleine")
         let _slice2 = arena.alloc_slice_fill::<f32>(768, 0.0).unwrap();
@@ -134,10 +131,7 @@ mod tests {
         let mut vec = AlignedVec::new::<f32>(100);
 
         // Vérifier alignement
-        assert!(
-            vec.is_aligned(),
-            "AlignedVec must be aligned on 128 bytes"
-        );
+        assert!(vec.is_aligned(), "AlignedVec must be aligned on 128 bytes");
 
         // Remplir
         vec.fill::<f32>(1.0);
@@ -147,5 +141,54 @@ mod tests {
         assert_eq!(slice.len(), 100);
         assert_eq!(slice[0], 1.0);
         assert_eq!(slice[99], 1.0);
+    }
+
+    #[test]
+    fn test_aligned_vec_new_fill() {
+        use crate::AlignedVec;
+
+        let vec = AlignedVec::new_fill::<f64>(32, std::f64::consts::PI);
+
+        assert!(vec.is_aligned());
+        let slice = vec.as_slice::<f64>();
+        assert_eq!(slice.len(), 32);
+        for &v in slice.iter() {
+            assert!((v - std::f64::consts::PI).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn test_aligned_vec_as_mut_slice() {
+        use crate::AlignedVec;
+
+        let mut vec = AlignedVec::new::<i32>(16);
+        {
+            let slice = vec.as_mut_slice::<i32>();
+            for (i, v) in slice.iter_mut().enumerate() {
+                *v = i as i32;
+            }
+        }
+        let slice = vec.as_slice::<i32>();
+        for (i, &v) in slice.iter().enumerate() {
+            assert_eq!(v, i as i32);
+        }
+    }
+
+    #[test]
+    fn test_arena_new_for_type() {
+        let arena = PinnedArena::new_for_type::<f32>(1024);
+        // Must be large enough for 1024 f32 (4096 bytes)
+        assert!(arena.capacity() >= 4096);
+        assert!(arena.capacity() % 128 == 0);
+    }
+
+    #[test]
+    fn test_arena_alloc_with() {
+        let mut arena = PinnedArena::new(4096);
+        let val: &mut f64 = arena.alloc_with(42.0).unwrap();
+        assert_eq!(*val, 42.0);
+        // Modify through the reference
+        *val = 99.0;
+        assert_eq!(*val, 99.0);
     }
 }

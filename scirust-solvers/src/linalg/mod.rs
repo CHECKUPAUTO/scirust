@@ -309,3 +309,31 @@ pub fn axpy(alpha: f64, x: &[f64], y: &mut [f64]) {
         *yi += alpha * xi;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_fn_identity() {
+        let m = Matrix::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 0.0 });
+        assert_eq!(m.shape(), (3, 3));
+        for i in 0..3 {
+            for j in 0..3 {
+                assert_eq!(m[(i, j)], if i == j { 1.0 } else { 0.0 });
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_fn_hilbert() {
+        let n = 4;
+        let h = Matrix::from_fn(n, n, |i, j| 1.0 / (i + j + 1) as f64);
+        // H[0,0] = 1/(0+0+1) = 1.0
+        assert!((h[(0, 0)] - 1.0).abs() < 1e-15);
+        // H[3,3] = 1/(3+3+1) = 1/7
+        assert!((h[(3, 3)] - 1.0 / 7.0).abs() < 1e-15);
+        // H[0,3] = 1/(0+3+1) = 1/4
+        assert!((h[(0, 3)] - 0.25).abs() < 1e-15);
+    }
+}

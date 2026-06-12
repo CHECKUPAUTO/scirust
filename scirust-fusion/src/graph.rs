@@ -24,9 +24,9 @@ pub enum OpKind {
 
     // Normalization
     LayerNorm,
-    LayerNormFused,     // LayerNorm avec bias/scale intégré
+    LayerNormFused, // LayerNorm avec bias/scale intégré
     BatchNorm,
-    RMSNorm,            // RMSNorm (simplifié, pas de mean)
+    RMSNorm, // RMSNorm (simplifié, pas de mean)
 
     // Element-wise
     Add,
@@ -114,7 +114,12 @@ impl FusedOp {
     }
 
     /// Crée une opération avec deux inputs.
-    pub fn with_inputs(kind: OpKind, input_a: usize, input_b: usize, constant: Option<FusionConstant>) -> Self {
+    pub fn with_inputs(
+        kind: OpKind,
+        input_a: usize,
+        input_b: usize,
+        constant: Option<FusionConstant>,
+    ) -> Self {
         Self {
             kind,
             inputs: vec![input_a, input_b],
@@ -128,7 +133,8 @@ impl FusedOp {
         use OpKind::*;
 
         // Patterns de fusion autorisés
-        matches!((self.kind, other),
+        matches!(
+            (self.kind, other),
             // MatMul peut être fusionné avec activation
             (MatMul | Linear, ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh)
             // Activation peut suivre MatMul
@@ -179,7 +185,12 @@ impl OpGraph {
     }
 
     /// Ajoute une opération avec un input.
-    pub fn add_unary(&mut self, kind: OpKind, input: usize, constant: Option<FusionConstant>) -> usize {
+    pub fn add_unary(
+        &mut self,
+        kind: OpKind,
+        input: usize,
+        constant: Option<FusionConstant>,
+    ) -> usize {
         let idx = self.ops.len();
         self.ops.push(FusedOp::with_input(kind, input, constant));
         self.ops[idx].output = Some(idx);
@@ -187,15 +198,27 @@ impl OpGraph {
     }
 
     /// Ajoute une opération avec deux inputs.
-    pub fn add_binary(&mut self, kind: OpKind, input_a: usize, input_b: usize, constant: Option<FusionConstant>) -> usize {
+    pub fn add_binary(
+        &mut self,
+        kind: OpKind,
+        input_a: usize,
+        input_b: usize,
+        constant: Option<FusionConstant>,
+    ) -> usize {
         let idx = self.ops.len();
-        self.ops.push(FusedOp::with_inputs(kind, input_a, input_b, constant));
+        self.ops
+            .push(FusedOp::with_inputs(kind, input_a, input_b, constant));
         self.ops[idx].output = Some(idx);
         idx
     }
 
     /// Ajoute une opération avec plusieurs inputs.
-    pub fn add_nary(&mut self, kind: OpKind, inputs: Vec<usize>, constant: Option<FusionConstant>) -> usize {
+    pub fn add_nary(
+        &mut self,
+        kind: OpKind,
+        inputs: Vec<usize>,
+        constant: Option<FusionConstant>,
+    ) -> usize {
         let idx = self.ops.len();
         self.ops.push(FusedOp {
             kind,
@@ -213,8 +236,10 @@ impl OpGraph {
         let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
 
         // Construire le graphe d'adjacence
-        for (i, op) in self.ops.iter().enumerate() {
-            for &input in &op.inputs {
+        for (i, op) in self.ops.iter().enumerate()
+        {
+            for &input in &op.inputs
+            {
                 adj[input].push(i);
                 in_degree[i] += 1;
             }
@@ -224,17 +249,21 @@ impl OpGraph {
         let mut queue: Vec<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
         self.topo_order.clear();
 
-        while let Some(node) = queue.pop() {
+        while let Some(node) = queue.pop()
+        {
             self.topo_order.push(node);
-            for &next in &adj[node] {
+            for &next in &adj[node]
+            {
                 in_degree[next] -= 1;
-                if in_degree[next] == 0 {
+                if in_degree[next] == 0
+                {
                     queue.push(next);
                 }
             }
         }
 
-        if self.topo_order.len() != n {
+        if self.topo_order.len() != n
+        {
             panic!("OpGraph: cycle detected — not a DAG!");
         }
     }
@@ -276,12 +305,19 @@ impl OpGraph {
         result
     }
 
-    fn _collect_deps(&self, idx: usize, visited: &mut std::collections::HashSet<usize>, result: &mut Vec<usize>) {
-        if !visited.insert(idx) {
+    fn _collect_deps(
+        &self,
+        idx: usize,
+        visited: &mut std::collections::HashSet<usize>,
+        result: &mut Vec<usize>,
+    ) {
+        if !visited.insert(idx)
+        {
             return;
         }
         result.push(idx);
-        for &input in &self.ops[idx].inputs {
+        for &input in &self.ops[idx].inputs
+        {
             self._collect_deps(input, visited, result);
         }
     }

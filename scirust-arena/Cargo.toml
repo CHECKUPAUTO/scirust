@@ -8,6 +8,9 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 libc = "0.2"
 
+[features]
+nightly = []
+
 [dev-dependencies]
 criterion = "0.5"
 

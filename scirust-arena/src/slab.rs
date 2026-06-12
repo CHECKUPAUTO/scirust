@@ -31,7 +31,10 @@ struct SlabEntry {
 }
 
 enum EntryState {
-    Occupied { _size: usize },
+    Occupied {
+        #[allow(dead_code)]
+        size: usize,
+    },
     Free,
 }
 
@@ -66,7 +69,8 @@ impl<T: Copy, const N: usize> Slab<T, N> {
 
         let memory = vec![0u8; total_bytes];
         let mut free_list = Vec::with_capacity(capacity);
-        for i in 0..capacity {
+        for i in 0..capacity
+        {
             free_list.push(i as u32);
         }
 
@@ -107,7 +111,8 @@ impl<T: Copy, const N: usize> Slab<T, N> {
     #[inline]
     pub fn free(&mut self, handle: SlabHandle) {
         let entry = &mut self.entries[handle.index as usize];
-        if let EntryState::Free = entry.state {
+        if let EntryState::Free = entry.state
+        {
             return;
         }
         entry.state = EntryState::Free;
@@ -119,14 +124,14 @@ impl<T: Copy, const N: usize> Slab<T, N> {
     #[inline]
     pub fn is_valid(&self, handle: SlabHandle) -> bool {
         let entry = &self.entries[handle.index as usize];
-        matches!(entry.state, EntryState::Occupied { .. })
-            && entry.version == handle.version
+        matches!(entry.state, EntryState::Occupied { .. }) && entry.version == handle.version
     }
 
     /// Retourne un slice mutable vers les données d'une entrée.
     #[inline]
     pub fn data_slice(&mut self, handle: SlabHandle) -> Option<&mut [T]> {
-        if !self.is_valid(handle) {
+        if !self.is_valid(handle)
+        {
             return None;
         }
         let base = self.memory.as_mut_ptr() as usize;
@@ -147,12 +152,14 @@ impl<T: Copy, const N: usize> Slab<T, N> {
 
     /// Réinitialise tout le slab.
     pub fn reset(&mut self) {
-        for entry in &mut self.entries {
+        for entry in &mut self.entries
+        {
             entry.state = EntryState::Free;
             entry.version = 0;
         }
         self.free_list.clear();
-        for i in 0..self.entries.len() {
+        for i in 0..self.entries.len()
+        {
             self.free_list.push(i as u32);
         }
         self.next_version = 1;

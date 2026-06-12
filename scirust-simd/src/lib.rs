@@ -537,6 +537,34 @@ mod tests {
         let backend = detect_simd_backend();
         assert!(backend.available());
     }
+
+    #[test]
+    #[cfg(feature = "portable-simd")]
+    fn test_simd_map_add_one() {
+        let input = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let mut output = vec![0.0f32; 8];
+        generic::simd_map::<f32, 8, _>(&input, &mut output, |v| v + Simd::splat(1.0));
+        assert_eq!(output, vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    }
+
+    #[test]
+    #[cfg(feature = "portable-simd")]
+    fn test_simd_zip_with_add() {
+        let a = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b = vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+        let mut out = vec![0.0f32; 8];
+        generic::simd_zip_with::<f32, 8, _>(&a, &b, &mut out, |x, y| x + y);
+        assert_eq!(out, vec![11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0]);
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_sve_vector_length_elements_returns_valid_width() {
+        // On aarch64, sve_vector_length_elements returns a multiple of 4 (f32 lanes).
+        // On aarch64 without SVE support, returns 0.
+        let vl = super::sve::sve_vector_length_elements::<f32>();
+        assert!(vl == 0 || (vl >= 4 && vl.is_power_of_two()));
+    }
 }
 
 pub mod complex;

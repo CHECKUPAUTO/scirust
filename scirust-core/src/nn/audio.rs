@@ -33,8 +33,10 @@ impl CTCLoss {
             };
 
             let lp = log_probs
-                .try_slice_rows(t, 1).unwrap()
-                .try_slice_cols(target_idx % vocab_size, 1).unwrap();
+                .try_slice_rows(t, 1)
+                .unwrap()
+                .try_slice_cols(target_idx % vocab_size, 1)
+                .unwrap();
             total_log_p = total_log_p.try_add(lp).unwrap();
         }
 

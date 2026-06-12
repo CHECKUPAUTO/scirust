@@ -1,16 +1,16 @@
-//! Advanced optimizers for neural network training
-//! Includes: RMSprop, AdamW, LAMB, and other variants
+/// Advanced optimizers for neural network training
+/// Includes: RMSprop, AdamW, LAMB, and other variants
 use std::collections::HashMap;
 
 /// RMSprop optimizer - uses exponential moving average of squared gradients
 #[derive(Debug, Clone)]
 pub struct RMSprop {
     learning_rate: f32,
-    decay_rate: f32,      // Default: 0.99
-    epsilon: f32,          // Default: 1e-8
-    momentum: f32,         // Default: 0.0
-    v: HashMap<String, Vec<f32>>,  // Accumulated squared gradients
-    m: HashMap<String, Vec<f32>>,  // Momentum buffers
+    decay_rate: f32,              // Default: 0.99
+    epsilon: f32,                 // Default: 1e-8
+    momentum: f32,                // Default: 0.0
+    v: HashMap<String, Vec<f32>>, // Accumulated squared gradients
+    m: HashMap<String, Vec<f32>>, // Momentum buffers
 }
 
 impl RMSprop {
@@ -36,15 +36,23 @@ impl RMSprop {
     }
 
     pub fn step(&mut self, param_id: &str, grad: &[f32]) {
-        let v = self.v.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
-        let m = self.m.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
+        let v = self
+            .v
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
+        let m = self
+            .m
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
 
-        for i in 0..grad.len() {
+        for i in 0..grad.len()
+        {
             // Update biased second moment estimate
             v[i] = self.decay_rate * v[i] + (1.0 - self.decay_rate) * grad[i] * grad[i];
 
             // Update momentum (if enabled)
-            m[i] = self.momentum * m[i] + self.learning_rate * grad[i] / (v[i].sqrt() + self.epsilon);
+            m[i] =
+                self.momentum * m[i] + self.learning_rate * grad[i] / (v[i].sqrt() + self.epsilon);
         }
     }
 
@@ -57,14 +65,14 @@ impl RMSprop {
 #[derive(Debug, Clone)]
 pub struct AdamW {
     learning_rate: f32,
-    beta1: f32,            // Default: 0.9 (exponential decay for mean)
-    beta2: f32,            // Default: 0.999 (exponential decay for variance)
-    epsilon: f32,          // Default: 1e-8
+    beta1: f32,   // Default: 0.9 (exponential decay for mean)
+    beta2: f32,   // Default: 0.999 (exponential decay for variance)
+    epsilon: f32, // Default: 1e-8
     #[allow(dead_code)]
-    pub weight_decay: f32,     // Default: 0.01 (decoupled weight decay)
-    m: HashMap<String, Vec<f32>>,  // First moment (mean)
-    v: HashMap<String, Vec<f32>>,  // Second moment (variance)
-    t: u32,                // Timestep for bias correction
+    pub weight_decay: f32, // Default: 0.01 (decoupled weight decay)
+    m: HashMap<String, Vec<f32>>, // First moment (mean)
+    v: HashMap<String, Vec<f32>>, // Second moment (variance)
+    t: u32,       // Timestep for bias correction
 }
 
 impl AdamW {
@@ -88,14 +96,21 @@ impl AdamW {
 
     pub fn step(&mut self, param_id: &str, grad: &[f32], param: &mut [f32]) {
         self.t += 1;
-        
-        let m = self.m.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
-        let v = self.v.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
+
+        let m = self
+            .m
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
+        let v = self
+            .v
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
 
         let bias_correction1 = 1.0 - self.beta1.powi(self.t as i32);
         let bias_correction2 = 1.0 - self.beta2.powi(self.t as i32);
 
-        for i in 0..grad.len() {
+        for i in 0..grad.len()
+        {
             // Update biased first moment estimate
             m[i] = self.beta1 * m[i] + (1.0 - self.beta1) * grad[i];
 
@@ -144,13 +159,20 @@ impl LAMB {
     pub fn step(&mut self, param_id: &str, grad: &[f32], param: &mut [f32]) {
         self.t += 1;
 
-        let m = self.m.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
-        let v = self.v.entry(param_id.to_string()).or_insert_with(|| vec![0.0; grad.len()]);
+        let m = self
+            .m
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
+        let v = self
+            .v
+            .entry(param_id.to_string())
+            .or_insert_with(|| vec![0.0; grad.len()]);
 
         let bias_correction1 = 1.0 - self.beta1.powi(self.t as i32);
         let bias_correction2 = 1.0 - self.beta2.powi(self.t as i32);
 
-        for i in 0..grad.len() {
+        for i in 0..grad.len()
+        {
             m[i] = self.beta1 * m[i] + (1.0 - self.beta1) * grad[i];
             v[i] = self.beta2 * v[i] + (1.0 - self.beta2) * grad[i] * grad[i];
 
@@ -161,9 +183,12 @@ impl LAMB {
             let param_norm = param.iter().map(|p| p * p).sum::<f32>().sqrt();
             let update_norm = update;
 
-            let adaptive_lr = if param_norm > 0.0 {
+            let adaptive_lr = if param_norm > 0.0
+            {
                 self.learning_rate * (param_norm / (update_norm + self.epsilon))
-            } else {
+            }
+            else
+            {
                 self.learning_rate
             };
 

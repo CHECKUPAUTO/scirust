@@ -20,7 +20,6 @@
 //! amp.optimizer_step(&mut opt, &grads)?;
 //! ```
 
-
 /// Precision kind for mixed-precision training.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MixedPrecisionKind {
@@ -61,7 +60,8 @@ pub struct MixedPrecisionEnv {
 impl MixedPrecisionEnv {
     /// Create a new AMP environment.
     pub fn new(kind: MixedPrecisionKind, loss_scale: LossScale) -> Self {
-        let init_scale = match loss_scale {
+        let init_scale = match loss_scale
+        {
             LossScale::Fixed(s) => s,
             LossScale::Dynamic => 2.0f32.powi(16), // 65536
         };
@@ -80,25 +80,19 @@ impl MixedPrecisionEnv {
 
     /// Cast f32 tensor to the target precision.
     pub fn cast_to(&self, data: &[f32]) -> Vec<f32> {
-        match self.kind {
-            MixedPrecisionKind::FP16 => {
-                data.iter().map(|&x| fp32_to_fp16(x)).collect()
-            }
-            MixedPrecisionKind::BF16 => {
-                data.iter().map(|&x| fp32_to_bf16(x)).collect()
-            }
+        match self.kind
+        {
+            MixedPrecisionKind::FP16 => data.iter().map(|&x| fp32_to_fp16(x)).collect(),
+            MixedPrecisionKind::BF16 => data.iter().map(|&x| fp32_to_bf16(x)).collect(),
         }
     }
 
     /// Cast from target precision back to f32.
     pub fn cast_from(&self, data: &[f32]) -> Vec<f32> {
-        match self.kind {
-            MixedPrecisionKind::FP16 => {
-                data.iter().map(|&x| fp16_to_fp32(x)).collect()
-            }
-            MixedPrecisionKind::BF16 => {
-                data.iter().map(|&x| bf16_to_fp32(x)).collect()
-            }
+        match self.kind
+        {
+            MixedPrecisionKind::FP16 => data.iter().map(|&x| fp16_to_fp32(x)).collect(),
+            MixedPrecisionKind::BF16 => data.iter().map(|&x| bf16_to_fp32(x)).collect(),
         }
     }
 
@@ -120,21 +114,28 @@ impl MixedPrecisionEnv {
 
     /// Update loss scale after a training step.
     pub fn update_scale(&mut self, had_overflow: bool) {
-        match self.loss_scale {
-            LossScale::Fixed(_) => {} // No change
-            LossScale::Dynamic => {
-                if had_overflow {
+        match self.loss_scale
+        {
+            LossScale::Fixed(_) =>
+            {}, // No change
+            LossScale::Dynamic =>
+            {
+                if had_overflow
+                {
                     self.current_scale *= self.backoff_factor;
                     self.growth_steps = 0;
-                } else {
+                }
+                else
+                {
                     self.growth_steps += 1;
-                    if self.growth_steps >= self.growth_interval {
+                    if self.growth_steps >= self.growth_interval
+                    {
                         self.current_scale =
                             (self.current_scale * self.growth_factor).min(self.max_scale);
                         self.growth_steps = 0;
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -207,7 +208,8 @@ mod tests {
         let initial = amp.current_scale;
 
         // No overflow for growth_interval steps
-        for _ in 0..amp.growth_interval {
+        for _ in 0..amp.growth_interval
+        {
             amp.update_scale(false);
         }
         assert!(amp.current_scale > initial);

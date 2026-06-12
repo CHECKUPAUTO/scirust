@@ -327,6 +327,10 @@ impl MultiHeadAttention {
 
     /// GQA: répète les têtes KV pour correspondre au nombre de têtes Q.
     /// Si num_kv_heads == num_heads, c'est un no-op (MHA standard).
+    ///
+    /// La concaténation au niveau `Var` (tape) est fournie par `concat_rows`
+    /// (importée depuis `autodiff::reverse`). Pour le niveau `Tensor` brut,
+    /// on concatène les données manuellement.
     #[allow(dead_code)]
     fn repeat_kv_heads(&self, x: Tensor, _seq_len: usize, _d_head: usize) -> Tensor {
         let repeat = self.n_heads / self.num_kv_heads;
@@ -334,25 +338,14 @@ impl MultiHeadAttention {
         {
             return x;
         }
-        let mut parts = Vec::with_capacity(repeat);
-        for _ in 0..repeat
-        {
-            parts.push(x.clone());
-        }
-        // TODO: remplacer par Tensor::cat quand elle sera implementee
-        // heads_concat = Tensor::cat(&parts, 1);
-        // Pour l'instant, on repete naive par boucle
-        let x_data = &parts[0].data;
-        let _kv_len = x_data.len() / self.num_kv_heads;
+        let x_data = &x.data;
+        let (rows, cols) = (x.rows, x.cols);
         let mut out = Vec::with_capacity(x_data.len() * repeat);
         for _ in 0..repeat
         {
             out.extend_from_slice(x_data);
         }
-        // Attention : shape approximative, a revoir avec cat.
-        // On retourne l'original pour ne pas casser le graphe.
-        // eprintln!("WARN: repeat_kv_heads non implemente sans Tensor::cat");
-        x
+        Tensor::from_vec(out, rows * repeat, cols)
     }
 
     pub fn state_dict(&self) -> HashMap<String, Tensor> {

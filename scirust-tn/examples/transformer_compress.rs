@@ -6,9 +6,9 @@
 //! Intended to run on the Jetson Thor for realistic numbers. CPU-only here
 //! since Phase 1 doesn't yet wire to scirust-gpu / cudarc.
 
-use scirust_core::nn::init::Zeros;
 use scirust_core::nn::Linear;
 use scirust_core::nn::PcgEngine;
+use scirust_core::nn::init::Zeros;
 use scirust_tn::{tt_decompose, tt_decompose_auto};
 use std::time::Instant;
 
@@ -17,20 +17,28 @@ fn frob_norm(a: &[f32]) -> f32 {
 }
 
 fn frob_err(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f32>()
+        .sqrt()
 }
 
 fn fill_weight(linear: &mut Linear, seed: u32) {
     let n = linear.in_features * linear.out_features;
     // Deterministic pseudo-random fill, fine for a benchmark
     let mut state = seed as u64;
-    for k in 0..n {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    for k in 0..n
+    {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let v = ((state >> 33) as i32 as f32) / (i32::MAX as f32);
         linear.weight.data[k] = v;
         let _ = k;
     }
-    for k in 0..linear.out_features {
+    for k in 0..linear.out_features
+    {
         linear.bias.data[k] = 0.01 * (k as f32);
     }
 }
@@ -55,14 +63,16 @@ fn bench_one(in_features: usize, out_features: usize, n_factors: usize, max_rank
 
     let rel_err = frob_err(&linear.weight.data, &w_recon.data) / frob_norm(&linear.weight.data);
 
-    println!(
-        "  {in_features}x{out_features}, d={n_factors}, max_rank={max_rank}, tol={tol:.0e}",
-    );
+    println!("  {in_features}x{out_features}, d={n_factors}, max_rank={max_rank}, tol={tol:.0e}",);
     println!("    in_dims = {:?}", tt.in_dims);
     println!("    out_dims = {:?}", tt.out_dims);
     println!("    ranks = {:?}", tt.ranks);
-    println!("    params: dense={}  TT={}  ratio={:.2}x",
-             tt.dense_params(), tt.num_params(), tt.compression_ratio());
+    println!(
+        "    params: dense={}  TT={}  ratio={:.2}x",
+        tt.dense_params(),
+        tt.num_params(),
+        tt.compression_ratio()
+    );
     println!("    decompose time: {decomp_time:?}");
     println!("    reconstruct time: {recon_time:?}");
     println!("    relative Frobenius error: {rel_err:.4e}");

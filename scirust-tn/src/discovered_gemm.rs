@@ -13,13 +13,19 @@
 #[inline(never)]
 pub fn compute_kernel(c: &mut [f64], a: &[f64], b: &[f64], n: usize) {
     // Pré-zéroer la matrice C pour éviter les accumulations inutiles
-    for x in c.iter_mut() { *x = 0.0; }
-    
+    for x in c.iter_mut()
+    {
+        *x = 0.0;
+    }
+
     // Utilisation de l'algorithme de multiplication matricielle optimisé (i-k-j)
-    for i in 0..n {
-        for k in 0..n {
+    for i in 0..n
+    {
+        for k in 0..n
+        {
             let aik = a[i * n + k];
-            for j in 0..n {
+            for j in 0..n
+            {
                 c[i * n + j] += aik * b[k * n + j];
             }
         }
@@ -37,16 +43,21 @@ mod forge_tests {
         let mut got = vec![0.0f64; n * n];
         compute_kernel(&mut got, &a, &b, n);
         let mut want = vec![0.0f64; n * n];
-        for i in 0..n {
-            for j in 0..n {
+        for i in 0..n
+        {
+            for j in 0..n
+            {
                 let mut s = 0.0f64;
-                for k in 0..n { s += a[i * n + k] * b[k * n + j]; }
+                for k in 0..n
+                {
+                    s += a[i * n + k] * b[k * n + j];
+                }
                 want[i * n + j] = s;
             }
         }
-        for i in 0..n * n {
+        for i in 0..n * n
+        {
             assert!((got[i] - want[i]).abs() < 1e-9, "mismatch at {i}");
         }
     }
 }
-

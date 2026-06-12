@@ -128,4 +128,16 @@ mod tests {
         let backward = simpson_adaptive(|x| x.sin(), PI, 0.0, 1e-10, 20).unwrap();
         assert_relative_eq!(forward, -backward, epsilon = 1e-10);
     }
+
+    #[test]
+    fn simpson_adaptive_strict_rejects_max_depth_zero() {
+        let result = simpson_adaptive_strict(|x| x, 0.0, 1.0, 1e-10, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn simpson_adaptive_strict_works_like_adaptive() {
+        let v = simpson_adaptive_strict(|x| x.sin(), 0.0, PI, 1e-12, 30).unwrap();
+        assert_relative_eq!(v, 2.0, epsilon = 1e-10);
+    }
 }

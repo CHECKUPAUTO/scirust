@@ -116,6 +116,101 @@ fn test_vae_forward() {
     assert_eq!(recon.shape(), (1, 10));
     assert_eq!(mu.shape(), (1, 4));
     assert_eq!(logvar.shape(), (1, 4));
+
+    // KL loss must be callable during VAE training
+    let kl = model.kl_loss(&tape, mu, logvar);
+    let kl_val = tape.value(kl.idx());
+    assert!(kl_val.data[0].is_finite());
+}
+
+#[test]
+fn test_vae_kl_loss_shapes() {
+    // Verify kl_loss accepts batched mu/logvar
+    let mut rng = PcgEngine::new(42);
+    let mut model = VAE::new(20, 12, 6, &KaimingNormal, &Zeros, &mut rng);
+    let tape = Tape::new();
+    let x = tape.input(Tensor::zeros(3, 20)); // batch of 3
+    let (_recon, mu, logvar) = model.forward(&tape, x);
+    let kl = model.kl_loss(&tape, mu, logvar);
+    let kl_val = tape.value(kl.idx());
+    // KL divergence should be a scalar (1x1)
+    assert_eq!(kl_val.shape(), (1, 1));
+    assert!(kl_val.data[0].is_finite());
+}
+
+#[test]
+fn test_resnet18_resnet34_constructors() {
+    // resnet18 (block_counts=[2,2,2,2]) and resnet34 ([3,4,6,3])
+    // both have 4 stages: 64 → 128 → 256 → 512
+    let rn18 = ResNet::resnet18(10, &KaimingNormal, &Zeros, &mut PcgEngine::new(42));
+    assert_eq!(rn18.out_channels, 512);
+
+    let rn34 = ResNet::resnet34(10, &KaimingNormal, &Zeros, &mut PcgEngine::new(43));
+    assert_eq!(rn34.out_channels, 512);
+}
+
+#[test]
+fn test_infer_step_with_kv_cache() {
+    use scirust_core::nn::transformer::MultiHeadAttention;
+    let mut rng = PcgEngine::new(42);
+    let mut mha = MultiHeadAttention::new(8, 4, 4, false, &KaimingNormal, &Zeros, &mut rng);
+    let tape = Tape::new();
+    // Single token input: (1, d_model)
+    let token = tape.input(Tensor::zeros(1, 8));
+    let out = mha.infer_step(&tape, token, 0);
+    assert_eq!(out.shape(), (1, 8));
+}
+
+#[test]
+fn test_flash_attention_forward_basic() {
+    use scirust_core::nn::transformer::flash_attention::flash_attention_forward;
+    let tape = Tape::new();
+    let d_head = 8;
+    let seq_len = 4;
+    let n_heads = 2;
+    let batch = 1;
+    let total = batch * n_heads * seq_len;
+    let q = tape.input(Tensor::zeros(total, d_head));
+    let k = tape.input(Tensor::zeros(total, d_head));
+    let v = tape.input(Tensor::zeros(total, d_head));
+    let scale = 1.0 / (d_head as f32).sqrt();
+    let out = flash_attention_forward(&tape, q, k, v, batch, n_heads, seq_len, d_head, scale, 2, false);
+    assert_eq!(out.shape(), (total, d_head));
+}
+
+#[test]
+fn test_pinn_total_loss() {
+    use scirust_core::nn::loss::pinn::PinnLossEvaluator;
+    use scirust_core::nn::{Linear, Sequential};
+    let mut rng = PcgEngine::new(42);
+    let mut model = Sequential::new()
+        .add(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
+        .add(ReLU::new())
+        .add(Linear::new(8, 1, &KaimingNormal, &Zeros, &mut rng));
+    let mut pinn = PinnLossEvaluator::new(&mut model, 0.01);
+    let tape = Tape::new();
+    // coords: (batch, 2) where col0=x, col1=t
+    let coords = tape.input(Tensor::zeros(4, 2));
+    let targets = tape.input(Tensor::zeros(4, 1));
+    let loss = pinn.total_loss(&tape, coords, targets, 0.1);
+    let loss_val = tape.value(loss.idx());
+    assert!(loss_val.data[0].is_finite());
+}
+
+#[test]
+fn test_epsilon_greedy_explores_and_exploits() {
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    let agent = TabularAgent::new(0.1, 0.9, 0.5);
+    // With epsilon=0.5, both actions should be reachable over many tries
+    let actions = vec!["left", "right"];
+    let mut counts = std::collections::HashMap::new();
+    for _ in 0..500 {
+        let a = agent.act_epsilon_greedy(&"s", &actions, &mut rng);
+        *counts.entry(a).or_insert(0) += 1;
+    }
+    assert!(counts.contains_key(&"left"));
+    assert!(counts.contains_key(&"right"));
 }
 
 #[test]

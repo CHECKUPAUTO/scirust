@@ -25,7 +25,12 @@ impl TensorRuntime {
     }
 
     /// Apply a fused element-wise kernel from `input` into `output`.
-    pub fn run_fused(&mut self, input: &str, kernel: &FusedKernel, output: &str) -> Result<(), String> {
+    pub fn run_fused(
+        &mut self,
+        input: &str,
+        kernel: &FusedKernel,
+        output: &str,
+    ) -> Result<(), String> {
         let t = self
             .regs
             .get(input)
@@ -43,7 +48,8 @@ impl TensorRuntime {
         output: &str,
     ) -> Result<(), String> {
         let mut tensors = Vec::with_capacity(inputs.len());
-        for name in inputs {
+        for name in inputs
+        {
             tensors.push(
                 self.regs
                     .get(*name)

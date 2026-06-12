@@ -161,18 +161,24 @@ impl TTLinear {
     }
 }
 
-
 impl Module for TTLinear {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
         self.register_params(tape);
 
         let mut core_vars: Vec<Var<'t>> = Vec::new();
-        for &idx in &self.core_indices {
+        for &idx in &self.core_indices
+        {
             core_vars.push(Var::new(tape, idx));
         }
         let b_var = self.bias_idx.map(|idx| Var::new(tape, idx));
 
-        input.tt_contract(core_vars, b_var, self.in_dims.clone(), self.out_dims.clone(), self.ranks.clone())
+        input.tt_contract(
+            core_vars,
+            b_var,
+            self.in_dims.clone(),
+            self.out_dims.clone(),
+            self.ranks.clone(),
+        )
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -411,13 +417,16 @@ mod tests {
         let tt_rank = 3;
 
         let mut linear = Linear::new(
-            outer, inner,
+            outer,
+            inner,
             &crate::nn::init::Zeros,
             &crate::nn::init::Zeros,
             &mut crate::nn::rng::PcgEngine::new(42),
         );
-        for i in 0..outer {
-            for j in 0..inner {
+        for i in 0..outer
+        {
+            for j in 0..inner
+            {
                 linear.weight.data[i * inner + j] = ((i * inner + j) as f32).sin();
             }
         }
@@ -426,10 +435,16 @@ mod tests {
         let tape = Tape::new();
         let batch = 4;
 
-        for batch_idx in 0..5 {
+        for batch_idx in 0..5
+        {
             let input_data: Vec<f32> = (0..batch * outer)
-                .map(|k| ((k + batch_idx * 37) as f32).cos()).collect();
-            let input_t = Tensor { rows: batch, cols: outer, data: input_data.clone() };
+                .map(|k| ((k + batch_idx * 37) as f32).cos())
+                .collect();
+            let input_t = Tensor {
+                rows: batch,
+                cols: outer,
+                data: input_data.clone(),
+            };
 
             let dense_out = linear.forward(&tape, tape.input(input_t.clone()));
             let tt_out = tt.forward(&tape, tape.input(input_t));
@@ -444,26 +459,35 @@ mod tests {
     #[test]
     fn tt_backward_gradient_flows() {
         let mut linear = Linear::new(
-            6, 4,
+            6,
+            4,
             &crate::nn::init::Zeros,
             &crate::nn::init::Zeros,
             &mut crate::nn::rng::PcgEngine::new(42),
         );
-        for i in 0..(6 * 4) {
+        for i in 0..(6 * 4)
+        {
             linear.weight.data[i] = ((i as f32) * 0.13).cos();
         }
         let mut tt = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
         let tape = Tape::new();
 
-        let x = tape.input(Tensor { rows: 2, cols: 6, data: vec![0.5; 12] });
+        let x = tape.input(Tensor {
+            rows: 2,
+            cols: 6,
+            data: vec![0.5; 12],
+        });
         let y = tt.forward(&tape, x);
         let loss = y.sum();
         tape.backward(loss.idx());
 
-        for (i, idx) in tt.parameter_indices().iter().enumerate() {
+        for (i, idx) in tt.parameter_indices().iter().enumerate()
+        {
             let grad = tape.grad(*idx);
-            assert!(grad.data.iter().any(|&g| g.abs() > 1e-6),
-                "core {i} (idx {idx}) has zero gradient");
+            assert!(
+                grad.data.iter().any(|&g| g.abs() > 1e-6),
+                "core {i} (idx {idx}) has zero gradient"
+            );
         }
     }
 }

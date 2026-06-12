@@ -23,12 +23,6 @@ pub enum SomToken {
 
 pub struct StructuredTokenizer;
 
-impl Default for StructuredTokenizer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl StructuredTokenizer {
     pub fn new() -> Self {
         Self

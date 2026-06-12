@@ -87,9 +87,7 @@ pub fn save_checkpoint(
 }
 
 /// Load a checkpoint from a directory.
-pub fn load_checkpoint(
-    dir: impl AsRef<Path>,
-) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+pub fn load_checkpoint(dir: impl AsRef<Path>) -> Result<Checkpoint, Box<dyn std::error::Error>> {
     let dir = dir.as_ref();
     let json = fs::read_to_string(dir.join("checkpoint.json"))?;
     let checkpoint: Checkpoint = serde_json::from_str(&json)?;
@@ -103,18 +101,24 @@ pub fn list_checkpoints(
     let parent = parent_dir.as_ref();
     let mut checkpoints = Vec::new();
 
-    if !parent.exists() {
+    if !parent.exists()
+    {
         return Ok(checkpoints);
     }
 
-    for entry in fs::read_dir(parent)? {
+    for entry in fs::read_dir(parent)?
+    {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir()
+        {
             let ckpt_file = path.join("checkpoint.json");
-            if ckpt_file.exists() {
-                if let Ok(json) = fs::read_to_string(&ckpt_file) {
-                    if let Ok(ckpt) = serde_json::from_str::<Checkpoint>(&json) {
+            if ckpt_file.exists()
+            {
+                if let Ok(json) = fs::read_to_string(&ckpt_file)
+                {
+                    if let Ok(ckpt) = serde_json::from_str::<Checkpoint>(&json)
+                    {
                         checkpoints.push((ckpt.epoch, path));
                     }
                 }
@@ -155,7 +159,10 @@ mod tests {
         assert_eq!(loaded.epoch, 5);
         assert_eq!(loaded.step, 100);
         assert_eq!(loaded.optimizer_state.learning_rate, 0.001);
-        assert_eq!(loaded.weights.get("fc1.weight").unwrap(), &vec![0.1, 0.2, 0.3]);
+        assert_eq!(
+            loaded.weights.get("fc1.weight").unwrap(),
+            &vec![0.1, 0.2, 0.3]
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -169,9 +176,13 @@ mod tests {
         weights.insert("w".into(), vec![1.0]);
 
         let opt = OptimizerState {
-            learning_rate: 0.01, step: 0, epoch: 0,
-            m: HashMap::new(), v: HashMap::new(),
-            beta1_t: 0.9, beta2_t: 0.999,
+            learning_rate: 0.01,
+            step: 0,
+            epoch: 0,
+            m: HashMap::new(),
+            v: HashMap::new(),
+            beta1_t: 0.9,
+            beta2_t: 0.999,
         };
 
         save_checkpoint(parent.join("ckpt_epoch1"), &weights, &opt, 1, 10).unwrap();

@@ -1,5 +1,5 @@
 //! SOM Model Architecture (<= 300M parameters).
-//! Implements a Graph Transformer architecture with Encoder and Fusion layers.
+//! A Graph Transformer backbone for ownership prediction.
 
 use scirust_core::autodiff::reverse::{Tape, Var};
 use scirust_core::nn::linear::Linear;
@@ -7,59 +7,8 @@ use scirust_core::nn::Module;
 use scirust_core::nn::rng::PcgEngine;
 use scirust_core::nn::init::{KaimingNormal, Zeros};
 
-pub struct GraphEncoder {
-    pub node_emb: Linear,
-    pub edge_emb: Linear,
-}
-
-impl GraphEncoder {
-    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
-        Self {
-            node_emb: Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng),
-            edge_emb: Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng),
-        }
-    }
-
-    pub fn forward<'t>(&mut self, tape: &'t Tape, nodes: Var<'t>, edges: Var<'t>) -> Var<'t> {
-        let n = self.node_emb.forward(tape, nodes);
-        let e = self.edge_emb.forward(tape, edges);
-        n.add(e) // Simple fusion for encoder
-    }
-}
-
-pub struct GraphTransformerLayer {
-    pub qkv: Linear,
-    pub output: Linear,
-}
-
-impl GraphTransformerLayer {
-    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
-        Self {
-            qkv: Linear::new(d_model, d_model * 3, &KaimingNormal, &Zeros, rng),
-            output: Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng),
-        }
-    }
-
-    pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>) -> Var<'t> {
-        let qkv = self.qkv.forward(tape, x);
-        // Simplified self-attention logic for Graph Transformer
-        let d = qkv.shape().1 / 3;
-        let q = qkv.slice_cols(0, d);
-        let k = qkv.slice_cols(d, d);
-        let v = qkv.slice_cols(2 * d, d);
-
-        let scores = q.matmul(k.transpose()).scale(1.0 / (d as f32).sqrt());
-        let attn = scores.softmax(1);
-        let context = attn.matmul(v);
-
-        self.output.forward(tape, context).add(x).relu() // Residual + Relu
-    }
-}
-
 pub struct SomModel {
-    pub encoder: GraphEncoder,
-    pub transformer_layers: Vec<GraphTransformerLayer>,
-    pub fusion_layer: Linear,
+    pub transformer_backbone: Vec<Linear>,
     pub ownership_head: Linear,
     pub borrow_head: Linear,
     pub lifetime_head: Linear,
@@ -72,17 +21,13 @@ pub struct SomModel {
 
 impl SomModel {
     pub fn new(d_model: usize, n_layers: usize, rng: &mut PcgEngine) -> Self {
-        let encoder = GraphEncoder::new(d_model, rng);
         let mut layers = Vec::new();
         for _ in 0..n_layers {
-            layers.push(GraphTransformerLayer::new(d_model, rng));
+            layers.push(Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng));
         }
-        let fusion_layer = Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng);
 
         Self {
-            encoder,
-            transformer_layers: layers,
-            fusion_layer,
+            transformer_backbone: layers,
             ownership_head: Linear::new(d_model, 4, &KaimingNormal, &Zeros, rng),
             borrow_head: Linear::new(d_model, 3, &KaimingNormal, &Zeros, rng),
             lifetime_head: Linear::new(d_model, 1, &KaimingNormal, &Zeros, rng),
@@ -94,14 +39,11 @@ impl SomModel {
         }
     }
 
-    pub fn forward<'t>(&mut self, tape: &'t Tape, nodes: Var<'t>, edges: Var<'t>) -> SomOutput<'t> {
-        let mut h = self.encoder.forward(tape, nodes, edges);
-
-        for layer in &mut self.transformer_layers {
-            h = layer.forward(tape, h);
+    pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>) -> SomOutput<'t> {
+        let mut h = x;
+        for layer in &mut self.transformer_backbone {
+            h = layer.forward(tape, h).relu();
         }
-
-        h = self.fusion_layer.forward(tape, h).relu();
 
         SomOutput {
             ownership: self.ownership_head.forward(tape, h),

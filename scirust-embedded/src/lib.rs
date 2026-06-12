@@ -40,7 +40,9 @@ pub struct StaticTensor<T, const R: usize, const C: usize> {
 impl<T: Copy + Default, const R: usize, const C: usize> StaticTensor<T, R, C> {
     /// Initialise un tenseur.
     pub fn new(val: T) -> Self {
-        Self { data: [[val; C]; R] }
+        Self {
+            data: [[val; C]; R],
+        }
     }
 }
 
@@ -57,10 +59,13 @@ impl<const IN: usize, const OUT: usize> StaticLinear<IN, OUT> {
         input: &StaticTensor<Q16_16, B, IN>,
         output: &mut StaticTensor<Q16_16, B, OUT>,
     ) {
-        for b in 0..B {
-            for j in 0..OUT {
+        for b in 0..B
+        {
+            for j in 0..OUT
+            {
                 let mut acc = self.bias.data[0][j];
-                for i in 0..IN {
+                for i in 0..IN
+                {
                     acc = acc.add(input.data[b][i].mul(self.weight.data[j][i]));
                 }
                 output.data[b][j] = acc;

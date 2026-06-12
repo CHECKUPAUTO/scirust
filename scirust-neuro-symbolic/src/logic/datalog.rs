@@ -82,21 +82,28 @@ impl DatalogEngine {
     /// Naive bottom-up evaluation: repeatedly apply every rule, deriving new
     /// ground facts, until no rule produces anything new (a fixpoint).
     pub fn run_fixed_point(&mut self) -> Result<()> {
-        loop {
+        loop
+        {
             let mut new_facts: Vec<Fact> = Vec::new();
-            for rule in &self.rules {
-                for sub in self.eval_body(&rule.body) {
-                    if let Some(fact) = instantiate(&rule.head, &sub) {
-                        if !self.facts.contains(&fact) {
+            for rule in &self.rules
+            {
+                for sub in self.eval_body(&rule.body)
+                {
+                    if let Some(fact) = instantiate(&rule.head, &sub)
+                    {
+                        if !self.facts.contains(&fact)
+                        {
                             new_facts.push(fact);
                         }
                     }
                 }
             }
-            if new_facts.is_empty() {
+            if new_facts.is_empty()
+            {
                 break;
             }
-            for f in new_facts {
+            for f in new_facts
+            {
                 self.facts.insert(f);
             }
         }
@@ -106,20 +113,26 @@ impl DatalogEngine {
     /// All substitutions over the current facts that satisfy the whole body.
     fn eval_body(&self, body: &[Atom]) -> Vec<Subst> {
         let mut subs = vec![Subst::new()];
-        for atom in body {
+        for atom in body
+        {
             let mut next = Vec::new();
-            for sub in &subs {
-                for fact in &self.facts {
-                    if fact.predicate != atom.predicate || fact.terms.len() != atom.terms.len() {
+            for sub in &subs
+            {
+                for fact in &self.facts
+                {
+                    if fact.predicate != atom.predicate || fact.terms.len() != atom.terms.len()
+                    {
                         continue;
                     }
-                    if let Some(s2) = unify(atom, fact, sub) {
+                    if let Some(s2) = unify(atom, fact, sub)
+                    {
                         next.push(s2);
                     }
                 }
             }
             subs = next;
-            if subs.is_empty() {
+            if subs.is_empty()
+            {
                 break;
             }
         }
@@ -129,19 +142,26 @@ impl DatalogEngine {
 
 fn unify(atom: &Atom, fact: &Fact, sub: &Subst) -> Option<Subst> {
     let mut s = sub.clone();
-    for (t, val) in atom.terms.iter().zip(&fact.terms) {
-        match t {
-            Term::Const(c) => {
-                if c != val {
+    for (t, val) in atom.terms.iter().zip(&fact.terms)
+    {
+        match t
+        {
+            Term::Const(c) =>
+            {
+                if c != val
+                {
                     return None;
                 }
-            }
-            Term::Var(v) => match s.get(v) {
+            },
+            Term::Var(v) => match s.get(v)
+            {
                 Some(bound) if bound != val => return None,
-                Some(_) => {}
-                None => {
+                Some(_) =>
+                {},
+                None =>
+                {
                     s.insert(v.clone(), val.clone());
-                }
+                },
             },
         }
     }
@@ -150,8 +170,10 @@ fn unify(atom: &Atom, fact: &Fact, sub: &Subst) -> Option<Subst> {
 
 fn instantiate(head: &Atom, sub: &Subst) -> Option<Fact> {
     let mut terms = Vec::with_capacity(head.terms.len());
-    for t in &head.terms {
-        match t {
+    for t in &head.terms
+    {
+        match t
+        {
             Term::Const(c) => terms.push(c.clone()),
             Term::Var(v) => terms.push(sub.get(v)?.clone()),
         }

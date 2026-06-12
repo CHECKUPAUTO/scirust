@@ -4,7 +4,7 @@
 use crate::nn::conv_utils::im2col_raw;
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
-use crate::tn::tt_decompose::{interleave_weight, reconstruct_matrix, TTCores};
+use crate::tn::tt_decompose::{TTCores, interleave_weight, reconstruct_matrix};
 use matrixmultiply::sgemm;
 use std::cell::RefCell;
 
@@ -1202,9 +1202,9 @@ impl Tape {
                 {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    let m = av.rows;          // M
-                    let k = av.cols;          // K = bv.rows
-                    let n = bv.cols;          // N
+                    let m = av.rows; // M
+                    let k = av.cols; // K = bv.rows
+                    let n = bv.cols; // N
                     debug_assert_eq!(bv.rows, k);
 
                     // Try GPU engine first
@@ -1213,13 +1213,35 @@ impl Tape {
                         let ga = &mut grads[a];
                         // ga += g @ b.T  (M×K = M×N * K×N^T)
                         let mut ga_data = ga.data.clone();
-                        engine.gemm(1.0, g.data.as_slice(), bv.data.as_slice(), 1.0, &mut ga_data, m, n, k, false, true);
+                        engine.gemm(
+                            1.0,
+                            g.data.as_slice(),
+                            bv.data.as_slice(),
+                            1.0,
+                            &mut ga_data,
+                            m,
+                            n,
+                            k,
+                            false,
+                            true,
+                        );
                         ga.data = ga_data;
 
                         let gb = &mut grads[b];
                         // gb += a.T @ g  (K×N = M×K^T * M×N)
                         let mut gb_data = gb.data.clone();
-                        engine.gemm(1.0, av.data.as_slice(), g.data.as_slice(), 1.0, &mut gb_data, k, m, n, true, false);
+                        engine.gemm(
+                            1.0,
+                            av.data.as_slice(),
+                            g.data.as_slice(),
+                            1.0,
+                            &mut gb_data,
+                            k,
+                            m,
+                            n,
+                            true,
+                            false,
+                        );
                         gb.data = gb_data;
                     }
                     else
@@ -2168,10 +2190,23 @@ impl Tape {
                     // Straight-Through Estimator (STE): pass gradients through unmodified
                     grads[input].add_assign(&g);
                 },
-                Op::TtContract { input_idx, core_indices, bias_idx, in_dims, out_dims, ranks, d, .. } =>
+                Op::TtContract {
+                    input_idx,
+                    core_indices,
+                    bias_idx,
+                    in_dims,
+                    out_dims,
+                    ranks,
+                    d,
+                    ..
+                } =>
                 {
-                    let (x, w) = match &nodes[i].saved {
-                        SavedData::TtContractState { input, weight } => (input.clone(), weight.clone()),
+                    let (x, w) = match &nodes[i].saved
+                    {
+                        SavedData::TtContractState { input, weight } =>
+                        {
+                            (input.clone(), weight.clone())
+                        },
                         _ => unreachable!(),
                     };
 
@@ -2220,11 +2255,13 @@ impl Tape {
                     let dd = d;
                     let in_dims_slice = &in_dims[..dd];
                     let out_dims_slice = &out_dims[..dd];
-                    let interleaved_tnd = interleave_weight(&dw_tensor.data, in_dims_slice, out_dims_slice);
+                    let interleaved_tnd =
+                        interleave_weight(&dw_tensor.data, in_dims_slice, out_dims_slice);
 
                     let dims_2d: Vec<usize> = (0..dd).map(|i| in_dims[i] * out_dims[i]).collect();
 
-                    for k in 0..dd {
+                    for k in 0..dd
+                    {
                         let core_idx = core_indices[k];
                         let r_k = ranks[k];
                         let n_k = in_dims[k] * out_dims[k];
@@ -2232,9 +2269,12 @@ impl Tape {
 
                         let mut d_core_data = vec![0.0; r_k * n_k * r_next];
 
-                        match dd {
-                            2 => {
-                                if k == 0 {
+                        match dd
+                        {
+                            2 =>
+                            {
+                                if k == 0
+                                {
                                     // d_core_0 = d_interleaved @ core_1^T
                                     // m=n_0, k=n_1, n=r_1
                                     let core_1 = &values[core_indices[1]].as_cpu();
@@ -2243,18 +2283,25 @@ impl Tape {
                                     let nn = r_next;
                                     unsafe {
                                         sgemm(
-                                            m, kk, nn,
+                                            m,
+                                            kk,
+                                            nn,
                                             1.0,
                                             interleaved_tnd.data.as_ptr(),
-                                            dims_2d[1] as isize, 1,
+                                            dims_2d[1] as isize,
+                                            1,
                                             core_1.data.as_ptr(),
-                                            1, core_1.cols as isize,
+                                            1,
+                                            core_1.cols as isize,
                                             0.0,
                                             d_core_data.as_mut_ptr(),
-                                            nn as isize, 1,
+                                            nn as isize,
+                                            1,
                                         );
                                     }
-                                } else {
+                                }
+                                else
+                                {
                                     // d_core_1 = core_0^T @ d_interleaved
                                     // m=r_1, k=n_0, n=n_1
                                     let core_0 = &values[core_indices[0]].as_cpu();
@@ -2263,37 +2310,53 @@ impl Tape {
                                     let nn = dims_2d[1];
                                     unsafe {
                                         sgemm(
-                                            m, kk, nn,
+                                            m,
+                                            kk,
+                                            nn,
                                             1.0,
                                             core_0.data.as_ptr(),
-                                            1, core_0.cols as isize,
+                                            1,
+                                            core_0.cols as isize,
                                             interleaved_tnd.data.as_ptr(),
-                                            dims_2d[1] as isize, 1,
+                                            dims_2d[1] as isize,
+                                            1,
                                             0.0,
                                             d_core_data.as_mut_ptr(),
-                                            nn as isize, 1,
+                                            nn as isize,
+                                            1,
                                         );
                                     }
                                 }
                             },
-                            _ => {
+                            _ =>
+                            {
                                 // d>2: gradient set to zero (not yet implemented)
-                            }
+                            },
                         }
 
-                        let d_core_tensor = Tensor { rows: r_k * n_k, cols: r_next, data: d_core_data };
+                        let d_core_tensor = Tensor {
+                            rows: r_k * n_k,
+                            cols: r_next,
+                            data: d_core_data,
+                        };
                         grads[core_idx] = grads[core_idx].add(&d_core_tensor);
                     }
 
-                    if let Some(b_idx) = bias_idx {
+                    if let Some(b_idx) = bias_idx
+                    {
                         let mut db = vec![0.0; g.cols];
-                        #[allow(clippy::needless_range_loop)]
-                        for j in 0..g.cols {
-                            for i in 0..g.rows {
+                        for j in 0..g.cols
+                        {
+                            for i in 0..g.rows
+                            {
                                 db[j] += g.data[i * g.cols + j];
                             }
                         }
-                        let db_tensor = Tensor { rows: 1, cols: g.cols, data: db };
+                        let db_tensor = Tensor {
+                            rows: 1,
+                            cols: g.cols,
+                            data: db,
+                        };
                         grads[b_idx] = grads[b_idx].add(&db_tensor);
                     }
                 },
@@ -3435,55 +3498,89 @@ impl<'t> Var<'t> {
         let mut in_dims_arr = [0usize; 8];
         let mut out_dims_arr = [0usize; 8];
         let mut ranks_arr = [0usize; 9];
-        for (k, idx) in cores.iter().map(|c| c.idx).enumerate() {
+        for (k, idx) in cores.iter().map(|c| c.idx).enumerate()
+        {
             core_indices_arr[k] = idx;
         }
-        for (k, &d_k) in in_dims.iter().enumerate() {
+        for (k, &d_k) in in_dims.iter().enumerate()
+        {
             in_dims_arr[k] = d_k;
         }
-        for (k, &d_k) in out_dims.iter().enumerate() {
+        for (k, &d_k) in out_dims.iter().enumerate()
+        {
             out_dims_arr[k] = d_k;
         }
-        for (k, &r_k) in ranks.iter().enumerate() {
+        for (k, &r_k) in ranks.iter().enumerate()
+        {
             ranks_arr[k] = r_k;
         }
 
-        let core_tnd: Vec<TensorND> = cores.iter().enumerate().map(|(k, c)| {
-            let cv = self.tape.values.borrow()[c.idx].as_cpu().clone();
-            let r_k = ranks_arr[k];
-            let n_k = in_dims_arr[k] * out_dims_arr[k];
-            let r_next = ranks_arr[k + 1];
-            assert_eq!(cv.data.len(), r_k * n_k * r_next, "core {k} data len mismatch");
-            TensorND::new(cv.data, vec![r_k, n_k, r_next])
-        }).collect();
+        let core_tnd: Vec<TensorND> = cores
+            .iter()
+            .enumerate()
+            .map(|(k, c)| {
+                let cv = self.tape.values.borrow()[c.idx].as_cpu().clone();
+                let r_k = ranks_arr[k];
+                let n_k = in_dims_arr[k] * out_dims_arr[k];
+                let r_next = ranks_arr[k + 1];
+                assert_eq!(
+                    cv.data.len(),
+                    r_k * n_k * r_next,
+                    "core {k} data len mismatch"
+                );
+                TensorND::new(cv.data, vec![r_k, n_k, r_next])
+            })
+            .collect();
 
-        let mode_dims: Vec<usize> = (0..d)
-            .map(|k| in_dims[k] * out_dims[k]).collect();
-        let tt = TTCores { cores: core_tnd, ranks, mode_dims };
+        let mode_dims: Vec<usize> = (0..d).map(|k| in_dims[k] * out_dims[k]).collect();
+        let tt = TTCores {
+            cores: core_tnd,
+            ranks,
+            mode_dims,
+        };
 
         let w_data = reconstruct_matrix(&tt, &in_dims, &out_dims);
         let in_features: usize = in_dims.iter().product();
         let out_features: usize = out_dims.iter().product();
-        let w_tensor = Tensor { rows: in_features, cols: out_features, data: w_data };
+        let w_tensor = Tensor {
+            rows: in_features,
+            cols: out_features,
+            data: w_data,
+        };
 
         let mut out_data = vec![0.0; a.rows * out_features];
         unsafe {
             sgemm(
-                a.rows, a.cols, out_features,
+                a.rows,
+                a.cols,
+                out_features,
                 1.0,
-                a.data.as_ptr(), a.cols as isize, 1,
-                w_tensor.data.as_ptr(), w_tensor.cols as isize, 1,
+                a.data.as_ptr(),
+                a.cols as isize,
+                1,
+                w_tensor.data.as_ptr(),
+                w_tensor.cols as isize,
+                1,
                 0.0,
-                out_data.as_mut_ptr(), out_features as isize, 1,
+                out_data.as_mut_ptr(),
+                out_features as isize,
+                1,
             );
         }
-        let mut out_tensor = Tensor { rows: a.rows, cols: out_features, data: out_data };
+        let mut out_tensor = Tensor {
+            rows: a.rows,
+            cols: out_features,
+            data: out_data,
+        };
 
         let bias_idx = bias.as_ref().map(|b| b.idx);
-        if let Some(ref b) = bias {
+        if let Some(ref b) = bias
+        {
             let bv = self.tape.values.borrow()[b.idx].as_cpu().clone();
-            for j in 0..out_features {
-                for i in 0..out_tensor.rows {
+            for j in 0..out_features
+            {
+                for i in 0..out_tensor.rows
+                {
                     out_tensor.data[i * out_features + j] += bv.data[j % bv.cols];
                 }
             }
@@ -3509,7 +3606,10 @@ impl<'t> Var<'t> {
             saved,
         );
 
-        Ok(Var { tape: self.tape, idx: new_idx })
+        Ok(Var {
+            tape: self.tape,
+            idx: new_idx,
+        })
     }
     pub fn tt_contract(
         self,
@@ -3519,7 +3619,8 @@ impl<'t> Var<'t> {
         out_dims: Vec<usize>,
         ranks: Vec<usize>,
     ) -> Var<'t> {
-        self.try_tt_contract(cores, bias, in_dims, out_dims, ranks).unwrap()
+        self.try_tt_contract(cores, bias, in_dims, out_dims, ranks)
+            .unwrap()
     }
 
     pub fn causal_mask(self, seq_len: usize) -> Var<'t> {
@@ -3879,8 +3980,7 @@ impl<'t> Var<'t> {
                                             + co * kernel * kernel
                                             + kh * kernel
                                             + kw;
-                                        let in_idx =
-                                            b_i * in_c * h * w + ci * h * w + ih * w + iw;
+                                        let in_idx = b_i * in_c * h * w + ci * h * w + ih * w + iw;
                                         let out_idx = b_i * out_c * h_out * w_out
                                             + co * h_out * w_out
                                             + oh * w_out
@@ -3906,9 +4006,8 @@ impl<'t> Var<'t> {
                     {
                         for ow in 0..w_out
                         {
-                            let out_idx = b_i * out_c * h_out * w_out + co * h_out * w_out
-                                + oh * w_out
-                                + ow;
+                            let out_idx =
+                                b_i * out_c * h_out * w_out + co * h_out * w_out + oh * w_out + ow;
                             out.data[out_idx] += b_val;
                         }
                     }
@@ -3956,7 +4055,17 @@ impl<'t> Var<'t> {
         output_padding: usize,
     ) -> Var<'t> {
         self.try_conv2d_transpose_forward(
-            weight, bias, batch, in_c, h, w, out_c, kernel, stride, pad, output_padding,
+            weight,
+            bias,
+            batch,
+            in_c,
+            h,
+            w,
+            out_c,
+            kernel,
+            stride,
+            pad,
+            output_padding,
         )
         .unwrap()
     }

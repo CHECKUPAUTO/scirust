@@ -170,7 +170,7 @@ Motifs détectés:
 | bf16 quant | ✓ | ✓ | ✓ | ✓ |
 | int4 quant | ✓ | ✓ | ✓ | ✓ |
 
-## Prochaines étapes (TODO)
+## Prochaines étapes
 
 1. **Fusion avec autodiff**: adapter les kernels fusionnés pour qu'ils fonctionnent
    avec le graphe tape. Nécessite d'ajouter les backward rules pour chaque kernel.

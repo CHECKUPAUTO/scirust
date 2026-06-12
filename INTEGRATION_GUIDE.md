@@ -85,7 +85,7 @@ cargo run --package simd_views_demo --features scirust-core/portable-simd
 SimdBackend (trait)
 ├── ScalarBackend       — stable, toujours dispo
 ├── PortableSimdBackend — nightly std::simd (AVX2/NEON/SVE auto)
-└── BlasBackend (TODO)  — matrixmultiply / netlib
+└── BlasBackend  — matrixmultiply / netlib
 ```
 
 Le choix de backend se fait à la compilation via `best_backend()`.

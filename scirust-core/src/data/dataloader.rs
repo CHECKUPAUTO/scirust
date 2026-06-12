@@ -121,9 +121,11 @@ impl<D: Dataset> DataLoader<D> {
         let n = self.dataset.n_samples();
         self.indices = (0..n).collect();
 
-        if self.config.shuffle {
+        if self.config.shuffle
+        {
             // Fisher-Yates shuffle
-            for i in (1..self.indices.len()).rev() {
+            for i in (1..self.indices.len()).rev()
+            {
                 let j = (self.rng.next_u32() as usize) % (i + 1);
                 self.indices.swap(i, j);
             }
@@ -136,10 +138,13 @@ impl<D: Dataset> DataLoader<D> {
     pub fn n_batches(&self) -> usize {
         let n = self.dataset.n_samples();
         let bs = self.config.batch_size;
-        if self.config.drop_last {
+        if self.config.drop_last
+        {
             n / bs
-        } else {
-            n.div_ceil(bs) // ceil division
+        }
+        else
+        {
+            (n + bs - 1) / bs // ceil division
         }
     }
 }
@@ -152,18 +157,23 @@ impl<D: Dataset> Iterator for DataLoader<D> {
         let bs = self.config.batch_size;
 
         // Initialize on first call
-        if self.indices.is_empty() {
+        if self.indices.is_empty()
+        {
             self.reset();
         }
 
-        if self.current >= n {
+        if self.current >= n
+        {
             return None;
         }
 
         let remaining = n - self.current;
-        let actual_bs = if self.config.drop_last && remaining < bs {
+        let actual_bs = if self.config.drop_last && remaining < bs
+        {
             return None;
-        } else {
+        }
+        else
+        {
             remaining.min(bs)
         };
 
@@ -175,7 +185,8 @@ impl<D: Dataset> Iterator for DataLoader<D> {
         let mut batch_x = Vec::with_capacity(actual_bs * in_dim);
         let mut batch_y = Vec::with_capacity(actual_bs * out_dim);
 
-        for k in 0..actual_bs {
+        for k in 0..actual_bs
+        {
             let (x, y) = self.dataset.sample(self.indices[self.current + k]);
             debug_assert_eq!(x.len(), in_dim, "inconsistent feature dimension");
             debug_assert_eq!(y.len(), out_dim, "inconsistent label dimension");
@@ -234,9 +245,15 @@ mod tests {
         let dataset2 = make_dataset(10, 3, 2);
 
         let mut loader1 = DataLoader::builder(dataset1)
-            .batch_size(5).shuffle(true).seed(123).build();
+            .batch_size(5)
+            .shuffle(true)
+            .seed(123)
+            .build();
         let mut loader2 = DataLoader::builder(dataset2)
-            .batch_size(5).shuffle(true).seed(123).build();
+            .batch_size(5)
+            .shuffle(true)
+            .seed(123)
+            .build();
 
         loader1.reset();
         loader2.reset();
@@ -257,14 +274,16 @@ mod tests {
 
         // Collect first pass into a vec
         let mut first_pass = Vec::new();
-        while let Some(batch) = loader.next() {
+        while let Some(batch) = loader.next()
+        {
             first_pass.push(batch);
         }
 
         loader.reset();
 
         let mut second_pass = Vec::new();
-        while let Some(batch) = loader.next() {
+        while let Some(batch) = loader.next()
+        {
             second_pass.push(batch);
         }
 
