@@ -25,6 +25,7 @@ pub trait GpuEngine: std::fmt::Debug {
     ///   - op(A) is `m × k`, stored in `a` (length m*k)
     ///   - op(B) is `k × n`, stored in `b` (length k*n)
     ///   - C is `m × n`, stored in `c` (length m*n)
+    #[allow(clippy::too_many_arguments)]
     fn gemm(
         &self,
         alpha: f32,
@@ -2095,38 +2096,26 @@ impl Tape {
                                         {
                                             for kw in 0..kernel
                                             {
-                                                let ih_signed =
-                                                    oh as isize + pad as isize - kh as isize;
-                                                let iw_signed =
-                                                    ow as isize + pad as isize - kw as isize;
+                                                let ih_signed = oh as isize + pad as isize - kh as isize;
+                                                let iw_signed = ow as isize + pad as isize - kw as isize;
                                                 if ih_signed >= 0
-                                                    && ih_signed < h_in as isize
+                                                    && ih_signed < (h_in * stride) as isize
                                                     && iw_signed >= 0
-                                                    && iw_signed < w_in as isize
-                                                    && (ih_signed as usize - (oh - kh + pad))
-                                                        % stride
-                                                        == 0
-                                                    && (iw_signed as usize - (ow - kw + pad))
-                                                        % stride
-                                                        == 0
+                                                    && iw_signed < (w_in * stride) as isize
+                                                    && ih_signed % stride as isize == 0
+                                                    && iw_signed % stride as isize == 0
                                                 {
-                                                    let ih = ih_signed as usize;
-                                                    let iw = iw_signed as usize;
-                                                    if (oh + pad as usize) >= kh
-                                                        && (oh + pad as usize - kh) % stride == 0
-                                                        && (ow + pad as usize - kw) % stride == 0
-                                                    {
-                                                        let w_idx = ci * out_c * kernel * kernel
-                                                            + co * kernel * kernel
-                                                            + kh * kernel
-                                                            + kw;
-                                                        let in_idx = b_i * in_c * h_in * w_in
-                                                            + ci * h_in * w_in
-                                                            + ih * w_in
-                                                            + iw;
-                                                        dx.data[in_idx] +=
-                                                            grad_out * weight_t.data[w_idx];
-                                                    }
+                                                    let ih = (ih_signed / stride as isize) as usize;
+                                                    let iw = (iw_signed / stride as isize) as usize;
+                                                    let w_idx = ci * out_c * kernel * kernel
+                                                        + co * kernel * kernel
+                                                        + kh * kernel
+                                                        + kw;
+                                                    let in_idx = b_i * in_c * h_in * w_in
+                                                        + ci * h_in * w_in
+                                                        + ih * w_in
+                                                        + iw;
+                                                    dx.data[in_idx] += grad_out * weight_t.data[w_idx];
                                                 }
                                             }
                                         }
@@ -2263,7 +2252,7 @@ impl Tape {
                         );
                     }
 
-                    let dd = d as usize;
+                    let dd = d;
                     let in_dims_slice = &in_dims[..dd];
                     let out_dims_slice = &out_dims[..dd];
                     let interleaved_tnd =
@@ -2476,10 +2465,7 @@ impl Tape {
                                 for r in 0..br
                                 {
                                     l_i[r] = rescale[r] * l_i[r] + row_sum_p[r];
-                                }
-
-                                for r in 0..br
-                                {
+                                m_i[..br].copy_from_slice(&m_new[..br]);
                                     m_i[r] = m_new[r];
                                 }
                             }
@@ -3926,6 +3912,7 @@ impl<'t> Var<'t> {
         self.try_conv2d_forward(weight, bias, batch, in_c, h, w, out_c, kernel, stride, pad)
             .unwrap()
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn try_conv2d_transpose_forward(
         self,
         weight: Var<'t>,
@@ -4052,6 +4039,7 @@ impl<'t> Var<'t> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn conv2d_transpose_forward(
         self,
         weight: Var<'t>,

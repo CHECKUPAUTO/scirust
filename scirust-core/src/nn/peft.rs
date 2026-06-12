@@ -59,7 +59,7 @@ impl LoRALinear {
 
 impl Module for LoRALinear {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        let base_out = self.base.forward(tape, input.clone());
+        let base_out = self.base.forward(tape, input);
         let lora_h = self.lora_a.forward(tape, input);
         let lora_out = self.lora_b.forward(tape, lora_h);
 

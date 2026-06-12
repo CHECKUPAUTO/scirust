@@ -48,10 +48,7 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
     if mult >= (1i64 << 31)
     {
         mult = 1i64 << 30;
-        if shift > 0
-        {
-            shift -= 1;
-        }
+        shift = shift.saturating_sub(1);
     }
     (mult, shift)
 }
@@ -214,14 +211,7 @@ impl QModel {
                     {
                         r = 0;
                     }
-                    if r > 127
-                    {
-                        r = 127;
-                    }
-                    if r < -128
-                    {
-                        r = -128;
-                    }
+                    r = r.clamp(-128, 127);
                     q[bi * l.out_f + o] = r as i8;
                 }
             }

@@ -95,7 +95,7 @@ pub fn generate_static_pipeline(layers: &[LayerSpec], weights_bytes: &[u8]) -> S
 
     let mut current_dim = in_dim;
     let mut buffer_idx = 0;
-    code.push_str(&format!("        let mut buf0 = *input;\n"));
+    code.push_str("        let mut buf0 = *input;\n");
 
     for (i, layer) in layers.iter().enumerate()
     {
@@ -111,9 +111,9 @@ pub fn generate_static_pipeline(layers: &[LayerSpec], weights_bytes: &[u8]) -> S
                     "        let mut buf{} = [[0.0f32; {}]; B];\n",
                     next_buffer_idx, out_features
                 ));
-                code.push_str(&format!("        for b in 0..B {{\n"));
+                code.push_str("        for b in 0..B {\n");
                 code.push_str(&format!("            for o in 0..{} {{\n", out_features));
-                code.push_str(&format!("                let mut acc = 0.0f32;\n"));
+                code.push_str("                let mut acc = 0.0f32;\n");
                 code.push_str(&format!("                for i in 0..{} {{\n", in_features));
                 code.push_str(&format!(
                     "                    acc += buf{}[b][i] * self.weight_{}[i][o];\n",
@@ -131,7 +131,7 @@ pub fn generate_static_pipeline(layers: &[LayerSpec], weights_bytes: &[u8]) -> S
             },
             LayerSpec::ReLU =>
             {
-                code.push_str(&format!("        for b in 0..B {{\n"));
+                code.push_str("        for b in 0..B {\n");
                 code.push_str(&format!("            for d in 0..{} {{\n", current_dim));
                 code.push_str(&format!(
                     "                if buf{}[b][d] < 0.0 {{ buf{}[b][d] = 0.0; }}\n",

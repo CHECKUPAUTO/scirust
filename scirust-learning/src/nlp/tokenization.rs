@@ -61,11 +61,9 @@ impl SimpleTokenizer {
             .collect();
         entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-        let mut id = 2;
-        for (word, _) in entries
+        for (id, (word, _)) in (2..).zip(entries)
         {
             vocab.insert(word, id);
-            id += 1;
         }
 
         Self::new(vocab)

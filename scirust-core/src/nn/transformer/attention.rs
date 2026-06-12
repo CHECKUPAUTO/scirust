@@ -39,7 +39,7 @@ impl MultiHeadAttention {
         rng: &mut PcgEngine,
     ) -> Self {
         assert!(
-            d_model.is_multiple_of(n_heads),
+            d_model % n_heads == 0,
             "MultiHeadAttention: d_model ({d_model}) doit etre divisible par n_heads ({n_heads})"
         );
         let d_head = d_model / n_heads;
@@ -141,9 +141,9 @@ impl MultiHeadAttention {
             let v_h = &v_per_head[h];
             for b in 0..batch
             {
-                let q_hb = q_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
-                let k_hb = k_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
-                let v_hb = v_h.clone().try_slice_rows(b * seq_len, seq_len).unwrap();
+                let q_hb = q_h.try_slice_rows(b * seq_len, seq_len).unwrap();
+                let k_hb = k_h.try_slice_rows(b * seq_len, seq_len).unwrap();
+                let v_hb = v_h.try_slice_rows(b * seq_len, seq_len).unwrap();
 
                 let k_hb_t = k_hb.transpose_2d();
                 let scores = q_hb.try_matmul(k_hb_t).unwrap();
@@ -252,8 +252,8 @@ impl MultiHeadAttention {
 
     /// Inférence incrémentale avec KV-Cache (mode token unique).
     pub fn infer_step<'t>(&mut self, tape: &'t Tape, x_token: Var<'t>, _pos: usize) -> Var<'t> {
-        let q = self.w_q.forward(tape, x_token.clone());
-        let k = self.w_k.forward(tape, x_token.clone());
+        let q = self.w_q.forward(tape, x_token);
+        let k = self.w_k.forward(tape, x_token);
         let v = self.w_v.forward(tape, x_token);
         let (k_cached, v_cached) = {
             let mut cache = self.kv_cache.borrow_mut();
@@ -286,9 +286,9 @@ impl MultiHeadAttention {
         let mut heads = Vec::with_capacity(h_n);
         for h in 0..h_n
         {
-            let qh = q.clone().slice_cols(h * d_h, d_h);
-            let kh = k_cached.clone().slice_cols(h * d_h, d_h);
-            let vh = v_cached.clone().slice_cols(h * d_h, d_h);
+            let qh = q.slice_cols(h * d_h, d_h);
+            let kh = k_cached.slice_cols(h * d_h, d_h);
+            let vh = v_cached.slice_cols(h * d_h, d_h);
             heads.push(
                 qh.matmul(kh.transpose_2d())
                     .scale(scale)

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 /// evaluated once every variable is bound.
 pub struct CspSolver {
     pub domains: HashMap<String, Vec<i32>>,
+    #[allow(clippy::type_complexity)]
     pub constraints: Vec<Box<dyn Fn(&HashMap<String, i32>) -> bool>>,
 }
 

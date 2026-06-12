@@ -73,7 +73,7 @@ impl ExprNode {
     }
 
     /// Pretty-print the expression as a string.
-    pub fn to_string(&self) -> String {
+    pub fn to_expr_string(&self) -> String {
         match self
         {
             ExprNode::X => "x".into(),
@@ -88,15 +88,15 @@ impl ExprNode {
                     format!("{:.4}", c)
                 }
             },
-            ExprNode::Add(a, b) => format!("({}+{})", a.to_string(), b.to_string()),
-            ExprNode::Sub(a, b) => format!("({}-{})", a.to_string(), b.to_string()),
-            ExprNode::Mul(a, b) => format!("({}*{})", a.to_string(), b.to_string()),
-            ExprNode::Div(a, b) => format!("({}/{})", a.to_string(), b.to_string()),
-            ExprNode::Sin(a) => format!("sin({})", a.to_string()),
-            ExprNode::Cos(a) => format!("cos({})", a.to_string()),
-            ExprNode::Exp(a) => format!("exp({})", a.to_string()),
-            ExprNode::Log(a) => format!("log({})", a.to_string()),
-            ExprNode::Pow2(a) => format!("({})^2", a.to_string()),
+            ExprNode::Add(a, b) => format!("({}+{})", a.to_expr_string(), b.to_expr_string()),
+            ExprNode::Sub(a, b) => format!("({}-{})", a.to_expr_string(), b.to_expr_string()),
+            ExprNode::Mul(a, b) => format!("({}*{})", a.to_expr_string(), b.to_expr_string()),
+            ExprNode::Div(a, b) => format!("({}/{})", a.to_expr_string(), b.to_expr_string()),
+            ExprNode::Sin(a) => format!("sin({})", a.to_expr_string()),
+            ExprNode::Cos(a) => format!("cos({})", a.to_expr_string()),
+            ExprNode::Exp(a) => format!("exp({})", a.to_expr_string()),
+            ExprNode::Log(a) => format!("log({})", a.to_expr_string()),
+            ExprNode::Pow2(a) => format!("({})^2", a.to_expr_string()),
         }
     }
 
@@ -195,7 +195,7 @@ impl PatternMiner {
 
         for expr in &candidates
         {
-            let expr_str = expr.to_string();
+            let expr_str = expr.to_expr_string();
             if !seen_exprs.insert(expr_str.clone())
             {
                 continue; // skip duplicates

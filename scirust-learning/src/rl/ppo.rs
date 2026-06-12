@@ -38,7 +38,7 @@ impl<A: Module, C: Module> PPOAgent<A, C> {
         for i in 0..states.len()
         {
             let s_var = tape.input(states[i].clone());
-            let actor_out = self.actor.forward(&tape, s_var.clone());
+            let actor_out = self.actor.forward(&tape, s_var);
             let probs = actor_out.softmax(1);
             let prob_a = probs.slice_cols(actions[i], 1);
 
@@ -74,7 +74,7 @@ impl<A: Module, C: Module> PPOAgent<A, C> {
             let critic_out = self.critic.forward(&tape, s_var);
             let target = tape.input(Tensor::from_vec(vec![returns[i]], 1, 1));
             let diff = critic_out.sub(target);
-            let critic_loss = diff.hadamard(diff.clone()); // MSE
+            let critic_loss = diff.hadamard(diff); // MSE
             total_critic_loss = total_critic_loss.add(critic_loss);
         }
 

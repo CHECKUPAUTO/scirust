@@ -19,6 +19,7 @@ pub struct PatchEmbedding {
 }
 
 impl PatchEmbedding {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<W: Initializer, B: Initializer>(
         in_channels: usize,
         embed_dim: usize,
@@ -42,6 +43,7 @@ impl PatchEmbedding {
 }
 
 impl ViT {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<W: Initializer, B: Initializer>(
         _img_size: usize,
         patch_size: usize,

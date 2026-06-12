@@ -80,14 +80,14 @@ impl KalmanFilter1D {
     /// Prediction step
     pub fn predict(&mut self) {
         // x = x (constant model for 1D)
-        self.p = self.p + self.q;
+        self.p += self.q;
     }
 
     /// Update step with a new measurement
     pub fn update(&mut self, z: f64) {
         let k = self.p / (self.p + self.r);
         self.x = self.x + k * (z - self.x);
-        self.p = (1.0 - k) * self.p;
+        self.p *= 1.0 - k;
     }
 
     pub fn state(&self) -> f64 {
@@ -130,8 +130,10 @@ impl KalmanFilter {
         // x = F * x
         let n = self.x.len();
         let mut new_x = vec![0.0; n];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n
         {
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 new_x[i] += self.f[i][j] * self.x[j];
@@ -141,8 +143,10 @@ impl KalmanFilter {
 
         // P = F * P * F^T + Q
         let mut fp = vec![vec![0.0; n]; n];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n
         {
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 for k in 0..n
@@ -152,8 +156,10 @@ impl KalmanFilter {
             }
         }
         let mut fpf_t = vec![vec![0.0; n]; n];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n
         {
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 for k in 0..n
@@ -162,8 +168,10 @@ impl KalmanFilter {
                 }
             }
         }
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n
         {
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 self.p[i][j] = fpf_t[i][j] + self.q[i][j];
@@ -178,9 +186,11 @@ impl KalmanFilter {
 
         // y = z - H * x (innovation)
         let mut y = vec![0.0; m];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..m
         {
             let mut hx = 0.0;
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 hx += self.h[i][j] * self.x[j];
@@ -190,8 +200,10 @@ impl KalmanFilter {
 
         // S = H * P * H^T + R
         let mut hp = vec![vec![0.0; n]; m];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..m
         {
+            #[allow(clippy::needless_range_loop)]
             for j in 0..n
             {
                 for k in 0..n
@@ -201,6 +213,7 @@ impl KalmanFilter {
             }
         }
         let mut s = vec![vec![0.0; m]; m];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..m
         {
             for j in 0..m
@@ -219,9 +232,11 @@ impl KalmanFilter {
         {
             let s_inv = 1.0 / s[0][0];
             let mut k = vec![0.0; n];
+        #[allow(clippy::needless_range_loop)]
             for i in 0..n
             {
                 let mut ph_t = 0.0;
+            #[allow(clippy::needless_range_loop)]
                 for j in 0..n
                 {
                     ph_t += self.p[i][j] * self.h[0][j];
@@ -230,6 +245,7 @@ impl KalmanFilter {
             }
 
             // x = x + K * y
+        #[allow(clippy::needless_range_loop)]
             for i in 0..n
             {
                 self.x[i] += k[i] * y[0];
@@ -237,16 +253,20 @@ impl KalmanFilter {
 
             // P = (I - K * H) * P
             let mut kh = vec![vec![0.0; n]; n];
+        #[allow(clippy::needless_range_loop)]
             for i in 0..n
             {
+            #[allow(clippy::needless_range_loop)]
                 for j in 0..n
                 {
                     kh[i][j] = k[i] * self.h[0][j];
                 }
             }
             let mut new_p = vec![vec![0.0; n]; n];
+        #[allow(clippy::needless_range_loop)]
             for i in 0..n
             {
+            #[allow(clippy::needless_range_loop)]
                 for j in 0..n
                 {
                     let mut khp = 0.0;

@@ -80,6 +80,7 @@ impl SentimentPipeline {
 
         // Création d'un masque de pooling : 1/L pour les tokens réels, 0 pour le padding
         let mut mask = vec![0.0f32; self.max_seq_len];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..actual_len
         {
             mask[i] = inv_len;

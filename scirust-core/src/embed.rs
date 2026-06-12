@@ -66,6 +66,7 @@ impl EmbeddingEngine {
         for i in 0..seq_len
         {
             let base = i * d_model;
+            #[allow(clippy::needless_range_loop)]
             for j in 0..d_model
             {
                 let v = hidden.data[base + j];

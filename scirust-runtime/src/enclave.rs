@@ -18,6 +18,8 @@ pub struct EnclaveLayout {
 /// Enclave-compatible entry point for secure inference.
 /// Runs in a strict #![no_std] environment.
 #[no_mangle]
+/// # Safety
+/// Pointers must be valid.
 pub unsafe extern "C" fn safe_enclave_infer(
     weight_ptr: *const f32,
     input_ptr: *const f32,

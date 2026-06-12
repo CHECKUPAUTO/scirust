@@ -3,6 +3,7 @@
 
 /// Deterministic, scalar-fallback computational kernel for GEMM using integer emulation.
 /// alpha_scale is used to interpret integers as fixed-point (e.g., 1e6).
+#[allow(clippy::too_many_arguments)]
 pub fn soft_gemm(
     alpha: i32,
     alpha_scale: i32,

@@ -126,6 +126,7 @@ impl Default for TilingConfig {
 
 /// Matmul tuilée avec le backend SIMD automatique et portable.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn matmul_tiled_f32(
     alpha: f32,
     a: &[f32],
@@ -150,6 +151,7 @@ pub fn matmul_tiled_f32(
     let (tile_m, tile_k, tile_n) = (config.tile_m, config.tile_k, config.tile_n);
 
     // Initialiser C par beta
+    #[allow(clippy::needless_range_loop)]
     for i in 0..m * n
     {
         c[i] *= beta;
@@ -225,6 +227,7 @@ pub fn matmul_neon_tiled_f32(
 
     let (tile_m, tile_k, tile_n) = (64, 64, 64);
 
+    #[allow(clippy::needless_range_loop)]
     for i in 0..m * n
     {
         c[i] *= beta;
@@ -287,6 +290,7 @@ pub fn matmul_neon_tiled_f32(
 /// Matmul tuilée pour x86_64 AVX2 + FMA.
 #[inline]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[allow(clippy::too_many_arguments)]
 pub fn matmul_avx2_tiled_f32(
     alpha: f32,
     a: &[f32],
@@ -306,6 +310,7 @@ pub fn matmul_avx2_tiled_f32(
         return matmul_tiled_f32(alpha, a, b, beta, c, m, k, n, None);
     }
 
+    #[allow(clippy::needless_range_loop)]
     for i in 0..m * n
     {
         c[i] *= beta;

@@ -62,10 +62,7 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
     if mult >= (1i64 << 31)
     {
         mult = 1i64 << 30;
-        if shift > 0
-        {
-            shift -= 1;
-        }
+        shift = shift.saturating_sub(1);
     }
     (mult, shift)
 }
@@ -93,7 +90,7 @@ fn main() {
 
     let sd = load_weights("mnist_mlp.srt").expect("load_weights");
     let (mut w1, mut b1, mut w2, mut b2) = (None, None, None, None);
-    for (_k, t) in &sd
+    for t in sd.values()
     {
         match t.shape()
         {
@@ -147,15 +144,7 @@ fn main() {
             {
                 let a = acc1[bi * 256 + o] + b1_i32[o];
                 let (m, sh) = req1[o];
-                let mut q = requant(a, m, sh);
-                if q < 0
-                {
-                    q = 0;
-                }
-                if q > 127
-                {
-                    q = 127;
-                }
+                let q = requant(a, m, sh).clamp(0, 127);
                 q_hid[bi * 256 + o] = q as i8;
             }
         }

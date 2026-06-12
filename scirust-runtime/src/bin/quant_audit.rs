@@ -45,7 +45,7 @@ fn main() {
         println!("  {:<14} ({}, {})", k, r, c);
     }
     let (mut w1, mut b1, mut w2, mut b2) = (None, None, None, None);
-    for (_k, t) in &sd
+    for t in sd.values()
     {
         match t.shape()
         {

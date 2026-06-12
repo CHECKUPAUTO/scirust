@@ -89,6 +89,8 @@ impl<'a, T> MatrixView<'a, T> {
     /// L'appelant garantit que tous les indices (r*row_stride + c*col_stride)
     /// restent dans les limites de la mémoire pointée.
     #[inline]
+    /// # Safety
+    /// Pointer must be valid.
     pub unsafe fn from_raw_parts(
         ptr: *const T,
         rows: usize,
@@ -229,6 +231,8 @@ impl<'a, T> MatrixViewMut<'a, T> {
     }
 
     #[inline]
+    /// # Safety
+    /// Pointer must be valid.
     pub unsafe fn from_raw_parts(
         ptr: *mut T,
         rows: usize,
