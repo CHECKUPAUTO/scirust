@@ -1778,6 +1778,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-som-cli"
+version = "0.1.0"
+dependencies = [
+ "scirust-som-frontend",
+ "scirust-som-symbolic",
+ "scirust-som-visualizer",
+]
+
+[[package]]
 name = "scirust-som-dataset"
 version = "0.1.0"
 dependencies = [
@@ -1790,11 +1799,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-som-frontend"
+version = "0.1.0"
+dependencies = [
+ "scirust-som-pcg",
+ "syn",
+]
+
+[[package]]
 name = "scirust-som-inference"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
  "scirust-som-dataset",
+ "scirust-som-frontend",
  "scirust-som-model",
  "scirust-som-pcg",
  "scirust-som-symbolic",

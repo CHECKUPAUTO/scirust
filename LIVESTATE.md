@@ -3,6 +3,25 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-12 — volet 3 : SOM sur du VRAI Rust
+- `scirust-som-frontend` (nouveau) : parser `syn` (grammaire Rust réelle,
+  stable) → abaisse un sous-ensemble vers l'IR de l'oracle. Couvre fn /
+  let / move / &,&mut / blocs / return / appels / impl-méthodes ; signale
+  honnêtement ce qui est sauté (if/match/loops/closures/macros) ou
+  approximé (receveur de méthode = emprunt partagé). 6 tests.
+- `scirust-som-cli` (nouveau) : binaire `som-analyze <file.rs>` — analyse
+  d'ownership d'un vrai fichier Rust, table par token + diagnostics,
+  exit 1 si faute (utilisable comme linter). 4 tests d'intégration
+  bout-en-bout (vrai source Rust → oracle). Exemples dans
+  scirust-som/examples/ (use_after_move.rs détecté E0382, borrow_conflict.rs).
+- `inference::predict_rust_source` : entraîne sur synthétique, prédit sur
+  vrai Rust ; test bout-en-bout (accord modèle/oracle > 0,4 sur fichier réel).
+- Honnêteté documentée (README) : emprunts LEXICAUX (pas NLL,
+  conservateur) ; types Copy sur-signalés (uniform move) ; code
+  rectiligne seulement. La précision NLL/Copy/branches = chantier
+  rustc-driver (HIR/MIR), hors workspace.
+- SOM passe de 25 à 35 tests ; workspace ~665 tests, 6 gates verts.
+
 ## Session 2026-06-12 — volet 2 : réparation CI
 - `.github/workflows/ci.yml` réécrit pour être réalisable :
   - suppression de `--all-features` (blas-openblas et blas-mkl sont

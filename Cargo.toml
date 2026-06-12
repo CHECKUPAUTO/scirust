@@ -75,6 +75,8 @@ members = [
     "scirust-som/crates/trainer",
     "scirust-som/crates/inference",
     "scirust-som/crates/symbolic",
+    "scirust-som/crates/frontend",
+    "scirust-som/crates/cli",
     "scirust-som/crates/visualizer",
 ]
 exclude = [

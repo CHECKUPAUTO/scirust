@@ -160,6 +160,14 @@ pub fn predict_program(model: &mut SomModel, ast: &SomAst) -> InferenceReport {
     }
 }
 
+/// Parse real Rust source with the `syn` frontend, lower it, and run the
+/// model against the oracle on it. Returns `None` only if the input is not
+/// valid Rust.
+pub fn predict_rust_source(model: &mut SomModel, src: &str) -> Option<InferenceReport> {
+    let lowered = scirust_som_frontend::lower_str(src).ok()?;
+    Some(predict_program(model, &lowered.ast))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +256,59 @@ mod tests {
         println!("borrow accuracy:    {:.4}", eval.borrow_accuracy);
         println!("invalid accuracy:   {:.4}", eval.invalid_accuracy);
         println!("tokens evaluated:   {}", eval.n_tokens);
+    }
+
+    #[test]
+    fn predicts_on_real_rust_source() {
+        // The model is trained on the synthetic distribution, then asked to
+        // predict on a real Rust file parsed by the syn frontend. We assert
+        // the path runs end to end and that a trained model agrees with the
+        // oracle better than chance on the real input.
+        let train_set = build_training_set(42, 64, 64);
+        let mut model = SomModel::new(SomModelConfig {
+            vocab_size: SomVocab::vocab_size(),
+            d_model: 32,
+            n_heads: 2,
+            n_layers: 2,
+            d_ff: 64,
+            max_seq_len: 64,
+            seed: 42,
+            ..SomModelConfig::default()
+        });
+        train(
+            &mut model,
+            &train_set,
+            &TrainerConfig {
+                epochs: 6,
+                learning_rate: 0.005,
+            },
+        );
+
+        let src = r#"
+            fn process(input: String) {
+                let owned = input;
+                let moved = owned;
+                let oops = owned;
+                drop(oops);
+                drop(moved);
+            }
+        "#;
+        let report = predict_rust_source(&mut model, src).expect("valid rust");
+        assert_eq!(report.predictions.len(), report.oracle.tokens.len());
+        // Oracle ground truth on real Rust contains the use-after-move fault.
+        assert!(
+            report
+                .oracle
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.kind, scirust_som_symbolic::FaultKind::UseAfterMove))
+        );
+        // 1/5 ownership classes ≈ 0.2 by chance; a trained model clears it.
+        assert!(
+            report.ownership_agreement > 0.4,
+            "agreement {} too low on real Rust",
+            report.ownership_agreement
+        );
     }
 
     #[test]

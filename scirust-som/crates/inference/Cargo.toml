@@ -11,6 +11,7 @@ scirust-som-dataset = { path = "../dataset" }
 scirust-som-symbolic = { path = "../symbolic" }
 scirust-som-tokenizer = { path = "../tokenizer" }
 scirust-som-pcg = { path = "../pcg" }
+scirust-som-frontend = { path = "../frontend" }
 
 [dev-dependencies]
 scirust-som-trainer = { path = "../trainer" }

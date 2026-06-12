@@ -1,0 +1,14 @@
+[package]
+name = "scirust-som-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "som-analyze"
+path = "src/main.rs"
+
+[dependencies]
+scirust-som-frontend = { path = "../frontend" }
+scirust-som-symbolic = { path = "../symbolic" }
+scirust-som-visualizer = { path = "../visualizer" }
