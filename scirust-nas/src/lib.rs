@@ -291,7 +291,7 @@ impl NasSearch {
                 // Mutate: change one random layer
                 if !child.layers.is_empty()
                 {
-                    let idx = ((gen * pop_size + i) as usize) % child.layers.len();
+                    let idx = (gen * pop_size + i) % child.layers.len();
                     let seed = (self.config.seed + (gen * pop_size + i) as u64) * 0x9E3779B9;
                     let rng = seed ^ (seed << 13);
                     let new_dim = self.config.min_hidden

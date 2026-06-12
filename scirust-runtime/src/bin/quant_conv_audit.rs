@@ -85,13 +85,13 @@ fn fakequant_per_row(t: &Tensor) -> Tensor {
     for r in 0..rows
     {
         let mut ma = 0.0f32;
-    #[allow(clippy::needless_range_loop)]
+        #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             ma = ma.max(t.data[r * cols + c].abs());
         }
         let s = if ma == 0.0 { 1.0 } else { ma / 127.0 };
-    #[allow(clippy::needless_range_loop)]
+        #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             let q = (t.data[r * cols + c] / s).round().clamp(-128.0, 127.0);
@@ -117,7 +117,7 @@ fn fakequant_per_col(t: &Tensor) -> Tensor {
     let mut out = vec![0.0f32; rows * cols];
     for r in 0..rows
     {
-    #[allow(clippy::needless_range_loop)]
+        #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             let q = (t.data[r * cols + c] / scales[c])

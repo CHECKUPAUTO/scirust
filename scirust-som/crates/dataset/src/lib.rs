@@ -1,8 +1,8 @@
 //! Dataset Builder for SciRust Ownership Model (SOM).
 //! Converts PCG (Place Capability Graph) to labeled samples for ML.
 
-use scirust_som_pcg::{Pcg, PcgNode, PcgEdge};
-use serde::{Serialize, Deserialize};
+use scirust_som_pcg::{Pcg, PcgEdge, PcgNode};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SomSample {
@@ -53,24 +53,48 @@ impl DatasetBuilder {
         let mut labels = SomLabels::default();
 
         // Basic labeling logic based on PCG edges
-        for (i, node) in pcg.nodes.iter().enumerate() {
-            if let PcgNode::Variable(_) = node {
+        for (i, node) in pcg.nodes.iter().enumerate()
+        {
+            if let PcgNode::Variable(_) = node
+            {
                 // Determine ownership label
                 let mut label = OwnershipLabel::Owned;
-                if pcg.edges.iter().any(|(f, _, e)| *f == i && *e == PcgEdge::Moves) {
+                if pcg
+                    .edges
+                    .iter()
+                    .any(|(f, _, e)| *f == i && *e == PcgEdge::Moves)
+                {
                     label = OwnershipLabel::Moved;
-                } else if pcg.edges.iter().any(|(_, t, e)| *t == i && *e == PcgEdge::Drops) {
+                }
+                else if pcg
+                    .edges
+                    .iter()
+                    .any(|(_, t, e)| *t == i && *e == PcgEdge::Drops)
+                {
                     label = OwnershipLabel::Dropped;
-                } else if pcg.edges.iter().any(|(_, t, e)| *t == i && (*e == PcgEdge::Borrows || *e == PcgEdge::MutBorrows)) {
+                }
+                else if pcg.edges.iter().any(|(_, t, e)| {
+                    *t == i && (*e == PcgEdge::Borrows || *e == PcgEdge::MutBorrows)
+                })
+                {
                     label = OwnershipLabel::Borrowed;
                 }
                 labels.ownership.push(label);
 
                 // Determine borrow label
                 let mut b_label = BorrowLabel::None;
-                if pcg.edges.iter().any(|(_, t, e)| *t == i && *e == PcgEdge::MutBorrows) {
+                if pcg
+                    .edges
+                    .iter()
+                    .any(|(_, t, e)| *t == i && *e == PcgEdge::MutBorrows)
+                {
                     b_label = BorrowLabel::Mutable;
-                } else if pcg.edges.iter().any(|(_, t, e)| *t == i && *e == PcgEdge::Borrows) {
+                }
+                else if pcg
+                    .edges
+                    .iter()
+                    .any(|(_, t, e)| *t == i && *e == PcgEdge::Borrows)
+                {
                     b_label = BorrowLabel::Shared;
                 }
                 labels.borrow_type.push(b_label);
@@ -87,7 +111,8 @@ impl DatasetBuilder {
     }
 
     pub fn export_jsonl(&self, samples: &[SomSample]) -> String {
-        samples.iter()
+        samples
+            .iter()
             .map(|s| serde_json::to_string(s).unwrap())
             .collect::<Vec<_>>()
             .join("\n")
@@ -97,8 +122,8 @@ impl DatasetBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_som_pcg::ast::*;
     use scirust_som_pcg::PcgBuilder;
+    use scirust_som_pcg::ast::*;
 
     #[test]
     fn test_sample_generation() {

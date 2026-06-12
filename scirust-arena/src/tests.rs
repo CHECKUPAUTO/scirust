@@ -152,7 +152,8 @@ mod tests {
         assert!(vec.is_aligned());
         let slice = vec.as_slice::<f64>();
         assert_eq!(slice.len(), 32);
-        for &v in slice.iter() {
+        for &v in slice.iter()
+        {
             assert!((v - std::f64::consts::PI).abs() < 1e-15);
         }
     }
@@ -164,12 +165,14 @@ mod tests {
         let mut vec = AlignedVec::new::<i32>(16);
         {
             let slice = vec.as_mut_slice::<i32>();
-            for (i, v) in slice.iter_mut().enumerate() {
+            for (i, v) in slice.iter_mut().enumerate()
+            {
                 *v = i as i32;
             }
         }
         let slice = vec.as_slice::<i32>();
-        for (i, &v) in slice.iter().enumerate() {
+        for (i, &v) in slice.iter().enumerate()
+        {
             assert_eq!(v, i as i32);
         }
     }

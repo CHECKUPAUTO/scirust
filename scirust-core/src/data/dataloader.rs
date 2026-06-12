@@ -144,7 +144,7 @@ impl<D: Dataset> DataLoader<D> {
         }
         else
         {
-            (n + bs - 1) / bs // ceil division
+            n.div_ceil(bs)
         }
     }
 }

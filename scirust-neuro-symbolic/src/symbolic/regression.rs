@@ -67,6 +67,9 @@ impl NeuralSymbolicRegression {
 }
 
 /// Solve `A x = b` by Gaussian elimination with partial pivoting.
+// Rows `r` and `col` of `a` are borrowed in the same statement; an iterator
+// rewrite would need split_at_mut for no readability gain.
+#[allow(clippy::needless_range_loop)]
 fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     let n = b.len();
     for col in 0..n

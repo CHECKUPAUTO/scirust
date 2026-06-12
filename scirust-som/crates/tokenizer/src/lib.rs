@@ -2,7 +2,7 @@
 //! Converts AST and PCG elements into a token sequence for ML model input.
 
 use scirust_som_pcg::ast::*;
-use scirust_som_pcg::{Pcg, PcgNode, PcgEdge};
+use scirust_som_pcg::{Pcg, PcgEdge, PcgNode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SomToken {
@@ -23,6 +23,12 @@ pub enum SomToken {
 
 pub struct StructuredTokenizer;
 
+impl Default for StructuredTokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StructuredTokenizer {
     pub fn new() -> Self {
         Self
@@ -30,43 +36,53 @@ impl StructuredTokenizer {
 
     pub fn tokenize_ast(&self, ast: &SomAst) -> Vec<SomToken> {
         let mut tokens = Vec::new();
-        match ast {
-            SomAst::Program(functions) => {
-                for func in functions {
+        match ast
+        {
+            SomAst::Program(functions) =>
+            {
+                for func in functions
+                {
                     tokens.push(SomToken::FnDecl(func.name.clone()));
-                    for param in &func.params {
+                    for param in &func.params
+                    {
                         tokens.push(SomToken::Param(param.name.clone()));
                     }
                     self.tokenize_body(&func.body, &mut tokens);
                 }
-            }
+            },
         }
         tokens
     }
 
     fn tokenize_body(&self, body: &[Statement], tokens: &mut Vec<SomToken>) {
-        for stmt in body {
-            match stmt {
+        for stmt in body
+        {
+            match stmt
+            {
                 Statement::VarDecl { name, .. } => tokens.push(SomToken::VarDecl(name.clone())),
                 Statement::Assignment { lhs, .. } => tokens.push(SomToken::Assign(lhs.clone())),
                 Statement::Return(_) => tokens.push(SomToken::Return),
-                Statement::Scope(inner) => {
+                Statement::Scope(inner) =>
+                {
                     tokens.push(SomToken::ScopeStart);
                     self.tokenize_body(inner, tokens);
                     tokens.push(SomToken::ScopeEnd);
-                }
-                _ => {}
+                },
+                _ =>
+                {},
             }
         }
     }
 
     pub fn tokenize_pcg(&self, pcg: &Pcg) -> Vec<SomToken> {
         let mut tokens = Vec::new();
-        for node in &pcg.nodes {
+        for node in &pcg.nodes
+        {
             tokens.push(SomToken::Node(node.clone()));
         }
         tokens.push(SomToken::Sep);
-        for (f, t, e) in &pcg.edges {
+        for (f, t, e) in &pcg.edges
+        {
             tokens.push(SomToken::Node(pcg.nodes[*f].clone()));
             tokens.push(SomToken::Edge(e.clone()));
             tokens.push(SomToken::Node(pcg.nodes[*t].clone()));
@@ -90,9 +106,11 @@ mod tests {
                     ty: Type::Int,
                     init: None,
                 },
-                Statement::Scope(vec![
-                    Statement::VarDecl { name: "y".to_string(), ty: Type::Int, init: None }
-                ]),
+                Statement::Scope(vec![Statement::VarDecl {
+                    name: "y".to_string(),
+                    ty: Type::Int,
+                    init: None,
+                }]),
             ],
         }]);
 

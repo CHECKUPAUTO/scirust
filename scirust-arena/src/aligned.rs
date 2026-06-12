@@ -135,7 +135,7 @@ impl AlignedVec {
 
     /// Longueur en octets effectivement utilisés.
     #[inline]
-#[allow(clippy::misnamed_getters)]
+    #[allow(clippy::misnamed_getters)]
     pub fn len(&self) -> usize {
         self.byte_len
     }

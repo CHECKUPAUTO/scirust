@@ -2,10 +2,10 @@
 //! A Graph Transformer backbone for ownership prediction.
 
 use scirust_core::autodiff::reverse::{Tape, Var};
-use scirust_core::nn::linear::Linear;
 use scirust_core::nn::Module;
-use scirust_core::nn::rng::PcgEngine;
 use scirust_core::nn::init::{KaimingNormal, Zeros};
+use scirust_core::nn::linear::Linear;
+use scirust_core::nn::rng::PcgEngine;
 
 pub struct SomModel {
     pub transformer_backbone: Vec<Linear>,
@@ -22,7 +22,8 @@ pub struct SomModel {
 impl SomModel {
     pub fn new(d_model: usize, n_layers: usize, rng: &mut PcgEngine) -> Self {
         let mut layers = Vec::new();
-        for _ in 0..n_layers {
+        for _ in 0..n_layers
+        {
             layers.push(Linear::new(d_model, d_model, &KaimingNormal, &Zeros, rng));
         }
 
@@ -41,7 +42,8 @@ impl SomModel {
 
     pub fn forward<'t>(&mut self, tape: &'t Tape, x: Var<'t>) -> SomOutput<'t> {
         let mut h = x;
-        for layer in &mut self.transformer_backbone {
+        for layer in &mut self.transformer_backbone
+        {
             h = layer.forward(tape, h).relu();
         }
 
