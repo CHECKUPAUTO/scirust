@@ -38,7 +38,7 @@ Every result below is reproduced by code in this repository and documented in th
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
 - **Deep-learning core + reverse-mode autodiff** — 683 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
-- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reached ~63 TFLOPS. ⚠ *Status: the kernels live in `scirust-gpu/src/` but are currently **not wired into the build** (no `mod` declarations, no `wgpu`/`cudarc` dependencies); the measurement is historical and not reproducible from the present workspace. See `scirust_complete_audit_report.md` §5.*
+- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reached ~63 TFLOPS. ⚠ *Status: the kernels are preserved in [`archive/scirust-gpu/`](archive/scirust-gpu/) outside the build (no `wgpu`/`cudarc` dependencies in the workspace); the measurement is historical and not reproducible from the present workspace. See `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
@@ -109,16 +109,16 @@ scirust-core = { path = "path/to/scirust-core" }
 ```
 
 > GPU note: `scirust-gpu` currently exposes CPU-validated stubs only; the
-> WGSL/cuBLAS kernels in its `src/` are archived and not part of the build
-> (`--features wgpu` compiles nothing extra). Re-wiring them is tracked in
-> the audit report.
+> WGSL/cuBLAS kernels are preserved in `archive/scirust-gpu/` outside the
+> build (`--features wgpu` compiles nothing extra). Re-wiring them is
+> tracked in `docs/INDUSTRIAL_ROADMAP.md` (P2.2).
 
 ## Architecture
 
 ```
 scirust-core/    Core compute, autograd, layers (~12k loc)
 scirust-simd/    SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/     archived WGSL/cuBLAS kernels (not wired; see audit §5)
+scirust-gpu/     CPU-validated GPU stubs (kernels archived in archive/)
 scirust-som/     Ownership Model: real-Rust analyzer + Transformer pipeline
 examples/        Quickstart, MNIST training, benchmarks
 ```
