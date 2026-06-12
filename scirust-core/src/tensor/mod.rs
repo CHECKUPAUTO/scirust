@@ -1,3 +1,5 @@
+pub mod broadcast;
+pub mod device;
 pub mod pinned;
 pub mod tensor3d;
 pub mod tensor_nd;

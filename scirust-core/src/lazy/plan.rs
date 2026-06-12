@@ -20,9 +20,9 @@
 // La compilation est coûteuse, l'exécution doit être bon marché. C'est
 // exactement le pattern "compile-once-run-many" du training loop.
 
-use std::collections::{HashMap, HashSet};
 use crate::autodiff::reverse::Tensor;
 use crate::lazy::{LazyGraph, LazyId, LazyOp};
+use std::collections::{HashMap, HashSet};
 
 // ================================================================== //
 //  Instruction — opérations dans la séquence exécutable               //
@@ -35,14 +35,18 @@ use crate::lazy::{LazyGraph, LazyId, LazyOp};
 pub enum Instr {
     /// Charge un Tensor concret (feeds nommés ou constantes embarquées)
     LoadConst { output_buf: usize, value: Tensor },
-    LoadFeed  { output_buf: usize, feed_name: String, expected_shape: (usize, usize) },
+    LoadFeed {
+        output_buf: usize,
+        feed_name: String,
+        expected_shape: (usize, usize),
+    },
 
     /// Opérations pointwise — peuvent être fusionnées
     PointwiseChain {
         output_buf: usize,
-        input_bufs: Vec<usize>,         // inputs de la chaîne (1 ou 2)
-        ops:        Vec<PwOp>,          // séquence d'ops appliquée en un passage
-        shape:      (usize, usize),
+        input_bufs: Vec<usize>, // inputs de la chaîne (1 ou 2)
+        ops: Vec<PwOp>,         // séquence d'ops appliquée en un passage
+        shape: (usize, usize),
     },
 
     /// MatMul (pas fusable avec pointwise dans ce design)
@@ -50,7 +54,9 @@ pub enum Instr {
         output_buf: usize,
         a_buf: usize,
         b_buf: usize,
-        m: usize, k: usize, n: usize,
+        m: usize,
+        k: usize,
+        n: usize,
     },
 }
 
@@ -60,7 +66,7 @@ pub enum Instr {
 #[derive(Clone, Debug)]
 pub enum PwOp {
     /// Charge la valeur d'un input dans l'accumulateur (premier op de la chaîne)
-    LoadInput(usize),                      // index dans input_bufs
+    LoadInput(usize), // index dans input_bufs
     /// acc = acc + buf
     Add(usize),
     /// acc = acc - buf
@@ -97,22 +103,22 @@ pub enum CachePolicy {
 
 pub struct Plan {
     pub instructions: Vec<Instr>,
-    pub n_buffers:    usize,
-    pub output_buf:   usize,
+    pub n_buffers: usize,
+    pub output_buf: usize,
     pub output_shape: (usize, usize),
     /// Pour chaque feed nommé, son buffer dans le plan
-    pub feed_slots:   HashMap<String, usize>,
+    pub feed_slots: HashMap<String, usize>,
     /// Optimisations appliquées (pour reporting / debug)
-    pub stats:        PlanStats,
+    pub stats: PlanStats,
     pub cache_policy: CachePolicy,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct PlanStats {
     pub original_node_count: usize,
-    pub instructions_count:  usize,
-    pub fused_chains:        usize,
-    pub dce_eliminated:      usize,
+    pub instructions_count: usize,
+    pub fused_chains: usize,
+    pub dce_eliminated: usize,
 }
 
 impl Plan {
@@ -124,84 +130,118 @@ impl Plan {
     /// Exécute avec des feeds dynamiques. Les noms doivent matcher
     /// les feeds définis lors de la compilation.
     pub fn execute_with(&self, feeds: &[(&str, Tensor)]) -> Tensor {
-        let feed_map: HashMap<&str, &Tensor> = feeds.iter()
-            .map(|(k, v)| (*k, v))
-            .collect();
+        let feed_map: HashMap<&str, &Tensor> = feeds.iter().map(|(k, v)| (*k, v)).collect();
 
         // Allocation des buffers — un Vec<Option<Tensor>> permet le drop
         let mut buffers: Vec<Option<Tensor>> = vec![None; self.n_buffers];
 
-        for instr in &self.instructions {
-            match instr {
-                Instr::LoadConst { output_buf, value } => {
+        for instr in &self.instructions
+        {
+            match instr
+            {
+                Instr::LoadConst { output_buf, value } =>
+                {
                     buffers[*output_buf] = Some(value.clone());
-                }
-                Instr::LoadFeed { output_buf, feed_name, expected_shape } => {
-                    let t = feed_map.get(feed_name.as_str())
+                },
+                Instr::LoadFeed {
+                    output_buf,
+                    feed_name,
+                    expected_shape,
+                } =>
+                {
+                    let t = feed_map
+                        .get(feed_name.as_str())
                         .unwrap_or_else(|| panic!("feed manquant : '{feed_name}'"));
-                    assert_eq!(t.shape(), *expected_shape,
-                               "feed '{feed_name}' shape mismatch : {:?} vs {:?}",
-                               t.shape(), expected_shape);
+                    assert_eq!(
+                        t.shape(),
+                        *expected_shape,
+                        "feed '{feed_name}' shape mismatch : {:?} vs {:?}",
+                        t.shape(),
+                        expected_shape
+                    );
                     buffers[*output_buf] = Some((*t).clone());
-                }
-                Instr::PointwiseChain { output_buf, input_bufs, ops, shape } => {
+                },
+                Instr::PointwiseChain {
+                    output_buf,
+                    input_bufs,
+                    ops,
+                    shape,
+                } =>
+                {
                     let result = run_pointwise_chain(&buffers, input_bufs, ops, *shape);
                     buffers[*output_buf] = Some(result);
-                }
-                Instr::MatMul { output_buf, a_buf, b_buf, m, k, n } => {
+                },
+                Instr::MatMul {
+                    output_buf,
+                    a_buf,
+                    b_buf,
+                    m,
+                    k,
+                    n,
+                } =>
+                {
                     let a = buffers[*a_buf].as_ref().expect("buffer a non chargé");
                     let b = buffers[*b_buf].as_ref().expect("buffer b non chargé");
                     let mut out = Tensor::zeros(*m, *n);
-                    for i in 0..*m {
-                        for j in 0..*n {
+                    for i in 0..*m
+                    {
+                        for j in 0..*n
+                        {
                             let mut acc = 0.0f32;
-                            for p in 0..*k {
+                            for p in 0..*k
+                            {
                                 acc += a.data[i * k + p] * b.data[p * n + j];
                             }
                             out.data[i * n + j] = acc;
                         }
                     }
                     buffers[*output_buf] = Some(out);
-                }
+                },
             }
         }
 
-        buffers[self.output_buf].take().expect("buffer de sortie absent")
+        buffers[self.output_buf]
+            .take()
+            .expect("buffer de sortie absent")
     }
 }
 
 fn run_pointwise_chain(
-    buffers:    &[Option<Tensor>],
+    buffers: &[Option<Tensor>],
     input_bufs: &[usize],
-    ops:        &[PwOp],
-    shape:      (usize, usize),
+    ops: &[PwOp],
+    shape: (usize, usize),
 ) -> Tensor {
     let n = shape.0 * shape.1;
     let mut acc = vec![0.0f32; n];
 
     // Pré-charge tous les inputs comme références
-    let inputs: Vec<&Tensor> = input_bufs.iter()
+    let inputs: Vec<&Tensor> = input_bufs
+        .iter()
         .map(|b| buffers[*b].as_ref().expect("input non chargé"))
         .collect();
 
     // Boucle externe sur les éléments — boucle interne sur les ops.
     // En une seule passe, on applique toute la chaîne. C'est la
     // "fusion" : un seul parcours mémoire au lieu de N parcours.
-    for i in 0..n {
+    for (i, slot) in acc.iter_mut().enumerate().take(n)
+    {
         let mut a: f32 = 0.0;
-        for op in ops {
-            match op {
+        for op in ops
+        {
+            match op
+            {
                 PwOp::LoadInput(k) => a = inputs[*k].data[i],
-                PwOp::Add(k)       => a += inputs[*k].data[i],
-                PwOp::Sub(k)       => a -= inputs[*k].data[i],
-                PwOp::Mul(k)       => a *= inputs[*k].data[i],
-                PwOp::Scale(s)     => a *= s,
-                PwOp::Relu         => a = a.max(0.0),
-                PwOp::Exp          => a = a.exp(),
-                PwOp::Log          => a = a.max(1e-12).ln(),
+                PwOp::Add(k) => a += inputs[*k].data[i],
+                PwOp::Sub(k) => a -= inputs[*k].data[i],
+                PwOp::Mul(k) => a *= inputs[*k].data[i],
+                PwOp::Scale(s) => a *= s,
+                PwOp::Relu => a = a.max(0.0),
+                PwOp::Exp => a = a.exp(),
+                PwOp::Log => a = a.max(1e-12).ln(),
             }
         }
-        acc[i] = a;
+        *slot = a;
     }
     Tensor::from_vec(acc, shape.0, shape.1)
 }
@@ -211,17 +251,17 @@ fn run_pointwise_chain(
 // ================================================================== //
 
 pub struct Compiler<'g> {
-    graph:        &'g LazyGraph,
+    graph: &'g LazyGraph,
     /// Mapping LazyId → buffer slot dans le plan
-    buf_of_node:  HashMap<LazyId, usize>,
+    buf_of_node: HashMap<LazyId, usize>,
     /// Feeds détectés pendant la compilation
-    feed_slots:   HashMap<String, usize>,
+    feed_slots: HashMap<String, usize>,
     /// Instructions générées
     instructions: Vec<Instr>,
     /// Compteur pour allouer les buffers
-    next_buf:     usize,
+    next_buf: usize,
     /// Stats accumulées
-    stats:        PlanStats,
+    stats: PlanStats,
     cache_policy: CachePolicy,
 }
 
@@ -229,11 +269,11 @@ impl<'g> Compiler<'g> {
     pub fn new(graph: &'g LazyGraph) -> Self {
         Self {
             graph,
-            buf_of_node:  HashMap::new(),
-            feed_slots:   HashMap::new(),
+            buf_of_node: HashMap::new(),
+            feed_slots: HashMap::new(),
             instructions: Vec::new(),
-            next_buf:     0,
-            stats:        PlanStats::default(),
+            next_buf: 0,
+            stats: PlanStats::default(),
             cache_policy: CachePolicy::LeavesOnly,
         }
     }
@@ -260,10 +300,21 @@ impl<'g> Compiler<'g> {
         // dans le graphe live et que ce successeur est aussi pointwise,
         // on l'absorbe.
         let consumer_count = self.count_consumers(target, &live);
+        let consumer_ids = self.consumer_ids(&live);
 
-        for &id in &order {
-            if self.buf_of_node.contains_key(&id) {
+        for &id in &order
+        {
+            if self.buf_of_node.contains_key(&id)
+            {
                 continue; // déjà émis (peut arriver avec fusion)
+            }
+            // Un pointwise absorbé par son unique consommateur pointwise ne
+            // doit pas être émis ici : c'est le tail de la chaîne qui
+            // l'émettra. Sans ce saut, chaque maillon devenait sa propre
+            // chaîne de longueur 1 et la fusion n'avait jamais lieu.
+            if self.will_be_fused(id, &consumer_ids)
+            {
+                continue;
             }
             let (op, shape) = {
                 let nodes = self.graph.nodes_borrow();
@@ -279,11 +330,11 @@ impl<'g> Compiler<'g> {
 
         Plan {
             instructions: self.instructions,
-            n_buffers:    self.next_buf,
+            n_buffers: self.next_buf,
             output_buf,
             output_shape,
-            feed_slots:   self.feed_slots,
-            stats:        self.stats,
+            feed_slots: self.feed_slots,
+            stats: self.stats,
             cache_policy: self.cache_policy,
         }
     }
@@ -291,10 +342,15 @@ impl<'g> Compiler<'g> {
     fn compute_reachable(&self, target: LazyId) -> HashSet<LazyId> {
         let mut live = HashSet::new();
         let mut stack = vec![target];
-        while let Some(id) = stack.pop() {
-            if !live.insert(id) { continue; }
+        while let Some(id) = stack.pop()
+        {
+            if !live.insert(id)
+            {
+                continue;
+            }
             let op = self.graph.nodes_borrow()[id].op.clone();
-            for parent in op_parents(&op) {
+            for parent in op_parents(&op)
+            {
                 stack.push(parent);
             }
         }
@@ -309,12 +365,21 @@ impl<'g> Compiler<'g> {
         order
     }
 
-    fn dfs(&self, id: LazyId, live: &HashSet<LazyId>,
-           visited: &mut HashSet<LazyId>, order: &mut Vec<LazyId>) {
-        if !live.contains(&id) || visited.contains(&id) { return; }
+    fn dfs(
+        &self,
+        id: LazyId,
+        live: &HashSet<LazyId>,
+        visited: &mut HashSet<LazyId>,
+        order: &mut Vec<LazyId>,
+    ) {
+        if !live.contains(&id) || visited.contains(&id)
+        {
+            return;
+        }
         visited.insert(id);
         let op = self.graph.nodes_borrow()[id].op.clone();
-        for parent in op_parents(&op) {
+        for parent in op_parents(&op)
+        {
             self.dfs(parent, live, visited, order);
         }
         order.push(id);
@@ -322,9 +387,11 @@ impl<'g> Compiler<'g> {
 
     fn count_consumers(&self, target: LazyId, live: &HashSet<LazyId>) -> HashMap<LazyId, usize> {
         let mut count: HashMap<LazyId, usize> = HashMap::new();
-        for &id in live {
+        for &id in live
+        {
             let op = self.graph.nodes_borrow()[id].op.clone();
-            for parent in op_parents(&op) {
+            for parent in op_parents(&op)
+            {
                 *count.entry(parent).or_insert(0) += 1;
             }
         }
@@ -334,71 +401,126 @@ impl<'g> Compiler<'g> {
         count
     }
 
+    /// Consommateurs réels (ids) de chaque nœud du graphe live.
+    fn consumer_ids(&self, live: &HashSet<LazyId>) -> HashMap<LazyId, Vec<LazyId>> {
+        let mut map: HashMap<LazyId, Vec<LazyId>> = HashMap::new();
+        for &id in live
+        {
+            let op = self.graph.nodes_borrow()[id].op.clone();
+            for parent in op_parents(&op)
+            {
+                map.entry(parent).or_default().push(id);
+            }
+        }
+        map
+    }
+
+    /// Vrai si ce nœud sera absorbé dans la chaîne pointwise de son unique
+    /// consommateur (lui-même pointwise). Le target n'a aucun consommateur
+    /// live, il n'est donc jamais absorbé.
+    fn will_be_fused(&self, id: LazyId, consumer_ids: &HashMap<LazyId, Vec<LazyId>>) -> bool {
+        let op = self.graph.nodes_borrow()[id].op.clone();
+        if !is_pointwise(&op)
+        {
+            return false;
+        }
+        match consumer_ids.get(&id).map(|v| v.as_slice())
+        {
+            Some([single]) =>
+            {
+                let consumer_op = self.graph.nodes_borrow()[*single].op.clone();
+                is_pointwise(&consumer_op)
+            },
+            _ => false,
+        }
+    }
+
     fn alloc_buf(&mut self) -> usize {
         let b = self.next_buf;
         self.next_buf += 1;
         b
     }
 
-    fn emit_node(&mut self,
-                 id: LazyId,
-                 op: LazyOp,
-                 shape: (usize, usize),
-                 consumers: &HashMap<LazyId, usize>,
-                 live: &HashSet<LazyId>)
-    {
-        match op {
-            LazyOp::Const(t) => {
+    fn emit_node(
+        &mut self,
+        id: LazyId,
+        op: LazyOp,
+        shape: (usize, usize),
+        consumers: &HashMap<LazyId, usize>,
+        live: &HashSet<LazyId>,
+    ) {
+        match op
+        {
+            LazyOp::Const(t) =>
+            {
                 let buf = self.alloc_buf();
-                self.instructions.push(Instr::LoadConst { output_buf: buf, value: t });
+                self.instructions.push(Instr::LoadConst {
+                    output_buf: buf,
+                    value: t,
+                });
                 self.buf_of_node.insert(id, buf);
-            }
-            LazyOp::Feed { name, shape: s } => {
+            },
+            LazyOp::Feed { name, shape: s } =>
+            {
                 let buf = self.alloc_buf();
                 self.feed_slots.insert(name.clone(), buf);
                 self.instructions.push(Instr::LoadFeed {
-                    output_buf: buf, feed_name: name, expected_shape: s,
+                    output_buf: buf,
+                    feed_name: name,
+                    expected_shape: s,
                 });
                 self.buf_of_node.insert(id, buf);
-            }
-            LazyOp::MatMul(a, b) => {
+            },
+            LazyOp::MatMul(a, b) =>
+            {
                 let a_buf = *self.buf_of_node.get(&a).expect("a pas encore émis");
                 let b_buf = *self.buf_of_node.get(&b).expect("b pas encore émis");
                 let buf = self.alloc_buf();
                 let (m, k) = self.graph.nodes_borrow()[a].shape;
                 let (_, n) = self.graph.nodes_borrow()[b].shape;
                 self.instructions.push(Instr::MatMul {
-                    output_buf: buf, a_buf, b_buf, m, k, n,
+                    output_buf: buf,
+                    a_buf,
+                    b_buf,
+                    m,
+                    k,
+                    n,
                 });
                 self.buf_of_node.insert(id, buf);
-            }
+            },
 
             // Pointwise ops — éligibles à la fusion
-            pw_op @ (LazyOp::Add(_, _) | LazyOp::Sub(_, _) | LazyOp::Mul(_, _)
-                   | LazyOp::Scale(_, _) | LazyOp::Relu(_) | LazyOp::Exp(_)
-                   | LazyOp::Log(_)) =>
+            pw_op @ (LazyOp::Add(_, _)
+            | LazyOp::Sub(_, _)
+            | LazyOp::Mul(_, _)
+            | LazyOp::Scale(_, _)
+            | LazyOp::Relu(_)
+            | LazyOp::Exp(_)
+            | LazyOp::Log(_)) =>
             {
                 self.emit_pointwise_chain(id, pw_op, shape, consumers, live);
-            }
+            },
         }
     }
 
     /// Tente de fusionner ce nœud avec ses parents pointwise mono-consommateur.
     /// Construit une chaîne PwOp et émet une seule instruction PointwiseChain.
-    fn emit_pointwise_chain(&mut self,
-                            id: LazyId,
-                            head_op: LazyOp,
-                            shape: (usize, usize),
-                            consumers: &HashMap<LazyId, usize>,
-                            live: &HashSet<LazyId>)
-    {
+    fn emit_pointwise_chain(
+        &mut self,
+        id: LazyId,
+        head_op: LazyOp,
+        shape: (usize, usize),
+        consumers: &HashMap<LazyId, usize>,
+        live: &HashSet<LazyId>,
+    ) {
         let mut chain_ops: Vec<PwOp> = Vec::new();
         let mut input_bufs: Vec<usize> = Vec::new();
         let chain_member_ids = self.collect_chain_members(id, consumers, live);
 
         // Construction de la chaîne en parcourant les membres en post-order.
         // Premier nœud non pointwise rencontré → entrée.
-        for &mid in &chain_member_ids {
+        for &mid in &chain_member_ids
+        {
             let op = self.graph.nodes_borrow()[mid].op.clone();
             self.append_to_chain(mid, op, &mut chain_ops, &mut input_bufs, &chain_member_ids);
         }
@@ -408,16 +530,18 @@ impl<'g> Compiler<'g> {
         self.instructions.push(Instr::PointwiseChain {
             output_buf: out_buf,
             input_bufs,
-            ops:        chain_ops,
+            ops: chain_ops,
             shape,
         });
 
         // Tous les membres de la chaîne pointent sur ce même buffer
-        for mid in &chain_member_ids {
+        for mid in &chain_member_ids
+        {
             self.buf_of_node.insert(*mid, out_buf);
         }
 
-        if chain_member_ids.len() > 1 {
+        if chain_member_ids.len() > 1
+        {
             self.stats.fused_chains += 1;
         }
 
@@ -428,22 +552,24 @@ impl<'g> Compiler<'g> {
     /// Remonte la chaîne pointwise. Retourne les nœuds en ordre d'exécution
     /// (parent avant enfant). On s'arrête quand un parent a >1 consommateur
     /// ou n'est pas pointwise — il devient une "entrée" de la chaîne.
-    fn collect_chain_members(&self,
-                             tail: LazyId,
-                             consumers: &HashMap<LazyId, usize>,
-                             _live: &HashSet<LazyId>) -> Vec<LazyId>
-    {
+    fn collect_chain_members(
+        &self,
+        tail: LazyId,
+        consumers: &HashMap<LazyId, usize>,
+        _live: &HashSet<LazyId>,
+    ) -> Vec<LazyId> {
         let mut members = Vec::new();
         self.collect_recursive(tail, consumers, &mut members, true);
         members
     }
 
-    fn collect_recursive(&self,
-                         id: LazyId,
-                         consumers: &HashMap<LazyId, usize>,
-                         out: &mut Vec<LazyId>,
-                         is_tail: bool)
-    {
+    fn collect_recursive(
+        &self,
+        id: LazyId,
+        consumers: &HashMap<LazyId, usize>,
+        out: &mut Vec<LazyId>,
+        is_tail: bool,
+    ) {
         let op = self.graph.nodes_borrow()[id].op.clone();
         let is_pw = is_pointwise(&op);
         let n_consumers = *consumers.get(&id).unwrap_or(&0);
@@ -453,9 +579,11 @@ impl<'g> Compiler<'g> {
         //   - il est pointwise ET a un seul consommateur (qui est dans la chaîne)
         let in_chain = is_tail || (is_pw && n_consumers == 1);
 
-        if in_chain && is_pw {
+        if in_chain && is_pw
+        {
             // On descend d'abord chez les parents pointwise mono-consommateur
-            for parent in op_parents(&op) {
+            for parent in op_parents(&op)
+            {
                 self.collect_recursive(parent, consumers, out, false);
             }
             out.push(id);
@@ -466,15 +594,17 @@ impl<'g> Compiler<'g> {
 
     /// Récupère ou crée le slot d'index d'un input dans la chaîne.
     /// Le buffer doit déjà avoir été émis (parent traité avant).
-    fn get_or_add_input(&self,
-                        parent_id: LazyId,
-                        input_bufs: &mut Vec<usize>) -> usize
-    {
-        let buf = *self.buf_of_node.get(&parent_id)
+    fn get_or_add_input(&self, parent_id: LazyId, input_bufs: &mut Vec<usize>) -> usize {
+        let buf = *self
+            .buf_of_node
+            .get(&parent_id)
             .unwrap_or_else(|| panic!("parent {parent_id} pas encore émis"));
-        if let Some(pos) = input_bufs.iter().position(|&b| b == buf) {
+        if let Some(pos) = input_bufs.iter().position(|&b| b == buf)
+        {
             pos
-        } else {
+        }
+        else
+        {
             input_bufs.push(buf);
             input_bufs.len() - 1
         }
@@ -486,102 +616,143 @@ impl<'g> Compiler<'g> {
         chain_member_ids.contains(&parent_id)
     }
 
-    fn append_to_chain(&mut self,
-                       id: LazyId,
-                       op: LazyOp,
-                       chain_ops: &mut Vec<PwOp>,
-                       input_bufs: &mut Vec<usize>,
-                       chain_member_ids: &[LazyId])
-    {
-        match op {
-            LazyOp::Add(a, b) => {
+    fn append_to_chain(
+        &mut self,
+        id: LazyId,
+        op: LazyOp,
+        chain_ops: &mut Vec<PwOp>,
+        input_bufs: &mut Vec<usize>,
+        chain_member_ids: &[LazyId],
+    ) {
+        match op
+        {
+            LazyOp::Add(a, b) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
                 let b_in = self.parent_is_in_chain(b, chain_member_ids);
-                if !a_in && !b_in {
+                if !a_in && !b_in
+                {
                     // Premier op de la chaîne (chain_ops vide) : a est l'init,
                     // b est ajouté.
                     let ia = self.get_or_add_input(a, input_bufs);
-                    if chain_ops.is_empty() { chain_ops.push(PwOp::LoadInput(ia)); }
+                    if chain_ops.is_empty()
+                    {
+                        chain_ops.push(PwOp::LoadInput(ia));
+                    }
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Add(ib));
-                } else if a_in && !b_in {
+                }
+                else if a_in && !b_in
+                {
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Add(ib));
-                } else if !a_in && b_in {
+                }
+                else if !a_in && b_in
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::Add(ia));
-                } else {
+                }
+                else
+                {
                     // Les deux parents sont dans la chaîne — cas exotique
                     // (diamant). On retombe sur l'émission séparée :
                     // ne devrait pas arriver avec count_consumers correct.
                     panic!("diamant détecté dans une chaîne pointwise — non supporté");
                 }
-            }
-            LazyOp::Sub(a, b) => {
+            },
+            LazyOp::Sub(a, b) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
                 let b_in = self.parent_is_in_chain(b, chain_member_ids);
-                if !a_in && !b_in {
+                if !a_in && !b_in
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
-                    if chain_ops.is_empty() { chain_ops.push(PwOp::LoadInput(ia)); }
+                    if chain_ops.is_empty()
+                    {
+                        chain_ops.push(PwOp::LoadInput(ia));
+                    }
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Sub(ib));
-                } else if a_in {
+                }
+                else if a_in
+                {
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Sub(ib));
-                } else {
+                }
+                else
+                {
                     panic!("Sub avec b dans la chaîne — non géré (acc - chain_val)");
                 }
-            }
-            LazyOp::Mul(a, b) => {
+            },
+            LazyOp::Mul(a, b) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
                 let b_in = self.parent_is_in_chain(b, chain_member_ids);
-                if !a_in && !b_in {
+                if !a_in && !b_in
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
-                    if chain_ops.is_empty() { chain_ops.push(PwOp::LoadInput(ia)); }
+                    if chain_ops.is_empty()
+                    {
+                        chain_ops.push(PwOp::LoadInput(ia));
+                    }
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Mul(ib));
-                } else if a_in && !b_in {
+                }
+                else if a_in && !b_in
+                {
                     let ib = self.get_or_add_input(b, input_bufs);
                     chain_ops.push(PwOp::Mul(ib));
-                } else if !a_in && b_in {
+                }
+                else if !a_in && b_in
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::Mul(ia));
-                } else {
+                }
+                else
+                {
                     panic!("diamant détecté dans Mul");
                 }
-            }
-            LazyOp::Scale(a, s) => {
+            },
+            LazyOp::Scale(a, s) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
-                if !a_in && chain_ops.is_empty() {
+                if !a_in && chain_ops.is_empty()
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::LoadInput(ia));
                 }
                 chain_ops.push(PwOp::Scale(s));
-            }
-            LazyOp::Relu(a) => {
+            },
+            LazyOp::Relu(a) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
-                if !a_in && chain_ops.is_empty() {
+                if !a_in && chain_ops.is_empty()
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::LoadInput(ia));
                 }
                 chain_ops.push(PwOp::Relu);
-            }
-            LazyOp::Exp(a) => {
+            },
+            LazyOp::Exp(a) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
-                if !a_in && chain_ops.is_empty() {
+                if !a_in && chain_ops.is_empty()
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::LoadInput(ia));
                 }
                 chain_ops.push(PwOp::Exp);
-            }
-            LazyOp::Log(a) => {
+            },
+            LazyOp::Log(a) =>
+            {
                 let a_in = self.parent_is_in_chain(a, chain_member_ids);
-                if !a_in && chain_ops.is_empty() {
+                if !a_in && chain_ops.is_empty()
+                {
                     let ia = self.get_or_add_input(a, input_bufs);
                     chain_ops.push(PwOp::LoadInput(ia));
                 }
                 chain_ops.push(PwOp::Log);
-            }
+            },
             _ => panic!("append_to_chain: op non pointwise"),
         }
         let _ = id;
@@ -593,18 +764,27 @@ impl<'g> Compiler<'g> {
 // ================================================================== //
 
 fn is_pointwise(op: &LazyOp) -> bool {
-    matches!(op,
-        LazyOp::Add(_, _) | LazyOp::Sub(_, _) | LazyOp::Mul(_, _)
-      | LazyOp::Scale(_, _) | LazyOp::Relu(_) | LazyOp::Exp(_) | LazyOp::Log(_))
+    matches!(
+        op,
+        LazyOp::Add(_, _)
+            | LazyOp::Sub(_, _)
+            | LazyOp::Mul(_, _)
+            | LazyOp::Scale(_, _)
+            | LazyOp::Relu(_)
+            | LazyOp::Exp(_)
+            | LazyOp::Log(_)
+    )
 }
 
 fn op_parents(op: &LazyOp) -> Vec<LazyId> {
-    match op {
+    match op
+    {
         LazyOp::Const(_) | LazyOp::Feed { .. } => vec![],
-        LazyOp::Add(a, b) | LazyOp::Sub(a, b) | LazyOp::Mul(a, b) | LazyOp::MatMul(a, b)
-            => vec![*a, *b],
-        LazyOp::Scale(a, _) | LazyOp::Relu(a) | LazyOp::Exp(a) | LazyOp::Log(a)
-            => vec![*a],
+        LazyOp::Add(a, b) | LazyOp::Sub(a, b) | LazyOp::Mul(a, b) | LazyOp::MatMul(a, b) =>
+        {
+            vec![*a, *b]
+        },
+        LazyOp::Scale(a, _) | LazyOp::Relu(a) | LazyOp::Exp(a) | LazyOp::Log(a) => vec![*a],
     }
 }
 
@@ -619,7 +799,10 @@ mod tests {
     #[test]
     fn plan_executes_simple_chain() {
         let g = LazyGraph::new();
-        let a = LazyTensor::from_tensor(g.clone(), Tensor::from_vec(vec![-1.0, 2.0, -3.0, 4.0], 1, 4));
+        let a = LazyTensor::from_tensor(
+            g.clone(),
+            Tensor::from_vec(vec![-1.0, 2.0, -3.0, 4.0], 1, 4),
+        );
         let y = a.relu().scale(2.0);
 
         let plan = Compiler::new(&g).compile(y.id);
@@ -651,8 +834,7 @@ mod tests {
         let _dead = a.exp().scale(99.0);
 
         let plan = Compiler::new(&g).compile(y.id);
-        assert!(plan.stats.dce_eliminated >= 2,
-                "stats: {:?}", plan.stats);
+        assert!(plan.stats.dce_eliminated >= 2, "stats: {:?}", plan.stats);
     }
 
     #[test]
@@ -679,7 +861,8 @@ mod tests {
         let y = x.relu().scale(2.0);
         let plan = Compiler::new(&g).compile(y.id);
 
-        for _ in 0..100 {
+        for _ in 0..100
+        {
             let _ = plan.execute_with(&[("x", Tensor::from_vec(vec![1.0; 4], 1, 4))]);
         }
     }
