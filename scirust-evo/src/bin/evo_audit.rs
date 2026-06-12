@@ -108,6 +108,7 @@ fn zdt1_gd(dims: usize, gens: usize) -> (f64, f64, usize) {
 
 fn main() {
     let (dims, runs) = (10usize, 5usize);
+    #[allow(clippy::type_complexity)]
     let funcs: [(&str, fn(&[f64]) -> f64); 4] = [
         ("sphere", sphere),
         ("rastrigin", rastrigin),

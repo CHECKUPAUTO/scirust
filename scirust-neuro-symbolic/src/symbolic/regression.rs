@@ -82,6 +82,7 @@ fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>
                 continue;
             }
             let factor = a[r][col] / a[col][col];
+            #[allow(clippy::needless_range_loop)]
             for c in col..n {
                 a[r][c] -= factor * a[col][c];
             }

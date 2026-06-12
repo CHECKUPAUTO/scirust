@@ -231,6 +231,7 @@ pub(crate) fn interleave_weight(w: &[f32], in_dims: &[usize], out_dims: &[usize]
     // For each target flat index, compute (i_0, j_0, ..., i_{d-1}, j_{d-1}),
     // then map to source flat index (i * out + j).
     let mut t = vec![0.0f32; total];
+    #[allow(clippy::needless_range_loop)]
     for target_flat in 0..total
     {
         let mut idx = vec![0usize; 2 * d];
@@ -288,6 +289,7 @@ fn deinterleave_weight(t: &[f32], in_dims: &[usize], out_dims: &[usize]) -> Vec<
     }
 
     let mut w = vec![0.0f32; total];
+    #[allow(clippy::needless_range_loop)]
     for source_flat in 0..total
     {
         let mut idx = vec![0usize; 2 * d];

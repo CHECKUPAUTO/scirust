@@ -114,30 +114,30 @@ impl LSTM {
         for t in 0..seq_len
         {
             let x_t = input
-                .clone()
+
                 .try_slice_rows(t * batch_size, (t + 1) * batch_size)
                 .unwrap();
 
             // gates = x_t @ W_ih^T + h @ W_hh^T + b_ih + b_hh
             let mut gates = x_t
-                .try_matmul(w_ih_t.clone())
+                .try_matmul(w_ih_t)
                 .unwrap()
-                .try_add(h.try_matmul(w_hh_t.clone()).unwrap())
+                .try_add(h.try_matmul(w_hh_t).unwrap())
                 .unwrap();
             if let Some(ref bi) = b_ih
             {
-                gates = gates.try_add_bias(bi.clone()).unwrap();
+                gates = gates.try_add_bias(*bi).unwrap();
             }
             if let Some(ref bh) = b_hh
             {
-                gates = gates.try_add_bias(bh.clone()).unwrap();
+                gates = gates.try_add_bias(*bh).unwrap();
             }
 
             // Split en 4 portes (input, forget, cell, output)
             let d = self.hidden_size;
-            let i_gate = gates.clone().try_slice_cols(0, d).unwrap().sigmoid();
-            let f_gate = gates.clone().try_slice_cols(d, d).unwrap().sigmoid();
-            let g_gate = gates.clone().try_slice_cols(2 * d, d).unwrap().tanh();
+            let i_gate = gates.try_slice_cols(0, d).unwrap().sigmoid();
+            let f_gate = gates.try_slice_cols(d, d).unwrap().sigmoid();
+            let g_gate = gates.try_slice_cols(2 * d, d).unwrap().tanh();
             let o_gate = gates.try_slice_cols(3 * d, d).unwrap().sigmoid();
 
             // c = f ⊙ c + i ⊙ g
@@ -146,9 +146,9 @@ impl LSTM {
                 .unwrap()
                 .try_add(i_gate.try_hadamard(g_gate).unwrap())
                 .unwrap();
-            h = o_gate.try_hadamard(c.clone().tanh()).unwrap();
+            h = o_gate.try_hadamard(c.tanh()).unwrap();
 
-            outputs.push(h.clone());
+            outputs.push(h);
         }
 
         concat_rows(tape, &outputs)

@@ -118,7 +118,7 @@ impl<M: Module> DQNAgent<M> {
             let q_a = q_values.slice_cols(t.action, 1);
             let target_var = tape.input(Tensor::from_vec(vec![target], 1, 1));
             let diff = q_a.sub(target_var);
-            let loss = diff.hadamard(diff.clone());
+            let loss = diff.hadamard(diff);
             total_loss = total_loss.add(loss);
         }
 

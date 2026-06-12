@@ -44,6 +44,7 @@ pub trait SimdBackend: Send + Sync {
 
     /// Décomposition de Cholesky : A = L * L^T (A doit être symétrique définie positive)
     /// Remplace A par sa partie triangulaire inférieure L.
+    #[allow(clippy::needless_range_loop)]
     fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()>;
 
     fn name(&self) -> &'static str;
@@ -166,6 +167,7 @@ impl SimdBackend for BlasBackend {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
         ScalarBackend.cholesky_f64(a)
     }
@@ -298,6 +300,7 @@ impl SimdBackend for ScalarBackend {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
         let n = a.len();
         for i in 0..n
@@ -493,6 +496,7 @@ impl SimdBackend for PortableSimdBackend {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn cholesky_f64(&self, a: &mut [Vec<f64>]) -> Option<()> {
         ScalarBackend.cholesky_f64(a)
     }

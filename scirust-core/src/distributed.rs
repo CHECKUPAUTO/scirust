@@ -16,7 +16,9 @@
 //! - No NCCL/RDMA — pure TCP, suitable for CPU clusters.
 
 use std::collections::HashMap;
+#[allow(unused_imports)]
 use std::net::TcpListener;
+#[allow(unused_imports)]
 use std::sync::{Arc, Mutex};
 
 /// Distributed training context for a single worker.
@@ -64,7 +66,7 @@ impl DistributedContext {
 /// In single-worker mode, this is a no-op.
 pub fn all_reduce(
     ctx: &DistributedContext,
-    gradients: &mut HashMap<String, Vec<f32>>,
+    _gradients: &mut HashMap<String, Vec<f32>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if ctx.world_size <= 1 {
         return Ok(()); // No-op for single worker
@@ -110,7 +112,7 @@ pub fn barrier(ctx: &DistributedContext) -> Result<(), Box<dyn std::error::Error
 /// Broadcast a value from rank 0 to all workers.
 pub fn broadcast_f32(
     ctx: &DistributedContext,
-    value: &mut f32,
+    _value: &mut f32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if ctx.world_size <= 1 {
         return Ok(());

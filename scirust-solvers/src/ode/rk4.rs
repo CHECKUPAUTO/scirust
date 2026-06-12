@@ -9,6 +9,7 @@
 //! ```
 
 
+#[allow(dead_code)]
 fn check_finite(value: f64, _label: &str) -> Result<(), crate::SolverError> {
     if !value.is_finite()
     {

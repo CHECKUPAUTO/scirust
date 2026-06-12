@@ -180,7 +180,7 @@ impl NasSearch {
         let mut prev_dim = 784; // Default input (MNIST)
         let mut rng = seed;
 
-        for i in 0..n_layers {
+        for _i in 0..n_layers {
             // Simple PRNG: xorshift
             rng ^= rng << 13;
             rng ^= rng >> 17;
@@ -204,7 +204,7 @@ impl NasSearch {
 
             // Estimate params and FLOPs
             total_params += (prev_dim * out_dim + out_dim) as f64;
-            total_flops += (2.0 * prev_dim as f64 * out_dim as f64);
+            total_flops += 2.0 * prev_dim as f64 * out_dim as f64;
             prev_dim = out_dim;
         }
 
@@ -225,7 +225,7 @@ impl NasSearch {
 
         // Reward moderate complexity, penalize extreme values
         let capacity_score = (-(capacity - 4.0).powi(2) / 8.0).exp();
-        let complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp();
+        let _complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp();
 
         self.config.accuracy_weight * capacity_score * 0.85
             + self.config.params_weight * complexity
@@ -265,7 +265,7 @@ impl NasSearch {
 
                 // Mutate: change one random layer
                 if !child.layers.is_empty() {
-                    let idx = ((gen * pop_size + i) as usize) % child.layers.len();
+                    let idx = (gen * pop_size + i) % child.layers.len();
                     let seed = (self.config.seed + (gen * pop_size + i) as u64) * 0x9E3779B9;
                     let rng = seed ^ (seed << 13);
                     let new_dim = self.config.min_hidden

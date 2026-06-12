@@ -439,6 +439,7 @@ impl SimdBackend {
 use std::arch::is_x86_feature_detected;
 
 #[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
 fn has_sve() -> bool {
     unsafe {
         let hwcap = libc::getauxval(33); // AT_HWCAP
@@ -447,6 +448,7 @@ fn has_sve() -> bool {
 }
 
 #[cfg(not(target_arch = "aarch64"))]
+#[allow(dead_code)]
 fn has_sve() -> bool {
     false
 }

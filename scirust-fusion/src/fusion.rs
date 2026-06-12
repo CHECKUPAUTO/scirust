@@ -6,7 +6,7 @@
 //! 2. Regroupe les nœuds compatibles
 //! 3. Génère un `FusedKernel` pour chaque groupe
 
-use crate::graph::{FusedOp, OpGraph, OpKind};
+use crate::graph::{OpGraph, OpKind};
 use crate::kernel::FusedKernel;
 use crate::patterns::FusionPatterns;
 
@@ -70,7 +70,7 @@ impl FusionPipeline {
             }
 
             // Essayer de prolonger la fusion avec les voisins
-            let op = graph.op(node);
+            let _op = graph.op(node);
 
             // Chercher un successeur qui peut être fusionné
             let fused = self.try_extend(&group, graph, node, visited);
@@ -191,12 +191,12 @@ impl FusionPipeline {
         if matches_pattern(&kinds, &[OpKind::SsmStep, OpKind::SsmStep]) {
             return KernelType::SsmScan;
         }
-        // LayerNorm → activation (any of SiLU / Gelu / GELU_Approx / ReLU).
+        // LayerNorm → activation (any of SiLU / Gelu / GeluApprox / ReLU).
         if kinds.len() == 2
             && matches!(kinds[0], OpKind::LayerNorm | OpKind::LayerNormFused)
             && matches!(
                 kinds[1],
-                OpKind::SiLU | OpKind::Gelu | OpKind::GELU_Approx | OpKind::ReLU
+                OpKind::SiLU | OpKind::Gelu | OpKind::GeluApprox | OpKind::ReLU
             )
         {
             return KernelType::LayerNormActivation;
@@ -220,7 +220,7 @@ fn matches_pattern(kinds: &[OpKind], pattern: &[OpKind]) -> bool {
         OpKind::MatMul | OpKind::Linear => matches!(a, OpKind::MatMul | OpKind::Linear),
         OpKind::SiLU => *a == OpKind::SiLU,
         OpKind::ReLU => *a == OpKind::ReLU,
-        OpKind::Gelu | OpKind::GELU_Approx => matches!(a, OpKind::Gelu | OpKind::GELU_Approx),
+        OpKind::Gelu | OpKind::GeluApprox => matches!(a, OpKind::Gelu | OpKind::GeluApprox),
         OpKind::Sigmoid => *a == OpKind::Sigmoid,
         OpKind::Tanh => *a == OpKind::Tanh,
         OpKind::LayerNorm | OpKind::LayerNormFused => {

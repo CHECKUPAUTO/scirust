@@ -67,6 +67,14 @@ members = [
     "scirust-tensor-examples",
     "scirust-onnx",
     "scirust-nas",
+    "scirust-som/crates/pcg",
+    "scirust-som/crates/tokenizer",
+    "scirust-som/crates/dataset",
+    "scirust-som/crates/model",
+    "scirust-som/crates/trainer",
+    "scirust-som/crates/inference",
+    "scirust-som/crates/symbolic",
+    "scirust-som/crates/visualizer",
 ]
 exclude = [
     "scirust-rustc-driver",

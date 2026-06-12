@@ -43,7 +43,7 @@ impl NBeatsBlock {
         {
             h = fc.forward(tape, h).relu();
         }
-        let backcast = self.backcast_head.forward(tape, h.clone());
+        let backcast = self.backcast_head.forward(tape, h);
         let forecast = self.forecast_head.forward(tape, h);
         (backcast, forecast)
     }

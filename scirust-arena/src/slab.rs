@@ -31,7 +31,7 @@ struct SlabEntry {
 }
 
 enum EntryState {
-    Occupied { size: usize },
+    Occupied { _size: usize },
     Free,
 }
 
@@ -95,7 +95,7 @@ impl<T: Copy, const N: usize> Slab<T, N> {
         self.next_version += 1;
 
         self.entries[index as usize].state = EntryState::Occupied {
-            size: self.slot_size_bytes,
+            _size: self.slot_size_bytes,
         };
         self.entries[index as usize].version = version;
         self.count += 1;

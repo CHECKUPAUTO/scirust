@@ -40,7 +40,7 @@ impl<E: Module> MoELayer<E> {
 
 impl<E: Module> Module for MoELayer<E> {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        let gate_logits = self.gate.forward(tape, input.clone());
+        let gate_logits = self.gate.forward(tape, input);
         let gate_probs = gate_logits.try_softmax(1).unwrap();
 
         let probs = tape.value(gate_probs.idx());

@@ -139,7 +139,7 @@ impl<D: Dataset> DataLoader<D> {
         if self.config.drop_last {
             n / bs
         } else {
-            (n + bs - 1) / bs // ceil division
+            n.div_ceil(bs) // ceil division
         }
     }
 }

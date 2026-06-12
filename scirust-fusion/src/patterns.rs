@@ -92,7 +92,7 @@ impl FusionPatterns {
             ops: &[
                 OpKindMatcher::Any(&[OpKind::LayerNorm, OpKind::LayerNormFused]),
                 OpKindMatcher::Any(&[
-                    OpKind::SiLU, OpKind::Gelu, OpKind::GELU_Approx,
+                    OpKind::SiLU, OpKind::Gelu, OpKind::GeluApprox,
                     OpKind::ReLU, OpKind::Sigmoid, OpKind::Tanh,
                 ]),
             ],

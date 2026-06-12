@@ -20,8 +20,6 @@
 //! amp.optimizer_step(&mut opt, &grads)?;
 //! ```
 
-use crate::autodiff::reverse::{Tape, Tensor, Var};
-use crate::nn::Module;
 
 /// Precision kind for mixed-precision training.
 #[derive(Debug, Clone, Copy, PartialEq)]

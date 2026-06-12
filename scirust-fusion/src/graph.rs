@@ -15,7 +15,7 @@ pub enum OpKind {
     ReLU,
     SiLU,
     Gelu,
-    GELU_Approx,
+    GeluApprox,
     Sigmoid,
     Tanh,
     Softmax,
@@ -130,17 +130,17 @@ impl FusedOp {
         // Patterns de fusion autorisés
         matches!((self.kind, other),
             // MatMul peut être fusionné avec activation
-            (MatMul | Linear, ReLU | SiLU | Gelu | GELU_Approx | Sigmoid | Tanh)
+            (MatMul | Linear, ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh)
             // Activation peut suivre MatMul
-            | (ReLU | SiLU | Gelu | GELU_Approx | Sigmoid | Tanh, MatMul | Linear)
+            | (ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh, MatMul | Linear)
             // MatMul peut enchaîner avec un autre MatMul (MLP)
             | (MatMul | Linear, MatMul | Linear)
             // LayerNorm peut fusionner avec activation
-            | (LayerNorm | LayerNormFused, ReLU | SiLU | Gelu | GELU_Approx | Sigmoid | Tanh)
+            | (LayerNorm | LayerNormFused, ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh)
             // Activation peut précéder LayerNorm
-            | (ReLU | SiLU | Gelu | GELU_Approx | Sigmoid | Tanh, LayerNorm | LayerNormFused)
+            | (ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh, LayerNorm | LayerNormFused)
             // RMSNorm peut fusionner avec activation
-            | (RMSNorm, ReLU | SiLU | Gelu | GELU_Approx | Sigmoid | Tanh)
+            | (RMSNorm, ReLU | SiLU | Gelu | GeluApprox | Sigmoid | Tanh)
             // SSM step peut se chaîner avec lui-même
             | (SsmStep, SsmStep)
             // Element-wise entre résultats de même shape

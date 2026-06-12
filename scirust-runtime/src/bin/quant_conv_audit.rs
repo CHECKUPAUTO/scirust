@@ -85,11 +85,13 @@ fn fakequant_per_row(t: &Tensor) -> Tensor {
     for r in 0..rows
     {
         let mut ma = 0.0f32;
+    #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             ma = ma.max(t.data[r * cols + c].abs());
         }
         let s = if ma == 0.0 { 1.0 } else { ma / 127.0 };
+    #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             let q = (t.data[r * cols + c] / s).round().clamp(-128.0, 127.0);
@@ -102,6 +104,7 @@ fn fakequant_per_row(t: &Tensor) -> Tensor {
 fn fakequant_per_col(t: &Tensor) -> Tensor {
     let (rows, cols) = t.shape();
     let mut scales = vec![1.0f32; cols];
+    #[allow(clippy::needless_range_loop)]
     for c in 0..cols
     {
         let mut ma = 0.0f32;
@@ -114,6 +117,7 @@ fn fakequant_per_col(t: &Tensor) -> Tensor {
     let mut out = vec![0.0f32; rows * cols];
     for r in 0..rows
     {
+    #[allow(clippy::needless_range_loop)]
         for c in 0..cols
         {
             let q = (t.data[r * cols + c] / scales[c])
@@ -136,7 +140,7 @@ fn main() {
 
     // fake-quant de tous les poids (conv per-row, linear per-col)
     let mut sd = a.state_dict();
-    for (_k, t) in sd.iter_mut()
+    for t in sd.values_mut()
     {
         *t = match t.shape()
         {

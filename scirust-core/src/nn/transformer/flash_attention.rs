@@ -21,6 +21,7 @@ use crate::autodiff::reverse::{Op, SavedData, Tape, Tensor, Var};
 /// * `scale` - Facteur d'échelle (typ. 1.0 / sqrt(d_head))
 /// * `block_size` - Taille de bloc pour le tiling (typ. 32 ou 64)
 /// * `causal` - Si true, applique un masque causal
+#[allow(clippy::too_many_arguments)]
 pub fn flash_attention_forward<'t>(
     tape: &'t Tape,
     q_var: Var<'t>,
@@ -189,10 +190,7 @@ pub fn flash_attention_forward<'t>(
                 }
 
                 // 7. Update m_i
-                for r in 0..br
-                {
-                    m_i[r] = m_new[r];
-                }
+                m_i[..br].copy_from_slice(&m_new[..br]);
             }
 
             // Normalisation : O_i = O_i / l_i

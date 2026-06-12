@@ -61,7 +61,7 @@ fn main() {
 
     let sd = load_weights("mnist_mlp.srt").expect("load_weights");
     let (mut w1, mut b1, mut w2, mut b2) = (None, None, None, None);
-    for (_k, t) in &sd
+    for t in sd.values()
     {
         match t.shape()
         {

@@ -16,6 +16,12 @@ pub struct Pipeline {
     vars: HashMap<String, f64>,
 }
 
+impl Default for Pipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pipeline {
     pub fn new() -> Self {
         Self {

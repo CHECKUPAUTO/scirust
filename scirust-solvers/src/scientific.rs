@@ -66,8 +66,8 @@ impl FemSolver1D {
         for i in 1..n
         {
             let m = a[i] / b[i - 1];
-            b[i] = b[i] - m * c[i - 1];
-            d[i] = d[i] - m * d[i - 1];
+            b[i] -= m * c[i - 1];
+            d[i] -= m * d[i - 1];
         }
 
         // Back substitution

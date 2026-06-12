@@ -29,10 +29,7 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
     if mult >= (1i64 << 31)
     {
         mult = 1i64 << 30;
-        if shift > 0
-        {
-            shift -= 1;
-        }
+        shift = shift.saturating_sub(1);
     }
     (mult, shift)
 }
@@ -145,7 +142,7 @@ fn infer(layers: &[QLinear], input: &[f32], batch: usize) -> Vec<f32> {
             return out;
         }
         let s_out = layers[li + 1].s_in;
-        let mut q = vec![0i8; batch * l.out_f];
+        let mut q_vec = vec![0i8; batch * l.out_f];
         for bi in 0..batch
         {
             for o in 0..l.out_f
@@ -158,18 +155,10 @@ fn infer(layers: &[QLinear], input: &[f32], batch: usize) -> Vec<f32> {
                 {
                     r = 0;
                 }
-                if r > 127
-                {
-                    r = 127;
-                }
-                if r < -128
-                {
-                    r = -128;
-                }
-                q[bi * l.out_f + o] = r as i8;
+                q_vec[bi * l.out_f + o] = r.clamp(-128, 127) as i8;
             }
         }
-        cur_q = q;
+        cur_q = q_vec;
     }
     unreachable!()
 }
@@ -229,7 +218,7 @@ fn main() {
 
     let sd = load_weights("mnist_mlp.srt").expect("load_weights");
     let (mut w1, mut b1, mut w2, mut b2) = (None, None, None, None);
-    for (_k, t) in &sd
+    for t in sd.values()
     {
         match t.shape()
         {

@@ -1,6 +1,5 @@
-/// Advanced optimizers for neural network training
-/// Includes: RMSprop, AdamW, LAMB, and other variants
-
+//! Advanced optimizers for neural network training
+//! Includes: RMSprop, AdamW, LAMB, and other variants
 use std::collections::HashMap;
 
 /// RMSprop optimizer - uses exponential moving average of squared gradients

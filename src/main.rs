@@ -70,7 +70,7 @@ impl CoreState {
 struct GoalEngine;
 
 impl GoalEngine {
-    fn reflect(&self, state: &CoreState) -> String {
+    fn reflect(&self, _state: &CoreState) -> String {
         let scirust_tasks = [
             "Générer la structure de Tenseur alignée pour AVX2/NEON",
             "Forger les abstractions de Traits pour le backend SIMD CPU",
@@ -101,6 +101,7 @@ impl GoalEngine {
 #[derive(Debug)]
 enum Event {
     UserMessage(String),
+    #[allow(dead_code)]
     SystemAlert(String),
     Shutdown,
 }
