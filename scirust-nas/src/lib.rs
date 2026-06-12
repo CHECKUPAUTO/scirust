@@ -45,8 +45,10 @@ pub struct Architecture {
 impl fmt::Display for Architecture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
-        for (i, layer) in self.layers.iter().enumerate() {
-            if i > 0 {
+        for (i, layer) in self.layers.iter().enumerate()
+        {
+            if i > 0
+            {
                 write!(f, " → ")?;
             }
             write!(f, "{}", layer)?;
@@ -82,16 +84,31 @@ pub enum LayerSpec {
 
 impl fmt::Display for LayerSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LayerSpec::Linear { out_features, activation } => {
+        match self
+        {
+            LayerSpec::Linear {
+                out_features,
+                activation,
+            } =>
+            {
                 write!(f, "Linear({},{})", out_features, activation)
-            }
-            LayerSpec::Conv2d { out_channels, kernel_size, stride } => {
+            },
+            LayerSpec::Conv2d {
+                out_channels,
+                kernel_size,
+                stride,
+            } =>
+            {
                 write!(f, "Conv2d({},{},{})", out_channels, kernel_size, stride)
-            }
-            LayerSpec::TransformerBlock { embed_dim, num_heads, ff_dim } => {
+            },
+            LayerSpec::TransformerBlock {
+                embed_dim,
+                num_heads,
+                ff_dim,
+            } =>
+            {
                 write!(f, "Transformer({},{},{})", embed_dim, num_heads, ff_dim)
-            }
+            },
             LayerSpec::Dropout { rate } => write!(f, "Dropout({})", rate),
             LayerSpec::Pool { kind } => write!(f, "Pool({:?})", kind),
         }
@@ -180,7 +197,8 @@ impl NasSearch {
         let mut prev_dim = 784; // Default input (MNIST)
         let mut rng = seed;
 
-        for i in 0..n_layers {
+        for _i in 0..n_layers
+        {
             // Simple PRNG: xorshift
             rng ^= rng << 13;
             rng ^= rng >> 17;
@@ -190,7 +208,8 @@ impl NasSearch {
                 + (rng as usize % (self.config.max_hidden - self.config.min_hidden + 1));
 
             let act_idx = (rng >> 8) as usize % 4;
-            let activation = match act_idx {
+            let activation = match act_idx
+            {
                 0 => ActivationChoice::ReLU,
                 1 => ActivationChoice::GELU,
                 2 => ActivationChoice::SiLU,
@@ -204,7 +223,7 @@ impl NasSearch {
 
             // Estimate params and FLOPs
             total_params += (prev_dim * out_dim + out_dim) as f64;
-            total_flops += (2.0 * prev_dim as f64 * out_dim as f64);
+            total_flops += 2.0 * prev_dim as f64 * out_dim as f64;
             prev_dim = out_dim;
         }
 
@@ -225,7 +244,7 @@ impl NasSearch {
 
         // Reward moderate complexity, penalize extreme values
         let capacity_score = (-(capacity - 4.0).powi(2) / 8.0).exp();
-        let complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp();
+        let _complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp();
 
         self.config.accuracy_weight * capacity_score * 0.85
             + self.config.params_weight * complexity
@@ -235,14 +254,18 @@ impl NasSearch {
     /// Generate initial population.
     pub fn initialize(&mut self, pop_size: usize) {
         self.population.clear();
-        for i in 0..pop_size {
+        for i in 0..pop_size
+        {
             let mut arch = self.random_architecture((self.config.seed + i as u64) * 0x9E3779B9);
             arch.fitness = self.evaluate(&arch);
             self.population.push(arch);
             self.evaluations += 1;
         }
-        self.population
-            .sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap_or(std::cmp::Ordering::Equal));
+        self.population.sort_by(|a, b| {
+            b.fitness
+                .partial_cmp(&a.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// Run evolution for `generations` with `pop_size` individuals.
@@ -253,18 +276,21 @@ impl NasSearch {
     ) -> Result<Vec<Architecture>, Box<dyn std::error::Error>> {
         self.initialize(pop_size);
 
-        for gen in 0..generations {
+        for gen in 0..generations
+        {
             // Tournament selection: top half survives
             let survive = pop_size / 2;
             self.population.truncate(survive);
 
             // Generate offspring via mutation
-            for i in 0..survive {
+            for i in 0..survive
+            {
                 let parent = &self.population[i % survive];
                 let mut child = parent.clone();
 
                 // Mutate: change one random layer
-                if !child.layers.is_empty() {
+                if !child.layers.is_empty()
+                {
                     let idx = ((gen * pop_size + i) as usize) % child.layers.len();
                     let seed = (self.config.seed + (gen * pop_size + i) as u64) * 0x9E3779B9;
                     let rng = seed ^ (seed << 13);
@@ -281,13 +307,16 @@ impl NasSearch {
                 self.population.push(child);
                 self.evaluations += 1;
 
-                if self.evaluations >= self.config.max_models {
+                if self.evaluations >= self.config.max_models
+                {
                     break;
                 }
             }
 
             self.population.sort_by(|a, b| {
-                b.fitness.partial_cmp(&a.fitness).unwrap_or(std::cmp::Ordering::Equal)
+                b.fitness
+                    .partial_cmp(&a.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
         }
 

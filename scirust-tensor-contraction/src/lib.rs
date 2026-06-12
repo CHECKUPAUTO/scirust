@@ -31,8 +31,10 @@ impl ContractionPlan {
 
     fn sizes(&self, inputs: &[&TensorND]) -> BTreeMap<char, usize> {
         let mut sizes = BTreeMap::new();
-        for (spec, t) in self.operand_specs.iter().zip(inputs) {
-            for (p, &lab) in spec.iter().enumerate() {
+        for (spec, t) in self.operand_specs.iter().zip(inputs)
+        {
+            for (p, &lab) in spec.iter().enumerate()
+            {
                 sizes.insert(lab, t.shape[p]);
             }
         }
@@ -41,7 +43,8 @@ impl ContractionPlan {
 
     /// Execute the contraction, returning the result tensor.
     pub fn execute(&self, inputs: &[&TensorND]) -> Result<TensorND, String> {
-        if inputs.len() != self.operand_specs.len() {
+        if inputs.len() != self.operand_specs.len()
+        {
             return Err(format!(
                 "plan expects {} operands, got {}",
                 self.operand_specs.len(),
@@ -56,14 +59,18 @@ impl ContractionPlan {
             .map(|(s, t)| (s.clone(), (*t).clone()))
             .collect();
 
-        while work.len() > 1 {
+        while work.len() > 1
+        {
             // Pick the pair whose contraction yields the smallest result.
             let (mut bi, mut bj, mut best_cost) = (0usize, 1usize, usize::MAX);
-            for i in 0..work.len() {
-                for j in (i + 1)..work.len() {
+            for i in 0..work.len()
+            {
+                for j in (i + 1)..work.len()
+                {
                     let res = result_labels(&work[i].0, &work[j].0, &work, i, j, &self.output);
                     let cost: usize = res.iter().map(|l| sizes[l]).product::<usize>().max(1);
-                    if cost < best_cost {
+                    if cost < best_cost
+                    {
                         best_cost = cost;
                         bi = i;
                         bj = j;
@@ -85,9 +92,12 @@ impl ContractionPlan {
         }
 
         let (final_spec, final_t) = work.pop().ok_or("empty contraction")?;
-        if final_spec == self.output {
+        if final_spec == self.output
+        {
             Ok(final_t)
-        } else {
+        }
+        else
+        {
             // Reorder/reduce to the requested output layout.
             let pat = format!(
                 "{}->{}",
@@ -110,8 +120,10 @@ fn result_labels(
     output: &[char],
 ) -> Vec<char> {
     let mut union: Vec<char> = Vec::new();
-    for &c in sa.iter().chain(sb.iter()) {
-        if !union.contains(&c) {
+    for &c in sa.iter().chain(sb.iter())
+    {
+        if !union.contains(&c)
+        {
             union.push(c);
         }
     }
@@ -119,9 +131,10 @@ fn result_labels(
         .into_iter()
         .filter(|&c| {
             output.contains(&c)
-                || work.iter().enumerate().any(|(k, (spec, _))| {
-                    k != skip_i && k != skip_j && spec.contains(&c)
-                })
+                || work
+                    .iter()
+                    .enumerate()
+                    .any(|(k, (spec, _))| k != skip_i && k != skip_j && spec.contains(&c))
         })
         .collect()
 }

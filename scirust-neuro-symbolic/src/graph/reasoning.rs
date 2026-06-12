@@ -16,7 +16,8 @@ impl GraphReasoning {
     /// Returns the shortest path of entity names from `start` to `end`
     /// (inclusive), or an empty vector if no path exists.
     pub fn find_path(&self, start: &str, end: &str) -> Vec<String> {
-        if start == end {
+        if start == end
+        {
             return vec![start.to_string()];
         }
         let mut prev: HashMap<String, String> = HashMap::new();
@@ -25,7 +26,8 @@ impl GraphReasoning {
         queue.push_back(start.to_string());
         visited.insert(start.to_string());
 
-        while let Some(current) = queue.pop_front() {
+        while let Some(current) = queue.pop_front()
+        {
             // Outgoing neighbours, visited in a deterministic order.
             let mut neighbours: Vec<&str> = self
                 .kg
@@ -35,12 +37,15 @@ impl GraphReasoning {
                 .map(|t| t.object.0.as_str())
                 .collect();
             neighbours.sort_unstable();
-            for nb in neighbours {
-                if !visited.insert(nb.to_string()) {
+            for nb in neighbours
+            {
+                if !visited.insert(nb.to_string())
+                {
                     continue;
                 }
                 prev.insert(nb.to_string(), current.clone());
-                if nb == end {
+                if nb == end
+                {
                     return reconstruct(&prev, start, end);
                 }
                 queue.push_back(nb.to_string());
@@ -53,12 +58,15 @@ impl GraphReasoning {
 fn reconstruct(prev: &HashMap<String, String>, start: &str, end: &str) -> Vec<String> {
     let mut path = vec![end.to_string()];
     let mut node = end.to_string();
-    while node != start {
-        match prev.get(&node) {
-            Some(p) => {
+    while node != start
+    {
+        match prev.get(&node)
+        {
+            Some(p) =>
+            {
                 path.push(p.clone());
                 node = p.clone();
-            }
+            },
             None => return Vec::new(),
         }
     }

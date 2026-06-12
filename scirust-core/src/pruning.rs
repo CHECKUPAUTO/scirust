@@ -15,9 +15,6 @@
 //! // weights ≈ [0.5, 0.0, 0.0, 0.8, 0.0, 0.3]
 //! ```
 
-#[allow(unused_imports)]
-use crate::autodiff::reverse::Tensor;
-
 /// Pruning strategy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PruningMethod {
@@ -33,12 +30,14 @@ pub enum PruningMethod {
 ///
 /// `sparsity` is the fraction of weights to zero out (0.0 = none, 0.9 = 90% pruned).
 pub fn prune_magnitude(weights: &mut [f32], sparsity: f32) {
-    if sparsity <= 0.0 || weights.is_empty() {
+    if sparsity <= 0.0 || weights.is_empty()
+    {
         return;
     }
 
     let n_prune = ((weights.len() as f32) * sparsity) as usize;
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return;
     }
 
@@ -53,7 +52,8 @@ pub fn prune_magnitude(weights: &mut [f32], sparsity: f32) {
     indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Zero out the smallest n_prune weights
-    for (idx, _) in indexed.iter().take(n_prune) {
+    for (idx, _) in indexed.iter().take(n_prune)
+    {
         weights[*idx] = 0.0;
     }
 }
@@ -63,12 +63,14 @@ pub fn prune_magnitude(weights: &mut [f32], sparsity: f32) {
 /// Removes columns with smallest L2 norm. `sparsity` fraction of columns
 /// are zeroed out entirely.
 pub fn prune_structured_columns(weights: &mut [f32], rows: usize, cols: usize, sparsity: f32) {
-    if sparsity <= 0.0 || cols == 0 {
+    if sparsity <= 0.0 || cols == 0
+    {
         return;
     }
 
     let n_prune = ((cols as f32) * sparsity) as usize;
-    if n_prune == 0 {
+    if n_prune == 0
+    {
         return;
     }
 
@@ -89,8 +91,10 @@ pub fn prune_structured_columns(weights: &mut [f32], rows: usize, cols: usize, s
     col_norms.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Zero out smallest columns
-    for (col, _) in col_norms.iter().take(n_prune) {
-        for r in 0..rows {
+    for (col, _) in col_norms.iter().take(n_prune)
+    {
+        for r in 0..rows
+        {
             weights[r * cols + *col] = 0.0;
         }
     }
@@ -98,7 +102,8 @@ pub fn prune_structured_columns(weights: &mut [f32], rows: usize, cols: usize, s
 
 /// Compute current sparsity ratio (fraction of exactly zero weights).
 pub fn sparsity_ratio(weights: &[f32]) -> f32 {
-    if weights.is_empty() {
+    if weights.is_empty()
+    {
         return 0.0;
     }
     let zeros = weights.iter().filter(|&&w| w == 0.0).count();
@@ -136,13 +141,15 @@ impl LotteryTicketPruner {
 
     /// Prune and rewind: zero smallest weights, restore others to initial values.
     pub fn prune_and_rewind(&self, weights: &mut [f32]) {
-        let initial = match &self.initial_weights {
+        let initial = match &self.initial_weights
+        {
             Some(w) => w,
             None => return,
         };
 
         let current_sparsity = sparsity_ratio(weights);
-        if current_sparsity >= 1.0 - (1.0 - self.prune_fraction).powi(self.iterations as i32) {
+        if current_sparsity >= 1.0 - (1.0 - self.prune_fraction).powi(self.iterations as i32)
+        {
             return; // Already reached target sparsity
         }
 
@@ -150,8 +157,10 @@ impl LotteryTicketPruner {
         prune_magnitude(weights, self.prune_fraction);
 
         // Rewind non-zero weights to initial values
-        for (w, &init) in weights.iter_mut().zip(initial.iter()) {
-            if *w != 0.0 {
+        for (w, &init) in weights.iter_mut().zip(initial.iter())
+        {
+            if *w != 0.0
+            {
                 *w = init;
             }
         }

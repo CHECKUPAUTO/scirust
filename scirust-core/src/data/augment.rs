@@ -339,7 +339,8 @@ impl AugmentedDataset {
             .map(|i| {
                 let (x, _y) = base.sample(i);
                 let mut x_aug = x.to_vec();
-                for t in transforms {
+                for t in transforms
+                {
                     t.apply(&mut x_aug, dims);
                 }
                 x_aug
@@ -407,7 +408,7 @@ mod tests {
     #[test]
     fn dataset_trait_sample_returns_augmented_data() {
         // Regression: the `Dataset::sample` impl used to return the *unaugmented*
-        // base sample (FIXME workaround). It must now return augmented data.
+        // base sample. It must now return augmented data.
         use crate::data::Dataset;
         let base = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![0.0], 6, 1);
         let dims = ImageDims::new(1, 2, 3);
@@ -415,7 +416,11 @@ mod tests {
         let ds = AugmentedDataset::new(base, transforms, dims);
         let ds_ref: &dyn Dataset = &ds;
         let (x, _y) = ds_ref.sample(0);
-        assert_eq!(x, &[3.0, 2.0, 1.0, 6.0, 5.0, 4.0], "Dataset::sample must return augmented (flipped) data");
+        assert_eq!(
+            x,
+            &[3.0, 2.0, 1.0, 6.0, 5.0, 4.0],
+            "Dataset::sample must return augmented (flipped) data"
+        );
     }
 
     #[test]

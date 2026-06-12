@@ -20,8 +20,6 @@ pub mod matrix {
 pub mod autodiff;
 pub mod optim;
 
-
-
 pub mod data;
 pub mod embed;
 pub mod tensor;
@@ -54,11 +52,11 @@ pub mod dispatch {
     }
 }
 pub mod aot;
+pub mod checkpoint;
 pub mod compute_backend;
 pub mod homomorphic;
 pub mod quantization;
 pub mod xai;
-pub mod checkpoint;
 
 pub mod amp;
 pub mod distributed;

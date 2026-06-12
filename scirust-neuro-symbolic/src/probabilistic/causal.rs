@@ -25,13 +25,16 @@ impl CausalEngine {
             .into_iter()
             .map(|(p, c)| (p.to_string(), c))
             .collect();
-        self.equations.insert(node.to_string(), (intercept, parents));
+        self.equations
+            .insert(node.to_string(), (intercept, parents));
     }
 
     fn all_nodes(&self) -> HashSet<String> {
         let mut nodes: HashSet<String> = self.equations.keys().cloned().collect();
-        for (_, parents) in self.equations.values() {
-            for (p, _) in parents {
+        for (_, parents) in self.equations.values()
+        {
+            for (p, _) in parents
+            {
                 nodes.insert(p.clone());
             }
         }
@@ -47,9 +50,12 @@ impl CausalEngine {
             .collect();
 
         // For a DAG, |nodes| relaxation passes propagate all values.
-        for _ in 0..=nodes.len() {
-            for (node, (intercept, parents)) in &self.equations {
-                if overrides.contains_key(node) {
+        for _ in 0..=nodes.len()
+        {
+            for (node, (intercept, parents)) in &self.equations
+            {
+                if overrides.contains_key(node)
+                {
                     continue; // do(node) cuts its structural equation
                 }
                 let v = intercept

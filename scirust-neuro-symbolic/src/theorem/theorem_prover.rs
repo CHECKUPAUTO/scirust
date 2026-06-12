@@ -25,43 +25,56 @@ impl NeuralTheoremProver {
         let mut facts: HashSet<String> = HashSet::new();
         let mut rules: Vec<(Vec<String>, String)> = Vec::new();
 
-        for p in premises {
-            if let Some((body, head)) = p.split_once("->") {
+        for p in premises
+        {
+            if let Some((body, head)) = p.split_once("->")
+            {
                 let body_atoms: Vec<String> = body
                     .split('&')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
                 rules.push((body_atoms, head.trim().to_string()));
-            } else {
+            }
+            else
+            {
                 facts.insert(p.trim().to_string());
             }
         }
 
         let goal = goal.trim().to_string();
-        let max_rounds = if self.iterations == 0 {
+        let max_rounds = if self.iterations == 0
+        {
             usize::MAX
-        } else {
+        }
+        else
+        {
             self.iterations
         };
 
         let mut round = 0;
-        loop {
-            if facts.contains(&goal) {
+        loop
+        {
+            if facts.contains(&goal)
+            {
                 return Ok(true);
             }
-            if round >= max_rounds {
+            if round >= max_rounds
+            {
                 break;
             }
             let mut changed = false;
-            for (body, head) in &rules {
-                if !facts.contains(head) && body.iter().all(|b| facts.contains(b)) {
+            for (body, head) in &rules
+            {
+                if !facts.contains(head) && body.iter().all(|b| facts.contains(b))
+                {
                     facts.insert(head.clone());
                     changed = true;
                 }
             }
             round += 1;
-            if !changed {
+            if !changed
+            {
                 break;
             }
         }

@@ -36,9 +36,12 @@ impl CspSolver {
             v
         };
         let mut assignment = HashMap::new();
-        if self.backtrack(&vars, 0, &mut assignment) {
+        if self.backtrack(&vars, 0, &mut assignment)
+        {
             Some(assignment)
-        } else {
+        }
+        else
+        {
             None
         }
     }
@@ -53,13 +56,16 @@ impl CspSolver {
         idx: usize,
         assignment: &mut HashMap<String, i32>,
     ) -> bool {
-        if idx == vars.len() {
+        if idx == vars.len()
+        {
             return self.satisfies_all(assignment);
         }
         let var = &vars[idx];
-        for &val in &self.domains[var] {
+        for &val in &self.domains[var]
+        {
             assignment.insert(var.clone(), val);
-            if self.backtrack(vars, idx + 1, assignment) {
+            if self.backtrack(vars, idx + 1, assignment)
+            {
                 return true;
             }
             assignment.remove(var);

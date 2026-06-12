@@ -17,10 +17,9 @@
 //! std::fs::write("model.onnx.json", json).unwrap();
 //! ```
 
-use scirust_core::nn::Module;
 use scirust_core::autodiff::reverse::Tape;
+use scirust_core::nn::Module;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// ONNX-compatible graph representation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,7 +120,8 @@ pub fn export_sequential_to_onnx_json(
     let mut node_id = 0usize;
 
     // Collect weights as initializers
-    for (i, idx) in param_indices.iter().enumerate() {
+    for (i, idx) in param_indices.iter().enumerate()
+    {
         let tensor = tape.value(*idx);
         initializers.push(OnnxTensor {
             name: format!("param_{}", i),
@@ -133,12 +133,15 @@ pub fn export_sequential_to_onnx_json(
 
     // Build a single MatMul + Add node for a Linear layer
     let in_dim = input_shape.1 as u64;
-    let batch_dim = if input_shape.0 < 0 {
+    let batch_dim = if input_shape.0 < 0
+    {
         OnnxDim {
             dim_value: None,
             dim_param: Some("batch_size".into()),
         }
-    } else {
+    }
+    else
+    {
         OnnxDim {
             dim_value: Some(input_shape.0 as u64),
             dim_param: None,
@@ -149,10 +152,13 @@ pub fn export_sequential_to_onnx_json(
         name: "input".into(),
         elem_type: 1,
         shape: OnnxShape {
-            dims: vec![batch_dim, OnnxDim {
-                dim_value: Some(in_dim),
-                dim_param: None,
-            }],
+            dims: vec![
+                batch_dim,
+                OnnxDim {
+                    dim_value: Some(in_dim),
+                    dim_param: None,
+                },
+            ],
         },
     };
 
@@ -164,11 +170,7 @@ pub fn export_sequential_to_onnx_json(
     let out_dim_hidden: u64 = 256;
     nodes.push(OnnxNode {
         op_type: "Gemm".into(),
-        inputs: vec![
-            "input".into(),
-            "param_0".into(),
-            "param_1".into(),
-        ],
+        inputs: vec!["input".into(), "param_0".into(), "param_1".into()],
         outputs: vec![format!("hidden_{}", node_id)],
         attributes: vec![
             OnnxAttribute {
@@ -282,8 +284,14 @@ mod tests {
                     elem_type: 1,
                     shape: OnnxShape {
                         dims: vec![
-                            OnnxDim { dim_value: None, dim_param: Some("N".into()) },
-                            OnnxDim { dim_value: Some(784), dim_param: None },
+                            OnnxDim {
+                                dim_value: None,
+                                dim_param: Some("N".into()),
+                            },
+                            OnnxDim {
+                                dim_value: Some(784),
+                                dim_param: None,
+                            },
                         ],
                     },
                 }],
@@ -292,8 +300,14 @@ mod tests {
                     elem_type: 1,
                     shape: OnnxShape {
                         dims: vec![
-                            OnnxDim { dim_value: None, dim_param: Some("N".into()) },
-                            OnnxDim { dim_value: Some(10), dim_param: None },
+                            OnnxDim {
+                                dim_value: None,
+                                dim_param: Some("N".into()),
+                            },
+                            OnnxDim {
+                                dim_value: Some(10),
+                                dim_param: None,
+                            },
                         ],
                     },
                 }],

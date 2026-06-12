@@ -61,8 +61,10 @@ impl GeneticAlgorithm {
         }
     }
 
-    pub fn evolve<F>(&self, population: &mut Vec<Individual>, fitness_fn: F
-    ) where F: Fn(&[Individual]) -> Vec<f64> {
+    pub fn evolve<F>(&self, population: &mut Vec<Individual>, fitness_fn: F)
+    where
+        F: Fn(&[Individual]) -> Vec<f64>,
+    {
         let fitnesses = fitness_fn(population);
         for (i, fit) in fitnesses.iter().enumerate()
         {
@@ -71,10 +73,12 @@ impl GeneticAlgorithm {
         population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let mut new_pop = population[..self.elitism].to_vec();
         let mut rng = self.rng.borrow_mut();
-        while new_pop.len() < self.pop_size {
-            let p1 = &population[rng.gen_range(0..population.len()/2)];
-            let p2 = &population[rng.gen_range(0..population.len()/2)];
-            let mut child = if rng.gen::<f64>() < self.crossover_rate {
+        while new_pop.len() < self.pop_size
+        {
+            let p1 = &population[rng.gen_range(0..population.len() / 2)];
+            let p2 = &population[rng.gen_range(0..population.len() / 2)];
+            let mut child = if rng.gen::<f64>() < self.crossover_rate
+            {
                 let point = rng.gen_range(0..p1.genome.len());
                 let mut g = p1.genome[..point].to_vec();
                 g.extend_from_slice(&p2.genome[point..]);
@@ -87,7 +91,8 @@ impl GeneticAlgorithm {
             if rng.gen::<f64>() < self.mutation_rate
             {
                 let normal = Normal::new(0.0, 0.5).unwrap();
-                for gene in &mut child.genome {
+                for gene in &mut child.genome
+                {
                     *gene += normal.sample(&mut *rng);
                     *gene = gene.clamp(self.bounds.0, self.bounds.1);
                 }
@@ -100,7 +105,9 @@ impl GeneticAlgorithm {
     pub fn init_pop(&self, dims: usize) -> Vec<Individual> {
         let mut rng = self.rng.borrow_mut();
         let u = Uniform::new_inclusive(self.bounds.0, self.bounds.1);
-        (0..self.pop_size).map(|_| Individual::new((0..dims).map(|_| u.sample(&mut *rng)).collect())).collect()
+        (0..self.pop_size)
+            .map(|_| Individual::new((0..dims).map(|_| u.sample(&mut *rng)).collect()))
+            .collect()
     }
 }
 
@@ -124,24 +131,49 @@ impl CmaEs {
     /// Construct with an explicit seed for a reproducible random stream.
     pub fn seeded(dims: usize, seed: u64) -> Self {
         let lambda = 4 + (3.0 * (dims as f64).ln()).floor() as usize;
-        Self { dims, lambda, mu: lambda/2, sigma: 0.5, bounds: (-5.0, 5.0), rng: RefCell::new(StdRng::seed_from_u64(seed)) }
+        Self {
+            dims,
+            lambda,
+            mu: lambda / 2,
+            sigma: 0.5,
+            bounds: (-5.0, 5.0),
+            rng: RefCell::new(StdRng::seed_from_u64(seed)),
+        }
     }
-    pub fn step<F>(&mut self, theta: &mut Vec<f64>, fitness_fn: F
-    ) -> Vec<Individual> where F: Fn(&[f64]) -> f64 {
-        let (dims, sigma, bounds, lambda, mu) = (self.dims, self.sigma, self.bounds, self.lambda, self.mu);
+    pub fn step<F>(&mut self, theta: &mut Vec<f64>, fitness_fn: F) -> Vec<Individual>
+    where
+        F: Fn(&[f64]) -> f64,
+    {
+        let (dims, sigma, bounds, lambda, mu) =
+            (self.dims, self.sigma, self.bounds, self.lambda, self.mu);
         let normal = Normal::new(0.0, 1.0).unwrap();
         let mut rng = self.rng.borrow_mut();
-        let mut offspring: Vec<Individual> = (0..lambda).map(|_| {
-            let mut g = theta.to_owned();
-            for val in g.iter_mut().take(dims) { *val += normal.sample(&mut *rng) * sigma; *val = val.clamp(bounds.0, bounds.1); }
-            Individual::new(g)
-        }).collect();
-        let fitnesses = offspring.iter().map(|ind| fitness_fn(&ind.genome)).collect::<Vec<_>>();
-        for (i, fit) in fitnesses.iter().enumerate() { offspring[i].fitness = *fit; }
+        let mut offspring: Vec<Individual> = (0..lambda)
+            .map(|_| {
+                let mut g = theta.clone();
+                for i in 0..dims
+                {
+                    g[i] += normal.sample(&mut *rng) * sigma;
+                    g[i] = g[i].clamp(bounds.0, bounds.1);
+                }
+                Individual::new(g)
+            })
+            .collect();
+        let fitnesses = offspring
+            .iter()
+            .map(|ind| fitness_fn(&ind.genome))
+            .collect::<Vec<_>>();
+        for (i, fit) in fitnesses.iter().enumerate()
+        {
+            offspring[i].fitness = *fit;
+        }
         offspring.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let w: Vec<f64> = (0..mu).map(|i| (mu as f64 - i as f64).max(0.0)).collect();
         let sw: f64 = w.iter().sum();
-        for (i, val) in theta.iter_mut().enumerate().take(dims) { *val = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum(); }
+        for i in 0..dims
+        {
+            theta[i] = (0..mu).map(|j| offspring[j].genome[i] * w[j] / sw).sum();
+        }
         offspring
     }
 }
@@ -165,17 +197,31 @@ impl OpenEs {
     }
     /// Construct with an explicit seed for a reproducible random stream.
     pub fn seeded(dims: usize, seed: u64) -> Self {
-        Self { dims, pop_size: 4 + (3 * dims / 2), sigma: 0.1, alpha: 0.05, bounds: (-5.0, 5.0), rng: RefCell::new(StdRng::seed_from_u64(seed)) }
+        Self {
+            dims,
+            pop_size: 4 + (3 * dims / 2),
+            sigma: 0.1,
+            alpha: 0.05,
+            bounds: (-5.0, 5.0),
+            rng: RefCell::new(StdRng::seed_from_u64(seed)),
+        }
     }
-    pub fn step<F>(&self, theta: &mut [f64], fitness_fn: F
-    ) -> f64 where F: Fn(&[f64]) -> f64 {
+    pub fn step<F>(&self, theta: &mut Vec<f64>, fitness_fn: F) -> f64
+    where
+        F: Fn(&[f64]) -> f64,
+    {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let mut rng = self.rng.borrow_mut();
         let mut noise = Vec::with_capacity(self.pop_size);
         let mut rewards = Vec::with_capacity(self.pop_size);
-        for _ in 0..self.pop_size {
+        for _ in 0..self.pop_size
+        {
             let eps: Vec<f64> = (0..self.dims).map(|_| normal.sample(&mut *rng)).collect();
-            let perturbed: Vec<f64> = theta.iter().zip(&eps).map(|(t, e)| (t + self.sigma * e).clamp(self.bounds.0, self.bounds.1)).collect();
+            let perturbed: Vec<f64> = theta
+                .iter()
+                .zip(&eps)
+                .map(|(t, e)| (t + self.sigma * e).clamp(self.bounds.0, self.bounds.1))
+                .collect();
             let r = fitness_fn(&perturbed);
             noise.push(eps);
             rewards.push(r);
@@ -238,7 +284,9 @@ pub struct Nsga2 {
 }
 
 impl Default for Nsga2 {
-    fn default() -> Self { Self::seeded(EVO_DEFAULT_SEED.wrapping_add(3)) }
+    fn default() -> Self {
+        Self::seeded(EVO_DEFAULT_SEED.wrapping_add(3))
+    }
 }
 
 fn dominates(a: &MoIndividual, b: &MoIndividual) -> bool {
@@ -260,11 +308,19 @@ fn dominates(a: &MoIndividual, b: &MoIndividual) -> bool {
 impl Nsga2 {
     /// Construct with an explicit seed for a reproducible random stream.
     pub fn seeded(seed: u64) -> Self {
-        Self { pop_size: 100, mutation_rate: 0.1, crossover_rate: 0.9, bounds: (-5.0, 5.0), rng: RefCell::new(StdRng::seed_from_u64(seed)) }
+        Self {
+            pop_size: 100,
+            mutation_rate: 0.1,
+            crossover_rate: 0.9,
+            bounds: (-5.0, 5.0),
+            rng: RefCell::new(StdRng::seed_from_u64(seed)),
+        }
     }
 
-    pub fn evolve<F>(&self, population: &mut Vec<MoIndividual>, objectives_fn: F
-    ) where F: Fn(&[MoIndividual]) -> Vec<Vec<f64>> {
+    pub fn evolve<F>(&self, population: &mut Vec<MoIndividual>, objectives_fn: F)
+    where
+        F: Fn(&[MoIndividual]) -> Vec<Vec<f64>>,
+    {
         // Evaluate + rank the current population so selection sees valid ranks.
         let objs = objectives_fn(population);
         for (i, obj) in objs.iter().enumerate()
@@ -277,24 +333,39 @@ impl Nsga2 {
         let mut new_pop = Vec::with_capacity(self.pop_size);
         {
             let mut rng = self.rng.borrow_mut();
-            while new_pop.len() < self.pop_size {
+            while new_pop.len() < self.pop_size
+            {
                 let p1 = Self::tournament_select(population, &mut rng);
                 let p2 = Self::tournament_select(population, &mut rng);
-                let (mut c1, mut c2) = if rng.gen::<f64>() < self.crossover_rate {
+                let (mut c1, mut c2) = if rng.gen::<f64>() < self.crossover_rate
+                {
                     let point = rng.gen_range(0..p1.genome.len());
-                    let mut g1 = p1.genome[..point].to_vec(); g1.extend_from_slice(&p2.genome[point..]);
-                    let mut g2 = p2.genome[..point].to_vec(); g2.extend_from_slice(&p1.genome[point..]);
+                    let mut g1 = p1.genome[..point].to_vec();
+                    g1.extend_from_slice(&p2.genome[point..]);
+                    let mut g2 = p2.genome[..point].to_vec();
+                    g2.extend_from_slice(&p1.genome[point..]);
                     (MoIndividual::new(g1), MoIndividual::new(g2))
-                } else { (p1.clone(), p2.clone()) };
+                }
+                else
+                {
+                    (p1.clone(), p2.clone())
+                };
                 Self::mutate(&mut c1, &mut rng, self.mutation_rate, self.bounds);
                 Self::mutate(&mut c2, &mut rng, self.mutation_rate, self.bounds);
-                new_pop.push(c1); if new_pop.len() < self.pop_size { new_pop.push(c2); }
+                new_pop.push(c1);
+                if new_pop.len() < self.pop_size
+                {
+                    new_pop.push(c2);
+                }
             }
         }
         // Re-evaluate and rank the produced generation so callers can read the
         // Pareto front (`rank == 1`) directly from the returned population.
         let objs = objectives_fn(&new_pop);
-        for (i, obj) in objs.iter().enumerate() { new_pop[i].objectives = obj.clone(); }
+        for (i, obj) in objs.iter().enumerate()
+        {
+            new_pop[i].objectives = obj.clone();
+        }
         self.non_dominated_sort(&mut new_pop);
         self.crowding_distance(&mut new_pop);
         *population = new_pop;
@@ -374,19 +445,42 @@ impl Nsga2 {
         }
     }
     fn tournament_select(pop: &[MoIndividual], rng: &mut StdRng) -> MoIndividual {
-        let i1 = rng.gen_range(0..pop.len()); let i2 = rng.gen_range(0..pop.len());
-        if pop[i1].rank < pop[i2].rank { pop[i1].clone() }
-        else if pop[i1].rank > pop[i2].rank { pop[i2].clone() }
-        else if pop[i1].crowding_distance > pop[i2].crowding_distance { pop[i1].clone() }
-        else { pop[i2].clone() }
+        let i1 = rng.gen_range(0..pop.len());
+        let i2 = rng.gen_range(0..pop.len());
+        if pop[i1].rank < pop[i2].rank
+        {
+            pop[i1].clone()
+        }
+        else if pop[i1].rank > pop[i2].rank
+        {
+            pop[i2].clone()
+        }
+        else if pop[i1].crowding_distance > pop[i2].crowding_distance
+        {
+            pop[i1].clone()
+        }
+        else
+        {
+            pop[i2].clone()
+        }
     }
     fn mutate(ind: &mut MoIndividual, rng: &mut StdRng, mutation_rate: f64, bounds: (f64, f64)) {
         let normal = Normal::new(0.0, 0.5).unwrap();
-        for gene in &mut ind.genome { if rng.gen::<f64>() < mutation_rate { *gene += normal.sample(rng); *gene = gene.clamp(bounds.0, bounds.1); } }
+        for gene in &mut ind.genome
+        {
+            if rng.gen::<f64>() < mutation_rate
+            {
+                *gene += normal.sample(rng);
+                *gene = gene.clamp(bounds.0, bounds.1);
+            }
+        }
     }
     pub fn init_pop(&self, dims: usize) -> Vec<MoIndividual> {
-        let mut rng = self.rng.borrow_mut(); let u = Uniform::new_inclusive(self.bounds.0, self.bounds.1);
-        (0..self.pop_size).map(|_| MoIndividual::new((0..dims).map(|_| u.sample(&mut *rng)).collect())).collect()
+        let mut rng = self.rng.borrow_mut();
+        let u = Uniform::new_inclusive(self.bounds.0, self.bounds.1);
+        (0..self.pop_size)
+            .map(|_| MoIndividual::new((0..dims).map(|_| u.sample(&mut *rng)).collect()))
+            .collect()
     }
 }
 
@@ -486,16 +580,24 @@ mod tests {
             let mut nsga = Nsga2::seeded(123);
             nsga.pop_size = 40;
             let mut pop = nsga.init_pop(6);
-            for _ in 0..30 {
-                nsga.evolve(&mut pop, |inds| inds.iter().map(|ind| {
-                    let x = &ind.genome;
-                    let f1 = x[0].clamp(0.0, 1.0);
-                    let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
-                    let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
-                    vec![f1, g * h]
-                }).collect());
+            for _ in 0..30
+            {
+                nsga.evolve(&mut pop, |inds| {
+                    inds.iter()
+                        .map(|ind| {
+                            let x = &ind.genome;
+                            let f1 = x[0].clamp(0.0, 1.0);
+                            let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
+                            let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
+                            vec![f1, g * h]
+                        })
+                        .collect()
+                });
             }
-            pop.iter().flat_map(|i| i.genome.clone()).map(|v| v.to_bits()).collect::<Vec<u64>>()
+            pop.iter()
+                .flat_map(|i| i.genome.clone())
+                .map(|v| v.to_bits())
+                .collect::<Vec<u64>>()
         };
         assert_eq!(run(), run(), "seeded NSGA-II must be bit-reproducible");
     }

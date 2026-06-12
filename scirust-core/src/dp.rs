@@ -69,11 +69,7 @@ pub struct MomentsAccountant {
 
 impl MomentsAccountant {
     /// Create a new moments accountant.
-    pub fn new(
-        delta: f64,
-        q: f64,
-        sigma: f64,
-    ) -> Self {
+    pub fn new(delta: f64, q: f64, sigma: f64) -> Self {
         // Orders α for Rényi divergence computation
         let orders: Vec<f64> = (1..=100)
             .map(|i| 1.0 + (i as f64) * 0.1) // 1.1, 1.2, ..., 11.0
@@ -95,7 +91,8 @@ impl MomentsAccountant {
     pub fn step(&mut self) {
         // Compute Rényi divergence for each order α
         // Using the tight bound from Abadi et al. (2016)
-        for (i, &alpha) in self.orders.iter().enumerate() {
+        for (i, &alpha) in self.orders.iter().enumerate()
+        {
             let moment = compute_log_moment(alpha, self.q, self.sigma);
             self.log_moments[i] += moment;
         }
@@ -110,10 +107,11 @@ impl MomentsAccountant {
     fn compute_epsilon(&self) -> f64 {
         let mut best_eps = f64::INFINITY;
 
-        for (i, &alpha) in self.orders.iter().enumerate() {
-            let eps = self.log_moments[i]
-                - (self.delta.ln() / alpha);
-            if eps < best_eps {
+        for (i, &alpha) in self.orders.iter().enumerate()
+        {
+            let eps = self.log_moments[i] - (self.delta.ln() / alpha);
+            if eps < best_eps
+            {
                 best_eps = eps;
             }
         }
@@ -126,7 +124,8 @@ impl MomentsAccountant {
 fn compute_log_moment(alpha: f64, q: f64, sigma: f64) -> f64 {
     // Simplified bound for Gaussian mechanism with subsampling
     // From Abadi et al. 2016, Theorem 2 (with simplifications)
-    if q == 0.0 || sigma == 0.0 {
+    if q == 0.0 || sigma == 0.0
+    {
         return 0.0;
     }
 
@@ -141,9 +140,11 @@ pub fn clip_gradients(grads: &mut [f32], l2_norm_clip: f32) {
     let norm_sq: f32 = grads.iter().map(|&g| g * g).sum();
     let norm = norm_sq.sqrt();
 
-    if norm > l2_norm_clip && norm > 1e-12 {
+    if norm > l2_norm_clip && norm > 1e-12
+    {
         let scale = l2_norm_clip / norm;
-        for g in grads.iter_mut() {
+        for g in grads.iter_mut()
+        {
             *g *= scale;
         }
     }
@@ -153,17 +154,14 @@ pub fn clip_gradients(grads: &mut [f32], l2_norm_clip: f32) {
 ///
 /// σ = noise_multiplier * l2_norm_clip (should match clip_gradients).
 pub fn add_noise(grads: &mut [f32], noise_stddev: f32, rng: &mut PcgEngine) {
-    for g in grads.iter_mut() {
+    for g in grads.iter_mut()
+    {
         *g += rng.normal(0.0, noise_stddev);
     }
 }
 
 /// Clip per-sample gradients and add noise in one step.
-pub fn dp_protect(
-    per_sample_grads: &mut [f32],
-    config: &DpSgdConfig,
-    rng: &mut PcgEngine,
-) {
+pub fn dp_protect(per_sample_grads: &mut [f32], config: &DpSgdConfig, rng: &mut PcgEngine) {
     clip_gradients(per_sample_grads, config.l2_norm_clip);
     let noise_std = config.noise_multiplier * config.l2_norm_clip;
     add_noise(per_sample_grads, noise_std, rng);
@@ -211,7 +209,8 @@ mod tests {
         let mut acc = MomentsAccountant::new(1e-5, 0.01, 1.1);
 
         // 1000 steps
-        for _ in 0..1000 {
+        for _ in 0..1000
+        {
             acc.step();
         }
 

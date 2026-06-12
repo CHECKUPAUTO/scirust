@@ -41,8 +41,10 @@ impl ProbabilisticLogic {
     pub fn infer_probability(&self, event: &str) -> Result<f64> {
         let base = self.priors.get(event).copied().unwrap_or(0.0);
         let mut complement = 1.0 - base;
-        for (body, head, weight) in &self.rules {
-            if head != event {
+        for (body, head, weight) in &self.rules
+        {
+            if head != event
+            {
                 continue;
             }
             let p_body: f64 = body

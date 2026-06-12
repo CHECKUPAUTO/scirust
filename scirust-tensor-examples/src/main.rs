@@ -19,5 +19,8 @@ fn main() {
     let q = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 1, 2, 2]);
     let k = TensorND::new(vec![1.0, 0.0, 0.0, 1.0], vec![1, 1, 2, 2]);
     let scores = einsum("bhid,bhjd->bhij", &[&q, &k]).expect("attention");
-    println!("attention scores = {:?} shape {:?}", scores.data, scores.shape);
+    println!(
+        "attention scores = {:?} shape {:?}",
+        scores.data, scores.shape
+    );
 }
