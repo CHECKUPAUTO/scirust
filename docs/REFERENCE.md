@@ -5,9 +5,10 @@ binaires, features, et points d'entrée d'API. La documentation
 **exhaustive des fonctions** est générée par rustdoc (voir §7) — chaque
 fonction publique y est documentée depuis le code source.
 
-> Toolchain requis : **Rust nightly** (fixé par `rust-toolchain.toml`,
-> composants rustfmt/clippy/rustc-dev/llvm-tools). Tout est pur Rust, sans
-> FFI ; aucune dépendance système.
+> Toolchains : le dépôt épingle **nightly** (rust-toolchain.toml) pour la
+> feature optionnelle `portable-simd`, mais **tout le workspace compile et
+> passe ses tests sur Rust STABLE** (683 tests vérifiés ; job CI
+> `build-test-stable`). Pur Rust, zéro FFI, aucune dépendance système.
 
 ---
 
@@ -44,6 +45,30 @@ conflits d'emprunt E0502, lecture sous `&mut` E0503, emprunt échappé,
 non-déclarés). **Codes de sortie** : `0` aucun défaut, `1` ≥ 1 défaut
 (utilisable comme check de script), `2` erreur d'usage/IO/syntaxe.
 Exemples fournis : `scirust-som/examples/*.rs`.
+
+### `scirust-verify` — certificats d'inférence vérifiables (preuve)
+
+```bash
+cargo run -p scirust-runtime --bin scirust_verify -- emit   model.qsr1 model.proof [batch] [seeds...]
+cargo run -p scirust-runtime --bin scirust_verify -- verify model.proof model.qsr1
+```
+
+`emit` scelle un certificat canonique `SCIRUST-PROOF-1` (sha256 artefact,
+certificat de ressources, empreintes FNV+sha256 des sorties sur entrées
+seedées, après preuve d'égalité bit-exacte std/no_std). `verify` re-dérive
+tout depuis les octets et sort 0 (MATCH) ou 1 (MISMATCH) — toute
+altération de l'artefact ou du certificat est détectée (testé). La
+ré-émission est bit-identique.
+
+### `cargo som` / sortie SARIF — linter d'ownership pour la CI
+
+```bash
+cargo install --path scirust-som/crates/cli   # installe som-analyze + cargo-som
+cargo som --sarif src/lib.rs > som.sarif       # SARIF 2.1.0 (code scanning)
+```
+
+Limite documentée : localisations au niveau fichier (les régions
+ligne-précises arrivent avec les spans du frontend).
 
 ### `openclaw-u` — démo agent autonome (hors framework)
 

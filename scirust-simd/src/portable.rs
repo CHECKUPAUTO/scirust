@@ -32,7 +32,7 @@
 
 #[cfg(feature = "portable-simd")]
 pub mod simd_ops {
-    use std::simd::{SimdFloat, StdFloat, f32x8, f64x4, num::SimdFloat as _};
+    use std::simd::{StdFloat, f32x8, f64x4, num::SimdFloat};
 
     // ------------------------------------------------------------------ //
     //  ADDITION                                                            //

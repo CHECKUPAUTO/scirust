@@ -27,6 +27,15 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **Support Rust stable** : `#![feature(portable_simd)]` rendu réellement
+  optionnel (`cfg_attr`), fallback scalaire du tiling ; les 683 tests
+  passent sur stable ; job CI `build-test-stable`. La feature nightly
+  `portable-simd` (cassée par la migration d'API std::simd) est réparée.
+- **`scirust-verify`** : certificats d'inférence `SCIRUST-PROOF-1`
+  fichier-à-fichier (emit/verify, exit codes), détection d'altération
+  artefact/certificat testée, ré-émission bit-identique.
+- **`cargo som` + `--sarif`** : le linter d'ownership en sous-commande
+  cargo avec sortie SARIF 2.1.0 pour le code scanning CI.
 - **SOM opérationnel sur du vrai Rust** : frontend `syn`
   (`scirust-som-frontend`), oracle d'ownership **type-aware**
   (Copy/move exact, E0382/E0502/E0503-style), CLI `som-analyze`,

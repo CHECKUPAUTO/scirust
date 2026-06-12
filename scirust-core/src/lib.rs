@@ -1,4 +1,4 @@
-#![feature(portable_simd)]
+#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
 
 pub mod io;
 pub mod nn;

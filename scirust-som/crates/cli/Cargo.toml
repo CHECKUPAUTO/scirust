@@ -4,11 +4,22 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+name = "scirust_som_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "som-analyze"
 path = "src/main.rs"
+
+[[bin]]
+name = "cargo-som"
+path = "src/cargo_som.rs"
 
 [dependencies]
 scirust-som-frontend = { path = "../frontend" }
 scirust-som-symbolic = { path = "../symbolic" }
 scirust-som-visualizer = { path = "../visualizer" }
+
+[dev-dependencies]
+serde_json = "1"

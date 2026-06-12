@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-12 — volet 6 : exécution roadmap P0/P1
+- P0.3 STABLE : feature(portable_simd) optionnelle via cfg_attr +
+  fallback scalaire tiling → workspace entier compile ET passe 683
+  tests sur Rust stable ; job CI build-test-stable ajouté ; feature
+  nightly portable-simd réparée (migration std::simd : SimdFloat→num::,
+  LaneCount/SupportedLaneCount supprimés) — 763 tests verts feature ON
+- P0.1 PREUVE : binaire scirust-verify (emit/verify de certificats
+  SCIRUST-PROOF-1) ; test E2E : MATCH propre, altération artefact
+  détectée, certificat falsifié détecté, ré-émission bit-identique
+- P1.2 LINTER CI : crate cli refactorée en lib partagée + 2 binaires
+  (som-analyze, cargo-som) ; sortie --sarif SARIF 2.1.0 validée par
+  test JSON ; localisations niveau fichier (spans = prochain jalon)
+
 ## Session 2026-06-12 — volet 5 : tour de code « philosophie & câblage »
 - 20 fichiers morts confirmés par test de corruption, traités :
   recâblés (core::lazy + fix réel de la fusion pointwise qui ne
