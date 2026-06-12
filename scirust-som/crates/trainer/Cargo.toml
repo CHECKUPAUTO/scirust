@@ -2,6 +2,7 @@
 name = "scirust-som-trainer"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
 scirust-core = { path = "../../../scirust-core" }

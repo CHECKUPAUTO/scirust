@@ -2,6 +2,7 @@
 name = "scirust-tn"
 version = "0.1.0"
 edition = "2021"
+publish = false
 rust-version = "1.85"
 description = "Tensor Network primitives for SciRust: Tensor-Train decomposition, MPS, DMRG"
 license = "MIT OR Apache-2.0"

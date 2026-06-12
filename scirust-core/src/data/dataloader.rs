@@ -9,7 +9,7 @@
 //! use scirust_core::data::{Dataset, InMemoryDataset, dataloader::DataLoader};
 //!
 //! let dataset = InMemoryDataset::new(features, labels, in_dim, out_dim);
-//! let mut loader = DataLoader::builder(dataset)
+//! let loader = DataLoader::builder(dataset)
 //!     .batch_size(32)
 //!     .shuffle(true)
 //!     .build();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_dataloader_basic() {
         let dataset = make_dataset(10, 3, 2);
-        let mut loader = DataLoader::builder(dataset)
+        let loader = DataLoader::builder(dataset)
             .batch_size(3)
             .shuffle(false)
             .build();
@@ -223,13 +223,13 @@ mod tests {
         assert_eq!(batches.len(), 4);
         assert_eq!(batches[0].0.len(), 3 * 3);
         assert_eq!(batches[0].1.len(), 3 * 2);
-        assert_eq!(batches[3].0.len(), 1 * 3);
+        assert_eq!(batches[3].0.len(), 3);
     }
 
     #[test]
     fn test_dataloader_drop_last() {
         let dataset = make_dataset(5, 3, 2);
-        let mut loader = DataLoader::builder(dataset)
+        let loader = DataLoader::builder(dataset)
             .batch_size(2)
             .shuffle(false)
             .drop_last(true)
@@ -274,7 +274,7 @@ mod tests {
 
         // Collect first pass into a vec
         let mut first_pass = Vec::new();
-        while let Some(batch) = loader.next()
+        for batch in loader.by_ref()
         {
             first_pass.push(batch);
         }
@@ -282,7 +282,7 @@ mod tests {
         loader.reset();
 
         let mut second_pass = Vec::new();
-        while let Some(batch) = loader.next()
+        for batch in loader.by_ref()
         {
             second_pass.push(batch);
         }

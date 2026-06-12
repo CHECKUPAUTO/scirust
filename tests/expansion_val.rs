@@ -20,7 +20,7 @@ fn test_bpe_integration() {
     let texts = vec!["the quick brown fox", "jumps over the lazy dog"];
     let tokenizer = BpeTokenizer::train(&texts, 50);
     let encoded = tokenizer.tokenize("the quick dog");
-    assert!(encoded.len() > 0);
+    assert!(!encoded.is_empty());
 }
 
 #[test]

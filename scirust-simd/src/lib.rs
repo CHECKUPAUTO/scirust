@@ -346,14 +346,28 @@ mod neon_fns {
 
 #[cfg(target_arch = "aarch64")]
 pub mod sve {
-    #[allow(unused_imports)]
-    pub use super::sve_fns::*;
-}
-
-#[cfg(target_arch = "aarch64")]
-mod sve_fns {
-    #[allow(unused_imports)]
-    pub use crate::sve::*;
+    /// SVE vector length in elements of `T`, or 0 when SVE is unavailable.
+    ///
+    /// Reads the architectural vector length with `rdvl` (stable inline
+    /// asm). The instruction is only executed after runtime detection, so
+    /// this is safe to call on any aarch64 core.
+    pub fn sve_vector_length_elements<T>() -> usize {
+        if !std::arch::is_aarch64_feature_detected!("sve")
+        {
+            return 0;
+        }
+        let vl_bytes: u64;
+        // SAFETY: rdvl is only reached when the CPU reports SVE support.
+        unsafe {
+            core::arch::asm!(
+                ".arch_extension sve",
+                "rdvl {0}, #1",
+                out(reg) vl_bytes,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        vl_bytes as usize / core::mem::size_of::<T>()
+    }
 }
 
 // =============================================================================

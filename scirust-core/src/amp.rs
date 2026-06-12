@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_fp16_conversion() {
-        let x = 1.23456789f32;
+        let x = 1.234_567_9f32;
         let half = fp32_to_fp16(x);
         let back = fp16_to_fp32(half);
         // Should lose precision
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_bf16_conversion() {
-        let x = 1.23456789f32;
+        let x = 1.234_567_9f32;
         let half = fp32_to_bf16(x);
         let back = bf16_to_fp32(half);
         // BF16 has even less mantissa than FP16

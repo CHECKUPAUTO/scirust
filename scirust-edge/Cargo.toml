@@ -2,6 +2,7 @@
 name = "scirust-edge"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "no_std, allocation-free deterministic int8 inference for QSR1 artifacts (Cortex-M class)"
 license-file = "../LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"

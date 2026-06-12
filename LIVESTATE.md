@@ -3,6 +3,32 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-12 — volet 2 : réparation CI
+- `.github/workflows/ci.yml` réécrit pour être réalisable :
+  - suppression de `--all-features` (blas-openblas et blas-mkl sont
+    mutuellement exclusifs → la CI ne pouvait JAMAIS compiler)
+  - nouveau job `cross-check-aarch64` (cargo check --target aarch64) :
+    type-vérifie tous les chemins NEON/SVE — la classe de bug du merge
+    du 12/06 devient détectable sur PR
+  - coverage passé en informatif (continue-on-error), cargo-llvm-cov
+    pré-compilé via taiki-e/install-action
+- `deny.toml` réécrit (l'ancien n'était pas du TOML valide → le job
+  License/Security échouait au parsing) ; validé en local avec
+  cargo-deny 0.19.8 : advisories/bans/licenses/sources tous ok ;
+  RUSTSEC-2024-0436 (`paste` unmaintained via nalgebra→simba) ignoré
+  avec justification — c'est l'alerte Dependabot ouverte
+- `publish = false` ajouté aux 51 manifestes (réalité : deps par chemin,
+  licence non-commerciale) — active l'exemption licences des crates
+  privées dans cargo-deny
+- Tous les warnings restants éliminés (RUSTFLAGS -D warnings tenable) ;
+  gate clippy étendu à --all-targets : 14 lints de code de test corrigés
+- Cross-check aarch64 a aussi révélé/réparé : test SVE cassé
+  (`sve_vector_length_elements` inexistante — modules sve/sve_fns en
+  ré-export circulaire vide) → implémentation réelle via `rdvl` (asm
+  stable, gardée par détection runtime)
+- Reste à faire côté GitHub (non scriptable depuis le repo) : protection
+  de branche master exigeant fmt/clippy/build-test/cross-check/deny
+
 ## Session 2026-06-12 (audit + SOM tranche verticale)
 - Audit complet exécuté : voir `scirust_complete_audit_report.md`
 - Régression de merge réparée (sgemv AVX2/SSE2/NEON, arena slab) ; gates

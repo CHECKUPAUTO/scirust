@@ -2,6 +2,7 @@
 name = "scirust-simd"
 version = "0.1.0"
 edition = "2021"
+publish = false
 authors = ["SciRust Team"]
 description = "SIMD auto-vectorization primitives for SciRust"
 license-file = "../LICENSE.md"

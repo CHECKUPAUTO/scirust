@@ -510,8 +510,10 @@ mod tests {
 
     #[test]
     fn ga_sphere() {
-        let mut ga = GeneticAlgorithm::default();
-        ga.pop_size = 50;
+        let ga = GeneticAlgorithm {
+            pop_size: 50,
+            ..GeneticAlgorithm::default()
+        };
         let mut pop = ga.init_pop(10);
         for _ in 0..100
         {
@@ -552,8 +554,10 @@ mod tests {
 
     #[test]
     fn nsga2_zdt1() {
-        let mut nsga = Nsga2::default();
-        nsga.pop_size = 50;
+        let nsga = Nsga2 {
+            pop_size: 50,
+            ..Nsga2::default()
+        };
         let mut pop = nsga.init_pop(10);
         for _ in 0..50
         {

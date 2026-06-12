@@ -2,6 +2,7 @@
 name = "scirust-neuro-symbolic"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Neuro-Symbolic Reasoning engine for SciRust"
 
 [dependencies]

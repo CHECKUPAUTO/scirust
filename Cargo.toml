@@ -2,6 +2,7 @@
 name = "scirust"
 version = "0.13.0"
 edition = "2021"
+publish = false
 rust-version = "1.85"
 description = "SciRust — Industrial-grade deep learning framework in pure Rust"
 license-file = "LICENSE.md"

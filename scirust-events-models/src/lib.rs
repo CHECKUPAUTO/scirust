@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_event_classifier() {
         let mut rng = PcgEngine::new(42);
-        let mut model = Sequential::new()
+        let model = Sequential::new()
             .add(Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng))
             .add(ReLU::new());
 

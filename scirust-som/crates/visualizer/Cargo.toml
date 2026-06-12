@@ -2,6 +2,7 @@
 name = "scirust-som-visualizer"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
 scirust-som-symbolic = { path = "../symbolic" }

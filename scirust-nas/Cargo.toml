@@ -2,6 +2,7 @@
 name = "scirust-nas"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Neural Architecture Search — evolutionary and gradient-based architecture optimization"
 
 [dependencies]

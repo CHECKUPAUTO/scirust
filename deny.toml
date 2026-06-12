@@ -1,97 +1,40 @@
-# deny.toml — cargo-deny configuration for SciRust
-# License: PolyForm Noncommercial 1.0.0 + commercial
+# deny.toml — cargo-deny configuration for SciRust (validated with cargo-deny 0.19)
+#
+# The workspace crates themselves are source-available under
+# PolyForm Noncommercial 1.0.0 (see LICENSE.md) and are not published to
+# crates.io (`publish = false`), so the license check below covers
+# third-party dependencies only.
+
+[graph]
+all-features = false
 
 [advisories]
-# Ignore specific advisories if needed
-ignore = []
+ignore = [
+    # Unmaintained notice, not a vulnerability: `paste` is pulled in via
+    # nalgebra -> simba and has no upstream replacement yet
+    # (https://rustsec.org/advisories/RUSTSEC-2024-0436).
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitively required by nalgebra/simba, no safe upgrade available" },
+]
 
 [licenses]
-# Allow the project's own license
+# Exactly the permissive licenses present in the dependency tree
+# (cargo-deny warns on unused allowances, so keep this list tight).
 allow = [
-    "PolyForm-Noncommercial-1.0.0",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "Zlib",
+    "Unicode-3.0",
 ]
-
-# Allow common permissive licenses in dependencies
-allow-osi-approved = true
-allow-fsf-libre = true
-
-# Unclear or problematic licenses
-deny = [
-    "AGPL-3.0",
-    "GPL-3.0",
-    "LGPL-3.0",
-    "SSPL-1.0",
-    "Commons-Clause-1.0",
-]
-
-# Clarify license for dependencies with ambiguous licenses
-clarify = {
-    "matrixmultiply" = "Apache-2.0",
-    "wgpu" = "Apache-2.0 OR MIT",
-    "cudarc" = "MIT",
-    "half" = "MIT",
-    "nalgebra" = "Apache-2.0 OR MIT",
-    "ndarray" = "MIT",
-    "rand" = "MIT",
-    "serde" = "MIT",
-    "thiserror" = "MIT",
-    "bytemuck" = "Apache-2.0 OR MIT",
-    "pollster" = "Apache-2.0 OR MIT",
-    "sha2" = "MIT OR Apache-2.0",
-    "libm" = "MIT",
-}
+confidence-threshold = 0.8
+# Workspace members are unpublished; skip license checks for them.
+private = { ignore = true }
 
 [bans]
-# Deny specific crates or versions
-deny = {
-    # No specific bans currently
-}
-
-# Allow multiple versions of the same crate if semver compatible
 multiple-versions = "allow"
-
-# Wildcard allow for development dependencies
-wildcards = { allow = ["dev", "build"] }
-
-[licenses.private]
-# Private crates that don't publish to crates.io
-ignore = [
-    "scirust",
-    "scirust-core",
-    "scirust-autodiff",
-    "scirust-simd",
-    "scirust-simd-macros",
-    "scirust-gpu",
-    "scirust-gpu-macros",
-    "scirust-macros",
-    "scirust-runtime",
-    "scirust-learning",
-    "scirust-symbolic",
-    "scirust-symreg",
-    "scirust-solvers",
-    "scirust-reasoning",
-    "scirust-bridge",
-    "scirust-evo",
-    "scirust-edge",
-    "scirust-events-core",
-    "scirust-events-models",
-    "scirust-events-runtime",
-    "scirust-events-examples",
-    "scirust-neuro-symbolic",
-    "scirust-arena",
-    "scirust-fusion",
-    "scirust-rustc-driver",
-    "scirust-tensor-core",
-    "scirust-tensor-einsum",
-    "scirust-tensor-contraction",
-    "scirust-tensor-compile",
-    "scirust-tensor-runtime",
-    "scirust-tensor-examples",
-    "scirust-tn",
-    "scirust-burn-bridge",
-]
+wildcards = "allow"
 
 [sources]
-# Only allow crates.io
-allow-unknown-registry = false
-allow-unknown-git = false
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -2,6 +2,7 @@
 name = "scirust-onnx"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "ONNX model export for SciRust — convert trained models to standard ONNX format"
 
 [dependencies]
