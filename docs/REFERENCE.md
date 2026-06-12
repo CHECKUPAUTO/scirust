@@ -7,7 +7,7 @@ fonction publique y est documentée depuis le code source.
 
 > Toolchains : le dépôt épingle **nightly** (rust-toolchain.toml) pour la
 > feature optionnelle `portable-simd`, mais **tout le workspace compile et
-> passe ses tests sur Rust STABLE** (683 tests vérifiés ; job CI
+> passe ses tests sur Rust STABLE** (686 tests vérifiés ; job CI
 > `build-test-stable`). Pur Rust, zéro FFI, aucune dépendance système.
 
 ---
