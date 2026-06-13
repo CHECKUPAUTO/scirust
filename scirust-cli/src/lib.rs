@@ -7,6 +7,7 @@
 //! the guarantees.
 
 pub mod learning;
+pub mod numeric;
 pub mod quickstart;
 pub mod symbolic;
 
@@ -20,7 +21,7 @@ struct Command {
 /// Commands grouped by theme, in display order.
 const GROUPS: &[(&str, &[Command])] = &[
     (
-        "LEARNING",
+        "LEARNING & OPTIMIZATION",
         &[
             Command {
                 name: "quickstart",
@@ -36,6 +37,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 name: "evo",
                 args: "[--seed N] [--gens G]",
                 about: "Minimize the sphere function with a seeded genetic algorithm.",
+            },
+            Command {
+                name: "cmaes",
+                args: "[--seed N] [--steps S]",
+                about: "Minimize the sphere function with a seeded CMA-ES.",
             },
         ],
     ),
@@ -60,7 +66,57 @@ const GROUPS: &[(&str, &[Command])] = &[
             Command {
                 name: "solve",
                 args: "<expr> [var]",
-                about: "Real roots of `expr = 0` (linear / quadratic).",
+                about: "Symbolic real roots of `expr = 0` (linear / quadratic).",
+            },
+            Command {
+                name: "to-rust",
+                args: "<expr>",
+                about: "Transpile an expression to Rust source.",
+            },
+            Command {
+                name: "regress",
+                args: "<xs> <ys> [degree]",
+                about: "Least-squares fit (linear, or polynomial of given degree).",
+            },
+        ],
+    ),
+    (
+        "NUMERICAL SOLVERS",
+        &[
+            Command {
+                name: "integrate",
+                args: "<expr> <a> <b> [var]",
+                about: "Definite integral ∫[a,b] via Romberg.",
+            },
+            Command {
+                name: "root",
+                args: "<expr> <a> <b> [var]",
+                about: "A root in [a,b] via Brent (needs a sign change).",
+            },
+            Command {
+                name: "minimize",
+                args: "<expr> <a> <b> [var]",
+                about: "Local minimum in [a,b] (root of the symbolic derivative).",
+            },
+            Command {
+                name: "linsolve",
+                args: "\"r;r\" \"b\"",
+                about: "Solve A·x = b by LU, e.g. `linsolve \"2,1;1,3\" \"3,5\"`.",
+            },
+            Command {
+                name: "det",
+                args: "\"r;r\"",
+                about: "Determinant of a square matrix.",
+            },
+            Command {
+                name: "polyroots",
+                args: "\"c0,c1,..\"",
+                about: "Real roots of a polynomial (ascending coefficients).",
+            },
+            Command {
+                name: "ode",
+                args: "<f(t,y)> <y0> <t0> <t1> [h]",
+                about: "Integrate dy/dt = f(t,y) with RK4.",
             },
         ],
     ),
@@ -176,10 +232,20 @@ pub fn run(args: &[String]) -> u8 {
         Some("quickstart") => quickstart::run(),
         Some("som") => learning::run_som(rest),
         Some("evo") => learning::run_evo(rest),
+        Some("cmaes") => learning::run_cmaes(rest),
         Some("diff") => symbolic::run_diff(rest),
         Some("simplify") => symbolic::run_simplify(rest),
         Some("eval") => symbolic::run_eval(rest),
         Some("solve") => symbolic::run_solve(rest),
+        Some("to-rust") => symbolic::run_to_rust(rest),
+        Some("regress") => symbolic::run_regress(rest),
+        Some("integrate") => numeric::run_integrate(rest),
+        Some("root") => numeric::run_root(rest),
+        Some("minimize") => numeric::run_minimize(rest),
+        Some("linsolve") => numeric::run_linsolve(rest),
+        Some("det") => numeric::run_det(rest),
+        Some("polyroots") => numeric::run_polyroots(rest),
+        Some("ode") => numeric::run_ode(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -218,7 +284,17 @@ mod tests {
         assert_eq!(run(&s(&["diff", "x*x"])), 0);
         assert_eq!(run(&s(&["solve", "x^2 - 4"])), 0);
         assert_eq!(run(&s(&["evo", "--gens", "20"])), 0);
+        assert_eq!(run(&s(&["cmaes", "--steps", "20"])), 0);
         assert_eq!(run(&s(&["som", "train", "--epochs", "3"])), 0);
+        assert_eq!(run(&s(&["to-rust", "x + 1"])), 0);
+        assert_eq!(run(&s(&["regress", "0,1,2", "1,3,5"])), 0);
+        assert_eq!(run(&s(&["integrate", "x", "0", "1"])), 0);
+        assert_eq!(run(&s(&["root", "x^2 - 2", "0", "2"])), 0);
+        assert_eq!(run(&s(&["minimize", "x^2 - 4*x + 7", "0", "5"])), 0);
+        assert_eq!(run(&s(&["linsolve", "2,1;1,3", "3,5"])), 0);
+        assert_eq!(run(&s(&["det", "2,1;1,3"])), 0);
+        assert_eq!(run(&s(&["polyroots", "-2,0,1"])), 0);
+        assert_eq!(run(&s(&["ode", "y", "1", "0", "1"])), 0);
     }
 
     #[test]

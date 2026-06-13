@@ -6,7 +6,10 @@
 
 use std::collections::HashMap;
 
-use scirust_symbolic::{diff, eval, parse, simplify, solve_linear, solve_quadratic};
+use scirust_symbolic::{
+    diff, eval, linear_regression, parse, polynomial_fit, simplify, solve_linear, solve_quadratic,
+    to_rust_code,
+};
 
 fn parse_or_report(expr: &str) -> Result<scirust_symbolic::Expr, u8> {
     parse(expr).map_err(|e| {
@@ -139,12 +142,133 @@ pub fn run_solve(args: &[String]) -> u8 {
     }
 }
 
+/// `to-rust <expr>` — transpile an expression to Rust source.
+pub fn run_to_rust(args: &[String]) -> u8 {
+    let Some(expr) = args.first()
+    else
+    {
+        eprintln!("usage: scirust to-rust <expr>");
+        return 2;
+    };
+    match parse_or_report(expr)
+    {
+        Ok(e) =>
+        {
+            println!("{}", to_rust_code(&simplify(&e)));
+            0
+        },
+        Err(c) => c,
+    }
+}
+
+/// `regress <xs> <ys> [degree]` — least-squares fit. With no degree (or
+/// degree 1) reports slope/intercept; with degree ≥ 2 reports polynomial
+/// coefficients (ascending). Both are comma-separated number lists.
+pub fn run_regress(args: &[String]) -> u8 {
+    let (Some(xs_s), Some(ys_s)) = (args.first(), args.get(1))
+    else
+    {
+        eprintln!("usage: scirust regress <x1,x2,..> <y1,y2,..> [degree]");
+        return 2;
+    };
+    let parse_list = |s: &str| -> Result<Vec<f64>, u8> {
+        s.split(',')
+            .map(|t| {
+                t.trim().parse::<f64>().map_err(|_| {
+                    eprintln!("error: `{}` is not a number", t.trim());
+                    2u8
+                })
+            })
+            .collect()
+    };
+    let xs = match parse_list(xs_s)
+    {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    let ys = match parse_list(ys_s)
+    {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    if xs.len() != ys.len() || xs.is_empty()
+    {
+        eprintln!("error: xs and ys must be non-empty and the same length");
+        return 2;
+    }
+    let degree = args
+        .get(2)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    if degree <= 1
+    {
+        match linear_regression(&xs, &ys)
+        {
+            // scirust_symbolic returns (intercept, slope).
+            Ok((intercept, slope)) =>
+            {
+                println!("y = {slope:.6} * x + {intercept:.6}");
+                0
+            },
+            Err(e) =>
+            {
+                eprintln!("error: {e}");
+                2
+            },
+        }
+    }
+    else
+    {
+        match polynomial_fit(&xs, &ys, degree)
+        {
+            Ok(coeffs) =>
+            {
+                let terms: Vec<String> = coeffs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("{c:.6}·x^{i}"))
+                    .collect();
+                println!("y = {}", terms.join(" + "));
+                0
+            },
+            Err(e) =>
+            {
+                eprintln!("error: {e}");
+                2
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn to_rust_and_regress() {
+        assert_eq!(run_to_rust(&s(&["x^2 + 1"])), 0);
+        assert_eq!(run_to_rust(&[]), 2);
+        // y = 2x + 1 through (0,1),(1,3),(2,5)
+        assert_eq!(run_regress(&s(&["0,1,2", "1,3,5"])), 0);
+        assert_eq!(run_regress(&s(&["0,1,2", "0,1,4", "2"])), 0); // quadratic
+        assert_eq!(run_regress(&s(&["0,1", "1,2,3"])), 2); // length mismatch
+    }
+
+    #[test]
+    fn regress_recovers_correct_slope_intercept() {
+        // Pin the (intercept, slope) convention so the CLI never mislabels it:
+        // points lie exactly on y = 2x + 1.
+        let (intercept, slope) =
+            linear_regression(&[0.0, 1.0, 2.0, 3.0], &[1.0, 3.0, 5.0, 7.0]).expect("fit ok");
+        assert!((slope - 2.0).abs() < 1e-9, "slope should be 2, got {slope}");
+        assert!(
+            (intercept - 1.0).abs() < 1e-9,
+            "intercept should be 1, got {intercept}"
+        );
     }
 
     #[test]

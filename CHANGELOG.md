@@ -30,6 +30,14 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI massivement étoffée** (19 commandes, toutes adossées à du code
+  testé) : ajout de `cmaes` ; maths symboliques `to-rust`, `regress` ;
+  solveurs numériques `integrate` (Romberg), `root`/`minimize` (Brent,
+  via dérivée symbolique), `linsolve`/`det` (LU), `polyroots`,
+  `ode` (RK4). Les commandes pilotées par expression utilisent
+  `scirust-symbolic::eval` comme pont vers les solveurs `scirust-solvers`.
+  +10 tests CLI ; bug d'ordre (intercept,slope) de `regress` corrigé et
+  épinglé par un test.
 - **CLI `scirust` étoffée** (niveau industriel) : nouvelles commandes
   groupées et documentées — `som train` (modèle d'ownership, accuracy vs
   baseline), `evo` (optimiseur génétique seedé), `diff`/`simplify`/`eval`/

@@ -69,6 +69,9 @@ scirust som train                     # train the ownership model; accuracy vs b
 scirust evo                           # minimize a function with a seeded genetic algorithm
 scirust diff "x^2 + 3*x"              # symbolic derivative → ((2 * x) + 3)
 scirust solve "x^2 - 4"               # real roots → { -2, 2 }
+scirust integrate "sin(x)" 0 3.14159  # definite integral (Romberg) → 2
+scirust linsolve "2,1;1,3" "3,5"      # solve A·x = b → [0.8, 1.4]
+scirust ode "y" 1 0 1                 # dy/dt=y, y(0)=1 → y(1) ≈ e
 scirust eval "2*x + 1" x=3            # evaluate → 7
 scirust analyze src/main.rs           # ownership analysis of a real Rust file
 scirust analyze src/main.rs --sarif   # same, as SARIF 2.1.0 for CI code scanning

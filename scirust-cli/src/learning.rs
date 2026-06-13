@@ -1,7 +1,7 @@
 //! Learning subcommands beyond `quickstart`: ownership-model training and
 //! evolutionary optimization. Both are deterministic in their seed.
 
-use scirust_evo::GeneticAlgorithm;
+use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
 use scirust_som_model::{SomModel, SomModelConfig};
@@ -115,12 +115,58 @@ pub fn run_evo(args: &[String]) -> u8 {
     }
 }
 
+/// `cmaes [--seed N] [--steps S]` — minimize the sphere function with a
+/// seeded CMA-ES and report the best value found (→ 0). Deterministic.
+pub fn run_cmaes(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 7);
+    let steps = flag_u64(args, "--steps", 80) as usize;
+    let dims = 5;
+
+    let mut es = CmaEs::seeded(dims, seed);
+    let mut theta = vec![1.5f64; dims];
+    let start = sphere(&theta);
+    for _ in 0..steps
+    {
+        es.step(&mut theta, |x| -sphere(x));
+    }
+    let best = sphere(&theta);
+
+    println!("CMA-ES — minimize sphere f(x)=Σxᵢ² (dims {dims}, seed {seed})\n");
+    println!("  steps     : {steps}");
+    println!("  best f(x) : {start:.4} → {best:.6}");
+    if best < start
+    {
+        println!("\nOK — converged toward the optimum, deterministically.");
+        0
+    }
+    else
+    {
+        println!("\nNOTE — no improvement; increase --steps.");
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn cmaes_minimizes_sphere_deterministically() {
+        assert_eq!(run_cmaes(&s(&["--seed", "3", "--steps", "40"])), 0);
+        let best = |seed: u64| {
+            let mut es = CmaEs::seeded(5, seed);
+            let mut theta = vec![1.5f64; 5];
+            for _ in 0..40
+            {
+                es.step(&mut theta, |x| -sphere(x));
+            }
+            sphere(&theta)
+        };
+        assert_eq!(best(3).to_bits(), best(3).to_bits());
     }
 
     #[test]

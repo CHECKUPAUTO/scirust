@@ -1578,6 +1578,7 @@ dependencies = [
  "scirust-core",
  "scirust-evo",
  "scirust-runtime",
+ "scirust-solvers",
  "scirust-som-cli",
  "scirust-som-dataset",
  "scirust-som-inference",

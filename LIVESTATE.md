@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 9 : CLI massive (19 commandes)
+- +10 commandes adossées à du code testé : cmaes ; to-rust, regress ;
+  integrate/root/minimize/linsolve/det/polyroots/ode (scirust-solvers,
+  pont via scirust-symbolic::eval pour les commandes à expression)
+- module numeric.rs ; +deps scirust-solvers ; 27 tests CLI au total
+- bug réel attrapé : regress sortait 1x+2 au lieu de 2x+1 (ordre du
+  tuple (intercept,slope) inversé) → corrigé + test de convention
+- aide groupée en 5 sections (LEARNING & OPTIMIZATION / SYMBOLIC /
+  NUMERICAL SOLVERS / CODE ANALYSIS / INFERENCE / META)
+
 ## Session 2026-06-13 — volet 8 : CLI industrielle + flash attention testé
 - Flash Attention RÉELLEMENT testé : 4 tests (forward vs oracle dense,
   causal, bit-déterminisme, gradients finis) → statut « ✅ Stable » honnête

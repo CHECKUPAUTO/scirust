@@ -52,10 +52,20 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `quickstart` | entraîne le MLP 2→8→2 (XOR), bit-déterministe, 4/4 | `scirust-core` |
 | `som train [--seed N] [--epochs E]` | entraîne le modèle d'ownership, accuracy vs baseline | `scirust-som-*` |
 | `evo [--seed N] [--gens G]` | minimise la sphère par algorithme génétique seedé | `scirust-evo` |
+| `cmaes [--seed N] [--steps S]` | minimise la sphère par CMA-ES seedé | `scirust-evo` |
 | `diff <expr> [var]` | dérivée symbolique | `scirust-symbolic` |
 | `simplify <expr>` | simplification algébrique | `scirust-symbolic` |
 | `eval <expr> [x=..]` | évaluation numérique | `scirust-symbolic` |
-| `solve <expr> [var]` | racines réelles (linéaire/quadratique) | `scirust-symbolic` |
+| `solve <expr> [var]` | racines réelles symboliques (linéaire/quadratique) | `scirust-symbolic` |
+| `to-rust <expr>` | transpile une expression en Rust | `scirust-symbolic` |
+| `regress <xs> <ys> [deg]` | régression moindres carrés (linéaire/polynomiale) | `scirust-symbolic` |
+| `integrate <expr> <a> <b> [var]` | intégrale définie (Romberg) | `scirust-solvers` |
+| `root <expr> <a> <b> [var]` | racine dans [a,b] (Brent) | `scirust-solvers` |
+| `minimize <expr> <a> <b> [var]` | minimum local (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
+| `linsolve "r;r" "b"` | résout A·x=b (LU) | `scirust-solvers` |
+| `det "r;r"` | déterminant | `scirust-solvers` |
+| `polyroots "c0,c1,.."` | racines réelles d'un polynôme | `scirust-solvers` |
+| `ode <f(t,y)> <y0> <t0> <t1> [h]` | intègre dy/dt=f (RK4) | `scirust-solvers`+`-symbolic` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
 | `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
 | `info` / `help` / `version` | méta | — |
