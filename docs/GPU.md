@@ -13,16 +13,25 @@
   fixed-accumulation-order GEMM exposed through the `RawComputeBackend` trait
   and the `GpuAccelerator` dispatcher. It is the bit-tolerant oracle the GPU
   path is validated against.
-- **Portable GPU GEMM via wgpu** (`WgpuBackend`, feature `wgpu`): a real WGSL
-  compute shader (`C = A·B`, row-major `f32`) executed on a Vulkan/Metal/DX12/GL
-  adapter. Validated against `CpuBackend` within a documented floating-point
-  tolerance (GPU accumulation order is not bit-identical to the scalar path).
+- **Portable GPU GEMM via wgpu** (`WgpuBackend`, feature `wgpu`): a real general
+  WGSL compute shader (`C = alpha·op(A)·op(B) + beta·C`, with optional
+  transposes, row-major `f32`) executed on a Vulkan/Metal/DX12/GL adapter.
+  Validated against `CpuBackend` within a documented floating-point tolerance
+  (GPU accumulation order is not bit-identical to the scalar path).
+- **Autograd-tape integration** (`WgpuEngine`, feature `wgpu`): `WgpuEngine`
+  implements the tape's `GpuEngine` hook. Attach it with
+  `Tape::with_gpu_engine(WgpuEngine::new().unwrap())`, and `Var::matmul_gpu`
+  runs **both its forward and backward GEMMs on the GPU** (the backward's
+  `dA = g·Bᵀ` and `dB = Aᵀ·g` use the transpose path). The device + pipeline
+  are created once and reused across the pass. Validated end to end against the
+  CPU tape (forward + both gradients) on lavapipe.
 - **CUDA** (`CudaBackend`): out of scope until a GPU CI runner exists; always
   returns `BackendError::Unavailable`. The archived cuBLAS draft is kept in
   `archive/scirust-gpu/`.
-- `scirust-core`'s training/inference still routes through the CPU/SIMD kernels
-  (AVX2/SSE2/NEON); the wgpu path is a standalone, opt-in compute backend, not
-  yet plumbed into the autograd tape (that is the next step — see roadmap).
+- Default training/inference still routes through the CPU/SIMD kernels
+  (AVX2/SSE2/NEON); the GPU path is opt-in (feature + explicit `matmul_gpu`),
+  keeping the bit-exact default guarantee intact. Higher-level layers
+  (`Conv2d` via im2col) are the next consumers — see roadmap.
 
 ```rust
 use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
@@ -31,12 +40,29 @@ use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
 let acc = GpuAccelerator::cpu();
 let c = acc.matmul(&a, &b, m, k, n)?;            // real GEMM, bit-deterministic
 
-// Portable GPU path (requires `--features wgpu` and an adapter):
+// Standalone portable GPU GEMM (requires `--features wgpu` and an adapter):
 match WgpuBackend.gemm_f32(&a, &b, m, k, n) {
     Ok(gpu_c) => { /* validated against CpuBackend within tolerance */ }
     Err(BackendError::Unavailable("wgpu")) => { /* no feature / no adapter — honest */ }
     Err(e) => return Err(e),
 }
+```
+
+GPU-accelerated autograd (feature `wgpu`):
+
+```rust
+use scirust_core::autodiff::reverse::Tape;
+use scirust_gpu::WgpuEngine;
+
+let tape = match WgpuEngine::new() {
+    Some(engine) => Tape::new().with_gpu_engine(engine),  // forward + backward on GPU
+    None => Tape::new(),                                   // no adapter → CPU tape
+};
+let a = tape.input(/* … */);
+let b = tape.input(/* … */);
+let c = a.matmul_gpu(b);   // GEMM on the GPU engine when attached, else CPU
+let loss = c.sum();
+tape.backward(loss.idx()); // dA = g·Bᵀ, dB = Aᵀ·g also on the GPU
 ```
 
 ## How it's tested (no claim without a test)
@@ -72,10 +98,11 @@ not compile it.
 ## Roadmap (P2.2 and beyond)
 
 See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. Done: portable
-wgpu GEMM, tested via lavapipe, oracle-validated. Next:
+wgpu GEMM (oracle-validated via lavapipe) **and** its plumbing into the autograd
+tape (`WgpuEngine` + `Var::matmul_gpu` forward/backward). Next:
 
-- Plumb the wgpu backend into `Conv2d` / the autograd tape (keep activations in
-  VRAM across layers) — the archived im2col pipelines in
+- Route `Conv2d` (im2col + GEMM) through `matmul_gpu`; then keep activations in
+  VRAM across layers — the archived im2col pipelines in
   [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
 - More ops (elementwise, reductions) behind the same trait.
 - CUDA/cuBLAS only once a hardware GPU runner exists.

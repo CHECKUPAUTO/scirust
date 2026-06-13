@@ -56,7 +56,15 @@ _Rien pour l'instant._
   (`llvmpipe`) — aucun GPU matériel requis, « pas de claim sans test »
   respecté. `cargo deny` passe sur l'arbre de deps wgpu ; dépendance
   optionnelle (les 8 gates par défaut ne la compilent pas). Nouveau job CI
-  `GPU (wgpu / lavapipe)`. Reste à brancher dans la tape autograd (P2.2).
+  `GPU (wgpu / lavapipe)`.
+- **GPU wgpu branché dans la tape autograd (P2.2, étape « tape »)** :
+  `WgpuEngine` implémente le hook `GpuEngine` du `Tape` (kernel GEMM
+  général `C = α·op(A)·op(B) + β·C` avec transposition). `Var::matmul_gpu`
+  exécute **forward ET backward** (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU,
+  device/pipeline mis en cache, repli CPU si un dispatch échoue. Validé
+  bout-en-bout contre la tape CPU (forward + 2 gradients, tolérance) sur
+  lavapipe. Opt-in (feature + `matmul_gpu`) → garantie bit-exacte par
+  défaut intacte. Reste : router `Conv2d` (im2col + GEMM) via `matmul_gpu`.
 - **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
   reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
   `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une

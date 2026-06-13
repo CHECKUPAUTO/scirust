@@ -3,6 +3,26 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 17 : GPU wgpu branché dans la tape autograd (P2.2)
+- découverte : scirust-core avait DÉJÀ tout le câblage (trait GpuEngine,
+  Tape.gpu_engine + with/set/clear, Op::MatMulGpu avec backward GPU/CPU,
+  Var::matmul_gpu) — mais AUCUN implémenteur, et le forward de
+  try_matmul_gpu restait CPU.
+- WgpuEngine (scirust-gpu, feature wgpu) implémente GpuEngine via un kernel
+  GEMM général C=α·op(A)·op(B)+β·C (transpose/alpha/beta) partagé avec
+  WgpuBackend (refactor WgpuContext, device/pipeline en cache). Repli CPU
+  si dispatch échoue (jamais de faux résultat).
+- scirust-core: try_matmul_gpu forward utilise l'engine si présent (sinon
+  CPU). Pas de cycle : scirust-gpu→scirust-core (optionnel, feature wgpu) ;
+  core ne dépend que de gpu-macros.
+- test bout-en-bout : matmul_gpu forward+backward == tape CPU (rel<1e-4)
+  exécuté sur llvmpipe (confirmé "wgpu engine on: llvmpipe"). +3 tests
+  (12 total --features wgpu). 726 défaut inchangé.
+- 8 gates verts (clippy défaut+wgpu, deny avec core-dep-de-gpu, doc,
+  stable/nightly 726, aarch64, portable-simd). docs GPU.md/README/roadmap
+  /CHANGELOG mis à jour. Reste P2.2 : Conv2d (im2col) via matmul_gpu.
+- note infra : disque saturé pendant build wgpu → purge target/doc+incremental.
+
 ## Session 2026-06-13 — volet 16 : GPU wgpu RÉEL (P2.2 recâbler), testé sur lavapipe
 - décision user : « pursue real wgpu now ». Débloqué en installant Mesa
   lavapipe (mesa-vulkan-drivers) → adaptateur Vulkan logiciel llvmpipe

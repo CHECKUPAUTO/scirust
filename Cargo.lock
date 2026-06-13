@@ -2129,6 +2129,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "pollster",
+ "scirust-core",
  "scirust-gpu-macros",
  "wgpu",
 ]

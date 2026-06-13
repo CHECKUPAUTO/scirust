@@ -2793,11 +2793,33 @@ impl<'t> Var<'t> {
     }
 
     /// MatMul GPU-acceléré.
+    ///
+    /// When a [`GpuEngine`] is attached to the tape, both this forward GEMM and
+    /// the corresponding backward run on the engine; otherwise it transparently
+    /// falls back to the CPU path. GPU results are not bit-identical to the CPU
+    /// path (different accumulation order) — see `docs/GPU.md`.
     pub fn try_matmul_gpu(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_inner_dim("matmul_gpu", a.cols, b.rows)?;
-        let out = a.matmul(&b);
+        let out = {
+            let engine = self.tape.gpu_engine.borrow();
+            if let Some(ref engine) = *engine
+            {
+                let (m, k, n) = (a.rows, a.cols, b.cols);
+                let mut c = vec![0.0f32; m * n];
+                engine.gemm(1.0, &a.data, &b.data, 0.0, &mut c, m, k, n, false, false);
+                Tensor {
+                    rows: m,
+                    cols: n,
+                    data: c,
+                }
+            }
+            else
+            {
+                a.matmul(&b)
+            }
+        };
         let new_idx = self.tape.push_with_saved(
             Op::MatMulGpu(self.idx, other.idx),
             DeviceTensor::cpu(out),

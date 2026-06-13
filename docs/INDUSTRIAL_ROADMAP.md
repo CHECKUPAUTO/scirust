@@ -101,8 +101,14 @@ définition de fini (toujours : gates verts + oracle + doc).
   (Mesa lavapipe) — « pas de claim sans test » respecté. `cargo deny`
   passe sur l'arbre de deps wgpu. Dépendance optionnelle (les 8 gates par
   défaut ne la compilent pas).
-- **Reste** : brancher le backend wgpu dans la tape autograd / `Conv2d`
-  (garder les activations en VRAM ; pipelines im2col archivés en
+- **FAIT (étape 3 — tape autograd)** : `WgpuEngine` implémente le hook
+  `GpuEngine` du `Tape` ; `Var::matmul_gpu` exécute **forward ET backward**
+  (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU, device/pipeline mis en cache.
+  Validé bout-en-bout contre la tape CPU (forward + 2 gradients) sur
+  lavapipe. Chemin opt-in (feature + `matmul_gpu`) → garantie bit-exacte
+  par défaut intacte.
+- **Reste** : router `Conv2d` (im2col + GEMM) via `matmul_gpu`, puis garder
+  les activations en VRAM entre couches (pipelines im2col archivés en
   référence) ; plus d'ops (elementwise, réductions). CUDA/cuBLAS reste
   hors périmètre tant qu'un runner GPU matériel n'existe pas.
 
