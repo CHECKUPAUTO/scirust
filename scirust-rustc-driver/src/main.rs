@@ -1,5 +1,5 @@
 #![feature(rustc_private)]
-#![allow(unused_extern_crate)]
+#![allow(unused_extern_crates)]
 
 extern crate rustc_driver;
 extern crate rustc_interface;
@@ -12,7 +12,7 @@ use rustc_interface::interface;
 use rustc_middle::ty::TyCtxt;
 
 mod passes;
-use passes::{AutodiffPass, GpuPass, MirPass, SciRustPassManager, SimdPass};
+use passes::{AutodiffPass, GpuPass, SciRustPassManager, SimdPass};
 
 // ---------------------------------------------------------------------------
 // Callbacks

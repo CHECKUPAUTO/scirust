@@ -1,6 +1,9 @@
 // scirust-core/src/autodiff/data_parallel.rs
 // Phase 4: Data Parallelism Engine — GradientAggregator & DataParallelTrainer
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::parallel::ParallelTape;
 
 /// Aggregates gradients from multiple workers via reduce-sum / reduce-mean.
@@ -89,6 +92,62 @@ impl DataParallelTrainer {
             all_grads.push(grads);
         }
         GradientAggregator::reduce_mean(&all_grads)
+    }
+
+    /// Run the workers across `n_threads` OS threads and return the
+    /// **fixed-order** mean of their gradients — a *certified-deterministic*
+    /// parallel batch.
+    ///
+    /// Threads pull worker indices from a shared atomic counter (work
+    /// stealing), but each worker's result is written to its own
+    /// worker-indexed slot and the reduction always sums worker `0, 1, …,
+    /// n-1` in that order. Floating-point addition is not associative, so a
+    /// naive "accumulate as threads finish" reduction would depend on the
+    /// scheduler; this one does not. Consequently the result is **bit-identical
+    /// for any `n_threads`** and identical to the sequential [`Self::train_batch`].
+    ///
+    /// `batch_fn` must be `Sync` (shared across threads) and deterministic in
+    /// `(tape, worker)`.
+    pub fn train_batch_threaded<F>(&self, n_threads: usize, batch_fn: F) -> Vec<f64>
+    where
+        F: Fn(&ParallelTape, usize) -> Vec<f64> + Sync,
+    {
+        let n = self.n_workers;
+        if n == 0
+        {
+            return Vec::new();
+        }
+        let n_threads = n_threads.clamp(1, n);
+        let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..n).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+
+        std::thread::scope(|scope| {
+            for _ in 0..n_threads
+            {
+                scope.spawn(|| {
+                    loop
+                    {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= n
+                        {
+                            break;
+                        }
+                        let g = batch_fn(&self.tapes[i], i);
+                        *slots[i].lock().expect("data-parallel slot poisoned") = Some(g);
+                    }
+                });
+            }
+        });
+
+        let all: Vec<Vec<f64>> = slots
+            .into_iter()
+            .map(|m| {
+                m.into_inner()
+                    .expect("data-parallel slot poisoned")
+                    .expect("data-parallel worker did not run")
+            })
+            .collect();
+        GradientAggregator::reduce_mean(&all)
     }
 
     /// Return a reference to the worker's tape.
@@ -325,5 +384,119 @@ mod tests {
             "expected 6.0, got {}",
             avg_grads[0]
         );
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Certified determinism: thread count must not change the result    //
+    // ------------------------------------------------------------------ //
+
+    /// The aggregated gradient is bit-identical for 1/2/4/8 OS threads and
+    /// equal to the sequential path. Per-worker contributions are deliberately
+    /// order-sensitive (element 0 mixes ±1e16 with small values), so a
+    /// scheduler-dependent reduction order *would* perturb the low bits — the
+    /// fixed worker-order reduction does not.
+    #[test]
+    fn train_batch_threaded_is_thread_count_invariant() {
+        let bf = |_tape: &ParallelTape, w: usize| -> Vec<f64> {
+            let e0 = match w % 4
+            {
+                0 => 1e16,
+                1 => 1.0,
+                2 => -1e16,
+                _ => 3.0,
+            };
+            vec![e0, (w as f64 + 1.0).recip(), (w as f64).sin()]
+        };
+        let run = |threads: usize| DataParallelTrainer::new(8).train_batch_threaded(threads, bf);
+        let r1 = run(1);
+        assert_eq!(r1, run(2), "2 threads differ from 1");
+        assert_eq!(r1, run(4), "4 threads differ from 1");
+        assert_eq!(r1, run(8), "8 threads differ from 1");
+        // …and identical to the sequential reduction.
+        let seq = DataParallelTrainer::new(8).train_batch(bf);
+        assert_eq!(r1, seq, "threaded differs from sequential");
+    }
+
+    /// Same guarantee with **real autograd**: each worker builds a graph on its
+    /// `ParallelTape` and runs the actual backward; the aggregate is
+    /// bit-identical across 1/2/4 threads.
+    #[test]
+    fn parallel_tape_training_is_deterministic_across_threads() {
+        let bf = |tape: &ParallelTape, w: usize| -> Vec<f64> {
+            let x = tape.alloc_node(Node {
+                op: Op::Input,
+                shape: (1, 3),
+                saved: SavedData::None,
+            });
+            let y = tape.alloc_node(Node {
+                op: Op::Scale {
+                    input: x,
+                    scalar: 2.0,
+                },
+                shape: (1, 3),
+                saved: SavedData::None,
+            });
+            let xv: Vec<f32> = (0..3).map(|j| ((w * 3 + j) as f32).sin()).collect();
+            let yv: Vec<f32> = xv.iter().map(|v| v * 2.0).collect();
+            tape.set_value(x, &xv);
+            tape.set_value(y, &yv);
+            tape.backward(y);
+            vec![tape.grad(x)]
+        };
+        let run = |threads: usize| DataParallelTrainer::new(4).train_batch_threaded(threads, bf);
+        let r1 = run(1);
+        assert_eq!(r1, run(2), "2 threads differ from 1");
+        assert_eq!(r1, run(4), "4 threads differ from 1");
+    }
+
+    /// A **full multi-step SGD run** is bit-identical across thread counts:
+    /// each step's aggregated gradient is thread-count-invariant and the
+    /// optimizer update is deterministic, so the whole trajectory composes.
+    /// Each worker trains a shared linear model `y = x·W` on its own data shard
+    /// with an MSE loss, using the real reverse-mode autograd tape.
+    #[test]
+    fn multi_step_training_is_thread_count_invariant() {
+        use crate::autodiff::reverse::Tape;
+
+        fn train(threads: usize) -> Vec<f32> {
+            let (in_dim, out_dim, n_workers, steps, lr) = (3usize, 2usize, 4usize, 8usize, 0.05f32);
+            let mut w: Vec<f32> = (0..in_dim * out_dim)
+                .map(|i| (i as f32 * 0.1).sin())
+                .collect();
+            for _ in 0..steps
+            {
+                let trainer = DataParallelTrainer::new(n_workers);
+                let w_ref = &w;
+                let grads = trainer.train_batch_threaded(threads, |_t, worker| {
+                    // Per-worker data shard, deterministic from the worker id.
+                    let x: Vec<f32> = (0..in_dim)
+                        .map(|j| (((worker * in_dim + j) as f32) * 0.3).cos())
+                        .collect();
+                    let target: Vec<f32> = (0..out_dim)
+                        .map(|j| (((worker + j) as f32) * 0.2).sin())
+                        .collect();
+                    let tape = Tape::new();
+                    let xv = tape.input(Tensor::from_vec(x, 1, in_dim));
+                    let wv = tape.input(Tensor::from_vec(w_ref.clone(), in_dim, out_dim));
+                    let tv = tape.input(Tensor::from_vec(target, 1, out_dim));
+                    let y = xv.matmul(wv);
+                    let loss = y.sub(tv).pow(2.0).sum();
+                    tape.backward(loss.idx());
+                    tape.grad(wv.idx()).data.iter().map(|&v| v as f64).collect()
+                });
+                for (wj, &g) in w.iter_mut().zip(grads.iter())
+                {
+                    *wj -= lr * g as f32;
+                }
+            }
+            w
+        }
+
+        let w1 = train(1);
+        assert_eq!(w1, train(2), "2 threads diverge over the run");
+        assert_eq!(w1, train(4), "4 threads diverge over the run");
+        // Sanity: the run actually moved the weights off their init.
+        let w0: Vec<f32> = (0..6).map(|i| (i as f32 * 0.1).sin()).collect();
+        assert_ne!(w1, w0, "training did not update the weights");
     }
 }

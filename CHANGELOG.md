@@ -3,9 +3,61 @@
 Le format suit [Keep a Changelog](https://keepachangelog.com/) ;
 versions sémantiques à partir de la prochaine release taguée.
 
-## [Non publié] — 2026-06-12
+## [Non publié]
 
 ### Réparé
+- **Revue de code (max-effort) — durcissement** : (1) chemin GPU résident
+  (`GpuChain`) : les dimensions dégénérées (`m`/`n`/`k == 0`) faisaient paniquer
+  wgpu (buffers de taille nulle) ; gardes ajoutées (placeholder 4 octets,
+  dispatch sauté, `download` court-circuité) + test. (2) `scirust ode` :
+  `h = 0` provoquait un dépassement de capacité (panique, code 101), `t1 ≤ t0`
+  renvoyait silencieusement `y0` (code 0, réponse fausse) et dopri5/rk4
+  divergeaient sur de mauvaises bornes ; garde unifiée (`t1 > t0`, `h > 0` fini
+  → code 2) + tests. Les autres axes de revue (maths GEMM/transpose, routage
+  des gradients Conv2d, `matmul_gpu` av/ar, déterminisme de la réduction
+  threadée, restructuration cfg SIMD) ont été tracés à la main : corrects.
+- **`scirust-rustc-driver` recompile (P2.3, infra)** : le driver (exclu du
+  workspace, `rustc_private`) ne compilait plus sur la nightly courante
+  (`get_attrs` renvoie un itérateur, plus un slice). Réparé + warning-clean ;
+  job CI informatif `rustc-driver` (continue-on-error) pour rendre la dérive
+  d'API future visible ; `scirust-rustc-driver/target/` retiré du suivi git
+  (artefacts de build) et ignoré.
+
+### Ajouté
+- **Primitives d'inférence de forme N-D (P2.4, fondation)** : `TensorND`
+  gagne `broadcast_shape`, `matmul_shape` (matmul batché, broadcast des axes
+  batch) et `broadcast_to` (matérialisation numpy) — les briques d'inférence
+  de forme « au-delà de rows/cols » que la future tape/IR N-D utilisera, avec
+  le pont `from/to_tensor_2d` existant. 3 tests. (La fusion de la tape 2D
+  elle-même reste le gros chantier, à faire par incréments testés.)
+- **Entraînement data-parallèle à déterminisme certifié (P2.1)** :
+  `DataParallelTrainer::train_batch_threaded(n_threads, ..)` exécute les
+  workers sur N threads OS (vol de tâches via compteur atomique) mais réduit
+  les gradients dans un ordre fixe (worker 0,1,…,n-1), indépendant de
+  l'ordonnanceur. L'addition flottante n'étant pas associative, le résultat
+  est **bit-identique pour 1/2/4/8 threads** et identique au séquentiel —
+  garantie testée que les frameworks grand public n'offrent pas. Trois tests
+  CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
+  une **boucle SGD multi-pas complète** dont la trajectoire de poids est
+  bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
+
+## [0.14.0] — 2026-06-13
+
+### Réparé
+- **`scirust-gpu` honnête (P2.2, étape « trancher »)** : les backends
+  `WgpuBackend`/`CudaBackend` renvoyaient `vec![0.0; m*n]` — des résultats
+  **fabriqués** (zéros) sous une étiquette « wgpu »/« cuda », en violation
+  de la politique « 100 % câblé/testé, zéro sur-promesse ». Remplacés par
+  un vrai backend CPU de référence **testé** (oracle GEMM bit-déterministe)
+  et des chemins device qui signalent honnêtement `BackendError::Unavailable`
+  (jamais de sortie inventée), à l'image de `scirust_core::compute_backend`.
+  Crate passée de 0 à 6 tests. (Le câblage wgpu réel a suivi dans une étape
+  séparée — voir « Ajouté » : GEMM WGSL testé sur Vulkan logiciel.)
+- **`docs/GPU.md` honnête** : la page décrivait une API GPU en une ligne
+  (`GpuContext::try_init`, `ConvGpuPipelines`, `Conv2d::on_gpu`…) qui
+  n'existe pas (modules archivés ; `--features wgpu` ne compile rien).
+  Réécrite en page de statut + roadmap honnête (ce qui existe = backend CPU
+  de référence testé ; pourquoi le GPU n'est pas revendiqué ; plan P2.2).
 - Régression de merge cassant la compilation sur toutes architectures
   (sgemv AVX2/SSE2/NEON, champ slab arena).
 - CI rendue réalisable : retrait de `--all-features` (features BLAS
@@ -18,6 +70,9 @@ versions sémantiques à partir de la prochaine release taguée.
   (`-D warnings` tenable sur tous les targets).
 
 ### Changé
+- **Statut GPU** retiré du tableau des features livrées du README (il
+  listait du non-câblé) → remplacé par une note honnête « Not included
+  yet » pointant la roadmap P2.2.
 - **Augmentation de données 100 % déterministe** : RNG `PcgEngine`
   injecté, flux par échantillon indépendant de l'ordre, `with_seed`
   effectif, vrai bruit gaussien (Box-Muller).
@@ -27,6 +82,92 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **GPU wgpu réel et testé (P2.2, étape « recâbler »)** : vrai GEMM `f32`
+  en WGSL (`C = A·B`) derrière la feature `wgpu`, exécuté sur adaptateur
+  Vulkan/Metal/DX12/GL via wgpu 0.20. **Validé contre l'oracle CPU**
+  (tolérance flottante documentée, l'accumulation GPU n'étant pas
+  bit-identique) et **testé en CI** sur Vulkan logiciel Mesa lavapipe
+  (`llvmpipe`) — aucun GPU matériel requis, « pas de claim sans test »
+  respecté. `cargo deny` passe sur l'arbre de deps wgpu ; dépendance
+  optionnelle (les 8 gates par défaut ne la compilent pas). Nouveau job CI
+  `GPU (wgpu / lavapipe)`.
+- **GPU wgpu branché dans la tape autograd (P2.2, étape « tape »)** :
+  `WgpuEngine` implémente le hook `GpuEngine` du `Tape` (kernel GEMM
+  général `C = α·op(A)·op(B) + β·C` avec transposition). `Var::matmul_gpu`
+  exécute **forward ET backward** (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU,
+  device/pipeline mis en cache, repli CPU si un dispatch échoue. Validé
+  bout-en-bout contre la tape CPU (forward + 2 gradients, tolérance) sur
+  lavapipe. Opt-in (feature + `matmul_gpu`) → garantie bit-exacte par
+  défaut intacte.
+- **Conv2d GPU (P2.2, étape « Conv2d »)** : les GEMM im2col de Conv2d
+  (forward `W·col`, backward `dW = dout·colᵀ` et `dInput = Wᵀ·dout`) passent
+  par l'engine via le nouvel helper `Tape::gemm_ab` (chemin transpose natif),
+  quand un `WgpuEngine` est attaché. Validé bout-en-bout contre la Conv2d CPU
+  sur lavapipe (forward + dInput + dWeight, tolérance). Repli CPU
+  bit-identique sans engine (aucune régression). im2col/col2im restent CPU.
+- **Activations résidentes en VRAM (P2.2, étape « résidence »)** : API
+  `GpuChain` — upload des entrées une fois, chaîne de `matmul` sur des
+  handles `GpuMatrix`, un intermédiaire reste en mémoire GPU et alimente le
+  GEMM suivant sans aller-retour CPU ; seul le résultat final est téléchargé.
+  Validé contre l'oracle CPU sur lavapipe (chaîne 2 GEMM + transpose). La
+  résidence transparente dans la tape (DeviceTensor matérialisé paresseusement
+  en GPU) reste un chantier futur — sans bénéfice mesurable hors GPU matériel.
+- **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
+  reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
+  `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une
+  source donnée), généré par `./scripts/generate-sbom.sh`. Nouveau job CI
+  `sbom` (artefact à chaque build) et workflow `release.yml` (sur tag `v*` :
+  rejoue les gates, génère le SBOM, crée la release et y attache le SBOM).
+  Section SBOM dans `SECURITY.md`, `docs/sbom/README.md` (provenance).
+- **CLI : 5e vague** — `tt` (compression tensor-train TT-SVD d'une matrice,
+  `scirust-tn` ; rapporte cœurs, rangs de liaison, ratio de compression et
+  erreur de reconstruction, sortie 1 si `--max-err` dépassé), `solve-system`
+  (système non-linéaire F(x)=0 par Broyden, `scirust-solvers`), `inverse`
+  (inverse de matrice LU), `fem-heat` (chaleur 1D −u″=source par éléments
+  finis linéaires), et méthode `dopri5` (Dormand–Prince adaptatif) pour `ode`.
+  `FemSolver1D` était non testé : 2 tests ajoutés (oracle parabolique
+  −u″=f exact aux nœuds + symétrie). Nouveau groupe TENSOR NETWORKS.
+  `reconstruct_matrix` réexporté depuis `scirust-tn` (paire de
+  `tt_decompose_matrix`). `newton_system` non exposé (closure `Fn(&[Dual])`
+  comme `bfgs`).
+- **CLI : 4e vague** — `trig` (identités trigonométriques), `patterns`
+  (tendance d'une série), `qr` (décomposition QR), `cg` (gradient
+  conjugué SPD). `bfgs` délibérément non exposé (closure `Fn(&[Dual])`
+  non constructible depuis une expression symbolique évaluée en f64).
+- **CLI : 3e vague** — `symreg` (régression symbolique par programmation
+  génétique, `scirust-symreg`), `sat` (satisfiabilité DPLL,
+  `scirust-neuro-symbolic`), et deux méthodes de plus pour `root`
+  (`secant`, `newton` via dérivée symbolique). Nouveau groupe LOGIC.
+- **CLI : 2e vague de commandes** (29 → toutes testées) : `integrate
+  --method simpson|gauss`, `root --method bisection`, `optimize`
+  (Nelder–Mead multi-variable), `lstsq` (moindres carrés QR), `cholesky`,
+  `prove` (équivalence symbolique), `gradient` (numérique 1–2 var). Les
+  commandes à expression réutilisent `scirust-symbolic::eval`.
+- **CLI massivement étoffée** (19 commandes, toutes adossées à du code
+  testé) : ajout de `cmaes` ; maths symboliques `to-rust`, `regress` ;
+  solveurs numériques `integrate` (Romberg), `root`/`minimize` (Brent,
+  via dérivée symbolique), `linsolve`/`det` (LU), `polyroots`,
+  `ode` (RK4). Les commandes pilotées par expression utilisent
+  `scirust-symbolic::eval` comme pont vers les solveurs `scirust-solvers`.
+  +10 tests CLI ; bug d'ordre (intercept,slope) de `regress` corrigé et
+  épinglé par un test.
+- **CLI `scirust` étoffée** (niveau industriel) : nouvelles commandes
+  groupées et documentées — `som train` (modèle d'ownership, accuracy vs
+  baseline), `evo` (optimiseur génétique seedé), `diff`/`simplify`/`eval`/
+  `solve` (maths symboliques), `info` (garanties). `scirust help` les
+  liste par thème. Chaque commande est adossée à du code déjà testé.
+- **Flash Attention réellement testé** : 4 tests dans
+  `nn/transformer/flash_attention.rs` (forward vs oracle d'attention
+  dense, masque causal, déterminisme bit-exact, gradients finis) — la
+  ligne de statut passe de revendiquée à vérifiée.
+- **CLI unifiée `scirust`** (`scirust-cli`) : point d'entrée unique et
+  découvrable (`scirust help`) regroupant `quickstart` (démo MLP 2→8→2
+  bit-déterministe, 4/4), `analyze` (ownership, délègue à som-cli),
+  `verify` (certificats, délègue à `proofcli`), `version`. Logique verify
+  factorisée dans `scirust_runtime::proofcli` (zéro duplication ;
+  `scirust-verify` délègue désormais). Quickstart du README réécrit
+  autour de la CLI (plus de copier-coller de 40 lignes d'API), exemple
+  bibliothèque corrigé pour l'API réelle.
 - **Support Rust stable** : `#![feature(portable_simd)]` rendu réellement
   optionnel (`cfg_attr`), fallback scalaire du tiling ; les 683 tests
   passent sur stable ; job CI `build-test-stable`. La feature nightly

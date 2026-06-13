@@ -294,4 +294,5 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
 }
 pub mod enclave;
 pub mod proof;
+pub mod proofcli;
 pub mod quant;

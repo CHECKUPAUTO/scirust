@@ -87,40 +87,44 @@ static DETECTED: OnceLock<BackendKind> = OnceLock::new();
 pub fn detect_backend() -> BackendKind {
     *DETECTED.get_or_init(|| {
         // Si l'utilisateur a compilé avec portable-simd, on l'utilise
-        // (le compilateur émet déjà les bonnes instructions).
+        // (le compilateur émet déjà les bonnes instructions) ; sinon on fait
+        // de la détection runtime. Les deux chemins sont mutuellement exclusifs
+        // par `cfg` pour éviter tout code mort.
         #[cfg(feature = "portable-simd")]
         {
-            return BackendKind::PortableSimd;
+            BackendKind::PortableSimd
         }
-
-        // Détection runtime x86_64
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(not(feature = "portable-simd"))]
         {
-            // AVX-512 d'abord (plus large)
-            if std::is_x86_feature_detected!("avx512f")
+            // Détection runtime x86_64
+            #[cfg(target_arch = "x86_64")]
             {
-                return BackendKind::Avx512;
+                // AVX-512 d'abord (plus large)
+                if std::is_x86_feature_detected!("avx512f")
+                {
+                    return BackendKind::Avx512;
+                }
+                if std::is_x86_feature_detected!("avx2")
+                {
+                    return BackendKind::Avx2;
+                }
+                if std::is_x86_feature_detected!("sse2")
+                {
+                    return BackendKind::Sse2;
+                }
             }
-            if std::is_x86_feature_detected!("avx2")
-            {
-                return BackendKind::Avx2;
-            }
-            if std::is_x86_feature_detected!("sse2")
-            {
-                return BackendKind::Sse2;
-            }
-        }
 
-        // ARM64 — NEON est baseline depuis ARMv8, toujours dispo
-        #[cfg(target_arch = "aarch64")]
-        {
-            if std::arch::is_aarch64_feature_detected!("neon")
+            // ARM64 — NEON est baseline depuis ARMv8, toujours dispo
+            #[cfg(target_arch = "aarch64")]
             {
-                return BackendKind::Neon;
+                if std::arch::is_aarch64_feature_detected!("neon")
+                {
+                    return BackendKind::Neon;
+                }
             }
-        }
 
-        BackendKind::Scalar
+            BackendKind::Scalar
+        }
     })
 }
 

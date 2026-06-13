@@ -1,148 +1,139 @@
-# GPU — Activate GPU compute
+# GPU — status and roadmap
 
-## Goal
+> **Status: a real, portable GPU compute path is wired behind the `wgpu`
+> feature and tested against the CPU oracle.** It is *not* on by default.
+> This page documents exactly what exists, how it is tested, and what remains.
+> (An earlier version of this page described a one-line `Conv2d::on_gpu` API
+> that did not exist — that archived API is not compiled; the doc was corrected
+> rather than left as an overclaim.)
 
-Move expensive operations (Conv2d, large matmuls) to GPU using one line of code,
-without rewriting your model.
+## What exists today
 
-## Prerequisites
+- **CPU reference backend** (`CpuBackend`, always built): a deterministic,
+  fixed-accumulation-order GEMM exposed through the `RawComputeBackend` trait
+  and the `GpuAccelerator` dispatcher. It is the bit-tolerant oracle the GPU
+  path is validated against.
+- **Portable GPU GEMM via wgpu** (`WgpuBackend`, feature `wgpu`): a real general
+  WGSL compute shader (`C = alpha·op(A)·op(B) + beta·C`, with optional
+  transposes, row-major `f32`) executed on a Vulkan/Metal/DX12/GL adapter.
+  Validated against `CpuBackend` within a documented floating-point tolerance
+  (GPU accumulation order is not bit-identical to the scalar path).
+- **Autograd-tape integration** (`WgpuEngine`, feature `wgpu`): `WgpuEngine`
+  implements the tape's `GpuEngine` hook. Attach it with
+  `Tape::with_gpu_engine(WgpuEngine::new().unwrap())`, and `Var::matmul_gpu`
+  runs **both its forward and backward GEMMs on the GPU** (the backward's
+  `dA = g·Bᵀ` and `dB = Aᵀ·g` use the transpose path). The device + pipeline
+  are created once and reused across the pass. Validated end to end against the
+  CPU tape (forward + both gradients) on lavapipe.
+- **CUDA** (`CudaBackend`): out of scope until a GPU CI runner exists; always
+  returns `BackendError::Unavailable`. The archived cuBLAS draft is kept in
+  `archive/scirust-gpu/`.
+- Default training/inference still routes through the CPU/SIMD kernels
+  (AVX2/SSE2/NEON); the GPU path is opt-in (feature + an attached engine),
+  keeping the bit-exact default guarantee intact.
+- **Conv2d on the GPU**: when a `WgpuEngine` is attached to the tape, the
+  Conv2d im2col GEMMs — forward `W·col`, backward `dW = dout·colᵀ` and
+  `dInput = Wᵀ·dout` — run on the engine (validated end to end against the CPU
+  Conv2d on lavapipe). im2col/col2im themselves stay on the CPU for now.
+- **VRAM-resident matmul chains** (`GpuChain`): keep an intermediate activation
+  in GPU memory across a sequence of GEMMs — upload inputs once, chain
+  `matmul`s on `GpuMatrix` handles, download only the final result. The
+  intermediate never round-trips to the CPU. Oracle-validated on lavapipe.
 
-- A GPU compatible with WebGPU (most modern GPUs since 2020)
-- Build with `--features wgpu`
+```rust
+use scirust_gpu::GpuChain;
 
-## Step 1 — Enable the feature
-
-```toml
-# Cargo.toml
-[dependencies]
-scirust-gpu = { path = "...", features = ["wgpu"] }
+let chain = GpuChain::new().expect("a Vulkan adapter");
+let a = chain.upload(&a_data, 2, 3);
+let b = chain.upload(&b_data, 3, 2);
+let c = chain.upload(&c_data, 2, 4);
+let t = chain.matmul(&a, &b)?;   // T = A·B stays in VRAM …
+let out = chain.matmul(&t, &c)?; // … and feeds the next GEMM directly
+let result = chain.download(&out)?; // only the final matrix is downloaded
 ```
+
+```rust
+use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
+
+// Always-available, deterministic CPU reference path:
+let acc = GpuAccelerator::cpu();
+let c = acc.matmul(&a, &b, m, k, n)?;            // real GEMM, bit-deterministic
+
+// Standalone portable GPU GEMM (requires `--features wgpu` and an adapter):
+match WgpuBackend.gemm_f32(&a, &b, m, k, n) {
+    Ok(gpu_c) => { /* validated against CpuBackend within tolerance */ }
+    Err(BackendError::Unavailable("wgpu")) => { /* no feature / no adapter — honest */ }
+    Err(e) => return Err(e),
+}
+```
+
+GPU-accelerated autograd (feature `wgpu`):
+
+```rust
+use scirust_core::autodiff::reverse::Tape;
+use scirust_gpu::WgpuEngine;
+
+let tape = match WgpuEngine::new() {
+    Some(engine) => Tape::new().with_gpu_engine(engine),  // forward + backward on GPU
+    None => Tape::new(),                                   // no adapter → CPU tape
+};
+let a = tape.input(/* … */);
+let b = tape.input(/* … */);
+let c = a.matmul_gpu(b);   // GEMM on the GPU engine when attached, else CPU
+let loss = c.sum();
+tape.backward(loss.idx()); // dA = g·Bᵀ, dB = Aᵀ·g also on the GPU
+```
+
+## How it's tested (no claim without a test)
+
+The wgpu GEMM is exercised in CI on a **software Vulkan adapter** — Mesa
+*lavapipe* (`llvmpipe`) — so the assertion path runs without physical GPU
+hardware:
 
 ```bash
-cargo run --release --features wgpu
+sudo apt-get install -y mesa-vulkan-drivers vulkan-tools   # provides lavapipe
+cargo test -p scirust-gpu --features wgpu
 ```
 
-## Step 2 — Initialize the GPU context
+The tests compare the wgpu result to `CpuBackend` with a relative-Frobenius
+tolerance (`< 1e-4`). If no adapter can be acquired, the GPU tests skip rather
+than fail; CI installs lavapipe so they actually execute. The CI job is
+`GPU (wgpu / lavapipe)` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-```rust
-use std::sync::Arc;
-use scirust_gpu::gpu_tensor::GpuContext;
-use scirust_gpu::gpu_conv::ConvGpuPipelines;
-use scirust_gpu::global::set_global_gpu_context;
+## Determinism note
 
-let ctx = GpuContext::try_init()
-    .expect("No GPU adapter found");
+GPU floating-point is not bit-identical to the scalar CPU path (different
+accumulation order, possible FMA), so the bit-exact guarantee does **not**
+extend to the GPU backend. `CpuBackend` is the documented bit-tolerant oracle;
+GPU output is asserted equal to it within tolerance, not bit-for-bit.
 
-// Build pipelines once (compilation is expensive)
-let conv_pipelines = Arc::new(ConvGpuPipelines::build(&ctx.device));
+## Supply chain
 
-// Install the global context (used by the autograd backward pass)
-set_global_gpu_context(ctx.clone()).unwrap();
-```
+Enabling `wgpu` pulls a larger transitive tree (`wgpu-hal`, `naga`, `ash`, …).
+That tree clears `cargo deny` (advisories, licences, bans, sources) as part of
+CI. The dependency is **optional** — default builds and the standard gates do
+not compile it.
 
-## Step 3 — Activate GPU on a layer
+## Roadmap (P2.2 and beyond)
 
-```rust
-use scirust_core::nn::conv2d::Conv2d;
+See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. Done: portable
+wgpu GEMM (oracle-validated via lavapipe), its plumbing into the autograd tape
+(`WgpuEngine` + `Var::matmul_gpu` forward/backward), Conv2d's im2col GEMMs, and
+a VRAM-resident matmul-chain API (`GpuChain`). Next:
 
-let conv = Conv2d::new(in_c, out_c, 3, 1, Padding::Same,
-    &KaimingNormal, Some(&Zeros), &mut rng)
-    .input_dims(32, 32)
-    .on_gpu(ctx.clone(), conv_pipelines.clone());   // ← that's it
-```
+- **Transparent tape residency**: make `matmul_gpu`/Conv2d on the tape keep
+  intermediates resident automatically. This requires the tape's value storage
+  (`DeviceTensor`, today a CPU `Tensor`) to become lazily-materialised GPU
+  storage and the rest of the forward op-set (bias, activations) to be
+  device-resident — a larger change, payoff only on real GPU hardware.
+- Move im2col/col2im onto the GPU — the archived pipelines in
+  [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
+- More ops (elementwise, reductions) behind the same trait.
+- CUDA/cuBLAS only once a hardware GPU runner exists.
 
-The `.on_gpu()` builder activates GPU routing for this layer:
-- The forward pass runs on GPU (im2col + sgemm + reshape)
-- The im2col tensor is cached in VRAM for backward
-- Output is returned to CPU automatically (compatible with CPU-only layers
-  in the rest of the model)
+## Historical result (not reproducible from this build)
 
-## Three GPU modes
-
-The `Conv2d` module supports three backends:
-
-```rust
-use scirust_core::nn::conv2d::ConvBackend;
-
-// Default: CPU only
-let conv = Conv2d::new(...);
-
-// GPU forward, output downloaded to RAM (compatible with CPU layers after)
-let conv = Conv2d::new(...).on_gpu_descend(ctx, pipelines);
-
-// GPU forward, output stays in VRAM (for chains: Conv → ReLU GPU → Conv)
-let conv = Conv2d::new(...).on_gpu(ctx, pipelines);
-
-// Switch back to CPU
-let conv = conv.on_cpu();
-```
-
-## Building a full GPU pipeline
-
-To minimize CPU↔GPU transfers, keep activations in VRAM between layers:
-
-```rust
-use scirust_gpu::gpu_elementwise::{ElementwisePipelines, relu_gpu};
-
-let ew_pipelines = Arc::new(ElementwisePipelines::build(&ctx.device));
-
-let mut conv1 = Conv2d::new(...).on_gpu(ctx.clone(), conv_pipelines.clone());
-let mut conv2 = Conv2d::new(...).on_gpu(ctx.clone(), conv_pipelines.clone());
-
-let tape = Tape::new();
-let xv = tape.input(x_cpu);
-let xv_gpu = xv.to_gpu(&ctx);                          // upload once
-let h1 = conv1.forward(&tape, xv_gpu);
-let h1_relu = h1.relu_gpu(&ctx, &ew_pipelines);        // GPU → GPU
-let h2 = conv2.forward(&tape, h1_relu);
-let h2_relu = h2.relu_gpu(&ctx, &ew_pipelines);        // GPU → GPU
-let out = h2_relu.to_cpu(&ctx);                        // download once
-```
-
-This is **Pattern 3** in our architecture: the activations live in VRAM,
-and only the input/output cross the bus.
-
-## When GPU is *slower*
-
-GPU overhead (kernel launch, memory transfers) means GPU is **not always faster**:
-
-| Workload | GPU benefit |
-|---|---|
-| Conv2d on small images (8×8, batch 4) | Probably slower than CPU |
-| Conv2d on medium images (32×32, batch 32) | 2-5× faster |
-| Conv2d on large images (224×224, batch 64) | 10-50× faster |
-| MatMul on small matrices (< 256×256) | Marginal benefit |
-| MatMul on large matrices (1024×1024+) | Massive speedup |
-
-Rule of thumb: GPU is worth it when the compute per byte transferred is high.
-
-## Limitations
-
-- **Backward pass**: forward runs on GPU, but backward currently performs
-  some matmul operations on CPU. Forward speedup is realized; full
-  end-to-end speedup is partial.
-- **Single GPU only**: the global context system assumes one GPU. Multi-GPU
-  support is on the roadmap.
-- **No fp16**: all GPU compute is f32. Mixed precision is planned for v10.
-
-## Troubleshooting
-
-**`No GPU adapter found`** — Your system doesn't have a wgpu-compatible
-adapter. Check that you have a recent enough graphics driver. On headless
-servers, you may need to set up a software adapter or skip GPU.
-
-**`set_global_gpu_context` panic** — You've installed it twice. The global
-context is set once per program (it's a `OnceLock`). For testing scenarios
-where you need different contexts, structure your tests as separate processes.
-
-**Outputs differ from CPU** — Should be < 1e-3 relative error. If significantly
-larger, file an issue with a minimal reproducer.
-
-## Performance tips
-
-1. **Build pipelines once** at startup, share via `Arc`. Compiling shaders
-   is expensive (~ms per pipeline).
-2. **Batch as much as possible** — GPU loves big batches, hates many small ones.
-3. **Use `--release`** — Debug builds disable optimization in `wgpu`.
-4. **Profile transfers**, not just compute — `cargo run --features wgpu --release`
-   and look at the bench output, which counts CPU↔GPU transfers explicitly.
+A cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor
+(aarch64), validated against a CPU oracle. This is a **historical measurement**
+from the archived code, not a current capability — see
+`scirust_complete_audit_report.md` §5.

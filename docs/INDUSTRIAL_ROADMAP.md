@@ -85,29 +85,79 @@ définition de fini (toujours : gates verts + oracle + doc).
 ## P2 — Profondeur technique (différenciation durable)
 
 ### P2.1 Mode « déterminisme certifié » du training
-- Étendre la garantie bit-exacte de l'inférence au **training**
-  multi-thread : réductions à arbre fixe dans `data_parallel`
-  (l'addition flottante n'est pas associative — ordonnancement figé),
-  test CI « même seed, 1/2/4 threads ⇒ pertes bit-identiques ».
-  Aucun framework grand public n'offre cette garantie testée.
+- **FAIT** : `DataParallelTrainer::train_batch_threaded(n_threads, ..)`
+  exécute les workers sur N threads OS (vol de tâches via compteur
+  atomique) mais écrit chaque résultat dans son slot indexé par worker et
+  réduit toujours dans l'ordre worker `0,1,…,n-1`. L'addition flottante
+  n'étant pas associative, une réduction « au fil des terminaisons »
+  dépendrait de l'ordonnanceur ; celle-ci non → résultat **bit-identique
+  pour 1/2/4/8 threads** et identique au séquentiel. Tests CI :
+  `train_batch_threaded_is_thread_count_invariant` (contributions
+  délibérément sensibles à l'ordre, ±1e16) +
+  `parallel_tape_training_is_deterministic_across_threads` (vrai backward
+  autograd). Aucun framework grand public n'offre cette garantie testée.
+- **FAIT (boucle complète)** : `multi_step_training_is_thread_count_invariant`
+  — une vraie boucle SGD multi-pas (modèle linéaire partagé, shards par
+  worker, perte MSE, autograd réel) produit une trajectoire de poids
+  **bit-identique pour 1/2/4 threads**. L'invariance d'un batch se compose
+  donc sur tout l'entraînement (la garantie ne dépend pas du nombre de
+  couches). Le « benchmark de scaling » est volontairement omis (le temps
+  mural n'est pas déterministe — non testable en CI).
 
 ### P2.2 GPU : trancher et recâbler proprement
-- Décision produit à prendre (les sources sont dans `archive/`) :
-  réintroduire le chemin **wgpu** seul (portable, testable en CI
-  software via LLVMpipe pour la compilation des pipelines), avec
-  oracle CPU bit-tolérant documenté. CUDA/cuBLAS reste hors périmètre
-  tant qu'un runner GPU n'existe pas — pas de claim sans CI.
+- **FAIT (étape 1 — trancher)** : suppression des stubs GPU mensongers
+  (`gemm_f32` renvoyait des zéros) ; `scirust-gpu` expose un backend CPU
+  de référence testé + des chemins device honnêtes (`Unavailable`).
+- **FAIT (étape 2 — recâbler wgpu)** : vrai GEMM WGSL derrière la feature
+  `wgpu`, exécuté sur adaptateur Vulkan, **validé contre l'oracle CPU**
+  (tolérance flottante documentée) et **testé en CI** sur Vulkan logiciel
+  (Mesa lavapipe) — « pas de claim sans test » respecté. `cargo deny`
+  passe sur l'arbre de deps wgpu. Dépendance optionnelle (les 8 gates par
+  défaut ne la compilent pas).
+- **FAIT (étape 3 — tape autograd)** : `WgpuEngine` implémente le hook
+  `GpuEngine` du `Tape` ; `Var::matmul_gpu` exécute **forward ET backward**
+  (`dA = g·Bᵀ`, `dB = Aᵀ·g`) sur le GPU, device/pipeline mis en cache.
+  Validé bout-en-bout contre la tape CPU (forward + 2 gradients) sur
+  lavapipe. Chemin opt-in (feature + `matmul_gpu`) → garantie bit-exacte
+  par défaut intacte.
+- **FAIT (étape 4 — Conv2d)** : les GEMM im2col de Conv2d (forward `W·col`,
+  backward `dW = dout·colᵀ`, `dInput = Wᵀ·dout`) passent par l'engine via
+  `Tape::gemm_ab` (chemin transpose natif), validés bout-en-bout contre la
+  Conv2d CPU sur lavapipe. im2col/col2im restent CPU pour l'instant.
+- **Reste** : garder les activations en VRAM entre couches (éviter
+  l'aller-retour CPU par op) + im2col/col2im sur GPU (pipelines archivés en
+  référence) ; plus d'ops (elementwise, réductions). CUDA/cuBLAS reste
+  hors périmètre tant qu'un runner GPU matériel n'existe pas.
 
 ### P2.3 SOM précision rustc (HIR/MIR)
 - Brancher `scirust-rustc-driver` pour : types résolus (fin du
   `let x = f();` conservateur), NLL réels, jointures de branches.
   L'oracle `syn` actuel devient le « mode rapide », le mode rustc le
   « mode précis » — même format de rapport.
+- **FAIT (infrastructure)** : le driver (exclu du workspace, `rustc_private`)
+  ne compilait plus sur la nightly courante (dérive d'API : `get_attrs`
+  renvoie désormais un itérateur). Réparé + warning-clean, et nouveau job CI
+  **informatif** `rustc-driver (excluded, informational)` (continue-on-error)
+  pour rendre visible la dérive future — c'est précisément parce que le crate
+  est exclu/non-gaté que la casse était invisible.
+- **Reste (le gros)** : écrire une passe MIR d'extraction ownership/emprunts
+  (NLL, types résolus) produisant le **format de rapport SOM**, brancher en
+  « mode précis ». Chantier conséquent et fragile (API rustc internes) — à
+  faire par incréments, hors des 8 gates par défaut.
 
 ### P2.4 Tenseur N-D unifié
 - Fusionner `tensor::TensorND` (déjà dans core) avec la tape 2D :
   prérequis aux ambitions compilateur (shape inference au-delà de
   rows/cols), à faire **avant** tout IR de training.
+- **FAIT (fondation — primitives d'inférence de forme)** : `TensorND`
+  expose maintenant `broadcast_shape(a,b)` (forme broadcastée numpy),
+  `matmul_shape(a,b)` (matmul (batché) `(…,m,k)·(…,k,n)→(…,m,n)` avec
+  broadcast des axes batch) et `broadcast_to(target)` (matérialisation).
+  Avec le pont `from/to_tensor_2d` existant, ce sont les briques que la
+  future tape/IR N-D utilisera. 12 tests (3 ajoutés). La **fusion** réelle
+  de la tape (réécriture des ~4700 lignes de `reverse.rs` sur `TensorND`)
+  reste le gros chantier — fait honnêtement par incréments testés, pas en
+  bloc.
 
 ## Ce qu'on ne propose PAS (anti-objectifs)
 - Courir après les TFLOPS de PyTorch/TensorRT : créneau perdu d'avance

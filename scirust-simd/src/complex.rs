@@ -6,8 +6,9 @@
 // Représentation mémoire : interleaved [re0, im0, re1, im1, ...]
 // avec #[repr(C)] pour garantir le layout. Cela permet de transmuter
 // un &[Complex<f32>] en &[f32] de longueur double.
-
-#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
+//
+// Le feature `portable_simd` est déclaré une seule fois à la racine du crate
+// (`lib.rs`) ; inutile de le répéter ici.
 
 // ------------------------------------------------------------------ //
 //  Type Complex                                                       //
@@ -78,7 +79,6 @@ fn as_f32_mut(s: &mut [Complex<f32>]) -> &mut [f32] {
 
 #[cfg(feature = "portable-simd")]
 pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
-    use std::simd::f32x8;
     assert_eq!(dst.len(), src.len());
 
     let dst_f = as_f32_mut(dst);

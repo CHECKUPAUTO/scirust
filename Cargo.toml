@@ -1,6 +1,6 @@
 [package]
 name = "scirust"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 publish = false
 rust-version = "1.85"
@@ -77,6 +77,7 @@ members = [
     "scirust-som/crates/symbolic",
     "scirust-som/crates/frontend",
     "scirust-som/crates/cli",
+    "scirust-cli",
     "scirust-som/crates/visualizer",
 ]
 exclude = [

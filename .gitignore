@@ -39,3 +39,11 @@ systemd/turboquant-*.service
 *.tmp
 *.bak
 *.lock
+
+# CycloneDX SBOMs: cargo-cyclonedx writes one next to every workspace member.
+# Only the curated facade SBOM under docs/sbom/ is tracked.
+*.cdx.json
+!docs/sbom/*.cdx.json
+
+# Excluded rustc-driver has its own (untracked) build dir
+scirust-rustc-driver/target/

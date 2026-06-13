@@ -32,6 +32,62 @@ La CI exporte `RUSTFLAGS="-D warnings"` : tout warning est une erreur.
 
 ## 2. Binaires exécutables
 
+### `scirust` — CLI unifiée (point d'entrée recommandé)
+
+```bash
+cargo install --path scirust-cli   # fournit le binaire `scirust`
+scirust help                       # liste toutes les commandes
+scirust quickstart                 # entraîne le classifieur démo (déterministe) → 4/4
+scirust analyze <file.rs> [--sarif]
+scirust verify emit|verify <args...>
+scirust version
+```
+
+Dispatcher mince au-dessus de capacités déjà testées (aucun nouveau
+calcul). Sans installation : `cargo run -p scirust-cli -- <commande>`.
+Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
+
+| Commande | Effet | Adossé à |
+|---|---|---|
+| `quickstart` | entraîne le MLP 2→8→2 (XOR), bit-déterministe, 4/4 | `scirust-core` |
+| `som train [--seed N] [--epochs E]` | entraîne le modèle d'ownership, accuracy vs baseline | `scirust-som-*` |
+| `evo [--seed N] [--gens G]` | minimise la sphère par algorithme génétique seedé | `scirust-evo` |
+| `cmaes [--seed N] [--steps S]` | minimise la sphère par CMA-ES seedé | `scirust-evo` |
+| `diff <expr> [var]` | dérivée symbolique | `scirust-symbolic` |
+| `simplify <expr>` | simplification algébrique | `scirust-symbolic` |
+| `eval <expr> [x=..]` | évaluation numérique | `scirust-symbolic` |
+| `solve <expr> [var]` | racines réelles symboliques (linéaire/quadratique) | `scirust-symbolic` |
+| `prove <a> <b>` | preuve best-effort d'équivalence | `scirust-symbolic` |
+| `gradient <expr> x=.. [y=..]` | gradient numérique (1–2 variables) | `scirust-symbolic` |
+| `to-rust <expr>` | transpile une expression en Rust | `scirust-symbolic` |
+| `regress <xs> <ys> [deg]` | régression moindres carrés (linéaire/polynomiale) | `scirust-symbolic` |
+| `symreg <xs> <ys> [--seed N]` | découverte de loi close (programmation génétique) | `scirust-symreg` |
+| `sat "c;c"` | satisfiabilité DPLL | `scirust-neuro-symbolic` |
+| `trig <expr>` | identités trigonométriques + simplification | `scirust-symbolic` |
+| `patterns "v1,v2,.."` | détection de tendance dans une série | `scirust-symbolic` |
+| `integrate <expr> <a> <b> [var] [--method]` | intégrale définie (Romberg/Simpson/Gauss) | `scirust-solvers` |
+| `root <expr> <a> <b> [var] [--method]` | racine (Brent/bisection/secant/newton) | `scirust-solvers`(+`-symbolic` pour newton) |
+| `minimize <expr> <a> <b> [var]` | minimum local 1D (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
+| `optimize <expr> --start a,b --vars x,y` | minimum multi-D (Nelder–Mead) | `scirust-solvers`+`-symbolic` |
+| `linsolve "r;r" "b"` | résout A·x=b (LU) | `scirust-solvers` |
+| `lstsq "r;r;r" "b"` | moindres carrés A·x≈b (QR) | `scirust-solvers` |
+| `det "r;r"` | déterminant | `scirust-solvers` |
+| `cholesky "r;r"` | facteur L de Cholesky (SPD) | `scirust-solvers` |
+| `qr "r;r"` | décomposition QR (Q, R) | `scirust-solvers` |
+| `cg "r;r" "b"` | gradient conjugué (SPD, itératif) | `scirust-solvers` |
+| `inverse "r;r"` | inverse d'une matrice carrée (LU) | `scirust-solvers` |
+| `solve-system "f1;f2" --vars x,y --start a,b` | système non-linéaire F(x)=0 (Broyden) | `scirust-solvers`+`-symbolic` |
+| `polyroots "c0,c1,.."` | racines réelles d'un polynôme | `scirust-solvers` |
+| `ode <f(t,y)> <y0> <t0> <t1> [h] [--method]` | intègre dy/dt=f (RK4 / DOPRI5 adaptatif) | `scirust-solvers`+`-symbolic` |
+| `fem-heat <nodes> <length> <source>` | chaleur 1D −u″=source (éléments finis linéaires) | `scirust-solvers` |
+| `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
+| `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
+| `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
+| `info` / `help` / `version` | méta | — |
+
+Les binaires ci-dessous restent disponibles individuellement ; `scirust`
+ne fait que les regrouper derrière une interface unique et découvrable.
+
 ### `som-analyze` — analyse d'ownership d'un fichier Rust réel
 
 ```bash

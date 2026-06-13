@@ -37,6 +37,6 @@ pub mod discovered_gemm;
 pub mod tt;
 
 pub use scirust_core::tn::factorize::auto_factorize;
-pub use scirust_core::tn::tt_decompose::{TTCores, tt_decompose_matrix};
+pub use scirust_core::tn::tt_decompose::{TTCores, reconstruct_matrix, tt_decompose_matrix};
 
 pub use tt::{TTLinear, tt_decompose, tt_decompose_auto};

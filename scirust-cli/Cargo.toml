@@ -1,0 +1,30 @@
+[package]
+name = "scirust-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "scirust_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scirust"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-runtime = { path = "../scirust-runtime" }
+scirust-symbolic = { path = "../scirust-symbolic" }
+scirust-evo = { path = "../scirust-evo" }
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-tn = { path = "../scirust-tn" }
+scirust-symreg = { path = "../scirust-symreg" }
+scirust-neuro-symbolic = { path = "../scirust-neuro-symbolic" }
+scirust-som-cli = { path = "../scirust-som/crates/cli" }
+scirust-som-tokenizer = { path = "../scirust-som/crates/tokenizer" }
+scirust-som-dataset = { path = "../scirust-som/crates/dataset" }
+scirust-som-model = { path = "../scirust-som/crates/model" }
+scirust-som-trainer = { path = "../scirust-som/crates/trainer" }
+scirust-som-inference = { path = "../scirust-som/crates/inference" }

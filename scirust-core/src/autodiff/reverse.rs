@@ -799,6 +799,37 @@ impl Tape {
         *self.gpu_engine.borrow_mut() = None;
     }
 
+    /// `C = op(A)·op(B)` where `ta`/`tb` request a transpose of the
+    /// corresponding operand. Routes through the attached [`GpuEngine`] when one
+    /// is present (using its native transpose path), otherwise falls back to a
+    /// CPU [`Tensor::matmul`] that is bit-identical to the explicit-transpose
+    /// form. Used to plumb Conv2d's im2col GEMMs through the GPU.
+    pub(crate) fn gemm_ab(&self, a: &Tensor, b: &Tensor, ta: bool, tb: bool) -> Tensor {
+        if let Some(ref engine) = *self.gpu_engine.borrow()
+        {
+            let m = if ta { a.cols } else { a.rows };
+            let k = if ta { a.rows } else { a.cols };
+            let n = if tb { b.rows } else { b.cols };
+            let mut c = vec![0.0f32; m * n];
+            engine.gemm(1.0, &a.data, &b.data, 0.0, &mut c, m, k, n, ta, tb);
+            Tensor {
+                rows: m,
+                cols: n,
+                data: c,
+            }
+        }
+        else
+        {
+            match (ta, tb)
+            {
+                (false, false) => a.matmul(b),
+                (false, true) => a.matmul(&b.transpose()),
+                (true, false) => a.transpose().matmul(b),
+                (true, true) => a.transpose().matmul(&b.transpose()),
+            }
+        }
+    }
+
     pub fn set_grad_enabled(&self, enabled: bool) {
         *self.grad_enabled.borrow_mut() = enabled;
     }
@@ -2018,12 +2049,12 @@ impl Tape {
                         &input_t, batch, in_c, h, w, kernel, stride, pad,
                     );
 
-                    // dW = dout @ col^T  (matmul parallèle) -> bit-exact
-                    let dw = dout.matmul(&col.transpose());
+                    // dW = dout @ col^T  (GPU engine if attached, else CPU)
+                    let dw = self.gemm_ab(&dout, &col, false, true);
                     grads[weight] = grads[weight].add(&dw);
 
                     // dcol = W^T @ dout ; dx = col2im(dcol)
-                    let dcol = weight_t.transpose().matmul(&dout);
+                    let dcol = self.gemm_ab(&weight_t, &dout, true, false);
                     let dx = crate::nn::conv_utils::col2im_raw(
                         &dcol, batch, in_c, h, w, kernel, stride, pad,
                     );
@@ -2793,11 +2824,33 @@ impl<'t> Var<'t> {
     }
 
     /// MatMul GPU-acceléré.
+    ///
+    /// When a [`GpuEngine`] is attached to the tape, both this forward GEMM and
+    /// the corresponding backward run on the engine; otherwise it transparently
+    /// falls back to the CPU path. GPU results are not bit-identical to the CPU
+    /// path (different accumulation order) — see `docs/GPU.md`.
     pub fn try_matmul_gpu(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_inner_dim("matmul_gpu", a.cols, b.rows)?;
-        let out = a.matmul(&b);
+        let out = {
+            let engine = self.tape.gpu_engine.borrow();
+            if let Some(ref engine) = *engine
+            {
+                let (m, k, n) = (a.rows, a.cols, b.cols);
+                let mut c = vec![0.0f32; m * n];
+                engine.gemm(1.0, &a.data, &b.data, 0.0, &mut c, m, k, n, false, false);
+                Tensor {
+                    rows: m,
+                    cols: n,
+                    data: c,
+                }
+            }
+            else
+            {
+                a.matmul(&b)
+            }
+        };
         let new_idx = self.tape.push_with_saved(
             Op::MatMulGpu(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3847,7 +3900,8 @@ impl<'t> Var<'t> {
 
         let col = im2col_raw(&a, batch, in_c, h, w, kernel, stride, pad);
 
-        let mut out_2d = wv.matmul(&col);
+        // (out_c × in_c·k·k) · (in_c·k·k × N) → routed to the GPU engine if attached.
+        let mut out_2d = self.tape.gemm_ab(&wv, &col, false, false);
 
         if let Some(b_v) = bias
         {

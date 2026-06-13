@@ -61,6 +61,20 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # The optional nightly `portable-simd` feature must keep building and
+  # testing warning-clean (RUSTFLAGS=-D warnings is set workspace-wide above).
+  portable-simd:
+    name: Build & Test (portable-simd, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build & test scirust-simd with portable-simd
+        run: cargo test -p scirust-simd --features portable-simd
+
   # The whole workspace must also build and pass on STABLE Rust (the
   # `portable-simd` nightly feature is optional and off by default) —
   # this is the gate industrial consumers care about.
@@ -104,6 +118,67 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  # Real wgpu compute path, validated against the CPU oracle on a software
+  # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
+  gpu-wgpu:
+    name: GPU (wgpu / lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Mesa lavapipe (software Vulkan)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Test wgpu backend on lavapipe
+        run: cargo test -p scirust-gpu --features wgpu
+
+  # Informational: the rustc driver (excluded from the workspace) uses
+  # `rustc_private` internals that drift across nightlies. Build it so that
+  # drift is visible, but don't gate merges on the nightly-of-the-day.
+  rustc-driver:
+    name: rustc-driver (excluded, informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + rustc internals
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, rust-src, llvm-tools-preview
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: scirust-rustc-driver
+      - name: Build the rustc driver
+        working-directory: scirust-rustc-driver
+        run: cargo build
+
+  # Informational: regenerate the CycloneDX SBOM and publish it as an
+  # artifact. Does not gate merges (transitive-dep churn is expected).
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - name: Generate SBOM
+        run: ./scripts/generate-sbom.sh
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scirust-sbom-cyclonedx
+          path: docs/sbom/scirust.cdx.json
 
   # Informational: coverage upload depends on external service/token and
   # must not gate merges.
