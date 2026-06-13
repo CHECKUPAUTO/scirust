@@ -18,6 +18,12 @@ versions sémantiques à partir de la prochaine release taguée.
   threadée, restructuration cfg SIMD) ont été tracés à la main : corrects.
 
 ### Ajouté
+- **Primitives d'inférence de forme N-D (P2.4, fondation)** : `TensorND`
+  gagne `broadcast_shape`, `matmul_shape` (matmul batché, broadcast des axes
+  batch) et `broadcast_to` (matérialisation numpy) — les briques d'inférence
+  de forme « au-delà de rows/cols » que la future tape/IR N-D utilisera, avec
+  le pont `from/to_tensor_2d` existant. 3 tests. (La fusion de la tape 2D
+  elle-même reste le gros chantier, à faire par incréments testés.)
 - **Entraînement data-parallèle à déterminisme certifié (P2.1)** :
   `DataParallelTrainer::train_batch_threaded(n_threads, ..)` exécute les
   workers sur N threads OS (vol de tâches via compteur atomique) mais réduit

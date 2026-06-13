@@ -139,6 +139,15 @@ définition de fini (toujours : gates verts + oracle + doc).
 - Fusionner `tensor::TensorND` (déjà dans core) avec la tape 2D :
   prérequis aux ambitions compilateur (shape inference au-delà de
   rows/cols), à faire **avant** tout IR de training.
+- **FAIT (fondation — primitives d'inférence de forme)** : `TensorND`
+  expose maintenant `broadcast_shape(a,b)` (forme broadcastée numpy),
+  `matmul_shape(a,b)` (matmul (batché) `(…,m,k)·(…,k,n)→(…,m,n)` avec
+  broadcast des axes batch) et `broadcast_to(target)` (matérialisation).
+  Avec le pont `from/to_tensor_2d` existant, ce sont les briques que la
+  future tape/IR N-D utilisera. 12 tests (3 ajoutés). La **fusion** réelle
+  de la tape (réécriture des ~4700 lignes de `reverse.rs` sur `TensorND`)
+  reste le gros chantier — fait honnêtement par incréments testés, pas en
+  bloc.
 
 ## Ce qu'on ne propose PAS (anti-objectifs)
 - Courir après les TFLOPS de PyTorch/TensorRT : créneau perdu d'avance

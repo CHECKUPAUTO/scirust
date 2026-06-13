@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 22 : P2.4 fondation — primitives d'inférence de forme N-D
+- constat : TensorND a déjà reshape/transpose/slice/can_broadcast_to +
+  pont from/to_tensor_2d. Manquaient les primitives d'inférence de forme.
+- ajout (TensorND) : broadcast_shape(a,b) numpy ; matmul_shape(a,b) batché
+  ((…,m,k)·(…,k,n)→(…,m,n), broadcast batch) ; broadcast_to(target)
+  matérialisation. 3 tests (12 au total dans tensor_nd).
+- honnête : la FUSION tape 2D↔ND (réécriture reverse.rs ~4700 l sur TensorND)
+  reste le gros chantier ; livré la fondation testée, pas le bloc.
+- clippy : needless_range_loop → enumerate sur out_strides. 732 tests.
+
 ## Session 2026-06-13 — volet 21 : revue de code max-effort + durcissement
 - 4 angles finder (agents //) sur le diff de branche (~8,8k lignes) : GPU
   wgpu/résidence, routage autodiff GPU, threading déterminisme + cfg SIMD,

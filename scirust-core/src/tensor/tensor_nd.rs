@@ -298,6 +298,105 @@ impl TensorND {
     }
 
     // ------------------------------------------------------------------
+    //  Shape inference (numpy semantics) — building blocks for an N-D tape/IR
+    // ------------------------------------------------------------------
+
+    /// The shape two operands broadcast to (numpy semantics), or `None` if they
+    /// are incompatible. Shapes are aligned from the right; missing leading axes
+    /// count as `1`, and each output axis is the max of the two whenever one is
+    /// `1` or they are equal.
+    pub fn broadcast_shape(a: &[usize], b: &[usize]) -> Option<Vec<usize>> {
+        let nd = a.len().max(b.len());
+        let pa = nd - a.len();
+        let pb = nd - b.len();
+        let mut out = vec![0usize; nd];
+        for (i, slot) in out.iter_mut().enumerate()
+        {
+            let da = if i < pa { 1 } else { a[i - pa] };
+            let db = if i < pb { 1 } else { b[i - pb] };
+            *slot = if da == db
+            {
+                da
+            }
+            else if da == 1
+            {
+                db
+            }
+            else if db == 1
+            {
+                da
+            }
+            else
+            {
+                return None;
+            };
+        }
+        Some(out)
+    }
+
+    /// Output shape of a (batched) matmul `a @ b` (numpy semantics): the last
+    /// two axes are the matrix dims `(…, m, k) · (…, k, n) → (…, m, n)` and any
+    /// leading batch axes must broadcast. `None` if the inner dims disagree,
+    /// either operand has `ndim < 2`, or the batch axes are incompatible.
+    pub fn matmul_shape(a: &[usize], b: &[usize]) -> Option<Vec<usize>> {
+        if a.len() < 2 || b.len() < 2
+        {
+            return None;
+        }
+        let (am, ak) = (a[a.len() - 2], a[a.len() - 1]);
+        let (bk, bn) = (b[b.len() - 2], b[b.len() - 1]);
+        if ak != bk
+        {
+            return None;
+        }
+        let mut out = Self::broadcast_shape(&a[..a.len() - 2], &b[..b.len() - 2])?;
+        out.push(am);
+        out.push(bn);
+        Some(out)
+    }
+
+    /// Materialise a broadcast of `self` to `target_shape` (numpy semantics):
+    /// size-1 axes and missing leading axes are replicated. Errors if `self`
+    /// cannot broadcast to the target (see [`Self::can_broadcast_to`]).
+    pub fn broadcast_to(&self, target_shape: &[usize]) -> Result<Self, String> {
+        if !self.can_broadcast_to(target_shape)
+        {
+            return Err(format!(
+                "cannot broadcast {:?} to {:?}",
+                self.shape, target_shape
+            ));
+        }
+        let nd = target_shape.len();
+        let off = nd - self.ndim(); // right-alignment offset
+        let out_strides = compute_strides(target_shape);
+        let total: usize = target_shape.iter().product();
+        let mut data = vec![0.0f32; total];
+        for (flat, slot) in data.iter_mut().enumerate()
+        {
+            let mut rem = flat;
+            let mut src_flat = 0usize;
+            for (axis, &stride) in out_strides.iter().enumerate()
+            {
+                let idx = rem / stride;
+                rem %= stride;
+                if axis >= off
+                {
+                    let src_axis = axis - off;
+                    // A size-1 source axis contributes index 0 (it is replicated).
+                    let src_idx = if self.shape[src_axis] == 1 { 0 } else { idx };
+                    src_flat += src_idx * self.strides[src_axis];
+                }
+            }
+            *slot = self.data[src_flat];
+        }
+        Ok(Self {
+            data,
+            shape: target_shape.to_vec(),
+            strides: out_strides,
+        })
+    }
+
+    // ------------------------------------------------------------------
     //  Conversion 2D ↔ ND
     // ------------------------------------------------------------------
     pub fn from_tensor_2d(t: &Tensor) -> Self {
@@ -465,5 +564,59 @@ mod tests {
         assert!(t.can_broadcast_to(&[3, 1, 4]));
         assert!(!t.can_broadcast_to(&[3, 2, 5])); // 4 != 5
         assert!(!t.can_broadcast_to(&[1])); // ndim trop petit
+    }
+
+    #[test]
+    fn broadcast_shape_rules() {
+        let bs = TensorND::broadcast_shape;
+        assert_eq!(bs(&[3, 1], &[1, 4]), Some(vec![3, 4]));
+        assert_eq!(bs(&[2, 3, 4], &[4]), Some(vec![2, 3, 4])); // right-align + leading 1s
+        assert_eq!(bs(&[1], &[]), Some(vec![1]));
+        assert_eq!(bs(&[], &[]), Some(vec![]));
+        assert_eq!(bs(&[3], &[4]), None); // 3 vs 4, neither is 1
+        assert_eq!(bs(&[5, 2], &[5, 3]), None); // 2 vs 3
+    }
+
+    #[test]
+    fn matmul_shape_rules() {
+        let ms = TensorND::matmul_shape;
+        assert_eq!(ms(&[2, 3], &[3, 4]), Some(vec![2, 4]));
+        assert_eq!(ms(&[5, 2, 3], &[5, 3, 4]), Some(vec![5, 2, 4])); // batched
+        assert_eq!(ms(&[5, 2, 3], &[3, 4]), Some(vec![5, 2, 4])); // batch broadcasts
+        assert_eq!(ms(&[1, 2, 3], &[6, 3, 4]), Some(vec![6, 2, 4])); // batch 1 broadcasts
+        assert_eq!(ms(&[2, 3], &[4, 5]), None); // inner dim 3 != 4
+        assert_eq!(ms(&[3], &[3, 4]), None); // ndim < 2
+        assert_eq!(ms(&[2, 2, 3], &[5, 3, 4]), None); // batch 2 vs 5
+    }
+
+    #[test]
+    fn broadcast_to_materialises() {
+        // Column vector [3,1] → [3,4]: each row value repeated across columns.
+        let t = TensorND::from_vec(vec![1.0, 2.0, 3.0], vec![3, 1]);
+        let b = t.broadcast_to(&[3, 4]).unwrap();
+        assert_eq!(b.shape(), &[3, 4]);
+        assert_eq!(
+            b.data,
+            vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0]
+        );
+
+        // Row vector [1,3] → [2,3]: the row replicated down.
+        let r = TensorND::from_vec(vec![1.0, 2.0, 3.0], vec![1, 3]);
+        assert_eq!(
+            r.broadcast_to(&[2, 3]).unwrap().data,
+            vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
+        );
+
+        // Add leading axes: [4] → [2,3,4] replicates the vector 6 times.
+        let v = TensorND::from_vec(vec![10.0, 20.0, 30.0, 40.0], vec![4]);
+        let bv = v.broadcast_to(&[2, 3, 4]).unwrap();
+        assert_eq!(bv.shape(), &[2, 3, 4]);
+        assert_eq!(bv.numel(), 24);
+        assert_eq!(&bv.data[0..4], &[10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(&bv.data[20..24], &[10.0, 20.0, 30.0, 40.0]);
+
+        // Incompatible target is an error, not a panic: [3,1] aligned against
+        // [2,3] gives 3-vs-2 on the leading axis → cannot broadcast.
+        assert!(t.broadcast_to(&[2, 3]).is_err());
     }
 }
