@@ -24,8 +24,10 @@ versions sémantiques à partir de la prochaine release taguée.
   les gradients dans un ordre fixe (worker 0,1,…,n-1), indépendant de
   l'ordonnanceur. L'addition flottante n'étant pas associative, le résultat
   est **bit-identique pour 1/2/4/8 threads** et identique au séquentiel —
-  garantie testée que les frameworks grand public n'offrent pas. Deux tests
-  CI : contributions sensibles à l'ordre (±1e16) et vrai backward autograd.
+  garantie testée que les frameworks grand public n'offrent pas. Trois tests
+  CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
+  une **boucle SGD multi-pas complète** dont la trajectoire de poids est
+  bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
 
 ## [0.14.0] — 2026-06-13
 

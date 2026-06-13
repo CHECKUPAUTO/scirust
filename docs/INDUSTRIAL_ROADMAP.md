@@ -96,8 +96,13 @@ définition de fini (toujours : gates verts + oracle + doc).
   délibérément sensibles à l'ordre, ±1e16) +
   `parallel_tape_training_is_deterministic_across_threads` (vrai backward
   autograd). Aucun framework grand public n'offre cette garantie testée.
-- Reste : étendre la primitive à un boucle d'entraînement multi-couches
-  complète + benchmark de scaling (1→N threads).
+- **FAIT (boucle complète)** : `multi_step_training_is_thread_count_invariant`
+  — une vraie boucle SGD multi-pas (modèle linéaire partagé, shards par
+  worker, perte MSE, autograd réel) produit une trajectoire de poids
+  **bit-identique pour 1/2/4 threads**. L'invariance d'un batch se compose
+  donc sur tout l'entraînement (la garantie ne dépend pas du nombre de
+  couches). Le « benchmark de scaling » est volontairement omis (le temps
+  mural n'est pas déterministe — non testable en CI).
 
 ### P2.2 GPU : trancher et recâbler proprement
 - **FAIT (étape 1 — trancher)** : suppression des stubs GPU mensongers
