@@ -3,6 +3,25 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 16 : GPU wgpu RÉEL (P2.2 recâbler), testé sur lavapipe
+- décision user : « pursue real wgpu now ». Débloqué en installant Mesa
+  lavapipe (mesa-vulkan-drivers) → adaptateur Vulkan logiciel llvmpipe
+  présent dans le conteneur → wgpu testable ici.
+- vrai GEMM WGSL (C=A·B, f32) derrière feature `wgpu` (wgpu 0.20.1 +
+  pollster + bytemuck, deps optionnelles). WgpuBackend::gemm_f32 exécute
+  le shader sur Vulkan ; sinon/erreur adaptateur → Unavailable (jamais
+  inventé). 3 tests wgpu validés contre l'oracle CpuBackend (rel.err<1e-4)
+  — exécutés réellement (pas skippés) sur llvmpipe.
+- cargo deny PASSE sur l'arbre wgpu (advisories/bans/licenses/sources ok).
+  clippy --features wgpu clean. doc clean. no_std + default intacts.
+- CI : job `GPU (wgpu / lavapipe)` (apt install mesa-vulkan-drivers +
+  cargo test -p scirust-gpu --features wgpu). Gates par défaut ne
+  compilent pas wgpu (optionnel) → aarch64/etc. inchangés.
+- docs : GPU.md réécrit (wgpu réel+testé, déterminisme tolérant, supply
+  chain), README (5 endroits), roadmap P2.2 (étapes FAIT), CHANGELOG.
+- reste P2.2 : brancher wgpu dans la tape autograd / Conv2d (im2col
+  archivés en réf). 726 tests (défaut) ; +9 en scirust-gpu --features wgpu.
+
 ## Session 2026-06-13 — volet 15 : SBOM CycloneDX + release v0.14 (prép) + GPU.md honnête
 - SBOM : CycloneDX 1.5 reproductible (docs/sbom/scirust.cdx.json, 78
   composants, façade scirust 0.13.0). SOURCE_DATE_EPOCH figé + pas de

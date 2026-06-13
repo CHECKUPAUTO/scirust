@@ -13,9 +13,8 @@ versions sémantiques à partir de la prochaine release taguée.
   un vrai backend CPU de référence **testé** (oracle GEMM bit-déterministe)
   et des chemins device qui signalent honnêtement `BackendError::Unavailable`
   (jamais de sortie inventée), à l'image de `scirust_core::compute_backend`.
-  Crate passée de 0 à 6 tests. Le câblage wgpu réel reste bloqué tant
-  qu'aucun runner GPU / Vulkan logiciel n'existe en CI (« pas de claim sans
-  test ») — voir roadmap P2.2.
+  Crate passée de 0 à 6 tests. (Le câblage wgpu réel a suivi dans une étape
+  séparée — voir « Ajouté » : GEMM WGSL testé sur Vulkan logiciel.)
 - **`docs/GPU.md` honnête** : la page décrivait une API GPU en une ligne
   (`GpuContext::try_init`, `ConvGpuPipelines`, `Conv2d::on_gpu`…) qui
   n'existe pas (modules archivés ; `--features wgpu` ne compile rien).
@@ -45,6 +44,15 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **GPU wgpu réel et testé (P2.2, étape « recâbler »)** : vrai GEMM `f32`
+  en WGSL (`C = A·B`) derrière la feature `wgpu`, exécuté sur adaptateur
+  Vulkan/Metal/DX12/GL via wgpu 0.20. **Validé contre l'oracle CPU**
+  (tolérance flottante documentée, l'accumulation GPU n'étant pas
+  bit-identique) et **testé en CI** sur Vulkan logiciel Mesa lavapipe
+  (`llvmpipe`) — aucun GPU matériel requis, « pas de claim sans test »
+  respecté. `cargo deny` passe sur l'arbre de deps wgpu ; dépendance
+  optionnelle (les 8 gates par défaut ne la compilent pas). Nouveau job CI
+  `GPU (wgpu / lavapipe)`. Reste à brancher dans la tape autograd (P2.2).
 - **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
   reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
   `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une

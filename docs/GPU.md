@@ -1,67 +1,84 @@
 # GPU — status and roadmap
 
-> **Honest status (today): GPU compute is _not_ wired into the build.**
-> This page documents what actually exists, why hardware GPU is not yet a
-> claimed capability, and what re-wiring it requires. It used to describe a
-> one-line GPU API (`GpuContext`, `ConvGpuPipelines`, `set_global_gpu_context`,
-> `Conv2d::on_gpu`); that API is **archived, not compiled** — keeping the doc
-> as-is would have been an overclaim, which the project does not do.
+> **Status: a real, portable GPU compute path is wired behind the `wgpu`
+> feature and tested against the CPU oracle.** It is *not* on by default.
+> This page documents exactly what exists, how it is tested, and what remains.
+> (An earlier version of this page described a one-line `Conv2d::on_gpu` API
+> that did not exist — that archived API is not compiled; the doc was corrected
+> rather than left as an overclaim.)
 
 ## What exists today
 
-- **`scirust-gpu` ships one real, tested path**: a deterministic CPU reference
-  backend (`CpuBackend`) with a fixed accumulation order, exposed through the
-  `RawComputeBackend` trait and the `GpuAccelerator` dispatcher. It is the
-  bit-tolerant oracle any future GPU backend must be validated against.
-- The `WgpuBackend` / `CudaBackend` placeholders return
-  `BackendError::Unavailable` — they **never fabricate results**.
-- `scirust-core` routes all compute through CPU/SIMD kernels
-  (AVX2/SSE2/NEON, runtime-dispatched), which are the tested production path.
-- `--features wgpu` currently compiles nothing extra (the feature is a
-  reserved switch, not an implementation).
+- **CPU reference backend** (`CpuBackend`, always built): a deterministic,
+  fixed-accumulation-order GEMM exposed through the `RawComputeBackend` trait
+  and the `GpuAccelerator` dispatcher. It is the bit-tolerant oracle the GPU
+  path is validated against.
+- **Portable GPU GEMM via wgpu** (`WgpuBackend`, feature `wgpu`): a real WGSL
+  compute shader (`C = A·B`, row-major `f32`) executed on a Vulkan/Metal/DX12/GL
+  adapter. Validated against `CpuBackend` within a documented floating-point
+  tolerance (GPU accumulation order is not bit-identical to the scalar path).
+- **CUDA** (`CudaBackend`): out of scope until a GPU CI runner exists; always
+  returns `BackendError::Unavailable`. The archived cuBLAS draft is kept in
+  `archive/scirust-gpu/`.
+- `scirust-core`'s training/inference still routes through the CPU/SIMD kernels
+  (AVX2/SSE2/NEON); the wgpu path is a standalone, opt-in compute backend, not
+  yet plumbed into the autograd tape (that is the next step — see roadmap).
 
 ```rust
-use scirust_gpu::{GpuAccelerator, BackendError};
+use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
 
-let acc = GpuAccelerator::cpu();                 // the wired, tested path
-let c = acc.matmul(&a, &b, m, k, n)?;            // real GEMM, deterministic
+// Always-available, deterministic CPU reference path:
+let acc = GpuAccelerator::cpu();
+let c = acc.matmul(&a, &b, m, k, n)?;            // real GEMM, bit-deterministic
 
-// Device paths are honest about not being wired yet:
-let gpu = GpuAccelerator::Wgpu(scirust_gpu::WgpuBackend);
-assert!(matches!(gpu.matmul(&a, &b, m, k, n), Err(BackendError::Unavailable("wgpu"))));
+// Portable GPU path (requires `--features wgpu` and an adapter):
+match WgpuBackend.gemm_f32(&a, &b, m, k, n) {
+    Ok(gpu_c) => { /* validated against CpuBackend within tolerance */ }
+    Err(BackendError::Unavailable("wgpu")) => { /* no feature / no adapter — honest */ }
+    Err(e) => return Err(e),
+}
 ```
 
-## Why GPU is not claimed yet
+## How it's tested (no claim without a test)
 
-The project rule is **no claim without a test**. A truthful "GPU accelerated"
-claim needs all of:
+The wgpu GEMM is exercised in CI on a **software Vulkan adapter** — Mesa
+*lavapipe* (`llvmpipe`) — so the assertion path runs without physical GPU
+hardware:
 
-1. **A CI runner that can execute it.** wgpu compute needs a Vulkan/Metal/DX12
-   adapter (or a software Vulkan ICD such as Mesa *lavapipe*). The standard
-   hosted runners — and the dev container — have none, so a wgpu path cannot
-   be tested here.
-2. **A determinism story.** GPU floating-point is not bit-identical to the CPU
-   path across drivers; the project's bit-exact guarantee requires a
-   documented, bit-*tolerant* CPU oracle for any GPU result. `CpuBackend` is
-   that oracle.
-3. **A supply-chain decision.** `wgpu` pulls a large transitive tree
-   (`wgpu-hal`, `naga`, …) that must clear `cargo deny` and is weighed against
-   the "pure Rust, minimal, auditable" posture.
+```bash
+sudo apt-get install -y mesa-vulkan-drivers vulkan-tools   # provides lavapipe
+cargo test -p scirust-gpu --features wgpu
+```
 
-Until those hold, shipping a wgpu backend would only reproduce the dishonest
-stub that was just removed.
+The tests compare the wgpu result to `CpuBackend` with a relative-Frobenius
+tolerance (`< 1e-4`). If no adapter can be acquired, the GPU tests skip rather
+than fail; CI installs lavapipe so they actually execute. The CI job is
+`GPU (wgpu / lavapipe)` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-## Re-wiring plan (roadmap P2.2)
+## Determinism note
 
-See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. The intended
-path is **wgpu only** (portable; testable in CI via a software Vulkan adapter),
-with the archived WGSL kernels in [`archive/scirust-gpu/`](../archive/scirust-gpu/)
-re-aligned to the current `scirust-core` API and validated against `CpuBackend`.
-CUDA/cuBLAS stays out of scope until a GPU runner exists.
+GPU floating-point is not bit-identical to the scalar CPU path (different
+accumulation order, possible FMA), so the bit-exact guarantee does **not**
+extend to the GPU backend. `CpuBackend` is the documented bit-tolerant oracle;
+GPU output is asserted equal to it within tolerance, not bit-for-bit.
 
-The archived sources include working drafts of: a `saxpy`/`relu` WGSL compute
-path (`wgpu_backend.rs`), a GPU tensor/context, im2col-based Conv2d pipelines,
-and a cuBLAS matmul — preserved for reference, not built.
+## Supply chain
+
+Enabling `wgpu` pulls a larger transitive tree (`wgpu-hal`, `naga`, `ash`, …).
+That tree clears `cargo deny` (advisories, licences, bans, sources) as part of
+CI. The dependency is **optional** — default builds and the standard gates do
+not compile it.
+
+## Roadmap (P2.2 and beyond)
+
+See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. Done: portable
+wgpu GEMM, tested via lavapipe, oracle-validated. Next:
+
+- Plumb the wgpu backend into `Conv2d` / the autograd tape (keep activations in
+  VRAM across layers) — the archived im2col pipelines in
+  [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
+- More ops (elementwise, reductions) behind the same trait.
+- CUDA/cuBLAS only once a hardware GPU runner exists.
 
 ## Historical result (not reproducible from this build)
 

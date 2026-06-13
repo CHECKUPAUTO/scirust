@@ -8,7 +8,12 @@ publish = false
 default = ["std"]
 std = []
 cuda = []
-wgpu = []
+# Portable GPU compute via wgpu (Vulkan/Metal/DX12/GL). Testable in CI with a
+# software Vulkan adapter (Mesa lavapipe). See docs/GPU.md (P2.2).
+wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dependencies]
 scirust-gpu-macros = { path = "../scirust-gpu-macros" }
+wgpu = { version = "0.20", optional = true }
+pollster = { version = "0.3", optional = true }
+bytemuck = { version = "1", optional = true }

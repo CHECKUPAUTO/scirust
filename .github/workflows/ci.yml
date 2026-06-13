@@ -105,6 +105,24 @@ jobs:
         with:
           command: check
 
+  # Real wgpu compute path, validated against the CPU oracle on a software
+  # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
+  gpu-wgpu:
+    name: GPU (wgpu / lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Mesa lavapipe (software Vulkan)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Test wgpu backend on lavapipe
+        run: cargo test -p scirust-gpu --features wgpu
+
   # Informational: regenerate the CycloneDX SBOM and publish it as an
   # artifact. Does not gate merges (transitive-dep churn is expected).
   sbom:

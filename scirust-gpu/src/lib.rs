@@ -2,24 +2,31 @@
 //!
 //! ## Honesty policy (repo-wide)
 //! Code under `*/src/` is wired and tested and never claims a capability it
-//! does not have. Hardware GPU backends (wgpu, CUDA) are **not yet wired**:
-//! their archived drafts live in `archive/scirust-gpu/`, and re-wiring the
-//! portable wgpu path is roadmap item **P2.2**. That work is gated on a CI
-//! GPU (or software-Vulkan) runner — the project rule is *no claim without a
-//! test*, and GPU floating-point also needs a documented bit-tolerant CPU
-//! oracle before any "GPU accelerated" claim is truthful.
+//! does not have.
 //!
-//! Until then this crate ships exactly one **real, tested** path — the CPU
-//! reference backend — plus an extension point (`RawComputeBackend` +
-//! `GpuAccelerator`) for future devices. The placeholder device backends do
-//! not fabricate results: they return [`BackendError::Unavailable`], mirroring
-//! the honest `Err` signalling already used in
-//! `scirust_core::compute_backend` ("vrai signal : pas de stub trompeur").
+//! - **CPU reference backend** ([`CpuBackend`]) — always built, deterministic,
+//!   oracle-grade GEMM. This is the bit-tolerant oracle a GPU result is
+//!   validated against.
+//! - **Portable GPU** ([`WgpuBackend`]) — real WGSL compute path behind the
+//!   `wgpu` feature (Vulkan/Metal/DX12/GL). It is exercised in CI on a software
+//!   Vulkan adapter (Mesa *lavapipe*) against the CPU oracle, so the *no claim
+//!   without a test* rule holds without physical GPU hardware. Without the
+//!   feature, or when no adapter can be acquired, it returns
+//!   [`BackendError::Unavailable`] — it never fabricates output.
+//! - **CUDA** ([`CudaBackend`]) — out of scope until a GPU CI runner exists;
+//!   always returns [`BackendError::Unavailable`]. The archived cuBLAS draft
+//!   lives in `archive/scirust-gpu/`.
+//!
+//! This mirrors the honest `Err` signalling in `scirust_core::compute_backend`
+//! ("vrai signal : pas de stub trompeur"). See `docs/GPU.md` (roadmap P2.2).
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String, vec, vec::Vec};
+
+#[cfg(feature = "wgpu")]
+mod wgpu_backend;
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,9 +138,13 @@ impl RawComputeBackend for CpuBackend {
     }
 }
 
-/// Portable GPU backend (wgpu). **Not yet wired** — placeholder extension
-/// point for roadmap P2.2. Returns [`BackendError::Unavailable`] instead of
-/// fabricating results. The archived WGSL kernels are in `archive/scirust-gpu/`.
+/// Portable GPU backend (wgpu, Vulkan/Metal/DX12/GL).
+///
+/// With the `wgpu` feature enabled, `gemm_f32` runs a real WGSL compute shader
+/// on an available adapter and is validated against [`CpuBackend`] in CI on a
+/// software Vulkan adapter (Mesa lavapipe). Without the feature — or when no
+/// adapter can be acquired — it returns [`BackendError::Unavailable`] and never
+/// fabricates output. See `docs/GPU.md` (roadmap P2.2).
 pub struct WgpuBackend;
 
 impl RawComputeBackend for WgpuBackend {
@@ -143,13 +154,22 @@ impl RawComputeBackend for WgpuBackend {
 
     fn gemm_f32(
         &self,
-        _a: &[f32],
-        _b: &[f32],
-        _m: usize,
-        _k: usize,
-        _n: usize,
+        a: &[f32],
+        b: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
     ) -> BackendResult<Vec<f32>> {
-        Err(BackendError::Unavailable("wgpu"))
+        #[cfg(feature = "wgpu")]
+        {
+            check_gemm_dims(a, b, m, k, n)?;
+            wgpu_backend::wgpu_gemm(a, b, m, k, n)
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            let _ = (a, b, m, k, n);
+            Err(BackendError::Unavailable("wgpu"))
+        }
     }
 }
 
@@ -177,12 +197,13 @@ impl RawComputeBackend for CudaBackend {
 
 /// Transparent hardware dispatcher.
 ///
-/// Only the CPU reference path is wired today; `Wgpu`/`Cuda` are honest
-/// placeholders that report [`BackendError::Unavailable`] (see P2.2).
+/// `Cpu` is always wired; `Wgpu` is wired behind the `wgpu` feature (and
+/// reports [`BackendError::Unavailable`] otherwise); `Cuda` is a placeholder
+/// that always reports [`BackendError::Unavailable`] (see P2.2).
 pub enum GpuAccelerator {
     /// Real, tested CPU reference path.
     Cpu(CpuBackend),
-    /// Placeholder portable-GPU path (not wired — see P2.2).
+    /// Portable GPU path — real WGSL compute under the `wgpu` feature.
     Wgpu(WgpuBackend),
     /// Placeholder CUDA path (out of scope without a GPU runner).
     Cuda(CudaBackend),
@@ -269,13 +290,17 @@ mod tests {
         // than returning fabricated (e.g. all-zero) results.
         let a = [1.0, 2.0, 3.0, 4.0];
         let b = [1.0, 0.0, 0.0, 1.0];
-        assert_eq!(
-            WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
-            Err(BackendError::Unavailable("wgpu"))
-        );
+        // CUDA is never implemented → always Unavailable.
         assert_eq!(
             CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
             Err(BackendError::Unavailable("cuda"))
+        );
+        // Without the `wgpu` feature the wgpu path is likewise Unavailable.
+        // (With the feature, it runs for real — covered in `wgpu_backend` tests.)
+        #[cfg(not(feature = "wgpu"))]
+        assert_eq!(
+            WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
+            Err(BackendError::Unavailable("wgpu"))
         );
     }
 
@@ -289,6 +314,8 @@ mod tests {
 
         let wgpu = GpuAccelerator::Wgpu(WgpuBackend);
         assert_eq!(wgpu.device_name(), "wgpu");
+        // Unwired without the feature; with it, behaviour is exercised elsewhere.
+        #[cfg(not(feature = "wgpu"))]
         assert!(wgpu.matmul(&a, &id, 2, 2, 2).is_err());
     }
 }

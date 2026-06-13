@@ -92,11 +92,19 @@ définition de fini (toujours : gates verts + oracle + doc).
   Aucun framework grand public n'offre cette garantie testée.
 
 ### P2.2 GPU : trancher et recâbler proprement
-- Décision produit à prendre (les sources sont dans `archive/`) :
-  réintroduire le chemin **wgpu** seul (portable, testable en CI
-  software via LLVMpipe pour la compilation des pipelines), avec
-  oracle CPU bit-tolérant documenté. CUDA/cuBLAS reste hors périmètre
-  tant qu'un runner GPU n'existe pas — pas de claim sans CI.
+- **FAIT (étape 1 — trancher)** : suppression des stubs GPU mensongers
+  (`gemm_f32` renvoyait des zéros) ; `scirust-gpu` expose un backend CPU
+  de référence testé + des chemins device honnêtes (`Unavailable`).
+- **FAIT (étape 2 — recâbler wgpu)** : vrai GEMM WGSL derrière la feature
+  `wgpu`, exécuté sur adaptateur Vulkan, **validé contre l'oracle CPU**
+  (tolérance flottante documentée) et **testé en CI** sur Vulkan logiciel
+  (Mesa lavapipe) — « pas de claim sans test » respecté. `cargo deny`
+  passe sur l'arbre de deps wgpu. Dépendance optionnelle (les 8 gates par
+  défaut ne la compilent pas).
+- **Reste** : brancher le backend wgpu dans la tape autograd / `Conv2d`
+  (garder les activations en VRAM ; pipelines im2col archivés en
+  référence) ; plus d'ops (elementwise, réductions). CUDA/cuBLAS reste
+  hors périmètre tant qu'un runner GPU matériel n'existe pas.
 
 ### P2.3 SOM précision rustc (HIR/MIR)
 - Brancher `scirust-rustc-driver` pour : types résolus (fin du

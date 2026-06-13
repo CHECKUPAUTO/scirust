@@ -9,7 +9,8 @@
 
 > A pure-Rust deep learning framework — SIMD CPU kernels, reverse-mode
 > autograd, batch normalization, convolutions, and data parallelism.
-> (GPU/WGSL kernels exist in-tree but are archived, not wired — see Status.)
+> (A portable wgpu GEMM is wired behind the optional `wgpu` feature, tested
+> against the CPU oracle on software Vulkan — see docs/GPU.md.)
 > No C++, no Python, no FFI — just Rust from top to bottom.
 
 ## Why?
@@ -38,7 +39,7 @@ Every result below is reproduced by code in this repository and documented in th
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
 - **Deep-learning core + reverse-mode autodiff** — 683 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
-- **(Archived, not in build) Portable GPU / Tensor Core** — a cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64), validated against a CPU oracle. ⚠ *This is a historical result, not a current capability: the kernels live in [`archive/scirust-gpu/`](archive/scirust-gpu/) outside the workspace and are not reproducible from today's build. Re-wiring is roadmap item P2.2; see `scirust_complete_audit_report.md` §5.*
+- **Portable GPU GEMM (wgpu, optional)** — a real WGSL `f32` matmul behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI. Not yet plumbed into the autograd tape (P2.2). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
@@ -123,20 +124,20 @@ Add a single crate to your own `Cargo.toml`:
 scirust-core = { path = "path/to/scirust-core" }
 ```
 
-> GPU note: `scirust-gpu` ships one real, tested path — a deterministic CPU
-> reference backend (the bit-tolerant oracle a future GPU must match). The
-> `wgpu`/`cuda` device backends are honest placeholders that return
-> `BackendError::Unavailable` rather than fabricated results; the WGSL/cuBLAS
-> kernels are preserved in `archive/scirust-gpu/` outside the build
-> (`--features wgpu` compiles nothing extra). Re-wiring a tested wgpu path is
-> tracked in `docs/INDUSTRIAL_ROADMAP.md` (P2.2).
+> GPU note: `scirust-gpu` ships a deterministic CPU reference backend (always
+> built; the bit-tolerant oracle) and a real portable **wgpu GEMM** behind the
+> optional `wgpu` feature, validated against that oracle on a software Vulkan
+> adapter (Mesa lavapipe) in CI. Without the feature/adapter the `wgpu` path
+> returns `BackendError::Unavailable` — never fabricated output. `cuda` stays
+> out of scope until a GPU runner exists. Plumbing wgpu into the autograd tape
+> (the archived Conv2d pipelines) is the next step — see `docs/GPU.md` (P2.2).
 
 ## Architecture
 
 ```
 scirust-core/    Core compute, autograd, layers (~12k loc)
 scirust-simd/    SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/     Tested CPU reference backend; GPU device paths report Unavailable (kernels in archive/)
+scirust-gpu/     CPU reference backend + real wgpu GEMM (feature `wgpu`, tested on lavapipe)
 scirust-som/     Ownership Model: real-Rust analyzer + Transformer pipeline
 examples/        Quickstart, MNIST training, benchmarks
 ```
@@ -145,7 +146,7 @@ examples/        Quickstart, MNIST training, benchmarks
 
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — Train a 2-class classifier in 50 lines
 - [`docs/MNIST.md`](docs/MNIST.md) — Real MNIST training with data parallelism
-- [`docs/GPU.md`](docs/GPU.md) — Activate GPU routing for Conv2d
+- [`docs/GPU.md`](docs/GPU.md) — Portable wgpu compute (status, testing, roadmap)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
 - [`docs/sbom/`](docs/sbom/) — CycloneDX SBOM (reproducible, regenerated in CI & attached to releases)
@@ -182,14 +183,15 @@ examples/        Quickstart, MNIST training, benchmarks
 | Fused ops (matmul+SiLU, matmul+GELU, etc.) | ✅ New |
 | HPC im2col (cache-aware) | ✅ New |
 | SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
+| Portable GPU GEMM (`scirust-gpu`, feature `wgpu`) | ✅ New (WGSL compute, oracle-validated on lavapipe; not yet in autograd) |
 
-> **Not included yet (no claim).** Hardware GPU execution is **not** part of
-> the build: `scirust-gpu` ships a real, tested CPU reference backend, while
-> its `wgpu`/`cuda` device paths honestly return `BackendError::Unavailable`
-> (never fabricated output), and the WGSL/cuBLAS kernels are preserved in
-> `archive/scirust-gpu/` outside the workspace. Re-wiring a tested wgpu path
-> is tracked in [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md)
-> (P2.2). The table above lists only what ships and is tested today.
+> **GPU scope (honest).** A portable wgpu GEMM compute backend is wired behind
+> the optional `wgpu` feature and tested against the CPU oracle on a software
+> Vulkan adapter (Mesa lavapipe) in CI. It is **not** yet plumbed into the
+> autograd tape / `Conv2d` (next step, P2.2), and **CUDA** remains out of scope
+> until a hardware GPU runner exists (`CudaBackend` returns `Unavailable`). The
+> archived WGSL/cuBLAS drafts live in `archive/scirust-gpu/`. See
+> [`docs/GPU.md`](docs/GPU.md) and [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md).
 
 
 ## Package layout: framework library vs. bundled agent
