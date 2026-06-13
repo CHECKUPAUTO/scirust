@@ -207,8 +207,8 @@ const GROUPS: &[(&str, &[Command])] = &[
         "NLP",
         &[Command {
             name: "bpe",
-            args: "\"<corpus>\" [--vocab N] [--encode \"<text>\"]",
-            about: "Train a deterministic BPE tokenizer; encode/decode text.",
+            args: "\"<corpus>\" [--vocab N] [--encode \"<text>\"] [--bytes]",
+            about: "Train a deterministic BPE tokenizer (--bytes = lossless byte-level).",
         }],
     ),
     (
