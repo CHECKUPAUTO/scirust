@@ -56,56 +56,62 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 
 ## Quick start (60 seconds)
 
-Train a 2-class classifier on synthetic data:
+No code to copy. Install the unified `scirust` CLI and run a command:
 
-```rust
-use scirust_core::autodiff::reverse::{Tape, Tensor};
-use scirust_core::autodiff::optim::{Adam, Optimizer};
-use scirust_core::nn::{
-    PcgEngine, Module, Sequential, Linear, ReLU,
-    KaimingNormal, Zeros,
-};
-use scirust_core::nn::loss::{Loss, strict::CrossEntropyLoss};
+```bash
+git clone https://github.com/CHECKUPAUTO/scirust && cd scirust
+cargo install --path scirust-cli      # provides the `scirust` binary
 
-fn main() {
-    let mut rng = PcgEngine::new(42);
-    let mut model = Sequential::new()
-        .push(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
-        .push(ReLU)
-        .push(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
-
-    // Toy dataset: 2 clusters
-    let x = Tensor::from_vec(vec![1.0, 1.0,  -1.0, -1.0,  2.0, 2.0,  -2.0, -2.0], 4, 2);
-    let y = Tensor::from_vec(vec![1.0, 0.0,  0.0, 1.0,  1.0, 0.0,  0.0, 1.0], 4, 2);
-
-    let mut opt = Adam::new(0.05);
-    for epoch in 0..100 {
-        let tape = Tape::new();
-        let xv = tape.input(x.clone());
-        let yv = tape.input(y.clone());
-        let logits = model.forward(&tape, xv);
-        let loss = CrossEntropyLoss.forward(logits, yv);
-        loss.backward();
-        opt.step(&model.parameter_indices(), &tape);
-        model.sync(&tape);
-
-        if epoch % 20 == 0 {
-            println!("epoch {epoch}: loss = {:.4}", tape.value(loss.idx()).data[0]);
-        }
-    }
-}
+scirust help                          # list every command
+scirust quickstart                    # train a demo classifier (deterministic) → 4/4
+scirust analyze src/main.rs           # ownership analysis of a real Rust file
+scirust analyze src/main.rs --sarif   # same, as SARIF 2.1.0 for CI code scanning
+scirust verify emit  model.qsr1 model.proof    # seal an inference certificate
+scirust verify verify model.proof model.qsr1   # re-check it bit-for-bit
 ```
 
-That's it. No GPU setup, no `unsafe`, no manual memory management.
+`scirust quickstart` prints a decreasing loss and reaches 4/4 on a
+non-linearly-separable task — proof the autograd tape, Adam, and the layers
+work together. Same seed ⇒ identical numbers, every run.
 
-## Installation
+No `cargo install`? Run any command in place with
+`cargo run -p scirust-cli -- <command>`.
 
-Add to your `Cargo.toml`:
+## Library API (for embedding)
+
+The CLI is a thin layer over the crates; embed them directly when you need
+full control. The 2→8→2 classifier the quickstart trains, in code:
+
+```rust
+use scirust_core::autodiff::optim::{Adam, Optimizer};
+use scirust_core::autodiff::reverse::{Tape, Tensor};
+use scirust_core::nn::{
+    CrossEntropyLoss, KaimingNormal, Linear, Loss, Module, PcgEngine, ReLU, Sequential, Zeros,
+};
+
+let mut rng = PcgEngine::new(42);
+let mut model = Sequential::new()
+    .add(Linear::new(2, 8, &KaimingNormal, &Zeros, &mut rng))
+    .add(ReLU::new())
+    .add(Linear::new(8, 2, &KaimingNormal, &Zeros, &mut rng));
+let loss_fn = CrossEntropyLoss::new();
+let mut opt = Adam::new(0.05);
+
+let tape = Tape::new();
+let x = tape.input(Tensor::from_vec(vec![0.0, 1.0], 1, 2));
+let y = tape.input(Tensor::from_vec(vec![0.0, 1.0], 1, 2)); // one-hot
+let logits = model.forward(&tape, x);
+let loss = loss_fn.forward(&tape, logits, y);
+tape.backward(loss.idx());
+opt.step(&model.parameter_indices(), &tape);
+model.sync(&tape);
+```
+
+Add a single crate to your own `Cargo.toml`:
 
 ```toml
 [dependencies]
 scirust-core = { path = "path/to/scirust-core" }
-
 ```
 
 > GPU note: `scirust-gpu` currently exposes CPU-validated stubs only; the

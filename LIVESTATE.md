@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 7 : CLI unifiée (UX)
+- `scirust-cli` (nouveau) : binaire `scirust` + lib, dispatcher
+  découvrable (`help`/`version`/`quickstart`/`analyze`/`verify`) au-dessus
+  du code déjà testé ; 7 tests (help/version, commande inconnue→2,
+  quickstart 4/4 + bit-déterministe, usage analyze/verify)
+- `scirust_runtime::proofcli` : logique emit/verify extraite en lib
+  (DRY) ; `scirust-verify` délègue ; test verify_roundtrip toujours vert
+- README : Quickstart réécrit autour de la CLI (fini les 40 lignes
+  d'API à copier) ; section « Library API » avec snippet corrigé pour
+  l'API réelle (.add / loss_fn.forward(&tape,..) / tape.backward(idx))
+- REFERENCE/CHANGELOG mis à jour
+
 ## Session 2026-06-12 — volet 6 : exécution roadmap P0/P1
 - P0.3 STABLE : feature(portable_simd) optionnelle via cfg_attr +
   fallback scalaire tiling → workspace entier compile ET passe 683

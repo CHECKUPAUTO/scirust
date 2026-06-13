@@ -1572,6 +1572,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-cli"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-runtime",
+ "scirust-som-cli",
+]
+
+[[package]]
 name = "scirust-core"
 version = "0.1.0"
 dependencies = [

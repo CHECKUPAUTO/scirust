@@ -1,0 +1,19 @@
+[package]
+name = "scirust-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "scirust_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scirust"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-runtime = { path = "../scirust-runtime" }
+scirust-som-cli = { path = "../scirust-som/crates/cli" }

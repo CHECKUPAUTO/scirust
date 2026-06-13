@@ -27,6 +27,14 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI unifiée `scirust`** (`scirust-cli`) : point d'entrée unique et
+  découvrable (`scirust help`) regroupant `quickstart` (démo MLP 2→8→2
+  bit-déterministe, 4/4), `analyze` (ownership, délègue à som-cli),
+  `verify` (certificats, délègue à `proofcli`), `version`. Logique verify
+  factorisée dans `scirust_runtime::proofcli` (zéro duplication ;
+  `scirust-verify` délègue désormais). Quickstart du README réécrit
+  autour de la CLI (plus de copier-coller de 40 lignes d'API), exemple
+  bibliothèque corrigé pour l'API réelle.
 - **Support Rust stable** : `#![feature(portable_simd)]` rendu réellement
   optionnel (`cfg_attr`), fallback scalaire du tiling ; les 683 tests
   passent sur stable ; job CI `build-test-stable`. La feature nightly

@@ -32,6 +32,26 @@ La CI exporte `RUSTFLAGS="-D warnings"` : tout warning est une erreur.
 
 ## 2. Binaires exécutables
 
+### `scirust` — CLI unifiée (point d'entrée recommandé)
+
+```bash
+cargo install --path scirust-cli   # fournit le binaire `scirust`
+scirust help                       # liste toutes les commandes
+scirust quickstart                 # entraîne le classifieur démo (déterministe) → 4/4
+scirust analyze <file.rs> [--sarif]
+scirust verify emit|verify <args...>
+scirust version
+```
+
+Dispatcher mince au-dessus des capacités déjà testées : `quickstart`
+(entraînement MLP 2→8→2 bit-déterministe), `analyze` (délègue à
+`scirust-som-cli`), `verify` (délègue à `scirust_runtime::proofcli`).
+Sans installation : `cargo run -p scirust-cli -- <commande>`. Codes de
+sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
+
+Les binaires ci-dessous restent disponibles individuellement ; `scirust`
+ne fait que les regrouper derrière une interface unique et découvrable.
+
 ### `som-analyze` — analyse d'ownership d'un fichier Rust réel
 
 ```bash
