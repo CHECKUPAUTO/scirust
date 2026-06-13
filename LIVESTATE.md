@@ -3,6 +3,25 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 24 : campagne « faire grandir scirust » (TOUS les chantiers)
+- réponse honnête à « scirust assez conséquent ? » : oui pour le créneau
+  déterministe/auditable/embarqué ; lacunes = tape 2D, GPU immature, pas de
+  KV-cache/tokenizer prod, ONNX export-only, pas de distribué. → lancé tout.
+- BPE (scirust-learning) : bug déterminisme (max_by_key(count) dépend de
+  l'ordre HashMap) → tie-break (count, Reverse(pair)) ; +5 tests.
+- autodiff::nd (NOUVEAU) : autograd N-D reverse sur TensorND (add/mul
+  broadcast, matmul2d, relu, sum) ; gradient check numérique. Coexiste avec
+  la tape 2D ; utilise broadcast_shape/broadcast_to/matmul_shape (vol. 22).
+- GPU elementwise : 2e pipeline wgpu (add/mul/relu) ; GpuChain.add/mul/relu ;
+  couche matmul→+biais→relu 100% résidente VRAM, testée lavapipe.
+- ONNX import : import_onnx_json + OnnxGraph::weights ; round-trip poids
+  bit-exact (checkpoint) ; testé sur Linear KaimingNormal réel.
+- KV-cache : infer_step existait (non testé) → test d'équivalence dernier
+  token vs forward complet (causal). Correct → décodage O(n) validé.
+- honnête : tape N-D = MVP (pas la fusion), ONNX = poids (pas graphe arbitraire
+  ni protobuf), GPU = ops de base (pas tout l'op-set). Incréments testés.
+- 743 tests workspace ; 18 wgpu ; 8 gates verts.
+
 ## Session 2026-06-13 — volet 23 : P2.3 infra — rustc-driver recompile + visible
 - scirust-rustc-driver (exclu du workspace, rustc_private) ne compilait plus
   sur nightly courante : get_attrs renvoie un itérateur (plus un slice) →

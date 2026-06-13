@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — campagne « faire grandir scirust »
+- **Autograd N-D (MVP, P2.4)** : `autodiff::nd` — `NdTape`/`NdVar` sur
+  `TensorND` (add/mul broadcastés, matmul 2D, relu, sum), à côté de la tape 2D
+  de production. Validé par un **gradient check numérique** (différences
+  finies vs backward) sur `sum(relu(X·W+b)·V)`.
+- **Ops GPU élargies** : kernel elementwise wgpu (add/mul/relu) ; une couche
+  entière (matmul → +biais → relu) reste **résidente en VRAM**, validée contre
+  l'oracle CPU sur lavapipe.
+- **ONNX import** : `import_onnx_json` + `OnnxGraph::weights` — les poids
+  font un aller-retour export→import **bit-exact** (format de checkpoint).
+- **KV-cache vérifié** : test prouvant que le décodage incrémental
+  (`MultiHeadAttention::infer_step`) donne le même dernier token que le forward
+  complet — décodage O(n) désormais testé.
+- **BPE déterministe** : tie-break par paire (`(count, Reverse(pair))`) — le
+  `max_by_key(count)` dépendait de l'ordre d'itération du HashMap ; +5 tests.
+
 ### Réparé
 - **Revue de code (max-effort) — durcissement** : (1) chemin GPU résident
   (`GpuChain`) : les dimensions dégénérées (`m`/`n`/`k == 0`) faisaient paniquer
