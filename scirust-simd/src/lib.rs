@@ -29,7 +29,7 @@
 //! assert_eq!(output, vec![11.0, 22.0, 33.0, 44.0]);
 //! ```
 
-#![feature(portable_simd)]
+#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
@@ -53,14 +53,13 @@ pub use scirust_simd_macros::simd;
 
 #[cfg(feature = "portable-simd")]
 pub mod generic {
-    use std::simd::{LaneCount, Simd, SimdElement, SupportedLaneCount};
+    use std::simd::{Simd, SimdElement};
 
     /// Apply a lane-wise operation to every element of `input`, writing results
     /// into `output`.
     pub fn simd_map<T, const N: usize, F>(input: &[T], output: &mut [T], f: F)
     where
         T: SimdElement + Default,
-        LaneCount<N>: SupportedLaneCount,
         F: Fn(Simd<T, N>) -> Simd<T, N>,
     {
         assert_eq!(input.len(), output.len());
@@ -89,7 +88,6 @@ pub mod generic {
     pub fn simd_zip_with<T, const N: usize, F>(a: &[T], b: &[T], output: &mut [T], f: F)
     where
         T: SimdElement + Default,
-        LaneCount<N>: SupportedLaneCount,
         F: Fn(Simd<T, N>, Simd<T, N>) -> Simd<T, N>,
     {
         assert_eq!(a.len(), b.len());
@@ -557,7 +555,7 @@ mod tests {
     fn test_simd_map_add_one() {
         let input = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let mut output = vec![0.0f32; 8];
-        generic::simd_map::<f32, 8, _>(&input, &mut output, |v| v + Simd::splat(1.0));
+        generic::simd_map::<f32, 8, _>(&input, &mut output, |v| v + std::simd::f32x8::splat(1.0));
         assert_eq!(output, vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
     }
 

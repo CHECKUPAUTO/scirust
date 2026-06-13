@@ -114,3 +114,42 @@ fn copy_read_under_mut_borrow_is_flagged() {
     "#;
     assert!(faults(src).contains(&FaultKind::UseWhileMutBorrowed));
 }
+
+#[test]
+fn sarif_output_is_valid_and_lists_faults() {
+    use scirust_som_symbolic::OwnershipOracle;
+    let src = r#"
+        fn process(input: String) {
+            let owned = input;
+            let moved = owned;
+            let oops = owned;
+            drop(oops);
+            drop(moved);
+        }
+    "#;
+    let lowered = scirust_som_frontend::lower_str(src).unwrap();
+    let analysis = OwnershipOracle::new().analyze(&lowered.ast);
+    let sarif = scirust_som_cli::render_sarif("src/process.rs", &analysis);
+
+    // Structurally valid JSON with the SARIF 2.1.0 envelope and our fault.
+    let parsed: serde_json::Value = serde_json::from_str(&sarif).expect("valid JSON");
+    assert_eq!(parsed["version"], "2.1.0");
+    assert_eq!(parsed["runs"][0]["tool"]["driver"]["name"], "scirust-som");
+    let results = parsed["runs"][0]["results"].as_array().unwrap();
+    assert_eq!(results.len(), analysis.diagnostics.len());
+    assert!(results.iter().any(|r| r["ruleId"] == "UseAfterMove"));
+    assert_eq!(
+        results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        "src/process.rs"
+    );
+}
+
+#[test]
+fn sarif_clean_file_has_empty_results() {
+    use scirust_som_symbolic::OwnershipOracle;
+    let lowered = scirust_som_frontend::lower_str("fn ok(a: String) { drop(a); }").unwrap();
+    let analysis = OwnershipOracle::new().analyze(&lowered.ast);
+    let sarif = scirust_som_cli::render_sarif("ok.rs", &analysis);
+    let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
+    assert_eq!(parsed["runs"][0]["results"].as_array().unwrap().len(), 0);
+}

@@ -3,6 +3,7 @@
 //! Ce module implémente le tiling automatique pour les opérations matricielles,
 //! adapté à la taille du cache L2 de la machine cible.
 
+#[cfg(feature = "portable-simd")]
 use std::simd::f32x4;
 
 /// Paramètres de tiling adaptatifs.
@@ -177,10 +178,14 @@ pub fn matmul_tiled_f32(
                     for p in pp..pk
                     {
                         let alpha_a = alpha * a[a_row_off + p];
-                        let a_val = f32x4::splat(alpha_a);
                         let b_col_off = p * n;
 
                         let mut j = jj;
+                        // Chemin portable_simd (nightly) ; sans la feature,
+                        // la boucle scalaire de queue couvre tout [jj, jn).
+                        #[cfg(feature = "portable-simd")]
+                        let a_val = f32x4::splat(alpha_a);
+                        #[cfg(feature = "portable-simd")]
                         while j + 4 <= jn
                         {
                             let c_idx = c_row_off + j;

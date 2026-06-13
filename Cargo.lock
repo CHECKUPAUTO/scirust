@@ -1784,6 +1784,7 @@ dependencies = [
  "scirust-som-frontend",
  "scirust-som-symbolic",
  "scirust-som-visualizer",
+ "serde_json",
 ]
 
 [[package]]

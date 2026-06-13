@@ -408,3 +408,39 @@ conforme à la philosophie « claims backed by measurements ».
    persistance des poids (SRT1).
 
 FIN DE LA MISE À JOUR
+
+---
+
+# TOUR DE CODE « PHILOSOPHIE & CÂBLAGE » — 2026-06-12 (soir)
+
+Balayage systématique : conformité déterminisme + règle « 100 % du code
+est utile et câblé ». Méthode : scan des fichiers hors module-tree
+confirmé par test de corruption (un fichier dont la corruption ne casse
+pas `cargo check` n'est pas compilé), grep des sources d'aléa.
+
+## Constats et actions
+
+| Constat | Action |
+|---|---|
+| **20 fichiers morts confirmés** (gpu ×8, simd neon/sve, core quant/ ×5, lazy/ ×2, tensor broadcast/device, symbolic prelude) | triés un par un ↓ |
+| `core/lazy/` mort alors que le README revendiquait « Lazy graph ✓ » ; recâblé, son test de fusion échouait : **la fusion pointwise ne fusionnait jamais** (chaque maillon émis comme chaîne de 1) | bug d'ordonnancement corrigé (saut des nœuds absorbés) ; 8/8 tests lazy verts — le claim redevient vrai |
+| `tensor/broadcast.rs`, `tensor/device.rs`, `symbolic/prelude.rs` : sains mais débranchés | recâblés (prelude réécrit pour le layout actuel) |
+| `core/quant/` (« Pilier 5 ») : kernels SIMD **mathématiquement faux** (masque 0x7F sur signés, lanes recombinées de travers, bf16 corrompant le bit de signe) et duplication du chemin int8 validé | **archivé** dans `archive/` avec état documenté — pas de duplication non validée |
+| `scirust-gpu` ×8, `simd/neon.rs` (duplicat), `simd/sve.rs` (intrinsics inexistants) | **archivés** (`archive/README.md` : provenance, état, voie de reprise) |
+| `src/upgrade_patch.rs` : artefact runtime du démo agent rangé dans src/ | déplacé hors de `src/` (const mise à jour) |
+| **`data/augment.rs` : non-déterminisme réel** (`thread_rng`, `rand::random`), `with_seed` qui ignorait la seed, « bruit gaussien » uniforme déguisé, et `RandomCrop` qui **jetait son résultat** (no-op silencieux) | réécriture déterministe : RNG `PcgEngine` injecté, flux par échantillon indépendant de l'ordre, vrai Box-Muller, crop effectif ; +3 tests (bit-déterminisme par seed, indépendance d'ordre, régression crop) |
+| `logging.rs` (`SystemTime`) et `openclaw-u` (`thread_rng`) | exemptions documentées (observabilité / démo hors framework) dans CONTRIBUTING.md |
+
+## Standards industriels ajoutés
+
+`CONTRIBUTING.md` (contrat qualité + règles déterminisme/câblage/oracle),
+`SECURITY.md` (signalement, surface zéro-FFI, avis acceptés),
+`CHANGELOG.md` (Keep a Changelog), `docs/INDUSTRIAL_ROADMAP.md`
+(propositions P0–P2 pour l'adoption industrielle), LIVESTATE purgé de
+son pied de page périmé.
+
+Après ce tour : `*/src/` ne contient plus un seul fichier non compilé ;
+le seul aléa non seedé restant du dépôt est l'horodatage des logs et le
+binaire de démo, tous deux documentés comme hors-contrat.
+
+FIN DU TOUR DE CODE

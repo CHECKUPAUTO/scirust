@@ -61,6 +61,23 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # The whole workspace must also build and pass on STABLE Rust (the
+  # `portable-simd` nightly feature is optional and off by default) —
+  # this is the gate industrial consumers care about.
+  build-test-stable:
+    name: Build & Test (stable, x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build workspace (stable)
+        run: cargo build --workspace --all-targets
+      - name: Run tests (stable)
+        run: cargo test --workspace
+
   # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
   # A pure `cargo check` needs no cross linker and would have caught the
   # 2026-06-12 sgemv merge regression on the NEON side.

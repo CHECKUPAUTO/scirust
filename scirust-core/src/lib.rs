@@ -1,4 +1,4 @@
-#![feature(portable_simd)]
+#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
 
 pub mod io;
 pub mod nn;
@@ -55,6 +55,7 @@ pub mod aot;
 pub mod checkpoint;
 pub mod compute_backend;
 pub mod homomorphic;
+pub mod lazy;
 pub mod quantization;
 pub mod xai;
 

@@ -1203,3 +1203,5 @@ mod tests {
         assert!((coeffs[1] - 2.0).abs() < 1e-6);
     }
 }
+
+pub mod prelude;

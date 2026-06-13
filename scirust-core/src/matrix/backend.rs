@@ -355,7 +355,7 @@ impl SimdBackend for PortableSimdBackend {
     #[inline]
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         // y += alpha * x, vectorisé
-        use std::simd::f32x8;
+        use std::simd::{StdFloat, f32x8};
         let splat = f32x8::splat(alpha);
         let (pre_x, mid_x, suf_x) = x.as_simd::<8>();
         let (pre_y, mid_y, suf_y) = y.as_simd_mut::<8>();
@@ -378,7 +378,7 @@ impl SimdBackend for PortableSimdBackend {
 
     #[inline]
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
-        use std::simd::f64x4;
+        use std::simd::{StdFloat, f64x4};
         let splat = f64x4::splat(alpha);
         let (pre_x, mid_x, _) = x.as_simd::<4>();
         let (pre_y, mid_y, suf_y) = y.as_simd_mut::<4>();
@@ -479,7 +479,7 @@ impl SimdBackend for PortableSimdBackend {
     }
 
     fn relu_f32(&self, v: &mut [f32]) {
-        use std::simd::{SimdFloat, f32x8};
+        use std::simd::{f32x8, num::SimdFloat};
         let zero = f32x8::splat(0.0);
         let (pre, mid, suf) = v.as_simd_mut::<8>();
         for x in pre.iter_mut()
