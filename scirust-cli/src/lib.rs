@@ -9,6 +9,7 @@
 pub mod learning;
 pub mod numeric;
 pub mod quickstart;
+pub mod reasoning;
 pub mod symbolic;
 
 /// One registered command for the help listing.
@@ -88,7 +89,20 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "<xs> <ys> [degree]",
                 about: "Least-squares fit (linear, or polynomial of given degree).",
             },
+            Command {
+                name: "symreg",
+                args: "<xs> <ys> [--seed N]",
+                about: "Discover a closed-form y=f(x) by genetic programming.",
+            },
         ],
+    ),
+    (
+        "LOGIC",
+        &[Command {
+            name: "sat",
+            args: "\"1,-2;2;-1,3\"",
+            about: "DPLL satisfiability (clauses ; literals , ; -v = ¬v).",
+        }],
     ),
     (
         "NUMERICAL SOLVERS",
@@ -266,6 +280,8 @@ pub fn run(args: &[String]) -> u8 {
         Some("gradient") => symbolic::run_gradient(rest),
         Some("to-rust") => symbolic::run_to_rust(rest),
         Some("regress") => symbolic::run_regress(rest),
+        Some("symreg") => reasoning::run_symreg(rest),
+        Some("sat") => reasoning::run_sat(rest),
         Some("integrate") => numeric::run_integrate(rest),
         Some("root") => numeric::run_root(rest),
         Some("minimize") => numeric::run_minimize(rest),
@@ -329,6 +345,17 @@ mod tests {
         assert_eq!(run(&s(&["gradient", "x^2", "x=3"])), 0);
         assert_eq!(run(&s(&["lstsq", "1,0;1,1;1,2", "1,2,3"])), 0);
         assert_eq!(run(&s(&["cholesky", "4,2;2,3"])), 0);
+        assert_eq!(
+            run(&s(&["root", "x^2 - 2", "0", "2", "--method", "secant"])),
+            0
+        );
+        assert_eq!(
+            run(&s(&["root", "x^2 - 2", "0", "2", "--method", "newton"])),
+            0
+        );
+        assert_eq!(run(&s(&["sat", "1,-2;2"])), 0);
+        assert_eq!(run(&s(&["sat", "1;-1"])), 1);
+        assert_eq!(run(&s(&["symreg", "0,1,2,3", "0,2,4,6"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

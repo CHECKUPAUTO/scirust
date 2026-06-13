@@ -1577,6 +1577,7 @@ version = "0.1.0"
 dependencies = [
  "scirust-core",
  "scirust-evo",
+ "scirust-neuro-symbolic",
  "scirust-runtime",
  "scirust-solvers",
  "scirust-som-cli",
@@ -1586,6 +1587,7 @@ dependencies = [
  "scirust-som-tokenizer",
  "scirust-som-trainer",
  "scirust-symbolic",
+ "scirust-symreg",
 ]
 
 [[package]]

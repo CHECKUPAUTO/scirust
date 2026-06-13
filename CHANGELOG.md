@@ -30,6 +30,10 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI : 3e vague** — `symreg` (régression symbolique par programmation
+  génétique, `scirust-symreg`), `sat` (satisfiabilité DPLL,
+  `scirust-neuro-symbolic`), et deux méthodes de plus pour `root`
+  (`secant`, `newton` via dérivée symbolique). Nouveau groupe LOGIC.
 - **CLI : 2e vague de commandes** (29 → toutes testées) : `integrate
   --method simpson|gauss`, `root --method bisection`, `optimize`
   (Nelder–Mead multi-variable), `lstsq` (moindres carrés QR), `cholesky`,

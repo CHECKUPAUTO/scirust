@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 11 : CLI vague 3 (symreg, sat, root methods)
+- +4 commandes/méthodes : symreg (scirust-symreg : GP + fit constantes
+  symbolique), sat (scirust-neuro-symbolic : DPLL), root --method
+  secant|newton (newton via dérivée symbolique). Nouveau groupe LOGIC.
+- module reasoning.rs ; +deps scirust-symreg, scirust-neuro-symbolic
+- vérifs main : secant/newton→√2, SAT {1,2}/UNSAT, symreg y≈2x MSE≈0
+- CSP/datalog laissés de côté (closures/règles non exprimables en CLI
+  sans inventer un DSL non testé — hors politique)
+- 39 tests CLI ; 8 gates verts
+
 ## Session 2026-06-13 — volet 10 : CLI vague 2 (capacités testées non exposées)
 - +9 commandes : integrate --method simpson|gauss, root --method
   bisection, optimize (Nelder–Mead multi-D), lstsq (QR), cholesky,

@@ -18,6 +18,8 @@ use scirust_solvers::quadrature::romberg::romberg;
 use scirust_solvers::quadrature::simpson::simpson_adaptive;
 use scirust_solvers::roots::bisection::bisection;
 use scirust_solvers::roots::brent::brent;
+use scirust_solvers::roots::newton::newton_with_derivative;
+use scirust_solvers::roots::secant::secant;
 use scirust_solvers::{Solution, Tolerance};
 use scirust_symbolic::{Expr, diff, eval, parse, simplify};
 
@@ -134,8 +136,10 @@ pub fn run_integrate(args: &[String]) -> u8 {
     0
 }
 
-/// `root <expr> <a> <b> [var] [--method brent|bisection]` — a root in
-/// `[a,b]` (needs a sign change). Default method: Brent.
+/// `root <expr> <a> <b> [var] [--method brent|bisection|secant|newton]` — a
+/// root using `[a,b]` as a bracket (brent/bisection, sign change needed),
+/// as two initial guesses (secant), or as a midpoint start with the
+/// symbolic derivative (newton). Default: Brent.
 pub fn run_root(args: &[String]) -> u8 {
     let (method, pos) = take_flag(args, "--method");
     let method = method.unwrap_or_else(|| "brent".to_string());
@@ -143,7 +147,7 @@ pub fn run_root(args: &[String]) -> u8 {
     else
     {
         eprintln!(
-            "usage: scirust root <expr> <a> <b> [var] [--method brent|bisection]   (sign change needed)"
+            "usage: scirust root <expr> <a> <b> [var] [--method brent|bisection|secant|newton]"
         );
         return 2;
     };
@@ -159,14 +163,21 @@ pub fn run_root(args: &[String]) -> u8 {
         _ => return 2,
     };
     let tol = Tolerance::new(1e-12, 1e-12, 200);
-    let f = fn1(parsed, var);
     let result = match method.as_str()
     {
-        "brent" => brent(f, a, b, tol),
-        "bisection" => bisection(f, a, b, tol),
+        "brent" => brent(fn1(parsed, var), a, b, tol),
+        "bisection" => bisection(fn1(parsed, var), a, b, tol),
+        "secant" => secant(fn1(parsed, var), a, b, tol),
+        "newton" =>
+        {
+            let deriv = simplify(&diff(&parsed, &var));
+            let f = fn1(parsed, var.clone());
+            let df = fn1(deriv, var);
+            newton_with_derivative(f, df, 0.5 * (a + b), tol)
+        },
         other =>
         {
-            eprintln!("error: unknown method `{other}` (brent|bisection)");
+            eprintln!("error: unknown method `{other}` (brent|bisection|secant|newton)");
             return 2;
         },
     };

@@ -61,8 +61,10 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `gradient <expr> x=.. [y=..]` | gradient numérique (1–2 variables) | `scirust-symbolic` |
 | `to-rust <expr>` | transpile une expression en Rust | `scirust-symbolic` |
 | `regress <xs> <ys> [deg]` | régression moindres carrés (linéaire/polynomiale) | `scirust-symbolic` |
+| `symreg <xs> <ys> [--seed N]` | découverte de loi close (programmation génétique) | `scirust-symreg` |
+| `sat "c;c"` | satisfiabilité DPLL | `scirust-neuro-symbolic` |
 | `integrate <expr> <a> <b> [var] [--method]` | intégrale définie (Romberg/Simpson/Gauss) | `scirust-solvers` |
-| `root <expr> <a> <b> [var] [--method]` | racine dans [a,b] (Brent/bisection) | `scirust-solvers` |
+| `root <expr> <a> <b> [var] [--method]` | racine (Brent/bisection/secant/newton) | `scirust-solvers`(+`-symbolic` pour newton) |
 | `minimize <expr> <a> <b> [var]` | minimum local 1D (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
 | `optimize <expr> --start a,b --vars x,y` | minimum multi-D (Nelder–Mead) | `scirust-solvers`+`-symbolic` |
 | `linsolve "r;r" "b"` | résout A·x=b (LU) | `scirust-solvers` |
