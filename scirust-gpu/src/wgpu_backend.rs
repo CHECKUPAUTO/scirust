@@ -273,13 +273,26 @@ impl WgpuContext {
 
     /// Upload a row-major `rows×cols` matrix to a resident GPU storage buffer.
     pub(crate) fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
-        let buf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("resident"),
-                contents: bytemuck::cast_slice(data),
+        // wgpu rejects zero-sized buffers; back an empty matrix with a 4-byte
+        // placeholder so the handle stays valid (`download` short-circuits empties).
+        let buf = if data.is_empty()
+        {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("resident-empty"),
+                size: 4,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            });
+                mapped_at_creation: false,
+            })
+        }
+        else
+        {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("resident"),
+                    contents: bytemuck::cast_slice(data),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                })
+        };
         GpuMatrix { buf, rows, cols }
     }
 
@@ -303,7 +316,11 @@ impl WgpuContext {
                 "inner dims disagree: op(A) is {m}×{k}, op(B) is {kb}×{n}"
             )));
         }
-        let bytes = (m * n * std::mem::size_of::<f32>()) as u64;
+        // Never create a zero-sized buffer (wgpu rejects it). For a degenerate
+        // result (`m`/`n`/`k == 0`) the zero-initialised buffer already holds
+        // the correct empty/all-zeros matrix, so we skip the dispatch entirely.
+        let elems = m * n;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
         let c_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("resident-c"),
             size: bytes,
@@ -312,7 +329,10 @@ impl WgpuContext {
         });
         // Fresh result: alpha=1, beta=0. wgpu zero-initialises c_buf, so the
         // `beta·C` term reads valid zeros.
-        self.encode_gemm(&a.buf, &b.buf, &c_buf, m, k, n, ta, tb, 1.0, 0.0);
+        if m != 0 && n != 0 && k != 0
+        {
+            self.encode_gemm(&a.buf, &b.buf, &c_buf, m, k, n, ta, tb, 1.0, 0.0);
+        }
         Ok(GpuMatrix {
             buf: c_buf,
             rows: m,
@@ -322,7 +342,12 @@ impl WgpuContext {
 
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub(crate) fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
-        let bytes = (mat.rows * mat.cols * std::mem::size_of::<f32>()) as u64;
+        let elems = mat.rows * mat.cols;
+        if elems == 0
+        {
+            return Ok(Vec::new());
+        }
+        let bytes = (elems * std::mem::size_of::<f32>()) as u64;
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("download"),
             size: bytes,

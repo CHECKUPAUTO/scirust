@@ -146,4 +146,29 @@ mod tests {
         let expected = CpuBackend.gemm_f32(&at, &b, 2, 3, 4).unwrap();
         assert!(rel_err(&out, &expected) < 1e-4);
     }
+
+    /// Degenerate dimensions must not panic (wgpu rejects zero-sized buffers):
+    /// `k == 0` yields an all-zeros result, `m == 0` yields an empty matrix.
+    #[test]
+    fn resident_degenerate_dims_are_handled() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        // k == 0: (2×0)·(0×3) → 2×3 of zeros.
+        let a = chain.upload(&[], 2, 0);
+        let b = chain.upload(&[], 0, 3);
+        let c = chain.matmul(&a, &b).unwrap();
+        assert_eq!((c.rows(), c.cols()), (2, 3));
+        assert_eq!(chain.download(&c).unwrap(), vec![0.0; 6]);
+
+        // m == 0: (0×2)·(2×3) → 0×3, an empty download.
+        let e = chain.upload(&[], 0, 2);
+        let f = chain.upload(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
+        let g = chain.matmul(&e, &f).unwrap();
+        assert_eq!((g.rows(), g.cols()), (0, 3));
+        assert!(chain.download(&g).unwrap().is_empty());
+    }
 }
