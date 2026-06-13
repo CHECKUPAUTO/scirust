@@ -153,6 +153,7 @@ examples/        Quickstart, MNIST training, benchmarks
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
 - [`docs/sbom/`](docs/sbom/) — CycloneDX SBOM (reproducible, regenerated in CI & attached to releases)
+- [`docs/GROWTH_PLAN.md`](docs/GROWTH_PLAN.md) — Vision, non-negotiable fundamentals, and the ambitious growth plan
 - [`docs/RELEASING.md`](docs/RELEASING.md) — Release process & branch-protection runbook
 - [`SECURITY.md`](SECURITY.md) — Supply-chain posture, SBOM, accepted advisories
 - [`scirust-som/README.md`](scirust-som/README.md) — Ownership Model (real-Rust analyzer)
