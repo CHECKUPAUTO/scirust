@@ -5,7 +5,15 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-_Rien pour l'instant._
+### Ajouté
+- **Entraînement data-parallèle à déterminisme certifié (P2.1)** :
+  `DataParallelTrainer::train_batch_threaded(n_threads, ..)` exécute les
+  workers sur N threads OS (vol de tâches via compteur atomique) mais réduit
+  les gradients dans un ordre fixe (worker 0,1,…,n-1), indépendant de
+  l'ordonnanceur. L'addition flottante n'étant pas associative, le résultat
+  est **bit-identique pour 1/2/4/8 threads** et identique au séquentiel —
+  garantie testée que les frameworks grand public n'offrent pas. Deux tests
+  CI : contributions sensibles à l'ordre (±1e16) et vrai backward autograd.
 
 ## [0.14.0] — 2026-06-13
 

@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 20 : déterminisme certifié du training multi-thread (P2.1)
+- constat : DataParallelTrainer.train_batch était SÉQUENTIEL (pas de threads) ;
+  réduction déjà en ordre worker fixe mais aucune garantie testée sous threads.
+- ajout train_batch_threaded(n_threads, bf) : workers sur N threads OS
+  (thread::scope + compteur atomique, vol de tâches), résultats écrits dans
+  slots indexés par worker, reduce_mean en ordre fixe → indépendant du nombre
+  de threads ET de l'ordre de terminaison (l'add flottante n'est pas assoc.).
+- 2 tests : thread_count_invariant (contributions ±1e16 sensibles à l'ordre,
+  1/2/4/8 threads == séquentiel bit-à-bit) + parallel_tape...deterministic
+  (vrai backward ParallelTape sur 1/2/4 threads). Couverts par le job CI
+  build-test existant.
+- 728 tests (nightly+stable). 8 gates verts. roadmap P2.1 = FAIT.
+- reste P2.1 : boucle multi-couches complète + bench de scaling.
+
 ## Session 2026-06-13 — volet 19 : activations résidentes en VRAM (P2.2 résidence)
 - constat : DeviceTensor = { inner: Tensor } (CPU only). Résidence
   transparente dans la tape forcerait as_cpu() (≈50 sites) à matérialiser

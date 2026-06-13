@@ -1,6 +1,9 @@
 // scirust-core/src/autodiff/data_parallel.rs
 // Phase 4: Data Parallelism Engine — GradientAggregator & DataParallelTrainer
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::parallel::ParallelTape;
 
 /// Aggregates gradients from multiple workers via reduce-sum / reduce-mean.
@@ -89,6 +92,62 @@ impl DataParallelTrainer {
             all_grads.push(grads);
         }
         GradientAggregator::reduce_mean(&all_grads)
+    }
+
+    /// Run the workers across `n_threads` OS threads and return the
+    /// **fixed-order** mean of their gradients — a *certified-deterministic*
+    /// parallel batch.
+    ///
+    /// Threads pull worker indices from a shared atomic counter (work
+    /// stealing), but each worker's result is written to its own
+    /// worker-indexed slot and the reduction always sums worker `0, 1, …,
+    /// n-1` in that order. Floating-point addition is not associative, so a
+    /// naive "accumulate as threads finish" reduction would depend on the
+    /// scheduler; this one does not. Consequently the result is **bit-identical
+    /// for any `n_threads`** and identical to the sequential [`Self::train_batch`].
+    ///
+    /// `batch_fn` must be `Sync` (shared across threads) and deterministic in
+    /// `(tape, worker)`.
+    pub fn train_batch_threaded<F>(&self, n_threads: usize, batch_fn: F) -> Vec<f64>
+    where
+        F: Fn(&ParallelTape, usize) -> Vec<f64> + Sync,
+    {
+        let n = self.n_workers;
+        if n == 0
+        {
+            return Vec::new();
+        }
+        let n_threads = n_threads.clamp(1, n);
+        let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..n).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+
+        std::thread::scope(|scope| {
+            for _ in 0..n_threads
+            {
+                scope.spawn(|| {
+                    loop
+                    {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= n
+                        {
+                            break;
+                        }
+                        let g = batch_fn(&self.tapes[i], i);
+                        *slots[i].lock().expect("data-parallel slot poisoned") = Some(g);
+                    }
+                });
+            }
+        });
+
+        let all: Vec<Vec<f64>> = slots
+            .into_iter()
+            .map(|m| {
+                m.into_inner()
+                    .expect("data-parallel slot poisoned")
+                    .expect("data-parallel worker did not run")
+            })
+            .collect();
+        GradientAggregator::reduce_mean(&all)
     }
 
     /// Return a reference to the worker's tape.
@@ -325,5 +384,68 @@ mod tests {
             "expected 6.0, got {}",
             avg_grads[0]
         );
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Certified determinism: thread count must not change the result    //
+    // ------------------------------------------------------------------ //
+
+    /// The aggregated gradient is bit-identical for 1/2/4/8 OS threads and
+    /// equal to the sequential path. Per-worker contributions are deliberately
+    /// order-sensitive (element 0 mixes ±1e16 with small values), so a
+    /// scheduler-dependent reduction order *would* perturb the low bits — the
+    /// fixed worker-order reduction does not.
+    #[test]
+    fn train_batch_threaded_is_thread_count_invariant() {
+        let bf = |_tape: &ParallelTape, w: usize| -> Vec<f64> {
+            let e0 = match w % 4
+            {
+                0 => 1e16,
+                1 => 1.0,
+                2 => -1e16,
+                _ => 3.0,
+            };
+            vec![e0, (w as f64 + 1.0).recip(), (w as f64).sin()]
+        };
+        let run = |threads: usize| DataParallelTrainer::new(8).train_batch_threaded(threads, bf);
+        let r1 = run(1);
+        assert_eq!(r1, run(2), "2 threads differ from 1");
+        assert_eq!(r1, run(4), "4 threads differ from 1");
+        assert_eq!(r1, run(8), "8 threads differ from 1");
+        // …and identical to the sequential reduction.
+        let seq = DataParallelTrainer::new(8).train_batch(bf);
+        assert_eq!(r1, seq, "threaded differs from sequential");
+    }
+
+    /// Same guarantee with **real autograd**: each worker builds a graph on its
+    /// `ParallelTape` and runs the actual backward; the aggregate is
+    /// bit-identical across 1/2/4 threads.
+    #[test]
+    fn parallel_tape_training_is_deterministic_across_threads() {
+        let bf = |tape: &ParallelTape, w: usize| -> Vec<f64> {
+            let x = tape.alloc_node(Node {
+                op: Op::Input,
+                shape: (1, 3),
+                saved: SavedData::None,
+            });
+            let y = tape.alloc_node(Node {
+                op: Op::Scale {
+                    input: x,
+                    scalar: 2.0,
+                },
+                shape: (1, 3),
+                saved: SavedData::None,
+            });
+            let xv: Vec<f32> = (0..3).map(|j| ((w * 3 + j) as f32).sin()).collect();
+            let yv: Vec<f32> = xv.iter().map(|v| v * 2.0).collect();
+            tape.set_value(x, &xv);
+            tape.set_value(y, &yv);
+            tape.backward(y);
+            vec![tape.grad(x)]
+        };
+        let run = |threads: usize| DataParallelTrainer::new(4).train_batch_threaded(threads, bf);
+        let r1 = run(1);
+        assert_eq!(r1, run(2), "2 threads differ from 1");
+        assert_eq!(r1, run(4), "4 threads differ from 1");
     }
 }

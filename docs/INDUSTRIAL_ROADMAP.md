@@ -85,11 +85,19 @@ définition de fini (toujours : gates verts + oracle + doc).
 ## P2 — Profondeur technique (différenciation durable)
 
 ### P2.1 Mode « déterminisme certifié » du training
-- Étendre la garantie bit-exacte de l'inférence au **training**
-  multi-thread : réductions à arbre fixe dans `data_parallel`
-  (l'addition flottante n'est pas associative — ordonnancement figé),
-  test CI « même seed, 1/2/4 threads ⇒ pertes bit-identiques ».
-  Aucun framework grand public n'offre cette garantie testée.
+- **FAIT** : `DataParallelTrainer::train_batch_threaded(n_threads, ..)`
+  exécute les workers sur N threads OS (vol de tâches via compteur
+  atomique) mais écrit chaque résultat dans son slot indexé par worker et
+  réduit toujours dans l'ordre worker `0,1,…,n-1`. L'addition flottante
+  n'étant pas associative, une réduction « au fil des terminaisons »
+  dépendrait de l'ordonnanceur ; celle-ci non → résultat **bit-identique
+  pour 1/2/4/8 threads** et identique au séquentiel. Tests CI :
+  `train_batch_threaded_is_thread_count_invariant` (contributions
+  délibérément sensibles à l'ordre, ±1e16) +
+  `parallel_tape_training_is_deterministic_across_threads` (vrai backward
+  autograd). Aucun framework grand public n'offre cette garantie testée.
+- Reste : étendre la primitive à un boucle d'entraînement multi-couches
+  complète + benchmark de scaling (1→N threads).
 
 ### P2.2 GPU : trancher et recâbler proprement
 - **FAIT (étape 1 — trancher)** : suppression des stubs GPU mensongers
