@@ -7,7 +7,7 @@
 //   x' = x + MultiHeadAttention(LayerNorm(x))
 //   y  = x' + FeedForward(LayerNorm(x'))
 
-use crate::autodiff::reverse::{Tape, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::init::Initializer;
 use crate::nn::layer_norm::LayerNorm;
 use crate::nn::linear::Linear;
@@ -83,6 +83,21 @@ impl TransformerBlock {
         let x2 = x1.try_add(ffn_out).unwrap();
 
         Var3D::from_var(x2, batch, seq_len, d_model)
+    }
+
+    /// Incremental single-token forward for KV-cache decoding. Mirrors
+    /// [`Self::forward_3d`] exactly but for one token, using
+    /// [`MultiHeadAttention::infer_step`] so attention reads the cached K/V.
+    pub fn infer_step<'t>(&mut self, tape: &'t Tape, x_token: Var<'t>, pos: usize) -> Var<'t> {
+        // x + Attention(LN(x)) over the cached sequence.
+        let ln1_out = self.ln1.forward(tape, x_token);
+        let attn_out = self.mha.infer_step(tape, ln1_out, pos);
+        let x1 = x_token.try_add(attn_out).unwrap();
+        // x1 + FFN(LN(x1)).
+        let ln2_out = self.ln2.forward(tape, x1);
+        let h_ff = self.ffn1.forward(tape, ln2_out).relu();
+        let ffn_out = self.ffn2.forward(tape, h_ff);
+        x1.try_add(ffn_out).unwrap()
     }
 
     pub fn parameter_indices(&self) -> Vec<usize> {

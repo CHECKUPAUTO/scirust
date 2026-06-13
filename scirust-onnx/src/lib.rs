@@ -1,12 +1,13 @@
-//! ONNX export for SciRust models.
+//! ONNX export/import for SciRust models.
 //!
-//! Converts `Sequential` and individual `Module` layers to the ONNX
-//! protobuf-compatible JSON representation, enabling interoperability
-//! with ONNX Runtime, Netron visualization, and deployment toolchains.
+//! Converts `Sequential` and individual `Module` layers to an ONNX-compatible
+//! JSON representation, and reads it back. The weight tensors round-trip
+//! bit-for-bit, so this doubles as a **model checkpoint** format (save/load).
 //!
-//! The current implementation produces an ONNX-compatible JSON graph
-//! (the human-readable intermediate representation). A protobuf encoder
-//! can be added as a future extension.
+//! The current implementation produces an ONNX-compatible JSON graph (the
+//! human-readable intermediate representation); a protobuf encoder and a
+//! faithful per-layer graph export (vs. the current representative template)
+//! are future extensions. See [`import_onnx_json`] / [`OnnxGraph::weights`].
 //!
 //! # Example
 //!
@@ -263,6 +264,37 @@ pub fn export_sequential_to_onnx_json(
     Ok(serde_json::to_string_pretty(&onnx)?)
 }
 
+/// Parse an ONNX-JSON graph produced by [`export_sequential_to_onnx_json`].
+///
+/// The model **weights** (the graph initializers) survive an export→import
+/// round-trip bit-for-bit — which is what model checkpointing (save/load)
+/// needs. Note that the exported *graph structure* is still a representative
+/// MLP template rather than a faithful per-layer export, so reconstructing an
+/// arbitrary computation graph from the import is future work; today the import
+/// is a faithful **weight** loader.
+pub fn import_onnx_json(json: &str) -> Result<OnnxGraph, Box<dyn std::error::Error>> {
+    Ok(serde_json::from_str(json)?)
+}
+
+impl OnnxGraph {
+    /// The weight tensors stored as graph initializers, returned as
+    /// `(name, dims, row-major data)`. This is what round-trips exactly through
+    /// [`export_sequential_to_onnx_json`] → [`import_onnx_json`].
+    pub fn weights(&self) -> Vec<(String, Vec<usize>, Vec<f32>)> {
+        self.graph
+            .initializers
+            .iter()
+            .map(|t| {
+                (
+                    t.name.clone(),
+                    t.dims.iter().map(|&d| d as usize).collect(),
+                    t.raw_data.clone(),
+                )
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +359,68 @@ mod tests {
         assert!(json.contains("Relu"));
 
         let _loaded: OnnxGraph = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn weights_roundtrip_exactly() {
+        // Tricky f32 values (negatives, tiny, large, smallest positive) must
+        // survive export→import bit-for-bit.
+        let data = vec![0.0, -1.5, 2.5, 1e-8, -1e8, f32::MIN_POSITIVE, 42.0];
+        let graph = OnnxGraph {
+            name: "m".into(),
+            ir_version: 7,
+            producer_name: "t".into(),
+            producer_version: "0".into(),
+            domain: "d".into(),
+            model_version: 1,
+            doc_string: String::new(),
+            graph: OnnxGraphDef {
+                name: "m".into(),
+                inputs: vec![],
+                outputs: vec![],
+                nodes: vec![],
+                initializers: vec![OnnxTensor {
+                    name: "w".into(),
+                    dims: vec![1, 7],
+                    data_type: 1,
+                    raw_data: data.clone(),
+                }],
+            },
+        };
+        let json = serde_json::to_string(&graph).unwrap();
+        let back = import_onnx_json(&json).unwrap();
+        let w = back.weights();
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].0, "w");
+        assert_eq!(w[0].1, vec![1, 7]);
+        assert_eq!(w[0].2, data); // bit-exact
+    }
+
+    #[test]
+    fn exported_model_weights_are_importable() {
+        use scirust_core::autodiff::reverse::{Tape, Tensor};
+        use scirust_core::nn::init::{KaimingNormal, Zeros};
+        use scirust_core::nn::rng::PcgEngine;
+        use scirust_core::nn::{Linear, Module};
+
+        let tape = Tape::new();
+        let mut rng = PcgEngine::new(7);
+        let mut lin = Linear::new(4, 3, &KaimingNormal, &Zeros, &mut rng);
+        let x = tape.input(Tensor::from_vec(vec![0.1, 0.2, 0.3, 0.4], 1, 4));
+        let _ = lin.forward(&tape, x);
+        let params = lin.parameter_indices();
+
+        let json = export_sequential_to_onnx_json(&tape, &lin, "lin", (-1, 4)).unwrap();
+        let weights = import_onnx_json(&json).unwrap().weights();
+
+        assert_eq!(weights.len(), params.len());
+        // First param is the (KaimingNormal → non-zero) weight matrix; it must
+        // round-trip exactly to the tape's value.
+        let w0 = tape.value(params[0]);
+        assert_eq!(weights[0].2, w0.data);
+        assert!(
+            weights[0].2.iter().any(|&v| v != 0.0),
+            "weights should be non-zero"
+        );
     }
 }

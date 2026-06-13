@@ -506,4 +506,70 @@ mod tests {
         assert_eq!(mha2.w_q.weight.data, mha1.w_q.weight.data);
         assert_eq!(mha2.w_o.bias.data, mha1.w_o.bias.data);
     }
+
+    /// KV-cache correctness: feeding a sequence token-by-token through
+    /// `infer_step` (incremental, O(n) decoding) must produce the same output
+    /// for the final token as a full `forward_3d` over the whole sequence — the
+    /// defining property of a correct KV-cache.
+    #[test]
+    fn kv_cache_matches_full_forward_last_position() {
+        let d_model = 8;
+        let n_heads = 2;
+        let seq = 4;
+        let mut rng = PcgEngine::new(123);
+        let mut attn = MultiHeadAttention::new(
+            d_model,
+            n_heads,
+            n_heads,
+            true,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        );
+
+        let x: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.13).sin())
+            .collect();
+
+        // Full forward → last position's output.
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(x.clone(), seq, d_model));
+        let out3 = attn.forward_3d(&tape, Var3D::from_var(xv, 1, seq, d_model));
+        let full = tape.value(out3.as_var().idx());
+        let last_full = full.data[(seq - 1) * d_model..seq * d_model].to_vec();
+
+        // Incremental decoding with the KV-cache.
+        attn.kv_cache.replace(None);
+        let tape2 = Tape::new();
+        let mut last_inc = Vec::new();
+        for t in 0..seq
+        {
+            let tok = tape2.input(Tensor::from_vec(
+                x[t * d_model..(t + 1) * d_model].to_vec(),
+                1,
+                d_model,
+            ));
+            let o = attn.infer_step(&tape2, tok, t);
+            last_inc = tape2.value(o.idx()).data.clone();
+        }
+
+        assert_eq!(last_inc.len(), last_full.len());
+        let num: f32 = last_full
+            .iter()
+            .zip(&last_inc)
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        let den: f32 = last_full
+            .iter()
+            .map(|a| a * a)
+            .sum::<f32>()
+            .sqrt()
+            .max(1e-30);
+        assert!(
+            num / den < 1e-4,
+            "KV-cache mismatch: full={last_full:?} inc={last_inc:?} rel={}",
+            num / den
+        );
+    }
 }

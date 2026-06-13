@@ -22,6 +22,7 @@ scirust-solvers = { path = "../scirust-solvers" }
 scirust-tn = { path = "../scirust-tn" }
 scirust-symreg = { path = "../scirust-symreg" }
 scirust-neuro-symbolic = { path = "../scirust-neuro-symbolic" }
+scirust-learning = { path = "../scirust-learning" }
 scirust-som-cli = { path = "../scirust-som/crates/cli" }
 scirust-som-tokenizer = { path = "../scirust-som/crates/tokenizer" }
 scirust-som-dataset = { path = "../scirust-som/crates/dataset" }

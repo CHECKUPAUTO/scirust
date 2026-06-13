@@ -150,14 +150,17 @@ définition de fini (toujours : gates verts + oracle + doc).
   prérequis aux ambitions compilateur (shape inference au-delà de
   rows/cols), à faire **avant** tout IR de training.
 - **FAIT (fondation — primitives d'inférence de forme)** : `TensorND`
-  expose maintenant `broadcast_shape(a,b)` (forme broadcastée numpy),
-  `matmul_shape(a,b)` (matmul (batché) `(…,m,k)·(…,k,n)→(…,m,n)` avec
-  broadcast des axes batch) et `broadcast_to(target)` (matérialisation).
-  Avec le pont `from/to_tensor_2d` existant, ce sont les briques que la
-  future tape/IR N-D utilisera. 12 tests (3 ajoutés). La **fusion** réelle
-  de la tape (réécriture des ~4700 lignes de `reverse.rs` sur `TensorND`)
-  reste le gros chantier — fait honnêtement par incréments testés, pas en
-  bloc.
+  expose `broadcast_shape`, `matmul_shape`, `broadcast_to` (+ pont
+  `from/to_tensor_2d`). 12 tests.
+- **FAIT (autograd N-D capable)** : `autodiff::nd` exprime désormais une
+  **attention multi-tête complète** `softmax(Q·Kᵀ/√d)·V` sur `(têtes, seq, d)`
+  — via `bmm` (matmul batché broadcast), `transpose_last2`, `softmax`
+  (axe final, backward Jacobien), `mul`/`add`/`sub`/`relu`/`sum` — le tout
+  **gradient-checké** (différences finies). C'est précisément ce que la tape
+  2D ne sait pas faire ⇒ la N-D est le **sur-ensemble capable**. La 2D reste
+  le défaut de production **par choix d'architecture** (coexistence, cf.
+  `GROWTH_PLAN.md`), pas un TODO ; la réécriture en bloc de `reverse.rs` n'est
+  pas souhaitable — on migre par incréments testés.
 
 ## Ce qu'on ne propose PAS (anti-objectifs)
 - Courir après les TFLOPS de PyTorch/TensorRT : créneau perdu d'avance

@@ -1,4 +1,5 @@
 use super::tokenization::Tokenizer;
+use std::cmp::Reverse;
 use std::collections::HashMap;
 
 /// Byte Pair Encoding (BPE) Tokenizer for SciRust.
@@ -68,9 +69,13 @@ impl BpeTokenizer {
                 break;
             }
 
+            // Pick the most frequent pair. Ties are broken deterministically by
+            // the pair itself (lexicographically smallest) — `max_by_key` alone
+            // would return whichever tied pair the HashMap happened to iterate
+            // last, making training non-reproducible.
             let best_pair = pair_counts
                 .into_iter()
-                .max_by_key(|&(_, count)| count)
+                .max_by_key(|(pair, count)| (*count, Reverse(pair.clone())))
                 .map(|(pair, _)| pair);
 
             if let Some((p1, p2)) = best_pair
@@ -156,5 +161,94 @@ impl Tokenizer for BpeTokenizer {
 
     fn pad_id(&self) -> u32 {
         self.pad_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nlp::tokenization::Tokenizer;
+
+    #[test]
+    fn train_encode_decode_roundtrip() {
+        let corpus = ["low lower lowest", "newer newest wider"];
+        let tok = BpeTokenizer::train(&corpus, 50);
+        // Text drawn from the corpus round-trips exactly.
+        for s in ["low", "lower", "newest", "wider"]
+        {
+            assert_eq!(tok.decode(&tok.tokenize(s)), s, "round-trip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn training_is_deterministic() {
+        // The whole point of the tie-break fix: identical corpus + vocab_size
+        // must yield an identical tokenizer every time (reproducibility).
+        let corpus = ["banana bandana", "an ananas in a cabana", "panama canal"];
+        let reference = BpeTokenizer::train(&corpus, 40);
+        let probe = "a banana in panama";
+        let expected = reference.tokenize(probe);
+        for _ in 0..5
+        {
+            let again = BpeTokenizer::train(&corpus, 40);
+            assert_eq!(again.tokenize(probe), expected, "BPE training diverged");
+        }
+    }
+
+    #[test]
+    fn frequent_pair_is_merged() {
+        // "ab" is by far the most frequent adjacent pair → it must become a
+        // single merged token (encoding "abab" uses fewer ids than 4 chars).
+        let tok = BpeTokenizer::train(&["abababab abab ab"], 30);
+        assert!(
+            tok.tokenize("abab").len() < 4,
+            "expected `ab` to merge, got {:?}",
+            tok.tokenize("abab")
+        );
+    }
+
+    #[test]
+    fn unknown_char_maps_to_unk() {
+        let tok = BpeTokenizer::train(&["abc"], 10);
+        // 'z' never appears in the corpus → unknown id (0).
+        assert_eq!(tok.tokenize("z"), vec![0]);
+    }
+
+    #[test]
+    fn vocab_size_is_respected() {
+        let tok = BpeTokenizer::train(&["the quick brown fox jumps"], 25);
+        assert!(tok.vocab_size() <= 25);
+        assert!(tok.vocab_size() >= 2); // at least the special tokens
+    }
+
+    /// End-to-end: a BPE tokenizer drives a MiniLLM through the tokenizer-
+    /// agnostic `generate_ids` API (`bpe.tokenize → generate_ids → bpe.decode`),
+    /// deterministically. This is the "BPE in generate" wiring.
+    #[test]
+    fn bpe_drives_mini_llm_generation() {
+        use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
+
+        let corpus = ["hello world", "low lower lowest newest wider"];
+        let bpe = BpeTokenizer::train(&corpus, 48);
+        let vocab = bpe.vocab_size();
+        let cfg = MiniLLMConfig {
+            vocab_size: vocab,
+            d_model: 16,
+            n_heads: 2,
+            n_layers: 1,
+            d_ff: 32,
+            max_seq_len: 32,
+        };
+        // The CharTokenizer field is unused; generation is driven at the id level.
+        let mut model = MiniLLM::new(cfg, CharTokenizer::new(&corpus));
+
+        let prompt_ids: Vec<usize> = bpe.tokenize("hello").iter().map(|&x| x as usize).collect();
+        let out = model.generate_ids(&prompt_ids, 5);
+
+        // Fixed model seed + greedy argmax + deterministic BPE ⇒ reproducible.
+        assert_eq!(out, model.generate_ids(&prompt_ids, 5));
+        // Every produced id is in the BPE vocab and decodes without panicking.
+        assert!(out.iter().all(|&id| id < vocab));
+        let _text = bpe.decode(&out.iter().map(|&x| x as u32).collect::<Vec<_>>());
     }
 }

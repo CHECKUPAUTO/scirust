@@ -3,6 +3,55 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 26 : traiter à fond les 3 « parts honnêtes »
+- (C) BPE byte-level (ByteBpeTokenizer, GPT-2) : base 256 octets → 0 OOV,
+  round-trip lossless tout UTF-8 (emoji/accents/scripts inconnus) ; 5 tests ;
+  CLI `bpe --bytes`. Remplace « BPE basique ».
+- (A) sampling seedé (nn::sampling : temp/top-k/top-p, PcgEngine) ; greedy =
+  argmax ; MiniLLM::generate_ids_cached_sampled (O(n) KV-cache + sampling,
+  déterministe par graine) ; 5 tests. Remplace « décodage glouton ».
+- (B) autograd N-D capable : +softmax(axe final, backward Jacobien) +
+  transpose_last2 ; **attention multi-tête complète** softmax(Q·Kᵀ/√d)·V sur
+  (têtes,seq,d) GRADIENT-CHECKÉE. La N-D = sur-ensemble capable ; 2D = défaut
+  par choix d'archi (coexistence, pas TODO). Remplace « tape N-D = ops/toy ».
+- principe tenu : aucun TODO laissé, chaque sujet traité à fond + testé.
+- 759 tests workspace ; 8 gates verts. roadmap P2.4 / GROWTH_PLAN / CHANGELOG.
+
+## Session 2026-06-13 — volet 25 : fusion N-D + LLM bout-en-bout + CLI bpe
+- chantier 1 (fusion N-D) : NdVar::bmm (matmul batché broadcast) + sub ;
+  forward + backward gradient-checkés. La tape N-D devient le sur-ensemble
+  capable (ce que la 2D ne sait pas : scores d'attention par tête).
+- chantier 2 (LLM e2e) : generate_ids (découplé du tokenizer → BPE pilote) ;
+  KV-cache bout-en-bout (block/encoder::infer_step, PositionalEncoding::
+  encoding_at, MiniLLM::generate_ids_cached) PROUVÉ équivalent au recalcul
+  complet (seule la dernière position sert → attend tout dans les 2 cas, même
+  encoder BERT non-causal). Test BPE→generate dans scirust-learning.
+- chantier 3 (CLI) : commande `bpe` (scirust-learning ajouté en dep CLI),
+  groupe NLP, REFERENCE/CHANGELOG. Pas de commande `generate` (modèle non
+  entraîné = gibberish → ne pas sur-promettre).
+- honnête : decode glouton (pas de sampling), tokenizer char/BPE basique,
+  tape N-D = ops (pas la fusion complète de reverse.rs).
+- 747 core + 29 CLI ; 8 gates verts.
+
+## Session 2026-06-13 — volet 24 : campagne « faire grandir scirust » (TOUS les chantiers)
+- réponse honnête à « scirust assez conséquent ? » : oui pour le créneau
+  déterministe/auditable/embarqué ; lacunes = tape 2D, GPU immature, pas de
+  KV-cache/tokenizer prod, ONNX export-only, pas de distribué. → lancé tout.
+- BPE (scirust-learning) : bug déterminisme (max_by_key(count) dépend de
+  l'ordre HashMap) → tie-break (count, Reverse(pair)) ; +5 tests.
+- autodiff::nd (NOUVEAU) : autograd N-D reverse sur TensorND (add/mul
+  broadcast, matmul2d, relu, sum) ; gradient check numérique. Coexiste avec
+  la tape 2D ; utilise broadcast_shape/broadcast_to/matmul_shape (vol. 22).
+- GPU elementwise : 2e pipeline wgpu (add/mul/relu) ; GpuChain.add/mul/relu ;
+  couche matmul→+biais→relu 100% résidente VRAM, testée lavapipe.
+- ONNX import : import_onnx_json + OnnxGraph::weights ; round-trip poids
+  bit-exact (checkpoint) ; testé sur Linear KaimingNormal réel.
+- KV-cache : infer_step existait (non testé) → test d'équivalence dernier
+  token vs forward complet (causal). Correct → décodage O(n) validé.
+- honnête : tape N-D = MVP (pas la fusion), ONNX = poids (pas graphe arbitraire
+  ni protobuf), GPU = ops de base (pas tout l'op-set). Incréments testés.
+- 743 tests workspace ; 18 wgpu ; 8 gates verts.
+
 ## Session 2026-06-13 — volet 23 : P2.3 infra — rustc-driver recompile + visible
 - scirust-rustc-driver (exclu du workspace, rustc_private) ne compilait plus
   sur nightly courante : get_attrs renvoie un itérateur (plus un slice) →
