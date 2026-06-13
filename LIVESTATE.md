@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 27 : couches N-D réutilisables + generate_sampled public
+- ops nd : reshape + permute (général, backward = perm inverse).
+- nn::nd_layers : NdLinear (entraînable, sgd_step) + NdMultiHeadAttention
+  (q/k/v/o + bloc attention). Tests : grad check entrée, MLP N-D qui APPREND
+  (perte<70%), grad check couche attention complète. « voici les couches ».
+- MiniLLM::generate_sampled(&str) : API publique sampling+KV-cache, greedy =
+  generate, déterministe par graine. « sampling branché dans generate public ».
+- 763 tests ; 8 gates verts. GROWTH_PLAN court terme : nd::Linear/Attention +
+  sampling-in-generate = FAITS.
+
 ## Session 2026-06-13 — volet 26 : traiter à fond les 3 « parts honnêtes »
 - (C) BPE byte-level (ByteBpeTokenizer, GPT-2) : base 256 octets → 0 OOV,
   round-trip lossless tout UTF-8 (emoji/accents/scripts inconnus) ; 5 tests ;

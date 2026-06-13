@@ -376,6 +376,22 @@ impl MiniLLM {
         }
         ids
     }
+
+    /// Public text generation with **seeded sampling** over the KV-cache:
+    /// encodes `prompt` with the model's tokenizer, generates, and decodes back
+    /// to a string. Deterministic for a fixed `seed`; `SamplingConfig::greedy()`
+    /// reproduces [`Self::generate`].
+    pub fn generate_sampled(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        cfg: &crate::nn::sampling::SamplingConfig,
+        seed: u64,
+    ) -> String {
+        let ids = self.tokenizer.encode(prompt);
+        let out = self.generate_ids_cached_sampled(&ids, max_tokens, cfg, seed);
+        self.tokenizer.decode(&out)
+    }
 }
 
 /// Greedy argmax over row `row` of a `(_, vocab)` logits tensor.
@@ -501,6 +517,38 @@ mod tests {
         let b = m.generate_ids_cached_sampled(&prompt, 6, &sc, 123);
         assert_eq!(a, b, "sampling not deterministic for a fixed seed");
         assert!(a.iter().all(|&id| id < m.config.vocab_size));
+    }
+
+    /// Public `generate_sampled(&str)`: greedy reproduces `generate`, and a
+    /// fixed seed makes temperature sampling reproducible at the string level.
+    #[test]
+    fn generate_sampled_string_api() {
+        use crate::nn::sampling::SamplingConfig;
+        let tok = CharTokenizer::new(&["hello world abcdefghij"]);
+        let cfg = MiniLLMConfig {
+            vocab_size: tok.vocab_size,
+            d_model: 16,
+            n_heads: 2,
+            n_layers: 2,
+            d_ff: 32,
+            max_seq_len: 64,
+        };
+        let mut m = MiniLLM::new(cfg, tok);
+        // Greedy sampling reproduces the plain greedy `generate`.
+        assert_eq!(
+            m.generate_sampled("hel", 6, &SamplingConfig::greedy(), 0),
+            m.generate("hel", 6)
+        );
+        // Temperature sampling: same seed ⇒ identical string.
+        let sc = SamplingConfig {
+            temperature: 0.9,
+            top_k: 4,
+            top_p: 1.0,
+        };
+        assert_eq!(
+            m.generate_sampled("hel", 6, &sc, 99),
+            m.generate_sampled("hel", 6, &sc, 99)
+        );
     }
 
     /// `generate_ids` is tokenizer-agnostic: feeding raw ids works and the
