@@ -137,6 +137,27 @@ jobs:
       - name: Test wgpu backend on lavapipe
         run: cargo test -p scirust-gpu --features wgpu
 
+  # Informational: the rustc driver (excluded from the workspace) uses
+  # `rustc_private` internals that drift across nightlies. Build it so that
+  # drift is visible, but don't gate merges on the nightly-of-the-day.
+  rustc-driver:
+    name: rustc-driver (excluded, informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + rustc internals
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-dev, rust-src, llvm-tools-preview
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: scirust-rustc-driver
+      - name: Build the rustc driver
+        working-directory: scirust-rustc-driver
+        run: cargo build
+
   # Informational: regenerate the CycloneDX SBOM and publish it as an
   # artifact. Does not gate merges (transitive-dep churn is expected).
   sbom:

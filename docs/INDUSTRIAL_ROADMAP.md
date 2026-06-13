@@ -134,6 +134,16 @@ définition de fini (toujours : gates verts + oracle + doc).
   `let x = f();` conservateur), NLL réels, jointures de branches.
   L'oracle `syn` actuel devient le « mode rapide », le mode rustc le
   « mode précis » — même format de rapport.
+- **FAIT (infrastructure)** : le driver (exclu du workspace, `rustc_private`)
+  ne compilait plus sur la nightly courante (dérive d'API : `get_attrs`
+  renvoie désormais un itérateur). Réparé + warning-clean, et nouveau job CI
+  **informatif** `rustc-driver (excluded, informational)` (continue-on-error)
+  pour rendre visible la dérive future — c'est précisément parce que le crate
+  est exclu/non-gaté que la casse était invisible.
+- **Reste (le gros)** : écrire une passe MIR d'extraction ownership/emprunts
+  (NLL, types résolus) produisant le **format de rapport SOM**, brancher en
+  « mode précis ». Chantier conséquent et fragile (API rustc internes) — à
+  faire par incréments, hors des 8 gates par défaut.
 
 ### P2.4 Tenseur N-D unifié
 - Fusionner `tensor::TensorND` (déjà dans core) avec la tape 2D :

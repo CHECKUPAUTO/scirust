@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 23 : P2.3 infra — rustc-driver recompile + visible
+- scirust-rustc-driver (exclu du workspace, rustc_private) ne compilait plus
+  sur nightly courante : get_attrs renvoie un itérateur (plus un slice) →
+  .is_empty() inexistant. Fix : .next().is_some() (+ allow(deprecated),
+  car get_attrs déprécié au profit de find_attr!). +2 warnings triviaux
+  (unused_extern_crate typo, import MirPass). Driver build = 0 warning.
+- env : rustc-dev-x86_64 + rust-src INSTALLÉS → le driver buildable ici.
+- job CI informatif rustc-driver (continue-on-error, installe rustc-dev/
+  rust-src) : la casse était invisible car crate exclu/non-gaté.
+- scirust-rustc-driver/target/ était SUIVI par git (artefacts) → git rm
+  --cached + .gitignore.
+- honnête : P2.3 réel (passe MIR ownership/NLL → format rapport SOM) reste
+  le gros chantier, fragile, hors 8 gates. Livré l'infra, pas la passe.
+
 ## Session 2026-06-13 — volet 22 : P2.4 fondation — primitives d'inférence de forme N-D
 - constat : TensorND a déjà reshape/transpose/slice/can_broadcast_to +
   pont from/to_tensor_2d. Manquaient les primitives d'inférence de forme.

@@ -44,3 +44,6 @@ systemd/turboquant-*.service
 # Only the curated facade SBOM under docs/sbom/ is tracked.
 *.cdx.json
 !docs/sbom/*.cdx.json
+
+# Excluded rustc-driver has its own (untracked) build dir
+scirust-rustc-driver/target/

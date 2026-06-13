@@ -16,6 +16,12 @@ versions sémantiques à partir de la prochaine release taguée.
   → code 2) + tests. Les autres axes de revue (maths GEMM/transpose, routage
   des gradients Conv2d, `matmul_gpu` av/ar, déterminisme de la réduction
   threadée, restructuration cfg SIMD) ont été tracés à la main : corrects.
+- **`scirust-rustc-driver` recompile (P2.3, infra)** : le driver (exclu du
+  workspace, `rustc_private`) ne compilait plus sur la nightly courante
+  (`get_attrs` renvoie un itérateur, plus un slice). Réparé + warning-clean ;
+  job CI informatif `rustc-driver` (continue-on-error) pour rendre la dérive
+  d'API future visible ; `scirust-rustc-driver/target/` retiré du suivi git
+  (artefacts de build) et ignoré.
 
 ### Ajouté
 - **Primitives d'inférence de forme N-D (P2.4, fondation)** : `TensorND`

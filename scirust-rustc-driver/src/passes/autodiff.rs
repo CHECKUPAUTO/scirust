@@ -22,9 +22,14 @@ impl<'tcx> MirPass<'tcx> for AutodiffPass {
     fn should_run(
         &self, tcx: TyCtxt<'tcx>, def_id: LocalDefId, _body: &Body<'tcx>
     ) -> bool {
-        // Check for #[autodiff] attribute
-        let attrs = tcx.get_attrs(def_id, Symbol::intern("autodiff"));
-        !attrs.is_empty()
+        // Check for #[autodiff] attribute. `get_attrs` returns an iterator on
+        // current nightlies (it used to return a slice), so probe with `next`.
+        // It is `deprecated` in favour of `rustc_hir::find_attr!`; migrating is
+        // future work — the method still works for an unparsed tool attribute.
+        #[allow(deprecated)]
+        tcx.get_attrs(def_id, Symbol::intern("autodiff"))
+            .next()
+            .is_some()
     }
 
     fn run(
