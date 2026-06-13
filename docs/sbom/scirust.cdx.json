@@ -3,7 +3,7 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-06-13T13:42:00.000000000Z",
+    "timestamp": "2026-06-13T14:05:11.000000000Z",
     "tools": [
       {
         "vendor": "CycloneDX",
@@ -13,9 +13,9 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "path+file:///home/user/scirust#0.13.0",
+      "bom-ref": "path+file:///home/user/scirust#0.14.0",
       "name": "scirust",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "description": "SciRust — Industrial-grade deep learning framework in pure Rust",
       "scope": "required",
       "licenses": [
@@ -29,7 +29,7 @@
           }
         }
       ],
-      "purl": "pkg:cargo/scirust@0.13.0?download_url=file://.",
+      "purl": "pkg:cargo/scirust@0.14.0?download_url=file://.",
       "externalReferences": [
         {
           "type": "vcs",
@@ -39,17 +39,17 @@
       "components": [
         {
           "type": "library",
-          "bom-ref": "path+file:///home/user/scirust#0.13.0 bin-target-0",
+          "bom-ref": "path+file:///home/user/scirust#0.14.0 bin-target-0",
           "name": "scirust",
-          "version": "0.13.0",
-          "purl": "pkg:cargo/scirust@0.13.0?download_url=file://.#src/lib.rs"
+          "version": "0.14.0",
+          "purl": "pkg:cargo/scirust@0.14.0?download_url=file://.#src/lib.rs"
         },
         {
           "type": "application",
-          "bom-ref": "path+file:///home/user/scirust#0.13.0 bin-target-1",
+          "bom-ref": "path+file:///home/user/scirust#0.14.0 bin-target-1",
           "name": "openclaw-u",
-          "version": "0.13.0",
-          "purl": "pkg:cargo/scirust@0.13.0?download_url=file://.#src/main.rs"
+          "version": "0.14.0",
+          "purl": "pkg:cargo/scirust@0.14.0?download_url=file://.#src/main.rs"
         }
       ]
     },
@@ -2303,7 +2303,7 @@
   ],
   "dependencies": [
     {
-      "ref": "path+file:///home/user/scirust#0.13.0",
+      "ref": "path+file:///home/user/scirust#0.14.0",
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#chrono@0.4.44",
         "registry+https://github.com/rust-lang/crates.io-index#rand@0.8.6",

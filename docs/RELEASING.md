@@ -10,11 +10,12 @@ which fires on any pushed `v*` tag. A tag is a deliberate human action; the
 workflow only reacts to it.
 
 1. **Bump the version.** Set the `scirust` facade version in the root
-   `Cargo.toml` (currently `0.13.0` → `0.14.0`). Bump any sub-crate that
-   actually changed if/when they are published; today all sub-crates are
+   `Cargo.toml` (e.g. `0.14.0` → `0.15.0`). Bump any sub-crate that actually
+   changed if/when they are published; today all sub-crates are
    `publish = false`.
-2. **Finalize the changelog.** Rename the `## [Non publié]` section in
-   [`CHANGELOG.md`](../CHANGELOG.md) to `## [0.14.0] — <date>`.
+2. **Finalize the changelog.** Move the accumulated entries under
+   `## [Non publié]` in [`CHANGELOG.md`](../CHANGELOG.md) into a new
+   `## [<version>] — <date>` section.
 3. **Refresh the SBOM snapshot.** `./scripts/generate-sbom.sh` then commit
    `docs/sbom/scirust.cdx.json`.
 4. **Commit, then tag and push:**

@@ -3,7 +3,11 @@
 Le format suit [Keep a Changelog](https://keepachangelog.com/) ;
 versions sémantiques à partir de la prochaine release taguée.
 
-## [Non publié] — 2026-06-12
+## [Non publié]
+
+_Rien pour l'instant._
+
+## [0.14.0] — 2026-06-13
 
 ### Réparé
 - **`scirust-gpu` honnête (P2.2, étape « trancher »)** : les backends
