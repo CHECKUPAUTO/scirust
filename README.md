@@ -189,10 +189,12 @@ examples/        Quickstart, MNIST training, benchmarks
 
 > **GPU scope (honest).** A portable wgpu GEMM is wired behind the optional
 > `wgpu` feature, tested against the CPU oracle on a software Vulkan adapter
-> (Mesa lavapipe) in CI, and plumbed into the autograd tape (`WgpuEngine` +
-> `Var::matmul_gpu`) and Conv2d's im2col GEMMs, forward and backward. It is
-> opt-in, so the default bit-exact guarantee is unaffected. Still to do: keep
-> activations in VRAM across layers and move im2col onto the GPU (P2.2).
+> (Mesa lavapipe) in CI, plumbed into the autograd tape (`WgpuEngine` +
+> `Var::matmul_gpu`) and Conv2d's im2col GEMMs (forward and backward), with a
+> VRAM-resident matmul-chain API (`GpuChain`) that keeps intermediates on the
+> device across GEMMs. It is opt-in, so the default bit-exact guarantee is
+> unaffected. Still to do: make tape residency transparent and move im2col onto
+> the GPU (P2.2).
 > **CUDA** remains out of scope until a hardware GPU runner exists
 > (`CudaBackend` returns `Unavailable`); archived WGSL/cuBLAS drafts live
 > in `archive/scirust-gpu/`. See [`docs/GPU.md`](docs/GPU.md) and

@@ -71,6 +71,13 @@ _Rien pour l'instant._
   quand un `WgpuEngine` est attaché. Validé bout-en-bout contre la Conv2d CPU
   sur lavapipe (forward + dInput + dWeight, tolérance). Repli CPU
   bit-identique sans engine (aucune régression). im2col/col2im restent CPU.
+- **Activations résidentes en VRAM (P2.2, étape « résidence »)** : API
+  `GpuChain` — upload des entrées une fois, chaîne de `matmul` sur des
+  handles `GpuMatrix`, un intermédiaire reste en mémoire GPU et alimente le
+  GEMM suivant sans aller-retour CPU ; seul le résultat final est téléchargé.
+  Validé contre l'oracle CPU sur lavapipe (chaîne 2 GEMM + transpose). La
+  résidence transparente dans la tape (DeviceTensor matérialisé paresseusement
+  en GPU) reste un chantier futur — sans bénéfice mesurable hors GPU matériel.
 - **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
   reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
   `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une

@@ -26,12 +26,18 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 #[cfg(feature = "wgpu")]
+mod chain;
+#[cfg(feature = "wgpu")]
 mod engine;
 #[cfg(feature = "wgpu")]
 mod wgpu_backend;
 
 #[cfg(feature = "wgpu")]
+pub use chain::GpuChain;
+#[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
+#[cfg(feature = "wgpu")]
+pub use wgpu_backend::GpuMatrix;
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]

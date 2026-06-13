@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 19 : activations résidentes en VRAM (P2.2 résidence)
+- constat : DeviceTensor = { inner: Tensor } (CPU only). Résidence
+  transparente dans la tape forcerait as_cpu() (≈50 sites) à matérialiser
+  → gros refactor, bénéfice mesurable seulement sur GPU réel. Hors scope.
+- livré le mécanisme honnête et testé : WgpuContext.upload/gemm_resident/
+  download (+ encode_gemm partagé) ; GpuMatrix (buffer+shape) ; API publique
+  GpuChain { new, upload, matmul, matmul_t, download }.
+- test resident_chain : (A·B)·C garde T=A·B en VRAM, alimente le 2e GEMM
+  sans download, == oracle CPU (rel<1e-4) sur llvmpipe. +resident_transpose.
+  15 tests --features wgpu. scirust-gpu seul (core intact), défaut 726/6.
+- 8 gates verts (fmt, clippy déf+wgpu, doc déf+wgpu, deny, default tests).
+- reste P2.2 : résidence transparente dans la tape (DeviceTensor paresseux)
+  + im2col/col2im GPU + ops elementwise.
+
 ## Session 2026-06-13 — volet 18 : Conv2d sur GPU (P2.2 étape Conv2d)
 - nouvel helper Tape::gemm_ab(a,b,ta,tb) : engine.gemm si attaché (transpose
   natif), sinon match CPU bit-identique aux .matmul/.transpose d'origine.

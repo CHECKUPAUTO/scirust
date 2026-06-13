@@ -35,6 +35,22 @@
   Conv2d im2col GEMMs — forward `W·col`, backward `dW = dout·colᵀ` and
   `dInput = Wᵀ·dout` — run on the engine (validated end to end against the CPU
   Conv2d on lavapipe). im2col/col2im themselves stay on the CPU for now.
+- **VRAM-resident matmul chains** (`GpuChain`): keep an intermediate activation
+  in GPU memory across a sequence of GEMMs — upload inputs once, chain
+  `matmul`s on `GpuMatrix` handles, download only the final result. The
+  intermediate never round-trips to the CPU. Oracle-validated on lavapipe.
+
+```rust
+use scirust_gpu::GpuChain;
+
+let chain = GpuChain::new().expect("a Vulkan adapter");
+let a = chain.upload(&a_data, 2, 3);
+let b = chain.upload(&b_data, 3, 2);
+let c = chain.upload(&c_data, 2, 4);
+let t = chain.matmul(&a, &b)?;   // T = A·B stays in VRAM …
+let out = chain.matmul(&t, &c)?; // … and feeds the next GEMM directly
+let result = chain.download(&out)?; // only the final matrix is downloaded
+```
 
 ```rust
 use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
@@ -102,11 +118,15 @@ not compile it.
 
 See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. Done: portable
 wgpu GEMM (oracle-validated via lavapipe), its plumbing into the autograd tape
-(`WgpuEngine` + `Var::matmul_gpu` forward/backward), **and** Conv2d's im2col
-GEMMs routed through the engine. Next:
+(`WgpuEngine` + `Var::matmul_gpu` forward/backward), Conv2d's im2col GEMMs, and
+a VRAM-resident matmul-chain API (`GpuChain`). Next:
 
-- Keep activations in VRAM across layers (avoid the per-op CPU round-trip) and
-  move im2col/col2im onto the GPU — the archived pipelines in
+- **Transparent tape residency**: make `matmul_gpu`/Conv2d on the tape keep
+  intermediates resident automatically. This requires the tape's value storage
+  (`DeviceTensor`, today a CPU `Tensor`) to become lazily-materialised GPU
+  storage and the rest of the forward op-set (bias, activations) to be
+  device-resident — a larger change, payoff only on real GPU hardware.
+- Move im2col/col2im onto the GPU — the archived pipelines in
   [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
 - More ops (elementwise, reductions) behind the same trait.
 - CUDA/cuBLAS only once a hardware GPU runner exists.
