@@ -27,8 +27,9 @@
 //
 // The fallback scalar implementations (when `portable-simd` feature is disabled) are
 // entirely safe Rust with no `unsafe` code.
-
-#![cfg_attr(feature = "portable-simd", feature(portable_simd))]
+//
+// The `portable_simd` feature is declared once at the crate root (`lib.rs`);
+// no need to repeat it here.
 
 #[cfg(feature = "portable-simd")]
 pub mod simd_ops {

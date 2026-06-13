@@ -61,6 +61,20 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # The optional nightly `portable-simd` feature must keep building and
+  # testing warning-clean (RUSTFLAGS=-D warnings is set workspace-wide above).
+  portable-simd:
+    name: Build & Test (portable-simd, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build & test scirust-simd with portable-simd
+        run: cargo test -p scirust-simd --features portable-simd
+
   # The whole workspace must also build and pass on STABLE Rust (the
   # `portable-simd` nightly feature is optional and off by default) —
   # this is the gate industrial consumers care about.
