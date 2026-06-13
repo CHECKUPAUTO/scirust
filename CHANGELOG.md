@@ -30,6 +30,10 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI : 4e vague** — `trig` (identités trigonométriques), `patterns`
+  (tendance d'une série), `qr` (décomposition QR), `cg` (gradient
+  conjugué SPD). `bfgs` délibérément non exposé (closure `Fn(&[Dual])`
+  non constructible depuis une expression symbolique évaluée en f64).
 - **CLI : 3e vague** — `symreg` (régression symbolique par programmation
   génétique, `scirust-symreg`), `sat` (satisfiabilité DPLL,
   `scirust-neuro-symbolic`), et deux méthodes de plus pour `root`

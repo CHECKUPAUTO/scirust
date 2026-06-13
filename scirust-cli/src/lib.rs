@@ -94,6 +94,16 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "<xs> <ys> [--seed N]",
                 about: "Discover a closed-form y=f(x) by genetic programming.",
             },
+            Command {
+                name: "trig",
+                args: "<expr>",
+                about: "Apply trigonometric identities, then simplify.",
+            },
+            Command {
+                name: "patterns",
+                args: "\"v1,v2,..\"",
+                about: "Detect trend patterns in a numeric series.",
+            },
         ],
     ),
     (
@@ -146,6 +156,16 @@ const GROUPS: &[(&str, &[Command])] = &[
                 name: "cholesky",
                 args: "\"r;r\"",
                 about: "Cholesky factor L of an SPD matrix (A = L·Lᵀ).",
+            },
+            Command {
+                name: "qr",
+                args: "\"r;r\"",
+                about: "QR decomposition A = Q·R (prints Q and R).",
+            },
+            Command {
+                name: "cg",
+                args: "\"r;r\" \"b\"",
+                about: "Solve SPD A·x = b by conjugate gradient (iterative).",
             },
             Command {
                 name: "polyroots",
@@ -281,6 +301,8 @@ pub fn run(args: &[String]) -> u8 {
         Some("to-rust") => symbolic::run_to_rust(rest),
         Some("regress") => symbolic::run_regress(rest),
         Some("symreg") => reasoning::run_symreg(rest),
+        Some("trig") => symbolic::run_trig(rest),
+        Some("patterns") => symbolic::run_patterns(rest),
         Some("sat") => reasoning::run_sat(rest),
         Some("integrate") => numeric::run_integrate(rest),
         Some("root") => numeric::run_root(rest),
@@ -290,6 +312,8 @@ pub fn run(args: &[String]) -> u8 {
         Some("lstsq") => numeric::run_lstsq(rest),
         Some("det") => numeric::run_det(rest),
         Some("cholesky") => numeric::run_cholesky(rest),
+        Some("qr") => numeric::run_qr(rest),
+        Some("cg") => numeric::run_cg(rest),
         Some("polyroots") => numeric::run_polyroots(rest),
         Some("ode") => numeric::run_ode(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
@@ -356,6 +380,10 @@ mod tests {
         assert_eq!(run(&s(&["sat", "1,-2;2"])), 0);
         assert_eq!(run(&s(&["sat", "1;-1"])), 1);
         assert_eq!(run(&s(&["symreg", "0,1,2,3", "0,2,4,6"])), 0);
+        assert_eq!(run(&s(&["trig", "sin(x)^2 + cos(x)^2"])), 0);
+        assert_eq!(run(&s(&["patterns", "1,2,3,4"])), 0);
+        assert_eq!(run(&s(&["qr", "1,1;0,1;1,0"])), 0);
+        assert_eq!(run(&s(&["cg", "4,1;1,3", "1,2"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

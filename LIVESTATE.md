@@ -3,6 +3,13 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 12 : CLI vague 4 (trig, patterns, qr, cg)
+- +4 commandes : trig (apply_trig_identity), patterns (discover_patterns),
+  qr (qr_decompose), cg (conjugate_gradient SPD). 33 commandes au total.
+- bfgs NON exposé : Fn(&[Dual])->Dual non câblable depuis eval(f64) — honnête
+- vérifs : cg == linsolve (0.0909,0.6364), QR orthogonal, patterns trend_up
+- 43 tests CLI ; 8 gates verts
+
 ## Session 2026-06-13 — volet 11 : CLI vague 3 (symreg, sat, root methods)
 - +4 commandes/méthodes : symreg (scirust-symreg : GP + fit constantes
   symbolique), sat (scirust-neuro-symbolic : DPLL), root --method

@@ -7,8 +7,9 @@
 use std::collections::HashMap;
 
 use scirust_symbolic::{
-    derivative_1d, diff, eval, gradient_2d, linear_regression, parse, polynomial_fit, prove_equal,
-    simplify, solve_linear, solve_quadratic, to_rust_code,
+    apply_trig_identity, derivative_1d, diff, discover_patterns, eval, gradient_2d,
+    linear_regression, parse, polynomial_fit, prove_equal, simplify, solve_linear, solve_quadratic,
+    to_rust_code,
 };
 
 fn parse_or_report(expr: &str) -> Result<scirust_symbolic::Expr, u8> {
@@ -342,12 +343,71 @@ pub fn run_gradient(args: &[String]) -> u8 {
     }
 }
 
+/// `trig <expr>` — apply trigonometric identities, then simplify.
+pub fn run_trig(args: &[String]) -> u8 {
+    let Some(expr) = args.first()
+    else
+    {
+        eprintln!("usage: scirust trig <expr>   e.g. trig \"sin(x)^2 + cos(x)^2\"");
+        return 2;
+    };
+    match parse_or_report(expr)
+    {
+        Ok(e) =>
+        {
+            println!("{}", simplify(&apply_trig_identity(&e)));
+            0
+        },
+        Err(c) => c,
+    }
+}
+
+/// `patterns "<v1,v2,..>"` — detect trend patterns in a numeric series.
+pub fn run_patterns(args: &[String]) -> u8 {
+    let Some(series) = args.first()
+    else
+    {
+        eprintln!("usage: scirust patterns \"1,2,3,2,1\"");
+        return 2;
+    };
+    let data: Vec<f64> = match series
+        .split(',')
+        .map(|t| t.trim().parse::<f64>())
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(v) => v,
+        Err(_) =>
+        {
+            eprintln!("error: series must be comma-separated numbers");
+            return 2;
+        },
+    };
+    let found = discover_patterns(&data);
+    if found.is_empty()
+    {
+        println!("no dominant pattern detected");
+    }
+    else
+    {
+        println!("patterns: {}", found.join(", "));
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn trig_and_patterns() {
+        assert_eq!(run_trig(&s(&["sin(x)^2 + cos(x)^2"])), 0);
+        assert_eq!(run_trig(&[]), 2);
+        assert_eq!(run_patterns(&s(&["1,2,3,4,5"])), 0);
+        assert_eq!(run_patterns(&s(&["a,b"])), 2);
     }
 
     #[test]

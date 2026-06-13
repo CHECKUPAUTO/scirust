@@ -63,6 +63,8 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `regress <xs> <ys> [deg]` | régression moindres carrés (linéaire/polynomiale) | `scirust-symbolic` |
 | `symreg <xs> <ys> [--seed N]` | découverte de loi close (programmation génétique) | `scirust-symreg` |
 | `sat "c;c"` | satisfiabilité DPLL | `scirust-neuro-symbolic` |
+| `trig <expr>` | identités trigonométriques + simplification | `scirust-symbolic` |
+| `patterns "v1,v2,.."` | détection de tendance dans une série | `scirust-symbolic` |
 | `integrate <expr> <a> <b> [var] [--method]` | intégrale définie (Romberg/Simpson/Gauss) | `scirust-solvers` |
 | `root <expr> <a> <b> [var] [--method]` | racine (Brent/bisection/secant/newton) | `scirust-solvers`(+`-symbolic` pour newton) |
 | `minimize <expr> <a> <b> [var]` | minimum local 1D (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
@@ -71,6 +73,8 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `lstsq "r;r;r" "b"` | moindres carrés A·x≈b (QR) | `scirust-solvers` |
 | `det "r;r"` | déterminant | `scirust-solvers` |
 | `cholesky "r;r"` | facteur L de Cholesky (SPD) | `scirust-solvers` |
+| `qr "r;r"` | décomposition QR (Q, R) | `scirust-solvers` |
+| `cg "r;r" "b"` | gradient conjugué (SPD, itératif) | `scirust-solvers` |
 | `polyroots "c0,c1,.."` | racines réelles d'un polynôme | `scirust-solvers` |
 | `ode <f(t,y)> <y0> <t0> <t1> [h]` | intègre dy/dt=f (RK4) | `scirust-solvers`+`-symbolic` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |

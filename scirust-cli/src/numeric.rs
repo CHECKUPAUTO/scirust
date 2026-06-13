@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use scirust_solvers::Matrix;
 use scirust_solvers::linalg::cholesky::cholesky_decompose;
+use scirust_solvers::linalg::conjugate_gradient;
 use scirust_solvers::linalg::qr::{qr_decompose, solve_qr_least_squares};
 use scirust_solvers::linalg::solve as lin_solve;
 use scirust_solvers::optimize::nelder_mead::nelder_mead;
@@ -604,6 +605,95 @@ pub fn run_optimize(args: &[String]) -> u8 {
     }
 }
 
+/// `qr "<rows>"` — QR decomposition A = Q·R. Prints Q and R.
+pub fn run_qr(args: &[String]) -> u8 {
+    let Some(mat) = args.first()
+    else
+    {
+        eprintln!("usage: scirust qr \"1,1;0,1;1,0\"");
+        return 2;
+    };
+    let (m, n, data) = match parse_matrix(mat)
+    {
+        Ok(t) => t,
+        Err(c) => return c,
+    };
+    let qr = match qr_decompose(Matrix::from_row_major(m, n, data))
+    {
+        Ok(q) => q,
+        Err(e) =>
+        {
+            println!("error: {e:?}");
+            return 2;
+        },
+    };
+    let print_mat = |name: &str, mtx: &Matrix| {
+        println!("{name} ({}x{}):", mtx.rows(), mtx.cols());
+        for i in 0..mtx.rows()
+        {
+            let row: Vec<String> = (0..mtx.cols())
+                .map(|j| format!("{:.6}", mtx.data()[i * mtx.cols() + j]))
+                .collect();
+            println!("  [ {} ]", row.join(", "));
+        }
+    };
+    print_mat("Q", &qr.q());
+    print_mat("R", &qr.r());
+    0
+}
+
+/// `cg "<rows>" "<b>"` — solve a symmetric-positive-definite A·x = b with
+/// the conjugate-gradient iterative method (matrix-free).
+pub fn run_cg(args: &[String]) -> u8 {
+    let (Some(mat), Some(rhs)) = (args.first(), args.get(1))
+    else
+    {
+        eprintln!("usage: scirust cg \"4,1;1,3\" \"1,2\"   (A symmetric positive-definite)");
+        return 2;
+    };
+    let (m, n, data) = match parse_matrix(mat)
+    {
+        Ok(t) => t,
+        Err(c) => return c,
+    };
+    if m != n
+    {
+        eprintln!("error: matrix must be square");
+        return 2;
+    }
+    let b = match parse_list(rhs, "rhs entry")
+    {
+        Ok(v) => v,
+        Err(c) => return c,
+    };
+    if b.len() != n
+    {
+        eprintln!("error: rhs length {} must equal matrix size {n}", b.len());
+        return 2;
+    }
+    let matvec = move |x: &[f64], out: &mut [f64]| {
+        for (i, oi) in out.iter_mut().enumerate()
+        {
+            *oi = (0..n).map(|j| data[i * n + j] * x[j]).sum();
+        }
+    };
+    match conjugate_gradient(matvec, &b, vec![0.0; n], Tolerance::new(1e-12, 1e-12, 1000))
+    {
+        Ok(sol) =>
+        {
+            let iters = sol.info.iterations;
+            let xs: Vec<String> = sol.value.iter().map(|v| format!("{v:.6}")).collect();
+            println!("x = [ {} ]  ({iters} iterations)", xs.join(", "));
+            0
+        },
+        Err(e) =>
+        {
+            println!("did not converge (is A SPD?): {e:?}");
+            1
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +725,16 @@ mod tests {
             0
         );
         assert_eq!(run_root(&s(&["x^2 - 2", "0", "2", "--method", "brent"])), 0);
+    }
+
+    #[test]
+    fn qr_and_cg() {
+        // QR of a tall matrix.
+        assert_eq!(run_qr(&s(&["1,1;0,1;1,0"])), 0);
+        assert_eq!(run_qr(&[]), 2);
+        // SPD system [[4,1],[1,3]] x = [1,2].
+        assert_eq!(run_cg(&s(&["4,1;1,3", "1,2"])), 0);
+        assert_eq!(run_cg(&s(&["4,1;1,3", "1,2,3"])), 2); // rhs mismatch
     }
 
     #[test]
