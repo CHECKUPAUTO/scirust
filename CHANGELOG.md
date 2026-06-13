@@ -6,6 +6,17 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Attention N-D gradient-checkée** : `autodiff::nd` exprime une **attention
+  multi-tête complète** `softmax(Q·Kᵀ/√d)·V` sur `(têtes, seq, d)` (ops
+  `bmm`/`transpose_last2`/`softmax`/`mul`/`add`/`sub`/`relu`/`sum`), validée
+  par gradient check. La tape N-D devient le sur-ensemble capable ; la 2D
+  reste le défaut par choix d'architecture (coexistence, cf. GROWTH_PLAN).
+- **Sampling seedé** (`nn::sampling`) : température / top-k / top-p pilotés par
+  `PcgEngine` seedé → déterministe. `MiniLLM::generate_ids_cached_sampled`
+  (génération O(n) à KV-cache avec sampling). Greedy reproduit le chemin argmax.
+- **BPE byte-level** (`ByteBpeTokenizer`, style GPT-2) : vocab de base = 256
+  octets ⇒ **aucun OOV**, round-trip **lossless** sur tout UTF-8 (accents,
+  emoji, scripts inconnus). Déterministe. Exposé en CLI via `bpe --bytes`.
 - **LLM bout-en-bout** : décodage KV-cache O(n) (`MiniLLM::generate_ids_cached`,
   `TransformerBlock/Encoder::infer_step`, `PositionalEncoding::encoding_at`)
   **prouvé équivalent** au recalcul complet ; génération découplée du tokenizer

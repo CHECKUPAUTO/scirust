@@ -26,6 +26,10 @@ enum Op {
     /// Batched matmul `(…,m,k)·(…,k,n)→(…,m,n)` with broadcast batch axes.
     Bmm(usize, usize),
     Relu(usize),
+    /// Softmax over the last axis.
+    Softmax(usize),
+    /// Swap the last two axes.
+    TransposeLast2(usize),
     Sum(usize),
 }
 
@@ -133,6 +137,16 @@ impl NdTape {
                     accumulate(&mut grads[a], &ga);
                     accumulate(&mut grads[b], &gb);
                 },
+                Op::Softmax(a) =>
+                {
+                    // dx_i = y_i · (g_i − Σ_j g_j y_j) over the last axis.
+                    let y = &nodes[i].value;
+                    accumulate(&mut grads[a], &softmax_backward(y, &g));
+                },
+                Op::TransposeLast2(a) =>
+                {
+                    accumulate(&mut grads[a], &transpose_last2(&g));
+                },
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
@@ -204,6 +218,20 @@ impl<'t> NdVar<'t> {
         let (a, b) = self.pair(other);
         let out = batched_matmul(&a, &b);
         self.tape.push(Op::Bmm(self.idx, other.idx), out)
+    }
+
+    /// Softmax over the last axis (e.g. attention weights over keys).
+    pub fn softmax(self) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = softmax_lastaxis(&a);
+        self.tape.push(Op::Softmax(self.idx), out)
+    }
+
+    /// Swap the last two axes (e.g. `Kᵀ` inside attention).
+    pub fn transpose_last2(self) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = transpose_last2(&a);
+        self.tape.push(Op::TransposeLast2(self.idx), out)
     }
 
     /// Elementwise ReLU.
@@ -362,6 +390,78 @@ fn matmul2d(a: &TensorND, b: &TensorND) -> TensorND {
         }
     }
     TensorND::new(data, vec![m, n])
+}
+
+/// Softmax over the last (contiguous) axis.
+fn softmax_lastaxis(t: &TensorND) -> TensorND {
+    let last = t.shape[t.ndim() - 1].max(1);
+    let outer = t.data.len() / last;
+    let mut out = vec![0.0f32; t.data.len()];
+    for o in 0..outer
+    {
+        let base = o * last;
+        let mut mx = f32::NEG_INFINITY;
+        for i in 0..last
+        {
+            mx = mx.max(t.data[base + i]);
+        }
+        let mut sum = 0.0f32;
+        for i in 0..last
+        {
+            let e = (t.data[base + i] - mx).exp();
+            out[base + i] = e;
+            sum += e;
+        }
+        for i in 0..last
+        {
+            out[base + i] /= sum;
+        }
+    }
+    TensorND::new(out, t.shape.clone())
+}
+
+/// Backward of [`softmax_lastaxis`]: `dx_i = y_i·(g_i − Σ_j g_j y_j)`.
+fn softmax_backward(y: &TensorND, g: &TensorND) -> TensorND {
+    let last = y.shape[y.ndim() - 1].max(1);
+    let outer = y.data.len() / last;
+    let mut dx = vec![0.0f32; y.data.len()];
+    for o in 0..outer
+    {
+        let base = o * last;
+        let mut dot = 0.0f32;
+        for i in 0..last
+        {
+            dot += g.data[base + i] * y.data[base + i];
+        }
+        for i in 0..last
+        {
+            dx[base + i] = y.data[base + i] * (g.data[base + i] - dot);
+        }
+    }
+    TensorND::new(dx, y.shape.clone())
+}
+
+/// Swap the last two axes (`(…,a,b) → (…,b,a)`); its own inverse.
+fn transpose_last2(t: &TensorND) -> TensorND {
+    let nd = t.ndim();
+    assert!(nd >= 2, "transpose_last2: need ndim >= 2");
+    let (a, b) = (t.shape[nd - 2], t.shape[nd - 1]);
+    let outer = t.data.len() / (a * b).max(1);
+    let mut out = vec![0.0f32; t.data.len()];
+    for o in 0..outer
+    {
+        let base = o * a * b;
+        for i in 0..a
+        {
+            for j in 0..b
+            {
+                out[base + j * a + i] = t.data[base + i * b + j];
+            }
+        }
+    }
+    let mut shape = t.shape.clone();
+    shape.swap(nd - 2, nd - 1);
+    TensorND::new(out, shape)
 }
 
 /// Map a flat index in `out_batch` to the corresponding flat batch offset in a
@@ -544,6 +644,66 @@ mod tests {
 
         // The bias broadcast must reduce correctly: gb has the bias shape.
         assert_eq!(gb.shape, vec![1, 4]);
+    }
+
+    /// Multi-head **scaled-dot-product attention** expressed entirely on the
+    /// N-D tape — `softmax(Q·Kᵀ/√d)·V` over `(heads, seq, d)` — with its
+    /// gradients checked against finite differences. This is the milestone the
+    /// 2-D tape cannot reach: it proves the N-D autograd handles batched matmul,
+    /// last-axis transpose, scaling and softmax together, correctly.
+    #[test]
+    fn nd_multihead_attention_gradient_check() {
+        let (h, seq, d) = (2usize, 3, 4);
+        let shape = vec![h, seq, d];
+        let n = h * seq * d;
+        let q: Vec<f32> = (0..n).map(|i| (i as f32 * 0.11 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..n).map(|i| (i as f32 * 0.07 + 0.3).cos()).collect();
+        let v: Vec<f32> = (0..n).map(|i| (i as f32 * 0.05 - 0.2).sin()).collect();
+        let scale = 1.0 / (d as f32).sqrt();
+
+        let attn_loss = |q: &[f32], k: &[f32], v: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(q.to_vec(), shape.clone()));
+            let kv = t.input(TensorND::new(k.to_vec(), shape.clone()));
+            let vv = t.input(TensorND::new(v.to_vec(), shape.clone()));
+            let sc = t.input(TensorND::new(vec![scale], vec![1]));
+            let out = qv.bmm(kv.transpose_last2()).mul(sc).softmax().bmm(vv);
+            t.value(out.sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), shape.clone()));
+        let kv = t.input(TensorND::new(k.clone(), shape.clone()));
+        let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+        let sc = t.input(TensorND::new(vec![scale], vec![1]));
+        let out = qv.bmm(kv.transpose_last2()).mul(sc).softmax().bmm(vv);
+        assert_eq!(t.value(out).shape, vec![h, seq, d]);
+        let grads = t.backward(out.sum());
+        let (gq, gk, gv) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+        );
+
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for kk in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[kk] += eps;
+                dn[kk] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[kk]).abs() < 2e-2,
+                    "attention grad {kk}: numeric {num}, analytic {}",
+                    analytic.data[kk]
+                );
+            }
+        };
+        check(&gq, &q, &|p| attn_loss(p, &k, &v));
+        check(&gk, &k, &|p| attn_loss(&q, p, &v));
+        check(&gv, &v, &|p| attn_loss(&q, &k, p));
     }
 
     #[test]

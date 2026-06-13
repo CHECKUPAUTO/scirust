@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 26 : traiter à fond les 3 « parts honnêtes »
+- (C) BPE byte-level (ByteBpeTokenizer, GPT-2) : base 256 octets → 0 OOV,
+  round-trip lossless tout UTF-8 (emoji/accents/scripts inconnus) ; 5 tests ;
+  CLI `bpe --bytes`. Remplace « BPE basique ».
+- (A) sampling seedé (nn::sampling : temp/top-k/top-p, PcgEngine) ; greedy =
+  argmax ; MiniLLM::generate_ids_cached_sampled (O(n) KV-cache + sampling,
+  déterministe par graine) ; 5 tests. Remplace « décodage glouton ».
+- (B) autograd N-D capable : +softmax(axe final, backward Jacobien) +
+  transpose_last2 ; **attention multi-tête complète** softmax(Q·Kᵀ/√d)·V sur
+  (têtes,seq,d) GRADIENT-CHECKÉE. La N-D = sur-ensemble capable ; 2D = défaut
+  par choix d'archi (coexistence, pas TODO). Remplace « tape N-D = ops/toy ».
+- principe tenu : aucun TODO laissé, chaque sujet traité à fond + testé.
+- 759 tests workspace ; 8 gates verts. roadmap P2.4 / GROWTH_PLAN / CHANGELOG.
+
 ## Session 2026-06-13 — volet 25 : fusion N-D + LLM bout-en-bout + CLI bpe
 - chantier 1 (fusion N-D) : NdVar::bmm (matmul batché broadcast) + sub ;
   forward + backward gradient-checkés. La tape N-D devient le sur-ensemble
