@@ -26,6 +26,7 @@ pub mod positional_encoding;
 pub mod residual;
 pub mod rng;
 pub mod rope;
+pub mod sampling;
 pub mod sequential;
 pub mod transformer;
 pub mod tt_linear;

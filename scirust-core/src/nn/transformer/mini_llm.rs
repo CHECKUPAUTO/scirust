@@ -333,6 +333,49 @@ impl MiniLLM {
         }
         ids
     }
+
+    /// O(n) KV-cache generation with **seeded sampling** (temperature / top-k /
+    /// top-p). Deterministic: the same `seed` and inputs always yield the same
+    /// tokens. `SamplingConfig::greedy()` reproduces [`Self::generate_ids_cached`].
+    pub fn generate_ids_cached_sampled(
+        &mut self,
+        prompt_ids: &[usize],
+        max_tokens: usize,
+        cfg: &crate::nn::sampling::SamplingConfig,
+        seed: u64,
+    ) -> Vec<usize> {
+        self.reset_kv_cache();
+        let mut rng = crate::nn::rng::PcgEngine::new(seed);
+        let vocab = self.config.vocab_size;
+        let mut ids = prompt_ids.to_vec();
+        if ids.is_empty()
+        {
+            return ids;
+        }
+        let prompt: Vec<usize> = ids.clone();
+        let mut logits = self.step_logits(prompt[0], 0);
+        for (pos, &id) in prompt.iter().enumerate().skip(1)
+        {
+            logits = self.step_logits(id, pos);
+        }
+        for _ in 0..max_tokens
+        {
+            let pos = ids.len();
+            if pos >= self.config.max_seq_len
+            {
+                break;
+            }
+            let row = &logits.data[..vocab.min(logits.data.len())];
+            let next = crate::nn::sampling::sample_token(row, cfg, &mut rng);
+            ids.push(next);
+            if next == 0
+            {
+                break;
+            }
+            logits = self.step_logits(next, pos);
+        }
+        ids
+    }
 }
 
 /// Greedy argmax over row `row` of a `(_, vocab)` logits tensor.
@@ -425,6 +468,39 @@ mod tests {
         let cached = m.generate_ids_cached(&prompt, 6);
         assert_eq!(full, cached, "KV-cache decode diverged from full recompute");
         assert!(cached.len() > prompt.len(), "nothing was generated");
+    }
+
+    /// Seeded sampling: greedy reproduces the cached argmax path, and a fixed
+    /// seed makes temperature sampling fully deterministic.
+    #[test]
+    fn sampled_generation_greedy_and_deterministic() {
+        use crate::nn::sampling::SamplingConfig;
+        let tok = CharTokenizer::new(&["hello world abcdefghij"]);
+        let cfg = MiniLLMConfig {
+            vocab_size: tok.vocab_size,
+            d_model: 16,
+            n_heads: 2,
+            n_layers: 2,
+            d_ff: 32,
+            max_seq_len: 64,
+        };
+        let mut m = MiniLLM::new(cfg, tok);
+        let prompt = vec![2usize, 3, 4];
+
+        // Greedy sampling == the cached argmax path.
+        let greedy = m.generate_ids_cached_sampled(&prompt, 6, &SamplingConfig::greedy(), 0);
+        assert_eq!(greedy, m.generate_ids_cached(&prompt, 6));
+
+        // Temperature sampling: same seed ⇒ identical, and ids stay in vocab.
+        let sc = SamplingConfig {
+            temperature: 0.8,
+            top_k: 5,
+            top_p: 0.95,
+        };
+        let a = m.generate_ids_cached_sampled(&prompt, 6, &sc, 123);
+        let b = m.generate_ids_cached_sampled(&prompt, 6, &sc, 123);
+        assert_eq!(a, b, "sampling not deterministic for a fixed seed");
+        assert!(a.iter().all(|&id| id < m.config.vocab_size));
     }
 
     /// `generate_ids` is tokenizer-agnostic: feeding raw ids works and the
