@@ -3,6 +3,23 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 14 : P2.2 « trancher » — scirust-gpu honnête
+- diagnostic : scirust-gpu/src/lib.rs livrait WgpuBackend/CudaBackend dont
+  gemm_f32 renvoyait vec![0.0; m*n] — résultats FABRIQUÉS sous étiquette
+  GPU, en violation directe de la politique du repo (la même crate core
+  compute_backend.rs faisait déjà ça correctement : Err honnête + tests).
+- env. probé : pas de /dev/dri, pas d'ICD Vulkan (loader libvulkan présent
+  mais aucun driver lavapipe) → wgpu NON testable ici. Donc « pas de claim
+  sans test » interdit d'ajouter un chemin wgpu non testable maintenant.
+- correctif (in-philosophy, débloqué) : vrai backend CPU de référence testé
+  (GEMM bit-déterministe, oracle), device paths → BackendError::Unavailable
+  (jamais de sortie inventée), BackendError {Unavailable, ShapeMismatch}.
+  0 → 6 tests. std + no_std compilent. README requalifié (3 endroits).
+- types scirust-gpu non importés ailleurs (vérifié) → refactor sans casse.
+- reste P2.2 (vrai wgpu) = décision produit : deps lourdes (wgpu/naga) vs
+  philosophie auditable + non-déterminisme FP GPU + runner CI absent.
+- 726 tests workspace ; 8 gates verts.
+
 ## Session 2026-06-13 — volet 13 : CLI vague 5 (tt, solve-system, inverse, fem-heat, dopri5)
 - +4 commandes + 1 méthode : tt (compression tensor-train TT-SVD,
   scirust-tn — cœurs/rangs/ratio/erreur, sortie 1 si --max-err dépassé),

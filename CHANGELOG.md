@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié] — 2026-06-12
 
 ### Réparé
+- **`scirust-gpu` honnête (P2.2, étape « trancher »)** : les backends
+  `WgpuBackend`/`CudaBackend` renvoyaient `vec![0.0; m*n]` — des résultats
+  **fabriqués** (zéros) sous une étiquette « wgpu »/« cuda », en violation
+  de la politique « 100 % câblé/testé, zéro sur-promesse ». Remplacés par
+  un vrai backend CPU de référence **testé** (oracle GEMM bit-déterministe)
+  et des chemins device qui signalent honnêtement `BackendError::Unavailable`
+  (jamais de sortie inventée), à l'image de `scirust_core::compute_backend`.
+  Crate passée de 0 à 6 tests. Le câblage wgpu réel reste bloqué tant
+  qu'aucun runner GPU / Vulkan logiciel n'existe en CI (« pas de claim sans
+  test ») — voir roadmap P2.2.
 - Régression de merge cassant la compilation sur toutes architectures
   (sgemv AVX2/SSE2/NEON, champ slab arena).
 - CI rendue réalisable : retrait de `--all-features` (features BLAS

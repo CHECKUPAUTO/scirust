@@ -123,9 +123,12 @@ Add a single crate to your own `Cargo.toml`:
 scirust-core = { path = "path/to/scirust-core" }
 ```
 
-> GPU note: `scirust-gpu` currently exposes CPU-validated stubs only; the
-> WGSL/cuBLAS kernels are preserved in `archive/scirust-gpu/` outside the
-> build (`--features wgpu` compiles nothing extra). Re-wiring them is
+> GPU note: `scirust-gpu` ships one real, tested path — a deterministic CPU
+> reference backend (the bit-tolerant oracle a future GPU must match). The
+> `wgpu`/`cuda` device backends are honest placeholders that return
+> `BackendError::Unavailable` rather than fabricated results; the WGSL/cuBLAS
+> kernels are preserved in `archive/scirust-gpu/` outside the build
+> (`--features wgpu` compiles nothing extra). Re-wiring a tested wgpu path is
 > tracked in `docs/INDUSTRIAL_ROADMAP.md` (P2.2).
 
 ## Architecture
@@ -133,7 +136,7 @@ scirust-core = { path = "path/to/scirust-core" }
 ```
 scirust-core/    Core compute, autograd, layers (~12k loc)
 scirust-simd/    SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/     CPU-validated GPU stubs (kernels archived in archive/)
+scirust-gpu/     Tested CPU reference backend; GPU device paths report Unavailable (kernels in archive/)
 scirust-som/     Ownership Model: real-Rust analyzer + Transformer pipeline
 examples/        Quickstart, MNIST training, benchmarks
 ```
@@ -177,12 +180,13 @@ examples/        Quickstart, MNIST training, benchmarks
 | HPC im2col (cache-aware) | ✅ New |
 | SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
 
-> **Not included yet (no claim).** GPU execution is **not** part of the
-> build: `scirust-gpu` ships CPU-validated stubs only, and the WGSL/cuBLAS
-> kernels are preserved in `archive/scirust-gpu/` outside the workspace.
-> Re-wiring a tested wgpu path is tracked in
-> [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md) (P2.2). The
-> table above lists only what ships and is tested today.
+> **Not included yet (no claim).** Hardware GPU execution is **not** part of
+> the build: `scirust-gpu` ships a real, tested CPU reference backend, while
+> its `wgpu`/`cuda` device paths honestly return `BackendError::Unavailable`
+> (never fabricated output), and the WGSL/cuBLAS kernels are preserved in
+> `archive/scirust-gpu/` outside the workspace. Re-wiring a tested wgpu path
+> is tracked in [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md)
+> (P2.2). The table above lists only what ships and is tested today.
 
 
 ## Package layout: framework library vs. bundled agent
