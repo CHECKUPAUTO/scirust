@@ -5,7 +5,7 @@
 // L'encoder est l'architecture BERT-style (sans causal mask par defaut) :
 // chaque token peut attendre tous les autres tokens de la sequence.
 
-use crate::autodiff::reverse::{Tape, Tensor};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::init::Initializer;
 use crate::nn::layer_norm::LayerNorm;
 use crate::nn::module::Module;
@@ -58,6 +58,17 @@ impl TransformerEncoder {
         }
         let ln_out = self.final_ln.forward(tape, h.as_var());
         Var3D::from_var(ln_out, h.batch, h.seq_len, h.d_model)
+    }
+
+    /// Incremental single-token forward for KV-cache decoding: chain each
+    /// block's [`TransformerBlock::infer_step`] then the final LayerNorm.
+    pub fn infer_step<'t>(&mut self, tape: &'t Tape, x_token: Var<'t>, pos: usize) -> Var<'t> {
+        let mut h = x_token;
+        for block in self.blocks.iter_mut()
+        {
+            h = block.infer_step(tape, h, pos);
+        }
+        self.final_ln.forward(tape, h)
     }
 
     pub fn parameter_indices(&self) -> Vec<usize> {

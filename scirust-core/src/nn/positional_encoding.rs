@@ -43,6 +43,18 @@ impl PositionalEncoding {
         }
     }
 
+    /// The positional encoding row for a single absolute position (length
+    /// `d_model`). Used for incremental (KV-cache) decoding, where one token is
+    /// processed at a time and must receive the encoding for *its* position.
+    pub fn encoding_at(&self, pos: usize) -> Vec<f32> {
+        assert!(
+            pos < self.max_seq_len,
+            "encoding_at: pos {pos} out of range"
+        );
+        let d = self.d_model;
+        self.pe.data[pos * d..(pos + 1) * d].to_vec()
+    }
+
     /// Ajoute le PE à `input` de shape (batch * seq_len, d_model).
     /// `seq_len` doit être <= max_seq_len.
     pub fn forward<'t>(&self, tape: &'t Tape, input: Var<'t>, seq_len: usize) -> Var<'t> {

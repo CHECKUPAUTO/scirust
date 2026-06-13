@@ -220,4 +220,35 @@ mod tests {
         assert!(tok.vocab_size() <= 25);
         assert!(tok.vocab_size() >= 2); // at least the special tokens
     }
+
+    /// End-to-end: a BPE tokenizer drives a MiniLLM through the tokenizer-
+    /// agnostic `generate_ids` API (`bpe.tokenize → generate_ids → bpe.decode`),
+    /// deterministically. This is the "BPE in generate" wiring.
+    #[test]
+    fn bpe_drives_mini_llm_generation() {
+        use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
+
+        let corpus = ["hello world", "low lower lowest newest wider"];
+        let bpe = BpeTokenizer::train(&corpus, 48);
+        let vocab = bpe.vocab_size();
+        let cfg = MiniLLMConfig {
+            vocab_size: vocab,
+            d_model: 16,
+            n_heads: 2,
+            n_layers: 1,
+            d_ff: 32,
+            max_seq_len: 32,
+        };
+        // The CharTokenizer field is unused; generation is driven at the id level.
+        let mut model = MiniLLM::new(cfg, CharTokenizer::new(&corpus));
+
+        let prompt_ids: Vec<usize> = bpe.tokenize("hello").iter().map(|&x| x as usize).collect();
+        let out = model.generate_ids(&prompt_ids, 5);
+
+        // Fixed model seed + greedy argmax + deterministic BPE ⇒ reproducible.
+        assert_eq!(out, model.generate_ids(&prompt_ids, 5));
+        // Every produced id is in the BPE vocab and decodes without panicking.
+        assert!(out.iter().all(|&id| id < vocab));
+        let _text = bpe.decode(&out.iter().map(|&x| x as u32).collect::<Vec<_>>());
+    }
 }
