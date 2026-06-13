@@ -20,8 +20,11 @@ use crate::tensor::tensor_nd::TensorND;
 enum Op {
     Leaf,
     Add(usize, usize),
+    Sub(usize, usize),
     Mul(usize, usize),
     Matmul(usize, usize),
+    /// Batched matmul `(…,m,k)·(…,k,n)→(…,m,n)` with broadcast batch axes.
+    Bmm(usize, usize),
     Relu(usize),
     Sum(usize),
 }
@@ -96,6 +99,14 @@ impl NdTape {
                     accumulate(&mut grads[a], &unbroadcast(&g, &sa));
                     accumulate(&mut grads[b], &unbroadcast(&g, &sb));
                 },
+                Op::Sub(a, b) =>
+                {
+                    let sa = nodes[a].value.shape.clone();
+                    let sb = nodes[b].value.shape.clone();
+                    let neg = ew(&g, &g, |x, _| -x);
+                    accumulate(&mut grads[a], &unbroadcast(&g, &sa));
+                    accumulate(&mut grads[b], &unbroadcast(&neg, &sb));
+                },
                 Op::Mul(a, b) =>
                 {
                     let out_shape = &nodes[i].value.shape;
@@ -113,6 +124,12 @@ impl NdTape {
                     let bv = &nodes[b].value;
                     let ga = matmul2d(&g, &transpose2d(bv));
                     let gb = matmul2d(&transpose2d(av), &g);
+                    accumulate(&mut grads[a], &ga);
+                    accumulate(&mut grads[b], &gb);
+                },
+                Op::Bmm(a, b) =>
+                {
+                    let (ga, gb) = bmm_backward(&nodes[a].value, &nodes[b].value, &g);
                     accumulate(&mut grads[a], &ga);
                     accumulate(&mut grads[b], &gb);
                 },
@@ -157,6 +174,14 @@ impl<'t> NdVar<'t> {
         self.tape.push(Op::Add(self.idx, other.idx), out)
     }
 
+    /// Elementwise `self - other` (broadcasting).
+    #[allow(clippy::should_implement_trait)]
+    pub fn sub(self, other: NdVar<'t>) -> NdVar<'t> {
+        let (a, b) = self.pair(other);
+        let out = ew_broadcast(&a, &b, |x, y| x - y);
+        self.tape.push(Op::Sub(self.idx, other.idx), out)
+    }
+
     /// Elementwise `self * other` (broadcasting).
     #[allow(clippy::should_implement_trait)]
     pub fn mul(self, other: NdVar<'t>) -> NdVar<'t> {
@@ -170,6 +195,15 @@ impl<'t> NdVar<'t> {
         let (a, b) = self.pair(other);
         let out = matmul2d(&a, &b);
         self.tape.push(Op::Matmul(self.idx, other.idx), out)
+    }
+
+    /// Batched matrix product `(…,m,k) · (…,k,n) → (…,m,n)` with the leading
+    /// batch axes broadcast — the N-D capability the 2-D tape cannot express
+    /// (e.g. per-head attention scores). Both operands need `ndim ≥ 2`.
+    pub fn bmm(self, other: NdVar<'t>) -> NdVar<'t> {
+        let (a, b) = self.pair(other);
+        let out = batched_matmul(&a, &b);
+        self.tape.push(Op::Bmm(self.idx, other.idx), out)
     }
 
     /// Elementwise ReLU.
@@ -330,6 +364,118 @@ fn matmul2d(a: &TensorND, b: &TensorND) -> TensorND {
     TensorND::new(data, vec![m, n])
 }
 
+/// Map a flat index in `out_batch` to the corresponding flat batch offset in a
+/// (possibly smaller / size-1-broadcast) `target_batch`.
+fn project_batch(out_flat: usize, out_batch: &[usize], target_batch: &[usize]) -> usize {
+    if target_batch.is_empty()
+    {
+        return 0;
+    }
+    let out_strides = strides_of(out_batch);
+    let tgt_strides = strides_of(target_batch);
+    let off = out_batch.len() - target_batch.len();
+    let mut rem = out_flat;
+    let mut tgt_flat = 0usize;
+    for (ax, &os) in out_strides.iter().enumerate()
+    {
+        let idx = rem / os;
+        rem %= os;
+        if ax >= off
+        {
+            let ta = ax - off;
+            let tidx = if target_batch[ta] == 1 { 0 } else { idx };
+            tgt_flat += tidx * tgt_strides[ta];
+        }
+    }
+    tgt_flat
+}
+
+/// Batched matmul `(…,m,k)·(…,k,n)→(…,m,n)` with broadcast batch axes.
+fn batched_matmul(a: &TensorND, b: &TensorND) -> TensorND {
+    let (an, bn) = (a.ndim(), b.ndim());
+    assert!(an >= 2 && bn >= 2, "bmm: both operands need ndim >= 2");
+    let (m, k) = (a.shape[an - 2], a.shape[an - 1]);
+    let (k2, n) = (b.shape[bn - 2], b.shape[bn - 1]);
+    assert_eq!(k, k2, "bmm: inner dims disagree");
+    let a_batch = &a.shape[..an - 2];
+    let b_batch = &b.shape[..bn - 2];
+    let out_batch = TensorND::broadcast_shape(a_batch, b_batch).expect("bmm: batch broadcast");
+    let bsz: usize = out_batch.iter().product::<usize>().max(1);
+    let mut data = vec![0.0f32; bsz * m * n];
+    for bi in 0..bsz
+    {
+        let a_off = project_batch(bi, &out_batch, a_batch) * m * k;
+        let b_off = project_batch(bi, &out_batch, b_batch) * k * n;
+        let o_off = bi * m * n;
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for p in 0..k
+                {
+                    acc += a.data[a_off + i * k + p] * b.data[b_off + p * n + j];
+                }
+                data[o_off + i * n + j] = acc;
+            }
+        }
+    }
+    let mut shape = out_batch;
+    shape.push(m);
+    shape.push(n);
+    TensorND::new(data, shape)
+}
+
+/// Gradients of [`batched_matmul`]: `gA = g·Bᵀ`, `gB = Aᵀ·g` per batch,
+/// accumulated back into the (broadcast) operand shapes.
+fn bmm_backward(a: &TensorND, b: &TensorND, g: &TensorND) -> (TensorND, TensorND) {
+    let (an, bn) = (a.ndim(), b.ndim());
+    let (m, k) = (a.shape[an - 2], a.shape[an - 1]);
+    let n = b.shape[bn - 1];
+    let a_batch = &a.shape[..an - 2];
+    let b_batch = &b.shape[..bn - 2];
+    let out_batch = TensorND::broadcast_shape(a_batch, b_batch).unwrap();
+    let bsz: usize = out_batch.iter().product::<usize>().max(1);
+    let mut ga = vec![0.0f32; a.data.len()];
+    let mut gb = vec![0.0f32; b.data.len()];
+    for bi in 0..bsz
+    {
+        let a_off = project_batch(bi, &out_batch, a_batch) * m * k;
+        let b_off = project_batch(bi, &out_batch, b_batch) * k * n;
+        let g_off = bi * m * n;
+        // gA[i,p] += sum_j g[i,j] * b[p,j]   (g·Bᵀ)
+        for i in 0..m
+        {
+            for p in 0..k
+            {
+                let mut acc = 0.0f32;
+                for j in 0..n
+                {
+                    acc += g.data[g_off + i * n + j] * b.data[b_off + p * n + j];
+                }
+                ga[a_off + i * k + p] += acc;
+            }
+        }
+        // gB[p,j] += sum_i a[i,p] * g[i,j]   (Aᵀ·g)
+        for p in 0..k
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for i in 0..m
+                {
+                    acc += a.data[a_off + i * k + p] * g.data[g_off + i * n + j];
+                }
+                gb[b_off + p * n + j] += acc;
+            }
+        }
+    }
+    (
+        TensorND::new(ga, a.shape.clone()),
+        TensorND::new(gb, b.shape.clone()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,5 +574,59 @@ mod tests {
         let c = a.matmul(b);
         // row0·cols: [1*1+2*0+3*1, 1*0+2*1+3*1] = [4, 5]; row1: [10, 11]
         assert_eq!(tape.value(c).data, vec![4.0, 5.0, 10.0, 11.0]);
+    }
+
+    /// Batched matmul with a **broadcast** batch axis: forward matches a manual
+    /// per-batch product, and the gradients match finite differences (including
+    /// the batch-1 operand whose gradient accumulates over every batch).
+    #[test]
+    fn bmm_forward_and_gradient_check() {
+        let a_shape = vec![2usize, 2, 3]; // batch 2
+        let b_shape = vec![1usize, 3, 2]; // batch 1 → broadcasts over the 2
+        let a: Vec<f32> = (0..12).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+        let b: Vec<f32> = (0..6).map(|i| (i as f32 * 0.3 + 0.5).cos()).collect();
+
+        // Forward correctness on one cell of batch 0.
+        let tape = NdTape::new();
+        let av = tape.input(TensorND::new(a.clone(), a_shape.clone()));
+        let bv = tape.input(TensorND::new(b.clone(), b_shape.clone()));
+        let out = tape.value(av.bmm(bv));
+        assert_eq!(out.shape, vec![2, 2, 2]);
+        let manual000 = a[0] * b[0] + a[1] * b[2] + a[2] * b[4];
+        assert!((out.data[0] - manual000).abs() < 1e-5);
+
+        // loss = sum(bmm(a, b)); gradient-check both operands.
+        let loss_of = |aa: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xa = t.input(TensorND::new(aa.to_vec(), a_shape.clone()));
+            let xb = t.input(TensorND::new(bb.to_vec(), b_shape.clone()));
+            t.value(xa.bmm(xb).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xa = t.input(TensorND::new(a.clone(), a_shape.clone()));
+        let xb = t.input(TensorND::new(b.clone(), b_shape.clone()));
+        let grads = t.backward(xa.bmm(xb).sum());
+        let (ga, gb) = (grads[xa.idx()].clone(), grads[xb.idx()].clone());
+
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for kk in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[kk] += eps;
+                dn[kk] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[kk]).abs() < 2e-2,
+                    "bmm grad {kk}: numeric {num}, analytic {}",
+                    analytic.data[kk]
+                );
+            }
+        };
+        check(&ga, &a, &|p| loss_of(p, &b));
+        check(&gb, &b, &|p| loss_of(&a, p));
+        // The broadcast operand keeps its own (batch-1) shape.
+        assert_eq!(gb.shape, vec![1, 3, 2]);
     }
 }
