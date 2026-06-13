@@ -69,6 +69,16 @@ const GROUPS: &[(&str, &[Command])] = &[
                 about: "Symbolic real roots of `expr = 0` (linear / quadratic).",
             },
             Command {
+                name: "prove",
+                args: "<a> <b>",
+                about: "Best-effort proof that two expressions are equivalent.",
+            },
+            Command {
+                name: "gradient",
+                args: "<expr> x=.. [y=..]",
+                about: "Numeric gradient at a point (1 or 2 variables).",
+            },
+            Command {
                 name: "to-rust",
                 args: "<expr>",
                 about: "Transpile an expression to Rust source.",
@@ -85,13 +95,13 @@ const GROUPS: &[(&str, &[Command])] = &[
         &[
             Command {
                 name: "integrate",
-                args: "<expr> <a> <b> [var]",
-                about: "Definite integral ∫[a,b] via Romberg.",
+                args: "<expr> <a> <b> [var] [--method M]",
+                about: "Definite integral (Romberg | simpson | gauss).",
             },
             Command {
                 name: "root",
-                args: "<expr> <a> <b> [var]",
-                about: "A root in [a,b] via Brent (needs a sign change).",
+                args: "<expr> <a> <b> [var] [--method M]",
+                about: "A root in [a,b] (brent | bisection; needs a sign change).",
             },
             Command {
                 name: "minimize",
@@ -99,14 +109,29 @@ const GROUPS: &[(&str, &[Command])] = &[
                 about: "Local minimum in [a,b] (root of the symbolic derivative).",
             },
             Command {
+                name: "optimize",
+                args: "<expr> --start a,b --vars x,y",
+                about: "Multi-variable minimum via Nelder–Mead (derivative-free).",
+            },
+            Command {
                 name: "linsolve",
                 args: "\"r;r\" \"b\"",
                 about: "Solve A·x = b by LU, e.g. `linsolve \"2,1;1,3\" \"3,5\"`.",
             },
             Command {
+                name: "lstsq",
+                args: "\"r;r;r\" \"b\"",
+                about: "Least-squares A·x ≈ b via QR (rows ≥ cols).",
+            },
+            Command {
                 name: "det",
                 args: "\"r;r\"",
                 about: "Determinant of a square matrix.",
+            },
+            Command {
+                name: "cholesky",
+                args: "\"r;r\"",
+                about: "Cholesky factor L of an SPD matrix (A = L·Lᵀ).",
             },
             Command {
                 name: "polyroots",
@@ -237,13 +262,18 @@ pub fn run(args: &[String]) -> u8 {
         Some("simplify") => symbolic::run_simplify(rest),
         Some("eval") => symbolic::run_eval(rest),
         Some("solve") => symbolic::run_solve(rest),
+        Some("prove") => symbolic::run_prove(rest),
+        Some("gradient") => symbolic::run_gradient(rest),
         Some("to-rust") => symbolic::run_to_rust(rest),
         Some("regress") => symbolic::run_regress(rest),
         Some("integrate") => numeric::run_integrate(rest),
         Some("root") => numeric::run_root(rest),
         Some("minimize") => numeric::run_minimize(rest),
+        Some("optimize") => numeric::run_optimize(rest),
         Some("linsolve") => numeric::run_linsolve(rest),
+        Some("lstsq") => numeric::run_lstsq(rest),
         Some("det") => numeric::run_det(rest),
+        Some("cholesky") => numeric::run_cholesky(rest),
         Some("polyroots") => numeric::run_polyroots(rest),
         Some("ode") => numeric::run_ode(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
@@ -295,6 +325,21 @@ mod tests {
         assert_eq!(run(&s(&["det", "2,1;1,3"])), 0);
         assert_eq!(run(&s(&["polyroots", "-2,0,1"])), 0);
         assert_eq!(run(&s(&["ode", "y", "1", "0", "1"])), 0);
+        assert_eq!(run(&s(&["prove", "x + x", "2*x"])), 0);
+        assert_eq!(run(&s(&["gradient", "x^2", "x=3"])), 0);
+        assert_eq!(run(&s(&["lstsq", "1,0;1,1;1,2", "1,2,3"])), 0);
+        assert_eq!(run(&s(&["cholesky", "4,2;2,3"])), 0);
+        assert_eq!(
+            run(&s(&[
+                "optimize",
+                "(x-1)^2 + (y-2)^2",
+                "--vars",
+                "x,y",
+                "--start",
+                "0,0"
+            ])),
+            0
+        );
     }
 
     #[test]

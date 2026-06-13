@@ -30,6 +30,11 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI : 2e vague de commandes** (29 → toutes testées) : `integrate
+  --method simpson|gauss`, `root --method bisection`, `optimize`
+  (Nelder–Mead multi-variable), `lstsq` (moindres carrés QR), `cholesky`,
+  `prove` (équivalence symbolique), `gradient` (numérique 1–2 var). Les
+  commandes à expression réutilisent `scirust-symbolic::eval`.
 - **CLI massivement étoffée** (19 commandes, toutes adossées à du code
   testé) : ajout de `cmaes` ; maths symboliques `to-rust`, `regress` ;
   solveurs numériques `integrate` (Romberg), `root`/`minimize` (Brent,

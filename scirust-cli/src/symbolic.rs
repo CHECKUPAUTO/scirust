@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use scirust_symbolic::{
-    diff, eval, linear_regression, parse, polynomial_fit, simplify, solve_linear, solve_quadratic,
-    to_rust_code,
+    derivative_1d, diff, eval, gradient_2d, linear_regression, parse, polynomial_fit, prove_equal,
+    simplify, solve_linear, solve_quadratic, to_rust_code,
 };
 
 fn parse_or_report(expr: &str) -> Result<scirust_symbolic::Expr, u8> {
@@ -240,12 +240,126 @@ pub fn run_regress(args: &[String]) -> u8 {
     }
 }
 
+/// `prove "<a>" "<b>"` — best-effort proof that two expressions are
+/// equivalent (`scirust_symbolic::prove_equal`). Exit 0 if proven equal,
+/// 1 otherwise (the prover is sound but incomplete: 1 ≠ "unequal").
+pub fn run_prove(args: &[String]) -> u8 {
+    let (Some(a), Some(b)) = (args.first(), args.get(1))
+    else
+    {
+        eprintln!("usage: scirust prove \"<expr_a>\" \"<expr_b>\"   e.g. prove \"x + x\" \"2*x\"");
+        return 2;
+    };
+    let (ea, eb) = match (parse_or_report(a), parse_or_report(b))
+    {
+        (Ok(ea), Ok(eb)) => (ea, eb),
+        _ => return 2,
+    };
+    if prove_equal(&ea, &eb)
+    {
+        println!("proven equal: ({a}) ≡ ({b})");
+        0
+    }
+    else
+    {
+        println!("not proven equal: ({a}) ?= ({b})  (prover is incomplete)");
+        1
+    }
+}
+
+/// `gradient "<expr>" x=.. [y=..]` — numeric gradient at a point. One
+/// binding → d/dx (central difference); two → ∂/∂x and ∂/∂y.
+pub fn run_gradient(args: &[String]) -> u8 {
+    let Some(expr) = args.first()
+    else
+    {
+        eprintln!("usage: scirust gradient <expr> x=1.0 [y=2.0]");
+        return 2;
+    };
+    let parsed = match parse_or_report(expr)
+    {
+        Ok(e) => e,
+        Err(c) => return c,
+    };
+    // Preserve binding order so x is the first variable, y the second.
+    let mut binds: Vec<(String, f64)> = Vec::new();
+    for a in &args[1..]
+    {
+        let Some((name, val)) = a.split_once('=')
+        else
+        {
+            eprintln!("error: bindings must look like `x=1.0`, got `{a}`");
+            return 2;
+        };
+        match val.parse::<f64>()
+        {
+            Ok(v) => binds.push((name.to_string(), v)),
+            Err(_) =>
+            {
+                eprintln!("error: `{val}` is not a number (in `{a}`)");
+                return 2;
+            },
+        }
+    }
+    match binds.len()
+    {
+        1 =>
+        {
+            let (v, x0) = binds[0].clone();
+            let g = derivative_1d(
+                |x| {
+                    let mut m = HashMap::new();
+                    m.insert(v.clone(), x);
+                    eval(&parsed, &m).unwrap_or(f64::NAN)
+                },
+                x0,
+            );
+            println!("d/d{v} = {g:.6}");
+            0
+        },
+        2 =>
+        {
+            let (vx, x0) = binds[0].clone();
+            let (vy, y0) = binds[1].clone();
+            let (gx, gy) = gradient_2d(
+                |x, y| {
+                    let mut m = HashMap::new();
+                    m.insert(vx.clone(), x);
+                    m.insert(vy.clone(), y);
+                    eval(&parsed, &m).unwrap_or(f64::NAN)
+                },
+                x0,
+                y0,
+            );
+            println!("∂/∂{vx} = {gx:.6},  ∂/∂{vy} = {gy:.6}");
+            0
+        },
+        _ =>
+        {
+            eprintln!("error: gradient supports 1 or 2 variables");
+            2
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn prove_and_gradient() {
+        assert_eq!(run_prove(&s(&["x + x", "2*x"])), 0);
+        assert_eq!(run_prove(&s(&["x", "x + 1"])), 1);
+        assert_eq!(run_prove(&s(&["x"])), 2);
+        // d/dx of x^2 at 3 = 6
+        assert_eq!(run_gradient(&s(&["x^2", "x=3"])), 0);
+        // grad of x^2 + y^2 at (1,2)
+        assert_eq!(run_gradient(&s(&["x^2 + y^2", "x=1", "y=2"])), 0);
+        assert_eq!(run_gradient(&[]), 2);
     }
 
     #[test]

@@ -57,13 +57,18 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `simplify <expr>` | simplification algébrique | `scirust-symbolic` |
 | `eval <expr> [x=..]` | évaluation numérique | `scirust-symbolic` |
 | `solve <expr> [var]` | racines réelles symboliques (linéaire/quadratique) | `scirust-symbolic` |
+| `prove <a> <b>` | preuve best-effort d'équivalence | `scirust-symbolic` |
+| `gradient <expr> x=.. [y=..]` | gradient numérique (1–2 variables) | `scirust-symbolic` |
 | `to-rust <expr>` | transpile une expression en Rust | `scirust-symbolic` |
 | `regress <xs> <ys> [deg]` | régression moindres carrés (linéaire/polynomiale) | `scirust-symbolic` |
-| `integrate <expr> <a> <b> [var]` | intégrale définie (Romberg) | `scirust-solvers` |
-| `root <expr> <a> <b> [var]` | racine dans [a,b] (Brent) | `scirust-solvers` |
-| `minimize <expr> <a> <b> [var]` | minimum local (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
+| `integrate <expr> <a> <b> [var] [--method]` | intégrale définie (Romberg/Simpson/Gauss) | `scirust-solvers` |
+| `root <expr> <a> <b> [var] [--method]` | racine dans [a,b] (Brent/bisection) | `scirust-solvers` |
+| `minimize <expr> <a> <b> [var]` | minimum local 1D (racine de la dérivée) | `scirust-solvers`+`-symbolic` |
+| `optimize <expr> --start a,b --vars x,y` | minimum multi-D (Nelder–Mead) | `scirust-solvers`+`-symbolic` |
 | `linsolve "r;r" "b"` | résout A·x=b (LU) | `scirust-solvers` |
+| `lstsq "r;r;r" "b"` | moindres carrés A·x≈b (QR) | `scirust-solvers` |
 | `det "r;r"` | déterminant | `scirust-solvers` |
+| `cholesky "r;r"` | facteur L de Cholesky (SPD) | `scirust-solvers` |
 | `polyroots "c0,c1,.."` | racines réelles d'un polynôme | `scirust-solvers` |
 | `ode <f(t,y)> <y0> <t0> <t1> [h]` | intègre dy/dt=f (RK4) | `scirust-solvers`+`-symbolic` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |

@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 10 : CLI vague 2 (capacités testées non exposées)
+- +9 commandes : integrate --method simpson|gauss, root --method
+  bisection, optimize (Nelder–Mead multi-D), lstsq (QR), cholesky,
+  prove (équiv. symbolique), gradient (num. 1-2 var) ; aide enrichie
+- Réponse MTP : Multi-Token Prediction NON nécessaire (hors niche
+  déterministe/embarquée ; leviers réels = int8/SIMD/fusion/KV-cache/GPU)
+- 34 tests CLI ; 8 gates verts
+
 ## Session 2026-06-13 — volet 9 : CLI massive (19 commandes)
 - +10 commandes adossées à du code testé : cmaes ; to-rust, regress ;
   integrate/root/minimize/linsolve/det/polyroots/ode (scirust-solvers,
