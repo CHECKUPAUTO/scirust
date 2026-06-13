@@ -140,6 +140,107 @@ impl NdMultiHeadAttention {
         let merged = ctx.permute(&[1, 0, 2]).reshape(&[seq, self.d_model]);
         self.w_o.forward(tape, merged)
     }
+
+    /// SGD-update every projection from a `backward` result.
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        self.w_q.sgd_step(grads, lr);
+        self.w_k.sgd_step(grads, lr);
+        self.w_v.sgd_step(grads, lr);
+        self.w_o.sgd_step(grads, lr);
+    }
+}
+
+/// Layer normalisation over the last axis with a learnable affine
+/// (`y = γ·layernorm(x) + β`).
+pub struct NdLayerNorm {
+    gamma: TensorND, // (d,)
+    beta: TensorND,  // (d,)
+    eps: f32,
+    g_idx: Option<usize>,
+    b_idx: Option<usize>,
+}
+
+impl NdLayerNorm {
+    /// New layer over the last axis of width `d`. `γ = 1`, `β = 0`.
+    pub fn new(d: usize, eps: f32) -> Self {
+        Self {
+            gamma: TensorND::ones(&[d]),
+            beta: TensorND::zeros(&[d]),
+            eps,
+            g_idx: None,
+            b_idx: None,
+        }
+    }
+
+    /// Forward: normalise the last axis then apply the broadcast affine.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let g = tape.input(self.gamma.clone());
+        let b = tape.input(self.beta.clone());
+        self.g_idx = Some(g.idx());
+        self.b_idx = Some(b.idx());
+        x.layernorm(self.eps).mul(g).add(b)
+    }
+
+    /// SGD-update `γ` and `β`.
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        if let Some(i) = self.g_idx
+        {
+            for (p, &gv) in self.gamma.data.iter_mut().zip(&grads[i].data)
+            {
+                *p -= lr * gv;
+            }
+        }
+        if let Some(i) = self.b_idx
+        {
+            for (p, &gv) in self.beta.data.iter_mut().zip(&grads[i].data)
+            {
+                *p -= lr * gv;
+            }
+        }
+    }
+}
+
+/// A full **Pre-LN transformer block** over the N-D tape:
+/// `x₁ = x + Attn(LN₁(x))`, `y = x₁ + FFN(LN₂(x₁))`. Input/output `(seq, d_model)`.
+pub struct NdTransformerBlock {
+    ln1: NdLayerNorm,
+    attn: NdMultiHeadAttention,
+    ln2: NdLayerNorm,
+    ffn1: NdLinear,
+    ffn2: NdLinear,
+}
+
+impl NdTransformerBlock {
+    /// New block. Seeded init.
+    pub fn new(d_model: usize, n_heads: usize, d_ff: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            ln1: NdLayerNorm::new(d_model, 1e-5),
+            attn: NdMultiHeadAttention::new(d_model, n_heads, rng),
+            ln2: NdLayerNorm::new(d_model, 1e-5),
+            ffn1: NdLinear::new(d_model, d_ff, rng),
+            ffn2: NdLinear::new(d_ff, d_model, rng),
+        }
+    }
+
+    /// Pre-LN forward with residual connections.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let a = self.ln1.forward(tape, x);
+        let a = self.attn.forward(tape, a);
+        let x1 = x.add(a); // residual 1
+        let f = self.ln2.forward(tape, x1);
+        let f = self.ffn1.forward(tape, f).relu();
+        let f = self.ffn2.forward(tape, f);
+        x1.add(f) // residual 2
+    }
+
+    /// SGD-update every parameter (both LayerNorms, attention, both FFN linears).
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        self.ln1.sgd_step(grads, lr);
+        self.attn.sgd_step(grads, lr);
+        self.ln2.sgd_step(grads, lr);
+        self.ffn1.sgd_step(grads, lr);
+        self.ffn2.sgd_step(grads, lr);
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +371,46 @@ mod tests {
                 gx.data[k]
             );
         }
+    }
+
+    /// A **full Pre-LN transformer block** (LayerNorm + attention + residual +
+    /// FFN + residual) trains end to end on the N-D tape: the regression loss
+    /// drops well below its initial value. The milestone: "here is the
+    /// transformer block, and it learns".
+    #[test]
+    fn nd_transformer_block_trains() {
+        let (d_model, n_heads, d_ff, seq) = (8usize, 2, 16, 4);
+        let mut rng = PcgEngine::new(11);
+        let mut block = NdTransformerBlock::new(d_model, n_heads, d_ff, &mut rng);
+
+        let xs: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.13 - 0.5).sin())
+            .collect();
+        let ts: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.07).cos() * 0.3)
+            .collect();
+
+        let mut first = f32::NAN;
+        let mut last = f32::NAN;
+        for step in 0..80
+        {
+            let t = NdTape::new();
+            let x = t.input(TensorND::new(xs.clone(), vec![seq, d_model]));
+            let target = t.input(TensorND::new(ts.clone(), vec![seq, d_model]));
+            let y = block.forward(&t, x);
+            let loss_v = mse(y, target);
+            let loss = t.value(loss_v).data[0];
+            if step == 0
+            {
+                first = loss;
+            }
+            last = loss;
+            let grads = t.backward(loss_v);
+            block.sgd_step(&grads, 0.01);
+        }
+        assert!(
+            last < first * 0.7,
+            "transformer block did not learn: first {first}, last {last}"
+        );
     }
 }

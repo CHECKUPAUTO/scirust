@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 28 : bloc transformer N-D complet, entraînable
+- op nd : layernorm(axe final, backward dx=rstd(g-mean_g-y·mean_gy)) gradient-
+  checké. nd ops complètes : add/sub/mul/matmul/bmm/relu/softmax/transpose_last2
+  /reshape/permute/layernorm/sum.
+- nn::nd_layers : +NdLayerNorm (affine γ/β) +NdTransformerBlock (Pre-LN,
+  résidus) ; +sgd_step partout (attn, ln, block). Test : **bloc transformer
+  N-D complet qui APPREND** (perte<70%). « voici le bloc transformer ».
+- la tape N-D = mini-framework transformer entraînable, coexiste avec la 2D.
+- 765 tests ; 8 gates verts.
+
 ## Session 2026-06-13 — volet 27 : couches N-D réutilisables + generate_sampled public
 - ops nd : reshape + permute (général, backward = perm inverse).
 - nn::nd_layers : NdLinear (entraînable, sgd_step) + NdMultiHeadAttention

@@ -6,11 +6,14 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
-- **Couches N-D réutilisables** (`nn::nd_layers`) : `NdLinear` (entraînable,
-  `sgd_step`) et `NdMultiHeadAttention` (projections q/k/v/o + bloc d'attention)
-  sur la tape N-D. Tests : gradient check de l'entrée, un **MLP N-D qui
-  apprend** (perte < 70 % de l'initiale), et gradient check de la couche
-  d'attention complète. Ops `reshape`/`permute` ajoutées (avec backward).
+- **Bloc transformer N-D complet et entraînable** (`nn::nd_layers`) :
+  `NdLinear`, `NdMultiHeadAttention`, `NdLayerNorm` (affine γ/β) et
+  `NdTransformerBlock` (Pre-LN : `x + Attn(LN(x))`, `x₁ + FFN(LN(x₁))`) sur la
+  tape N-D, tous **entraînables** (`sgd_step`). Tests : gradient check
+  entrée/couche d'attention/LayerNorm, **un MLP N-D qui apprend** ET **un bloc
+  transformer N-D complet qui apprend** (perte < 70 % de l'initiale). Ops
+  N-D ajoutées : `bmm`, `softmax`, `transpose_last2`, `reshape`, `permute`,
+  `layernorm` — toutes gradient-checkées.
 - **`MiniLLM::generate_sampled(&str)`** : génération publique à partir d'une
   chaîne, sampling seedé sur le KV-cache, déterministe ; greedy reproduit
   `generate`.

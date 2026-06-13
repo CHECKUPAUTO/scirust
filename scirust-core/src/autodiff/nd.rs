@@ -8,9 +8,11 @@
 //! (finite differences vs. the analytic gradient), the gold standard for
 //! autodiff correctness.
 //!
-//! Supported ops (MVP): elementwise `add`/`mul` with broadcasting, 2-D `matmul`,
-//! `relu`, and `sum` to a scalar. The building blocks (`broadcast_shape`,
-//! `broadcast_to`, `matmul_shape`) live on [`TensorND`].
+//! Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
+//! `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
+//! `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
+//! a full transformer block (see `nn::nd_layers`). The shape building blocks
+//! (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
 
 use std::cell::RefCell;
 
@@ -34,6 +36,8 @@ enum Op {
     Reshape(usize),
     /// General axis permutation; backward permutes by the inverse.
     Permute(usize, Vec<usize>),
+    /// Layer normalisation over the last axis (no affine); `f32` is `eps`.
+    LayerNormLast(usize, f32),
     Sum(usize),
 }
 
@@ -167,6 +171,11 @@ impl NdTape {
                     }
                     accumulate(&mut grads[a], &g.transpose(&inv).expect("permute backward"));
                 },
+                Op::LayerNormLast(a, eps) =>
+                {
+                    let dx = layernorm_backward(&nodes[a].value, &nodes[i].value, &g, eps);
+                    accumulate(&mut grads[a], &dx);
+                },
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
@@ -264,6 +273,15 @@ impl<'t> NdVar<'t> {
         );
         let out = TensorND::new(a.data.clone(), shape.to_vec());
         self.tape.push(Op::Reshape(self.idx), out)
+    }
+
+    /// Layer normalisation over the last axis (zero mean, unit variance), with
+    /// no affine — the `gamma`/`beta` of a `LayerNorm` layer are applied as a
+    /// separate `mul`/`add`.
+    pub fn layernorm(self, eps: f32) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = layernorm_lastaxis(&a, eps);
+        self.tape.push(Op::LayerNormLast(self.idx, eps), out)
     }
 
     /// Permute the axes (e.g. `(seq, heads, d) → (heads, seq, d)` for attention).
@@ -483,6 +501,52 @@ fn softmax_backward(y: &TensorND, g: &TensorND) -> TensorND {
         }
     }
     TensorND::new(dx, y.shape.clone())
+}
+
+/// Layer normalisation over the last axis (no affine).
+fn layernorm_lastaxis(t: &TensorND, eps: f32) -> TensorND {
+    let d = t.shape[t.ndim() - 1].max(1);
+    let outer = t.data.len() / d;
+    let mut out = vec![0.0f32; t.data.len()];
+    for o in 0..outer
+    {
+        let base = o * d;
+        let row = &t.data[base..base + d];
+        let mean = row.iter().sum::<f32>() / d as f32;
+        let var = row.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / d as f32;
+        let rstd = 1.0 / (var + eps).sqrt();
+        for i in 0..d
+        {
+            out[base + i] = (row[i] - mean) * rstd;
+        }
+    }
+    TensorND::new(out, t.shape.clone())
+}
+
+/// Backward of [`layernorm_lastaxis`]:
+/// `dx_i = rstd·(g_i − mean(g) − y_i·mean(g·y))` over the last axis.
+fn layernorm_backward(x: &TensorND, y: &TensorND, g: &TensorND, eps: f32) -> TensorND {
+    let d = x.shape[x.ndim() - 1].max(1);
+    let outer = x.data.len() / d;
+    let mut dx = vec![0.0f32; x.data.len()];
+    for o in 0..outer
+    {
+        let base = o * d;
+        let row = &x.data[base..base + d];
+        let mean = row.iter().sum::<f32>() / d as f32;
+        let var = row.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / d as f32;
+        let rstd = 1.0 / (var + eps).sqrt();
+        let mean_g = g.data[base..base + d].iter().sum::<f32>() / d as f32;
+        let mean_gy = (0..d)
+            .map(|i| g.data[base + i] * y.data[base + i])
+            .sum::<f32>()
+            / d as f32;
+        for i in 0..d
+        {
+            dx[base + i] = rstd * (g.data[base + i] - mean_g - y.data[base + i] * mean_gy);
+        }
+    }
+    TensorND::new(dx, x.shape.clone())
 }
 
 /// Swap the last two axes (`(…,a,b) → (…,b,a)`); its own inverse.
@@ -748,6 +812,45 @@ mod tests {
         check(&gq, &q, &|p| attn_loss(p, &k, &v));
         check(&gk, &k, &|p| attn_loss(&q, p, &v));
         check(&gv, &v, &|p| attn_loss(&q, &k, p));
+    }
+
+    /// LayerNorm over the last axis: its input gradient matches finite
+    /// differences (loss = sum(layernorm(x)·v) to make the gradient non-trivial).
+    #[test]
+    fn nd_layernorm_gradient_check() {
+        let shape = vec![2usize, 5];
+        let n = 10;
+        let x: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let v: Vec<f32> = (0..n).map(|i| (i as f32 * 0.2).cos()).collect();
+        let eps = 1e-5f32;
+
+        let loss_of = |xd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), shape.clone()));
+            let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+            t.value(xv.layernorm(eps).mul(vv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), shape.clone()));
+        let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+        let grads = t.backward(xv.layernorm(eps).mul(vv).sum());
+        let gx = grads[xv.idx()].clone();
+
+        let fd = 1e-3f32;
+        for k in 0..n
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += fd;
+            dn[k] -= fd;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * fd);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "layernorm grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
     }
 
     #[test]
