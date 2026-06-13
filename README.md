@@ -184,16 +184,3 @@ SciRust is **source-available** and dual-licensed: free for noncommercial and pe
 under the **PolyForm Noncommercial 1.0.0** license, with a separate **commercial license**
 available. See [`LICENSE.md`](LICENSE.md) and [`LICENSING.md`](LICENSING.md). This is not an
 OSI-approved open-source license.
-
-## Contributing
-
-PRs welcome. Please run the full quality gate before submitting:
-
-```bash
-cargo check --workspace --lib
-cargo clippy --workspace --lib -- -D warnings
-cargo test --workspace --lib
-```
-
-For features touching the autograd tape, include a comparison against
-PyTorch numerical gradients in your tests.
