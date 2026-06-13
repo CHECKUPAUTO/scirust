@@ -56,6 +56,21 @@ impl GpuChain {
         self.ctx.gemm_resident(a, b, transpose_a, transpose_b)
     }
 
+    /// Elementwise `a + b` (same shape), result resident.
+    pub fn add(&self, a: &GpuMatrix, b: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.ew_resident(a, b, 0)
+    }
+
+    /// Elementwise `a * b` (same shape), result resident.
+    pub fn mul(&self, a: &GpuMatrix, b: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.ew_resident(a, b, 1)
+    }
+
+    /// Elementwise `relu(a)`, result resident.
+    pub fn relu(&self, a: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.ew_resident(a, a, 2)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -170,5 +185,62 @@ mod tests {
         let g = chain.matmul(&e, &f).unwrap();
         assert_eq!((g.rows(), g.cols()), (0, 3));
         assert!(chain.download(&g).unwrap().is_empty());
+    }
+
+    /// A full resident layer chain GEMM → +bias → ReLU stays in VRAM and
+    /// matches the CPU oracle on lavapipe.
+    #[test]
+    fn resident_layer_chain_gemm_bias_relu() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        // X(2×3) · W(3×2) = H(2×2); H + B; relu. All resident.
+        let x = vec![0.5, -0.4, 0.3, -0.2, 0.6, 0.1];
+        let w = vec![0.2, -0.5, 0.4, 0.1, -0.3, 0.7];
+        let bias = vec![-0.6, 0.05, -0.6, 0.05]; // 2×2, pushes some cells < 0
+
+        let gx = chain.upload(&x, 2, 3);
+        let gw = chain.upload(&w, 3, 2);
+        let gb = chain.upload(&bias, 2, 2);
+        let h = chain.matmul(&gx, &gw).unwrap();
+        let hb = chain.add(&h, &gb).unwrap();
+        let out = chain.download(&chain.relu(&hb).unwrap()).unwrap();
+
+        // CPU oracle.
+        let cpu_h = CpuBackend.gemm_f32(&x, &w, 2, 3, 2).unwrap();
+        let expected: Vec<f32> = cpu_h
+            .iter()
+            .zip(&bias)
+            .map(|(h, b)| (h + b).max(0.0))
+            .collect();
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
+        // ReLU actually clamped something (so the test is meaningful).
+        assert!(expected.contains(&0.0));
+    }
+
+    /// Resident elementwise mul matches the CPU product; shape mismatch errors.
+    #[test]
+    fn resident_elementwise_mul() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let a = vec![1.0, 2.0, 3.0, 4.0];
+        let b = vec![5.0, -1.0, 0.5, 2.0];
+        let ga = chain.upload(&a, 2, 2);
+        let gb = chain.upload(&b, 2, 2);
+        let out = chain.download(&chain.mul(&ga, &gb).unwrap()).unwrap();
+        assert_eq!(out, vec![5.0, -2.0, 1.5, 8.0]);
+        // Shape mismatch is an error, not a panic.
+        let gc = chain.upload(&[1.0, 2.0], 1, 2);
+        assert!(chain.add(&ga, &gc).is_err());
     }
 }

@@ -54,12 +54,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-/// A wgpu device + compiled GEMM pipeline, created once and reused across calls
-/// (adapter/device acquisition and shader compilation are expensive).
+/// Elementwise kernel: `op` selects `0=add`, `1=mul` (binary, `a` and `b`), or
+/// `2=relu` (unary, `b` ignored). One invocation per element.
+const EW_WGSL: &str = r#"
+struct P { n: u32, op: u32, _p0: u32, _p1: u32, };
+
+@group(0) @binding(0) var<storage, read>       a: array<f32>;
+@group(0) @binding(1) var<storage, read>       b: array<f32>;
+@group(0) @binding(2) var<storage, read_write> c: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    if (p.op == 0u) { c[i] = a[i] + b[i]; }
+    else if (p.op == 1u) { c[i] = a[i] * b[i]; }
+    else { c[i] = max(a[i], 0.0); }
+}
+"#;
+
+/// A wgpu device + compiled compute pipelines, created once and reused across
+/// calls (adapter/device acquisition and shader compilation are expensive).
 pub(crate) struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    ew_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -123,11 +144,101 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let ew_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ew"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(EW_WGSL)),
+        });
+        let ew_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("ew"),
+            layout: None,
+            module: &ew_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
             pipeline,
+            ew_pipeline,
             adapter_name,
+        })
+    }
+
+    /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
+    /// (unary). For binary ops `a` and `b` must share a shape; the result stays
+    /// in VRAM. For relu, pass `b = a` (it is ignored).
+    pub(crate) fn ew_resident(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        op: u32,
+    ) -> BackendResult<GpuMatrix> {
+        if op < 2 && (a.rows != b.rows || a.cols != b.cols)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "elementwise: {}×{} vs {}×{}",
+                a.rows, a.cols, b.rows, b.cols
+            )));
+        }
+        let n = a.rows * a.cols;
+        let bytes = (n.max(1) * std::mem::size_of::<f32>()) as u64;
+        let c_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ew-c"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if n > 0
+        {
+            let params: [u32; 4] = [n as u32, op, 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ew-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ew"),
+                layout: &self.ew_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ew") });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("ew"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.ew_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: c_buf,
+            rows: a.rows,
+            cols: a.cols,
         })
     }
 
