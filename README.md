@@ -148,6 +148,9 @@ examples/        Quickstart, MNIST training, benchmarks
 - [`docs/GPU.md`](docs/GPU.md) — Activate GPU routing for Conv2d
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
+- [`docs/sbom/`](docs/sbom/) — CycloneDX SBOM (reproducible, regenerated in CI & attached to releases)
+- [`docs/RELEASING.md`](docs/RELEASING.md) — Release process & branch-protection runbook
+- [`SECURITY.md`](SECURITY.md) — Supply-chain posture, SBOM, accepted advisories
 - [`scirust-som/README.md`](scirust-som/README.md) — Ownership Model (real-Rust analyzer)
 
 ## Status

@@ -19,6 +19,18 @@ d'issue publique pour une faille exploitable. Accusé de réception sous
 - **Déterminisme** : l'inférence est bit-exacte et rejouable (runtime
   SRT1) — propriété utile aux audits forensiques.
 
+## SBOM (nomenclature logicielle)
+
+- **Format CycloneDX 1.x (JSON)** — standard consommable par les scanners
+  industriels (OWASP Dependency-Track, Grype, etc.).
+- **Génération reproductible** : `./scripts/generate-sbom.sh` (s'appuie sur
+  `cargo cyclonedx` + le `Cargo.lock` committé). Un instantané est versionné
+  dans [`docs/sbom/`](docs/sbom/) pour visibilité immédiate.
+- **CI/Release** : le job `sbom` régénère et publie le SBOM en artefact à
+  chaque build ; le workflow de release l'attache à chaque tag `v*`
+  (cf. `release v0.14`). Aucune divergence silencieuse : la source de
+  vérité reste `Cargo.lock` + la régénération.
+
 ## Avis connus acceptés
 
 - RUSTSEC-2024-0436 (`paste`, unmaintained — non-vulnérabilité) :

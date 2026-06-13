@@ -3,6 +3,22 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 15 : SBOM CycloneDX + release v0.14 (prép) + GPU.md honnête
+- SBOM : CycloneDX 1.5 reproductible (docs/sbom/scirust.cdx.json, 78
+  composants, façade scirust 0.13.0). SOURCE_DATE_EPOCH figé + pas de
+  serial → octet-identique vérifié. scripts/generate-sbom.sh (garde le
+  SBOM façade, purge les SBOM par-membre que cargo-cyclonedx essaime).
+  .gitignore : *.cdx.json sauf docs/sbom/.
+- CI : job sbom (artefact, informatif). release.yml : sur tag v*, rejoue
+  les gates + génère + attache le SBOM à la release (le tag = action
+  humaine ; l'auto le suit). SECURITY.md + docs/sbom/README.md.
+- docs/GPU.md : décrivait une API GPU une-ligne INEXISTANTE (modules
+  archivés) → réécrite en statut+roadmap honnête (CPU ref testé ; pas de
+  claim GPU ; pourquoi ; plan P2.2). README : liens SBOM/SECURITY.
+- reste pour la release : bump 0.13→0.14 + push tag (gated, perm requise) ;
+  protection de branche = réglage GitHub (non scriptable ici).
+- gates non-Rust → fmt clean ; build/test inchangés (726).
+
 ## Session 2026-06-13 — volet 14 : P2.2 « trancher » — scirust-gpu honnête
 - diagnostic : scirust-gpu/src/lib.rs livrait WgpuBackend/CudaBackend dont
   gemm_f32 renvoyait vec![0.0; m*n] — résultats FABRIQUÉS sous étiquette

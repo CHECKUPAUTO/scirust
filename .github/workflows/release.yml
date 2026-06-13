@@ -1,0 +1,52 @@
+name: Release
+
+# Publishes a GitHub Release with a reproducible CycloneDX SBOM attached
+# whenever a version tag is pushed (e.g. `v0.14.0`). Tagging is a deliberate,
+# human action — this workflow only reacts to it.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  release:
+    name: Release ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Gate the release on the same checks CI enforces, so a tag can never
+      # ship something that wouldn't pass on master.
+      - name: Build & test (workspace)
+        run: cargo test --workspace
+        env:
+          RUSTFLAGS: "-D warnings"
+
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+
+      - name: Generate SBOM
+        run: ./scripts/generate-sbom.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            docs/sbom/scirust.cdx.json

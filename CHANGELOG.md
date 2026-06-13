@@ -16,6 +16,11 @@ versions sémantiques à partir de la prochaine release taguée.
   Crate passée de 0 à 6 tests. Le câblage wgpu réel reste bloqué tant
   qu'aucun runner GPU / Vulkan logiciel n'existe en CI (« pas de claim sans
   test ») — voir roadmap P2.2.
+- **`docs/GPU.md` honnête** : la page décrivait une API GPU en une ligne
+  (`GpuContext::try_init`, `ConvGpuPipelines`, `Conv2d::on_gpu`…) qui
+  n'existe pas (modules archivés ; `--features wgpu` ne compile rien).
+  Réécrite en page de statut + roadmap honnête (ce qui existe = backend CPU
+  de référence testé ; pourquoi le GPU n'est pas revendiqué ; plan P2.2).
 - Régression de merge cassant la compilation sur toutes architectures
   (sgemv AVX2/SSE2/NEON, champ slab arena).
 - CI rendue réalisable : retrait de `--all-features` (features BLAS
@@ -40,6 +45,13 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
+  reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
+  `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une
+  source donnée), généré par `./scripts/generate-sbom.sh`. Nouveau job CI
+  `sbom` (artefact à chaque build) et workflow `release.yml` (sur tag `v*` :
+  rejoue les gates, génère le SBOM, crée la release et y attache le SBOM).
+  Section SBOM dans `SECURITY.md`, `docs/sbom/README.md` (provenance).
 - **CLI : 5e vague** — `tt` (compression tensor-train TT-SVD d'une matrice,
   `scirust-tn` ; rapporte cœurs, rangs de liaison, ratio de compression et
   erreur de reconstruction, sortie 1 si `--max-err` dépassé), `solve-system`

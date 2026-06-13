@@ -105,6 +105,28 @@ jobs:
         with:
           command: check
 
+  # Informational: regenerate the CycloneDX SBOM and publish it as an
+  # artifact. Does not gate merges (transitive-dep churn is expected).
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - name: Generate SBOM
+        run: ./scripts/generate-sbom.sh
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scirust-sbom-cyclonedx
+          path: docs/sbom/scirust.cdx.json
+
   # Informational: coverage upload depends on external service/token and
   # must not gate merges.
   coverage:
