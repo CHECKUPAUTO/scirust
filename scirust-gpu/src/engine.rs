@@ -163,4 +163,58 @@ mod tests {
         assert!(rel_err(&gpu_ga.data, &cpu_ga.data) < 1e-4, "dA mismatch");
         assert!(rel_err(&gpu_gb.data, &cpu_gb.data) < 1e-4, "dB mismatch");
     }
+
+    /// Conv2d forward + backward through the GPU engine (im2col GEMMs) must
+    /// match the CPU path within tolerance. Skips if no adapter.
+    #[test]
+    fn conv2d_gpu_matches_cpu() {
+        let Some(engine) = WgpuEngine::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (batch, in_c, h, w, out_c, k, stride, pad) = (2usize, 2, 3, 3, 3, 2, 1, 0);
+        let in_feats = in_c * h * w;
+        let w_cols = in_c * k * k;
+        let xs: Vec<f32> = (0..batch * in_feats)
+            .map(|i| (i as f32 * 0.1 - 1.0).sin())
+            .collect();
+        let ws: Vec<f32> = (0..out_c * w_cols)
+            .map(|i| (i as f32 * 0.2).cos())
+            .collect();
+
+        // CPU reference tape.
+        let ct = Tape::new();
+        let cx = ct.input(Tensor::from_vec(xs.clone(), batch, in_feats));
+        let cw = ct.input(Tensor::from_vec(ws.clone(), out_c, w_cols));
+        let co = cx
+            .try_conv2d_forward(cw, None, batch, in_c, h, w, out_c, k, stride, pad)
+            .unwrap();
+        ct.backward(co.sum().idx());
+        let (c_out, c_gx, c_gw) = (ct.value(co.idx()), ct.grad(cx.idx()), ct.grad(cw.idx()));
+
+        // GPU tape (im2col GEMMs routed through the engine).
+        let gt = Tape::new().with_gpu_engine(engine);
+        let gx = gt.input(Tensor::from_vec(xs, batch, in_feats));
+        let gw = gt.input(Tensor::from_vec(ws, out_c, w_cols));
+        let go = gx
+            .try_conv2d_forward(gw, None, batch, in_c, h, w, out_c, k, stride, pad)
+            .unwrap();
+        gt.backward(go.sum().idx());
+        let (g_out, g_gx, g_gw) = (gt.value(go.idx()), gt.grad(gx.idx()), gt.grad(gw.idx()));
+
+        assert!(
+            rel_err(&g_out.data, &c_out.data) < 1e-4,
+            "conv forward mismatch"
+        );
+        assert!(
+            rel_err(&g_gx.data, &c_gx.data) < 1e-4,
+            "conv dInput mismatch"
+        );
+        assert!(
+            rel_err(&g_gw.data, &c_gw.data) < 1e-4,
+            "conv dWeight mismatch"
+        );
+    }
 }

@@ -39,7 +39,7 @@ Every result below is reproduced by code in this repository and documented in th
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
 - **Deep-learning core + reverse-mode autodiff** — 683 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
-- **Portable GPU GEMM + autograd (wgpu, optional)** — a real WGSL `f32` matmul behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI, and plumbed into the autograd tape (`Var::matmul_gpu` forward + backward via `WgpuEngine`). `Conv2d` routing is next (P2.2). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
+- **Portable GPU compute (wgpu, optional)** — a real WGSL `f32` GEMM behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI, plumbed into the autograd tape (`Var::matmul_gpu` forward + backward via `WgpuEngine`) **and** into Conv2d's im2col GEMMs (forward + backward). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
@@ -129,10 +129,10 @@ scirust-core = { path = "path/to/scirust-core" }
 > optional `wgpu` feature, validated against that oracle on a software Vulkan
 > adapter (Mesa lavapipe) in CI. Without the feature/adapter the `wgpu` path
 > returns `BackendError::Unavailable` — never fabricated output. It is also
-> plumbed into the autograd tape (`WgpuEngine` + `Var::matmul_gpu`, forward and
-> backward, validated end-to-end on lavapipe). `cuda` stays out of scope until a
-> GPU runner exists. Routing `Conv2d` through the GPU is the next step — see
-> `docs/GPU.md` (P2.2).
+> plumbed into the autograd tape (`WgpuEngine` + `Var::matmul_gpu`) and into
+> Conv2d's im2col GEMMs, forward and backward, validated end-to-end on lavapipe.
+> `cuda` stays out of scope until a GPU runner exists. Next: keep activations in
+> VRAM across layers — see `docs/GPU.md` (P2.2).
 
 ## Architecture
 
@@ -185,15 +185,16 @@ examples/        Quickstart, MNIST training, benchmarks
 | Fused ops (matmul+SiLU, matmul+GELU, etc.) | ✅ New |
 | HPC im2col (cache-aware) | ✅ New |
 | SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
-| Portable GPU GEMM + autograd (`scirust-gpu`, feature `wgpu`) | ✅ New (WGSL compute + `Var::matmul_gpu` fwd/bwd, oracle-validated on lavapipe) |
+| Portable GPU compute + autograd + Conv2d (`scirust-gpu`, feature `wgpu`) | ✅ New (WGSL GEMM, `Var::matmul_gpu` + Conv2d fwd/bwd, oracle-validated on lavapipe) |
 
 > **GPU scope (honest).** A portable wgpu GEMM is wired behind the optional
 > `wgpu` feature, tested against the CPU oracle on a software Vulkan adapter
 > (Mesa lavapipe) in CI, and plumbed into the autograd tape (`WgpuEngine` +
-> `Var::matmul_gpu`, forward and backward). It is opt-in, so the default
-> bit-exact guarantee is unaffected. Still to do: route `Conv2d` through it
-> (next step, P2.2). **CUDA** remains out of scope until a hardware GPU runner
-> exists (`CudaBackend` returns `Unavailable`); archived WGSL/cuBLAS drafts live
+> `Var::matmul_gpu`) and Conv2d's im2col GEMMs, forward and backward. It is
+> opt-in, so the default bit-exact guarantee is unaffected. Still to do: keep
+> activations in VRAM across layers and move im2col onto the GPU (P2.2).
+> **CUDA** remains out of scope until a hardware GPU runner exists
+> (`CudaBackend` returns `Unavailable`); archived WGSL/cuBLAS drafts live
 > in `archive/scirust-gpu/`. See [`docs/GPU.md`](docs/GPU.md) and
 > [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md).
 

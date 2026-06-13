@@ -107,8 +107,12 @@ définition de fini (toujours : gates verts + oracle + doc).
   Validé bout-en-bout contre la tape CPU (forward + 2 gradients) sur
   lavapipe. Chemin opt-in (feature + `matmul_gpu`) → garantie bit-exacte
   par défaut intacte.
-- **Reste** : router `Conv2d` (im2col + GEMM) via `matmul_gpu`, puis garder
-  les activations en VRAM entre couches (pipelines im2col archivés en
+- **FAIT (étape 4 — Conv2d)** : les GEMM im2col de Conv2d (forward `W·col`,
+  backward `dW = dout·colᵀ`, `dInput = Wᵀ·dout`) passent par l'engine via
+  `Tape::gemm_ab` (chemin transpose natif), validés bout-en-bout contre la
+  Conv2d CPU sur lavapipe. im2col/col2im restent CPU pour l'instant.
+- **Reste** : garder les activations en VRAM entre couches (éviter
+  l'aller-retour CPU par op) + im2col/col2im sur GPU (pipelines archivés en
   référence) ; plus d'ops (elementwise, réductions). CUDA/cuBLAS reste
   hors périmètre tant qu'un runner GPU matériel n'existe pas.
 

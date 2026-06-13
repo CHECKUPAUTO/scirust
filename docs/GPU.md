@@ -29,9 +29,12 @@
   returns `BackendError::Unavailable`. The archived cuBLAS draft is kept in
   `archive/scirust-gpu/`.
 - Default training/inference still routes through the CPU/SIMD kernels
-  (AVX2/SSE2/NEON); the GPU path is opt-in (feature + explicit `matmul_gpu`),
-  keeping the bit-exact default guarantee intact. Higher-level layers
-  (`Conv2d` via im2col) are the next consumers — see roadmap.
+  (AVX2/SSE2/NEON); the GPU path is opt-in (feature + an attached engine),
+  keeping the bit-exact default guarantee intact.
+- **Conv2d on the GPU**: when a `WgpuEngine` is attached to the tape, the
+  Conv2d im2col GEMMs — forward `W·col`, backward `dW = dout·colᵀ` and
+  `dInput = Wᵀ·dout` — run on the engine (validated end to end against the CPU
+  Conv2d on lavapipe). im2col/col2im themselves stay on the CPU for now.
 
 ```rust
 use scirust_gpu::{GpuAccelerator, BackendError, WgpuBackend, RawComputeBackend};
@@ -98,11 +101,12 @@ not compile it.
 ## Roadmap (P2.2 and beyond)
 
 See [`docs/INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) §P2.2. Done: portable
-wgpu GEMM (oracle-validated via lavapipe) **and** its plumbing into the autograd
-tape (`WgpuEngine` + `Var::matmul_gpu` forward/backward). Next:
+wgpu GEMM (oracle-validated via lavapipe), its plumbing into the autograd tape
+(`WgpuEngine` + `Var::matmul_gpu` forward/backward), **and** Conv2d's im2col
+GEMMs routed through the engine. Next:
 
-- Route `Conv2d` (im2col + GEMM) through `matmul_gpu`; then keep activations in
-  VRAM across layers — the archived im2col pipelines in
+- Keep activations in VRAM across layers (avoid the per-op CPU round-trip) and
+  move im2col/col2im onto the GPU — the archived pipelines in
   [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
 - More ops (elementwise, reductions) behind the same trait.
 - CUDA/cuBLAS only once a hardware GPU runner exists.

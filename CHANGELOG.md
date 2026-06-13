@@ -64,7 +64,13 @@ _Rien pour l'instant._
   device/pipeline mis en cache, repli CPU si un dispatch échoue. Validé
   bout-en-bout contre la tape CPU (forward + 2 gradients, tolérance) sur
   lavapipe. Opt-in (feature + `matmul_gpu`) → garantie bit-exacte par
-  défaut intacte. Reste : router `Conv2d` (im2col + GEMM) via `matmul_gpu`.
+  défaut intacte.
+- **Conv2d GPU (P2.2, étape « Conv2d »)** : les GEMM im2col de Conv2d
+  (forward `W·col`, backward `dW = dout·colᵀ` et `dInput = Wᵀ·dout`) passent
+  par l'engine via le nouvel helper `Tape::gemm_ab` (chemin transpose natif),
+  quand un `WgpuEngine` est attaché. Validé bout-en-bout contre la Conv2d CPU
+  sur lavapipe (forward + dInput + dWeight, tolérance). Repli CPU
+  bit-identique sans engine (aucune régression). im2col/col2im restent CPU.
 - **SBOM CycloneDX + automatisation de release** : SBOM CycloneDX 1.5
   reproductible (`docs/sbom/scirust.cdx.json`, horodatage figé via
   `SOURCE_DATE_EPOCH`, sans serial aléatoire → octet-identique pour une

@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 18 : Conv2d sur GPU (P2.2 étape Conv2d)
+- nouvel helper Tape::gemm_ab(a,b,ta,tb) : engine.gemm si attaché (transpose
+  natif), sinon match CPU bit-identique aux .matmul/.transpose d'origine.
+- 3 GEMM de Conv2d routés : forward W·col (gemm_ab false,false), backward
+  dW=dout·colᵀ (false,true), dInput=Wᵀ·dout (true,false) — dans
+  try_conv2d_forward + l'arm Op::Conv2dForward de backward().
+- test conv2d_gpu_matches_cpu (scirust-gpu, via try_conv2d_forward) : forward
+  + dInput + dWeight == CPU (rel<1e-4) sur llvmpipe. 13 tests --features wgpu.
+- défaut bit-identique (conv2d tests core OK, 726 inchangé). 8 gates verts.
+- reste P2.2 : activations en VRAM entre couches + im2col/col2im GPU.
+
 ## Session 2026-06-13 — volet 17 : GPU wgpu branché dans la tape autograd (P2.2)
 - découverte : scirust-core avait DÉJÀ tout le câblage (trait GpuEngine,
   Tape.gpu_engine + with/set/clear, Op::MatMulGpu avec backward GPU/CPU,
