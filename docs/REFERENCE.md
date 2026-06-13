@@ -75,8 +75,12 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `cholesky "r;r"` | facteur L de Cholesky (SPD) | `scirust-solvers` |
 | `qr "r;r"` | décomposition QR (Q, R) | `scirust-solvers` |
 | `cg "r;r" "b"` | gradient conjugué (SPD, itératif) | `scirust-solvers` |
+| `inverse "r;r"` | inverse d'une matrice carrée (LU) | `scirust-solvers` |
+| `solve-system "f1;f2" --vars x,y --start a,b` | système non-linéaire F(x)=0 (Broyden) | `scirust-solvers`+`-symbolic` |
 | `polyroots "c0,c1,.."` | racines réelles d'un polynôme | `scirust-solvers` |
-| `ode <f(t,y)> <y0> <t0> <t1> [h]` | intègre dy/dt=f (RK4) | `scirust-solvers`+`-symbolic` |
+| `ode <f(t,y)> <y0> <t0> <t1> [h] [--method]` | intègre dy/dt=f (RK4 / DOPRI5 adaptatif) | `scirust-solvers`+`-symbolic` |
+| `fem-heat <nodes> <length> <source>` | chaleur 1D −u″=source (éléments finis linéaires) | `scirust-solvers` |
+| `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
 | `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
 | `info` / `help` / `version` | méta | — |

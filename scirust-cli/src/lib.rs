@@ -168,16 +168,39 @@ const GROUPS: &[(&str, &[Command])] = &[
                 about: "Solve SPD A·x = b by conjugate gradient (iterative).",
             },
             Command {
+                name: "inverse",
+                args: "\"r;r\"",
+                about: "Inverse of a square matrix (LU).",
+            },
+            Command {
+                name: "solve-system",
+                args: "\"f1;f2\" --vars x,y --start a,b",
+                about: "Solve a nonlinear system F(x)=0 (Broyden quasi-Newton).",
+            },
+            Command {
                 name: "polyroots",
                 args: "\"c0,c1,..\"",
                 about: "Real roots of a polynomial (ascending coefficients).",
             },
             Command {
                 name: "ode",
-                args: "<f(t,y)> <y0> <t0> <t1> [h]",
-                about: "Integrate dy/dt = f(t,y) with RK4.",
+                args: "<f(t,y)> <y0> <t0> <t1> [h] [--method M]",
+                about: "Integrate dy/dt = f(t,y) (rk4 | dopri5 adaptive).",
+            },
+            Command {
+                name: "fem-heat",
+                args: "<nodes> <length> <source>",
+                about: "1D steady heat -u''=source via linear finite elements.",
             },
         ],
+    ),
+    (
+        "TENSOR NETWORKS",
+        &[Command {
+            name: "tt",
+            args: "\"r;r\" [--factors d] [--max-rank r] [--tol t] [--max-err e]",
+            about: "Tensor-train (TT-SVD) compression of a matrix; reports ratio & error.",
+        }],
     ),
     (
         "CODE ANALYSIS",
@@ -316,6 +339,10 @@ pub fn run(args: &[String]) -> u8 {
         Some("cg") => numeric::run_cg(rest),
         Some("polyroots") => numeric::run_polyroots(rest),
         Some("ode") => numeric::run_ode(rest),
+        Some("inverse") => numeric::run_inverse(rest),
+        Some("solve-system") => numeric::run_solve_system(rest),
+        Some("fem-heat") => numeric::run_fem_heat(rest),
+        Some("tt") => numeric::run_tt(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -384,6 +411,24 @@ mod tests {
         assert_eq!(run(&s(&["patterns", "1,2,3,4"])), 0);
         assert_eq!(run(&s(&["qr", "1,1;0,1;1,0"])), 0);
         assert_eq!(run(&s(&["cg", "4,1;1,3", "1,2"])), 0);
+        assert_eq!(run(&s(&["inverse", "4,7;2,6"])), 0);
+        assert_eq!(
+            run(&s(&[
+                "solve-system",
+                "x^2 + y^2 - 4; x - y",
+                "--vars",
+                "x,y",
+                "--start",
+                "1,1"
+            ])),
+            0
+        );
+        assert_eq!(run(&s(&["fem-heat", "9", "1", "1"])), 0);
+        assert_eq!(
+            run(&s(&["ode", "y", "1", "0", "1", "--method", "dopri5"])),
+            0
+        );
+        assert_eq!(run(&s(&["tt", "1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

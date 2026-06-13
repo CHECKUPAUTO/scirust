@@ -80,3 +80,48 @@ impl FemSolver1D {
         u
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// For `-u'' = f` on `[0, L]` with `u(0) = u(L) = 0` and constant `f`, the
+    /// exact solution is the parabola `u(x) = (f/2)·x·(L − x)`. 1D linear FEM is
+    /// nodally exact for this operator, so the computed nodal values must match
+    /// the analytic ones to round-off.
+    #[test]
+    fn steady_heat_matches_analytic_parabola() {
+        let n = 5;
+        let length = 1.0;
+        let f = 1.0;
+        let fem = FemSolver1D::new(n, length);
+        let u = fem.solve_steady_heat(f);
+        assert_eq!(u.len(), n);
+        let h = length / (n as f64 - 1.0);
+        for (i, &ui) in u.iter().enumerate()
+        {
+            let x = i as f64 * h;
+            let exact = 0.5 * f * x * (length - x);
+            assert!(
+                (ui - exact).abs() < 1e-9,
+                "node {i}: got {ui}, expected {exact}"
+            );
+        }
+        // Boundary conditions enforced exactly.
+        assert_eq!(u[0], 0.0);
+        assert_eq!(u[n - 1], 0.0);
+    }
+
+    /// The displacement is symmetric about the midpoint and peaks there.
+    #[test]
+    fn steady_heat_is_symmetric_and_peaks_at_center() {
+        let fem = FemSolver1D::new(7, 2.0);
+        let u = fem.solve_steady_heat(3.0);
+        let mid = u.len() / 2;
+        for k in 0..mid
+        {
+            assert!((u[k] - u[u.len() - 1 - k]).abs() < 1e-9);
+        }
+        assert!(u[mid] >= u[mid - 1] && u[mid] >= u[mid + 1]);
+    }
+}

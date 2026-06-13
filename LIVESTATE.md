@@ -1,7 +1,23 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-12
+> Dernière mise à jour : 2026-06-13
+
+## Session 2026-06-13 — volet 13 : CLI vague 5 (tt, solve-system, inverse, fem-heat, dopri5)
+- +4 commandes + 1 méthode : tt (compression tensor-train TT-SVD,
+  scirust-tn — cœurs/rangs/ratio/erreur, sortie 1 si --max-err dépassé),
+  solve-system (système non-linéaire F(x)=0 via Broyden), inverse (LU),
+  fem-heat (chaleur 1D -u''=source, éléments finis), ode --method dopri5
+  (Dormand-Prince adaptatif). 37 commandes au total. Nouveau groupe
+  TENSOR NETWORKS.
+- testes manquants : FemSolver1D était non testé → 2 tests (oracle
+  parabole -u''=f exact aux nœuds + symétrie). reconstruct_matrix
+  réexporté depuis scirust-tn (paire de tt_decompose_matrix).
+- newton_system non exposé (closure Fn(&[Dual]) comme bfgs — honnête)
+- vérifs main : √2 (solve-system), inverse 2×2 exacte, e à 1e-8 (dopri5),
+  FEM == (f/2)x(L-x), tt rel.err 2.4e-7 (ratio honnête <1 sur petite
+  matrice : surcoût des cœurs domine)
+- 32 tests CLI ; 720 tests workspace (nightly + stable) ; 8 gates verts
 
 ## Session 2026-06-13 — volet 12 : CLI vague 4 (trig, patterns, qr, cg)
 - +4 commandes : trig (apply_trig_identity), patterns (discover_patterns),

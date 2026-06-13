@@ -30,6 +30,17 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI : 5e vague** — `tt` (compression tensor-train TT-SVD d'une matrice,
+  `scirust-tn` ; rapporte cœurs, rangs de liaison, ratio de compression et
+  erreur de reconstruction, sortie 1 si `--max-err` dépassé), `solve-system`
+  (système non-linéaire F(x)=0 par Broyden, `scirust-solvers`), `inverse`
+  (inverse de matrice LU), `fem-heat` (chaleur 1D −u″=source par éléments
+  finis linéaires), et méthode `dopri5` (Dormand–Prince adaptatif) pour `ode`.
+  `FemSolver1D` était non testé : 2 tests ajoutés (oracle parabolique
+  −u″=f exact aux nœuds + symétrie). Nouveau groupe TENSOR NETWORKS.
+  `reconstruct_matrix` réexporté depuis `scirust-tn` (paire de
+  `tt_decompose_matrix`). `newton_system` non exposé (closure `Fn(&[Dual])`
+  comme `bfgs`).
 - **CLI : 4e vague** — `trig` (identités trigonométriques), `patterns`
   (tendance d'une série), `qr` (décomposition QR), `cg` (gradient
   conjugué SPD). `bfgs` délibérément non exposé (closure `Fn(&[Dual])`

@@ -1,8 +1,10 @@
-//! Numerical subcommands over `scirust-solvers`, driven by `scirust-symbolic`
-//! for the expression-based ones (the parsed expression becomes the closure
-//! the solver integrates / root-finds). All are deterministic.
+//! Numerical subcommands over `scirust-solvers` and `scirust-tn`, driven by
+//! `scirust-symbolic` for the expression-based ones (the parsed expression
+//! becomes the closure the solver integrates / root-finds). All are
+//! deterministic.
 //!
-//! Commands: integrate, root, minimize, linsolve, det, polyroots, ode.
+//! Commands: integrate, root, minimize, optimize, linsolve, lstsq, det,
+//! cholesky, qr, cg, inverse, solve-system, polyroots, ode, fem-heat, tt.
 
 use std::collections::HashMap;
 
@@ -11,6 +13,8 @@ use scirust_solvers::linalg::cholesky::cholesky_decompose;
 use scirust_solvers::linalg::conjugate_gradient;
 use scirust_solvers::linalg::qr::{qr_decompose, solve_qr_least_squares};
 use scirust_solvers::linalg::solve as lin_solve;
+use scirust_solvers::nonlinear::broyden;
+use scirust_solvers::ode::dopri5::dopri5;
 use scirust_solvers::optimize::nelder_mead::nelder_mead;
 use scirust_solvers::polynomial::Polynomial;
 use scirust_solvers::polynomial::roots::real_roots;
@@ -21,8 +25,10 @@ use scirust_solvers::roots::bisection::bisection;
 use scirust_solvers::roots::brent::brent;
 use scirust_solvers::roots::newton::newton_with_derivative;
 use scirust_solvers::roots::secant::secant;
+use scirust_solvers::scientific::FemSolver1D;
 use scirust_solvers::{Solution, Tolerance};
 use scirust_symbolic::{Expr, diff, eval, parse, simplify};
+use scirust_tn::{auto_factorize, reconstruct_matrix, tt_decompose_matrix};
 
 // ---- shared helpers ----------------------------------------------------
 
@@ -373,14 +379,20 @@ pub fn run_polyroots(args: &[String]) -> u8 {
     }
 }
 
-/// `ode <expr> <y0> <t0> <t1> [h]` — integrate dy/dt = f(t, y) with RK4.
-/// The expression may use variables `t` and `y`.
+/// `ode <expr> <y0> <t0> <t1> [h] [--method rk4|dopri5]` — integrate
+/// dy/dt = f(t, y). The expression may use variables `t` and `y`. `rk4` is a
+/// fixed-step Runge–Kutta (default); `dopri5` is adaptive Dormand–Prince (the
+/// `h` argument seeds its initial step). Returns 1 if dopri5 fails to step.
 pub fn run_ode(args: &[String]) -> u8 {
+    let (method, pos) = take_flag(args, "--method");
+    let method = method.unwrap_or_else(|| "rk4".to_string());
     let (Some(expr), Some(y0), Some(t0), Some(t1)) =
-        (args.first(), args.get(1), args.get(2), args.get(3))
+        (pos.first(), pos.get(1), pos.get(2), pos.get(3))
     else
     {
-        eprintln!("usage: scirust ode <expr in t,y> <y0> <t0> <t1> [h]   e.g. ode \"y\" 1 0 1");
+        eprintln!(
+            "usage: scirust ode <expr in t,y> <y0> <t0> <t1> [h] [--method rk4|dopri5]   e.g. ode \"y\" 1 0 1"
+        );
         return 2;
     };
     let parsed = match parse_expr(expr)
@@ -397,7 +409,7 @@ pub fn run_ode(args: &[String]) -> u8 {
         (Ok(a), Ok(b), Ok(c)) => (a, b, c),
         _ => return 2,
     };
-    let h = match args.get(4)
+    let h = match pos.get(4)
     {
         Some(s) => match parse_f64(s, "h")
         {
@@ -412,11 +424,44 @@ pub fn run_ode(args: &[String]) -> u8 {
         m.insert("y".to_string(), y[0]);
         dy[0] = eval(&parsed, &m).unwrap_or(f64::NAN);
     };
-    let traj = scirust_solvers::ode::rk4::rk4_fixed(f, t0, t1, vec![y0], h);
-    let (tf, yf) = traj.last().expect("at least the initial point");
     println!("dy/dt = {expr},  y({t0}) = {y0}");
-    println!("y({tf:.4}) ≈ {:.8}   ({} steps)", yf[0], traj.len() - 1);
-    0
+    match method.as_str()
+    {
+        "rk4" =>
+        {
+            let traj = scirust_solvers::ode::rk4::rk4_fixed(f, t0, t1, vec![y0], h);
+            let (tf, yf) = traj.last().expect("at least the initial point");
+            println!(
+                "y({tf:.4}) ≈ {:.8}   ({} steps, rk4)",
+                yf[0],
+                traj.len() - 1
+            );
+            0
+        },
+        "dopri5" => match dopri5(f, t0, t1, vec![y0], 1e-8, 1e-10, h)
+        {
+            Ok(out) =>
+            {
+                let tf = out.t.last().copied().unwrap_or(t0);
+                let yf = out.y.last().map(|v| v[0]).unwrap_or(y0);
+                println!(
+                    "y({tf:.4}) ≈ {yf:.8}   ({} accepted / {} rejected steps, dopri5)",
+                    out.accepted, out.rejected
+                );
+                0
+            },
+            Err(e) =>
+            {
+                println!("integration failed: {e:?}");
+                1
+            },
+        },
+        other =>
+        {
+            eprintln!("error: unknown method `{other}` (rk4|dopri5)");
+            2
+        },
+    }
 }
 
 /// Parse an `"r;r;r"` matrix string into (rows, cols, row-major data).
@@ -694,6 +739,280 @@ pub fn run_cg(args: &[String]) -> u8 {
     }
 }
 
+/// `inverse "<rows>"` — inverse of a square matrix via LU. Prints the inverse,
+/// or exits 1 if the matrix is singular.
+pub fn run_inverse(args: &[String]) -> u8 {
+    let Some(mat) = args.first()
+    else
+    {
+        eprintln!("usage: scirust inverse \"4,7;2,6\"   (square, non-singular)");
+        return 2;
+    };
+    let (m, n, data) = match parse_matrix(mat)
+    {
+        Ok(t) => t,
+        Err(c) => return c,
+    };
+    if m != n
+    {
+        eprintln!("error: matrix must be square");
+        return 2;
+    }
+    match Matrix::from_row_major(m, n, data).inverse()
+    {
+        Ok(inv) =>
+        {
+            println!("A⁻¹ ({n}x{n}):");
+            for i in 0..n
+            {
+                let row: Vec<String> = (0..n)
+                    .map(|j| format!("{:.6}", inv.data()[i * n + j]))
+                    .collect();
+                println!("  [ {} ]", row.join(", "));
+            }
+            0
+        },
+        Err(e) =>
+        {
+            println!("singular / error: {e:?}");
+            1
+        },
+    }
+}
+
+/// `solve-system "f1; f2; ..." --vars x,y,.. --start a,b,..` — solve the
+/// nonlinear system F(x) = 0 with Broyden's quasi-Newton method. Each
+/// semicolon-separated expression is one equation `fᵢ(vars) = 0`; there must
+/// be exactly as many equations as unknowns. Exits 1 if it fails to converge.
+pub fn run_solve_system(args: &[String]) -> u8 {
+    let (vars_s, rest) = take_flag(args, "--vars");
+    let (start_s, rest) = take_flag(&rest, "--start");
+    let Some(sys) = rest.first()
+    else
+    {
+        eprintln!("usage: scirust solve-system \"f1; f2\" --vars x,y --start a,b");
+        return 2;
+    };
+    let exprs_src: Vec<&str> = sys
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let start = match start_s
+    {
+        Some(s) => match parse_list(&s, "start coordinate")
+        {
+            Ok(v) => v,
+            Err(c) => return c,
+        },
+        None =>
+        {
+            eprintln!("error: --start a,b,.. is required");
+            return 2;
+        },
+    };
+    let vars: Vec<String> = match vars_s
+    {
+        Some(v) => v.split(',').map(|t| t.trim().to_string()).collect(),
+        None if start.len() == 1 => vec!["x".to_string()],
+        None =>
+        {
+            eprintln!("error: --vars x,y,.. is required when --start has more than one value");
+            return 2;
+        },
+    };
+    if vars.len() != start.len()
+    {
+        eprintln!("error: --vars and --start must have the same length");
+        return 2;
+    }
+    if exprs_src.len() != vars.len()
+    {
+        eprintln!(
+            "error: need exactly as many equations as unknowns ({} equations, {} unknowns)",
+            exprs_src.len(),
+            vars.len()
+        );
+        return 2;
+    }
+    let mut parsed = Vec::with_capacity(exprs_src.len());
+    for e in &exprs_src
+    {
+        match parse_expr(e)
+        {
+            Ok(p) => parsed.push(p),
+            Err(c) => return c,
+        }
+    }
+    let vars2 = vars.clone();
+    let f = move |x: &[f64], out: &mut [f64]| {
+        let mut m = HashMap::new();
+        for (v, xi) in vars2.iter().zip(x)
+        {
+            m.insert(v.clone(), *xi);
+        }
+        for (i, e) in parsed.iter().enumerate()
+        {
+            out[i] = eval(e, &m).unwrap_or(f64::NAN);
+        }
+    };
+    match broyden(f, start, Tolerance::new(1e-12, 1e-12, 500))
+    {
+        Ok(sol) =>
+        {
+            let x = sol.into_inner();
+            let pt: Vec<String> = vars
+                .iter()
+                .zip(&x)
+                .map(|(v, xi)| format!("{v} = {xi:.6}"))
+                .collect();
+            println!("solution: {}", pt.join(", "));
+            0
+        },
+        Err(e) =>
+        {
+            println!("did not converge: {e:?}");
+            1
+        },
+    }
+}
+
+/// `fem-heat <nodes> <length> <source>` — 1D steady-state heat / Poisson
+/// equation `-u'' = source` on `[0, length]` with `u(0) = u(L) = 0`, solved by
+/// linear finite elements. Prints the nodal displacements.
+pub fn run_fem_heat(args: &[String]) -> u8 {
+    let (Some(nodes), Some(length), Some(source)) = (args.first(), args.get(1), args.get(2))
+    else
+    {
+        eprintln!("usage: scirust fem-heat <nodes> <length> <source>   e.g. fem-heat 9 1 1");
+        return 2;
+    };
+    let nodes = match nodes.parse::<usize>()
+    {
+        Ok(v) if v >= 2 => v,
+        _ =>
+        {
+            eprintln!("error: nodes must be an integer ≥ 2");
+            return 2;
+        },
+    };
+    let (length, source) = match (parse_f64(length, "length"), parse_f64(source, "source"))
+    {
+        (Ok(a), Ok(b)) if a > 0.0 => (a, b),
+        (Ok(_), Ok(_)) =>
+        {
+            eprintln!("error: length must be positive");
+            return 2;
+        },
+        _ => return 2,
+    };
+    let u = FemSolver1D::new(nodes, length).solve_steady_heat(source);
+    let h = length / (nodes as f64 - 1.0);
+    println!("-u'' = {source}  on [0, {length}],  u(0) = u(L) = 0  ({nodes} nodes, linear FEM)");
+    for (i, ui) in u.iter().enumerate()
+    {
+        println!("  x = {:.4}   u = {ui:.6}", i as f64 * h);
+    }
+    0
+}
+
+/// `tt "<rows>" [--factors d] [--max-rank r] [--tol t] [--max-err e]` —
+/// tensor-train (TT) compression of a matrix via TT-SVD (Oseledets/Novikov).
+/// Reports the number of cores, bond ranks, parameter counts, compression
+/// ratio and reconstruction error. With `--max-err e`, exits 1 if the relative
+/// Frobenius error exceeds `e` (use it as an accuracy gate); otherwise exits 0.
+pub fn run_tt(args: &[String]) -> u8 {
+    let (factors_s, rest) = take_flag(args, "--factors");
+    let (rank_s, rest) = take_flag(&rest, "--max-rank");
+    let (tol_s, rest) = take_flag(&rest, "--tol");
+    let (err_s, rest) = take_flag(&rest, "--max-err");
+    let Some(mat) = rest.first()
+    else
+    {
+        eprintln!(
+            "usage: scirust tt \"<rows>\" [--factors d] [--max-rank r] [--tol t] [--max-err e]"
+        );
+        return 2;
+    };
+    let (m, n, data) = match parse_matrix(mat)
+    {
+        Ok(t) => t,
+        Err(c) => return c,
+    };
+    let d = match factors_s
+    {
+        Some(s) => match s.parse::<usize>()
+        {
+            Ok(v) if v >= 1 => v,
+            _ =>
+            {
+                eprintln!("error: --factors must be a positive integer");
+                return 2;
+            },
+        },
+        None => 2,
+    };
+    let max_rank = match rank_s
+    {
+        Some(s) => match s.parse::<usize>()
+        {
+            Ok(v) if v >= 1 => v,
+            _ =>
+            {
+                eprintln!("error: --max-rank must be a positive integer");
+                return 2;
+            },
+        },
+        None => m.max(n), // no effective cap: truncate by tolerance only
+    };
+    let tol = match tol_s
+    {
+        Some(s) => match parse_f64(&s, "tol")
+        {
+            Ok(v) => v as f32,
+            Err(c) => return c,
+        },
+        None => 0.0f32,
+    };
+    let in_dims = auto_factorize(m, d);
+    let out_dims = auto_factorize(n, d);
+    let w: Vec<f32> = data.iter().map(|&x| x as f32).collect();
+    let tt = tt_decompose_matrix(&w, &in_dims, &out_dims, max_rank, tol);
+    let recon = reconstruct_matrix(&tt, &in_dims, &out_dims);
+    let mut num = 0.0f64;
+    let mut den = 0.0f64;
+    for (a, b) in w.iter().zip(&recon)
+    {
+        let diff = (*a - *b) as f64;
+        num += diff * diff;
+        den += (*a as f64) * (*a as f64);
+    }
+    let rel = num.sqrt() / den.sqrt().max(1e-30);
+    let orig = m * n;
+    let comp = tt.num_params();
+    let ratio = orig as f64 / comp as f64;
+    println!(
+        "TT decomposition of {m}x{n} matrix  (in_dims = {in_dims:?}, out_dims = {out_dims:?})"
+    );
+    println!("  cores: {}   bond ranks: {:?}", tt.ndim(), tt.ranks);
+    println!("  params: {orig} → {comp}   (compression {ratio:.2}x)");
+    println!("  reconstruction rel. error: {rel:.3e}");
+    if let Some(e) = err_s
+    {
+        let budget = match parse_f64(&e, "max-err")
+        {
+            Ok(v) => v,
+            Err(c) => return c,
+        };
+        if rel > budget
+        {
+            println!("error budget exceeded: {rel:.3e} > {budget:.3e}");
+            return 1;
+        }
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +1097,71 @@ mod tests {
     fn ode_exponential_growth() {
         // dy/dt = y, y(0)=1 → y(1) ≈ e
         assert_eq!(run_ode(&s(&["y", "1", "0", "1"])), 0);
+        assert_eq!(run_ode(&s(&["y", "1", "0", "1", "--method", "dopri5"])), 0);
+        assert_eq!(run_ode(&s(&["y", "1", "0", "1", "--method", "nope"])), 2);
         assert_eq!(run_ode(&[]), 2);
+    }
+
+    #[test]
+    fn inverse_and_solve_system() {
+        // [[4,7],[2,6]] is non-singular.
+        assert_eq!(run_inverse(&s(&["4,7;2,6"])), 0);
+        assert_eq!(run_inverse(&s(&["1,2;2,4"])), 1); // singular
+        assert_eq!(run_inverse(&s(&["1,2,3"])), 2); // non-square
+        // Nonlinear system: x²+y²=4, x−y=0 → x=y=√2.
+        assert_eq!(
+            run_solve_system(&s(&[
+                "x^2 + y^2 - 4; x - y",
+                "--vars",
+                "x,y",
+                "--start",
+                "1,1"
+            ])),
+            0
+        );
+        // Wrong equation count vs unknowns.
+        assert_eq!(
+            run_solve_system(&s(&["x - 1", "--vars", "x,y", "--start", "1,1"])),
+            2
+        );
+        assert_eq!(run_solve_system(&s(&["x - 1"])), 2); // missing --start
+    }
+
+    #[test]
+    fn fem_heat_runs() {
+        // -u'' = 1 on [0,1], u(0)=u(L)=0.
+        assert_eq!(run_fem_heat(&s(&["9", "1", "1"])), 0);
+        assert_eq!(run_fem_heat(&s(&["1", "1", "1"])), 2); // nodes < 2
+        assert_eq!(run_fem_heat(&s(&["5", "0", "1"])), 2); // length not positive
+        assert_eq!(run_fem_heat(&[]), 2);
+    }
+
+    #[test]
+    fn tt_compression() {
+        // Rank-1 outer-product 4x4 matrix compresses with tiny error.
+        assert_eq!(run_tt(&s(&["1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16"])), 0);
+        // Accuracy gate: exact (tol 0) rank-1 stays well under 1e-3.
+        assert_eq!(
+            run_tt(&s(&[
+                "1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16",
+                "--max-err",
+                "1e-3"
+            ])),
+            0
+        );
+        // Forcing max-rank 1 on a full-rank matrix breaks a tight budget.
+        assert_eq!(
+            run_tt(&s(&[
+                "1,2,3,4;5,6,7,8;9,10,11,12;13,14,15,16",
+                "--max-rank",
+                "1",
+                "--tol",
+                "0.5",
+                "--max-err",
+                "1e-9"
+            ])),
+            1
+        );
+        assert_eq!(run_tt(&[]), 2);
     }
 }
