@@ -7,6 +7,7 @@
 //! the guarantees.
 
 pub mod learning;
+pub mod nlp;
 pub mod numeric;
 pub mod quickstart;
 pub mod reasoning;
@@ -203,6 +204,14 @@ const GROUPS: &[(&str, &[Command])] = &[
         }],
     ),
     (
+        "NLP",
+        &[Command {
+            name: "bpe",
+            args: "\"<corpus>\" [--vocab N] [--encode \"<text>\"]",
+            about: "Train a deterministic BPE tokenizer; encode/decode text.",
+        }],
+    ),
+    (
         "CODE ANALYSIS",
         &[Command {
             name: "analyze",
@@ -343,6 +352,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("solve-system") => numeric::run_solve_system(rest),
         Some("fem-heat") => numeric::run_fem_heat(rest),
         Some("tt") => numeric::run_tt(rest),
+        Some("bpe") => nlp::run_bpe(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -429,6 +439,7 @@ mod tests {
             0
         );
         assert_eq!(run(&s(&["tt", "1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16"])), 0);
+        assert_eq!(run(&s(&["bpe", "low lower lowest", "--vocab", "30"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

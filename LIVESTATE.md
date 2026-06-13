@@ -3,6 +3,22 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 25 : fusion N-D + LLM bout-en-bout + CLI bpe
+- chantier 1 (fusion N-D) : NdVar::bmm (matmul batché broadcast) + sub ;
+  forward + backward gradient-checkés. La tape N-D devient le sur-ensemble
+  capable (ce que la 2D ne sait pas : scores d'attention par tête).
+- chantier 2 (LLM e2e) : generate_ids (découplé du tokenizer → BPE pilote) ;
+  KV-cache bout-en-bout (block/encoder::infer_step, PositionalEncoding::
+  encoding_at, MiniLLM::generate_ids_cached) PROUVÉ équivalent au recalcul
+  complet (seule la dernière position sert → attend tout dans les 2 cas, même
+  encoder BERT non-causal). Test BPE→generate dans scirust-learning.
+- chantier 3 (CLI) : commande `bpe` (scirust-learning ajouté en dep CLI),
+  groupe NLP, REFERENCE/CHANGELOG. Pas de commande `generate` (modèle non
+  entraîné = gibberish → ne pas sur-promettre).
+- honnête : decode glouton (pas de sampling), tokenizer char/BPE basique,
+  tape N-D = ops (pas la fusion complète de reverse.rs).
+- 747 core + 29 CLI ; 8 gates verts.
+
 ## Session 2026-06-13 — volet 24 : campagne « faire grandir scirust » (TOUS les chantiers)
 - réponse honnête à « scirust assez conséquent ? » : oui pour le créneau
   déterministe/auditable/embarqué ; lacunes = tape 2D, GPU immature, pas de

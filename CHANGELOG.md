@@ -6,6 +6,18 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **LLM bout-en-bout** : décodage KV-cache O(n) (`MiniLLM::generate_ids_cached`,
+  `TransformerBlock/Encoder::infer_step`, `PositionalEncoding::encoding_at`)
+  **prouvé équivalent** au recalcul complet ; génération découplée du tokenizer
+  (`MiniLLM::generate_ids`) → un BPE peut piloter la génération (test
+  d'intégration dans `scirust-learning`). Décodage glouton (sampling à venir).
+- **CLI `bpe`** : entraîne un tokenizer BPE déterministe sur un corpus
+  (documents séparés par `;`), encode/decode, rapporte la taille de vocab et le
+  round-trip. Adossé à `scirust-learning` (38 → 39 commandes ; nouveau groupe
+  NLP).
+- **Matmul par lots N-D** (`NdVar::bmm`) : `(…,m,k)·(…,k,n)→(…,m,n)` avec axes
+  batch broadcastés — la capacité que la tape 2D ne sait pas exprimer
+  (scores d'attention par tête). Forward + backward gradient-checkés.
 - **Autograd N-D (MVP, P2.4)** : `autodiff::nd` — `NdTape`/`NdVar` sur
   `TensorND` (add/mul broadcastés, matmul 2D, relu, sum), à côté de la tape 2D
   de production. Validé par un **gradient check numérique** (différences
