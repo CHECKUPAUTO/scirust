@@ -246,3 +246,166 @@ pub fn flash_attention_forward<'t>(
 
     Var { tape, idx: new_idx }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reference dense attention for one head: O = softmax(scale·QKᵀ)·V,
+    /// with an optional causal mask. This is the oracle `flash_attention_forward`
+    /// is validated against.
+    #[allow(clippy::too_many_arguments)]
+    fn reference_attention(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        seq: usize,
+        d_head: usize,
+        dv: usize,
+        scale: f32,
+        causal: bool,
+    ) -> Vec<f32> {
+        let mut out = vec![0.0f32; seq * dv];
+        for i in 0..seq
+        {
+            // scores
+            let mut scores = vec![f32::NEG_INFINITY; seq];
+            for (j, sc) in scores.iter_mut().enumerate()
+            {
+                if causal && j > i
+                {
+                    continue;
+                }
+                let mut dot = 0.0f32;
+                for d in 0..d_head
+                {
+                    dot += q[i * d_head + d] * k[j * d_head + d];
+                }
+                *sc = dot * scale;
+            }
+            // stable softmax
+            let m = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let mut denom = 0.0f32;
+            let mut p = vec![0.0f32; seq];
+            for j in 0..seq
+            {
+                if scores[j].is_finite()
+                {
+                    p[j] = (scores[j] - m).exp();
+                    denom += p[j];
+                }
+            }
+            for j in 0..seq
+            {
+                let w = p[j] / denom;
+                for d in 0..dv
+                {
+                    out[i * dv + d] += w * v[j * dv + d];
+                }
+            }
+        }
+        out
+    }
+
+    fn approx_eq(a: &[f32], b: &[f32], tol: f32) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() <= tol)
+    }
+
+    // A small, fixed self-attention case (1 head, seq=4, d=4). block_size=2
+    // forces the tiling/online-softmax path to run more than one inner block.
+    fn fixture() -> (Vec<f32>, Vec<f32>, Vec<f32>, usize, usize, f32) {
+        let seq = 4;
+        let d = 4;
+        let scale = 1.0 / (d as f32).sqrt();
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.1) - 0.7).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * -0.05) + 0.3).collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.07) - 0.2).collect();
+        (q, k, v, seq, d, scale)
+    }
+
+    #[test]
+    fn flash_matches_standard_attention() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let tape = Tape::new();
+        let qv = tape.input(Tensor::from_vec(q.clone(), seq, d));
+        let kv = tape.input(Tensor::from_vec(k.clone(), seq, d));
+        let vv = tape.input(Tensor::from_vec(v.clone(), seq, d));
+
+        let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, false);
+        let got = tape.value(out.idx()).data.clone();
+        let want = reference_attention(&q, &k, &v, seq, d, d, scale, false);
+
+        assert!(
+            approx_eq(&got, &want, 1e-5),
+            "flash != reference attention\n got={got:?}\nwant={want:?}"
+        );
+    }
+
+    #[test]
+    fn flash_causal_matches_masked_reference() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let tape = Tape::new();
+        let qv = tape.input(Tensor::from_vec(q.clone(), seq, d));
+        let kv = tape.input(Tensor::from_vec(k.clone(), seq, d));
+        let vv = tape.input(Tensor::from_vec(v.clone(), seq, d));
+
+        let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, true);
+        let got = tape.value(out.idx()).data.clone();
+        let want = reference_attention(&q, &k, &v, seq, d, d, scale, true);
+        assert!(
+            approx_eq(&got, &want, 1e-5),
+            "causal flash != masked reference"
+        );
+
+        // Row 0 attends only to position 0 ⇒ its output equals V row 0.
+        assert!(
+            approx_eq(&got[0..d], &v[0..d], 1e-6),
+            "causal row 0 must equal V[0]"
+        );
+    }
+
+    #[test]
+    fn flash_is_deterministic() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let run = || {
+            let tape = Tape::new();
+            let qv = tape.input(Tensor::from_vec(q.clone(), seq, d));
+            let kv = tape.input(Tensor::from_vec(k.clone(), seq, d));
+            let vv = tape.input(Tensor::from_vec(v.clone(), seq, d));
+            let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, false);
+            tape.value(out.idx())
+                .data
+                .iter()
+                .map(|f| f.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run(), "same inputs ⇒ bit-identical output");
+    }
+
+    #[test]
+    fn flash_backward_produces_finite_gradients() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let tape = Tape::new();
+        let qv = tape.input(Tensor::from_vec(q, seq, d));
+        let kv = tape.input(Tensor::from_vec(k, seq, d));
+        let vv = tape.input(Tensor::from_vec(v, seq, d));
+        let (qi, ki, vi) = (qv.idx(), kv.idx(), vv.idx());
+
+        let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, false);
+        out.sum().backward();
+
+        for idx in [qi, ki, vi]
+        {
+            let g = tape.grad(idx);
+            assert_eq!(g.data.len(), seq * d, "gradient shape must match input");
+            assert!(
+                g.data.iter().all(|x| x.is_finite()),
+                "gradients must be finite"
+            );
+            assert!(
+                g.data.iter().any(|&x| x != 0.0),
+                "at least some gradient must be non-zero"
+            );
+        }
+    }
+}

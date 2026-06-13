@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-12
 
+## Session 2026-06-13 — volet 8 : CLI industrielle + flash attention testé
+- Flash Attention RÉELLEMENT testé : 4 tests (forward vs oracle dense,
+  causal, bit-déterminisme, gradients finis) → statut « ✅ Stable » honnête
+- 2 lignes GPU retirées du tableau Status (listaient du non-câblé) ;
+  note « Not included yet » + renvoi roadmap P2.2
+- CLI `scirust` étoffée : `som train`, `evo`, `diff`/`simplify`/`eval`/
+  `solve`, `info` — aide groupée par thème ; +modules symbolic.rs,
+  learning.rs ; 11 tests CLI ; chaque commande adossée à du code testé
+- README/REFERENCE/CHANGELOG mis à jour
+
 ## Session 2026-06-13 — volet 7 : CLI unifiée (UX)
 - `scirust-cli` (nouveau) : binaire `scirust` + lib, dispatcher
   découvrable (`help`/`version`/`quickstart`/`analyze`/`verify`) au-dessus

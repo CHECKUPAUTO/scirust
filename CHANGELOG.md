@@ -18,6 +18,9 @@ versions sémantiques à partir de la prochaine release taguée.
   (`-D warnings` tenable sur tous les targets).
 
 ### Changé
+- **Statut GPU** retiré du tableau des features livrées du README (il
+  listait du non-câblé) → remplacé par une note honnête « Not included
+  yet » pointant la roadmap P2.2.
 - **Augmentation de données 100 % déterministe** : RNG `PcgEngine`
   injecté, flux par échantillon indépendant de l'ordre, `with_seed`
   effectif, vrai bruit gaussien (Box-Muller).
@@ -27,6 +30,15 @@ versions sémantiques à partir de la prochaine release taguée.
   non commerciale).
 
 ### Ajouté
+- **CLI `scirust` étoffée** (niveau industriel) : nouvelles commandes
+  groupées et documentées — `som train` (modèle d'ownership, accuracy vs
+  baseline), `evo` (optimiseur génétique seedé), `diff`/`simplify`/`eval`/
+  `solve` (maths symboliques), `info` (garanties). `scirust help` les
+  liste par thème. Chaque commande est adossée à du code déjà testé.
+- **Flash Attention réellement testé** : 4 tests dans
+  `nn/transformer/flash_attention.rs` (forward vs oracle d'attention
+  dense, masque causal, déterminisme bit-exact, gradients finis) — la
+  ligne de statut passe de revendiquée à vérifiée.
 - **CLI unifiée `scirust`** (`scirust-cli`) : point d'entrée unique et
   découvrable (`scirust help`) regroupant `quickstart` (démo MLP 2→8→2
   bit-déterministe, 4/4), `analyze` (ownership, délègue à som-cli),

@@ -43,11 +43,22 @@ scirust verify emit|verify <args...>
 scirust version
 ```
 
-Dispatcher mince au-dessus des capacités déjà testées : `quickstart`
-(entraînement MLP 2→8→2 bit-déterministe), `analyze` (délègue à
-`scirust-som-cli`), `verify` (délègue à `scirust_runtime::proofcli`).
-Sans installation : `cargo run -p scirust-cli -- <commande>`. Codes de
-sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
+Dispatcher mince au-dessus de capacités déjà testées (aucun nouveau
+calcul). Sans installation : `cargo run -p scirust-cli -- <commande>`.
+Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
+
+| Commande | Effet | Adossé à |
+|---|---|---|
+| `quickstart` | entraîne le MLP 2→8→2 (XOR), bit-déterministe, 4/4 | `scirust-core` |
+| `som train [--seed N] [--epochs E]` | entraîne le modèle d'ownership, accuracy vs baseline | `scirust-som-*` |
+| `evo [--seed N] [--gens G]` | minimise la sphère par algorithme génétique seedé | `scirust-evo` |
+| `diff <expr> [var]` | dérivée symbolique | `scirust-symbolic` |
+| `simplify <expr>` | simplification algébrique | `scirust-symbolic` |
+| `eval <expr> [x=..]` | évaluation numérique | `scirust-symbolic` |
+| `solve <expr> [var]` | racines réelles (linéaire/quadratique) | `scirust-symbolic` |
+| `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
+| `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
+| `info` / `help` / `version` | méta | — |
 
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`
 ne fait que les regrouper derrière une interface unique et découvrable.

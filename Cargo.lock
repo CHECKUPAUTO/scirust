@@ -1576,8 +1576,15 @@ name = "scirust-cli"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
+ "scirust-evo",
  "scirust-runtime",
  "scirust-som-cli",
+ "scirust-som-dataset",
+ "scirust-som-inference",
+ "scirust-som-model",
+ "scirust-som-tokenizer",
+ "scirust-som-trainer",
+ "scirust-symbolic",
 ]
 
 [[package]]

@@ -38,7 +38,7 @@ Every result below is reproduced by code in this repository and documented in th
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
 - **Deep-learning core + reverse-mode autodiff** — 683 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
-- **Portable GPU / Tensor Core** (NVIDIA Jetson Thor, aarch64) — a cuBLAS-backed BF16 matmul, validated against a CPU oracle, reached ~63 TFLOPS. ⚠ *Status: the kernels are preserved in [`archive/scirust-gpu/`](archive/scirust-gpu/) outside the build (no `wgpu`/`cudarc` dependencies in the workspace); the measurement is historical and not reproducible from the present workspace. See `scirust_complete_audit_report.md` §5.*
+- **(Archived, not in build) Portable GPU / Tensor Core** — a cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64), validated against a CPU oracle. ⚠ *This is a historical result, not a current capability: the kernels live in [`archive/scirust-gpu/`](archive/scirust-gpu/) outside the workspace and are not reproducible from today's build. Re-wiring is roadmap item P2.2; see `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
@@ -62,8 +62,14 @@ No code to copy. Install the unified `scirust` CLI and run a command:
 git clone https://github.com/CHECKUPAUTO/scirust && cd scirust
 cargo install --path scirust-cli      # provides the `scirust` binary
 
-scirust help                          # list every command
+scirust help                          # list every command, grouped
+scirust info                          # capabilities & determinism guarantees
 scirust quickstart                    # train a demo classifier (deterministic) → 4/4
+scirust som train                     # train the ownership model; accuracy vs baseline
+scirust evo                           # minimize a function with a seeded genetic algorithm
+scirust diff "x^2 + 3*x"              # symbolic derivative → ((2 * x) + 3)
+scirust solve "x^2 - 4"               # real roots → { -2, 2 }
+scirust eval "2*x + 1" x=3            # evaluate → 7
 scirust analyze src/main.rs           # ownership analysis of a real Rust file
 scirust analyze src/main.rs --sarif   # same, as SARIF 2.1.0 for CI code scanning
 scirust verify emit  model.qsr1 model.proof    # seal an inference certificate
@@ -147,15 +153,13 @@ examples/        Quickstart, MNIST training, benchmarks
 | BatchNorm | ✅ Stable |
 | Dropout | ✅ Stable |
 | Data parallelism (CPU multithread) | ✅ Stable |
-| GPU forward (wgpu) | ⚠ Archived — kernels present but not wired (see audit §5) |
-| GPU backward | ⚠ Archived — not wired (bolt-opt-autodiff) |
 | Transformer (MHA, Encoder, Decoder) | ✅ Stable |
-| GQA & KV-Cache | ✅ Stable (GQA + infer_step avec cache) |
+| GQA & KV-Cache | ✅ Stable (GQA + `infer_step` with cache, 6 tests) |
 | RoPE embeddings | ✅ Stable |
-| RNN / LSTM | ✅ Stable (module lstm.rs avec forward_sequence, 7 tests) |
-| Flash Attention | ✅ Stable (module flash_attention.rs) |
-| Conv2dTranspose | ✅ Stable (module conv2d_transpose.rs) |
-| Mixed precision (fp16) | ✅ Stable (module mixed_precision.rs, 3 tests) |
+| RNN / LSTM | ✅ Stable (`nn/lstm.rs`, `forward_sequence`, 7 tests) |
+| Flash Attention | ✅ Stable (`nn/transformer/flash_attention.rs`, 4 tests vs dense-attention oracle) |
+| Conv2dTranspose | ✅ Stable (`nn/conv2d_transpose.rs`, 7 tests) |
+| Mixed precision (fp16) | ✅ Stable (`autodiff/mixed_precision.rs`, 3 tests) |
 | Checkpointing (save/resume training) | ✅ New |
 | DataLoader (batching, shuffle, prefetch) | ✅ New |
 | ONNX export | ✅ New |
@@ -169,6 +173,13 @@ examples/        Quickstart, MNIST training, benchmarks
 | Fused ops (matmul+SiLU, matmul+GELU, etc.) | ✅ New |
 | HPC im2col (cache-aware) | ✅ New |
 | SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
+
+> **Not included yet (no claim).** GPU execution is **not** part of the
+> build: `scirust-gpu` ships CPU-validated stubs only, and the WGSL/cuBLAS
+> kernels are preserved in `archive/scirust-gpu/` outside the workspace.
+> Re-wiring a tested wgpu path is tracked in
+> [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md) (P2.2). The
+> table above lists only what ships and is tested today.
 
 
 ## Package layout: framework library vs. bundled agent
