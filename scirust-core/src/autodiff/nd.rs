@@ -30,6 +30,10 @@ enum Op {
     Softmax(usize),
     /// Swap the last two axes.
     TransposeLast2(usize),
+    /// Reshape (data unchanged); backward reshapes the gradient back.
+    Reshape(usize),
+    /// General axis permutation; backward permutes by the inverse.
+    Permute(usize, Vec<usize>),
     Sum(usize),
 }
 
@@ -147,6 +151,22 @@ impl NdTape {
                 {
                     accumulate(&mut grads[a], &transpose_last2(&g));
                 },
+                Op::Reshape(a) =>
+                {
+                    // Reshape the upstream grad back to the input's shape.
+                    let shape = nodes[a].value.shape.clone();
+                    accumulate(&mut grads[a], &TensorND::new(g.data.clone(), shape));
+                },
+                Op::Permute(a, ref perm) =>
+                {
+                    // Gradient flows through the inverse permutation.
+                    let mut inv = vec![0usize; perm.len()];
+                    for (i, &p) in perm.iter().enumerate()
+                    {
+                        inv[p] = i;
+                    }
+                    accumulate(&mut grads[a], &g.transpose(&inv).expect("permute backward"));
+                },
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
@@ -232,6 +252,30 @@ impl<'t> NdVar<'t> {
         let a = self.tape.nodes.borrow()[self.idx].value.clone();
         let out = transpose_last2(&a);
         self.tape.push(Op::TransposeLast2(self.idx), out)
+    }
+
+    /// Reshape to `shape` (same number of elements; data order preserved).
+    pub fn reshape(self, shape: &[usize]) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(
+            a.data.len(),
+            shape.iter().product::<usize>(),
+            "reshape: element count mismatch"
+        );
+        let out = TensorND::new(a.data.clone(), shape.to_vec());
+        self.tape.push(Op::Reshape(self.idx), out)
+    }
+
+    /// Permute the axes (e.g. `(seq, heads, d) → (heads, seq, d)` for attention).
+    pub fn permute(self, perm: &[usize]) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = a.transpose(perm).expect("permute: invalid axes");
+        self.tape.push(Op::Permute(self.idx, perm.to_vec()), out)
+    }
+
+    /// The shape of this node's value.
+    pub fn shape(self) -> Vec<usize> {
+        self.tape.nodes.borrow()[self.idx].value.shape.clone()
     }
 
     /// Elementwise ReLU.
