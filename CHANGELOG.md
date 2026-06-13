@@ -5,6 +5,18 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Réparé
+- **Revue de code (max-effort) — durcissement** : (1) chemin GPU résident
+  (`GpuChain`) : les dimensions dégénérées (`m`/`n`/`k == 0`) faisaient paniquer
+  wgpu (buffers de taille nulle) ; gardes ajoutées (placeholder 4 octets,
+  dispatch sauté, `download` court-circuité) + test. (2) `scirust ode` :
+  `h = 0` provoquait un dépassement de capacité (panique, code 101), `t1 ≤ t0`
+  renvoyait silencieusement `y0` (code 0, réponse fausse) et dopri5/rk4
+  divergeaient sur de mauvaises bornes ; garde unifiée (`t1 > t0`, `h > 0` fini
+  → code 2) + tests. Les autres axes de revue (maths GEMM/transpose, routage
+  des gradients Conv2d, `matmul_gpu` av/ar, déterminisme de la réduction
+  threadée, restructuration cfg SIMD) ont été tracés à la main : corrects.
+
 ### Ajouté
 - **Entraînement data-parallèle à déterminisme certifié (P2.1)** :
   `DataParallelTrainer::train_batch_threaded(n_threads, ..)` exécute les

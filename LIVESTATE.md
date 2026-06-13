@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-13
 
+## Session 2026-06-13 — volet 21 : revue de code max-effort + durcissement
+- 4 angles finder (agents //) sur le diff de branche (~8,8k lignes) : GPU
+  wgpu/résidence, routage autodiff GPU, threading déterminisme + cfg SIMD,
+  numerics CLI. 2 angles : 0 bug (maths GEMM/transpose, gradients Conv2d,
+  matmul_gpu, réduction threadée, cfg SIMD — tracés à la main, corrects).
+- corrigé (GPU résident) : dims dégénérées m/n/k==0 → panique wgpu (buffers
+  taille 0). Gardes : upload placeholder 4o, gemm_resident skip dispatch +
+  buffer min 1 elem, download court-circuit vide. +test. (commit c141c5a)
+- corrigé (run_ode) : h=0 → overflow panique (101) ; t1<=t0 → renvoyait y0
+  en silence (code 0, faux) ; dopri5 code 1 au lieu de 2 sur bornes invalides.
+  Garde unifiée t1>t0 & h>0 fini → code 2. +5 asserts. clippy: h<=0 (pas
+  !(h>0), neg_cmp_op_on_partial_ord).
+- 728 tests workspace ; wgpu 16. 8 gates verts.
+
 ## Session 2026-06-13 — volet 20 : déterminisme certifié du training multi-thread (P2.1)
 - constat : DataParallelTrainer.train_batch était SÉQUENTIEL (pas de threads) ;
   réduction déjà en ordre worker fixe mais aucune garantie testée sous threads.

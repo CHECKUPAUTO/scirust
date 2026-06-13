@@ -418,6 +418,19 @@ pub fn run_ode(args: &[String]) -> u8 {
         },
         None => ((t1 - t0) / 100.0).abs().max(1e-6),
     };
+    // Both integrators require a forward interval and a positive finite step;
+    // without these guards rk4 silently returns y0 (t1 ≤ t0) or overflows its
+    // step count (h = 0), and the two methods disagree on bad bounds.
+    if t1 <= t0
+    {
+        eprintln!("error: t1 must be greater than t0 (got t0 = {t0}, t1 = {t1})");
+        return 2;
+    }
+    if h <= 0.0 || !h.is_finite()
+    {
+        eprintln!("error: step h must be a positive, finite number (got {h})");
+        return 2;
+    }
     let f = move |t: f64, y: &[f64], dy: &mut [f64]| {
         let mut m = HashMap::new();
         m.insert("t".to_string(), t);
@@ -1099,6 +1112,12 @@ mod tests {
         assert_eq!(run_ode(&s(&["y", "1", "0", "1"])), 0);
         assert_eq!(run_ode(&s(&["y", "1", "0", "1", "--method", "dopri5"])), 0);
         assert_eq!(run_ode(&s(&["y", "1", "0", "1", "--method", "nope"])), 2);
+        // Input guards (usage errors, exit 2) — not panics or silent wrong answers.
+        assert_eq!(run_ode(&s(&["y", "1", "0", "1", "0"])), 2); // h = 0
+        assert_eq!(run_ode(&s(&["y", "1", "1", "0"])), 2); // t1 < t0
+        assert_eq!(run_ode(&s(&["y", "1", "0", "0"])), 2); // zero span
+        assert_eq!(run_ode(&s(&["y", "1", "0", "1", "-0.1"])), 2); // negative h
+        assert_eq!(run_ode(&s(&["y", "1", "1", "0", "--method", "dopri5"])), 2);
         assert_eq!(run_ode(&[]), 2);
     }
 
