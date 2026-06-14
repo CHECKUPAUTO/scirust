@@ -3,6 +3,9 @@
 > Document stratégique. La feuille de route opérationnelle détaillée vit dans
 > [`INDUSTRIAL_ROADMAP.md`](INDUSTRIAL_ROADMAP.md) ; ce document donne la
 > **vision**, les **fondamentaux non négociables**, et un **phasage ambitieux**.
+> La feuille de route **« recherche → fonctions »** (papers réels traduits en
+> fonctions concrètes, avec statut) vit dans
+> [`RESEARCH_ROADMAP.md`](RESEARCH_ROADMAP.md).
 
 ## 1. Vision : l'IA certifiable
 
