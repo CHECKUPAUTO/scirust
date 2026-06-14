@@ -84,6 +84,25 @@ impl NdLinear {
     }
 }
 
+/// A `(seq, seq)` additive attention mask: `0` on and below the diagonal,
+/// `-1e9` above it. Added to the scores before the softmax, it drives the
+/// weights for "future" keys (`j > i`) to ~0 — i.e. causal/decoder attention.
+/// `-1e9` (rather than `-inf`) keeps the softmax numerically safe.
+fn causal_mask(seq: usize) -> TensorND {
+    let mut data = vec![0.0f32; seq * seq];
+    for i in 0..seq
+    {
+        for (j, slot) in data[i * seq..(i + 1) * seq].iter_mut().enumerate()
+        {
+            if j > i
+            {
+                *slot = -1e9;
+            }
+        }
+    }
+    TensorND::new(data, vec![seq, seq])
+}
+
 /// Multi-head self-attention over the N-D tape, built from [`NdLinear`]
 /// projections and the N-D attention math (`bmm` / `transpose_last2` /
 /// `softmax`). Input and output are `(seq, d_model)`.
@@ -95,11 +114,14 @@ pub struct NdMultiHeadAttention {
     n_heads: usize,
     d_model: usize,
     d_head: usize,
+    causal: bool,
 }
 
 impl NdMultiHeadAttention {
     /// New layer; `d_model` must be divisible by `n_heads`. Seeded init.
-    pub fn new(d_model: usize, n_heads: usize, rng: &mut PcgEngine) -> Self {
+    /// `causal = true` masks each position from attending to later ones
+    /// (decoder/LM attention).
+    pub fn new(d_model: usize, n_heads: usize, causal: bool, rng: &mut PcgEngine) -> Self {
         assert!(d_model % n_heads == 0, "d_model must divide n_heads");
         Self {
             w_q: NdLinear::new(d_model, d_model, rng),
@@ -109,6 +131,7 @@ impl NdMultiHeadAttention {
             n_heads,
             d_model,
             d_head: d_model / n_heads,
+            causal,
         }
     }
 
@@ -118,7 +141,9 @@ impl NdMultiHeadAttention {
             .permute(&[1, 0, 2])
     }
 
-    /// Self-attention `softmax(Q·Kᵀ/√d)·V`, then the output projection.
+    /// Self-attention `softmax(Q·Kᵀ/√d)·V`, then the output projection. When
+    /// `causal`, a triangular mask is added to the scores before the softmax so
+    /// position `i` cannot attend to any `j > i`.
     pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
         let seq = x.shape()[0];
 
@@ -133,8 +158,15 @@ impl NdMultiHeadAttention {
             vec![1.0 / (self.d_head as f32).sqrt()],
             vec![1],
         ));
-        let scores = q.bmm(k.transpose_last2()).mul(scale).softmax(); // (h, seq, seq)
-        let ctx = scores.bmm(v); // (h, seq, d_head)
+        let mut scores = q.bmm(k.transpose_last2()).mul(scale); // (h, seq, seq)
+        if self.causal
+        {
+            // Mask (seq, seq) broadcasts over the heads axis; -1e9 above the
+            // diagonal drives those softmax weights to ~0.
+            let mask = tape.input(causal_mask(seq));
+            scores = scores.add(mask);
+        }
+        let ctx = scores.softmax().bmm(v); // (h, seq, d_head)
 
         // Merge heads: (h, seq, d_head) → (seq, h, d_head) → (seq, d_model).
         let merged = ctx.permute(&[1, 0, 2]).reshape(&[seq, self.d_model]);
@@ -211,11 +243,17 @@ pub struct NdTransformerBlock {
 }
 
 impl NdTransformerBlock {
-    /// New block. Seeded init.
-    pub fn new(d_model: usize, n_heads: usize, d_ff: usize, rng: &mut PcgEngine) -> Self {
+    /// New block. Seeded init. `causal` selects masked (decoder/LM) attention.
+    pub fn new(
+        d_model: usize,
+        n_heads: usize,
+        d_ff: usize,
+        causal: bool,
+        rng: &mut PcgEngine,
+    ) -> Self {
         Self {
             ln1: NdLayerNorm::new(d_model, 1e-5),
-            attn: NdMultiHeadAttention::new(d_model, n_heads, rng),
+            attn: NdMultiHeadAttention::new(d_model, n_heads, causal, rng),
             ln2: NdLayerNorm::new(d_model, 1e-5),
             ffn1: NdLinear::new(d_model, d_ff, rng),
             ffn2: NdLinear::new(d_ff, d_model, rng),
@@ -338,7 +376,7 @@ mod tests {
     fn nd_attention_layer_gradient_check() {
         let (d_model, n_heads, seq) = (8usize, 2, 3);
         let mut rng = PcgEngine::new(2);
-        let mut attn = NdMultiHeadAttention::new(d_model, n_heads, &mut rng);
+        let mut attn = NdMultiHeadAttention::new(d_model, n_heads, false, &mut rng);
         let x: Vec<f32> = (0..seq * d_model)
             .map(|i| (i as f32 * 0.13 - 0.4).sin())
             .collect();
@@ -373,6 +411,59 @@ mod tests {
         }
     }
 
+    /// **Causality**: with the mask on, changing the input at the *last*
+    /// position must leave every *earlier* output position bit-for-bit
+    /// unchanged — each position attends only to itself and the past. The
+    /// perturbed position's own output *does* move, proving the change really
+    /// propagated (so the invariance above is causality, not a dead forward).
+    #[test]
+    fn nd_causal_attention_is_causal() {
+        let (d_model, n_heads, seq) = (8usize, 2, 4);
+        let mut rng = PcgEngine::new(5);
+        let mut attn = NdMultiHeadAttention::new(d_model, n_heads, true, &mut rng);
+
+        let base: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.21 - 0.7).sin())
+            .collect();
+        let mut perturbed = base.clone();
+        for v in perturbed[(seq - 1) * d_model..].iter_mut()
+        {
+            *v += 0.5; // move only the last position's features
+        }
+
+        let run = |xd: &[f32], attn: &mut NdMultiHeadAttention| -> Vec<f32> {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d_model]));
+            let out = attn.forward(&t, xv);
+            t.value(out).data.clone()
+        };
+
+        let a = run(&base, &mut attn);
+        let b = run(&perturbed, &mut attn);
+
+        for i in 0..seq - 1
+        {
+            for c in 0..d_model
+            {
+                let k = i * d_model + c;
+                assert_eq!(
+                    a[k], b[k],
+                    "causal leak: output position {i} changed when only the last input moved"
+                );
+            }
+        }
+        let last = (seq - 1) * d_model;
+        let moved: f32 = a[last..]
+            .iter()
+            .zip(&b[last..])
+            .map(|(x, y)| (x - y).abs())
+            .sum();
+        assert!(
+            moved > 1e-4,
+            "perturbation did not propagate (moved {moved})"
+        );
+    }
+
     /// A **full Pre-LN transformer block** (LayerNorm + attention + residual +
     /// FFN + residual) trains end to end on the N-D tape: the regression loss
     /// drops well below its initial value. The milestone: "here is the
@@ -381,7 +472,7 @@ mod tests {
     fn nd_transformer_block_trains() {
         let (d_model, n_heads, d_ff, seq) = (8usize, 2, 16, 4);
         let mut rng = PcgEngine::new(11);
-        let mut block = NdTransformerBlock::new(d_model, n_heads, d_ff, &mut rng);
+        let mut block = NdTransformerBlock::new(d_model, n_heads, d_ff, false, &mut rng);
 
         let xs: Vec<f32> = (0..seq * d_model)
             .map(|i| (i as f32 * 0.13 - 0.5).sin())
