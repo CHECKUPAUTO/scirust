@@ -39,6 +39,13 @@ enum Op {
     /// Layer normalisation over the last axis (no affine); `f32` is `eps`.
     LayerNormLast(usize, f32),
     Sum(usize),
+    /// Row lookup (embedding): select rows of a `(vocab, dim)` table by the
+    /// integer indices. Backward scatter-adds the upstream rows back.
+    Gather(usize, Vec<usize>),
+    /// Fused softmax + mean negative-log-likelihood over `(n, vocab)` logits
+    /// with one integer target per row. Output is the scalar mean loss; the
+    /// indices are constants (not differentiated).
+    CrossEntropy(usize, Vec<usize>),
 }
 
 struct Node {
@@ -197,6 +204,40 @@ impl NdTape {
                     let n = nodes[a].value.numel();
                     accumulate(&mut grads[a], &TensorND::new(vec![s; n], shape));
                 },
+                Op::Gather(a, ref idx) =>
+                {
+                    // Scatter-add each output row's gradient back to its source
+                    // row (repeated indices accumulate).
+                    let dim = nodes[a].value.shape[1];
+                    for (r, &ix) in idx.iter().enumerate()
+                    {
+                        for c in 0..dim
+                        {
+                            grads[a].data[ix * dim + c] += g.data[r * dim + c];
+                        }
+                    }
+                },
+                Op::CrossEntropy(a, ref targets) =>
+                {
+                    // dL/dlogits = (softmax(logits) − onehot(target)) / n, times
+                    // the (scalar) upstream gradient.
+                    let logits = &nodes[a].value;
+                    let (n, vocab) = (logits.shape[0], logits.shape[1]);
+                    let scale = g.data[0] / n as f32;
+                    let mut dl = vec![0.0f32; logits.data.len()];
+                    for (r, &target) in targets.iter().enumerate()
+                    {
+                        let row = &logits.data[r * vocab..(r + 1) * vocab];
+                        let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                        let sum: f32 = row.iter().map(|&v| (v - mx).exp()).sum();
+                        for c in 0..vocab
+                        {
+                            dl[r * vocab + c] = scale * (row[c] - mx).exp() / sum;
+                        }
+                        dl[r * vocab + target] -= scale;
+                    }
+                    accumulate(&mut grads[a], &TensorND::new(dl, logits.shape.clone()));
+                },
             }
         }
         grads
@@ -310,6 +351,57 @@ impl<'t> NdVar<'t> {
         let s: f32 = a.data.iter().sum();
         self.tape
             .push(Op::Sum(self.idx), TensorND::new(vec![s], vec![1]))
+    }
+
+    /// Embedding lookup: `self` is a `(vocab, dim)` table; returns the
+    /// `(indices.len(), dim)` stack of the selected rows. Gradients
+    /// scatter-add back to the table (repeated indices accumulate).
+    pub fn gather(self, indices: &[usize]) -> NdVar<'t> {
+        let w = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(w.ndim(), 2, "gather: table must be 2-D (vocab, dim)");
+        let (vocab, dim) = (w.shape[0], w.shape[1]);
+        let mut data = Vec::with_capacity(indices.len() * dim);
+        for &ix in indices
+        {
+            assert!(
+                ix < vocab,
+                "gather: index {ix} out of range (vocab {vocab})"
+            );
+            data.extend_from_slice(&w.data[ix * dim..(ix + 1) * dim]);
+        }
+        let out = TensorND::new(data, vec![indices.len(), dim]);
+        self.tape.push(Op::Gather(self.idx, indices.to_vec()), out)
+    }
+
+    /// Fused softmax + mean negative-log-likelihood: `self` is `(n, vocab)`
+    /// logits, `targets` holds one class index per row. Returns the scalar mean
+    /// loss, computed with the log-sum-exp trick for numerical stability.
+    pub fn cross_entropy(self, targets: &[usize]) -> NdVar<'t> {
+        let logits = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(
+            logits.ndim(),
+            2,
+            "cross_entropy: logits must be 2-D (n, vocab)"
+        );
+        let (n, vocab) = (logits.shape[0], logits.shape[1]);
+        assert_eq!(targets.len(), n, "cross_entropy: one target per row");
+        let mut loss = 0.0f32;
+        for (r, &t) in targets.iter().enumerate()
+        {
+            let row = &logits.data[r * vocab..(r + 1) * vocab];
+            let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let lse = mx + row.iter().map(|&v| (v - mx).exp()).sum::<f32>().ln();
+            assert!(
+                t < vocab,
+                "cross_entropy: target {t} out of range (vocab {vocab})"
+            );
+            loss += lse - row[t];
+        }
+        loss /= n as f32;
+        self.tape.push(
+            Op::CrossEntropy(self.idx, targets.to_vec()),
+            TensorND::new(vec![loss], vec![1]),
+        )
     }
 
     fn pair(self, other: NdVar<'t>) -> (TensorND, TensorND) {
@@ -935,5 +1027,113 @@ mod tests {
         check(&gb, &b, &|p| loss_of(&a, p));
         // The broadcast operand keeps its own (batch-1) shape.
         assert_eq!(gb.shape, vec![1, 3, 2]);
+    }
+
+    /// Embedding `gather`: forward selects the right rows, and the gradient
+    /// w.r.t. the table matches finite differences. The index list repeats a
+    /// row (tests scatter-add) and omits two rows (whose gradient must be 0).
+    #[test]
+    fn nd_gather_gradient_check() {
+        let (vocab, dim) = (5usize, 3usize);
+        let idx = vec![2usize, 0, 2, 4]; // row 2 repeated; rows 1 and 3 unused
+        let w: Vec<f32> = (0..vocab * dim)
+            .map(|i| (i as f32 * 0.2 - 0.5).sin())
+            .collect();
+        let v: Vec<f32> = (0..idx.len() * dim)
+            .map(|i| (i as f32 * 0.3).cos())
+            .collect();
+
+        // Forward picks the correct rows.
+        let t0 = NdTape::new();
+        let w0 = t0.input(TensorND::new(w.clone(), vec![vocab, dim]));
+        let picked = t0.value(w0.gather(&idx));
+        assert_eq!(picked.shape, vec![idx.len(), dim]);
+        assert_eq!(&picked.data[0..dim], &w[2 * dim..3 * dim]);
+
+        let loss_of = |wd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let wv = t.input(TensorND::new(wd.to_vec(), vec![vocab, dim]));
+            let vv = t.input(TensorND::new(v.clone(), vec![idx.len(), dim]));
+            t.value(wv.gather(&idx).mul(vv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let wv = t.input(TensorND::new(w.clone(), vec![vocab, dim]));
+        let vv = t.input(TensorND::new(v.clone(), vec![idx.len(), dim]));
+        let grads = t.backward(wv.gather(&idx).mul(vv).sum());
+        let gw = grads[wv.idx()].clone();
+        assert_eq!(gw.shape, vec![vocab, dim]);
+
+        let eps = 1e-3f32;
+        for k in 0..w.len()
+        {
+            let mut up = w.clone();
+            let mut dn = w.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * eps);
+            assert!(
+                (num - gw.data[k]).abs() < 2e-2,
+                "gather grad {k}: numeric {num}, analytic {}",
+                gw.data[k]
+            );
+        }
+        // Rows never gathered (1 and 3) receive zero gradient.
+        assert_eq!(&gw.data[dim..2 * dim], &[0.0, 0.0, 0.0]);
+        assert_eq!(&gw.data[3 * dim..4 * dim], &[0.0, 0.0, 0.0]);
+    }
+
+    /// Fused softmax cross-entropy: gradient w.r.t. the logits matches finite
+    /// differences, and each row's gradient sums to ~0 (a property of
+    /// `softmax − onehot`).
+    #[test]
+    fn nd_cross_entropy_gradient_check() {
+        let (n, vocab) = (3usize, 4usize);
+        let targets = vec![1usize, 3, 0];
+        let logits: Vec<f32> = (0..n * vocab)
+            .map(|i| (i as f32 * 0.17 - 0.5).sin())
+            .collect();
+
+        let loss_of = |ld: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let lv = t.input(TensorND::new(ld.to_vec(), vec![n, vocab]));
+            t.value(lv.cross_entropy(&targets)).data[0]
+        };
+
+        let t = NdTape::new();
+        let lv = t.input(TensorND::new(logits.clone(), vec![n, vocab]));
+        let grads = t.backward(lv.cross_entropy(&targets));
+        let gl = grads[lv.idx()].clone();
+
+        let eps = 1e-3f32;
+        for k in 0..logits.len()
+        {
+            let mut up = logits.clone();
+            let mut dn = logits.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * eps);
+            assert!(
+                (num - gl.data[k]).abs() < 2e-2,
+                "cross-entropy grad {k}: numeric {num}, analytic {}",
+                gl.data[k]
+            );
+        }
+        for r in 0..n
+        {
+            let s: f32 = gl.data[r * vocab..(r + 1) * vocab].iter().sum();
+            assert!(s.abs() < 1e-6, "row {r} gradient should sum to 0, got {s}");
+        }
+    }
+
+    /// Sanity: with uniform logits the softmax is uniform, so the cross-entropy
+    /// equals `ln(vocab)` regardless of the target.
+    #[test]
+    fn nd_cross_entropy_uniform_is_ln_vocab() {
+        let (n, vocab) = (2usize, 7usize);
+        let t = NdTape::new();
+        let lv = t.input(TensorND::new(vec![0.0f32; n * vocab], vec![n, vocab]));
+        let loss = t.value(lv.cross_entropy(&[0, 3])).data[0];
+        assert!((loss - (vocab as f32).ln()).abs() < 1e-5, "loss {loss}");
     }
 }
