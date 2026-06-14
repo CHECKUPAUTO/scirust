@@ -84,6 +84,11 @@ impl NdLinear {
         &self.weight
     }
 
+    /// The bias tensor `(1, out)`.
+    pub fn bias(&self) -> &TensorND {
+        &self.bias
+    }
+
     /// The trainable parameters (weight, bias) paired with their gradient
     /// indices, for an optimizer ([`NdAdam`](crate::nn::nd_optim::NdAdam)).
     /// Call after a `forward` on the tape being differentiated.

@@ -13,6 +13,7 @@ pub mod embedding;
 pub mod fused_ops;
 pub mod generative;
 pub mod gnn;
+pub mod ibp;
 pub mod im2col_hpc;
 pub mod init;
 pub mod layer_norm;
