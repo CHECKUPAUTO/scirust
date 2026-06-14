@@ -92,7 +92,7 @@ valeur du projet) :
   linter (SARIF déjà livré).
 
 ### G. Outillage & confiance
-- **Acquis** : CLI (39 commandes) · SBOM CycloneDX · automatisation de release ·
+- **Acquis** : CLI (40 commandes) · SBOM CycloneDX · automatisation de release ·
   certificats de preuve · `cargo deny`.
 - **Jalons** : **protection de branche** · fuzzing des parsers · couverture
   mesurée · benchmarks **reproductibles** · docs exhaustives.

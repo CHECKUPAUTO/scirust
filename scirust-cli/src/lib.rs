@@ -205,11 +205,18 @@ const GROUPS: &[(&str, &[Command])] = &[
     ),
     (
         "NLP",
-        &[Command {
-            name: "bpe",
-            args: "\"<corpus>\" [--vocab N] [--encode \"<text>\"] [--bytes]",
-            about: "Train a deterministic BPE tokenizer (--bytes = lossless byte-level).",
-        }],
+        &[
+            Command {
+                name: "bpe",
+                args: "\"<corpus>\" [--vocab N] [--encode \"<text>\"] [--bytes]",
+                about: "Train a deterministic BPE tokenizer (--bytes = lossless byte-level).",
+            },
+            Command {
+                name: "lm",
+                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R]",
+                about: "Train a tiny causal decoder LM (N-D tape + Adam) to recall a token sequence.",
+            },
+        ],
     ),
     (
         "CODE ANALYSIS",
@@ -353,6 +360,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("fem-heat") => numeric::run_fem_heat(rest),
         Some("tt") => numeric::run_tt(rest),
         Some("bpe") => nlp::run_bpe(rest),
+        Some("lm") => nlp::run_lm(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -440,6 +448,7 @@ mod tests {
         );
         assert_eq!(run(&s(&["tt", "1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16"])), 0);
         assert_eq!(run(&s(&["bpe", "low lower lowest", "--vocab", "30"])), 0);
+        assert_eq!(run(&s(&["lm", "1,2,3,1,2,3", "--steps", "10"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

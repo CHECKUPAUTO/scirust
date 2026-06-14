@@ -19,8 +19,11 @@
   couches (compose jusqu'au modèle) ⇒ un `step()` met à jour tout le LM.
   Tests : quadratique (oracle), déterminisme bit-à-bit, LM entraîné par Adam
   (<10 % en 150 pas, prédictions exactes).
+- CLI : **commande `lm`** (`scirust lm [..] [--seed/--steps/--lr]`) — entraîne
+  le LM décodeur N-D + Adam, rapporte perte + rappel exact ; déterministe.
+  39 → 40 commandes. Docs CLI (REFERENCE.md, README, GROWTH_PLAN) à jour.
 - fix doc : lien intra-doc `[encode]` cassé dans byte_bpe.rs (gate doc).
-- 775 tests ; 8 gates verts.
+- 776 tests ; 8 gates verts.
 
 ## Session 2026-06-13 — volet 28 : bloc transformer N-D complet, entraînable
 - op nd : layernorm(axe final, backward dx=rstd(g-mean_g-y·mean_gy)) gradient-

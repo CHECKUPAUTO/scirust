@@ -67,6 +67,7 @@ cargo install --path scirust-cli      # provides the `scirust` binary
 scirust help                          # list every command, grouped
 scirust info                          # capabilities & determinism guarantees
 scirust quickstart                    # train a demo classifier (deterministic) → 4/4
+scirust lm                            # train a tiny causal decoder LM (N-D tape + Adam) → exact recall
 scirust som train                     # train the ownership model; accuracy vs baseline
 scirust evo                           # minimize a function with a seeded genetic algorithm
 scirust diff "x^2 + 3*x"              # symbolic derivative → ((2 * x) + 3)

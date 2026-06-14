@@ -6,6 +6,11 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Commande CLI `lm`** : entraîne un petit LM décodeur causal (tape N-D + Adam)
+  sur une séquence de tokens et rapporte la courbe de perte + le rappel exact —
+  `scirust lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]`. Déterministe par
+  graine ; expose toute la pile N-D (embeddings, attention causale, gather,
+  cross-entropy, Adam) en une commande. CLI : 39 → 40 commandes.
 - **Optimiseur Adam N-D, réutilisable et déterministe** (`nn::nd_optim`) :
   `NdAdam` (Kingma & Ba) sur un ensemble ordonné de paramètres. Chaque couche
   expose `parameters() -> Vec<NdParam>` (vue `&mut` des valeurs + index du
