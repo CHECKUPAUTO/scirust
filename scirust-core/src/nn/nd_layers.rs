@@ -344,6 +344,101 @@ impl NdLayerNorm {
     }
 }
 
+/// RMS normalisation over the last axis with a learnable scale
+/// (`y = γ · rmsnorm(x)`) — the LLaMA-family normalisation (no centring, no
+/// bias). Cheaper than [`NdLayerNorm`].
+pub struct NdRmsNorm {
+    gamma: TensorND, // (d,)
+    eps: f32,
+    g_idx: Option<usize>,
+}
+
+impl NdRmsNorm {
+    /// New layer over the last axis of width `d`. `γ = 1`.
+    pub fn new(d: usize, eps: f32) -> Self {
+        Self {
+            gamma: TensorND::ones(&[d]),
+            eps,
+            g_idx: None,
+        }
+    }
+
+    /// Forward: RMS-normalise the last axis then apply the broadcast scale.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let g = tape.input(self.gamma.clone());
+        self.g_idx = Some(g.idx());
+        x.rmsnorm(self.eps).mul(g)
+    }
+
+    /// SGD-update `γ`.
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        if let Some(i) = self.g_idx
+        {
+            for (p, &gv) in self.gamma.data.iter_mut().zip(&grads[i].data)
+            {
+                *p -= lr * gv;
+            }
+        }
+    }
+
+    /// Trainable parameter (`γ`) with its gradient index.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = Vec::new();
+        if let Some(i) = self.g_idx
+        {
+            params.push(NdParam {
+                value: &mut self.gamma,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
+/// A **SwiGLU** feed-forward block (Shazeer 2020): `SiLU(x·Wg) ⊙ (x·Wu)` then a
+/// down-projection, where `SiLU(z) = z · σ(z)`. The gated-FFN used by LLaMA/PaLM
+/// in place of the two-matrix ReLU FFN. Input/output `(…, d_model)`; the gate
+/// and up projections widen to `d_ff`.
+pub struct NdSwiGLU {
+    w_gate: NdLinear, // d_model → d_ff
+    w_up: NdLinear,   // d_model → d_ff
+    w_down: NdLinear, // d_ff → d_model
+}
+
+impl NdSwiGLU {
+    /// New block. Seeded init.
+    pub fn new(d_model: usize, d_ff: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            w_gate: NdLinear::new(d_model, d_ff, rng),
+            w_up: NdLinear::new(d_model, d_ff, rng),
+            w_down: NdLinear::new(d_ff, d_model, rng),
+        }
+    }
+
+    /// Forward `down( SiLU(gate(x)) ⊙ up(x) )`.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let gate = self.w_gate.forward(tape, x);
+        let silu = gate.mul(gate.sigmoid()); // SiLU(z) = z·σ(z)
+        let up = self.w_up.forward(tape, x);
+        self.w_down.forward(tape, silu.mul(up))
+    }
+
+    /// SGD-update the three projections.
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        self.w_gate.sgd_step(grads, lr);
+        self.w_up.sgd_step(grads, lr);
+        self.w_down.sgd_step(grads, lr);
+    }
+
+    /// Trainable parameters of all three projections (gate, up, down).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.w_gate.parameters();
+        params.extend(self.w_up.parameters());
+        params.extend(self.w_down.parameters());
+        params
+    }
+}
+
 /// A full **Pre-LN transformer block** over the N-D tape:
 /// `x₁ = x + Attn(LN₁(x))`, `y = x₁ + FFN(LN₂(x₁))`. Input/output `(seq, d_model)`.
 pub struct NdTransformerBlock {
@@ -400,6 +495,62 @@ impl NdTransformerBlock {
         params.extend(self.ln2.parameters());
         params.extend(self.ffn1.parameters());
         params.extend(self.ffn2.parameters());
+        params
+    }
+}
+
+/// A **LLaMA-style transformer block**: Pre-**RMSNorm**, causal attention, and a
+/// **SwiGLU** feed-forward, with residuals —
+/// `x₁ = x + Attn(RMS₁(x))`, `y = x₁ + SwiGLU(RMS₂(x₁))`. The modern decoder
+/// block (vs the LayerNorm + ReLU-FFN [`NdTransformerBlock`]). `(seq, d_model)`.
+pub struct NdLlamaBlock {
+    norm1: NdRmsNorm,
+    attn: NdMultiHeadAttention,
+    norm2: NdRmsNorm,
+    ffn: NdSwiGLU,
+}
+
+impl NdLlamaBlock {
+    /// New block. Seeded init. `causal` selects masked (decoder/LM) attention.
+    pub fn new(
+        d_model: usize,
+        n_heads: usize,
+        d_ff: usize,
+        causal: bool,
+        rng: &mut PcgEngine,
+    ) -> Self {
+        Self {
+            norm1: NdRmsNorm::new(d_model, 1e-5),
+            attn: NdMultiHeadAttention::new(d_model, n_heads, causal, rng),
+            norm2: NdRmsNorm::new(d_model, 1e-5),
+            ffn: NdSwiGLU::new(d_model, d_ff, rng),
+        }
+    }
+
+    /// Pre-RMSNorm forward with residual connections.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let a = self.norm1.forward(tape, x);
+        let a = self.attn.forward(tape, a);
+        let x1 = x.add(a); // residual 1
+        let f = self.norm2.forward(tape, x1);
+        let f = self.ffn.forward(tape, f);
+        x1.add(f) // residual 2
+    }
+
+    /// SGD-update every parameter (both RMSNorms, attention, the SwiGLU FFN).
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        self.norm1.sgd_step(grads, lr);
+        self.attn.sgd_step(grads, lr);
+        self.norm2.sgd_step(grads, lr);
+        self.ffn.sgd_step(grads, lr);
+    }
+
+    /// Trainable parameters in a fixed order (norm1, attention, norm2, ffn).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.norm1.parameters();
+        params.extend(self.attn.parameters());
+        params.extend(self.norm2.parameters());
+        params.extend(self.ffn.parameters());
         params
     }
 }
@@ -647,6 +798,134 @@ mod tests {
         assert!(
             last < first * 0.7,
             "transformer block did not learn: first {first}, last {last}"
+        );
+    }
+
+    /// [`NdRmsNorm`] layer: gradient w.r.t. the input matches finite differences
+    /// (exercises the rmsnorm op + the broadcast `γ` scale).
+    #[test]
+    fn nd_rmsnorm_layer_input_gradient_check() {
+        let (d, seq) = (5usize, 3usize);
+        let mut norm = NdRmsNorm::new(d, 1e-6);
+        let x: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.2 - 0.6).sin() + 0.3)
+            .collect();
+        let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.1).cos() * 0.4).collect();
+
+        let loss_of = |xd: &[f32], norm: &mut NdRmsNorm| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d]));
+            let tv = t.input(TensorND::new(target.clone(), vec![seq, d]));
+            let y = norm.forward(&t, xv);
+            t.value(mse(y, tv)).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d]));
+        let tv = t.input(TensorND::new(target.clone(), vec![seq, d]));
+        let y = norm.forward(&t, xv);
+        let grads = t.backward(mse(y, tv));
+        let gx = grads[xv.idx()].clone();
+
+        let eps = 1e-3f32;
+        for k in 0..x.len()
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up, &mut norm) - loss_of(&dn, &mut norm)) / (2.0 * eps);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "rmsnorm layer grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
+    }
+
+    /// [`NdSwiGLU`] FFN: gradient w.r.t. the input matches finite differences
+    /// (exercises gate/up/down projections + the SiLU gate).
+    #[test]
+    fn nd_swiglu_gradient_check() {
+        let (d_model, d_ff, seq) = (4usize, 8usize, 2usize);
+        let mut rng = PcgEngine::new(9);
+        let mut ffn = NdSwiGLU::new(d_model, d_ff, &mut rng);
+        let x: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.23 - 0.5).sin())
+            .collect();
+        let target: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.11).cos() * 0.3)
+            .collect();
+
+        let loss_of = |xd: &[f32], ffn: &mut NdSwiGLU| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d_model]));
+            let tv = t.input(TensorND::new(target.clone(), vec![seq, d_model]));
+            let y = ffn.forward(&t, xv);
+            t.value(mse(y, tv)).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d_model]));
+        let tv = t.input(TensorND::new(target.clone(), vec![seq, d_model]));
+        let y = ffn.forward(&t, xv);
+        assert_eq!(y.shape(), vec![seq, d_model]);
+        let grads = t.backward(mse(y, tv));
+        let gx = grads[xv.idx()].clone();
+
+        let eps = 1e-3f32;
+        for k in 0..x.len()
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up, &mut ffn) - loss_of(&dn, &mut ffn)) / (2.0 * eps);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "swiglu grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
+    }
+
+    /// A **LLaMA-style block** (Pre-RMSNorm + causal attention + SwiGLU) trains
+    /// end to end on the N-D tape: the regression loss drops well below its
+    /// initial value — proof RMSNorm and SwiGLU compose and learn.
+    #[test]
+    fn nd_llama_block_trains() {
+        let (d_model, n_heads, d_ff, seq) = (8usize, 2, 16, 4);
+        let mut rng = PcgEngine::new(13);
+        let mut block = NdLlamaBlock::new(d_model, n_heads, d_ff, true, &mut rng);
+
+        let xs: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.13 - 0.5).sin())
+            .collect();
+        let ts: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.07).cos() * 0.3)
+            .collect();
+
+        let mut first = f32::NAN;
+        let mut last = f32::NAN;
+        for step in 0..80
+        {
+            let t = NdTape::new();
+            let x = t.input(TensorND::new(xs.clone(), vec![seq, d_model]));
+            let target = t.input(TensorND::new(ts.clone(), vec![seq, d_model]));
+            let y = block.forward(&t, x);
+            let loss_v = mse(y, target);
+            let loss = t.value(loss_v).data[0];
+            if step == 0
+            {
+                first = loss;
+            }
+            last = loss;
+            let grads = t.backward(loss_v);
+            block.sgd_step(&grads, 0.01);
+        }
+        assert!(
+            last < first * 0.7,
+            "LLaMA block did not learn: first {first}, last {last}"
         );
     }
 }
