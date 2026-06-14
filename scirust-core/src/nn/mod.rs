@@ -24,6 +24,7 @@ pub mod module;
 pub mod nd_decoder;
 pub mod nd_layers;
 pub mod nd_optim;
+pub mod neural_ode;
 pub mod peft;
 pub mod pool;
 pub mod positional_encoding;
