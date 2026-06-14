@@ -92,7 +92,8 @@ impl ByteBpeTokenizer {
         toks.iter().map(|t| self.vocab[t]).collect()
     }
 
-    /// Decode token ids back to a string. Exact for ids produced by [`encode`];
+    /// Decode token ids back to a string. Exact for ids produced by
+    /// [`encode`](Self::encode);
     /// uses lossy UTF-8 for arbitrary (e.g. model-generated) id streams.
     pub fn decode(&self, ids: &[u32]) -> String {
         let mut bytes = Vec::new();

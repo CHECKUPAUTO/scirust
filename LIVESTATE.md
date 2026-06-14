@@ -1,7 +1,46 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-13
+> Dernière mise à jour : 2026-06-14
+
+## Session 2026-06-14 — volet 29 : LM décodeur causal N-D + Adam N-D
+- attention causale : `NdMultiHeadAttention { causal }` (masque triangulaire
+  -1e9 avant softmax, propagé à `NdTransformerBlock`) ; aucune nouvelle op.
+  Test de causalité : perturber le dernier token n'altère AUCUNE sortie
+  antérieure (bit-à-bit), la sortie perturbée bouge.
+- ops nd : `gather` (embedding, backward scatter-add ; indices répétés
+  s'accumulent, lignes inutilisées = grad 0) + `cross_entropy` (softmax+NLL
+  fusionné, log-sum-exp ; backward (softmax-onehot)/n). Gradient-checkées.
+- `nn::nd_decoder` : **NdDecoderLM** (GPT-style : embeddings tok+pos appris,
+  N blocs causals, LN final, tête lm) entraîné en cross-entropy token-suivant.
+  Test phare : **sur-apprend une séquence et la reprédit exactement**. « voici
+  le LM ». +NdEmbedding (couche réutilisable, nd_layers).
+- `nn::nd_optim` : **NdAdam** déterministe + `parameters()` sur toutes les
+  couches (compose jusqu'au modèle) ⇒ un `step()` met à jour tout le LM.
+  Tests : quadratique (oracle), déterminisme bit-à-bit, LM entraîné par Adam
+  (<10 % en 150 pas, prédictions exactes).
+- fix doc : lien intra-doc `[encode]` cassé dans byte_bpe.rs (gate doc).
+- 775 tests ; 8 gates verts.
+
+## Session 2026-06-13 — volet 28 : bloc transformer N-D complet, entraînable
+- op nd : layernorm(axe final, backward dx=rstd(g-mean_g-y·mean_gy)) gradient-
+  checké. nd ops complètes : add/sub/mul/matmul/bmm/relu/softmax/transpose_last2
+  /reshape/permute/layernorm/sum.
+- nn::nd_layers : +NdLayerNorm (affine γ/β) +NdTransformerBlock (Pre-LN,
+  résidus) ; +sgd_step partout (attn, ln, block). Test : **bloc transformer
+  N-D complet qui APPREND** (perte<70%). « voici le bloc transformer ».
+- la tape N-D = mini-framework transformer entraînable, coexiste avec la 2D.
+- 765 tests ; 8 gates verts.
+
+## Session 2026-06-13 — volet 27 : couches N-D réutilisables + generate_sampled public
+- ops nd : reshape + permute (général, backward = perm inverse).
+- nn::nd_layers : NdLinear (entraînable, sgd_step) + NdMultiHeadAttention
+  (q/k/v/o + bloc attention). Tests : grad check entrée, MLP N-D qui APPREND
+  (perte<70%), grad check couche attention complète. « voici les couches ».
+- MiniLLM::generate_sampled(&str) : API publique sampling+KV-cache, greedy =
+  generate, déterministe par graine. « sampling branché dans generate public ».
+- 763 tests ; 8 gates verts. GROWTH_PLAN court terme : nd::Linear/Attention +
+  sampling-in-generate = FAITS.
 
 ## Session 2026-06-13 — volet 26 : traiter à fond les 3 « parts honnêtes »
 - (C) BPE byte-level (ByteBpeTokenizer, GPT-2) : base 256 octets → 0 OOV,

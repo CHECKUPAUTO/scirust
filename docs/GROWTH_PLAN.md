@@ -105,6 +105,15 @@ valeur du projet) :
 | **Moyen terme** (mois) | `nd::Linear`/`nd::Attention` + migration · lavapipe → runner GPU + résidence transparente · entraînement multi-nœuds déterministe · passe MIR SOM |
 | **Long terme** | tape N-D unifiée (2D = cas particulier) · model zoo certifié · « IA certifiable » comme produit (audit/conformité) |
 
+**État (volet 29)** : court terme *sampling seedé + KV-cache* et *softmax/
+layernorm N-D* = **faits** ; moyen terme `nd::Linear`/`nd::Attention` = **faits**
+et déjà dépassés — la tape N-D porte désormais un **LM décodeur causal complet**
+(`nn::nd_decoder::NdDecoderLM` : embeddings tok/pos, blocs causals, tête lm,
+cross-entropy) **entraînable de bout en bout** par un **optimiseur Adam N-D
+déterministe** (`nn::nd_optim::NdAdam` + `parameters()` sur toutes les couches).
+Toutes les ops N-D (dont `gather`, `cross_entropy`, attention causale) sont
+gradient-checkées ; le LM sur-apprend et reprédit une séquence exactement.
+
 ## 5. Métrique de succès
 
 Pas les TFLOPS — mais le **nombre de propriétés certifiables testées** :

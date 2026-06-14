@@ -8,9 +8,11 @@
 //! (finite differences vs. the analytic gradient), the gold standard for
 //! autodiff correctness.
 //!
-//! Supported ops (MVP): elementwise `add`/`mul` with broadcasting, 2-D `matmul`,
-//! `relu`, and `sum` to a scalar. The building blocks (`broadcast_shape`,
-//! `broadcast_to`, `matmul_shape`) live on [`TensorND`].
+//! Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
+//! `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
+//! `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
+//! a full transformer block (see `nn::nd_layers`). The shape building blocks
+//! (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
 
 use std::cell::RefCell;
 
@@ -30,7 +32,20 @@ enum Op {
     Softmax(usize),
     /// Swap the last two axes.
     TransposeLast2(usize),
+    /// Reshape (data unchanged); backward reshapes the gradient back.
+    Reshape(usize),
+    /// General axis permutation; backward permutes by the inverse.
+    Permute(usize, Vec<usize>),
+    /// Layer normalisation over the last axis (no affine); `f32` is `eps`.
+    LayerNormLast(usize, f32),
     Sum(usize),
+    /// Row lookup (embedding): select rows of a `(vocab, dim)` table by the
+    /// integer indices. Backward scatter-adds the upstream rows back.
+    Gather(usize, Vec<usize>),
+    /// Fused softmax + mean negative-log-likelihood over `(n, vocab)` logits
+    /// with one integer target per row. Output is the scalar mean loss; the
+    /// indices are constants (not differentiated).
+    CrossEntropy(usize, Vec<usize>),
 }
 
 struct Node {
@@ -147,6 +162,27 @@ impl NdTape {
                 {
                     accumulate(&mut grads[a], &transpose_last2(&g));
                 },
+                Op::Reshape(a) =>
+                {
+                    // Reshape the upstream grad back to the input's shape.
+                    let shape = nodes[a].value.shape.clone();
+                    accumulate(&mut grads[a], &TensorND::new(g.data.clone(), shape));
+                },
+                Op::Permute(a, ref perm) =>
+                {
+                    // Gradient flows through the inverse permutation.
+                    let mut inv = vec![0usize; perm.len()];
+                    for (i, &p) in perm.iter().enumerate()
+                    {
+                        inv[p] = i;
+                    }
+                    accumulate(&mut grads[a], &g.transpose(&inv).expect("permute backward"));
+                },
+                Op::LayerNormLast(a, eps) =>
+                {
+                    let dx = layernorm_backward(&nodes[a].value, &nodes[i].value, &g, eps);
+                    accumulate(&mut grads[a], &dx);
+                },
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
@@ -167,6 +203,40 @@ impl NdTape {
                     let shape = nodes[a].value.shape.clone();
                     let n = nodes[a].value.numel();
                     accumulate(&mut grads[a], &TensorND::new(vec![s; n], shape));
+                },
+                Op::Gather(a, ref idx) =>
+                {
+                    // Scatter-add each output row's gradient back to its source
+                    // row (repeated indices accumulate).
+                    let dim = nodes[a].value.shape[1];
+                    for (r, &ix) in idx.iter().enumerate()
+                    {
+                        for c in 0..dim
+                        {
+                            grads[a].data[ix * dim + c] += g.data[r * dim + c];
+                        }
+                    }
+                },
+                Op::CrossEntropy(a, ref targets) =>
+                {
+                    // dL/dlogits = (softmax(logits) − onehot(target)) / n, times
+                    // the (scalar) upstream gradient.
+                    let logits = &nodes[a].value;
+                    let (n, vocab) = (logits.shape[0], logits.shape[1]);
+                    let scale = g.data[0] / n as f32;
+                    let mut dl = vec![0.0f32; logits.data.len()];
+                    for (r, &target) in targets.iter().enumerate()
+                    {
+                        let row = &logits.data[r * vocab..(r + 1) * vocab];
+                        let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                        let sum: f32 = row.iter().map(|&v| (v - mx).exp()).sum();
+                        for c in 0..vocab
+                        {
+                            dl[r * vocab + c] = scale * (row[c] - mx).exp() / sum;
+                        }
+                        dl[r * vocab + target] -= scale;
+                    }
+                    accumulate(&mut grads[a], &TensorND::new(dl, logits.shape.clone()));
                 },
             }
         }
@@ -234,6 +304,39 @@ impl<'t> NdVar<'t> {
         self.tape.push(Op::TransposeLast2(self.idx), out)
     }
 
+    /// Reshape to `shape` (same number of elements; data order preserved).
+    pub fn reshape(self, shape: &[usize]) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(
+            a.data.len(),
+            shape.iter().product::<usize>(),
+            "reshape: element count mismatch"
+        );
+        let out = TensorND::new(a.data.clone(), shape.to_vec());
+        self.tape.push(Op::Reshape(self.idx), out)
+    }
+
+    /// Layer normalisation over the last axis (zero mean, unit variance), with
+    /// no affine — the `gamma`/`beta` of a `LayerNorm` layer are applied as a
+    /// separate `mul`/`add`.
+    pub fn layernorm(self, eps: f32) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = layernorm_lastaxis(&a, eps);
+        self.tape.push(Op::LayerNormLast(self.idx, eps), out)
+    }
+
+    /// Permute the axes (e.g. `(seq, heads, d) → (heads, seq, d)` for attention).
+    pub fn permute(self, perm: &[usize]) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = a.transpose(perm).expect("permute: invalid axes");
+        self.tape.push(Op::Permute(self.idx, perm.to_vec()), out)
+    }
+
+    /// The shape of this node's value.
+    pub fn shape(self) -> Vec<usize> {
+        self.tape.nodes.borrow()[self.idx].value.shape.clone()
+    }
+
     /// Elementwise ReLU.
     pub fn relu(self) -> NdVar<'t> {
         let a = self.tape.nodes.borrow()[self.idx].value.clone();
@@ -248,6 +351,57 @@ impl<'t> NdVar<'t> {
         let s: f32 = a.data.iter().sum();
         self.tape
             .push(Op::Sum(self.idx), TensorND::new(vec![s], vec![1]))
+    }
+
+    /// Embedding lookup: `self` is a `(vocab, dim)` table; returns the
+    /// `(indices.len(), dim)` stack of the selected rows. Gradients
+    /// scatter-add back to the table (repeated indices accumulate).
+    pub fn gather(self, indices: &[usize]) -> NdVar<'t> {
+        let w = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(w.ndim(), 2, "gather: table must be 2-D (vocab, dim)");
+        let (vocab, dim) = (w.shape[0], w.shape[1]);
+        let mut data = Vec::with_capacity(indices.len() * dim);
+        for &ix in indices
+        {
+            assert!(
+                ix < vocab,
+                "gather: index {ix} out of range (vocab {vocab})"
+            );
+            data.extend_from_slice(&w.data[ix * dim..(ix + 1) * dim]);
+        }
+        let out = TensorND::new(data, vec![indices.len(), dim]);
+        self.tape.push(Op::Gather(self.idx, indices.to_vec()), out)
+    }
+
+    /// Fused softmax + mean negative-log-likelihood: `self` is `(n, vocab)`
+    /// logits, `targets` holds one class index per row. Returns the scalar mean
+    /// loss, computed with the log-sum-exp trick for numerical stability.
+    pub fn cross_entropy(self, targets: &[usize]) -> NdVar<'t> {
+        let logits = self.tape.nodes.borrow()[self.idx].value.clone();
+        assert_eq!(
+            logits.ndim(),
+            2,
+            "cross_entropy: logits must be 2-D (n, vocab)"
+        );
+        let (n, vocab) = (logits.shape[0], logits.shape[1]);
+        assert_eq!(targets.len(), n, "cross_entropy: one target per row");
+        let mut loss = 0.0f32;
+        for (r, &t) in targets.iter().enumerate()
+        {
+            let row = &logits.data[r * vocab..(r + 1) * vocab];
+            let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let lse = mx + row.iter().map(|&v| (v - mx).exp()).sum::<f32>().ln();
+            assert!(
+                t < vocab,
+                "cross_entropy: target {t} out of range (vocab {vocab})"
+            );
+            loss += lse - row[t];
+        }
+        loss /= n as f32;
+        self.tape.push(
+            Op::CrossEntropy(self.idx, targets.to_vec()),
+            TensorND::new(vec![loss], vec![1]),
+        )
     }
 
     fn pair(self, other: NdVar<'t>) -> (TensorND, TensorND) {
@@ -439,6 +593,52 @@ fn softmax_backward(y: &TensorND, g: &TensorND) -> TensorND {
         }
     }
     TensorND::new(dx, y.shape.clone())
+}
+
+/// Layer normalisation over the last axis (no affine).
+fn layernorm_lastaxis(t: &TensorND, eps: f32) -> TensorND {
+    let d = t.shape[t.ndim() - 1].max(1);
+    let outer = t.data.len() / d;
+    let mut out = vec![0.0f32; t.data.len()];
+    for o in 0..outer
+    {
+        let base = o * d;
+        let row = &t.data[base..base + d];
+        let mean = row.iter().sum::<f32>() / d as f32;
+        let var = row.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / d as f32;
+        let rstd = 1.0 / (var + eps).sqrt();
+        for i in 0..d
+        {
+            out[base + i] = (row[i] - mean) * rstd;
+        }
+    }
+    TensorND::new(out, t.shape.clone())
+}
+
+/// Backward of [`layernorm_lastaxis`]:
+/// `dx_i = rstd·(g_i − mean(g) − y_i·mean(g·y))` over the last axis.
+fn layernorm_backward(x: &TensorND, y: &TensorND, g: &TensorND, eps: f32) -> TensorND {
+    let d = x.shape[x.ndim() - 1].max(1);
+    let outer = x.data.len() / d;
+    let mut dx = vec![0.0f32; x.data.len()];
+    for o in 0..outer
+    {
+        let base = o * d;
+        let row = &x.data[base..base + d];
+        let mean = row.iter().sum::<f32>() / d as f32;
+        let var = row.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / d as f32;
+        let rstd = 1.0 / (var + eps).sqrt();
+        let mean_g = g.data[base..base + d].iter().sum::<f32>() / d as f32;
+        let mean_gy = (0..d)
+            .map(|i| g.data[base + i] * y.data[base + i])
+            .sum::<f32>()
+            / d as f32;
+        for i in 0..d
+        {
+            dx[base + i] = rstd * (g.data[base + i] - mean_g - y.data[base + i] * mean_gy);
+        }
+    }
+    TensorND::new(dx, x.shape.clone())
 }
 
 /// Swap the last two axes (`(…,a,b) → (…,b,a)`); its own inverse.
@@ -706,6 +906,45 @@ mod tests {
         check(&gv, &v, &|p| attn_loss(&q, &k, p));
     }
 
+    /// LayerNorm over the last axis: its input gradient matches finite
+    /// differences (loss = sum(layernorm(x)·v) to make the gradient non-trivial).
+    #[test]
+    fn nd_layernorm_gradient_check() {
+        let shape = vec![2usize, 5];
+        let n = 10;
+        let x: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let v: Vec<f32> = (0..n).map(|i| (i as f32 * 0.2).cos()).collect();
+        let eps = 1e-5f32;
+
+        let loss_of = |xd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), shape.clone()));
+            let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+            t.value(xv.layernorm(eps).mul(vv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), shape.clone()));
+        let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+        let grads = t.backward(xv.layernorm(eps).mul(vv).sum());
+        let gx = grads[xv.idx()].clone();
+
+        let fd = 1e-3f32;
+        for k in 0..n
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += fd;
+            dn[k] -= fd;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * fd);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "layernorm grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
+    }
+
     #[test]
     fn broadcast_add_reduces_gradient() {
         // c = a(2,3) + b(1,3); d(loss) = sum(c). dL/db must be summed over the
@@ -788,5 +1027,113 @@ mod tests {
         check(&gb, &b, &|p| loss_of(&a, p));
         // The broadcast operand keeps its own (batch-1) shape.
         assert_eq!(gb.shape, vec![1, 3, 2]);
+    }
+
+    /// Embedding `gather`: forward selects the right rows, and the gradient
+    /// w.r.t. the table matches finite differences. The index list repeats a
+    /// row (tests scatter-add) and omits two rows (whose gradient must be 0).
+    #[test]
+    fn nd_gather_gradient_check() {
+        let (vocab, dim) = (5usize, 3usize);
+        let idx = vec![2usize, 0, 2, 4]; // row 2 repeated; rows 1 and 3 unused
+        let w: Vec<f32> = (0..vocab * dim)
+            .map(|i| (i as f32 * 0.2 - 0.5).sin())
+            .collect();
+        let v: Vec<f32> = (0..idx.len() * dim)
+            .map(|i| (i as f32 * 0.3).cos())
+            .collect();
+
+        // Forward picks the correct rows.
+        let t0 = NdTape::new();
+        let w0 = t0.input(TensorND::new(w.clone(), vec![vocab, dim]));
+        let picked = t0.value(w0.gather(&idx));
+        assert_eq!(picked.shape, vec![idx.len(), dim]);
+        assert_eq!(&picked.data[0..dim], &w[2 * dim..3 * dim]);
+
+        let loss_of = |wd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let wv = t.input(TensorND::new(wd.to_vec(), vec![vocab, dim]));
+            let vv = t.input(TensorND::new(v.clone(), vec![idx.len(), dim]));
+            t.value(wv.gather(&idx).mul(vv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let wv = t.input(TensorND::new(w.clone(), vec![vocab, dim]));
+        let vv = t.input(TensorND::new(v.clone(), vec![idx.len(), dim]));
+        let grads = t.backward(wv.gather(&idx).mul(vv).sum());
+        let gw = grads[wv.idx()].clone();
+        assert_eq!(gw.shape, vec![vocab, dim]);
+
+        let eps = 1e-3f32;
+        for k in 0..w.len()
+        {
+            let mut up = w.clone();
+            let mut dn = w.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * eps);
+            assert!(
+                (num - gw.data[k]).abs() < 2e-2,
+                "gather grad {k}: numeric {num}, analytic {}",
+                gw.data[k]
+            );
+        }
+        // Rows never gathered (1 and 3) receive zero gradient.
+        assert_eq!(&gw.data[dim..2 * dim], &[0.0, 0.0, 0.0]);
+        assert_eq!(&gw.data[3 * dim..4 * dim], &[0.0, 0.0, 0.0]);
+    }
+
+    /// Fused softmax cross-entropy: gradient w.r.t. the logits matches finite
+    /// differences, and each row's gradient sums to ~0 (a property of
+    /// `softmax − onehot`).
+    #[test]
+    fn nd_cross_entropy_gradient_check() {
+        let (n, vocab) = (3usize, 4usize);
+        let targets = vec![1usize, 3, 0];
+        let logits: Vec<f32> = (0..n * vocab)
+            .map(|i| (i as f32 * 0.17 - 0.5).sin())
+            .collect();
+
+        let loss_of = |ld: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let lv = t.input(TensorND::new(ld.to_vec(), vec![n, vocab]));
+            t.value(lv.cross_entropy(&targets)).data[0]
+        };
+
+        let t = NdTape::new();
+        let lv = t.input(TensorND::new(logits.clone(), vec![n, vocab]));
+        let grads = t.backward(lv.cross_entropy(&targets));
+        let gl = grads[lv.idx()].clone();
+
+        let eps = 1e-3f32;
+        for k in 0..logits.len()
+        {
+            let mut up = logits.clone();
+            let mut dn = logits.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * eps);
+            assert!(
+                (num - gl.data[k]).abs() < 2e-2,
+                "cross-entropy grad {k}: numeric {num}, analytic {}",
+                gl.data[k]
+            );
+        }
+        for r in 0..n
+        {
+            let s: f32 = gl.data[r * vocab..(r + 1) * vocab].iter().sum();
+            assert!(s.abs() < 1e-6, "row {r} gradient should sum to 0, got {s}");
+        }
+    }
+
+    /// Sanity: with uniform logits the softmax is uniform, so the cross-entropy
+    /// equals `ln(vocab)` regardless of the target.
+    #[test]
+    fn nd_cross_entropy_uniform_is_ln_vocab() {
+        let (n, vocab) = (2usize, 7usize);
+        let t = NdTape::new();
+        let lv = t.input(TensorND::new(vec![0.0f32; n * vocab], vec![n, vocab]));
+        let loss = t.value(lv.cross_entropy(&[0, 3])).data[0];
+        assert!((loss - (vocab as f32).ln()).abs() < 1e-5, "loss {loss}");
     }
 }
