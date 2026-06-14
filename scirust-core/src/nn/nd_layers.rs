@@ -8,6 +8,7 @@
 //! preserving determinism.
 
 use crate::autodiff::nd::{NdTape, NdVar};
+use crate::nn::nd_optim::NdParam;
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
 
@@ -82,6 +83,28 @@ impl NdLinear {
     pub fn weight(&self) -> &TensorND {
         &self.weight
     }
+
+    /// The trainable parameters (weight, bias) paired with their gradient
+    /// indices, for an optimizer ([`NdAdam`](crate::nn::nd_optim::NdAdam)).
+    /// Call after a `forward` on the tape being differentiated.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = Vec::new();
+        if let Some(i) = self.w_idx
+        {
+            params.push(NdParam {
+                value: &mut self.weight,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = self.b_idx
+        {
+            params.push(NdParam {
+                value: &mut self.bias,
+                grad_idx: i,
+            });
+        }
+        params
+    }
 }
 
 /// An embedding table `(vocab, dim)`: maps integer ids to rows via the N-D
@@ -127,6 +150,20 @@ impl NdEmbedding {
     /// The embedding table `(vocab, dim)`.
     pub fn table(&self) -> &TensorND {
         &self.table
+    }
+
+    /// The trainable parameter (the table) paired with its gradient index, for
+    /// an optimizer. Call after a `forward` on the tape being differentiated.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = Vec::new();
+        if let Some(i) = self.idx
+        {
+            params.push(NdParam {
+                value: &mut self.table,
+                grad_idx: i,
+            });
+        }
+        params
     }
 }
 
@@ -226,6 +263,15 @@ impl NdMultiHeadAttention {
         self.w_v.sgd_step(grads, lr);
         self.w_o.sgd_step(grads, lr);
     }
+
+    /// Trainable parameters of all four projections, in q/k/v/o order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.w_q.parameters();
+        params.extend(self.w_k.parameters());
+        params.extend(self.w_v.parameters());
+        params.extend(self.w_o.parameters());
+        params
+    }
 }
 
 /// Layer normalisation over the last axis with a learnable affine
@@ -276,6 +322,26 @@ impl NdLayerNorm {
             }
         }
     }
+
+    /// Trainable parameters (gamma, beta) with their gradient indices.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = Vec::new();
+        if let Some(i) = self.g_idx
+        {
+            params.push(NdParam {
+                value: &mut self.gamma,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = self.b_idx
+        {
+            params.push(NdParam {
+                value: &mut self.beta,
+                grad_idx: i,
+            });
+        }
+        params
+    }
 }
 
 /// A full **Pre-LN transformer block** over the N-D tape:
@@ -324,6 +390,17 @@ impl NdTransformerBlock {
         self.ln2.sgd_step(grads, lr);
         self.ffn1.sgd_step(grads, lr);
         self.ffn2.sgd_step(grads, lr);
+    }
+
+    /// Trainable parameters of the whole block, in a fixed order
+    /// (ln1, attention, ln2, ffn1, ffn2).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.ln1.parameters();
+        params.extend(self.attn.parameters());
+        params.extend(self.ln2.parameters());
+        params.extend(self.ffn1.parameters());
+        params.extend(self.ffn2.parameters());
+        params
     }
 }
 

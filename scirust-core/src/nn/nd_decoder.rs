@@ -13,6 +13,7 @@
 
 use crate::autodiff::nd::{NdTape, NdVar};
 use crate::nn::nd_layers::{NdEmbedding, NdLayerNorm, NdLinear, NdTransformerBlock};
+use crate::nn::nd_optim::NdParam;
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
 
@@ -108,6 +109,22 @@ impl NdDecoderLM {
         }
         self.ln_f.sgd_step(grads, lr);
         self.head.sgd_step(grads, lr);
+    }
+
+    /// Every trainable parameter, in a fixed order (token + positional
+    /// embeddings, each block, final LayerNorm, LM head), paired with its
+    /// gradient index — feed to [`NdAdam`](crate::nn::nd_optim::NdAdam). Call
+    /// after a forward/loss on the tape being differentiated.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.tok.parameters();
+        params.extend(self.pos.parameters());
+        for b in &mut self.blocks
+        {
+            params.extend(b.parameters());
+        }
+        params.extend(self.ln_f.parameters());
+        params.extend(self.head.parameters());
+        params
     }
 
     /// Greedy next-token prediction at each position: returns the argmax of
@@ -209,5 +226,46 @@ mod tests {
         let b = run();
         assert_eq!(a.shape, vec![tokens.len(), 6]);
         assert_eq!(a.data, b.data);
+    }
+
+    /// The decoder LM trains with the **N-D Adam** optimizer (via
+    /// `parameters()`): in far fewer steps than the SGD test it drives the loss
+    /// below 10% of its start and predicts the sequence exactly. Proves Adam is
+    /// wired through every layer of the model.
+    #[test]
+    fn nd_decoder_lm_trains_with_adam() {
+        use crate::nn::nd_optim::NdAdam;
+
+        let mut rng = PcgEngine::new(123);
+        let mut lm = NdDecoderLM::new(tiny_cfg(), &mut rng);
+        let seq = [1usize, 2, 3, 4, 2, 5];
+        let mut opt = NdAdam::with_lr(0.01);
+
+        let mut first = f32::NAN;
+        let mut last = f32::NAN;
+        for step in 0..150
+        {
+            let t = NdTape::new();
+            let loss_v = lm.loss(&t, &seq);
+            let loss = t.value(loss_v).data[0];
+            if step == 0
+            {
+                first = loss;
+            }
+            last = loss;
+            let grads = t.backward(loss_v);
+            let mut params = lm.parameters();
+            opt.step(&mut params, &grads);
+        }
+
+        assert!(
+            last < first * 0.1,
+            "Adam did not train the decoder: first {first}, last {last}"
+        );
+        assert_eq!(opt.step_count(), 150);
+
+        let t = NdTape::new();
+        let preds = lm.predict(&t, &seq[..seq.len() - 1]);
+        assert_eq!(preds, seq[1..].to_vec(), "Adam-trained model mispredicts");
     }
 }
