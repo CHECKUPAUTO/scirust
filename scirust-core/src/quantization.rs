@@ -208,6 +208,162 @@ mod tests_quant_linear {
     }
 }
 
+// ----- SmoothQuant : lissage activation→poids pour quantification int8 --------
+
+/// **SmoothQuant** (Xiao et al. 2022) : facteurs de lissage par canal d'entrée
+/// `s_j = max|X_:,j|^α / max|W_j,:|^(1-α)`. On migre la difficulté de
+/// quantification des activations (souvent à valeurs aberrantes) vers les poids,
+/// qui se quantifient mieux. `x` est `(tokens × in)`, `w` est `(in × out)`,
+/// `alpha ∈ [0,1]` (0.5 typique). Retourne les `in` facteurs.
+pub fn smoothquant_scales(
+    x: &[f32],
+    tokens: usize,
+    in_f: usize,
+    w: &[f32],
+    out_f: usize,
+    alpha: f32,
+) -> Vec<f32> {
+    assert_eq!(x.len(), tokens * in_f, "smoothquant: x size");
+    assert_eq!(w.len(), in_f * out_f, "smoothquant: w size");
+    let mut s = vec![1.0f32; in_f];
+    for (j, sj) in s.iter_mut().enumerate()
+    {
+        let mut xmax = 0.0f32;
+        for t in 0..tokens
+        {
+            xmax = xmax.max(x[t * in_f + j].abs());
+        }
+        let mut wmax = 0.0f32;
+        for o in 0..out_f
+        {
+            wmax = wmax.max(w[j * out_f + o].abs());
+        }
+        let num = xmax.powf(alpha);
+        let den = wmax.powf(1.0 - alpha);
+        // Keep s_j = 1 for empty channels (avoids div-by-zero / NaNs).
+        if num > 1e-12 && den > 1e-12
+        {
+            *sj = num / den;
+        }
+    }
+    s
+}
+
+/// Apply SmoothQuant in place: `X[:,j] /= s_j`, `W[j,:] *= s_j`. This is exactly
+/// difficulty-preserving — `X·W` is unchanged — so it can run before int8
+/// quantization without altering the (full-precision) result.
+pub fn apply_smoothquant(
+    x: &mut [f32],
+    tokens: usize,
+    in_f: usize,
+    w: &mut [f32],
+    out_f: usize,
+    s: &[f32],
+) {
+    assert_eq!(s.len(), in_f, "smoothquant: scale len");
+    for t in 0..tokens
+    {
+        for j in 0..in_f
+        {
+            x[t * in_f + j] /= s[j];
+        }
+    }
+    for j in 0..in_f
+    {
+        for o in 0..out_f
+        {
+            w[j * out_f + o] *= s[j];
+        }
+    }
+}
+
+#[cfg(test)]
+mod smoothquant_tests {
+    use super::*;
+
+    fn matmul_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for p in 0..k
+            {
+                for j in 0..n
+                {
+                    out[i * n + j] += a[i * k + p] * b[p * n + j];
+                }
+            }
+        }
+        out
+    }
+
+    /// SmoothQuant preserves the full-precision product `X·W`.
+    #[test]
+    fn smoothquant_preserves_product() {
+        let (tokens, in_f, out_f) = (3usize, 4, 2);
+        let mut x: Vec<f32> = (0..tokens * in_f)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin())
+            .collect();
+        // Outlier input channel 0 (large activations) — the case SmoothQuant targets.
+        for t in 0..tokens
+        {
+            x[t * in_f] *= 50.0;
+        }
+        let mut w: Vec<f32> = (0..in_f * out_f).map(|i| (i as f32 * 0.2).cos()).collect();
+
+        let y = matmul_f32(&x, &w, tokens, in_f, out_f);
+        let s = smoothquant_scales(&x, tokens, in_f, &w, out_f, 0.5);
+        apply_smoothquant(&mut x, tokens, in_f, &mut w, out_f, &s);
+        let y2 = matmul_f32(&x, &w, tokens, in_f, out_f);
+
+        for (a, b) in y.iter().zip(&y2)
+        {
+            assert!((a - b).abs() < 1e-2, "product changed: {a} vs {b}");
+        }
+    }
+
+    /// SmoothQuant flattens the per-channel activation ranges: the outlier
+    /// channel's range shrinks, so the spread across channels is far smaller.
+    #[test]
+    fn smoothquant_reduces_activation_outliers() {
+        let (tokens, in_f, out_f) = (4usize, 4, 3);
+        let mut x: Vec<f32> = (0..tokens * in_f)
+            .map(|i| (i as f32 * 0.17 + 0.5).sin())
+            .collect();
+        for t in 0..tokens
+        {
+            x[t * in_f] *= 40.0; // outlier channel 0
+        }
+        let mut w: Vec<f32> = (0..in_f * out_f)
+            .map(|i| (i as f32 * 0.11 - 0.3).cos())
+            .collect();
+
+        let chan_spread = |x: &[f32]| -> f32 {
+            let maxes: Vec<f32> = (0..in_f)
+                .map(|j| {
+                    (0..tokens)
+                        .map(|t| x[t * in_f + j].abs())
+                        .fold(0.0, f32::max)
+                })
+                .collect();
+            maxes.iter().cloned().fold(0.0, f32::max)
+                / maxes
+                    .iter()
+                    .cloned()
+                    .fold(f32::INFINITY, f32::min)
+                    .max(1e-9)
+        };
+
+        let before = chan_spread(&x);
+        let s = smoothquant_scales(&x, tokens, in_f, &w, out_f, 0.5);
+        apply_smoothquant(&mut x, tokens, in_f, &mut w, out_f, &s);
+        let after = chan_spread(&x);
+        assert!(
+            after < before * 0.5,
+            "outliers not smoothed: {before} -> {after}"
+        );
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
