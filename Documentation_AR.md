@@ -141,3 +141,4 @@ SciRust هو إطار العمل المفضل لأولئك الذين يعطون
 أوامر CLI جديدة:
 - `scirust certify [--seed N] [--eps E]` — حدود قابلة للإثبات لشبكة ReLU MLP (IBP).
 - `scirust lm [...] [--opt adam|adamw|lion]` — تدريب النموذج اللغوي N-D.
+- `scirust conformal [--seed N] [--alpha A]` — فترات مطابِقة بتغطية مضمونة دون افتراض توزيع.

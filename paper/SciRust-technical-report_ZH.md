@@ -273,3 +273,5 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 
 两个 CLI 命令暴露了这些工作：`scirust certify`（IBP 界与鲁棒性）与
 `scirust lm --opt adam|adamw|lion`（训练 N-D 解码器语言模型）。
+
+第三个命令 `scirust conformal` 生成具有保证覆盖率的保形预测区间（无分布假设）。

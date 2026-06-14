@@ -280,3 +280,5 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP-Schranken/Robustheit)
 und `scirust lm --opt adam|adamw|lion` (Training des N-D-Decoder-LM).
+
+Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.

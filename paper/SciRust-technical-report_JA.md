@@ -278,3 +278,5 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 
 2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP 境界とロバスト性）と
 `scirust lm --opt adam|adamw|lion`（N-D デコーダ LM の学習）。
+
+3 つ目のコマンド `scirust conformal` は、分布非依存で被覆率を保証する共形予測区間を生成します。

@@ -2,6 +2,7 @@
 //! evolutionary optimization. Both are deterministic in their seed.
 
 use scirust_core::nn::PcgEngine;
+use scirust_core::nn::conformal::ConformalRegressor;
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_evo::{CmaEs, GeneticAlgorithm};
@@ -81,6 +82,48 @@ pub fn run_certify(args: &[String]) -> u8 {
             "not certified at this eps (try a smaller --eps)".to_string()
         }
     );
+    0
+}
+
+/// `conformal [--seed N] [--alpha A]` — calibrate a **split-conformal**
+/// regressor on synthetic residuals at target coverage `1 − α`, then report the
+/// **empirical coverage** measured on fresh data and the interval half-width.
+/// Distribution-free guarantee, demonstrated and deterministic by seed.
+pub fn run_conformal(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let alpha = flag_f32(args, "--alpha", 0.1);
+    if alpha <= 0.0 || alpha >= 1.0 || !alpha.is_finite()
+    {
+        eprintln!("usage: scirust conformal [--seed N] [--alpha A]");
+        eprintln!("error: --alpha must be in (0, 1)");
+        return 2;
+    }
+
+    let mut rng = PcgEngine::new(seed);
+    let noise = |r: &mut PcgEngine| (r.float_signed() + r.float_signed()).abs();
+    let cal: Vec<f32> = (0..2000).map(|_| noise(&mut rng)).collect();
+    let reg = ConformalRegressor::calibrate(&cal, alpha);
+
+    let n_test = 5000usize;
+    let mut covered = 0usize;
+    for _ in 0..n_test
+    {
+        if reg.covers(0.0, noise(&mut rng))
+        {
+            covered += 1;
+        }
+    }
+    let coverage = covered as f32 / n_test as f32;
+    let target = 100.0 * (1.0 - alpha);
+
+    println!("Conformal prediction — pure Rust, deterministic (seed {seed})");
+    println!("  calibration: 2000 points · target coverage {target:.0}% (alpha {alpha})");
+    println!("  interval half-width q̂ = {:.4}", reg.half_width());
+    println!(
+        "  empirical coverage on {n_test} fresh points: {:.1}%",
+        100.0 * coverage
+    );
+    println!("  guarantee: distribution-free marginal coverage ≥ {target:.0}%");
     0
 }
 
@@ -272,5 +315,15 @@ mod tests {
         assert_eq!(run_certify(&s(&["--seed", "3", "--eps", "0.2"])), 0);
         // Invalid eps is rejected.
         assert_eq!(run_certify(&s(&["--eps", "0"])), 2);
+    }
+
+    #[test]
+    fn conformal_runs() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(run_conformal(&s(&["--alpha", "0.1"])), 0);
+        assert_eq!(run_conformal(&s(&["--seed", "5", "--alpha", "0.2"])), 0);
+        // alpha must be in (0,1).
+        assert_eq!(run_conformal(&s(&["--alpha", "0"])), 2);
+        assert_eq!(run_conformal(&s(&["--alpha", "1"])), 2);
     }
 }

@@ -5,6 +5,7 @@ pub mod audio;
 pub mod batch_norm;
 pub mod batch_norm_2d;
 pub mod certified;
+pub mod conformal;
 pub mod conv2d;
 pub mod conv2d_transpose;
 pub mod conv_utils;

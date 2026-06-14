@@ -606,3 +606,5 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
 
 Two CLI commands surface this work: `scirust certify` (IBP bounds and robustness)
 and `scirust lm --opt adam|adamw|lion` (train the N-D decoder LM).
+
+A third command, `scirust conformal`, produces distribution-free conformal-prediction intervals with a guaranteed coverage level.

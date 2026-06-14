@@ -267,3 +267,4 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
 Nouvelles commandes CLI :
 - `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP).
 - `scirust lm [...] [--opt adam|adamw|lion]` — entraîne le LM décodeur N-D.
+- `scirust conformal [--seed N] [--alpha A]` — intervalles conformes à couverture garantie (sans hypothèse de distribution).

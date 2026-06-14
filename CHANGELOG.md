@@ -6,6 +6,13 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Conformal prediction** (`nn::conformal`, Angelopoulos & Bates 2021, roadmap
+  #21) : `conformal_quantile`, `ConformalRegressor`, `ConformalClassifier` —
+  ensembles/intervalles de prédiction à **couverture garantie sans hypothèse de
+  distribution** (`≥ 1 − α`). Tests : la couverture empirique atteint la cible
+  sur des données fraîches (régression *et* classification). CLI : `scirust
+  conformal [--seed N] [--alpha A]` (couverture mesurée en direct, ex. 90,8 %
+  pour une cible de 90 %). CLI : 41 → 42 commandes.
 - **Lot 3 recherche → fonctions** (testées, 8 gates verts ; **14 des 20** items
   de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
   - **Muon** (`nn::nd_optim`, Jordan et al. 2024) : optimiseur matriciel —

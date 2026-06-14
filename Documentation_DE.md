@@ -165,3 +165,4 @@ Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fer
 Neue CLI-Befehle:
 - `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP).
 - `scirust lm [...] [--opt adam|adamw|lion]` — trainiert das N-D-Decoder-LM.
+- `scirust conformal [--seed N] [--alpha A]` — konforme Intervalle mit garantierter, verteilungsfreier Überdeckung.

@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 34 : conformal prediction (#21) + doc/CLI/paper
+- `nn::conformal` (Angelopoulos & Bates) : `conformal_quantile`,
+  `ConformalRegressor`, `ConformalClassifier` ; couverture garantie sans
+  hypothèse de distribution. Tests : couverture empirique atteint la cible
+  (régression + classification).
+- CLI : `scirust conformal [--seed N] [--alpha A]` (couverture en direct ;
+  90,8 % pour cible 90 %). 42 commandes.
+- docs : roadmap #21 ✅ ; README/REFERENCE/GROWTH_PLAN ; Documentation (8 langues)
+  et paper (8 langues) — commande conformal ajoutée.
+- 816 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 33 : CLI + docs multilingues + papers (cycle 2)
 - CLI : `scirust certify` (bornes IBP) + `scirust lm --opt adam|adamw|lion`.
   41 commandes. Tests + 8 gates verts.
