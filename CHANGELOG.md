@@ -6,6 +6,26 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Feuille de route recherche → fonctions** ([`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  20 papers réels traduits en fonctions concrètes, avec statut et effort. Premier
+  lot **livré cette session** (testé, 8 gates verts) :
+  - **IBP — bornes de sortie certifiées** (`nn::ibp`, Gowal et al. 2018) :
+    propagation d'intervalles dans un MLP ReLU → boîte de sortie **prouvée** ;
+    `certified_robust` transforme la borne en garantie de classe. Soundness
+    testée par échantillonnage (4000 points ∈ boîte certifiée). *Le* pilier « IA
+    certifiable » rendu concret.
+  - **Réductions reproductibles** (`reproducible`, Demmel & Nguyen) :
+    `reproducible_sum`/`_mean`/`_dot` **bit-identiques quel que soit l'ordre /
+    le nombre de threads** (tri canonique + expansion exacte de Shewchuk) ;
+    survit à l'annulation catastrophique.
+  - **Couches LLaMA N-D** (`nn::nd_layers`) : `NdRmsNorm`, `NdSwiGLU` (+ ops
+    `rmsnorm`/`sigmoid` gradient-checkées) et `NdLlamaBlock` (Pre-RMSNorm +
+    attention causale + SwiGLU) — entraînables, Adam-ready.
+  - **Décodage spéculatif exact** (`nn::nd_decoder`, Leviathan/Chen 2023) :
+    `generate_speculative` produit **exactement** la sortie greedy de la cible
+    pour n'importe quel brouillon, avec moins de forwards ; + `generate_greedy`.
+  - **Optimiseurs** (`nn::nd_optim`) : **AdamW** (weight-decay découplé) et
+    **Lion** (sign-momentum, déterministe).
 - **Commande CLI `lm`** : entraîne un petit LM décodeur causal (tape N-D + Adam)
   sur une séquence de tokens et rapporte la courbe de perte + le rappel exact —
   `scirust lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]`. Déterministe par

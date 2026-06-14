@@ -3,6 +3,22 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 30 : recherche → fonctions (lot 1, 7 features)
+- `docs/RESEARCH_ROADMAP.md` : 20 papers réels → fonctions, statut + effort.
+- **IBP certifié** (`nn::ibp`, Gowal 2018) : intervalles → boîte de sortie
+  prouvée ; `certified_robust` ; soundness testée (4000 échantillons ∈ boîte).
+  Le pilier « IA certifiable » concret. +`NdLinear::bias()`.
+- **réductions reproductibles** (`reproducible`, Demmel-Nguyen) : sum/mean/dot
+  bit-identiques quel que soit l'ordre (tri canonique + expansion Shewchuk) ;
+  survit à l'annulation catastrophique.
+- ops nd : `rmsnorm` + `sigmoid` gradient-checkées. Couches : `NdRmsNorm`,
+  `NdSwiGLU`, `NdLlamaBlock` (Pre-RMSNorm+attn causale+SwiGLU), entraînables.
+- **décodage spéculatif exact** (`nn::nd_decoder`) : `generate_speculative`
+  = greedy cible exact pour tout brouillon, moins de forwards ; +`generate_greedy`.
+- optimiseurs : **AdamW** (wd découplé) + **Lion** (déterministe).
+- DP-SGD (#19) déjà présent dans `dp.rs` (marqué ✅ dans la roadmap).
+- 794 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 29 : LM décodeur causal N-D + Adam N-D
 - attention causale : `NdMultiHeadAttention { causal }` (masque triangulaire
   -1e9 avant softmax, propagé à `NdTransformerBlock`) ; aucune nouvelle op.
