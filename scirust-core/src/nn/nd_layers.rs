@@ -200,6 +200,7 @@ pub struct NdMultiHeadAttention {
     w_v: NdLinear,
     w_o: NdLinear,
     n_heads: usize,
+    num_kv_heads: usize,
     d_model: usize,
     d_head: usize,
     causal: bool,
@@ -215,15 +216,37 @@ impl NdMultiHeadAttention {
     /// (decoder/LM attention). Rotary embeddings are off by default — enable
     /// with [`Self::with_rope`].
     pub fn new(d_model: usize, n_heads: usize, causal: bool, rng: &mut PcgEngine) -> Self {
+        Self::new_gqa(d_model, n_heads, n_heads, causal, rng)
+    }
+
+    /// **Grouped-query attention** (Ainslie et al. 2023): `num_kv_heads` key/value
+    /// heads shared across the `n_heads` query heads (`n_heads` must be a
+    /// multiple of `num_kv_heads`). `num_kv_heads == n_heads` is standard MHA;
+    /// `num_kv_heads == 1` is multi-query attention. The K/V projections shrink
+    /// to `num_kv_heads · d_head`.
+    pub fn new_gqa(
+        d_model: usize,
+        n_heads: usize,
+        num_kv_heads: usize,
+        causal: bool,
+        rng: &mut PcgEngine,
+    ) -> Self {
         assert!(d_model % n_heads == 0, "d_model must divide n_heads");
+        assert!(
+            num_kv_heads >= 1 && n_heads % num_kv_heads == 0,
+            "n_heads must be a multiple of num_kv_heads"
+        );
+        let d_head = d_model / n_heads;
+        let kv_dim = num_kv_heads * d_head;
         Self {
             w_q: NdLinear::new(d_model, d_model, rng),
-            w_k: NdLinear::new(d_model, d_model, rng),
-            w_v: NdLinear::new(d_model, d_model, rng),
+            w_k: NdLinear::new(d_model, kv_dim, rng),
+            w_v: NdLinear::new(d_model, kv_dim, rng),
             w_o: NdLinear::new(d_model, d_model, rng),
             n_heads,
+            num_kv_heads,
             d_model,
-            d_head: d_model / n_heads,
+            d_head,
             causal,
             rope: false,
         }
@@ -242,29 +265,30 @@ impl NdMultiHeadAttention {
         self
     }
 
-    /// `(seq, d_model) → (n_heads, seq, d_head)`.
-    fn split_heads<'t>(&self, x: NdVar<'t>, seq: usize) -> NdVar<'t> {
-        x.reshape(&[seq, self.n_heads, self.d_head])
-            .permute(&[1, 0, 2])
+    /// `(seq, heads·d_head) → (heads, seq, d_head)`.
+    fn split_heads<'t>(&self, x: NdVar<'t>, seq: usize, heads: usize) -> NdVar<'t> {
+        x.reshape(&[seq, heads, self.d_head]).permute(&[1, 0, 2])
     }
 
     /// Self-attention `softmax(Q·Kᵀ/√d)·V`, then the output projection. When
     /// `causal`, a triangular mask is added to the scores before the softmax so
-    /// position `i` cannot attend to any `j > i`.
+    /// position `i` cannot attend to any `j > i`. With grouped-query attention
+    /// (`num_kv_heads < n_heads`) each key/value head is shared across a group of
+    /// query heads via `bmm` batch broadcasting.
     pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
         let seq = x.shape()[0];
 
         let q = self.w_q.forward(tape, x);
-        let mut q = self.split_heads(q, seq);
+        let mut q = self.split_heads(q, seq, self.n_heads);
         let k = self.w_k.forward(tape, x);
-        let mut k = self.split_heads(k, seq);
+        let mut k = self.split_heads(k, seq, self.num_kv_heads);
         let v = self.w_v.forward(tape, x);
-        let v = self.split_heads(v, seq);
+        let v = self.split_heads(v, seq, self.num_kv_heads);
 
         if self.rope
         {
-            // Rotate Q and K per head over (n_heads, seq, d_head); attention
-            // then depends only on relative position.
+            // Rotate Q and K per head over (heads, seq, d_head); attention then
+            // depends only on relative position.
             q = q.rope(ROPE_BASE);
             k = k.rope(ROPE_BASE);
         }
@@ -273,15 +297,37 @@ impl NdMultiHeadAttention {
             vec![1.0 / (self.d_head as f32).sqrt()],
             vec![1],
         ));
-        let mut scores = q.bmm(k.transpose_last2()).mul(scale); // (h, seq, seq)
-        if self.causal
+        let group = self.n_heads / self.num_kv_heads;
+
+        let ctx = if group == 1
         {
-            // Mask (seq, seq) broadcasts over the heads axis; -1e9 above the
-            // diagonal drives those softmax weights to ~0.
-            let mask = tape.input(causal_mask(seq));
-            scores = scores.add(mask);
+            // Standard multi-head path: (n_heads, seq, d_head).
+            let mut scores = q.bmm(k.transpose_last2()).mul(scale);
+            if self.causal
+            {
+                scores = scores.add(tape.input(causal_mask(seq)));
+            }
+            scores.softmax().bmm(v)
         }
-        let ctx = scores.softmax().bmm(v); // (h, seq, d_head)
+        else
+        {
+            // GQA: q (kv_heads, group, seq, d_head) vs k/v (kv_heads, 1, …) — the
+            // size-1 group axis broadcasts, sharing each kv head across `group`
+            // query heads. Then fold the group axis back into the head axis.
+            let kvh = self.num_kv_heads;
+            let qg = q.reshape(&[kvh, group, seq, self.d_head]);
+            let kg = k.reshape(&[kvh, 1, seq, self.d_head]);
+            let vg = v.reshape(&[kvh, 1, seq, self.d_head]);
+            let mut scores = qg.bmm(kg.transpose_last2()).mul(scale); // (kvh, group, seq, seq)
+            if self.causal
+            {
+                scores = scores.add(tape.input(causal_mask(seq)));
+            }
+            scores
+                .softmax()
+                .bmm(vg)
+                .reshape(&[self.n_heads, seq, self.d_head])
+        };
 
         // Merge heads: (h, seq, d_head) → (seq, h, d_head) → (seq, d_model).
         let merged = ctx.permute(&[1, 0, 2]).reshape(&[seq, self.d_model]);
@@ -830,6 +876,58 @@ mod tests {
                 "rope attention grad {k}: numeric {num}, analytic {}",
                 gx.data[k]
             );
+        }
+    }
+
+    /// **Grouped-query attention**: the K/V projections shrink to
+    /// `num_kv_heads · d_head`, the output keeps shape `(seq, d_model)`, and the
+    /// input gradient matches finite differences (covers GQA *and* the
+    /// multi-query `num_kv_heads = 1` case via the `bmm`-broadcast path).
+    #[test]
+    fn nd_gqa_gradient_check() {
+        let (d_model, n_heads, seq) = (8usize, 4, 3);
+        for num_kv_heads in [2usize, 1]
+        {
+            let mut rng = PcgEngine::new(8);
+            let mut attn =
+                NdMultiHeadAttention::new_gqa(d_model, n_heads, num_kv_heads, true, &mut rng);
+            // K/V projections are narrower than d_model: num_kv_heads · d_head.
+            let d_head = d_model / n_heads;
+            assert_eq!(
+                attn.w_k.weight().shape,
+                vec![d_model, num_kv_heads * d_head]
+            );
+
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.17 - 0.3).sin())
+                .collect();
+            let loss_of = |xd: &[f32], attn: &mut NdMultiHeadAttention| -> f32 {
+                let t = NdTape::new();
+                let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d_model]));
+                t.value(attn.forward(&t, xv).sum()).data[0]
+            };
+
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(x.clone(), vec![seq, d_model]));
+            let out = attn.forward(&t, xv);
+            assert_eq!(out.shape(), vec![seq, d_model]);
+            let grads = t.backward(out.sum());
+            let gx = grads[xv.idx()].clone();
+
+            let eps = 1e-3f32;
+            for k in 0..x.len()
+            {
+                let mut up = x.clone();
+                let mut dn = x.clone();
+                up[k] += eps;
+                dn[k] -= eps;
+                let num = (loss_of(&up, &mut attn) - loss_of(&dn, &mut attn)) / (2.0 * eps);
+                assert!(
+                    (num - gx.data[k]).abs() < 2e-2,
+                    "gqa(kv={num_kv_heads}) grad {k}: numeric {num}, analytic {}",
+                    gx.data[k]
+                );
+            }
         }
     }
 
