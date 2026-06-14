@@ -252,3 +252,35 @@ où $\tau$ est un seuil étalonné.
 
 ### 14.3 Résultats et métriques
 Les performances attendues sur le Numenta Anomaly Benchmark (NAB) visent un score F1 $>0,85$ avec une dérive nulle au bit près sur plusieurs threads. L'utilisation de la quantification int8 QSR1 devrait réduire la latence de $3\times$ sur les processeurs ARM embarqués tout en maintenant une proximité de bits MSE $<10^{-4}$ par rapport à l'oracle f32.
+
+## Autograd N-D et extensions issues de la recherche
+
+Au-delà de la tape 2-D en mode inverse, SciRust fournit désormais une **tape
+autograd N-D** dont chaque opérateur est validé par un gradient check par
+différences finies, et au-dessus une pile d'apprentissage profond adossée à la
+recherche. Chaque capacité correspond à un papier précis et est livrée avec un
+test ; la correspondance complète (14 des 20 éléments livrés) est suivie dans
+`docs/RESEARCH_ROADMAP.md`.
+
+- **Modèle de langage décodeur causal**, entraîné de bout en bout (embeddings de
+  token et de position appris, attention multi-tête causale, cross-entropy
+  softmax fusionnée et numériquement stable), qui sur-apprend une séquence fixe
+  exactement — preuve bout-en-bout que la pile apprend.
+- **Couches de la famille LLaMA** : RMSNorm, SwiGLU, bloc LLaMA Pre-RMSNorm,
+  embeddings rotatifs (RoPE, propriété de position relative testée), et attention
+  groupée / multi-requête exprimée via le broadcast du produit matriciel par lots.
+- **Optimiseurs déterministes** : Adam, AdamW (weight decay découplé), Lion et
+  Muon (momentum orthogonalisé par Newton–Schulz) — tous reproductibles bit à bit.
+- **IA certifiable** : la propagation par intervalles (IBP) fournit des bornes de
+  sortie prouvées pour les MLP ReLU et un certificat de robustesse, validés par
+  échantillonnage de validité.
+- **Réductions reproductibles** : somme/moyenne/produit scalaire flottants
+  indépendants de l'ordre (ordre canonique + expansion exacte), bit-identiques
+  quel que soit le nombre de threads.
+- **Inférence** : décodage spéculatif exact (préservant la sortie) et une
+  FlashAttention à softmax en ligne par tuiles.
+- **Pont scientifique** : un Neural ODE qui rétropropage à travers un solveur RK4.
+- **Compression** : élagage Wanda (conscient des activations) et SmoothQuant.
+
+Deux commandes CLI exposent ces travaux : `scirust certify` (bornes et robustesse
+IBP) et `scirust lm --opt adam|adamw|lion` (entraînement du LM décodeur N-D).

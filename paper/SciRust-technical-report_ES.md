@@ -252,3 +252,30 @@ donde $\tau$ es un umbral calibrado.
 
 ### 14.3 Resultados y métricas
 El rendimiento esperado en el Numenta Anomaly Benchmark (NAB) apunta a una puntuación F1 de $>0,85$ con cero deriva de bits en múltiples subprocesos. Se espera que el uso de la cuantización int8 QSR1 reduzca la latencia en $3\times$ en los procesadores ARM de borde mientras mantiene una cercanía de bits de MSE de $<10^{-4}$ en comparación con el oráculo f32.
+
+## Autodiferenciación N-D y extensiones de investigación
+
+Más allá del grafo 2-D en modo inverso, SciRust ofrece ahora un **grafo de
+autodiferenciación N-D** cuyos operadores se validan con comprobación de
+gradiente por diferencias finitas, y sobre él una pila de aprendizaje profundo
+respaldada por la investigación. Cada capacidad corresponde a un artículo y se
+entrega con una prueba; la correspondencia completa (14 de 20 entregados) se
+sigue en `docs/RESEARCH_ROADMAP.md`.
+
+- **Modelo de lenguaje decodificador causal**, entrenado de extremo a extremo
+  (embeddings de token y posición, atención causal, entropía cruzada softmax
+  fusionada y estable), que memoriza una secuencia exactamente.
+- **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA Pre-RMSNorm, RoPE
+  (propiedad de posición relativa probada) y atención agrupada / multi-consulta.
+- **Optimizadores deterministas**: Adam, AdamW, Lion y Muon (Newton–Schulz).
+- **IA certificable**: la propagación por intervalos (IBP) da cotas de salida
+  demostrables y un certificado de robustez.
+- **Reducciones reproducibles**: suma/media/producto escalar independientes del
+  orden, idénticas bit a bit sin importar el número de hilos.
+- **Inferencia**: decodificación especulativa exacta y FlashAttention con softmax
+  en línea por bloques.
+- **Puente científico**: una Neural ODE con retropropagación a través de RK4.
+- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant.
+
+Dos comandos CLI exponen este trabajo: `scirust certify` (cotas y robustez IBP) y
+`scirust lm --opt adam|adamw|lion` (entrenar el LM decodificador N-D).

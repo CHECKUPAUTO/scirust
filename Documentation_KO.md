@@ -119,3 +119,24 @@ SciRust는 가공되지 않은 속도나 Python의 편리함보다 **이해**와
 
 ---
 *자세한 기술 정보는 `paper/SciRust-technical-report.md`의 전체 보고서를 참조하세요.*
+
+## 13. 연구 → 기능 (N-D 자동미분 확장)
+
+N-D 자동미분 테이프는 이제 완전한 딥러닝 스택을 갖추었으며, 각 구성 요소는
+연구 논문과 테스트(그래디언트 체크 또는 오라클)로 뒷받침됩니다.
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) 참조 (20개 중 14개 완료).
+
+- **인과적 디코더 LM**, 엔드투엔드 학습 (토큰 + 위치 임베딩, 인과적 어텐션,
+  융합 softmax 교차 엔트로피); 시퀀스를 정확히 과적합.
+- **LLaMA 계열 레이어**: RMSNorm, SwiGLU, LLaMA 블록, RoPE, 그룹/
+  멀티쿼리 어텐션(GQA/MQA).
+- **결정론적 옵티마이저**: Adam, AdamW, Lion, Muon(Newton–Schulz).
+- **인증 가능한 AI**: 구간 경계 전파(IBP) — *증명 가능한* 출력 경계와 견고성 인증서.
+- **재현 가능한 리덕션**, 순서 무관 (스레드 수와 무관하게 비트 단위로 동일).
+- **정확한 추측 디코딩**; **FlashAttention**(온라인 softmax); **Neural ODE**
+  (RK4 솔버를 통한 역전파).
+- **압축**: Wanda 가지치기(활성화 인식), SmoothQuant.
+
+새 CLI 명령:
+- `scirust certify [--seed N] [--eps E]` — ReLU MLP의 증명 가능한 경계(IBP).
+- `scirust lm [...] [--opt adam|adamw|lion]` — N-D 디코더 LM 학습.

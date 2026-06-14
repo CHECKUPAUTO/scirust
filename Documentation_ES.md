@@ -121,3 +121,28 @@ scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
 ## 8. Conclusión
 
 SciRust es el framework de elección para quienes priorizan la **comprensión** y el **rigor** sobre la velocidad bruta o la facilidad de Python. Es una herramienta poderosa para construir una IA de confianza, desde la investigación hasta el entorno embebido.
+
+## 13. Investigación → Funciones (extensiones del grafo N-D)
+
+El grafo de autodiferenciación N-D ahora incluye una pila completa de aprendizaje
+profundo, cada pieza respaldada por un artículo de investigación y una prueba
+(comprobación de gradiente u oráculo). Véase
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 entregados).
+
+- **LM decodificador causal**, entrenado de extremo a extremo (embeddings de
+  token + posición, atención causal, entropía cruzada con softmax fusionado);
+  memoriza una secuencia exactamente.
+- **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA, RoPE, atención agrupada /
+  multi-consulta (GQA/MQA).
+- **Optimizadores deterministas**: Adam, AdamW, Lion, Muon (Newton–Schulz).
+- **IA certificable**: Interval Bound Propagation — cotas de salida *demostrables*
+  y certificado de robustez.
+- **Reducciones reproducibles**, independientes del orden (bit a bit idénticas sin
+  importar el número de hilos).
+- **Decodificación especulativa exacta**; **FlashAttention** (softmax en línea);
+  **Neural ODE** (retropropagación a través de un solucionador RK4).
+- **Compresión**: poda Wanda (consciente de activaciones), SmoothQuant.
+
+Nuevos comandos CLI:
+- `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP).
+- `scirust lm [...] [--opt adam|adamw|lion]` — entrena el LM decodificador N-D.

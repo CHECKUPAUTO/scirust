@@ -244,3 +244,26 @@ SciRust est le framework de choix pour ceux qui privilégient la **compréhensio
 
 ---
 *Pour plus de détails techniques, consultez le rapport complet dans `paper/SciRust-technical-report.md`.*
+
+## 13. Recherche → Fonctions (extensions de la tape N-D)
+
+La tape autograd N-D porte désormais une pile d'apprentissage profond complète,
+chaque brique adossée à un papier de recherche et à un test (gradient check ou
+oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livrés).
+
+- **LM décodeur causal** entraînable de bout en bout (embeddings token + position,
+  attention causale, cross-entropy fusionnée) ; sur-apprend une séquence exactement.
+- **Couches LLaMA** : RMSNorm, SwiGLU, bloc LLaMA, RoPE, attention groupée /
+  multi-requête (GQA/MQA).
+- **Optimiseurs déterministes** : Adam, AdamW, Lion, Muon (Newton–Schulz).
+- **IA certifiable** : Interval Bound Propagation — bornes de sortie *prouvées*
+  et certificat de robustesse.
+- **Réductions reproductibles** indépendantes de l'ordre (bit-identiques quel que
+  soit le nombre de threads).
+- **Décodage spéculatif exact** ; **FlashAttention** (softmax en ligne) ;
+  **Neural ODE** (backprop à travers un solveur RK4).
+- **Compression** : élagage Wanda (activation-aware), SmoothQuant.
+
+Nouvelles commandes CLI :
+- `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP).
+- `scirust lm [...] [--opt adam|adamw|lion]` — entraîne le LM décodeur N-D.

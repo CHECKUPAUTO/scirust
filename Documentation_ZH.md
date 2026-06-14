@@ -145,3 +145,23 @@ scirust-tensor-einsum = { path = "scirust-tensor-einsum" }
 
 ---
 *有关更多技术细节，请参阅 `paper/SciRust-technical-report.md` 中的完整报告。*
+
+## 13. 研究 → 功能（N-D 自动微分扩展）
+
+N-D 自动微分带现在承载了完整的深度学习栈，每个组件都有研究论文与测试支撑
+（梯度检查或参考验证）。详见
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)（已完成 14/20）。
+
+- **因果解码器语言模型**，端到端训练（词元 + 位置嵌入、因果注意力、融合的
+  softmax 交叉熵）；可精确过拟合一个序列。
+- **LLaMA 系列层**：RMSNorm、SwiGLU、LLaMA 块、RoPE、分组/多查询注意力（GQA/MQA）。
+- **确定性优化器**：Adam、AdamW、Lion、Muon（Newton–Schulz）。
+- **可认证 AI**：区间界传播（IBP）——*可证明的*输出界与鲁棒性证书。
+- **可复现归约**，与顺序无关（无论线程数多少都按位相同）。
+- **精确投机解码**；**FlashAttention**（在线 softmax）；**神经 ODE**
+  （通过 RK4 求解器反向传播）。
+- **压缩**：Wanda 剪枝（感知激活）、SmoothQuant。
+
+新增 CLI 命令：
+- `scirust certify [--seed N] [--eps E]` —— ReLU MLP 的可证明输出界（IBP）。
+- `scirust lm [...] [--opt adam|adamw|lion]` —— 训练 N-D 解码器语言模型。

@@ -575,3 +575,34 @@ The next steps follow directly: a GPU-accelerated forward path reusing the valid
 cuBLAS backend for dense layers, a three-dimensional inference path for
 attention-based models, and supply-chain pinning to extend the runtime's auditability
 from its weights to its build.
+
+## N-D Autograd and Research-Driven Extensions
+
+Beyond the 2-D reverse-mode tape, SciRust now provides an **N-D autograd tape**
+whose every operator is validated by a finite-difference gradient check, and on
+top of it a research-backed deep-learning stack. Each capability maps to a
+specific paper and ships with a test; the full mapping (14 of 20 items delivered)
+is tracked in `docs/RESEARCH_ROADMAP.md`.
+
+- **Causal decoder language model**, trained end-to-end (token and learned
+  positional embeddings, causal multi-head attention, a fused, numerically
+  stable softmax cross-entropy), which overfits a fixed sequence exactly —
+  end-to-end evidence that the stack learns.
+- **LLaMA-family layers**: RMSNorm, SwiGLU, a Pre-RMSNorm LLaMA block, rotary
+  position embeddings (RoPE, with the relative-position property tested), and
+  grouped-/multi-query attention expressed through batched-matmul broadcasting.
+- **Deterministic optimizers**: Adam, AdamW (decoupled weight decay), Lion, and
+  Muon (Newton–Schulz orthogonalized momentum) — all bit-for-bit reproducible.
+- **Certifiable AI**: Interval Bound Propagation yields provable output bounds
+  for ReLU MLPs and a robustness certificate, validated by soundness sampling.
+- **Reproducible reductions**: order-independent floating-point sum/mean/dot
+  (canonical ordering + exact expansion), bit-identical regardless of thread
+  count — the foundation for bit-exact multi-thread training.
+- **Inference**: exact (output-preserving) speculative decoding and a tiled
+  online-softmax FlashAttention.
+- **Scientific bridge**: a Neural ODE that backpropagates through an RK4 solver.
+- **Compression**: Wanda activation-aware pruning and SmoothQuant, extending the
+  deterministic int8 path.
+
+Two CLI commands surface this work: `scirust certify` (IBP bounds and robustness)
+and `scirust lm --opt adam|adamw|lion` (train the N-D decoder LM).

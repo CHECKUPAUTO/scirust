@@ -38,7 +38,9 @@ by measurements.
 Every result below is reproduced by code in this repository and documented in the
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
-- **Deep-learning core + reverse-mode autodiff** — 683 passing workspace tests (0 failures; measured 2026-06-12); an MLP reaches 97.70% on MNIST.
+- **Deep-learning core + reverse-mode autodiff** — 810 passing workspace tests (0 failures; measured 2026-06-14); an MLP reaches 97.70% on MNIST.
+- **N-D autograd stack, research-backed and gradient-checked** — a complete causal **decoder LM** (token + positional embeddings, causal attention, fused softmax cross-entropy) that trains end-to-end and overfits a sequence *exactly*; LLaMA-family layers (**RMSNorm**, **SwiGLU**, **RoPE**, **grouped/multi-query attention**); deterministic optimizers (**Adam, AdamW, Lion, Muon**); **exact speculative decoding** and **FlashAttention** (online softmax); a **Neural ODE** (backprop through an RK4 solver). Every op is validated by a finite-difference gradient check. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
+- **Certifiable & reproducible** — **Interval Bound Propagation** gives *provable* output bounds and robustness certificates for ReLU MLPs (`scirust certify`); **order-independent floating-point reductions** are bit-identical regardless of thread count; **Wanda** pruning and **SmoothQuant** extend the deterministic int8 path.
 - **Portable GPU compute (wgpu, optional)** — a real WGSL `f32` GEMM behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI, plumbed into the autograd tape (`Var::matmul_gpu` forward + backward via `WgpuEngine`) **and** into Conv2d's im2col GEMMs (forward + backward). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Certified-deterministic multi-thread training** — `DataParallelTrainer::train_batch_threaded` runs workers across N OS threads yet reduces gradients in a fixed worker order, so the aggregate is **bit-identical for 1/2/4/8 threads** and equal to the sequential path (float addition isn't associative — the reduction order is pinned). CI-tested, including a real autograd backward. No mainstream framework ships this guarantee tested.
@@ -67,7 +69,9 @@ cargo install --path scirust-cli      # provides the `scirust` binary
 scirust help                          # list every command, grouped
 scirust info                          # capabilities & determinism guarantees
 scirust quickstart                    # train a demo classifier (deterministic) → 4/4
-scirust lm                            # train a tiny causal decoder LM (N-D tape + Adam) → exact recall
+scirust lm                            # train a tiny causal decoder LM (N-D tape) → exact recall
+scirust lm --opt lion                 # …with a different deterministic optimizer (adam|adamw|lion)
+scirust certify --eps 0.02            # prove a ReLU MLP's output bounds over an L∞ box (IBP)
 scirust som train                     # train the ownership model; accuracy vs baseline
 scirust evo                           # minimize a function with a seeded genetic algorithm
 scirust diff "x^2 + 3*x"              # symbolic derivative → ((2 * x) + 3)

@@ -144,3 +144,26 @@ SciRust is the framework of choice for those who prioritize **understanding** an
 
 ---
 *For more technical details, see the full report in `paper/SciRust-technical-report.md`.*
+
+## 13. Research → Functions (N-D autograd extensions)
+
+The N-D autograd tape now carries a complete deep-learning stack, every piece
+backed by a research paper and a test (gradient check or oracle). See
+[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 delivered).
+
+- **Causal decoder LM**, trained end-to-end (token + positional embeddings,
+  causal attention, fused softmax cross-entropy); overfits a sequence exactly.
+- **LLaMA-family layers**: RMSNorm, SwiGLU, LLaMA block, RoPE, grouped/
+  multi-query attention (GQA/MQA).
+- **Deterministic optimizers**: Adam, AdamW, Lion, Muon (Newton–Schulz).
+- **Certifiable AI**: Interval Bound Propagation — *provable* output bounds and
+  a robustness certificate.
+- **Reproducible reductions**, order-independent (bit-identical regardless of
+  thread count).
+- **Exact speculative decoding**; **FlashAttention** (online softmax);
+  **Neural ODE** (backprop through an RK4 solver).
+- **Compression**: Wanda (activation-aware) pruning, SmoothQuant.
+
+New CLI commands:
+- `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP).
+- `scirust lm [...] [--opt adam|adamw|lion]` — train the N-D decoder LM.

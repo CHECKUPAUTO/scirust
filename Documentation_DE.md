@@ -142,3 +142,26 @@ SciRust ist das Framework der Wahl für alle, die **Verständnis** und **Strenge
 
 ---
 *Weitere technische Details finden Sie im vollständigen Bericht unter `paper/SciRust-technical-report.md`.*
+
+## 13. Forschung → Funktionen (N-D-Autograd-Erweiterungen)
+
+Das N-D-Autograd-Band trägt nun einen vollständigen Deep-Learning-Stack, jedes
+Element gestützt auf eine Forschungsarbeit und einen Test (Gradientenprüfung oder
+Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fertig).
+
+- **Kausales Decoder-LM**, durchgängig trainiert (Token- + Positions-Embeddings,
+  kausale Attention, fusionierte Softmax-Kreuzentropie); lernt eine Sequenz exakt.
+- **LLaMA-Schichten**: RMSNorm, SwiGLU, LLaMA-Block, RoPE, gruppierte /
+  Multi-Query-Attention (GQA/MQA).
+- **Deterministische Optimierer**: Adam, AdamW, Lion, Muon (Newton–Schulz).
+- **Zertifizierbare KI**: Interval Bound Propagation — *beweisbare* Ausgabeschranken
+  und Robustheitszertifikat.
+- **Reproduzierbare Reduktionen**, reihenfolgenunabhängig (bit-identisch
+  unabhängig von der Thread-Anzahl).
+- **Exaktes spekulatives Decoding**; **FlashAttention** (Online-Softmax);
+  **Neural ODE** (Backprop durch einen RK4-Löser).
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst), SmoothQuant.
+
+Neue CLI-Befehle:
+- `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP).
+- `scirust lm [...] [--opt adam|adamw|lion]` — trainiert das N-D-Decoder-LM.

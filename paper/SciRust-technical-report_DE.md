@@ -254,3 +254,29 @@ wobei $\tau$ ein kalibrierter Schwellenwert ist.
 
 ### 14.3 Ergebnisse und Metriken
 Erwartete Leistung auf dem Numenta Anomaly Benchmark (NAB) zielt auf einen F1-Score von $>0,85$ bei Null Bit-Drift über mehrere Threads ab. Die Verwendung der QSR1 Int8-Quantisierung wird voraussichtlich die Latenz auf eingebetteten ARM-Prozessoren um das 3-fache reduzieren, während eine MSE-Bit-Nähe von $<10^{-4}$ im Vergleich zum f32-Orakel beibehalten wird.
+
+## N-D-Autograd und forschungsgetriebene Erweiterungen
+
+Über das 2-D-Rückwärtsband hinaus bietet SciRust nun ein **N-D-Autograd-Band**,
+dessen Operatoren jeweils per Finite-Differenzen-Gradientenprüfung validiert sind,
+und darauf einen forschungsgestützten Deep-Learning-Stack. Jede Fähigkeit
+entspricht einer Arbeit und wird mit einem Test geliefert; die vollständige
+Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
+
+- **Kausales Decoder-Sprachmodell**, durchgängig trainiert (Token- und
+  Positions-Embeddings, kausale Attention, fusionierte stabile Softmax-
+  Kreuzentropie), das eine Sequenz exakt lernt.
+- **LLaMA-Schichten**: RMSNorm, SwiGLU, Pre-RMSNorm-LLaMA-Block, RoPE (mit
+  getesteter Relativpositions-Eigenschaft) und gruppierte/Multi-Query-Attention.
+- **Deterministische Optimierer**: Adam, AdamW, Lion und Muon (Newton–Schulz).
+- **Zertifizierbare KI**: Interval Bound Propagation liefert beweisbare
+  Ausgabeschranken und ein Robustheitszertifikat.
+- **Reproduzierbare Reduktionen**: reihenfolgenunabhängige Summe/Mittel/
+  Skalarprodukt, bit-identisch unabhängig von der Thread-Anzahl.
+- **Inferenz**: exaktes spekulatives Decoding und gekacheltes Online-Softmax-
+  FlashAttention.
+- **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant.
+
+Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP-Schranken/Robustheit)
+und `scirust lm --opt adam|adamw|lion` (Training des N-D-Decoder-LM).
