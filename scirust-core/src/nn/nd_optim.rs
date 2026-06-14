@@ -20,8 +20,11 @@ pub struct NdParam<'a> {
     pub grad_idx: usize,
 }
 
-/// Adam hyper-parameters. [`Default`] is the canonical
-/// `lr = 1e-3, β1 = 0.9, β2 = 0.999, eps = 1e-8`.
+/// Adam / **AdamW** hyper-parameters. [`Default`] is the canonical
+/// `lr = 1e-3, β1 = 0.9, β2 = 0.999, eps = 1e-8` with no weight decay (plain
+/// Adam). Set `weight_decay > 0` for **AdamW** (decoupled weight decay,
+/// Loshchilov & Hutter 2017): the decay is applied directly to the parameter,
+/// not through the gradient/moments.
 #[derive(Clone, Copy, Debug)]
 pub struct AdamConfig {
     /// Learning rate.
@@ -32,6 +35,8 @@ pub struct AdamConfig {
     pub beta2: f32,
     /// Numerical-stability term in the denominator.
     pub eps: f32,
+    /// Decoupled weight decay (0 = plain Adam).
+    pub weight_decay: f32,
 }
 
 impl Default for AdamConfig {
@@ -41,6 +46,7 @@ impl Default for AdamConfig {
             beta1: 0.9,
             beta2: 0.999,
             eps: 1e-8,
+            weight_decay: 0.0,
         }
     }
 }
@@ -67,10 +73,19 @@ impl NdAdam {
         }
     }
 
-    /// Adam with default betas/eps at learning rate `lr`.
+    /// Adam with default betas/eps at learning rate `lr` (no weight decay).
     pub fn with_lr(lr: f32) -> Self {
         Self::new(AdamConfig {
             lr,
+            ..AdamConfig::default()
+        })
+    }
+
+    /// **AdamW** at learning rate `lr` with decoupled `weight_decay`.
+    pub fn with_lr_wd(lr: f32, weight_decay: f32) -> Self {
+        Self::new(AdamConfig {
+            lr,
+            weight_decay,
             ..AdamConfig::default()
         })
     }
@@ -105,6 +120,7 @@ impl NdAdam {
             beta1,
             beta2,
             eps,
+            weight_decay,
         } = self.cfg;
         let bc1 = 1.0 - beta1.powi(self.t as i32);
         let bc2 = 1.0 - beta2.powi(self.t as i32);
@@ -126,7 +142,114 @@ impl NdAdam {
                 vk[j] = beta2 * vk[j] + (1.0 - beta2) * gj * gj;
                 let mhat = mk[j] / bc1;
                 let vhat = vk[j] / bc2;
-                p.value.data[j] -= lr * mhat / (vhat.sqrt() + eps);
+                // AdamW: decoupled weight decay on the pre-update parameter.
+                let theta = p.value.data[j];
+                p.value.data[j] = theta - lr * (mhat / (vhat.sqrt() + eps) + weight_decay * theta);
+            }
+        }
+    }
+}
+
+/// Lion hyper-parameters (Chen et al. 2023). [`Default`] is `lr = 1e-4,
+/// β1 = 0.9, β2 = 0.99` with no weight decay. Lion typically wants a learning
+/// rate ~3–10× smaller than Adam.
+#[derive(Clone, Copy, Debug)]
+pub struct LionConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Decay for the update-direction interpolation.
+    pub beta1: f32,
+    /// Decay for the momentum state.
+    pub beta2: f32,
+    /// Decoupled weight decay (0 = none).
+    pub weight_decay: f32,
+}
+
+impl Default for LionConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-4,
+            beta1: 0.9,
+            beta2: 0.99,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **Lion** optimizer (*EvoLved Sign Momentum*, Chen et al. 2023): the update is
+/// the **sign** of an interpolated momentum, so every parameter moves by exactly
+/// `±lr` (plus decoupled weight decay). One state buffer (half of Adam's), and
+/// — being pure `f32` in a fixed order — **bit-for-bit deterministic**.
+pub struct NdLion {
+    cfg: LionConfig,
+    m: Vec<Vec<f32>>,
+}
+
+impl NdLion {
+    /// New optimizer with the given config.
+    pub fn new(cfg: LionConfig) -> Self {
+        Self { cfg, m: Vec::new() }
+    }
+
+    /// Lion with default betas at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(LionConfig {
+            lr,
+            ..LionConfig::default()
+        })
+    }
+
+    /// One Lion update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m.is_empty() && !params.is_empty()
+        {
+            self.m = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        assert_eq!(
+            self.m.len(),
+            params.len(),
+            "NdLion: parameter count changed between steps"
+        );
+        let LionConfig {
+            lr,
+            beta1,
+            beta2,
+            weight_decay,
+        } = self.cfg;
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            assert_eq!(
+                g.len(),
+                p.value.data.len(),
+                "NdLion: grad/param size mismatch at parameter {k}"
+            );
+            let mk = &mut self.m[k];
+            for j in 0..p.value.data.len()
+            {
+                let gj = g[j];
+                // Update direction = sign(β1·m + (1−β1)·g).
+                let u = beta1 * mk[j] + (1.0 - beta1) * gj;
+                let step = if u > 0.0
+                {
+                    1.0
+                }
+                else if u < 0.0
+                {
+                    -1.0
+                }
+                else
+                {
+                    0.0
+                };
+                let theta = p.value.data[j];
+                p.value.data[j] = theta - lr * (step + weight_decay * theta);
+                // Momentum update uses β2.
+                mk[j] = beta2 * mk[j] + (1.0 - beta2) * gj;
             }
         }
     }
@@ -194,6 +317,105 @@ mod tests {
                     grad_idx: 0,
                 }];
                 opt.step(&mut params, &grads);
+            }
+            x.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// AdamW's weight decay is **decoupled**: with a zero gradient the adaptive
+    /// term vanishes, so `weight_decay > 0` shrinks the parameter toward 0 while
+    /// plain Adam (`wd = 0`) leaves it unchanged.
+    #[test]
+    fn nd_adamw_decouples_weight_decay() {
+        let zero_grad = vec![TensorND::new(vec![0.0, 0.0], vec![2])];
+
+        let mut x_wd = TensorND::new(vec![1.0, -2.0], vec![2]);
+        let mut opt_wd = NdAdam::with_lr_wd(0.1, 0.5);
+        let mut x_plain = TensorND::new(vec![1.0, -2.0], vec![2]);
+        let mut opt_plain = NdAdam::with_lr(0.1);
+        for _ in 0..20
+        {
+            opt_wd.step(
+                &mut [NdParam {
+                    value: &mut x_wd,
+                    grad_idx: 0,
+                }],
+                &zero_grad,
+            );
+            opt_plain.step(
+                &mut [NdParam {
+                    value: &mut x_plain,
+                    grad_idx: 0,
+                }],
+                &zero_grad,
+            );
+        }
+        // Plain Adam: untouched by a zero gradient.
+        assert_eq!(x_plain.data, vec![1.0, -2.0]);
+        // AdamW: each |value| strictly shrank toward 0.
+        assert!(x_wd.data[0].abs() < 1.0 && x_wd.data[1].abs() < 2.0);
+    }
+
+    /// Lion minimises the same quadratic oracle as Adam, converging to within a
+    /// small band of the target (the sign update settles around the optimum).
+    #[test]
+    fn nd_lion_converges_on_quadratic() {
+        let target = [3.0f32, -2.0, 0.5];
+        let mut x = TensorND::new(vec![0.0, 0.0, 0.0], vec![3]);
+        let mut opt = NdLion::with_lr(0.01);
+
+        for _ in 0..800
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![3])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut x,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        for (&xi, &ti) in x.data.iter().zip(&target)
+        {
+            assert!(
+                (xi - ti).abs() < 0.05,
+                "x={:?}, target={:?}",
+                x.data,
+                target
+            );
+        }
+    }
+
+    /// Lion is bit-for-bit deterministic across runs.
+    #[test]
+    fn nd_lion_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let target = [1.0f32, -1.0];
+            let mut x = TensorND::new(vec![0.5, 0.5], vec![2]);
+            let mut opt = NdLion::with_lr(0.02);
+            for _ in 0..100
+            {
+                let gd: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![2])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
             }
             x.data
         };
