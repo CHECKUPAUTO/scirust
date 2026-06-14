@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 33 : CLI + docs multilingues + papers (cycle 2)
+- CLI : `scirust certify` (bornes IBP) + `scirust lm --opt adam|adamw|lion`.
+  41 commandes. Tests + 8 gates verts.
+- docs multilingues : section « Recherche → Fonctions » ajoutée à README,
+  Documentation.md + 7 traductions (EN/ES/DE/ZH/JA/KO/AR), et au paper
+  (8 langues). Compteur tests README 683→810.
+- 2ᵉ recherche de papers → RESEARCH_ROADMAP Tier 7 (#21-#25) : conformal
+  prediction (#21, fort fit certifiable), Schedule-Free (#22), AdEMAMix (#23),
+  SOAP (#24), DeltaNet (#25).
+- 810 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 32 : recherche → fonctions (lot 3)
 - **Muon** (`nn::nd_optim`) : momentum + Newton-Schulz (quintique, sans SVD) sur
   matrices 2-D ; `newton_schulz_orthogonalize` pub ; déterministe. Tests :

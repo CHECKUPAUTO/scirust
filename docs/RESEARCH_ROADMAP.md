@@ -62,6 +62,19 @@
 | 19 | Abadi et al., *Deep Learning with Differential Privacy (DP-SGD)* (2016) | `clip_gradients` + `add_noise` (gaussien **seedé**) + `dp_protect` + moments accountant (Rényi DP) — **déjà présent** | `dp` | ✅ | M |
 | 20 | Frantar & Alistarh, *SparseGPT* (2023) ; Sun et al., *Wanda* (2023) ; Frankle & Carbin, *Lottery Ticket* (2019) | `prune_wanda` (activation-aware) + magnitude/structured/Lottery-Ticket déjà présents | `pruning` | ✅ | M |
 
+## Tier 7 — Nouveaux papers (cycle 2, recherche du 14/06)
+
+Trouvés lors d'une seconde recherche ; choisis pour leur fit avec les
+fondamentaux (certifiable, déterministe, implémentable, testable).
+
+| # | Papier | Fonction scirust | Module | Statut | Effort |
+|---|--------|------------------|--------|--------|--------|
+| 21 | Angelopoulos & Bates, *A Gentle Introduction to Conformal Prediction* (2021, arXiv:2107.07511) | `conformal` : ensembles de prédiction **split-conformal** à couverture garantie *sans hypothèse de distribution* (quantile de calibration) ; test : couverture empirique ≈ 1−α. **Fort fit « IA certifiable »** | `nn` (nouveau) | 📋 | M |
+| 22 | Defazio et al., *The Road Less Scheduled (Schedule-Free)* (2024 ; vainqueur MLCommons AlgoPerf) | `NdScheduleFree` : optimiseur **sans planning de LR** (moyenne de poids) ; déterministe | `nn::nd_optim` | 📋 | M |
+| 23 | Pagliardini et al. (Apple), *The AdEMAMix Optimizer* (2024, arXiv:2409.03137) | optimiseur à **deux EMA** (mémoire de gradient longue) ; déterministe | `nn::nd_optim` | 📋 | M |
+| 24 | Vyas et al., *SOAP: Improving and Stabilizing Shampoo using Adam* (2024) | optimiseur préconditionné (Shampoo dans la base propre + Adam) | `nn::nd_optim` | 📋 | L |
+| 25 | Yang et al., *Gated Delta Networks / DeltaNet* (2024, arXiv:2412.06464) | couche d'**attention linéaire récurrente** (règle delta), temps linéaire, déterministe ; alternative plus tractable que Mamba | `nn::nd_layers` | 📋 | L |
+
 ---
 
 ## Ordre d'attaque
@@ -73,10 +86,12 @@ FlashAttention online-softmax (#9) · décodage spéculatif exact (#10) · GQA/M
 pruning Wanda + magnitude/lottery (#20). → **14 des 20** ; SmoothQuant (#15)
 partiel.
 
-**Ensuite** : GPTQ/AWQ (#15, raffinement de la quantification).
+**Ensuite** : **conformal prediction (#21, fort fit certifiable)** · Schedule-Free
+(#22) · AdEMAMix (#23) · GPTQ/AWQ (#15, raffinement de la quantification).
 
 **Paris lourds** (planifiés, jalonnés) : CROWN (#2) · SMT/Marabou (#4) ·
-Mamba (#18) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
+Mamba (#18) · DeltaNet (#25) · SOAP (#24) · PINN (#17, après l'autodiff d'ordre 2)
+· DiFR (#5).
 
 Chaque item respecte les fondamentaux : op autograd ⇒ **gradient check** ;
 garantie (borne, privacy, reproductibilité) ⇒ **test d'oracle/soundness** ;
