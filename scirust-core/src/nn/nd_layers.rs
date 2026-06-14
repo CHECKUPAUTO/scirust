@@ -203,12 +203,17 @@ pub struct NdMultiHeadAttention {
     d_model: usize,
     d_head: usize,
     causal: bool,
+    rope: bool,
 }
+
+/// Frequency base for [`NdMultiHeadAttention`] rotary embeddings.
+const ROPE_BASE: f32 = 10000.0;
 
 impl NdMultiHeadAttention {
     /// New layer; `d_model` must be divisible by `n_heads`. Seeded init.
     /// `causal = true` masks each position from attending to later ones
-    /// (decoder/LM attention).
+    /// (decoder/LM attention). Rotary embeddings are off by default — enable
+    /// with [`Self::with_rope`].
     pub fn new(d_model: usize, n_heads: usize, causal: bool, rng: &mut PcgEngine) -> Self {
         assert!(d_model % n_heads == 0, "d_model must divide n_heads");
         Self {
@@ -220,7 +225,21 @@ impl NdMultiHeadAttention {
             d_model,
             d_head: d_model / n_heads,
             causal,
+            rope: false,
         }
+    }
+
+    /// Enable (or disable) **rotary position embeddings** on Q and K
+    /// (Su et al. 2021). Requires an even `d_head`. Builder-style, so existing
+    /// call sites are unaffected.
+    pub fn with_rope(mut self, enabled: bool) -> Self {
+        assert!(
+            !enabled || self.d_head % 2 == 0,
+            "RoPE needs an even d_head (got {})",
+            self.d_head
+        );
+        self.rope = enabled;
+        self
     }
 
     /// `(seq, d_model) → (n_heads, seq, d_head)`.
@@ -236,11 +255,19 @@ impl NdMultiHeadAttention {
         let seq = x.shape()[0];
 
         let q = self.w_q.forward(tape, x);
-        let q = self.split_heads(q, seq);
+        let mut q = self.split_heads(q, seq);
         let k = self.w_k.forward(tape, x);
-        let k = self.split_heads(k, seq);
+        let mut k = self.split_heads(k, seq);
         let v = self.w_v.forward(tape, x);
         let v = self.split_heads(v, seq);
+
+        if self.rope
+        {
+            // Rotate Q and K per head over (n_heads, seq, d_head); attention
+            // then depends only on relative position.
+            q = q.rope(ROPE_BASE);
+            k = k.rope(ROPE_BASE);
+        }
 
         let scale = tape.input(TensorND::new(
             vec![1.0 / (self.d_head as f32).sqrt()],
@@ -763,6 +790,47 @@ mod tests {
             moved > 1e-4,
             "perturbation did not propagate (moved {moved})"
         );
+    }
+
+    /// Attention **with rotary embeddings** (`with_rope(true)`) keeps its
+    /// `(seq, d_model)` shape and its input gradient matches finite differences
+    /// — RoPE is wired into the attention path correctly.
+    #[test]
+    fn nd_attention_with_rope_gradient_check() {
+        let (d_model, n_heads, seq) = (8usize, 2, 3);
+        let mut rng = PcgEngine::new(6);
+        let mut attn = NdMultiHeadAttention::new(d_model, n_heads, true, &mut rng).with_rope(true);
+        let x: Vec<f32> = (0..seq * d_model)
+            .map(|i| (i as f32 * 0.13 - 0.4).sin())
+            .collect();
+
+        let loss_of = |xd: &[f32], attn: &mut NdMultiHeadAttention| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d_model]));
+            t.value(attn.forward(&t, xv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d_model]));
+        let out = attn.forward(&t, xv);
+        assert_eq!(out.shape(), vec![seq, d_model]);
+        let grads = t.backward(out.sum());
+        let gx = grads[xv.idx()].clone();
+
+        let eps = 1e-3f32;
+        for k in 0..x.len()
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up, &mut attn) - loss_of(&dn, &mut attn)) / (2.0 * eps);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "rope attention grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
     }
 
     /// A **full Pre-LN transformer block** (LayerNorm + attention + residual +

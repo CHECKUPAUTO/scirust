@@ -43,6 +43,9 @@ enum Op {
     RmsNormLast(usize, f32),
     /// Logistic sigmoid `σ(x) = 1/(1+e^-x)`, elementwise.
     Sigmoid(usize),
+    /// Rotary position embedding over `(…, seq, d)` (position = axis −2); `f32`
+    /// is the frequency base. Backward applies the inverse rotation.
+    Rope(usize, f32),
     Sum(usize),
     /// Row lookup (embedding): select rows of a `(vocab, dim)` table by the
     /// integer indices. Backward scatter-adds the upstream rows back.
@@ -205,6 +208,11 @@ impl NdTape {
                         .collect();
                     accumulate(&mut grads[a], &TensorND::new(d, y.shape.clone()));
                 },
+                Op::Rope(a, base) =>
+                {
+                    // RoPE is an orthogonal rotation R(pos); dx = Rᵀ·g = R(−pos)·g.
+                    accumulate(&mut grads[a], &rope_lastaxis(&g, base, true));
+                },
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
@@ -364,6 +372,18 @@ impl<'t> NdVar<'t> {
         let data: Vec<f32> = a.data.iter().map(|&x| 1.0 / (1.0 + (-x).exp())).collect();
         let out = TensorND::new(data, a.shape.clone());
         self.tape.push(Op::Sigmoid(self.idx), out)
+    }
+
+    /// **Rotary position embedding** (Su et al., RoFormer 2021) over a
+    /// `(…, seq, d)` tensor: position is the second-to-last axis, and each
+    /// adjacent pair `(x_{2p}, x_{2p+1})` of the last axis (which must be even)
+    /// is rotated by `pos · base^(−2p/d)`. Applied to queries/keys, it makes the
+    /// attention score depend only on the **relative** position. `base` is
+    /// typically `10000`.
+    pub fn rope(self, base: f32) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let out = rope_lastaxis(&a, base, false);
+        self.tape.push(Op::Rope(self.idx, base), out)
     }
 
     /// Permute the axes (e.g. `(seq, heads, d) → (heads, seq, d)` for attention).
@@ -722,6 +742,37 @@ fn rmsnorm_backward(x: &TensorND, y: &TensorND, g: &TensorND, eps: f32) -> Tenso
         }
     }
     TensorND::new(dx, x.shape.clone())
+}
+
+/// Rotary position embedding over `(…, seq, d)` (position = axis −2). Each pair
+/// `(x_{2p}, x_{2p+1})` is rotated by `pos · base^(−2p/d)`. `inverse` rotates by
+/// the negative angle (the transpose), used by the backward pass.
+fn rope_lastaxis(t: &TensorND, base: f32, inverse: bool) -> TensorND {
+    let nd = t.ndim();
+    assert!(nd >= 2, "rope: need ndim >= 2 (…, seq, d)");
+    let d = t.shape[nd - 1];
+    let seq = t.shape[nd - 2];
+    assert!(d % 2 == 0, "rope: last axis must be even");
+    let m = t.data.len() / (seq * d).max(1);
+    let mut out = vec![0.0f32; t.data.len()];
+    let sign = if inverse { -1.0 } else { 1.0 };
+    for outer in 0..m
+    {
+        for s in 0..seq
+        {
+            let row = (outer * seq + s) * d;
+            for p in 0..d / 2
+            {
+                let theta = base.powf(-2.0 * p as f32 / d as f32);
+                let ang = sign * s as f32 * theta;
+                let (sin, cos) = ang.sin_cos();
+                let (a, b) = (t.data[row + 2 * p], t.data[row + 2 * p + 1]);
+                out[row + 2 * p] = a * cos - b * sin;
+                out[row + 2 * p + 1] = a * sin + b * cos;
+            }
+        }
+    }
+    TensorND::new(out, t.shape.clone())
 }
 
 /// Swap the last two axes (`(…,a,b) → (…,b,a)`); its own inverse.
@@ -1106,6 +1157,97 @@ mod tests {
                 gx.data[k]
             );
         }
+    }
+
+    /// RoPE input gradient matches finite differences (loss = sum(rope(x)·v)).
+    #[test]
+    fn nd_rope_gradient_check() {
+        let (seq, d) = (3usize, 4usize);
+        let shape = vec![seq, d];
+        let x: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.21 - 0.5).sin())
+            .collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.13).cos()).collect();
+        let base = 10000.0f32;
+
+        let loss_of = |xd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xd.to_vec(), shape.clone()));
+            let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+            t.value(xv.rope(base).mul(vv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), shape.clone()));
+        let vv = t.input(TensorND::new(v.clone(), shape.clone()));
+        let grads = t.backward(xv.rope(base).mul(vv).sum());
+        let gx = grads[xv.idx()].clone();
+
+        let fd = 1e-3f32;
+        for k in 0..x.len()
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += fd;
+            dn[k] -= fd;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * fd);
+            assert!(
+                (num - gx.data[k]).abs() < 2e-2,
+                "rope grad {k}: numeric {num}, analytic {}",
+                gx.data[k]
+            );
+        }
+    }
+
+    /// RoPE is an orthogonal rotation: it preserves each row's L2 norm.
+    #[test]
+    fn nd_rope_preserves_norm() {
+        let (seq, d) = (4usize, 6usize);
+        let x: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() + 0.2)
+            .collect();
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d]));
+        let y = t.value(xv.rope(10000.0)).data;
+        for s in 0..seq
+        {
+            let nx: f32 = x[s * d..(s + 1) * d].iter().map(|v| v * v).sum();
+            let ny: f32 = y[s * d..(s + 1) * d].iter().map(|v| v * v).sum();
+            assert!((nx - ny).abs() < 1e-4, "row {s}: norm {nx} -> {ny}");
+        }
+    }
+
+    /// The defining RoPE property: with identical query rows and identical key
+    /// rows, the score `q'_i · k'_j` depends only on the **relative** offset
+    /// `i − j`, so equal offsets give equal scores.
+    #[test]
+    fn nd_rope_relative_position() {
+        let (seq, d) = (5usize, 4usize);
+        let qrow = [0.5f32, -0.3, 0.8, 0.1];
+        let krow = [0.2f32, 0.7, -0.4, 0.6];
+        let q: Vec<f32> = (0..seq).flat_map(|_| qrow).collect();
+        let k: Vec<f32> = (0..seq).flat_map(|_| krow).collect();
+
+        let t = NdTape::new();
+        let qv = t
+            .value(t.input(TensorND::new(q, vec![seq, d])).rope(10000.0))
+            .data;
+        let kv = t
+            .value(t.input(TensorND::new(k, vec![seq, d])).rope(10000.0))
+            .data;
+        let dot =
+            |i: usize, j: usize| -> f32 { (0..d).map(|c| qv[i * d + c] * kv[j * d + c]).sum() };
+        // offset +1: (1,0), (2,1), (3,2), (4,3) all equal.
+        let s = dot(1, 0);
+        for (i, j) in [(2, 1), (3, 2), (4, 3)]
+        {
+            assert!((dot(i, j) - s).abs() < 1e-4, "offset +1 not constant");
+        }
+        // offset −2: (0,2) == (2,4).
+        assert!(
+            (dot(0, 2) - dot(2, 4)).abs() < 1e-4,
+            "offset -2 not constant"
+        );
     }
 
     #[test]
