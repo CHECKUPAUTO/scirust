@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 31 : recherche → fonctions (lot 2)
+- **RoPE** (`autodiff::nd`) : op `rope` (paires, backward = rotation inverse) ;
+  gradient-check + conservation norme + propriété position relative ; branchée
+  dans l'attention via `with_rope`.
+- **GQA/MQA** (`nn::nd_layers`) : `new_gqa(num_kv_heads)` — partage K/V via
+  broadcast `bmm`, aucune nouvelle op ; gradient-check (kv=2 et kv=1).
+- **Neural ODE** (`nn::neural_ode`) : `rk4_integrate` + `NeuralOde`, backprop à
+  travers RK4 sur la tape ; RK4 validé (→ e), grad-check, apprend (Adam).
+- découverte : FlashAttention online-softmax (#9) **déjà** dans
+  `nn::transformer::flash_attention` → marqué ✅, pas de doublon.
+- roadmap : **11 des 20** items livrés/présents.
+- 802 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 30 : recherche → fonctions (lot 1, 7 features)
 - `docs/RESEARCH_ROADMAP.md` : 20 papers réels → fonctions, statut + effort.
 - **IBP certifié** (`nn::ibp`, Gowal 2018) : intervalles → boîte de sortie

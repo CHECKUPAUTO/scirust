@@ -6,6 +6,19 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Lot 2 recherche → fonctions** (3 features de plus, testées, 8 gates verts ;
+  **11 des 20** items de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  - **RoPE** (`autodiff::nd`, Su et al. 2021) : op `rope` (rotation par paires,
+    backward = rotation inverse) ; gradient-checkée, conservation de norme et
+    **propriété de position relative** testées ; branchée via
+    `NdMultiHeadAttention::with_rope`.
+  - **GQA / MQA** (`nn::nd_layers`, Ainslie et al. 2023) :
+    `NdMultiHeadAttention::new_gqa(num_kv_heads, …)` — têtes K/V partagées via le
+    broadcast `bmm` (aucune nouvelle op) ; gradient-checkée (GQA et MQA).
+  - **Neural ODE** (`nn::neural_ode`, Chen et al. 2018) : `rk4_integrate` +
+    `NeuralOde` — backprop **à travers** le solveur RK4 sur la tape N-D (fusion
+    solveurs + autograd). RK4 validé (`dy/dt=y → e`), gradient-check à travers
+    le solveur, et la dynamique **apprend** (Adam).
 - **Feuille de route recherche → fonctions** ([`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
   20 papers réels traduits en fonctions concrètes, avec statut et effort. Premier
   lot **livré cette session** (testé, 8 gates verts) :

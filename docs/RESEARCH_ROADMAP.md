@@ -28,10 +28,10 @@
 |---|--------|------------------|--------|--------|--------|
 | 6 | Zhang & Sennrich, *Root Mean Square Layer Normalization* (NeurIPS 2019) | `NdRmsNorm` (+ op `rmsnorm`) ; `NdLlamaBlock` | `autodiff::nd`, `nn::nd_layers` | ✅ | S |
 | 7 | Shazeer, *GLU Variants Improve Transformer* (2020, arXiv:2002.05202) | `NdSwiGLU` (+ op `sigmoid`/SiLU) ; `NdLlamaBlock` | `autodiff::nd`, `nn::nd_layers` | ✅ | S |
-| 8 | Su et al., *RoFormer / RoPE* (2021) | RoPE porté en N-D | `nn::nd_layers` | 📋 | M |
-| 9 | Milakov & Gimelshein, *Online normalizer for softmax* (2018) ; Dao, *FlashAttention-2* (arXiv:2307.08691) | softmax une-passe + attention tuilée `O(seq)` mémoire, déterministe | `autodiff::nd` | 📋 | M |
+| 8 | Su et al., *RoFormer / RoPE* (2021) | op `rope` (gradient-checkée, propriété de position relative testée) + `NdMultiHeadAttention::with_rope` | `autodiff::nd`, `nn::nd_layers` | ✅ | M |
+| 9 | Milakov & Gimelshein, *Online normalizer for softmax* (2018) ; Dao, *FlashAttention-2* (arXiv:2307.08691) | FlashAttention tuilée + online-softmax avec **backward** — **déjà présent** | `nn::transformer::flash_attention` | ✅ | M |
 | 10 | Leviathan et al., *Speculative Decoding* (ICML 2023) ; Chen et al., *Speculative Sampling* (2023) | `generate_speculative` (variante greedy) : sortie **exactement** = greedy cible, moins de forwards. + `generate_greedy` | `nn::nd_decoder` | ✅ | M |
-| 11 | Ainslie et al., *GQA* (2023) ; Shazeer, *MQA* (2019) | `num_kv_heads` dans l'attention N-D | `nn::nd_layers` | 📋 | M |
+| 11 | Ainslie et al., *GQA* (2023) ; Shazeer, *MQA* (2019) | `NdMultiHeadAttention::new_gqa` (`num_kv_heads`, partage via broadcast `bmm` ; MQA = 1) | `nn::nd_layers` | ✅ | M |
 
 ## Tier 3 — Optimiseurs
 
@@ -51,7 +51,7 @@
 
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
-| 16 | Chen et al., *Neural ODEs* (NeurIPS 2018, arXiv:1806.07366) | `NeuralODE` : solveur (rk4/dopri5) + tape N-D | `nn` + `scirust-solvers` | 📋 | M |
+| 16 | Chen et al., *Neural ODEs* (NeurIPS 2018, arXiv:1806.07366) | `rk4_integrate` + `NeuralOde` : backprop **à travers** le solveur RK4 sur la tape N-D | `nn::neural_ode` | ✅ | M |
 | 17 | Raissi, Perdikaris & Karniadakis, *PINNs* (J. Comp. Phys. 2019) | `pinn` : résidu de PDE dans la loss (besoin d'autodiff d'ordre 2) | `nn` + `symbolic` | 📋 | L |
 
 ## Tier 6 — Architectures alternatives & confiance
@@ -66,16 +66,16 @@
 
 ## Ordre d'attaque
 
-**✅ Livré** (testé + 8 gates verts) : IBP certifié (#1) · sommation reproductible
-(#3) · RMSNorm + SwiGLU + `NdLlamaBlock` (#6, #7) · décodage spéculatif exact
-(#10) · AdamW + Lion (#12, #13) · DP-SGD (#19, déjà présent dans `dp.rs`).
+**✅ Livré / présent** (testé + 8 gates verts) : IBP certifié (#1) · sommation
+reproductible (#3) · RoPE N-D (#8) · RMSNorm + SwiGLU + `NdLlamaBlock` (#6, #7) ·
+FlashAttention online-softmax (#9, déjà présent) · décodage spéculatif exact
+(#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Neural ODE (#16) · DP-SGD
+(#19, déjà présent dans `dp.rs`). → **11 des 20**.
 
-**Ensuite** : GQA (#11) · Neural ODE (#16) · online softmax / attention tuilée
-(#9) · RoPE N-D (#8).
+**Ensuite** : Muon (#14) · GPTQ/AWQ (#15) · pruning (#20).
 
-**Paris lourds** (planifiés, jalonnés) : CROWN (#2) · SMT/Marabou (#4) · GPTQ/AWQ
-(#15) · Mamba (#18) · PINN (#17, après l'autodiff d'ordre 2) · Muon (#14) ·
-pruning (#20) · DiFR (#5).
+**Paris lourds** (planifiés, jalonnés) : CROWN (#2) · SMT/Marabou (#4) ·
+Mamba (#18) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
 
 Chaque item respecte les fondamentaux : op autograd ⇒ **gradient check** ;
 garantie (borne, privacy, reproductibilité) ⇒ **test d'oracle/soundness** ;
