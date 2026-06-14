@@ -39,13 +39,13 @@
 |---|--------|------------------|--------|--------|--------|
 | 12 | Loshchilov & Hutter, *Decoupled Weight Decay (AdamW)* (2017, arXiv:1711.05101) | `weight_decay` découplé dans `AdamConfig` + `NdAdam::with_lr_wd` | `nn::nd_optim` | ✅ | S |
 | 13 | Chen et al., *Symbolic Discovery of Optimization Algorithms (Lion)* (2023) | `NdLion` (sign-based, mémoire moitié, déterministe) | `nn::nd_optim` | ✅ | S |
-| 14 | Jordan et al., *Muon* (2024) | `NdMuon` (orthogonalisation Newton-Schulz) | `nn::nd_optim` | 📋 | M |
+| 14 | Jordan et al., *Muon* (2024) | `NdMuon` (momentum + orthogonalisation Newton-Schulz) + `newton_schulz_orthogonalize` | `nn::nd_optim` | ✅ | M |
 
 ## Tier 4 — Quantification (thèse int8 bit-exact)
 
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
-| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | PTQ déterministe W8A8 / W4, round-trip testé | `quantization` | 📋 | L |
+| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | **SmoothQuant** (`smoothquant_scales`/`apply_smoothquant`) + int8 per-canal déjà présent ; **GPTQ/AWQ à venir** | `quantization` | 🔨 | L |
 
 ## Tier 5 — Pont calcul scientifique (fusion unique : solveurs + autograd + symbolique)
 
@@ -60,7 +60,7 @@
 |---|--------|------------------|--------|--------|--------|
 | 18 | Gu & Dao, *Mamba* (2023, arXiv:2312.00752) | *selective scan* (récurrence déterministe) ; modèle séquence linéaire-temps | `nn` | 📋 | XL |
 | 19 | Abadi et al., *Deep Learning with Differential Privacy (DP-SGD)* (2016) | `clip_gradients` + `add_noise` (gaussien **seedé**) + `dp_protect` + moments accountant (Rényi DP) — **déjà présent** | `dp` | ✅ | M |
-| 20 | Frantar & Alistarh, *SparseGPT* (2023) ; Sun et al., *Wanda* (2023) ; Frankle & Carbin, *Lottery Ticket* (2019) | élagage one-shot déterministe | `pruning` | 📋 | M |
+| 20 | Frantar & Alistarh, *SparseGPT* (2023) ; Sun et al., *Wanda* (2023) ; Frankle & Carbin, *Lottery Ticket* (2019) | `prune_wanda` (activation-aware) + magnitude/structured/Lottery-Ticket déjà présents | `pruning` | ✅ | M |
 
 ---
 
@@ -68,11 +68,12 @@
 
 **✅ Livré / présent** (testé + 8 gates verts) : IBP certifié (#1) · sommation
 reproductible (#3) · RoPE N-D (#8) · RMSNorm + SwiGLU + `NdLlamaBlock` (#6, #7) ·
-FlashAttention online-softmax (#9, déjà présent) · décodage spéculatif exact
-(#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Neural ODE (#16) · DP-SGD
-(#19, déjà présent dans `dp.rs`). → **11 des 20**.
+FlashAttention online-softmax (#9) · décodage spéculatif exact (#10) · GQA/MQA
+(#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE (#16) · DP-SGD (#19) ·
+pruning Wanda + magnitude/lottery (#20). → **14 des 20** ; SmoothQuant (#15)
+partiel.
 
-**Ensuite** : Muon (#14) · GPTQ/AWQ (#15) · pruning (#20).
+**Ensuite** : GPTQ/AWQ (#15, raffinement de la quantification).
 
 **Paris lourds** (planifiés, jalonnés) : CROWN (#2) · SMT/Marabou (#4) ·
 Mamba (#18) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).

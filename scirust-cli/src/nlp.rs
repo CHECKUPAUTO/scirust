@@ -5,7 +5,8 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
-use scirust_core::nn::nd_optim::NdAdam;
+use scirust_core::nn::nd_optim::{NdAdam, NdLion, NdParam};
+use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
 use scirust_learning::nlp::byte_bpe::ByteBpeTokenizer;
 use scirust_learning::nlp::tokenization::Tokenizer;
@@ -134,16 +135,33 @@ pub fn run_bpe(args: &[String]) -> u8 {
     0
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]` — train a small **causal
-/// decoder language model** on the N-D autograd tape and report whether it
-/// learns to predict the sequence. Pure Rust, deterministic by seed: token +
-/// learned positional embeddings, causal multi-head attention, a final
-/// LayerNorm and an LM head, optimised by a deterministic Adam wired through
-/// every layer. Surfaces the whole N-D stack end to end.
+/// One of the N-D optimizers, selectable from the CLI; all share `step`.
+enum LmOpt {
+    Adam(NdAdam),
+    Lion(NdLion),
+}
+
+impl LmOpt {
+    fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        match self
+        {
+            LmOpt::Adam(o) => o.step(params, grads),
+            LmOpt::Lion(o) => o.step(params, grads),
+        }
+    }
+}
+
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion]` —
+/// train a small **causal decoder language model** on the N-D autograd tape and
+/// report whether it learns to predict the sequence. Pure Rust, deterministic by
+/// seed: token + learned positional embeddings, causal multi-head attention, a
+/// final LayerNorm and an LM head, optimised by a selectable deterministic
+/// optimizer wired through every layer. Surfaces the whole N-D stack end to end.
 pub fn run_lm(args: &[String]) -> u8 {
     let (seed_s, rest) = take_flag(args, "--seed");
     let (steps_s, rest) = take_flag(&rest, "--steps");
     let (lr_s, rest) = take_flag(&rest, "--lr");
+    let (opt_s, rest) = take_flag(&rest, "--opt");
 
     let tokens: Vec<usize> = match rest.first()
     {
@@ -168,7 +186,9 @@ pub fn run_lm(args: &[String]) -> u8 {
     };
     if tokens.len() < 2
     {
-        eprintln!("usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R]");
+        eprintln!(
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion]"
+        );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
     }
@@ -199,6 +219,14 @@ pub fn run_lm(args: &[String]) -> u8 {
         },
         None => 200,
     };
+    let opt_kind = opt_s.as_deref().unwrap_or("adam");
+    if !matches!(opt_kind, "adam" | "adamw" | "lion")
+    {
+        eprintln!("error: --opt must be one of: adam, adamw, lion");
+        return 2;
+    }
+    // Lion likes a smaller default step than Adam.
+    let default_lr = if opt_kind == "lion" { 0.003 } else { 0.01 };
     let lr: f32 = match &lr_s
     {
         Some(s) => match s.parse::<f32>()
@@ -210,7 +238,7 @@ pub fn run_lm(args: &[String]) -> u8 {
                 return 2;
             },
         },
-        None => 0.01,
+        None => default_lr,
     };
 
     let vocab = tokens.iter().max().copied().unwrap() + 1;
@@ -225,7 +253,12 @@ pub fn run_lm(args: &[String]) -> u8 {
     };
     let mut rng = PcgEngine::new(seed);
     let mut lm = NdDecoderLM::new(cfg, &mut rng);
-    let mut opt = NdAdam::with_lr(lr);
+    let mut opt = match opt_kind
+    {
+        "adamw" => LmOpt::Adam(NdAdam::with_lr_wd(lr, 0.01)),
+        "lion" => LmOpt::Lion(NdLion::with_lr(lr)),
+        _ => LmOpt::Adam(NdAdam::with_lr(lr)),
+    };
 
     let mut first = f32::NAN;
     let mut last = f32::NAN;
@@ -255,7 +288,7 @@ pub fn run_lm(args: &[String]) -> u8 {
         tokens.len()
     );
     println!("  tokens: {tokens:?}");
-    println!("  optimizer: Adam(lr={lr}), {steps} steps");
+    println!("  optimizer: {opt_kind}(lr={lr}), {steps} steps");
     println!(
         "  loss: {first:.4} → {last:.4}  ({:.1}% of initial)",
         100.0 * last / first
@@ -332,6 +365,16 @@ mod tests {
         );
         // The default sequence actually overfits to exact recall (determinism).
         assert_eq!(run_lm(&s(&["1,2,3,4,2,5", "--steps", "200"])), 0);
+        // Optimizer selection: adamw and lion run too.
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "adamw"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "lion"])),
+            0
+        );
+        assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer
         // Usage / validation errors.
         assert_eq!(run_lm(&s(&["1"])), 2); // need ≥ 2 tokens
         assert_eq!(run_lm(&s(&["1,foo,3"])), 2); // non-integer token

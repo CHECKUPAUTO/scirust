@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 32 : recherche → fonctions (lot 3)
+- **Muon** (`nn::nd_optim`) : momentum + Newton-Schulz (quintique, sans SVD) sur
+  matrices 2-D ; `newton_schulz_orthogonalize` pub ; déterministe. Tests :
+  orthogonalité (déviation s'effondre), perte matricielle, déterminisme.
+- **Wanda** (`pruning::prune_wanda`) : élagage one-shot |W|·‖X‖ par ligne ;
+  diffère de magnitude sur canaux aberrants.
+- **SmoothQuant** (`quantization`) : lissage par canal, préserve X·W ; réduit la
+  dispersion des activations. (GPTQ/AWQ encore à faire → #15 partiel.)
+- roadmap : **14 des 20** livrés/présents.
+- 810 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 31 : recherche → fonctions (lot 2)
 - **RoPE** (`autodiff::nd`) : op `rope` (paires, backward = rotation inverse) ;
   gradient-check + conservation norme + propriété position relative ; branchée

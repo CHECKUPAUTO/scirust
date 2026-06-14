@@ -213,8 +213,8 @@ const GROUPS: &[(&str, &[Command])] = &[
             },
             Command {
                 name: "lm",
-                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R]",
-                about: "Train a tiny causal decoder LM (N-D tape + Adam) to recall a token sequence.",
+                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion]",
+                about: "Train a tiny causal decoder LM (N-D tape) to recall a token sequence.",
             },
         ],
     ),
@@ -228,11 +228,18 @@ const GROUPS: &[(&str, &[Command])] = &[
     ),
     (
         "INFERENCE INTEGRITY",
-        &[Command {
-            name: "verify",
-            args: "emit|verify <args..>",
-            about: "Emit or check a deterministic inference proof certificate.",
-        }],
+        &[
+            Command {
+                name: "verify",
+                args: "emit|verify <args..>",
+                about: "Emit or check a deterministic inference proof certificate.",
+            },
+            Command {
+                name: "certify",
+                args: "[--seed N] [--eps E]",
+                about: "Certify a ReLU MLP's output bounds over an L∞ box via interval propagation (IBP).",
+            },
+        ],
     ),
     (
         "META",
@@ -329,6 +336,7 @@ pub fn run(args: &[String]) -> u8 {
         },
         Some("quickstart") => quickstart::run(),
         Some("som") => learning::run_som(rest),
+        Some("certify") => learning::run_certify(rest),
         Some("evo") => learning::run_evo(rest),
         Some("cmaes") => learning::run_cmaes(rest),
         Some("diff") => symbolic::run_diff(rest),
@@ -449,6 +457,7 @@ mod tests {
         assert_eq!(run(&s(&["tt", "1,2,3,4;2,4,6,8;3,6,9,12;4,8,12,16"])), 0);
         assert_eq!(run(&s(&["bpe", "low lower lowest", "--vocab", "30"])), 0);
         assert_eq!(run(&s(&["lm", "1,2,3,1,2,3", "--steps", "10"])), 0);
+        assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",

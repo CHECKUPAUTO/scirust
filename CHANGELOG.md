@@ -6,6 +6,19 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Lot 3 recherche → fonctions** (testées, 8 gates verts ; **14 des 20** items
+  de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  - **Muon** (`nn::nd_optim`, Jordan et al. 2024) : optimiseur matriciel —
+    momentum puis **orthogonalisation Newton–Schulz** (quintique, sans SVD) de
+    la mise à jour des matrices 2-D ; `newton_schulz_orthogonalize` exposé.
+    Déterministe. Tests : orthogonalité (déviation ‖A·Aᵀ−I‖ s'effondre), perte
+    matricielle, déterminisme.
+  - **Wanda** (`pruning::prune_wanda`, Sun et al. 2023) : élagage one-shot par
+    `|W|·‖X‖` (poids × norme d'activation), par ligne de sortie — diffère de
+    l'élagage par magnitude sur les canaux à activations aberrantes.
+  - **SmoothQuant** (`quantization::smoothquant_scales`/`apply_smoothquant`,
+    Xiao et al. 2022) : lissage par canal d'entrée qui migre les valeurs
+    aberrantes d'activation vers les poids ; **préserve `X·W`**.
 - **Lot 2 recherche → fonctions** (3 features de plus, testées, 8 gates verts ;
   **11 des 20** items de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
   - **RoPE** (`autodiff::nd`, Su et al. 2021) : op `rope` (rotation par paires,
