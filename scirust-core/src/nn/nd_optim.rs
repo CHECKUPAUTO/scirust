@@ -255,9 +255,190 @@ impl NdLion {
     }
 }
 
+// --- Muon (matrix-aware optimizer) ---------------------------------------
+
+/// Frobenius norm of a flat matrix.
+fn frob_norm(a: &[f32]) -> f32 {
+    a.iter().map(|&x| x * x).sum::<f32>().sqrt()
+}
+
+/// Transpose an `r×c` row-major matrix into `c×r`.
+fn transpose(a: &[f32], r: usize, c: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; r * c];
+    for i in 0..r
+    {
+        for j in 0..c
+        {
+            out[j * r + i] = a[i * c + j];
+        }
+    }
+    out
+}
+
+/// Matrix product `(ar×ac) · (ac×bc) → (ar×bc)`, row-major.
+fn matmul(a: &[f32], ar: usize, ac: usize, b: &[f32], bc: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; ar * bc];
+    for i in 0..ar
+    {
+        for p in 0..ac
+        {
+            let aip = a[i * ac + p];
+            if aip == 0.0
+            {
+                continue;
+            }
+            for j in 0..bc
+            {
+                out[i * bc + j] += aip * b[p * bc + j];
+            }
+        }
+    }
+    out
+}
+
+/// **Newton–Schulz** orthogonalisation (the quintic iteration from Muon): pushes
+/// a matrix's singular values into a band near 1 (approximately orthogonal)
+/// using only matmuls, so it is matrix-free and deterministic. Five steps is the
+/// usual choice; the iteration holds the values in the band rather than
+/// converging to exactly `I`. Returns the `rows×cols` result.
+pub fn newton_schulz_orthogonalize(g: &[f32], rows: usize, cols: usize, steps: usize) -> Vec<f32> {
+    assert_eq!(g.len(), rows * cols, "newton_schulz: size mismatch");
+    let (a, b, c) = (3.4445f32, -4.7750f32, 2.0315f32);
+    let norm = frob_norm(g) + 1e-7;
+    let mut x: Vec<f32> = g.iter().map(|&v| v / norm).collect();
+    // Work in the "wide" orientation (rows ≤ cols).
+    let transposed = rows > cols;
+    let (mut r, mut cc) = (rows, cols);
+    if transposed
+    {
+        x = transpose(&x, rows, cols);
+        std::mem::swap(&mut r, &mut cc);
+    }
+    for _ in 0..steps
+    {
+        let xt = transpose(&x, r, cc); // cc×r
+        let aa = matmul(&x, r, cc, &xt, r); // A = X·Xᵀ  (r×r)
+        let a2 = matmul(&aa, r, r, &aa, r); // A²       (r×r)
+        let bmat: Vec<f32> = aa.iter().zip(&a2).map(|(&u, &w)| b * u + c * w).collect();
+        let bx = matmul(&bmat, r, r, &x, cc); // B·X     (r×cc)
+        for (xi, &bxi) in x.iter_mut().zip(&bx)
+        {
+            *xi = a * *xi + bxi;
+        }
+    }
+    if transposed
+    {
+        x = transpose(&x, r, cc);
+    }
+    x
+}
+
+/// Hyper-parameters for [`NdMuon`].
+#[derive(Clone, Copy, Debug)]
+pub struct MuonConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Momentum coefficient (β).
+    pub momentum: f32,
+    /// Newton–Schulz iteration count.
+    pub ns_steps: usize,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+}
+
+impl Default for MuonConfig {
+    fn default() -> Self {
+        Self {
+            lr: 0.02,
+            momentum: 0.95,
+            ns_steps: 5,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **Muon** (Jordan et al. 2024): momentum, then **orthogonalise** the update of
+/// each 2-D weight matrix with Newton–Schulz before the step. Matrices with both
+/// dims ≥ 2 use the orthogonalised update (scaled by `√(rows/cols)`); other
+/// parameters (biases, `(1,n)` scales) fall back to momentum SGD — matching the
+/// paper's "Muon for hidden matrices, plain update for the rest". Pure `f32` in a
+/// fixed order ⇒ **bit-for-bit deterministic**.
+pub struct NdMuon {
+    cfg: MuonConfig,
+    m: Vec<Vec<f32>>,
+}
+
+impl NdMuon {
+    /// New optimizer with the given config.
+    pub fn new(cfg: MuonConfig) -> Self {
+        Self { cfg, m: Vec::new() }
+    }
+
+    /// Muon with default momentum/steps at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(MuonConfig {
+            lr,
+            ..MuonConfig::default()
+        })
+    }
+
+    /// One Muon update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m.is_empty() && !params.is_empty()
+        {
+            self.m = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        assert_eq!(
+            self.m.len(),
+            params.len(),
+            "NdMuon: parameter count changed between steps"
+        );
+        let MuonConfig {
+            lr,
+            momentum,
+            ns_steps,
+            weight_decay,
+        } = self.cfg;
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let mk = &mut self.m[k];
+            for (mj, &gj) in mk.iter_mut().zip(g)
+            {
+                *mj = momentum * *mj + (1.0 - momentum) * gj;
+            }
+
+            let shape = &p.value.shape;
+            if shape.len() == 2 && shape[0] >= 2 && shape[1] >= 2
+            {
+                let (r, c) = (shape[0], shape[1]);
+                let o = newton_schulz_orthogonalize(mk, r, c, ns_steps);
+                let scale = (r as f32 / c as f32).max(1.0).sqrt();
+                for (pv, &ov) in p.value.data.iter_mut().zip(&o)
+                {
+                    *pv -= lr * (scale * ov + weight_decay * *pv);
+                }
+            }
+            else
+            {
+                // Non-matrix parameter: momentum SGD.
+                for (pv, &mv) in p.value.data.iter_mut().zip(mk.iter())
+                {
+                    *pv -= lr * (mv + weight_decay * *pv);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nn::PcgEngine;
 
     /// Adam minimises a quadratic `Σ(xᵢ − targetᵢ)²` (gradient `2(x − target)`),
     /// driving `x` to the target — the standard optimizer oracle.
@@ -418,6 +599,114 @@ mod tests {
                 );
             }
             x.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// Newton–Schulz drives the singular values toward 1, so the matrix becomes
+    /// **approximately orthogonal**: for a wide `m×n` matrix the deviation
+    /// `‖A·Aᵀ − I_m‖_F` collapses versus the (Frobenius-normalised) input.
+    #[test]
+    fn newton_schulz_orthogonalizes() {
+        let (m, n) = (3usize, 5usize);
+        let mut rng = PcgEngine::new(2);
+        let g: Vec<f32> = (0..m * n).map(|_| rng.float_signed()).collect();
+
+        // Deviation from orthogonality of an m×n matrix: ‖(A·Aᵀ) − I_m‖_F.
+        let dev = |a: &[f32]| -> f32 {
+            let at = transpose(a, m, n);
+            let aat = matmul(a, m, n, &at, m);
+            let mut s = 0.0f32;
+            for i in 0..m
+            {
+                for j in 0..m
+                {
+                    let want = if i == j { 1.0 } else { 0.0 };
+                    s += (aat[i * m + j] - want).powi(2);
+                }
+            }
+            s.sqrt()
+        };
+
+        let nrm = frob_norm(&g) + 1e-7;
+        let normalized: Vec<f32> = g.iter().map(|&v| v / nrm).collect();
+        let din = dev(&normalized);
+        let dout = dev(&newton_schulz_orthogonalize(&g, m, n, 5));
+
+        // NS pushes singular values into a band near 1 — much more orthogonal
+        // than the raw (normalised) matrix, though not exactly `I`.
+        assert!(dout < 0.7, "NS output not ~orthogonal: deviation {dout}");
+        assert!(
+            dout < 0.6 * din,
+            "NS did not improve orthogonality: {din} -> {dout}"
+        );
+    }
+
+    /// Muon reduces a matrix regression loss `‖W − T‖²` (grad `2(W − T)`): the
+    /// orthogonalised update is a descent direction, so the loss collapses.
+    #[test]
+    fn nd_muon_reduces_matrix_loss() {
+        let (r, c) = (4usize, 6usize);
+        let target: Vec<f32> = (0..r * c).map(|i| (i as f32 * 0.2 - 0.5).sin()).collect();
+        let mut w = TensorND::new(vec![0.0f32; r * c], vec![r, c]);
+        let mut opt = NdMuon::with_lr(0.1);
+
+        let loss = |w: &TensorND| -> f32 {
+            w.data
+                .iter()
+                .zip(&target)
+                .map(|(&a, &b)| (a - b) * (a - b))
+                .sum()
+        };
+        let first = loss(&w);
+        for _ in 0..300
+        {
+            let gd: Vec<f32> = w
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&a, &b)| 2.0 * (a - b))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![r, c])];
+            let mut params = vec![NdParam {
+                value: &mut w,
+                grad_idx: 0,
+            }];
+            opt.step(&mut params, &grads);
+        }
+        let last = loss(&w);
+        assert!(
+            last < first * 0.1,
+            "Muon did not reduce loss: {first} -> {last}"
+        );
+    }
+
+    /// Muon is bit-for-bit deterministic across runs.
+    #[test]
+    fn nd_muon_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let (r, c) = (3usize, 4usize);
+            let target: Vec<f32> = (0..r * c).map(|i| (i as f32 * 0.3).cos()).collect();
+            let mut w = TensorND::new(vec![0.1f32; r * c], vec![r, c]);
+            let mut opt = NdMuon::with_lr(0.05);
+            for _ in 0..50
+            {
+                let gd: Vec<f32> = w
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&a, &b)| 2.0 * (a - b))
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![r, c])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut w,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            w.data
         };
         assert_eq!(run(), run());
     }
