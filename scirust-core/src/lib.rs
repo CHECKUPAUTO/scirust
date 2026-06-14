@@ -64,3 +64,4 @@ pub mod distributed;
 pub mod dp;
 pub mod logging;
 pub mod pruning;
+pub mod reproducible;
