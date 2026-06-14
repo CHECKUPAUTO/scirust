@@ -149,6 +149,106 @@ impl NdDecoderLM {
             })
             .collect()
     }
+
+    /// Maximum sequence length (size of the positional table).
+    pub fn max_seq(&self) -> usize {
+        self.max_seq
+    }
+
+    /// Autoregressive **greedy** decoding: append the argmax next token,
+    /// `n_new` times, and return the newly generated tokens. Requires
+    /// `prompt.len() + n_new <= max_seq`.
+    pub fn generate_greedy(&mut self, prompt: &[usize], n_new: usize) -> Vec<usize> {
+        assert!(!prompt.is_empty(), "empty prompt");
+        assert!(
+            prompt.len() + n_new <= self.max_seq,
+            "prompt + n_new exceeds max_seq"
+        );
+        let mut seq = prompt.to_vec();
+        for _ in 0..n_new
+        {
+            let tape = NdTape::new();
+            let next = *self.predict(&tape, &seq).last().unwrap();
+            seq.push(next);
+        }
+        seq[prompt.len()..].to_vec()
+    }
+}
+
+/// **Speculative decoding** (Leviathan et al. 2023; Chen et al. 2023), greedy
+/// variant: the cheap `draft` proposes up to `k` tokens, the `target` verifies
+/// them in a single forward, accepts the longest prefix whose argmax matches,
+/// corrects the first mismatch, and adds a bonus token when all are accepted.
+///
+/// The output is **exactly** `target.generate_greedy(prompt, n_new)` for *any*
+/// draft — only the number of `target` forwards changes (the speed-up). Returns
+/// `(new_tokens, target_forward_count)`. Requires `prompt.len() + n_new <=
+/// target.max_seq()` and `k >= 1`.
+pub fn generate_speculative(
+    target: &mut NdDecoderLM,
+    draft: &mut NdDecoderLM,
+    prompt: &[usize],
+    n_new: usize,
+    k: usize,
+) -> (Vec<usize>, usize) {
+    assert!(k >= 1, "k must be >= 1");
+    assert!(!prompt.is_empty(), "empty prompt");
+    assert!(
+        prompt.len() + n_new <= target.max_seq(),
+        "prompt + n_new exceeds target max_seq"
+    );
+    let mut seq = prompt.to_vec();
+    let mut target_forwards = 0usize;
+
+    while seq.len() - prompt.len() < n_new
+    {
+        let remaining = n_new - (seq.len() - prompt.len());
+        let kk = k.min(remaining);
+
+        // 1. Draft proposes kk tokens greedily.
+        let mut proposed = Vec::with_capacity(kk);
+        let mut dseq = seq.clone();
+        for _ in 0..kk
+        {
+            let tape = NdTape::new();
+            let nt = *draft.predict(&tape, &dseq).last().unwrap();
+            proposed.push(nt);
+            dseq.push(nt);
+        }
+
+        // 2. Target verifies the whole block in ONE forward.
+        let mut check = seq.clone();
+        check.extend(&proposed);
+        let tape = NdTape::new();
+        let preds = target.predict(&tape, &check);
+        target_forwards += 1;
+
+        // 3. Accept the matching prefix; correct the first mismatch.
+        let base = seq.len() - 1; // preds[base] is the token after `seq`
+        let mut accepted = 0;
+        for (i, &pi) in proposed.iter().enumerate()
+        {
+            let tok = preds[base + i];
+            if tok == pi
+            {
+                seq.push(pi);
+                accepted += 1;
+            }
+            else
+            {
+                seq.push(tok); // target's correction (== greedy's choice here)
+                break;
+            }
+        }
+        // 4. All accepted ⇒ a free bonus token (target's argmax at the end).
+        if accepted == proposed.len() && seq.len() - prompt.len() < n_new
+        {
+            seq.push(preds[base + proposed.len()]);
+        }
+    }
+
+    seq.truncate(prompt.len() + n_new);
+    (seq[prompt.len()..].to_vec(), target_forwards)
 }
 
 #[cfg(test)]
@@ -267,5 +367,43 @@ mod tests {
         let t = NdTape::new();
         let preds = lm.predict(&t, &seq[..seq.len() - 1]);
         assert_eq!(preds, seq[1..].to_vec(), "Adam-trained model mispredicts");
+    }
+
+    /// **Speculative decoding is exact**: its output equals plain greedy for the
+    /// target, for *any* draft. With an identical draft every token is accepted,
+    /// so the target runs far fewer forwards; with a different draft the output
+    /// is still identical (only the forward count rises).
+    #[test]
+    fn nd_speculative_decoding_is_exact() {
+        let cfg = tiny_cfg();
+        let prompt = [1usize, 2];
+        let n = 5;
+
+        // Greedy reference from the target.
+        let mut reference_model = NdDecoderLM::new(cfg, &mut PcgEngine::new(123));
+        let greedy = reference_model.generate_greedy(&prompt, n);
+
+        // Identical draft (same seed) ⇒ exact output AND fewer target forwards.
+        let mut target = NdDecoderLM::new(cfg, &mut PcgEngine::new(123));
+        let mut draft_same = NdDecoderLM::new(cfg, &mut PcgEngine::new(123));
+        let (spec_same, fwds_same) =
+            generate_speculative(&mut target, &mut draft_same, &prompt, n, 4);
+        assert_eq!(
+            spec_same, greedy,
+            "identical-draft speculative must equal greedy"
+        );
+        assert!(
+            fwds_same < n,
+            "identical draft should accept all ⇒ < {n} target forwards, got {fwds_same}"
+        );
+
+        // Different draft (different seed) ⇒ still exact output.
+        let mut target2 = NdDecoderLM::new(cfg, &mut PcgEngine::new(123));
+        let mut draft_diff = NdDecoderLM::new(cfg, &mut PcgEngine::new(999));
+        let (spec_diff, _) = generate_speculative(&mut target2, &mut draft_diff, &prompt, n, 4);
+        assert_eq!(
+            spec_diff, greedy,
+            "different-draft speculative must still equal greedy"
+        );
     }
 }
