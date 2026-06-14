@@ -81,9 +81,12 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `ode <f(t,y)> <y0> <t0> <t1> [h] [--method]` | intègre dy/dt=f (RK4 / DOPRI5 adaptatif) | `scirust-solvers`+`-symbolic` |
 | `fem-heat <nodes> <length> <source>` | chaleur 1D −u″=source (éléments finis linéaires) | `scirust-solvers` |
 | `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
-| `bpe "<corpus>" [--vocab N] [--encode "<text>"]` | tokenizer BPE déterministe (entraînement + encode/decode) | `scirust-learning` |
+| `bpe "<corpus>" [--vocab N] [--encode "<text>"] [--bytes]` | tokenizer BPE déterministe (entraînement + encode/decode ; `--bytes` = byte-level lossless) | `scirust-learning` |
+| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
 | `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
+| `certify [--seed N] [--eps E]` | bornes de sortie prouvées d'un MLP ReLU sur une boîte L∞ (IBP) | `scirust-core::nn::ibp` |
+| `conformal [--seed N] [--alpha A]` | intervalles conformes à couverture garantie sans hypothèse de distribution | `scirust-core::nn::conformal` |
 | `info` / `help` / `version` | méta | — |
 
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`

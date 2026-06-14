@@ -3,6 +3,91 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 36 : AdEMAMix (#23) + nettoyage code mort
+- `nn::nd_optim::NdAdEMAMix` (Pagliardini 2024) : Adam à deux EMA (β1 rapide +
+  β3 lente, mélange α) ; déterministe. CLI `lm --opt ademamix`. Tests :
+  convergence quadratique (bande), déterminisme.
+- **nettoyage** : suppression de `src/nn/.legacy/` (2363 lignes, non câblé,
+  dotfile, 0 référence, superposé par les vraies impls). Vérif : analyseur
+  CodeFlow = faux positifs (traits/ops/pub API/kernels SIMD par-archi ;
+  `archive/` exclu du build) → rien d'autre à supprimer sans casser l'API.
+- 820 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 35 : Schedule-Free (#22) + doc/CLI/paper
+- `nn::nd_optim::NdScheduleFree` (Defazio 2024) : sans planning LR ; base z,
+  moyenne Polyak x (point d'éval), gradient en y=(1−β)z+βx. `write_eval_point`.
+  Tests : convergence quadratique, déterminisme.
+- CLI : `lm --opt schedule-free` (finalize() charge x avant predict ; rappel
+  exact en direct). 4 variantes d'opt dans lm.
+- docs : roadmap #22 ✅ ; REFERENCE/CHANGELOG ; option --opt mise à jour dans
+  Documentation (8) + paper (8).
+- NOTE analyseur CodeFlow : voir réponse — faux positifs (outil non-Rust :
+  prétend « 0 test » alors que 816 tests passent ; « doublons » = noyaux SIMD
+  par-archi + méthodes de traits).
+- 818 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 34 : conformal prediction (#21) + doc/CLI/paper
+- `nn::conformal` (Angelopoulos & Bates) : `conformal_quantile`,
+  `ConformalRegressor`, `ConformalClassifier` ; couverture garantie sans
+  hypothèse de distribution. Tests : couverture empirique atteint la cible
+  (régression + classification).
+- CLI : `scirust conformal [--seed N] [--alpha A]` (couverture en direct ;
+  90,8 % pour cible 90 %). 42 commandes.
+- docs : roadmap #21 ✅ ; README/REFERENCE/GROWTH_PLAN ; Documentation (8 langues)
+  et paper (8 langues) — commande conformal ajoutée.
+- 816 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 33 : CLI + docs multilingues + papers (cycle 2)
+- CLI : `scirust certify` (bornes IBP) + `scirust lm --opt adam|adamw|lion`.
+  41 commandes. Tests + 8 gates verts.
+- docs multilingues : section « Recherche → Fonctions » ajoutée à README,
+  Documentation.md + 7 traductions (EN/ES/DE/ZH/JA/KO/AR), et au paper
+  (8 langues). Compteur tests README 683→810.
+- 2ᵉ recherche de papers → RESEARCH_ROADMAP Tier 7 (#21-#25) : conformal
+  prediction (#21, fort fit certifiable), Schedule-Free (#22), AdEMAMix (#23),
+  SOAP (#24), DeltaNet (#25).
+- 810 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 32 : recherche → fonctions (lot 3)
+- **Muon** (`nn::nd_optim`) : momentum + Newton-Schulz (quintique, sans SVD) sur
+  matrices 2-D ; `newton_schulz_orthogonalize` pub ; déterministe. Tests :
+  orthogonalité (déviation s'effondre), perte matricielle, déterminisme.
+- **Wanda** (`pruning::prune_wanda`) : élagage one-shot |W|·‖X‖ par ligne ;
+  diffère de magnitude sur canaux aberrants.
+- **SmoothQuant** (`quantization`) : lissage par canal, préserve X·W ; réduit la
+  dispersion des activations. (GPTQ/AWQ encore à faire → #15 partiel.)
+- roadmap : **14 des 20** livrés/présents.
+- 810 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 31 : recherche → fonctions (lot 2)
+- **RoPE** (`autodiff::nd`) : op `rope` (paires, backward = rotation inverse) ;
+  gradient-check + conservation norme + propriété position relative ; branchée
+  dans l'attention via `with_rope`.
+- **GQA/MQA** (`nn::nd_layers`) : `new_gqa(num_kv_heads)` — partage K/V via
+  broadcast `bmm`, aucune nouvelle op ; gradient-check (kv=2 et kv=1).
+- **Neural ODE** (`nn::neural_ode`) : `rk4_integrate` + `NeuralOde`, backprop à
+  travers RK4 sur la tape ; RK4 validé (→ e), grad-check, apprend (Adam).
+- découverte : FlashAttention online-softmax (#9) **déjà** dans
+  `nn::transformer::flash_attention` → marqué ✅, pas de doublon.
+- roadmap : **11 des 20** items livrés/présents.
+- 802 tests ; 8 gates verts.
+
+## Session 2026-06-14 — volet 30 : recherche → fonctions (lot 1, 7 features)
+- `docs/RESEARCH_ROADMAP.md` : 20 papers réels → fonctions, statut + effort.
+- **IBP certifié** (`nn::ibp`, Gowal 2018) : intervalles → boîte de sortie
+  prouvée ; `certified_robust` ; soundness testée (4000 échantillons ∈ boîte).
+  Le pilier « IA certifiable » concret. +`NdLinear::bias()`.
+- **réductions reproductibles** (`reproducible`, Demmel-Nguyen) : sum/mean/dot
+  bit-identiques quel que soit l'ordre (tri canonique + expansion Shewchuk) ;
+  survit à l'annulation catastrophique.
+- ops nd : `rmsnorm` + `sigmoid` gradient-checkées. Couches : `NdRmsNorm`,
+  `NdSwiGLU`, `NdLlamaBlock` (Pre-RMSNorm+attn causale+SwiGLU), entraînables.
+- **décodage spéculatif exact** (`nn::nd_decoder`) : `generate_speculative`
+  = greedy cible exact pour tout brouillon, moins de forwards ; +`generate_greedy`.
+- optimiseurs : **AdamW** (wd découplé) + **Lion** (déterministe).
+- DP-SGD (#19) déjà présent dans `dp.rs` (marqué ✅ dans la roadmap).
+- 794 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 29 : LM décodeur causal N-D + Adam N-D
 - attention causale : `NdMultiHeadAttention { causal }` (masque triangulaire
   -1e9 avant softmax, propagé à `NdTransformerBlock`) ; aucune nouvelle op.
@@ -19,8 +104,11 @@
   couches (compose jusqu'au modèle) ⇒ un `step()` met à jour tout le LM.
   Tests : quadratique (oracle), déterminisme bit-à-bit, LM entraîné par Adam
   (<10 % en 150 pas, prédictions exactes).
+- CLI : **commande `lm`** (`scirust lm [..] [--seed/--steps/--lr]`) — entraîne
+  le LM décodeur N-D + Adam, rapporte perte + rappel exact ; déterministe.
+  39 → 40 commandes. Docs CLI (REFERENCE.md, README, GROWTH_PLAN) à jour.
 - fix doc : lien intra-doc `[encode]` cassé dans byte_bpe.rs (gate doc).
-- 775 tests ; 8 gates verts.
+- 776 tests ; 8 gates verts.
 
 ## Session 2026-06-13 — volet 28 : bloc transformer N-D complet, entraînable
 - op nd : layernorm(axe final, backward dx=rstd(g-mean_g-y·mean_gy)) gradient-

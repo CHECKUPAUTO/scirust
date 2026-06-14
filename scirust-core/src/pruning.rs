@@ -100,6 +100,57 @@ pub fn prune_structured_columns(weights: &mut [f32], rows: usize, cols: usize, s
     }
 }
 
+/// **Wanda** one-shot pruning (Sun et al., 2023): prune by the importance
+/// `|W_ij| · ‖X_j‖₂` — weight magnitude scaled by the L2 norm of input feature
+/// `j`'s calibration activations — comparing **per output row**. No retraining,
+/// no gradients; just a forward pass to gather `input_norms`.
+///
+/// `weights` is `(out × in)` row-major; `input_norms.len() == in_features`;
+/// `sparsity` is the fraction of weights zeroed **within each row**.
+pub fn prune_wanda(
+    weights: &mut [f32],
+    out: usize,
+    in_features: usize,
+    input_norms: &[f32],
+    sparsity: f32,
+) {
+    assert_eq!(weights.len(), out * in_features, "prune_wanda: weight size");
+    assert_eq!(
+        input_norms.len(),
+        in_features,
+        "prune_wanda: input_norms len"
+    );
+    if sparsity <= 0.0 || in_features == 0
+    {
+        return;
+    }
+    let n_prune = ((in_features as f32) * sparsity) as usize;
+    if n_prune == 0
+    {
+        return;
+    }
+    for r in 0..out
+    {
+        let row = &mut weights[r * in_features..(r + 1) * in_features];
+        // Importance per input feature; deterministic tie-break by index.
+        let mut scored: Vec<(usize, f32)> = row
+            .iter()
+            .zip(input_norms)
+            .enumerate()
+            .map(|(j, (&w, &xn))| (j, w.abs() * xn))
+            .collect();
+        scored.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+        for (j, _) in scored.iter().take(n_prune)
+        {
+            row[*j] = 0.0;
+        }
+    }
+}
+
 /// Compute current sparsity ratio (fraction of exactly zero weights).
 pub fn sparsity_ratio(weights: &[f32]) -> f32 {
     if weights.is_empty()
@@ -236,5 +287,45 @@ mod tests {
         // Weight 0 and 2 kept, rewound to initial
         assert_eq!(weights[0], 0.5);
         assert_eq!(weights[2], 0.8);
+    }
+
+    /// Wanda prunes by `|w|·‖x‖`, so a *large* weight on a *quiet* input is
+    /// dropped while a smaller weight on a loud input is kept — the opposite of
+    /// pure magnitude pruning.
+    #[test]
+    fn test_wanda_differs_from_magnitude() {
+        let input_norms = [0.1f32, 10.0];
+
+        // Wanda: metric = [1.0·0.1, 0.5·10] = [0.1, 5.0] → drop col 0.
+        let mut w = [1.0f32, 0.5];
+        prune_wanda(&mut w, 1, 2, &input_norms, 0.5);
+        assert_eq!(w, [0.0, 0.5]);
+
+        // Pure magnitude on the same weights drops the *other* one.
+        let mut wm = [1.0f32, 0.5];
+        prune_magnitude(&mut wm, 0.5);
+        assert_eq!(wm, [1.0, 0.0]);
+    }
+
+    /// Wanda zeroes the requested fraction within each output row.
+    #[test]
+    fn test_wanda_respects_sparsity_per_row() {
+        let input_norms = [1.0f32, 1.0, 1.0, 1.0];
+        let mut w: Vec<f32> = (0..8).map(|i| i as f32 + 1.0).collect(); // 2 rows × 4
+        prune_wanda(&mut w, 2, 4, &input_norms, 0.5); // drop 2 of 4 per row
+        for r in 0..2
+        {
+            let zeros = w[r * 4..(r + 1) * 4].iter().filter(|&&v| v == 0.0).count();
+            assert_eq!(zeros, 2, "row {r} should have 2 zeros");
+        }
+    }
+
+    /// With uniform input norms, Wanda reduces to magnitude pruning (per row).
+    #[test]
+    fn test_wanda_uniform_norms_is_magnitude() {
+        let input_norms = [1.0f32; 4];
+        let mut w = [4.0f32, 1.0, 3.0, 2.0];
+        prune_wanda(&mut w, 1, 4, &input_norms, 0.5); // drop the 2 smallest: 1.0, 2.0
+        assert_eq!(w, [4.0, 0.0, 3.0, 0.0]);
     }
 }

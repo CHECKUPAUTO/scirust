@@ -6,6 +6,83 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap #23) :
+  Adam à **deux EMA** du gradient (rapide β1 + lente β3 à longue mémoire, mélangées
+  par α) ; déterministe. CLI : `scirust lm --opt ademamix`. Tests : convergence
+  quadratique (bande), déterminisme bit-à-bit.
+
+### Nettoyé
+- Suppression de `scirust-core/src/nn/.legacy/` (**2363 lignes** de code mort) :
+  répertoire non câblé dans l'arbre de modules (dotfile, zéro référence),
+  superposé par les implémentations réelles `nn::conv2d`/`batch_norm`/`layer_norm`/
+  `pool`/`loss`/`transformer`. Conforme au fondamental « code sous src/ câblé et
+  testé, sinon archivé ».
+
+### Ajouté — campagne « faire grandir scirust » (suite)
+- **Schedule-Free** (`nn::nd_optim::NdScheduleFree`, Defazio et al. 2024, roadmap
+  #22) : optimiseur **sans planning de learning-rate** — séquence de base `z`
+  (descente), moyenne de Polyak `x` (**point d'évaluation**), gradient pris en
+  `y = (1−β)z + βx`. Déterministe. CLI : `scirust lm --opt schedule-free`
+  (le point d'éval `x` est chargé avant la prédiction). Tests : convergence sur
+  quadratique, déterminisme bit-à-bit.
+- **Conformal prediction** (`nn::conformal`, Angelopoulos & Bates 2021, roadmap
+  #21) : `conformal_quantile`, `ConformalRegressor`, `ConformalClassifier` —
+  ensembles/intervalles de prédiction à **couverture garantie sans hypothèse de
+  distribution** (`≥ 1 − α`). Tests : la couverture empirique atteint la cible
+  sur des données fraîches (régression *et* classification). CLI : `scirust
+  conformal [--seed N] [--alpha A]` (couverture mesurée en direct, ex. 90,8 %
+  pour une cible de 90 %). CLI : 41 → 42 commandes.
+- **Lot 3 recherche → fonctions** (testées, 8 gates verts ; **14 des 20** items
+  de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  - **Muon** (`nn::nd_optim`, Jordan et al. 2024) : optimiseur matriciel —
+    momentum puis **orthogonalisation Newton–Schulz** (quintique, sans SVD) de
+    la mise à jour des matrices 2-D ; `newton_schulz_orthogonalize` exposé.
+    Déterministe. Tests : orthogonalité (déviation ‖A·Aᵀ−I‖ s'effondre), perte
+    matricielle, déterminisme.
+  - **Wanda** (`pruning::prune_wanda`, Sun et al. 2023) : élagage one-shot par
+    `|W|·‖X‖` (poids × norme d'activation), par ligne de sortie — diffère de
+    l'élagage par magnitude sur les canaux à activations aberrantes.
+  - **SmoothQuant** (`quantization::smoothquant_scales`/`apply_smoothquant`,
+    Xiao et al. 2022) : lissage par canal d'entrée qui migre les valeurs
+    aberrantes d'activation vers les poids ; **préserve `X·W`**.
+- **Lot 2 recherche → fonctions** (3 features de plus, testées, 8 gates verts ;
+  **11 des 20** items de [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  - **RoPE** (`autodiff::nd`, Su et al. 2021) : op `rope` (rotation par paires,
+    backward = rotation inverse) ; gradient-checkée, conservation de norme et
+    **propriété de position relative** testées ; branchée via
+    `NdMultiHeadAttention::with_rope`.
+  - **GQA / MQA** (`nn::nd_layers`, Ainslie et al. 2023) :
+    `NdMultiHeadAttention::new_gqa(num_kv_heads, …)` — têtes K/V partagées via le
+    broadcast `bmm` (aucune nouvelle op) ; gradient-checkée (GQA et MQA).
+  - **Neural ODE** (`nn::neural_ode`, Chen et al. 2018) : `rk4_integrate` +
+    `NeuralOde` — backprop **à travers** le solveur RK4 sur la tape N-D (fusion
+    solveurs + autograd). RK4 validé (`dy/dt=y → e`), gradient-check à travers
+    le solveur, et la dynamique **apprend** (Adam).
+- **Feuille de route recherche → fonctions** ([`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)) :
+  20 papers réels traduits en fonctions concrètes, avec statut et effort. Premier
+  lot **livré cette session** (testé, 8 gates verts) :
+  - **IBP — bornes de sortie certifiées** (`nn::ibp`, Gowal et al. 2018) :
+    propagation d'intervalles dans un MLP ReLU → boîte de sortie **prouvée** ;
+    `certified_robust` transforme la borne en garantie de classe. Soundness
+    testée par échantillonnage (4000 points ∈ boîte certifiée). *Le* pilier « IA
+    certifiable » rendu concret.
+  - **Réductions reproductibles** (`reproducible`, Demmel & Nguyen) :
+    `reproducible_sum`/`_mean`/`_dot` **bit-identiques quel que soit l'ordre /
+    le nombre de threads** (tri canonique + expansion exacte de Shewchuk) ;
+    survit à l'annulation catastrophique.
+  - **Couches LLaMA N-D** (`nn::nd_layers`) : `NdRmsNorm`, `NdSwiGLU` (+ ops
+    `rmsnorm`/`sigmoid` gradient-checkées) et `NdLlamaBlock` (Pre-RMSNorm +
+    attention causale + SwiGLU) — entraînables, Adam-ready.
+  - **Décodage spéculatif exact** (`nn::nd_decoder`, Leviathan/Chen 2023) :
+    `generate_speculative` produit **exactement** la sortie greedy de la cible
+    pour n'importe quel brouillon, avec moins de forwards ; + `generate_greedy`.
+  - **Optimiseurs** (`nn::nd_optim`) : **AdamW** (weight-decay découplé) et
+    **Lion** (sign-momentum, déterministe).
+- **Commande CLI `lm`** : entraîne un petit LM décodeur causal (tape N-D + Adam)
+  sur une séquence de tokens et rapporte la courbe de perte + le rappel exact —
+  `scirust lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R]`. Déterministe par
+  graine ; expose toute la pile N-D (embeddings, attention causale, gather,
+  cross-entropy, Adam) en une commande. CLI : 39 → 40 commandes.
 - **Optimiseur Adam N-D, réutilisable et déterministe** (`nn::nd_optim`) :
   `NdAdam` (Kingma & Ba) sur un ensemble ordonné de paramètres. Chaque couche
   expose `parameters() -> Vec<NdParam>` (vue `&mut` des valeurs + index du

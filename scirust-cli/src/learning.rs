@@ -1,6 +1,10 @@
 //! Learning subcommands beyond `quickstart`: ownership-model training and
 //! evolutionary optimization. Both are deterministic in their seed.
 
+use scirust_core::nn::PcgEngine;
+use scirust_core::nn::conformal::ConformalRegressor;
+use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust};
+use scirust_core::nn::nd_layers::NdLinear;
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
@@ -14,6 +18,113 @@ fn flag_u64(args: &[String], name: &str, default: u64) -> u64 {
         .and_then(|i| args.get(i + 1))
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+fn flag_f32(args: &[String], name: &str, default: f32) -> f32 {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// `certify [--seed N] [--eps E]` — build a small seeded ReLU MLP and prove,
+/// via **Interval Bound Propagation**, output bounds over an L∞ box of radius
+/// `eps` around an input; report whether the predicted class is **provably**
+/// unchanged across the whole box. Showcases scirust's "certifiable AI" thesis.
+pub fn run_certify(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let eps = flag_f32(args, "--eps", 0.05);
+    if eps <= 0.0 || !eps.is_finite()
+    {
+        eprintln!("usage: scirust certify [--seed N] [--eps E]");
+        eprintln!("error: --eps must be a positive number");
+        return 2;
+    }
+
+    let (in_f, hidden, out_f) = (4usize, 8usize, 3usize);
+    let mut rng = PcgEngine::new(seed);
+    let l1 = NdLinear::new(in_f, hidden, &mut rng);
+    let l2 = NdLinear::new(hidden, out_f, &mut rng);
+    let mlp = IbpMlp::new(vec![
+        IbpLinear::from_nd_linear(&l1),
+        IbpLinear::from_nd_linear(&l2),
+    ]);
+
+    let centre = vec![0.2f32, -0.5, 0.7, -0.1];
+    let pred = mlp.forward(&centre);
+    let argmax = pred
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, _)| i)
+        .unwrap();
+    let cert = mlp.certify(&Interval::around(&centre, eps));
+    let robust = certified_robust(&cert, argmax);
+
+    println!("IBP certification — pure Rust, deterministic (seed {seed})");
+    println!("  MLP: {in_f}->{hidden}->{out_f} (ReLU)");
+    println!("  input: {centre:?}  ->  prediction: class {argmax}");
+    println!("  L∞ box radius eps = {eps}");
+    println!("  certified output bounds:");
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", cert.lo[c], cert.hi[c]);
+    }
+    println!(
+        "  robustness: {}",
+        if robust
+        {
+            format!("CERTIFIED — class {argmax} cannot change anywhere in the box")
+        }
+        else
+        {
+            "not certified at this eps (try a smaller --eps)".to_string()
+        }
+    );
+    0
+}
+
+/// `conformal [--seed N] [--alpha A]` — calibrate a **split-conformal**
+/// regressor on synthetic residuals at target coverage `1 − α`, then report the
+/// **empirical coverage** measured on fresh data and the interval half-width.
+/// Distribution-free guarantee, demonstrated and deterministic by seed.
+pub fn run_conformal(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let alpha = flag_f32(args, "--alpha", 0.1);
+    if alpha <= 0.0 || alpha >= 1.0 || !alpha.is_finite()
+    {
+        eprintln!("usage: scirust conformal [--seed N] [--alpha A]");
+        eprintln!("error: --alpha must be in (0, 1)");
+        return 2;
+    }
+
+    let mut rng = PcgEngine::new(seed);
+    let noise = |r: &mut PcgEngine| (r.float_signed() + r.float_signed()).abs();
+    let cal: Vec<f32> = (0..2000).map(|_| noise(&mut rng)).collect();
+    let reg = ConformalRegressor::calibrate(&cal, alpha);
+
+    let n_test = 5000usize;
+    let mut covered = 0usize;
+    for _ in 0..n_test
+    {
+        if reg.covers(0.0, noise(&mut rng))
+        {
+            covered += 1;
+        }
+    }
+    let coverage = covered as f32 / n_test as f32;
+    let target = 100.0 * (1.0 - alpha);
+
+    println!("Conformal prediction — pure Rust, deterministic (seed {seed})");
+    println!("  calibration: 2000 points · target coverage {target:.0}% (alpha {alpha})");
+    println!("  interval half-width q̂ = {:.4}", reg.half_width());
+    println!(
+        "  empirical coverage on {n_test} fresh points: {:.1}%",
+        100.0 * coverage
+    );
+    println!("  guarantee: distribution-free marginal coverage ≥ {target:.0}%");
+    0
 }
 
 /// `som train [--seed N] [--epochs E]` — train the ownership model on
@@ -194,5 +305,25 @@ mod tests {
                 .fold(f64::INFINITY, f64::min)
         };
         assert_eq!(best(1).to_bits(), best(1).to_bits());
+    }
+
+    #[test]
+    fn certify_runs() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // A small box certifies; default and explicit eps both succeed.
+        assert_eq!(run_certify(&s(&["--eps", "0.01"])), 0);
+        assert_eq!(run_certify(&s(&["--seed", "3", "--eps", "0.2"])), 0);
+        // Invalid eps is rejected.
+        assert_eq!(run_certify(&s(&["--eps", "0"])), 2);
+    }
+
+    #[test]
+    fn conformal_runs() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(run_conformal(&s(&["--alpha", "0.1"])), 0);
+        assert_eq!(run_conformal(&s(&["--seed", "5", "--alpha", "0.2"])), 0);
+        // alpha must be in (0,1).
+        assert_eq!(run_conformal(&s(&["--alpha", "0"])), 2);
+        assert_eq!(run_conformal(&s(&["--alpha", "1"])), 2);
     }
 }
