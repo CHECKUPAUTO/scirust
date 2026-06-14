@@ -6,6 +6,35 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Optimiseur Adam N-D, réutilisable et déterministe** (`nn::nd_optim`) :
+  `NdAdam` (Kingma & Ba) sur un ensemble ordonné de paramètres. Chaque couche
+  expose `parameters() -> Vec<NdParam>` (vue `&mut` des valeurs + index du
+  gradient issu de `backward`) ; la composition remonte l'arbre
+  (`NdLinear`/`NdEmbedding`/`NdLayerNorm` → attention → bloc → `NdDecoderLM`),
+  donc **un seul `opt.step()` met à jour tout le modèle**. Arithmétique f32 en
+  ordre fixe ⇒ **bit-à-bit déterministe**. Tests : convergence sur quadratique
+  (oracle), déterminisme bit-à-bit, et **le LM décodeur entraîné par Adam via
+  `parameters()`** (< 10 % de perte en 150 pas vs 300 en SGD, prédictions
+  exactes).
+- **Modèle de langage décodeur causal bout-en-bout** (`nn::nd_decoder`) :
+  `NdDecoderLM` de style GPT entièrement sur la tape N-D — embedding de tokens
+  + embedding positionnel appris → N blocs transformer Pre-LN **causals** →
+  LayerNorm final → tête linéaire vers les logits de vocabulaire, entraîné par
+  cross-entropy au token suivant. Test phare : **le LM sur-apprend une séquence
+  et la reprédit exactement** à chaque position (preuve bout-en-bout que toute
+  la pile apprend) ; forward déterministe par graine. `NdEmbedding` (table
+  adossée à `gather`) ajoutée comme couche réutilisable.
+- **Ops N-D `gather` + `cross_entropy`** (`autodiff::nd`) : `gather(indices)`
+  (lookup d'embedding `(vocab, dim) → (n, dim)`, backward scatter-add — les
+  indices répétés s'accumulent, les lignes jamais vues gardent un gradient nul)
+  et `cross_entropy(targets)` (softmax + NLL moyen **fusionné**, log-sum-exp
+  stable, backward `(softmax − onehot)/n`). Gradient-checkées ; sanity
+  `logits uniformes → ln(vocab)`.
+- **Attention causale N-D** (`NdMultiHeadAttention { causal }`, propagée à
+  `NdTransformerBlock`) : masque triangulaire additif (`-1e9` au-dessus de la
+  diagonale) avant le softmax — aucune nouvelle op d'autograd. Test de
+  **causalité** : perturber le dernier token d'entrée laisse **chaque** sortie
+  antérieure bit-à-bit inchangée, tandis que la sortie perturbée bouge.
 - **Bloc transformer N-D complet et entraînable** (`nn::nd_layers`) :
   `NdLinear`, `NdMultiHeadAttention`, `NdLayerNorm` (affine γ/β) et
   `NdTransformerBlock` (Pre-LN : `x + Attn(LN(x))`, `x₁ + FFN(LN(x₁))`) sur la

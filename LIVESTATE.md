@@ -1,7 +1,26 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-13
+> Dernière mise à jour : 2026-06-14
+
+## Session 2026-06-14 — volet 29 : LM décodeur causal N-D + Adam N-D
+- attention causale : `NdMultiHeadAttention { causal }` (masque triangulaire
+  -1e9 avant softmax, propagé à `NdTransformerBlock`) ; aucune nouvelle op.
+  Test de causalité : perturber le dernier token n'altère AUCUNE sortie
+  antérieure (bit-à-bit), la sortie perturbée bouge.
+- ops nd : `gather` (embedding, backward scatter-add ; indices répétés
+  s'accumulent, lignes inutilisées = grad 0) + `cross_entropy` (softmax+NLL
+  fusionné, log-sum-exp ; backward (softmax-onehot)/n). Gradient-checkées.
+- `nn::nd_decoder` : **NdDecoderLM** (GPT-style : embeddings tok+pos appris,
+  N blocs causals, LN final, tête lm) entraîné en cross-entropy token-suivant.
+  Test phare : **sur-apprend une séquence et la reprédit exactement**. « voici
+  le LM ». +NdEmbedding (couche réutilisable, nd_layers).
+- `nn::nd_optim` : **NdAdam** déterministe + `parameters()` sur toutes les
+  couches (compose jusqu'au modèle) ⇒ un `step()` met à jour tout le LM.
+  Tests : quadratique (oracle), déterminisme bit-à-bit, LM entraîné par Adam
+  (<10 % en 150 pas, prédictions exactes).
+- fix doc : lien intra-doc `[encode]` cassé dans byte_bpe.rs (gate doc).
+- 775 tests ; 8 gates verts.
 
 ## Session 2026-06-13 — volet 28 : bloc transformer N-D complet, entraînable
 - op nd : layernorm(axe final, backward dx=rstd(g-mean_g-y·mean_gy)) gradient-
