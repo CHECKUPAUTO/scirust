@@ -5,7 +5,7 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
-use scirust_core::nn::nd_optim::{NdAdam, NdLion, NdParam};
+use scirust_core::nn::nd_optim::{NdAdam, NdLion, NdParam, NdScheduleFree};
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
 use scirust_learning::nlp::byte_bpe::ByteBpeTokenizer;
@@ -139,6 +139,7 @@ pub fn run_bpe(args: &[String]) -> u8 {
 enum LmOpt {
     Adam(NdAdam),
     Lion(NdLion),
+    ScheduleFree(NdScheduleFree),
 }
 
 impl LmOpt {
@@ -147,11 +148,22 @@ impl LmOpt {
         {
             LmOpt::Adam(o) => o.step(params, grads),
             LmOpt::Lion(o) => o.step(params, grads),
+            LmOpt::ScheduleFree(o) => o.step(params, grads),
+        }
+    }
+
+    /// After training, load the deployable weights. Schedule-Free keeps `y` in
+    /// the parameters and the average `x` separately, so we write `x` back;
+    /// the other optimizers already hold the final weights.
+    fn finalize(&self, params: &mut [NdParam]) {
+        if let LmOpt::ScheduleFree(o) = self
+        {
+            o.write_eval_point(params);
         }
     }
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion]` —
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free]` —
 /// train a small **causal decoder language model** on the N-D autograd tape and
 /// report whether it learns to predict the sequence. Pure Rust, deterministic by
 /// seed: token + learned positional embeddings, causal multi-head attention, a
@@ -187,7 +199,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     if tokens.len() < 2
     {
         eprintln!(
-            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion]"
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free]"
         );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
@@ -220,13 +232,18 @@ pub fn run_lm(args: &[String]) -> u8 {
         None => 200,
     };
     let opt_kind = opt_s.as_deref().unwrap_or("adam");
-    if !matches!(opt_kind, "adam" | "adamw" | "lion")
+    if !matches!(opt_kind, "adam" | "adamw" | "lion" | "schedule-free")
     {
-        eprintln!("error: --opt must be one of: adam, adamw, lion");
+        eprintln!("error: --opt must be one of: adam, adamw, lion, schedule-free");
         return 2;
     }
-    // Lion likes a smaller default step than Adam.
-    let default_lr = if opt_kind == "lion" { 0.003 } else { 0.01 };
+    // Each optimizer prefers a different default step size.
+    let default_lr = match opt_kind
+    {
+        "lion" => 0.003,
+        "schedule-free" => 0.5,
+        _ => 0.01,
+    };
     let lr: f32 = match &lr_s
     {
         Some(s) => match s.parse::<f32>()
@@ -257,6 +274,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     {
         "adamw" => LmOpt::Adam(NdAdam::with_lr_wd(lr, 0.01)),
         "lion" => LmOpt::Lion(NdLion::with_lr(lr)),
+        "schedule-free" => LmOpt::ScheduleFree(NdScheduleFree::with_lr(lr)),
         _ => LmOpt::Adam(NdAdam::with_lr(lr)),
     };
 
@@ -275,6 +293,11 @@ pub fn run_lm(args: &[String]) -> u8 {
         let grads = tape.backward(loss_v);
         let mut params = lm.parameters();
         opt.step(&mut params, &grads);
+    }
+    // Load the deployable weights (a no-op except for Schedule-Free).
+    {
+        let mut params = lm.parameters();
+        opt.finalize(&mut params);
     }
 
     let tape = NdTape::new();
@@ -372,6 +395,16 @@ mod tests {
         );
         assert_eq!(
             run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "lion"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&[
+                "1,2,3,1,2,3",
+                "--steps",
+                "20",
+                "--opt",
+                "schedule-free"
+            ])),
             0
         );
         assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer

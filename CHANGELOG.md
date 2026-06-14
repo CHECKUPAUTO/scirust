@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Schedule-Free** (`nn::nd_optim::NdScheduleFree`, Defazio et al. 2024, roadmap
+  #22) : optimiseur **sans planning de learning-rate** — séquence de base `z`
+  (descente), moyenne de Polyak `x` (**point d'évaluation**), gradient pris en
+  `y = (1−β)z + βx`. Déterministe. CLI : `scirust lm --opt schedule-free`
+  (le point d'éval `x` est chargé avant la prédiction). Tests : convergence sur
+  quadratique, déterminisme bit-à-bit.
 - **Conformal prediction** (`nn::conformal`, Angelopoulos & Bates 2021, roadmap
   #21) : `conformal_quantile`, `ConformalRegressor`, `ConformalClassifier` —
   ensembles/intervalles de prédiction à **couverture garantie sans hypothèse de

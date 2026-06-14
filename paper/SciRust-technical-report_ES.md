@@ -278,6 +278,6 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant.
 
 Dos comandos CLI exponen este trabajo: `scirust certify` (cotas y robustez IBP) y
-`scirust lm --opt adam|adamw|lion` (entrenar el LM decodificador N-D).
+`scirust lm --opt adam|adamw|lion|schedule-free` (entrenar el LM decodificador N-D).
 
 Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.

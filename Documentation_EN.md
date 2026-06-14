@@ -166,5 +166,5 @@ backed by a research paper and a test (gradient check or oracle). See
 
 New CLI commands:
 - `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP).
-- `scirust lm [...] [--opt adam|adamw|lion]` — train the N-D decoder LM.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free]` — train the N-D decoder LM.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.

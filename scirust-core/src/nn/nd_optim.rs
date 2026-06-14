@@ -435,6 +435,113 @@ impl NdMuon {
     }
 }
 
+/// Hyper-parameters for [`NdScheduleFree`]. [`Default`] is `lr = 1.0,
+/// beta = 0.9` with no weight decay.
+#[derive(Clone, Copy, Debug)]
+pub struct ScheduleFreeConfig {
+    /// Learning rate (Schedule-Free tolerates a constant, large LR).
+    pub lr: f32,
+    /// Interpolation between the base sequence `z` and the average `x`.
+    pub beta: f32,
+    /// Decoupled weight decay (applied at the evaluation point).
+    pub weight_decay: f32,
+}
+
+impl Default for ScheduleFreeConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1.0,
+            beta: 0.9,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **Schedule-Free** optimization (Defazio et al., *The Road Less Scheduled*,
+/// 2024; AlgoPerf self-tuning winner): no learning-rate schedule. Three points
+/// per parameter — a base sequence `z` (gradient descent), a Polyak average `x`
+/// (the **evaluation point**), and an interpolation `y = (1−β)z + βx` where the
+/// gradient is taken. With a constant LR the averaging weight is `1/(t+1)`
+/// (uniform Polyak–Ruppert averaging).
+///
+/// Contract: the parameter tensors hold `y` (so the forward/backward computes
+/// the gradient at `y`); [`Self::step`] consumes that gradient and writes the
+/// next `y` back. Call [`Self::write_eval_point`] to load `x` for
+/// evaluation/deployment. Pure `f32` in a fixed order ⇒ **deterministic**.
+pub struct NdScheduleFree {
+    cfg: ScheduleFreeConfig,
+    t: u64,
+    z: Vec<Vec<f32>>,
+    x: Vec<Vec<f32>>,
+}
+
+impl NdScheduleFree {
+    /// New optimizer with the given config.
+    pub fn new(cfg: ScheduleFreeConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            z: Vec::new(),
+            x: Vec::new(),
+        }
+    }
+
+    /// Schedule-Free at learning rate `lr` (default `beta`, no weight decay).
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(ScheduleFreeConfig {
+            lr,
+            ..ScheduleFreeConfig::default()
+        })
+    }
+
+    /// One update: read the gradient (taken at `y`), advance `z`/`x`, and write
+    /// the next `y` into the parameter tensors.
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.z.is_empty() && !params.is_empty()
+        {
+            // z₁ = x₁ = θ₀ (the current parameter values, which equal y₁).
+            self.z = params.iter().map(|p| p.value.data.clone()).collect();
+            self.x = self.z.clone();
+        }
+        assert_eq!(
+            self.z.len(),
+            params.len(),
+            "NdScheduleFree: parameter count changed between steps"
+        );
+        self.t += 1;
+        let ScheduleFreeConfig {
+            lr,
+            beta,
+            weight_decay,
+        } = self.cfg;
+        let c = 1.0 / (self.t as f32 + 1.0); // averaging weight for constant LR
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let zk = &mut self.z[k];
+            let xk = &mut self.x[k];
+            for j in 0..p.value.data.len()
+            {
+                let yj = p.value.data[j]; // gradient was taken here
+                let geff = g[j] + weight_decay * yj;
+                zk[j] -= lr * geff;
+                xk[j] = (1.0 - c) * xk[j] + c * zk[j];
+                p.value.data[j] = (1.0 - beta) * zk[j] + beta * xk[j];
+            }
+        }
+    }
+
+    /// Load the evaluation point `x` (the Polyak average) into the parameter
+    /// tensors — call before measuring/deploying the model.
+    pub fn write_eval_point(&self, params: &mut [NdParam]) {
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            p.value.data.copy_from_slice(&self.x[k]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,6 +814,82 @@ mod tests {
                 );
             }
             w.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// Schedule-Free minimises the quadratic oracle: the **evaluation point**
+    /// `x` converges to the target. The gradient is taken at `y` (the parameter
+    /// the optimizer keeps live), as the contract requires.
+    #[test]
+    fn nd_schedule_free_converges_on_quadratic() {
+        let target = [3.0f32, -2.0, 0.5];
+        let mut p = TensorND::new(vec![0.0, 0.0, 0.0], vec![3]);
+        let mut opt = NdScheduleFree::with_lr(0.2);
+
+        for _ in 0..1000
+        {
+            // gradient of Σ(y−t)² at the current y (= p).
+            let gd: Vec<f32> = p
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&yi, &ti)| 2.0 * (yi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![3])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut p,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        // Load the averaged evaluation point and check it reached the target.
+        opt.write_eval_point(&mut [NdParam {
+            value: &mut p,
+            grad_idx: 0,
+        }]);
+        for (&xi, &ti) in p.data.iter().zip(&target)
+        {
+            assert!(
+                (xi - ti).abs() < 0.02,
+                "x={:?}, target={:?}",
+                p.data,
+                target
+            );
+        }
+    }
+
+    /// Schedule-Free is bit-for-bit deterministic across runs.
+    #[test]
+    fn nd_schedule_free_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let target = [1.0f32, -1.0];
+            let mut p = TensorND::new(vec![0.5, 0.5], vec![2]);
+            let mut opt = NdScheduleFree::with_lr(0.1);
+            for _ in 0..200
+            {
+                let gd: Vec<f32> = p
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&yi, &ti)| 2.0 * (yi - ti))
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![2])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut p,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            opt.write_eval_point(&mut [NdParam {
+                value: &mut p,
+                grad_idx: 0,
+            }]);
+            p.data
         };
         assert_eq!(run(), run());
     }

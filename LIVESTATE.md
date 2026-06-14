@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 35 : Schedule-Free (#22) + doc/CLI/paper
+- `nn::nd_optim::NdScheduleFree` (Defazio 2024) : sans planning LR ; base z,
+  moyenne Polyak x (point d'éval), gradient en y=(1−β)z+βx. `write_eval_point`.
+  Tests : convergence quadratique, déterminisme.
+- CLI : `lm --opt schedule-free` (finalize() charge x avant predict ; rappel
+  exact en direct). 4 variantes d'opt dans lm.
+- docs : roadmap #22 ✅ ; REFERENCE/CHANGELOG ; option --opt mise à jour dans
+  Documentation (8) + paper (8).
+- NOTE analyseur CodeFlow : voir réponse — faux positifs (outil non-Rust :
+  prétend « 0 test » alors que 816 tests passent ; « doublons » = noyaux SIMD
+  par-archi + méthodes de traits).
+- 818 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 34 : conformal prediction (#21) + doc/CLI/paper
 - `nn::conformal` (Angelopoulos & Bates) : `conformal_quantile`,
   `ConformalRegressor`, `ConformalClassifier` ; couverture garantie sans
