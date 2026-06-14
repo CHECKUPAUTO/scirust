@@ -84,6 +84,52 @@ impl NdLinear {
     }
 }
 
+/// An embedding table `(vocab, dim)`: maps integer ids to rows via the N-D
+/// tape's [`gather`](NdVar::gather). Used for both token and (learned)
+/// positional embeddings. Seeded init, SGD-updatable.
+pub struct NdEmbedding {
+    table: TensorND, // (vocab, dim)
+    idx: Option<usize>,
+}
+
+impl NdEmbedding {
+    /// New table with seeded init `U(-s, s)`, `s = 1/√dim`.
+    pub fn new(vocab: usize, dim: usize, rng: &mut PcgEngine) -> Self {
+        let scale = (1.0 / dim as f32).sqrt();
+        let data: Vec<f32> = (0..vocab * dim)
+            .map(|_| rng.float_signed() * scale)
+            .collect();
+        Self {
+            table: TensorND::new(data, vec![vocab, dim]),
+            idx: None,
+        }
+    }
+
+    /// Look up `ids` → `(ids.len(), dim)`, recording the table node so
+    /// [`Self::sgd_step`] can read its gradient.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, ids: &[usize]) -> NdVar<'t> {
+        let w = tape.input(self.table.clone());
+        self.idx = Some(w.idx());
+        w.gather(ids)
+    }
+
+    /// SGD-update the table from a `backward` result.
+    pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
+        if let Some(i) = self.idx
+        {
+            for (p, &g) in self.table.data.iter_mut().zip(&grads[i].data)
+            {
+                *p -= lr * g;
+            }
+        }
+    }
+
+    /// The embedding table `(vocab, dim)`.
+    pub fn table(&self) -> &TensorND {
+        &self.table
+    }
+}
+
 /// A `(seq, seq)` additive attention mask: `0` on and below the diagonal,
 /// `-1e9` above it. Added to the scores before the softmax, it drives the
 /// weights for "future" keys (`j > i`) to ~0 — i.e. causal/decoder attention.
@@ -367,6 +413,28 @@ mod tests {
             last < first * 0.7,
             "MLP did not learn: first {first}, last {last}"
         );
+    }
+
+    /// [`NdEmbedding`] selects the right rows and its SGD update touches only
+    /// the rows that were looked up (the rest keep their values).
+    #[test]
+    fn nd_embedding_forward_and_update() {
+        let mut rng = PcgEngine::new(3);
+        let mut emb = NdEmbedding::new(4, 3, &mut rng);
+        let before = emb.table().data.clone();
+
+        let t = NdTape::new();
+        let e = emb.forward(&t, &[1, 1]); // row 1, twice
+        assert_eq!(e.shape(), vec![2, 3]);
+        let ev = t.value(e);
+        assert_eq!(&ev.data[0..3], &before[3..6]); // gathered row == table row 1
+        let grads = t.backward(e.sum());
+        emb.sgd_step(&grads, 0.1);
+
+        let after = emb.table().data.clone();
+        assert_eq!(&after[0..3], &before[0..3]); // row 0 untouched
+        assert_ne!(&after[3..6], &before[3..6]); // row 1 moved
+        assert_eq!(&after[6..12], &before[6..12]); // rows 2,3 untouched
     }
 
     /// The full multi-head attention **layer** (q/k/v/o projections + the

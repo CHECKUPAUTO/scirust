@@ -20,6 +20,7 @@ pub mod linear;
 pub mod loss;
 pub mod lstm;
 pub mod module;
+pub mod nd_decoder;
 pub mod nd_layers;
 pub mod peft;
 pub mod pool;
