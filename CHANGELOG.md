@@ -6,6 +6,19 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap #23) :
+  Adam à **deux EMA** du gradient (rapide β1 + lente β3 à longue mémoire, mélangées
+  par α) ; déterministe. CLI : `scirust lm --opt ademamix`. Tests : convergence
+  quadratique (bande), déterminisme bit-à-bit.
+
+### Nettoyé
+- Suppression de `scirust-core/src/nn/.legacy/` (**2363 lignes** de code mort) :
+  répertoire non câblé dans l'arbre de modules (dotfile, zéro référence),
+  superposé par les implémentations réelles `nn::conv2d`/`batch_norm`/`layer_norm`/
+  `pool`/`loss`/`transformer`. Conforme au fondamental « code sous src/ câblé et
+  testé, sinon archivé ».
+
+### Ajouté — campagne « faire grandir scirust » (suite)
 - **Schedule-Free** (`nn::nd_optim::NdScheduleFree`, Defazio et al. 2024, roadmap
   #22) : optimiseur **sans planning de learning-rate** — séquence de base `z`
   (descente), moyenne de Polyak `x` (**point d'évaluation**), gradient pris en

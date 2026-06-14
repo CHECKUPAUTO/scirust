@@ -145,5 +145,5 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
 
 Nuevos comandos CLI:
 - `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free]` — entrena el LM decodificador N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — entrena el LM decodificador N-D.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.

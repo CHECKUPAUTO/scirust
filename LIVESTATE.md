@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-14
 
+## Session 2026-06-14 — volet 36 : AdEMAMix (#23) + nettoyage code mort
+- `nn::nd_optim::NdAdEMAMix` (Pagliardini 2024) : Adam à deux EMA (β1 rapide +
+  β3 lente, mélange α) ; déterministe. CLI `lm --opt ademamix`. Tests :
+  convergence quadratique (bande), déterminisme.
+- **nettoyage** : suppression de `src/nn/.legacy/` (2363 lignes, non câblé,
+  dotfile, 0 référence, superposé par les vraies impls). Vérif : analyseur
+  CodeFlow = faux positifs (traits/ops/pub API/kernels SIMD par-archi ;
+  `archive/` exclu du build) → rien d'autre à supprimer sans casser l'API.
+- 820 tests ; 8 gates verts.
+
 ## Session 2026-06-14 — volet 35 : Schedule-Free (#22) + doc/CLI/paper
 - `nn::nd_optim::NdScheduleFree` (Defazio 2024) : sans planning LR ; base z,
   moyenne Polyak x (point d'éval), gradient en y=(1−β)z+βx. `write_eval_point`.

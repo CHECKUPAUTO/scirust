@@ -213,7 +213,7 @@ const GROUPS: &[(&str, &[Command])] = &[
             },
             Command {
                 name: "lm",
-                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free]",
+                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix]",
                 about: "Train a tiny causal decoder LM (N-D tape) to recall a token sequence.",
             },
         ],

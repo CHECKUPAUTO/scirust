@@ -279,6 +279,6 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 - **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant.
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP-Schranken/Robustheit)
-und `scirust lm --opt adam|adamw|lion|schedule-free` (Training des N-D-Decoder-LM).
+und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (Training des N-D-Decoder-LM).
 
 Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.

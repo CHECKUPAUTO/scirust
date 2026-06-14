@@ -5,7 +5,7 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
-use scirust_core::nn::nd_optim::{NdAdam, NdLion, NdParam, NdScheduleFree};
+use scirust_core::nn::nd_optim::{NdAdEMAMix, NdAdam, NdLion, NdParam, NdScheduleFree};
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
 use scirust_learning::nlp::byte_bpe::ByteBpeTokenizer;
@@ -140,6 +140,7 @@ enum LmOpt {
     Adam(NdAdam),
     Lion(NdLion),
     ScheduleFree(NdScheduleFree),
+    AdEMAMix(NdAdEMAMix),
 }
 
 impl LmOpt {
@@ -149,6 +150,7 @@ impl LmOpt {
             LmOpt::Adam(o) => o.step(params, grads),
             LmOpt::Lion(o) => o.step(params, grads),
             LmOpt::ScheduleFree(o) => o.step(params, grads),
+            LmOpt::AdEMAMix(o) => o.step(params, grads),
         }
     }
 
@@ -163,7 +165,7 @@ impl LmOpt {
     }
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free]` —
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix]` —
 /// train a small **causal decoder language model** on the N-D autograd tape and
 /// report whether it learns to predict the sequence. Pure Rust, deterministic by
 /// seed: token + learned positional embeddings, causal multi-head attention, a
@@ -199,7 +201,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     if tokens.len() < 2
     {
         eprintln!(
-            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free]"
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix]"
         );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
@@ -232,9 +234,12 @@ pub fn run_lm(args: &[String]) -> u8 {
         None => 200,
     };
     let opt_kind = opt_s.as_deref().unwrap_or("adam");
-    if !matches!(opt_kind, "adam" | "adamw" | "lion" | "schedule-free")
+    if !matches!(
+        opt_kind,
+        "adam" | "adamw" | "lion" | "schedule-free" | "ademamix"
+    )
     {
-        eprintln!("error: --opt must be one of: adam, adamw, lion, schedule-free");
+        eprintln!("error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix");
         return 2;
     }
     // Each optimizer prefers a different default step size.
@@ -242,6 +247,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     {
         "lion" => 0.003,
         "schedule-free" => 0.5,
+        "ademamix" => 0.005,
         _ => 0.01,
     };
     let lr: f32 = match &lr_s
@@ -275,6 +281,7 @@ pub fn run_lm(args: &[String]) -> u8 {
         "adamw" => LmOpt::Adam(NdAdam::with_lr_wd(lr, 0.01)),
         "lion" => LmOpt::Lion(NdLion::with_lr(lr)),
         "schedule-free" => LmOpt::ScheduleFree(NdScheduleFree::with_lr(lr)),
+        "ademamix" => LmOpt::AdEMAMix(NdAdEMAMix::with_lr(lr)),
         _ => LmOpt::Adam(NdAdam::with_lr(lr)),
     };
 
@@ -405,6 +412,10 @@ mod tests {
                 "--opt",
                 "schedule-free"
             ])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "ademamix"])),
             0
         );
         assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer

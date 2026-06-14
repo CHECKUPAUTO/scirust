@@ -542,6 +542,126 @@ impl NdScheduleFree {
     }
 }
 
+/// Hyper-parameters for [`NdAdEMAMix`]. [`Default`] is `lr = 1e-3, β1 = 0.9,
+/// β2 = 0.999, β3 = 0.9999, α = 5.0, eps = 1e-8`.
+#[derive(Clone, Copy, Debug)]
+pub struct AdEMAMixConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Fast first-moment decay (Adam-like).
+    pub beta1: f32,
+    /// Second-moment decay.
+    pub beta2: f32,
+    /// **Slow** first-moment decay (long gradient memory, e.g. 0.9999).
+    pub beta3: f32,
+    /// Mixing weight of the slow EMA.
+    pub alpha: f32,
+    /// Numerical-stability term.
+    pub eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+}
+
+impl Default for AdEMAMixConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            beta3: 0.9999,
+            alpha: 5.0,
+            eps: 1e-8,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **AdEMAMix** (Pagliardini et al., Apple, 2024): Adam with **two** first-moment
+/// EMAs — a fast one (`β1`) and a slow one (`β3`, long gradient memory) — mixed
+/// by `α`. The update is `(m̂₁ + α·m₂) / (√v̂ + eps)`, with bias correction on the
+/// fast moment and the second moment. Pure `f32` in a fixed order ⇒
+/// **bit-for-bit deterministic**. (The paper warms `α`/`β3` up over training;
+/// here they are constant — supply pre-warmed values if desired.)
+pub struct NdAdEMAMix {
+    cfg: AdEMAMixConfig,
+    t: u64,
+    m1: Vec<Vec<f32>>,
+    m2: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>,
+}
+
+impl NdAdEMAMix {
+    /// New optimizer with the given config.
+    pub fn new(cfg: AdEMAMixConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            m1: Vec::new(),
+            m2: Vec::new(),
+            v: Vec::new(),
+        }
+    }
+
+    /// AdEMAMix with default betas/alpha at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(AdEMAMixConfig {
+            lr,
+            ..AdEMAMixConfig::default()
+        })
+    }
+
+    /// One AdEMAMix update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m1.is_empty() && !params.is_empty()
+        {
+            let zeros: Vec<Vec<f32>> = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+            self.m1 = zeros.clone();
+            self.m2 = zeros.clone();
+            self.v = zeros;
+        }
+        assert_eq!(
+            self.m1.len(),
+            params.len(),
+            "NdAdEMAMix: parameter count changed between steps"
+        );
+        self.t += 1;
+        let AdEMAMixConfig {
+            lr,
+            beta1,
+            beta2,
+            beta3,
+            alpha,
+            eps,
+            weight_decay,
+        } = self.cfg;
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let m1k = &mut self.m1[k];
+            let m2k = &mut self.m2[k];
+            let vk = &mut self.v[k];
+            for j in 0..p.value.data.len()
+            {
+                let gj = g[j];
+                m1k[j] = beta1 * m1k[j] + (1.0 - beta1) * gj;
+                m2k[j] = beta3 * m2k[j] + (1.0 - beta3) * gj;
+                vk[j] = beta2 * vk[j] + (1.0 - beta2) * gj * gj;
+                let m1hat = m1k[j] / bc1;
+                let vhat = vk[j] / bc2;
+                let theta = p.value.data[j];
+                p.value.data[j] = theta
+                    - lr * ((m1hat + alpha * m2k[j]) / (vhat.sqrt() + eps) + weight_decay * theta);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,6 +1010,67 @@ mod tests {
                 grad_idx: 0,
             }]);
             p.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// AdEMAMix minimises the quadratic oracle, converging to within a small
+    /// band of the target (the long-memory slow EMA leaves a little residual
+    /// oscillation on a deterministic problem — it is built for stochastic
+    /// training).
+    #[test]
+    fn nd_ademamix_converges_on_quadratic() {
+        let target = [3.0f32, -2.0, 0.5];
+        let mut x = TensorND::new(vec![0.0, 0.0, 0.0], vec![3]);
+        let mut opt = NdAdEMAMix::with_lr(0.02);
+        for _ in 0..2000
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![3])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut x,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        for (&xi, &ti) in x.data.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.1, "x={:?}, target={:?}", x.data, target);
+        }
+    }
+
+    /// AdEMAMix is bit-for-bit deterministic across runs.
+    #[test]
+    fn nd_ademamix_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let target = [1.0f32, -1.0];
+            let mut x = TensorND::new(vec![0.5, 0.5], vec![2]);
+            let mut opt = NdAdEMAMix::with_lr(0.02);
+            for _ in 0..200
+            {
+                let gd: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![2])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            x.data
         };
         assert_eq!(run(), run());
     }

@@ -283,6 +283,6 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 - **Compression** : élagage Wanda (conscient des activations) et SmoothQuant.
 
 Deux commandes CLI exposent ces travaux : `scirust certify` (bornes et robustesse
-IBP) et `scirust lm --opt adam|adamw|lion|schedule-free` (entraînement du LM décodeur N-D).
+IBP) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entraînement du LM décodeur N-D).
 
 Une troisième commande, `scirust conformal`, produit des intervalles de prédiction conformes à couverture garantie, sans hypothèse de distribution.

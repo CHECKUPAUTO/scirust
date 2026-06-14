@@ -605,6 +605,6 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
   deterministic int8 path.
 
 Two CLI commands surface this work: `scirust certify` (IBP bounds and robustness)
-and `scirust lm --opt adam|adamw|lion|schedule-free` (train the N-D decoder LM).
+and `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (train the N-D decoder LM).
 
 A third command, `scirust conformal`, produces distribution-free conformal-prediction intervals with a guaranteed coverage level.

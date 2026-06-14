@@ -274,6 +274,6 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
 - **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant.
 
 두 가지 CLI 명령이 이를 노출합니다: `scirust certify`(IBP 경계와 견고성)와
-`scirust lm --opt adam|adamw|lion|schedule-free`(N-D 디코더 LM 학습).
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix`(N-D 디코더 LM 학습).
 
 세 번째 명령 `scirust conformal`은 분포 가정 없이 커버리지를 보장하는 컨포멀 예측 구간을 생성합니다.
