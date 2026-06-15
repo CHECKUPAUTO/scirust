@@ -119,6 +119,11 @@ const GROUPS: &[(&str, &[Command])] = &[
         "NUMERICAL SOLVERS",
         &[
             Command {
+                name: "pinn",
+                args: "[--seed N] [--steps S]",
+                about: "Physics-Informed NN: solve u''=-u (BVP) with the PDE residual in the loss; checks vs sin x.",
+            },
+            Command {
                 name: "integrate",
                 args: "<expr> <a> <b> [var] [--method M]",
                 about: "Definite integral (Romberg | simpson | gauss).",
@@ -368,6 +373,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("som") => learning::run_som(rest),
         Some("certify") => learning::run_certify(rest),
         Some("conformal") => learning::run_conformal(rest),
+        Some("pinn") => learning::run_pinn(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),
         Some("evo") => learning::run_evo(rest),
@@ -496,6 +502,7 @@ mod tests {
         assert_eq!(run(&s(&["mamba", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
+        assert_eq!(run(&s(&["pinn", "--steps", "50"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);
         assert_eq!(

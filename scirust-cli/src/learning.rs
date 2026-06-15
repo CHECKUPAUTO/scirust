@@ -5,6 +5,7 @@ use scirust_core::nn::PcgEngine;
 use scirust_core::nn::conformal::ConformalRegressor;
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
+use scirust_core::nn::pinn::solve_harmonic;
 use scirust_core::quantization::{awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel};
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
@@ -322,6 +323,33 @@ pub fn run_awq(args: &[String]) -> u8 {
     println!("    AWQ              : {eg:.5}");
     println!(
         "  AWQ reduces the calibration error by {reduction:.1}% by protecting salient channels"
+    );
+    0
+}
+
+/// `pinn [--seed N] [--steps S]` — train a **Physics-Informed Neural Network** to
+/// solve the boundary-value problem `u'' = −u`, `u(0)=0`, `u(π/2)=1` (whose exact
+/// solution is `sin x`) with the PDE residual in the loss, and report the loss
+/// reduction and the max error against the analytic solution. Deterministic.
+pub fn run_pinn(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let steps = flag_u64(args, "--steps", 4000).max(1) as usize;
+
+    let sol = solve_harmonic(16, steps, 0.01, seed);
+    println!("Physics-Informed Neural Network — pure Rust, deterministic (seed {seed})");
+    println!("  BVP: u'' = -u on [0, π/2], u(0)=0, u(π/2)=1  (exact solution: sin x)");
+    println!(
+        "  net 1->16->16->1 (sigmoid); PDE residual by central differences ({steps} Adam steps)"
+    );
+    println!(
+        "  loss (PDE residual + boundary): {:.5} → {:.5}  ({:.1}% of initial)",
+        sol.first_loss,
+        sol.last_loss,
+        100.0 * sol.last_loss / sol.first_loss
+    );
+    println!(
+        "  max |u(x) − sin x| over a uniform grid: {:.4}",
+        sol.max_error
     );
     0
 }

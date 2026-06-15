@@ -6,6 +6,15 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **PINN** (`nn::pinn` : `Pinn1D`, `solve_harmonic`, Raissi et al. 2019,
+  roadmap #17) : réseau **physics-informed** — la **physique est dans la loss**
+  via un résidu de PDE aux points de collocation + conditions aux limites.
+  Résout le problème aux limites `u'' = −u`, `u(0)=0`, `u(π/2)=1` (solution
+  exacte `sin x`) ; la dérivée seconde `u''` est prise par **différences finies
+  dans l'entrée** (les évaluations `u(x±h)` passent par les *mêmes* paramètres
+  dans un seul graphe forward), donc le gradient par rapport aux paramètres reste
+  exact (autodiff inverse) et déterministe. Vérifié contre la solution analytique
+  (erreur max ≈ 0,004). CLI : `scirust pinn`.
 - **Mamba** (`nn::nd_layers::selective_scan` + `NdMamba`, Gu & Dao 2023,
   roadmap #18) : **selective scan** S6 — état-espace à matrice `A` diagonale et
   paramètres `Δ, B, C` **dépendants de l'entrée** (sélectifs) ; discrétisation
