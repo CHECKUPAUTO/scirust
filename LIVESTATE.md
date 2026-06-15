@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-15 — volet 40 : SOAP (#24) + CLI/doc
+- `nn::nd_optim::NdSoap` + `jacobi_eigenvectors` (Vyas 2024) : Adam dans la base
+  propre de Shampoo (L=E[GGᵀ], R=E[GᵀG]) ; eigensolveur Jacobi cyclique
+  déterministe ; base rafraîchie tous precond_freq pas (moments tournés). Repli
+  Adam pour params non matriciels.
+- CLI : `lm --opt soap` (en direct, "1,2,3,1,2,3" 60 pas : loss 1.6168→0.0023,
+  rappel exact). 6 variantes d'opt dans lm. 44 commandes (inchangé).
+- Tests : Jacobi diagonalise (orthogonalité + reconstruction 5×5), SOAP converge
+  sur quadratique matricielle (precond_freq=2), déterminisme bit-à-bit.
+- docs : roadmap #24 📋→✅ (16/20 + #21..#24) ; README optimiseurs (liste complète) ;
+  REFERENCE lm --opt ; CHANGELOG ; Documentation (8) + paper (8) option --opt.
+- 828 tests ; 8 gates verts.
+
 ## Session 2026-06-15 — volet 39 : AWQ (#15) + CLI/doc
 - `quantization::awq_quantize` + `awq_act_scale` + `AwqResult` (Lin 2023) :
   quantification int8 consciente des activations. Importance a_j=moyenne|x_:,j| ;

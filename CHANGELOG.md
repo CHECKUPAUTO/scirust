@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **SOAP** (`nn::nd_optim::NdSoap` + `jacobi_eigenvectors`, Vyas et al. 2024,
+  roadmap #24) : optimiseur qui exécute **Adam dans la base propre de Shampoo**.
+  Pour chaque matrice de poids : facteurs `L = E[GGᵀ]`, `R = E[GᵀG]` (moyenne
+  mobile) ; rotation du gradient dans leur base propre (`Ĝ = Q_Lᵀ G Q_R`), Adam
+  dans cette base, puis rotation inverse de la mise à jour. Base propre par
+  **eigensolveur de Jacobi cyclique** déterministe (`jacobi_eigenvectors`),
+  rafraîchie tous les `precond_freq` pas (moments tournés dans la nouvelle base).
+  Repli Adam pour les paramètres non matriciels. Déterministe. CLI :
+  `scirust lm --opt soap`. Tests : Jacobi diagonalise (orthogonalité +
+  reconstruction), convergence sur quadratique matricielle, déterminisme bit-à-bit.
 - **AWQ** (`quantization::awq_quantize` + `awq_act_scale` + `AwqResult`, Lin et al.
   2023, roadmap #15) : quantification int8 **consciente des activations** par
   recherche d'échelle. Importance par canal d'entrée `a_j = moyenne|x_:,j|` ;
