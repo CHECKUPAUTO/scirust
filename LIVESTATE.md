@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-15 — volet 42 : Mamba (#18) + op tape exp + CLI/doc
+- `nn::nd_layers::selective_scan` + `NdMamba` (Gu & Dao 2023) : scan sélectif S6
+  (Δ,B,C dépendants de l'entrée ; A diagonal ; Ā=exp(Δ·A)) ; récurrence linéaire-
+  temps déroulée sur la tape ; init S4D-réelle ; saut D⊙x.
+- nouvel op autograd `NdVar::exp` (backward g·exp(x)), gradient-checké.
+- CLI : `mamba [--seed N] [--steps S]` (en direct, seed 5/150 pas : MSE 24.53 →
+  0.00). 46 commandes.
+- Tests : selective_scan match référence ; gradient check (x,Δ,A,B,C) ; couche
+  entraîne (MSE↓) + déterminisme ; exp gradient check.
+- docs : roadmap #18 📋→✅ (17/20 + #21..#25) ; README stack N-D ; REFERENCE
+  mamba ; GROWTH_PLAN 46 ; CHANGELOG ; Documentation (8) + paper (8).
+- 836 tests ; 8 gates verts.
+
 ## Session 2026-06-15 — volet 41 : DeltaNet (#25) + op tape cat0 + CLI/doc
 - `nn::nd_layers::delta_rule` + `NdDeltaNet` (Yang 2024) : attention linéaire
   récurrente à règle delta (mémoire poids rapides S ; S_t = S_{t-1} +

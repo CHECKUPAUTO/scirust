@@ -274,7 +274,7 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Reducciones reproducibles**: suma/media/producto escalar independientes del
   orden, idénticas bit a bit sin importar el número de hilos.
 - **Inferencia**: decodificación especulativa exacta, FlashAttention con softmax
-  en línea por bloques y una capa DeltaNet de atención lineal con regla delta.
+  en línea por bloques, una capa DeltaNet de atención lineal con regla delta y una capa Mamba de espacio de estados selectivo.
 - **Puente científico**: una Neural ODE con retropropagación a través de RK4.
 - **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
 

@@ -600,7 +600,7 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
   (canonical ordering + exact expansion), bit-identical regardless of thread
   count — the foundation for bit-exact multi-thread training.
 - **Inference**: exact (output-preserving) speculative decoding, a tiled
-  online-softmax FlashAttention, and a DeltaNet delta-rule linear-attention layer.
+  online-softmax FlashAttention, a DeltaNet delta-rule linear-attention layer, and a Mamba selective state-space layer.
 - **Scientific bridge**: a Neural ODE that backpropagates through an RK4 solver.
 - **Compression**: Wanda activation-aware pruning and SmoothQuant, and GPTQ (second-order error-feedback int8 weight quantization, CLI `scirust gptq`), and AWQ (activation-aware search-based int8 weight quantization, CLI `scirust awq`), extending the
   deterministic int8 path.

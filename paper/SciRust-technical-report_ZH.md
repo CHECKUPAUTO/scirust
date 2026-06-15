@@ -267,7 +267,7 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 - **确定性优化器**：Adam、AdamW、Lion、Muon（Newton–Schulz）、Schedule-Free、AdEMAMix 与 SOAP（Shampoo 特征基中的 Adam）。
 - **可认证 AI**：区间界传播（IBP）**与 CROWN**（基于线性松弛的更紧界）给出可证明的输出界与鲁棒性证书。
 - **可复现归约**：与顺序无关的求和/均值/点积，无论线程数均按位相同。
-- **推理**：精确（保持输出）投机解码、分块在线 softmax 的 FlashAttention，以及 DeltaNet 的 delta 规则线性注意力层。
+- **推理**：精确（保持输出）投机解码、分块在线 softmax 的 FlashAttention、DeltaNet 的 delta 规则线性注意力层，以及 Mamba 的选择性状态空间层。
 - **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE。
 - **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant，以及 GPTQ（二阶误差反馈的 int8 权重量化，CLI `scirust gptq`）和 AWQ（感知激活的基于搜索的 int8 权重量化，CLI `scirust awq`）。
 

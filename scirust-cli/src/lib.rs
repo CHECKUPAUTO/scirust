@@ -221,6 +221,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N] [--steps S]",
                 about: "Train a single-head DeltaNet (delta-rule linear attention) layer to fit a sequence.",
             },
+            Command {
+                name: "mamba",
+                args: "[--seed N] [--steps S]",
+                about: "Train a Mamba selective state-space layer (S6 scan) to fit a sequence.",
+            },
         ],
     ),
     (
@@ -398,6 +403,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("bpe") => nlp::run_bpe(rest),
         Some("lm") => nlp::run_lm(rest),
         Some("deltanet") => nlp::run_deltanet(rest),
+        Some("mamba") => nlp::run_mamba(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -487,6 +493,7 @@ mod tests {
         assert_eq!(run(&s(&["bpe", "low lower lowest", "--vocab", "30"])), 0);
         assert_eq!(run(&s(&["lm", "1,2,3,1,2,3", "--steps", "10"])), 0);
         assert_eq!(run(&s(&["deltanet", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["mamba", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);

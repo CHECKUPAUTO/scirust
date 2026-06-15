@@ -43,6 +43,8 @@ enum Op {
     RmsNormLast(usize, f32),
     /// Logistic sigmoid `σ(x) = 1/(1+e^-x)`, elementwise.
     Sigmoid(usize),
+    /// Elementwise `exp(x)`; backward is `g · exp(x)`.
+    Exp(usize),
     /// Rotary position embedding over `(…, seq, d)` (position = axis −2); `f32`
     /// is the frequency base. Backward applies the inverse rotation.
     Rope(usize, f32),
@@ -208,6 +210,18 @@ impl NdTape {
                         .iter()
                         .zip(&y.data)
                         .map(|(&gi, &yi)| gi * yi * (1.0 - yi))
+                        .collect();
+                    accumulate(&mut grads[a], &TensorND::new(d, y.shape.clone()));
+                },
+                Op::Exp(a) =>
+                {
+                    // dx = g · exp(x); the output node already holds exp(x).
+                    let y = &nodes[i].value;
+                    let d: Vec<f32> = g
+                        .data
+                        .iter()
+                        .zip(&y.data)
+                        .map(|(&gi, &yi)| gi * yi)
                         .collect();
                     accumulate(&mut grads[a], &TensorND::new(d, y.shape.clone()));
                 },
@@ -393,6 +407,15 @@ impl<'t> NdVar<'t> {
         let data: Vec<f32> = a.data.iter().map(|&x| 1.0 / (1.0 + (-x).exp())).collect();
         let out = TensorND::new(data, a.shape.clone());
         self.tape.push(Op::Sigmoid(self.idx), out)
+    }
+
+    /// Elementwise `exp(x)` — the discretisation `exp(Δ·A)` of a state-space
+    /// model (e.g. Mamba's selective scan) and positive reparametrisations.
+    pub fn exp(self) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let data: Vec<f32> = a.data.iter().map(|&x| x.exp()).collect();
+        let out = TensorND::new(data, a.shape.clone());
+        self.tape.push(Op::Exp(self.idx), out)
     }
 
     /// **Rotary position embedding** (Su et al., RoFormer 2021) over a
@@ -1429,6 +1452,42 @@ mod tests {
         };
         check(&ga, &a, &|p| loss_of(p, &b));
         check(&gb, &b, &|p| loss_of(&a, p));
+    }
+
+    /// `exp` forward and gradient (`d/dx exp = exp`) vs finite differences.
+    #[test]
+    fn nd_exp_forward_and_gradient_check() {
+        let x = vec![0.3f32, -0.7, 1.1, -0.2, 0.5, -1.4];
+        let t0 = NdTape::new();
+        let xv0 = t0.input(TensorND::new(x.clone(), vec![2, 3]));
+        let e = t0.value(xv0.exp());
+        for (got, &xi) in e.data.iter().zip(&x)
+        {
+            assert!((got - xi.exp()).abs() < 1e-6);
+        }
+        let loss_of = |xx: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xx.to_vec(), vec![2, 3]));
+            t.value(xv.exp().sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![2, 3]));
+        let grads = t.backward(xv.exp().sum());
+        let g = grads[xv.idx()].clone();
+        let eps = 1e-3f32;
+        for k in 0..x.len()
+        {
+            let mut up = x.clone();
+            let mut dn = x.clone();
+            up[k] += eps;
+            dn[k] -= eps;
+            let num = (loss_of(&up) - loss_of(&dn)) / (2.0 * eps);
+            assert!(
+                (num - g.data[k]).abs() < 2e-2,
+                "exp grad {k}: {num} vs {}",
+                g.data[k]
+            );
+        }
     }
 
     /// Embedding `gather`: forward selects the right rows, and the gradient

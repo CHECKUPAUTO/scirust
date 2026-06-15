@@ -58,7 +58,7 @@
 
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
-| 18 | Gu & Dao, *Mamba* (2023, arXiv:2312.00752) | *selective scan* (récurrence déterministe) ; modèle séquence linéaire-temps | `nn` | 📋 | XL |
+| 18 | Gu & Dao, *Mamba* (2023, arXiv:2312.00752) | `selective_scan` + `NdMamba` — *selective scan* S6 (Δ, B, C dépendants de l'entrée ; A diagonal ; discrétisation `exp(Δ·A)`), récurrence déterministe linéaire-temps déroulée sur la tape (nouvel op `exp`) ⇒ **gradient check** ; match référence + entraînement ; CLI `mamba` | `nn::nd_layers` | ✅ | XL |
 | 19 | Abadi et al., *Deep Learning with Differential Privacy (DP-SGD)* (2016) | `clip_gradients` + `add_noise` (gaussien **seedé**) + `dp_protect` + moments accountant (Rényi DP) — **déjà présent** | `dp` | ✅ | M |
 | 20 | Frantar & Alistarh, *SparseGPT* (2023) ; Sun et al., *Wanda* (2023) ; Frankle & Carbin, *Lottery Ticket* (2019) | `prune_wanda` (activation-aware) + magnitude/structured/Lottery-Ticket déjà présents | `pruning` | ✅ | M |
 
@@ -85,10 +85,10 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 exact (#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE
 (#16) · DP-SGD (#19) · pruning Wanda + magnitude/lottery (#20) · **SmoothQuant +
 GPTQ + AWQ (#15)** · **conformal prediction (#21)** · **Schedule-Free (#22)** ·
-**AdEMAMix (#23)** · **SOAP (#24)** · **DeltaNet (#25)**. →
-**16/20 + #21 + #22 + #23 + #24 + #25**.
+**AdEMAMix (#23)** · **SOAP (#24)** · **DeltaNet (#25)** · **Mamba (#18)**. →
+**17/20 + #21 + #22 + #23 + #24 + #25**.
 
-**Paris lourds** (planifiés, jalonnés) : SMT/Marabou (#4) · Mamba (#18) ·
+**Paris lourds** (planifiés, jalonnés) : SMT/Marabou (#4) ·
 PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
 
 Chaque item respecte les fondamentaux : op autograd ⇒ **gradient check** ;

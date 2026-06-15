@@ -6,6 +6,15 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Mamba** (`nn::nd_layers::selective_scan` + `NdMamba`, Gu & Dao 2023,
+  roadmap #18) : **selective scan** S6 — état-espace à matrice `A` diagonale et
+  paramètres `Δ, B, C` **dépendants de l'entrée** (sélectifs) ; discrétisation
+  par maintien d'ordre zéro `Ā = exp(Δ·A)`, `B̄x = Δ·B·x` ; récurrence
+  déterministe linéaire-temps `h_t = Ā_t ⊙ h_{t-1} + B̄x_t`, `y_t = h_t·C_t`,
+  déroulée sur la tape N-D. Nouvel op autograd `NdVar::exp` (gradient-checké).
+  Init S4D-réelle (`A[:,j] = −(j+1)`), saut `D⊙x`. Tests : `selective_scan` match
+  une référence Vec, gradient check (x, Δ, A, B, C), couche entraîne (MSE↓) +
+  déterminisme. CLI : `scirust mamba`.
 - **DeltaNet** (`nn::nd_layers::delta_rule` + `NdDeltaNet`, Yang et al. 2024,
   roadmap #25) : couche d'**attention linéaire récurrente** à règle delta
   (`S_t = S_{t-1} + β_t(v_t − S_{t-1}k_t)k_tᵀ`, `o_t = S_t q_t`) — mémoire à poids
