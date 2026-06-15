@@ -274,8 +274,8 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
   Ausgabeschranken und ein Robustheitszertifikat.
 - **Reproduzierbare Reduktionen**: reihenfolgenunabhängige Summe/Mittel/
   Skalarprodukt, bit-identisch unabhängig von der Thread-Anzahl.
-- **Inferenz**: exaktes spekulatives Decoding und gekacheltes Online-Softmax-
-  FlashAttention.
+- **Inferenz**: exaktes spekulatives Decoding, gekacheltes Online-Softmax-
+  FlashAttention, eine DeltaNet-Schicht für lineare Aufmerksamkeit mit Delta-Regel und eine Mamba-Schicht mit selektivem Zustandsraum.
 - **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
 - **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`) und AWQ (aktivierungsbewusste, suchbasierte int8-Gewichtsquantisierung, CLI `scirust awq`).
 

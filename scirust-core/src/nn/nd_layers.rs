@@ -633,6 +633,215 @@ impl NdLlamaBlock {
     }
 }
 
+/// **DeltaNet delta rule** (Yang et al. 2024) — linear-attention recurrence with
+/// a fast-weight memory `S` (`d×d`) updated by the *delta rule*:
+///
+/// ```text
+/// S_t = S_{t-1} + β_t (v_t − S_{t-1} k_t) k_tᵀ ,   o_t = S_t q_t
+/// ```
+///
+/// i.e. each step writes the *prediction error* `v_t − S_{t-1}k_t` into memory,
+/// gated by `β_t ∈ (0,1)`. Linear-time, **causal**, and fully differentiable: the
+/// recurrence is unrolled on the tape (per-timestep `gather`/`matmul`, outputs
+/// reassembled with [`cat0`](NdVar::cat0)), so gradients are exact and
+/// finite-difference-checked. `q`, `k`, `v` are `(seq, d)`, `beta` is `(seq, 1)`;
+/// returns `(seq, d)`.
+pub fn delta_rule<'t>(
+    tape: &'t NdTape,
+    q: NdVar<'t>,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    beta: NdVar<'t>,
+) -> NdVar<'t> {
+    let qs = q.shape();
+    let (seq, d) = (qs[0], qs[1]);
+    let mut s = tape.input(TensorND::zeros(&[d, d])); // fast-weight memory S_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let k_col = k.gather(&[t]).reshape(&[d, 1]);
+        let k_row = k.gather(&[t]).reshape(&[1, d]);
+        let v_col = v.gather(&[t]).reshape(&[d, 1]);
+        let q_col = q.gather(&[t]).reshape(&[d, 1]);
+        let b_t = beta.gather(&[t]); // (1,1), broadcasts over (d,d)
+        let sk = s.matmul(k_col); // S k_t                (d,1)
+        let delta = v_col.matmul(k_row).sub(sk.matmul(k_row)); // (v_t − S k_t) k_tᵀ
+        s = s.add(delta.mul(b_t)); // S_t                  (d,d)
+        outs.push(s.matmul(q_col).reshape(&[1, d])); // o_t (1,d)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **DeltaNet** single-head linear-attention layer: project the input to
+/// `q, k, v` and a per-step gate `β = σ(·)`, then run the [`delta_rule`]
+/// recurrence. Deterministic; trainable through the N-D tape like the other
+/// layers. `forward` maps `(seq, d_model) → (seq, d_model)`.
+pub struct NdDeltaNet {
+    q_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    beta_proj: NdLinear,
+}
+
+impl NdDeltaNet {
+    /// New layer with seeded projections (`q,k,v: d_model→d_model`, `β: d_model→1`).
+    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            q_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            beta_proj: NdLinear::new(d_model, 1, rng),
+        }
+    }
+
+    /// Forward pass over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let q = self.q_proj.forward(tape, x);
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        let beta = self.beta_proj.forward(tape, x).sigmoid(); // (seq,1) ∈ (0,1)
+        delta_rule(tape, q, k, v, beta)
+    }
+
+    /// Trainable parameters in a fixed order (q, k, v, β projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.q_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params.extend(self.beta_proj.parameters());
+        params
+    }
+}
+
+/// **Mamba selective scan** (Gu & Dao 2023) — the S6 input-dependent
+/// state-space recurrence with a diagonal state matrix. For each channel `i` of
+/// `d` and state index `j` of `n`, with continuous `A = −exp(a_log)` and a
+/// **selective** (input-dependent) timestep `Δ`, input matrix `B`, output matrix
+/// `C`, the zero-order-hold discretisation gives:
+///
+/// ```text
+/// h_t[i,j] = exp(Δ_t[i]·A[i,j])·h_{t-1}[i,j] + Δ_t[i]·B_t[j]·x_t[i]
+/// y_t[i]   = Σ_j h_t[i,j]·C_t[j]
+/// ```
+///
+/// Linear-time, causal, deterministic; unrolled on the tape (so gradients are
+/// exact and finite-difference-checked). `x`/`delta` are `(seq, d)`, `a_log` is
+/// `(d, n)`, `b`/`c` are `(seq, n)`; returns `(seq, d)`. `delta` must already be
+/// positive (the layer uses `Δ = exp(·)`).
+pub fn selective_scan<'t>(
+    tape: &'t NdTape,
+    x: NdVar<'t>,
+    delta: NdVar<'t>,
+    a_log: NdVar<'t>,
+    b: NdVar<'t>,
+    c: NdVar<'t>,
+) -> NdVar<'t> {
+    let xs = x.shape();
+    let (seq, d) = (xs[0], xs[1]);
+    let n = a_log.shape()[1];
+    let ea = a_log.exp(); // exp(a_log) = −A  (d, n)
+    let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
+    let mut h = tape.input(TensorND::zeros(&[d, n])); // h_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let dt_col = delta.gather(&[t]).reshape(&[d, 1]); // Δ_t   (d,1)
+        let x_col = x.gather(&[t]).reshape(&[d, 1]); //      x_t   (d,1)
+        let b_row = b.gather(&[t]).reshape(&[1, n]); //      B_t   (1,n)
+        let c_col = c.gather(&[t]).reshape(&[n, 1]); //      C_t   (n,1)
+        // Ā = exp(Δ ⊙ A) = exp(−Δ ⊙ exp(a_log))
+        let da = dt_col.mul(ea).mul(neg1).exp(); // (d,n)
+        // B̄x = (Δ ⊙ B) ⊙ x
+        let dbx = dt_col.mul(b_row).mul(x_col); // (d,n)
+        h = da.mul(h).add(dbx); // (d,n)
+        outs.push(h.matmul(c_col).reshape(&[1, d])); // y_t (1,d)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **Mamba** selective state-space layer: project the input to the SSM input
+/// `x`, the selective timestep `Δ = exp(·)`, and the input/output matrices
+/// `B, C`, run the [`selective_scan`], add the gated skip `D ⊙ x`, and project
+/// back. Diagonal real `A` initialised S4D-style (`A[:,j] = −(j+1)`).
+/// Deterministic; trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdMamba {
+    in_proj: NdLinear,
+    delta_proj: NdLinear,
+    b_proj: NdLinear,
+    c_proj: NdLinear,
+    out_proj: NdLinear,
+    a_log: TensorND,  // (d_inner, n)
+    d_skip: TensorND, // (1, d_inner)
+    a_idx: Option<usize>,
+    d_idx: Option<usize>,
+}
+
+impl NdMamba {
+    /// New layer; `d_inner` is the SSM channel count, `n` the state size.
+    pub fn new(d_model: usize, d_inner: usize, n: usize, rng: &mut PcgEngine) -> Self {
+        // S4D-real init: A[:,j] = −(j+1) ⇒ a_log[:,j] = ln(j+1).
+        let mut a_log = vec![0f32; d_inner * n];
+        for i in 0..d_inner
+        {
+            for j in 0..n
+            {
+                a_log[i * n + j] = ((j + 1) as f32).ln();
+            }
+        }
+        Self {
+            in_proj: NdLinear::new(d_model, d_inner, rng),
+            delta_proj: NdLinear::new(d_model, d_inner, rng),
+            b_proj: NdLinear::new(d_model, n, rng),
+            c_proj: NdLinear::new(d_model, n, rng),
+            out_proj: NdLinear::new(d_inner, d_model, rng),
+            a_log: TensorND::new(a_log, vec![d_inner, n]),
+            d_skip: TensorND::zeros(&[1, d_inner]),
+            a_idx: None,
+            d_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xi = self.in_proj.forward(tape, x); // (seq, d_inner)
+        let delta = self.delta_proj.forward(tape, x).exp(); // Δ > 0
+        let b = self.b_proj.forward(tape, x); // (seq, n)
+        let c = self.c_proj.forward(tape, x); // (seq, n)
+        let a_log_v = tape.input(self.a_log.clone());
+        self.a_idx = Some(a_log_v.idx());
+        let scan = selective_scan(tape, xi, delta, a_log_v, b, c); // (seq, d_inner)
+        let d_v = tape.input(self.d_skip.clone());
+        self.d_idx = Some(d_v.idx());
+        let y = scan.add(d_v.mul(xi)); // gated skip D ⊙ x
+        self.out_proj.forward(tape, y) // (seq, d_model)
+    }
+
+    /// Trainable parameters in a fixed order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, d_idx) = (self.a_idx, self.d_idx);
+        let mut params = self.in_proj.parameters();
+        params.extend(self.delta_proj.parameters());
+        params.extend(self.b_proj.parameters());
+        params.extend(self.c_proj.parameters());
+        params.extend(self.out_proj.parameters());
+        if let Some(i) = a_idx
+        {
+            params.push(NdParam {
+                value: &mut self.a_log,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = d_idx
+        {
+            params.push(NdParam {
+                value: &mut self.d_skip,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,6 +849,343 @@ mod tests {
     fn mse<'t>(pred: NdVar<'t>, target: NdVar<'t>) -> NdVar<'t> {
         let diff = pred.sub(target);
         diff.mul(diff).sum()
+    }
+
+    /// A plain-`Vec` reference for the delta-rule recurrence, for the forward test.
+    fn delta_rule_reference(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        beta: &[f32],
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut s = vec![0f32; d * d];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            // S_{t-1} k_t
+            let mut sk = vec![0f32; d];
+            for i in 0..d
+            {
+                for j in 0..d
+                {
+                    sk[i] += s[i * d + j] * k[t * d + j];
+                }
+            }
+            // S_t = S_{t-1} + β_t (v_t − S_{t-1} k_t) k_tᵀ
+            for i in 0..d
+            {
+                for j in 0..d
+                {
+                    s[i * d + j] += beta[t] * (v[t * d + i] - sk[i]) * k[t * d + j];
+                }
+            }
+            // o_t = S_t q_t
+            for i in 0..d
+            {
+                let mut acc = 0f32;
+                for j in 0..d
+                {
+                    acc += s[i * d + j] * q[t * d + j];
+                }
+                out[t * d + i] = acc;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `delta_rule` matches the hand-written recurrence.
+    #[test]
+    fn delta_rule_matches_reference() {
+        let (seq, d) = (4usize, 3usize);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+        let beta: Vec<f32> = (0..seq).map(|i| 0.3 + 0.1 * i as f32).collect();
+
+        let want = delta_rule_reference(&q, &k, &v, &beta, seq, d);
+        let tape = NdTape::new();
+        let qv = tape.input(TensorND::new(q, vec![seq, d]));
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let bv = tape.input(TensorND::new(beta, vec![seq, 1]));
+        let out = tape.value(delta_rule(&tape, qv, kv, vv, bv));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-5, "delta_rule mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `delta_rule` gradients (w.r.t. q, k, v, β) match finite differences.
+    #[test]
+    fn delta_rule_gradient_check() {
+        let (seq, d) = (3usize, 2usize);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 + 0.2).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+        let beta: Vec<f32> = vec![0.3, 0.6, 0.5];
+
+        // loss = Σ out²
+        let loss_of = |qq: &[f32], kk: &[f32], vv: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(qq.to_vec(), vec![seq, d]));
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![seq, 1]));
+            let o = delta_rule(&t, qv, kv, vv2, bv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), vec![seq, d]));
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let bv = t.input(TensorND::new(beta.clone(), vec![seq, 1]));
+        let o = delta_rule(&t, qv, kv, vv, bv);
+        let grads = t.backward(o.mul(o).sum());
+        let (gq, gk, gv, gb) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+            grads[bv.idx()].clone(),
+        );
+
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "delta_rule grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gq, &q, &|p| loss_of(p, &k, &v, &beta));
+        check(&gk, &k, &|p| loss_of(&q, p, &v, &beta));
+        check(&gv, &v, &|p| loss_of(&q, &k, p, &beta));
+        check(&gb, &beta, &|p| loss_of(&q, &k, &v, p));
+    }
+
+    /// The `NdDeltaNet` layer is deterministic and can drive a loss down: training
+    /// its projections with Adam reduces the MSE to a fixed target sequence.
+    #[test]
+    fn nd_deltanet_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(7);
+            let mut layer = NdDeltaNet::new(d, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(
+            last < first * 0.5,
+            "DeltaNet did not learn: {first} -> {last}"
+        );
+        // Determinism: a second identical run gives bit-identical endpoints.
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Plain-`Vec` reference for the Mamba selective scan, for the forward test.
+    #[allow(clippy::too_many_arguments)]
+    fn selective_scan_reference(
+        x: &[f32],
+        delta: &[f32],
+        a_log: &[f32],
+        b: &[f32],
+        c: &[f32],
+        seq: usize,
+        d: usize,
+        n: usize,
+    ) -> Vec<f32> {
+        let mut h = vec![0f32; d * n];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for i in 0..d
+            {
+                for j in 0..n
+                {
+                    let a = -(a_log[i * n + j].exp()); // A = −exp(a_log)
+                    let da = (delta[t * d + i] * a).exp();
+                    let dbx = delta[t * d + i] * b[t * n + j] * x[t * d + i];
+                    h[i * n + j] = da * h[i * n + j] + dbx;
+                }
+            }
+            for i in 0..d
+            {
+                let mut acc = 0f32;
+                for j in 0..n
+                {
+                    acc += h[i * n + j] * c[t * n + j];
+                }
+                out[t * d + i] = acc;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `selective_scan` matches the hand-written SSM recurrence.
+    #[test]
+    fn selective_scan_matches_reference() {
+        let (seq, d, n) = (4usize, 3usize, 2usize);
+        let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let delta: Vec<f32> = (0..seq * d).map(|i| 0.2 + 0.05 * i as f32).collect();
+        let a_log: Vec<f32> = (0..d * n).map(|j| ((j % n) as f32 + 1.0).ln()).collect();
+        let b: Vec<f32> = (0..seq * n).map(|i| (i as f32 * 0.2 + 0.3).cos()).collect();
+        let c: Vec<f32> = (0..seq * n)
+            .map(|i| (i as f32 * 0.17 - 0.2).sin())
+            .collect();
+
+        let want = selective_scan_reference(&x, &delta, &a_log, &b, &c, seq, d, n);
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x, vec![seq, d]));
+        let dv = tape.input(TensorND::new(delta, vec![seq, d]));
+        let av = tape.input(TensorND::new(a_log, vec![d, n]));
+        let bv = tape.input(TensorND::new(b, vec![seq, n]));
+        let cv = tape.input(TensorND::new(c, vec![seq, n]));
+        let y = tape.value(selective_scan(&tape, xv, dv, av, bv, cv));
+        assert_eq!(y.shape, vec![seq, d]);
+        for (got, w) in y.data.iter().zip(&want)
+        {
+            assert!(
+                (got - w).abs() < 1e-5,
+                "selective_scan mismatch: {got} vs {w}"
+            );
+        }
+    }
+
+    /// `selective_scan` gradients (x, Δ, a_log, B, C) match finite differences.
+    #[test]
+    fn selective_scan_gradient_check() {
+        let (seq, d, n) = (3usize, 2usize, 2usize);
+        let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let delta: Vec<f32> = (0..seq * d).map(|i| 0.2 + 0.1 * i as f32).collect();
+        let a_log: Vec<f32> = (0..d * n).map(|j| ((j % n) as f32 + 1.0).ln()).collect();
+        let b: Vec<f32> = (0..seq * n).map(|i| (i as f32 * 0.3 + 0.2).cos()).collect();
+        let c: Vec<f32> = (0..seq * n)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+
+        let loss_of = |xx: &[f32], dd: &[f32], aa: &[f32], bb: &[f32], cc: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xx.to_vec(), vec![seq, d]));
+            let dv = t.input(TensorND::new(dd.to_vec(), vec![seq, d]));
+            let av = t.input(TensorND::new(aa.to_vec(), vec![d, n]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![seq, n]));
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![seq, n]));
+            let y = selective_scan(&t, xv, dv, av, bv, cv);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d]));
+        let dv = t.input(TensorND::new(delta.clone(), vec![seq, d]));
+        let av = t.input(TensorND::new(a_log.clone(), vec![d, n]));
+        let bv = t.input(TensorND::new(b.clone(), vec![seq, n]));
+        let cv = t.input(TensorND::new(c.clone(), vec![seq, n]));
+        let y = selective_scan(&t, xv, dv, av, bv, cv);
+        let grads = t.backward(y.mul(y).sum());
+        let (gx, gd, ga, gb, gc) = (
+            grads[xv.idx()].clone(),
+            grads[dv.idx()].clone(),
+            grads[av.idx()].clone(),
+            grads[bv.idx()].clone(),
+            grads[cv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "selective_scan grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gx, &x, &|p| loss_of(p, &delta, &a_log, &b, &c));
+        check(&gd, &delta, &|p| loss_of(&x, p, &a_log, &b, &c));
+        check(&ga, &a_log, &|p| loss_of(&x, &delta, p, &b, &c));
+        check(&gb, &b, &|p| loss_of(&x, &delta, &a_log, p, &c));
+        check(&gc, &c, &|p| loss_of(&x, &delta, &a_log, &b, p));
+    }
+
+    /// The `NdMamba` layer trains (MSE↓ to a target sequence) and is
+    /// bit-for-bit deterministic across identical runs.
+    #[test]
+    fn nd_mamba_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(5);
+            let mut layer = NdMamba::new(d_model, 6, 4, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "Mamba did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
     }
 
     /// Gradient of the loss w.r.t. the layer **input** matches finite

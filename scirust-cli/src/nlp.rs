@@ -5,6 +5,7 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
+use scirust_core::nn::nd_layers::{NdDeltaNet, NdMamba};
 use scirust_core::nn::nd_optim::{NdAdEMAMix, NdAdam, NdLion, NdParam, NdScheduleFree, NdSoap};
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
@@ -341,6 +342,107 @@ pub fn run_lm(args: &[String]) -> u8 {
                 targets.len()
             )
         }
+    );
+    0
+}
+
+/// `deltanet [--seed N] [--steps S]` — train a single-head **DeltaNet**
+/// (delta-rule linear attention) layer to fit a fixed target sequence and report
+/// the MSE reduction. Showcases the fast-weight recurrence (unrolled and
+/// gradient-checked on the N-D tape). Pure Rust, deterministic by seed.
+pub fn run_deltanet(args: &[String]) -> u8 {
+    let (seed_s, rest) = take_flag(args, "--seed");
+    let (steps_s, _rest) = take_flag(&rest, "--steps");
+    let seed: u64 = seed_s.and_then(|s| s.parse().ok()).unwrap_or(7);
+    let steps: usize = steps_s
+        .and_then(|s| s.parse().ok())
+        .filter(|&v| v >= 1)
+        .unwrap_or(150);
+
+    let (seq, d) = (6usize, 8usize);
+    let mut rng = PcgEngine::new(seed);
+    let mut layer = NdDeltaNet::new(d, &mut rng);
+    let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+    let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+    let mut opt = NdAdam::with_lr(0.05);
+
+    let (mut first, mut last) = (f32::NAN, f32::NAN);
+    for step in 0..steps
+    {
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+        let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+        let out = layer.forward(&tape, xv);
+        let diff = out.sub(tv);
+        let loss = diff.mul(diff).sum();
+        let lval = tape.value(loss).data[0];
+        if step == 0
+        {
+            first = lval;
+        }
+        last = lval;
+        let grads = tape.backward(loss);
+        opt.step(&mut layer.parameters(), &grads);
+    }
+
+    println!("DeltaNet (delta-rule linear attention) — pure Rust, deterministic (seed {seed})");
+    println!("  single head, d_model {d}, sequence length {seq}");
+    println!("  fast-weight memory S updated by the delta rule; trained with Adam ({steps} steps)");
+    println!(
+        "  MSE to target: {first:.4} → {last:.4}  ({:.1}% of initial)",
+        100.0 * last / first
+    );
+    0
+}
+
+/// `mamba [--seed N] [--steps S]` — train a single **Mamba** selective
+/// state-space layer (S6 input-dependent scan) to fit a fixed target sequence
+/// and report the MSE reduction. Pure Rust, deterministic by seed.
+pub fn run_mamba(args: &[String]) -> u8 {
+    let (seed_s, rest) = take_flag(args, "--seed");
+    let (steps_s, _rest) = take_flag(&rest, "--steps");
+    let seed: u64 = seed_s.and_then(|s| s.parse().ok()).unwrap_or(5);
+    let steps: usize = steps_s
+        .and_then(|s| s.parse().ok())
+        .filter(|&v| v >= 1)
+        .unwrap_or(150);
+
+    let (seq, d_model, d_inner, n) = (6usize, 8usize, 12usize, 8usize);
+    let mut rng = PcgEngine::new(seed);
+    let mut layer = NdMamba::new(d_model, d_inner, n, &mut rng);
+    let x: Vec<f32> = (0..seq * d_model)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin())
+        .collect();
+    let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+    let mut opt = NdAdam::with_lr(0.05);
+
+    let (mut first, mut last) = (f32::NAN, f32::NAN);
+    for step in 0..steps
+    {
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+        let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+        let out = layer.forward(&tape, xv);
+        let diff = out.sub(tv);
+        let loss = diff.mul(diff).sum();
+        let lval = tape.value(loss).data[0];
+        if step == 0
+        {
+            first = lval;
+        }
+        last = lval;
+        let grads = tape.backward(loss);
+        opt.step(&mut layer.parameters(), &grads);
+    }
+
+    println!("Mamba selective state-space layer — pure Rust, deterministic (seed {seed})");
+    println!("  d_model {d_model}, d_inner {d_inner}, state size {n}, sequence length {seq}");
+    println!(
+        "  input-dependent (selective) Δ, B, C; diagonal A; linear-time scan ({steps} Adam steps)"
+    );
+    println!(
+        "  MSE to target: {first:.4} → {last:.4}  ({:.1}% of initial)",
+        100.0 * last / first
     );
     0
 }

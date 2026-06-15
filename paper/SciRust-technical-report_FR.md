@@ -278,8 +278,8 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 - **Réductions reproductibles** : somme/moyenne/produit scalaire flottants
   indépendants de l'ordre (ordre canonique + expansion exacte), bit-identiques
   quel que soit le nombre de threads.
-- **Inférence** : décodage spéculatif exact (préservant la sortie) et une
-  FlashAttention à softmax en ligne par tuiles.
+- **Inférence** : décodage spéculatif exact (préservant la sortie), une
+  FlashAttention à softmax en ligne par tuiles, une couche DeltaNet d'attention linéaire à règle delta et une couche Mamba à état-espace sélectif.
 - **Pont scientifique** : un Neural ODE qui rétropropage à travers un solveur RK4.
 - **Compression** : élagage Wanda (conscient des activations) et SmoothQuant, et GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2, CLI `scirust gptq`), et AWQ (quantification int8 des poids basée sur une recherche et consciente des activations, CLI `scirust awq`).
 
