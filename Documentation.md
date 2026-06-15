@@ -263,9 +263,10 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
   soit le nombre de threads).
 - **Décodage spéculatif exact** ; **FlashAttention** (softmax en ligne) ;
   **Neural ODE** (backprop à travers un solveur RK4).
-- **Compression** : élagage Wanda (activation-aware), SmoothQuant.
+- **Compression** : élagage Wanda (activation-aware), SmoothQuant, GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2).
 
 Nouvelles commandes CLI :
 - `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP **et** CROWN, les bornes plus serrées par relaxation linéaire, côte à côte).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — entraîne le LM décodeur N-D.
 - `scirust conformal [--seed N] [--alpha A]` — intervalles conformes à couverture garantie (sans hypothèse de distribution).
+- `scirust gptq [--seed N] [--samples S] [--damp D]` — quantification int8 des poids GPTQ ; affiche la réduction d'erreur de calibration par rapport au round-to-nearest.

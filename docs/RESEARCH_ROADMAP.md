@@ -45,7 +45,7 @@
 
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
-| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | **SmoothQuant** (`smoothquant_scales`/`apply_smoothquant`) + int8 per-canal déjà présent ; **GPTQ/AWQ à venir** | `quantization` | 🔨 | L |
+| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | **SmoothQuant** (`smoothquant_scales`/`apply_smoothquant`) + int8 per-canal + **GPTQ** (`quantize_gptq`/`gptq_hessian` : quantification int8 par feedback d'erreur d'ordre 2 via Hessienne inverse de calibration ; testé < round-to-nearest ; CLI `gptq`). AWQ = raffinement optionnel, non encore implémenté | `quantization` | ✅ | L |
 
 ## Tier 5 — Pont calcul scientifique (fusion unique : solveurs + autograd + symbolique)
 
@@ -83,11 +83,11 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 (#2)** · sommation reproductible (#3) · RoPE N-D (#8) · RMSNorm + SwiGLU +
 `NdLlamaBlock` (#6, #7) · FlashAttention online-softmax (#9) · décodage spéculatif
 exact (#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE
-(#16) · DP-SGD (#19) · pruning Wanda + magnitude/lottery (#20) · **conformal
-prediction (#21)** · **Schedule-Free (#22)** · **AdEMAMix (#23)**. →
-**15/20 + #21 + #22 + #23** ; SmoothQuant (#15) partiel.
+(#16) · DP-SGD (#19) · pruning Wanda + magnitude/lottery (#20) · **SmoothQuant +
+GPTQ (#15)** · **conformal prediction (#21)** · **Schedule-Free (#22)** ·
+**AdEMAMix (#23)**. → **16/20 + #21 + #22 + #23**.
 
-**Ensuite** : GPTQ/AWQ (#15, raffinement de la quantification).
+**Ensuite** : AWQ (#15, raffinement optionnel activation-aware de la quantification).
 
 **Paris lourds** (planifiés, jalonnés) : SMT/Marabou (#4) · Mamba (#18) ·
 DeltaNet (#25) · SOAP (#24) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).

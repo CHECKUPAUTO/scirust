@@ -602,7 +602,7 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
 - **Inference**: exact (output-preserving) speculative decoding and a tiled
   online-softmax FlashAttention.
 - **Scientific bridge**: a Neural ODE that backpropagates through an RK4 solver.
-- **Compression**: Wanda activation-aware pruning and SmoothQuant, extending the
+- **Compression**: Wanda activation-aware pruning and SmoothQuant, and GPTQ (second-order error-feedback int8 weight quantization, CLI `scirust gptq`), extending the
   deterministic int8 path.
 
 Two CLI commands surface this work: `scirust certify` (IBP **and CROWN** bounds, side by side, and robustness)

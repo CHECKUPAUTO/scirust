@@ -277,7 +277,7 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 - **Inferenz**: exaktes spekulatives Decoding und gekacheltes Online-Softmax-
   FlashAttention.
 - **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
-- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant.
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`).
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)
 und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (Training des N-D-Decoder-LM).

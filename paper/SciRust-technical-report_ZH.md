@@ -269,7 +269,7 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 - **可复现归约**：与顺序无关的求和/均值/点积，无论线程数均按位相同。
 - **推理**：精确（保持输出）投机解码与分块在线 softmax 的 FlashAttention。
 - **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE。
-- **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant。
+- **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant，以及 GPTQ（二阶误差反馈的 int8 权重量化，CLI `scirust gptq`）。
 
 两个 CLI 命令暴露了这些工作：`scirust certify`（IBP **与 CROWN** 界并排显示、鲁棒性）与
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix`（训练 N-D 解码器语言模型）。

@@ -274,7 +274,7 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 - **再現可能なリダクション**：順序非依存の和/平均/内積。スレッド数によらずビット同一。
 - **推論**：厳密（出力保存）な投機的デコードとタイル化オンライン softmax の FlashAttention。
 - **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE。
-- **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant。
+- **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant、さらに GPTQ（2 次の誤差フィードバックによる int8 重み量子化、CLI `scirust gptq`）。
 
 2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP **と CROWN** の境界を並べて表示、およびロバスト性）と
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix`（N-D デコーダ LM の学習）。
