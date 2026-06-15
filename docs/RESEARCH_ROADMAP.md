@@ -73,7 +73,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 22 | Defazio et al., *The Road Less Scheduled (Schedule-Free)* (2024 ; vainqueur MLCommons AlgoPerf) | `NdScheduleFree` : optimiseur **sans planning de LR** (moyenne Polyak `x`, point d'éval séparé) ; déterministe ; CLI `lm --opt schedule-free` | `nn::nd_optim` | ✅ | M |
 | 23 | Pagliardini et al. (Apple), *The AdEMAMix Optimizer* (2024, arXiv:2409.03137) | `NdAdEMAMix` : **deux EMA** du gradient (rapide β1 + lente β3, mélange α) ; déterministe ; CLI `lm --opt ademamix` | `nn::nd_optim` | ✅ | M |
 | 24 | Vyas et al., *SOAP: Improving and Stabilizing Shampoo using Adam* (2024) | `NdSoap` — Adam dans la **base propre** de Shampoo (`L=E[GGᵀ]`, `R=E[GᵀG]` ; eigensolveur **Jacobi** déterministe `jacobi_eigenvectors`) ; convergence + déterminisme testés ; CLI `lm --opt soap` | `nn::nd_optim` | ✅ | L |
-| 25 | Yang et al., *Gated Delta Networks / DeltaNet* (2024, arXiv:2412.06464) | couche d'**attention linéaire récurrente** (règle delta), temps linéaire, déterministe ; alternative plus tractable que Mamba | `nn::nd_layers` | 📋 | L |
+| 25 | Yang et al., *Gated Delta Networks / DeltaNet* (2024, arXiv:2412.06464) | `delta_rule` + `NdDeltaNet` — **attention linéaire récurrente** (règle delta : `S_t = S_{t-1} + β_t(v_t − S_{t-1}k_t)k_tᵀ`), temps linéaire, causale, déterministe ; déroulée sur la tape (nouvel op `cat0`) ⇒ **gradient check** ; match référence + entraînement ; CLI `deltanet` | `nn::nd_layers` | ✅ | L |
 
 ---
 
@@ -85,10 +85,11 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 exact (#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE
 (#16) · DP-SGD (#19) · pruning Wanda + magnitude/lottery (#20) · **SmoothQuant +
 GPTQ + AWQ (#15)** · **conformal prediction (#21)** · **Schedule-Free (#22)** ·
-**AdEMAMix (#23)** · **SOAP (#24)**. → **16/20 + #21 + #22 + #23 + #24**.
+**AdEMAMix (#23)** · **SOAP (#24)** · **DeltaNet (#25)**. →
+**16/20 + #21 + #22 + #23 + #24 + #25**.
 
 **Paris lourds** (planifiés, jalonnés) : SMT/Marabou (#4) · Mamba (#18) ·
-DeltaNet (#25) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
+PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
 
 Chaque item respecte les fondamentaux : op autograd ⇒ **gradient check** ;
 garantie (borne, privacy, reproductibilité) ⇒ **test d'oracle/soundness** ;

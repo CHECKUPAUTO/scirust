@@ -50,6 +50,9 @@ enum Op {
     /// Row lookup (embedding): select rows of a `(vocab, dim)` table by the
     /// integer indices. Backward scatter-adds the upstream rows back.
     Gather(usize, Vec<usize>),
+    /// Concatenate operands along axis 0 (shared trailing dims). Backward splits
+    /// the upstream gradient row-blocks back to each operand.
+    Cat(Vec<usize>),
     /// Fused softmax + mean negative-log-likelihood over `(n, vocab)` logits
     /// with one integer target per row. Output is the scalar mean loss; the
     /// indices are constants (not differentiated).
@@ -247,6 +250,24 @@ impl NdTape {
                         }
                     }
                 },
+                Op::Cat(ref idxs) =>
+                {
+                    // Split the upstream gradient into row-blocks, one per operand.
+                    let trailing: usize = nodes[i].value.shape[1..].iter().product();
+                    let mut row_off = 0usize;
+                    for &part in idxs
+                    {
+                        let prows = nodes[part].value.shape[0];
+                        let start = row_off * trailing;
+                        let end = (row_off + prows) * trailing;
+                        let gp = TensorND::new(
+                            g.data[start..end].to_vec(),
+                            nodes[part].value.shape.clone(),
+                        );
+                        accumulate(&mut grads[part], &gp);
+                        row_off += prows;
+                    }
+                },
                 Op::CrossEntropy(a, ref targets) =>
                 {
                     // dL/dlogits = (softmax(logits) − onehot(target)) / n, times
@@ -432,6 +453,32 @@ impl<'t> NdVar<'t> {
         }
         let out = TensorND::new(data, vec![indices.len(), dim]);
         self.tape.push(Op::Gather(self.idx, indices.to_vec()), out)
+    }
+
+    /// Concatenate `self` with `rest` along axis 0 — all parts must share their
+    /// trailing dims. Lets a recurrence (e.g. DeltaNet) assemble per-timestep
+    /// `(1, d)` outputs into a single `(seq, d)` tensor on the tape. Backward
+    /// splits the upstream gradient row-blocks back to each part.
+    pub fn cat0(self, rest: &[NdVar<'t>]) -> NdVar<'t> {
+        let nodes = self.tape.nodes.borrow();
+        let first = &nodes[self.idx].value;
+        let trailing: Vec<usize> = first.shape[1..].to_vec();
+        let mut rows = first.shape[0];
+        let mut data = first.data.clone();
+        let mut idxs = vec![self.idx];
+        for p in rest
+        {
+            let v = &nodes[p.idx].value;
+            assert_eq!(v.shape[1..], trailing[..], "cat0: trailing dims must match");
+            rows += v.shape[0];
+            data.extend_from_slice(&v.data);
+            idxs.push(p.idx);
+        }
+        drop(nodes);
+        let mut shape = vec![rows];
+        shape.extend_from_slice(&trailing);
+        let out = TensorND::new(data, shape);
+        self.tape.push(Op::Cat(idxs), out)
     }
 
     /// Fused softmax + mean negative-log-likelihood: `self` is `(n, vocab)`
@@ -1332,6 +1379,56 @@ mod tests {
         check(&gb, &b, &|p| loss_of(&a, p));
         // The broadcast operand keeps its own (batch-1) shape.
         assert_eq!(gb.shape, vec![1, 3, 2]);
+    }
+
+    /// `cat0` concatenates along axis 0 (forward), and the gradient splits the
+    /// upstream row-blocks back to each part (checked against finite differences).
+    #[test]
+    fn nd_cat0_forward_and_gradient_check() {
+        let a = vec![1.0f32, -2.0, 0.5, 3.0, -1.0, 0.7]; // (2,3)
+        let b = vec![0.2f32, -0.4, 0.9]; // (1,3)
+
+        let t0 = NdTape::new();
+        let av0 = t0.input(TensorND::new(a.clone(), vec![2, 3]));
+        let bv0 = t0.input(TensorND::new(b.clone(), vec![1, 3]));
+        let c = t0.value(av0.cat0(&[bv0]));
+        assert_eq!(c.shape, vec![3, 3]);
+        assert_eq!(&c.data[0..6], &a[..]);
+        assert_eq!(&c.data[6..9], &b[..]);
+
+        // loss = sum(cat²); gradient-check both parts.
+        let loss_of = |aa: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xa = t.input(TensorND::new(aa.to_vec(), vec![2, 3]));
+            let xb = t.input(TensorND::new(bb.to_vec(), vec![1, 3]));
+            let cc = xa.cat0(&[xb]);
+            t.value(cc.mul(cc).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xa = t.input(TensorND::new(a.clone(), vec![2, 3]));
+        let xb = t.input(TensorND::new(b.clone(), vec![1, 3]));
+        let cc = xa.cat0(&[xb]);
+        let grads = t.backward(cc.mul(cc).sum());
+        let (ga, gb) = (grads[xa.idx()].clone(), grads[xb.idx()].clone());
+
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for k in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[k] += eps;
+                dn[k] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[k]).abs() < 2e-2,
+                    "cat0 grad {k}: numeric {num}, analytic {}",
+                    analytic.data[k]
+                );
+            }
+        };
+        check(&ga, &a, &|p| loss_of(p, &b));
+        check(&gb, &b, &|p| loss_of(&a, p));
     }
 
     /// Embedding `gather`: forward selects the right rows, and the gradient

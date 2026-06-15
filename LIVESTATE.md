@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-15 — volet 41 : DeltaNet (#25) + op tape cat0 + CLI/doc
+- `nn::nd_layers::delta_rule` + `NdDeltaNet` (Yang 2024) : attention linéaire
+  récurrente à règle delta (mémoire poids rapides S ; S_t = S_{t-1} +
+  β_t(v_t − S_{t-1}k_t)k_tᵀ ; o_t = S_t q_t). Récurrence déroulée sur la tape.
+- nouvel op autograd `NdVar::cat0` (concat axe 0 + backward par découpe),
+  gradient-checké — nécessaire pour réassembler les sorties par pas de temps.
+- CLI : `deltanet [--seed N] [--steps S]` (en direct, seed 7/150 pas : MSE
+  23.76 → 0.00). 45 commandes.
+- Tests : delta_rule match référence Vec ; gradient check (q,k,v,β) ; couche
+  entraîne (MSE↓) + déterminisme ; cat0 gradient check.
+- docs : roadmap #25 📋→✅ (16/20 + #21..#25) ; README stack N-D ; REFERENCE
+  deltanet ; GROWTH_PLAN 45 ; CHANGELOG ; Documentation (8) + paper (8).
+- 832 tests ; 8 gates verts.
+
 ## Session 2026-06-15 — volet 40 : SOAP (#24) + CLI/doc
 - `nn::nd_optim::NdSoap` + `jacobi_eigenvectors` (Vyas 2024) : Adam dans la base
   propre de Shampoo (L=E[GGᵀ], R=E[GᵀG]) ; eigensolveur Jacobi cyclique

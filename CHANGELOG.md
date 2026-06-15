@@ -6,6 +6,14 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **DeltaNet** (`nn::nd_layers::delta_rule` + `NdDeltaNet`, Yang et al. 2024,
+  roadmap #25) : couche d'**attention linéaire récurrente** à règle delta
+  (`S_t = S_{t-1} + β_t(v_t − S_{t-1}k_t)k_tᵀ`, `o_t = S_t q_t`) — mémoire à poids
+  rapides, temps linéaire, causale. La récurrence est **déroulée sur la tape N-D**
+  (nouvel op autograd `NdVar::cat0` : concaténation axe 0 + backward par découpe,
+  **gradient-checké**), donc les gradients sont exacts et vérifiés par différences
+  finies (q, k, v, β). Tests : correspondance avec une référence Vec, gradient
+  check, entraînement (MSE↓) + déterminisme bit-à-bit. CLI : `scirust deltanet`.
 - **SOAP** (`nn::nd_optim::NdSoap` + `jacobi_eigenvectors`, Vyas et al. 2024,
   roadmap #24) : optimiseur qui exécute **Adam dans la base propre de Shampoo**.
   Pour chaque matrice de poids : facteurs `L = E[GGᵀ]`, `R = E[GᵀG]` (moyenne
