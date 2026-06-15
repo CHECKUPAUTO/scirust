@@ -670,6 +670,255 @@ mod gptq_tests {
     }
 }
 
+// ----- AWQ : quantification consciente des activations (scaling par recherche) -
+
+/// **AWQ** (Lin et al. 2023) — importance d'activation par canal d'entrée :
+/// `a_j = moyenne_t |x[t,j]|`. Les canaux à grande activation sont « saillants »
+/// et méritent d'être protégés à la quantification. `x` est `(samples × in_features)`
+/// row-major. Retourne les `in_features` magnitudes moyennes.
+pub fn awq_act_scale(x: &[f32], samples: usize, in_features: usize) -> Vec<f32> {
+    assert_eq!(x.len(), samples * in_features, "awq_act_scale: x size");
+    let mut a = vec![0f32; in_features];
+    for t in 0..samples
+    {
+        for (j, aj) in a.iter_mut().enumerate()
+        {
+            *aj += x[t * in_features + j].abs();
+        }
+    }
+    let inv = 1.0 / samples as f32;
+    for aj in a.iter_mut()
+    {
+        *aj *= inv;
+    }
+    a
+}
+
+/// Résultat AWQ : poids int8, scales int8 par canal de sortie, facteurs d'échelle
+/// par canal d'entrée appliqués avant quantification, et l'exposant `alpha` retenu.
+#[derive(Clone, Debug)]
+pub struct AwqResult {
+    /// Poids quantifiés int8 `(in_features × out_features)` row-major (sur les
+    /// poids **mis à l'échelle** `W·diag(s)`).
+    pub q: Vec<i8>,
+    /// Scale int8 symétrique par canal de sortie (len `out_features`).
+    pub w_scales: Vec<f32>,
+    /// Facteur d'échelle par canal d'entrée `s_j` (len `in_features`).
+    pub channel_scales: Vec<f32>,
+    /// Exposant `alpha` retenu par la recherche (`s_j = a_j^alpha`, moyenne géom. 1).
+    pub alpha: f32,
+}
+
+impl AwqResult {
+    /// Déquantifie vers les poids **d'origine** `Ŵ[j,:] = dequant(q)[j,:] / s_j`,
+    /// row-major `(in_features × out_features)`.
+    pub fn dequantize(&self, in_features: usize, out_features: usize) -> Vec<f32> {
+        let mut w = vec![0f32; in_features * out_features];
+        for j in 0..in_features
+        {
+            let inv = 1.0 / self.channel_scales[j];
+            for o in 0..out_features
+            {
+                w[j * out_features + o] =
+                    self.q[j * out_features + o] as f32 * self.w_scales[o] * inv;
+            }
+        }
+        w
+    }
+}
+
+/// **AWQ** : quantification int8 des poids **consciente des activations** par
+/// recherche d'échelle. On protège les canaux d'entrée saillants en les mettant à
+/// l'échelle (`W[j,:] ·= s_j`, avec `s_j = a_j^alpha` normalisé à moyenne
+/// géométrique unité) avant la quantification int8 per-canal de sortie ; l'équivalence est
+/// préservée en divisant les activations correspondantes (`x[:,j] /= s_j`), ce qui
+/// se replie dans la couche précédente au déploiement. `alpha` est choisi par
+/// **grille** (`grid` points dans `[0,1]`, `alpha=0` ⇒ round-to-nearest) en
+/// minimisant l'erreur de sortie pondérée par la calibration `Σ_o Δw_oᵀ H Δw_o`.
+/// `w` est `(in_features × out_features)`, `x` est `(samples × in_features)`.
+/// Déterministe (grille et ordre fixes).
+pub fn awq_quantize(
+    w: &[f32],
+    in_features: usize,
+    out_features: usize,
+    x: &[f32],
+    samples: usize,
+    grid: usize,
+) -> AwqResult {
+    assert_eq!(w.len(), in_features * out_features, "awq: weight size");
+    assert!(
+        grid >= 2,
+        "awq: grid must be >= 2 (includes alpha=0 and alpha=1)"
+    );
+    let act = awq_act_scale(x, samples, in_features);
+    let h = gptq_hessian(x, samples, in_features); // métrique d'erreur pondérée
+    let log_act: Vec<f32> = act.iter().map(|&a| a.max(1e-12).ln()).collect();
+
+    // Erreur de sortie pondérée par la calibration pour des poids déquantifiés.
+    let werr = |wq: &[f32]| -> f64 {
+        let mut e = 0f64;
+        for o in 0..out_features
+        {
+            for a in 0..in_features
+            {
+                let da = (wq[a * out_features + o] - w[a * out_features + o]) as f64;
+                if da == 0.0
+                {
+                    continue;
+                }
+                for b in 0..in_features
+                {
+                    let db = (wq[b * out_features + o] - w[b * out_features + o]) as f64;
+                    e += da * h[a * in_features + b] as f64 * db;
+                }
+            }
+        }
+        e
+    };
+
+    let mut best: Option<AwqResult> = None;
+    let mut best_err = f64::INFINITY;
+    for g in 0..grid
+    {
+        let alpha = g as f32 / (grid - 1) as f32;
+        // s_j = a_j^alpha normalisé en moyenne géométrique 1 (neutre en magnitude).
+        let mean_log = log_act.iter().sum::<f32>() / in_features as f32;
+        let s: Vec<f32> = log_act
+            .iter()
+            .map(|&la| (alpha * (la - mean_log)).exp())
+            .collect();
+        // Poids mis à l'échelle, puis quantification int8 per-canal de sortie.
+        let mut ws = vec![0f32; in_features * out_features];
+        for j in 0..in_features
+        {
+            for o in 0..out_features
+            {
+                ws[j * out_features + o] = w[j * out_features + o] * s[j];
+            }
+        }
+        let (q, w_scales) = quantize_per_channel(&ws, in_features, out_features);
+        let cand = AwqResult {
+            q,
+            w_scales,
+            channel_scales: s,
+            alpha,
+        };
+        let err = werr(&cand.dequantize(in_features, out_features));
+        if err < best_err
+        {
+            best_err = err;
+            best = Some(cand);
+        }
+    }
+    best.expect("awq: grid >= 2 guarantees a candidate")
+}
+
+#[cfg(test)]
+mod awq_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    fn weighted_err(w: &[f32], wq: &[f32], in_f: usize, out_f: usize, h: &[f32]) -> f64 {
+        let mut e = 0f64;
+        for o in 0..out_f
+        {
+            for a in 0..in_f
+            {
+                let da = (wq[a * out_f + o] - w[a * out_f + o]) as f64;
+                if da == 0.0
+                {
+                    continue;
+                }
+                for b in 0..in_f
+                {
+                    let db = (wq[b * out_f + o] - w[b * out_f + o]) as f64;
+                    e += da * h[a * in_f + b] as f64 * db;
+                }
+            }
+        }
+        e
+    }
+
+    /// With a few **salient** (high-activation) input channels, AWQ's search picks
+    /// a scaling (`alpha > 0`) that strictly lowers the calibration output error
+    /// versus plain round-to-nearest (which AWQ contains as the `alpha = 0` point).
+    #[test]
+    fn awq_protects_salient_channels_and_beats_rtn() {
+        let (in_f, out_f, samples) = (12usize, 6usize, 96usize);
+        let mut rng = PcgEngine::new(11);
+        // Activations: most channels small, a few salient (×20). These dominate Y.
+        let salient = [2usize, 5, 9];
+        let mut x = vec![0f32; samples * in_f];
+        for t in 0..samples
+        {
+            for j in 0..in_f
+            {
+                let base = rng.float_signed();
+                x[t * in_f + j] = if salient.contains(&j)
+                {
+                    20.0 * base
+                }
+                else
+                {
+                    base
+                };
+            }
+        }
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let h = gptq_hessian(&x, samples, in_f);
+
+        let res = awq_quantize(&w, in_f, out_f, &x, samples, 21);
+        let wq = res.dequantize(in_f, out_f);
+        let e_awq = weighted_err(&w, &wq, in_f, out_f, &h);
+
+        // alpha = 0 is exactly per-channel round-to-nearest.
+        let (qr, sr) = quantize_per_channel(&w, in_f, out_f);
+        let mut wr = vec![0f32; in_f * out_f];
+        for j in 0..in_f
+        {
+            for o in 0..out_f
+            {
+                wr[j * out_f + o] = qr[j * out_f + o] as f32 * sr[o];
+            }
+        }
+        let e_rtn = weighted_err(&w, &wr, in_f, out_f, &h);
+
+        assert!(
+            res.alpha > 0.0,
+            "AWQ should scale salient channels (alpha>0)"
+        );
+        assert!(
+            e_awq < e_rtn,
+            "AWQ not better than RTN: awq={e_awq} rtn={e_rtn} (alpha={})",
+            res.alpha
+        );
+    }
+
+    /// AWQ is deterministic: identical inputs ⇒ identical codes, scales, alpha.
+    #[test]
+    fn awq_deterministic() {
+        let (in_f, out_f, samples) = (8usize, 4usize, 50usize);
+        let w: Vec<f32> = (0..in_f * out_f).map(|k| (k as f32 * 0.17).sin()).collect();
+        let x: Vec<f32> = (0..samples * in_f)
+            .map(|k| (k as f32 * 0.09).cos())
+            .collect();
+        let r1 = awq_quantize(&w, in_f, out_f, &x, samples, 11);
+        let r2 = awq_quantize(&w, in_f, out_f, &x, samples, 11);
+        assert_eq!(r1.q, r2.q);
+        assert_eq!(r1.alpha.to_bits(), r2.alpha.to_bits());
+        assert_eq!(
+            r1.channel_scales
+                .iter()
+                .map(|x| x.to_bits())
+                .collect::<Vec<_>>(),
+            r2.channel_scales
+                .iter()
+                .map(|x| x.to_bits())
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).

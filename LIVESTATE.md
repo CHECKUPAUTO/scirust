@@ -3,6 +3,33 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-15 — volet 40 : SOAP (#24) + CLI/doc
+- `nn::nd_optim::NdSoap` + `jacobi_eigenvectors` (Vyas 2024) : Adam dans la base
+  propre de Shampoo (L=E[GGᵀ], R=E[GᵀG]) ; eigensolveur Jacobi cyclique
+  déterministe ; base rafraîchie tous precond_freq pas (moments tournés). Repli
+  Adam pour params non matriciels.
+- CLI : `lm --opt soap` (en direct, "1,2,3,1,2,3" 60 pas : loss 1.6168→0.0023,
+  rappel exact). 6 variantes d'opt dans lm. 44 commandes (inchangé).
+- Tests : Jacobi diagonalise (orthogonalité + reconstruction 5×5), SOAP converge
+  sur quadratique matricielle (precond_freq=2), déterminisme bit-à-bit.
+- docs : roadmap #24 📋→✅ (16/20 + #21..#24) ; README optimiseurs (liste complète) ;
+  REFERENCE lm --opt ; CHANGELOG ; Documentation (8) + paper (8) option --opt.
+- 828 tests ; 8 gates verts.
+
+## Session 2026-06-15 — volet 39 : AWQ (#15) + CLI/doc
+- `quantization::awq_quantize` + `awq_act_scale` + `AwqResult` (Lin 2023) :
+  quantification int8 consciente des activations. Importance a_j=moyenne|x_:,j| ;
+  scaling s_j=a_j^alpha (moyenne géom. unité) sur les poids avant quant int8
+  per-canal ; alpha choisi par grille sur [0,1] (alpha=0 = RTN) minimisant
+  l'erreur de sortie pondérée calibration.
+- CLI : `awq [--seed N] [--samples S] [--grid G]` (en direct, seed 1 : alpha 0.400,
+  RTN 1.70819 → AWQ 0.78211, **−54,2 %** en protégeant 3 canaux saillants ×20).
+  44 commandes. **#15 complet : SmoothQuant + GPTQ + AWQ**.
+- Tests : protège canaux saillants → erreur < RTN (alpha>0 choisi) + déterminisme.
+- docs : roadmap #15 (AWQ ajouté, « Ensuite » vidé de #15) ; README int8 ;
+  REFERENCE awq ; GROWTH_PLAN 44 ; CHANGELOG ; Documentation (8) + paper (8).
+- 825 tests ; 8 gates verts.
+
 ## Session 2026-06-15 — volet 38 : GPTQ (#15) + CLI/doc
 - `quantization::quantize_gptq` + `gptq_hessian` (Frantar 2022) : quantification
   int8 par feedback d'erreur 2e ordre. H=XᵀX (calibration) → inverse Cholesky

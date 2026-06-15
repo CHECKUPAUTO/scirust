@@ -130,16 +130,17 @@ SciRust هو إطار العمل المفضل لأولئك الذين يعطون
   انتباه سببي، إنتروبيا متقاطعة softmax مدمجة)؛ يحفظ تسلسلًا بدقّة.
 - **طبقات بأسلوب LLaMA**: RMSNorm وSwiGLU وكتلة LLaMA وRoPE والانتباه المجمَّع/
   متعدد الاستعلام (GQA/MQA).
-- **مُحسِّنات حتمية**: Adam وAdamW وLion وMuon (Newton–Schulz).
+- **مُحسِّنات حتمية**: Adam وAdamW وLion وMuon (Newton–Schulz) وSchedule-Free وAdEMAMix وSOAP (Adam في الأساس الذاتي لـ Shampoo).
 - **ذكاء اصطناعي قابل للاعتماد**: انتشار حدود الفترات (IBP) **وCROWN** (حدود أضيق عبر الاسترخاء الخطي) — حدود مخرجات *قابلة
   للإثبات* وشهادة متانة.
 - **اختزالات قابلة للتكرار** مستقلة عن الترتيب (متطابقة بِتّيًا مهما كان عدد الخيوط).
 - **فكّ تشفير تخميني دقيق**؛ **FlashAttention** (softmax على الإنترنت)؛
   **Neural ODE** (انتشار عكسي عبر مُكامل RK4).
-- **ضغط**: تقليم Wanda (مدرك للتنشيط)، SmoothQuant، GPTQ (تكميم أوزان int8 بتغذية راجعة للخطأ من الرتبة الثانية).
+- **ضغط**: تقليم Wanda (مدرك للتنشيط)، SmoothQuant، GPTQ (تكميم أوزان int8 بتغذية راجعة للخطأ من الرتبة الثانية)، AWQ (تكميم أوزان int8 مدرك للتنشيط قائم على البحث).
 
 أوامر CLI جديدة:
 - `scirust certify [--seed N] [--eps E]` — حدود قابلة للإثبات لشبكة ReLU MLP (IBP **وCROWN**، الحدود الأضيق عبر الاسترخاء الخطي، جنبًا إلى جنب).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — تدريب النموذج اللغوي N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap]` — تدريب النموذج اللغوي N-D.
 - `scirust conformal [--seed N] [--alpha A]` — فترات مطابِقة بتغطية مضمونة دون افتراض توزيع.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — تكميم أوزان int8 بطريقة GPTQ؛ يُبلِغ عن مقدار انخفاض خطأ المعايرة مقارنةً بـ round-to-nearest.
+- `scirust awq [--seed N] [--samples S] [--grid G]` — تكميم أوزان int8 مدرك للتنشيط بطريقة AWQ؛ يُبلِغ عن أُسّ القياس المختار ومقدار انخفاض خطأ المعايرة مقارنةً بـ round-to-nearest.

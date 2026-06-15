@@ -270,7 +270,7 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
   embeddings rotatifs (RoPE, propriété de position relative testée), et attention
   groupée / multi-requête exprimée via le broadcast du produit matriciel par lots.
 - **Optimiseurs déterministes** : Adam, AdamW (weight decay découplé), Lion et
-  Muon (momentum orthogonalisé par Newton–Schulz) — tous reproductibles bit à bit.
+  Muon (momentum orthogonalisé par Newton–Schulz), Schedule-Free, AdEMAMix et SOAP (Adam dans la base propre de Shampoo) — tous reproductibles bit à bit.
 - **IA certifiable** : la propagation par intervalles (IBP) **et CROWN** (bornes
   plus serrées par relaxation linéaire) fournissent des bornes de
   sortie prouvées pour les MLP ReLU et un certificat de robustesse, validés par
@@ -281,8 +281,8 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 - **Inférence** : décodage spéculatif exact (préservant la sortie) et une
   FlashAttention à softmax en ligne par tuiles.
 - **Pont scientifique** : un Neural ODE qui rétropropage à travers un solveur RK4.
-- **Compression** : élagage Wanda (conscient des activations) et SmoothQuant, et GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2, CLI `scirust gptq`).
+- **Compression** : élagage Wanda (conscient des activations) et SmoothQuant, et GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2, CLI `scirust gptq`), et AWQ (quantification int8 des poids basée sur une recherche et consciente des activations, CLI `scirust awq`).
 
-Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entraînement du LM décodeur N-D).
+Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (entraînement du LM décodeur N-D).
 
 Une troisième commande, `scirust conformal`, produit des intervalles de prédiction conformes à couverture garantie, sans hypothèse de distribution.

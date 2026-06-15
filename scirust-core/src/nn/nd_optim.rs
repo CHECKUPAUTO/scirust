@@ -662,6 +662,312 @@ impl NdAdEMAMix {
     }
 }
 
+/// Eigenvectors of a symmetric `n×n` matrix `a` (row-major) by **cyclic Jacobi
+/// rotations**. Deterministic: fixed sweep order, fixed convergence threshold and
+/// max sweeps. Returns the orthogonal `Q` (`n×n`, row-major) whose **columns** are
+/// eigenvectors, so `Qᵀ A Q` is (numerically) diagonal. Used by SOAP for the
+/// Shampoo eigenbasis; `a` is assumed symmetric (only the symmetric part matters).
+pub fn jacobi_eigenvectors(a: &[f32], n: usize) -> Vec<f32> {
+    assert_eq!(a.len(), n * n, "jacobi: size mismatch");
+    let mut m = a.to_vec(); // diagonalised in place
+    let mut v = vec![0f32; n * n];
+    for i in 0..n
+    {
+        v[i * n + i] = 1.0;
+    }
+    if n == 1
+    {
+        return v;
+    }
+    for _sweep in 0..60
+    {
+        let mut off = 0f32;
+        for p in 0..n
+        {
+            for q in (p + 1)..n
+            {
+                off += m[p * n + q].abs();
+            }
+        }
+        if off <= 1e-12
+        {
+            break;
+        }
+        for p in 0..n
+        {
+            for q in (p + 1)..n
+            {
+                let apq = m[p * n + q];
+                if apq.abs() <= 1e-20
+                {
+                    continue;
+                }
+                let (app, aqq) = (m[p * n + p], m[q * n + q]);
+                let tau = (aqq - app) / (2.0 * apq);
+                // tan of the rotation (numerically stable branch by sign of tau).
+                let t = if tau >= 0.0
+                {
+                    1.0 / (tau + (1.0 + tau * tau).sqrt())
+                }
+                else
+                {
+                    -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+                };
+                let c = 1.0 / (1.0 + t * t).sqrt();
+                let s = t * c;
+                // A ← Jᵀ A J : rotate columns p,q, then rows p,q.
+                for k in 0..n
+                {
+                    let (akp, akq) = (m[k * n + p], m[k * n + q]);
+                    m[k * n + p] = c * akp - s * akq;
+                    m[k * n + q] = s * akp + c * akq;
+                }
+                for k in 0..n
+                {
+                    let (apk, aqk) = (m[p * n + k], m[q * n + k]);
+                    m[p * n + k] = c * apk - s * aqk;
+                    m[q * n + k] = s * apk + c * aqk;
+                }
+                // V ← V J (accumulate eigenvectors).
+                for k in 0..n
+                {
+                    let (vkp, vkq) = (v[k * n + p], v[k * n + q]);
+                    v[k * n + p] = c * vkp - s * vkq;
+                    v[k * n + q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    v
+}
+
+/// Hyper-parameters for [`NdSoap`]. [`Default`] mirrors the paper: Adam
+/// `β1 = 0.9, β2 = 0.999`, preconditioner decay `shampoo_beta = 0.95`, eigenbasis
+/// refreshed every `precond_freq = 10` steps.
+#[derive(Clone, Copy, Debug)]
+pub struct SoapConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Adam first-moment decay.
+    pub beta1: f32,
+    /// Adam second-moment decay.
+    pub beta2: f32,
+    /// Running-average decay of the Shampoo factors `L = E[GGᵀ]`, `R = E[GᵀG]`.
+    pub shampoo_beta: f32,
+    /// Numerical-stability term.
+    pub eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+    /// Eigenbasis refresh interval (in steps).
+    pub precond_freq: usize,
+}
+
+impl Default for SoapConfig {
+    fn default() -> Self {
+        Self {
+            lr: 3e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            shampoo_beta: 0.95,
+            eps: 1e-8,
+            weight_decay: 0.0,
+            precond_freq: 10,
+        }
+    }
+}
+
+/// Per-parameter SOAP state. Matrix parameters carry the Shampoo factors and
+/// eigenbases; other parameters fall back to plain Adam (moments only).
+struct SoapState {
+    is_matrix: bool,
+    rows: usize,
+    cols: usize,
+    l: Vec<f32>,
+    r: Vec<f32>,
+    ql: Vec<f32>,
+    qr: Vec<f32>,
+    mom1: Vec<f32>,
+    mom2: Vec<f32>,
+}
+
+/// **SOAP** (Vyas et al. 2024): *Improving and Stabilizing Shampoo using Adam*.
+/// For each 2-D weight matrix it maintains Shampoo's preconditioner factors
+/// `L = E[GGᵀ]` and `R = E[GᵀG]`, rotates the gradient into their **eigenbasis**
+/// (`Ĝ = Q_Lᵀ G Q_R`), runs **Adam** there, and rotates the update back
+/// (`U = Q_L Û Q_Rᵀ`). The eigenbasis is refreshed every `precond_freq` steps; the
+/// Adam moments are rotated into the new basis on refresh (the second-moment
+/// rotation is kept non-negative, as the moment is a variance proxy).
+/// Non-matrix parameters use plain Adam. Pure `f32`, fixed order ⇒
+/// **bit-for-bit deterministic**.
+pub struct NdSoap {
+    cfg: SoapConfig,
+    t: u64,
+    state: Vec<SoapState>,
+}
+
+impl NdSoap {
+    /// New optimizer with the given config (no steps taken yet).
+    pub fn new(cfg: SoapConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            state: Vec::new(),
+        }
+    }
+
+    /// SOAP with default hyper-parameters at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(SoapConfig {
+            lr,
+            ..SoapConfig::default()
+        })
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One SOAP update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.state.is_empty() && !params.is_empty()
+        {
+            self.state = params
+                .iter()
+                .map(|p| {
+                    let shape = &p.value.shape;
+                    if shape.len() == 2 && shape[0] >= 2 && shape[1] >= 2
+                    {
+                        let (m, n) = (shape[0], shape[1]);
+                        SoapState {
+                            is_matrix: true,
+                            rows: m,
+                            cols: n,
+                            l: vec![0.0; m * m],
+                            r: vec![0.0; n * n],
+                            ql: Vec::new(),
+                            qr: Vec::new(),
+                            mom1: vec![0.0; m * n],
+                            mom2: vec![0.0; m * n],
+                        }
+                    }
+                    else
+                    {
+                        let len = p.value.data.len();
+                        SoapState {
+                            is_matrix: false,
+                            rows: 0,
+                            cols: 0,
+                            l: Vec::new(),
+                            r: Vec::new(),
+                            ql: Vec::new(),
+                            qr: Vec::new(),
+                            mom1: vec![0.0; len],
+                            mom2: vec![0.0; len],
+                        }
+                    }
+                })
+                .collect();
+        }
+        assert_eq!(
+            self.state.len(),
+            params.len(),
+            "NdSoap: parameter count changed between steps"
+        );
+        self.t += 1;
+        let t_now = self.t;
+        let cfg = self.cfg;
+        let bc1 = 1.0 - cfg.beta1.powi(t_now as i32);
+        let bc2 = 1.0 - cfg.beta2.powi(t_now as i32);
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let st = &mut self.state[k];
+            if !st.is_matrix
+            {
+                for (i, &gi) in g.iter().enumerate()
+                {
+                    st.mom1[i] = cfg.beta1 * st.mom1[i] + (1.0 - cfg.beta1) * gi;
+                    st.mom2[i] = cfg.beta2 * st.mom2[i] + (1.0 - cfg.beta2) * gi * gi;
+                    let mhat = st.mom1[i] / bc1;
+                    let vhat = st.mom2[i] / bc2;
+                    let theta = p.value.data[i];
+                    p.value.data[i] = theta
+                        - cfg.lr * (mhat / (vhat.sqrt() + cfg.eps) + cfg.weight_decay * theta);
+                }
+                continue;
+            }
+
+            let (m, n) = (st.rows, st.cols);
+            let gt = transpose(g, m, n); // n×m
+            // First touch: seed factors and eigenbases from this gradient.
+            if st.ql.is_empty()
+            {
+                st.l = matmul(g, m, n, &gt, m); // GGᵀ  (m×m)
+                st.r = matmul(&gt, n, m, g, n); // GᵀG  (n×n)
+                st.ql = jacobi_eigenvectors(&st.l, m);
+                st.qr = jacobi_eigenvectors(&st.r, n);
+            }
+
+            // Rotate gradient into the eigenbasis: Ĝ = Q_Lᵀ G Q_R.
+            let qlt = transpose(&st.ql, m, m);
+            let gl = matmul(&qlt, m, m, g, n); // m×n
+            let ghat = matmul(&gl, m, n, &st.qr, n); // m×n
+
+            // Adam in the eigenbasis.
+            let mut upd = vec![0f32; m * n];
+            for i in 0..m * n
+            {
+                st.mom1[i] = cfg.beta1 * st.mom1[i] + (1.0 - cfg.beta1) * ghat[i];
+                st.mom2[i] = cfg.beta2 * st.mom2[i] + (1.0 - cfg.beta2) * ghat[i] * ghat[i];
+                let mhat = st.mom1[i] / bc1;
+                let vhat = st.mom2[i] / bc2;
+                upd[i] = mhat / (vhat.sqrt() + cfg.eps);
+            }
+
+            // Rotate the update back: U = Q_L Û Q_Rᵀ.
+            let qrt = transpose(&st.qr, n, n);
+            let ul = matmul(&st.ql, m, m, &upd, n); // m×n
+            let u = matmul(&ul, m, n, &qrt, n); // m×n
+            for (pv, &uv) in p.value.data.iter_mut().zip(&u)
+            {
+                *pv -= cfg.lr * (uv + cfg.weight_decay * *pv);
+            }
+
+            // Update Shampoo factors (running average).
+            let ggt = matmul(g, m, n, &gt, m);
+            let gtg = matmul(&gt, n, m, g, n);
+            let sb = cfg.shampoo_beta;
+            for (li, &gi) in st.l.iter_mut().zip(&ggt)
+            {
+                *li = sb * *li + (1.0 - sb) * gi;
+            }
+            for (ri, &gi) in st.r.iter_mut().zip(&gtg)
+            {
+                *ri = sb * *ri + (1.0 - sb) * gi;
+            }
+
+            // Periodically refresh the eigenbasis and rotate the moments into it.
+            if t_now as usize % cfg.precond_freq == 0
+            {
+                let ql_new = jacobi_eigenvectors(&st.l, m);
+                let qr_new = jacobi_eigenvectors(&st.r, n);
+                let rot_l = matmul(&transpose(&ql_new, m, m), m, m, &st.ql, m); // m×m
+                let rot_r = matmul(&transpose(&st.qr, n, n), n, n, &qr_new, n); // n×n
+                let rotate = |x: &[f32]| -> Vec<f32> {
+                    let t1 = matmul(&rot_l, m, m, x, n); // m×n
+                    matmul(&t1, m, n, &rot_r, n) // m×n
+                };
+                st.mom1 = rotate(&st.mom1);
+                st.mom2 = rotate(&st.mom2).iter().map(|x| x.abs()).collect();
+                st.ql = ql_new;
+                st.qr = qr_new;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1071,6 +1377,128 @@ mod tests {
                 );
             }
             x.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// The Jacobi eigensolver returns an **orthogonal** `Q` that **diagonalises**
+    /// a symmetric matrix: `QᵀQ ≈ I`, `QᵀAQ` is diagonal, and `Q·diag·Qᵀ ≈ A`.
+    #[test]
+    fn jacobi_diagonalizes_symmetric() {
+        let n = 5;
+        let mut rng = PcgEngine::new(3);
+        // A = MᵀM is symmetric PSD with non-trivial off-diagonal structure.
+        let m: Vec<f32> = (0..n * n).map(|_| rng.float_signed()).collect();
+        let mt = transpose(&m, n, n);
+        let a = matmul(&mt, n, n, &m, n);
+
+        let q = jacobi_eigenvectors(&a, n);
+        let qt = transpose(&q, n, n);
+
+        // Orthogonality: QᵀQ ≈ I.
+        let qtq = matmul(&qt, n, n, &q, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (qtq[i * n + j] - want).abs() < 1e-4,
+                    "QᵀQ not identity at ({i},{j}): {}",
+                    qtq[i * n + j]
+                );
+            }
+        }
+        // Diagonalisation: off-diagonal of QᵀAQ ≈ 0.
+        let aq = matmul(&a, n, n, &q, n);
+        let d = matmul(&qt, n, n, &aq, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                if i != j
+                {
+                    assert!(
+                        d[i * n + j].abs() < 1e-3,
+                        "off-diag ({i},{j}) = {}",
+                        d[i * n + j]
+                    );
+                }
+            }
+        }
+        // Reconstruction: Q·(QᵀAQ)·Qᵀ ≈ A.
+        let qd = matmul(&q, n, n, &d, n);
+        let recon = matmul(&qd, n, n, &qt, n);
+        for (r, a0) in recon.iter().zip(&a)
+        {
+            assert!((r - a0).abs() < 1e-3, "reconstruction off: {r} vs {a0}");
+        }
+    }
+
+    /// SOAP (Adam in the Shampoo eigenbasis) minimises a convex matrix quadratic
+    /// `½‖W − T‖²` (gradient `W − T`), driving every entry to the target. Exercises
+    /// the eigenbasis refresh + moment rotation (`precond_freq = 2`).
+    #[test]
+    fn nd_soap_converges_on_matrix_quadratic() {
+        let (rows, cols) = (4usize, 3usize);
+        let target: Vec<f32> = (0..rows * cols)
+            .map(|k| (k as f32 * 0.5 - 2.0).sin())
+            .collect();
+        let mut w = TensorND::new(vec![0.0; rows * cols], vec![rows, cols]);
+        let mut opt = NdSoap::new(SoapConfig {
+            lr: 0.05,
+            precond_freq: 2,
+            ..SoapConfig::default()
+        });
+        for _ in 0..1000
+        {
+            let gd: Vec<f32> = w
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&wi, &ti)| wi - ti)
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![rows, cols])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut w,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        for (wi, ti) in w.data.iter().zip(&target)
+        {
+            assert!((wi - ti).abs() < 0.1, "SOAP did not converge: {wi} vs {ti}");
+        }
+    }
+
+    /// SOAP is deterministic: two independent runs are bit-for-bit identical.
+    #[test]
+    fn nd_soap_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let (rows, cols) = (3usize, 3usize);
+            let target: Vec<f32> = (0..rows * cols).map(|k| k as f32 * 0.1).collect();
+            let mut w = TensorND::new(vec![0.2; rows * cols], vec![rows, cols]);
+            let mut opt = NdSoap::with_lr(0.03);
+            for _ in 0..120
+            {
+                let gd: Vec<f32> = w
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&wi, &ti)| wi - ti)
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![rows, cols])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut w,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            w.data
         };
         assert_eq!(run(), run());
     }

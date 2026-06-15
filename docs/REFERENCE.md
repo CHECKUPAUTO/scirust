@@ -82,12 +82,13 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `fem-heat <nodes> <length> <source>` | chaleur 1D −u″=source (éléments finis linéaires) | `scirust-solvers` |
 | `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
 | `bpe "<corpus>" [--vocab N] [--encode "<text>"] [--bytes]` | tokenizer BPE déterministe (entraînement + encode/decode ; `--bytes` = byte-level lossless) | `scirust-learning` |
-| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
+| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix\|soap]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
 | `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
 | `certify [--seed N] [--eps E]` | bornes de sortie prouvées d'un MLP ReLU sur une boîte L∞ — **IBP** (couche par couche) **et CROWN** (relaxation linéaire, plus serrée) côte à côte | `scirust-core::nn::ibp` |
 | `conformal [--seed N] [--alpha A]` | intervalles conformes à couverture garantie sans hypothèse de distribution | `scirust-core::nn::conformal` |
 | `gptq [--seed N] [--samples S] [--damp D]` | quantification int8 GPTQ (feedback d'erreur d'ordre 2) ; affiche la réduction d'erreur de calibration vs round-to-nearest | `scirust-core::quantization` |
+| `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
 | `info` / `help` / `version` | méta | — |
 
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`

@@ -268,7 +268,7 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
   Kreuzentropie), das eine Sequenz exakt lernt.
 - **LLaMA-Schichten**: RMSNorm, SwiGLU, Pre-RMSNorm-LLaMA-Block, RoPE (mit
   getesteter Relativpositions-Eigenschaft) und gruppierte/Multi-Query-Attention.
-- **Deterministische Optimierer**: Adam, AdamW, Lion und Muon (Newton–Schulz).
+- **Deterministische Optimierer**: Adam, AdamW, Lion, Muon (Newton–Schulz), Schedule-Free, AdEMAMix und SOAP (Adam in Shampoos Eigenbasis).
 - **Zertifizierbare KI**: Interval Bound Propagation **und CROWN** (engere
   Schranken durch lineare Relaxation) liefern beweisbare
   Ausgabeschranken und ein Robustheitszertifikat.
@@ -277,9 +277,9 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 - **Inferenz**: exaktes spekulatives Decoding und gekacheltes Online-Softmax-
   FlashAttention.
 - **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
-- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`).
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`) und AWQ (aktivierungsbewusste, suchbasierte int8-Gewichtsquantisierung, CLI `scirust awq`).
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)
-und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (Training des N-D-Decoder-LM).
+und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (Training des N-D-Decoder-LM).
 
 Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.

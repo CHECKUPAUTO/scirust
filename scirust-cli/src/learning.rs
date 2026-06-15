@@ -5,7 +5,7 @@ use scirust_core::nn::PcgEngine;
 use scirust_core::nn::conformal::ConformalRegressor;
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
-use scirust_core::quantization::{gptq_hessian, quantize_gptq, quantize_per_channel};
+use scirust_core::quantization::{awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel};
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
@@ -232,6 +232,97 @@ pub fn run_gptq(args: &[String]) -> u8 {
     println!("    round-to-nearest : {er:.5}");
     println!("    GPTQ             : {eg:.5}");
     println!("  GPTQ reduces the calibration error by {reduction:.1}% at the same int8 budget");
+    0
+}
+
+/// `awq [--seed N] [--samples S] [--grid G]` — quantize a synthetic Linear layer
+/// to int8 with **AWQ** (activation-aware, search-based per-channel scaling) on
+/// calibration activations that have a few salient (high-magnitude) channels, and
+/// report the calibration-weighted error against plain round-to-nearest plus the
+/// scaling exponent the search selected. Deterministic in `--seed`.
+pub fn run_awq(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let samples = flag_u64(args, "--samples", 128).max(1) as usize;
+    let grid = flag_u64(args, "--grid", 21).max(2) as usize;
+
+    let (in_f, out_f) = (16usize, 8usize);
+    let salient = [3usize, 7, 11];
+    let mut rng = PcgEngine::new(seed);
+    // A few salient input channels (×20) dominate the layer output — exactly the
+    // regime AWQ targets by protecting those channels at quantization time.
+    let mut x = vec![0f32; samples * in_f];
+    for t in 0..samples
+    {
+        for j in 0..in_f
+        {
+            let base = rng.float_signed();
+            x[t * in_f + j] = if salient.contains(&j)
+            {
+                20.0 * base
+            }
+            else
+            {
+                base
+            };
+        }
+    }
+    let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+    let h = gptq_hessian(&x, samples, in_f);
+
+    let werr = |wq: &[f32]| -> f64 {
+        let mut e = 0f64;
+        for o in 0..out_f
+        {
+            for ai in 0..in_f
+            {
+                let da = (wq[ai * out_f + o] - w[ai * out_f + o]) as f64;
+                if da == 0.0
+                {
+                    continue;
+                }
+                for b in 0..in_f
+                {
+                    let db = (wq[b * out_f + o] - w[b * out_f + o]) as f64;
+                    e += da * h[ai * in_f + b] as f64 * db;
+                }
+            }
+        }
+        e
+    };
+
+    let res = awq_quantize(&w, in_f, out_f, &x, samples, grid);
+    let eg = werr(&res.dequantize(in_f, out_f));
+    let (qr, sr) = quantize_per_channel(&w, in_f, out_f);
+    let mut wr = vec![0f32; in_f * out_f];
+    for j in 0..in_f
+    {
+        for o in 0..out_f
+        {
+            wr[j * out_f + o] = qr[j * out_f + o] as f32 * sr[o];
+        }
+    }
+    let er = werr(&wr);
+    let reduction = if er > 0.0
+    {
+        100.0 * (1.0 - eg / er)
+    }
+    else
+    {
+        0.0
+    };
+
+    println!("AWQ int8 quantization — pure Rust, deterministic (seed {seed})");
+    println!(
+        "  Linear: {in_f}->{out_f} · {samples} calibration samples · salient channels {salient:?} (×20)"
+    );
+    println!("  per-output-channel symmetric int8 · alpha grid of {grid} points in [0,1]");
+    println!("  selected scaling exponent alpha = {:.3}", res.alpha);
+    println!("  calibration-weighted reconstruction error  Σ Δwᵀ·H·Δw:");
+    println!("    round-to-nearest : {er:.5}");
+    println!("    AWQ              : {eg:.5}");
+    println!(
+        "  AWQ reduces the calibration error by {reduction:.1}% by protecting salient channels"
+    );
     0
 }
 

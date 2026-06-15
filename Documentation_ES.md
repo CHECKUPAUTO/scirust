@@ -134,7 +134,7 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
   memoriza una secuencia exactamente.
 - **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA, RoPE, atención agrupada /
   multi-consulta (GQA/MQA).
-- **Optimizadores deterministas**: Adam, AdamW, Lion, Muon (Newton–Schulz).
+- **Optimizadores deterministas**: Adam, AdamW, Lion, Muon (Newton–Schulz), Schedule-Free, AdEMAMix y SOAP (Adam en la base propia de Shampoo).
 - **IA certificable**: Interval Bound Propagation **y CROWN** (cotas más
   ajustadas por relajación lineal) — cotas de salida *demostrables*
   y certificado de robustez.
@@ -142,10 +142,11 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
   importar el número de hilos).
 - **Decodificación especulativa exacta**; **FlashAttention** (softmax en línea);
   **Neural ODE** (retropropagación a través de un solucionador RK4).
-- **Compresión**: poda Wanda (consciente de activaciones), SmoothQuant, GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden).
+- **Compresión**: poda Wanda (consciente de activaciones), SmoothQuant, GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden), AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones).
 
 Nuevos comandos CLI:
 - `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP **y** CROWN, las cotas más ajustadas por relajación lineal, en paralelo).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — entrena el LM decodificador N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap]` — entrena el LM decodificador N-D.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — cuantización int8 de pesos GPTQ; informa la reducción del error de calibración frente a round-to-nearest.
+- `scirust awq [--seed N] [--samples S] [--grid G]` — cuantización int8 de pesos AWQ consciente de activaciones; informa el exponente de escalado seleccionado y la reducción del error de calibración frente a round-to-nearest.
