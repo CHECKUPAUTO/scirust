@@ -276,7 +276,7 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Inferencia**: decodificación especulativa exacta y FlashAttention con softmax
   en línea por bloques.
 - **Puente científico**: una Neural ODE con retropropagación a través de RK4.
-- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`).
+- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
 
 Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entrenar el LM decodificador N-D).

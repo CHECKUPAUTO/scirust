@@ -271,7 +271,7 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
 - **재현 가능한 리덕션**: 순서 무관 합/평균/내적, 스레드 수와 무관하게 비트 단위 동일.
 - **추론**: 정확한(출력 보존) 추측 디코딩과 타일형 온라인 softmax FlashAttention.
 - **과학적 가교**: RK4 솔버를 통해 역전파하는 Neural ODE.
-- **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant, 그리고 GPTQ(2차 오차 피드백 기반 int8 가중치 양자화, CLI `scirust gptq`).
+- **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant, 그리고 GPTQ(2차 오차 피드백 기반 int8 가중치 양자화, CLI `scirust gptq`), 그리고 AWQ(활성화 인식 기반 탐색 방식 int8 가중치 양자화, CLI `scirust awq`).
 
 두 가지 CLI 명령이 이를 노출합니다: `scirust certify`(IBP **및 CROWN** 경계를 나란히, 견고성)와
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix`(N-D 디코더 LM 학습).

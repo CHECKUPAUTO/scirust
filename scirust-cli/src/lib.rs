@@ -248,11 +248,18 @@ const GROUPS: &[(&str, &[Command])] = &[
     ),
     (
         "COMPRESSION",
-        &[Command {
-            name: "gptq",
-            args: "[--seed N] [--samples S] [--damp D]",
-            about: "GPTQ int8 weight quantization (error feedback); reports the error reduction vs round-to-nearest.",
-        }],
+        &[
+            Command {
+                name: "gptq",
+                args: "[--seed N] [--samples S] [--damp D]",
+                about: "GPTQ int8 weight quantization (error feedback); reports the error reduction vs round-to-nearest.",
+            },
+            Command {
+                name: "awq",
+                args: "[--seed N] [--samples S] [--grid G]",
+                about: "AWQ activation-aware int8 quantization (search-based per-channel scaling); reports the error reduction vs round-to-nearest.",
+            },
+        ],
     ),
     (
         "META",
@@ -352,6 +359,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("certify") => learning::run_certify(rest),
         Some("conformal") => learning::run_conformal(rest),
         Some("gptq") => learning::run_gptq(rest),
+        Some("awq") => learning::run_awq(rest),
         Some("evo") => learning::run_evo(rest),
         Some("cmaes") => learning::run_cmaes(rest),
         Some("diff") => symbolic::run_diff(rest),
@@ -475,6 +483,7 @@ mod tests {
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
+        assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",
