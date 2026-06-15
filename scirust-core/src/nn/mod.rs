@@ -27,6 +27,7 @@ pub mod nd_layers;
 pub mod nd_optim;
 pub mod neural_ode;
 pub mod peft;
+pub mod pinn;
 pub mod pool;
 pub mod positional_encoding;
 pub mod residual;

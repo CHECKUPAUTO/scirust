@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-15 — volet 43 : PINN (#17) + CLI/doc
+- `nn::pinn` (`Pinn1D` MLP 1→16→16→1 sigmoid, `solve_harmonic`) (Raissi 2019) :
+  résout u''=−u, u(0)=0, u(π/2)=1 (= sin x) ; résidu PDE par différences finies
+  dans l'entrée (réseau partagé, grad params exact par autodiff inverse) + CL.
+- CLI : `pinn [--seed N] [--steps S]` (en direct, seed 1/4000 pas : loss 30.70 →
+  0.0003, erreur max vs sin = 0.0036). Groupe NUMERICAL SOLVERS. 47 commandes.
+- Tests : loss < 5% de l'initial + erreur max < 0.05 vs sin(x) ; déterminisme.
+- docs : roadmap #17 📋→✅ (18/20 + #21..#25) ; README stack N-D ; REFERENCE
+  pinn ; GROWTH_PLAN 47 ; CHANGELOG ; Documentation (8) + paper (8).
+- 838 tests ; 8 gates verts.
+
 ## Session 2026-06-15 — volet 42 : Mamba (#18) + op tape exp + CLI/doc
 - `nn::nd_layers::selective_scan` + `NdMamba` (Gu & Dao 2023) : scan sélectif S6
   (Δ,B,C dépendants de l'entrée ; A diagonal ; Ā=exp(Δ·A)) ; récurrence linéaire-
