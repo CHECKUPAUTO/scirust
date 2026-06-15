@@ -156,15 +156,17 @@ backed by a research paper and a test (gradient check or oracle). See
 - **LLaMA-family layers**: RMSNorm, SwiGLU, LLaMA block, RoPE, grouped/
   multi-query attention (GQA/MQA).
 - **Deterministic optimizers**: Adam, AdamW, Lion, Muon (Newton–Schulz).
-- **Certifiable AI**: Interval Bound Propagation — *provable* output bounds and
+- **Certifiable AI**: Interval Bound Propagation **and CROWN** (tighter
+  linear-relaxation bounds) — *provable* output bounds and
   a robustness certificate.
 - **Reproducible reductions**, order-independent (bit-identical regardless of
   thread count).
 - **Exact speculative decoding**; **FlashAttention** (online softmax);
   **Neural ODE** (backprop through an RK4 solver).
-- **Compression**: Wanda (activation-aware) pruning, SmoothQuant.
+- **Compression**: Wanda (activation-aware) pruning, SmoothQuant, GPTQ (second-order error-feedback int8 weight quantization).
 
 New CLI commands:
-- `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP).
+- `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP **and** CROWN, the tighter linear-relaxation bounds, side by side).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — train the N-D decoder LM.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.
+- `scirust gptq [--seed N] [--samples S] [--damp D]` — GPTQ int8 weight quantization; reports the calibration-error reduction vs round-to-nearest.

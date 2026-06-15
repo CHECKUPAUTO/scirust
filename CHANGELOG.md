@@ -6,6 +6,24 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **GPTQ** (`quantization::quantize_gptq` + `gptq_hessian`, Frantar et al. 2022,
+  roadmap #15) : quantification int8 des poids par **feedback d'erreur d'ordre 2**.
+  Hessienne proxy `H = XᵀX` sur des activations de calibration ; inverse par
+  Cholesky (en f64, déterministe) ; pour chaque canal de sortie, quantification
+  séquentielle des poids d'entrée avec propagation de l'erreur (OBQ/GPTQ, ordre
+  naturel) et complément de Schur. Scale symétrique par canal de sortie. CLI :
+  `scirust gptq [--seed N] [--samples S] [--damp D]`. Tests : **erreur de
+  reconstruction pondérée par la calibration < round-to-nearest** (≈ −85 % sur
+  données corrélées) + soundness (jamais pire) + déterminisme bit-à-bit. Complète
+  le volet quantification (#15) avec SmoothQuant et l'int8 per-canal.
+- **CROWN** (`nn::ibp::crown_bounds`, Zhang et al. 2018, roadmap #2) : bornes de
+  sortie d'un MLP ReLU à 1 couche cachée par **relaxation linéaire** +
+  back-substitution sur une boîte L∞. Relaxation par neurone : exacte pour les
+  neurones stables, chorde supérieure / pente inférieure adaptative pour les
+  instables. **Plus serrée qu'IBP** (prouvé par test). CLI : `scirust certify`
+  affiche désormais IBP **et** CROWN côte à côte (CROWN certifie la robustesse
+  là où IBP échoue). Tests : soundness (échantillonnage de la boîte) + largeur
+  CROWN ≤ largeur IBP par sortie.
 - **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap #23) :
   Adam à **deux EMA** du gradient (rapide β1 + lente β3 à longue mémoire, mélangées
   par α) ; déterministe. CLI : `scirust lm --opt ademamix`. Tests : convergence

@@ -364,6 +364,312 @@ mod smoothquant_tests {
     }
 }
 
+// ----- GPTQ : quantification post-entraînement par feedback d'erreur ----------
+
+/// **GPTQ** (Frantar et al. 2022) — proxy de Hessienne `H = XᵀX` sur les
+/// activations de calibration. `x` est `(samples × in_features)` row-major
+/// (même disposition que l'entrée de `quantized_linear_forward`). Retourne la
+/// matrice symétrique `in_features × in_features` (row-major).
+pub fn gptq_hessian(x: &[f32], samples: usize, in_features: usize) -> Vec<f32> {
+    assert_eq!(x.len(), samples * in_features, "gptq_hessian: x size");
+    let d = in_features;
+    let mut h = vec![0f32; d * d];
+    for t in 0..samples
+    {
+        let row = &x[t * d..t * d + d];
+        for a in 0..d
+        {
+            let xa = row[a];
+            if xa == 0.0
+            {
+                continue;
+            }
+            for b in a..d
+            {
+                h[a * d + b] += xa * row[b];
+            }
+        }
+    }
+    // Symmetrise (we only filled the upper triangle).
+    for a in 0..d
+    {
+        for b in (a + 1)..d
+        {
+            h[b * d + a] = h[a * d + b];
+        }
+    }
+    h
+}
+
+/// Inverse d'une matrice symétrique définie positive `d×d` (row-major) par
+/// Cholesky `H = L Lᵀ` puis `H⁻¹ = L⁻ᵀ L⁻¹`. Calcul interne en `f64` pour la
+/// stabilité ; déterministe (ordre fixe). Suppose `h` déjà amortie (definie
+/// positive) ; un pivot non positif est planché pour rester fini.
+fn spd_inverse_f64(h: &[f32], d: usize) -> Vec<f64> {
+    let mut l = vec![0f64; d * d];
+    for i in 0..d
+    {
+        for j in 0..=i
+        {
+            let mut s = h[i * d + j] as f64;
+            for k in 0..j
+            {
+                s -= l[i * d + k] * l[j * d + k];
+            }
+            if i == j
+            {
+                l[i * d + j] = if s > 1e-12 { s.sqrt() } else { 1e-6 };
+            }
+            else
+            {
+                l[i * d + j] = s / l[j * d + j];
+            }
+        }
+    }
+    // L⁻¹ (lower) par substitution avant, colonne par colonne.
+    let mut linv = vec![0f64; d * d];
+    for col in 0..d
+    {
+        linv[col * d + col] = 1.0 / l[col * d + col];
+        for i in (col + 1)..d
+        {
+            let mut s = 0f64;
+            for k in col..i
+            {
+                s += l[i * d + k] * linv[k * d + col];
+            }
+            linv[i * d + col] = -s / l[i * d + i];
+        }
+    }
+    // H⁻¹ = L⁻ᵀ L⁻¹ : Hinv[a,b] = Σ_k linv[k,a]·linv[k,b].
+    let mut hinv = vec![0f64; d * d];
+    for a in 0..d
+    {
+        for b in a..d
+        {
+            let mut s = 0f64;
+            for k in a.max(b)..d
+            {
+                s += linv[k * d + a] * linv[k * d + b];
+            }
+            hinv[a * d + b] = s;
+            hinv[b * d + a] = s;
+        }
+    }
+    hinv
+}
+
+/// **GPTQ** : quantification int8 des poids par feedback d'erreur d'ordre 2.
+/// `weight` est `(in_features × out_features)` row-major (canal de sortie `o` en
+/// colonne, comme `quantize_per_channel`). `hessian` est le proxy
+/// `in_features × in_features` issu de `gptq_hessian`. Pour chaque canal `o`, on
+/// quantifie les poids d'entrée séquentiellement et on **propage l'erreur** sur
+/// les poids non encore quantifiés via la Hessienne inverse (OBQ/GPTQ, ordre
+/// naturel). Scale symétrique par canal de sortie. Déterministe (ordre fixe).
+///
+/// `percdamp` amortit la diagonale (`λ = percdamp·moyenne(diag H)`, 0.01 typique)
+/// pour la stabilité numérique de l'inverse.
+pub fn quantize_gptq(
+    weight: &[f32],
+    in_features: usize,
+    out_features: usize,
+    hessian: &[f32],
+    percdamp: f32,
+) -> (Vec<i8>, Vec<f32>) {
+    assert_eq!(
+        weight.len(),
+        in_features * out_features,
+        "gptq: weight size"
+    );
+    assert_eq!(
+        hessian.len(),
+        in_features * in_features,
+        "gptq: hessian size"
+    );
+    let d = in_features;
+
+    // Scale par canal de sortie, figé sur les poids d'origine.
+    let mut scales = vec![1f32; out_features];
+    for (o, so) in scales.iter_mut().enumerate()
+    {
+        let mut m = 0f32;
+        for i in 0..d
+        {
+            m = m.max(weight[i * out_features + o].abs());
+        }
+        *so = if m == 0.0 { 1.0 } else { m / 127.0 };
+    }
+
+    // Hessienne amortie puis inversée (en f64).
+    let mut h = hessian.to_vec();
+    let mut diag_mean = 0f32;
+    for i in 0..d
+    {
+        diag_mean += h[i * d + i];
+    }
+    diag_mean /= d as f32;
+    let damp = percdamp * diag_mean.max(1e-8);
+    for i in 0..d
+    {
+        if h[i * d + i] <= 0.0
+        {
+            h[i * d + i] = 1.0; // colonne « morte » : se quantifiera vers 0
+        }
+        h[i * d + i] += damp;
+    }
+    let mut hinv = spd_inverse_f64(&h, d);
+
+    let mut q = vec![0i8; d * out_features];
+    let mut w = weight.to_vec(); // copie modifiée par le feedback d'erreur
+    let mut err = vec![0f64; out_features];
+    for i in 0..d
+    {
+        let di = hinv[i * d + i];
+        let inv_di = if di.abs() > 1e-12 { 1.0 / di } else { 0.0 };
+        // Quantifier la colonne d'entrée i pour tous les canaux de sortie.
+        for o in 0..out_features
+        {
+            let s = scales[o];
+            let wv = w[i * out_features + o];
+            let qv = (wv / s).round().clamp(-128.0, 127.0);
+            q[i * out_features + o] = qv as i8;
+            err[o] = (wv as f64 - (qv * s) as f64) * inv_di;
+        }
+        // Propager l'erreur sur les poids non encore quantifiés (colonnes j>i).
+        for j in (i + 1)..d
+        {
+            let hij = hinv[i * d + j];
+            if hij == 0.0
+            {
+                continue;
+            }
+            for o in 0..out_features
+            {
+                w[j * out_features + o] -= (err[o] * hij) as f32;
+            }
+        }
+        // Complément de Schur sur le bloc restant de H⁻¹ (déterministe).
+        if inv_di != 0.0
+        {
+            for a in (i + 1)..d
+            {
+                let f = hinv[a * d + i] * inv_di;
+                if f == 0.0
+                {
+                    continue;
+                }
+                for b in (i + 1)..d
+                {
+                    hinv[a * d + b] -= f * hinv[i * d + b];
+                }
+            }
+        }
+    }
+    (q, scales)
+}
+
+#[cfg(test)]
+mod gptq_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// Reconstruction error weighted by the calibration covariance:
+    /// `Σ_o (Δw_o)ᵀ H (Δw_o)` where `Δw_o` is the per-output-channel weight
+    /// error — exactly the objective GPTQ minimises.
+    fn weighted_err(w: &[f32], wq: &[f32], in_f: usize, out_f: usize, h: &[f32]) -> f64 {
+        let mut e = 0f64;
+        for o in 0..out_f
+        {
+            for a in 0..in_f
+            {
+                let da = (wq[a * out_f + o] - w[a * out_f + o]) as f64;
+                if da == 0.0
+                {
+                    continue;
+                }
+                for b in 0..in_f
+                {
+                    let db = (wq[b * out_f + o] - w[b * out_f + o]) as f64;
+                    e += da * h[a * in_f + b] as f64 * db;
+                }
+            }
+        }
+        e
+    }
+
+    fn dequant(q: &[i8], scales: &[f32], in_f: usize, out_f: usize) -> Vec<f32> {
+        let mut w = vec![0f32; in_f * out_f];
+        for i in 0..in_f
+        {
+            for o in 0..out_f
+            {
+                w[i * out_f + o] = q[i * out_f + o] as f32 * scales[o];
+            }
+        }
+        w
+    }
+
+    /// On **correlated** calibration data, GPTQ's error feedback yields a
+    /// strictly lower calibration-weighted reconstruction error than plain
+    /// round-to-nearest (`quantize_per_channel`) at the same int8 budget — the
+    /// whole point of the method. Also checks soundness (never worse).
+    #[test]
+    fn gptq_beats_rtn_on_calibration_error() {
+        let (in_f, out_f, samples, latent) = (8usize, 4usize, 96usize, 3usize);
+        let mut rng = PcgEngine::new(7);
+
+        // Correlated activations: x[t,:] = A·z[t] + small noise (rank-`latent`).
+        let a: Vec<f32> = (0..in_f * latent).map(|_| rng.float_signed()).collect();
+        let mut x = vec![0f32; samples * in_f];
+        for t in 0..samples
+        {
+            let z: Vec<f32> = (0..latent).map(|_| rng.float_signed()).collect();
+            for i in 0..in_f
+            {
+                let mut v = 0.1 * rng.float_signed();
+                for (l, &zl) in z.iter().enumerate()
+                {
+                    v += a[i * latent + l] * zl;
+                }
+                x[t * in_f + i] = v;
+            }
+        }
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let h = gptq_hessian(&x, samples, in_f);
+
+        let (qg, sg) = quantize_gptq(&w, in_f, out_f, &h, 0.01);
+        let wg = dequant(&qg, &sg, in_f, out_f);
+        let (qr, sr) = quantize_per_channel(&w, in_f, out_f);
+        let wr = dequant(&qr, &sr, in_f, out_f);
+
+        let eg = weighted_err(&w, &wg, in_f, out_f, &h);
+        let er = weighted_err(&w, &wr, in_f, out_f, &h);
+        // Sound: GPTQ is never worse than RTN on the objective it optimises.
+        assert!(eg <= er + 1e-3, "GPTQ worse than RTN: {eg} vs {er}");
+        // Meaningful: on correlated data GPTQ is clearly better.
+        assert!(
+            eg < 0.9 * er,
+            "GPTQ not meaningfully better: gptq={eg} rtn={er}"
+        );
+    }
+
+    /// GPTQ is deterministic: identical inputs ⇒ bit-identical codes and scales.
+    #[test]
+    fn gptq_deterministic() {
+        let (in_f, out_f) = (6usize, 3usize);
+        let w: Vec<f32> = (0..in_f * out_f).map(|k| (k as f32 * 0.21).sin()).collect();
+        let x: Vec<f32> = (0..40 * in_f).map(|k| (k as f32 * 0.13).cos()).collect();
+        let h = gptq_hessian(&x, 40, in_f);
+        let (q1, s1) = quantize_gptq(&w, in_f, out_f, &h, 0.01);
+        let (q2, s2) = quantize_gptq(&w, in_f, out_f, &h, 0.01);
+        assert_eq!(q1, q2);
+        assert_eq!(
+            s1.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+            s2.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).

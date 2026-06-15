@@ -267,13 +267,13 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
 - **LLaMA 계열 레이어**: RMSNorm, SwiGLU, Pre-RMSNorm LLaMA 블록, RoPE(상대 위치
   성질 검증), 그룹/멀티쿼리 어텐션.
 - **결정론적 옵티마이저**: Adam, AdamW, Lion, Muon(Newton–Schulz).
-- **인증 가능한 AI**: 구간 경계 전파(IBP)가 증명 가능한 출력 경계와 견고성 인증서를 제공.
+- **인증 가능한 AI**: 구간 경계 전파(IBP) **및 CROWN**(선형 완화 기반의 더 조밀한 경계)이 증명 가능한 출력 경계와 견고성 인증서를 제공.
 - **재현 가능한 리덕션**: 순서 무관 합/평균/내적, 스레드 수와 무관하게 비트 단위 동일.
 - **추론**: 정확한(출력 보존) 추측 디코딩과 타일형 온라인 softmax FlashAttention.
 - **과학적 가교**: RK4 솔버를 통해 역전파하는 Neural ODE.
-- **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant.
+- **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant, 그리고 GPTQ(2차 오차 피드백 기반 int8 가중치 양자화, CLI `scirust gptq`).
 
-두 가지 CLI 명령이 이를 노출합니다: `scirust certify`(IBP 경계와 견고성)와
+두 가지 CLI 명령이 이를 노출합니다: `scirust certify`(IBP **및 CROWN** 경계를 나란히, 견고성)와
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix`(N-D 디코더 LM 학습).
 
 세 번째 명령 `scirust conformal`은 분포 가정 없이 커버리지를 보장하는 컨포멀 예측 구간을 생성합니다.

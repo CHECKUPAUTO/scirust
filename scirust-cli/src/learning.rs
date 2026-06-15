@@ -3,8 +3,9 @@
 
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::conformal::ConformalRegressor;
-use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust};
+use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
+use scirust_core::quantization::{gptq_hessian, quantize_gptq, quantize_per_channel};
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
@@ -28,10 +29,11 @@ fn flag_f32(args: &[String], name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-/// `certify [--seed N] [--eps E]` — build a small seeded ReLU MLP and prove,
-/// via **Interval Bound Propagation**, output bounds over an L∞ box of radius
-/// `eps` around an input; report whether the predicted class is **provably**
-/// unchanged across the whole box. Showcases scirust's "certifiable AI" thesis.
+/// `certify [--seed N] [--eps E]` — build a small seeded ReLU MLP and prove
+/// output bounds over an L∞ box of radius `eps` around an input, via both
+/// **Interval Bound Propagation** and the tighter **CROWN** relaxation; report
+/// whether the predicted class is **provably** unchanged. Showcases scirust's
+/// "certifiable AI" thesis (and that CROWN certifies where IBP cannot).
 pub fn run_certify(args: &[String]) -> u8 {
     let seed = flag_u64(args, "--seed", 1);
     let eps = flag_f32(args, "--eps", 0.05);
@@ -46,12 +48,14 @@ pub fn run_certify(args: &[String]) -> u8 {
     let mut rng = PcgEngine::new(seed);
     let l1 = NdLinear::new(in_f, hidden, &mut rng);
     let l2 = NdLinear::new(hidden, out_f, &mut rng);
-    let mlp = IbpMlp::new(vec![
-        IbpLinear::from_nd_linear(&l1),
-        IbpLinear::from_nd_linear(&l2),
-    ]);
+    let il1 = IbpLinear::from_nd_linear(&l1);
+    let il2 = IbpLinear::from_nd_linear(&l2);
 
     let centre = vec![0.2f32, -0.5, 0.7, -0.1];
+    let box_in = Interval::around(&centre, eps);
+    // CROWN before moving the layers into the IBP MLP.
+    let crown = crown_bounds(&il1, &il2, &box_in);
+    let mlp = IbpMlp::new(vec![il1, il2]);
     let pred = mlp.forward(&centre);
     let argmax = pred
         .iter()
@@ -59,29 +63,38 @@ pub fn run_certify(args: &[String]) -> u8 {
         .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(i, _)| i)
         .unwrap();
-    let cert = mlp.certify(&Interval::around(&centre, eps));
-    let robust = certified_robust(&cert, argmax);
+    let ibp = mlp.certify(&box_in);
 
-    println!("IBP certification — pure Rust, deterministic (seed {seed})");
-    println!("  MLP: {in_f}->{hidden}->{out_f} (ReLU)");
-    println!("  input: {centre:?}  ->  prediction: class {argmax}");
-    println!("  L∞ box radius eps = {eps}");
-    println!("  certified output bounds:");
-    for c in 0..out_f
-    {
-        println!("    class {c}: [{:.4}, {:.4}]", cert.lo[c], cert.hi[c]);
-    }
-    println!(
-        "  robustness: {}",
-        if robust
+    let robust_str = |out: &Interval| {
+        if certified_robust(out, argmax)
         {
-            format!("CERTIFIED — class {argmax} cannot change anywhere in the box")
+            format!("CERTIFIED — class {argmax} cannot change in the box")
         }
         else
         {
-            "not certified at this eps (try a smaller --eps)".to_string()
+            "not certified at this eps".to_string()
         }
-    );
+    };
+    let width = |out: &Interval| -> f32 {
+        (0..out_f).map(|c| out.hi[c] - out.lo[c]).sum::<f32>() / out_f as f32
+    };
+
+    println!("Certified bounds — pure Rust, deterministic (seed {seed})");
+    println!("  MLP: {in_f}->{hidden}->{out_f} (ReLU)");
+    println!("  input: {centre:?}  ->  prediction: class {argmax}");
+    println!("  L∞ box radius eps = {eps}");
+    println!("  IBP   bounds (avg width {:.4}):", width(&ibp));
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", ibp.lo[c], ibp.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&ibp));
+    println!("  CROWN bounds (avg width {:.4}, tighter):", width(&crown));
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&crown));
     0
 }
 
@@ -124,6 +137,101 @@ pub fn run_conformal(args: &[String]) -> u8 {
         100.0 * coverage
     );
     println!("  guarantee: distribution-free marginal coverage ≥ {target:.0}%");
+    0
+}
+
+/// `gptq [--seed N] [--samples S] [--damp D]` — quantize a synthetic Linear
+/// layer to int8 with **GPTQ** (second-order error feedback) on correlated
+/// calibration activations, and report the calibration-weighted reconstruction
+/// error against plain round-to-nearest. Deterministic in `--seed`.
+pub fn run_gptq(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let samples = flag_u64(args, "--samples", 128).max(1) as usize;
+    let damp = flag_f32(args, "--damp", 0.01);
+    if damp < 0.0 || !damp.is_finite()
+    {
+        eprintln!("usage: scirust gptq [--seed N] [--samples S] [--damp D]");
+        eprintln!("error: --damp must be a non-negative number");
+        return 2;
+    }
+
+    let (in_f, out_f, latent) = (16usize, 8usize, 4usize);
+    let mut rng = PcgEngine::new(seed);
+    // Correlated activations x = A·z + small noise (rank `latent`): off-diagonal
+    // Hessian structure is exactly what GPTQ exploits over round-to-nearest.
+    let a: Vec<f32> = (0..in_f * latent).map(|_| rng.float_signed()).collect();
+    let mut x = vec![0f32; samples * in_f];
+    for t in 0..samples
+    {
+        let z: Vec<f32> = (0..latent).map(|_| rng.float_signed()).collect();
+        for i in 0..in_f
+        {
+            let mut v = 0.1 * rng.float_signed();
+            for (l, &zl) in z.iter().enumerate()
+            {
+                v += a[i * latent + l] * zl;
+            }
+            x[t * in_f + i] = v;
+        }
+    }
+    let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+    let h = gptq_hessian(&x, samples, in_f);
+
+    // Calibration-weighted error Σ_o Δw_oᵀ H Δw_o (the GPTQ objective).
+    let werr = |wq: &[f32]| -> f64 {
+        let mut e = 0f64;
+        for o in 0..out_f
+        {
+            for ai in 0..in_f
+            {
+                let da = (wq[ai * out_f + o] - w[ai * out_f + o]) as f64;
+                if da == 0.0
+                {
+                    continue;
+                }
+                for b in 0..in_f
+                {
+                    let db = (wq[b * out_f + o] - w[b * out_f + o]) as f64;
+                    e += da * h[ai * in_f + b] as f64 * db;
+                }
+            }
+        }
+        e
+    };
+    let dequant = |q: &[i8], s: &[f32]| -> Vec<f32> {
+        let mut out = vec![0f32; in_f * out_f];
+        for i in 0..in_f
+        {
+            for o in 0..out_f
+            {
+                out[i * out_f + o] = q[i * out_f + o] as f32 * s[o];
+            }
+        }
+        out
+    };
+
+    let (qg, sg) = quantize_gptq(&w, in_f, out_f, &h, damp);
+    let (qr, sr) = quantize_per_channel(&w, in_f, out_f);
+    let eg = werr(&dequant(&qg, &sg));
+    let er = werr(&dequant(&qr, &sr));
+    let reduction = if er > 0.0
+    {
+        100.0 * (1.0 - eg / er)
+    }
+    else
+    {
+        0.0
+    };
+
+    println!("GPTQ int8 quantization — pure Rust, deterministic (seed {seed})");
+    println!(
+        "  Linear: {in_f}->{out_f} · {samples} correlated calibration samples (rank {latent})"
+    );
+    println!("  per-output-channel symmetric int8 · damping λ = {damp}");
+    println!("  calibration-weighted reconstruction error  Σ Δwᵀ·H·Δw:");
+    println!("    round-to-nearest : {er:.5}");
+    println!("    GPTQ             : {eg:.5}");
+    println!("  GPTQ reduces the calibration error by {reduction:.1}% at the same int8 budget");
     0
 }
 

@@ -268,16 +268,17 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA Pre-RMSNorm, RoPE
   (propiedad de posición relativa probada) y atención agrupada / multi-consulta.
 - **Optimizadores deterministas**: Adam, AdamW, Lion y Muon (Newton–Schulz).
-- **IA certificable**: la propagación por intervalos (IBP) da cotas de salida
+- **IA certificable**: la propagación por intervalos (IBP) **y CROWN** (cotas
+  más ajustadas por relajación lineal) dan cotas de salida
   demostrables y un certificado de robustez.
 - **Reducciones reproducibles**: suma/media/producto escalar independientes del
   orden, idénticas bit a bit sin importar el número de hilos.
 - **Inferencia**: decodificación especulativa exacta y FlashAttention con softmax
   en línea por bloques.
 - **Puente científico**: una Neural ODE con retropropagación a través de RK4.
-- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant.
+- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`).
 
-Dos comandos CLI exponen este trabajo: `scirust certify` (cotas y robustez IBP) y
+Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entrenar el LM decodificador N-D).
 
 Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.

@@ -1,7 +1,33 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-14
+> Dernière mise à jour : 2026-06-15
+
+## Session 2026-06-15 — volet 38 : GPTQ (#15) + CLI/doc
+- `quantization::quantize_gptq` + `gptq_hessian` (Frantar 2022) : quantification
+  int8 par feedback d'erreur 2e ordre. H=XᵀX (calibration) → inverse Cholesky
+  f64 → boucle OBQ/GPTQ par canal de sortie (propagation d'erreur + complément
+  de Schur). Scale symétrique per-canal de sortie.
+- CLI : `gptq [--seed N] [--samples S] [--damp D]` (en direct, seed 1 : RTN
+  0.04549 → GPTQ 0.00689, **−84,9 %** d'erreur de calibration). Nouveau groupe
+  CLI « COMPRESSION ». 43 commandes.
+- Tests : erreur pondérée calibration < RTN (< 0,9·RTN sur données corrélées) +
+  soundness (jamais pire) + déterminisme bit-à-bit.
+- docs : roadmap #15 🔨→✅ (16/20) ; README int8 ; REFERENCE gptq ; GROWTH_PLAN
+  43 ; CHANGELOG ; Documentation (8 langues) + paper (8 langues).
+- 823 tests ; 8 gates verts.
+
+## Session 2026-06-15 — volet 37 : CROWN (#2) + doc/CLI
+- `nn::ibp::crown_bounds(l1, l2, box)` (Zhang 2018) : bornes de sortie d'un MLP
+  ReLU à 1 couche cachée par **relaxation linéaire** + back-substitution.
+  Relaxation par neurone (stable = exact ; instable = chorde sup / pente inf).
+  **Plus serrée qu'IBP** : prouvé par test (largeur CROWN ≤ largeur IBP +
+  soundness par échantillonnage de la boîte L∞).
+- CLI : `certify` affiche IBP **et** CROWN côte à côte (en direct, eps=0.05 :
+  IBP largeur 0.0847 NON certifié vs CROWN largeur 0.0366 CERTIFIÉ).
+- docs : roadmap #2 📋→✅ (15/20 du tier robustesse/opt) ; README certifiable ;
+  REFERENCE certify ; CHANGELOG ; Documentation (8 langues) + paper (8 langues).
+- 821 tests ; 8 gates verts.
 
 ## Session 2026-06-14 — volet 36 : AdEMAMix (#23) + nettoyage code mort
 - `nn::nd_optim::NdAdEMAMix` (Pagliardini 2024) : Adam à deux EMA (β1 rapide +

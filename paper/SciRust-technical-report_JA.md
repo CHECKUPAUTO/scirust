@@ -270,13 +270,13 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 - **LLaMA 系レイヤ**：RMSNorm、SwiGLU、Pre-RMSNorm の LLaMA ブロック、RoPE
   （相対位置性質をテスト済み）、グループ化/マルチクエリ注意。
 - **決定的オプティマイザ**：Adam、AdamW、Lion、Muon（Newton–Schulz）。
-- **認証可能な AI**：区間境界伝播（IBP）が証明可能な出力境界とロバスト性証明書を提供。
+- **認証可能な AI**：区間境界伝播（IBP）**と CROWN**（線形緩和によるより厳しい境界）が証明可能な出力境界とロバスト性証明書を提供。
 - **再現可能なリダクション**：順序非依存の和/平均/内積。スレッド数によらずビット同一。
 - **推論**：厳密（出力保存）な投機的デコードとタイル化オンライン softmax の FlashAttention。
 - **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE。
-- **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant。
+- **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant、さらに GPTQ（2 次の誤差フィードバックによる int8 重み量子化、CLI `scirust gptq`）。
 
-2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP 境界とロバスト性）と
+2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP **と CROWN** の境界を並べて表示、およびロバスト性）と
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix`（N-D デコーダ LM の学習）。
 
 3 つ目のコマンド `scirust conformal` は、分布非依存で被覆率を保証する共形予測区間を生成します。

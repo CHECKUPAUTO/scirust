@@ -17,7 +17,7 @@
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
 | 1 | Gowal et al., *On the Effectiveness of Interval Bound Propagation* (2018) | `IbpMlp::certify(box) -> box` + `certified_robust` : intervalles propagés couche par couche ; **borne de sortie prouvée** (soundness testée) | `nn::ibp` | ✅ | S |
-| 2 | Zhang et al., *CROWN* (NeurIPS 2018) ; Wang et al., *β-CROWN* (NeurIPS 2021, arXiv:2103.06624) | bornes par relaxation linéaire (plus serrées qu'IBP) | `nn::certified` | 📋 | L |
+| 2 | Zhang et al., *CROWN* (NeurIPS 2018) ; Wang et al., *β-CROWN* (NeurIPS 2021, arXiv:2103.06624) | `crown_bounds` — bornes de sortie par relaxation linéaire (back-substitution) **plus serrées qu'IBP** ; soundness + tighter-than-IBP testés ; exposé dans `certify` (affiche IBP **et** CROWN) | `nn::ibp` | ✅ | L |
 | 3 | Demmel & Nguyen, *Algorithms for Efficient Reproducible Floating-Point Summation* (ACM TOMS 2020) | `reproducible_sum`/`_mean`/`_dot` : somme **bit-identique quel que soit l'ordre / le nombre de threads** (tri canonique + expansion exacte) | `reproducible` | ✅ | M |
 | 4 | Katz et al., *Reluplex* (CAV 2017, arXiv:1702.01135) ; *Marabou* (CAV 2019) | `verify-net` : vérification **complète** (SMT) d'une propriété sur un petit réseau ReLU | `scirust-neuro-symbolic` + CLI | 📋 | XL |
 | 5 | *DiFR: Inference Verification Despite Nondeterminism* (2025, arXiv:2511.20621) | vérifier une trace d'inférence malgré le non-déterminisme | `scirust_runtime::proofcli` | 📋 | L |
@@ -45,7 +45,7 @@
 
 | # | Papier | Fonction scirust | Module | Statut | Effort |
 |---|--------|------------------|--------|--------|--------|
-| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | **SmoothQuant** (`smoothquant_scales`/`apply_smoothquant`) + int8 per-canal déjà présent ; **GPTQ/AWQ à venir** | `quantization` | 🔨 | L |
+| 15 | Frantar et al., *GPTQ* (2022) ; Lin et al., *AWQ* (2023) ; Xiao et al., *SmoothQuant* (2022, arXiv:2211.10438) | **SmoothQuant** (`smoothquant_scales`/`apply_smoothquant`) + int8 per-canal + **GPTQ** (`quantize_gptq`/`gptq_hessian` : quantification int8 par feedback d'erreur d'ordre 2 via Hessienne inverse de calibration ; testé < round-to-nearest ; CLI `gptq`). AWQ = raffinement optionnel, non encore implémenté | `quantization` | ✅ | L |
 
 ## Tier 5 — Pont calcul scientifique (fusion unique : solveurs + autograd + symbolique)
 
@@ -79,19 +79,18 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 
 ## Ordre d'attaque
 
-**✅ Livré / présent** (testé + 8 gates verts) : IBP certifié (#1) · sommation
-reproductible (#3) · RoPE N-D (#8) · RMSNorm + SwiGLU + `NdLlamaBlock` (#6, #7) ·
-FlashAttention online-softmax (#9) · décodage spéculatif exact (#10) · GQA/MQA
-(#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE (#16) · DP-SGD (#19) ·
-pruning Wanda + magnitude/lottery (#20) · **conformal prediction (#21)** ·
-**Schedule-Free (#22)** · **AdEMAMix (#23)**. → **14/20 + #21 + #22 + #23** ;
-SmoothQuant (#15) partiel.
+**✅ Livré / présent** (testé + 8 gates verts) : IBP certifié (#1) · **CROWN
+(#2)** · sommation reproductible (#3) · RoPE N-D (#8) · RMSNorm + SwiGLU +
+`NdLlamaBlock` (#6, #7) · FlashAttention online-softmax (#9) · décodage spéculatif
+exact (#10) · GQA/MQA (#11) · AdamW + Lion (#12, #13) · Muon (#14) · Neural ODE
+(#16) · DP-SGD (#19) · pruning Wanda + magnitude/lottery (#20) · **SmoothQuant +
+GPTQ (#15)** · **conformal prediction (#21)** · **Schedule-Free (#22)** ·
+**AdEMAMix (#23)**. → **16/20 + #21 + #22 + #23**.
 
-**Ensuite** : GPTQ/AWQ (#15, raffinement de la quantification).
+**Ensuite** : AWQ (#15, raffinement optionnel activation-aware de la quantification).
 
-**Paris lourds** (planifiés, jalonnés) : CROWN (#2) · SMT/Marabou (#4) ·
-Mamba (#18) · DeltaNet (#25) · SOAP (#24) · PINN (#17, après l'autodiff d'ordre 2)
-· DiFR (#5).
+**Paris lourds** (planifiés, jalonnés) : SMT/Marabou (#4) · Mamba (#18) ·
+DeltaNet (#25) · SOAP (#24) · PINN (#17, après l'autodiff d'ordre 2) · DiFR (#5).
 
 Chaque item respecte les fondamentaux : op autograd ⇒ **gradient check** ;
 garantie (borne, privacy, reproductibilité) ⇒ **test d'oracle/soundness** ;

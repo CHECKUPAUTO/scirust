@@ -269,16 +269,17 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 - **LLaMA-Schichten**: RMSNorm, SwiGLU, Pre-RMSNorm-LLaMA-Block, RoPE (mit
   getesteter Relativpositions-Eigenschaft) und gruppierte/Multi-Query-Attention.
 - **Deterministische Optimierer**: Adam, AdamW, Lion und Muon (Newton–Schulz).
-- **Zertifizierbare KI**: Interval Bound Propagation liefert beweisbare
+- **Zertifizierbare KI**: Interval Bound Propagation **und CROWN** (engere
+  Schranken durch lineare Relaxation) liefern beweisbare
   Ausgabeschranken und ein Robustheitszertifikat.
 - **Reproduzierbare Reduktionen**: reihenfolgenunabhängige Summe/Mittel/
   Skalarprodukt, bit-identisch unabhängig von der Thread-Anzahl.
 - **Inferenz**: exaktes spekulatives Decoding und gekacheltes Online-Softmax-
   FlashAttention.
 - **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
-- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant.
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`).
 
-Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP-Schranken/Robustheit)
+Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)
 und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (Training des N-D-Decoder-LM).
 
 Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.

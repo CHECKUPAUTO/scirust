@@ -154,15 +154,17 @@ Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fer
 - **LLaMA-Schichten**: RMSNorm, SwiGLU, LLaMA-Block, RoPE, gruppierte /
   Multi-Query-Attention (GQA/MQA).
 - **Deterministische Optimierer**: Adam, AdamW, Lion, Muon (Newton–Schulz).
-- **Zertifizierbare KI**: Interval Bound Propagation — *beweisbare* Ausgabeschranken
+- **Zertifizierbare KI**: Interval Bound Propagation **und CROWN** (engere
+  Schranken durch lineare Relaxation) — *beweisbare* Ausgabeschranken
   und Robustheitszertifikat.
 - **Reproduzierbare Reduktionen**, reihenfolgenunabhängig (bit-identisch
   unabhängig von der Thread-Anzahl).
 - **Exaktes spekulatives Decoding**; **FlashAttention** (Online-Softmax);
   **Neural ODE** (Backprop durch einen RK4-Löser).
-- **Kompression**: Wanda-Pruning (aktivierungsbewusst), SmoothQuant.
+- **Kompression**: Wanda-Pruning (aktivierungsbewusst), SmoothQuant, GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung).
 
 Neue CLI-Befehle:
-- `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP).
+- `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP **und** CROWN, die engeren Schranken durch lineare Relaxation, nebeneinander).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — trainiert das N-D-Decoder-LM.
 - `scirust conformal [--seed N] [--alpha A]` — konforme Intervalle mit garantierter, verteilungsfreier Überdeckung.
+- `scirust gptq [--seed N] [--samples S] [--damp D]` — GPTQ-int8-Gewichtsquantisierung; gibt die Reduktion des Kalibrierungsfehlers gegenüber Round-to-Nearest aus.
