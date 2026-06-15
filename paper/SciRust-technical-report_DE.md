@@ -276,7 +276,7 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
   Skalarprodukt, bit-identisch unabhängig von der Thread-Anzahl.
 - **Inferenz**: exaktes spekulatives Decoding, gekacheltes Online-Softmax-
   FlashAttention, eine DeltaNet-Schicht für lineare Aufmerksamkeit mit Delta-Regel und eine Mamba-Schicht mit selektivem Zustandsraum.
-- **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser.
+- **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser, und ein physikinformiertes neuronales Netz (PINN), das ein PDE-Residuum in die Verlustfunktion legt, um ein Randwertproblem zu lösen.
 - **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`) und AWQ (aktivierungsbewusste, suchbasierte int8-Gewichtsquantisierung, CLI `scirust awq`).
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)

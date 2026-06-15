@@ -275,7 +275,7 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
   orden, idénticas bit a bit sin importar el número de hilos.
 - **Inferencia**: decodificación especulativa exacta, FlashAttention con softmax
   en línea por bloques, una capa DeltaNet de atención lineal con regla delta y una capa Mamba de espacio de estados selectivo.
-- **Puente científico**: una Neural ODE con retropropagación a través de RK4.
+- **Puente científico**: una Neural ODE con retropropagación a través de RK4, y una red neuronal informada por la física (PINN) que coloca un residuo de EDP en la pérdida para resolver un problema de contorno.
 - **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
 
 Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
