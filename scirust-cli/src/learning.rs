@@ -3,7 +3,7 @@
 
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::conformal::ConformalRegressor;
-use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust};
+use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
@@ -28,10 +28,11 @@ fn flag_f32(args: &[String], name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-/// `certify [--seed N] [--eps E]` — build a small seeded ReLU MLP and prove,
-/// via **Interval Bound Propagation**, output bounds over an L∞ box of radius
-/// `eps` around an input; report whether the predicted class is **provably**
-/// unchanged across the whole box. Showcases scirust's "certifiable AI" thesis.
+/// `certify [--seed N] [--eps E]` — build a small seeded ReLU MLP and prove
+/// output bounds over an L∞ box of radius `eps` around an input, via both
+/// **Interval Bound Propagation** and the tighter **CROWN** relaxation; report
+/// whether the predicted class is **provably** unchanged. Showcases scirust's
+/// "certifiable AI" thesis (and that CROWN certifies where IBP cannot).
 pub fn run_certify(args: &[String]) -> u8 {
     let seed = flag_u64(args, "--seed", 1);
     let eps = flag_f32(args, "--eps", 0.05);
@@ -46,12 +47,14 @@ pub fn run_certify(args: &[String]) -> u8 {
     let mut rng = PcgEngine::new(seed);
     let l1 = NdLinear::new(in_f, hidden, &mut rng);
     let l2 = NdLinear::new(hidden, out_f, &mut rng);
-    let mlp = IbpMlp::new(vec![
-        IbpLinear::from_nd_linear(&l1),
-        IbpLinear::from_nd_linear(&l2),
-    ]);
+    let il1 = IbpLinear::from_nd_linear(&l1);
+    let il2 = IbpLinear::from_nd_linear(&l2);
 
     let centre = vec![0.2f32, -0.5, 0.7, -0.1];
+    let box_in = Interval::around(&centre, eps);
+    // CROWN before moving the layers into the IBP MLP.
+    let crown = crown_bounds(&il1, &il2, &box_in);
+    let mlp = IbpMlp::new(vec![il1, il2]);
     let pred = mlp.forward(&centre);
     let argmax = pred
         .iter()
@@ -59,29 +62,38 @@ pub fn run_certify(args: &[String]) -> u8 {
         .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(i, _)| i)
         .unwrap();
-    let cert = mlp.certify(&Interval::around(&centre, eps));
-    let robust = certified_robust(&cert, argmax);
+    let ibp = mlp.certify(&box_in);
 
-    println!("IBP certification — pure Rust, deterministic (seed {seed})");
-    println!("  MLP: {in_f}->{hidden}->{out_f} (ReLU)");
-    println!("  input: {centre:?}  ->  prediction: class {argmax}");
-    println!("  L∞ box radius eps = {eps}");
-    println!("  certified output bounds:");
-    for c in 0..out_f
-    {
-        println!("    class {c}: [{:.4}, {:.4}]", cert.lo[c], cert.hi[c]);
-    }
-    println!(
-        "  robustness: {}",
-        if robust
+    let robust_str = |out: &Interval| {
+        if certified_robust(out, argmax)
         {
-            format!("CERTIFIED — class {argmax} cannot change anywhere in the box")
+            format!("CERTIFIED — class {argmax} cannot change in the box")
         }
         else
         {
-            "not certified at this eps (try a smaller --eps)".to_string()
+            "not certified at this eps".to_string()
         }
-    );
+    };
+    let width = |out: &Interval| -> f32 {
+        (0..out_f).map(|c| out.hi[c] - out.lo[c]).sum::<f32>() / out_f as f32
+    };
+
+    println!("Certified bounds — pure Rust, deterministic (seed {seed})");
+    println!("  MLP: {in_f}->{hidden}->{out_f} (ReLU)");
+    println!("  input: {centre:?}  ->  prediction: class {argmax}");
+    println!("  L∞ box radius eps = {eps}");
+    println!("  IBP   bounds (avg width {:.4}):", width(&ibp));
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", ibp.lo[c], ibp.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&ibp));
+    println!("  CROWN bounds (avg width {:.4}, tighter):", width(&crown));
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&crown));
     0
 }
 

@@ -593,7 +593,8 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
   grouped-/multi-query attention expressed through batched-matmul broadcasting.
 - **Deterministic optimizers**: Adam, AdamW (decoupled weight decay), Lion, and
   Muon (Newton–Schulz orthogonalized momentum) — all bit-for-bit reproducible.
-- **Certifiable AI**: Interval Bound Propagation yields provable output bounds
+- **Certifiable AI**: Interval Bound Propagation **and CROWN** (tighter
+  linear-relaxation bounds) yield provable output bounds
   for ReLU MLPs and a robustness certificate, validated by soundness sampling.
 - **Reproducible reductions**: order-independent floating-point sum/mean/dot
   (canonical ordering + exact expansion), bit-identical regardless of thread
@@ -604,7 +605,7 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
 - **Compression**: Wanda activation-aware pruning and SmoothQuant, extending the
   deterministic int8 path.
 
-Two CLI commands surface this work: `scirust certify` (IBP bounds and robustness)
+Two CLI commands surface this work: `scirust certify` (IBP **and CROWN** bounds, side by side, and robustness)
 and `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (train the N-D decoder LM).
 
 A third command, `scirust conformal`, produces distribution-free conformal-prediction intervals with a guaranteed coverage level.

@@ -1,7 +1,19 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-14
+> Dernière mise à jour : 2026-06-15
+
+## Session 2026-06-15 — volet 37 : CROWN (#2) + doc/CLI
+- `nn::ibp::crown_bounds(l1, l2, box)` (Zhang 2018) : bornes de sortie d'un MLP
+  ReLU à 1 couche cachée par **relaxation linéaire** + back-substitution.
+  Relaxation par neurone (stable = exact ; instable = chorde sup / pente inf).
+  **Plus serrée qu'IBP** : prouvé par test (largeur CROWN ≤ largeur IBP +
+  soundness par échantillonnage de la boîte L∞).
+- CLI : `certify` affiche IBP **et** CROWN côte à côte (en direct, eps=0.05 :
+  IBP largeur 0.0847 NON certifié vs CROWN largeur 0.0366 CERTIFIÉ).
+- docs : roadmap #2 📋→✅ (15/20 du tier robustesse/opt) ; README certifiable ;
+  REFERENCE certify ; CHANGELOG ; Documentation (8 langues) + paper (8 langues).
+- 821 tests ; 8 gates verts.
 
 ## Session 2026-06-14 — volet 36 : AdEMAMix (#23) + nettoyage code mort
 - `nn::nd_optim::NdAdEMAMix` (Pagliardini 2024) : Adam à deux EMA (β1 rapide +

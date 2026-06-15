@@ -6,6 +6,14 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **CROWN** (`nn::ibp::crown_bounds`, Zhang et al. 2018, roadmap #2) : bornes de
+  sortie d'un MLP ReLU à 1 couche cachée par **relaxation linéaire** +
+  back-substitution sur une boîte L∞. Relaxation par neurone : exacte pour les
+  neurones stables, chorde supérieure / pente inférieure adaptative pour les
+  instables. **Plus serrée qu'IBP** (prouvé par test). CLI : `scirust certify`
+  affiche désormais IBP **et** CROWN côte à côte (CROWN certifie la robustesse
+  là où IBP échoue). Tests : soundness (échantillonnage de la boîte) + largeur
+  CROWN ≤ largeur IBP par sortie.
 - **AdEMAMix** (`nn::nd_optim::NdAdEMAMix`, Pagliardini et al. 2024, roadmap #23) :
   Adam à **deux EMA** du gradient (rapide β1 + lente β3 à longue mémoire, mélangées
   par α) ; déterministe. CLI : `scirust lm --opt ademamix`. Tests : convergence

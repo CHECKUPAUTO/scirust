@@ -256,7 +256,8 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
 - **Couches LLaMA** : RMSNorm, SwiGLU, bloc LLaMA, RoPE, attention groupée /
   multi-requête (GQA/MQA).
 - **Optimiseurs déterministes** : Adam, AdamW, Lion, Muon (Newton–Schulz).
-- **IA certifiable** : Interval Bound Propagation — bornes de sortie *prouvées*
+- **IA certifiable** : Interval Bound Propagation **et CROWN** (bornes plus
+  serrées par relaxation linéaire) — bornes de sortie *prouvées*
   et certificat de robustesse.
 - **Réductions reproductibles** indépendantes de l'ordre (bit-identiques quel que
   soit le nombre de threads).
@@ -265,6 +266,6 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
 - **Compression** : élagage Wanda (activation-aware), SmoothQuant.
 
 Nouvelles commandes CLI :
-- `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP).
+- `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP **et** CROWN, les bornes plus serrées par relaxation linéaire, côte à côte).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — entraîne le LM décodeur N-D.
 - `scirust conformal [--seed N] [--alpha A]` — intervalles conformes à couverture garantie (sans hypothèse de distribution).

@@ -135,7 +135,8 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
 - **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA, RoPE, atención agrupada /
   multi-consulta (GQA/MQA).
 - **Optimizadores deterministas**: Adam, AdamW, Lion, Muon (Newton–Schulz).
-- **IA certificable**: Interval Bound Propagation — cotas de salida *demostrables*
+- **IA certificable**: Interval Bound Propagation **y CROWN** (cotas más
+  ajustadas por relajación lineal) — cotas de salida *demostrables*
   y certificado de robustez.
 - **Reducciones reproducibles**, independientes del orden (bit a bit idénticas sin
   importar el número de hilos).
@@ -144,6 +145,6 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
 - **Compresión**: poda Wanda (consciente de activaciones), SmoothQuant.
 
 Nuevos comandos CLI:
-- `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP).
+- `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP **y** CROWN, las cotas más ajustadas por relajación lineal, en paralelo).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — entrena el LM decodificador N-D.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.

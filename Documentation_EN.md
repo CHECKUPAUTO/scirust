@@ -156,7 +156,8 @@ backed by a research paper and a test (gradient check or oracle). See
 - **LLaMA-family layers**: RMSNorm, SwiGLU, LLaMA block, RoPE, grouped/
   multi-query attention (GQA/MQA).
 - **Deterministic optimizers**: Adam, AdamW, Lion, Muon (Newton–Schulz).
-- **Certifiable AI**: Interval Bound Propagation — *provable* output bounds and
+- **Certifiable AI**: Interval Bound Propagation **and CROWN** (tighter
+  linear-relaxation bounds) — *provable* output bounds and
   a robustness certificate.
 - **Reproducible reductions**, order-independent (bit-identical regardless of
   thread count).
@@ -165,6 +166,6 @@ backed by a research paper and a test (gradient check or oracle). See
 - **Compression**: Wanda (activation-aware) pruning, SmoothQuant.
 
 New CLI commands:
-- `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP).
+- `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP **and** CROWN, the tighter linear-relaxation bounds, side by side).
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix]` — train the N-D decoder LM.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.

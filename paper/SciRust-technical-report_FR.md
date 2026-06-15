@@ -271,7 +271,8 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
   groupée / multi-requête exprimée via le broadcast du produit matriciel par lots.
 - **Optimiseurs déterministes** : Adam, AdamW (weight decay découplé), Lion et
   Muon (momentum orthogonalisé par Newton–Schulz) — tous reproductibles bit à bit.
-- **IA certifiable** : la propagation par intervalles (IBP) fournit des bornes de
+- **IA certifiable** : la propagation par intervalles (IBP) **et CROWN** (bornes
+  plus serrées par relaxation linéaire) fournissent des bornes de
   sortie prouvées pour les MLP ReLU et un certificat de robustesse, validés par
   échantillonnage de validité.
 - **Réductions reproductibles** : somme/moyenne/produit scalaire flottants
@@ -282,7 +283,6 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 - **Pont scientifique** : un Neural ODE qui rétropropage à travers un solveur RK4.
 - **Compression** : élagage Wanda (conscient des activations) et SmoothQuant.
 
-Deux commandes CLI exposent ces travaux : `scirust certify` (bornes et robustesse
-IBP) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entraînement du LM décodeur N-D).
+Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix` (entraînement du LM décodeur N-D).
 
 Une troisième commande, `scirust conformal`, produit des intervalles de prédiction conformes à couverture garantie, sans hypothèse de distribution.

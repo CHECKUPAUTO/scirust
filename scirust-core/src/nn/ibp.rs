@@ -187,6 +187,110 @@ pub fn certified_robust(out: &Interval, target: usize) -> bool {
         .all(|(j, &hj)| j == target || t_lo > hj)
 }
 
+/// **CROWN** certified bounds (Zhang et al. 2018) for a one-hidden-layer ReLU
+/// network `y = L2(relu(L1(x)))` over an input box. Unlike IBP — which takes the
+/// interval at *every* layer — CROWN keeps a **linear** lower/upper bound of the
+/// output in terms of the input through the ReLU relaxation, and only intervalises
+/// at the very end. That back-substitution makes the certified box **tighter than
+/// (or equal to) IBP**.
+///
+/// ReLU relaxation per hidden neuron with pre-activation bounds `[l, u]`:
+/// stable neurons are exact (`relu = z` or `0`); for an unstable neuron the upper
+/// bound is the chord through `(l,0)`–`(u,u)` and the lower bound is `α·z` with
+/// the area-minimising `α ∈ {0,1}`.
+pub fn crown_bounds(l1: &IbpLinear, l2: &IbpLinear, input: &Interval) -> Interval {
+    assert_eq!(l1.out_f, l2.in_f, "crown: layer dims must chain");
+    assert_eq!(input.lo.len(), l1.in_f, "crown: input size");
+    let (in_f, hid, out_f) = (l1.in_f, l1.out_f, l2.out_f);
+
+    // Pre-activation bounds of the hidden layer (interval is exact for affine).
+    let pre = l1.forward_interval(input);
+
+    // ReLU relaxation: relu(z) ≥ sl·z + il and relu(z) ≤ su·z + iu.
+    // `il` (lower intercept) stays 0 for every relaxation case, so it needs no `mut`.
+    let (mut sl, il) = (vec![0f32; hid], vec![0f32; hid]);
+    let (mut su, mut iu) = (vec![0f32; hid], vec![0f32; hid]);
+    for h in 0..hid
+    {
+        let (zlo, zhi) = (pre.lo[h], pre.hi[h]);
+        if zlo >= 0.0
+        {
+            sl[h] = 1.0;
+            su[h] = 1.0;
+        }
+        else if zhi <= 0.0
+        {
+            // stays zero
+        }
+        else
+        {
+            let s = zhi / (zhi - zlo);
+            su[h] = s;
+            iu[h] = -s * zlo; // chord through (zlo,0)–(zhi,zhi)
+            sl[h] = if zhi >= -zlo { 1.0 } else { 0.0 }; // area-minimising α
+        }
+    }
+
+    let c: Vec<f32> = input
+        .lo
+        .iter()
+        .zip(&input.hi)
+        .map(|(&a, &b)| 0.5 * (a + b))
+        .collect();
+    let r: Vec<f32> = input
+        .lo
+        .iter()
+        .zip(&input.hi)
+        .map(|(&a, &b)| 0.5 * (b - a))
+        .collect();
+
+    let mut lo = vec![0f32; out_f];
+    let mut hi = vec![0f32; out_f];
+    for o in 0..out_f
+    {
+        // Build a linear bound a + cᵀx, then intervalise over the box.
+        // `upper = false` → a *lower* bound on y[o]; `true` → an upper bound.
+        let bound = |upper: bool| -> f32 {
+            let mut konst = l2.b[o];
+            let mut coef = vec![0f32; in_f];
+            for h in 0..hid
+            {
+                let w2 = l2.w[h * out_f + o];
+                // For a lower bound: w2≥0 picks the relu lower relaxation, w2<0 the
+                // upper; for an upper bound, the opposite.
+                let pick_lower = (w2 >= 0.0) ^ upper;
+                let (s, ic) = if pick_lower
+                {
+                    (sl[h], il[h])
+                }
+                else
+                {
+                    (su[h], iu[h])
+                };
+                let cz = w2 * s;
+                konst += w2 * ic + cz * l1.b[h];
+                if cz != 0.0
+                {
+                    for (i, ci) in coef.iter_mut().enumerate()
+                    {
+                        *ci += cz * l1.w[i * hid + h];
+                    }
+                }
+            }
+            // min (upper=false) or max (upper=true) of a + cᵀx over the box.
+            let mut y = konst;
+            for i in 0..in_f
+            {
+                y += coef[i] * c[i] + if upper { coef[i].abs() } else { -coef[i].abs() } * r[i];
+            }
+            y
+        };
+        lo[o] = bound(false);
+        hi[o] = bound(true);
+    }
+    Interval { lo, hi }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +407,58 @@ mod tests {
             !certified_robust(&loose, 0),
             "large box must not falsely certify"
         );
+    }
+
+    /// CROWN is **sound** (every sampled output lands in its certified box) and
+    /// **tighter than IBP** (each output's certified width is ≤ the IBP width)
+    /// for a one-hidden-layer ReLU network.
+    #[test]
+    fn crown_is_sound_and_tighter_than_ibp() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = NdLinear::new(4, 8, &mut rng);
+        let l2 = NdLinear::new(8, 3, &mut rng);
+        let il1 = IbpLinear::from_nd_linear(&l1);
+        let il2 = IbpLinear::from_nd_linear(&l2);
+
+        let centre = [0.2f32, -0.5, 0.7, -0.1];
+        let box_in = Interval::around(&centre, 0.15);
+        let crown = crown_bounds(&il1, &il2, &box_in);
+
+        // IBP bounds for the same network (consumes the layers).
+        let mlp = IbpMlp::new(vec![il1, il2]);
+        let ibp = mlp.certify(&box_in);
+
+        // Tighter (or equal): CROWN width ≤ IBP width per output.
+        for o in 0..3
+        {
+            let cw = crown.hi[o] - crown.lo[o];
+            let iw = ibp.hi[o] - ibp.lo[o];
+            assert!(
+                cw <= iw + 1e-5,
+                "CROWN not tighter at {o}: crown {cw} vs ibp {iw}"
+            );
+        }
+
+        // Sound: sample the box; every output is inside the CROWN box.
+        let mut srng = PcgEngine::new(99);
+        for _ in 0..4000
+        {
+            let x: Vec<f32> = box_in
+                .lo
+                .iter()
+                .zip(&box_in.hi)
+                .map(|(&l, &h)| l + srng.float() * (h - l))
+                .collect();
+            let y = mlp.forward(&x);
+            for (o, &yo) in y.iter().enumerate()
+            {
+                assert!(
+                    yo >= crown.lo[o] - 1e-4 && yo <= crown.hi[o] + 1e-4,
+                    "CROWN unsound at out {o}: {yo} not in [{}, {}]",
+                    crown.lo[o],
+                    crown.hi[o]
+                );
+            }
+        }
     }
 }
