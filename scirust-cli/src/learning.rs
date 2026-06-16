@@ -2,6 +2,7 @@
 //! evolutionary optimization. Both are deterministic in their seed.
 
 use scirust_core::nn::PcgEngine;
+use scirust_core::nn::calibration::{expected_calibration_error, temperature_scale};
 use scirust_core::nn::conformal::ConformalRegressor;
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
@@ -138,6 +139,52 @@ pub fn run_conformal(args: &[String]) -> u8 {
         100.0 * coverage
     );
     println!("  guarantee: distribution-free marginal coverage ≥ {target:.0}%");
+    0
+}
+
+/// `calibrate [--seed N]` — **temperature scaling** (Guo et al. 2017) on a
+/// synthetic over-confident classifier: find the temperature `T` minimising the
+/// NLL and report the **expected calibration error** before/after (accuracy is
+/// unchanged). Deterministic in `--seed`.
+pub fn run_calibrate(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let (n, classes) = (2000usize, 5usize);
+    let mut rng = PcgEngine::new(seed);
+    // Over-confident logits: peaked on a class, with ~30% corrupted labels.
+    let mut logits = vec![0f32; n * classes];
+    let mut labels = vec![0usize; n];
+    for i in 0..n
+    {
+        let true_c = (rng.float() * classes as f32) as usize % classes;
+        for c in 0..classes
+        {
+            logits[i * classes + c] = 0.5 * rng.float_signed();
+        }
+        logits[i * classes + true_c] += 6.0;
+        labels[i] = if rng.float() < 0.3
+        {
+            (true_c + 1) % classes
+        }
+        else
+        {
+            true_c
+        };
+    }
+
+    let ece_before = expected_calibration_error(&logits, &labels, n, classes, 1.0, 15);
+    let t = temperature_scale(&logits, &labels, n, classes);
+    let ece_after = expected_calibration_error(&logits, &labels, n, classes, t, 15);
+
+    println!("Temperature scaling (calibration) — pure Rust, deterministic (seed {seed})");
+    println!(
+        "  synthetic over-confident classifier: {n} samples, {classes} classes (~30% label noise)"
+    );
+    println!("  fitted temperature T = {t:.3}  (T>1 softens over-confident logits)");
+    println!("  expected calibration error: {ece_before:.4} → {ece_after:.4}");
+    println!(
+        "  ECE reduced by {:.1}% — accuracy (argmax) unchanged",
+        100.0 * (1.0 - ece_after / ece_before.max(1e-9))
+    );
     0
 }
 

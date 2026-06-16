@@ -259,6 +259,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N] [--alpha A]",
                 about: "Split-conformal prediction intervals with a distribution-free coverage guarantee.",
             },
+            Command {
+                name: "calibrate",
+                args: "[--seed N]",
+                about: "Temperature scaling: fit T to lower the expected calibration error (accuracy unchanged).",
+            },
         ],
     ),
     (
@@ -373,6 +378,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("som") => learning::run_som(rest),
         Some("certify") => learning::run_certify(rest),
         Some("conformal") => learning::run_conformal(rest),
+        Some("calibrate") => learning::run_calibrate(rest),
         Some("pinn") => learning::run_pinn(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),
@@ -502,6 +508,7 @@ mod tests {
         assert_eq!(run(&s(&["mamba", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
+        assert_eq!(run(&s(&["calibrate", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["pinn", "--steps", "50"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);

@@ -152,6 +152,7 @@ Nuevos comandos CLI:
 - `scirust deltanet [--seed N] [--steps S]` — entrena una capa DeltaNet (atención lineal con regla delta) de una sola cabeza para ajustar una secuencia; informa la reducción del MSE.
 - `scirust mamba [--seed N] [--steps S]` — entrena una capa Mamba de espacio de estados selectivo (escaneo S6) para ajustar una secuencia; informa la reducción del MSE.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.
+- `scirust calibrate [--seed N]` — escalado de temperatura; ajusta T para reducir el error de calibración esperado (ECE) sin cambiar la exactitud.
 - `scirust pinn [--seed N] [--steps S]` — red informada por la física; resuelve el BVP `u''=−u` (residuo de la EDP en la pérdida), verificado frente a `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — cuantización int8 de pesos GPTQ; informa la reducción del error de calibración frente a round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — cuantización int8 de pesos AWQ consciente de activaciones; informa el exponente de escalado seleccionado y la reducción del error de calibración frente a round-to-nearest.

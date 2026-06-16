@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 46 : Temperature scaling / calibration (#39)
+- `nn::calibration` (Guo 2017) : `temperature_scale` (golden-section sur NLL),
+  `expected_calibration_error`, `nll`. Recalibration post-hoc sans changer
+  l'argmax (accuracy). Déterministe.
+- CLI : nouveau `calibrate [--seed N]` dans le groupe INFERENCE INTEGRITY (avec
+  certify/conformal). 48 commandes. En direct : ECE 0.29→0.004 (−98,5 %), T=2,70.
+- Tests : ECE baisse + accuracy inchangée + déterminisme.
+- docs : roadmap #39 📋→✅ ; README certifiable ; REFERENCE calibrate ;
+  GROWTH_PLAN 48 ; CHANGELOG. Multilingue (ligne CLI `calibrate`) : lot suivant.
+- 842 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 45 : Lookahead (#45) — 1er du pool de candidats
 - `nn::nd_optim::NdLookahead` (Zhang 2019) : wrapper poids lents/rapides autour
   d'Adam (k pas rapides, sync φ←φ+α(θ−φ), θ←φ). Déterministe.

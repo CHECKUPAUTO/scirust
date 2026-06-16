@@ -171,6 +171,7 @@ Neue CLI-Befehle:
 - `scirust deltanet [--seed N] [--steps S]` — trainiert eine einköpfige DeltaNet-Schicht (lineare Aufmerksamkeit mit Delta-Regel), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust mamba [--seed N] [--steps S]` — trainiert eine Mamba-Schicht mit selektivem Zustandsraum (S6-Scan), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust conformal [--seed N] [--alpha A]` — konforme Intervalle mit garantierter, verteilungsfreier Überdeckung.
+- `scirust calibrate [--seed N]` — Temperaturskalierung; passt T an, um den erwarteten Kalibrierungsfehler (ECE) zu senken, ohne die Genauigkeit zu verändern.
 - `scirust pinn [--seed N] [--steps S]` — physikinformiertes Netz; löst das BVP `u''=−u` (PDE-Residuum in der Loss), geprüft gegen `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — GPTQ-int8-Gewichtsquantisierung; gibt die Reduktion des Kalibrierungsfehlers gegenüber Round-to-Nearest aus.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — AWQ-aktivierungsbewusste int8-Gewichtsquantisierung; gibt den gewählten Skalierungsexponenten und die Reduktion des Kalibrierungsfehlers gegenüber Round-to-Nearest aus.

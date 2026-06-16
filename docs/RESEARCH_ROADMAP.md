@@ -102,7 +102,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 36 | Bates et al., *Risk-Controlling Prediction Sets (RCPS)* (J. ACM 2021, arXiv:2101.02703) | `risk_control` : garantie sur un **risque** borné (au-delà de la couverture) via borne de concentration | `nn::conformal` | 📋 | M |
 | 37 | Angelopoulos et al., *Learn then Test* (arXiv:2110.01052) | contrôle de **risques multiples** par tests d'hypothèses (correction familiale) ; déterministe | `nn::conformal` | 📋 | M |
 | 38 | Gibbs & Candès, *Adaptive Conformal Inference* (NeurIPS 2021, arXiv:2106.00170) | `online_conformal` : couverture garantie **en ligne sous dérive** (ajustement adaptatif d'α) | `nn::conformal` | 📋 | M |
-| 39 | Guo et al., *On Calibration of Modern NN (Temperature Scaling)* (ICML 2017, arXiv:1706.04599) | `temperature_scale` : recalibration post-hoc ; oracle : ECE baisse (déterministe) | `nn::calibration` | 📋 | S |
+| 39 | Guo et al., *On Calibration of Modern NN (Temperature Scaling)* (ICML 2017, arXiv:1706.04599) | `nn::calibration` : `temperature_scale` (golden-section sur la NLL) + `expected_calibration_error` + `nll` ; recalibration post-hoc **sans changer l'accuracy** ; oracle : ECE baisse (testé, déterministe) ; CLI `calibrate` | `nn::calibration` | ✅ | S |
 | 40 | Lakshminarayanan et al., *Deep Ensembles* (NeurIPS 2017, arXiv:1612.01474) | `deep_ensemble` : incertitude prédictive par **ensemble seedé** (chaque membre déterministe) | `nn` | 📋 | M |
 
 ## Tier 10 — Optimiseurs (au-delà d'Adam/Lion/Muon/SF/AdEMAMix/SOAP)

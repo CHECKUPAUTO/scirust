@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Temperature scaling / calibration** (`nn::calibration`, Guo et al. 2017,
+  roadmap #39) : `temperature_scale` (recherche golden-section sur la NLL) +
+  `expected_calibration_error` + `nll`. Recalibration post-hoc des probabilités
+  **sans changer l'accuracy** (l'argmax est invariant à `T>0`). Déterministe. CLI :
+  `scirust calibrate` (en direct : ECE 0.29 → 0.004, −98,5 %, T=2,70). Tests : ECE
+  baisse + accuracy inchangée + déterminisme.
 - **Lookahead** (`nn::nd_optim::NdLookahead`, Zhang et al. 2019, roadmap #45) :
   optimiseur **wrapper** poids lents/rapides autour d'Adam — `k` pas rapides puis
   `φ ← φ + α(θ − φ) ; θ ← φ`. Déterministe. CLI : `scirust lm --opt lookahead`.
