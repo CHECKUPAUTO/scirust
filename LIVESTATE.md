@@ -3,6 +3,21 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 44 : recherche ~55 papers → roadmap (Tier 8-14)
+- Ajout de **55 candidats vérifiés** (#26-#80) dans `docs/RESEARCH_ROADMAP.md`,
+  arXiv vérifié par recherche web, chacun traduit en fonction scirust concrète +
+  module + effort, tous 📋 (au standard test/oracle + 8 gates).
+- Tiers : 8 vérification/robustesse certifiée (GCP-CROWN, randomized smoothing,
+  DeepPoly, AI², CROWN-IBP, MILP, Lipschitz) · 9 conformal/incertitude (CQR, APS,
+  RAPS, RCPS, LtT, ACI, temp-scaling, deep ensembles) · 10 optimiseurs (Shampoo,
+  Adafactor, LAMB, Sophia, Lookahead, Prodigy, SAM, GaLore, Adan) · 11 séquence
+  (Mamba-2, S4/S5, RWKV, RetNet, GLA, Hyena, xLSTM, HGRN, ALiBi, YaRN) · 12
+  décodage (Medusa, EAGLE, PagedAttention) · 13 quantif (QuIP#, OmniQuant,
+  SqueezeLLM, SpQR, KVQuant, BitNet b1.58, AQLM, LLM.int8, LoRA, DoRA, NF4) ·
+  14 scientifique/audit (FNO, DeepONet, KAN, Rényi-DP, watermark LLM, ZK-ML).
+- « Ordre d'attaque » mis à jour : pool de candidats trié par tractabilité.
+- Docs uniquement (roadmap) ; gates Rust inchangés (838 tests).
+
 ## Session 2026-06-15 — volet 43 : PINN (#17) + CLI/doc
 - `nn::pinn` (`Pinn1D` MLP 1→16→16→1 sigmoid, `solve_harmonic`) (Raissi 2019) :
   résout u''=−u, u(0)=0, u(π/2)=1 (= sin x) ; résidu PDE par différences finies
