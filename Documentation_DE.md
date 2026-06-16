@@ -181,3 +181,4 @@ Neue CLI-Befehle:
 - `scirust pinn [--seed N] [--steps S]` — physikinformiertes Netz; löst das BVP `u''=−u` (PDE-Residuum in der Loss), geprüft gegen `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — GPTQ-int8-Gewichtsquantisierung; gibt die Reduktion des Kalibrierungsfehlers gegenüber Round-to-Nearest aus.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — AWQ-aktivierungsbewusste int8-Gewichtsquantisierung; gibt den gewählten Skalierungsexponenten und die Reduktion des Kalibrierungsfehlers gegenüber Round-to-Nearest aus.
+- `scirust bitnet [--seed N]` — BitNet b1.58 ternäre {-1,0,+1}-Gewichtsquantisierung (~1,58 Bit/Gewicht); verifiziert die multiplikationsfreie Matrixmultiplikation.

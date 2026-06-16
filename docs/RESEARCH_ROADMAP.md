@@ -152,12 +152,12 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 66 | Kim et al., *SqueezeLLM* (arXiv:2306.07629) | `quantize_squeezellm` : quantification **non-uniforme** sensible (k-means pondéré par la sensibilité) ; oracle < RTN | `quantization` | 📋 | M |
 | 67 | Dettmers et al., *SpQR* (arXiv:2306.03078) | `quantize_spqr` : **sparse-quantized** (outliers isolés en fp16, reste en bas-bit) ; oracle < RTN | `quantization` | 📋 | M |
 | 68 | Hooper et al., *KVQuant* (NeurIPS 2024, arXiv:2401.18079) | `kv_quant` : quant du **KV-cache** (clés per-canal, pre-RoPE) ; oracle : perplexité ≈ fp16 | `quantization` | 📋 | M |
-| 69 | Ma et al., *BitNet b1.58* (arXiv:2402.17764) | `ternary_quant` : poids **ternaires {−1,0,1}** ; matmul sans multiplication (somme/différence) ; déterministe | `quantization` | 📋 | M |
+| 69 | Ma et al., *BitNet b1.58* (arXiv:2402.17764) | `ternary_quantize` + `ternary_matmul` : poids **ternaires {−1,0,1}** (échelle absmean, ~1,58 bit/poids) ; matmul **sans multiplication** (somme/diff/skip) ; **oracle** : = produit déquantifié (bit-exact pour la forme somme-de-signes) ; CLI `bitnet` | `quantization` | ✅ | M |
 | 70 | Egiazarian et al., *AQLM : Additive Quantization* (ICML 2024, arXiv:2401.06118) | `quantize_aqlm` : **quantification additive** multi-codebook (codebooks appris) ; oracle < RTN en 2-bit | `quantization` | 📋 | L |
 | 71 | Dettmers et al., *LLM.int8()* (NeurIPS 2022, arXiv:2208.07339) | `int8_mixed` : décomposition mixte (canaux outliers en fp16, reste int8) ; oracle : sortie ≈ fp16 | `quantization` | 📋 | M |
 | 72 | Hu et al., *LoRA* (ICLR 2022, arXiv:2106.09685) | `LoraLinear` : adaptation **low-rank** (`W` gelé + `ΔW = (α/r)·A·B`, seuls `A`,`B` entraînés) ; `B=0` à l'init ⇒ = base ; gradient check sur `A`,`B` ; couche de la tape N-D | `nn::nd_layers` | ✅ | M |
 | 73 | Liu et al., *DoRA* (ICML 2024, arXiv:2402.09353) | `DoraLinear` : LoRA décomposée **magnitude/direction** ; gradient check | `nn::nd_layers` | 📋 | M |
-| 74 | Dettmers et al., *QLoRA / NF4* (NeurIPS 2023, arXiv:2305.14314) | `nf4_quant` : type 4-bit **NormalFloat** (quantiles d'une normale) + double-quant ; oracle < RTN sur poids gaussiens | `quantization` | 📋 | M |
+| 74 | Dettmers et al., *QLoRA / NF4* (NeurIPS 2023, arXiv:2305.14314) | `nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS` : type 4-bit **NormalFloat** (16 niveaux = quantiles d'une normale, échelle absmax) ; **oracle** : erreur < int4 uniforme sur poids gaussiens (+ round-trip exact + déterminisme) | `quantization` | ✅ | M |
 
 ## Tier 14 — Calcul scientifique, déterminisme & audit (au-delà de Neural ODE/PINN/reproducible)
 

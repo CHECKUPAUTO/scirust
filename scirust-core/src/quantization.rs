@@ -919,6 +919,267 @@ mod awq_tests {
     }
 }
 
+// ----- BitNet b1.58 : poids ternaires {−1,0,1}, matmul sans multiplication ----
+
+/// **BitNet b1.58** (Ma et al. 2024) — quantification **ternaire** des poids vers
+/// `{−1, 0, +1}` avec une échelle par tenseur (« absmean » : `scale = moyenne|W|`).
+/// Chaque poids devient `round(W/scale)` borné à `[−1, 1]`. Retourne les codes
+/// ternaires (`i8 ∈ {−1,0,1}`) et le scale.
+pub fn ternary_quantize(w: &[f32]) -> (Vec<i8>, f32) {
+    let n = w.len().max(1);
+    let scale = w.iter().map(|x| x.abs()).sum::<f32>() / n as f32;
+    let inv = if scale > 1e-12 { 1.0 / scale } else { 0.0 };
+    let q: Vec<i8> = w
+        .iter()
+        .map(|&x| (x * inv).round().clamp(-1.0, 1.0) as i8)
+        .collect();
+    (q, scale)
+}
+
+/// **Multiplication-free** ternary matmul `y = x · (scale · W_ternary)` with
+/// `W_ternary ∈ {−1,0,1}` — `x` is `(batch × in)` row-major, `w_q` is
+/// `(in × out)` row-major. Because the weights are ±1/0, each accumulation is an
+/// **add / subtract / skip** (no multiply); a single `scale` multiply is applied
+/// at the end. This equals the dequantised product **bit-for-bit** (the test
+/// oracle), demonstrating BitNet's "matmul without multiplications".
+pub fn ternary_matmul(
+    x: &[f32],
+    batch: usize,
+    w_q: &[i8],
+    in_f: usize,
+    out_f: usize,
+    scale: f32,
+) -> Vec<f32> {
+    assert_eq!(x.len(), batch * in_f, "ternary_matmul: x size");
+    assert_eq!(w_q.len(), in_f * out_f, "ternary_matmul: w size");
+    let mut out = vec![0f32; batch * out_f];
+    for b in 0..batch
+    {
+        let xrow = &x[b * in_f..b * in_f + in_f];
+        for o in 0..out_f
+        {
+            let mut acc = 0f32;
+            for i in 0..in_f
+            {
+                match w_q[i * out_f + o]
+                {
+                    1 => acc += xrow[i],
+                    -1 => acc -= xrow[i],
+                    _ =>
+                    {},
+                }
+            }
+            out[b * out_f + o] = acc * scale;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod bitnet_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// `ternary_quantize` maps to `{−1,0,1}` only, and the **multiplication-free**
+    /// `ternary_matmul` equals the dequantised float product **bit-for-bit**.
+    #[test]
+    fn ternary_matmul_equals_dequant_bit_exact() {
+        let (in_f, out_f, batch) = (12usize, 6usize, 4usize);
+        let mut rng = PcgEngine::new(3);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let x: Vec<f32> = (0..batch * in_f).map(|_| rng.float_signed()).collect();
+
+        let (wq, scale) = ternary_quantize(&w);
+        // Only ternary values.
+        assert!(wq.iter().all(|&v| v == -1 || v == 0 || v == 1));
+
+        let mut sign_sum = vec![0f32; batch * out_f]; // (Σ ±xᵢ)·scale — same order as mf
+        let mut dequant = vec![0f32; batch * out_f]; // Σ xᵢ·(±scale) — ordinary multiply
+        for b in 0..batch
+        {
+            for o in 0..out_f
+            {
+                let (mut s, mut d) = (0f32, 0f32);
+                for i in 0..in_f
+                {
+                    let q = wq[i * out_f + o] as f32;
+                    s += q * x[b * in_f + i]; // ±xᵢ (or 0)
+                    d += x[b * in_f + i] * (q * scale);
+                }
+                sign_sum[b * out_f + o] = s * scale;
+                dequant[b * out_f + o] = d;
+            }
+        }
+        let mf = ternary_matmul(&x, batch, &wq, in_f, out_f, scale);
+        // The multiplication-free path is exactly (Σ ±xᵢ)·scale (bit-for-bit).
+        for (a, r) in mf.iter().zip(&sign_sum)
+        {
+            assert_eq!(
+                a.to_bits(),
+                r.to_bits(),
+                "ternary matmul not the sign-sum form: {a} vs {r}"
+            );
+        }
+        // …and equals the dequantised product up to floating-point reassociation.
+        for (a, d) in mf.iter().zip(&dequant)
+        {
+            assert!(
+                (a - d).abs() < 1e-4,
+                "ternary matmul off from dequant: {a} vs {d}"
+            );
+        }
+    }
+
+    /// Deterministic: identical input ⇒ identical codes and scale.
+    #[test]
+    fn ternary_quantize_deterministic() {
+        let w: Vec<f32> = (0..40).map(|k| (k as f32 * 0.21).sin()).collect();
+        let (q1, s1) = ternary_quantize(&w);
+        let (q2, s2) = ternary_quantize(&w);
+        assert_eq!(q1, q2);
+        assert_eq!(s1.to_bits(), s2.to_bits());
+    }
+}
+
+// ----- NF4 : NormalFloat 4-bit (QLoRA, Dettmers et al. 2023) -------------------
+
+/// The **NF4** (4-bit NormalFloat) code values, from QLoRA / bitsandbytes: 16
+/// levels that are the quantiles of a standard normal, normalised so the extreme
+/// magnitudes map to ±1 and with an **exact 0**. NF4 is information-theoretically
+/// (near-)optimal for the roughly-Gaussian weights of a trained network.
+pub const NF4_LEVELS: [f32; 16] = [
+    -1.0,
+    -0.6961928,
+    -0.52507305,
+    -0.3949175,
+    -0.28444138,
+    -0.18477343,
+    -0.091050036,
+    0.0,
+    0.0795803,
+    0.1609302,
+    0.2461123,
+    0.33791524,
+    0.44070983,
+    0.562617,
+    0.72295684,
+    1.0,
+];
+
+/// Quantise a weight block to **NF4**: divide by the block's `absmax` (so values
+/// lie in `[−1, 1]`), then map each to the nearest [`NF4_LEVELS`] entry. Returns
+/// the 4-bit codes (`0..16`) and the `absmax` scale. Deterministic.
+pub fn nf4_quantize(w: &[f32]) -> (Vec<u8>, f32) {
+    let absmax = w.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+    let inv = if absmax > 1e-12 { 1.0 / absmax } else { 0.0 };
+    let codes: Vec<u8> = w
+        .iter()
+        .map(|&x| {
+            let v = x * inv;
+            // Nearest NF4 level (16 entries; linear scan, deterministic order).
+            let mut best = 0usize;
+            let mut bd = (v - NF4_LEVELS[0]).abs();
+            for (k, &lvl) in NF4_LEVELS.iter().enumerate().skip(1)
+            {
+                let d = (v - lvl).abs();
+                if d < bd
+                {
+                    bd = d;
+                    best = k;
+                }
+            }
+            best as u8
+        })
+        .collect();
+    (codes, absmax)
+}
+
+/// Dequantise NF4 codes back to `f32`: `NF4_LEVELS[code] · absmax`.
+pub fn nf4_dequantize(codes: &[u8], absmax: f32) -> Vec<f32> {
+    codes
+        .iter()
+        .map(|&c| NF4_LEVELS[c as usize] * absmax)
+        .collect()
+}
+
+#[cfg(test)]
+mod nf4_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// On **Gaussian** weights, NF4's quantile-matched levels give a strictly
+    /// lower reconstruction error than uniform 4-bit (16 evenly-spaced levels) —
+    /// the whole point of the NormalFloat type. Also checks determinism.
+    #[test]
+    fn nf4_beats_uniform_4bit_on_gaussian() {
+        let mut rng = PcgEngine::new(5);
+        // Box–Muller: standard-normal weights from uniform (0,1) draws.
+        let w: Vec<f32> = (0..4096)
+            .map(|_| {
+                let u1 = rng.float().max(1e-7);
+                let u2 = rng.float();
+                (-2.0 * u1.ln()).sqrt() * (std::f32::consts::TAU * u2).cos()
+            })
+            .collect();
+
+        let (codes, absmax) = nf4_quantize(&w);
+        assert!(codes.iter().all(|&c| (c as usize) < 16));
+        let nf4 = nf4_dequantize(&codes, absmax);
+
+        // Uniform 4-bit: 16 evenly-spaced levels in [−1, 1], same nearest mapping.
+        let ulevels: Vec<f32> = (0..16).map(|k| -1.0 + 2.0 * k as f32 / 15.0).collect();
+        let inv = 1.0 / absmax;
+        let uni: Vec<f32> = w
+            .iter()
+            .map(|&x| {
+                let v = x * inv;
+                let mut best = ulevels[0];
+                let mut bd = (v - ulevels[0]).abs();
+                for &lvl in &ulevels[1..]
+                {
+                    let d = (v - lvl).abs();
+                    if d < bd
+                    {
+                        bd = d;
+                        best = lvl;
+                    }
+                }
+                best * absmax
+            })
+            .collect();
+
+        let err = |q: &[f32]| -> f64 {
+            w.iter()
+                .zip(q)
+                .map(|(&a, &b)| (a - b).abs() as f64)
+                .sum::<f64>()
+        };
+        let (e_nf4, e_uni) = (err(&nf4), err(&uni));
+        assert!(
+            e_nf4 < e_uni,
+            "NF4 not better than uniform-4bit: {e_nf4} vs {e_uni}"
+        );
+
+        // Determinism.
+        let (c2, s2) = nf4_quantize(&w);
+        assert_eq!(codes, c2);
+        assert_eq!(absmax.to_bits(), s2.to_bits());
+    }
+
+    /// Round-trip on values that are exactly NF4 levels is exact.
+    #[test]
+    fn nf4_round_trip_on_level_values() {
+        let w: Vec<f32> = NF4_LEVELS.iter().map(|&l| l * 3.0).collect(); // absmax = 3
+        let (codes, absmax) = nf4_quantize(&w);
+        assert!((absmax - 3.0).abs() < 1e-6);
+        let back = nf4_dequantize(&codes, absmax);
+        for (a, b) in w.iter().zip(&back)
+        {
+            assert!((a - b).abs() < 1e-5, "NF4 round-trip off: {a} vs {b}");
+        }
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).

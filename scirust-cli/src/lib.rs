@@ -294,6 +294,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N] [--samples S] [--grid G]",
                 about: "AWQ activation-aware int8 quantization (search-based per-channel scaling); reports the error reduction vs round-to-nearest.",
             },
+            Command {
+                name: "bitnet",
+                args: "[--seed N]",
+                about: "BitNet b1.58 ternary {-1,0,+1} quantization; verifies the multiplication-free matmul.",
+            },
         ],
     ),
     (
@@ -397,6 +402,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("pinn") => learning::run_pinn(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),
+        Some("bitnet") => learning::run_bitnet(rest),
         Some("evo") => learning::run_evo(rest),
         Some("cmaes") => learning::run_cmaes(rest),
         Some("diff") => symbolic::run_diff(rest),
@@ -533,6 +539,7 @@ mod tests {
         assert_eq!(run(&s(&["pinn", "--steps", "50"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);
+        assert_eq!(run(&s(&["bitnet", "--seed", "1"])), 0);
         assert_eq!(
             run(&s(&[
                 "optimize",
