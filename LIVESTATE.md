@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 47 : LoRA (#72) — couche PEFT low-rank
+- `nn::nd_layers::LoraLinear` (Hu 2022) : base W gelée + ΔW=(α/r)·A·B ; seuls A,B
+  entraînés ; B=0 init ⇒ = base. Couche de la tape (forward sur le dernier axe).
+- Couche de bibliothèque (pas de commande CLI dédiée — comme RMSNorm/SwiGLU) ;
+  exposée + testée.
+- Tests : init = base (== x·W), gradient check sur A et B, parameters() = {A,B}.
+- docs : roadmap #72 📋→✅ ; README couches ; CHANGELOG.
+- 843 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 46 : Temperature scaling / calibration (#39)
 - `nn::calibration` (Guo 2017) : `temperature_scale` (golden-section sur NLL),
   `expected_calibration_error`, `nll`. Recalibration post-hoc sans changer

@@ -842,6 +842,99 @@ impl NdMamba {
     }
 }
 
+/// **LoRA** — Low-Rank Adaptation (Hu et al., ICLR 2022). A frozen base weight
+/// `W` (`in × out`) is adapted by a trainable low-rank update `ΔW = (α/r)·A·B`,
+/// with `A` (`in × r`) and `B` (`r × out`), so only `r·(in+out)` parameters are
+/// learned instead of `in·out`. `B` starts at **zero** (so the layer is exactly
+/// the base map at init) and `A` is seeded; **only `A` and `B`** are returned by
+/// [`parameters()`](Self::parameters) — the base `W` never moves. Acts on the
+/// last axis like [`NdLinear`]; `y = x·W + (α/r)·(x·A)·B`. Gradient-checked.
+pub struct LoraLinear {
+    w: TensorND,  // (in, out) — frozen base
+    a: TensorND,  // (in, r)   — trainable
+    b: TensorND,  // (r, out)  — trainable
+    scaling: f32, // α / r
+    in_features: usize,
+    out_features: usize,
+    a_idx: Option<usize>,
+    b_idx: Option<usize>,
+}
+
+impl LoraLinear {
+    /// New adapter over a given frozen base weight `w` (`in × out`, row-major),
+    /// with rank `r` and LoRA `alpha`. `A ~ U(-s, s)` (`s = 1/√in`), `B = 0`.
+    pub fn new(
+        w: Vec<f32>,
+        in_features: usize,
+        out_features: usize,
+        r: usize,
+        alpha: f32,
+        rng: &mut PcgEngine,
+    ) -> Self {
+        assert_eq!(w.len(), in_features * out_features, "LoraLinear: base size");
+        assert!(r >= 1, "LoraLinear: rank must be ≥ 1");
+        let s = (1.0 / in_features as f32).sqrt();
+        let a: Vec<f32> = (0..in_features * r)
+            .map(|_| rng.float_signed() * s)
+            .collect();
+        Self {
+            w: TensorND::new(w, vec![in_features, out_features]),
+            a: TensorND::new(a, vec![in_features, r]),
+            b: TensorND::zeros(&[r, out_features]),
+            scaling: alpha / r as f32,
+            in_features,
+            out_features,
+            a_idx: None,
+            b_idx: None,
+        }
+    }
+
+    /// Forward `(…, in) → (…, out)` (leading axes flattened then restored).
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xs = x.shape();
+        let in_f = *xs.last().expect("LoraLinear: input has no axes");
+        assert_eq!(in_f, self.in_features, "LoraLinear: input feature mismatch");
+        let m: usize = xs[..xs.len() - 1].iter().product();
+
+        let w = tape.input(self.w.clone());
+        let a = tape.input(self.a.clone());
+        let b = tape.input(self.b.clone());
+        self.a_idx = Some(a.idx());
+        self.b_idx = Some(b.idx());
+        let scale = tape.input(TensorND::new(vec![self.scaling], vec![1, 1]));
+
+        let x2 = x.reshape(&[m, in_f]); // (m, in)
+        let base = x2.matmul(w); // (m, out)
+        let delta = x2.matmul(a).matmul(b).mul(scale); // (m, out)
+        let y2 = base.add(delta);
+
+        let mut out_shape = xs[..xs.len() - 1].to_vec();
+        out_shape.push(self.out_features);
+        y2.reshape(&out_shape)
+    }
+
+    /// The two trainable LoRA factors `A` and `B` (the base `W` is frozen).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, b_idx) = (self.a_idx, self.b_idx);
+        let mut params = Vec::new();
+        if let Some(i) = a_idx
+        {
+            params.push(NdParam {
+                value: &mut self.a,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = b_idx
+        {
+            params.push(NdParam {
+                value: &mut self.b,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,6 +1279,86 @@ mod tests {
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// LoRA at init equals the frozen base map (`B = 0` ⇒ `ΔW = 0`), and its
+    /// `A`/`B` gradients match finite differences; `parameters()` exposes only A,B.
+    #[test]
+    fn lora_starts_as_base_and_gradient_checks() {
+        let (in_f, out_f, r) = (4usize, 3usize, 2usize);
+        let mut rng = PcgEngine::new(2);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let x: Vec<f32> = (0..2 * in_f)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin())
+            .collect();
+
+        // At init (B = 0), LoRA forward == x · W exactly.
+        let mut lora = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut rng);
+        let t0 = NdTape::new();
+        let xv = t0.input(TensorND::new(x.clone(), vec![2, in_f]));
+        let y = t0.value(lora.forward(&t0, xv));
+        for b in 0..2
+        {
+            for o in 0..out_f
+            {
+                let mut base = 0f32;
+                for i in 0..in_f
+                {
+                    base += x[b * in_f + i] * w[i * out_f + o];
+                }
+                assert!(
+                    (y.data[b * out_f + o] - base).abs() < 1e-5,
+                    "LoRA init ≠ base"
+                );
+            }
+        }
+        assert_eq!(lora.parameters().len(), 2, "LoRA exposes only A and B");
+
+        // Gradient check on A and B (perturb after a few updates so B ≠ 0).
+        let a0 = lora.a.data.clone();
+        let mut b0 = lora.b.data.clone();
+        for v in b0.iter_mut()
+        {
+            *v = 0.1; // make B non-trivial for the check
+        }
+        let loss_of = |aa: &[f32], bb: &[f32]| -> f32 {
+            let mut lr = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut PcgEngine::new(2));
+            lr.a = TensorND::new(aa.to_vec(), vec![in_f, r]);
+            lr.b = TensorND::new(bb.to_vec(), vec![r, out_f]);
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(x.clone(), vec![2, in_f]));
+            let o = lr.forward(&t, xv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let mut lr = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut PcgEngine::new(2));
+        lr.a = TensorND::new(a0.clone(), vec![in_f, r]);
+        lr.b = TensorND::new(b0.clone(), vec![r, out_f]);
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![2, in_f]));
+        let o = lr.forward(&t, xv);
+        let grads = t.backward(o.mul(o).sum());
+        let (ga, gb) = (
+            grads[lr.a_idx.unwrap()].clone(),
+            grads[lr.b_idx.unwrap()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for k in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[k] += eps;
+                dn[k] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[k]).abs() < 2e-2,
+                    "LoRA grad {k}: {num} vs {}",
+                    analytic.data[k]
+                );
+            }
+        };
+        check(&ga, &a0, &|p| loss_of(p, &b0));
+        check(&gb, &b0, &|p| loss_of(&a0, p));
     }
 
     /// Gradient of the loss w.r.t. the layer **input** matches finite

@@ -155,7 +155,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 69 | Ma et al., *BitNet b1.58* (arXiv:2402.17764) | `ternary_quant` : poids **ternaires {−1,0,1}** ; matmul sans multiplication (somme/différence) ; déterministe | `quantization` | 📋 | M |
 | 70 | Egiazarian et al., *AQLM : Additive Quantization* (ICML 2024, arXiv:2401.06118) | `quantize_aqlm` : **quantification additive** multi-codebook (codebooks appris) ; oracle < RTN en 2-bit | `quantization` | 📋 | L |
 | 71 | Dettmers et al., *LLM.int8()* (NeurIPS 2022, arXiv:2208.07339) | `int8_mixed` : décomposition mixte (canaux outliers en fp16, reste int8) ; oracle : sortie ≈ fp16 | `quantization` | 📋 | M |
-| 72 | Hu et al., *LoRA* (ICLR 2022, arXiv:2106.09685) | `LoraLinear` : adaptation **low-rank** (`W + BA`, poids gelés) ; entraînable sur la tape ; gradient check | `nn::nd_layers` | 📋 | M |
+| 72 | Hu et al., *LoRA* (ICLR 2022, arXiv:2106.09685) | `LoraLinear` : adaptation **low-rank** (`W` gelé + `ΔW = (α/r)·A·B`, seuls `A`,`B` entraînés) ; `B=0` à l'init ⇒ = base ; gradient check sur `A`,`B` ; couche de la tape N-D | `nn::nd_layers` | ✅ | M |
 | 73 | Liu et al., *DoRA* (ICML 2024, arXiv:2402.09353) | `DoraLinear` : LoRA décomposée **magnitude/direction** ; gradient check | `nn::nd_layers` | 📋 | M |
 | 74 | Dettmers et al., *QLoRA / NF4* (NeurIPS 2023, arXiv:2305.14314) | `nf4_quant` : type 4-bit **NormalFloat** (quantiles d'une normale) + double-quant ; oracle < RTN sur poids gaussiens | `quantization` | 📋 | M |
 

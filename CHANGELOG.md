@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **LoRA** (`nn::nd_layers::LoraLinear`, Hu et al. 2022, roadmap #72) : adaptation
+  **low-rank** — poids de base `W` **gelé** + mise à jour `ΔW = (α/r)·A·B` ; seuls
+  `A` (`in×r`) et `B` (`r×out`) sont entraînés (`r·(in+out)` paramètres au lieu de
+  `in·out`). `B=0` à l'init ⇒ la couche **vaut exactement la base**. Couche de la
+  tape N-D. Tests : init = base, **gradient check** sur `A` et `B`, `parameters()`
+  n'expose que `A`,`B`.
 - **Temperature scaling / calibration** (`nn::calibration`, Guo et al. 2017,
   roadmap #39) : `temperature_scale` (recherche golden-section sur la NLL) +
   `expected_calibration_error` + `nll`. Recalibration post-hoc des probabilités
