@@ -283,6 +283,6 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 - **Pont scientifique** : un Neural ODE qui rétropropage à travers un solveur RK4, et un réseau informé par la physique (PINN) qui place un résidu de PDE dans la loss pour résoudre un problème aux limites.
 - **Compression** : élagage Wanda (conscient des activations) et SmoothQuant, et GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2, CLI `scirust gptq`), et AWQ (quantification int8 des poids basée sur une recherche et consciente des activations, CLI `scirust awq`).
 
-Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (entraînement du LM décodeur N-D).
+Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead` (entraînement du LM décodeur N-D).
 
 Une troisième commande, `scirust conformal`, produit des intervalles de prédiction conformes à couverture garantie, sans hypothèse de distribution.

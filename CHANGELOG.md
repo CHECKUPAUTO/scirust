@@ -6,6 +6,11 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Lookahead** (`nn::nd_optim::NdLookahead`, Zhang et al. 2019, roadmap #45) :
+  optimiseur **wrapper** poids lents/rapides autour d'Adam — `k` pas rapides puis
+  `φ ← φ + α(θ − φ) ; θ ← φ`. Déterministe. CLI : `scirust lm --opt lookahead`.
+  Tests : convergence quadratique, déterminisme bit-à-bit. (1er du pool de
+  candidats Tier 8-14.)
 - **PINN** (`nn::pinn` : `Pinn1D`, `solve_harmonic`, Raissi et al. 2019,
   roadmap #17) : réseau **physics-informed** — la **physique est dans la loss**
   via un résidu de PDE aux points de collocation + conditions aux limites.

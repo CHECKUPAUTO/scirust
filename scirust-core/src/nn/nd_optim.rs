@@ -968,6 +968,89 @@ impl NdSoap {
     }
 }
 
+/// Hyper-parameters for [`NdLookahead`]. [`Default`] is the paper's `k = 5`
+/// (sync interval) and `alpha = 0.5` (slow-weight step).
+#[derive(Clone, Copy, Debug)]
+pub struct LookaheadConfig {
+    /// Number of fast (inner-optimizer) steps between slow-weight syncs.
+    pub k: usize,
+    /// Slow-weight interpolation factor in `(0, 1]`.
+    pub alpha: f32,
+}
+
+impl Default for LookaheadConfig {
+    fn default() -> Self {
+        Self { k: 5, alpha: 0.5 }
+    }
+}
+
+/// **Lookahead** (Zhang et al., NeurIPS 2019): wrap a fast inner optimizer
+/// (here [`NdAdam`]) with a set of **slow weights**. The inner optimizer takes
+/// `k` ordinary steps; then the slow weights move a fraction `alpha` toward the
+/// fast weights and the fast weights are reset to the slow ones
+/// (`φ ← φ + α(θ − φ); θ ← φ`). This "k steps forward, 1 step back" reduces
+/// variance and is robust to the inner learning rate. Pure `f32` in a fixed
+/// order ⇒ **bit-for-bit deterministic**.
+pub struct NdLookahead {
+    base: NdAdam,
+    cfg: LookaheadConfig,
+    t: u64,
+    slow: Vec<Vec<f32>>,
+}
+
+impl NdLookahead {
+    /// Wrap an existing [`NdAdam`] with the given Lookahead config.
+    pub fn new(base: NdAdam, cfg: LookaheadConfig) -> Self {
+        Self {
+            base,
+            cfg,
+            t: 0,
+            slow: Vec::new(),
+        }
+    }
+
+    /// Lookahead over Adam at learning rate `lr` (default `k = 5, alpha = 0.5`).
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(NdAdam::with_lr(lr), LookaheadConfig::default())
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One Lookahead update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.slow.is_empty() && !params.is_empty()
+        {
+            // Slow weights start at the current parameters.
+            self.slow = params.iter().map(|p| p.value.data.clone()).collect();
+        }
+        assert_eq!(
+            self.slow.len(),
+            params.len(),
+            "NdLookahead: parameter count changed between steps"
+        );
+        // Fast (inner) update in place.
+        self.base.step(params, grads);
+        self.t += 1;
+        // Every k steps: pull the slow weights toward fast, then reset fast to slow.
+        if self.t as usize % self.cfg.k == 0
+        {
+            let alpha = self.cfg.alpha;
+            for (k, p) in params.iter_mut().enumerate()
+            {
+                let slow = &mut self.slow[k];
+                for (s, pv) in slow.iter_mut().zip(p.value.data.iter_mut())
+                {
+                    *s += alpha * (*pv - *s);
+                    *pv = *s;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1499,6 +1582,67 @@ mod tests {
                 );
             }
             w.data
+        };
+        assert_eq!(run(), run());
+    }
+
+    /// Lookahead-over-Adam minimises the same quadratic oracle, converging to the
+    /// target (the slow weights track the fast trajectory).
+    #[test]
+    fn nd_lookahead_converges_on_quadratic() {
+        let target = [3.0f32, -2.0, 0.5];
+        let mut x = TensorND::new(vec![0.0, 0.0, 0.0], vec![3]);
+        let mut opt = NdLookahead::with_lr(0.05);
+        for _ in 0..400
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![3])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut x,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        for (xi, ti) in x.data.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "Lookahead off: {xi} vs {ti}");
+        }
+        assert_eq!(opt.step_count(), 400);
+    }
+
+    /// Lookahead is deterministic: two identical runs are bit-for-bit equal.
+    #[test]
+    fn nd_lookahead_is_deterministic() {
+        let run = || -> Vec<f32> {
+            let target = [1.0f32, -1.0];
+            let mut x = TensorND::new(vec![0.5, 0.5], vec![2]);
+            let mut opt =
+                NdLookahead::new(NdAdam::with_lr(0.05), LookaheadConfig { k: 3, alpha: 0.5 });
+            for _ in 0..120
+            {
+                let gd: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                    .collect();
+                let grads = vec![TensorND::new(gd, vec![2])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            x.data
         };
         assert_eq!(run(), run());
     }

@@ -167,7 +167,7 @@ Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fer
 
 Neue CLI-Befehle:
 - `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP **und** CROWN, die engeren Schranken durch lineare Relaxation, nebeneinander).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap]` — trainiert das N-D-Decoder-LM.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead]` — trainiert das N-D-Decoder-LM.
 - `scirust deltanet [--seed N] [--steps S]` — trainiert eine einköpfige DeltaNet-Schicht (lineare Aufmerksamkeit mit Delta-Regel), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust mamba [--seed N] [--steps S]` — trainiert eine Mamba-Schicht mit selektivem Zustandsraum (S6-Scan), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust conformal [--seed N] [--alpha A]` — konforme Intervalle mit garantierter, verteilungsfreier Überdeckung.

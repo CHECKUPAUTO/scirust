@@ -277,6 +277,6 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 - **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant、さらに GPTQ（2 次の誤差フィードバックによる int8 重み量子化、CLI `scirust gptq`）と AWQ（活性化を考慮した探索ベースの int8 重み量子化、CLI `scirust awq`）。
 
 2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP **と CROWN** の境界を並べて表示、およびロバスト性）と
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap`（N-D デコーダ LM の学習）。
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead`（N-D デコーダ LM の学習）。
 
 3 つ目のコマンド `scirust conformal` は、分布非依存で被覆率を保証する共形予測区間を生成します。

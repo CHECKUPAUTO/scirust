@@ -279,6 +279,6 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
 
 Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (entrenar el LM decodificador N-D).
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead` (entrenar el LM decodificador N-D).
 
 Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.

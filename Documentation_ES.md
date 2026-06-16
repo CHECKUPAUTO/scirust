@@ -148,7 +148,7 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
 
 Nuevos comandos CLI:
 - `scirust certify [--seed N] [--eps E]` — cotas demostrables de un MLP ReLU (IBP **y** CROWN, las cotas más ajustadas por relajación lineal, en paralelo).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap]` — entrena el LM decodificador N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead]` — entrena el LM decodificador N-D.
 - `scirust deltanet [--seed N] [--steps S]` — entrena una capa DeltaNet (atención lineal con regla delta) de una sola cabeza para ajustar una secuencia; informa la reducción del MSE.
 - `scirust mamba [--seed N] [--steps S]` — entrena una capa Mamba de espacio de estados selectivo (escaneo S6) para ajustar una secuencia; informa la reducción del MSE.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.

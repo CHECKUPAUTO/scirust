@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 45 : Lookahead (#45) — 1er du pool de candidats
+- `nn::nd_optim::NdLookahead` (Zhang 2019) : wrapper poids lents/rapides autour
+  d'Adam (k pas rapides, sync φ←φ+α(θ−φ), θ←φ). Déterministe.
+- CLI : `lm --opt lookahead` (7e variante d'opt). `--opt` mis à jour dans les 16
+  fichiers (code + Documentation×8 + paper×8) par sed (token script-agnostique).
+- Tests : convergence quadratique, déterminisme bit-à-bit.
+- docs : roadmap #45 📋→✅ ; README optimiseurs ; CHANGELOG.
+- Cadence pool : code+test+CLI+roadmap+CHANGELOG/LIVESTATE+README/REFERENCE par
+  item ; les bullets prose multilingues d'optimiseurs seront rafraîchies en lot
+  après quelques optimiseurs (le `--opt` suffit à l'exposition CLI multilingue).
+- 840 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 44 : recherche ~55 papers → roadmap (Tier 8-14)
 - Ajout de **55 candidats vérifiés** (#26-#80) dans `docs/RESEARCH_ROADMAP.md`,
   arXiv vérifié par recherche web, chacun traduit en fonction scirust concrète +
