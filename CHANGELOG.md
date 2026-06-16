@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **RetNet** (`nn::nd_layers::retention` + `NdRetention`, Sun et al. 2023,
+  roadmap #54) : couche de **rétention** — attention linéaire récurrente à
+  décroissance `γ` (`S_t = γ·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la
+  tape. **Oracle de dualité** : la forme récurrente **égale** la forme parallèle
+  `(QKᵀ⊙D)V` (`D_{nm}=γ^{n-m}`), testé ; + gradient check (q,k,v) + entraînement
+  + déterminisme. CLI : `scirust retnet` (en direct : MSE 24.63 → 0.0002).
 - **LAMB** (`nn::nd_optim::NdLamb`, You et al. 2020, roadmap #43) : Adam à
   **confiance par couche** — direction Adam `r` remise à l'échelle par
   `‖θ‖/‖r‖` par tenseur. CLI `lm --opt lamb`. Tests : convergence (bande ∝ lr,

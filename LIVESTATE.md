@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 49 : RetNet (#54) — rétention (séquence)
+- `nn::nd_layers::retention` + `NdRetention` (Sun 2023) : attention linéaire
+  récurrente à décroissance γ (S_t=γS_{t-1}+kᵀv, o_t=qS), déroulée sur la tape
+  (réutilise cat0).
+- CLI : `retnet [--seed N] [--steps S]` (en direct, seed 6/150 : MSE 24.63→0.0002).
+  49 commandes.
+- Tests : **oracle de dualité** récurrent ≡ parallèle (QKᵀ⊙D)V ; gradient check
+  (q,k,v) ; couche entraîne + déterminisme.
+- docs : roadmap #54 📋→✅ ; README stack ; REFERENCE retnet ; GROWTH_PLAN 49 ;
+  CHANGELOG. Multilingue (retnet) : lot suivant.
+- 848 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 48 : LAMB (#43) + Adan (#49) — optimiseurs
 - `nn::nd_optim::NdLamb` (You 2020) : Adam + ratio de confiance ‖θ‖/‖r‖ par
   tenseur. `NdAdan` (Xie 2022) : Nesterov adaptatif (3 EMA m,v,n + g_prev).

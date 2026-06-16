@@ -164,6 +164,7 @@ backed by a research paper and a test (gradient check or oracle). See
 - **Exact speculative decoding**; **FlashAttention** (online softmax);
   **DeltaNet** (delta-rule linear attention);
   **Mamba** (selective state-space / selective scan);
+  **RetNet** (retention / linear attention);
   **Neural ODE** (backprop through an RK4 solver); a Physics-Informed Neural Network (PINN) that solves a boundary-value problem with the PDE residual in the loss.
 - **Compression**: Wanda (activation-aware) pruning, SmoothQuant, GPTQ (second-order error-feedback int8 weight quantization), AWQ (activation-aware search-based int8 weight quantization).
 
@@ -172,6 +173,7 @@ New CLI commands:
 - `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]` — train the N-D decoder LM.
 - `scirust deltanet [--seed N] [--steps S]` — train a single-head DeltaNet (delta-rule linear attention) layer to fit a sequence; reports the MSE reduction.
 - `scirust mamba [--seed N] [--steps S]` — train a Mamba selective state-space layer (S6 scan) to fit a sequence; reports the MSE reduction.
+- `scirust retnet [--seed N] [--steps S]` — train a RetNet retention layer (linear attention, recurrent form ≡ parallel form) to fit a sequence; reports the MSE reduction.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.
 - `scirust calibrate [--seed N]` — temperature scaling; fit T to lower the expected calibration error (ECE) without changing accuracy.
 - `scirust pinn [--seed N] [--steps S]` — physics-informed network; solve the BVP `u''=−u` (PDE residual in the loss), checked against `sin x`.

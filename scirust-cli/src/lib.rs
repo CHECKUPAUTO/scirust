@@ -231,6 +231,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N] [--steps S]",
                 about: "Train a Mamba selective state-space layer (S6 scan) to fit a sequence.",
             },
+            Command {
+                name: "retnet",
+                args: "[--seed N] [--steps S]",
+                about: "Train a RetNet retention layer (linear attention, recurrent ≡ parallel) to fit a sequence.",
+            },
         ],
     ),
     (
@@ -416,6 +421,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("lm") => nlp::run_lm(rest),
         Some("deltanet") => nlp::run_deltanet(rest),
         Some("mamba") => nlp::run_mamba(rest),
+        Some("retnet") => nlp::run_retnet(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -506,6 +512,7 @@ mod tests {
         assert_eq!(run(&s(&["lm", "1,2,3,1,2,3", "--steps", "10"])), 0);
         assert_eq!(run(&s(&["deltanet", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["mamba", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["retnet", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
         assert_eq!(run(&s(&["calibrate", "--seed", "1"])), 0);

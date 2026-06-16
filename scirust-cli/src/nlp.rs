@@ -5,7 +5,7 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
-use scirust_core::nn::nd_layers::{NdDeltaNet, NdMamba};
+use scirust_core::nn::nd_layers::{NdDeltaNet, NdMamba, NdRetention};
 use scirust_core::nn::nd_optim::{
     NdAdEMAMix, NdAdam, NdAdan, NdLamb, NdLion, NdLookahead, NdParam, NdScheduleFree, NdSoap,
 };
@@ -461,6 +461,57 @@ pub fn run_mamba(args: &[String]) -> u8 {
     println!(
         "  input-dependent (selective) Δ, B, C; diagonal A; linear-time scan ({steps} Adam steps)"
     );
+    println!(
+        "  MSE to target: {first:.4} → {last:.4}  ({:.1}% of initial)",
+        100.0 * last / first
+    );
+    0
+}
+
+/// `retnet [--seed N] [--steps S]` — train a single-head **RetNet** retention
+/// layer (linear-attention recurrence with decay γ, recurrent form ≡ parallel
+/// form) to fit a fixed target sequence and report the MSE reduction.
+/// Deterministic in `--seed`.
+pub fn run_retnet(args: &[String]) -> u8 {
+    let (seed_s, rest) = take_flag(args, "--seed");
+    let (steps_s, _rest) = take_flag(&rest, "--steps");
+    let seed: u64 = seed_s.and_then(|s| s.parse().ok()).unwrap_or(6);
+    let steps: usize = steps_s
+        .and_then(|s| s.parse().ok())
+        .filter(|&v| v >= 1)
+        .unwrap_or(150);
+
+    let (seq, d_model, gamma) = (6usize, 8usize, 0.9f32);
+    let mut rng = PcgEngine::new(seed);
+    let mut layer = NdRetention::new(d_model, gamma, &mut rng);
+    let x: Vec<f32> = (0..seq * d_model)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin())
+        .collect();
+    let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+    let mut opt = NdAdam::with_lr(0.05);
+
+    let (mut first, mut last) = (f32::NAN, f32::NAN);
+    for step in 0..steps
+    {
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+        let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+        let out = layer.forward(&tape, xv);
+        let diff = out.sub(tv);
+        let loss = diff.mul(diff).sum();
+        let lval = tape.value(loss).data[0];
+        if step == 0
+        {
+            first = lval;
+        }
+        last = lval;
+        let grads = tape.backward(loss);
+        opt.step(&mut layer.parameters(), &grads);
+    }
+
+    println!("RetNet retention layer — pure Rust, deterministic (seed {seed})");
+    println!("  single head, d_model {d_model}, decay γ = {gamma}, sequence length {seq}");
+    println!("  linear-attention recurrence (recurrent form ≡ parallel form); {steps} Adam steps");
     println!(
         "  MSE to target: {first:.4} → {last:.4}  ({:.1}% of initial)",
         100.0 * last / first

@@ -935,6 +935,82 @@ impl LoraLinear {
     }
 }
 
+/// **Retention** (RetNet, Sun et al. 2023) — a linear-attention recurrence with a
+/// fixed per-head decay `γ`: a state matrix `S` (`d × d`) accumulates the outer
+/// products `kₜᵀvₜ` with exponential decay, and the output reads it out with the
+/// query:
+///
+/// ```text
+/// S_t = γ·S_{t-1} + kₜᵀ·vₜ ,   o_t = q_t·S_t
+/// ```
+///
+/// This recurrent form is mathematically **equal to** the parallel form
+/// `(QKᵀ ⊙ D)V` with `D_{nm} = γ^{n-m}` (causal) — the RetNet duality, used as the
+/// test oracle. Linear-time, causal, deterministic; unrolled on the tape (so
+/// gradients are exact and finite-difference-checked). `q`/`k`/`v` are
+/// `(seq, d)`; returns `(seq, d)`.
+pub fn retention<'t>(
+    tape: &'t NdTape,
+    q: NdVar<'t>,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    gamma: f32,
+) -> NdVar<'t> {
+    let qs = q.shape();
+    let (seq, d) = (qs[0], qs[1]);
+    let g = tape.input(TensorND::new(vec![gamma], vec![1, 1]));
+    let mut s = tape.input(TensorND::zeros(&[d, d])); // S_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let k_col = k.gather(&[t]).reshape(&[d, 1]); // (d,1)
+        let v_row = v.gather(&[t]).reshape(&[1, d]); // (1,d)
+        let q_row = q.gather(&[t]).reshape(&[1, d]); // (1,d)
+        let kv = k_col.matmul(v_row); // kₜᵀvₜ  (d,d)
+        s = s.mul(g).add(kv); // γS + kᵀv
+        outs.push(q_row.matmul(s)); // o_t  (1,d)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **RetNet** single-head retention layer: project the input to `q, k, v` and run
+/// the [`retention`] recurrence with a fixed decay `γ`. Deterministic; trainable
+/// through the N-D tape. `forward` maps `(seq, d_model) → (seq, d_model)`.
+pub struct NdRetention {
+    q_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    gamma: f32,
+}
+
+impl NdRetention {
+    /// New layer with seeded projections and decay `gamma ∈ (0, 1)`.
+    pub fn new(d_model: usize, gamma: f32, rng: &mut PcgEngine) -> Self {
+        Self {
+            q_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            gamma,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let q = self.q_proj.forward(tape, x);
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        retention(tape, q, k, v, self.gamma)
+    }
+
+    /// Trainable parameters (q, k, v projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.q_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1276,6 +1352,149 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "Mamba did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Parallel-form reference for RetNet retention: `o[n] = Σ_{m≤n} γ^{n−m}
+    /// (q[n]·k[m]) v[m]` — the oracle the tape recurrence must match.
+    fn retention_parallel(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        gamma: f32,
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut out = vec![0f32; seq * d];
+        for n in 0..seq
+        {
+            for m in 0..=n
+            {
+                let mut qk = 0f32;
+                for i in 0..d
+                {
+                    qk += q[n * d + i] * k[m * d + i];
+                }
+                let w = gamma.powi((n - m) as i32) * qk;
+                for j in 0..d
+                {
+                    out[n * d + j] += w * v[m * d + j];
+                }
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `retention` equals the parallel form (RetNet duality).
+    #[test]
+    fn retention_matches_parallel_form() {
+        let (seq, d, gamma) = (5usize, 3usize, 0.9f32);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+
+        let want = retention_parallel(&q, &k, &v, gamma, seq, d);
+        let tape = NdTape::new();
+        let qv = tape.input(TensorND::new(q, vec![seq, d]));
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let out = tape.value(retention(&tape, qv, kv, vv, gamma));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-4, "retention mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `retention` gradients (q, k, v) match finite differences.
+    #[test]
+    fn retention_gradient_check() {
+        let (seq, d, gamma) = (3usize, 2usize, 0.8f32);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 + 0.2).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+
+        let loss_of = |qq: &[f32], kk: &[f32], vv: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(qq.to_vec(), vec![seq, d]));
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let o = retention(&t, qv, kv, vv2, gamma);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), vec![seq, d]));
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let o = retention(&t, qv, kv, vv, gamma);
+        let grads = t.backward(o.mul(o).sum());
+        let (gq, gk, gv) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "retention grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gq, &q, &|p| loss_of(p, &k, &v));
+        check(&gk, &k, &|p| loss_of(&q, p, &v));
+        check(&gv, &v, &|p| loss_of(&q, &k, p));
+    }
+
+    /// The `NdRetention` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_retention_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(6);
+            let mut layer = NdRetention::new(d, 0.9, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(
+            last < first * 0.6,
+            "RetNet did not learn: {first} -> {last}"
+        );
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
