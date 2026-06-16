@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 48 : LAMB (#43) + Adan (#49) — optimiseurs
+- `nn::nd_optim::NdLamb` (You 2020) : Adam + ratio de confiance ‖θ‖/‖r‖ par
+  tenseur. `NdAdan` (Xie 2022) : Nesterov adaptatif (3 EMA m,v,n + g_prev).
+- CLI : `lm --opt lamb|adan` (8e/9e variantes). `--opt` mis à jour dans les 16
+  fichiers + code.
+- Tests : LAMB converge dans une bande (∝ lr — pas de norme ≈ lr·‖θ‖, comme les
+  méthodes par signe) + déterminisme ; Adan converge sur quadratique + déterminisme.
+- docs : roadmap #43,#49 📋→✅ ; README optimiseurs ; CHANGELOG.
+- 845 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 47 : LoRA (#72) — couche PEFT low-rank
 - `nn::nd_layers::LoraLinear` (Hu 2022) : base W gelée + ΔW=(α/r)·A·B ; seuls A,B
   entraînés ; B=0 init ⇒ = base. Couche de la tape (forward sur le dernier axe).

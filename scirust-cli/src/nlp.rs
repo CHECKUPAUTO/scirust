@@ -7,7 +7,7 @@ use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
 use scirust_core::nn::nd_layers::{NdDeltaNet, NdMamba};
 use scirust_core::nn::nd_optim::{
-    NdAdEMAMix, NdAdam, NdLion, NdLookahead, NdParam, NdScheduleFree, NdSoap,
+    NdAdEMAMix, NdAdam, NdAdan, NdLamb, NdLion, NdLookahead, NdParam, NdScheduleFree, NdSoap,
 };
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
@@ -146,6 +146,8 @@ enum LmOpt {
     AdEMAMix(NdAdEMAMix),
     Soap(NdSoap),
     Lookahead(NdLookahead),
+    Lamb(NdLamb),
+    Adan(NdAdan),
 }
 
 impl LmOpt {
@@ -158,6 +160,8 @@ impl LmOpt {
             LmOpt::AdEMAMix(o) => o.step(params, grads),
             LmOpt::Soap(o) => o.step(params, grads),
             LmOpt::Lookahead(o) => o.step(params, grads),
+            LmOpt::Lamb(o) => o.step(params, grads),
+            LmOpt::Adan(o) => o.step(params, grads),
         }
     }
 
@@ -172,7 +176,7 @@ impl LmOpt {
     }
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead]` —
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]` —
 /// train a small **causal decoder language model** on the N-D autograd tape and
 /// report whether it learns to predict the sequence. Pure Rust, deterministic by
 /// seed: token + learned positional embeddings, causal multi-head attention, a
@@ -208,7 +212,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     if tokens.len() < 2
     {
         eprintln!(
-            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead]"
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]"
         );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
@@ -243,11 +247,19 @@ pub fn run_lm(args: &[String]) -> u8 {
     let opt_kind = opt_s.as_deref().unwrap_or("adam");
     if !matches!(
         opt_kind,
-        "adam" | "adamw" | "lion" | "schedule-free" | "ademamix" | "soap" | "lookahead"
+        "adam"
+            | "adamw"
+            | "lion"
+            | "schedule-free"
+            | "ademamix"
+            | "soap"
+            | "lookahead"
+            | "lamb"
+            | "adan"
     )
     {
         eprintln!(
-            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead"
+            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead, lamb, adan"
         );
         return 2;
     }
@@ -293,6 +305,8 @@ pub fn run_lm(args: &[String]) -> u8 {
         "ademamix" => LmOpt::AdEMAMix(NdAdEMAMix::with_lr(lr)),
         "soap" => LmOpt::Soap(NdSoap::with_lr(lr)),
         "lookahead" => LmOpt::Lookahead(NdLookahead::with_lr(lr)),
+        "lamb" => LmOpt::Lamb(NdLamb::with_lr(lr)),
+        "adan" => LmOpt::Adan(NdAdan::with_lr(lr)),
         _ => LmOpt::Adam(NdAdam::with_lr(lr)),
     };
 
@@ -536,6 +550,14 @@ mod tests {
         );
         assert_eq!(
             run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "lookahead"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "lamb"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "adan"])),
             0
         );
         assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer

@@ -1051,6 +1051,267 @@ impl NdLookahead {
     }
 }
 
+/// Hyper-parameters for [`NdLamb`]. [`Default`] is `lr = 1e-3, β1 = 0.9,
+/// β2 = 0.999, eps = 1e-6` with no weight decay.
+#[derive(Clone, Copy, Debug)]
+pub struct LambConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// First-moment decay.
+    pub beta1: f32,
+    /// Second-moment decay.
+    pub beta2: f32,
+    /// Numerical-stability term.
+    pub eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+}
+
+impl Default for LambConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-6,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **LAMB** (You et al., ICLR 2020): Adam with a **per-layer trust ratio**. The
+/// Adam update direction `r` is rescaled by `‖θ‖ / ‖r‖` (computed per parameter
+/// tensor — the "layer"), which lets LAMB use very large batches/learning rates
+/// stably. Pure `f32`, fixed order ⇒ **bit-for-bit deterministic**.
+pub struct NdLamb {
+    cfg: LambConfig,
+    t: u64,
+    m: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>,
+}
+
+impl NdLamb {
+    /// New optimizer with the given config.
+    pub fn new(cfg: LambConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            m: Vec::new(),
+            v: Vec::new(),
+        }
+    }
+
+    /// LAMB with defaults at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(LambConfig {
+            lr,
+            ..LambConfig::default()
+        })
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One LAMB update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m.is_empty() && !params.is_empty()
+        {
+            self.m = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+            self.v = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        assert_eq!(
+            self.m.len(),
+            params.len(),
+            "NdLamb: parameter count changed"
+        );
+        self.t += 1;
+        let LambConfig {
+            lr,
+            beta1,
+            beta2,
+            eps,
+            weight_decay,
+        } = self.cfg;
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let mk = &mut self.m[k];
+            let vk = &mut self.v[k];
+            // Adam update direction r, plus the running norms.
+            let mut r = vec![0f32; p.value.data.len()];
+            let mut w_norm2 = 0f32;
+            let mut r_norm2 = 0f32;
+            for j in 0..p.value.data.len()
+            {
+                let gj = g[j];
+                mk[j] = beta1 * mk[j] + (1.0 - beta1) * gj;
+                vk[j] = beta2 * vk[j] + (1.0 - beta2) * gj * gj;
+                let mhat = mk[j] / bc1;
+                let vhat = vk[j] / bc2;
+                let theta = p.value.data[j];
+                r[j] = mhat / (vhat.sqrt() + eps) + weight_decay * theta;
+                w_norm2 += theta * theta;
+                r_norm2 += r[j] * r[j];
+            }
+            let (w_norm, r_norm) = (w_norm2.sqrt(), r_norm2.sqrt());
+            // Trust ratio (1.0 when a norm vanishes, matching the reference).
+            let trust = if w_norm > 0.0 && r_norm > 0.0
+            {
+                w_norm / r_norm
+            }
+            else
+            {
+                1.0
+            };
+            for (pv, &rj) in p.value.data.iter_mut().zip(&r)
+            {
+                *pv -= lr * trust * rj;
+            }
+        }
+    }
+}
+
+/// Hyper-parameters for [`NdAdan`]. [`Default`] follows the paper:
+/// `β1 = 0.02, β2 = 0.08, β3 = 0.01` (these are the *complements* of the usual
+/// momentum, i.e. EMAs `x ← (1−β)x + β·new`), `lr = 1e-3, eps = 1e-8`.
+#[derive(Clone, Copy, Debug)]
+pub struct AdanConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Gradient EMA rate.
+    pub beta1: f32,
+    /// Gradient-difference EMA rate.
+    pub beta2: f32,
+    /// Squared-term EMA rate.
+    pub beta3: f32,
+    /// Numerical-stability term.
+    pub eps: f32,
+    /// Decoupled weight decay (applied multiplicatively).
+    pub weight_decay: f32,
+}
+
+impl Default for AdanConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-3,
+            beta1: 0.02,
+            beta2: 0.08,
+            beta3: 0.01,
+            eps: 1e-8,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **Adan** (Xie et al. 2022): *Adaptive Nesterov Momentum*. Tracks three EMAs —
+/// of the gradient `m`, of consecutive gradient differences `v`, and of the
+/// squared "look-ahead" gradient `n` — and steps with
+/// `θ ← (θ − η⊙(m + (1−β2)v)) / (1 + lr·wd)`, `η = lr/(√n + eps)`. Pure `f32`,
+/// fixed order ⇒ **bit-for-bit deterministic**.
+pub struct NdAdan {
+    cfg: AdanConfig,
+    t: u64,
+    m: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>,
+    n: Vec<Vec<f32>>,
+    g_prev: Vec<Vec<f32>>,
+}
+
+impl NdAdan {
+    /// New optimizer with the given config.
+    pub fn new(cfg: AdanConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            m: Vec::new(),
+            v: Vec::new(),
+            n: Vec::new(),
+            g_prev: Vec::new(),
+        }
+    }
+
+    /// Adan with defaults at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(AdanConfig {
+            lr,
+            ..AdanConfig::default()
+        })
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One Adan update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m.is_empty() && !params.is_empty()
+        {
+            let z = || {
+                params
+                    .iter()
+                    .map(|p| vec![0.0f32; p.value.data.len()])
+                    .collect()
+            };
+            self.m = z();
+            self.v = z();
+            self.n = z();
+            self.g_prev = z();
+        }
+        assert_eq!(
+            self.m.len(),
+            params.len(),
+            "NdAdan: parameter count changed"
+        );
+        self.t += 1;
+        let AdanConfig {
+            lr,
+            beta1,
+            beta2,
+            beta3,
+            eps,
+            weight_decay,
+        } = self.cfg;
+        let first = self.t == 1;
+        let decay = 1.0 / (1.0 + lr * weight_decay);
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let (mk, vk, nk, gp) = (
+                &mut self.m[k],
+                &mut self.v[k],
+                &mut self.n[k],
+                &mut self.g_prev[k],
+            );
+            for j in 0..p.value.data.len()
+            {
+                let gj = g[j];
+                let diff = if first { 0.0 } else { gj - gp[j] };
+                mk[j] = (1.0 - beta1) * mk[j] + beta1 * gj;
+                vk[j] = (1.0 - beta2) * vk[j] + beta2 * diff;
+                let gn = gj + (1.0 - beta2) * diff;
+                nk[j] = (1.0 - beta3) * nk[j] + beta3 * gn * gn;
+                let eta = lr / (nk[j].sqrt() + eps);
+                let upd = eta * (mk[j] + (1.0 - beta2) * vk[j]);
+                p.value.data[j] = (p.value.data[j] - upd) * decay;
+                gp[j] = gj;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1645,5 +1906,68 @@ mod tests {
             x.data
         };
         assert_eq!(run(), run());
+    }
+
+    /// Run `steps` of an optimizer on the quadratic `Σ(x−target)²` and return `x`.
+    fn quad_run<F: FnMut(&mut [NdParam], &[TensorND])>(
+        target: &[f32],
+        steps: usize,
+        mut step: F,
+    ) -> Vec<f32> {
+        let mut x = TensorND::new(vec![0.0; target.len()], vec![target.len()]);
+        for _ in 0..steps
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![target.len()])];
+            step(
+                &mut [NdParam {
+                    value: &mut x,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        x.data
+    }
+
+    /// LAMB minimises the quadratic oracle, and is bit-for-bit deterministic.
+    /// LAMB's per-layer trust ratio makes the update norm ≈ `lr·‖θ‖` independent
+    /// of the residual, so — like sign-based methods — it settles in a small
+    /// band (∝ `lr`) around the optimum rather than exactly; we use a small `lr`
+    /// to keep that band tight.
+    #[test]
+    fn nd_lamb_converges_and_is_deterministic() {
+        let target = [1.0f32, -0.8, 0.5];
+        let run = || {
+            let mut opt = NdLamb::with_lr(0.01);
+            quad_run(&target, 1500, |p, g| opt.step(p, g))
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "LAMB off: {xi} vs {ti}");
+        }
+        assert_eq!(run(), x);
+    }
+
+    /// Adan minimises the quadratic oracle and is bit-for-bit deterministic.
+    #[test]
+    fn nd_adan_converges_and_is_deterministic() {
+        let target = [3.0f32, -2.0, 0.5];
+        let run = || {
+            let mut opt = NdAdan::with_lr(0.1);
+            quad_run(&target, 800, |p, g| opt.step(p, g))
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.1, "Adan off: {xi} vs {ti}");
+        }
+        assert_eq!(run(), x);
     }
 }

@@ -111,13 +111,13 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 |---|--------|---------------------------|--------|--------|--------|
 | 41 | Gupta, Koren & Singer, *Shampoo* (ICML 2018, arXiv:1802.09568) | `NdShampoo` : préconditionneur **Kronecker** (`L^{-1/4} G R^{-1/4}`) ; réutilise `jacobi_eigenvectors` ; convergence + déterminisme | `nn::nd_optim` | 📋 | L |
 | 42 | Shazeer & Stern, *Adafactor* (ICML 2018, arXiv:1804.04235) | `NdAdafactor` : moments du 2e ordre **factorisés** (mémoire sous-linéaire) ; déterministe | `nn::nd_optim` | 📋 | M |
-| 43 | You et al., *LAMB* (ICLR 2020, arXiv:1904.00962) | `NdLamb` : Adam à **confiance par couche** (ratio de normes) ; CLI `lm --opt lamb` | `nn::nd_optim` | 📋 | M |
+| 43 | You et al., *LAMB* (ICLR 2020, arXiv:1904.00962) | `NdLamb` : Adam à **confiance par couche** (ratio `‖θ‖/‖r‖` par tenseur) ; convergence (bande) + déterminisme testés ; CLI `lm --opt lamb` | `nn::nd_optim` | ✅ | M |
 | 44 | Liu et al., *Sophia* (arXiv:2305.14342) | `NdSophia` : 2e ordre **clippé** (Hessienne diagonale estimée, Hutchinson seedé) ; CLI `lm --opt sophia` | `nn::nd_optim` | 📋 | L |
 | 45 | Zhang et al., *Lookahead* (NeurIPS 2019, arXiv:1907.08610) | `NdLookahead` : wrapper **poids lents/rapides** autour d'Adam (`k` pas rapides puis `φ←φ+α(θ−φ); θ←φ`) ; déterministe ; convergence + déterminisme testés ; CLI `lm --opt lookahead` | `nn::nd_optim` | ✅ | S |
 | 46 | Mishchenko & Defazio, *Prodigy* (arXiv:2306.06101) | `NdProdigy` : **sans learning-rate** (estime la distance D) ; déterministe ; CLI `lm --opt prodigy` | `nn::nd_optim` | 📋 | M |
 | 47 | Foret et al., *Sharpness-Aware Minimization (SAM)* (ICLR 2021, arXiv:2010.01412) | `NdSam` : montée puis descente (2 forwards) vers des minima plats ; oracle : netteté réduite | `nn::nd_optim` | 📋 | M |
 | 48 | Zhao et al., *GaLore* (ICML 2024, arXiv:2403.03507) | `galore_project` : **projection low-rank des gradients** (états d'optimiseur compressés) ; réutilise l'eigensolveur | `nn::nd_optim` | 📋 | M |
-| 49 | Xie et al., *Adan* (arXiv:2208.06677) | `NdAdan` : momentum de **Nesterov adaptatif** (différences de gradients) ; CLI `lm --opt adan` | `nn::nd_optim` | 📋 | M |
+| 49 | Xie et al., *Adan* (arXiv:2208.06677) | `NdAdan` : momentum de **Nesterov adaptatif** (3 EMA : gradient, différences, terme look-ahead au carré) ; convergence + déterminisme testés ; CLI `lm --opt adan` | `nn::nd_optim` | ✅ | M |
 
 ## Tier 11 — Modèles de séquence efficaces (au-delà de Mamba/DeltaNet/Flash/RoPE/GQA)
 

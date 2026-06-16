@@ -280,6 +280,6 @@ Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
 - **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`) und AWQ (aktivierungsbewusste, suchbasierte int8-Gewichtsquantisierung, CLI `scirust awq`).
 
 Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)
-und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead` (Training des N-D-Decoder-LM).
+und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (Training des N-D-Decoder-LM).
 
 Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.

@@ -272,6 +272,6 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 - **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant，以及 GPTQ（二阶误差反馈的 int8 权重量化，CLI `scirust gptq`）和 AWQ（感知激活的基于搜索的 int8 权重量化，CLI `scirust awq`）。
 
 两个 CLI 命令暴露了这些工作：`scirust certify`（IBP **与 CROWN** 界并排显示、鲁棒性）与
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead`（训练 N-D 解码器语言模型）。
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（训练 N-D 解码器语言模型）。
 
 第三个命令 `scirust conformal` 生成具有保证覆盖率的保形预测区间（无分布假设）。
