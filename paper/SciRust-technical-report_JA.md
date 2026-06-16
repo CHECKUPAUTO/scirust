@@ -272,7 +272,7 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 - **決定的オプティマイザ**：Adam、AdamW、Lion、Muon（Newton–Schulz）、Schedule-Free、AdEMAMix、SOAP（Shampoo の固有基底における Adam）。
 - **認証可能な AI**：区間境界伝播（IBP）**と CROWN**（線形緩和によるより厳しい境界）が証明可能な出力境界とロバスト性証明書を提供。
 - **再現可能なリダクション**：順序非依存の和/平均/内積。スレッド数によらずビット同一。
-- **推論**：厳密（出力保存）な投機的デコード、タイル化オンライン softmax の FlashAttention、DeltaNet のデルタ則線形アテンション層、Mamba の選択的状態空間層、RetNet のリテンション層、および GLA のゲート付き線形アテンション層。
+- **推論**：厳密（出力保存）な投機的デコード、タイル化オンライン softmax の FlashAttention、DeltaNet のデルタ則線形アテンション層、Mamba の選択的状態空間層、RetNet のリテンション層、GLA のゲート付き線形アテンション層、および HGRN のゲート付き線形 RNN 層。
 - **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE、および PDE 残差を損失に組み込んで境界値問題を解く物理情報ニューラルネットワーク（PINN）。
 - **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant、さらに GPTQ（2 次の誤差フィードバックによる int8 重み量子化、CLI `scirust gptq`）と AWQ（活性化を考慮した探索ベースの int8 重み量子化、CLI `scirust awq`）。
 

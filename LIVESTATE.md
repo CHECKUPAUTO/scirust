@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 51 : HGRN (#58) — RNN linéaire gaté
+- `nn::nd_layers::hgrn` + `NdHgrn` (Qin 2023) : intégration leaky par canal
+  (hₜ=fₜ⊙h+ (1−fₜ)⊙cₜ), porte d'oubli bornée f=lb+(1−lb)σ(·). Pas d'état
+  matriciel ; déroulé sur la tape (réutilise cat0 + sub via tenseur ones).
+- CLI : `hgrn [--seed N] [--steps S]` (en direct, seed 9/150 : MSE 27.37→4.59).
+  51 commandes.
+- Tests : match référence Vec ; gradient check (c,f) ; couche entraîne (< 0.7×) +
+  déterminisme.
+- docs : roadmap #58 📋→✅ ; README stack ; REFERENCE hgrn ; GROWTH_PLAN 51 ;
+  CHANGELOG. Multilingue (hgrn) : lot suivant.
+- 854 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 50 : GLA (#55) — attention linéaire gatée
 - `nn::nd_layers::gated_linear_attention` + `NdGla` (Yang 2024) : porte d'oubli
   par canal dépendante de l'entrée α=σ(·) (S_t=diag(α)S_{t-1}+kᵀv, o_t=qS),

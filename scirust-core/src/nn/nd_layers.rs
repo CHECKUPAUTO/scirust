@@ -1085,6 +1085,73 @@ impl NdGla {
     }
 }
 
+/// **HGRN gated linear recurrence** (Qin et al., NeurIPS 2023) — a per-channel
+/// (elementwise) leaky integrator with a data-dependent forget gate
+/// `fₜ ∈ (0,1)`:
+///
+/// ```text
+/// hₜ = fₜ ⊙ h_{t-1} + (1 − fₜ) ⊙ cₜ ,   oₜ = hₜ
+/// ```
+///
+/// No matrix state — linear-time, causal, deterministic; unrolled on the tape.
+/// `c` (candidate) and `f` (gate, already in `(0,1)`) are `(seq, d)`; returns
+/// `(seq, d)`.
+pub fn hgrn<'t>(tape: &'t NdTape, c: NdVar<'t>, f: NdVar<'t>) -> NdVar<'t> {
+    let cs = c.shape();
+    let (seq, d) = (cs[0], cs[1]);
+    let ones = tape.input(TensorND::new(vec![1.0f32; d], vec![1, d]));
+    let mut h = tape.input(TensorND::zeros(&[1, d])); // h_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let f_t = f.gather(&[t]); // (1,d)
+        let c_t = c.gather(&[t]); // (1,d)
+        let one_minus_f = ones.sub(f_t); // (1 − fₜ)
+        h = f_t.mul(h).add(one_minus_f.mul(c_t)); // fₜ⊙h + (1−fₜ)⊙cₜ
+        outs.push(h);
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **HGRN** single-layer token mixer: a candidate `c = W_c·x` is leaked into a
+/// running state through a **lower-bounded** forget gate
+/// `f = lb + (1 − lb)·σ(W_f·x)` (the lower bound `lb ∈ [0,1)` controls the
+/// minimum memory horizon — deeper layers use a larger `lb`). Deterministic;
+/// trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdHgrn {
+    c_proj: NdLinear,
+    f_proj: NdLinear,
+    lower_bound: f32,
+}
+
+impl NdHgrn {
+    /// New layer with seeded projections and forget-gate lower bound `lb ∈ [0,1)`.
+    pub fn new(d_model: usize, lb: f32, rng: &mut PcgEngine) -> Self {
+        Self {
+            c_proj: NdLinear::new(d_model, d_model, rng),
+            f_proj: NdLinear::new(d_model, d_model, rng),
+            lower_bound: lb,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let c = self.c_proj.forward(tape, x);
+        let lb = tape.input(TensorND::new(vec![self.lower_bound], vec![1, 1]));
+        let scale = tape.input(TensorND::new(vec![1.0 - self.lower_bound], vec![1, 1]));
+        // f = lb + (1−lb)·σ(W_f·x)  ∈ [lb, 1)
+        let f = self.f_proj.forward(tape, x).sigmoid().mul(scale).add(lb);
+        hgrn(tape, c, f)
+    }
+
+    /// Trainable parameters (candidate and forget-gate projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.c_proj.parameters();
+        params.extend(self.f_proj.parameters());
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1714,6 +1781,119 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "GLA did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Plain-`Vec` reference for the HGRN gated linear recurrence.
+    fn hgrn_reference(c: &[f32], f: &[f32], seq: usize, d: usize) -> Vec<f32> {
+        let mut h = vec![0f32; d];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for j in 0..d
+            {
+                h[j] = f[t * d + j] * h[j] + (1.0 - f[t * d + j]) * c[t * d + j];
+                out[t * d + j] = h[j];
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `hgrn` matches the recurrence reference.
+    #[test]
+    fn hgrn_matches_reference() {
+        let (seq, d) = (5usize, 3usize);
+        let c: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let f: Vec<f32> = (0..seq * d)
+            .map(|i| 0.5 + 0.3 * (i as f32 * 0.1).cos())
+            .collect();
+
+        let want = hgrn_reference(&c, &f, seq, d);
+        let tape = NdTape::new();
+        let cv = tape.input(TensorND::new(c, vec![seq, d]));
+        let fv = tape.input(TensorND::new(f, vec![seq, d]));
+        let out = tape.value(hgrn(&tape, cv, fv));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-5, "HGRN mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `hgrn` gradients (c, f) match finite differences.
+    #[test]
+    fn hgrn_gradient_check() {
+        let (seq, d) = (4usize, 2usize);
+        let c: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let f: Vec<f32> = (0..seq * d).map(|i| 0.4 + 0.05 * i as f32 % 0.5).collect();
+
+        let loss_of = |cc: &[f32], ff: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![seq, d]));
+            let fv = t.input(TensorND::new(ff.to_vec(), vec![seq, d]));
+            let o = hgrn(&t, cv, fv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let cv = t.input(TensorND::new(c.clone(), vec![seq, d]));
+        let fv = t.input(TensorND::new(f.clone(), vec![seq, d]));
+        let o = hgrn(&t, cv, fv);
+        let grads = t.backward(o.mul(o).sum());
+        let (gc, gf) = (grads[cv.idx()].clone(), grads[fv.idx()].clone());
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 2e-2,
+                    "HGRN grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gc, &c, &|p| loss_of(p, &f));
+        check(&gf, &f, &|p| loss_of(&c, p));
+    }
+
+    /// The `NdHgrn` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_hgrn_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(9);
+            let mut layer = NdHgrn::new(d, 0.0, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.7, "HGRN did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());

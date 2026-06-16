@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **HGRN** (`nn::nd_layers::hgrn` + `NdHgrn`, Qin et al. 2023, roadmap #58) : RNN
+  linéaire à intégration leaky par canal (`hₜ = fₜ⊙h_{t-1} + (1−fₜ)⊙cₜ`), porte
+  d'oubli **bornée inférieurement** `f = lb + (1−lb)·σ(·)` (la borne `lb` fixe
+  l'horizon mémoire minimal). Pas d'état matriciel ; déroulé sur la tape. Tests :
+  match référence + gradient check (c,f) + entraînement + déterminisme. CLI :
+  `scirust hgrn` (en direct : MSE 27.37 → 4.59).
 - **GLA — Gated Linear Attention** (`nn::nd_layers::gated_linear_attention` +
   `NdGla`, Yang et al. 2024, roadmap #55) : attention linéaire **gatée** — porte
   d'oubli par canal **dépendante de l'entrée** `αₜ=σ(·)`

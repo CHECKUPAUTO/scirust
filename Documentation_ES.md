@@ -145,6 +145,7 @@ profundo, cada pieza respaldada por un artículo de investigación y una prueba
   **Mamba** (espacio de estados selectivo / escaneo selectivo);
   **RetNet** (retención / atención lineal);
   **GLA** (atención lineal con compuerta);
+  **HGRN** (RNN lineal con compuerta);
   **Neural ODE** (retropropagación a través de un solucionador RK4); una red neuronal informada por la física (PINN) que resuelve un problema de valores en la frontera con el residuo de la EDP en la función de pérdida.
 - **Compresión**: poda Wanda (consciente de activaciones), SmoothQuant, GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden), AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones).
 
@@ -155,6 +156,7 @@ Nuevos comandos CLI:
 - `scirust mamba [--seed N] [--steps S]` — entrena una capa Mamba de espacio de estados selectivo (escaneo S6) para ajustar una secuencia; informa la reducción del MSE.
 - `scirust retnet [--seed N] [--steps S]` — entrena una capa de retención RetNet (atención lineal, forma recurrente ≡ forma paralela) para ajustar una secuencia; informa la reducción del MSE.
 - `scirust gla [--seed N] [--steps S]` — entrena una capa de atención lineal con compuerta GLA (compuerta de olvido dependiente de los datos) para ajustar una secuencia; informa la reducción del MSE.
+- `scirust hgrn [--seed N] [--steps S]` — entrena un mezclador de tokens HGRN de RNN lineal con compuerta (compuerta de olvido acotada inferiormente) para ajustar una secuencia; informa la reducción del MSE.
 - `scirust conformal [--seed N] [--alpha A]` — intervalos conformes con cobertura garantizada, sin supuestos de distribución.
 - `scirust calibrate [--seed N]` — escalado de temperatura; ajusta T para reducir el error de calibración esperado (ECE) sin cambiar la exactitud.
 - `scirust pinn [--seed N] [--steps S]` — red informada por la física; resuelve el BVP `u''=−u` (residuo de la EDP en la pérdida), verificado frente a `sin x`.

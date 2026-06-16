@@ -266,6 +266,7 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
   **Mamba** (état-espace sélectif / scan sélectif) ;
   **RetNet** (rétention / attention linéaire) ;
   **GLA** (attention linéaire à porte) ;
+  **HGRN** (RNN linéaire à porte) ;
   **Neural ODE** (backprop à travers un solveur RK4) ; un réseau de neurones informé par la physique (PINN) qui résout un problème aux limites avec le résidu de l'EDP dans la fonction de perte.
 - **Compression** : élagage Wanda (activation-aware), SmoothQuant, GPTQ (quantification int8 des poids par feedback d'erreur d'ordre 2), AWQ (quantification int8 des poids basée sur une recherche et consciente des activations).
 
@@ -276,6 +277,7 @@ Nouvelles commandes CLI :
 - `scirust mamba [--seed N] [--steps S]` — entraîne une couche Mamba à état-espace sélectif (scan S6) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust retnet [--seed N] [--steps S]` — entraîne une couche de rétention RetNet (attention linéaire, forme récurrente ≡ forme parallèle) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust gla [--seed N] [--steps S]` — entraîne une couche d'attention linéaire à porte GLA (porte d'oubli dépendante des données) pour ajuster une séquence ; affiche la réduction de la MSE.
+- `scirust hgrn [--seed N] [--steps S]` — entraîne un mélangeur de tokens HGRN à RNN linéaire à porte (porte d'oubli bornée inférieurement) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust conformal [--seed N] [--alpha A]` — intervalles conformes à couverture garantie (sans hypothèse de distribution).
 - `scirust calibrate [--seed N]` — mise à l'échelle de température ; ajuste T pour réduire l'erreur de calibration attendue (ECE) sans modifier l'exactitude.
 - `scirust pinn [--seed N] [--steps S]` — réseau informé par la physique ; résout le BVP `u''=−u` (résidu de l'EDP dans la loss), vérifié vs `sin x`.

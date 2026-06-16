@@ -166,6 +166,7 @@ backed by a research paper and a test (gradient check or oracle). See
   **Mamba** (selective state-space / selective scan);
   **RetNet** (retention / linear attention);
   **GLA** (gated linear attention);
+  **HGRN** (gated linear RNN);
   **Neural ODE** (backprop through an RK4 solver); a Physics-Informed Neural Network (PINN) that solves a boundary-value problem with the PDE residual in the loss.
 - **Compression**: Wanda (activation-aware) pruning, SmoothQuant, GPTQ (second-order error-feedback int8 weight quantization), AWQ (activation-aware search-based int8 weight quantization).
 
@@ -176,6 +177,7 @@ New CLI commands:
 - `scirust mamba [--seed N] [--steps S]` — train a Mamba selective state-space layer (S6 scan) to fit a sequence; reports the MSE reduction.
 - `scirust retnet [--seed N] [--steps S]` — train a RetNet retention layer (linear attention, recurrent form ≡ parallel form) to fit a sequence; reports the MSE reduction.
 - `scirust gla [--seed N] [--steps S]` — train a Gated Linear Attention layer (data-dependent forget gate) to fit a sequence; reports the MSE reduction.
+- `scirust hgrn [--seed N] [--steps S]` — train an HGRN gated-linear-RNN token mixer (lower-bounded forget gate) to fit a sequence; reports the MSE reduction.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.
 - `scirust calibrate [--seed N]` — temperature scaling; fit T to lower the expected calibration error (ECE) without changing accuracy.
 - `scirust pinn [--seed N] [--steps S]` — physics-informed network; solve the BVP `u''=−u` (PDE residual in the loss), checked against `sin x`.
