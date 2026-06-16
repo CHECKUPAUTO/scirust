@@ -183,3 +183,4 @@ New CLI commands:
 - `scirust pinn [--seed N] [--steps S]` — physics-informed network; solve the BVP `u''=−u` (PDE residual in the loss), checked against `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — GPTQ int8 weight quantization; reports the calibration-error reduction vs round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — AWQ activation-aware int8 weight quantization; reports the selected scaling exponent and the calibration-error reduction vs round-to-nearest.
+- `scirust bitnet [--seed N]` — BitNet b1.58 ternary {-1,0,+1} weight quantization (~1.58 bit/weight); verifies the multiplication-free matmul.

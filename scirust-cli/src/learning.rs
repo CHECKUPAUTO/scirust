@@ -7,7 +7,10 @@ use scirust_core::nn::conformal::ConformalRegressor;
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_core::nn::pinn::solve_harmonic;
-use scirust_core::quantization::{awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel};
+use scirust_core::quantization::{
+    awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel, ternary_matmul,
+    ternary_quantize,
+};
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
@@ -371,6 +374,60 @@ pub fn run_awq(args: &[String]) -> u8 {
     println!(
         "  AWQ reduces the calibration error by {reduction:.1}% by protecting salient channels"
     );
+    0
+}
+
+/// `bitnet [--seed N]` — **BitNet b1.58** ternary weight quantization on a
+/// synthetic Linear layer: quantize the weights to `{−1,0,+1}` (absmean scale),
+/// show the compression ratio, and verify the **multiplication-free** ternary
+/// matmul against the dequantised float product. Deterministic in `--seed`.
+pub fn run_bitnet(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let (in_f, out_f, batch) = (64usize, 64usize, 8usize);
+    let mut rng = PcgEngine::new(seed);
+    let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+    let x: Vec<f32> = (0..batch * in_f).map(|_| rng.float_signed()).collect();
+
+    let (wq, scale) = ternary_quantize(&w);
+    let zeros = wq.iter().filter(|&&v| v == 0).count();
+
+    // Reference dequantised product (ordinary multiply) and the mult-free path.
+    let mut dequant = vec![0f32; batch * out_f];
+    for b in 0..batch
+    {
+        for o in 0..out_f
+        {
+            let mut acc = 0f32;
+            for i in 0..in_f
+            {
+                acc += x[b * in_f + i] * (wq[i * out_f + o] as f32 * scale);
+            }
+            dequant[b * out_f + o] = acc;
+        }
+    }
+    let mf = ternary_matmul(&x, batch, &wq, in_f, out_f, scale);
+    let max_err = mf
+        .iter()
+        .zip(&dequant)
+        .map(|(a, d)| (a - d).abs())
+        .fold(0f32, f32::max);
+    // Weight reconstruction error vs fp32 (lossy — the extreme-compression regime).
+    let recon: f32 = w
+        .iter()
+        .zip(&wq)
+        .map(|(&orig, &q)| (orig - q as f32 * scale).abs())
+        .sum::<f32>()
+        / w.len() as f32;
+
+    println!("BitNet b1.58 ternary quantization — pure Rust, deterministic (seed {seed})");
+    println!("  Linear {in_f}->{out_f}: weights → ternary {{-1,0,+1}} (absmean scale {scale:.4})");
+    println!(
+        "  storage: 32 bits/weight → log2(3) ≈ 1.58 bits/weight (~{:.0}× smaller); {zeros}/{} weights are 0",
+        32.0 / 1.585,
+        in_f * out_f
+    );
+    println!("  multiplication-free matmul vs dequantised product: max abs error {max_err:.2e}");
+    println!("  mean |W − Ŵ| reconstruction error: {recon:.4} (lossy — 1.58-bit regime)");
     0
 }
 

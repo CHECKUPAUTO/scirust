@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 52 : BitNet b1.58 (#69) — quantif ternaire
+- `quantization::ternary_quantize` + `ternary_matmul` (Ma 2024) : poids ternaires
+  {−1,0,+1} (échelle absmean ~1,58 bit/poids) ; matmul sans multiplication
+  (add/sub/skip selon signe).
+- CLI : `bitnet [--seed N]` dans le groupe COMPRESSION (en direct : ~20×, 986/4096
+  zéros, max err mult-free vs déquant 1,4e-6, reconstruction 0,19 — lossy). 52 cmd.
+- Tests : ternaire ∈ {−1,0,1} ; mult-free = forme somme-de-signes (bit-exact) +
+  = produit déquant (à la réassociation fp près) ; déterminisme.
+- docs : roadmap #69 📋→✅ ; README int8 ; REFERENCE bitnet ; GROWTH_PLAN 52 ;
+  CHANGELOG. Multilingue (bitnet) : lot suivant.
+- 856 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 51 : HGRN (#58) — RNN linéaire gaté
 - `nn::nd_layers::hgrn` + `NdHgrn` (Qin 2023) : intégration leaky par canal
   (hₜ=fₜ⊙h+ (1−fₜ)⊙cₜ), porte d'oubli bornée f=lb+(1−lb)σ(·). Pas d'état

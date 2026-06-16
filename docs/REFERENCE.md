@@ -96,6 +96,7 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `calibrate [--seed N]` | temperature scaling : ajuste `T` pour réduire l'erreur de calibration (ECE) sans changer l'accuracy | `scirust-core::nn::calibration` |
 | `gptq [--seed N] [--samples S] [--damp D]` | quantification int8 GPTQ (feedback d'erreur d'ordre 2) ; affiche la réduction d'erreur de calibration vs round-to-nearest | `scirust-core::quantization` |
 | `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
+| `bitnet [--seed N]` | quantification ternaire BitNet b1.58 (`{-1,0,+1}`, ~1,58 bit/poids) ; vérifie le matmul sans multiplication | `scirust-core::quantization` |
 | `info` / `help` / `version` | méta | — |
 
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`

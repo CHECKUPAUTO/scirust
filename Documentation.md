@@ -283,3 +283,4 @@ Nouvelles commandes CLI :
 - `scirust pinn [--seed N] [--steps S]` — réseau informé par la physique ; résout le BVP `u''=−u` (résidu de l'EDP dans la loss), vérifié vs `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — quantification int8 des poids GPTQ ; affiche la réduction d'erreur de calibration par rapport au round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — quantification int8 des poids AWQ consciente des activations ; affiche l'exposant de mise à l'échelle sélectionné et la réduction d'erreur de calibration par rapport au round-to-nearest.
+- `scirust bitnet [--seed N]` — quantification ternaire {-1,0,+1} des poids BitNet b1.58 (~1,58 bit/poids) ; vérifie la multiplication matricielle sans multiplication.

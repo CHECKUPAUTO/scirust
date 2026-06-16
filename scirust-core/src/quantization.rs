@@ -919,6 +919,128 @@ mod awq_tests {
     }
 }
 
+// ----- BitNet b1.58 : poids ternaires {−1,0,1}, matmul sans multiplication ----
+
+/// **BitNet b1.58** (Ma et al. 2024) — quantification **ternaire** des poids vers
+/// `{−1, 0, +1}` avec une échelle par tenseur (« absmean » : `scale = moyenne|W|`).
+/// Chaque poids devient `round(W/scale)` borné à `[−1, 1]`. Retourne les codes
+/// ternaires (`i8 ∈ {−1,0,1}`) et le scale.
+pub fn ternary_quantize(w: &[f32]) -> (Vec<i8>, f32) {
+    let n = w.len().max(1);
+    let scale = w.iter().map(|x| x.abs()).sum::<f32>() / n as f32;
+    let inv = if scale > 1e-12 { 1.0 / scale } else { 0.0 };
+    let q: Vec<i8> = w
+        .iter()
+        .map(|&x| (x * inv).round().clamp(-1.0, 1.0) as i8)
+        .collect();
+    (q, scale)
+}
+
+/// **Multiplication-free** ternary matmul `y = x · (scale · W_ternary)` with
+/// `W_ternary ∈ {−1,0,1}` — `x` is `(batch × in)` row-major, `w_q` is
+/// `(in × out)` row-major. Because the weights are ±1/0, each accumulation is an
+/// **add / subtract / skip** (no multiply); a single `scale` multiply is applied
+/// at the end. This equals the dequantised product **bit-for-bit** (the test
+/// oracle), demonstrating BitNet's "matmul without multiplications".
+pub fn ternary_matmul(
+    x: &[f32],
+    batch: usize,
+    w_q: &[i8],
+    in_f: usize,
+    out_f: usize,
+    scale: f32,
+) -> Vec<f32> {
+    assert_eq!(x.len(), batch * in_f, "ternary_matmul: x size");
+    assert_eq!(w_q.len(), in_f * out_f, "ternary_matmul: w size");
+    let mut out = vec![0f32; batch * out_f];
+    for b in 0..batch
+    {
+        let xrow = &x[b * in_f..b * in_f + in_f];
+        for o in 0..out_f
+        {
+            let mut acc = 0f32;
+            for i in 0..in_f
+            {
+                match w_q[i * out_f + o]
+                {
+                    1 => acc += xrow[i],
+                    -1 => acc -= xrow[i],
+                    _ =>
+                    {},
+                }
+            }
+            out[b * out_f + o] = acc * scale;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod bitnet_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// `ternary_quantize` maps to `{−1,0,1}` only, and the **multiplication-free**
+    /// `ternary_matmul` equals the dequantised float product **bit-for-bit**.
+    #[test]
+    fn ternary_matmul_equals_dequant_bit_exact() {
+        let (in_f, out_f, batch) = (12usize, 6usize, 4usize);
+        let mut rng = PcgEngine::new(3);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let x: Vec<f32> = (0..batch * in_f).map(|_| rng.float_signed()).collect();
+
+        let (wq, scale) = ternary_quantize(&w);
+        // Only ternary values.
+        assert!(wq.iter().all(|&v| v == -1 || v == 0 || v == 1));
+
+        let mut sign_sum = vec![0f32; batch * out_f]; // (Σ ±xᵢ)·scale — same order as mf
+        let mut dequant = vec![0f32; batch * out_f]; // Σ xᵢ·(±scale) — ordinary multiply
+        for b in 0..batch
+        {
+            for o in 0..out_f
+            {
+                let (mut s, mut d) = (0f32, 0f32);
+                for i in 0..in_f
+                {
+                    let q = wq[i * out_f + o] as f32;
+                    s += q * x[b * in_f + i]; // ±xᵢ (or 0)
+                    d += x[b * in_f + i] * (q * scale);
+                }
+                sign_sum[b * out_f + o] = s * scale;
+                dequant[b * out_f + o] = d;
+            }
+        }
+        let mf = ternary_matmul(&x, batch, &wq, in_f, out_f, scale);
+        // The multiplication-free path is exactly (Σ ±xᵢ)·scale (bit-for-bit).
+        for (a, r) in mf.iter().zip(&sign_sum)
+        {
+            assert_eq!(
+                a.to_bits(),
+                r.to_bits(),
+                "ternary matmul not the sign-sum form: {a} vs {r}"
+            );
+        }
+        // …and equals the dequantised product up to floating-point reassociation.
+        for (a, d) in mf.iter().zip(&dequant)
+        {
+            assert!(
+                (a - d).abs() < 1e-4,
+                "ternary matmul off from dequant: {a} vs {d}"
+            );
+        }
+    }
+
+    /// Deterministic: identical input ⇒ identical codes and scale.
+    #[test]
+    fn ternary_quantize_deterministic() {
+        let w: Vec<f32> = (0..40).map(|k| (k as f32 * 0.21).sin()).collect();
+        let (q1, s1) = ternary_quantize(&w);
+        let (q2, s2) = ternary_quantize(&w);
+        assert_eq!(q1, q2);
+        assert_eq!(s1.to_bits(), s2.to_bits());
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).

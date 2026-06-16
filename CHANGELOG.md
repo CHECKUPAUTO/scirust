@@ -6,6 +6,13 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **BitNet b1.58** (`quantization::ternary_quantize` + `ternary_matmul`, Ma et al.
+  2024, roadmap #69) : quantification **ternaire** des poids vers `{−1,0,+1}`
+  (échelle absmean, ~1,58 bit/poids, ~20× plus compact) ; **matmul sans
+  multiplication** (addition / soustraction / skip selon le signe). Oracle :
+  `ternary_matmul` = la forme somme-de-signes **bit-exact** et = le produit
+  déquantifié à la réassociation flottante près. CLI : `scirust bitnet` (en
+  direct : max erreur 1,4e-6 vs déquant, 986/4096 poids nuls). Déterministe.
 - **HGRN** (`nn::nd_layers::hgrn` + `NdHgrn`, Qin et al. 2023, roadmap #58) : RNN
   linéaire à intégration leaky par canal (`hₜ = fₜ⊙h_{t-1} + (1−fₜ)⊙cₜ`), porte
   d'oubli **bornée inférieurement** `f = lb + (1−lb)·σ(·)` (la borne `lb` fixe
