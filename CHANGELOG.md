@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **NF4** (`quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS`, QLoRA,
+  Dettmers et al. 2023, roadmap #74) : type 4-bit **NormalFloat** — 16 niveaux qui
+  sont les **quantiles d'une normale** (échelle absmax par bloc). Optimal pour des
+  poids gaussiens. Oracle : erreur de reconstruction **< int4 uniforme** sur des
+  poids gaussiens (Box-Muller seedé) + round-trip exact sur les niveaux +
+  déterminisme. Couche de bibliothèque.
 - **BitNet b1.58** (`quantization::ternary_quantize` + `ternary_matmul`, Ma et al.
   2024, roadmap #69) : quantification **ternaire** des poids vers `{−1,0,+1}`
   (échelle absmean, ~1,58 bit/poids, ~20× plus compact) ; **matmul sans

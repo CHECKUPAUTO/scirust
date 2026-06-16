@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 53 : NF4 (#74) — NormalFloat 4-bit
+- `quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS` (QLoRA, Dettmers
+  2023) : 16 niveaux = quantiles d'une normale, échelle absmax par bloc.
+- Couche de bibliothèque (pas de CLI dédiée — primitive de quantif).
+- Tests : sur poids gaussiens (Box-Muller seedé) NF4 < int4 uniforme ; round-trip
+  exact sur les niveaux ; déterminisme.
+- docs : roadmap #74 📋→✅ ; README int8 ; CHANGELOG. Pas de cycle multilingue
+  (bibliothèque).
+- 858 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 52 : BitNet b1.58 (#69) — quantif ternaire
 - `quantization::ternary_quantize` + `ternary_matmul` (Ma 2024) : poids ternaires
   {−1,0,+1} (échelle absmean ~1,58 bit/poids) ; matmul sans multiplication
