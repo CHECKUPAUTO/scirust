@@ -6,6 +6,12 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **GLA — Gated Linear Attention** (`nn::nd_layers::gated_linear_attention` +
+  `NdGla`, Yang et al. 2024, roadmap #55) : attention linéaire **gatée** — porte
+  d'oubli par canal **dépendante de l'entrée** `αₜ=σ(·)`
+  (`S_t = diag(αₜ)·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la tape.
+  Tests : match d'une référence Vec + gradient check (q,k,v,α) + entraînement +
+  déterminisme. CLI : `scirust gla` (en direct : MSE 27.16 → 0.0000).
 - **RetNet** (`nn::nd_layers::retention` + `NdRetention`, Sun et al. 2023,
   roadmap #54) : couche de **rétention** — attention linéaire récurrente à
   décroissance `γ` (`S_t = γ·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la

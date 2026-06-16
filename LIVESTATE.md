@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 50 : GLA (#55) — attention linéaire gatée
+- `nn::nd_layers::gated_linear_attention` + `NdGla` (Yang 2024) : porte d'oubli
+  par canal dépendante de l'entrée α=σ(·) (S_t=diag(α)S_{t-1}+kᵀv, o_t=qS),
+  déroulée sur la tape (réutilise cat0).
+- CLI : `gla [--seed N] [--steps S]` (en direct, seed 8/150 : MSE 27.16→0.0000).
+  50 commandes.
+- Tests : match référence Vec ; gradient check (q,k,v,α) ; couche entraîne +
+  déterminisme.
+- docs : roadmap #55 📋→✅ ; README stack ; REFERENCE gla ; GROWTH_PLAN 50 ;
+  CHANGELOG. Multilingue (gla) : lot suivant.
+- 851 tests ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-16 — volet 49 : RetNet (#54) — rétention (séquence)
 - `nn::nd_layers::retention` + `NdRetention` (Sun 2023) : attention linéaire
   récurrente à décroissance γ (S_t=γS_{t-1}+kᵀv, o_t=qS), déroulée sur la tape
