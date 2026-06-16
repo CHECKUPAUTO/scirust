@@ -600,12 +600,12 @@ is tracked in `docs/RESEARCH_ROADMAP.md`.
   (canonical ordering + exact expansion), bit-identical regardless of thread
   count — the foundation for bit-exact multi-thread training.
 - **Inference**: exact (output-preserving) speculative decoding, a tiled
-  online-softmax FlashAttention, a DeltaNet delta-rule linear-attention layer, and a Mamba selective state-space layer.
+  online-softmax FlashAttention, a DeltaNet delta-rule linear-attention layer, a Mamba selective state-space layer, a RetNet retention layer, a GLA gated-linear-attention layer, and an HGRN gated-linear-RNN layer.
 - **Scientific bridge**: a Neural ODE that backpropagates through an RK4 solver, and a Physics-Informed Neural Network (PINN) that puts a PDE residual in the loss to solve a boundary-value problem.
 - **Compression**: Wanda activation-aware pruning and SmoothQuant, and GPTQ (second-order error-feedback int8 weight quantization, CLI `scirust gptq`), and AWQ (activation-aware search-based int8 weight quantization, CLI `scirust awq`), extending the
   deterministic int8 path.
 
 Two CLI commands surface this work: `scirust certify` (IBP **and CROWN** bounds, side by side, and robustness)
-and `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (train the N-D decoder LM).
+and `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (train the N-D decoder LM).
 
 A third command, `scirust conformal`, produces distribution-free conformal-prediction intervals with a guaranteed coverage level.

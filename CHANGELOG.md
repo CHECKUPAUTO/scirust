@@ -6,6 +6,49 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **HGRN** (`nn::nd_layers::hgrn` + `NdHgrn`, Qin et al. 2023, roadmap #58) : RNN
+  linéaire à intégration leaky par canal (`hₜ = fₜ⊙h_{t-1} + (1−fₜ)⊙cₜ`), porte
+  d'oubli **bornée inférieurement** `f = lb + (1−lb)·σ(·)` (la borne `lb` fixe
+  l'horizon mémoire minimal). Pas d'état matriciel ; déroulé sur la tape. Tests :
+  match référence + gradient check (c,f) + entraînement + déterminisme. CLI :
+  `scirust hgrn` (en direct : MSE 27.37 → 4.59).
+- **GLA — Gated Linear Attention** (`nn::nd_layers::gated_linear_attention` +
+  `NdGla`, Yang et al. 2024, roadmap #55) : attention linéaire **gatée** — porte
+  d'oubli par canal **dépendante de l'entrée** `αₜ=σ(·)`
+  (`S_t = diag(αₜ)·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la tape.
+  Tests : match d'une référence Vec + gradient check (q,k,v,α) + entraînement +
+  déterminisme. CLI : `scirust gla` (en direct : MSE 27.16 → 0.0000).
+- **RetNet** (`nn::nd_layers::retention` + `NdRetention`, Sun et al. 2023,
+  roadmap #54) : couche de **rétention** — attention linéaire récurrente à
+  décroissance `γ` (`S_t = γ·S_{t-1} + kₜᵀvₜ`, `o_t = q_t·S_t`), déroulée sur la
+  tape. **Oracle de dualité** : la forme récurrente **égale** la forme parallèle
+  `(QKᵀ⊙D)V` (`D_{nm}=γ^{n-m}`), testé ; + gradient check (q,k,v) + entraînement
+  + déterminisme. CLI : `scirust retnet` (en direct : MSE 24.63 → 0.0002).
+- **LAMB** (`nn::nd_optim::NdLamb`, You et al. 2020, roadmap #43) : Adam à
+  **confiance par couche** — direction Adam `r` remise à l'échelle par
+  `‖θ‖/‖r‖` par tenseur. CLI `lm --opt lamb`. Tests : convergence (bande ∝ lr,
+  car la norme de pas ≈ lr·‖θ‖) + déterminisme.
+- **Adan** (`nn::nd_optim::NdAdan`, Xie et al. 2022, roadmap #49) : momentum de
+  **Nesterov adaptatif** — 3 EMA (gradient `m`, différences `v`, terme
+  look-ahead au carré `n`) ; `θ ← (θ − η⊙(m+(1−β2)v))/(1+lr·wd)`. CLI
+  `lm --opt adan`. Tests : convergence quadratique + déterminisme.
+- **LoRA** (`nn::nd_layers::LoraLinear`, Hu et al. 2022, roadmap #72) : adaptation
+  **low-rank** — poids de base `W` **gelé** + mise à jour `ΔW = (α/r)·A·B` ; seuls
+  `A` (`in×r`) et `B` (`r×out`) sont entraînés (`r·(in+out)` paramètres au lieu de
+  `in·out`). `B=0` à l'init ⇒ la couche **vaut exactement la base**. Couche de la
+  tape N-D. Tests : init = base, **gradient check** sur `A` et `B`, `parameters()`
+  n'expose que `A`,`B`.
+- **Temperature scaling / calibration** (`nn::calibration`, Guo et al. 2017,
+  roadmap #39) : `temperature_scale` (recherche golden-section sur la NLL) +
+  `expected_calibration_error` + `nll`. Recalibration post-hoc des probabilités
+  **sans changer l'accuracy** (l'argmax est invariant à `T>0`). Déterministe. CLI :
+  `scirust calibrate` (en direct : ECE 0.29 → 0.004, −98,5 %, T=2,70). Tests : ECE
+  baisse + accuracy inchangée + déterminisme.
+- **Lookahead** (`nn::nd_optim::NdLookahead`, Zhang et al. 2019, roadmap #45) :
+  optimiseur **wrapper** poids lents/rapides autour d'Adam — `k` pas rapides puis
+  `φ ← φ + α(θ − φ) ; θ ← φ`. Déterministe. CLI : `scirust lm --opt lookahead`.
+  Tests : convergence quadratique, déterminisme bit-à-bit. (1er du pool de
+  candidats Tier 8-14.)
 - **PINN** (`nn::pinn` : `Pinn1D`, `solve_harmonic`, Raissi et al. 2019,
   roadmap #17) : réseau **physics-informed** — la **physique est dans la loss**
   via un résidu de PDE aux points de collocation + conditions aux limites.

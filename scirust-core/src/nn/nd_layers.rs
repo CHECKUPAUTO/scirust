@@ -842,6 +842,316 @@ impl NdMamba {
     }
 }
 
+/// **LoRA** — Low-Rank Adaptation (Hu et al., ICLR 2022). A frozen base weight
+/// `W` (`in × out`) is adapted by a trainable low-rank update `ΔW = (α/r)·A·B`,
+/// with `A` (`in × r`) and `B` (`r × out`), so only `r·(in+out)` parameters are
+/// learned instead of `in·out`. `B` starts at **zero** (so the layer is exactly
+/// the base map at init) and `A` is seeded; **only `A` and `B`** are returned by
+/// [`parameters()`](Self::parameters) — the base `W` never moves. Acts on the
+/// last axis like [`NdLinear`]; `y = x·W + (α/r)·(x·A)·B`. Gradient-checked.
+pub struct LoraLinear {
+    w: TensorND,  // (in, out) — frozen base
+    a: TensorND,  // (in, r)   — trainable
+    b: TensorND,  // (r, out)  — trainable
+    scaling: f32, // α / r
+    in_features: usize,
+    out_features: usize,
+    a_idx: Option<usize>,
+    b_idx: Option<usize>,
+}
+
+impl LoraLinear {
+    /// New adapter over a given frozen base weight `w` (`in × out`, row-major),
+    /// with rank `r` and LoRA `alpha`. `A ~ U(-s, s)` (`s = 1/√in`), `B = 0`.
+    pub fn new(
+        w: Vec<f32>,
+        in_features: usize,
+        out_features: usize,
+        r: usize,
+        alpha: f32,
+        rng: &mut PcgEngine,
+    ) -> Self {
+        assert_eq!(w.len(), in_features * out_features, "LoraLinear: base size");
+        assert!(r >= 1, "LoraLinear: rank must be ≥ 1");
+        let s = (1.0 / in_features as f32).sqrt();
+        let a: Vec<f32> = (0..in_features * r)
+            .map(|_| rng.float_signed() * s)
+            .collect();
+        Self {
+            w: TensorND::new(w, vec![in_features, out_features]),
+            a: TensorND::new(a, vec![in_features, r]),
+            b: TensorND::zeros(&[r, out_features]),
+            scaling: alpha / r as f32,
+            in_features,
+            out_features,
+            a_idx: None,
+            b_idx: None,
+        }
+    }
+
+    /// Forward `(…, in) → (…, out)` (leading axes flattened then restored).
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xs = x.shape();
+        let in_f = *xs.last().expect("LoraLinear: input has no axes");
+        assert_eq!(in_f, self.in_features, "LoraLinear: input feature mismatch");
+        let m: usize = xs[..xs.len() - 1].iter().product();
+
+        let w = tape.input(self.w.clone());
+        let a = tape.input(self.a.clone());
+        let b = tape.input(self.b.clone());
+        self.a_idx = Some(a.idx());
+        self.b_idx = Some(b.idx());
+        let scale = tape.input(TensorND::new(vec![self.scaling], vec![1, 1]));
+
+        let x2 = x.reshape(&[m, in_f]); // (m, in)
+        let base = x2.matmul(w); // (m, out)
+        let delta = x2.matmul(a).matmul(b).mul(scale); // (m, out)
+        let y2 = base.add(delta);
+
+        let mut out_shape = xs[..xs.len() - 1].to_vec();
+        out_shape.push(self.out_features);
+        y2.reshape(&out_shape)
+    }
+
+    /// The two trainable LoRA factors `A` and `B` (the base `W` is frozen).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, b_idx) = (self.a_idx, self.b_idx);
+        let mut params = Vec::new();
+        if let Some(i) = a_idx
+        {
+            params.push(NdParam {
+                value: &mut self.a,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = b_idx
+        {
+            params.push(NdParam {
+                value: &mut self.b,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
+/// **Retention** (RetNet, Sun et al. 2023) — a linear-attention recurrence with a
+/// fixed per-head decay `γ`: a state matrix `S` (`d × d`) accumulates the outer
+/// products `kₜᵀvₜ` with exponential decay, and the output reads it out with the
+/// query:
+///
+/// ```text
+/// S_t = γ·S_{t-1} + kₜᵀ·vₜ ,   o_t = q_t·S_t
+/// ```
+///
+/// This recurrent form is mathematically **equal to** the parallel form
+/// `(QKᵀ ⊙ D)V` with `D_{nm} = γ^{n-m}` (causal) — the RetNet duality, used as the
+/// test oracle. Linear-time, causal, deterministic; unrolled on the tape (so
+/// gradients are exact and finite-difference-checked). `q`/`k`/`v` are
+/// `(seq, d)`; returns `(seq, d)`.
+pub fn retention<'t>(
+    tape: &'t NdTape,
+    q: NdVar<'t>,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    gamma: f32,
+) -> NdVar<'t> {
+    let qs = q.shape();
+    let (seq, d) = (qs[0], qs[1]);
+    let g = tape.input(TensorND::new(vec![gamma], vec![1, 1]));
+    let mut s = tape.input(TensorND::zeros(&[d, d])); // S_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let k_col = k.gather(&[t]).reshape(&[d, 1]); // (d,1)
+        let v_row = v.gather(&[t]).reshape(&[1, d]); // (1,d)
+        let q_row = q.gather(&[t]).reshape(&[1, d]); // (1,d)
+        let kv = k_col.matmul(v_row); // kₜᵀvₜ  (d,d)
+        s = s.mul(g).add(kv); // γS + kᵀv
+        outs.push(q_row.matmul(s)); // o_t  (1,d)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **RetNet** single-head retention layer: project the input to `q, k, v` and run
+/// the [`retention`] recurrence with a fixed decay `γ`. Deterministic; trainable
+/// through the N-D tape. `forward` maps `(seq, d_model) → (seq, d_model)`.
+pub struct NdRetention {
+    q_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    gamma: f32,
+}
+
+impl NdRetention {
+    /// New layer with seeded projections and decay `gamma ∈ (0, 1)`.
+    pub fn new(d_model: usize, gamma: f32, rng: &mut PcgEngine) -> Self {
+        Self {
+            q_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            gamma,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let q = self.q_proj.forward(tape, x);
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        retention(tape, q, k, v, self.gamma)
+    }
+
+    /// Trainable parameters (q, k, v projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.q_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params
+    }
+}
+
+/// **Gated Linear Attention** (GLA, Yang et al., ICML 2024) — a linear-attention
+/// recurrence with a **data-dependent** per-key-channel forget gate `αₜ ∈ (0,1)`
+/// (instead of RetNet's fixed scalar decay):
+///
+/// ```text
+/// S_t = diag(αₜ)·S_{t-1} + kₜᵀ·vₜ ,   o_t = q_t·S_t
+/// ```
+///
+/// Linear-time, causal, deterministic; unrolled on the tape. `q`/`k`/`v` and the
+/// gate `alpha` are `(seq, d)` (`alpha` already in `(0,1)`); returns `(seq, d)`.
+pub fn gated_linear_attention<'t>(
+    tape: &'t NdTape,
+    q: NdVar<'t>,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    alpha: NdVar<'t>,
+) -> NdVar<'t> {
+    let qs = q.shape();
+    let (seq, d) = (qs[0], qs[1]);
+    let mut s = tape.input(TensorND::zeros(&[d, d])); // S_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let a_col = alpha.gather(&[t]).reshape(&[d, 1]); // (d,1) per-key-channel gate
+        let k_col = k.gather(&[t]).reshape(&[d, 1]);
+        let v_row = v.gather(&[t]).reshape(&[1, d]);
+        let q_row = q.gather(&[t]).reshape(&[1, d]);
+        let kv = k_col.matmul(v_row); // (d,d)
+        s = s.mul(a_col).add(kv); // diag(α)S + kᵀv  (α_col broadcasts over columns)
+        outs.push(q_row.matmul(s)); // o_t (1,d)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **GLA** single-head layer: project the input to `q, k, v` and a data-dependent
+/// forget gate `α = σ(·)`, then run [`gated_linear_attention`]. Deterministic;
+/// trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdGla {
+    q_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    g_proj: NdLinear,
+}
+
+impl NdGla {
+    /// New layer with seeded projections (`q,k,v` and the gate).
+    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            q_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            g_proj: NdLinear::new(d_model, d_model, rng),
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let q = self.q_proj.forward(tape, x);
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        let alpha = self.g_proj.forward(tape, x).sigmoid(); // gate ∈ (0,1)
+        gated_linear_attention(tape, q, k, v, alpha)
+    }
+
+    /// Trainable parameters (q, k, v, gate projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.q_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params.extend(self.g_proj.parameters());
+        params
+    }
+}
+
+/// **HGRN gated linear recurrence** (Qin et al., NeurIPS 2023) — a per-channel
+/// (elementwise) leaky integrator with a data-dependent forget gate
+/// `fₜ ∈ (0,1)`:
+///
+/// ```text
+/// hₜ = fₜ ⊙ h_{t-1} + (1 − fₜ) ⊙ cₜ ,   oₜ = hₜ
+/// ```
+///
+/// No matrix state — linear-time, causal, deterministic; unrolled on the tape.
+/// `c` (candidate) and `f` (gate, already in `(0,1)`) are `(seq, d)`; returns
+/// `(seq, d)`.
+pub fn hgrn<'t>(tape: &'t NdTape, c: NdVar<'t>, f: NdVar<'t>) -> NdVar<'t> {
+    let cs = c.shape();
+    let (seq, d) = (cs[0], cs[1]);
+    let ones = tape.input(TensorND::new(vec![1.0f32; d], vec![1, d]));
+    let mut h = tape.input(TensorND::zeros(&[1, d])); // h_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let f_t = f.gather(&[t]); // (1,d)
+        let c_t = c.gather(&[t]); // (1,d)
+        let one_minus_f = ones.sub(f_t); // (1 − fₜ)
+        h = f_t.mul(h).add(one_minus_f.mul(c_t)); // fₜ⊙h + (1−fₜ)⊙cₜ
+        outs.push(h);
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **HGRN** single-layer token mixer: a candidate `c = W_c·x` is leaked into a
+/// running state through a **lower-bounded** forget gate
+/// `f = lb + (1 − lb)·σ(W_f·x)` (the lower bound `lb ∈ [0,1)` controls the
+/// minimum memory horizon — deeper layers use a larger `lb`). Deterministic;
+/// trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdHgrn {
+    c_proj: NdLinear,
+    f_proj: NdLinear,
+    lower_bound: f32,
+}
+
+impl NdHgrn {
+    /// New layer with seeded projections and forget-gate lower bound `lb ∈ [0,1)`.
+    pub fn new(d_model: usize, lb: f32, rng: &mut PcgEngine) -> Self {
+        Self {
+            c_proj: NdLinear::new(d_model, d_model, rng),
+            f_proj: NdLinear::new(d_model, d_model, rng),
+            lower_bound: lb,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let c = self.c_proj.forward(tape, x);
+        let lb = tape.input(TensorND::new(vec![self.lower_bound], vec![1, 1]));
+        let scale = tape.input(TensorND::new(vec![1.0 - self.lower_bound], vec![1, 1]));
+        // f = lb + (1−lb)·σ(W_f·x)  ∈ [lb, 1)
+        let f = self.f_proj.forward(tape, x).sigmoid().mul(scale).add(lb);
+        hgrn(tape, c, f)
+    }
+
+    /// Trainable parameters (candidate and forget-gate projections).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.c_proj.parameters();
+        params.extend(self.f_proj.parameters());
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,6 +1496,487 @@ mod tests {
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Parallel-form reference for RetNet retention: `o[n] = Σ_{m≤n} γ^{n−m}
+    /// (q[n]·k[m]) v[m]` — the oracle the tape recurrence must match.
+    fn retention_parallel(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        gamma: f32,
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut out = vec![0f32; seq * d];
+        for n in 0..seq
+        {
+            for m in 0..=n
+            {
+                let mut qk = 0f32;
+                for i in 0..d
+                {
+                    qk += q[n * d + i] * k[m * d + i];
+                }
+                let w = gamma.powi((n - m) as i32) * qk;
+                for j in 0..d
+                {
+                    out[n * d + j] += w * v[m * d + j];
+                }
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `retention` equals the parallel form (RetNet duality).
+    #[test]
+    fn retention_matches_parallel_form() {
+        let (seq, d, gamma) = (5usize, 3usize, 0.9f32);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+
+        let want = retention_parallel(&q, &k, &v, gamma, seq, d);
+        let tape = NdTape::new();
+        let qv = tape.input(TensorND::new(q, vec![seq, d]));
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let out = tape.value(retention(&tape, qv, kv, vv, gamma));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-4, "retention mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `retention` gradients (q, k, v) match finite differences.
+    #[test]
+    fn retention_gradient_check() {
+        let (seq, d, gamma) = (3usize, 2usize, 0.8f32);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 + 0.2).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+
+        let loss_of = |qq: &[f32], kk: &[f32], vv: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(qq.to_vec(), vec![seq, d]));
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let o = retention(&t, qv, kv, vv2, gamma);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), vec![seq, d]));
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let o = retention(&t, qv, kv, vv, gamma);
+        let grads = t.backward(o.mul(o).sum());
+        let (gq, gk, gv) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "retention grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gq, &q, &|p| loss_of(p, &k, &v));
+        check(&gk, &k, &|p| loss_of(&q, p, &v));
+        check(&gv, &v, &|p| loss_of(&q, &k, p));
+    }
+
+    /// The `NdRetention` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_retention_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(6);
+            let mut layer = NdRetention::new(d, 0.9, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(
+            last < first * 0.6,
+            "RetNet did not learn: {first} -> {last}"
+        );
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Plain-`Vec` reference for the GLA recurrence (the definition oracle).
+    fn gla_reference(q: &[f32], k: &[f32], v: &[f32], a: &[f32], seq: usize, d: usize) -> Vec<f32> {
+        let mut s = vec![0f32; d * d];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for i in 0..d
+            {
+                for j in 0..d
+                {
+                    s[i * d + j] = a[t * d + i] * s[i * d + j] + k[t * d + i] * v[t * d + j];
+                }
+            }
+            for j in 0..d
+            {
+                let mut acc = 0f32;
+                for i in 0..d
+                {
+                    acc += q[t * d + i] * s[i * d + j];
+                }
+                out[t * d + j] = acc;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `gated_linear_attention` matches the recurrence reference.
+    #[test]
+    fn gla_matches_reference() {
+        let (seq, d) = (4usize, 3usize);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+        let a: Vec<f32> = (0..seq * d)
+            .map(|i| 0.5 + 0.3 * (i as f32 * 0.1).sin())
+            .collect();
+
+        let want = gla_reference(&q, &k, &v, &a, seq, d);
+        let tape = NdTape::new();
+        let qv = tape.input(TensorND::new(q, vec![seq, d]));
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let av = tape.input(TensorND::new(a, vec![seq, d]));
+        let out = tape.value(gated_linear_attention(&tape, qv, kv, vv, av));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-4, "GLA mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `gated_linear_attention` gradients (q, k, v, α) match finite differences.
+    #[test]
+    fn gla_gradient_check() {
+        let (seq, d) = (3usize, 2usize);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 + 0.2).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+        let a: Vec<f32> = (0..seq * d).map(|i| 0.4 + 0.1 * i as f32 % 0.5).collect();
+
+        let loss_of = |qq: &[f32], kk: &[f32], vv: &[f32], aa: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(qq.to_vec(), vec![seq, d]));
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let av = t.input(TensorND::new(aa.to_vec(), vec![seq, d]));
+            let o = gated_linear_attention(&t, qv, kv, vv2, av);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), vec![seq, d]));
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let av = t.input(TensorND::new(a.clone(), vec![seq, d]));
+        let o = gated_linear_attention(&t, qv, kv, vv, av);
+        let grads = t.backward(o.mul(o).sum());
+        let (gq, gk, gv, ga) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+            grads[av.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "GLA grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gq, &q, &|p| loss_of(p, &k, &v, &a));
+        check(&gk, &k, &|p| loss_of(&q, p, &v, &a));
+        check(&gv, &v, &|p| loss_of(&q, &k, p, &a));
+        check(&ga, &a, &|p| loss_of(&q, &k, &v, p));
+    }
+
+    /// The `NdGla` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_gla_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(8);
+            let mut layer = NdGla::new(d, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "GLA did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Plain-`Vec` reference for the HGRN gated linear recurrence.
+    fn hgrn_reference(c: &[f32], f: &[f32], seq: usize, d: usize) -> Vec<f32> {
+        let mut h = vec![0f32; d];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for j in 0..d
+            {
+                h[j] = f[t * d + j] * h[j] + (1.0 - f[t * d + j]) * c[t * d + j];
+                out[t * d + j] = h[j];
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `hgrn` matches the recurrence reference.
+    #[test]
+    fn hgrn_matches_reference() {
+        let (seq, d) = (5usize, 3usize);
+        let c: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+        let f: Vec<f32> = (0..seq * d)
+            .map(|i| 0.5 + 0.3 * (i as f32 * 0.1).cos())
+            .collect();
+
+        let want = hgrn_reference(&c, &f, seq, d);
+        let tape = NdTape::new();
+        let cv = tape.input(TensorND::new(c, vec![seq, d]));
+        let fv = tape.input(TensorND::new(f, vec![seq, d]));
+        let out = tape.value(hgrn(&tape, cv, fv));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-5, "HGRN mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `hgrn` gradients (c, f) match finite differences.
+    #[test]
+    fn hgrn_gradient_check() {
+        let (seq, d) = (4usize, 2usize);
+        let c: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let f: Vec<f32> = (0..seq * d).map(|i| 0.4 + 0.05 * i as f32 % 0.5).collect();
+
+        let loss_of = |cc: &[f32], ff: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![seq, d]));
+            let fv = t.input(TensorND::new(ff.to_vec(), vec![seq, d]));
+            let o = hgrn(&t, cv, fv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let cv = t.input(TensorND::new(c.clone(), vec![seq, d]));
+        let fv = t.input(TensorND::new(f.clone(), vec![seq, d]));
+        let o = hgrn(&t, cv, fv);
+        let grads = t.backward(o.mul(o).sum());
+        let (gc, gf) = (grads[cv.idx()].clone(), grads[fv.idx()].clone());
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 2e-2,
+                    "HGRN grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gc, &c, &|p| loss_of(p, &f));
+        check(&gf, &f, &|p| loss_of(&c, p));
+    }
+
+    /// The `NdHgrn` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_hgrn_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(9);
+            let mut layer = NdHgrn::new(d, 0.0, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.7, "HGRN did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// LoRA at init equals the frozen base map (`B = 0` ⇒ `ΔW = 0`), and its
+    /// `A`/`B` gradients match finite differences; `parameters()` exposes only A,B.
+    #[test]
+    fn lora_starts_as_base_and_gradient_checks() {
+        let (in_f, out_f, r) = (4usize, 3usize, 2usize);
+        let mut rng = PcgEngine::new(2);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let x: Vec<f32> = (0..2 * in_f)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin())
+            .collect();
+
+        // At init (B = 0), LoRA forward == x · W exactly.
+        let mut lora = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut rng);
+        let t0 = NdTape::new();
+        let xv = t0.input(TensorND::new(x.clone(), vec![2, in_f]));
+        let y = t0.value(lora.forward(&t0, xv));
+        for b in 0..2
+        {
+            for o in 0..out_f
+            {
+                let mut base = 0f32;
+                for i in 0..in_f
+                {
+                    base += x[b * in_f + i] * w[i * out_f + o];
+                }
+                assert!(
+                    (y.data[b * out_f + o] - base).abs() < 1e-5,
+                    "LoRA init ≠ base"
+                );
+            }
+        }
+        assert_eq!(lora.parameters().len(), 2, "LoRA exposes only A and B");
+
+        // Gradient check on A and B (perturb after a few updates so B ≠ 0).
+        let a0 = lora.a.data.clone();
+        let mut b0 = lora.b.data.clone();
+        for v in b0.iter_mut()
+        {
+            *v = 0.1; // make B non-trivial for the check
+        }
+        let loss_of = |aa: &[f32], bb: &[f32]| -> f32 {
+            let mut lr = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut PcgEngine::new(2));
+            lr.a = TensorND::new(aa.to_vec(), vec![in_f, r]);
+            lr.b = TensorND::new(bb.to_vec(), vec![r, out_f]);
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(x.clone(), vec![2, in_f]));
+            let o = lr.forward(&t, xv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let mut lr = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut PcgEngine::new(2));
+        lr.a = TensorND::new(a0.clone(), vec![in_f, r]);
+        lr.b = TensorND::new(b0.clone(), vec![r, out_f]);
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![2, in_f]));
+        let o = lr.forward(&t, xv);
+        let grads = t.backward(o.mul(o).sum());
+        let (ga, gb) = (
+            grads[lr.a_idx.unwrap()].clone(),
+            grads[lr.b_idx.unwrap()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for k in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[k] += eps;
+                dn[k] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[k]).abs() < 2e-2,
+                    "LoRA grad {k}: {num} vs {}",
+                    analytic.data[k]
+                );
+            }
+        };
+        check(&ga, &a0, &|p| loss_of(p, &b0));
+        check(&gb, &b0, &|p| loss_of(&a0, p));
     }
 
     /// Gradient of the loss w.r.t. the layer **input** matches finite

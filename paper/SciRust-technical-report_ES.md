@@ -274,11 +274,11 @@ sigue en `docs/RESEARCH_ROADMAP.md`.
 - **Reducciones reproducibles**: suma/media/producto escalar independientes del
   orden, idénticas bit a bit sin importar el número de hilos.
 - **Inferencia**: decodificación especulativa exacta, FlashAttention con softmax
-  en línea por bloques, una capa DeltaNet de atención lineal con regla delta y una capa Mamba de espacio de estados selectivo.
+  en línea por bloques, una capa DeltaNet de atención lineal con regla delta, una capa Mamba de espacio de estados selectivo, una capa de retención RetNet, una capa de atención lineal con compuerta GLA y una capa de RNN lineal con compuerta HGRN.
 - **Puente científico**: una Neural ODE con retropropagación a través de RK4, y una red neuronal informada por la física (PINN) que coloca un residuo de EDP en la pérdida para resolver un problema de contorno.
 - **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
 
 Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap` (entrenar el LM decodificador N-D).
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (entrenar el LM decodificador N-D).
 
 Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.

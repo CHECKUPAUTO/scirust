@@ -218,7 +218,7 @@ const GROUPS: &[(&str, &[Command])] = &[
             },
             Command {
                 name: "lm",
-                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap]",
+                args: "[\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]",
                 about: "Train a tiny causal decoder LM (N-D tape) to recall a token sequence.",
             },
             Command {
@@ -230,6 +230,21 @@ const GROUPS: &[(&str, &[Command])] = &[
                 name: "mamba",
                 args: "[--seed N] [--steps S]",
                 about: "Train a Mamba selective state-space layer (S6 scan) to fit a sequence.",
+            },
+            Command {
+                name: "retnet",
+                args: "[--seed N] [--steps S]",
+                about: "Train a RetNet retention layer (linear attention, recurrent ≡ parallel) to fit a sequence.",
+            },
+            Command {
+                name: "gla",
+                args: "[--seed N] [--steps S]",
+                about: "Train a Gated Linear Attention layer (data-dependent forget gate) to fit a sequence.",
+            },
+            Command {
+                name: "hgrn",
+                args: "[--seed N] [--steps S]",
+                about: "Train an HGRN gated-linear-RNN token mixer (lower-bounded forget gate) to fit a sequence.",
             },
         ],
     ),
@@ -258,6 +273,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 name: "conformal",
                 args: "[--seed N] [--alpha A]",
                 about: "Split-conformal prediction intervals with a distribution-free coverage guarantee.",
+            },
+            Command {
+                name: "calibrate",
+                args: "[--seed N]",
+                about: "Temperature scaling: fit T to lower the expected calibration error (accuracy unchanged).",
             },
         ],
     ),
@@ -373,6 +393,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("som") => learning::run_som(rest),
         Some("certify") => learning::run_certify(rest),
         Some("conformal") => learning::run_conformal(rest),
+        Some("calibrate") => learning::run_calibrate(rest),
         Some("pinn") => learning::run_pinn(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),
@@ -410,6 +431,9 @@ pub fn run(args: &[String]) -> u8 {
         Some("lm") => nlp::run_lm(rest),
         Some("deltanet") => nlp::run_deltanet(rest),
         Some("mamba") => nlp::run_mamba(rest),
+        Some("retnet") => nlp::run_retnet(rest),
+        Some("gla") => nlp::run_gla(rest),
+        Some("hgrn") => nlp::run_hgrn(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -500,8 +524,12 @@ mod tests {
         assert_eq!(run(&s(&["lm", "1,2,3,1,2,3", "--steps", "10"])), 0);
         assert_eq!(run(&s(&["deltanet", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["mamba", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["retnet", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["gla", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["hgrn", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
+        assert_eq!(run(&s(&["calibrate", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["pinn", "--steps", "50"])), 0);
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);

@@ -4,6 +4,7 @@ pub mod activation;
 pub mod audio;
 pub mod batch_norm;
 pub mod batch_norm_2d;
+pub mod calibration;
 pub mod certified;
 pub mod conformal;
 pub mod conv2d;

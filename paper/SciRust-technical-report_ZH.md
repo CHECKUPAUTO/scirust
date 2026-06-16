@@ -267,11 +267,11 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 - **确定性优化器**：Adam、AdamW、Lion、Muon（Newton–Schulz）、Schedule-Free、AdEMAMix 与 SOAP（Shampoo 特征基中的 Adam）。
 - **可认证 AI**：区间界传播（IBP）**与 CROWN**（基于线性松弛的更紧界）给出可证明的输出界与鲁棒性证书。
 - **可复现归约**：与顺序无关的求和/均值/点积，无论线程数均按位相同。
-- **推理**：精确（保持输出）投机解码、分块在线 softmax 的 FlashAttention、DeltaNet 的 delta 规则线性注意力层，以及 Mamba 的选择性状态空间层。
+- **推理**：精确（保持输出）投机解码、分块在线 softmax 的 FlashAttention、DeltaNet 的 delta 规则线性注意力层、Mamba 的选择性状态空间层、RetNet 的保留层、GLA 的门控线性注意力层，以及 HGRN 的门控线性 RNN 层。
 - **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE，以及将 PDE 残差放入损失以求解边值问题的物理信息神经网络（PINN）。
 - **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant，以及 GPTQ（二阶误差反馈的 int8 权重量化，CLI `scirust gptq`）和 AWQ（感知激活的基于搜索的 int8 权重量化，CLI `scirust awq`）。
 
 两个 CLI 命令暴露了这些工作：`scirust certify`（IBP **与 CROWN** 界并排显示、鲁棒性）与
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap`（训练 N-D 解码器语言模型）。
+`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（训练 N-D 解码器语言模型）。
 
 第三个命令 `scirust conformal` 生成具有保证覆盖率的保形预测区间（无分布假设）。

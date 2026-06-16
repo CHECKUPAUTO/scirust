@@ -3,6 +3,99 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-15
 
+## Session 2026-06-16 — volet 51 : HGRN (#58) — RNN linéaire gaté
+- `nn::nd_layers::hgrn` + `NdHgrn` (Qin 2023) : intégration leaky par canal
+  (hₜ=fₜ⊙h+ (1−fₜ)⊙cₜ), porte d'oubli bornée f=lb+(1−lb)σ(·). Pas d'état
+  matriciel ; déroulé sur la tape (réutilise cat0 + sub via tenseur ones).
+- CLI : `hgrn [--seed N] [--steps S]` (en direct, seed 9/150 : MSE 27.37→4.59).
+  51 commandes.
+- Tests : match référence Vec ; gradient check (c,f) ; couche entraîne (< 0.7×) +
+  déterminisme.
+- docs : roadmap #58 📋→✅ ; README stack ; REFERENCE hgrn ; GROWTH_PLAN 51 ;
+  CHANGELOG. Multilingue (hgrn) : lot suivant.
+- 854 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 50 : GLA (#55) — attention linéaire gatée
+- `nn::nd_layers::gated_linear_attention` + `NdGla` (Yang 2024) : porte d'oubli
+  par canal dépendante de l'entrée α=σ(·) (S_t=diag(α)S_{t-1}+kᵀv, o_t=qS),
+  déroulée sur la tape (réutilise cat0).
+- CLI : `gla [--seed N] [--steps S]` (en direct, seed 8/150 : MSE 27.16→0.0000).
+  50 commandes.
+- Tests : match référence Vec ; gradient check (q,k,v,α) ; couche entraîne +
+  déterminisme.
+- docs : roadmap #55 📋→✅ ; README stack ; REFERENCE gla ; GROWTH_PLAN 50 ;
+  CHANGELOG. Multilingue (gla) : lot suivant.
+- 851 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 49 : RetNet (#54) — rétention (séquence)
+- `nn::nd_layers::retention` + `NdRetention` (Sun 2023) : attention linéaire
+  récurrente à décroissance γ (S_t=γS_{t-1}+kᵀv, o_t=qS), déroulée sur la tape
+  (réutilise cat0).
+- CLI : `retnet [--seed N] [--steps S]` (en direct, seed 6/150 : MSE 24.63→0.0002).
+  49 commandes.
+- Tests : **oracle de dualité** récurrent ≡ parallèle (QKᵀ⊙D)V ; gradient check
+  (q,k,v) ; couche entraîne + déterminisme.
+- docs : roadmap #54 📋→✅ ; README stack ; REFERENCE retnet ; GROWTH_PLAN 49 ;
+  CHANGELOG. Multilingue (retnet) : lot suivant.
+- 848 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 48 : LAMB (#43) + Adan (#49) — optimiseurs
+- `nn::nd_optim::NdLamb` (You 2020) : Adam + ratio de confiance ‖θ‖/‖r‖ par
+  tenseur. `NdAdan` (Xie 2022) : Nesterov adaptatif (3 EMA m,v,n + g_prev).
+- CLI : `lm --opt lamb|adan` (8e/9e variantes). `--opt` mis à jour dans les 16
+  fichiers + code.
+- Tests : LAMB converge dans une bande (∝ lr — pas de norme ≈ lr·‖θ‖, comme les
+  méthodes par signe) + déterminisme ; Adan converge sur quadratique + déterminisme.
+- docs : roadmap #43,#49 📋→✅ ; README optimiseurs ; CHANGELOG.
+- 845 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 47 : LoRA (#72) — couche PEFT low-rank
+- `nn::nd_layers::LoraLinear` (Hu 2022) : base W gelée + ΔW=(α/r)·A·B ; seuls A,B
+  entraînés ; B=0 init ⇒ = base. Couche de la tape (forward sur le dernier axe).
+- Couche de bibliothèque (pas de commande CLI dédiée — comme RMSNorm/SwiGLU) ;
+  exposée + testée.
+- Tests : init = base (== x·W), gradient check sur A et B, parameters() = {A,B}.
+- docs : roadmap #72 📋→✅ ; README couches ; CHANGELOG.
+- 843 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 46 : Temperature scaling / calibration (#39)
+- `nn::calibration` (Guo 2017) : `temperature_scale` (golden-section sur NLL),
+  `expected_calibration_error`, `nll`. Recalibration post-hoc sans changer
+  l'argmax (accuracy). Déterministe.
+- CLI : nouveau `calibrate [--seed N]` dans le groupe INFERENCE INTEGRITY (avec
+  certify/conformal). 48 commandes. En direct : ECE 0.29→0.004 (−98,5 %), T=2,70.
+- Tests : ECE baisse + accuracy inchangée + déterminisme.
+- docs : roadmap #39 📋→✅ ; README certifiable ; REFERENCE calibrate ;
+  GROWTH_PLAN 48 ; CHANGELOG. Multilingue (ligne CLI `calibrate`) : lot suivant.
+- 842 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 45 : Lookahead (#45) — 1er du pool de candidats
+- `nn::nd_optim::NdLookahead` (Zhang 2019) : wrapper poids lents/rapides autour
+  d'Adam (k pas rapides, sync φ←φ+α(θ−φ), θ←φ). Déterministe.
+- CLI : `lm --opt lookahead` (7e variante d'opt). `--opt` mis à jour dans les 16
+  fichiers (code + Documentation×8 + paper×8) par sed (token script-agnostique).
+- Tests : convergence quadratique, déterminisme bit-à-bit.
+- docs : roadmap #45 📋→✅ ; README optimiseurs ; CHANGELOG.
+- Cadence pool : code+test+CLI+roadmap+CHANGELOG/LIVESTATE+README/REFERENCE par
+  item ; les bullets prose multilingues d'optimiseurs seront rafraîchies en lot
+  après quelques optimiseurs (le `--opt` suffit à l'exposition CLI multilingue).
+- 840 tests ; 8 gates verts (à confirmer).
+
+## Session 2026-06-16 — volet 44 : recherche ~55 papers → roadmap (Tier 8-14)
+- Ajout de **55 candidats vérifiés** (#26-#80) dans `docs/RESEARCH_ROADMAP.md`,
+  arXiv vérifié par recherche web, chacun traduit en fonction scirust concrète +
+  module + effort, tous 📋 (au standard test/oracle + 8 gates).
+- Tiers : 8 vérification/robustesse certifiée (GCP-CROWN, randomized smoothing,
+  DeepPoly, AI², CROWN-IBP, MILP, Lipschitz) · 9 conformal/incertitude (CQR, APS,
+  RAPS, RCPS, LtT, ACI, temp-scaling, deep ensembles) · 10 optimiseurs (Shampoo,
+  Adafactor, LAMB, Sophia, Lookahead, Prodigy, SAM, GaLore, Adan) · 11 séquence
+  (Mamba-2, S4/S5, RWKV, RetNet, GLA, Hyena, xLSTM, HGRN, ALiBi, YaRN) · 12
+  décodage (Medusa, EAGLE, PagedAttention) · 13 quantif (QuIP#, OmniQuant,
+  SqueezeLLM, SpQR, KVQuant, BitNet b1.58, AQLM, LLM.int8, LoRA, DoRA, NF4) ·
+  14 scientifique/audit (FNO, DeepONet, KAN, Rényi-DP, watermark LLM, ZK-ML).
+- « Ordre d'attaque » mis à jour : pool de candidats trié par tractabilité.
+- Docs uniquement (roadmap) ; gates Rust inchangés (838 tests).
+
 ## Session 2026-06-15 — volet 43 : PINN (#17) + CLI/doc
 - `nn::pinn` (`Pinn1D` MLP 1→16→16→1 sigmoid, `solve_harmonic`) (Raissi 2019) :
   résout u''=−u, u(0)=0, u(π/2)=1 (= sin x) ; résidu PDE par différences finies
