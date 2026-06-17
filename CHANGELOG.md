@@ -6,6 +6,15 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Adafactor** (`nn::nd_optim::NdAdafactor` + `AdafactorConfig`, Shazeer & Stern
+  2018, roadmap #42) : optimiseur à **moments du 2e ordre factorisés** — pour une
+  matrice de poids, ne stocke que les sommes **ligne** et **colonne** du carré du
+  gradient (`rows + cols` nombres au lieu de `rows·cols`) et reconstruit la rank-1
+  `V[i,j] = R[i]·C[j]/ΣR` (mémoire sous-linéaire). Update `G/√V` **clippé en RMS** ;
+  planning `β2ₜ = 1 − t^(−0.8)`. Paramètres non-matriciels : 2e moment complet
+  (RMSProp). Oracle : reconstruction rang-1 **exacte** quand `G²` est rang-1 +
+  convergence (bande) + chemin matriciel factorisé qui réduit `½‖W−T‖²` +
+  déterminisme. CLI : `scirust lm --opt adafactor` (10e valeur `--opt`).
 - **NF4** (`quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS`, QLoRA,
   Dettmers et al. 2023, roadmap #74) : type 4-bit **NormalFloat** — 16 niveaux qui
   sont les **quantiles d'une normale** (échelle absmax par bloc). Optimal pour des

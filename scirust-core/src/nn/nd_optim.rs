@@ -1312,6 +1312,249 @@ impl NdAdan {
     }
 }
 
+/// Reconstruct Adafactor's factored second-moment estimate from its row/column
+/// accumulators: `V[i,j] = R[i]·C[j] / ΣR`. This is the rank-1 matrix that
+/// preserves the row and column sums of the true squared-gradient matrix — the
+/// memory-saving core of the method. For a `rows×cols` weight it needs only
+/// `rows + cols` numbers of state instead of `rows·cols`. The reconstruction is
+/// **exact** whenever the squared-gradient matrix is itself rank-1.
+fn adafactor_factored_v(r: &[f32], c: &[f32]) -> Vec<f32> {
+    let cols = c.len();
+    let sum_r: f32 = r.iter().sum();
+    let inv = if sum_r > 0.0 { 1.0 / sum_r } else { 0.0 };
+    let mut v = vec![0.0f32; r.len() * cols];
+    for (i, &ri) in r.iter().enumerate()
+    {
+        for (j, &cj) in c.iter().enumerate()
+        {
+            v[i * cols + j] = ri * cj * inv;
+        }
+    }
+    v
+}
+
+/// Hyper-parameters for [`NdAdafactor`]. Defaults follow Shazeer & Stern (2018):
+/// the β2 schedule `β2ₜ = 1 − t^(−decay_rate)` with `decay_rate = 0.8`,
+/// `eps1 = 1e-30` (added to the squared gradient), update-RMS clip threshold
+/// `d = 1.0`, **no** first moment (`beta1 = 0`), no weight decay. `lr` is an
+/// **absolute** step size (equivalent to `relative_step = false,
+/// scale_parameter = false` in common implementations).
+#[derive(Clone, Copy, Debug)]
+pub struct AdafactorConfig {
+    /// Learning rate (absolute step size).
+    pub lr: f32,
+    /// Exponent of the β2 schedule `β2ₜ = 1 − t^(−decay_rate)`.
+    pub decay_rate: f32,
+    /// Regulariser added to the squared gradient.
+    pub eps1: f32,
+    /// Update-RMS clipping threshold `d` (the update is scaled so `RMS ≤ d`).
+    pub clip_threshold: f32,
+    /// Optional first-moment decay (`0` = canonical Adafactor, no momentum).
+    pub beta1: f32,
+    /// Decoupled weight decay (0 = none).
+    pub weight_decay: f32,
+}
+
+impl Default for AdafactorConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-2,
+            decay_rate: 0.8,
+            eps1: 1e-30,
+            clip_threshold: 1.0,
+            beta1: 0.0,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// Per-parameter Adafactor state. Matrix parameters carry the factored row/column
+/// accumulators (`r`, `c`); other parameters keep a full second moment (`v`).
+struct AdafactorState {
+    is_matrix: bool,
+    rows: usize,
+    cols: usize,
+    r: Vec<f32>,
+    c: Vec<f32>,
+    v: Vec<f32>,
+    m: Vec<f32>,
+}
+
+/// **Adafactor** (Shazeer & Stern, ICML 2018): *Adaptive Learning Rates with
+/// Sublinear Memory Cost*. For a 2-D weight matrix it does **not** store the full
+/// second-moment matrix; instead it keeps per-row and per-column running sums of
+/// the squared gradient (`rows + cols` numbers) and reconstructs the second
+/// moment as the rank-1 `V[i,j] = R[i]·C[j]/ΣR`. The raw update `G/√V` is then
+/// **RMS-clipped** to a fixed threshold `d`. Non-matrix parameters keep the full
+/// second moment (like RMSProp). A β2 schedule `β2ₜ = 1 − t^(−decay_rate)`
+/// increases the averaging over training. An optional first moment (`beta1`) is
+/// supported (off by default). Pure `f32` in a fixed order ⇒ **bit-for-bit
+/// deterministic**.
+pub struct NdAdafactor {
+    cfg: AdafactorConfig,
+    t: u64,
+    state: Vec<AdafactorState>,
+}
+
+impl NdAdafactor {
+    /// New optimizer with the given config (no steps taken yet).
+    pub fn new(cfg: AdafactorConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            state: Vec::new(),
+        }
+    }
+
+    /// Adafactor with default schedule/clipping at absolute learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(AdafactorConfig {
+            lr,
+            ..AdafactorConfig::default()
+        })
+    }
+
+    /// Steps taken so far (drives the β2 schedule).
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One Adafactor update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.state.is_empty() && !params.is_empty()
+        {
+            let beta1 = self.cfg.beta1;
+            self.state = params
+                .iter()
+                .map(|p| {
+                    let shape = &p.value.shape;
+                    let len = p.value.data.len();
+                    let m = if beta1 > 0.0
+                    {
+                        vec![0.0; len]
+                    }
+                    else
+                    {
+                        Vec::new()
+                    };
+                    if shape.len() == 2 && shape[0] >= 2 && shape[1] >= 2
+                    {
+                        AdafactorState {
+                            is_matrix: true,
+                            rows: shape[0],
+                            cols: shape[1],
+                            r: vec![0.0; shape[0]],
+                            c: vec![0.0; shape[1]],
+                            v: Vec::new(),
+                            m,
+                        }
+                    }
+                    else
+                    {
+                        AdafactorState {
+                            is_matrix: false,
+                            rows: 0,
+                            cols: 0,
+                            r: Vec::new(),
+                            c: Vec::new(),
+                            v: vec![0.0; len],
+                            m,
+                        }
+                    }
+                })
+                .collect();
+        }
+        assert_eq!(
+            self.state.len(),
+            params.len(),
+            "NdAdafactor: parameter count changed between steps"
+        );
+        self.t += 1;
+        let cfg = self.cfg;
+        let beta2 = 1.0 - (self.t as f32).powf(-cfg.decay_rate);
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            assert_eq!(
+                g.len(),
+                p.value.data.len(),
+                "NdAdafactor: grad/param size mismatch at parameter {k}"
+            );
+            let st = &mut self.state[k];
+
+            // 1) Second-moment estimate V, then the raw update U = G/√V.
+            let mut u = vec![0.0f32; g.len()];
+            if st.is_matrix
+            {
+                let cols = st.cols;
+                let mut row_sum = vec![0.0f32; st.rows];
+                let mut col_sum = vec![0.0f32; cols];
+                for (i, row) in g.chunks_exact(cols).enumerate()
+                {
+                    for (j, &gij) in row.iter().enumerate()
+                    {
+                        let g2 = gij * gij + cfg.eps1;
+                        row_sum[i] += g2;
+                        col_sum[j] += g2;
+                    }
+                }
+                for (ri, &rs) in st.r.iter_mut().zip(&row_sum)
+                {
+                    *ri = beta2 * *ri + (1.0 - beta2) * rs;
+                }
+                for (ci, &cs) in st.c.iter_mut().zip(&col_sum)
+                {
+                    *ci = beta2 * *ci + (1.0 - beta2) * cs;
+                }
+                let v = adafactor_factored_v(&st.r, &st.c);
+                for (ui, (&gi, &vi)) in u.iter_mut().zip(g.iter().zip(&v))
+                {
+                    *ui = gi / vi.sqrt();
+                }
+            }
+            else
+            {
+                for (vi, &gi) in st.v.iter_mut().zip(g)
+                {
+                    *vi = beta2 * *vi + (1.0 - beta2) * (gi * gi + cfg.eps1);
+                }
+                for (ui, (&gi, &vi)) in u.iter_mut().zip(g.iter().zip(&st.v))
+                {
+                    *ui = gi / vi.sqrt();
+                }
+            }
+
+            // 2) RMS-clip the update so RMS(U) ≤ clip_threshold.
+            let rms = (u.iter().map(|&x| x * x).sum::<f32>() / u.len() as f32).sqrt();
+            let denom = (rms / cfg.clip_threshold).max(1.0);
+            if denom > 1.0
+            {
+                for ui in u.iter_mut()
+                {
+                    *ui /= denom;
+                }
+            }
+
+            // 3) Optional first-moment smoothing.
+            if cfg.beta1 > 0.0
+            {
+                for (mi, ui) in st.m.iter_mut().zip(u.iter_mut())
+                {
+                    *mi = cfg.beta1 * *mi + (1.0 - cfg.beta1) * *ui;
+                    *ui = *mi;
+                }
+            }
+
+            // 4) Step with decoupled weight decay.
+            for (pv, &ui) in p.value.data.iter_mut().zip(&u)
+            {
+                *pv -= cfg.lr * (ui + cfg.weight_decay * *pv);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1969,5 +2212,100 @@ mod tests {
             assert!((xi - ti).abs() < 0.1, "Adan off: {xi} vs {ti}");
         }
         assert_eq!(run(), x);
+    }
+
+    /// Adafactor's factored reconstruction `V[i,j] = R[i]·C[j]/ΣR` is **exact**
+    /// when the squared-gradient matrix is itself rank-1 (the best case for the
+    /// sublinear-memory trick): build `G²` as an outer product `a⊗b`, feed its
+    /// row and column sums in, and recover `G²` to floating-point tolerance.
+    #[test]
+    fn adafactor_factored_v_reconstructs_rank1() {
+        let (rows, cols) = (3usize, 4usize);
+        let a = [0.5f32, 1.5, 2.0];
+        let b = [0.3f32, 0.7, 1.1, 0.2];
+        let mut g2 = vec![0.0f32; rows * cols];
+        let mut r = vec![0.0f32; rows];
+        let mut c = vec![0.0f32; cols];
+        for (i, &ai) in a.iter().enumerate()
+        {
+            for (j, &bj) in b.iter().enumerate()
+            {
+                let val = ai * bj;
+                g2[i * cols + j] = val;
+                r[i] += val;
+                c[j] += val;
+            }
+        }
+        let v = adafactor_factored_v(&r, &c);
+        for (vi, gi) in v.iter().zip(&g2)
+        {
+            assert!((vi - gi).abs() < 1e-5, "factored V off: {vi} vs {gi}");
+        }
+    }
+
+    /// Adafactor (vector path = RMSProp-with-schedule + update clipping) minimises
+    /// the quadratic oracle to within a small band of the target, and is
+    /// bit-for-bit deterministic. Like other RMS-/sign-scaled methods the clipped
+    /// update settles in a band ∝ `lr`, so we use a small `lr`.
+    #[test]
+    fn nd_adafactor_converges_and_is_deterministic() {
+        let target = [1.0f32, -0.8, 0.5];
+        let run = || {
+            let mut opt = NdAdafactor::with_lr(0.02);
+            quad_run(&target, 2000, |p, g| opt.step(p, g))
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "Adafactor off: {xi} vs {ti}");
+        }
+        assert_eq!(run(), x);
+        assert_eq!(
+            {
+                let mut o = NdAdafactor::with_lr(0.02);
+                let _ = quad_run(&target, 3, |p, g| o.step(p, g));
+                o.step_count()
+            },
+            3
+        );
+    }
+
+    /// Adafactor's **factored** matrix path reduces a convex matrix quadratic
+    /// `½‖W − T‖²` (gradient `W − T`): the rank-1 second-moment reconstruction
+    /// still yields a descent direction, so the loss collapses. Exercises the
+    /// row/column accumulators on a 2-D parameter.
+    #[test]
+    fn nd_adafactor_matrix_path_reduces_loss() {
+        let (rows, cols) = (4usize, 3usize);
+        let target: Vec<f32> = (0..rows * cols)
+            .map(|k| (k as f32 * 0.5 - 2.0).sin())
+            .collect();
+        let mut w = TensorND::new(vec![0.0; rows * cols], vec![rows, cols]);
+        let mut opt = NdAdafactor::with_lr(0.05);
+        let loss = |w: &TensorND| -> f32 {
+            w.data
+                .iter()
+                .zip(&target)
+                .map(|(&a, &b)| 0.5 * (a - b) * (a - b))
+                .sum()
+        };
+        let first = loss(&w);
+        for _ in 0..1500
+        {
+            let gd: Vec<f32> = w.data.iter().zip(&target).map(|(&a, &b)| a - b).collect();
+            let grads = vec![TensorND::new(gd, vec![rows, cols])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut w,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        let last = loss(&w);
+        assert!(
+            last < first * 0.05,
+            "Adafactor matrix path did not reduce loss: {first} -> {last}"
+        );
     }
 }

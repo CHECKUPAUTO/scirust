@@ -1,7 +1,19 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-15
+> Dernière mise à jour : 2026-06-17
+
+## Session 2026-06-17 — volet 54 : Adafactor (#42) — moments 2e ordre factorisés
+- `nn::nd_optim::NdAdafactor` + `AdafactorConfig` (Shazeer & Stern 2018) : pour une
+  matrice, sommes ligne/colonne du carré du gradient (mémoire `rows+cols`),
+  reconstruction rang-1 `V[i,j]=R[i]·C[j]/ΣR` ; update `G/√V` clippé en RMS ;
+  planning β2ₜ=1−t^(−0.8). Vecteurs : 2e moment complet (RMSProp).
+- CLI : `lm --opt adafactor` (10e valeur `--opt`).
+- Tests (3, core) : reconstruction rang-1 exacte ; convergence (bande) +
+  déterminisme ; chemin matriciel factorisé réduit ½‖W−T‖².
+- docs : roadmap #42 📋→✅ ; 8 Documentation (ligne `--opt`) ; REFERENCE (liste
+  `--opt` complétée lookahead/lamb/adan/adafactor) ; CHANGELOG.
+- 497 tests core (+3) ; 8 gates verts (à confirmer).
 
 ## Session 2026-06-16 — volet 53 : NF4 (#74) — NormalFloat 4-bit
 - `quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS` (QLoRA, Dettmers
