@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 60 : SpQR (#67) — sparse-quantized (outliers fp)
+- `quantization::SpqrOutliers` (Dettmers 2023) : garde la fraction d'outliers (plus
+  grosses erreurs |w−q|) en fp, reste en dense ; reconstruction = dense + outliers.
+- Bibliothèque seule (comme NF4/SqueezeLLM ; pas de CLI ni multilingue). Scales
+  groupés bi-niveaux non modélisés.
+- Tests (2, core) : erreur lourde-queue (gaussien + outliers ±12 clampés) divisée
+  > 3× en gardant 1 % ; reconstruction n'augmente jamais l'erreur + déterminisme.
+- docs : roadmap #67 📋→✅ ; CHANGELOG. 511 tests core (+2) ; 8 gates (à confirmer).
+- Note : Randomized Smoothing (#27, `nn::smoothing`) repéré comme prochain gros
+  item (Clopper-Pearson ⇒ betai/lgamma/probit ; oracle exact halfspace R=distance).
+
 ## Session 2026-06-17 — volet 59 : SqueezeLLM (#66) — quantif non-uniforme sensible
 - `quantization::SqueezeLlmCodebook` + `weighted_quant_error` (Kim 2023) : codebook
   `2^bits` par k-means **pondéré sensibilité** (proxy Hessien diag.) ; init quantile

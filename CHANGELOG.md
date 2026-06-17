@@ -6,6 +6,15 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **SpQR — Sparse-Quantized Representation** (`quantization::SpqrOutliers`,
+  Dettmers et al. 2023, roadmap #67) : l'erreur de quantification est à **queue
+  lourde** — une petite fraction de poids « outliers » concentre l'essentiel de
+  l'erreur. SpQR garde cette fraction (les plus grosses erreurs de quantif dense)
+  en **pleine précision** (canal creux) et quantifie le reste densément, donc ~1 %
+  d'outliers retire une grande part de l'erreur pour un faible surcoût mémoire.
+  Oracle : sur poids gaussiens + outliers injectés, garder 1 % des poids divise
+  l'erreur quadratique par > 3 ; reconstruction exacte des outliers ; déterminisme.
+  Couche de bibliothèque (les scales groupés bi-niveaux du papier sont orthogonaux).
 - **SqueezeLLM** (`quantization::SqueezeLlmCodebook` + `weighted_quant_error`, Kim
   et al. 2023, roadmap #66) : quantification **non-uniforme** des poids par
   **k-means pondéré par la sensibilité** (proxy de la diagonale de la Hessienne)

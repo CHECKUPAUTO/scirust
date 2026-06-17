@@ -1375,6 +1375,132 @@ mod tests_squeezellm {
     }
 }
 
+// ----- SpQR : sparse-quantized representation (outliers en fp) (#67) -----------
+
+/// **SpQR** — Sparse-Quantized Representation (Dettmers et al. 2023,
+/// arXiv:2306.03078). Weight-quantization error is **heavy-tailed**: a small
+/// fraction of "outlier" weights account for most of the loss. SpQR keeps that
+/// fraction in **full precision** (a sparse side-channel) and quantizes the rest
+/// densely, so a ~1 % outlier budget removes a large share of the error at a small
+/// memory overhead. This models the sparse-outlier core (the paper's bi-level
+/// grouped scales are orthogonal). Deterministic: outliers are the largest
+/// dense-quantization errors, ties broken by index.
+pub struct SpqrOutliers {
+    indices: Vec<usize>,
+    values: Vec<f32>,
+}
+
+impl SpqrOutliers {
+    /// Extract the `outlier_frac` (in `[0,1]`) fraction of weights whose dense
+    /// quantization error `|w − q|` is largest, storing their exact fp values.
+    pub fn extract(weights: &[f32], quantized: &[f32], outlier_frac: f32) -> Self {
+        assert_eq!(
+            weights.len(),
+            quantized.len(),
+            "SpQR: weights/quantized length mismatch"
+        );
+        assert!(
+            (0.0..=1.0).contains(&outlier_frac),
+            "SpQR: outlier_frac must be in [0,1]"
+        );
+        let n = weights.len();
+        let k = ((n as f32) * outlier_frac).round() as usize;
+        // Rank indices by descending |w − q| (ties → lower index for determinism).
+        let mut idx: Vec<usize> = (0..n).collect();
+        idx.sort_by(|&a, &b| {
+            let ea = (weights[a] - quantized[a]).abs();
+            let eb = (weights[b] - quantized[b]).abs();
+            eb.total_cmp(&ea).then(a.cmp(&b))
+        });
+        let mut indices: Vec<usize> = idx.into_iter().take(k).collect();
+        indices.sort_unstable();
+        let values = indices.iter().map(|&i| weights[i]).collect();
+        Self { indices, values }
+    }
+
+    /// Reconstruct: the dense `quantized` weights with the stored outliers
+    /// overwritten by their exact fp values.
+    pub fn reconstruct(&self, quantized: &[f32]) -> Vec<f32> {
+        let mut out = quantized.to_vec();
+        for (&i, &v) in self.indices.iter().zip(&self.values)
+        {
+            out[i] = v;
+        }
+        out
+    }
+
+    /// Number of full-precision outliers kept.
+    pub fn num_outliers(&self) -> usize {
+        self.indices.len()
+    }
+}
+
+#[cfg(test)]
+mod tests_spqr {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// Dense baseline: uniform int-`bits` round-to-nearest **clipped** to a fixed
+    /// `[lo, hi]` range (so out-of-range outliers incur a large clamp error).
+    fn rtn_clip(w: &[f32], bits: u32, lo: f32, hi: f32) -> Vec<f32> {
+        let k = 1usize << bits;
+        let step = (hi - lo) / (k as f32 - 1.0);
+        w.iter()
+            .map(|&x| {
+                let idx = ((x.clamp(lo, hi) - lo) / step).round();
+                lo + idx * step
+            })
+            .collect()
+    }
+
+    /// **The SpQR insight, tested.** Quantization error is heavy-tailed: a few
+    /// large-magnitude weights, clamped by the dense grid, dominate the squared
+    /// error. Keeping just **1 %** of weights (the largest errors) in full
+    /// precision cuts the total error by far more than 1 %.
+    #[test]
+    fn spqr_outliers_slash_heavy_tailed_error() {
+        let mut rng = PcgEngine::new(13);
+        let n = 2000usize;
+        // Bulk ~ sum of two uniforms ∈ [−2, 2]; inject 20 large outliers (±12).
+        let mut w: Vec<f32> = (0..n)
+            .map(|_| rng.float_signed() + rng.float_signed())
+            .collect();
+        for j in 0..(n / 100)
+        {
+            w[j * 100] = if j % 2 == 0 { 12.0 } else { -12.0 };
+        }
+        let q = rtn_clip(&w, 4, -3.0, 3.0);
+        let e_dense: f32 = w.iter().zip(&q).map(|(&a, &b)| (a - b) * (a - b)).sum();
+        let spqr = SpqrOutliers::extract(&w, &q, 0.01);
+        let recon = spqr.reconstruct(&q);
+        let e_spqr: f32 = w.iter().zip(&recon).map(|(&a, &b)| (a - b) * (a - b)).sum();
+        assert_eq!(spqr.num_outliers(), 20);
+        assert!(
+            e_spqr < 0.3 * e_dense,
+            "SpQR did not cut heavy-tailed error: dense={e_dense}, spqr={e_spqr}"
+        );
+    }
+
+    /// Reconstruction overwrites outliers with exact fp (error never increases),
+    /// and extraction is deterministic.
+    #[test]
+    fn spqr_reconstruction_and_determinism() {
+        let w: Vec<f32> = (0..50).map(|i| (i as f32 * 0.3).sin() * 3.0).collect();
+        let q: Vec<f32> = w.iter().map(|&x| x.round()).collect();
+        let a = SpqrOutliers::extract(&w, &q, 0.2);
+        let b = SpqrOutliers::extract(&w, &q, 0.2);
+        assert_eq!(a.reconstruct(&q), b.reconstruct(&q)); // determinism
+        assert_eq!(a.num_outliers(), 10);
+        let recon = a.reconstruct(&q);
+        let e_dense: f32 = w.iter().zip(&q).map(|(&x, &y)| (x - y) * (x - y)).sum();
+        let e_spqr: f32 = w.iter().zip(&recon).map(|(&x, &y)| (x - y) * (x - y)).sum();
+        assert!(
+            e_spqr <= e_dense,
+            "SpQR increased error: {e_dense} -> {e_spqr}"
+        );
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
