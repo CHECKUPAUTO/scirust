@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 71 : LLM.int8() (#71) — matmul mixte int8/fp32
+- `quantization::int8_mixed_matmul` (Dettmers 2022) : colonnes de features outliers
+  (>seuil) en fp32, reste en int8 ; X·W = int8(normal) + fp32(outlier). Réutilise
+  compute_scale/quantize_tensor/matmul_int8.
+- Bibliothèque seule (pas de CLI ni multilingue).
+- Tests (2, core) : erreur vs fp < 0,5× int8 simple (activations à outliers ×75) ;
+  sans outliers = int8 pur ; déterminisme.
+- docs : roadmap #71 📋→✅ ; CHANGELOG. 538 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 70 : fix SIMD — bug d'alignement (corrigé)
 - `scirust-simd::portable` : `add_f32/f64_inplace`, `dot_f32/f64`, `fma_f32`
   découpaient chaque opérande indépendamment (`as_simd`) ⇒ lanes décalées si

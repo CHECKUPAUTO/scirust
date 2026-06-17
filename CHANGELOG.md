@@ -19,6 +19,17 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **LLM.int8()** (`quantization::int8_mixed_matmul`, Dettmers et al. 2022, roadmap
+  #71) : matmul mixte int8/fp32. Les activations des transformeurs ont quelques
+  **colonnes de features outliers** de très grande magnitude ; les quantifier en
+  int8 avec le reste gonfle l'échelle et écrase la résolution des features
+  normales. LLM.int8() garde ces colonnes (et les lignes de W correspondantes) en
+  **pleine précision** et quantifie le reste en **int8** :
+  `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. Une colonne est
+  outlier si un `|X[i,j]|` dépasse le seuil (défaut 6.0). Oracle : sur des
+  activations à colonnes outliers, l'erreur vs fp est **< 0,5×** celle de l'int8
+  simple ; sans outliers, se réduit à l'int8 pur ; déterminisme. Couche de
+  bibliothèque.
 - **RCPS — Risk-Controlling Prediction Sets** (`nn::conformal::hoeffding_ucb` +
   `rcps_select`, Bates et al. 2021, roadmap #36) : là où le conformal contrôle la
   *couverture*, RCPS contrôle un **risque borné quelconque** (perte dans [0,1] :

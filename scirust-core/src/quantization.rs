@@ -1689,6 +1689,160 @@ mod tests_kvquant {
     }
 }
 
+// ----- LLM.int8() : décomposition mixte int8 / fp16 (#71) ----------------------
+
+/// **LLM.int8()** (Dettmers et al., NeurIPS 2022): a mixed-precision matmul
+/// `X·W` (`X` is `m×k`, `W` is `k×n`). Transformer activations have a few
+/// **outlier feature columns** of huge magnitude; quantizing them with everything
+/// else to int8 inflates the scale and crushes the resolution of the normal
+/// features. LLM.int8() keeps those columns (and the matching `W` rows) in **full
+/// precision** and quantizes the rest to **int8**:
+/// `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. A column is an
+/// outlier if any `|X[i,j]|` exceeds `threshold` (the paper's default is 6.0). The
+/// int8 scale, computed with the outliers removed, then resolves the bulk finely,
+/// so the result is close to fp while most of the matmul stays integer.
+pub fn int8_mixed_matmul(
+    x: &[f32],
+    w: &[f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    threshold: f32,
+) -> Vec<f32> {
+    assert_eq!(x.len(), m * k, "int8_mixed_matmul: X size mismatch");
+    assert_eq!(w.len(), k * n, "int8_mixed_matmul: W size mismatch");
+    // Outlier feature columns of X (any row exceeds the threshold).
+    let outlier: Vec<bool> = (0..k)
+        .map(|j| (0..m).any(|i| x[i * k + j].abs() > threshold))
+        .collect();
+
+    // int8 path: X and W with the outlier columns / rows zeroed (so the scale
+    // reflects the normal range and the zeros contribute nothing to the product).
+    let mut x_int = x.to_vec();
+    let mut w_int = w.to_vec();
+    for (j, &is_out) in outlier.iter().enumerate()
+    {
+        if is_out
+        {
+            for i in 0..m
+            {
+                x_int[i * k + j] = 0.0;
+            }
+            for l in 0..n
+            {
+                w_int[j * n + l] = 0.0;
+            }
+        }
+    }
+    let sx = compute_scale(&x_int);
+    let sw = compute_scale(&w_int);
+    let acc = matmul_int8(
+        &quantize_tensor(&x_int, sx),
+        &quantize_tensor(&w_int, sw),
+        m,
+        k,
+        n,
+    );
+    let mut out: Vec<f32> = acc.iter().map(|&a| a as f32 * sx * sw).collect();
+
+    // fp32 path: add the exact contribution of the outlier columns.
+    for (j, &is_out) in outlier.iter().enumerate()
+    {
+        if is_out
+        {
+            for i in 0..m
+            {
+                let xij = x[i * k + j];
+                for l in 0..n
+                {
+                    out[i * n + l] += xij * w[j * n + l];
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests_llm_int8 {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    fn naive_matmul(x: &[f32], w: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for l in 0..n
+            {
+                let mut s = 0.0f32;
+                for j in 0..k
+                {
+                    s += x[i * k + j] * w[j * n + l];
+                }
+                out[i * n + l] = s;
+            }
+        }
+        out
+    }
+
+    /// **The LLM.int8() insight, tested.** With a few outlier feature columns,
+    /// plain int8 (quantize everything) loses huge accuracy — the outliers set the
+    /// scale and crush the bulk. The mixed decomposition keeps the outliers in fp32
+    /// and is far closer to the fp result. Deterministic.
+    #[test]
+    fn int8_mixed_beats_plain_int8() {
+        let mut rng = PcgEngine::new(23);
+        let (m, k, n) = (6usize, 16usize, 8usize);
+        let mut x = vec![0.0f32; m * k];
+        for i in 0..m
+        {
+            for j in 0..k
+            {
+                let v = rng.float_signed();
+                // Columns 3 and 10 are outlier features (≈ ×75 the bulk).
+                x[i * k + j] = if j == 3 || j == 10 { v * 30.0 } else { v * 0.4 };
+            }
+        }
+        let w: Vec<f32> = (0..k * n).map(|_| rng.float_signed()).collect();
+
+        let fp = naive_matmul(&x, &w, m, k, n);
+        let mixed = int8_mixed_matmul(&x, &w, m, k, n, 6.0);
+
+        // Plain int8: quantize all of X and all of W.
+        let (sx, sw) = (compute_scale(&x), compute_scale(&w));
+        let plain_acc = matmul_int8(&quantize_tensor(&x, sx), &quantize_tensor(&w, sw), m, k, n);
+        let plain: Vec<f32> = plain_acc.iter().map(|&a| a as f32 * sx * sw).collect();
+
+        let err = |a: &[f32], b: &[f32]| -> f32 {
+            a.iter().zip(b).map(|(&p, &q)| (p - q) * (p - q)).sum()
+        };
+        let (e_mixed, e_plain) = (err(&mixed, &fp), err(&plain, &fp));
+        assert!(
+            e_mixed < 0.5 * e_plain,
+            "LLM.int8 not better than plain int8: {e_mixed} vs {e_plain}"
+        );
+        // Determinism.
+        assert_eq!(mixed, int8_mixed_matmul(&x, &w, m, k, n, 6.0));
+    }
+
+    /// With no outliers below the threshold, LLM.int8() reduces to a pure int8
+    /// matmul (no fp32 correction added) — and still approximates fp well.
+    #[test]
+    fn int8_mixed_no_outliers_is_plain_int8() {
+        let (m, k, n) = (4usize, 8usize, 4usize);
+        let x: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.1).sin()).collect();
+        let w: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.2).cos()).collect();
+        let mixed = int8_mixed_matmul(&x, &w, m, k, n, 6.0);
+        let (sx, sw) = (compute_scale(&x), compute_scale(&w));
+        let plain_acc = matmul_int8(&quantize_tensor(&x, sx), &quantize_tensor(&w, sw), m, k, n);
+        let plain: Vec<f32> = plain_acc.iter().map(|&a| a as f32 * sx * sw).collect();
+        for (a, b) in mixed.iter().zip(&plain)
+        {
+            assert!((a - b).abs() < 1e-6, "no-outlier mismatch: {a} vs {b}");
+        }
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
