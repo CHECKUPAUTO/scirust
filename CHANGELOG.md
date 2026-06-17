@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Shampoo** (`nn::nd_optim::NdShampoo` + `ShampooConfig` + `inverse_pth_root`,
+  Gupta/Koren/Singer 2018, roadmap #41) : préconditionneur **Kronecker** structuré
+  — pour une matrice de poids, maintient les deux facteurs `L = E[GGᵀ]`,
+  `R = E[GᵀG]` et avance par l'update préconditionné
+  `W ← W − lr·L^(−1/4) G R^(−1/4)`. Les racines inverses des matrices viennent
+  d'une décomposition de Jacobi (`inverse_pth_root`, réutilise
+  `jacobi_eigenvectors`), cachées et rafraîchies tous les `precond_freq` pas.
+  Paramètres non-matriciels : Adagrad diagonal. Oracle : `A^(−1/2)²·A ≈ I` +
+  convergence sur quadratique matricielle + repli Adagrad + déterminisme. CLI :
+  `scirust lm --opt shampoo` (11e valeur `--opt`).
 - **Adafactor** (`nn::nd_optim::NdAdafactor` + `AdafactorConfig`, Shazeer & Stern
   2018, roadmap #42) : optimiseur à **moments du 2e ordre factorisés** — pour une
   matrice de poids, ne stocke que les sommes **ligne** et **colonne** du carré du

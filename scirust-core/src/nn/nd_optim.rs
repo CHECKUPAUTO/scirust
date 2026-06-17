@@ -1555,6 +1555,214 @@ impl NdAdafactor {
     }
 }
 
+/// **Inverse `p`-th root** of a symmetric PSD matrix `a` (`n×n`, row-major) via its
+/// Jacobi eigendecomposition: with `A = Q diag(λ) Qᵀ`, returns
+/// `(A + eps·I)^(−1/p) = Q diag((λ + eps)^(−1/p)) Qᵀ`. Eigenvalues are read from the
+/// diagonal of `Qᵀ A Q` and clamped to `≥ 0` (numerical PSD safety). Used by
+/// Shampoo for the `L^(−1/4)` / `R^(−1/4)` preconditioner factors. Deterministic
+/// (Jacobi is deterministic; pure `f32` in a fixed order).
+fn inverse_pth_root(a: &[f32], n: usize, p: f32, eps: f32) -> Vec<f32> {
+    let q = jacobi_eigenvectors(a, n); // columns are eigenvectors
+    let qt = transpose(&q, n, n);
+    let aq = matmul(a, n, n, &q, n); // A Q
+    let d = matmul(&qt, n, n, &aq, n); // Qᵀ A Q (diagonal ≈ eigenvalues)
+    // scaled = Q · diag((λ + eps)^(−1/p))  (scale each eigenvector column).
+    let mut scaled = vec![0.0f32; n * n];
+    for i in 0..n
+    {
+        let lam = d[i * n + i].max(0.0) + eps;
+        let s = lam.powf(-1.0 / p);
+        for r in 0..n
+        {
+            scaled[r * n + i] = q[r * n + i] * s;
+        }
+    }
+    matmul(&scaled, n, n, &qt, n) // (Q diag) Qᵀ
+}
+
+/// Hyper-parameters for [`NdShampoo`]. [`Default`] uses `lr = 0.1`, preconditioner
+/// EMA decay `beta = 0.95`, root regularisation `eps = 1e-6`, no weight decay, and
+/// refreshes the inverse roots every step (`precond_freq = 1`).
+#[derive(Clone, Copy, Debug)]
+pub struct ShampooConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// Running-average decay of the preconditioner factors `L = E[GGᵀ]`,
+    /// `R = E[GᵀG]` (EMA, as in practical Shampoo / SOAP; the 2018 original
+    /// accumulates a plain running sum).
+    pub beta: f32,
+    /// Root regularisation: the inverse roots use `(L + eps·I)^(−1/4)`.
+    pub eps: f32,
+    /// Decoupled weight decay (0 = none).
+    pub weight_decay: f32,
+    /// Refresh interval (in steps) for recomputing the inverse roots.
+    pub precond_freq: usize,
+}
+
+impl Default for ShampooConfig {
+    fn default() -> Self {
+        Self {
+            lr: 0.1,
+            beta: 0.95,
+            eps: 1e-6,
+            weight_decay: 0.0,
+            precond_freq: 1,
+        }
+    }
+}
+
+/// Per-parameter Shampoo state. Matrix parameters carry the Kronecker factors
+/// `l`, `r` and their cached inverse fourth roots `il`, `ir`; other parameters
+/// fall back to diagonal Adagrad (`g2`).
+struct ShampooState {
+    is_matrix: bool,
+    rows: usize,
+    cols: usize,
+    l: Vec<f32>,
+    r: Vec<f32>,
+    il: Vec<f32>,
+    ir: Vec<f32>,
+    g2: Vec<f32>,
+}
+
+/// **Shampoo** (Gupta, Koren & Singer, ICML 2018): a structure-aware
+/// preconditioner. For a 2-D weight matrix it maintains the two Kronecker factors
+/// `L = E[GGᵀ]` (`m×m`) and `R = E[GᵀG]` (`n×n`) and steps with the preconditioned
+/// update `W ← W − lr · L^(−1/4) G R^(−1/4)`. The matrix inverse fourth roots come
+/// from `inverse_pth_root` (Jacobi eigendecomposition), and are cached and
+/// refreshed every `precond_freq` steps. Non-matrix parameters fall back to
+/// diagonal **Adagrad** (Shampoo on a 1-D tensor). Pure `f32` in a fixed order ⇒
+/// **bit-for-bit deterministic**.
+pub struct NdShampoo {
+    cfg: ShampooConfig,
+    t: u64,
+    state: Vec<ShampooState>,
+}
+
+impl NdShampoo {
+    /// New optimizer with the given config (no steps taken yet).
+    pub fn new(cfg: ShampooConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            state: Vec::new(),
+        }
+    }
+
+    /// Shampoo with default preconditioner settings at learning rate `lr`.
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(ShampooConfig {
+            lr,
+            ..ShampooConfig::default()
+        })
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// One Shampoo update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.state.is_empty() && !params.is_empty()
+        {
+            self.state = params
+                .iter()
+                .map(|p| {
+                    let shape = &p.value.shape;
+                    let len = p.value.data.len();
+                    if shape.len() == 2 && shape[0] >= 2 && shape[1] >= 2
+                    {
+                        let (m, n) = (shape[0], shape[1]);
+                        ShampooState {
+                            is_matrix: true,
+                            rows: m,
+                            cols: n,
+                            l: vec![0.0; m * m],
+                            r: vec![0.0; n * n],
+                            il: Vec::new(),
+                            ir: Vec::new(),
+                            g2: Vec::new(),
+                        }
+                    }
+                    else
+                    {
+                        ShampooState {
+                            is_matrix: false,
+                            rows: 0,
+                            cols: 0,
+                            l: Vec::new(),
+                            r: Vec::new(),
+                            il: Vec::new(),
+                            ir: Vec::new(),
+                            g2: vec![0.0; len],
+                        }
+                    }
+                })
+                .collect();
+        }
+        assert_eq!(
+            self.state.len(),
+            params.len(),
+            "NdShampoo: parameter count changed between steps"
+        );
+        self.t += 1;
+        let t = self.t as usize;
+        let cfg = self.cfg;
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            assert_eq!(
+                g.len(),
+                p.value.data.len(),
+                "NdShampoo: grad/param size mismatch at parameter {k}"
+            );
+            let st = &mut self.state[k];
+            if st.is_matrix
+            {
+                let (m, n) = (st.rows, st.cols);
+                let gt = transpose(g, m, n); // n×m
+                let ggt = matmul(g, m, n, &gt, m); // m×m
+                let gtg = matmul(&gt, n, m, g, n); // n×n
+                let b = cfg.beta;
+                for (li, &v) in st.l.iter_mut().zip(&ggt)
+                {
+                    *li = b * *li + (1.0 - b) * v;
+                }
+                for (ri, &v) in st.r.iter_mut().zip(&gtg)
+                {
+                    *ri = b * *ri + (1.0 - b) * v;
+                }
+                if st.il.is_empty() || t % cfg.precond_freq == 0
+                {
+                    st.il = inverse_pth_root(&st.l, m, 4.0, cfg.eps);
+                    st.ir = inverse_pth_root(&st.r, n, 4.0, cfg.eps);
+                }
+                // Preconditioned update U = L^(−1/4) G R^(−1/4).
+                let ilg = matmul(&st.il, m, m, g, n); // m×n
+                let u = matmul(&ilg, m, n, &st.ir, n); // m×n
+                for (pv, &uv) in p.value.data.iter_mut().zip(&u)
+                {
+                    *pv -= cfg.lr * (uv + cfg.weight_decay * *pv);
+                }
+            }
+            else
+            {
+                // Diagonal Adagrad fallback.
+                for (a, &gi) in st.g2.iter_mut().zip(g)
+                {
+                    *a += gi * gi;
+                }
+                for (pv, (&gi, &a)) in p.value.data.iter_mut().zip(g.iter().zip(&st.g2))
+                {
+                    *pv -= cfg.lr * (gi / (a.sqrt() + cfg.eps) + cfg.weight_decay * *pv);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2307,5 +2515,89 @@ mod tests {
             last < first * 0.05,
             "Adafactor matrix path did not reduce loss: {first} -> {last}"
         );
+    }
+
+    /// `inverse_pth_root` matches the eigendecomposition definition: for a
+    /// symmetric positive-definite `A`, `A^(−1/2) · A^(−1/2) · A ≈ I`.
+    #[test]
+    fn inverse_pth_root_matches_eigen_definition() {
+        let n = 4;
+        let mut rng = PcgEngine::new(7);
+        // A = MᵀM + I : symmetric positive-definite.
+        let m: Vec<f32> = (0..n * n).map(|_| rng.float_signed()).collect();
+        let mt = transpose(&m, n, n);
+        let mut a = matmul(&mt, n, n, &m, n);
+        for i in 0..n
+        {
+            a[i * n + i] += 1.0;
+        }
+        let inv_half = inverse_pth_root(&a, n, 2.0, 0.0);
+        let half_sq = matmul(&inv_half, n, n, &inv_half, n); // A^(−1)
+        let prod = matmul(&half_sq, n, n, &a, n); // A^(−1) · A ≈ I
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (prod[i * n + j] - want).abs() < 1e-3,
+                    "A^(-1/2)² · A off at ({i},{j}): {}",
+                    prod[i * n + j]
+                );
+            }
+        }
+    }
+
+    /// Shampoo (Kronecker-preconditioned update `L^(−1/4) G R^(−1/4)`) minimises a
+    /// convex matrix quadratic `½‖W − T‖²` (gradient `W − T`), driving every entry
+    /// to the target, and is bit-for-bit deterministic across runs.
+    #[test]
+    fn nd_shampoo_converges_and_is_deterministic() {
+        let (rows, cols) = (4usize, 3usize);
+        let target: Vec<f32> = (0..rows * cols)
+            .map(|k| (k as f32 * 0.4 - 1.0).sin())
+            .collect();
+        let run = || {
+            let mut w = TensorND::new(vec![0.0; rows * cols], vec![rows, cols]);
+            let mut opt = NdShampoo::with_lr(0.2);
+            for _ in 0..1500
+            {
+                let gd: Vec<f32> = w.data.iter().zip(&target).map(|(&a, &b)| a - b).collect();
+                let grads = vec![TensorND::new(gd, vec![rows, cols])];
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut w,
+                        grad_idx: 0,
+                    }],
+                    &grads,
+                );
+            }
+            w.data
+        };
+        let w = run();
+        for (wi, ti) in w.iter().zip(&target)
+        {
+            assert!(
+                (wi - ti).abs() < 0.1,
+                "Shampoo did not converge: {wi} vs {ti}"
+            );
+        }
+        assert_eq!(run(), w);
+    }
+
+    /// Shampoo's diagonal (Adagrad) fallback for a non-matrix parameter also
+    /// minimises the quadratic oracle to within a small band.
+    #[test]
+    fn nd_shampoo_vector_fallback_converges() {
+        let target = [1.0f32, -0.8, 0.5];
+        let mut opt = NdShampoo::with_lr(0.3);
+        let x = quad_run(&target, 4000, |p, g| opt.step(p, g));
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!(
+                (xi - ti).abs() < 0.05,
+                "Shampoo Adagrad fallback off: {xi} vs {ti}"
+            );
+        }
     }
 }

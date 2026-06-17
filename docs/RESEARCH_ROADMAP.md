@@ -109,7 +109,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 
 | # | Papier | Fonction scirust proposée | Module | Statut | Effort |
 |---|--------|---------------------------|--------|--------|--------|
-| 41 | Gupta, Koren & Singer, *Shampoo* (ICML 2018, arXiv:1802.09568) | `NdShampoo` : préconditionneur **Kronecker** (`L^{-1/4} G R^{-1/4}`) ; réutilise `jacobi_eigenvectors` ; convergence + déterminisme | `nn::nd_optim` | 📋 | L |
+| 41 | Gupta, Koren & Singer, *Shampoo* (ICML 2018, arXiv:1802.09568) | `NdShampoo` : préconditionneur **Kronecker** (`L^{-1/4} G R^{-1/4}`, racines inverses via `inverse_pth_root`/`jacobi_eigenvectors`) ; matrices → update préconditionné, vecteurs → Adagrad diagonal ; oracle racine inverse (`A^{-1/2}²·A≈I`) + convergence + déterminisme testés ; CLI `lm --opt shampoo` | `nn::nd_optim` | ✅ | L |
 | 42 | Shazeer & Stern, *Adafactor* (ICML 2018, arXiv:1804.04235) | `NdAdafactor` : moments du 2e ordre **factorisés** (sommes ligne/colonne `V[i,j]=R[i]·C[j]/ΣR`, mémoire sous-linéaire) + clipping RMS de l'update + planning β2 ; reconstruction rang-1 exacte + convergence (bande) + déterminisme testés ; CLI `lm --opt adafactor` | `nn::nd_optim` | ✅ | M |
 | 43 | You et al., *LAMB* (ICLR 2020, arXiv:1904.00962) | `NdLamb` : Adam à **confiance par couche** (ratio `‖θ‖/‖r‖` par tenseur) ; convergence (bande) + déterminisme testés ; CLI `lm --opt lamb` | `nn::nd_optim` | ✅ | M |
 | 44 | Liu et al., *Sophia* (arXiv:2305.14342) | `NdSophia` : 2e ordre **clippé** (Hessienne diagonale estimée, Hutchinson seedé) ; CLI `lm --opt sophia` | `nn::nd_optim` | 📋 | L |

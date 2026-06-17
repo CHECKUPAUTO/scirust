@@ -3,6 +3,19 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 55 : Shampoo (#41) — préconditionneur Kronecker
+- `nn::nd_optim::NdShampoo` + `ShampooConfig` + helper `inverse_pth_root` (Gupta/
+  Koren/Singer 2018) : facteurs `L=E[GGᵀ]`, `R=E[GᵀG]` ; update préconditionné
+  `W − lr·L^(−1/4) G R^(−1/4)` ; racines inverses via Jacobi (réutilise
+  `jacobi_eigenvectors`), cachées/rafraîchies tous les `precond_freq` pas.
+  Vecteurs : Adagrad diagonal.
+- CLI : `lm --opt shampoo` (11e valeur `--opt`).
+- Tests (3, core) : `inverse_pth_root` `A^(−1/2)²·A≈I` ; convergence quadratique
+  matricielle + déterminisme ; repli Adagrad converge.
+- docs : roadmap #41 📋→✅ ; 8 Documentation (ligne `--opt`) ; REFERENCE ;
+  CHANGELOG.
+- 500 tests core (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-17 — volet 54 : Adafactor (#42) — moments 2e ordre factorisés
 - `nn::nd_optim::NdAdafactor` + `AdafactorConfig` (Shazeer & Stern 2018) : pour une
   matrice, sommes ligne/colonne du carré du gradient (mémoire `rows+cols`),

@@ -8,7 +8,7 @@ use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
 use scirust_core::nn::nd_layers::{NdDeltaNet, NdGla, NdHgrn, NdMamba, NdRetention};
 use scirust_core::nn::nd_optim::{
     NdAdEMAMix, NdAdafactor, NdAdam, NdAdan, NdLamb, NdLion, NdLookahead, NdParam, NdScheduleFree,
-    NdSoap,
+    NdShampoo, NdSoap,
 };
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
@@ -150,6 +150,7 @@ enum LmOpt {
     Lamb(NdLamb),
     Adan(NdAdan),
     Adafactor(NdAdafactor),
+    Shampoo(NdShampoo),
 }
 
 impl LmOpt {
@@ -165,6 +166,7 @@ impl LmOpt {
             LmOpt::Lamb(o) => o.step(params, grads),
             LmOpt::Adan(o) => o.step(params, grads),
             LmOpt::Adafactor(o) => o.step(params, grads),
+            LmOpt::Shampoo(o) => o.step(params, grads),
         }
     }
 
@@ -179,7 +181,7 @@ impl LmOpt {
     }
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor]` —
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` —
 /// train a small **causal decoder language model** on the N-D autograd tape and
 /// report whether it learns to predict the sequence. Pure Rust, deterministic by
 /// seed: token + learned positional embeddings, causal multi-head attention, a
@@ -215,7 +217,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     if tokens.len() < 2
     {
         eprintln!(
-            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor]"
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]"
         );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
@@ -260,10 +262,11 @@ pub fn run_lm(args: &[String]) -> u8 {
             | "lamb"
             | "adan"
             | "adafactor"
+            | "shampoo"
     )
     {
         eprintln!(
-            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead, lamb, adan, adafactor"
+            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead, lamb, adan, adafactor, shampoo"
         );
         return 2;
     }
@@ -312,6 +315,7 @@ pub fn run_lm(args: &[String]) -> u8 {
         "lamb" => LmOpt::Lamb(NdLamb::with_lr(lr)),
         "adan" => LmOpt::Adan(NdAdan::with_lr(lr)),
         "adafactor" => LmOpt::Adafactor(NdAdafactor::with_lr(lr)),
+        "shampoo" => LmOpt::Shampoo(NdShampoo::with_lr(lr)),
         _ => LmOpt::Adam(NdAdam::with_lr(lr)),
     };
 
@@ -718,6 +722,10 @@ mod tests {
         );
         assert_eq!(
             run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "adafactor"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "shampoo"])),
             0
         );
         assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer
