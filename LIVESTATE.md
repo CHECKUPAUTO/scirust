@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 56 : SAM (#47) — Sharpness-Aware Minimization
+- `nn::nd_optim::NdSam` + `SamConfig` (Foret 2021) : 2 phases — `ascent` perturbe
+  vers `θ+ρ·g/‖g‖` (norme globale du gradient), `descent` restaure θ + pas SGD au
+  gradient perturbé. Biais vers les minima plats.
+- Bibliothèque seule : 2 gradients/pas ⇒ incompatible avec la boucle `lm --opt`
+  (gradient unique). Pas de CLI ni de cycle multilingue (comme NF4).
+- Tests (2, core) : perturbation = ρ·g/‖g‖ (‖ε‖=ρ) ; convergence quadratique
+  (bande ∝ lr·ρ) + déterminisme.
+- docs : roadmap #47 📋→✅ ; CHANGELOG. 502 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 55 : Shampoo (#41) — préconditionneur Kronecker
 - `nn::nd_optim::NdShampoo` + `ShampooConfig` + helper `inverse_pth_root` (Gupta/
   Koren/Singer 2018) : facteurs `L=E[GGᵀ]`, `R=E[GᵀG]` ; update préconditionné

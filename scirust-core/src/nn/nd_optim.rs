@@ -1763,6 +1763,137 @@ impl NdShampoo {
     }
 }
 
+/// Hyper-parameters for [`NdSam`]. [`Default`] uses the paper's neighbourhood size
+/// `rho = 0.05`, inner SGD step `lr = 0.1`, `eps = 1e-12` for the gradient-norm
+/// denominator, and no weight decay.
+#[derive(Clone, Copy, Debug)]
+pub struct SamConfig {
+    /// Neighbourhood radius ρ of the sharpness perturbation.
+    pub rho: f32,
+    /// Inner (SGD) learning rate applied in the descent phase.
+    pub lr: f32,
+    /// Numerical-stability term for the global gradient norm.
+    pub eps: f32,
+    /// Decoupled weight decay applied in the descent phase (0 = none).
+    pub weight_decay: f32,
+}
+
+impl Default for SamConfig {
+    fn default() -> Self {
+        Self {
+            rho: 0.05,
+            lr: 0.1,
+            eps: 1e-12,
+            weight_decay: 0.0,
+        }
+    }
+}
+
+/// **SAM** — Sharpness-Aware Minimization (Foret et al., ICLR 2021): instead of
+/// minimising the loss at `θ`, SAM minimises the **worst-case loss in a ρ-ball**
+/// around `θ`, biasing training toward flat minima that tend to generalise better.
+/// Each update has two phases:
+///
+/// 1. [`ascent`](Self::ascent): perturb the parameters to the local worst case
+///    `θ + ε`, where `ε = ρ · g / ‖g‖` and `g`, `‖g‖` are the gradient and its
+///    **global** L2 norm (over all parameters) at `θ`.
+/// 2. [`descent`](Self::descent): restore `θ` and take an SGD step using the
+///    gradient evaluated at the perturbed point `θ + ε`.
+///
+/// Because the two phases need gradients at **two** different points, SAM does not
+/// fit the single-gradient [`NdAdam::step`] contract: call `ascent`, recompute the
+/// gradient at the perturbed parameters, then `descent`. Pure `f32` in a fixed
+/// order ⇒ **bit-for-bit deterministic**.
+pub struct NdSam {
+    cfg: SamConfig,
+    t: u64,
+    eps_store: Vec<Vec<f32>>,
+}
+
+impl NdSam {
+    /// New optimizer with the given config.
+    pub fn new(cfg: SamConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            eps_store: Vec::new(),
+        }
+    }
+
+    /// SAM with the given perturbation radius `rho` and inner SGD rate `lr`.
+    pub fn with_rho_lr(rho: f32, lr: f32) -> Self {
+        Self::new(SamConfig {
+            rho,
+            lr,
+            ..SamConfig::default()
+        })
+    }
+
+    /// Steps (ascent/descent pairs) completed so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// Phase 1 — perturb `params` to `θ + ρ·g/‖g‖` (the local worst case) and
+    /// remember the perturbation so [`descent`](Self::descent) can undo it. `grads`
+    /// is the gradient at the current `θ`.
+    pub fn ascent(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.eps_store.len() != params.len()
+        {
+            self.eps_store = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        // Global L2 norm of the full gradient (over all parameters).
+        let mut sumsq = 0.0f32;
+        for p in params.iter()
+        {
+            for &gi in &grads[p.grad_idx].data
+            {
+                sumsq += gi * gi;
+            }
+        }
+        let scale = self.cfg.rho / (sumsq.sqrt() + self.cfg.eps);
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let store = &mut self.eps_store[k];
+            for ((pv, &gi), e_slot) in p.value.data.iter_mut().zip(g.iter()).zip(store.iter_mut())
+            {
+                let e = scale * gi;
+                *e_slot = e;
+                *pv += e;
+            }
+        }
+    }
+
+    /// Phase 2 — restore `params` to `θ` (undo the ascent perturbation) and take
+    /// the inner SGD step using `grads_perturbed`, the gradient evaluated at the
+    /// perturbed parameters `θ + ε`.
+    pub fn descent(&mut self, params: &mut [NdParam], grads_perturbed: &[TensorND]) {
+        assert_eq!(
+            self.eps_store.len(),
+            params.len(),
+            "NdSam: descent before ascent / parameter count changed"
+        );
+        let SamConfig {
+            lr, weight_decay, ..
+        } = self.cfg;
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grads_perturbed[p.grad_idx].data;
+            let store = &self.eps_store[k];
+            for ((pv, &gi), &e) in p.value.data.iter_mut().zip(g.iter()).zip(store.iter())
+            {
+                *pv -= e; // restore θ
+                *pv -= lr * (gi + weight_decay * *pv); // SGD step at the perturbed gradient
+            }
+        }
+        self.t += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2599,5 +2730,88 @@ mod tests {
                 "Shampoo Adagrad fallback off: {xi} vs {ti}"
             );
         }
+    }
+
+    /// SAM's ascent perturbs the parameters by exactly `ε = ρ·g/‖g‖`: the
+    /// displacement is parallel to the gradient and has L2 norm `ρ`.
+    #[test]
+    fn nd_sam_ascent_perturbs_by_rho_along_gradient() {
+        let mut x = TensorND::new(vec![1.0, 2.0, -2.0], vec![3]);
+        let theta0 = x.data.clone();
+        let g = vec![TensorND::new(vec![3.0, 0.0, 4.0], vec![3])]; // ‖g‖ = 5
+        let rho = 0.1;
+        let mut opt = NdSam::with_rho_lr(rho, 0.1);
+        opt.ascent(
+            &mut [NdParam {
+                value: &mut x,
+                grad_idx: 0,
+            }],
+            &g,
+        );
+        // ε = ρ·g/‖g‖ = 0.1·[3,0,4]/5 = [0.06, 0, 0.08].
+        let expected = [0.06f32, 0.0, 0.08];
+        let mut dnorm2 = 0.0f32;
+        for ((xi, t0), e) in x.data.iter().zip(&theta0).zip(&expected)
+        {
+            let disp = xi - t0;
+            assert!((disp - e).abs() < 1e-6, "perturbation off: {disp} vs {e}");
+            dnorm2 += disp * disp;
+        }
+        assert!(
+            (dnorm2.sqrt() - rho).abs() < 1e-6,
+            "‖ε‖ = {} ≠ ρ = {rho}",
+            dnorm2.sqrt()
+        );
+    }
+
+    /// SAM (perturb, then SGD at the perturbed point) minimises the quadratic
+    /// oracle to within a small band of the target, and is bit-for-bit
+    /// deterministic. The fixed-size normalised perturbation leaves a residual
+    /// band ∝ `lr·ρ`, so we use a small `rho`.
+    #[test]
+    fn nd_sam_converges_and_is_deterministic() {
+        let target = [1.0f32, -0.8, 0.5];
+        let run = || {
+            let mut x = TensorND::new(vec![0.0; 3], vec![3]);
+            let mut opt = NdSam::with_rho_lr(0.02, 0.1);
+            for _ in 0..600
+            {
+                // Gradient of ½‖x−t‖² at θ.
+                let g0: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| xi - ti)
+                    .collect();
+                opt.ascent(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &[TensorND::new(g0, vec![3])],
+                );
+                // Gradient at the perturbed point θ+ε.
+                let g1: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| xi - ti)
+                    .collect();
+                opt.descent(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &[TensorND::new(g1, vec![3])],
+                );
+            }
+            x.data
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "SAM off: {xi} vs {ti}");
+        }
+        assert_eq!(run(), x);
     }
 }

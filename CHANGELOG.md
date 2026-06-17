@@ -6,6 +6,14 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **SAM — Sharpness-Aware Minimization** (`nn::nd_optim::NdSam` + `SamConfig`,
+  Foret et al. 2021, roadmap #47) : optimiseur **à deux phases** qui minimise la
+  perte du *pire cas* dans une boule de rayon ρ (biais vers les minima plats).
+  `ascent` perturbe les poids vers `θ + ρ·g/‖g‖` (norme **globale** du gradient) ;
+  `descent` restaure θ et fait un pas SGD avec le gradient **au point perturbé**.
+  Deux gradients par pas ⇒ hors de la boucle `lm --opt` à gradient unique (couche
+  de bibliothèque). Oracle : perturbation = `ρ·g/‖g‖` avec `‖ε‖ = ρ` + convergence
+  sur quadratique (bande ∝ lr·ρ) + déterminisme.
 - **Shampoo** (`nn::nd_optim::NdShampoo` + `ShampooConfig` + `inverse_pth_root`,
   Gupta/Koren/Singer 2018, roadmap #41) : préconditionneur **Kronecker** structuré
   — pour une matrice de poids, maintient les deux facteurs `L = E[GGᵀ]`,
