@@ -1894,6 +1894,161 @@ impl NdSam {
     }
 }
 
+/// Hyper-parameters for [`NdProdigy`]. [`Default`] follows the paper: base step
+/// `γ = 1.0` (Prodigy adapts the effective rate, so 1.0 needs no tuning),
+/// `β1 = 0.9`, `β2 = 0.999`, `eps = 1e-8`, and a tiny initial distance estimate
+/// `d0 = 1e-6`.
+#[derive(Clone, Copy, Debug)]
+pub struct ProdigyConfig {
+    /// Base step `γ` (Prodigy adapts the effective rate `γ·d`).
+    pub lr: f32,
+    /// First-moment decay.
+    pub beta1: f32,
+    /// Second-moment decay.
+    pub beta2: f32,
+    /// Numerical-stability term.
+    pub eps: f32,
+    /// Initial distance estimate `d₀` (grown toward `‖x₀ − x*‖`).
+    pub d0: f32,
+}
+
+impl Default for ProdigyConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1.0,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            d0: 1e-6,
+        }
+    }
+}
+
+/// **Prodigy** (Mishchenko & Defazio, 2023): a **parameter-free** Adam — it
+/// estimates the distance `d ≈ ‖x₀ − x*‖` to the solution online and uses it as
+/// the effective learning rate, so no manual lr tuning is needed. `d` grows from a
+/// tiny `d₀` via the running correlation `⟨g, x₀ − x⟩` until it matches the problem
+/// scale, then Adam proceeds at the right rate. `d`, the numerator `r`, and the
+/// denominator L1-norm are **global** scalars across all parameters. Pure `f32`,
+/// fixed order ⇒ **bit-for-bit deterministic**.
+pub struct NdProdigy {
+    cfg: ProdigyConfig,
+    t: u64,
+    d: f32,
+    r: f32,
+    m: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>,
+    s: Vec<Vec<f32>>,
+    x0: Vec<Vec<f32>>,
+}
+
+impl NdProdigy {
+    /// New optimizer with the given config (no steps taken yet).
+    pub fn new(cfg: ProdigyConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            d: cfg.d0,
+            r: 0.0,
+            m: Vec::new(),
+            v: Vec::new(),
+            s: Vec::new(),
+            x0: Vec::new(),
+        }
+    }
+
+    /// Prodigy with default betas/eps; `lr` is the base step `γ` (default 1.0).
+    pub fn with_lr(lr: f32) -> Self {
+        Self::new(ProdigyConfig {
+            lr,
+            ..ProdigyConfig::default()
+        })
+    }
+
+    /// Steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// The current distance estimate `d` (the adapted learning-rate scale).
+    pub fn d(&self) -> f32 {
+        self.d
+    }
+
+    /// One Prodigy update over `params` (same ordering contract as [`NdAdam`]).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.m.is_empty() && !params.is_empty()
+        {
+            let z = || -> Vec<Vec<f32>> {
+                params
+                    .iter()
+                    .map(|p| vec![0.0f32; p.value.data.len()])
+                    .collect()
+            };
+            self.m = z();
+            self.v = z();
+            self.s = z();
+            self.x0 = params.iter().map(|p| p.value.data.clone()).collect();
+            self.d = self.cfg.d0;
+        }
+        assert_eq!(
+            self.m.len(),
+            params.len(),
+            "NdProdigy: parameter count changed between steps"
+        );
+        self.t += 1;
+        let ProdigyConfig {
+            lr,
+            beta1,
+            beta2,
+            eps,
+            ..
+        } = self.cfg;
+        let sb2 = beta2.sqrt();
+        let d = self.d; // d_t — used for every update this step
+        let d2 = d * d;
+
+        // Pass 1: update m, v, s; accumulate the global numerator and ‖s‖₁.
+        let mut r_num = 0.0f32;
+        let mut s_l1 = 0.0f32;
+        for (k, p) in params.iter().enumerate()
+        {
+            let g = &grads[p.grad_idx].data;
+            let (mk, vk, sk, x0k) = (&mut self.m[k], &mut self.v[k], &mut self.s[k], &self.x0[k]);
+            for j in 0..p.value.data.len()
+            {
+                let gj = g[j];
+                mk[j] = beta1 * mk[j] + (1.0 - beta1) * d * gj;
+                vk[j] = beta2 * vk[j] + (1.0 - beta2) * d2 * gj * gj;
+                sk[j] = sb2 * sk[j] + (1.0 - sb2) * lr * d2 * gj;
+                r_num += (1.0 - sb2) * lr * d2 * gj * (x0k[j] - p.value.data[j]);
+                s_l1 += sk[j].abs();
+            }
+        }
+        // Global distance update: d_{t+1} = max(d_t, r_{t+1} / ‖s_{t+1}‖₁).
+        self.r = sb2 * self.r + r_num;
+        let d_next = if s_l1 > 0.0
+        {
+            (self.r / s_l1).max(d)
+        }
+        else
+        {
+            d
+        };
+
+        // Pass 2: Adam step at the current d_t.
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let (mk, vk) = (&self.m[k], &self.v[k]);
+            for j in 0..p.value.data.len()
+            {
+                p.value.data[j] -= lr * d * mk[j] / (vk[j].sqrt() + d * eps);
+            }
+        }
+        self.d = d_next;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2813,5 +2968,58 @@ mod tests {
             assert!((xi - ti).abs() < 0.05, "SAM off: {xi} vs {ti}");
         }
         assert_eq!(run(), x);
+    }
+
+    /// **Prodigy is parameter-free.** From a tiny `d₀ = 1e-6` it grows its distance
+    /// estimate `d` to the problem scale `‖x₀ − x*‖` and substantially reduces the
+    /// quadratic loss — no learning-rate tuning. (On a deterministic quadratic the
+    /// Adam-style step settles in a band ∝ `γ·d`, so we use `γ = 0.1`.) Bit-for-bit
+    /// deterministic.
+    #[test]
+    fn nd_prodigy_adapts_distance_and_reduces_loss() {
+        let target = [1.0f32, -0.8, 0.5];
+        let dist = (1.0f32 + 0.64 + 0.25).sqrt(); // ‖x₀ − x*‖ ≈ 1.375 (x₀ = 0)
+        let run = || -> (Vec<f32>, f32) {
+            let mut x = TensorND::new(vec![0.0; 3], vec![3]);
+            let mut opt = NdProdigy::new(ProdigyConfig {
+                lr: 0.1,
+                ..ProdigyConfig::default()
+            });
+            for _ in 0..3000
+            {
+                let gd: Vec<f32> = x
+                    .data
+                    .iter()
+                    .zip(&target)
+                    .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                    .collect();
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &[TensorND::new(gd, vec![3])],
+                );
+            }
+            (x.data.clone(), opt.d())
+        };
+        let (x, d) = run();
+        let loss: f32 = x
+            .iter()
+            .zip(&target)
+            .map(|(&xi, &ti)| (xi - ti) * (xi - ti))
+            .sum();
+        let init_loss: f32 = target.iter().map(|&t| t * t).sum();
+        assert!(
+            loss < 0.2 * init_loss,
+            "Prodigy loss {loss} not << initial {init_loss}"
+        );
+        assert!(
+            d > 0.2 * dist && d < 5.0 * dist,
+            "Prodigy d={d} not near the distance {dist}"
+        );
+        let (x2, d2) = run();
+        assert_eq!(x, x2);
+        assert_eq!(d.to_bits(), d2.to_bits());
     }
 }

@@ -6,6 +6,24 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Prodigy** (`nn::nd_optim::NdProdigy` + `ProdigyConfig`, Mishchenko & Defazio
+  2023, roadmap #46) : un Adam **sans learning-rate** (« parameter-free »). Il
+  estime en ligne la distance `d ≈ ‖x₀ − x*‖` à la solution — via la corrélation
+  globale `⟨g, x₀ − x⟩` accumulée — et l'utilise comme taux effectif, partant d'un
+  `d₀ = 1e-6` minuscule qui croît jusqu'à l'échelle du problème. `d`, le numérateur
+  `r` et la norme du dénominateur sont des scalaires **globaux** sur tous les
+  paramètres. Oracle : `d` s'adapte à l'échelle de la distance (sans réglage de lr)
+  + la perte quadratique chute fortement + déterminisme bit-exact. CLI :
+  `scirust lm --opt prodigy` (8 langues).
+- **KVQuant** (`quantization::kvquant_kv`, Hooper et al. 2024, roadmap #68) :
+  quantification du **KV-cache** d'attention à la granularité qui épouse sa
+  structure d'outliers — **clés per-canal** (les outliers des clés se concentrent
+  par colonne de features) et **valeurs per-token** (par ligne). Bien plus fidèle
+  qu'une échelle per-tensor unique, qu'une poignée de gros canaux de clés
+  domineraient (écrasant la résolution de tous les autres). Oracle : sur des clés à
+  outliers de canal, l'erreur de la sortie d'attention vs fp est **< 0,6×** celle
+  de la quantif per-tensor ; le per-canal résout les petites colonnes (<0,1× erreur)
+  là où le per-tensor échoue ; déterminisme. Couche de bibliothèque.
 - **ALiBi — Attention with Linear Biases** (`nn::nd_layers::alibi_slopes` +
   `alibi_bias` + `NdMultiHeadAttention::with_alibi`, Press, Smith & Lewis 2022,
   roadmap #59) : remplace les positions apprises/rotatives par un **biais statique

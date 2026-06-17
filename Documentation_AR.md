@@ -145,7 +145,7 @@ SciRust هو إطار العمل المفضل لأولئك الذين يعطون
 
 أوامر CLI جديدة:
 - `scirust certify [--seed N] [--eps E]` — حدود قابلة للإثبات لشبكة ReLU MLP (IBP **وCROWN**، الحدود الأضيق عبر الاسترخاء الخطي، جنبًا إلى جنب).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` — تدريب النموذج اللغوي N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo|prodigy]` — تدريب النموذج اللغوي N-D.
 - `scirust deltanet [--seed N] [--steps S]` — تدريب طبقة DeltaNet (انتباه خطي بقاعدة دلتا) أحادية الرأس لملاءمة تسلسل؛ يُبلِغ عن مقدار انخفاض الـ MSE.
 - `scirust mamba [--seed N] [--steps S]` — تدريب طبقة Mamba لفضاء حالة انتقائي (مسح S6) لملاءمة تسلسل؛ يُبلِغ عن مقدار انخفاض الـ MSE.
 - `scirust retnet [--seed N] [--steps S]` — تدريب طبقة احتفاظ RetNet (انتباه خطي، الصيغة التكرارية ≡ الصيغة المتوازية) لملاءمة تسلسل؛ يُبلِغ عن مقدار انخفاض الـ MSE.

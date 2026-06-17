@@ -172,7 +172,7 @@ backed by a research paper and a test (gradient check or oracle). See
 
 New CLI commands:
 - `scirust certify [--seed N] [--eps E]` — provable ReLU-MLP bounds (IBP **and** CROWN, the tighter linear-relaxation bounds, side by side).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` — train the N-D decoder LM.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo|prodigy]` — train the N-D decoder LM.
 - `scirust deltanet [--seed N] [--steps S]` — train a single-head DeltaNet (delta-rule linear attention) layer to fit a sequence; reports the MSE reduction.
 - `scirust mamba [--seed N] [--steps S]` — train a Mamba selective state-space layer (S6 scan) to fit a sequence; reports the MSE reduction.
 - `scirust retnet [--seed N] [--steps S]` — train a RetNet retention layer (linear attention, recurrent form ≡ parallel form) to fit a sequence; reports the MSE reduction.

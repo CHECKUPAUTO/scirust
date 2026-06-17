@@ -272,7 +272,7 @@ oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livr
 
 Nouvelles commandes CLI :
 - `scirust certify [--seed N] [--eps E]` — bornes prouvées d'un MLP ReLU (IBP **et** CROWN, les bornes plus serrées par relaxation linéaire, côte à côte).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` — entraîne le LM décodeur N-D.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo|prodigy]` — entraîne le LM décodeur N-D.
 - `scirust deltanet [--seed N] [--steps S]` — entraîne une couche DeltaNet (attention linéaire à règle delta) à une seule tête pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust mamba [--seed N] [--steps S]` — entraîne une couche Mamba à état-espace sélectif (scan S6) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust retnet [--seed N] [--steps S]` — entraîne une couche de rétention RetNet (attention linéaire, forme récurrente ≡ forme parallèle) pour ajuster une séquence ; affiche la réduction de la MSE.

@@ -1501,6 +1501,194 @@ mod tests_spqr {
     }
 }
 
+// ----- KVQuant : quantification du KV-cache (clés per-canal) (#68) -------------
+
+/// Symmetric `bits`-bit quantize→dequantize of a `rows×cols` matrix with one
+/// absmax scale per **row** (`per_row = true`) or per **column** (`per_row =
+/// false`). A zero row/column is left as zeros.
+fn kv_quant_dequant_axis(
+    m: &[f32],
+    rows: usize,
+    cols: usize,
+    bits: u32,
+    per_row: bool,
+) -> Vec<f32> {
+    let qmax = ((1i32 << (bits - 1)) - 1) as f32; // symmetric signed range
+    let mut out = vec![0.0f32; rows * cols];
+    let q1 = |x: f32, scale: f32| (x / scale).round().clamp(-qmax, qmax) * scale;
+    if per_row
+    {
+        for (row, orow) in m.chunks_exact(cols).zip(out.chunks_exact_mut(cols))
+        {
+            let amax = row.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+            let scale = if amax > 0.0 { amax / qmax } else { 1.0 };
+            for (o, &x) in orow.iter_mut().zip(row)
+            {
+                *o = q1(x, scale);
+            }
+        }
+    }
+    else
+    {
+        for j in 0..cols
+        {
+            let mut amax = 0.0f32;
+            for i in 0..rows
+            {
+                amax = amax.max(m[i * cols + j].abs());
+            }
+            let scale = if amax > 0.0 { amax / qmax } else { 1.0 };
+            for i in 0..rows
+            {
+                out[i * cols + j] = q1(m[i * cols + j], scale);
+            }
+        }
+    }
+    out
+}
+
+/// **KVQuant** (Hooper et al., NeurIPS 2024): quantize the attention **KV cache**
+/// at the granularity matching its outlier structure — **Keys per-channel** (per
+/// feature column, where key outliers concentrate) and **Values per-token** (per
+/// row). Returns `(k_hat, v_hat)` reconstructed at `bits`-bit. This is far more
+/// faithful than a single per-tensor scale, which a few large key channels would
+/// dominate (crushing the resolution of all the others). `k`/`v` are `(seq, d)`.
+pub fn kvquant_kv(k: &[f32], v: &[f32], seq: usize, d: usize, bits: u32) -> (Vec<f32>, Vec<f32>) {
+    assert_eq!(k.len(), seq * d, "KVQuant: K size mismatch");
+    assert_eq!(v.len(), seq * d, "KVQuant: V size mismatch");
+    assert!((2..=8).contains(&bits), "KVQuant: bits must be in 2..=8");
+    let k_hat = kv_quant_dequant_axis(k, seq, d, bits, false); // keys per-channel
+    let v_hat = kv_quant_dequant_axis(v, seq, d, bits, true); // values per-token
+    (k_hat, v_hat)
+}
+
+#[cfg(test)]
+mod tests_kvquant {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// Single-scale (per-tensor) symmetric quantize→dequantize baseline.
+    fn per_tensor(m: &[f32], bits: u32) -> Vec<f32> {
+        let qmax = ((1i32 << (bits - 1)) - 1) as f32;
+        let amax = m.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let scale = if amax > 0.0 { amax / qmax } else { 1.0 };
+        m.iter()
+            .map(|&x| (x / scale).round().clamp(-qmax, qmax) * scale)
+            .collect()
+    }
+
+    /// Tiny attention forward `softmax(Q·Kᵀ/√d)·V` (no mask), for the oracle.
+    fn attention(q: &[f32], k: &[f32], v: &[f32], seq: usize, d: usize) -> Vec<f32> {
+        let scale = 1.0 / (d as f32).sqrt();
+        let mut out = vec![0.0f32; seq * d];
+        for i in 0..seq
+        {
+            let mut scores = vec![0.0f32; seq];
+            for (j, sj) in scores.iter_mut().enumerate()
+            {
+                let mut s = 0.0f32;
+                for t in 0..d
+                {
+                    s += q[i * d + t] * k[j * d + t];
+                }
+                *sj = s * scale;
+            }
+            let mx = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let exps: Vec<f32> = scores.iter().map(|&z| (z - mx).exp()).collect();
+            let z: f32 = exps.iter().sum();
+            for (j, &e) in exps.iter().enumerate()
+            {
+                let w = e / z;
+                for t in 0..d
+                {
+                    out[i * d + t] += w * v[j * d + t];
+                }
+            }
+        }
+        out
+    }
+
+    /// **The KVQuant insight, tested.** Keys carry **per-channel outliers** (a few
+    /// feature columns are much larger). Per-tensor quantization wastes resolution
+    /// on the outlier channels, corrupting `Q·Kᵀ`; KVQuant's per-channel K (and
+    /// per-token V) keeps every channel well-resolved, so the attention output is
+    /// far closer to fp16. Deterministic.
+    #[test]
+    fn kvquant_beats_per_tensor_on_attention() {
+        let mut rng = PcgEngine::new(17);
+        let (seq, d) = (8usize, 16usize);
+        let mut k = vec![0.0f32; seq * d];
+        for i in 0..seq
+        {
+            for j in 0..d
+            {
+                let outlier = if j == 0 || j == 5 { 12.0 } else { 1.0 };
+                k[i * d + j] = rng.float_signed() * 0.5 * outlier;
+            }
+        }
+        let v: Vec<f32> = (0..seq * d).map(|_| rng.float_signed()).collect();
+        let q: Vec<f32> = (0..seq * d).map(|_| rng.float_signed()).collect();
+        let bits = 4;
+
+        let fp = attention(&q, &k, &v, seq, d);
+        let (kc, vt) = kvquant_kv(&k, &v, seq, d, bits);
+        let kvq = attention(&q, &kc, &vt, seq, d);
+        let pt = attention(&q, &per_tensor(&k, bits), &per_tensor(&v, bits), seq, d);
+
+        let err = |a: &[f32], b: &[f32]| -> f32 {
+            a.iter().zip(b).map(|(&x, &y)| (x - y) * (x - y)).sum()
+        };
+        let (e_kvq, e_pt) = (err(&kvq, &fp), err(&pt, &fp));
+        assert!(
+            e_kvq < e_pt,
+            "KVQuant {e_kvq} not better than per-tensor {e_pt}"
+        );
+        assert!(
+            e_kvq < 0.6 * e_pt,
+            "KVQuant not meaningfully better: {e_kvq} vs {e_pt}"
+        );
+    }
+
+    /// Per-channel quantization resolves a non-outlier column accurately even when
+    /// another column is a huge outlier — exactly where per-tensor fails — and the
+    /// reconstruction is deterministic.
+    #[test]
+    fn kvquant_per_channel_resolves_small_columns() {
+        let (seq, d) = (6usize, 4usize);
+        // Column 0 is a large outlier; columns 1..3 are small.
+        let mut m = vec![0.0f32; seq * d];
+        for i in 0..seq
+        {
+            m[i * d] = 50.0 + i as f32; // outlier column
+            for j in 1..d
+            {
+                m[i * d + j] = 0.1 * (i + j) as f32;
+            }
+        }
+        let per_chan = kv_quant_dequant_axis(&m, seq, d, 4, false);
+        let per_tens = per_tensor(&m, 4);
+        // Error on the small columns (j ≥ 1).
+        let small_err = |r: &[f32]| -> f32 {
+            let mut e = 0.0f32;
+            for i in 0..seq
+            {
+                for j in 1..d
+                {
+                    e += (m[i * d + j] - r[i * d + j]).powi(2);
+                }
+            }
+            e
+        };
+        assert!(
+            small_err(&per_chan) < 0.1 * small_err(&per_tens),
+            "per-channel did not resolve small columns: {} vs {}",
+            small_err(&per_chan),
+            small_err(&per_tens)
+        );
+        assert_eq!(per_chan, kv_quant_dequant_axis(&m, seq, d, 4, false)); // determinism
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
