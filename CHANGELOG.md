@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **RCPS — Risk-Controlling Prediction Sets** (`nn::conformal::hoeffding_ucb` +
+  `rcps_select`, Bates et al. 2021, roadmap #36) : là où le conformal contrôle la
+  *couverture*, RCPS contrôle un **risque borné quelconque** (perte dans [0,1] :
+  taux de faux négatifs, non-couverture, …) avec une garantie **haute probabilité
+  (PAC)**. Pour une famille de prédicteurs `C_λ` à risque non-croissant en λ, RCPS
+  choisit le plus petit `λ̂` dont la **borne de concentration de Hoeffding** sur le
+  risque est ≤ α (pour λ̂ et tout λ plus grand) ⇒ `R(λ̂) ≤ α` avec proba ≥ 1−δ.
+  Oracle : la borne dépasse la moyenne du bon écart + sélection exacte (cas
+  calculé) + sur données fraîches le risque empirique reste ≤ α (borne
+  conservatrice). Couche de bibliothèque.
 - **Prodigy** (`nn::nd_optim::NdProdigy` + `ProdigyConfig`, Mishchenko & Defazio
   2023, roadmap #46) : un Adam **sans learning-rate** (« parameter-free »). Il
   estime en ligne la distance `d ≈ ‖x₀ − x*‖` à la solution — via la corrélation

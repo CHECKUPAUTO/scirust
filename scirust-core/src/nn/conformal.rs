@@ -344,6 +344,47 @@ impl AdaptiveConformal {
     }
 }
 
+/// **Hoeffding** upper confidence bound on the mean of `n` i.i.d. losses in
+/// `[0, 1]` with empirical mean `mean`, at confidence `1 − delta`:
+/// `mean + √(ln(1/δ) / (2n))`. The bound holds with probability `≥ 1 − delta`.
+pub fn hoeffding_ucb(mean: f32, n: usize, delta: f32) -> f32 {
+    assert!(delta > 0.0 && delta < 1.0, "delta must be in (0,1)");
+    if n == 0
+    {
+        return f32::INFINITY;
+    }
+    mean + ((1.0 / delta).ln() / (2.0 * n as f32)).sqrt()
+}
+
+/// **RCPS** — Risk-Controlling Prediction Sets (Bates et al., 2021). Conformal
+/// prediction controls *coverage*; RCPS controls a **general bounded risk** (any
+/// loss in `[0, 1]` — false-negative rate, miscoverage, …) with a
+/// **high-probability** (PAC) guarantee. Given a family of predictors `C_λ` whose
+/// risk is **non-increasing** in `λ` (larger `λ` ⇒ smaller risk, e.g. larger sets),
+/// `risks[i]` is the empirical risk of `C_{λ_i}` on a calibration set of size `n`
+/// (with `λ` increasing in `i`). RCPS returns the index of the **smallest** `λ̂`
+/// such that the Hoeffding upper bound on the risk is `≤ alpha` for `λ̂` **and all
+/// larger** `λ` — guaranteeing `R(λ̂) ≤ alpha` with probability `≥ 1 − delta`.
+/// Returns `None` if no `λ` controls the risk.
+pub fn rcps_select(risks: &[f32], n: usize, alpha: f32, delta: f32) -> Option<usize> {
+    // Scan from the largest λ (smallest risk) leftward; keep the smallest index
+    // whose UCB — and every UCB to its right — is ≤ alpha. Stop at the first
+    // violation (rigorous even if the empirical risk isn't perfectly monotone).
+    let mut hat = None;
+    for i in (0..risks.len()).rev()
+    {
+        if hoeffding_ucb(risks[i], n, delta) <= alpha
+        {
+            hat = Some(i);
+        }
+        else
+        {
+            break;
+        }
+    }
+    hat
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,5 +790,50 @@ mod tests {
             "static conformal ({static_cov}) not clearly worse than ACI ({aci_cov})"
         );
         assert_eq!(run(), (aci_cov, static_cov)); // determinism
+    }
+
+    /// Hoeffding UCB exceeds the mean by the right slack, and `rcps_select` picks
+    /// the smallest `λ` whose UCB (and every larger one) clears `alpha`.
+    #[test]
+    fn rcps_select_picks_smallest_controlling_lambda() {
+        // n=10000, delta=0.05 → slack √(ln20/20000) ≈ 0.01224.
+        let ucb = hoeffding_ucb(0.5, 10000, 0.05);
+        assert!(ucb > 0.5 && (ucb - 0.5 - 0.01224).abs() < 1e-3, "ucb={ucb}");
+        // risks non-increasing; UCB ≤ 0.1 first at index 3 (0.05→0.062); index 2
+        // (0.12→0.132) violates.
+        let risks = [0.5, 0.3, 0.12, 0.05, 0.01];
+        assert_eq!(rcps_select(&risks, 10000, 0.1, 0.05), Some(3));
+        // Impossible target: no λ controls a risk below the slack.
+        assert_eq!(rcps_select(&risks, 10000, 0.001, 0.05), None);
+    }
+
+    /// **The RCPS guarantee, tested.** RCPS calibrates a threshold so the upper
+    /// confidence bound on the miscoverage risk is ≤ `alpha`; on fresh data the
+    /// empirical risk stays ≤ `alpha` (the concentration bound is conservative).
+    #[test]
+    fn rcps_controls_risk_on_fresh_data() {
+        let mut rng = PcgEngine::new(31);
+        let noise = |r: &mut PcgEngine| (r.float_signed() + r.float_signed()).abs();
+        let (alpha, delta) = (0.1f32, 0.1f32);
+        let n_cal = 2000usize;
+        let cal: Vec<f32> = (0..n_cal).map(|_| noise(&mut rng)).collect();
+        // λ grid (increasing) → risk(λ) = fraction of scores > λ (non-increasing).
+        let grid: Vec<f32> = (0..=40).map(|k| k as f32 * 0.05).collect(); // 0.0 .. 2.0
+        let risks: Vec<f32> = grid
+            .iter()
+            .map(|&lam| cal.iter().filter(|&&s| s > lam).count() as f32 / n_cal as f32)
+            .collect();
+        let idx = rcps_select(&risks, n_cal, alpha, delta).expect("RCPS finds a threshold");
+        let lam_hat = grid[idx];
+        assert!(hoeffding_ucb(risks[idx], n_cal, delta) <= alpha + 1e-6);
+        assert!(lam_hat < 2.0, "RCPS threshold vacuous");
+        // Fresh test set: empirical risk stays ≤ alpha.
+        let n_test = 6000usize;
+        let test_risk =
+            (0..n_test).filter(|_| noise(&mut rng) > lam_hat).count() as f32 / n_test as f32;
+        assert!(
+            test_risk <= alpha,
+            "RCPS test risk {test_risk} exceeds alpha {alpha}"
+        );
     }
 }

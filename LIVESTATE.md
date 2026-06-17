@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 69 : RCPS (#36) — contrôle de risque (PAC)
+- `nn::conformal::hoeffding_ucb` + `rcps_select` (Bates 2021) : contrôle d'un risque
+  borné (au-delà de la couverture) via borne Hoeffding ; plus petit λ dont UCB ≤ α
+  ⇒ R(λ̂)≤α w.p. 1−δ.
+- Bibliothèque seule (comme APS/RAPS/ACI). Complète le pilier conformal.
+- Tests (2, core) : UCB = moyenne + slack exact, rcps_select choisit le bon λ ;
+  risque test ≤ α sur données fraîches (borne conservatrice).
+- docs : roadmap #36 📋→✅ ; CHANGELOG. 536 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 68 : Prodigy (#46) — Adam sans learning-rate
 - `nn::nd_optim::NdProdigy` + `ProdigyConfig` (Mishchenko & Defazio 2023) :
   parameter-free ; estime d≈‖x₀−x*‖ en ligne (corrélation globale ⟨g,x₀−x⟩),
