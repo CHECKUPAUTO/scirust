@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 72 : Deep Ensembles (#40) — incertitude épistémique
+- `nn::ensemble::DeepEnsemble` (Lakshminarayanan 2017) : N MLP ReLU seedés (tape +
+  NdAdam) ; predict→(moy, écart-type) = estimation + incertitude épistémique.
+- Bibliothèque seule (pas de CLI ni multilingue). Réutilise NdLinear/relu/NdAdam.
+- Tests (2, core) : MSE ensemble ≤ moy membres (Jensen) + écart-type ≫ OOD (x=4
+  vs x=0) ; déterminisme bit-exact.
+- docs : roadmap #40 📋→✅ ; CHANGELOG. 540 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 71 : LLM.int8() (#71) — matmul mixte int8/fp32
 - `quantization::int8_mixed_matmul` (Dettmers 2022) : colonnes de features outliers
   (>seuil) en fp32, reste en int8 ; X·W = int8(normal) + fp32(outlier). Réutilise

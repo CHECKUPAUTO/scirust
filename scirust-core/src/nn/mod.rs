@@ -12,6 +12,7 @@ pub mod conv2d_transpose;
 pub mod conv_utils;
 pub mod dropout;
 pub mod embedding;
+pub mod ensemble;
 pub mod fused_ops;
 pub mod generative;
 pub mod gnn;

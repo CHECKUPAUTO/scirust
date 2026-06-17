@@ -19,6 +19,15 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Deep Ensembles** (`nn::ensemble::DeepEnsemble`, Lakshminarayanan, Pritzel &
+  Blundell 2017, roadmap #40) : incertitude prédictive par **ensemble seedé**. N
+  petits MLP ReLU (`1→hidden→1`) entraînés sur la tape N-D avec `NdAdam`, chacun
+  seedé différemment ; `predict(x)` renvoie `(moyenne, écart-type)` — l'estimation
+  ponctuelle et son **incertitude épistémique** (désaccord entre membres). Oracle :
+  la MSE de la moyenne d'ensemble est ≤ la MSE moyenne des membres (Jensen) +
+  l'écart-type est **bien plus grand hors-distribution** (loin de la plage
+  d'entraînement) qu'en-distribution + déterminisme bit-exact. Couche de
+  bibliothèque.
 - **LLM.int8()** (`quantization::int8_mixed_matmul`, Dettmers et al. 2022, roadmap
   #71) : matmul mixte int8/fp32. Les activations des transformeurs ont quelques
   **colonnes de features outliers** de très grande magnitude ; les quantifier en

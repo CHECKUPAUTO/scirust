@@ -103,7 +103,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 37 | Angelopoulos et al., *Learn then Test* (arXiv:2110.01052) | contrôle de **risques multiples** par tests d'hypothèses (correction familiale) ; déterministe | `nn::conformal` | 📋 | M |
 | 38 | Gibbs & Candès, *Adaptive Conformal Inference* (NeurIPS 2021, arXiv:2106.00170) | `AdaptiveConformal` : conformal **en ligne** — niveau αₜ adapté par rétroaction `αₜ₊₁=αₜ+γ(α−errₜ)` ⇒ couverture ≈ 1−α **sous dérive** (là où le conformal statique s'effondre) ; oracle : règle de mise à jour exacte + couverture maintenue sous changement de variance + déterminisme | `nn::conformal` | ✅ | M |
 | 39 | Guo et al., *On Calibration of Modern NN (Temperature Scaling)* (ICML 2017, arXiv:1706.04599) | `nn::calibration` : `temperature_scale` (golden-section sur la NLL) + `expected_calibration_error` + `nll` ; recalibration post-hoc **sans changer l'accuracy** ; oracle : ECE baisse (testé, déterministe) ; CLI `calibrate` | `nn::calibration` | ✅ | S |
-| 40 | Lakshminarayanan et al., *Deep Ensembles* (NeurIPS 2017, arXiv:1612.01474) | `deep_ensemble` : incertitude prédictive par **ensemble seedé** (chaque membre déterministe) | `nn` | 📋 | M |
+| 40 | Lakshminarayanan et al., *Deep Ensembles* (NeurIPS 2017, arXiv:1612.01474) | `nn::ensemble::DeepEnsemble` : N MLP ReLU seedés (tape + NdAdam) ; `predict→(moy, écart-type)` = estimation + **incertitude épistémique** ; oracle : MSE ensemble ≤ moy. membres (Jensen) + écart-type **≫ hors-distribution** + déterminisme | `nn` | ✅ | M |
 
 ## Tier 10 — Optimiseurs (au-delà d'Adam/Lion/Muon/SF/AdEMAMix/SOAP)
 
