@@ -191,6 +191,38 @@ fn causal_mask(seq: usize) -> TensorND {
     TensorND::new(data, vec![seq, seq])
 }
 
+/// **ALiBi** per-head slopes (Press, Smith & Lewis, *Attention with Linear
+/// Biases*, ICLR 2022): the geometric sequence `mₕ = 2^(−8h/H)` for `h = 1..H`
+/// (constant ratio `2^(−8/H)`; for `H` a power of two this is the paper's set,
+/// from `2^(−8/H)` down to `2^(−8)`). Steeper slopes (later heads) focus on recent
+/// tokens; shallow slopes attend more globally.
+pub fn alibi_slopes(n_heads: usize) -> Vec<f32> {
+    (1..=n_heads)
+        .map(|h| 2f32.powf(-8.0 * h as f32 / n_heads as f32))
+        .collect()
+}
+
+/// **ALiBi** additive attention bias of shape `(slopes.len(), seq, seq)`: for a
+/// causal query `i` and key `j ≤ i` the bias is `−slopeₕ·(i − j)` — **linear in
+/// the distance**, with no learned positions — and future keys (`j > i`) get
+/// `−1e9` (the causal mask). Added to the scores before the softmax it biases
+/// attention toward recent tokens and extrapolates to lengths unseen in training.
+pub fn alibi_bias(slopes: &[f32], seq: usize) -> TensorND {
+    let h = slopes.len();
+    let mut data = vec![0.0f32; h * seq * seq];
+    for (head, &m) in slopes.iter().enumerate()
+    {
+        for i in 0..seq
+        {
+            for j in 0..seq
+            {
+                data[(head * seq + i) * seq + j] = if j > i { -1e9 } else { -m * (i - j) as f32 };
+            }
+        }
+    }
+    TensorND::new(data, vec![h, seq, seq])
+}
+
 /// Multi-head self-attention over the N-D tape, built from [`NdLinear`]
 /// projections and the N-D attention math (`bmm` / `transpose_last2` /
 /// `softmax`). Input and output are `(seq, d_model)`.
@@ -205,6 +237,7 @@ pub struct NdMultiHeadAttention {
     d_head: usize,
     causal: bool,
     rope: bool,
+    alibi: bool,
 }
 
 /// Frequency base for [`NdMultiHeadAttention`] rotary embeddings.
@@ -249,7 +282,23 @@ impl NdMultiHeadAttention {
             d_head,
             causal,
             rope: false,
+            alibi: false,
         }
+    }
+
+    /// Enable **ALiBi** (Press et al. 2022): a static per-head linear-distance bias
+    /// on the attention scores instead of learned/rotary positions. Implies causal
+    /// masking and is mutually exclusive with RoPE; builder-style. Standard MHA
+    /// only (`num_kv_heads == n_heads`).
+    pub fn with_alibi(mut self) -> Self {
+        assert_eq!(
+            self.n_heads, self.num_kv_heads,
+            "ALiBi here is for standard MHA (num_kv_heads == n_heads)"
+        );
+        self.alibi = true;
+        self.causal = true;
+        self.rope = false;
+        self
     }
 
     /// Enable (or disable) **rotary position embeddings** on Q and K
@@ -303,7 +352,12 @@ impl NdMultiHeadAttention {
         {
             // Standard multi-head path: (n_heads, seq, d_head).
             let mut scores = q.bmm(k.transpose_last2()).mul(scale);
-            if self.causal
+            if self.alibi
+            {
+                // ALiBi: per-head linear-distance bias (already includes the mask).
+                scores = scores.add(tape.input(alibi_bias(&alibi_slopes(self.n_heads), seq)));
+            }
+            else if self.causal
             {
                 scores = scores.add(tape.input(causal_mask(seq)));
             }
@@ -2158,6 +2212,97 @@ mod tests {
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// ALiBi slopes are the geometric sequence `2^(−8h/H)`: decreasing, constant
+    /// ratio `2^(−8/H)`, last slope (h=H) is `2^(−8) = 1/256`.
+    #[test]
+    fn alibi_slopes_are_geometric() {
+        let h = 8usize;
+        let s = alibi_slopes(h);
+        let ratio = 2f32.powf(-8.0 / h as f32);
+        assert!((s[0] - ratio).abs() < 1e-6);
+        for k in 1..h
+        {
+            assert!((s[k] / s[k - 1] - ratio).abs() < 1e-5, "ratio at {k}");
+            assert!(s[k] < s[k - 1], "not decreasing at {k}");
+        }
+        assert!(
+            (s[h - 1] - 1.0 / 256.0).abs() < 1e-6,
+            "last slope {}",
+            s[h - 1]
+        );
+    }
+
+    /// ALiBi bias is linear in distance, causal, and shift-invariant (Toeplitz).
+    #[test]
+    fn alibi_bias_is_linear_causal_and_toeplitz() {
+        let seq = 6usize;
+        let m = 0.5f32;
+        let bias = alibi_bias(&[m], seq);
+        let at = |i: usize, j: usize| bias.data[i * seq + j]; // single head
+        for i in 0..seq
+        {
+            for j in 0..=i
+            {
+                assert!(
+                    (at(i, j) - (-m * (i - j) as f32)).abs() < 1e-6,
+                    "bias({i},{j})"
+                );
+            }
+            for j in (i + 1)..seq
+            {
+                assert!(at(i, j) < -1e8, "not masked ({i},{j})");
+            }
+        }
+        assert!((at(5, 2) - at(4, 1)).abs() < 1e-6, "not Toeplitz"); // shift-invariant
+        assert!(
+            at(5, 5) > at(5, 4) && at(5, 4) > at(5, 0),
+            "not recency-ordered"
+        );
+    }
+
+    /// Applied to uniform scores then softmax, ALiBi makes the attention weights
+    /// **decay with distance** — recency bias exactly `∝ exp(−slope·dist)`.
+    #[test]
+    fn alibi_softmax_weights_decay_with_distance() {
+        let seq = 8usize;
+        let m = 0.3f32;
+        let bias = alibi_bias(&[m], seq);
+        let i = seq - 1; // query = last position (all keys are causal/past)
+        let row: Vec<f32> = (0..seq).map(|j| bias.data[i * seq + j]).collect();
+        let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exps: Vec<f32> = row.iter().map(|&z| (z - mx).exp()).collect();
+        let z: f32 = exps.iter().sum();
+        let w: Vec<f32> = exps.iter().map(|&e| e / z).collect();
+        for j in 0..i
+        {
+            assert!(w[j] < w[j + 1], "weight not decaying at j={j}");
+        }
+        assert!(
+            (w[i - 1] / w[i] - (-m).exp()).abs() < 1e-4,
+            "decay ratio not exp(−m)"
+        );
+    }
+
+    /// `NdMultiHeadAttention::with_alibi` runs end-to-end (right output shape) and
+    /// is bit-for-bit deterministic — ALiBi tested on the real attention layer.
+    #[test]
+    fn nd_attention_with_alibi_runs_and_is_deterministic() {
+        let (seq, d_model, heads) = (5usize, 8usize, 4usize);
+        let run = || -> Vec<u32> {
+            let mut rng = PcgEngine::new(6);
+            let mut attn = NdMultiHeadAttention::new(d_model, heads, true, &mut rng).with_alibi();
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.2 - 1.0).sin())
+                .collect();
+            let tape = NdTape::new();
+            let xv = tape.input(TensorND::new(x, vec![seq, d_model]));
+            let out = tape.value(attn.forward(&tape, xv));
+            assert_eq!(out.shape, vec![seq, d_model]);
+            out.data.iter().map(|v| v.to_bits()).collect()
+        };
+        assert_eq!(run(), run());
     }
 
     /// LoRA at init equals the frozen base map (`B = 0` ⇒ `ΔW = 0`), and its

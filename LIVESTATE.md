@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 66 : ALiBi (#59) — biais d'attention linéaire
+- `nn::nd_layers::alibi_slopes` (pentes `2^(−8h/H)`) + `alibi_bias` (biais
+  `(H,seq,seq)` = `−pente·(i−j)` causal) + `NdMultiHeadAttention::with_alibi`.
+- Branché dans l'attention N-D (builder, inclut le masque causal). MHA standard.
+- Tests (4, core) : pentes géométriques ; biais linéaire/causal/Toeplitz ; poids
+  softmax décroissants (∝ exp(−pente·dist)) ; attention with_alibi déterministe.
+- docs : roadmap #59 📋→✅ ; CHANGELOG. 531 tests core (+4) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 65 : ACI (#38) — Adaptive Conformal Inference
 - `nn::conformal::AdaptiveConformal` (Gibbs & Candès 2021) : conformal en ligne ;
   niveau αₜ adapté par rétroaction αₜ₊₁=αₜ+γ(α−errₜ) ⇒ couverture ≈1−α sous dérive.

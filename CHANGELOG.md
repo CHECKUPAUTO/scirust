@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **ALiBi — Attention with Linear Biases** (`nn::nd_layers::alibi_slopes` +
+  `alibi_bias` + `NdMultiHeadAttention::with_alibi`, Press, Smith & Lewis 2022,
+  roadmap #59) : remplace les positions apprises/rotatives par un **biais statique
+  linéaire en distance** ajouté aux scores d'attention — pour la requête `i` et la
+  clé `j ≤ i`, `−penteₕ·(i−j)`, avec des pentes par tête en suite géométrique
+  `2^(−8h/H)`. Aucune position apprise ⇒ **extrapolation en longueur**. Branché dans
+  `NdMultiHeadAttention` (builder `with_alibi`, inclut le masque causal). Oracle :
+  pentes géométriques (ratio `2^(−8/H)`) + biais linéaire/causal/Toeplitz + poids
+  softmax décroissant avec la distance (exactement `∝ exp(−pente·dist)`) + forward
+  d'attention déterministe.
 - **ACI — Adaptive Conformal Inference** (`nn::conformal::AdaptiveConformal`, Gibbs
   & Candès 2021, roadmap #38) : conformal **en ligne** robuste à la **dérive de
   distribution**. Le conformal statique perd silencieusement sa couverture sous
