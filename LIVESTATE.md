@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 73 : DeepONet (#76) — apprentissage d'opérateurs
+- `nn::deeponet::DeepONet` (Lu 2021) : G(u)(y)=Σ b_k(u)·t_k(y) ; trunk cosinus fixe +
+  branch linéaire (POD-DeepONet) ⇒ convexe, exact pour opérateurs linéaires.
+- Bibliothèque seule (pas de CLI ni multilingue). Standalone (GD analytique).
+- Tests (2, core) : apprend l'antidérivée, généralise à fonctions non vues (MSE test
+  < 0,01, < 0,1× baseline) ; déterminisme.
+- docs : roadmap #76 📋→✅ ; CHANGELOG. 542 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 72 : Deep Ensembles (#40) — incertitude épistémique
 - `nn::ensemble::DeepEnsemble` (Lakshminarayanan 2017) : N MLP ReLU seedés (tape +
   NdAdam) ; predict→(moy, écart-type) = estimation + incertitude épistémique.

@@ -19,6 +19,16 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **DeepONet — apprentissage d'opérateurs** (`nn::deeponet::DeepONet`, Lu et al.
+  2021, roadmap #76) : apprend un **opérateur** `G : u ↦ G(u)` (fonction →
+  fonction) via une factorisation **branch × trunk** `G(u)(y) ≈ Σ_k b_k(u)·t_k(y)`
+  — la branch encode la fonction d'entrée `u` (échantillonnée à des capteurs
+  fixes), la trunk encode la position `y`. Variante **POD-DeepONet** (trunk cosinus
+  **fixe** `cos(kπy)` + branch **linéaire**) ⇒ ajustement **convexe**, exact pour
+  les opérateurs linéaires comme l'**antidérivée** `∫₀^y u`. Oracle : entraîné sur
+  certaines fonctions, il approxime l'antidérivée sur des fonctions **non vues** à
+  MSE test < 0,01 (≪ prédicteur constant) — la propriété d'apprentissage
+  d'opérateurs — + déterminisme. Couche de bibliothèque.
 - **Deep Ensembles** (`nn::ensemble::DeepEnsemble`, Lakshminarayanan, Pritzel &
   Blundell 2017, roadmap #40) : incertitude prédictive par **ensemble seedé**. N
   petits MLP ReLU (`1→hidden→1`) entraînés sur la tape N-D avec `NdAdam`, chacun
