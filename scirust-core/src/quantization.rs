@@ -1180,6 +1180,327 @@ mod nf4_tests {
     }
 }
 
+// ----- SqueezeLLM : sensitivity-weighted non-uniform quantization (#66) --------
+
+/// **SqueezeLLM** (Kim et al. 2023, arXiv:2306.07629) — non-uniform weight
+/// quantization. Instead of a uniform grid (round-to-nearest), SqueezeLLM fits a
+/// `2^bits`-entry **codebook** to the weights by **weighted k-means**, where each
+/// value's weight is its **sensitivity** — a proxy for the Hessian diagonal
+/// `∂²L/∂wᵢ²`. This places code points where they cut the *loss* most (important
+/// weights quantized finely), not merely where weights are dense, giving markedly
+/// lower error than RTN at the same bit-width — especially under the sensitivity
+/// metric it optimises. Deterministic: quantile initialisation + a fixed number of
+/// Lloyd iterations, pure `f32` in a fixed order. (The orthogonal "sparse" outlier
+/// branch of the paper is not modelled here.)
+pub struct SqueezeLlmCodebook {
+    levels: Vec<f32>,
+}
+
+impl SqueezeLlmCodebook {
+    /// Fit a `2^bits` codebook to `weights` with per-weight `sensitivity` (≥ 0;
+    /// pass all-ones for unweighted k-means), running `iters` Lloyd iterations
+    /// after a deterministic quantile initialisation.
+    pub fn fit(weights: &[f32], sensitivity: &[f32], bits: u32, iters: usize) -> Self {
+        assert_eq!(
+            weights.len(),
+            sensitivity.len(),
+            "SqueezeLLM: weights/sensitivity length mismatch"
+        );
+        assert!((1..=8).contains(&bits), "SqueezeLLM: bits must be in 1..=8");
+        let k = 1usize << bits;
+        let n = weights.len();
+        let mut levels = vec![0.0f32; k];
+        if n == 0
+        {
+            return Self { levels };
+        }
+        // Deterministic init: centroids at evenly spaced quantiles of the weights.
+        let mut sorted = weights.to_vec();
+        sorted.sort_by(f32::total_cmp);
+        for (j, lvl) in levels.iter_mut().enumerate()
+        {
+            let pos = ((j as f32 + 0.5) / k as f32) * (n as f32 - 1.0);
+            *lvl = sorted[pos.round() as usize];
+        }
+        // Weighted Lloyd iterations: assign to nearest centroid, then move each
+        // centroid to the sensitivity-weighted mean of its members (the optimum).
+        for _ in 0..iters
+        {
+            let mut sum = vec![0.0f32; k];
+            let mut wsum = vec![0.0f32; k];
+            for (&w, &s) in weights.iter().zip(sensitivity)
+            {
+                let a = nearest_level(&levels, w);
+                let s = s.max(0.0);
+                sum[a] += s * w;
+                wsum[a] += s;
+            }
+            for (lvl, (&sj, &wj)) in levels.iter_mut().zip(sum.iter().zip(&wsum))
+            {
+                if wj > 0.0
+                {
+                    *lvl = sj / wj;
+                }
+                // Empty cluster: keep its previous value (deterministic).
+            }
+        }
+        // Sort for a reproducible, scan-friendly codebook representation.
+        levels.sort_by(f32::total_cmp);
+        Self { levels }
+    }
+
+    /// Index of the nearest codebook entry to `w`.
+    pub fn quantize_index(&self, w: f32) -> usize {
+        nearest_level(&self.levels, w)
+    }
+
+    /// Centroid value for a codebook index.
+    pub fn dequantize(&self, idx: usize) -> f32 {
+        self.levels[idx]
+    }
+
+    /// Round-trip: the nearest codebook value to `w`.
+    pub fn quantize(&self, w: f32) -> f32 {
+        self.levels[nearest_level(&self.levels, w)]
+    }
+
+    /// The codebook (sorted centroid values).
+    pub fn levels(&self) -> &[f32] {
+        &self.levels
+    }
+}
+
+/// Index of the nearest value in `levels` to `w` (linear scan; ties go to the
+/// lower index — deterministic).
+fn nearest_level(levels: &[f32], w: f32) -> usize {
+    let mut best = 0usize;
+    let mut bd = (w - levels[0]).abs();
+    for (i, &l) in levels.iter().enumerate().skip(1)
+    {
+        let d = (w - l).abs();
+        if d < bd
+        {
+            bd = d;
+            best = i;
+        }
+    }
+    best
+}
+
+/// Sensitivity-weighted quantization error `Σ sᵢ·(wᵢ − q(wᵢ))²` — the objective
+/// SqueezeLLM minimises and the metric on which it beats round-to-nearest.
+pub fn weighted_quant_error(weights: &[f32], sensitivity: &[f32], quantized: &[f32]) -> f32 {
+    weights
+        .iter()
+        .zip(sensitivity)
+        .zip(quantized)
+        .map(|((&w, &s), &q)| s.max(0.0) * (w - q) * (w - q))
+        .sum()
+}
+
+#[cfg(test)]
+mod tests_squeezellm {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// Uniform round-to-nearest baseline: `2^bits` evenly spaced levels over
+    /// `[min, max]`, nearest mapping.
+    fn rtn(weights: &[f32], bits: u32) -> Vec<f32> {
+        let k = 1usize << bits;
+        let lo = weights.iter().cloned().fold(f32::INFINITY, f32::min);
+        let hi = weights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let step = (hi - lo) / (k as f32 - 1.0);
+        weights
+            .iter()
+            .map(|&w| {
+                let idx = ((w - lo) / step).round().clamp(0.0, (k - 1) as f32);
+                lo + idx * step
+            })
+            .collect()
+    }
+
+    /// **The SqueezeLLM claim, tested.** On Gaussian weights with non-uniform
+    /// sensitivity, the sensitivity-weighted k-means codebook achieves strictly
+    /// (and meaningfully) lower weighted quantization error than uniform
+    /// round-to-nearest at the same bit-width.
+    #[test]
+    fn squeezellm_beats_rtn_on_weighted_error() {
+        let mut rng = PcgEngine::new(9);
+        let n = 2000usize;
+        // Gaussian-ish weights (sum of uniforms); heteroscedastic sensitivity.
+        let w: Vec<f32> = (0..n)
+            .map(|_| rng.float_signed() + rng.float_signed() + rng.float_signed())
+            .collect();
+        let s: Vec<f32> = (0..n).map(|_| rng.float().abs() + 0.05).collect();
+        let bits = 3;
+        let cb = SqueezeLlmCodebook::fit(&w, &s, bits, 12);
+        let q_sq: Vec<f32> = w.iter().map(|&x| cb.quantize(x)).collect();
+        let q_rtn = rtn(&w, bits);
+        let e_sq = weighted_quant_error(&w, &s, &q_sq);
+        let e_rtn = weighted_quant_error(&w, &s, &q_rtn);
+        assert!(
+            e_sq < e_rtn,
+            "SqueezeLLM not better than RTN: sq={e_sq} rtn={e_rtn}"
+        );
+        assert!(
+            e_sq < 0.85 * e_rtn,
+            "SqueezeLLM only marginally better: sq={e_sq} rtn={e_rtn}"
+        );
+    }
+
+    /// The fit is deterministic, the codebook is sorted with `2^bits` entries, and
+    /// round-trip on a codebook value is exact (it maps to itself).
+    #[test]
+    fn squeezellm_roundtrip_and_determinism() {
+        let mut rng = PcgEngine::new(3);
+        let n = 500usize;
+        let w: Vec<f32> = (0..n).map(|_| rng.float_signed() * 2.0).collect();
+        let s = vec![1.0f32; n];
+        let fit = || SqueezeLlmCodebook::fit(&w, &s, 4, 10).levels().to_vec();
+        assert_eq!(fit(), fit()); // determinism
+
+        let cb = SqueezeLlmCodebook::fit(&w, &s, 4, 10);
+        assert_eq!(cb.levels().len(), 16);
+        for pair in cb.levels().windows(2)
+        {
+            assert!(pair[0] <= pair[1], "codebook not sorted");
+        }
+        for &l in cb.levels()
+        {
+            assert!(
+                (cb.quantize(l) - l).abs() < 1e-6,
+                "codebook value not fixed: {l}"
+            );
+        }
+    }
+}
+
+// ----- SpQR : sparse-quantized representation (outliers en fp) (#67) -----------
+
+/// **SpQR** — Sparse-Quantized Representation (Dettmers et al. 2023,
+/// arXiv:2306.03078). Weight-quantization error is **heavy-tailed**: a small
+/// fraction of "outlier" weights account for most of the loss. SpQR keeps that
+/// fraction in **full precision** (a sparse side-channel) and quantizes the rest
+/// densely, so a ~1 % outlier budget removes a large share of the error at a small
+/// memory overhead. This models the sparse-outlier core (the paper's bi-level
+/// grouped scales are orthogonal). Deterministic: outliers are the largest
+/// dense-quantization errors, ties broken by index.
+pub struct SpqrOutliers {
+    indices: Vec<usize>,
+    values: Vec<f32>,
+}
+
+impl SpqrOutliers {
+    /// Extract the `outlier_frac` (in `[0,1]`) fraction of weights whose dense
+    /// quantization error `|w − q|` is largest, storing their exact fp values.
+    pub fn extract(weights: &[f32], quantized: &[f32], outlier_frac: f32) -> Self {
+        assert_eq!(
+            weights.len(),
+            quantized.len(),
+            "SpQR: weights/quantized length mismatch"
+        );
+        assert!(
+            (0.0..=1.0).contains(&outlier_frac),
+            "SpQR: outlier_frac must be in [0,1]"
+        );
+        let n = weights.len();
+        let k = ((n as f32) * outlier_frac).round() as usize;
+        // Rank indices by descending |w − q| (ties → lower index for determinism).
+        let mut idx: Vec<usize> = (0..n).collect();
+        idx.sort_by(|&a, &b| {
+            let ea = (weights[a] - quantized[a]).abs();
+            let eb = (weights[b] - quantized[b]).abs();
+            eb.total_cmp(&ea).then(a.cmp(&b))
+        });
+        let mut indices: Vec<usize> = idx.into_iter().take(k).collect();
+        indices.sort_unstable();
+        let values = indices.iter().map(|&i| weights[i]).collect();
+        Self { indices, values }
+    }
+
+    /// Reconstruct: the dense `quantized` weights with the stored outliers
+    /// overwritten by their exact fp values.
+    pub fn reconstruct(&self, quantized: &[f32]) -> Vec<f32> {
+        let mut out = quantized.to_vec();
+        for (&i, &v) in self.indices.iter().zip(&self.values)
+        {
+            out[i] = v;
+        }
+        out
+    }
+
+    /// Number of full-precision outliers kept.
+    pub fn num_outliers(&self) -> usize {
+        self.indices.len()
+    }
+}
+
+#[cfg(test)]
+mod tests_spqr {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    /// Dense baseline: uniform int-`bits` round-to-nearest **clipped** to a fixed
+    /// `[lo, hi]` range (so out-of-range outliers incur a large clamp error).
+    fn rtn_clip(w: &[f32], bits: u32, lo: f32, hi: f32) -> Vec<f32> {
+        let k = 1usize << bits;
+        let step = (hi - lo) / (k as f32 - 1.0);
+        w.iter()
+            .map(|&x| {
+                let idx = ((x.clamp(lo, hi) - lo) / step).round();
+                lo + idx * step
+            })
+            .collect()
+    }
+
+    /// **The SpQR insight, tested.** Quantization error is heavy-tailed: a few
+    /// large-magnitude weights, clamped by the dense grid, dominate the squared
+    /// error. Keeping just **1 %** of weights (the largest errors) in full
+    /// precision cuts the total error by far more than 1 %.
+    #[test]
+    fn spqr_outliers_slash_heavy_tailed_error() {
+        let mut rng = PcgEngine::new(13);
+        let n = 2000usize;
+        // Bulk ~ sum of two uniforms ∈ [−2, 2]; inject 20 large outliers (±12).
+        let mut w: Vec<f32> = (0..n)
+            .map(|_| rng.float_signed() + rng.float_signed())
+            .collect();
+        for j in 0..(n / 100)
+        {
+            w[j * 100] = if j % 2 == 0 { 12.0 } else { -12.0 };
+        }
+        let q = rtn_clip(&w, 4, -3.0, 3.0);
+        let e_dense: f32 = w.iter().zip(&q).map(|(&a, &b)| (a - b) * (a - b)).sum();
+        let spqr = SpqrOutliers::extract(&w, &q, 0.01);
+        let recon = spqr.reconstruct(&q);
+        let e_spqr: f32 = w.iter().zip(&recon).map(|(&a, &b)| (a - b) * (a - b)).sum();
+        assert_eq!(spqr.num_outliers(), 20);
+        assert!(
+            e_spqr < 0.3 * e_dense,
+            "SpQR did not cut heavy-tailed error: dense={e_dense}, spqr={e_spqr}"
+        );
+    }
+
+    /// Reconstruction overwrites outliers with exact fp (error never increases),
+    /// and extraction is deterministic.
+    #[test]
+    fn spqr_reconstruction_and_determinism() {
+        let w: Vec<f32> = (0..50).map(|i| (i as f32 * 0.3).sin() * 3.0).collect();
+        let q: Vec<f32> = w.iter().map(|&x| x.round()).collect();
+        let a = SpqrOutliers::extract(&w, &q, 0.2);
+        let b = SpqrOutliers::extract(&w, &q, 0.2);
+        assert_eq!(a.reconstruct(&q), b.reconstruct(&q)); // determinism
+        assert_eq!(a.num_outliers(), 10);
+        let recon = a.reconstruct(&q);
+        let e_dense: f32 = w.iter().zip(&q).map(|(&x, &y)| (x - y) * (x - y)).sum();
+        let e_spqr: f32 = w.iter().zip(&recon).map(|(&x, &y)| (x - y) * (x - y)).sum();
+        assert!(
+            e_spqr <= e_dense,
+            "SpQR increased error: {e_dense} -> {e_spqr}"
+        );
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).

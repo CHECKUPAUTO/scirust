@@ -1,7 +1,142 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-15
+> Dernière mise à jour : 2026-06-17
+
+## Session 2026-06-17 — volet 66 : ALiBi (#59) — biais d'attention linéaire
+- `nn::nd_layers::alibi_slopes` (pentes `2^(−8h/H)`) + `alibi_bias` (biais
+  `(H,seq,seq)` = `−pente·(i−j)` causal) + `NdMultiHeadAttention::with_alibi`.
+- Branché dans l'attention N-D (builder, inclut le masque causal). MHA standard.
+- Tests (4, core) : pentes géométriques ; biais linéaire/causal/Toeplitz ; poids
+  softmax décroissants (∝ exp(−pente·dist)) ; attention with_alibi déterministe.
+- docs : roadmap #59 📋→✅ ; CHANGELOG. 531 tests core (+4) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 65 : ACI (#38) — Adaptive Conformal Inference
+- `nn::conformal::AdaptiveConformal` (Gibbs & Candès 2021) : conformal en ligne ;
+  niveau αₜ adapté par rétroaction αₜ₊₁=αₜ+γ(α−errₜ) ⇒ couverture ≈1−α sous dérive.
+- Bibliothèque seule (comme APS/RAPS). Complète CQR/APS/RAPS dans `nn::conformal`.
+- Tests (2, core) : règle de mise à jour αₜ exacte (miss→−γ(1−α), cover→+γα) ;
+  couverture maintenue ≈0,9 sous changement de variance (statique chute) + déterminisme.
+- docs : roadmap #38 📋→✅ ; CHANGELOG. 527 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 64 : KAN (#77) — Kolmogorov-Arnold Networks (RBF)
+- `nn::kan::KanLayer` (Liu 2024 ; base RBF de FastKAN, Li 2024) : activations
+  apprenables sur arêtes y_j=Σᵢφᵢⱼ(xᵢ), φ = Σ RBF gaussiennes + base SiLU.
+- Sortie linéaire en coeffs ⇒ ajustement convexe par GD analytique (standalone).
+- Bibliothèque seule (pas de CLI ni multilingue). Variante RBF/FastKAN (pas B-splines).
+- Tests (2, core) : ajuste sin(2x₀)+x₁² (MSE<0,02, <0,2× linéaire) ; base RBF
+  localisée (pic=1 au centre) + déterminisme bit-exact.
+- docs : roadmap #77 📋→✅ ; CHANGELOG. 525 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 63 : RWKV (#53) — mélange temporel WKV + op `div`
+- Nouvel op autograd `div` (division élémentaire broadcast, ∂a=g/b ∂b=−g·a/b²,
+  gradient-checké) dans `autodiff::nd`.
+- `nn::nd_layers::rwkv_wkv` + `NdRwkv` (Peng 2023) : WKV = attention linéaire à
+  décroissance expo. par canal + bonus courant, normalisée ; récurrence sur tape.
+  Couche : WKV gaté réception r=σ(W_r·x), decay=σ(·)/bonus=exp(·) par canal apprenables.
+- CLI : `rwkv [--seed N] [--steps S]` (groupe NLP). 8 Documentation mises à jour.
+- Tests (4) : div gradient-check ; WKV récurrent ≡ formule explicite ; WKV gradient
+  check (k,v,decay,bonus) ; NdRwkv entraîne (MSE↓) + déterminisme.
+- docs : roadmap #53 📋→✅ ; CHANGELOG. 523 tests core (+4) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 62 : GloRo (#32) — robustesse certifiée par Lipschitz
+- `nn::lipschitz` (Leino 2021) : `spectral_norm` (power iteration), `spectral_normalize`
+  (couche 1-Lipschitz), `GloroClassifier` (rayon L2 = marge/(√2‖W‖₂), exact-pour-linéaire).
+- Bibliothèque seule (pas de CLI ni multilingue). Complète IBP/CROWN/smoothing/GloRo.
+- Tests (3, core) : normes spectrales connues (diag/rect) ; norme ≈1 post-normalisation ;
+  rayon sain (pire δ ne bascule pas) + conservateur (≤ distance exacte) + déterminisme.
+- docs : roadmap #32 📋→✅ ; CHANGELOG. 519 tests core (+3) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 61 : Randomized Smoothing (#27) — robustesse certifiée L2
+- `nn::smoothing` (Cohen 2019) : classifieur lissé `g(x)=argmax_c P(f(x+ε)=c)`,
+  rayon L2 prouvé `σ·Φ⁻¹(pₐ)` ; `pₐ` minorée par Clopper-Pearson (betai/lgamma
+  exact) ; `Φ⁻¹` Acklam. `SmoothedClassifier::{predict,certify}` +
+  `clopper_pearson_lower` + `inv_normal_cdf` pub.
+- CLI : `certify` enrichi — IBP/CROWN (déterministe) + smoothing (probabiliste,
+  demi-espace : rayon ≈ distance). Même signature, pas de multilingue.
+- Tests (5, core) : Φ⁻¹ repères ; betai = CDF ; Clopper-Pearson (0.416 + inversion)
+  ; rayon = distance demi-espace (indép. σ) + déterminisme ; soundness/abstention.
+- docs : roadmap #27 📋→✅ ; CHANGELOG. 516 tests core (+5) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 60 : SpQR (#67) — sparse-quantized (outliers fp)
+- `quantization::SpqrOutliers` (Dettmers 2023) : garde la fraction d'outliers (plus
+  grosses erreurs |w−q|) en fp, reste en dense ; reconstruction = dense + outliers.
+- Bibliothèque seule (comme NF4/SqueezeLLM ; pas de CLI ni multilingue). Scales
+  groupés bi-niveaux non modélisés.
+- Tests (2, core) : erreur lourde-queue (gaussien + outliers ±12 clampés) divisée
+  > 3× en gardant 1 % ; reconstruction n'augmente jamais l'erreur + déterminisme.
+- docs : roadmap #67 📋→✅ ; CHANGELOG. 511 tests core (+2) ; 8 gates (à confirmer).
+- Note : Randomized Smoothing (#27, `nn::smoothing`) repéré comme prochain gros
+  item (Clopper-Pearson ⇒ betai/lgamma/probit ; oracle exact halfspace R=distance).
+
+## Session 2026-06-17 — volet 59 : SqueezeLLM (#66) — quantif non-uniforme sensible
+- `quantization::SqueezeLlmCodebook` + `weighted_quant_error` (Kim 2023) : codebook
+  `2^bits` par k-means **pondéré sensibilité** (proxy Hessien diag.) ; init quantile
+  + Lloyd déterministe ; ties→index bas.
+- Bibliothèque seule (comme NF4 ; pas de CLI ni multilingue). Branche sparse non
+  modélisée.
+- Tests (2, core) : erreur pondérée < RTN (gaussien 3 bits, <0,85×) ; round-trip
+  exact sur valeurs du codebook + codebook trié 16 entrées + déterminisme.
+- docs : roadmap #66 📋→✅ ; CHANGELOG. 509 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 58 : APS/RAPS (#34/#35) — ensembles de prédiction
+- `nn::conformal::AdaptivePredictionSets` (Romano/Sesia/Candès 2020 ; Angelopoulos
+  2021) : conformal classification par score cumulatif `s(x,c)` = masse des classes
+  ≥ probables que c. Set `{c : s≤q̂}` ⇒ couverture marginale ≥ 1−α + taille adaptative.
+- RAPS : `calibrate_raps(k_reg, λ)` ajoute `λ·max(0, rang−k_reg)` ⇒ ensembles plus
+  petits à couverture égale (démontré sur classifieur correct, beaucoup de classes —
+  longue queue ; data near-uniforme gonfle q̂ et casse l'effet).
+- Bibliothèque seule (comme `ConformalClassifier` ; pas de CLI ni multilingue).
+- Tests (3, core) : score cumulatif exact (cas main) ; couverture + adaptativité
+  (facile vs ambigu) + déterminisme ; RAPS < APS en taille à couverture ≥ 1−α.
+- docs : roadmap #34/#35 📋→✅ ; CHANGELOG. 507 tests core (+3) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 57 : CQR (#33) — Conformalized Quantile Regression
+- `nn::conformal::ConformalQuantileRegressor` (Romano, Patterson & Candès 2019) :
+  conformalise un régresseur de quantiles. Score `Eᵢ=max(q_lo−y, y−q_hi)`,
+  correction finie `Q` (réutilise `conformal_quantile`), intervalle adaptatif
+  `[q_lo−Q, q_hi+Q]`. Largeur variable selon x (vs split-conformal constant).
+- CLI : `conformal` enrichi — affiche split (largeur constante) **et** CQR
+  (largeur adaptative : région faible vs fort bruit) ; même signature (`--seed`,
+  `--alpha`), pas de changement multilingue.
+- Tests (2, core) : sémantique exacte du score (cas main) ; couverture marginale
+  ≥ 1−α + adaptativité (whigh > 1.5·wlow) + déterminisme.
+- docs : roadmap #33 📋→✅ ; CHANGELOG. 504 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 56 : SAM (#47) — Sharpness-Aware Minimization
+- `nn::nd_optim::NdSam` + `SamConfig` (Foret 2021) : 2 phases — `ascent` perturbe
+  vers `θ+ρ·g/‖g‖` (norme globale du gradient), `descent` restaure θ + pas SGD au
+  gradient perturbé. Biais vers les minima plats.
+- Bibliothèque seule : 2 gradients/pas ⇒ incompatible avec la boucle `lm --opt`
+  (gradient unique). Pas de CLI ni de cycle multilingue (comme NF4).
+- Tests (2, core) : perturbation = ρ·g/‖g‖ (‖ε‖=ρ) ; convergence quadratique
+  (bande ∝ lr·ρ) + déterminisme.
+- docs : roadmap #47 📋→✅ ; CHANGELOG. 502 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 55 : Shampoo (#41) — préconditionneur Kronecker
+- `nn::nd_optim::NdShampoo` + `ShampooConfig` + helper `inverse_pth_root` (Gupta/
+  Koren/Singer 2018) : facteurs `L=E[GGᵀ]`, `R=E[GᵀG]` ; update préconditionné
+  `W − lr·L^(−1/4) G R^(−1/4)` ; racines inverses via Jacobi (réutilise
+  `jacobi_eigenvectors`), cachées/rafraîchies tous les `precond_freq` pas.
+  Vecteurs : Adagrad diagonal.
+- CLI : `lm --opt shampoo` (11e valeur `--opt`).
+- Tests (3, core) : `inverse_pth_root` `A^(−1/2)²·A≈I` ; convergence quadratique
+  matricielle + déterminisme ; repli Adagrad converge.
+- docs : roadmap #41 📋→✅ ; 8 Documentation (ligne `--opt`) ; REFERENCE ;
+  CHANGELOG.
+- 500 tests core (+3) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-17 — volet 54 : Adafactor (#42) — moments 2e ordre factorisés
+- `nn::nd_optim::NdAdafactor` + `AdafactorConfig` (Shazeer & Stern 2018) : pour une
+  matrice, sommes ligne/colonne du carré du gradient (mémoire `rows+cols`),
+  reconstruction rang-1 `V[i,j]=R[i]·C[j]/ΣR` ; update `G/√V` clippé en RMS ;
+  planning β2ₜ=1−t^(−0.8). Vecteurs : 2e moment complet (RMSProp).
+- CLI : `lm --opt adafactor` (10e valeur `--opt`).
+- Tests (3, core) : reconstruction rang-1 exacte ; convergence (bande) +
+  déterminisme ; chemin matriciel factorisé réduit ½‖W−T‖².
+- docs : roadmap #42 📋→✅ ; 8 Documentation (ligne `--opt`) ; REFERENCE (liste
+  `--opt` complétée lookahead/lamb/adan/adafactor) ; CHANGELOG.
+- 497 tests core (+3) ; 8 gates verts (à confirmer).
 
 ## Session 2026-06-16 — volet 53 : NF4 (#74) — NormalFloat 4-bit
 - `quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS` (QLoRA, Dettmers

@@ -6,6 +6,135 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **ALiBi — Attention with Linear Biases** (`nn::nd_layers::alibi_slopes` +
+  `alibi_bias` + `NdMultiHeadAttention::with_alibi`, Press, Smith & Lewis 2022,
+  roadmap #59) : remplace les positions apprises/rotatives par un **biais statique
+  linéaire en distance** ajouté aux scores d'attention — pour la requête `i` et la
+  clé `j ≤ i`, `−penteₕ·(i−j)`, avec des pentes par tête en suite géométrique
+  `2^(−8h/H)`. Aucune position apprise ⇒ **extrapolation en longueur**. Branché dans
+  `NdMultiHeadAttention` (builder `with_alibi`, inclut le masque causal). Oracle :
+  pentes géométriques (ratio `2^(−8/H)`) + biais linéaire/causal/Toeplitz + poids
+  softmax décroissant avec la distance (exactement `∝ exp(−pente·dist)`) + forward
+  d'attention déterministe.
+- **ACI — Adaptive Conformal Inference** (`nn::conformal::AdaptiveConformal`, Gibbs
+  & Candès 2021, roadmap #38) : conformal **en ligne** robuste à la **dérive de
+  distribution**. Le conformal statique perd silencieusement sa couverture sous
+  changement de distribution ; ACI suit un niveau effectif `αₜ` et le corrige après
+  chaque observation par rétroaction `αₜ₊₁ = αₜ + γ(α − errₜ)`, ce qui pilote le
+  taux d'erreur long-terme vers `α` (couverture vers `1−α`) pour **tout** flux de
+  scores. Avec une fenêtre glissante de scores récents, la couverture reste ≈ 1−α
+  à travers les changements là où le conformal statique s'effondre. Oracle : règle
+  de mise à jour de `αₜ` exacte (cas calculé) + couverture ≈ 1−α maintenue sous
+  changement de variance (vs conformal statique qui chute) + déterminisme. Couche
+  de bibliothèque. Complète CQR/APS/RAPS dans le pilier conformal.
+- **KAN — Kolmogorov-Arnold Networks** (`nn::kan::KanLayer`, Liu et al. 2024 ;
+  base RBF de FastKAN, Li 2024 ; roadmap #77) : activations **apprenables sur les
+  arêtes** plutôt que sur les nœuds — `y_j = Σᵢ φᵢⱼ(xᵢ)` avec chaque `φ` une somme
+  de RBF gaussiennes (grille fixe) + un terme de base `SiLU`. La sortie est
+  **linéaire dans les coefficients**, donc l'ajustement est un problème de moindres
+  carrés **convexe** résolu par descente de gradient déterministe. Oracle : une
+  seule couche KAN ajuste la cible additive non-linéaire `sin(2x₀)+x₁²` à MSE<0,02
+  — bien en dessous du meilleur modèle linéaire (qui ne peut représenter sin/carré)
+  ; base RBF localisée ; déterminisme bit-exact. Couche de bibliothèque (variante
+  RBF/FastKAN, pas les B-splines du papier original).
+- **RWKV time-mixing (WKV)** (`nn::nd_layers::rwkv_wkv` + `NdRwkv`, Peng et al.
+  2023, roadmap #53) : opérateur **WKV** — attention linéaire récurrente à
+  **décroissance temporelle exponentielle par canal** `decay ∈ (0,1)` plus un
+  **bonus** pour le token courant, normalisée (numérateur/dénominateur), déroulée
+  en temps linéaire sur la tape. A nécessité un nouvel op autograd **`div`**
+  (division élémentaire, gradient `∂a=g/b`, `∂b=−g·a/b²`, gradient-checké). La
+  couche `NdRwkv` ajoute une **réception** `r=σ(W_r·x)` qui gate la sortie, avec
+  decay/bonus par canal apprenables. Oracle : la récurrence sur tape **≡ la
+  formule de somme pondérée explicite** + gradient check (k, v, decay, bonus) +
+  entraînement (MSE↓) + déterminisme bit-exact. CLI : `scirust rwkv` (8 langues).
+- **GloRo — robustesse certifiée par Lipschitz** (`nn::lipschitz`, Leino, Wang &
+  Fredrikson 2021, roadmap #32) : `spectral_norm` (norme spectrale par power
+  iteration déterministe), `spectral_normalize` (couche **1-Lipschitz** contrainte)
+  et `GloroClassifier` (classifieur linéaire à **rayon de robustesse L2 prouvé**
+  `marge/(√2·‖W‖₂)`, sans recherche ni échantillonnage ; le `√2` vient de la
+  Lipschitz `≤ √2·L` de la marge `f_A−f_B`). Oracle : normes spectrales connues
+  (diagonale, rectangulaire) ; norme ≈ 1 après normalisation ; rayon **sain** (la
+  pire perturbation à ce rayon ne bascule pas la prédiction) **et conservateur**
+  (≤ distance exacte à la frontière la plus proche) ; déterminisme. Couche de
+  bibliothèque. Complète le pilier certifiable : IBP, CROWN, smoothing, GloRo.
+- **Randomized Smoothing — robustesse L2 certifiée** (`nn::smoothing::SmoothedClassifier`
+  + `clopper_pearson_lower` + `inv_normal_cdf`, Cohen, Rosenfeld & Kolter 2019,
+  roadmap #27) : transforme tout classifieur en un classifieur **lissé** sous bruit
+  gaussien `N(0,σ²I)`, avec un **rayon de robustesse L2 prouvé** `σ·Φ⁻¹(pₐ)`. La
+  probabilité de la classe top `pₐ` est minorée par **Clopper-Pearson** (beta
+  incomplète régularisée `betai`/`lgamma`, exacte) ; `Φ⁻¹` par l'approximation
+  rationnelle d'Acklam. Oracle : pour un classifieur **demi-espace** le rayon
+  certifié **égale la distance exacte à la frontière** (indépendant de σ) +
+  soundness/abstention au bord + déterminisme + valeurs repères de `Φ⁻¹`/`betai`/
+  Clopper-Pearson. CLI : `scirust certify` affiche désormais IBP/CROWN
+  (déterministe) **et** smoothing (probabiliste).
+- **SpQR — Sparse-Quantized Representation** (`quantization::SpqrOutliers`,
+  Dettmers et al. 2023, roadmap #67) : l'erreur de quantification est à **queue
+  lourde** — une petite fraction de poids « outliers » concentre l'essentiel de
+  l'erreur. SpQR garde cette fraction (les plus grosses erreurs de quantif dense)
+  en **pleine précision** (canal creux) et quantifie le reste densément, donc ~1 %
+  d'outliers retire une grande part de l'erreur pour un faible surcoût mémoire.
+  Oracle : sur poids gaussiens + outliers injectés, garder 1 % des poids divise
+  l'erreur quadratique par > 3 ; reconstruction exacte des outliers ; déterminisme.
+  Couche de bibliothèque (les scales groupés bi-niveaux du papier sont orthogonaux).
+- **SqueezeLLM** (`quantization::SqueezeLlmCodebook` + `weighted_quant_error`, Kim
+  et al. 2023, roadmap #66) : quantification **non-uniforme** des poids par
+  **k-means pondéré par la sensibilité** (proxy de la diagonale de la Hessienne)
+  — un codebook de `2^bits` centroïdes placés là où ils réduisent le plus la
+  *perte*, et non là où les poids sont denses. Init déterministe (quantiles) +
+  itérations de Lloyd pondérées. Oracle : erreur de quantification pondérée
+  **strictement < round-to-nearest uniforme** (poids gaussiens, 3 bits, < 0,85×) +
+  round-trip exact sur les valeurs du codebook + déterminisme. Couche de
+  bibliothèque (la branche « sparse » outliers n'est pas modélisée).
+- **APS / RAPS — ensembles de prédiction adaptatifs** (`nn::conformal::AdaptivePredictionSets`,
+  Romano, Sesia & Candès 2020 ; Angelopoulos et al. 2021 ; roadmap #34/#35) :
+  conformal **classification** par score cumulatif `s(x,c)` = masse de toutes les
+  classes au moins aussi probables que `c`. Set `{c : s(x,c) ≤ q̂}` ⇒ couverture
+  marginale sans distribution ≥ 1−α avec **taille adaptative** (entrée confiante →
+  petit ensemble, ambiguë → grand). **RAPS** ajoute `λ·max(0, rang−k_reg)` au
+  score (`calibrate_raps`) pour rogner les classes peu probables et produire des
+  ensembles **plus petits** à couverture égale. Oracle : score cumulatif exact
+  (cas main) + couverture sur données fraîches + adaptativité (facile vs ambigu) +
+  RAPS < APS en taille moyenne + déterminisme. Couche de bibliothèque (comme
+  `ConformalClassifier`).
+- **CQR — Conformalized Quantile Regression** (`nn::conformal::ConformalQuantileRegressor`,
+  Romano, Patterson & Candès 2019, roadmap #33) : conformalise un régresseur de
+  **quantiles** pour produire des intervalles **adaptatifs** (hétéroscédastiques)
+  à couverture garantie. Score signé `Eᵢ = max(q_lo(xᵢ)−yᵢ, yᵢ−q_hi(xᵢ))`,
+  correction finie `Q` (quantile conformal des `Eᵢ`, réutilise `conformal_quantile`),
+  intervalle `[q_lo(x)−Q, q_hi(x)+Q]` — largeur **variable selon x** là où le
+  split-conformal symétrique est de largeur constante (`Q` peut être négatif et
+  resserrer une bande trop large). Oracle : sémantique exacte du score (cas
+  calculé à la main) + couverture marginale ≥ 1−α sur données fraîches +
+  **adaptativité** (intervalles bien plus larges en région à fort bruit) +
+  déterminisme. CLI : `scirust conformal` montre désormais split **et** CQR.
+- **SAM — Sharpness-Aware Minimization** (`nn::nd_optim::NdSam` + `SamConfig`,
+  Foret et al. 2021, roadmap #47) : optimiseur **à deux phases** qui minimise la
+  perte du *pire cas* dans une boule de rayon ρ (biais vers les minima plats).
+  `ascent` perturbe les poids vers `θ + ρ·g/‖g‖` (norme **globale** du gradient) ;
+  `descent` restaure θ et fait un pas SGD avec le gradient **au point perturbé**.
+  Deux gradients par pas ⇒ hors de la boucle `lm --opt` à gradient unique (couche
+  de bibliothèque). Oracle : perturbation = `ρ·g/‖g‖` avec `‖ε‖ = ρ` + convergence
+  sur quadratique (bande ∝ lr·ρ) + déterminisme.
+- **Shampoo** (`nn::nd_optim::NdShampoo` + `ShampooConfig` + `inverse_pth_root`,
+  Gupta/Koren/Singer 2018, roadmap #41) : préconditionneur **Kronecker** structuré
+  — pour une matrice de poids, maintient les deux facteurs `L = E[GGᵀ]`,
+  `R = E[GᵀG]` et avance par l'update préconditionné
+  `W ← W − lr·L^(−1/4) G R^(−1/4)`. Les racines inverses des matrices viennent
+  d'une décomposition de Jacobi (`inverse_pth_root`, réutilise
+  `jacobi_eigenvectors`), cachées et rafraîchies tous les `precond_freq` pas.
+  Paramètres non-matriciels : Adagrad diagonal. Oracle : `A^(−1/2)²·A ≈ I` +
+  convergence sur quadratique matricielle + repli Adagrad + déterminisme. CLI :
+  `scirust lm --opt shampoo` (11e valeur `--opt`).
+- **Adafactor** (`nn::nd_optim::NdAdafactor` + `AdafactorConfig`, Shazeer & Stern
+  2018, roadmap #42) : optimiseur à **moments du 2e ordre factorisés** — pour une
+  matrice de poids, ne stocke que les sommes **ligne** et **colonne** du carré du
+  gradient (`rows + cols` nombres au lieu de `rows·cols`) et reconstruit la rank-1
+  `V[i,j] = R[i]·C[j]/ΣR` (mémoire sous-linéaire). Update `G/√V` **clippé en RMS** ;
+  planning `β2ₜ = 1 − t^(−0.8)`. Paramètres non-matriciels : 2e moment complet
+  (RMSProp). Oracle : reconstruction rang-1 **exacte** quand `G²` est rang-1 +
+  convergence (bande) + chemin matriciel factorisé qui réduit `½‖W−T‖²` +
+  déterminisme. CLI : `scirust lm --opt adafactor` (10e valeur `--opt`).
 - **NF4** (`quantization::nf4_quantize`/`nf4_dequantize` + `NF4_LEVELS`, QLoRA,
   Dettmers et al. 2023, roadmap #74) : type 4-bit **NormalFloat** — 16 niveaux qui
   sont les **quantiles d'une normale** (échelle absmax par bloc). Optimal pour des

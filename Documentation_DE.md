@@ -170,12 +170,13 @@ Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fer
 
 Neue CLI-Befehle:
 - `scirust certify [--seed N] [--eps E]` — beweisbare ReLU-MLP-Schranken (IBP **und** CROWN, die engeren Schranken durch lineare Relaxation, nebeneinander).
-- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]` — trainiert das N-D-Decoder-LM.
+- `scirust lm [...] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` — trainiert das N-D-Decoder-LM.
 - `scirust deltanet [--seed N] [--steps S]` — trainiert eine einköpfige DeltaNet-Schicht (lineare Aufmerksamkeit mit Delta-Regel), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust mamba [--seed N] [--steps S]` — trainiert eine Mamba-Schicht mit selektivem Zustandsraum (S6-Scan), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust retnet [--seed N] [--steps S]` — trainiert eine RetNet-Retention-Schicht (lineare Aufmerksamkeit, rekurrente Form ≡ parallele Form), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust gla [--seed N] [--steps S]` — trainiert eine GLA-Schicht für gegatete lineare Aufmerksamkeit (datenabhängiges Forget-Gate), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust hgrn [--seed N] [--steps S]` — trainiert einen HGRN-Token-Mischer mit gegatetem linearem RNN (nach unten beschränktes Forget-Gate), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
+- `scirust rwkv [--seed N] [--steps S]` — trainiert eine RWKV-Zeitmisch-Schicht (WKV; kanalweiser Zeitabfall + Bonus), um eine Sequenz zu fitten; gibt die MSE-Reduktion aus.
 - `scirust conformal [--seed N] [--alpha A]` — konforme Intervalle mit garantierter, verteilungsfreier Überdeckung.
 - `scirust calibrate [--seed N]` — Temperaturskalierung; passt T an, um den erwarteten Kalibrierungsfehler (ECE) zu senken, ohne die Genauigkeit zu verändern.
 - `scirust pinn [--seed N] [--steps S]` — physikinformiertes Netz; löst das BVP `u''=−u` (PDE-Residuum in der Loss), geprüft gegen `sin x`.

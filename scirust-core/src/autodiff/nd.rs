@@ -24,6 +24,8 @@ enum Op {
     Add(usize, usize),
     Sub(usize, usize),
     Mul(usize, usize),
+    /// Elementwise division `a / b` (broadcasting).
+    Div(usize, usize),
     Matmul(usize, usize),
     /// Batched matmul `(…,m,k)·(…,k,n)→(…,m,n)` with broadcast batch axes.
     Bmm(usize, usize),
@@ -146,6 +148,18 @@ impl NdTape {
                     let bv = nodes[b].value.broadcast_to(out_shape).unwrap();
                     let ga = ew(&g, &bv, |x, y| x * y);
                     let gb = ew(&g, &av, |x, y| x * y);
+                    accumulate(&mut grads[a], &unbroadcast(&ga, &nodes[a].value.shape));
+                    accumulate(&mut grads[b], &unbroadcast(&gb, &nodes[b].value.shape));
+                },
+                Op::Div(a, b) =>
+                {
+                    // z = a/b ⇒ ∂a = g/b, ∂b = −g·a/b².
+                    let out_shape = &nodes[i].value.shape;
+                    let av = nodes[a].value.broadcast_to(out_shape).unwrap();
+                    let bv = nodes[b].value.broadcast_to(out_shape).unwrap();
+                    let ga = ew(&g, &bv, |x, y| x / y);
+                    let avb2 = ew(&av, &bv, |x, y| x / (y * y));
+                    let gb = ew(&g, &avb2, |x, y| -x * y);
                     accumulate(&mut grads[a], &unbroadcast(&ga, &nodes[a].value.shape));
                     accumulate(&mut grads[b], &unbroadcast(&gb, &nodes[b].value.shape));
                 },
@@ -337,6 +351,15 @@ impl<'t> NdVar<'t> {
         let (a, b) = self.pair(other);
         let out = ew_broadcast(&a, &b, |x, y| x * y);
         self.tape.push(Op::Mul(self.idx, other.idx), out)
+    }
+
+    /// Elementwise `self / other` (broadcasting). Backward:
+    /// `∂a = g/b`, `∂b = −g·a/b²`.
+    #[allow(clippy::should_implement_trait)]
+    pub fn div(self, other: NdVar<'t>) -> NdVar<'t> {
+        let (a, b) = self.pair(other);
+        let out = ew_broadcast(&a, &b, |x, y| x / y);
+        self.tape.push(Op::Div(self.idx, other.idx), out)
     }
 
     /// 2-D matrix product `self @ other`.
@@ -1486,6 +1509,55 @@ mod tests {
                 (num - g.data[k]).abs() < 2e-2,
                 "exp grad {k}: {num} vs {}",
                 g.data[k]
+            );
+        }
+    }
+
+    /// Elementwise division: forward `a/b`, and both input gradients vs finite
+    /// differences (loss = `sum(a/b)`). `b` is kept away from 0.
+    #[test]
+    fn nd_div_forward_and_gradient_check() {
+        let a = vec![0.5f32, -1.2, 2.0, 0.3, -0.8, 1.5];
+        let b = vec![1.3f32, 2.1, -1.7, 0.9, 1.1, -2.4];
+        let t0 = NdTape::new();
+        let av0 = t0.input(TensorND::new(a.clone(), vec![2, 3]));
+        let bv0 = t0.input(TensorND::new(b.clone(), vec![2, 3]));
+        let z = t0.value(av0.div(bv0));
+        for (got, (&ai, &bi)) in z.data.iter().zip(a.iter().zip(&b))
+        {
+            assert!((got - ai / bi).abs() < 1e-6);
+        }
+        let loss_of = |aa: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let av = t.input(TensorND::new(aa.to_vec(), vec![2, 3]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![2, 3]));
+            t.value(av.div(bv).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let av = t.input(TensorND::new(a.clone(), vec![2, 3]));
+        let bv = t.input(TensorND::new(b.clone(), vec![2, 3]));
+        let grads = t.backward(av.div(bv).sum());
+        let (ga, gb) = (grads[av.idx()].clone(), grads[bv.idx()].clone());
+        let eps = 1e-3f32;
+        for k in 0..a.len()
+        {
+            let (mut au, mut ad) = (a.clone(), a.clone());
+            au[k] += eps;
+            ad[k] -= eps;
+            let na = (loss_of(&au, &b) - loss_of(&ad, &b)) / (2.0 * eps);
+            assert!(
+                (na - ga.data[k]).abs() < 2e-2,
+                "div grad a {k}: {na} vs {}",
+                ga.data[k]
+            );
+            let (mut bu, mut bd) = (b.clone(), b.clone());
+            bu[k] += eps;
+            bd[k] -= eps;
+            let nb = (loss_of(&a, &bu) - loss_of(&a, &bd)) / (2.0 * eps);
+            assert!(
+                (nb - gb.data[k]).abs() < 2e-2,
+                "div grad b {k}: {nb} vs {}",
+                gb.data[k]
             );
         }
     }

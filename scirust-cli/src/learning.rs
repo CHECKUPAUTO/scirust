@@ -3,10 +3,11 @@
 
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::calibration::{expected_calibration_error, temperature_scale};
-use scirust_core::nn::conformal::ConformalRegressor;
+use scirust_core::nn::conformal::{ConformalQuantileRegressor, ConformalRegressor};
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_core::nn::pinn::solve_harmonic;
+use scirust_core::nn::smoothing::SmoothedClassifier;
 use scirust_core::quantization::{
     awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel, ternary_matmul,
     ternary_quantize,
@@ -100,6 +101,30 @@ pub fn run_certify(args: &[String]) -> u8 {
         println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
     }
     println!("    robustness: {}", robust_str(&crown));
+
+    // Randomized smoothing: a *probabilistic* L2 certificate (Cohen et al. 2019),
+    // the complement to the deterministic IBP/CROWN bounds above. For a half-space
+    // base classifier the certified radius provably equals the distance to the
+    // boundary — here we recover it by Monte-Carlo + Clopper-Pearson.
+    let sigma = 0.5f32;
+    let dist = 0.7f32; // L2 distance of the test point to the decision boundary
+    let halfspace = |z: &[f32]| -> usize { usize::from(z[0] > 0.0) };
+    let smc = SmoothedClassifier::new(sigma);
+    let mut srng = PcgEngine::new(seed);
+    let cert = smc.certify(&halfspace, &[dist, 0.0, 0.0], 20000, 2, 0.001, &mut srng);
+    println!("  Randomized smoothing (probabilistic, sigma = {sigma}):");
+    println!("    half-space classifier; test point at L2 distance {dist} from boundary");
+    if cert.abstained
+    {
+        println!("    ABSTAIN (lower bound on p_A could not clear 1/2)");
+    }
+    else
+    {
+        println!(
+            "    certified L2 radius = {:.4}  (p_A >= {:.4} at 99.9% conf) — exact answer is {dist}",
+            cert.radius, cert.p_a_lower
+        );
+    }
     0
 }
 
@@ -135,13 +160,65 @@ pub fn run_conformal(args: &[String]) -> u8 {
     let target = 100.0 * (1.0 - alpha);
 
     println!("Conformal prediction — pure Rust, deterministic (seed {seed})");
-    println!("  calibration: 2000 points · target coverage {target:.0}% (alpha {alpha})");
-    println!("  interval half-width q̂ = {:.4}", reg.half_width());
+    println!("  target coverage {target:.0}% (alpha {alpha}) · distribution-free, marginal");
+    println!("— Split conformal (constant width, |residual| score):");
+    println!("    interval half-width q̂ = {:.4}", reg.half_width());
     println!(
-        "  empirical coverage on {n_test} fresh points: {:.1}%",
+        "    empirical coverage on {n_test} fresh points: {:.1}%",
         100.0 * coverage
     );
-    println!("  guarantee: distribution-free marginal coverage ≥ {target:.0}%");
+
+    // CQR: adaptive intervals on heteroscedastic data (noise std σ(x) = 0.1 + x).
+    // The quantile band scales as ±c·σ(x); CQR conformalizes it to the same
+    // marginal guarantee while keeping the width input-dependent.
+    let cqr_noise = |r: &mut PcgEngine| r.float_signed() + r.float_signed() + r.float_signed();
+    let sigma = |x: f32| 0.1 + x;
+    let c = 1.4f32;
+    let (mut clo, mut chi, mut cy) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..3000
+    {
+        let x = rng.float();
+        let y = sigma(x) * cqr_noise(&mut rng);
+        clo.push(-c * sigma(x));
+        chi.push(c * sigma(x));
+        cy.push(y);
+    }
+    let cqr = ConformalQuantileRegressor::calibrate(&clo, &chi, &cy, alpha);
+    let (mut cqr_cov, mut wlow, mut nlow, mut whigh, mut nhigh) =
+        (0usize, 0.0f32, 0usize, 0.0f32, 0usize);
+    for _ in 0..n_test
+    {
+        let x = rng.float();
+        let y = sigma(x) * cqr_noise(&mut rng);
+        let (lo, hi) = cqr.interval(-c * sigma(x), c * sigma(x));
+        if y >= lo && y <= hi
+        {
+            cqr_cov += 1;
+        }
+        let w = hi - lo;
+        if x < 0.2
+        {
+            wlow += w;
+            nlow += 1;
+        }
+        else if x > 0.8
+        {
+            whigh += w;
+            nhigh += 1;
+        }
+    }
+    println!("— CQR / Conformalized Quantile Regression (adaptive width, Romano et al. 2019):");
+    println!("    conformal correction Q = {:.4}", cqr.correction());
+    println!(
+        "    mean width: low-noise region {:.3}  vs  high-noise region {:.3}  (adaptive)",
+        wlow / nlow as f32,
+        whigh / nhigh as f32
+    );
+    println!(
+        "    empirical coverage on {n_test} fresh points: {:.1}%",
+        100.0 * cqr_cov as f32 / n_test as f32
+    );
+    println!("  guarantee: both achieve distribution-free marginal coverage ≥ {target:.0}%");
     0
 }
 

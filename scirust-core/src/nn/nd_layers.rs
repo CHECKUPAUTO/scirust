@@ -191,6 +191,38 @@ fn causal_mask(seq: usize) -> TensorND {
     TensorND::new(data, vec![seq, seq])
 }
 
+/// **ALiBi** per-head slopes (Press, Smith & Lewis, *Attention with Linear
+/// Biases*, ICLR 2022): the geometric sequence `mₕ = 2^(−8h/H)` for `h = 1..H`
+/// (constant ratio `2^(−8/H)`; for `H` a power of two this is the paper's set,
+/// from `2^(−8/H)` down to `2^(−8)`). Steeper slopes (later heads) focus on recent
+/// tokens; shallow slopes attend more globally.
+pub fn alibi_slopes(n_heads: usize) -> Vec<f32> {
+    (1..=n_heads)
+        .map(|h| 2f32.powf(-8.0 * h as f32 / n_heads as f32))
+        .collect()
+}
+
+/// **ALiBi** additive attention bias of shape `(slopes.len(), seq, seq)`: for a
+/// causal query `i` and key `j ≤ i` the bias is `−slopeₕ·(i − j)` — **linear in
+/// the distance**, with no learned positions — and future keys (`j > i`) get
+/// `−1e9` (the causal mask). Added to the scores before the softmax it biases
+/// attention toward recent tokens and extrapolates to lengths unseen in training.
+pub fn alibi_bias(slopes: &[f32], seq: usize) -> TensorND {
+    let h = slopes.len();
+    let mut data = vec![0.0f32; h * seq * seq];
+    for (head, &m) in slopes.iter().enumerate()
+    {
+        for i in 0..seq
+        {
+            for j in 0..seq
+            {
+                data[(head * seq + i) * seq + j] = if j > i { -1e9 } else { -m * (i - j) as f32 };
+            }
+        }
+    }
+    TensorND::new(data, vec![h, seq, seq])
+}
+
 /// Multi-head self-attention over the N-D tape, built from [`NdLinear`]
 /// projections and the N-D attention math (`bmm` / `transpose_last2` /
 /// `softmax`). Input and output are `(seq, d_model)`.
@@ -205,6 +237,7 @@ pub struct NdMultiHeadAttention {
     d_head: usize,
     causal: bool,
     rope: bool,
+    alibi: bool,
 }
 
 /// Frequency base for [`NdMultiHeadAttention`] rotary embeddings.
@@ -249,7 +282,23 @@ impl NdMultiHeadAttention {
             d_head,
             causal,
             rope: false,
+            alibi: false,
         }
+    }
+
+    /// Enable **ALiBi** (Press et al. 2022): a static per-head linear-distance bias
+    /// on the attention scores instead of learned/rotary positions. Implies causal
+    /// masking and is mutually exclusive with RoPE; builder-style. Standard MHA
+    /// only (`num_kv_heads == n_heads`).
+    pub fn with_alibi(mut self) -> Self {
+        assert_eq!(
+            self.n_heads, self.num_kv_heads,
+            "ALiBi here is for standard MHA (num_kv_heads == n_heads)"
+        );
+        self.alibi = true;
+        self.causal = true;
+        self.rope = false;
+        self
     }
 
     /// Enable (or disable) **rotary position embeddings** on Q and K
@@ -303,7 +352,12 @@ impl NdMultiHeadAttention {
         {
             // Standard multi-head path: (n_heads, seq, d_head).
             let mut scores = q.bmm(k.transpose_last2()).mul(scale);
-            if self.causal
+            if self.alibi
+            {
+                // ALiBi: per-head linear-distance bias (already includes the mask).
+                scores = scores.add(tape.input(alibi_bias(&alibi_slopes(self.n_heads), seq)));
+            }
+            else if self.causal
             {
                 scores = scores.add(tape.input(causal_mask(seq)));
             }
@@ -1152,6 +1206,124 @@ impl NdHgrn {
     }
 }
 
+/// **RWKV time-mixing** — the WKV operator (Peng et al., *RWKV: Reinventing RNNs
+/// for the Transformer Era*, 2023). A linear-attention recurrence with a
+/// **per-channel exponential time decay** `decay ∈ (0,1)` and a **bonus** for the
+/// current token:
+///
+/// ```text
+/// wkv_t = ( Σ_{i<t} decay^{t-1-i}·e^{k_i}·v_i + bonus·e^{k_t}·v_t )
+///         / ( Σ_{i<t} decay^{t-1-i}·e^{k_i}     + bonus·e^{k_t} )
+/// ```
+///
+/// computed in linear time by carrying numerator/denominator states `(a, b)`:
+/// `wkv_t = (a + bonus·e^{k_t}·v_t)/(b + bonus·e^{k_t})`, then
+/// `a ← decay·a + e^{k_t}·v_t`, `b ← decay·b + e^{k_t}`. Causal and deterministic;
+/// unrolled on the tape (uses the `exp` and `div` ops). `k`/`v` are `(seq, d)`;
+/// `decay` (in `(0,1)`) and `bonus` (`> 0`) are `(1, d)`; returns `(seq, d)`.
+pub fn rwkv_wkv<'t>(
+    tape: &'t NdTape,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    decay: NdVar<'t>,
+    bonus: NdVar<'t>,
+) -> NdVar<'t> {
+    let ks = k.shape();
+    let (seq, d) = (ks[0], ks[1]);
+    let mut a = tape.input(TensorND::zeros(&[1, d])); // numerator state
+    let mut b = tape.input(TensorND::zeros(&[1, d])); // denominator state
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let k_t = k.gather(&[t]); // (1,d)
+        let v_t = v.gather(&[t]); // (1,d)
+        let ek = k_t.exp(); // e^{k_t}
+        let euk = bonus.mul(ek); // bonus·e^{k_t} (= e^{u+k_t})
+        let num = a.add(euk.mul(v_t)); // a + bonus·e^{k}·v
+        let den = b.add(euk); // b + bonus·e^{k}
+        outs.push(num.div(den)); // wkv_t
+        // Carry the (decayed) running sums to the next step.
+        let ekv = ek.mul(v_t);
+        a = decay.mul(a).add(ekv); // decay·a + e^{k}·v
+        b = decay.mul(b).add(ek); // decay·b + e^{k}
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **RWKV** time-mixing block: receptance-gated WKV. From the input `x` it
+/// projects a **receptance** gate `r = σ(W_r·x) ∈ (0,1)`, a key `k = W_k·x` and a
+/// value `v = W_v·x`, runs the [`rwkv_wkv`] recurrence with **learnable**
+/// per-channel decay `σ(w_decay) ∈ (0,1)` and bonus `e^{u_bonus} > 0`, and gates
+/// the projected output: `out = r ⊙ (W_o·wkv)`. Deterministic; trainable through
+/// the N-D tape. `(seq, d_model) → (seq, d_model)`. (Token-shift is omitted; this
+/// is the core time-mixing operator.)
+pub struct NdRwkv {
+    r_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    o_proj: NdLinear,
+    w_decay: TensorND, // raw (1,d); decay = σ(w_decay) ∈ (0,1)
+    u_bonus: TensorND, // raw (1,d); bonus = e^{u_bonus} > 0
+    wd_idx: Option<usize>,
+    ub_idx: Option<usize>,
+}
+
+impl NdRwkv {
+    /// New layer with seeded projections; decay initialised slow (`σ(2)≈0.88`) and
+    /// bonus initialised to 1 (`u = 0`).
+    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            r_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            o_proj: NdLinear::new(d_model, d_model, rng),
+            w_decay: TensorND::new(vec![2.0f32; d_model], vec![1, d_model]),
+            u_bonus: TensorND::new(vec![0.0f32; d_model], vec![1, d_model]),
+            wd_idx: None,
+            ub_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let r = self.r_proj.forward(tape, x).sigmoid(); // receptance gate ∈ (0,1)
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        let wd = tape.input(self.w_decay.clone());
+        self.wd_idx = Some(wd.idx());
+        let ub = tape.input(self.u_bonus.clone());
+        self.ub_idx = Some(ub.idx());
+        let decay = wd.sigmoid(); // ∈ (0,1)
+        let bonus = ub.exp(); // > 0
+        let wkv = rwkv_wkv(tape, k, v, decay, bonus);
+        let out = self.o_proj.forward(tape, wkv);
+        r.mul(out) // receptance-gated output
+    }
+
+    /// Trainable parameters (r/k/v/o projections + per-channel decay & bonus).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.r_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params.extend(self.o_proj.parameters());
+        if let Some(i) = self.wd_idx
+        {
+            params.push(NdParam {
+                value: &mut self.w_decay,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = self.ub_idx
+        {
+            params.push(NdParam {
+                value: &mut self.u_bonus,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1897,6 +2069,240 @@ mod tests {
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Explicit RWKV WKV reference (the weighted-sum formula, per channel).
+    fn rwkv_reference(
+        k: &[f32],
+        v: &[f32],
+        decay: &[f32],
+        bonus: &[f32],
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut out = vec![0f32; seq * d];
+        for j in 0..d
+        {
+            for t in 0..seq
+            {
+                let (mut num, mut den) = (0f32, 0f32);
+                for i in 0..t
+                {
+                    let wgt = decay[j].powi((t - 1 - i) as i32) * k[i * d + j].exp();
+                    num += wgt * v[i * d + j];
+                    den += wgt;
+                }
+                let wc = bonus[j] * k[t * d + j].exp();
+                num += wc * v[t * d + j];
+                den += wc;
+                out[t * d + j] = num / den;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `rwkv_wkv` matches the explicit weighted-sum formula.
+    #[test]
+    fn rwkv_wkv_matches_reference() {
+        let (seq, d) = (5usize, 3usize);
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 - 0.5).sin()).collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3).cos()).collect();
+        let decay: Vec<f32> = (0..d).map(|j| 0.8 + 0.05 * j as f32).collect(); // ∈(0,1)
+        let bonus: Vec<f32> = (0..d).map(|j| 1.0 + 0.2 * j as f32).collect(); // >0
+
+        let want = rwkv_reference(&k, &v, &decay, &bonus, seq, d);
+        let tape = NdTape::new();
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let dv = tape.input(TensorND::new(decay, vec![1, d]));
+        let bv = tape.input(TensorND::new(bonus, vec![1, d]));
+        let out = tape.value(rwkv_wkv(&tape, kv, vv, dv, bv));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-5, "RWKV mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `rwkv_wkv` gradients (k, v, decay, bonus) match finite differences.
+    #[test]
+    fn rwkv_wkv_gradient_check() {
+        let (seq, d) = (4usize, 2usize);
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.25).cos()).collect();
+        let decay: Vec<f32> = (0..d).map(|j| 0.85 + 0.05 * j as f32).collect();
+        let bonus: Vec<f32> = (0..d).map(|j| 1.0 + 0.1 * j as f32).collect();
+
+        let loss_of = |kk: &[f32], vv: &[f32], dd: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let dv = t.input(TensorND::new(dd.to_vec(), vec![1, d]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![1, d]));
+            let o = rwkv_wkv(&t, kv, vv2, dv, bv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let dv = t.input(TensorND::new(decay.clone(), vec![1, d]));
+        let bv = t.input(TensorND::new(bonus.clone(), vec![1, d]));
+        let o = rwkv_wkv(&t, kv, vv, dv, bv);
+        let grads = t.backward(o.mul(o).sum());
+        let (gk, gv, gd, gb) = (
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+            grads[dv.idx()].clone(),
+            grads[bv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "RWKV grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gk, &k, &|p| loss_of(p, &v, &decay, &bonus));
+        check(&gv, &v, &|p| loss_of(&k, p, &decay, &bonus));
+        check(&gd, &decay, &|p| loss_of(&k, &v, p, &bonus));
+        check(&gb, &bonus, &|p| loss_of(&k, &v, &decay, p));
+    }
+
+    /// The `NdRwkv` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_rwkv_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(11);
+            let mut layer = NdRwkv::new(d, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.7, "RWKV did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// ALiBi slopes are the geometric sequence `2^(−8h/H)`: decreasing, constant
+    /// ratio `2^(−8/H)`, last slope (h=H) is `2^(−8) = 1/256`.
+    #[test]
+    fn alibi_slopes_are_geometric() {
+        let h = 8usize;
+        let s = alibi_slopes(h);
+        let ratio = 2f32.powf(-8.0 / h as f32);
+        assert!((s[0] - ratio).abs() < 1e-6);
+        for k in 1..h
+        {
+            assert!((s[k] / s[k - 1] - ratio).abs() < 1e-5, "ratio at {k}");
+            assert!(s[k] < s[k - 1], "not decreasing at {k}");
+        }
+        assert!(
+            (s[h - 1] - 1.0 / 256.0).abs() < 1e-6,
+            "last slope {}",
+            s[h - 1]
+        );
+    }
+
+    /// ALiBi bias is linear in distance, causal, and shift-invariant (Toeplitz).
+    #[test]
+    fn alibi_bias_is_linear_causal_and_toeplitz() {
+        let seq = 6usize;
+        let m = 0.5f32;
+        let bias = alibi_bias(&[m], seq);
+        let at = |i: usize, j: usize| bias.data[i * seq + j]; // single head
+        for i in 0..seq
+        {
+            for j in 0..=i
+            {
+                assert!(
+                    (at(i, j) - (-m * (i - j) as f32)).abs() < 1e-6,
+                    "bias({i},{j})"
+                );
+            }
+            for j in (i + 1)..seq
+            {
+                assert!(at(i, j) < -1e8, "not masked ({i},{j})");
+            }
+        }
+        assert!((at(5, 2) - at(4, 1)).abs() < 1e-6, "not Toeplitz"); // shift-invariant
+        assert!(
+            at(5, 5) > at(5, 4) && at(5, 4) > at(5, 0),
+            "not recency-ordered"
+        );
+    }
+
+    /// Applied to uniform scores then softmax, ALiBi makes the attention weights
+    /// **decay with distance** — recency bias exactly `∝ exp(−slope·dist)`.
+    #[test]
+    fn alibi_softmax_weights_decay_with_distance() {
+        let seq = 8usize;
+        let m = 0.3f32;
+        let bias = alibi_bias(&[m], seq);
+        let i = seq - 1; // query = last position (all keys are causal/past)
+        let row: Vec<f32> = (0..seq).map(|j| bias.data[i * seq + j]).collect();
+        let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exps: Vec<f32> = row.iter().map(|&z| (z - mx).exp()).collect();
+        let z: f32 = exps.iter().sum();
+        let w: Vec<f32> = exps.iter().map(|&e| e / z).collect();
+        for j in 0..i
+        {
+            assert!(w[j] < w[j + 1], "weight not decaying at j={j}");
+        }
+        assert!(
+            (w[i - 1] / w[i] - (-m).exp()).abs() < 1e-4,
+            "decay ratio not exp(−m)"
+        );
+    }
+
+    /// `NdMultiHeadAttention::with_alibi` runs end-to-end (right output shape) and
+    /// is bit-for-bit deterministic — ALiBi tested on the real attention layer.
+    #[test]
+    fn nd_attention_with_alibi_runs_and_is_deterministic() {
+        let (seq, d_model, heads) = (5usize, 8usize, 4usize);
+        let run = || -> Vec<u32> {
+            let mut rng = PcgEngine::new(6);
+            let mut attn = NdMultiHeadAttention::new(d_model, heads, true, &mut rng).with_alibi();
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.2 - 1.0).sin())
+                .collect();
+            let tape = NdTape::new();
+            let xv = tape.input(TensorND::new(x, vec![seq, d_model]));
+            let out = tape.value(attn.forward(&tape, xv));
+            assert_eq!(out.shape, vec![seq, d_model]);
+            out.data.iter().map(|v| v.to_bits()).collect()
+        };
+        assert_eq!(run(), run());
     }
 
     /// LoRA at init equals the frozen base map (`B = 0` ⇒ `ΔW = 0`), and its

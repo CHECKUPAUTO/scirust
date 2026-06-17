@@ -5,9 +5,10 @@
 use scirust_core::autodiff::nd::NdTape;
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
-use scirust_core::nn::nd_layers::{NdDeltaNet, NdGla, NdHgrn, NdMamba, NdRetention};
+use scirust_core::nn::nd_layers::{NdDeltaNet, NdGla, NdHgrn, NdMamba, NdRetention, NdRwkv};
 use scirust_core::nn::nd_optim::{
-    NdAdEMAMix, NdAdam, NdAdan, NdLamb, NdLion, NdLookahead, NdParam, NdScheduleFree, NdSoap,
+    NdAdEMAMix, NdAdafactor, NdAdam, NdAdan, NdLamb, NdLion, NdLookahead, NdParam, NdScheduleFree,
+    NdShampoo, NdSoap,
 };
 use scirust_core::tensor::tensor_nd::TensorND;
 use scirust_learning::nlp::bpe::BpeTokenizer;
@@ -148,6 +149,8 @@ enum LmOpt {
     Lookahead(NdLookahead),
     Lamb(NdLamb),
     Adan(NdAdan),
+    Adafactor(NdAdafactor),
+    Shampoo(NdShampoo),
 }
 
 impl LmOpt {
@@ -162,6 +165,8 @@ impl LmOpt {
             LmOpt::Lookahead(o) => o.step(params, grads),
             LmOpt::Lamb(o) => o.step(params, grads),
             LmOpt::Adan(o) => o.step(params, grads),
+            LmOpt::Adafactor(o) => o.step(params, grads),
+            LmOpt::Shampoo(o) => o.step(params, grads),
         }
     }
 
@@ -176,7 +181,7 @@ impl LmOpt {
     }
 }
 
-/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]` —
+/// `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]` —
 /// train a small **causal decoder language model** on the N-D autograd tape and
 /// report whether it learns to predict the sequence. Pure Rust, deterministic by
 /// seed: token + learned positional embeddings, causal multi-head attention, a
@@ -212,7 +217,7 @@ pub fn run_lm(args: &[String]) -> u8 {
     if tokens.len() < 2
     {
         eprintln!(
-            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan]"
+            "usage: scirust lm [\"t0,t1,..\"] [--seed N] [--steps S] [--lr R] [--opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo]"
         );
         eprintln!("error: need at least 2 tokens for next-token training");
         return 2;
@@ -256,10 +261,12 @@ pub fn run_lm(args: &[String]) -> u8 {
             | "lookahead"
             | "lamb"
             | "adan"
+            | "adafactor"
+            | "shampoo"
     )
     {
         eprintln!(
-            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead, lamb, adan"
+            "error: --opt must be one of: adam, adamw, lion, schedule-free, ademamix, soap, lookahead, lamb, adan, adafactor, shampoo"
         );
         return 2;
     }
@@ -307,6 +314,8 @@ pub fn run_lm(args: &[String]) -> u8 {
         "lookahead" => LmOpt::Lookahead(NdLookahead::with_lr(lr)),
         "lamb" => LmOpt::Lamb(NdLamb::with_lr(lr)),
         "adan" => LmOpt::Adan(NdAdan::with_lr(lr)),
+        "adafactor" => LmOpt::Adafactor(NdAdafactor::with_lr(lr)),
+        "shampoo" => LmOpt::Shampoo(NdShampoo::with_lr(lr)),
         _ => LmOpt::Adam(NdAdam::with_lr(lr)),
     };
 
@@ -619,6 +628,55 @@ pub fn run_hgrn(args: &[String]) -> u8 {
     0
 }
 
+/// `rwkv ["t0,t1,.."] [--seed N] [--steps S]` — train a single **RWKV** time-mixing
+/// (WKV) layer to fit a sequence; reports the MSE reduction. Deterministic by seed.
+pub fn run_rwkv(args: &[String]) -> u8 {
+    let (seed_s, rest) = take_flag(args, "--seed");
+    let (steps_s, _rest) = take_flag(&rest, "--steps");
+    let seed: u64 = seed_s.and_then(|s| s.parse().ok()).unwrap_or(11);
+    let steps: usize = steps_s
+        .and_then(|s| s.parse().ok())
+        .filter(|&v| v >= 1)
+        .unwrap_or(150);
+
+    let (seq, d_model) = (6usize, 8usize);
+    let mut rng = PcgEngine::new(seed);
+    let mut layer = NdRwkv::new(d_model, &mut rng);
+    let x: Vec<f32> = (0..seq * d_model)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin())
+        .collect();
+    let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+    let mut opt = NdAdam::with_lr(0.05);
+
+    let (mut first, mut last) = (f32::NAN, f32::NAN);
+    for step in 0..steps
+    {
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+        let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+        let out = layer.forward(&tape, xv);
+        let diff = out.sub(tv);
+        let loss = diff.mul(diff).sum();
+        let lval = tape.value(loss).data[0];
+        if step == 0
+        {
+            first = lval;
+        }
+        last = lval;
+        let grads = tape.backward(loss);
+        opt.step(&mut layer.parameters(), &grads);
+    }
+
+    println!("RWKV time-mixing (WKV) — pure Rust, deterministic (seed {seed})");
+    println!("  d_model {d_model}, sequence length {seq}");
+    println!("  receptance-gated WKV, per-channel time decay + bonus; {steps} Adam steps");
+    println!(
+        "  MSE to target: {first:.4} → {last:.4}  ({:.1}% of initial)",
+        100.0 * last / first
+    );
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,6 +767,14 @@ mod tests {
         );
         assert_eq!(
             run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "adan"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "adafactor"])),
+            0
+        );
+        assert_eq!(
+            run_lm(&s(&["1,2,3,1,2,3", "--steps", "20", "--opt", "shampoo"])),
             0
         );
         assert_eq!(run_lm(&s(&["1,2,3", "--opt", "sgd"])), 2); // unknown optimizer
