@@ -6,6 +6,17 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Randomized Smoothing — robustesse L2 certifiée** (`nn::smoothing::SmoothedClassifier`
+  + `clopper_pearson_lower` + `inv_normal_cdf`, Cohen, Rosenfeld & Kolter 2019,
+  roadmap #27) : transforme tout classifieur en un classifieur **lissé** sous bruit
+  gaussien `N(0,σ²I)`, avec un **rayon de robustesse L2 prouvé** `σ·Φ⁻¹(pₐ)`. La
+  probabilité de la classe top `pₐ` est minorée par **Clopper-Pearson** (beta
+  incomplète régularisée `betai`/`lgamma`, exacte) ; `Φ⁻¹` par l'approximation
+  rationnelle d'Acklam. Oracle : pour un classifieur **demi-espace** le rayon
+  certifié **égale la distance exacte à la frontière** (indépendant de σ) +
+  soundness/abstention au bord + déterminisme + valeurs repères de `Φ⁻¹`/`betai`/
+  Clopper-Pearson. CLI : `scirust certify` affiche désormais IBP/CROWN
+  (déterministe) **et** smoothing (probabiliste).
 - **SpQR — Sparse-Quantized Representation** (`quantization::SpqrOutliers`,
   Dettmers et al. 2023, roadmap #67) : l'erreur de quantification est à **queue
   lourde** — une petite fraction de poids « outliers » concentre l'essentiel de

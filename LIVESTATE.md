@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 61 : Randomized Smoothing (#27) — robustesse certifiée L2
+- `nn::smoothing` (Cohen 2019) : classifieur lissé `g(x)=argmax_c P(f(x+ε)=c)`,
+  rayon L2 prouvé `σ·Φ⁻¹(pₐ)` ; `pₐ` minorée par Clopper-Pearson (betai/lgamma
+  exact) ; `Φ⁻¹` Acklam. `SmoothedClassifier::{predict,certify}` +
+  `clopper_pearson_lower` + `inv_normal_cdf` pub.
+- CLI : `certify` enrichi — IBP/CROWN (déterministe) + smoothing (probabiliste,
+  demi-espace : rayon ≈ distance). Même signature, pas de multilingue.
+- Tests (5, core) : Φ⁻¹ repères ; betai = CDF ; Clopper-Pearson (0.416 + inversion)
+  ; rayon = distance demi-espace (indép. σ) + déterminisme ; soundness/abstention.
+- docs : roadmap #27 📋→✅ ; CHANGELOG. 516 tests core (+5) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 60 : SpQR (#67) — sparse-quantized (outliers fp)
 - `quantization::SpqrOutliers` (Dettmers 2023) : garde la fraction d'outliers (plus
   grosses erreurs |w−q|) en fp, reste en dense ; reconstruction = dense + outliers.

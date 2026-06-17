@@ -36,6 +36,7 @@ pub mod rng;
 pub mod rope;
 pub mod sampling;
 pub mod sequential;
+pub mod smoothing;
 pub mod transformer;
 pub mod tt_linear;
 pub mod vision;

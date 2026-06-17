@@ -7,6 +7,7 @@ use scirust_core::nn::conformal::{ConformalQuantileRegressor, ConformalRegressor
 use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_core::nn::pinn::solve_harmonic;
+use scirust_core::nn::smoothing::SmoothedClassifier;
 use scirust_core::quantization::{
     awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel, ternary_matmul,
     ternary_quantize,
@@ -100,6 +101,30 @@ pub fn run_certify(args: &[String]) -> u8 {
         println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
     }
     println!("    robustness: {}", robust_str(&crown));
+
+    // Randomized smoothing: a *probabilistic* L2 certificate (Cohen et al. 2019),
+    // the complement to the deterministic IBP/CROWN bounds above. For a half-space
+    // base classifier the certified radius provably equals the distance to the
+    // boundary — here we recover it by Monte-Carlo + Clopper-Pearson.
+    let sigma = 0.5f32;
+    let dist = 0.7f32; // L2 distance of the test point to the decision boundary
+    let halfspace = |z: &[f32]| -> usize { usize::from(z[0] > 0.0) };
+    let smc = SmoothedClassifier::new(sigma);
+    let mut srng = PcgEngine::new(seed);
+    let cert = smc.certify(&halfspace, &[dist, 0.0, 0.0], 20000, 2, 0.001, &mut srng);
+    println!("  Randomized smoothing (probabilistic, sigma = {sigma}):");
+    println!("    half-space classifier; test point at L2 distance {dist} from boundary");
+    if cert.abstained
+    {
+        println!("    ABSTAIN (lower bound on p_A could not clear 1/2)");
+    }
+    else
+    {
+        println!(
+            "    certified L2 radius = {:.4}  (p_A >= {:.4} at 99.9% conf) — exact answer is {dist}",
+            cert.radius, cert.p_a_lower
+        );
+    }
     0
 }
 
