@@ -184,6 +184,98 @@ impl ConformalQuantileRegressor {
     }
 }
 
+/// Cumulative APS/RAPS score `s(x, c)` for **every** class `c` of one softmax row
+/// `probs`: classes are ranked by descending probability (ascending-index
+/// tie-break) and `s(x,c)` is the cumulative mass of all classes ranked at or
+/// above `c` (including `c`). The optional RAPS regularization adds
+/// `λ·max(0, rank(c) − k_reg)` (rank 1-indexed) to penalise — and thereby trim —
+/// low-probability tail classes.
+fn aps_cumulative(probs: &[f32], k_reg: usize, lam: f32) -> Vec<f32> {
+    let n = probs.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    // Descending probability, ascending index for a deterministic tie-break.
+    order.sort_by(|&a, &b| probs[b].total_cmp(&probs[a]).then(a.cmp(&b)));
+    let mut s = vec![0.0f32; n];
+    let mut cum = 0.0f32;
+    for (pos, &c) in order.iter().enumerate()
+    {
+        cum += probs[c];
+        let penalty = lam * ((pos as f32 + 1.0) - k_reg as f32).max(0.0);
+        s[c] = cum + penalty;
+    }
+    s
+}
+
+/// **Adaptive Prediction Sets (APS)** for conformal **classification** — Romano,
+/// Sesia & Candès (NeurIPS 2020), with the optional **RAPS** regularization of
+/// Angelopoulos et al. (2021). Where the threshold rule ([`ConformalClassifier`])
+/// keeps every class above a fixed probability, APS builds the set by walking
+/// classes from most to least probable and accumulating their mass: the
+/// nonconformity score of `(x, y)` is the cumulative mass of all classes at least
+/// as probable as the truth, `s(x,y)`. After calibrating `q̂` as the finite-sample
+/// quantile of those scores, the prediction set is `{c : s(x,c) ≤ q̂}`. This gives
+/// **distribution-free marginal coverage `≥ 1−α`** with **adaptive set size** —
+/// confident inputs get small sets, ambiguous ones get larger sets. **RAPS** adds
+/// `λ·max(0, rank − k_reg)` to the score, trimming unlikely tail classes for
+/// smaller, more stable sets at the same coverage. The score is shared by
+/// calibration and prediction, so the guarantee holds for any fixed `(k_reg, λ)`.
+/// Pure, deterministic arithmetic.
+pub struct AdaptivePredictionSets {
+    q: f32,
+    k_reg: usize,
+    lam: f32,
+}
+
+impl AdaptivePredictionSets {
+    /// Calibrate plain **APS** (no regularization) from softmax probabilities and
+    /// true labels.
+    pub fn calibrate(cal_probs: &[Vec<f32>], cal_labels: &[usize], alpha: f32) -> Self {
+        Self::calibrate_raps(cal_probs, cal_labels, alpha, 0, 0.0)
+    }
+
+    /// Calibrate **RAPS** with regularization `λ·max(0, rank − k_reg)`
+    /// (`k_reg = 0, lam = 0` recovers plain APS).
+    pub fn calibrate_raps(
+        cal_probs: &[Vec<f32>],
+        cal_labels: &[usize],
+        alpha: f32,
+        k_reg: usize,
+        lam: f32,
+    ) -> Self {
+        assert_eq!(
+            cal_probs.len(),
+            cal_labels.len(),
+            "APS: probs/labels length mismatch"
+        );
+        let scores: Vec<f32> = cal_probs
+            .iter()
+            .zip(cal_labels)
+            .map(|(p, &y)| aps_cumulative(p, k_reg, lam)[y])
+            .collect();
+        Self {
+            q: conformal_quantile(&scores, alpha),
+            k_reg,
+            lam,
+        }
+    }
+
+    /// The adaptive prediction set `{c : s(x,c) ≤ q̂}` for one softmax row.
+    pub fn predict_set(&self, probs: &[f32]) -> Vec<usize> {
+        let s = aps_cumulative(probs, self.k_reg, self.lam);
+        (0..probs.len()).filter(|&c| s[c] <= self.q).collect()
+    }
+
+    /// Whether the prediction set for `probs` contains `y_true`.
+    pub fn covers(&self, probs: &[f32], y_true: usize) -> bool {
+        aps_cumulative(probs, self.k_reg, self.lam)[y_true] <= self.q
+    }
+
+    /// The calibrated score threshold `q̂`.
+    pub fn threshold(&self) -> f32 {
+        self.q
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,5 +465,152 @@ mod tests {
         );
         // (3) Determinism.
         assert_eq!((coverage, wlow, whigh, q), run());
+    }
+
+    /// APS cumulative score orders classes by descending mass; RAPS adds the
+    /// rank penalty. probs sorted: idx1(0.5) > idx3(0.3) > idx0(0.15) > idx2(0.05).
+    #[test]
+    fn aps_cumulative_score_orders_by_mass() {
+        let p = [0.15f32, 0.5, 0.05, 0.3];
+        let s = aps_cumulative(&p, 0, 0.0);
+        assert!((s[1] - 0.5).abs() < 1e-6, "s1 = {}", s[1]); // rank1
+        assert!((s[3] - 0.8).abs() < 1e-6, "s3 = {}", s[3]); // rank2: 0.5+0.3
+        assert!((s[0] - 0.95).abs() < 1e-6, "s0 = {}", s[0]); // rank3: +0.15
+        assert!((s[2] - 1.0).abs() < 1e-6, "s2 = {}", s[2]); // rank4: +0.05
+        // RAPS penalty λ=0.1, k_reg=1: rank r adds 0.1·max(0, r−1).
+        let sr = aps_cumulative(&p, 1, 0.1);
+        assert!((sr[1] - 0.5).abs() < 1e-6); // rank1: +0
+        assert!((sr[3] - 0.9).abs() < 1e-6); // rank2: 0.8 + 0.1
+        assert!((sr[2] - 1.3).abs() < 1e-6); // rank4: 1.0 + 0.3
+    }
+
+    /// Build a mixed-difficulty classification stream: with probability ½ an
+    /// **easy** (peaked) example, else a **hard** (near-flat) one. Returns
+    /// `(probs, label, is_easy)`.
+    fn make_clf_example(r: &mut PcgEngine, classes: usize) -> (Vec<f32>, usize, bool) {
+        let y = (r.float() * classes as f32) as usize % classes;
+        let easy = r.float() < 0.5;
+        let bump = if easy { 3.2 } else { 0.4 };
+        let mut logits: Vec<f32> = (0..classes).map(|_| r.float_signed()).collect();
+        logits[y] += bump;
+        let mx = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exps: Vec<f32> = logits.iter().map(|&v| (v - mx).exp()).collect();
+        let z: f32 = exps.iter().sum();
+        (exps.iter().map(|&e| e / z).collect(), y, easy)
+    }
+
+    /// **The APS guarantee + adaptivity, tested.** APS hits the distribution-free
+    /// marginal coverage `≥ 1−α` on fresh data, and its set size **adapts** —
+    /// ambiguous (hard) inputs get substantially larger sets than confident (easy)
+    /// ones. Bit-for-bit deterministic across runs.
+    #[test]
+    fn aps_hits_coverage_and_adapts() {
+        let run = || -> (f32, f32, f32) {
+            let mut rng = PcgEngine::new(11);
+            let classes = 6usize;
+            let (mut cp, mut cl) = (Vec::new(), Vec::new());
+            for _ in 0..3000
+            {
+                let (p, y, _) = make_clf_example(&mut rng, classes);
+                cp.push(p);
+                cl.push(y);
+            }
+            let aps = AdaptivePredictionSets::calibrate(&cp, &cl, 0.1);
+            let n_test = 6000usize;
+            let (mut cov, mut esz, mut en, mut hsz, mut hn) =
+                (0usize, 0usize, 0usize, 0usize, 0usize);
+            for _ in 0..n_test
+            {
+                let (p, y, easy) = make_clf_example(&mut rng, classes);
+                if aps.covers(&p, y)
+                {
+                    cov += 1;
+                }
+                let sz = aps.predict_set(&p).len();
+                if easy
+                {
+                    esz += sz;
+                    en += 1;
+                }
+                else
+                {
+                    hsz += sz;
+                    hn += 1;
+                }
+            }
+            (
+                cov as f32 / n_test as f32,
+                esz as f32 / en as f32,
+                hsz as f32 / hn as f32,
+            )
+        };
+        let (cov, easy, hard) = run();
+        assert!(cov >= 0.87, "APS coverage {cov} below 0.90");
+        assert!(
+            hard > easy + 0.5,
+            "APS not adaptive: easy set {easy}, hard set {hard}"
+        );
+        assert_eq!((cov, easy, hard), run());
+    }
+
+    /// **RAPS** (regularized APS) yields **smaller** average prediction sets than
+    /// plain APS while keeping marginal coverage `≥ 1−α` — its headline property.
+    /// Demonstrated on a decent classifier over **many** classes (a long
+    /// probability tail that APS pads sets with and RAPS trims). Same data for both.
+    #[test]
+    fn raps_shrinks_sets_vs_aps_at_coverage() {
+        let classes = 40usize;
+        // Decent classifier (true class usually top) over many classes ⇒ long tail.
+        let draw = |r: &mut PcgEngine| -> (Vec<f32>, usize) {
+            let y = (r.float() * classes as f32) as usize % classes;
+            let mut logits: Vec<f32> = (0..classes).map(|_| r.float_signed()).collect();
+            logits[y] += 2.5;
+            let mx = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let exps: Vec<f32> = logits.iter().map(|&v| (v - mx).exp()).collect();
+            let z: f32 = exps.iter().sum();
+            (exps.iter().map(|&e| e / z).collect(), y)
+        };
+        let mut rng = PcgEngine::new(5);
+        let (mut cp, mut cl) = (Vec::new(), Vec::new());
+        for _ in 0..3000
+        {
+            let (p, y) = draw(&mut rng);
+            cp.push(p);
+            cl.push(y);
+        }
+        let alpha = 0.1;
+        let aps = AdaptivePredictionSets::calibrate(&cp, &cl, alpha);
+        let raps = AdaptivePredictionSets::calibrate_raps(&cp, &cl, alpha, 2, 0.1);
+
+        let n_test = 6000usize;
+        let mut tp = Vec::new();
+        let mut tl = Vec::new();
+        for _ in 0..n_test
+        {
+            let (p, y) = draw(&mut rng);
+            tp.push(p);
+            tl.push(y);
+        }
+        let eval = |m: &AdaptivePredictionSets| -> (f32, f32) {
+            let mut cov = 0usize;
+            let mut size = 0usize;
+            for (p, &y) in tp.iter().zip(&tl)
+            {
+                if m.covers(p, y)
+                {
+                    cov += 1;
+                }
+                size += m.predict_set(p).len();
+            }
+            (cov as f32 / n_test as f32, size as f32 / n_test as f32)
+        };
+        let (cov_aps, size_aps) = eval(&aps);
+        let (cov_raps, size_raps) = eval(&raps);
+        assert!(cov_aps >= 0.87, "APS coverage {cov_aps} below 0.90");
+        assert!(cov_raps >= 0.87, "RAPS coverage {cov_raps} below 0.90");
+        assert!(
+            size_raps < size_aps,
+            "RAPS did not shrink sets: APS {size_aps}, RAPS {size_raps}"
+        );
     }
 }

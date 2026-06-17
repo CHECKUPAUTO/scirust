@@ -6,6 +6,17 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **APS / RAPS — ensembles de prédiction adaptatifs** (`nn::conformal::AdaptivePredictionSets`,
+  Romano, Sesia & Candès 2020 ; Angelopoulos et al. 2021 ; roadmap #34/#35) :
+  conformal **classification** par score cumulatif `s(x,c)` = masse de toutes les
+  classes au moins aussi probables que `c`. Set `{c : s(x,c) ≤ q̂}` ⇒ couverture
+  marginale sans distribution ≥ 1−α avec **taille adaptative** (entrée confiante →
+  petit ensemble, ambiguë → grand). **RAPS** ajoute `λ·max(0, rang−k_reg)` au
+  score (`calibrate_raps`) pour rogner les classes peu probables et produire des
+  ensembles **plus petits** à couverture égale. Oracle : score cumulatif exact
+  (cas main) + couverture sur données fraîches + adaptativité (facile vs ambigu) +
+  RAPS < APS en taille moyenne + déterminisme. Couche de bibliothèque (comme
+  `ConformalClassifier`).
 - **CQR — Conformalized Quantile Regression** (`nn::conformal::ConformalQuantileRegressor`,
   Romano, Patterson & Candès 2019, roadmap #33) : conformalise un régresseur de
   **quantiles** pour produire des intervalles **adaptatifs** (hétéroscédastiques)

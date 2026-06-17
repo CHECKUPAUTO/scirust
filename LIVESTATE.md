@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 58 : APS/RAPS (#34/#35) — ensembles de prédiction
+- `nn::conformal::AdaptivePredictionSets` (Romano/Sesia/Candès 2020 ; Angelopoulos
+  2021) : conformal classification par score cumulatif `s(x,c)` = masse des classes
+  ≥ probables que c. Set `{c : s≤q̂}` ⇒ couverture marginale ≥ 1−α + taille adaptative.
+- RAPS : `calibrate_raps(k_reg, λ)` ajoute `λ·max(0, rang−k_reg)` ⇒ ensembles plus
+  petits à couverture égale (démontré sur classifieur correct, beaucoup de classes —
+  longue queue ; data near-uniforme gonfle q̂ et casse l'effet).
+- Bibliothèque seule (comme `ConformalClassifier` ; pas de CLI ni multilingue).
+- Tests (3, core) : score cumulatif exact (cas main) ; couverture + adaptativité
+  (facile vs ambigu) + déterminisme ; RAPS < APS en taille à couverture ≥ 1−α.
+- docs : roadmap #34/#35 📋→✅ ; CHANGELOG. 507 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 57 : CQR (#33) — Conformalized Quantile Regression
 - `nn::conformal::ConformalQuantileRegressor` (Romano, Patterson & Candès 2019) :
   conformalise un régresseur de quantiles. Score `Eᵢ=max(q_lo−y, y−q_hi)`,
