@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 65 : ACI (#38) — Adaptive Conformal Inference
+- `nn::conformal::AdaptiveConformal` (Gibbs & Candès 2021) : conformal en ligne ;
+  niveau αₜ adapté par rétroaction αₜ₊₁=αₜ+γ(α−errₜ) ⇒ couverture ≈1−α sous dérive.
+- Bibliothèque seule (comme APS/RAPS). Complète CQR/APS/RAPS dans `nn::conformal`.
+- Tests (2, core) : règle de mise à jour αₜ exacte (miss→−γ(1−α), cover→+γα) ;
+  couverture maintenue ≈0,9 sous changement de variance (statique chute) + déterminisme.
+- docs : roadmap #38 📋→✅ ; CHANGELOG. 527 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 64 : KAN (#77) — Kolmogorov-Arnold Networks (RBF)
 - `nn::kan::KanLayer` (Liu 2024 ; base RBF de FastKAN, Li 2024) : activations
   apprenables sur arêtes y_j=Σᵢφᵢⱼ(xᵢ), φ = Σ RBF gaussiennes + base SiLU.

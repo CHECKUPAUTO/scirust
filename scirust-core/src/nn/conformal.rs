@@ -276,6 +276,74 @@ impl AdaptivePredictionSets {
     }
 }
 
+/// **Adaptive Conformal Inference (ACI)** — Gibbs & Candès (NeurIPS 2021). Plain
+/// split conformal assumes exchangeability; under **distribution shift** its fixed
+/// quantile silently loses coverage. ACI restores it **online**: it tracks an
+/// effective miscoverage level `αₜ` and, after each observation, nudges it by the
+/// coverage error — `αₜ₊₁ = αₜ + γ·(α − errₜ)` where `errₜ = 1` iff the truth fell
+/// outside the level-`(1−αₜ)` interval. This feedback drives the long-run miss
+/// rate to `α` (so coverage to `1−α`) for **any** score stream, shifting or not.
+/// Paired with a sliding window of recent nonconformity scores (so the quantile
+/// itself tracks the current distribution), it holds `≈ 1−α` coverage through
+/// shifts where static conformal collapses. Pure `f32`, fixed order ⇒
+/// **deterministic**.
+pub struct AdaptiveConformal {
+    target_alpha: f32,
+    gamma: f32,
+    alpha_t: f32,
+}
+
+impl AdaptiveConformal {
+    /// New ACI at target miscoverage `target_alpha ∈ (0,1)` and adaptation rate
+    /// `gamma > 0` (the step size of the `αₜ` update).
+    pub fn new(target_alpha: f32, gamma: f32) -> Self {
+        assert!(
+            target_alpha > 0.0 && target_alpha < 1.0,
+            "ACI: target_alpha must be in (0,1)"
+        );
+        assert!(gamma > 0.0, "ACI: gamma must be positive");
+        Self {
+            target_alpha,
+            gamma,
+            alpha_t: target_alpha,
+        }
+    }
+
+    /// One online step: given the recent calibration `scores` (e.g. a sliding
+    /// window) and the new point's nonconformity `score`, report whether the
+    /// current level-`(1−αₜ)` interval **covers** it (`score ≤ q̂`), then update
+    /// `αₜ`. `αₜ ≤ 0` ⇒ the interval is everything (always covers); `αₜ ≥ 1` ⇒
+    /// empty (never covers).
+    pub fn step(&mut self, scores: &[f32], score: f32) -> bool {
+        let q = if self.alpha_t <= 0.0
+        {
+            f32::INFINITY
+        }
+        else if self.alpha_t >= 1.0
+        {
+            f32::NEG_INFINITY
+        }
+        else
+        {
+            conformal_quantile(scores, self.alpha_t)
+        };
+        let covered = score <= q;
+        let err = if covered { 0.0 } else { 1.0 };
+        self.alpha_t = (self.alpha_t + self.gamma * (self.target_alpha - err)).clamp(0.0, 1.0);
+        covered
+    }
+
+    /// The current effective miscoverage level `αₜ`.
+    pub fn alpha(&self) -> f32 {
+        self.alpha_t
+    }
+
+    /// The target miscoverage `α` (long-run coverage is `≈ 1 − α`).
+    pub fn target_alpha(&self) -> f32 {
+        self.target_alpha
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,5 +680,74 @@ mod tests {
             size_raps < size_aps,
             "RAPS did not shrink sets: APS {size_aps}, RAPS {size_raps}"
         );
+    }
+
+    /// ACI's `αₜ` feedback: a miss decreases `αₜ` by `γ(1−α)` (widening), a cover
+    /// increases it by `γα` (narrowing) — the exact update toward miss-rate `= α`.
+    #[test]
+    fn aci_alpha_update_rule() {
+        let window: Vec<f32> = (0..20).map(|i| i as f32 * 0.1).collect(); // [0,…,1.9]
+        let mut aci = AdaptiveConformal::new(0.1, 0.05);
+        // q at α=0.1: ⌈21·0.9⌉=19 → 19th smallest = 1.8; score 100 > 1.8 ⇒ miss.
+        assert!(!aci.step(&window, 100.0));
+        assert!(
+            (aci.alpha() - 0.055).abs() < 1e-6,
+            "after miss α={}",
+            aci.alpha()
+        );
+        // score −100 ⇒ cover ⇒ α += 0.05·0.1 = 0.005.
+        assert!(aci.step(&window, -100.0));
+        assert!(
+            (aci.alpha() - 0.06).abs() < 1e-6,
+            "after cover α={}",
+            aci.alpha()
+        );
+        assert!((aci.target_alpha() - 0.1).abs() < 1e-6);
+    }
+
+    /// **The ACI guarantee, tested.** On a stream with a mid-stream variance shift,
+    /// adaptive conformal (sliding window + `αₜ` feedback) holds ≈ `1−α` coverage,
+    /// while static conformal (a fixed quantile from the initial calibration)
+    /// collapses after the shift. Bit-for-bit deterministic.
+    #[test]
+    fn aci_maintains_coverage_under_shift() {
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(20);
+            let noise =
+                |r: &mut PcgEngine, scale: f32| scale * (r.float_signed() + r.float_signed()).abs();
+            let target = 0.1f32;
+            let w = 200usize;
+            let mut window: Vec<f32> = (0..w).map(|_| noise(&mut rng, 1.0)).collect();
+            let q_static = conformal_quantile(&window, target);
+            let mut aci = AdaptiveConformal::new(target, 0.05);
+            let n = 4000usize;
+            let (mut acov, mut scov) = (0usize, 0usize);
+            for t in 0..n
+            {
+                let scale = if t < n / 2 { 1.0 } else { 3.0 }; // variance shift halfway
+                let s = noise(&mut rng, scale);
+                if aci.step(&window, s)
+                {
+                    acov += 1;
+                }
+                if s <= q_static
+                {
+                    scov += 1;
+                }
+                window.remove(0);
+                window.push(s);
+            }
+            (acov as f32 / n as f32, scov as f32 / n as f32)
+        };
+        let (aci_cov, static_cov) = run();
+        assert!(
+            (aci_cov - 0.9).abs() < 0.05,
+            "ACI coverage {aci_cov} not ≈ 0.9"
+        );
+        assert!(
+            static_cov < aci_cov - 0.1,
+            "static conformal ({static_cov}) not clearly worse than ACI ({aci_cov})"
+        );
+        assert_eq!(run(), (aci_cov, static_cov)); // determinism
     }
 }

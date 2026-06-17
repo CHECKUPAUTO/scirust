@@ -6,6 +6,17 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **ACI — Adaptive Conformal Inference** (`nn::conformal::AdaptiveConformal`, Gibbs
+  & Candès 2021, roadmap #38) : conformal **en ligne** robuste à la **dérive de
+  distribution**. Le conformal statique perd silencieusement sa couverture sous
+  changement de distribution ; ACI suit un niveau effectif `αₜ` et le corrige après
+  chaque observation par rétroaction `αₜ₊₁ = αₜ + γ(α − errₜ)`, ce qui pilote le
+  taux d'erreur long-terme vers `α` (couverture vers `1−α`) pour **tout** flux de
+  scores. Avec une fenêtre glissante de scores récents, la couverture reste ≈ 1−α
+  à travers les changements là où le conformal statique s'effondre. Oracle : règle
+  de mise à jour de `αₜ` exacte (cas calculé) + couverture ≈ 1−α maintenue sous
+  changement de variance (vs conformal statique qui chute) + déterminisme. Couche
+  de bibliothèque. Complète CQR/APS/RAPS dans le pilier conformal.
 - **KAN — Kolmogorov-Arnold Networks** (`nn::kan::KanLayer`, Liu et al. 2024 ;
   base RBF de FastKAN, Li 2024 ; roadmap #77) : activations **apprenables sur les
   arêtes** plutôt que sur les nœuds — `y_j = Σᵢ φᵢⱼ(xᵢ)` avec chaque `φ` une somme
