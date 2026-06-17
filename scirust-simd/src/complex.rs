@@ -239,7 +239,7 @@ pub fn complex_dot_hermitian_f32(a: &[Complex<f32>], b: &[Complex<f32>]) -> Comp
             im_total += a[i].im * b[i].re - a[i].re * b[i].im;
         }
 
-        return Complex::new(re_total, im_total);
+        Complex::new(re_total, im_total)
     }
 
     #[cfg(not(feature = "portable-simd"))]

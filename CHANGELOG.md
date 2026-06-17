@@ -5,6 +5,19 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Corrigé
+- **SIMD `portable` — bug d'alignement (résultats faux, non déterministe)** :
+  `add_f32/f64_inplace`, `dot_f32/f64` et `fma_f32` (`scirust-simd::portable`)
+  découpaient **chaque opérande indépendamment** via `as_simd`/`as_simd_mut`.
+  Quand deux slices avaient des alignements mémoire différents (fréquent : dépend
+  de l'allocation), les boucles SIMD du cœur appariaient des lanes **décalées** →
+  résultats **incorrects**, de façon **non déterministe** (d'où le test
+  `test_add_f32_inplace` qui échouait ~30–50 % des lancers). Réécrites avec
+  `chunks_exact`, qui apparie le bloc k de chaque slice à l'identique quel que
+  soit l'alignement. Ajout d'un test de régression couvrant tous les décalages
+  relatifs (add/dot/fma vs référence scalaire) ; 12/12 lancers verts. Au passage,
+  un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
+
 ### Ajouté — campagne « faire grandir scirust »
 - **RCPS — Risk-Controlling Prediction Sets** (`nn::conformal::hoeffding_ucb` +
   `rcps_select`, Bates et al. 2021, roadmap #36) : là où le conformal contrôle la

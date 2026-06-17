@@ -49,24 +49,17 @@ pub mod simd_ops {
             "add_f32_inplace: longueurs différentes"
         );
 
-        let (pre, mid_dst, suf_dst) = dst.as_simd_mut::<8>();
-        let (_, mid_src, _) = src.as_simd::<8>();
-
-        // Prologue scalaire (alignement)
-        for (d, s) in pre.iter_mut().zip(src.iter())
+        // Chunk both slices identically (chunk k = elements [8k..8k+8] of each),
+        // so the pairing is correct regardless of the slices' runtime alignment.
+        let mut dc = dst.chunks_exact_mut(8);
+        let mut sc = src.chunks_exact(8);
+        for (d, s) in dc.by_ref().zip(sc.by_ref())
         {
-            *d += s;
+            let mut vd = f32x8::from_slice(d);
+            vd += f32x8::from_slice(s);
+            vd.copy_to_slice(d);
         }
-
-        // Cœur SIMD — 8 f32 en parallèle
-        for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter())
-        {
-            *vd += vs;
-        }
-
-        // Épilogue scalaire
-        let offset = pre.len() + mid_dst.len() * 8;
-        for (d, s) in suf_dst.iter_mut().zip(src[offset..].iter())
+        for (d, s) in dc.into_remainder().iter_mut().zip(sc.remainder())
         {
             *d += s;
         }
@@ -77,19 +70,15 @@ pub mod simd_ops {
     pub fn add_f64_inplace(dst: &mut [f64], src: &[f64]) {
         assert_eq!(dst.len(), src.len());
 
-        let (pre, mid_dst, suf_dst) = dst.as_simd_mut::<4>();
-        let (_, mid_src, _) = src.as_simd::<4>();
-
-        for (d, s) in pre.iter_mut().zip(src.iter())
+        let mut dc = dst.chunks_exact_mut(4);
+        let mut sc = src.chunks_exact(4);
+        for (d, s) in dc.by_ref().zip(sc.by_ref())
         {
-            *d += s;
+            let mut vd = f64x4::from_slice(d);
+            vd += f64x4::from_slice(s);
+            vd.copy_to_slice(d);
         }
-        for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter())
-        {
-            *vd += vs;
-        }
-        let offset = pre.len() + mid_dst.len() * 4;
-        for (d, s) in suf_dst.iter_mut().zip(src[offset..].iter())
+        for (d, s) in dc.into_remainder().iter_mut().zip(sc.remainder())
         {
             *d += s;
         }
@@ -147,31 +136,18 @@ pub mod simd_ops {
         assert_eq!(a.len(), b.len(), "dot_f32: longueurs différentes");
 
         let mut acc = f32x8::splat(0.0);
-
-        let (pre_a, mid_a, suf_a) = a.as_simd::<8>();
-        let (_, mid_b, _) = b.as_simd::<8>();
-
-        // Prologue
+        let mut ac = a.chunks_exact(8);
+        let mut bc = b.chunks_exact(8);
+        for (ca, cb) in ac.by_ref().zip(bc.by_ref())
+        {
+            acc += f32x8::from_slice(ca) * f32x8::from_slice(cb);
+        }
         let mut scalar_acc = 0.0f32;
-        for (x, y) in pre_a.iter().zip(b.iter())
+        for (x, y) in ac.remainder().iter().zip(bc.remainder())
         {
             scalar_acc += x * y;
         }
-
-        // Cœur SIMD
-        for (va, vb) in mid_a.iter().zip(mid_b.iter())
-        {
-            acc += va * vb;
-        }
-
-        // Épilogue
-        let offset = pre_a.len() + mid_a.len() * 8;
-        for (x, y) in suf_a.iter().zip(b[offset..].iter())
-        {
-            scalar_acc += x * y;
-        }
-
-        // Réduction horizontale du vecteur SIMD
+        // Réduction horizontale du vecteur SIMD.
         scalar_acc + acc.reduce_sum()
     }
 
@@ -180,24 +156,17 @@ pub mod simd_ops {
         assert_eq!(a.len(), b.len());
 
         let mut acc = f64x4::splat(0.0);
-        let (pre_a, mid_a, suf_a) = a.as_simd::<4>();
-        let (_, mid_b, _) = b.as_simd::<4>();
-
+        let mut ac = a.chunks_exact(4);
+        let mut bc = b.chunks_exact(4);
+        for (ca, cb) in ac.by_ref().zip(bc.by_ref())
+        {
+            acc += f64x4::from_slice(ca) * f64x4::from_slice(cb);
+        }
         let mut scalar_acc = 0.0f64;
-        for (x, y) in pre_a.iter().zip(b.iter())
+        for (x, y) in ac.remainder().iter().zip(bc.remainder())
         {
             scalar_acc += x * y;
         }
-        for (va, vb) in mid_a.iter().zip(mid_b.iter())
-        {
-            acc += va * vb;
-        }
-        let offset = pre_a.len() + mid_a.len() * 4;
-        for (x, y) in suf_a.iter().zip(b[offset..].iter())
-        {
-            scalar_acc += x * y;
-        }
-
         scalar_acc + acc.reduce_sum()
     }
 
@@ -210,26 +179,29 @@ pub mod simd_ops {
     pub fn fma_f32(dst: &mut [f32], a: &[f32], b: &[f32], c: &[f32]) {
         assert!(dst.len() == a.len() && a.len() == b.len() && b.len() == c.len());
 
-        let (pre, mid_dst, suf) = dst.as_simd_mut::<8>();
-        let (_, mid_a, _) = a.as_simd::<8>();
-        let (_, mid_b, _) = b.as_simd::<8>();
-        let (_, mid_c, _) = c.as_simd::<8>();
-
-        for i in 0..pre.len()
+        let mut dc = dst.chunks_exact_mut(8);
+        let mut ac = a.chunks_exact(8);
+        let mut bc = b.chunks_exact(8);
+        let mut cc = c.chunks_exact(8);
+        for (((d, ca), cb), ci) in dc
+            .by_ref()
+            .zip(ac.by_ref())
+            .zip(bc.by_ref())
+            .zip(cc.by_ref())
         {
-            pre[i] = a[i] * b[i] + c[i];
+            // mul_add est mappé sur VFMADD/FMLA quand disponible.
+            let v = f32x8::from_slice(ca).mul_add(f32x8::from_slice(cb), f32x8::from_slice(ci));
+            v.copy_to_slice(d);
         }
-
-        for i in 0..mid_dst.len()
+        let (dr, ar, br, cr) = (
+            dc.into_remainder(),
+            ac.remainder(),
+            bc.remainder(),
+            cc.remainder(),
+        );
+        for (i, d) in dr.iter_mut().enumerate()
         {
-            // mul_add est mappé sur VFMADD quand disponible
-            mid_dst[i] = mid_a[i].mul_add(mid_b[i], mid_c[i]);
-        }
-
-        let offset = pre.len() + mid_dst.len() * 8;
-        for (i, d) in suf.iter_mut().enumerate()
-        {
-            *d = a[offset + i] * b[offset + i] + c[offset + i];
+            *d = ar[i] * br[i] + cr[i];
         }
     }
 
@@ -353,6 +325,62 @@ mod tests {
         for (i, x) in dst.iter().enumerate()
         {
             assert!((x - (i as f32 + 1.5)).abs() < 1e-6, "add_f32 failed at {i}");
+        }
+    }
+
+    /// Regression: the multi-slice kernels must be correct **regardless of the
+    /// operands' relative alignment**. The previous `as_simd`-per-slice split
+    /// paired mismatched SIMD lanes when operands had different alignment,
+    /// producing wrong results *nondeterministically* (allocation-dependent).
+    /// Slicing from varied offsets forces every relative alignment.
+    #[test]
+    fn simd_kernels_correct_under_any_alignment() {
+        let n = 40usize;
+        for d_off in 0..9
+        {
+            for s_off in 0..9
+            {
+                let mut dbuf: Vec<f32> = (0..n + d_off).map(|i| (i as f32 * 0.7).sin()).collect();
+                let sbuf: Vec<f32> = (0..n + s_off).map(|i| (i as f32 * 0.3).cos()).collect();
+                let cbuf: Vec<f32> = (0..n + s_off).map(|i| (i as f32 * 0.11) - 0.5).collect();
+
+                // add_f32_inplace: dst += src.
+                let d0: Vec<f32> = dbuf[d_off..d_off + n].to_vec();
+                add_f32_inplace(&mut dbuf[d_off..d_off + n], &sbuf[s_off..s_off + n]);
+                for k in 0..n
+                {
+                    let want = d0[k] + sbuf[s_off + k];
+                    assert!(
+                        (dbuf[d_off + k] - want).abs() < 1e-6,
+                        "add d_off={d_off} s_off={s_off} k={k}"
+                    );
+                }
+
+                // dot_f32: a·b.
+                let dot = dot_f32(&sbuf[s_off..s_off + n], &cbuf[s_off..s_off + n]);
+                let want_dot: f32 = (0..n).map(|k| sbuf[s_off + k] * cbuf[s_off + k]).sum();
+                assert!(
+                    (dot - want_dot).abs() < 1e-3,
+                    "dot d_off={d_off} s_off={s_off}: {dot} vs {want_dot}"
+                );
+
+                // fma_f32: dst = a*b + c (a = the just-updated dbuf slice).
+                let mut fbuf = vec![0.0f32; n + d_off];
+                fma_f32(
+                    &mut fbuf[d_off..d_off + n],
+                    &dbuf[d_off..d_off + n],
+                    &sbuf[s_off..s_off + n],
+                    &cbuf[s_off..s_off + n],
+                );
+                for k in 0..n
+                {
+                    let want = dbuf[d_off + k] * sbuf[s_off + k] + cbuf[s_off + k];
+                    assert!(
+                        (fbuf[d_off + k] - want).abs() < 1e-5,
+                        "fma d_off={d_off} s_off={s_off} k={k}"
+                    );
+                }
+            }
         }
     }
 

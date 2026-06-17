@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 70 : fix SIMD — bug d'alignement (corrigé)
+- `scirust-simd::portable` : `add_f32/f64_inplace`, `dot_f32/f64`, `fma_f32`
+  découpaient chaque opérande indépendamment (`as_simd`) ⇒ lanes décalées si
+  alignements différents ⇒ résultats **faux non déterministes** (flake
+  `test_add_f32_inplace` ~30–50 %). Réécrit en `chunks_exact` (appariement bloc k
+  identique). + `needless_return` complex.rs corrigé.
+- Test de régression : tous les décalages relatifs (add/dot/fma vs scalaire) ;
+  12/12 lancers verts. Déterminisme rétabli (cœur de la thèse scirust).
+- docs : CHANGELOG (Corrigé). Pas de changement de roadmap (bug fix). 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 69 : RCPS (#36) — contrôle de risque (PAC)
 - `nn::conformal::hoeffding_ucb` + `rcps_select` (Bates 2021) : contrôle d'un risque
   borné (au-delà de la couverture) via borne Hoeffding ; plus petit λ dont UCB ≤ α
