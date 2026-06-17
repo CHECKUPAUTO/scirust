@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 63 : RWKV (#53) — mélange temporel WKV + op `div`
+- Nouvel op autograd `div` (division élémentaire broadcast, ∂a=g/b ∂b=−g·a/b²,
+  gradient-checké) dans `autodiff::nd`.
+- `nn::nd_layers::rwkv_wkv` + `NdRwkv` (Peng 2023) : WKV = attention linéaire à
+  décroissance expo. par canal + bonus courant, normalisée ; récurrence sur tape.
+  Couche : WKV gaté réception r=σ(W_r·x), decay=σ(·)/bonus=exp(·) par canal apprenables.
+- CLI : `rwkv [--seed N] [--steps S]` (groupe NLP). 8 Documentation mises à jour.
+- Tests (4) : div gradient-check ; WKV récurrent ≡ formule explicite ; WKV gradient
+  check (k,v,decay,bonus) ; NdRwkv entraîne (MSE↓) + déterminisme.
+- docs : roadmap #53 📋→✅ ; CHANGELOG. 523 tests core (+4) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 62 : GloRo (#32) — robustesse certifiée par Lipschitz
 - `nn::lipschitz` (Leino 2021) : `spectral_norm` (power iteration), `spectral_normalize`
   (couche 1-Lipschitz), `GloroClassifier` (rayon L2 = marge/(√2‖W‖₂), exact-pour-linéaire).

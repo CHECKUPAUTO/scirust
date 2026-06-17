@@ -278,6 +278,7 @@ Nouvelles commandes CLI :
 - `scirust retnet [--seed N] [--steps S]` — entraîne une couche de rétention RetNet (attention linéaire, forme récurrente ≡ forme parallèle) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust gla [--seed N] [--steps S]` — entraîne une couche d'attention linéaire à porte GLA (porte d'oubli dépendante des données) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust hgrn [--seed N] [--steps S]` — entraîne un mélangeur de tokens HGRN à RNN linéaire à porte (porte d'oubli bornée inférieurement) pour ajuster une séquence ; affiche la réduction de la MSE.
+- `scirust rwkv [--seed N] [--steps S]` — entraîne une couche de mélange temporel RWKV (WKV ; décroissance temporelle par canal + bonus) pour ajuster une séquence ; affiche la réduction de la MSE.
 - `scirust conformal [--seed N] [--alpha A]` — intervalles conformes à couverture garantie (sans hypothèse de distribution).
 - `scirust calibrate [--seed N]` — mise à l'échelle de température ; ajuste T pour réduire l'erreur de calibration attendue (ECE) sans modifier l'exactitude.
 - `scirust pinn [--seed N] [--steps S]` — réseau informé par la physique ; résout le BVP `u''=−u` (résidu de l'EDP dans la loss), vérifié vs `sin x`.

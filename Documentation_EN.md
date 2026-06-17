@@ -178,6 +178,7 @@ New CLI commands:
 - `scirust retnet [--seed N] [--steps S]` — train a RetNet retention layer (linear attention, recurrent form ≡ parallel form) to fit a sequence; reports the MSE reduction.
 - `scirust gla [--seed N] [--steps S]` — train a Gated Linear Attention layer (data-dependent forget gate) to fit a sequence; reports the MSE reduction.
 - `scirust hgrn [--seed N] [--steps S]` — train an HGRN gated-linear-RNN token mixer (lower-bounded forget gate) to fit a sequence; reports the MSE reduction.
+- `scirust rwkv [--seed N] [--steps S]` — train a single RWKV time-mixing (WKV) layer (per-channel time decay + bonus) to fit a sequence; reports the MSE reduction.
 - `scirust conformal [--seed N] [--alpha A]` — conformal intervals with a guaranteed, distribution-free coverage level.
 - `scirust calibrate [--seed N]` — temperature scaling; fit T to lower the expected calibration error (ECE) without changing accuracy.
 - `scirust pinn [--seed N] [--steps S]` — physics-informed network; solve the BVP `u''=−u` (PDE residual in the loss), checked against `sin x`.

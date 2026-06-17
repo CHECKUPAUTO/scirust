@@ -246,6 +246,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N] [--steps S]",
                 about: "Train an HGRN gated-linear-RNN token mixer (lower-bounded forget gate) to fit a sequence.",
             },
+            Command {
+                name: "rwkv",
+                args: "[--seed N] [--steps S]",
+                about: "Train an RWKV time-mixing (WKV) layer (per-channel decay + bonus) to fit a sequence.",
+            },
         ],
     ),
     (
@@ -440,6 +445,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("retnet") => nlp::run_retnet(rest),
         Some("gla") => nlp::run_gla(rest),
         Some("hgrn") => nlp::run_hgrn(rest),
+        Some("rwkv") => nlp::run_rwkv(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some(other) =>
@@ -533,6 +539,7 @@ mod tests {
         assert_eq!(run(&s(&["retnet", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["gla", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["hgrn", "--steps", "5"])), 0);
+        assert_eq!(run(&s(&["rwkv", "--steps", "5"])), 0);
         assert_eq!(run(&s(&["certify", "--eps", "0.02"])), 0);
         assert_eq!(run(&s(&["conformal", "--alpha", "0.1"])), 0);
         assert_eq!(run(&s(&["calibrate", "--seed", "1"])), 0);

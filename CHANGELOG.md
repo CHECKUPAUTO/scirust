@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **RWKV time-mixing (WKV)** (`nn::nd_layers::rwkv_wkv` + `NdRwkv`, Peng et al.
+  2023, roadmap #53) : opérateur **WKV** — attention linéaire récurrente à
+  **décroissance temporelle exponentielle par canal** `decay ∈ (0,1)` plus un
+  **bonus** pour le token courant, normalisée (numérateur/dénominateur), déroulée
+  en temps linéaire sur la tape. A nécessité un nouvel op autograd **`div`**
+  (division élémentaire, gradient `∂a=g/b`, `∂b=−g·a/b²`, gradient-checké). La
+  couche `NdRwkv` ajoute une **réception** `r=σ(W_r·x)` qui gate la sortie, avec
+  decay/bonus par canal apprenables. Oracle : la récurrence sur tape **≡ la
+  formule de somme pondérée explicite** + gradient check (k, v, decay, bonus) +
+  entraînement (MSE↓) + déterminisme bit-exact. CLI : `scirust rwkv` (8 langues).
 - **GloRo — robustesse certifiée par Lipschitz** (`nn::lipschitz`, Leino, Wang &
   Fredrikson 2021, roadmap #32) : `spectral_norm` (norme spectrale par power
   iteration déterministe), `spectral_normalize` (couche **1-Lipschitz** contrainte)

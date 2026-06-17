@@ -89,6 +89,7 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `retnet [--seed N] [--steps S]` | entraîne une couche RetNet (rétention, attention linéaire récurrente ≡ parallèle) à ajuster une séquence | `scirust-core::nn::nd_layers` |
 | `gla [--seed N] [--steps S]` | entraîne une couche Gated Linear Attention (porte d'oubli dépendante de l'entrée) à ajuster une séquence | `scirust-core::nn::nd_layers` |
 | `hgrn [--seed N] [--steps S]` | entraîne un mélangeur HGRN (RNN linéaire à porte d'oubli bornée) à ajuster une séquence | `scirust-core::nn::nd_layers` |
+| `rwkv [--seed N] [--steps S]` | entraîne une couche de mélange temporel RWKV (WKV ; décroissance par canal + bonus) à ajuster une séquence | `scirust-core::nn::nd_layers` |
 | `analyze <file.rs> [--sarif]` | analyse d'ownership de vrai Rust | `scirust-som-cli` |
 | `verify emit\|verify <args>` | certificats d'inférence | `scirust_runtime::proofcli` |
 | `certify [--seed N] [--eps E]` | bornes de sortie prouvées d'un MLP ReLU sur une boîte L∞ — **IBP** (couche par couche) **et CROWN** (relaxation linéaire, plus serrée) côte à côte | `scirust-core::nn::ibp` |

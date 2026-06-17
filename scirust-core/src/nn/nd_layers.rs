@@ -1152,6 +1152,124 @@ impl NdHgrn {
     }
 }
 
+/// **RWKV time-mixing** — the WKV operator (Peng et al., *RWKV: Reinventing RNNs
+/// for the Transformer Era*, 2023). A linear-attention recurrence with a
+/// **per-channel exponential time decay** `decay ∈ (0,1)` and a **bonus** for the
+/// current token:
+///
+/// ```text
+/// wkv_t = ( Σ_{i<t} decay^{t-1-i}·e^{k_i}·v_i + bonus·e^{k_t}·v_t )
+///         / ( Σ_{i<t} decay^{t-1-i}·e^{k_i}     + bonus·e^{k_t} )
+/// ```
+///
+/// computed in linear time by carrying numerator/denominator states `(a, b)`:
+/// `wkv_t = (a + bonus·e^{k_t}·v_t)/(b + bonus·e^{k_t})`, then
+/// `a ← decay·a + e^{k_t}·v_t`, `b ← decay·b + e^{k_t}`. Causal and deterministic;
+/// unrolled on the tape (uses the `exp` and `div` ops). `k`/`v` are `(seq, d)`;
+/// `decay` (in `(0,1)`) and `bonus` (`> 0`) are `(1, d)`; returns `(seq, d)`.
+pub fn rwkv_wkv<'t>(
+    tape: &'t NdTape,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    decay: NdVar<'t>,
+    bonus: NdVar<'t>,
+) -> NdVar<'t> {
+    let ks = k.shape();
+    let (seq, d) = (ks[0], ks[1]);
+    let mut a = tape.input(TensorND::zeros(&[1, d])); // numerator state
+    let mut b = tape.input(TensorND::zeros(&[1, d])); // denominator state
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let k_t = k.gather(&[t]); // (1,d)
+        let v_t = v.gather(&[t]); // (1,d)
+        let ek = k_t.exp(); // e^{k_t}
+        let euk = bonus.mul(ek); // bonus·e^{k_t} (= e^{u+k_t})
+        let num = a.add(euk.mul(v_t)); // a + bonus·e^{k}·v
+        let den = b.add(euk); // b + bonus·e^{k}
+        outs.push(num.div(den)); // wkv_t
+        // Carry the (decayed) running sums to the next step.
+        let ekv = ek.mul(v_t);
+        a = decay.mul(a).add(ekv); // decay·a + e^{k}·v
+        b = decay.mul(b).add(ek); // decay·b + e^{k}
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **RWKV** time-mixing block: receptance-gated WKV. From the input `x` it
+/// projects a **receptance** gate `r = σ(W_r·x) ∈ (0,1)`, a key `k = W_k·x` and a
+/// value `v = W_v·x`, runs the [`rwkv_wkv`] recurrence with **learnable**
+/// per-channel decay `σ(w_decay) ∈ (0,1)` and bonus `e^{u_bonus} > 0`, and gates
+/// the projected output: `out = r ⊙ (W_o·wkv)`. Deterministic; trainable through
+/// the N-D tape. `(seq, d_model) → (seq, d_model)`. (Token-shift is omitted; this
+/// is the core time-mixing operator.)
+pub struct NdRwkv {
+    r_proj: NdLinear,
+    k_proj: NdLinear,
+    v_proj: NdLinear,
+    o_proj: NdLinear,
+    w_decay: TensorND, // raw (1,d); decay = σ(w_decay) ∈ (0,1)
+    u_bonus: TensorND, // raw (1,d); bonus = e^{u_bonus} > 0
+    wd_idx: Option<usize>,
+    ub_idx: Option<usize>,
+}
+
+impl NdRwkv {
+    /// New layer with seeded projections; decay initialised slow (`σ(2)≈0.88`) and
+    /// bonus initialised to 1 (`u = 0`).
+    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            r_proj: NdLinear::new(d_model, d_model, rng),
+            k_proj: NdLinear::new(d_model, d_model, rng),
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            o_proj: NdLinear::new(d_model, d_model, rng),
+            w_decay: TensorND::new(vec![2.0f32; d_model], vec![1, d_model]),
+            u_bonus: TensorND::new(vec![0.0f32; d_model], vec![1, d_model]),
+            wd_idx: None,
+            ub_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let r = self.r_proj.forward(tape, x).sigmoid(); // receptance gate ∈ (0,1)
+        let k = self.k_proj.forward(tape, x);
+        let v = self.v_proj.forward(tape, x);
+        let wd = tape.input(self.w_decay.clone());
+        self.wd_idx = Some(wd.idx());
+        let ub = tape.input(self.u_bonus.clone());
+        self.ub_idx = Some(ub.idx());
+        let decay = wd.sigmoid(); // ∈ (0,1)
+        let bonus = ub.exp(); // > 0
+        let wkv = rwkv_wkv(tape, k, v, decay, bonus);
+        let out = self.o_proj.forward(tape, wkv);
+        r.mul(out) // receptance-gated output
+    }
+
+    /// Trainable parameters (r/k/v/o projections + per-channel decay & bonus).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.r_proj.parameters();
+        params.extend(self.k_proj.parameters());
+        params.extend(self.v_proj.parameters());
+        params.extend(self.o_proj.parameters());
+        if let Some(i) = self.wd_idx
+        {
+            params.push(NdParam {
+                value: &mut self.w_decay,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = self.ub_idx
+        {
+            params.push(NdParam {
+                value: &mut self.u_bonus,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1894,6 +2012,149 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.7, "HGRN did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Explicit RWKV WKV reference (the weighted-sum formula, per channel).
+    fn rwkv_reference(
+        k: &[f32],
+        v: &[f32],
+        decay: &[f32],
+        bonus: &[f32],
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut out = vec![0f32; seq * d];
+        for j in 0..d
+        {
+            for t in 0..seq
+            {
+                let (mut num, mut den) = (0f32, 0f32);
+                for i in 0..t
+                {
+                    let wgt = decay[j].powi((t - 1 - i) as i32) * k[i * d + j].exp();
+                    num += wgt * v[i * d + j];
+                    den += wgt;
+                }
+                let wc = bonus[j] * k[t * d + j].exp();
+                num += wc * v[t * d + j];
+                den += wc;
+                out[t * d + j] = num / den;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `rwkv_wkv` matches the explicit weighted-sum formula.
+    #[test]
+    fn rwkv_wkv_matches_reference() {
+        let (seq, d) = (5usize, 3usize);
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 - 0.5).sin()).collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3).cos()).collect();
+        let decay: Vec<f32> = (0..d).map(|j| 0.8 + 0.05 * j as f32).collect(); // ∈(0,1)
+        let bonus: Vec<f32> = (0..d).map(|j| 1.0 + 0.2 * j as f32).collect(); // >0
+
+        let want = rwkv_reference(&k, &v, &decay, &bonus, seq, d);
+        let tape = NdTape::new();
+        let kv = tape.input(TensorND::new(k, vec![seq, d]));
+        let vv = tape.input(TensorND::new(v, vec![seq, d]));
+        let dv = tape.input(TensorND::new(decay, vec![1, d]));
+        let bv = tape.input(TensorND::new(bonus, vec![1, d]));
+        let out = tape.value(rwkv_wkv(&tape, kv, vv, dv, bv));
+        assert_eq!(out.shape, vec![seq, d]);
+        for (got, w) in out.data.iter().zip(&want)
+        {
+            assert!((got - w).abs() < 1e-5, "RWKV mismatch: {got} vs {w}");
+        }
+    }
+
+    /// `rwkv_wkv` gradients (k, v, decay, bonus) match finite differences.
+    #[test]
+    fn rwkv_wkv_gradient_check() {
+        let (seq, d) = (4usize, 2usize);
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let v: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.25).cos()).collect();
+        let decay: Vec<f32> = (0..d).map(|j| 0.85 + 0.05 * j as f32).collect();
+        let bonus: Vec<f32> = (0..d).map(|j| 1.0 + 0.1 * j as f32).collect();
+
+        let loss_of = |kk: &[f32], vv: &[f32], dd: &[f32], bb: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv2 = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let dv = t.input(TensorND::new(dd.to_vec(), vec![1, d]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![1, d]));
+            let o = rwkv_wkv(&t, kv, vv2, dv, bv);
+            t.value(o.mul(o).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let dv = t.input(TensorND::new(decay.clone(), vec![1, d]));
+        let bv = t.input(TensorND::new(bonus.clone(), vec![1, d]));
+        let o = rwkv_wkv(&t, kv, vv, dv, bv);
+        let grads = t.backward(o.mul(o).sum());
+        let (gk, gv, gd, gb) = (
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+            grads[dv.idx()].clone(),
+            grads[bv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "RWKV grad {i}: {num} vs {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gk, &k, &|p| loss_of(p, &v, &decay, &bonus));
+        check(&gv, &v, &|p| loss_of(&k, p, &decay, &bonus));
+        check(&gd, &decay, &|p| loss_of(&k, &v, p, &bonus));
+        check(&gb, &bonus, &|p| loss_of(&k, &v, &decay, p));
+    }
+
+    /// The `NdRwkv` layer trains (MSE↓) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_rwkv_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d) = (4usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(11);
+            let mut layer = NdRwkv::new(d, &mut rng);
+            let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 1.0).sin()).collect();
+            let target: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.7, "RWKV did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
