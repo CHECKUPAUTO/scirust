@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **KAN — Kolmogorov-Arnold Networks** (`nn::kan::KanLayer`, Liu et al. 2024 ;
+  base RBF de FastKAN, Li 2024 ; roadmap #77) : activations **apprenables sur les
+  arêtes** plutôt que sur les nœuds — `y_j = Σᵢ φᵢⱼ(xᵢ)` avec chaque `φ` une somme
+  de RBF gaussiennes (grille fixe) + un terme de base `SiLU`. La sortie est
+  **linéaire dans les coefficients**, donc l'ajustement est un problème de moindres
+  carrés **convexe** résolu par descente de gradient déterministe. Oracle : une
+  seule couche KAN ajuste la cible additive non-linéaire `sin(2x₀)+x₁²` à MSE<0,02
+  — bien en dessous du meilleur modèle linéaire (qui ne peut représenter sin/carré)
+  ; base RBF localisée ; déterminisme bit-exact. Couche de bibliothèque (variante
+  RBF/FastKAN, pas les B-splines du papier original).
 - **RWKV time-mixing (WKV)** (`nn::nd_layers::rwkv_wkv` + `NdRwkv`, Peng et al.
   2023, roadmap #53) : opérateur **WKV** — attention linéaire récurrente à
   **décroissance temporelle exponentielle par canal** `decay ∈ (0,1)` plus un

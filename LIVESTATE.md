@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 64 : KAN (#77) — Kolmogorov-Arnold Networks (RBF)
+- `nn::kan::KanLayer` (Liu 2024 ; base RBF de FastKAN, Li 2024) : activations
+  apprenables sur arêtes y_j=Σᵢφᵢⱼ(xᵢ), φ = Σ RBF gaussiennes + base SiLU.
+- Sortie linéaire en coeffs ⇒ ajustement convexe par GD analytique (standalone).
+- Bibliothèque seule (pas de CLI ni multilingue). Variante RBF/FastKAN (pas B-splines).
+- Tests (2, core) : ajuste sin(2x₀)+x₁² (MSE<0,02, <0,2× linéaire) ; base RBF
+  localisée (pic=1 au centre) + déterminisme bit-exact.
+- docs : roadmap #77 📋→✅ ; CHANGELOG. 525 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 63 : RWKV (#53) — mélange temporel WKV + op `div`
 - Nouvel op autograd `div` (division élémentaire broadcast, ∂a=g/b ∂b=−g·a/b²,
   gradient-checké) dans `autodiff::nd`.
