@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 57 : CQR (#33) — Conformalized Quantile Regression
+- `nn::conformal::ConformalQuantileRegressor` (Romano, Patterson & Candès 2019) :
+  conformalise un régresseur de quantiles. Score `Eᵢ=max(q_lo−y, y−q_hi)`,
+  correction finie `Q` (réutilise `conformal_quantile`), intervalle adaptatif
+  `[q_lo−Q, q_hi+Q]`. Largeur variable selon x (vs split-conformal constant).
+- CLI : `conformal` enrichi — affiche split (largeur constante) **et** CQR
+  (largeur adaptative : région faible vs fort bruit) ; même signature (`--seed`,
+  `--alpha`), pas de changement multilingue.
+- Tests (2, core) : sémantique exacte du score (cas main) ; couverture marginale
+  ≥ 1−α + adaptativité (whigh > 1.5·wlow) + déterminisme.
+- docs : roadmap #33 📋→✅ ; CHANGELOG. 504 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 56 : SAM (#47) — Sharpness-Aware Minimization
 - `nn::nd_optim::NdSam` + `SamConfig` (Foret 2021) : 2 phases — `ascent` perturbe
   vers `θ+ρ·g/‖g‖` (norme globale du gradient), `descent` restaure θ + pas SGD au

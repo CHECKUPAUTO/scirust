@@ -96,7 +96,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 
 | # | Papier | Fonction scirust proposée | Module | Statut | Effort |
 |---|--------|---------------------------|--------|--------|--------|
-| 33 | Romano, Patterson & Candès, *Conformalized Quantile Regression (CQR)* (NeurIPS 2019, arXiv:1905.03222) | `ConformalQuantileRegressor` : intervalles **adaptatifs** (hétéroscédastiques) à couverture garantie ; oracle : couverture ≈ 1−α + largeur variable | `nn::conformal` | 📋 | M |
+| 33 | Romano, Patterson & Candès, *Conformalized Quantile Regression (CQR)* (NeurIPS 2019, arXiv:1905.03222) | `ConformalQuantileRegressor` : conformalise un régresseur de quantiles (score `Eᵢ=max(q_lo−y, y−q_hi)`, correction finie `Q`) ⇒ intervalles **adaptatifs** `[q_lo−Q, q_hi+Q]`, couverture marginale ≥ 1−α ; oracle : sémantique exacte du score + couverture (bande) + largeur variable (région forte vs faible bruit) + déterminisme ; CLI `conformal` (split + CQR) | `nn::conformal` | ✅ | M |
 | 34 | Romano, Sesia & Candès, *Classification with Valid & Adaptive Coverage (APS)* (NeurIPS 2020, arXiv:2006.02544) | ensembles de **classification** à couverture conditionnelle approchée (score cumulatif) | `nn::conformal` | 📋 | M |
 | 35 | Angelopoulos et al., *RAPS : Regularized Adaptive Prediction Sets* (ICLR 2021, arXiv:2009.14193) | ensembles **régularisés** (plus petits que APS) à couverture garantie | `nn::conformal` | 📋 | M |
 | 36 | Bates et al., *Risk-Controlling Prediction Sets (RCPS)* (J. ACM 2021, arXiv:2101.02703) | `risk_control` : garantie sur un **risque** borné (au-delà de la couverture) via borne de concentration | `nn::conformal` | 📋 | M |

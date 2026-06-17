@@ -122,6 +122,68 @@ impl ConformalClassifier {
     }
 }
 
+/// **Conformalized Quantile Regression (CQR)** — Romano, Patterson & Candès
+/// (NeurIPS 2019). Plain split-conformal regression ([`ConformalRegressor`]) adds
+/// a **constant** half-width `q̂` to every point, so its intervals cannot adapt to
+/// input-dependent (heteroscedastic) noise. CQR instead starts from a **quantile**
+/// regressor — estimates `q_lo(x)` and `q_hi(x)` of the conditional `α/2` and
+/// `1−α/2` quantiles — and conformalizes the *signed* score
+/// `Eᵢ = max(q_lo(xᵢ) − yᵢ, yᵢ − q_hi(xᵢ))` (how far **outside** the predicted band
+/// the truth fell; negative when comfortably inside). The calibrated interval is
+/// `[q_lo(x) − Q, q_hi(x) + Q]` with `Q` the finite-sample conformal quantile of
+/// the scores. This keeps the **distribution-free marginal coverage `≥ 1−α`** of
+/// split conformal while letting the width **vary with `x`** (and `Q` may be
+/// negative, *shrinking* over-wide base bands). The conformal step is agnostic to
+/// how `q_lo`/`q_hi` were fit. Pure, deterministic arithmetic.
+pub struct ConformalQuantileRegressor {
+    q: f32,
+    alpha: f32,
+}
+
+impl ConformalQuantileRegressor {
+    /// Calibrate from the base quantile predictions `q_lo`, `q_hi` and the truths
+    /// `y` on a held-out set, scoring `Eᵢ = max(q_lo(xᵢ) − yᵢ, yᵢ − q_hi(xᵢ))`.
+    pub fn calibrate(q_lo: &[f32], q_hi: &[f32], y: &[f32], alpha: f32) -> Self {
+        assert_eq!(q_lo.len(), q_hi.len(), "CQR: q_lo/q_hi length mismatch");
+        assert_eq!(
+            q_lo.len(),
+            y.len(),
+            "CQR: predictions/targets length mismatch"
+        );
+        let scores: Vec<f32> = q_lo
+            .iter()
+            .zip(q_hi)
+            .zip(y)
+            .map(|((&lo, &hi), &yi)| (lo - yi).max(yi - hi))
+            .collect();
+        Self {
+            q: conformal_quantile(&scores, alpha),
+            alpha,
+        }
+    }
+
+    /// The **adaptive** prediction interval `[q_lo(x) − Q, q_hi(x) + Q]`.
+    pub fn interval(&self, q_lo_x: f32, q_hi_x: f32) -> (f32, f32) {
+        (q_lo_x - self.q, q_hi_x + self.q)
+    }
+
+    /// Whether the calibrated interval around `(q_lo(x), q_hi(x))` covers `y_true`.
+    pub fn covers(&self, q_lo_x: f32, q_hi_x: f32, y_true: f32) -> bool {
+        y_true >= q_lo_x - self.q && y_true <= q_hi_x + self.q
+    }
+
+    /// The conformal correction `Q` (subtracted from `q_lo`, added to `q_hi`).
+    /// May be negative when the base quantiles already over-cover.
+    pub fn correction(&self) -> f32 {
+        self.q
+    }
+
+    /// The target miscoverage `α` (coverage is `≥ 1 − α`).
+    pub fn alpha(&self) -> f32 {
+        self.alpha
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +273,105 @@ mod tests {
             .count();
         let coverage = covered as f32 / n_test as f32;
         assert!(coverage >= 0.86, "coverage {coverage} below target 0.90");
+    }
+
+    /// CQR's score `Eᵢ = max(q_lo − y, y − q_hi)` and interval semantics, on an
+    /// exactly hand-computable case. Base band `[-1, 1]`; truths give scores
+    /// `[-1, 1, -0.5, 2]`; sorted `[-1, -0.5, 1, 2]`; `α = 0.5 → k = ⌈5·0.5⌉ = 3`,
+    /// so `Q` = 3rd smallest = `1`. The band widens to `[-2, 2]`.
+    #[test]
+    fn cqr_score_and_interval_semantics() {
+        let q_lo = [-1.0f32, -1.0, -1.0, -1.0];
+        let q_hi = [1.0f32, 1.0, 1.0, 1.0];
+        let y = [0.0f32, 2.0, 0.5, 3.0];
+        let cqr = ConformalQuantileRegressor::calibrate(&q_lo, &q_hi, &y, 0.5);
+        assert!(
+            (cqr.correction() - 1.0).abs() < 1e-6,
+            "Q = {}",
+            cqr.correction()
+        );
+        let (lo, hi) = cqr.interval(-1.0, 1.0);
+        assert!(
+            (lo + 2.0).abs() < 1e-6 && (hi - 2.0).abs() < 1e-6,
+            "interval ({lo}, {hi})"
+        );
+        assert!(cqr.covers(-1.0, 1.0, 1.8) && !cqr.covers(-1.0, 1.0, 2.5));
+        assert!((cqr.alpha() - 0.5).abs() < 1e-6);
+    }
+
+    /// **The CQR guarantee + its headline property, tested.** On heteroscedastic
+    /// data (noise std `σ(x) = 0.1 + x` grows with `x`) with a quantile model whose
+    /// band scales as `±c·σ(x)`, CQR (1) hits the distribution-free marginal
+    /// coverage `≥ 1−α` on fresh draws and (2) stays **adaptive** — intervals in
+    /// the high-noise region are far wider than in the low-noise region (a constant
+    /// half-width could not do both). Bit-for-bit deterministic across runs.
+    #[test]
+    fn cqr_hits_coverage_and_is_adaptive() {
+        let run = || -> (f32, f32, f32, f32) {
+            let mut rng = PcgEngine::new(123);
+            // Symmetric noise ξ = u1+u2+u3, u ~ U(−1,1) (std 1); σ(x) = 0.1 + x.
+            let noise = |r: &mut PcgEngine| r.float_signed() + r.float_signed() + r.float_signed();
+            let sigma = |x: f32| 0.1 + x;
+            let alpha = 0.1f32;
+            let c = 1.4f32; // base band a touch narrow ⇒ CQR corrects upward
+            let q_lo = |x: f32| -c * sigma(x);
+            let q_hi = |x: f32| c * sigma(x);
+
+            let (mut clo, mut chi, mut cy) = (Vec::new(), Vec::new(), Vec::new());
+            for _ in 0..3000
+            {
+                let x = rng.float();
+                let y = sigma(x) * noise(&mut rng);
+                clo.push(q_lo(x));
+                chi.push(q_hi(x));
+                cy.push(y);
+            }
+            let cqr = ConformalQuantileRegressor::calibrate(&clo, &chi, &cy, alpha);
+
+            let n_test = 8000usize;
+            let (mut covered, mut wlow, mut nlow, mut whigh, mut nhigh) =
+                (0usize, 0.0f32, 0usize, 0.0f32, 0usize);
+            for _ in 0..n_test
+            {
+                let x = rng.float();
+                let y = sigma(x) * noise(&mut rng);
+                let (lo, hi) = cqr.interval(q_lo(x), q_hi(x));
+                if y >= lo && y <= hi
+                {
+                    covered += 1;
+                }
+                let w = hi - lo;
+                if x < 0.2
+                {
+                    wlow += w;
+                    nlow += 1;
+                }
+                else if x > 0.8
+                {
+                    whigh += w;
+                    nhigh += 1;
+                }
+            }
+            (
+                covered as f32 / n_test as f32,
+                wlow / nlow as f32,
+                whigh / nhigh as f32,
+                cqr.correction(),
+            )
+        };
+        let (coverage, wlow, whigh, q) = run();
+        // (1) Marginal coverage ≥ 1−α (with finite-sample slack), not vacuous.
+        assert!(coverage >= 0.87, "CQR coverage {coverage} below 0.90");
+        assert!(
+            coverage <= 0.985,
+            "CQR interval vacuous (coverage {coverage})"
+        );
+        // (2) Adaptive: high-noise intervals clearly wider than low-noise ones.
+        assert!(
+            whigh > 1.5 * wlow,
+            "CQR not adaptive: wlow = {wlow}, whigh = {whigh}"
+        );
+        // (3) Determinism.
+        assert_eq!((coverage, wlow, whigh, q), run());
     }
 }

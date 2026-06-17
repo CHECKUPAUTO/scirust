@@ -6,6 +6,17 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **CQR — Conformalized Quantile Regression** (`nn::conformal::ConformalQuantileRegressor`,
+  Romano, Patterson & Candès 2019, roadmap #33) : conformalise un régresseur de
+  **quantiles** pour produire des intervalles **adaptatifs** (hétéroscédastiques)
+  à couverture garantie. Score signé `Eᵢ = max(q_lo(xᵢ)−yᵢ, yᵢ−q_hi(xᵢ))`,
+  correction finie `Q` (quantile conformal des `Eᵢ`, réutilise `conformal_quantile`),
+  intervalle `[q_lo(x)−Q, q_hi(x)+Q]` — largeur **variable selon x** là où le
+  split-conformal symétrique est de largeur constante (`Q` peut être négatif et
+  resserrer une bande trop large). Oracle : sémantique exacte du score (cas
+  calculé à la main) + couverture marginale ≥ 1−α sur données fraîches +
+  **adaptativité** (intervalles bien plus larges en région à fort bruit) +
+  déterminisme. CLI : `scirust conformal` montre désormais split **et** CQR.
 - **SAM — Sharpness-Aware Minimization** (`nn::nd_optim::NdSam` + `SamConfig`,
   Foret et al. 2021, roadmap #47) : optimiseur **à deux phases** qui minimise la
   perte du *pire cas* dans une boule de rayon ρ (biais vers les minima plats).
