@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 59 : SqueezeLLM (#66) — quantif non-uniforme sensible
+- `quantization::SqueezeLlmCodebook` + `weighted_quant_error` (Kim 2023) : codebook
+  `2^bits` par k-means **pondéré sensibilité** (proxy Hessien diag.) ; init quantile
+  + Lloyd déterministe ; ties→index bas.
+- Bibliothèque seule (comme NF4 ; pas de CLI ni multilingue). Branche sparse non
+  modélisée.
+- Tests (2, core) : erreur pondérée < RTN (gaussien 3 bits, <0,85×) ; round-trip
+  exact sur valeurs du codebook + codebook trié 16 entrées + déterminisme.
+- docs : roadmap #66 📋→✅ ; CHANGELOG. 509 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 58 : APS/RAPS (#34/#35) — ensembles de prédiction
 - `nn::conformal::AdaptivePredictionSets` (Romano/Sesia/Candès 2020 ; Angelopoulos
   2021) : conformal classification par score cumulatif `s(x,c)` = masse des classes

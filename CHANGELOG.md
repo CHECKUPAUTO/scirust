@@ -6,6 +6,15 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **SqueezeLLM** (`quantization::SqueezeLlmCodebook` + `weighted_quant_error`, Kim
+  et al. 2023, roadmap #66) : quantification **non-uniforme** des poids par
+  **k-means pondéré par la sensibilité** (proxy de la diagonale de la Hessienne)
+  — un codebook de `2^bits` centroïdes placés là où ils réduisent le plus la
+  *perte*, et non là où les poids sont denses. Init déterministe (quantiles) +
+  itérations de Lloyd pondérées. Oracle : erreur de quantification pondérée
+  **strictement < round-to-nearest uniforme** (poids gaussiens, 3 bits, < 0,85×) +
+  round-trip exact sur les valeurs du codebook + déterminisme. Couche de
+  bibliothèque (la branche « sparse » outliers n'est pas modélisée).
 - **APS / RAPS — ensembles de prédiction adaptatifs** (`nn::conformal::AdaptivePredictionSets`,
   Romano, Sesia & Candès 2020 ; Angelopoulos et al. 2021 ; roadmap #34/#35) :
   conformal **classification** par score cumulatif `s(x,c)` = masse de toutes les
