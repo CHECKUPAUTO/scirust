@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 74 : Watermark LLM (#79) — provenance auditable
+- `nn::watermark` (Kirchenbauer 2023) : partition vert/rouge seedée (hash
+  (seed,prev,token)), `apply_green_bias` (biais logits verts), `detect_z` (test z
+  (g−γn)/√(nγ(1−γ)) sans accès au modèle).
+- Bibliothèque seule (pas de CLI ni multilingue). Pilier audit/provenance (nouveau).
+- Tests (3, core) : fraction verte ≈ γ ; biais sur tokens verts seulement ; texte
+  filigrané détecté (z≫8) vs naturel (z≈0) + mauvais seed non détecté + déterminisme.
+- Note : piège Rust 2024 `gen` mot-clé réservé (renommé `draw`) — déjà vu (RWKV).
+- docs : roadmap #79 📋→✅ ; CHANGELOG. 545 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 73 : DeepONet (#76) — apprentissage d'opérateurs
 - `nn::deeponet::DeepONet` (Lu 2021) : G(u)(y)=Σ b_k(u)·t_k(y) ; trunk cosinus fixe +
   branch linéaire (POD-DeepONet) ⇒ convexe, exact pour opérateurs linéaires.

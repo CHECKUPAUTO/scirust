@@ -19,6 +19,18 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Watermark pour LLM** (`nn::watermark`, Kirchenbauer et al. 2023, roadmap #79) :
+  filigrane statistique rendant le texte généré **auditable sans accès au modèle**.
+  Le token précédent seede une partition du vocabulaire en liste **verte** (fraction
+  γ) / rouge ; `apply_green_bias` ajoute `δ` aux logits verts pour orienter la
+  génération. Le détecteur, qui ne connaît que le seed et γ, recompte les tokens
+  verts : un texte filigrané en contient bien plus que la fraction γ attendue par
+  hasard, ce qu'un **test z** `(g−γn)/√(nγ(1−γ))` (`detect_z`) signale par une
+  p-value minuscule, tandis que le texte naturel score `z≈0`. Tout est un hash
+  déterministe de `(seed, prev, token)`. Oracle : fraction verte ≈ γ + biais
+  appliqué aux seuls tokens verts + texte filigrané détecté (z≫8) vs naturel (z≈0)
+  + un **mauvais seed ne détecte pas** (pas de fausse provenance) + déterminisme.
+  Couche de bibliothèque.
 - **DeepONet — apprentissage d'opérateurs** (`nn::deeponet::DeepONet`, Lu et al.
   2021, roadmap #76) : apprend un **opérateur** `G : u ↦ G(u)` (fonction →
   fonction) via une factorisation **branch × trunk** `G(u)(y) ≈ Σ_k b_k(u)·t_k(y)`
