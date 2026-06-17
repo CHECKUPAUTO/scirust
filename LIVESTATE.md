@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 68 : Prodigy (#46) — Adam sans learning-rate
+- `nn::nd_optim::NdProdigy` + `ProdigyConfig` (Mishchenko & Defazio 2023) :
+  parameter-free ; estime d≈‖x₀−x*‖ en ligne (corrélation globale ⟨g,x₀−x⟩),
+  l'utilise comme taux. d, r, ‖s‖₁ scalaires globaux. Deux passes/step.
+- CLI : `lm --opt prodigy` (γ=0.1 par défaut). 8 Documentation + REFERENCE.
+- Tests (1, core) : d s'adapte à l'échelle de distance + perte chute (γ=0.1, bande
+  ∝ γd sur quadratique déterministe) + déterminisme.
+- docs : roadmap #46 📋→✅ ; CHANGELOG. 534 tests core (+1) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 67 : KVQuant (#68) — quant KV-cache (clés per-canal)
 - `quantization::kvquant_kv` (Hooper 2024) : clés per-canal (per-colonne), valeurs
   per-token (per-ligne), symétrique bits-bit. Épouse les outliers de canal des clés.
