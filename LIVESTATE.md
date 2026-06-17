@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 67 : KVQuant (#68) — quant KV-cache (clés per-canal)
+- `quantization::kvquant_kv` (Hooper 2024) : clés per-canal (per-colonne), valeurs
+  per-token (per-ligne), symétrique bits-bit. Épouse les outliers de canal des clés.
+- Bibliothèque seule (pas de CLI ni multilingue).
+- Tests (2, core) : erreur d'attention KVQuant < 0,6× per-tensor (clés à outliers
+  de canal ×12) ; per-canal résout les petites colonnes (<0,1× erreur) + déterminisme.
+- docs : roadmap #68 📋→✅ ; CHANGELOG. 533 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 66 : ALiBi (#59) — biais d'attention linéaire
 - `nn::nd_layers::alibi_slopes` (pentes `2^(−8h/H)`) + `alibi_bias` (biais
   `(H,seq,seq)` = `−pente·(i−j)` causal) + `NdMultiHeadAttention::with_alibi`.
