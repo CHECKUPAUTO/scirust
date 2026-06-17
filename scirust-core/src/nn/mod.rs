@@ -20,6 +20,7 @@ pub mod im2col_hpc;
 pub mod init;
 pub mod layer_norm;
 pub mod linear;
+pub mod lipschitz;
 pub mod loss;
 pub mod lstm;
 pub mod module;

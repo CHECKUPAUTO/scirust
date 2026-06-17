@@ -90,7 +90,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 29 | Gehr et al., *AI² : Abstract Interpretation for NN* (IEEE S&P 2018) | propagation par **zonotopes** (interprétation abstraite) ; soundness testée vs échantillonnage | `nn::ibp` | 📋 | L |
 | 30 | Zhang et al., *CROWN-IBP : Stable & Efficient Verified Training* (ICLR 2020, arXiv:1906.06316) | **entraînement certifié** : loss bornée (IBP + CROWN) ⇒ réseau prouvablement robuste ; oracle : rayon certifié croît à l'entraînement | `nn::ibp` + `nn::nd_layers` | 📋 | L |
 | 31 | Tjeng, Xiao & Tedrake, *Evaluating Robustness with MILP* (ICLR 2019, arXiv:1711.07356) | vérification **exacte** d'un petit réseau ReLU par programmation linéaire en nombres entiers (encodage big-M) ; complète #4 | `scirust-neuro-symbolic` + CLI | 📋 | L |
-| 32 | Leino, Wang & Fredrikson, *Globally-Robust Neural Networks (GloRo)* (ICML 2021) | borne de robustesse via **constante de Lipschitz** (produit des normes spectrales) ; `lipschitz_bound` + couche Lipschitz-contrainte | `nn::nd_layers` | 📋 | M |
+| 32 | Leino, Wang & Fredrikson, *Globally-Robust Neural Networks (GloRo)* (ICML 2021) | `nn::lipschitz` : `spectral_norm` (power iteration) + `spectral_normalize` (couche **1-Lipschitz**) + `GloroClassifier` (rayon L2 prouvé `marge/(√2‖W‖₂)`) ; oracle : normes spectrales connues + rayon **sain** (pire perturbation ne bascule pas) + **conservateur** (≤ distance exacte à la frontière) + déterminisme | `nn::lipschitz` | ✅ | M |
 
 ## Tier 9 — Incertitude, calibration & conformal (au-delà du split-conformal #21)
 

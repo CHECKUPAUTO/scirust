@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 62 : GloRo (#32) — robustesse certifiée par Lipschitz
+- `nn::lipschitz` (Leino 2021) : `spectral_norm` (power iteration), `spectral_normalize`
+  (couche 1-Lipschitz), `GloroClassifier` (rayon L2 = marge/(√2‖W‖₂), exact-pour-linéaire).
+- Bibliothèque seule (pas de CLI ni multilingue). Complète IBP/CROWN/smoothing/GloRo.
+- Tests (3, core) : normes spectrales connues (diag/rect) ; norme ≈1 post-normalisation ;
+  rayon sain (pire δ ne bascule pas) + conservateur (≤ distance exacte) + déterminisme.
+- docs : roadmap #32 📋→✅ ; CHANGELOG. 519 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 61 : Randomized Smoothing (#27) — robustesse certifiée L2
 - `nn::smoothing` (Cohen 2019) : classifieur lissé `g(x)=argmax_c P(f(x+ε)=c)`,
   rayon L2 prouvé `σ·Φ⁻¹(pₐ)` ; `pₐ` minorée par Clopper-Pearson (betai/lgamma

@@ -6,6 +6,16 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — campagne « faire grandir scirust »
+- **GloRo — robustesse certifiée par Lipschitz** (`nn::lipschitz`, Leino, Wang &
+  Fredrikson 2021, roadmap #32) : `spectral_norm` (norme spectrale par power
+  iteration déterministe), `spectral_normalize` (couche **1-Lipschitz** contrainte)
+  et `GloroClassifier` (classifieur linéaire à **rayon de robustesse L2 prouvé**
+  `marge/(√2·‖W‖₂)`, sans recherche ni échantillonnage ; le `√2` vient de la
+  Lipschitz `≤ √2·L` de la marge `f_A−f_B`). Oracle : normes spectrales connues
+  (diagonale, rectangulaire) ; norme ≈ 1 après normalisation ; rayon **sain** (la
+  pire perturbation à ce rayon ne bascule pas la prédiction) **et conservateur**
+  (≤ distance exacte à la frontière la plus proche) ; déterminisme. Couche de
+  bibliothèque. Complète le pilier certifiable : IBP, CROWN, smoothing, GloRo.
 - **Randomized Smoothing — robustesse L2 certifiée** (`nn::smoothing::SmoothedClassifier`
   + `clopper_pearson_lower` + `inv_normal_cdf`, Cohen, Rosenfeld & Kolter 2019,
   roadmap #27) : transforme tout classifieur en un classifieur **lissé** sous bruit
