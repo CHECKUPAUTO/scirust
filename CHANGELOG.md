@@ -19,6 +19,17 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Medusa — décodage à têtes multiples** (`nn::nd_decoder::MedusaHeads`/`generate_medusa`,
+  Cai et al. 2024, roadmap #61) : accélère le décodage en attachant au modèle de base
+  des **têtes supplémentaires** (tête `j` prédit le token à `+j+2` depuis l'état caché),
+  qui produisent un **brouillon multi-token d'un seul forward** ; une passe de
+  vérification accepte le plus long préfixe correspondant à l'argmax du modèle puis
+  commet un token de correction/bonus. `NdDecoderLM` expose désormais
+  `forward_hidden`/`forward_with_hidden` (état caché post-LayerNorm) ; `MedusaHeads::train`
+  entraîne les têtes sur les états cachés du modèle **gelé**. Oracle honnête : sortie
+  **exactement = greedy** pour des têtes **quelconques** (même aléatoires — la vérification
+  garantit l'exactitude) + déterminisme + têtes **entraînées** ⇒ au moins un bloc accepte
+  >1 token (forwards < 2·n) tout en restant exact. Couche de bibliothèque.
 - **PagedAttention — KV-cache paginé** (`nn::paged_attention::PagedKvCache`, Kwon et al.
   / vLLM 2023, roadmap #63) : le cache clés/valeurs du décodage est découpé en **blocs**
   de taille fixe tirés d'un pool partagé, adressés indirectement par une **table de

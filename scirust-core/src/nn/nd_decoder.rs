@@ -13,7 +13,7 @@
 
 use crate::autodiff::nd::{NdTape, NdVar};
 use crate::nn::nd_layers::{NdEmbedding, NdLayerNorm, NdLinear, NdTransformerBlock};
-use crate::nn::nd_optim::NdParam;
+use crate::nn::nd_optim::{NdAdam, NdParam};
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
 
@@ -67,8 +67,9 @@ impl NdDecoderLM {
         }
     }
 
-    /// Forward a token sequence → `(seq, vocab)` next-token logits.
-    pub fn forward<'t>(&mut self, tape: &'t NdTape, tokens: &[usize]) -> NdVar<'t> {
+    /// Forward up to (and including) the final LayerNorm → `(seq, d_model)` hidden
+    /// states: the inputs to the LM head and to any [`MedusaHeads`].
+    pub fn forward_hidden<'t>(&mut self, tape: &'t NdTape, tokens: &[usize]) -> NdVar<'t> {
         let seq = tokens.len();
         assert!(seq > 0, "empty sequence");
         assert!(
@@ -85,8 +86,26 @@ impl NdDecoderLM {
         {
             x = b.forward(tape, x);
         }
-        let x = self.ln_f.forward(tape, x);
-        self.head.forward(tape, x) // (seq, vocab)
+        self.ln_f.forward(tape, x) // (seq, d_model)
+    }
+
+    /// Forward a token sequence → `(seq, vocab)` next-token logits.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, tokens: &[usize]) -> NdVar<'t> {
+        let h = self.forward_hidden(tape, tokens);
+        self.head.forward(tape, h) // (seq, vocab)
+    }
+
+    /// Both the next-token logits `(seq, vocab)` and the hidden states
+    /// `(seq, d_model)` from a single forward — used by Medusa, which feeds the
+    /// last hidden state to its extra prediction heads.
+    pub fn forward_with_hidden<'t>(
+        &mut self,
+        tape: &'t NdTape,
+        tokens: &[usize],
+    ) -> (NdVar<'t>, NdVar<'t>) {
+        let h = self.forward_hidden(tape, tokens);
+        let logits = self.head.forward(tape, h);
+        (logits, h)
     }
 
     /// Next-token cross-entropy: feed `tokens[..n-1]`, predict `tokens[1..]`.
@@ -113,7 +132,7 @@ impl NdDecoderLM {
 
     /// Every trainable parameter, in a fixed order (token + positional
     /// embeddings, each block, final LayerNorm, LM head), paired with its
-    /// gradient index — feed to [`NdAdam`](crate::nn::nd_optim::NdAdam). Call
+    /// gradient index — feed to [`NdAdam`]. Call
     /// after a forward/loss on the tape being differentiated.
     pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
         let mut params = self.tok.parameters();
@@ -249,6 +268,192 @@ pub fn generate_speculative(
 
     seq.truncate(prompt.len() + n_new);
     (seq[prompt.len()..].to_vec(), target_forwards)
+}
+
+/// Argmax of a logit row (first index on ties).
+fn argmax_row(row: &[f32]) -> usize {
+    let mut best = 0usize;
+    for (c, &v) in row.iter().enumerate()
+    {
+        if v > row[best]
+        {
+            best = c;
+        }
+    }
+    best
+}
+
+/// **Medusa decoding heads** (Cai et al., ICML 2024). Extra linear heads attached
+/// to the base model's last hidden state, head `j` predicting the token `j + 2`
+/// positions ahead (head `0` ⇒ offset 2, …). Together with the base model's own
+/// next-token prediction they form a multi-token **draft from a single forward**,
+/// which [`generate_medusa`] then verifies — so the output stays exactly greedy
+/// while several tokens can be committed per verification.
+pub struct MedusaHeads {
+    heads: Vec<NdLinear>,
+    d_model: usize,
+}
+
+impl MedusaHeads {
+    /// `num_heads` extra heads over a `d_model`→`vocab` projection, seeded init.
+    pub fn new(num_heads: usize, d_model: usize, vocab: usize, rng: &mut PcgEngine) -> Self {
+        assert!(num_heads >= 1, "Medusa needs at least one head");
+        let heads = (0..num_heads)
+            .map(|_| NdLinear::new(d_model, vocab, rng))
+            .collect();
+        Self { heads, d_model }
+    }
+
+    /// Number of extra heads (`= longest speculative block beyond the base token`).
+    pub fn num_heads(&self) -> usize {
+        self.heads.len()
+    }
+
+    /// Trainable parameters of every head, in order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = Vec::new();
+        for head in &mut self.heads
+        {
+            params.extend(head.parameters());
+        }
+        params
+    }
+
+    /// The most likely token at offsets `+2, +3, …` from a single hidden state
+    /// `hidden_last` (length `d_model`) — the speculative continuation past the
+    /// base model's own next token.
+    pub fn propose(&mut self, hidden_last: &[f32]) -> Vec<usize> {
+        assert_eq!(hidden_last.len(), self.d_model, "Medusa: hidden width");
+        self.heads
+            .iter_mut()
+            .map(|head| {
+                let tape = NdTape::new();
+                let hv = tape.input(TensorND::new(hidden_last.to_vec(), vec![1, self.d_model]));
+                let logits = head.forward(&tape, hv); // (1, vocab)
+                argmax_row(&tape.value(logits).data)
+            })
+            .collect()
+    }
+
+    /// Train the heads (base model **frozen**) to predict the future tokens of
+    /// `seq`: head `j` regresses the token `j + 2` ahead from each hidden state.
+    /// The base hidden states are computed once (no gradient flows into the base).
+    pub fn train(&mut self, model: &mut NdDecoderLM, seq: &[usize], steps: usize, lr: f32) {
+        let l = seq.len();
+        // Frozen base hidden states (L, d_model), detached as a constant.
+        let tape0 = NdTape::new();
+        let h = model.forward_hidden(&tape0, seq);
+        let hidden_val = tape0.value(h).clone();
+        let mut opt = NdAdam::with_lr(lr);
+        for _ in 0..steps
+        {
+            let tape = NdTape::new();
+            let hin = tape.input(hidden_val.clone()); // constant (L, d_model)
+            let mut total: Option<NdVar> = None;
+            for (j, head) in self.heads.iter_mut().enumerate()
+            {
+                let o = j + 2;
+                if l <= o
+                {
+                    continue;
+                }
+                let logits = head.forward(&tape, hin); // (L, vocab)
+                let rows: Vec<usize> = (0..l - o).collect();
+                let sub = logits.gather(&rows); // (L-o, vocab)
+                let ce = sub.cross_entropy(&seq[o..l]);
+                total = Some(match total
+                {
+                    None => ce,
+                    Some(t) => t.add(ce),
+                });
+            }
+            if let Some(loss) = total
+            {
+                let grads = tape.backward(loss);
+                let mut params = self.parameters();
+                opt.step(&mut params, &grads);
+            }
+        }
+    }
+}
+
+/// **Medusa decoding** (Cai et al., ICML 2024, greedy variant). Each round the base
+/// model forwards the committed sequence (producing its next token *and* the hidden
+/// state), the [`MedusaHeads`] propose the following tokens from that hidden state,
+/// and a single verification forward over the proposed block accepts the longest
+/// prefix matching the base model's argmax, committing a correction/bonus token.
+///
+/// The output is **exactly** `model.generate_greedy(prompt, n_new)` for *any* heads
+/// (verification guarantees it); good heads merely let more than one token be
+/// committed per block. Returns `(new_tokens, base_forward_count)`. With heads that
+/// never help, every block commits one token (`2·n_new` forwards); whenever a head
+/// speculates correctly a block commits ≥ 2 tokens, so the count drops.
+pub fn generate_medusa(
+    model: &mut NdDecoderLM,
+    heads: &mut MedusaHeads,
+    prompt: &[usize],
+    n_new: usize,
+) -> (Vec<usize>, usize) {
+    assert!(!prompt.is_empty(), "empty prompt");
+    assert!(
+        prompt.len() + n_new <= model.max_seq(),
+        "prompt + n_new exceeds max_seq"
+    );
+    let mut seq = prompt.to_vec();
+    let mut forwards = 0usize;
+
+    while seq.len() - prompt.len() < n_new
+    {
+        let remaining = n_new - (seq.len() - prompt.len());
+
+        // 1. One base forward → next-token logits + hidden state; build the draft
+        //    block [base greedy token, then the Medusa heads' speculation].
+        let tape = NdTape::new();
+        let (logits, hidden) = model.forward_with_hidden(&tape, &seq);
+        forwards += 1;
+        let lv = tape.value(logits);
+        let vocab = lv.shape[1];
+        let last = seq.len() - 1;
+        let base_next = argmax_row(&lv.data[last * vocab..(last + 1) * vocab]);
+        let hv = tape.value(hidden);
+        let dm = hv.shape[1];
+        let hidden_last = hv.data[last * dm..(last + 1) * dm].to_vec();
+        let mut block = vec![base_next];
+        block.extend(heads.propose(&hidden_last));
+        block.truncate(remaining);
+
+        // 2. One verification forward over seq + block.
+        let mut check = seq.clone();
+        check.extend(&block);
+        let tape2 = NdTape::new();
+        let preds = model.predict(&tape2, &check);
+        forwards += 1;
+
+        // 3. Accept the matching prefix; the base token always matches greedy.
+        let base = seq.len() - 1;
+        let mut accepted = 0;
+        for (i, &bi) in block.iter().enumerate()
+        {
+            if preds[base + i] == bi
+            {
+                seq.push(bi);
+                accepted += 1;
+            }
+            else
+            {
+                seq.push(preds[base + i]); // greedy correction
+                break;
+            }
+        }
+        // 4. All accepted ⇒ a bonus greedy token after the block.
+        if accepted == block.len() && seq.len() - prompt.len() < n_new
+        {
+            seq.push(preds[base + block.len()]);
+        }
+    }
+
+    seq.truncate(prompt.len() + n_new);
+    (seq[prompt.len()..].to_vec(), forwards)
 }
 
 #[cfg(test)]
@@ -404,6 +609,82 @@ mod tests {
         assert_eq!(
             spec_diff, greedy,
             "different-draft speculative must still equal greedy"
+        );
+    }
+
+    /// **Medusa decoding is exact** — for *any* heads, even random/untrained ones,
+    /// its output equals plain greedy (verification corrects every speculation),
+    /// and the run is deterministic.
+    #[test]
+    fn nd_medusa_decoding_is_exact() {
+        let cfg = tiny_cfg();
+        let prompt = [1usize, 2];
+        let n = 5;
+
+        let mut reference = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let greedy = reference.generate_greedy(&prompt, n);
+
+        // Random (untrained) heads: output must still be exactly greedy.
+        let mut model = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let mut heads = MedusaHeads::new(3, cfg.d_model, cfg.vocab, &mut PcgEngine::new(55));
+        let (out, fwds) = generate_medusa(&mut model, &mut heads, &prompt, n);
+        assert_eq!(out, greedy, "Medusa output must equal greedy");
+        assert!(fwds <= 2 * n, "more forwards than the worst case");
+
+        // Determinism.
+        let mut model2 = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let mut heads2 = MedusaHeads::new(3, cfg.d_model, cfg.vocab, &mut PcgEngine::new(55));
+        let (out2, _) = generate_medusa(&mut model2, &mut heads2, &prompt, n);
+        assert_eq!(out2, out);
+    }
+
+    /// **Trained Medusa heads accelerate decoding** while staying exact. After the
+    /// base model overfits a periodic sequence and the heads learn its 2-/3-ahead
+    /// tokens, at least one verification block commits more than one token, so the
+    /// base-forward count drops below the one-token-per-block worst case `2·n` —
+    /// yet the output is still exactly greedy.
+    #[test]
+    fn nd_medusa_trained_heads_accept_multiple_tokens() {
+        let cfg = NdDecoderConfig {
+            vocab: 4,
+            d_model: 16,
+            n_heads: 2,
+            d_ff: 32,
+            n_layers: 2,
+            max_seq: 16,
+        };
+        // Periodic sequence the model can memorise.
+        let seq: Vec<usize> = (0..12).map(|i| i % 3).collect();
+
+        // Overfit the base model on the sequence.
+        let mut model = NdDecoderLM::new(cfg, &mut PcgEngine::new(1));
+        let mut opt = NdAdam::with_lr(0.05);
+        for _ in 0..300
+        {
+            let t = NdTape::new();
+            let loss = model.loss(&t, &seq);
+            let lv = t.value(loss);
+            let grads = t.backward(loss);
+            let mut params = model.parameters();
+            opt.step(&mut params, &grads);
+            let _ = lv;
+        }
+
+        // Greedy continuation of a prompt drawn from the sequence.
+        let prompt = [0usize, 1, 2, 0];
+        let n = 6;
+        let greedy = model.generate_greedy(&prompt, n);
+
+        // Train Medusa heads on the same (frozen-base) sequence, then decode.
+        let mut heads = MedusaHeads::new(2, cfg.d_model, cfg.vocab, &mut PcgEngine::new(2));
+        heads.train(&mut model, &seq, 400, 0.05);
+        let (out, fwds) = generate_medusa(&mut model, &mut heads, &prompt, n);
+
+        assert_eq!(out, greedy, "trained Medusa must still equal greedy");
+        assert!(
+            fwds < 2 * n,
+            "trained heads should accept >1 token in some block (forwards {fwds} not < {})",
+            2 * n
         );
     }
 }

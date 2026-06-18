@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 81 : Medusa (#61) — décodage à têtes multiples
+- `nn::nd_decoder::MedusaHeads`/`generate_medusa` (Cai 2024) : têtes (tête j → token +j+2
+  depuis l'état caché) ⇒ brouillon multi-token 1 forward, vérifié (préfixe + correction).
+  Ajout `NdDecoderLM::forward_hidden`/`forward_with_hidden` ; `MedusaHeads::train` (base gelée).
+- Bibliothèque seule (algorithme de décodage, pas de CLI ni multilingue). Module nd_decoder.
+- Tests (2, core) : exact = greedy pour têtes **quelconques** (random) + déterminisme ;
+  têtes entraînées (séquence périodique mémorisée) ⇒ blocs acceptent >1 token (forwards<2·n),
+  toujours exact. 6/6 tests nd_decoder verts.
+- docs : roadmap #61 📋→✅ ; CHANGELOG. 569 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 80 : PagedAttention (#63) — KV-cache paginé
 - `nn::paged_attention::PagedKvCache` (Kwon/vLLM 2023) : blocs d'un pool + table de blocs ;
   append/gather/attention indexée via la table (softmax(qKᵀ/√d)·V). reserve_decoy() = fragmentation.
@@ -10,7 +20,7 @@
 - Tests (3, core) : gather bit-identique sous fragmentation (leurres interleavés) + comptabilité
   blocs ⌈len/bs⌉ ; attention paginée **bit-identique** au cache contigu (même ordre arith) +
   déterminisme ; cas vide + division exacte en blocs.
-- docs : roadmap #63 📋→✅ ; CHANGELOG. 567 tests core (+3) ; 8 gates (à confirmer).
+- docs : roadmap #63 📋→✅ ; CHANGELOG. 567 tests core (+3) ; 8 gates verts ✓ ; commit 66a48be.
 
 ## Session 2026-06-18 — volet 79 : DoRA (#73) — LoRA magnitude/direction
 - `nn::dora::DoraLinear` (Liu 2024) : W'=m⊙(W₀+BA)/‖W₀+BA‖_col ; W₀ gelé, m/A/B entraînés.
