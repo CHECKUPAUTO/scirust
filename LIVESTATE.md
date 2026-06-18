@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-17
 
+## Session 2026-06-17 — volet 75 : Rényi DP accountant (#78) — budget confidentialité
+- `dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon` (Mironov 2017) : RDP gaussien
+  α/(2σ²) + conversion Mironov ε=RDP+ln(1/δ)/(α−1) optimisée sur α. Renforce DP-SGD.
+- Bibliothèque seule (pas de CLI ni multilingue). Module `dp` existant.
+- Tests (2, core) : RDP/conversion exactes (formes closes) ; ε ≪ composition basique
+  (steps=100,σ=4,δ=1e-5 : ~15 vs ~143) + monotonie.
+- docs : roadmap #78 📋→✅ ; CHANGELOG. 547 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-17 — volet 74 : Watermark LLM (#79) — provenance auditable
 - `nn::watermark` (Kirchenbauer 2023) : partition vert/rouge seedée (hash
   (seed,prev,token)), `apply_green_bias` (biais logits verts), `detect_z` (test z

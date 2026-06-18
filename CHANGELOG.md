@@ -19,6 +19,15 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Comptable RDP (Rényi DP)** (`dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon`,
+  Mironov 2017, roadmap #78) : comptabilité de budget de confidentialité par
+  **Rényi-DP**, plus serrée et plus principielle que la composition `(ε,δ)` naïve.
+  RDP du mécanisme gaussien `RDP(α)=α/(2σ²)` (additif en composition), conversion
+  Mironov `ε=RDP(α)+ln(1/δ)/(α−1)` (le `α−1` est ce qui la rend serrée), optimisée
+  sur une grille d'ordres α. Renforce le DP-SGD existant (#19). Oracle : RDP et
+  conversion exactes (formes closes) + `ε` **bien en dessous** de la composition
+  linéaire basique (qui paie une pénalité ~√étapes) + monotonie (plus d'étapes ⇒ ε
+  plus grand ; plus de bruit ⇒ ε plus petit). Couche de bibliothèque.
 - **Watermark pour LLM** (`nn::watermark`, Kirchenbauer et al. 2023, roadmap #79) :
   filigrane statistique rendant le texte généré **auditable sans accès au modèle**.
   Le token précédent seede une partition du vocabulaire en liste **verte** (fraction
