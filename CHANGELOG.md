@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — simulation quantique par réseaux de tenseurs
+- **Simulateur de circuits quantiques MPS / Tensor-Train** (`quantum::Mps`/`MpsNode`) : représente
+  un état à `n` qubits par une **chaîne de tenseurs de rang 3** au lieu des `2ⁿ` amplitudes d'un
+  state-vector dense ⇒ tant que l'intrication reste modérée, le coût passe de **exponentiel** à
+  `O(n·χ³)` (`χ` = dimension de liaison bornant l'intrication à chaque coupe). Une porte 1-qubit
+  contracte une `2×2` dans l'indice physique en place ; une porte **2-qubits** sur des qubits
+  adjacents (1) contracte les deux nœuds en un tenseur `θ`, (2) **applique** la porte `4×4`,
+  (3) reforme une matrice et exécute une **SVD tronquée** (la SVD **maison** `tn::ops::truncated_svd`,
+  **Rust pur via nalgebra — zéro FFI**), gardant au plus `χ` valeurs singulières pour plafonner la
+  dimension de liaison. Amplitudes réelles `f32` (portes réelles `H`/`X`/`Z`/`CNOT`/`CZ`/`Ry`) ;
+  les amplitudes complexes (phase/`S`/`T`/`Rz`) sont un travail futur. Oracle honnête (pas de
+  mock) : le MPS **reproduit exactement le state-vector dense** (simulateur de référence en clair)
+  sur un circuit **aléatoire** de 5 qubits / 40 portes + Bell `(|00⟩+|11⟩)/√2` (bond 2) + GHZ
+  3-qubits ; **troncation saine** (état produit → bond 1 ; cap `χ=1` ⇒ approximation de haute
+  fidélité) ; norme préservée ; déterminisme bit-exact. La même machinerie contraction + SVD
+  tronquée **est** la compression de poids Tensor-Train déjà présente (`tn::tt_decompose`,
+  `nn::tt_linear`) — directement réutilisable pour compresser des LLM locaux (SLHAv2).
+  *Note d'architecture* : refus délibéré de `openblas-src`/`cuSOLVER` (FFI C/CUDA, briseraient la
+  thèse zéro-FFI + déterminisme bit-exact) et de `faer` (Rust pur mais redondant avec nalgebra) —
+  la SVD maison existante suffit.
+
 ### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
 - **Commandes CLI de la synergie** (`scirust kvcache | guard | attest`) : exposent les primitives
   ci-dessous en ligne de commande, déterministes par `--seed`. `kvcache [--budget B]` compresse une
