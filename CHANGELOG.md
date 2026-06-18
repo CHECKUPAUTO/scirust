@@ -19,6 +19,24 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **QuIP# — incohérence Hadamard + codebook lattice E8** (`quantization::quantize_quip`/
+  `nearest_e8`/`random_hadamard_transform`, Tseng et al. 2024, roadmap #64) : deux idées. (1) Le
+  **traitement d'incohérence** : multiplier les poids par une **transformée de Hadamard
+  randomisée** (signes ±1 seedés puis FWHT, *orthogonale*) étale les aberrants à travers les
+  coordonnées et **rétrécit la plage dynamique** ; à budget de bits **égal**, les `2^bits`
+  niveaux fixes résolvent alors bien mieux le gros des poids (le RTN scalaire devait, lui, étaler
+  ses rares niveaux sur toute la plage pour couvrir les aberrants). (2) Le codebook **lattice
+  E8** : quantifier les poids tournés par blocs de 8 vers le point le plus proche du **réseau
+  E8** (`D8 ∪ (D8+½·1)`, décodeur fermé de Conway-Sloane) — le plus dense en dimension 8, avec un
+  **moment quadratique** plus bas que la grille cubique à densité **égale** (gain de packing
+  ~14 %). Oracle honnête : la RHT est orthogonale (round-trip exact) et **réduit la plage** d'un
+  poids à aberrants ; le décodeur E8 renvoie un point **valide** du réseau (coords toutes
+  entières ou toutes demi-entières, somme paire) et quantifie **mieux que la grille cubique en
+  moyenne** (gain lattice mesuré sur 4000 vecteurs) ; bout-en-bout, QuIP# reconstruit **mieux que
+  le RTN** scalaire à budget 2-bit sur des poids à aberrants épars + déterminisme bit-exact. (Le
+  grand Hadamard global et le codebook E8P curé de QuIP# sont simplifiés ici en un Hadamard par
+  bloc de 8 et le réseau E8 nu.) Complète la famille de quantification (AQLM, GPTQ, AWQ, NF4,
+  SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
 - **AQLM — quantification additive multi-codebook** (`quantization::quantize_aqlm`/`AqlmResult`,
   Egiazarian et al. 2024, roadmap #70) : au lieu de quantifier chaque poids **scalairement**, AQLM
   découpe les poids en **groupes** de dimension `g` et approxime chaque groupe par la **somme**

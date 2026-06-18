@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 92 : QuIP# (#64) — incohérence Hadamard + lattice E8
+- `quantization::quantize_quip`/`nearest_e8`/`random_hadamard_transform` (Tseng 2024) :
+  (1) incohérence = Hadamard randomisée (signes ±1 seedés + FWHT, orthogonale) ⇒ étale aberrants,
+  rétrécit la plage que les 2^bits niveaux couvrent (à budget égal) ; (2) codebook lattice E8
+  (D8 ∪ D8+½, décodeur Conway-Sloane) plus dense que la grille cubique à densité égale.
+- Bibliothèque seule (pas de CLI ni multilingue). Module quantization existant.
+- Tests (3, core) : RHT orthogonale (round-trip) + réduit plage aberrants (<0.6×) ; E8 valide
+  (coords alignées + somme paire) & < grille cubique en moyenne (4000 vecteurs) ; bout-en-bout
+  QuIP# < RTN scalaire 2-bit sur poids à aberrants + déterminisme (codes identiques).
+- docs : roadmap #64 📋→✅ ; CHANGELOG. 600 tests core (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 91 : AQLM (#70) — quantification additive multi-codebook
 - `quantization::quantize_aqlm`/`AqlmResult` (Egiazarian 2024) : groupes de dim g, chaque groupe
   ≈ somme de M mots de code (un par codebook, K mots chacun) ; codebooks appris par k-means
@@ -11,7 +22,7 @@
 - Bibliothèque seule (pas de CLI ni multilingue).
 - Tests (2, core) : < 0.7× RTN scalaire à ~2-bit égal (M·log₂K/g) sur poids structurés ;
   round-trip (longueur non divisible) + déterminisme (codes + bits identiques).
-- docs : roadmap #70 📋→✅ ; CHANGELOG. 597 tests core (+2) ; 8 gates verts (à confirmer).
+- docs : roadmap #70 📋→✅ ; CHANGELOG. 597 tests core (+2) ; 8 gates verts ✓ ; commit 40a5be0.
 
 ## Session 2026-06-18 — volet 90 : S5 (#52) — SSM MIMO + scan associatif parallèle
 - `nn::nd_layers::s5_scan`/`s5_parallel_scan`/`NdS5` (Smith 2023) : SSM MIMO diagonal (état

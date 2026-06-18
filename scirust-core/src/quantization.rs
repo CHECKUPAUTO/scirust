@@ -2446,3 +2446,308 @@ mod aqlm_tests {
         );
     }
 }
+
+// ====================================================================
+// QuIP# — incoherence processing + E8 lattice codebook (Tseng et al.,
+// ICML 2024, arXiv:2402.04396). Roadmap #64.
+// ====================================================================
+
+/// In-place length-8 **fast Walsh-Hadamard transform**, normalised by `1/√8` so the
+/// transform is **orthogonal** and **involutory** (`FWHT(FWHT(x)) = x`).
+fn fwht8(a: &mut [f32; 8]) {
+    let mut len = 1usize;
+    while len < 8
+    {
+        let mut i = 0usize;
+        while i < 8
+        {
+            for j in i..i + len
+            {
+                let (x, y) = (a[j], a[j + len]);
+                a[j] = x + y;
+                a[j + len] = x - y;
+            }
+            i += len * 2;
+        }
+        len *= 2;
+    }
+    let inv = 1.0 / (8.0f32).sqrt();
+    for v in a.iter_mut()
+    {
+        *v *= inv;
+    }
+}
+
+/// Nearest point of the integer lattice **D8** (`{z ∈ ℤ⁸ : Σ zᵢ even}`) to `y`:
+/// round to nearest integers; if the coordinate sum is odd, flip the parity by
+/// re-rounding the single coordinate with the largest rounding error.
+fn nearest_d8(y: &[f32; 8]) -> [f32; 8] {
+    let mut f = [0.0f32; 8];
+    let mut sum = 0i64;
+    let (mut worst, mut worst_err) = (0usize, -1.0f32);
+    for (i, fi) in f.iter_mut().enumerate()
+    {
+        let r = y[i].round();
+        *fi = r;
+        sum += r as i64;
+        let e = (y[i] - r).abs();
+        if e > worst_err
+        {
+            worst_err = e;
+            worst = i;
+        }
+    }
+    if sum % 2 != 0
+    {
+        // Re-round the worst coordinate to its second-nearest integer (flips parity).
+        f[worst] += if y[worst] - f[worst] >= 0.0
+        {
+            1.0
+        }
+        else
+        {
+            -1.0
+        };
+    }
+    f
+}
+
+/// Nearest point of the **E8 lattice** (`D8 ∪ (D8 + ½·1)`) to `x` — the densest
+/// lattice packing in 8 dimensions, with a lower quantization error than the cubic
+/// (integer) grid at the **same** point density. Closed-form Conway-Sloane decoder:
+/// take the nearer of the best `D8` point and the best `D8 + ½` point.
+pub fn nearest_e8(x: &[f32; 8]) -> [f32; 8] {
+    let a = nearest_d8(x);
+    let mut xs = *x;
+    for v in xs.iter_mut()
+    {
+        *v -= 0.5;
+    }
+    let mut b = nearest_d8(&xs);
+    for v in b.iter_mut()
+    {
+        *v += 0.5;
+    }
+    let dist = |p: &[f32; 8]| -> f32 { (0..8).map(|i| (x[i] - p[i]).powi(2)).sum() };
+    if dist(&a) <= dist(&b) { a } else { b }
+}
+
+/// Apply the **random Hadamard transform** (the QuIP# incoherence step) block-wise
+/// over groups of 8: flip signs by a seeded `±1` diagonal, then a length-8 FWHT. The
+/// map is **orthogonal**; its inverse is [`inverse_random_hadamard_transform`]. Pads to a
+/// multiple of 8 with zeros. `seed` selects the (reproducible) sign pattern.
+pub fn random_hadamard_transform(w: &[f32], seed: u64) -> Vec<f32> {
+    let n = w.len();
+    let nb = n.div_ceil(8);
+    let mut rng = crate::nn::PcgEngine::new(seed);
+    let signs: Vec<f32> = (0..nb * 8)
+        .map(|_| if rng.next_u32() & 1 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let mut out = vec![0.0f32; nb * 8];
+    for b in 0..nb
+    {
+        let mut blk = [0.0f32; 8];
+        for (t, bt) in blk.iter_mut().enumerate()
+        {
+            let idx = b * 8 + t;
+            let v = if idx < n { w[idx] } else { 0.0 };
+            *bt = v * signs[idx];
+        }
+        fwht8(&mut blk);
+        out[b * 8..b * 8 + 8].copy_from_slice(&blk);
+    }
+    out
+}
+
+/// Inverse of [`random_hadamard_transform`] for the same `seed`: the length-8 FWHT
+/// (its own inverse) then the `±1` sign flip. Returns `len` values (drops the padding).
+pub fn inverse_random_hadamard_transform(wr: &[f32], seed: u64, len: usize) -> Vec<f32> {
+    let nb = wr.len() / 8;
+    let mut rng = crate::nn::PcgEngine::new(seed);
+    let signs: Vec<f32> = (0..nb * 8)
+        .map(|_| if rng.next_u32() & 1 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let mut out = vec![0.0f32; nb * 8];
+    for b in 0..nb
+    {
+        let mut blk = [0.0f32; 8];
+        blk.copy_from_slice(&wr[b * 8..b * 8 + 8]);
+        fwht8(&mut blk);
+        for (t, bt) in blk.iter().enumerate()
+        {
+            out[b * 8 + t] = bt * signs[b * 8 + t];
+        }
+    }
+    out.truncate(len);
+    out
+}
+
+/// Result of [`quantize_quip`]: the E8 lattice codes (stored as `2×` coordinates so
+/// half-integers fit an integer), the shared scale, the seed (to regenerate the
+/// sign pattern) and the original length.
+pub struct QuipResult {
+    codes: Vec<i16>, // 2× E8 coordinates, per (padded) weight
+    scale: f32,
+    seed: u64,
+    n_weights: usize,
+}
+
+impl QuipResult {
+    /// Reconstruct the weights: scale the E8 lattice points back, then invert the
+    /// random Hadamard transform.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let wr: Vec<f32> = self
+            .codes
+            .iter()
+            .map(|&c| (c as f32 / 2.0) * self.scale)
+            .collect();
+        inverse_random_hadamard_transform(&wr, self.seed, self.n_weights)
+    }
+
+    /// The E8 codes (`2×` coordinates).
+    pub fn codes(&self) -> &[i16] {
+        &self.codes
+    }
+}
+
+/// **QuIP#** — quantize weights with **incoherence processing** + an **E8 lattice**
+/// codebook. First a [`random_hadamard_transform`] rotates the weights: this spreads
+/// outliers across coordinates (incoherence), shrinking the dynamic range so the
+/// fixed `2^bits` levels resolve the bulk far better at the **same** bit budget.
+/// The rotated weights are then quantized **block-wise in 8-D** to the nearest
+/// [`nearest_e8`] lattice point (scaled, bounded to `±qmax`), which has lower
+/// quantization error than the per-coordinate cubic grid at equal density.
+/// Deterministic. (QuIP#'s larger global Hadamard and curated E8P codebook are
+/// simplified here to a per-8-block Hadamard and the plain E8 lattice.)
+pub fn quantize_quip(w: &[f32], bits: u32, seed: u64) -> QuipResult {
+    assert!((1..=8).contains(&bits), "QuIP#: bits must be in 1..=8");
+    let n = w.len();
+    let wr = random_hadamard_transform(w, seed);
+    let qmax = ((1i32 << (bits - 1)) - 1).max(1) as f32;
+    let maxabs = wr.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+    let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+    let nb = wr.len() / 8;
+    let mut codes = vec![0i16; wr.len()];
+    for b in 0..nb
+    {
+        let mut y = [0.0f32; 8];
+        for (t, yt) in y.iter_mut().enumerate()
+        {
+            *yt = (wr[b * 8 + t] / scale).clamp(-qmax, qmax);
+        }
+        let e8 = nearest_e8(&y);
+        for t in 0..8
+        {
+            // Bound to the ±qmax box and store 2× (E8 coords are in ½ℤ).
+            let c = e8[t].clamp(-qmax, qmax);
+            codes[b * 8 + t] = (c * 2.0).round() as i16;
+        }
+    }
+    QuipResult {
+        codes,
+        scale,
+        seed,
+        n_weights: n,
+    }
+}
+
+#[cfg(test)]
+mod quip_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    fn mse(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(&x, &y)| (x - y) * (x - y))
+            .sum::<f32>()
+            / a.len() as f32
+    }
+
+    /// The random Hadamard transform is **orthogonal** (round-trips to the input) and
+    /// **reduces the dynamic range** of an outlier-heavy weight (incoherence).
+    #[test]
+    fn rht_orthogonal_and_reduces_outliers() {
+        let mut w = vec![0.02f32; 64];
+        w[5] = 3.0; // a big outlier
+        w[40] = -2.5;
+        let wr = random_hadamard_transform(&w, 7);
+        let back = inverse_random_hadamard_transform(&wr, 7, w.len());
+        for (a, b) in back.iter().zip(&w)
+        {
+            assert!((a - b).abs() < 1e-5, "RHT not orthogonal: {a} vs {b}");
+        }
+        let max_w = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let max_wr = wr.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        assert!(
+            max_wr < 0.6 * max_w,
+            "incoherence did not reduce range: {max_wr} vs {max_w}"
+        );
+    }
+
+    /// The E8 decoder returns a **valid** lattice point (all-integer or all-half-integer
+    /// coords, even integer-sum) and, **on average**, quantizes better than the cubic
+    /// (integer) grid — the E8 packing gain.
+    #[test]
+    fn nearest_e8_valid_and_beats_cubic() {
+        let mut rng = PcgEngine::new(31);
+        let (mut e8_err, mut cubic_err) = (0.0f32, 0.0f32);
+        for _ in 0..4000
+        {
+            let mut x = [0.0f32; 8];
+            for v in x.iter_mut()
+            {
+                *v = 2.5 * rng.float_signed();
+            }
+            let p = nearest_e8(&x);
+            // Validity: coords all-even-or-all-odd in 2× form (all integer or all
+            // half-integer) with even coordinate sum (⇔ 2·Σ ≡ 0 mod 4).
+            let two_c: Vec<i64> = p.iter().map(|&c| (2.0 * c).round() as i64).collect();
+            let all_even = two_c.iter().all(|&t| t % 2 == 0);
+            let all_odd = two_c.iter().all(|&t| t % 2 != 0);
+            assert!(all_even || all_odd, "E8 point not lattice-aligned: {p:?}");
+            assert!(
+                two_c.iter().sum::<i64>() % 4 == 0,
+                "E8 even-sum violated: {p:?}"
+            );
+            e8_err += (0..8).map(|i| (x[i] - p[i]).powi(2)).sum::<f32>();
+            let cubic: Vec<f32> = x.iter().map(|v| v.round()).collect();
+            cubic_err += (0..8).map(|i| (x[i] - cubic[i]).powi(2)).sum::<f32>();
+        }
+        assert!(
+            e8_err < 0.95 * cubic_err,
+            "E8 lattice gain absent: E8 {e8_err} vs cubic {cubic_err}"
+        );
+    }
+
+    /// End-to-end: QuIP# reconstructs **outlier-heavy** weights better than scalar RTN
+    /// at a matched 2-bit budget (incoherence shrinks the range the fixed levels must
+    /// cover; the E8 lattice adds packing gain). Plus determinism.
+    #[test]
+    fn quip_beats_rtn_at_2bit() {
+        let mut rng = PcgEngine::new(33);
+        // Mostly small weights with sparse large outliers (the hard case for RTN).
+        let mut w: Vec<f32> = (0..512).map(|_| 0.05 * rng.float_signed()).collect();
+        for i in (0..512).step_by(37)
+        {
+            w[i] = 2.0 + rng.float_signed();
+        }
+        let res = quantize_quip(&w, 2, 5);
+        let deq = res.dequantize();
+        assert_eq!(deq.len(), w.len());
+        let e_quip = mse(&w, &deq);
+        // Scalar RTN at 2 bits over the full range.
+        let qmax = 1.0f32;
+        let maxabs = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let s = maxabs / qmax;
+        let rtn: Vec<f32> = w
+            .iter()
+            .map(|&x| (x / s).round().clamp(-qmax, qmax) * s)
+            .collect();
+        let e_rtn = mse(&w, &rtn);
+        assert!(e_quip < e_rtn, "QuIP# {e_quip} not better than RTN {e_rtn}");
+        // Determinism.
+        let res2 = quantize_quip(&w, 2, 5);
+        assert_eq!(res.codes(), res2.codes());
+    }
+}
