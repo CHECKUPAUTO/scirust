@@ -88,6 +88,16 @@ members = [
     "scirust-func-safety",
     "scirust-integration",
     "scirust-industrial",
+    "scirust-ids",
+    "examples/ids_demo",
+    "scirust-unsupervised",
+    "scirust-multivariate",
+    "scirust-sequential",
+    "scirust-seasonal",
+    "scirust-nlp-advanced",
+    "scirust-vision",
+    "scirust-audio",
+    "scirust-graph",
 ]
 exclude = [
     "scirust-rustc-driver",

@@ -1,0 +1,13 @@
+[package]
+name = "scirust-multivariate"
+version = "0.1.0"
+edition = "2021"
+description = "Multivariate pattern detection: PCA, ICA, clustering, Mahalanobis distance"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.8"

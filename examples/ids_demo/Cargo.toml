@@ -1,0 +1,10 @@
+[package]
+name = "ids_demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust IDS demo — détection d'intrusions réseau en temps réel"
+
+[dependencies]
+scirust-ids = { path = "../../scirust-ids" }
+rand = "0.8"

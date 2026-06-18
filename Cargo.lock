@@ -1125,6 +1125,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ids_demo"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "scirust-ids",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2091,6 +2099,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-audio"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-signal",
+ "serde",
+]
+
+[[package]]
 name = "scirust-autodiff"
 version = "0.1.0"
 
@@ -2250,6 +2267,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-graph"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scirust-ids"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "scirust-events-core",
+ "scirust-learning",
+ "scirust-pdm",
+ "scirust-signal",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-industrial"
 version = "0.1.0"
 dependencies = [
@@ -2324,6 +2363,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-multivariate"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
 name = "scirust-nas"
 version = "0.1.0"
 dependencies = [
@@ -2344,6 +2392,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "scirust-nlp-advanced"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-learning",
+ "serde",
 ]
 
 [[package]]
@@ -2392,6 +2449,23 @@ dependencies = [
  "scirust-core",
  "scirust-edge",
  "sha2",
+]
+
+[[package]]
+name = "scirust-seasonal"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-signal",
+ "serde",
+]
+
+[[package]]
+name = "scirust-sequential"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
 ]
 
 [[package]]
@@ -2589,6 +2663,24 @@ dependencies = [
  "approx",
  "nalgebra",
  "scirust-core",
+]
+
+[[package]]
+name = "scirust-unsupervised"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
+name = "scirust-vision"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-signal",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

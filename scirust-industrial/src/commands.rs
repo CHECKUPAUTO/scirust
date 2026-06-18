@@ -378,7 +378,8 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
     }
 
     // Check 3: Backend type
-    let backend_type = scirust_integration::backend::BackendType::parse_from_str(&config.backend_type);
+    let backend_type =
+        scirust_integration::backend::BackendType::parse_from_str(&config.backend_type);
     match backend_type
     {
         Some(bt) =>

@@ -1,0 +1,17 @@
+[package]
+name = "scirust-ids"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Intrusion Detection System — network anomaly detection using signal processing, statistical change detection, and ML classifiers"
+
+[dependencies]
+scirust-signal = { path = "../scirust-signal" }
+scirust-pdm = { path = "../scirust-pdm" }
+scirust-events-core = { path = "../scirust-events-core" }
+scirust-learning = { path = "../scirust-learning" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+rand = "0.8"

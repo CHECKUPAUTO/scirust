@@ -1,0 +1,12 @@
+[package]
+name = "scirust-sequential"
+version = "0.1.0"
+edition = "2021"
+description = "Sequential pattern recognition: HMM, CRF, Viterbi, sequence labeling"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

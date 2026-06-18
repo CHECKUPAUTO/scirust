@@ -1,0 +1,13 @@
+[package]
+name = "scirust-seasonal"
+version = "0.1.0"
+edition = "2021"
+description = "Seasonal pattern detection: STL decomposition, cyclic patterns, Fourier analysis"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-signal = { path = "../scirust-signal" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
