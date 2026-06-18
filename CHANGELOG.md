@@ -19,6 +19,15 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **S4 (S4D) — espace d'états structuré diagonal** (`nn::nd_layers::s4_scan`/`NdS4`,
+  Gu et al. 2022, roadmap #51) : SSM **linéaire invariant dans le temps** (contrairement
+  au `selective_scan` de Mamba dont les matrices dépendent de l'entrée) — `A` diagonal,
+  `B`/`C`/`Δ` sont des **paramètres fixes** ; discrétisation `Ā=exp(Δ⊙A)`, `B̄=Δ⊙B`,
+  récurrence `h_t=Ā⊙h_{t−1}+B̄⊙x_t` (état `(d,n)`) déroulée sur la tape, lecture
+  `y_t=Σ_n C⊙h_t`. Init **HiPPO** diagonale (S4D-Lin) `A[:,j]=−(j+1)`, `A<0` contractif.
+  La couche `NdS4` ajoute projections d'entrée/sortie + skip gaté `D⊙x`. Oracle :
+  **gradient check** (différences finies vs analytique sur x, a_log, B, C, log_dt) +
+  entraînement (MSE↓ vers une cible) + déterminisme bit-exact. Couche de bibliothèque.
 - **AI² / zonotopes — domaine abstrait pour la vérification** (`nn::ibp::Zonotope`/
   `IbpMlp::certify_zonotope`, Gehr et al. 2018, roadmap #29) : propagation par
   **zonotopes** (centre + générateurs, `{c+Σεᵢgᵢ : εᵢ∈[−1,1]}`) — les couches affines

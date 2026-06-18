@@ -896,6 +896,144 @@ impl NdMamba {
     }
 }
 
+/// **S4D** diagonal structured state-space scan (Gu et al., *S4*, ICLR 2022; Gu,
+/// Goel & Ré, *S4D*) — a **linear time-invariant** SSM. Unlike Mamba's
+/// input-dependent [`selective_scan`], the diagonal state matrix `A`, the
+/// input/output vectors `B`/`C` and the per-channel step `Δ` are **fixed
+/// parameters**: discretise `Ā = exp(Δ⊙A)` and `B̄ = Δ⊙B`, run the recurrence
+/// `h_t = Ā⊙h_{t−1} + B̄⊙x_t` (state `(d, n)`) and read out `y_t = Σ_n C⊙h_t`.
+/// `x` is `(seq, d)`; `a_log`, `b`, `c` are `(d, n)`; `log_dt` is `(d, 1)`; returns
+/// `(seq, d)`. `A = −exp(a_log) < 0` keeps the recurrence contractive. Gradients
+/// are exact and finite-difference-checked.
+pub fn s4_scan<'t>(
+    tape: &'t NdTape,
+    x: NdVar<'t>,
+    a_log: NdVar<'t>,
+    b: NdVar<'t>,
+    c: NdVar<'t>,
+    log_dt: NdVar<'t>,
+) -> NdVar<'t> {
+    let xs = x.shape();
+    let (seq, d) = (xs[0], xs[1]);
+    let n = a_log.shape()[1];
+    let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
+    let ones_n = tape.input(TensorND::new(vec![1.0f32; n], vec![n, 1])); // sum over n
+    let dt = log_dt.exp(); // Δ > 0   (d,1)
+    let a = a_log.exp().mul(neg1); // A = −exp(a_log)  (d,n)
+    let abar = dt.mul(a).exp(); // exp(Δ⊙A)         (d,n)
+    let bbar = dt.mul(b); // Δ⊙B              (d,n)
+    let mut h = tape.input(TensorND::zeros(&[d, n])); // h_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let x_col = x.gather(&[t]).reshape(&[d, 1]); // x_t   (d,1)
+        let bx = bbar.mul(x_col); // B̄⊙x_t (d,n)
+        h = abar.mul(h).add(bx); // (d,n)
+        let y = c.mul(h).matmul(ones_n).reshape(&[1, d]); // Σ_n C⊙h  (1,d)
+        outs.push(y);
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **S4** layer (diagonal, S4D): project the input to the SSM channels, run a
+/// fixed-parameter [`s4_scan`] with HiPPO-style diagonal init `A[:,j] = −(j+1)`,
+/// add a gated skip `D⊙x` and project back. Deterministic; trainable through the
+/// N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdS4 {
+    in_proj: NdLinear,
+    out_proj: NdLinear,
+    a_log: TensorND,  // (d, n)
+    b: TensorND,      // (d, n)
+    c: TensorND,      // (d, n)
+    log_dt: TensorND, // (d, 1)
+    d_skip: TensorND, // (1, d)
+    a_idx: Option<usize>,
+    b_idx: Option<usize>,
+    c_idx: Option<usize>,
+    dt_idx: Option<usize>,
+    skip_idx: Option<usize>,
+}
+
+impl NdS4 {
+    /// New layer; `d` is the SSM channel count, `n` the state size.
+    pub fn new(d_model: usize, d: usize, n: usize, rng: &mut PcgEngine) -> Self {
+        // HiPPO-style diagonal (S4D-Lin) init: A[:,j] = −(j+1) ⇒ a_log = ln(j+1).
+        let mut a_log = vec![0f32; d * n];
+        for i in 0..d
+        {
+            for j in 0..n
+            {
+                a_log[i * n + j] = ((j + 1) as f32).ln();
+            }
+        }
+        // B = 1 (standard S4D), C seeded, Δ ≈ 0.1 (log_dt = ln 0.1).
+        let b = vec![1.0f32; d * n];
+        let c: Vec<f32> = (0..d * n)
+            .map(|_| rng.float_signed() * (1.0 / n as f32).sqrt())
+            .collect();
+        let log_dt = vec![(0.1f32).ln(); d];
+        Self {
+            in_proj: NdLinear::new(d_model, d, rng),
+            out_proj: NdLinear::new(d, d_model, rng),
+            a_log: TensorND::new(a_log, vec![d, n]),
+            b: TensorND::new(b, vec![d, n]),
+            c: TensorND::new(c, vec![d, n]),
+            log_dt: TensorND::new(log_dt, vec![d, 1]),
+            d_skip: TensorND::zeros(&[1, d]),
+            a_idx: None,
+            b_idx: None,
+            c_idx: None,
+            dt_idx: None,
+            skip_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xi = self.in_proj.forward(tape, x); // (seq, d)
+        let a_v = tape.input(self.a_log.clone());
+        self.a_idx = Some(a_v.idx());
+        let b_v = tape.input(self.b.clone());
+        self.b_idx = Some(b_v.idx());
+        let c_v = tape.input(self.c.clone());
+        self.c_idx = Some(c_v.idx());
+        let dt_v = tape.input(self.log_dt.clone());
+        self.dt_idx = Some(dt_v.idx());
+        let scan = s4_scan(tape, xi, a_v, b_v, c_v, dt_v); // (seq, d)
+        let skip_v = tape.input(self.d_skip.clone());
+        self.skip_idx = Some(skip_v.idx());
+        let y = scan.add(skip_v.mul(xi)); // gated skip D⊙x
+        self.out_proj.forward(tape, y) // (seq, d_model)
+    }
+
+    /// Trainable parameters in a fixed order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, b_idx, c_idx, dt_idx, skip_idx) = (
+            self.a_idx,
+            self.b_idx,
+            self.c_idx,
+            self.dt_idx,
+            self.skip_idx,
+        );
+        let mut params = self.in_proj.parameters();
+        params.extend(self.out_proj.parameters());
+        for (idx, value) in [
+            (a_idx, &mut self.a_log),
+            (b_idx, &mut self.b),
+            (c_idx, &mut self.c),
+            (dt_idx, &mut self.log_dt),
+            (skip_idx, &mut self.d_skip),
+        ]
+        {
+            if let Some(i) = idx
+            {
+                params.push(NdParam { value, grad_idx: i });
+            }
+        }
+        params
+    }
+}
+
 /// **LoRA** — Low-Rank Adaptation (Hu et al., ICLR 2022). A frozen base weight
 /// `W` (`in × out`) is adapted by a trainable low-rank update `ΔW = (α/r)·A·B`,
 /// with `A` (`in × r`) and `B` (`r × out`), so only `r·(in+out)` parameters are
@@ -1665,6 +1803,104 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "Mamba did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// `s4_scan` gradients (w.r.t. x, a_log, B, C, log_dt) match finite differences.
+    #[test]
+    fn s4_scan_gradient_check() {
+        let (seq, d, n) = (4usize, 2usize, 3usize);
+        let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let a_log: Vec<f32> = (0..d * n).map(|j| ((j % n) as f32 + 1.0).ln()).collect();
+        let b: Vec<f32> = (0..d * n).map(|i| 0.5 + 0.3 * (i as f32).cos()).collect();
+        let c: Vec<f32> = (0..d * n).map(|i| (i as f32 * 0.25 - 0.1).sin()).collect();
+        let log_dt: Vec<f32> = (0..d).map(|i| (0.2 + 0.05 * i as f32).ln()).collect();
+
+        let loss_of = |xx: &[f32], aa: &[f32], bb: &[f32], cc: &[f32], dd: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xx.to_vec(), vec![seq, d]));
+            let av = t.input(TensorND::new(aa.to_vec(), vec![d, n]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![d, n]));
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![d, n]));
+            let dv = t.input(TensorND::new(dd.to_vec(), vec![d, 1]));
+            let y = s4_scan(&t, xv, av, bv, cv, dv);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d]));
+        let av = t.input(TensorND::new(a_log.clone(), vec![d, n]));
+        let bv = t.input(TensorND::new(b.clone(), vec![d, n]));
+        let cv = t.input(TensorND::new(c.clone(), vec![d, n]));
+        let dv = t.input(TensorND::new(log_dt.clone(), vec![d, 1]));
+        let y = s4_scan(&t, xv, av, bv, cv, dv);
+        let grads = t.backward(y.mul(y).sum());
+        let (gx, ga, gb, gc, gd) = (
+            grads[xv.idx()].clone(),
+            grads[av.idx()].clone(),
+            grads[bv.idx()].clone(),
+            grads[cv.idx()].clone(),
+            grads[dv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "s4_scan grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gx, &x, &|p| loss_of(p, &a_log, &b, &c, &log_dt));
+        check(&ga, &a_log, &|p| loss_of(&x, p, &b, &c, &log_dt));
+        check(&gb, &b, &|p| loss_of(&x, &a_log, p, &c, &log_dt));
+        check(&gc, &c, &|p| loss_of(&x, &a_log, &b, p, &log_dt));
+        check(&gd, &log_dt, &|p| loss_of(&x, &a_log, &b, &c, p));
+    }
+
+    /// The `NdS4` layer trains (MSE↓ to a target sequence) and is bit-for-bit
+    /// deterministic across identical runs.
+    #[test]
+    fn nd_s4_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (5usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(9);
+            let mut layer = NdS4::new(d_model, 6, 4, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "S4 did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());

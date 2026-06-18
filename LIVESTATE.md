@@ -3,13 +3,21 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 84 : S4 / S4D (#51) — espace d'états structuré diagonal
+- `nn::nd_layers::s4_scan`/`NdS4` (Gu 2022) : SSM LTI diagonal (Ā=exp(Δ⊙A), B̄=Δ⊙B,
+  h_t=Ā⊙h_{t−1}+B̄⊙x_t, y_t=Σ_n C⊙h_t) ; init HiPPO diag A[:,j]=−(j+1). Paramètres fixes (vs Mamba sélectif).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (2, core) : gradient check (x, a_log, B, C, log_dt vs diff. finies, tol 3e-2) ;
+  NdS4 entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #51 📋→✅ ; CHANGELOG. 575 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 83 : AI²/zonotopes (#29) — domaine abstrait vérification
 - `nn::ibp::Zonotope`/`IbpMlp::certify_zonotope` (Gehr 2018) : affine exact, ReLU DeepZ
   (λx+μ±μ, 1 générateur/neurone instable). Générateurs partagés ⇒ corrélations.
 - CLI : exposé dans `certify` (à côté IBP/CROWN). Pas de nouvelle commande ⇒ pas de multilingue.
 - Tests (3, core) : affine exact (=intervalle) ; soundness (4000 points ∈ boîte zonotope, MLP 3 couches) ;
   plus serré qu'IBP sous corrélation (relu(x)−relu(x)≡0 : zono [−0.5,0.5] vs IBP [−1,1], sains).
-- docs : roadmap #29 📋→✅ ; CHANGELOG. 573 tests core (+3) ; 8 gates (à confirmer).
+- docs : roadmap #29 📋→✅ ; CHANGELOG. 573 tests core (+3) ; 8 gates verts ✓ ; commit 7963ee5.
 
 ## Session 2026-06-18 — volet 82 : EAGLE (#62) — décodage spéculatif niveau features
 - `nn::nd_decoder::EagleHead`/`generate_eagle` (Li 2024) : tête (feature, embed) → feature
