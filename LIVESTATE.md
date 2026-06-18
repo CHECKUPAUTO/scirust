@@ -3,6 +3,18 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 88 : FNO (#75) — opérateur neuronal de Fourier
+- `nn::fno::FnoSpectralConv1d`/`NdFno` (Li 2021) : DFT réelle = matrices cos/sin fixes (matmul
+  déterministe, différentiable, sans FFT ni complexe) ; garder `modes` basses fréqs, poids
+  complexe par mode R_k=Ar_k+iAi_k (mélange canaux via bmm), DFT⁻¹ (inverse unilatéral facteur-2).
+  Bloc σ(spectral+local). Nouveau module nn::fno.
+- Bibliothèque seule (couches gradient-checkées, pas de CLI ni multilingue).
+- Tests (4, core) : reconstruction exacte band-limité (DFT⁻¹∘DFT) ; gradient check (v, Ar, Ai) ;
+  **apprend la dérivation** (d/dx↔×ik) et généralise à phase non vue (MSE test <0.02, convexe) ;
+  NdFno entraîne (MSE↓ <0.6×) + déterminisme. Bug harnais évité : 1 forward/tape (sinon un
+  paramètre ré-inputé N fois ⇒ gradient éclaté sur N nœuds).
+- docs : roadmap #75 📋→✅ ; CHANGELOG. 588 tests core (+4) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 87 : Hyena (#56) — convolutions longues implicites + gating
 - `nn::nd_layers::hyena_long_conv`/`NdHyena` (Poli 2023) : mélangeur sans attention. Conv
   causale par canal y[t,c]=Σ_τ h[τ,c]u[t−τ,c] = Σ_τ h[τ,:]⊙(Sτ·u) (matrices décalage Sτ
@@ -11,7 +23,7 @@
 - Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
 - Tests (3, core) : conv ≡ référence causale écrite à la main ; gradient check (u, h) ;
   NdHyena entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
-- docs : roadmap #56 📋→✅ ; CHANGELOG. 584 tests core (+3) ; 8 gates verts (à confirmer).
+- docs : roadmap #56 📋→✅ ; CHANGELOG. 584 tests core (+3) ; 8 gates verts ✓ ; commit 8ff9c98.
 
 ## Session 2026-06-18 — volet 86 : xLSTM (#57) — sLSTM scalaire + mLSTM matriciel
 - `nn::nd_layers::slstm_scan`/`mlstm_scan`/`NdXlstm` (Beck 2024) : sLSTM (porte entrée

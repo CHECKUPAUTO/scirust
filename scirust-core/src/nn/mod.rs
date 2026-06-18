@@ -15,6 +15,7 @@ pub mod dora;
 pub mod dropout;
 pub mod embedding;
 pub mod ensemble;
+pub mod fno;
 pub mod fused_ops;
 pub mod generative;
 pub mod gnn;

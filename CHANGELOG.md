@@ -19,6 +19,23 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **FNO — opérateur neuronal de Fourier** (`nn::fno::FnoSpectralConv1d`/`NdFno`, Li et al.
+  2021, roadmap #75) : un opérateur neuronal apprend une application entre **fonctions** (p.ex.
+  condition initiale ↦ solution de PDE), pas entre vecteurs de taille fixe. FNO réalise
+  l'intégrale de noyau **globale** dans le **domaine de Fourier** : transformer le signal
+  échantillonné, garder les `modes` plus basses fréquences, multiplier chaque mode par un
+  **poids complexe appris** `R_k=Ar_k+iAi_k` (matrice `width×width`, mélange de canaux), puis
+  transformer en sens inverse. La DFT réelle et son inverse sont des **matrices cosinus/sinus
+  fixes** : tout le transform est un matmul ordinaire (déterministe) que la tape N-D dérive
+  directement — **sans FFT, sans type complexe, sans nouvel op** ; les poids par mode sont
+  appliqués par un matmul **par lots** (`bmm`) sur les modes. Bloc FNO complet :
+  `σ(SpectralConv(v)+W·v)`. Oracle honnête : reconstruction **exacte** d'un signal band-limité
+  aux modes gardés (DFT⁻¹∘DFT, valide les matrices + l'inverse unilatéral facteur-2) ;
+  **gradient check** par différences finies (signal, Ar, Ai) ; comme la dérivation est
+  diagonale en Fourier (`d/dx↔×ik`), une seule conv spectrale **apprend l'opérateur de
+  dérivation** `sin(ωx+φ)↦ω cos(ωx+φ)` et **généralise à une phase non vue** (MSE test <0,02,
+  ajustement convexe) ; déterminisme bit-exact. Rejoint la famille calcul scientifique
+  (Neural ODE, PINN, DeepONet, KAN).
 - **Hyena — convolutions longues implicites + gating** (`nn::nd_layers::hyena_long_conv`/
   `NdHyena`, Poli et al. 2023, roadmap #56) : un mélangeur de tokens **sans attention**. La
   portée longue vient d'une **convolution causale** dont le filtre n'est pas stocké tap par
