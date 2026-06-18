@@ -58,6 +58,7 @@ impl Interval {
 
 /// An affine layer `y = x·W + b` (W row-major `(in, out)`, b `(out)`) with both
 /// an interval rule and a concrete forward, for IBP certification.
+#[derive(Clone)]
 pub struct IbpLinear {
     w: Vec<f32>,
     b: Vec<f32>,
@@ -314,6 +315,131 @@ pub fn deeppoly_certify(layers: &[IbpLinear], input: &Interval) -> Interval {
         .map(|o| dp_concretize(&upper[o], &input.lo, &input.hi, true))
         .collect();
     Interval { lo, hi }
+}
+
+/// Concrete forward of a stack of [`IbpLinear`] layers (ReLU after each but the
+/// last) — the network function the [`verify_robustness`] branch-and-bound checks.
+fn forward_layers(layers: &[IbpLinear], x: &[f32]) -> Vec<f32> {
+    let mut cur = x.to_vec();
+    for (i, l) in layers.iter().enumerate()
+    {
+        cur = l.forward_point(&cur);
+        if i + 1 < layers.len()
+        {
+            for v in cur.iter_mut()
+            {
+                *v = v.max(0.0);
+            }
+        }
+    }
+    cur
+}
+
+/// Replace the last (logit) layer by a **margin** layer: for predicted class `t`,
+/// emit one output per other class `j`, equal to `logitₜ − logitⱼ`, by fusing the
+/// difference into the final affine map. The network's outputs are then all `> 0`
+/// exactly when class `t` strictly wins — so certifying every output's lower bound
+/// `> 0` certifies robustness.
+fn build_margin_net(layers: &[IbpLinear], t: usize) -> Vec<IbpLinear> {
+    let last = layers.last().unwrap();
+    let (h, k) = (last.in_f, last.out_f);
+    let mut out_layers: Vec<IbpLinear> = layers[..layers.len() - 1].to_vec();
+    let others: Vec<usize> = (0..k).filter(|&j| j != t).collect();
+    let mut wm = vec![0.0f32; h * others.len()];
+    let mut bm = vec![0.0f32; others.len()];
+    for (col, &j) in others.iter().enumerate()
+    {
+        for i in 0..h
+        {
+            // margin_j = logitₜ − logitⱼ = Σ_i (W[i,t] − W[i,j]) hᵢ + (bₜ − bⱼ)
+            wm[i * others.len() + col] = last.w[i * k + t] - last.w[i * k + j];
+        }
+        bm[col] = last.b[t] - last.b[j];
+    }
+    out_layers.push(IbpLinear::new(wm, bm, h, others.len()));
+    out_layers
+}
+
+/// The outcome of the complete robustness check.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BabResult {
+    /// **Proven** robust: the predicted class is unchanged over the whole box.
+    Robust,
+    /// A **concrete** counterexample input in the box whose predicted class differs.
+    Unsafe(Vec<f32>),
+    /// Undecided within the box-size tolerance / box budget (only the measure-zero
+    /// decision boundary should land here for a well-separated property).
+    Unknown,
+}
+
+/// **Complete** robustness verification by **branch-and-bound** (the engine behind
+/// GCP-CROWN, Zhang et al., NeurIPS 2022). Where IBP/CROWN/DeepPoly give a single
+/// *sound but incomplete* bound, BaB refines: it bounds the per-class **margins**
+/// over the input box with [`deeppoly_certify`]; if every margin lower bound is
+/// `> 0` the box is **robust**; otherwise it probes the box centre for a genuine
+/// **counterexample**, and failing that **splits** the box along its widest axis and
+/// recurses. As the boxes shrink the DeepPoly relaxation becomes exact, so the search
+/// **decides** robustness (up to `tol`) — proving cases a single bound cannot and
+/// returning a concrete counterexample when the class really can change. Branching
+/// is over the **input domain** (GCP-CROWN's ReLU-activation splitting and cutting
+/// planes are not implemented). Deterministic.
+pub fn verify_robustness(
+    layers: &[IbpLinear],
+    input: &Interval,
+    true_class: usize,
+    tol: f32,
+    max_boxes: usize,
+) -> BabResult {
+    let mnet = build_margin_net(layers, true_class);
+    let mut work = vec![input.clone()];
+    let mut count = 0usize;
+    while let Some(b) = work.pop()
+    {
+        count += 1;
+        if count > max_boxes
+        {
+            return BabResult::Unknown;
+        }
+        let out = deeppoly_certify(&mnet, &b);
+        if out.lo.iter().all(|&v| v > 0.0)
+        {
+            continue; // this sub-box is provably robust
+        }
+        // Probe the box centre for a real counterexample.
+        let center: Vec<f32> =
+            b.lo.iter()
+                .zip(&b.hi)
+                .map(|(&l, &h)| 0.5 * (l + h))
+                .collect();
+        if forward_layers(&mnet, &center).iter().any(|&v| v <= 0.0)
+        {
+            return BabResult::Unsafe(center);
+        }
+        if b.max_radius() < tol
+        {
+            return BabResult::Unknown; // can't split further
+        }
+        // Split along the widest coordinate.
+        let mut d = 0usize;
+        let mut wmax = 0.0f32;
+        for i in 0..b.lo.len()
+        {
+            let w = b.hi[i] - b.lo[i];
+            if w > wmax
+            {
+                wmax = w;
+                d = i;
+            }
+        }
+        let mid = 0.5 * (b.lo[d] + b.hi[d]);
+        let mut b1 = b.clone();
+        b1.hi[d] = mid;
+        let mut b2 = b.clone();
+        b2.lo[d] = mid;
+        work.push(b1);
+        work.push(b2);
+    }
+    BabResult::Robust
 }
 
 /// A **zonotope** over `n` dimensions: a center `c` plus `m` generator vectors,
@@ -879,5 +1005,140 @@ mod tests {
             "deeppoly box {dp:?}"
         );
         assert!(ibp.lo[0] <= 0.0 && ibp.hi[0] >= 1.0); // IBP sound but loose ([0,2])
+    }
+
+    fn argmax(v: &[f32]) -> usize {
+        v.iter()
+            .enumerate()
+            .fold(
+                (0usize, f32::MIN),
+                |b, (i, &x)| if x > b.1 { (i, x) } else { b },
+            )
+            .0
+    }
+
+    /// **BaB `Robust` is sound**: when branch-and-bound proves robustness over a box,
+    /// every sampled point really is classified as the predicted class. Deterministic.
+    #[test]
+    fn bab_robust_is_sound() {
+        let mut rng = PcgEngine::new(5);
+        let layers = vec![
+            IbpLinear::from_nd_linear(&NdLinear::new(2, 6, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(6, 2, &mut rng)),
+        ];
+        let x = [0.3f32, -0.4];
+        let pred = argmax(&forward_layers(&layers, &x));
+        let box_in = Interval::around(&x, 0.05);
+        let res = verify_robustness(&layers, &box_in, pred, 1e-3, 5000);
+        assert_eq!(res, BabResult::Robust, "expected robust at small eps");
+        assert_eq!(res, verify_robustness(&layers, &box_in, pred, 1e-3, 5000)); // deterministic
+
+        let mut srng = PcgEngine::new(99);
+        for _ in 0..5000
+        {
+            let p = sample(&box_in, &mut srng);
+            assert_eq!(
+                argmax(&forward_layers(&layers, &p)),
+                pred,
+                "robust box misclassified"
+            );
+        }
+    }
+
+    /// **BaB is more complete than a single DeepPoly bound**: it certifies a strictly
+    /// larger ℓ∞ radius (by splitting), and the extra-certified region is genuinely
+    /// robust (sampled).
+    #[test]
+    fn bab_certifies_larger_radius_than_deeppoly() {
+        let mut rng = PcgEngine::new(6);
+        let layers = vec![
+            IbpLinear::from_nd_linear(&NdLinear::new(2, 8, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(8, 3, &mut rng)),
+        ];
+        let x = [0.1f32, 0.2];
+        let pred = argmax(&forward_layers(&layers, &x));
+        let mnet = build_margin_net(&layers, pred);
+        let dp_robust = |eps: f32| {
+            deeppoly_certify(&mnet, &Interval::around(&x, eps))
+                .lo
+                .iter()
+                .all(|&v| v > 0.0)
+        };
+        let bab_robust = |eps: f32| {
+            verify_robustness(&layers, &Interval::around(&x, eps), pred, 1e-3, 8000)
+                == BabResult::Robust
+        };
+        let radius = |f: &dyn Fn(f32) -> bool| -> f32 {
+            let (mut lo, mut hi) = (0.0f32, 1.5f32);
+            for _ in 0..18
+            {
+                let m = 0.5 * (lo + hi);
+                if f(m)
+                {
+                    lo = m;
+                }
+                else
+                {
+                    hi = m;
+                }
+            }
+            lo
+        };
+        let eps_dp = radius(&dp_robust);
+        let eps_bab = radius(&bab_robust);
+        assert!(
+            eps_bab > eps_dp + 1e-3,
+            "BaB radius {eps_bab} not greater than DeepPoly {eps_dp}"
+        );
+        // The gap region DeepPoly could not certify is genuinely robust.
+        let mid = 0.5 * (eps_dp + eps_bab);
+        let mut srng = PcgEngine::new(7);
+        for _ in 0..3000
+        {
+            let p = sample(&Interval::around(&x, mid), &mut srng);
+            assert_eq!(
+                argmax(&forward_layers(&layers, &p)),
+                pred,
+                "BaB over-certified"
+            );
+        }
+    }
+
+    /// **BaB `Unsafe` is a real counterexample**: at a large radius (past the robust
+    /// boundary) BaB returns a concrete input in the box whose class differs.
+    #[test]
+    fn bab_finds_valid_counterexample() {
+        let mut rng = PcgEngine::new(6);
+        let layers = vec![
+            IbpLinear::from_nd_linear(&NdLinear::new(2, 8, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(8, 3, &mut rng)),
+        ];
+        let x = [0.1f32, 0.2];
+        let pred = argmax(&forward_layers(&layers, &x));
+        let eps = 1.2f32; // large box; the class does change somewhere inside
+        let box_in = Interval::around(&x, eps);
+        // Precondition: the box is genuinely non-robust (some sample misclassifies).
+        let mut srng = PcgEngine::new(1);
+        let nonrobust = (0..20000).any(|_| {
+            let p = sample(&box_in, &mut srng);
+            argmax(&forward_layers(&layers, &p)) != pred
+        });
+        assert!(nonrobust, "test setup: box should be non-robust");
+        match verify_robustness(&layers, &box_in, pred, 5e-3, 50000)
+        {
+            BabResult::Unsafe(cx) =>
+            {
+                assert_ne!(
+                    argmax(&forward_layers(&layers, &cx)),
+                    pred,
+                    "counterexample not misclassified"
+                );
+                for ((&c, &l), &h) in cx.iter().zip(&box_in.lo).zip(&box_in.hi)
+                {
+                    assert!(c >= l - 1e-6 && c <= h + 1e-6);
+                }
+            },
+            other => panic!("expected Unsafe, got {other:?}"),
+        }
     }
 }

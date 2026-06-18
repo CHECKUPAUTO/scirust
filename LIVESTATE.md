@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 96 : Branch-and-bound (#26) — vérification complète
+- `nn::ibp::verify_robustness`/`BabResult` (GCP-CROWN, Zhang 2022) : BaB sur le domaine d'entrée.
+  Marges par classe (fusionnées en dernière couche) bornées par DeepPoly ; toutes >0 ⇒ Robust ;
+  sinon sonde centre ⇒ contre-exemple ; sinon scinde axe le plus large + récurse. Décide
+  (Robust/Unsafe/Unknown). Split ReLU + plans coupants NON implémentés (documenté).
+- CLI : exposé dans `certify`. Pas de nouvelle commande ⇒ pas de multilingue.
+- Tests (3, core) : Robust sain (5000 pts) + déterministe ; rayon BaB > DeepPoly seul (+ région
+  sup. saine, 3000 pts) ; Unsafe = vrai contre-exemple (mal classé, dans boîte).
+- docs : roadmap #26 📋→✅ ; CHANGELOG. 608 tests core (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 95 : DeepPoly (#28) — domaine abstrait relationnel
 - `nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly` (Singh 2019) : bornes basse/haute
   **affines en les entrées** par neurone (back-substitution), relaxation ReLU asymétrique
@@ -12,7 +22,7 @@
   ⇒ pas de multilingue.
 - Tests (2, core) : sain (4000 pts ∈ boîte, MLP 3 couches) + déterministe ; plus serré qu'IBP
   sur relu(x)+relu(−x)=|x| (DeepPoly exact [0,1] vs IBP [0,2]).
-- docs : roadmap #28 📋→✅ ; CHANGELOG. 605 tests core (+2) ; 8 gates verts (à confirmer).
+- docs : roadmap #28 📋→✅ ; CHANGELOG. 605 tests core (+2) ; 8 gates verts ✓ ; commit dec7fbc.
 
 ## Session 2026-06-18 — volet 94 : CROWN-IBP (#30) — entraînement certifié
 - `nn::crown_ibp::CrownIbpMlp` (Zhang 2020) : propagation IBP **différentiable** sur la tape

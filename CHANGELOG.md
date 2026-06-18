@@ -19,6 +19,22 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Branch-and-bound — vérification *complète*** (`nn::ibp::verify_robustness`/`BabResult`,
+  GCP-CROWN, Zhang et al. 2022, roadmap #26) : là où IBP/CROWN/DeepPoly donnent **une** borne
+  *saine mais incomplète*, le branch-and-bound **décide**. Il borne les **marges** par classe
+  (`logitₜ − logitⱼ`, fusionnées dans une dernière couche pour que DeepPoly suive la corrélation)
+  sur la boîte d'entrée ; si toutes les bornes inférieures sont `> 0` la boîte est **prouvée
+  robuste** ; sinon il sonde le **centre** de la boîte pour un **contre-exemple concret**, et à
+  défaut **scinde** la boîte le long de son axe le plus large et récurse. Comme les sous-boîtes
+  rétrécissent, la relaxation ReLU de DeepPoly devient exacte, si bien que la recherche **tranche**
+  (jusqu'à une tolérance) — prouvant des cas qu'une borne unique ne peut pas, et renvoyant un
+  contre-exemple réel quand la classe peut effectivement changer. Oracle honnête : `Robust` est
+  **sain** (5000 points échantillonnés bien classés) ; le **rayon ℓ∞ certifié dépasse strictement**
+  celui de DeepPoly seul (et la région supplémentaire est échantillonnée robuste) ; `Unsafe`
+  renvoie un **vrai** contre-exemple (mal classé, dans la boîte) ; déterministe. Exposé dans la CLI
+  `certify`. (Le branchement est sur le **domaine d'entrée** ; le split des ReLU instables et les
+  plans coupants de GCP-CROWN ne sont pas implémentés.) Couronne la pile de vérification (IBP #1,
+  CROWN #2, zonotopes #29, DeepPoly #28, CROWN-IBP #30).
 - **DeepPoly — domaine abstrait relationnel** (`nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly`,
   Singh et al. 2019, roadmap #28) : un vérificateur de robustesse plus précis qu'IBP. Là où IBP
   traite chaque neurone par un simple intervalle (perdant toute corrélation), DeepPoly garde pour
