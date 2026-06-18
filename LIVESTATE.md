@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 90 : S5 (#52) — SSM MIMO + scan associatif parallèle
+- `nn::nd_layers::s5_scan`/`s5_parallel_scan`/`NdS5` (Smith 2023) : SSM MIMO diagonal (état
+  partagé n piloté par toutes entrées via B, lu via C ; hₜ=Ā⊙hₜ₋₁+xₜB, yₜ=hₜC) ; scan associatif
+  Hillis-Steele (combine (a₁,u₁)∘(a₂,u₂)=(a₂a₁,a₂u₁+u₂), ordre doublage fixe ⇒ déterministe).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (4, core) : scan parallèle ≡ séquentiel (aₜ variable ⇒ vrai associatif) ; s5_scan ≡
+  référence MIMO ; gradient check (x,Ā,B,C) ; NdS5 entraîne (MSE↓ <0.6×) + déterminisme.
+- docs : roadmap #52 📋→✅ ; CHANGELOG. 595 tests core (+4) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 89 : Mamba-2 / SSD (#50) — dualité espace-d'états ↔ attention
 - `nn::nd_layers::ssd_dual`/`NdMamba2` (Dao & Gu 2024) : A scalaire par pas ⇒ récurrence
   Hₜ=aₜHₜ₋₁+xₜBₜᵀ, yₜ=HₜCₜ **exactement** = forme quadratique masquée Y=(L⊙CBᵀ)X,
@@ -11,7 +20,7 @@
 - Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
 - Tests (3, core) : dual ≡ récurrence séquentielle (la dualité) ; gradient check (x,B,C,a_log) ;
   NdMamba2 entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
-- docs : roadmap #50 📋→✅ ; CHANGELOG. 591 tests core (+3) ; 8 gates verts (à confirmer).
+- docs : roadmap #50 📋→✅ ; CHANGELOG. 591 tests core (+3) ; 8 gates verts ✓ ; commit ad0bfb2.
 
 ## Session 2026-06-18 — volet 88 : FNO (#75) — opérateur neuronal de Fourier
 - `nn::fno::FnoSpectralConv1d`/`NdFno` (Li 2021) : DFT réelle = matrices cos/sin fixes (matmul

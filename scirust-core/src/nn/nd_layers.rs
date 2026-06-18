@@ -1913,6 +1913,156 @@ impl NdMamba2 {
     }
 }
 
+/// **S5** diagonal **MIMO** state-space scan (Smith, Warrington & Linderman, ICLR
+/// 2023, arXiv:2208.04933). Unlike S4D's independent per-channel SISO SSMs, S5
+/// drives a **single shared** `n`-dimensional state with all `h_in` inputs through a
+/// `B` matrix and reads `m_out` outputs through a `C` matrix:
+///
+/// ```text
+/// hₜ = Ā ⊙ hₜ₋₁ + xₜ·B   (state 1×n, Ā diagonal) ,   yₜ = hₜ·C
+/// ```
+///
+/// `x` is `(seq, h_in)`; `a_diag` (the diagonal `Ā`) is `(1, n)`; `b` is `(h_in, n)`;
+/// `c` is `(n, m_out)`; returns `(seq, m_out)`. The recurrence is linear, so it is
+/// computed by an **associative scan** — see [`s5_parallel_scan`] for the
+/// (deterministic) parallel form, whose result it equals. Unrolled on the tape;
+/// gradient-checked.
+pub fn s5_scan<'t>(
+    tape: &'t NdTape,
+    x: NdVar<'t>,
+    a_diag: NdVar<'t>,
+    b: NdVar<'t>,
+    c: NdVar<'t>,
+) -> NdVar<'t> {
+    let seq = x.shape()[0];
+    let n = a_diag.shape()[1];
+    let mut h = tape.input(TensorND::zeros(&[1, n])); // h_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let u = x.gather(&[t]).matmul(b); // xₜ·B  (1,n)
+        h = a_diag.mul(h).add(u); // hₜ = Ā⊙hₜ₋₁ + xₜ·B
+        outs.push(h.matmul(c)); // yₜ = hₜ·C  (1,m)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **Parallel associative scan** for the diagonal linear recurrence
+/// `hₜ = aₜ ⊙ hₜ₋₁ + uₜ` — the algorithm that makes S5 parallelisable. The scan
+/// element `(aₜ, uₜ)` represents the affine map `h ↦ aₜ⊙h + uₜ`; these compose by the
+/// **associative** operator `(a₁,u₁)∘(a₂,u₂) = (a₂⊙a₁, a₂⊙u₁+u₂)`. A Hillis-Steele
+/// inclusive scan (fixed `log₂ seq` doubling order ⇒ **deterministic**) yields every
+/// prefix state `hₜ` in parallel. `a`/`u` are `seq` vectors of length `n`; returns
+/// the `seq` states `hₜ`. Pure `f32`; its result equals the sequential recurrence
+/// (tested), which is what licenses the parallelisation.
+pub fn s5_parallel_scan(a: &[Vec<f32>], u: &[Vec<f32>]) -> Vec<Vec<f32>> {
+    let seq = a.len();
+    if seq == 0
+    {
+        return Vec::new();
+    }
+    let n = a[0].len();
+    let mut pa: Vec<Vec<f32>> = a.to_vec();
+    let mut pu: Vec<Vec<f32>> = u.to_vec();
+    let mut d = 1usize;
+    while d < seq
+    {
+        let (mut na, mut nu) = (pa.clone(), pu.clone());
+        for t in d..seq
+        {
+            // combine(prefix[t−d] (earlier), prefix[t] (later)): apply earlier then later.
+            for j in 0..n
+            {
+                na[t][j] = pa[t][j] * pa[t - d][j];
+                nu[t][j] = pa[t][j] * pu[t - d][j] + pu[t][j];
+            }
+        }
+        pa = na;
+        pu = nu;
+        d *= 2;
+    }
+    pu // hₜ = prefix-uₜ
+}
+
+/// **S5 block**: project the input to `h_in` channels, run the diagonal-MIMO
+/// [`s5_scan`] with a learnable diagonal decay `Ā = σ(a_raw) ∈ (0,1)` (kept
+/// contractive) and learnable `B`/`C`, add a gated skip `D⊙x` and project back.
+/// Deterministic; trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdS5 {
+    in_proj: NdLinear,
+    out_proj: NdLinear,
+    a_raw: TensorND,  // (1,n); Ā = σ(a_raw)
+    b: TensorND,      // (d, n)
+    c: TensorND,      // (n, d)
+    d_skip: TensorND, // (1, d)
+    a_idx: Option<usize>,
+    b_idx: Option<usize>,
+    c_idx: Option<usize>,
+    skip_idx: Option<usize>,
+}
+
+impl NdS5 {
+    /// New layer; `d` is the channel width, `n` the shared state size.
+    pub fn new(d_model: usize, d: usize, n: usize, rng: &mut PcgEngine) -> Self {
+        // Ā init ≈ σ(2) ≈ 0.88 (slow decay); B, C seeded.
+        let b: Vec<f32> = (0..d * n)
+            .map(|_| rng.float_signed() * (1.0 / n as f32).sqrt())
+            .collect();
+        let c: Vec<f32> = (0..n * d)
+            .map(|_| rng.float_signed() * (1.0 / n as f32).sqrt())
+            .collect();
+        Self {
+            in_proj: NdLinear::new(d_model, d, rng),
+            out_proj: NdLinear::new(d, d_model, rng),
+            a_raw: TensorND::new(vec![2.0f32; n], vec![1, n]),
+            b: TensorND::new(b, vec![d, n]),
+            c: TensorND::new(c, vec![n, d]),
+            d_skip: TensorND::zeros(&[1, d]),
+            a_idx: None,
+            b_idx: None,
+            c_idx: None,
+            skip_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xi = self.in_proj.forward(tape, x); // (seq, d)
+        let a_v = tape.input(self.a_raw.clone());
+        self.a_idx = Some(a_v.idx());
+        let b_v = tape.input(self.b.clone());
+        self.b_idx = Some(b_v.idx());
+        let c_v = tape.input(self.c.clone());
+        self.c_idx = Some(c_v.idx());
+        let a_diag = a_v.sigmoid(); // Ā ∈ (0,1)
+        let scan = s5_scan(tape, xi, a_diag, b_v, c_v); // (seq, d)
+        let skip_v = tape.input(self.d_skip.clone());
+        self.skip_idx = Some(skip_v.idx());
+        let y = scan.add(skip_v.mul(xi)); // gated skip D⊙x
+        self.out_proj.forward(tape, y)
+    }
+
+    /// Trainable parameters in a fixed order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, b_idx, c_idx, skip_idx) = (self.a_idx, self.b_idx, self.c_idx, self.skip_idx);
+        let mut params = self.in_proj.parameters();
+        params.extend(self.out_proj.parameters());
+        for (idx, value) in [
+            (a_idx, &mut self.a_raw),
+            (b_idx, &mut self.b),
+            (c_idx, &mut self.c),
+            (skip_idx, &mut self.d_skip),
+        ]
+        {
+            if let Some(i) = idx
+            {
+                params.push(NdParam { value, grad_idx: i });
+            }
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2863,6 +3013,210 @@ mod tests {
             last < first * 0.6,
             "Mamba-2 did not learn: {first} -> {last}"
         );
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// The S5 headline: the **parallel** (Hillis-Steele) associative scan produces
+    /// exactly the same prefix states as the **sequential** recurrence — what makes
+    /// the linear SSM parallelisable. Tested with *time-varying* `aₜ` (a genuine
+    /// associative scan, not the trivial constant case).
+    #[test]
+    fn s5_parallel_scan_matches_sequential() {
+        let (seq, n) = (9usize, 4usize); // non-power-of-two length on purpose
+        let a: Vec<Vec<f32>> = (0..seq)
+            .map(|t| {
+                (0..n)
+                    .map(|j| 0.5 + 0.3 * ((t * n + j) as f32 * 0.7).sin())
+                    .collect()
+            })
+            .collect();
+        let u: Vec<Vec<f32>> = (0..seq)
+            .map(|t| {
+                (0..n)
+                    .map(|j| ((t * n + j) as f32 * 0.4 - 0.3).cos())
+                    .collect()
+            })
+            .collect();
+        // Sequential reference hₜ = aₜ⊙hₜ₋₁ + uₜ.
+        let mut h = vec![0f32; n];
+        let mut seq_states = Vec::with_capacity(seq);
+        for t in 0..seq
+        {
+            for j in 0..n
+            {
+                h[j] = a[t][j] * h[j] + u[t][j];
+            }
+            seq_states.push(h.clone());
+        }
+        let par = s5_parallel_scan(&a, &u);
+        assert_eq!(par.len(), seq);
+        for (ps, ss) in par.iter().zip(&seq_states)
+        {
+            for (p, s) in ps.iter().zip(ss)
+            {
+                assert!((p - s).abs() < 1e-5, "parallel scan: {p} vs sequential {s}");
+            }
+        }
+    }
+
+    /// Plain-`Vec` reference for the diagonal-MIMO SSM that `s5_scan` computes.
+    #[allow(clippy::too_many_arguments)]
+    fn s5_reference(
+        x: &[f32],
+        a: &[f32],
+        b: &[f32],
+        c: &[f32],
+        seq: usize,
+        h_in: usize,
+        n: usize,
+        m: usize,
+    ) -> Vec<f32> {
+        let mut h = vec![0f32; n];
+        let mut out = vec![0f32; seq * m];
+        for t in 0..seq
+        {
+            let mut u = vec![0f32; n];
+            for (j, uj) in u.iter_mut().enumerate()
+            {
+                for i in 0..h_in
+                {
+                    *uj += x[t * h_in + i] * b[i * n + j];
+                }
+            }
+            for j in 0..n
+            {
+                h[j] = a[j] * h[j] + u[j];
+            }
+            for k in 0..m
+            {
+                let mut acc = 0f32;
+                for j in 0..n
+                {
+                    acc += h[j] * c[j * m + k];
+                }
+                out[t * m + k] = acc;
+            }
+        }
+        out
+    }
+
+    /// `s5_scan` (tape, MIMO B/C wiring) matches the hand-written recurrence.
+    #[test]
+    fn s5_scan_matches_reference() {
+        let (seq, h_in, n, m) = (5usize, 3usize, 4usize, 2usize);
+        let x: Vec<f32> = (0..seq * h_in)
+            .map(|i| (i as f32 * 0.3 - 0.5).sin())
+            .collect();
+        let a: Vec<f32> = (0..n).map(|j| 0.6 + 0.1 * j as f32).collect();
+        let b: Vec<f32> = (0..h_in * n)
+            .map(|i| (i as f32 * 0.2 + 0.4).cos())
+            .collect();
+        let c: Vec<f32> = (0..n * m).map(|i| (i as f32 * 0.17 - 0.3).sin()).collect();
+        let want = s5_reference(&x, &a, &b, &c, seq, h_in, n, m);
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x, vec![seq, h_in]));
+        let av = t.input(TensorND::new(a, vec![1, n]));
+        let bv = t.input(TensorND::new(b, vec![h_in, n]));
+        let cv = t.input(TensorND::new(c, vec![n, m]));
+        let got = t.value(s5_scan(&t, xv, av, bv, cv));
+        for (g, w) in got.data.iter().zip(&want)
+        {
+            assert!((g - w).abs() < 1e-4, "s5_scan: got {g}, want {w}");
+        }
+    }
+
+    /// `s5_scan` gradients (w.r.t. x, a_diag, B, C) match finite differences.
+    #[test]
+    fn s5_scan_gradient_check() {
+        let (seq, h_in, n, m) = (4usize, 2usize, 3usize, 2usize);
+        let x: Vec<f32> = (0..seq * h_in)
+            .map(|i| (i as f32 * 0.4 - 0.5).sin())
+            .collect();
+        let a: Vec<f32> = (0..n).map(|j| 0.5 + 0.1 * j as f32).collect();
+        let b: Vec<f32> = (0..h_in * n)
+            .map(|i| 0.5 + 0.3 * (i as f32).cos())
+            .collect();
+        let c: Vec<f32> = (0..n * m).map(|i| (i as f32 * 0.25 - 0.1).sin()).collect();
+        let loss_of = |xx: &[f32], aa: &[f32], bb: &[f32], cc: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xx.to_vec(), vec![seq, h_in]));
+            let av = t.input(TensorND::new(aa.to_vec(), vec![1, n]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![h_in, n]));
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![n, m]));
+            let y = s5_scan(&t, xv, av, bv, cv);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, h_in]));
+        let av = t.input(TensorND::new(a.clone(), vec![1, n]));
+        let bv = t.input(TensorND::new(b.clone(), vec![h_in, n]));
+        let cv = t.input(TensorND::new(c.clone(), vec![n, m]));
+        let y = s5_scan(&t, xv, av, bv, cv);
+        let grads = t.backward(y.mul(y).sum());
+        let (gx, ga, gb, gc) = (
+            grads[xv.idx()].clone(),
+            grads[av.idx()].clone(),
+            grads[bv.idx()].clone(),
+            grads[cv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "s5 grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gx, &x, &|p| loss_of(p, &a, &b, &c));
+        check(&ga, &a, &|p| loss_of(&x, p, &b, &c));
+        check(&gb, &b, &|p| loss_of(&x, &a, p, &c));
+        check(&gc, &c, &|p| loss_of(&x, &a, &b, p));
+    }
+
+    /// The `NdS5` layer trains (MSE↓ to a target) and is bit-for-bit deterministic.
+    #[test]
+    fn nd_s5_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (5usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(17);
+            let mut layer = NdS5::new(d_model, 6, 4, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "S5 did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
