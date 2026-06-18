@@ -1,5 +1,10 @@
 # SciRust — Feuille de route « recherche → fonctions »
 
+> **Statut : 80/80 ✅** — tous les papers candidats (#1–#80) sont livrés (testés,
+> oracle/gradient-check honnête, 8 gates verts), du certifiable au LLM N-D, des
+> optimiseurs à la quantification, des modèles de séquence à la vérification
+> complète et à l'inférence vérifiable.
+>
 > Papers de recherche réels sélectionnés pour leur **fit avec les fondamentaux**
 > de scirust (déterminisme bit-exact, certifiabilité, Rust pur testable) et
 > traduits en **fonctions concrètes**. Chaque entrée : référence → fonction/
@@ -19,7 +24,7 @@
 | 1 | Gowal et al., *On the Effectiveness of Interval Bound Propagation* (2018) | `IbpMlp::certify(box) -> box` + `certified_robust` : intervalles propagés couche par couche ; **borne de sortie prouvée** (soundness testée) | `nn::ibp` | ✅ | S |
 | 2 | Zhang et al., *CROWN* (NeurIPS 2018) ; Wang et al., *β-CROWN* (NeurIPS 2021, arXiv:2103.06624) | `crown_bounds` — bornes de sortie par relaxation linéaire (back-substitution) **plus serrées qu'IBP** ; soundness + tighter-than-IBP testés ; exposé dans `certify` (affiche IBP **et** CROWN) | `nn::ibp` | ✅ | L |
 | 3 | Demmel & Nguyen, *Algorithms for Efficient Reproducible Floating-Point Summation* (ACM TOMS 2020) | `reproducible_sum`/`_mean`/`_dot` : somme **bit-identique quel que soit l'ordre / le nombre de threads** (tri canonique + expansion exacte) | `reproducible` | ✅ | M |
-| 4 | Katz et al., *Reluplex* (CAV 2017, arXiv:1702.01135) ; *Marabou* (CAV 2019) | `verify-net` : vérification **complète** (SMT) d'une propriété sur un petit réseau ReLU | `scirust-neuro-symbolic` + CLI | 📋 | XL |
+| 4 | Katz et al., *Reluplex* (CAV 2017, arXiv:1702.01135) ; *Marabou* (CAV 2019) | `reluplex_verify`/`reluplex_unstable_count` : vérification **complète** de style SMT — recherche de **satisfiabilité** d'un contre-exemple par **case-splitting des phases ReLU**, mais **paresseux** : un neurone dont l'intervalle de pré-activation reste d'un seul côté de 0 sur la boîte est **stable** (phase forcée, jamais scindée) ; seuls les neurones **instables** sont scindés (`2^instables` feuilles vs `2^cachés` du MILP eager) ; chaque feuille (un patron ReLU complet) est affine, contre-exemple cherché par LP 2D exact (partagé avec #31) ; oracle : **accord avec MILP** (deux méthodes exactes, balayage de rayons) + contre-exemple réel (SAT) + **scinde moins** que tous les neurones (élimination par bornes) + déterminisme. Petit réseau (2 entrées, 1 couche cachée) | `nn::ibp` | ✅ | XL |
 | 5 | *DiFR: Inference Verification Despite Nondeterminism* (2025, arXiv:2511.20621) | `scirust_runtime::difr::difr_verify` : vérifie une sortie d'inférence **malgré le non-déterminisme FP** — recompute une **référence canonique** par `reproducible_dot` (produits + somme en f64, indépendant de l'ordre) et accepte ssi la sortie revendiquée est dans une **enveloppe d'erreur FP saine** (`γ·Σ\|termes\|` propagée à travers les couches, ReLU 1-lipschitzienne) ; oracle : accepte un calcul f32 dans un **ordre de sommation différent** ; enveloppe **saine** (1000 ordres aléatoires tous acceptés) et **fine** (~ppm de l'échelle ⇒ contrôle utile) ; **rejette la falsification** (au-delà de l'enveloppe) + déterminisme. Prolonge les certificats `proof` bit-exacts (qui rejetteraient une sortie honnête entre matériels différents) | `scirust_runtime::difr` | ✅ | L |
 
 ## Tier 2 — Pile LLM N-D (gains rapides, gradient-checkables)

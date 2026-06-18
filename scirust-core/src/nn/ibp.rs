@@ -567,6 +567,135 @@ pub fn milp_verify_robustness(
     }
 }
 
+/// Minimum margin over **one fixed ReLU pattern** (`active[i]` = neuron `i` on),
+/// over the box ∩ the pattern's activation half-spaces, and its minimiser. `None`
+/// if the pattern's region is empty. Helper shared by the Reluplex search.
+fn pattern_min_margin(
+    l1: &IbpLinear,
+    l2: &IbpLinear,
+    base: &[(f32, f32, f32)],
+    active: &[bool],
+    t: usize,
+) -> Option<(f32, Vec<f32>)> {
+    let (h, k) = (l1.out_f, l2.out_f);
+    let mut region = base.to_vec();
+    for (i, &on) in active.iter().enumerate()
+    {
+        let (w0, w1, b1i) = (l1.w[i], l1.w[h + i], l1.b[i]);
+        if on
+        {
+            region.push((-w0, -w1, b1i)); // zᵢ ≥ 0
+        }
+        else
+        {
+            region.push((w0, w1, -b1i)); // zᵢ ≤ 0
+        }
+    }
+    let mut best: Option<(f32, Vec<f32>)> = None;
+    for j in 0..k
+    {
+        if j == t
+        {
+            continue;
+        }
+        let (mut a0, mut a1) = (0.0f32, 0.0f32);
+        let mut d = l2.b[t] - l2.b[j];
+        for (i, &on) in active.iter().enumerate()
+        {
+            if on
+            {
+                let coef = l2.w[i * k + t] - l2.w[i * k + j];
+                a0 += coef * l1.w[i];
+                a1 += coef * l1.w[h + i];
+                d += coef * l1.b[i];
+            }
+        }
+        if let Some((val, pt)) = lp_min_2d(&region, (a0, a1))
+        {
+            if best.as_ref().is_none_or(|(bm, _)| val + d < *bm)
+            {
+                best = Some((val + d, pt.to_vec()));
+            }
+        }
+    }
+    best
+}
+
+/// **Reluplex-style** complete verification (Katz et al., *Reluplex*, CAV 2017): an
+/// SMT-flavoured **satisfiability search** for a counterexample by **case-splitting
+/// ReLU phases** — but **lazily**: a neuron whose pre-activation interval stays on
+/// one side of 0 over the box is **stable**, so its phase is forced (Reluplex never
+/// splits it); only the **unstable** neurons are split (`2^unstable` leaves, vs the
+/// `2^hidden` of eager [`milp_min_margin`]). On each leaf (a full ReLU pattern) the
+/// network is affine, and a violating input is sought by minimising each margin over
+/// the pattern's region (the exact 2-D LP, shared with the MILP verifier). Returns
+/// the first counterexample found ([`Unsafe`](BabResult::Unsafe)) or
+/// [`Robust`](BabResult::Robust). Exact for the (small, 2-input, 1-hidden) network;
+/// agrees with [`milp_verify_robustness`].
+pub fn reluplex_verify(
+    l1: &IbpLinear,
+    l2: &IbpLinear,
+    input: &Interval,
+    true_class: usize,
+) -> BabResult {
+    assert_eq!(l1.in_f, 2, "reluplex_verify: exactly 2 inputs");
+    let h = l1.out_f;
+    // Bound-based phase elimination: classify each hidden neuron over the box.
+    let zb = l1.forward_interval(input);
+    let mut active_base = vec![false; h]; // stable-active ⇒ true
+    let mut unstable = Vec::new();
+    for (i, ab) in active_base.iter_mut().enumerate()
+    {
+        if zb.lo[i] >= 0.0
+        {
+            *ab = true; // stable active (forced)
+        }
+        else if zb.hi[i] <= 0.0
+        {
+            // stable inactive (forced off)
+        }
+        else
+        {
+            unstable.push(i); // must be split
+        }
+    }
+    let base = vec![
+        (1.0, 0.0, input.hi[0]),
+        (-1.0, 0.0, -input.lo[0]),
+        (0.0, 1.0, input.hi[1]),
+        (0.0, -1.0, -input.lo[1]),
+    ];
+    // Case-split only the unstable neurons.
+    for pat in 0..(1usize << unstable.len())
+    {
+        let mut active = active_base.clone();
+        for (bit, &nu) in unstable.iter().enumerate()
+        {
+            if (pat >> bit) & 1 == 1
+            {
+                active[nu] = true;
+            }
+        }
+        if let Some((m, witness)) = pattern_min_margin(l1, l2, &base, &active, true_class)
+        {
+            if m <= 0.0
+            {
+                return BabResult::Unsafe(witness); // SAT: a real counterexample
+            }
+        }
+    }
+    BabResult::Robust
+}
+
+/// The number of **unstable** hidden ReLUs over the box — the neurons Reluplex must
+/// case-split (the rest are bound-eliminated). `2^this` is the leaf count.
+pub fn reluplex_unstable_count(l1: &IbpLinear, input: &Interval) -> usize {
+    let zb = l1.forward_interval(input);
+    (0..l1.out_f)
+        .filter(|&i| zb.lo[i] < 0.0 && zb.hi[i] > 0.0)
+        .count()
+}
+
 /// A **zonotope** over `n` dimensions: a center `c` plus `m` generator vectors,
 /// concretizing to `{ c + Σ εᵢ gᵢ : εᵢ ∈ [−1, 1] }`. Affine maps transform it
 /// **exactly**; ReLU is over-approximated (DeepZ). The shared `εᵢ` let it track
@@ -1373,6 +1502,83 @@ mod tests {
         assert!(
             strictly_tighter,
             "exact MILP never strictly tighter than DeepPoly"
+        );
+    }
+
+    /// **Reluplex agrees with MILP**: the lazy ReLU-phase search and the eager MILP
+    /// enumeration — two exact methods — return the same Robust/Unsafe decision across
+    /// a sweep of radii.
+    #[test]
+    fn reluplex_matches_milp() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = IbpLinear::from_nd_linear(&NdLinear::new(2, 4, &mut rng));
+        let l2 = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let net = vec![l1.clone(), l2.clone()];
+        let x = [0.1f32, -0.2];
+        let t = argmax(&forward_layers(&net, &x));
+        for k in 1..30
+        {
+            let eps = 0.05 * k as f32;
+            let b = Interval::around(&x, eps);
+            let rp = reluplex_verify(&l1, &l2, &b, t);
+            let mp = milp_verify_robustness(&l1, &l2, &b, t);
+            assert_eq!(
+                matches!(rp, BabResult::Robust),
+                matches!(mp, BabResult::Robust),
+                "reluplex/milp disagree at eps {eps}"
+            );
+        }
+    }
+
+    /// Reluplex returns a **real** counterexample (SAT) at a large radius.
+    #[test]
+    fn reluplex_finds_valid_counterexample() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = IbpLinear::from_nd_linear(&NdLinear::new(2, 4, &mut rng));
+        let l2 = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let net = vec![l1.clone(), l2.clone()];
+        let x = [0.1f32, -0.2];
+        let t = argmax(&forward_layers(&net, &x));
+        let b = Interval::around(&x, 1.5);
+        match reluplex_verify(&l1, &l2, &b, t)
+        {
+            BabResult::Unsafe(cx) =>
+            {
+                assert!(
+                    worst_margin(&net, &cx, t, 3) <= 1e-3,
+                    "not a counterexample"
+                );
+                assert!(cx[0] >= b.lo[0] - 1e-3 && cx[0] <= b.hi[0] + 1e-3);
+                assert!(cx[1] >= b.lo[1] - 1e-3 && cx[1] <= b.hi[1] + 1e-3);
+            },
+            other => panic!("expected Unsafe, got {other:?}"),
+        }
+    }
+
+    /// **Lazy splitting**: at a small radius most ReLUs are *stable* (bound-eliminated),
+    /// so Reluplex splits **fewer** than all `hidden` neurons — while still deciding
+    /// correctly (agreeing with MILP).
+    #[test]
+    fn reluplex_prunes_stable_relus() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = IbpLinear::from_nd_linear(&NdLinear::new(2, 4, &mut rng));
+        let l2 = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let net = vec![l1.clone(), l2.clone()];
+        let x = [0.1f32, -0.2];
+        let t = argmax(&forward_layers(&net, &x));
+        let small = Interval::around(&x, 0.03);
+        let unstable = reluplex_unstable_count(&l1, &small);
+        assert!(
+            unstable < l1.out_f,
+            "no stable ReLUs pruned: {unstable} of {}",
+            l1.out_f
+        );
+        assert_eq!(
+            matches!(reluplex_verify(&l1, &l2, &small, t), BabResult::Robust),
+            matches!(
+                milp_verify_robustness(&l1, &l2, &small, t),
+                BabResult::Robust
+            )
         );
     }
 }

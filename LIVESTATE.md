@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 100 : Reluplex (#4) — vérification complète SMT — ROADMAP 80/80 ✅
+- `nn::ibp::reluplex_verify`/`reluplex_unstable_count` (Katz 2017) : recherche SAT d'un
+  contre-exemple par case-splitting **paresseux** des phases ReLU (neurones stables = phase forcée,
+  jamais scindés ; seuls les instables scindés ⇒ 2^instables feuilles vs 2^cachés du MILP). Feuille
+  = patron affine, LP 2D exact (partagé #31). Distinct de #26 (split entrée) et #31 (eager).
+- Bibliothèque seule (pas de CLI ni multilingue). Module nn::ibp.
+- Tests (3, core) : accord avec MILP (balayage rayons, 2 méthodes exactes) ; contre-exemple réel
+  (SAT) ; scinde moins que tous les neurones (élimination par bornes) à petit rayon ; déterministe.
+- docs : roadmap #4 📋→✅ ; CHANGELOG. 613 tests core (+3) ; 8 gates verts (à confirmer).
+- **🎉 LES 80 ITEMS DE LA ROADMAP RECHERCHE SONT ✅ (80/80).**
+
 ## Session 2026-06-18 — volet 99 : Inférence vérifiable (#80) — Freivalds + engagement + Fiat-Shamir
 - `scirust_runtime::vinfer` : modèle linéaire entier sur GF(2³¹−1) engagé par hash ; vérif sortie
   batchée Y par Freivalds (W·(X·r)=Y·r, r par Fiat-Shamir de hash(engagement,X,Y)). Compact
@@ -11,7 +22,7 @@
 - Tests (4, runtime) : accepte inférence correcte + déterministe ; 1000 falsifications toutes
   rejetées (soundness) ; engagement lie le modèle ; Fiat-Shamir lie la sortie (sortie d'autres
   entrées rejetée).
-- docs : roadmap #80 📋→✅ ; CHANGELOG. 610 core + 7 runtime ; 8 gates verts (à confirmer).
+- docs : roadmap #80 📋→✅ ; CHANGELOG. 610 core + 7 runtime ; 8 gates verts ✓ ; commit 4dc3436.
 
 ## Session 2026-06-18 — volet 98 : DiFR (#5) — vérification d'inférence malgré le non-déterminisme
 - `scirust_runtime::difr::difr_verify` (2025) : référence canonique via reproducible_dot (f64,

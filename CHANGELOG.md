@@ -19,6 +19,22 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Reluplex — vérification *complète* de style SMT** (`nn::ibp::reluplex_verify`/
+  `reluplex_unstable_count`, Katz et al. 2017, roadmap #4) : une recherche de **satisfiabilité**
+  d'un contre-exemple par **case-splitting des phases ReLU** — mais **paresseuse**, la signature de
+  Reluplex : un neurone dont l'intervalle de pré-activation reste entièrement d'un côté de 0 sur la
+  boîte est **stable**, donc sa phase est **forcée** (jamais scindée) ; seuls les neurones
+  **instables** sont scindés, soit `2^instables` feuilles au lieu des `2^cachés` de l'énumération
+  *eager* du MILP (#31). Sur chaque feuille (un patron ReLU complet) le réseau est affine et un
+  contre-exemple est cherché en minimisant chaque marge sur la région du patron (le **LP 2D exact**
+  partagé avec le vérificateur MILP) ; on renvoie le **premier** contre-exemple trouvé (SAT) ou
+  Robust. Distinct du branch-and-bound (#26, scinde le domaine d'entrée) et du MILP (#31, énumère
+  *tous* les patrons) par le **splitting paresseux des phases ReLU**. Oracle honnête : **accord avec
+  MILP** sur tout un balayage de rayons (deux méthodes exactes ⇒ mêmes décisions) ; contre-exemple
+  réel (marge ≤ 0, dans la boîte) ; à petit rayon, **moins de neurones scindés** que `cachés`
+  (élimination par bornes) ; déterministe. Réseau (2 entrées, 1 couche). **Clôt la pile de
+  vérification** (IBP, CROWN, zonotopes, DeepPoly, randomized smoothing, Lipschitz, CROWN-IBP, BaB,
+  MILP, Reluplex).
 - **Inférence vérifiable — argument cryptographique compact** (`scirust_runtime::vinfer`,
   ZK-based Verifiable ML, roadmap #80) : prolonge les certificats `proof` de la ré-exécution
   bit-exacte vers une **garantie de soundness succincte**. Le modèle (une couche linéaire entière
