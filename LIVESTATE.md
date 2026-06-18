@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 99 : Inférence vérifiable (#80) — Freivalds + engagement + Fiat-Shamir
+- `scirust_runtime::vinfer` : modèle linéaire entier sur GF(2³¹−1) engagé par hash ; vérif sortie
+  batchée Y par Freivalds (W·(X·r)=Y·r, r par Fiat-Shamir de hash(engagement,X,Y)). Compact
+  (O(out·in+in·b) vs O(out·in·b)), sain (faux Y passe ≤ (1/p)^k). Pas de ZK (vérifieur a les poids).
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue). Nouveau module.
+- Tests (4, runtime) : accepte inférence correcte + déterministe ; 1000 falsifications toutes
+  rejetées (soundness) ; engagement lie le modèle ; Fiat-Shamir lie la sortie (sortie d'autres
+  entrées rejetée).
+- docs : roadmap #80 📋→✅ ; CHANGELOG. 610 core + 7 runtime ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 98 : DiFR (#5) — vérification d'inférence malgré le non-déterminisme
 - `scirust_runtime::difr::difr_verify` (2025) : référence canonique via reproducible_dot (f64,
   indépendant de l'ordre) + enveloppe d'erreur FP saine (γ·Σ|termes| propagée, ReLU 1-Lipschitz).
@@ -11,7 +21,7 @@
 - Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue).
 - Tests (3, runtime) : accepte un ordre de sommation différent ; enveloppe saine (1000 ordres
   tous acceptés) & fine (<0.001 échelle) ; rejette falsification (change la classe) + déterminisme.
-- docs : roadmap #5 📋→✅ ; CHANGELOG. 610 tests core + 3 runtime ; 8 gates verts (à confirmer).
+- docs : roadmap #5 📋→✅ ; CHANGELOG. 610 core + 3 runtime ; 8 gates verts ✓ ; commit 831746a.
 
 ## Session 2026-06-18 — volet 97 : MILP (#31) — vérification exacte
 - `nn::ibp::milp_min_margin`/`milp_verify_robustness` (Tjeng 2019) : réseau ReLU 2-entrées

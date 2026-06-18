@@ -19,6 +19,24 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Inférence vérifiable — argument cryptographique compact** (`scirust_runtime::vinfer`,
+  ZK-based Verifiable ML, roadmap #80) : prolonge les certificats `proof` de la ré-exécution
+  bit-exacte vers une **garantie de soundness succincte**. Le modèle (une couche linéaire entière
+  quantifiée sur le corps premier `GF(p)`, `p = 2³¹−1`) est **engagé** par le hachage de ses poids.
+  Pour vérifier une sortie batchée `Y` revendiquée pour des entrées `X`, le vérifieur exécute la
+  **vérification de Freivalds** sur `GF(p)` : tirer un `r` aléatoire et tester `W·(X·r) = Y·r`.
+  Calculer `W·(X·r)` coûte `O(out·in + in·b)` contre `O(out·in·b)` pour recalculer `Y = W·X`, donc
+  pour un batch c'est **succinct** (sous-linéaire dans le coût de recalcul). Un `Y` faux passe avec
+  proba `≤ 1/p` par défi, donc quelques défis donnent une erreur de soundness négligeable. Le défi
+  `r` est dérivé par **Fiat-Shamir** d'un hachage de `(engagement, X, Y)`, donc non-interactif et
+  **lié à la sortie revendiquée** (le prouveur ne peut pas adapter `Y` à un `r` connu). Oracle
+  honnête : accepte une inférence correcte (déterministe) ; **soundness** — sur 1000 falsifications
+  aléatoires d'une entrée de la sortie, **toutes** rejetées ; l'engagement **lie** le modèle
+  (vérifier contre l'engagement d'un autre modèle échoue) ; Fiat-Shamir **lie** la sortie (la sortie
+  valide d'**autres** entrées est rejetée pour `X`). Fournit la **soundness** cryptographique (la
+  sortie provient prouvablement du modèle engagé), **pas** le zero-knowledge — le vérifieur détient
+  les poids ; les zk-SNARK cachant les poids restent hors périmètre. Couronne la pile de preuve
+  (sommation reproductible #3, certificats `proof`, DiFR #5).
 - **DiFR — vérification d'inférence malgré le non-déterminisme** (`scirust_runtime::difr::difr_verify`,
   2025, roadmap #5) : les certificats [`proof`] vérifient une inférence par **ré-exécution
   bit-exacte** — ce qui ne marche que si le vérificateur reproduit l'arithmétique du prouveur à

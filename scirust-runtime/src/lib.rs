@@ -297,3 +297,4 @@ pub mod enclave;
 pub mod proof;
 pub mod proofcli;
 pub mod quant;
+pub mod vinfer;
