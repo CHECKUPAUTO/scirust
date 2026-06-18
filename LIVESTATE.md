@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 91 : AQLM (#70) — quantification additive multi-codebook
+- `quantization::quantize_aqlm`/`AqlmResult` (Egiazarian 2024) : groupes de dim g, chaque groupe
+  ≈ somme de M mots de code (un par codebook, K mots chacun) ; codebooks appris par k-means
+  résiduel + optimisation alternée (ré-encodage glouton + ré-ajustement LS). Vectoriel ⇒ capte
+  la structure inter-dim. Module quantization existant.
+- Bibliothèque seule (pas de CLI ni multilingue).
+- Tests (2, core) : < 0.7× RTN scalaire à ~2-bit égal (M·log₂K/g) sur poids structurés ;
+  round-trip (longueur non divisible) + déterminisme (codes + bits identiques).
+- docs : roadmap #70 📋→✅ ; CHANGELOG. 597 tests core (+2) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 90 : S5 (#52) — SSM MIMO + scan associatif parallèle
 - `nn::nd_layers::s5_scan`/`s5_parallel_scan`/`NdS5` (Smith 2023) : SSM MIMO diagonal (état
   partagé n piloté par toutes entrées via B, lu via C ; hₜ=Ā⊙hₜ₋₁+xₜB, yₜ=hₜC) ; scan associatif
@@ -10,7 +20,7 @@
 - Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
 - Tests (4, core) : scan parallèle ≡ séquentiel (aₜ variable ⇒ vrai associatif) ; s5_scan ≡
   référence MIMO ; gradient check (x,Ā,B,C) ; NdS5 entraîne (MSE↓ <0.6×) + déterminisme.
-- docs : roadmap #52 📋→✅ ; CHANGELOG. 595 tests core (+4) ; 8 gates verts (à confirmer).
+- docs : roadmap #52 📋→✅ ; CHANGELOG. 595 tests core (+4) ; 8 gates verts ✓ ; commit 55a31ad.
 
 ## Session 2026-06-18 — volet 89 : Mamba-2 / SSD (#50) — dualité espace-d'états ↔ attention
 - `nn::nd_layers::ssd_dual`/`NdMamba2` (Dao & Gu 2024) : A scalaire par pas ⇒ récurrence

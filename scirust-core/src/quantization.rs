@@ -2130,3 +2130,319 @@ mod omniquant_tests {
         );
     }
 }
+
+// ====================================================================
+// AQLM — Additive Quantization for Language Models (Egiazarian et al.,
+// ICML 2024, arXiv:2401.06118). Roadmap #70.
+// ====================================================================
+
+/// Result of [`quantize_aqlm`]: `num_codebooks` learned codebooks (each
+/// `codebook_size` codewords of dimension `group_size`) plus, per weight group, one
+/// code index into **each** codebook. The group is reconstructed by **summing** the
+/// chosen codewords — *additive* quantization.
+pub struct AqlmResult {
+    codebooks: Vec<Vec<f32>>, // M codebooks, each K·g floats (row-major K×g)
+    codes: Vec<usize>,        // n_groups · M, codes[i·M + m] = index into codebook m
+    group_size: usize,
+    num_codebooks: usize,
+    codebook_size: usize,
+    n_weights: usize,
+}
+
+impl AqlmResult {
+    /// Reconstruct the weights: each group is `Σ_m codebook_m[code_m]`.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let (g, m) = (self.group_size, self.num_codebooks);
+        let n_groups = self.codes.len().checked_div(m).unwrap_or(0);
+        let mut out = vec![0.0f32; n_groups * g];
+        for i in 0..n_groups
+        {
+            for (cb, codebook) in self.codebooks.iter().enumerate()
+            {
+                let a = self.codes[i * m + cb];
+                for t in 0..g
+                {
+                    out[i * g + t] += codebook[a * g + t];
+                }
+            }
+        }
+        out.truncate(self.n_weights);
+        out
+    }
+
+    /// The flat code indices (`n_groups · num_codebooks`).
+    pub fn codes(&self) -> &[usize] {
+        &self.codes
+    }
+
+    /// Effective bits per weight: `num_codebooks·log₂(codebook_size)/group_size`
+    /// (codebook storage is amortised over all groups).
+    pub fn bits_per_weight(&self) -> f32 {
+        self.num_codebooks as f32 * (self.codebook_size as f32).log2() / self.group_size as f32
+    }
+}
+
+/// Index of the nearest codeword in a flat `K×g` codebook to vector `v` (squared
+/// L2; ties to the lower index — deterministic).
+fn nearest_codeword(codebook: &[f32], k: usize, g: usize, v: &[f32]) -> usize {
+    let mut best = 0usize;
+    let mut bd = f32::INFINITY;
+    for j in 0..k
+    {
+        let mut d = 0.0f32;
+        for t in 0..g
+        {
+            let e = v[t] - codebook[j * g + t];
+            d += e * e;
+        }
+        if d < bd
+        {
+            bd = d;
+            best = j;
+        }
+    }
+    best
+}
+
+/// Deterministic vector k-means: `k` centroids of dimension `g` fitted to `data`
+/// (evenly-spaced initialisation, `iters` Lloyd steps; empty clusters keep their
+/// previous value). Returns a flat `K×g` codebook.
+fn vec_kmeans(data: &[Vec<f32>], k: usize, g: usize, iters: usize) -> Vec<f32> {
+    let n = data.len();
+    let mut cents = vec![0.0f32; k * g];
+    if n == 0
+    {
+        return cents;
+    }
+    for j in 0..k
+    {
+        let idx = (j * n / k).min(n - 1);
+        cents[j * g..j * g + g].copy_from_slice(&data[idx][..g]);
+    }
+    for _ in 0..iters
+    {
+        let mut sum = vec![0.0f32; k * g];
+        let mut cnt = vec![0usize; k];
+        for v in data
+        {
+            let a = nearest_codeword(&cents, k, g, v);
+            for t in 0..g
+            {
+                sum[a * g + t] += v[t];
+            }
+            cnt[a] += 1;
+        }
+        for j in 0..k
+        {
+            if cnt[j] > 0
+            {
+                for t in 0..g
+                {
+                    cents[j * g + t] = sum[j * g + t] / cnt[j] as f32;
+                }
+            }
+        }
+    }
+    cents
+}
+
+/// **AQLM** — additive (multi-codebook) quantization. The weights are split into
+/// groups of `group_size`; each group vector is approximated by the **sum** of one
+/// codeword taken from each of `num_codebooks` learned codebooks (each with
+/// `codebook_size` entries). Codebooks are initialised by **residual k-means** and
+/// then refined by **alternating optimisation** — repeatedly re-encode every group
+/// (greedy residual assignment) and re-fit each codebook by least squares given the
+/// other codebooks' current contributions (AQLM's beam search is simplified here to
+/// greedy residual assignment). Because the codewords are *vectors*, additive
+/// quantization captures cross-dimension structure that scalar round-to-nearest
+/// cannot, so it reconstructs better at the same low bit budget. Deterministic.
+pub fn quantize_aqlm(
+    w: &[f32],
+    group_size: usize,
+    num_codebooks: usize,
+    codebook_size: usize,
+    iters: usize,
+) -> AqlmResult {
+    let (g, m, k) = (group_size, num_codebooks, codebook_size);
+    assert!(g >= 1 && m >= 1 && k >= 1, "AQLM: sizes must be ≥ 1");
+    let n_weights = w.len();
+    let n_groups = n_weights.div_ceil(g);
+    // Split (zero-padding the final partial group).
+    let mut groups: Vec<Vec<f32>> = Vec::with_capacity(n_groups);
+    for i in 0..n_groups
+    {
+        let mut grp = vec![0.0f32; g];
+        for (t, gt) in grp.iter_mut().enumerate()
+        {
+            let idx = i * g + t;
+            if idx < n_weights
+            {
+                *gt = w[idx];
+            }
+        }
+        groups.push(grp);
+    }
+    // Initialise codebooks by residual k-means.
+    let mut codebooks: Vec<Vec<f32>> = Vec::with_capacity(m);
+    let mut residual: Vec<Vec<f32>> = groups.clone();
+    for _ in 0..m
+    {
+        let cents = vec_kmeans(&residual, k, g, iters);
+        for grp in residual.iter_mut()
+        {
+            let a = nearest_codeword(&cents, k, g, grp);
+            for t in 0..g
+            {
+                grp[t] -= cents[a * g + t];
+            }
+        }
+        codebooks.push(cents);
+    }
+    // Greedy residual encoding of every group across all codebooks.
+    let encode_all = |codebooks: &[Vec<f32>]| -> Vec<usize> {
+        let mut codes = vec![0usize; n_groups * m];
+        for (i, grp) in groups.iter().enumerate()
+        {
+            let mut r = grp.clone();
+            for (cb, codebook) in codebooks.iter().enumerate()
+            {
+                let a = nearest_codeword(codebook, k, g, &r);
+                codes[i * m + cb] = a;
+                for t in 0..g
+                {
+                    r[t] -= codebook[a * g + t];
+                }
+            }
+        }
+        codes
+    };
+    // Alternating refinement: re-encode, then re-fit each codebook by LS on the
+    // partial residual (group minus the other codebooks' contributions).
+    for _ in 0..iters
+    {
+        let codes = encode_all(&codebooks);
+        for cb in 0..m
+        {
+            let mut sum = vec![0.0f32; k * g];
+            let mut cnt = vec![0usize; k];
+            for (i, grp) in groups.iter().enumerate()
+            {
+                let mut pr = grp.clone();
+                for (mm, codebook) in codebooks.iter().enumerate()
+                {
+                    if mm == cb
+                    {
+                        continue;
+                    }
+                    let a = codes[i * m + mm];
+                    for t in 0..g
+                    {
+                        pr[t] -= codebook[a * g + t];
+                    }
+                }
+                let a = codes[i * m + cb];
+                for t in 0..g
+                {
+                    sum[a * g + t] += pr[t];
+                }
+                cnt[a] += 1;
+            }
+            for j in 0..k
+            {
+                if cnt[j] > 0
+                {
+                    for t in 0..g
+                    {
+                        codebooks[cb][j * g + t] = sum[j * g + t] / cnt[j] as f32;
+                    }
+                }
+            }
+        }
+    }
+    let codes = encode_all(&codebooks);
+    AqlmResult {
+        codebooks,
+        codes,
+        group_size: g,
+        num_codebooks: m,
+        codebook_size: k,
+        n_weights,
+    }
+}
+
+#[cfg(test)]
+mod aqlm_tests {
+    use super::*;
+    use crate::nn::rng::PcgEngine;
+
+    fn mse(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(&x, &y)| (x - y) * (x - y))
+            .sum::<f32>()
+            / a.len() as f32
+    }
+
+    /// Scalar symmetric round-to-nearest error at `bits` over the full range.
+    fn rtn_mse(w: &[f32], bits: u32) -> f32 {
+        let qmax = ((1i32 << (bits - 1)) - 1).max(1) as f32;
+        let maxabs = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+        let deq: Vec<f32> = w
+            .iter()
+            .map(|&x| (x / scale).round().clamp(-qmax, qmax) * scale)
+            .collect();
+        mse(w, &deq)
+    }
+
+    /// AQLM beats scalar RTN at a matched ~2-bit budget on **structured** weights
+    /// (groups built from a few prototype directions) — additive *vector* codebooks
+    /// capture cross-dimension structure scalar quantisation cannot.
+    #[test]
+    fn aqlm_beats_rtn_on_structured_weights() {
+        let (g, m, k) = (4usize, 2usize, 16usize); // 2·log2(16)/4 = 2 bits/weight
+        let n_groups = 256usize;
+        let mut rng = PcgEngine::new(20);
+        // A few prototype directions; each group ≈ scaled prototype + small noise.
+        let n_proto = 6usize;
+        let protos: Vec<Vec<f32>> = (0..n_proto)
+            .map(|_| (0..g).map(|_| rng.float_signed()).collect())
+            .collect();
+        let mut w = Vec::with_capacity(n_groups * g);
+        for i in 0..n_groups
+        {
+            let p = &protos[i % n_proto];
+            let scale = 0.5 + (i % 5) as f32 * 0.4;
+            for &pt in p.iter()
+            {
+                w.push(scale * pt + 0.03 * rng.float_signed());
+            }
+        }
+        let res = quantize_aqlm(&w, g, m, k, 8);
+        let deq = res.dequantize();
+        assert_eq!(deq.len(), w.len());
+        let e_aqlm = mse(&w, &deq);
+        let e_rtn = rtn_mse(&w, 2);
+        assert!(
+            e_aqlm < 0.7 * e_rtn,
+            "AQLM {e_aqlm} not better than 0.7·RTN {e_rtn}"
+        );
+        assert!((res.bits_per_weight() - 2.0).abs() < 1e-6);
+    }
+
+    /// Round-trip dimensions (incl. a non-divisible length) and bit-exact determinism.
+    #[test]
+    fn aqlm_roundtrip_shape_and_determinism() {
+        let mut rng = PcgEngine::new(21);
+        let w: Vec<f32> = (0..103).map(|_| rng.float_signed()).collect(); // not a multiple of g
+        let res = quantize_aqlm(&w, 4, 2, 8, 5);
+        assert_eq!(res.dequantize().len(), w.len());
+        let res2 = quantize_aqlm(&w, 4, 2, 8, 5);
+        assert_eq!(res.codes(), res2.codes());
+        let (d1, d2) = (res.dequantize(), res2.dequantize());
+        assert_eq!(
+            d1.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+            d2.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}

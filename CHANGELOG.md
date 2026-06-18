@@ -19,6 +19,20 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **AQLM — quantification additive multi-codebook** (`quantization::quantize_aqlm`/`AqlmResult`,
+  Egiazarian et al. 2024, roadmap #70) : au lieu de quantifier chaque poids **scalairement**, AQLM
+  découpe les poids en **groupes** de dimension `g` et approxime chaque groupe par la **somme**
+  d'un mot de code tiré de chacun de `M` codebooks appris (de `K` mots chacun). Les codebooks sont
+  initialisés par **k-means résiduel** puis affinés par **optimisation alternée** : ré-encoder
+  chaque groupe (assignation résiduelle gloutonne à travers les `M` codebooks) puis ré-ajuster
+  chaque codebook par moindres carrés sachant la contribution des autres (la beam search d'AQLM
+  est ici simplifiée en assignation gloutonne — documenté). Comme les mots de code sont des
+  **vecteurs**, la quantification additive capte la **structure inter-dimensions** que le
+  round-to-nearest scalaire ignore, d'où une bien meilleure reconstruction à bas budget. Oracle
+  honnête : erreur **< 0,7× RTN** scalaire à budget ~2-bit **égal** (`M·log₂K/g`) sur des poids
+  structurés (groupes bâtis sur quelques directions prototypes) + round-trip exact (longueur non
+  divisible, padding zéro) + déterminisme bit-exact. Rejoint la famille de quantification (GPTQ,
+  AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
 - **S5 — SSM MIMO + scan associatif parallèle** (`nn::nd_layers::s5_scan`/`s5_parallel_scan`/
   `NdS5`, Smith et al. 2023, roadmap #52) : contrairement aux SSM **SISO par canal** de S4D
   (chaque canal son propre état indépendant), S5 pilote un **unique état partagé** de dimension
