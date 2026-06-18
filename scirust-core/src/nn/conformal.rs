@@ -385,6 +385,40 @@ pub fn rcps_select(risks: &[f32], n: usize, alpha: f32, delta: f32) -> Option<us
     hat
 }
 
+/// **Hoeffding p-value** for the one-sided null `H₀: R(λ) > α`, from the empirical
+/// risk `emp_risk` of `n` i.i.d. losses in `[0, 1]`. By Hoeffding's inequality the
+/// least-favourable null `R(λ) = α` makes
+/// `p = exp(−2n·(α − R̂)₊²)` **super-uniform** (`P(p ≤ u) ≤ u`) — exactly the
+/// validity a multiple-testing procedure needs. Returns `1` when `R̂ ≥ α` (no
+/// evidence the risk is controlled).
+pub fn hoeffding_pvalue(emp_risk: f32, n: usize, alpha: f32) -> f32 {
+    let slack = (alpha - emp_risk).max(0.0);
+    (-2.0 * n as f32 * slack * slack).exp()
+}
+
+/// **Learn then Test** (Angelopoulos et al., 2021) — distribution-free control of
+/// **arbitrary, non-nested** risks by multiple hypothesis testing. Given a grid of
+/// candidate configurations with empirical risks `emp_risks` (losses in `[0, 1]`,
+/// each from `n` i.i.d. points), turn every candidate into a [`hoeffding_pvalue`]
+/// for `H₀: R(λ) > α` and apply the **Bonferroni** family-wise correction at level
+/// `delta`: select every `λ` whose `p ≤ delta / m` (`m` = grid size). This
+/// guarantees that, with probability `≥ 1 − delta`, **every** returned
+/// configuration truly satisfies `R(λ) ≤ α` (family-wise error rate `≤ delta`) —
+/// with **no** assumption that risk is monotone in the index (unlike RCPS, which
+/// needs a nested family). Returns the selected indices. Pure, deterministic.
+pub fn learn_then_test(emp_risks: &[f32], n: usize, alpha: f32, delta: f32) -> Vec<usize> {
+    assert!(delta > 0.0 && delta < 1.0, "delta must be in (0,1)");
+    let m = emp_risks.len();
+    if m == 0
+    {
+        return Vec::new();
+    }
+    let threshold = delta / m as f32;
+    (0..m)
+        .filter(|&i| hoeffding_pvalue(emp_risks[i], n, alpha) <= threshold)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,5 +869,83 @@ mod tests {
             test_risk <= alpha,
             "RCPS test risk {test_risk} exceeds alpha {alpha}"
         );
+    }
+
+    /// The Hoeffding p-value matches its closed form and saturates at 1.
+    #[test]
+    fn hoeffding_pvalue_closed_form() {
+        // R̂ ≥ α ⇒ no evidence ⇒ p = 1.
+        assert_eq!(hoeffding_pvalue(0.30, 100, 0.20), 1.0);
+        assert_eq!(hoeffding_pvalue(0.20, 100, 0.20), 1.0);
+        // R̂ < α ⇒ p = exp(−2n(α−R̂)²): n=200, α−R̂=0.1 ⇒ exp(−4) ≈ 0.0183.
+        let p = hoeffding_pvalue(0.10, 200, 0.20);
+        assert!((p - (-4.0f32).exp()).abs() < 1e-6, "p = {p}");
+    }
+
+    /// **The Learn-then-Test guarantee, tested by simulation.** With *every*
+    /// candidate sitting on the boundary `R(λ) = α` (so all nulls are true), LtT's
+    /// Bonferroni correction keeps the family-wise error rate — the chance of
+    /// selecting *any* candidate — below `delta`, while the naive "select whenever
+    /// `R̂ ≤ α`" rule fails almost always. This is the whole point of the multiple-
+    /// testing correction, shown empirically.
+    #[test]
+    fn ltt_controls_family_wise_error_rate() {
+        let mut rng = PcgEngine::new(2024);
+        let (m, n, alpha, delta) = (20usize, 500usize, 0.20f32, 0.10f32);
+        let trials = 2000usize;
+        let (mut ltt_fail, mut naive_fail) = (0usize, 0usize);
+        for _ in 0..trials
+        {
+            // Each candidate's empirical risk: mean of n Bernoulli(α) losses.
+            let risks: Vec<f32> = (0..m)
+                .map(|_| (0..n).filter(|_| rng.float() < alpha).count() as f32 / n as f32)
+                .collect();
+            // LtT (Bonferroni): a false rejection iff *any* candidate is selected.
+            if !learn_then_test(&risks, n, alpha, delta).is_empty()
+            {
+                ltt_fail += 1;
+            }
+            // Naive: select any candidate whose empirical risk is ≤ α (no test).
+            if risks.iter().any(|&r| r <= alpha)
+            {
+                naive_fail += 1;
+            }
+        }
+        let ltt_fwer = ltt_fail as f32 / trials as f32;
+        let naive_fwer = naive_fail as f32 / trials as f32;
+        assert!(
+            ltt_fwer <= delta,
+            "LtT FWER {ltt_fwer} exceeds delta {delta}"
+        );
+        assert!(
+            naive_fwer > 0.9,
+            "naive selection should fail almost always, got {naive_fwer}"
+        );
+    }
+
+    /// LtT has **power**: candidates whose true risk is well below `α` are selected
+    /// with enough data, and candidates above `α` are not — and the result is
+    /// deterministic.
+    #[test]
+    fn ltt_selects_good_and_rejects_bad() {
+        let mut rng = PcgEngine::new(7);
+        let (n, alpha, delta) = (4000usize, 0.20f32, 0.10f32);
+        // True risks: two safe (0.05, 0.10), two unsafe (0.30, 0.45).
+        let true_risks = [0.05f32, 0.10, 0.30, 0.45];
+        let emp: Vec<f32> = true_risks
+            .iter()
+            .map(|&p| (0..n).filter(|_| rng.float() < p).count() as f32 / n as f32)
+            .collect();
+        let selected = learn_then_test(&emp, n, alpha, delta);
+        assert!(
+            selected.contains(&0) && selected.contains(&1),
+            "missed safe λ"
+        );
+        assert!(
+            !selected.contains(&2) && !selected.contains(&3),
+            "kept unsafe λ"
+        );
+        // Determinism.
+        assert_eq!(learn_then_test(&emp, n, alpha, delta), selected);
     }
 }

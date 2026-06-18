@@ -1,7 +1,19 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-17
+> Dernière mise à jour : 2026-06-18
+
+## Session 2026-06-18 — volet 76 : Learn then Test (#37) — contrôle de risques multiples
+- `nn::conformal::learn_then_test`/`hoeffding_pvalue` (Angelopoulos 2021) : contrôle
+  distribution-free de risques multiples **arbitraires** (non emboîtés). p-value de
+  Hoeffding p=exp(−2n(α−R̂)₊²) pour H₀:R(λ)>α + correction Bonferroni (p≤δ/m) ⇒ FWER≤δ.
+  Plus général que RCPS #36 (pas d'hypothèse de monotonie). Réutilise l'infra conformal.
+- Bibliothèque seule (pas de CLI ni multilingue). Module `nn::conformal` existant.
+- Tests (3, core) : p-value forme close (saturation à 1) ; **FWER≤δ vérifié par
+  simulation** (2000 essais, toutes configs sur frontière R=α : FWER mesuré ≤ 0,1 vs
+  sélection naïve qui échoue >90 %) ; puissance (sûres retenues, non-sûres rejetées) +
+  déterminisme. 16/16 tests conformal verts.
+- docs : roadmap #37 📋→✅ ; CHANGELOG. 550 tests core (+3) ; 8 gates (à confirmer).
 
 ## Session 2026-06-17 — volet 75 : Rényi DP accountant (#78) — budget confidentialité
 - `dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon` (Mironov 2017) : RDP gaussien
@@ -9,7 +21,7 @@
 - Bibliothèque seule (pas de CLI ni multilingue). Module `dp` existant.
 - Tests (2, core) : RDP/conversion exactes (formes closes) ; ε ≪ composition basique
   (steps=100,σ=4,δ=1e-5 : ~15 vs ~143) + monotonie.
-- docs : roadmap #78 📋→✅ ; CHANGELOG. 547 tests core (+2) ; 8 gates (à confirmer).
+- docs : roadmap #78 📋→✅ ; CHANGELOG. 547 tests core (+2) ; 8 gates verts ✓ ; commit 1af31eb.
 
 ## Session 2026-06-17 — volet 74 : Watermark LLM (#79) — provenance auditable
 - `nn::watermark` (Kirchenbauer 2023) : partition vert/rouge seedée (hash

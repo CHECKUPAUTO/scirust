@@ -19,6 +19,18 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Learn then Test (LtT)** (`nn::conformal::learn_then_test`/`hoeffding_pvalue`,
+  Angelopoulos et al. 2021, roadmap #37) : contrôle **distribution-free** de
+  **risques multiples arbitraires** (non emboîtés) par tests d'hypothèses. Chaque
+  configuration `λ` d'une grille devient une **p-value de Hoeffding** pour
+  `H₀: R(λ) > α` (`p = exp(−2n(α−R̂)₊²)`, super-uniforme sous le null), puis
+  correction **familiale de Bonferroni** au niveau `δ` : on retient les `λ` avec
+  `p ≤ δ/m`. Garantit que, avec proba `≥ 1−δ`, **toute** config retenue vérifie
+  `R(λ) ≤ α` (FWER `≤ δ`) — **sans** hypothèse de monotonie (contrairement à RCPS
+  #36). Oracle honnête : FWER vérifié **par simulation** (toutes les configs sur
+  la frontière `R=α` ⇒ FWER mesuré `≤ δ`, vs sélection naïve qui échoue ~toujours)
+  + puissance (les configs sûres sont retenues, les non-sûres rejetées) +
+  déterminisme. Couche de bibliothèque.
 - **Comptable RDP (Rényi DP)** (`dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon`,
   Mironov 2017, roadmap #78) : comptabilité de budget de confidentialité par
   **Rényi-DP**, plus serrée et plus principielle que la composition `(ε,δ)` naïve.
