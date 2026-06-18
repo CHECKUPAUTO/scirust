@@ -3,6 +3,20 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 106 : simulateur quantique MPS / Tensor-Train
+- `quantum::Mps`/`MpsNode` : état n-qubits en chaîne de tenseurs rang-3 (au lieu de 2ⁿ) ⇒ coût
+  O(n·χ³) tant que l'intrication est modérée. Porte 1q in place ; porte 2q = contraction θ +
+  application 4×4 + SVD tronquée (tn::ops::truncated_svd, Rust pur/nalgebra, ZÉRO FFI) à χ.
+  Amplitudes réelles f32 (H/X/Z/CNOT/CZ/Ry) ; complexe = futur.
+- Décision archi (réponse au msg validation) : PAS d'openblas/cuSOLVER (FFI, brise zéro-FFI +
+  déterminisme) ni faer (redondant nalgebra). SVD maison existante. Le code de Gemini avait un
+  pseudo_svd MOCK + la porte non appliquée → corrigés (vraie SVD + vraie application).
+- Réutilise : la TT-compression existe déjà (tn::tt_decompose, nn::tt_linear) ⇒ même machinerie.
+- Bibliothèque seule (nouveau module quantum). Pas de CLI ni multilingue (pour l'instant).
+- Tests (4, core) : MPS ≡ statevector dense (circuit aléatoire 5q/40 portes, oracle vérité-terrain)
+  + Bell (bond 2) + GHZ + troncation saine (produit→bond1, cap χ=1 fidélité>0.5) + déterminisme.
+- docs : CHANGELOG. 624 tests core (+4) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 105 : synergie — commandes CLI kvcache/guard/attest (8 langues)
 - `scirust-cli::synergy` : 3 commandes (kvcache/guard/attest) exposant les primitives de synergie,
   déterministes par --seed. kvcache : ratio compression + fidélité cosinus attention (+ --budget
