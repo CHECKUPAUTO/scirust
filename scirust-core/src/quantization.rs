@@ -1919,3 +1919,214 @@ mod tests_neon {
         );
     }
 }
+
+// ===== OmniQuant — learnable weight clipping (Shao et al., ICLR 2024) ==========
+
+/// Result of [`omniquant_quantize`]: per-output-channel symmetric codes with the
+/// learned clip factors and scales.
+pub struct OmniQuantResult {
+    /// Quantized weights `(in_features, out_features)` row-major, codes in
+    /// `[−qmax, qmax]`.
+    pub codes: Vec<i8>,
+    /// Per-output-channel dequantization scale.
+    pub scales: Vec<f32>,
+    /// Per-output-channel learned clip factor `γ ∈ (0, 1]` (`1` = round-to-nearest).
+    pub clips: Vec<f32>,
+    /// Input features.
+    pub in_features: usize,
+    /// Output features.
+    pub out_features: usize,
+}
+
+impl OmniQuantResult {
+    /// Reconstruct the dequantized weight matrix `(in_features, out_features)`.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let mut w = vec![0.0f32; self.in_features * self.out_features];
+        for i in 0..self.in_features
+        {
+            for o in 0..self.out_features
+            {
+                w[i * self.out_features + o] =
+                    self.codes[i * self.out_features + o] as f32 * self.scales[o];
+            }
+        }
+        w
+    }
+}
+
+/// Symmetric quantization error of a channel at clip factor `gamma` (range
+/// `γ·max|w|`): `Σ (w − q·scale)²` with `q = clamp(round(w/scale), ±qmax)`.
+fn omniquant_channel_error(col: &[f32], maxabs: f32, qmax: f32, gamma: f32) -> (f32, f32) {
+    let scale = gamma * maxabs / qmax;
+    if scale == 0.0
+    {
+        return (0.0, 1.0);
+    }
+    let mut err = 0.0f32;
+    for &w in col
+    {
+        let q = (w / scale).round().clamp(-qmax, qmax);
+        let d = w - q * scale;
+        err += d * d;
+    }
+    (err, scale)
+}
+
+/// **OmniQuant** weight quantization with **Learnable Weight Clipping** (Shao et
+/// al., ICLR 2024, arXiv:2308.13137). Round-to-nearest quantizes each output
+/// channel over its full range `[−max|w|, max|w|]`; with heavy-tailed weights that
+/// wastes most code levels on rare outliers. OmniQuant instead learns a per-channel
+/// clip factor `γ ∈ (0, 1]` that **shrinks** the range to `γ·max|w|`, trading a
+/// little clipping error on the outliers for much finer steps on the bulk — found
+/// here by a deterministic search over a grid that **includes `γ = 1`** (plain
+/// RTN), so the result is never worse than RTN and strictly better whenever
+/// outliers are present. `bits ≤ 8`, symmetric; weights are `(in, out)` row-major.
+pub fn omniquant_quantize(
+    weight: &[f32],
+    in_features: usize,
+    out_features: usize,
+    bits: u32,
+    grid: usize,
+) -> OmniQuantResult {
+    assert_eq!(weight.len(), in_features * out_features, "weight size");
+    assert!((2..=8).contains(&bits), "omniquant: bits in 2..=8");
+    assert!(grid >= 1, "omniquant: grid >= 1");
+    let qmax = ((1i32 << (bits - 1)) - 1) as f32;
+    let mut scales = vec![1.0f32; out_features];
+    let mut clips = vec![1.0f32; out_features];
+    let mut codes = vec![0i8; in_features * out_features];
+
+    let mut col = vec![0.0f32; in_features];
+    for o in 0..out_features
+    {
+        for i in 0..in_features
+        {
+            col[i] = weight[i * out_features + o];
+        }
+        let maxabs = col.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+        if maxabs == 0.0
+        {
+            continue;
+        }
+        // Search γ over the grid (g/grid for g=1..=grid ⇒ includes γ=1 = RTN).
+        let (mut best_err, mut best_gamma, mut best_scale) = (f32::INFINITY, 1.0, maxabs / qmax);
+        for g in 1..=grid
+        {
+            let gamma = g as f32 / grid as f32;
+            let (err, scale) = omniquant_channel_error(&col, maxabs, qmax, gamma);
+            if err < best_err
+            {
+                best_err = err;
+                best_gamma = gamma;
+                best_scale = scale;
+            }
+        }
+        scales[o] = best_scale;
+        clips[o] = best_gamma;
+        for i in 0..in_features
+        {
+            let q = (col[i] / best_scale).round().clamp(-qmax, qmax);
+            codes[i * out_features + o] = q as i8;
+        }
+    }
+    OmniQuantResult {
+        codes,
+        scales,
+        clips,
+        in_features,
+        out_features,
+    }
+}
+
+#[cfg(test)]
+mod omniquant_tests {
+    use super::*;
+    use crate::nn::rng::PcgEngine;
+
+    /// Round-to-nearest reconstruction error over the **full** range (γ = 1).
+    fn rtn_error(weight: &[f32], in_f: usize, out_f: usize, bits: u32) -> f32 {
+        let qmax = ((1i32 << (bits - 1)) - 1) as f32;
+        let mut err = 0.0f32;
+        for o in 0..out_f
+        {
+            let mut maxabs = 0.0f32;
+            for i in 0..in_f
+            {
+                maxabs = maxabs.max(weight[i * out_f + o].abs());
+            }
+            let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+            for i in 0..in_f
+            {
+                let w = weight[i * out_f + o];
+                let q = (w / scale).round().clamp(-qmax, qmax);
+                let d = w - q * scale;
+                err += d * d;
+            }
+        }
+        err
+    }
+
+    fn omniquant_error(res: &OmniQuantResult, weight: &[f32]) -> f32 {
+        res.dequantize()
+            .iter()
+            .zip(weight)
+            .map(|(&d, &w)| (d - w) * (d - w))
+            .sum()
+    }
+
+    /// **OmniQuant beats round-to-nearest** on heavy-tailed weights: learning a
+    /// per-channel clip that ignores the rare outliers shrinks the step size on the
+    /// bulk, cutting the reconstruction error well below RTN — and at least one
+    /// channel actually clips (`γ < 1`).
+    #[test]
+    fn omniquant_beats_rtn_on_heavy_tailed_weights() {
+        let mut rng = PcgEngine::new(7);
+        let (in_f, out_f) = (64usize, 8usize);
+        let mut w = vec![0.0f32; in_f * out_f];
+        for v in w.iter_mut()
+        {
+            // Bulk ~ small Gaussian-ish; rare large outliers.
+            let mut x = (rng.float_signed() + rng.float_signed()) * 0.1;
+            if rng.float() < 0.03
+            {
+                x += rng.float_signed() * 5.0;
+            }
+            *v = x;
+        }
+        let res = omniquant_quantize(&w, in_f, out_f, 4, 64);
+        let e_omni = omniquant_error(&res, &w);
+        let e_rtn = rtn_error(&w, in_f, out_f, 4);
+        assert!(
+            e_omni < e_rtn,
+            "OmniQuant not better than RTN: omni={e_omni} rtn={e_rtn}"
+        );
+        assert!(
+            res.clips.iter().any(|&g| g < 1.0),
+            "no channel learned to clip"
+        );
+    }
+
+    /// OmniQuant is **never worse than RTN** (the grid includes `γ = 1`): on
+    /// outlier-free near-uniform weights it falls back to RTN, and it is
+    /// deterministic.
+    #[test]
+    fn omniquant_never_worse_than_rtn_and_deterministic() {
+        let mut rng = PcgEngine::new(3);
+        let (in_f, out_f) = (32usize, 4usize);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let res = omniquant_quantize(&w, in_f, out_f, 4, 32);
+        let e_omni = omniquant_error(&res, &w);
+        let e_rtn = rtn_error(&w, in_f, out_f, 4);
+        assert!(
+            e_omni <= e_rtn + 1e-6,
+            "omni {e_omni} worse than rtn {e_rtn}"
+        );
+        // Determinism: same codes/scales on a repeat.
+        let res2 = omniquant_quantize(&w, in_f, out_f, 4, 32);
+        assert_eq!(res.codes, res2.codes);
+        assert_eq!(
+            res.scales.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+            res2.scales.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}

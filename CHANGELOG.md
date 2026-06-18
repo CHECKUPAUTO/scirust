@@ -19,6 +19,16 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **OmniQuant — clipping de poids apprenable** (`quantization::omniquant_quantize`, Shao
+  et al. 2024, roadmap #65) : le round-to-nearest quantifie chaque canal sur sa plage
+  **complète** `[−max|w|, max|w|]` — avec des poids à queue lourde, la plupart des niveaux
+  de code sont gaspillés sur de rares aberrants. OmniQuant apprend un **facteur de coupe**
+  `γ∈(0,1]` par canal qui **rétrécit** la plage à `γ·max|w|`, échangeant un peu d'erreur de
+  coupe sur les aberrants contre des pas bien plus fins sur le gros des poids — trouvé ici
+  par une recherche déterministe sur une grille qui **inclut `γ=1`** (RTN pur). Oracle
+  honnête : erreur de reconstruction **< RTN** sur poids à queue lourde (≥1 canal coupe
+  réellement) + **jamais pire** que RTN (γ=1 est candidat) + déterminisme bit-exact.
+  Rejoint la famille de quantification (GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8).
 - **S4 (S4D) — espace d'états structuré diagonal** (`nn::nd_layers::s4_scan`/`NdS4`,
   Gu et al. 2022, roadmap #51) : SSM **linéaire invariant dans le temps** (contrairement
   au `selective_scan` de Mamba dont les matrices dépendent de l'entrée) — `A` diagonal,
