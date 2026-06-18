@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 79 : DoRA (#73) — LoRA magnitude/direction
+- `nn::dora::DoraLinear` (Liu 2024) : W'=m⊙(W₀+BA)/‖W₀+BA‖_col ; W₀ gelé, m/A/B entraînés.
+  Backward de la normalisation par colonne en forme close (∂L/∂V=(m/‖V‖)(gw−u·s), ∂L/∂m=s).
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::dora.
+- Tests (3, core) : init B=0,m=‖W₀‖_col ⇒ W'=W₀ exact (+ forward = map de base) ;
+  gradient check (diff. finies centrales eps=1e-3, tol 3e-2, params génériques B≠0) ;
+  récupère une cible DoRA (perte ÷100, GD) + déterminisme.
+- docs : roadmap #73 📋→✅ ; CHANGELOG. 564 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 78 : GaLore (#48) — projection low-rank des gradients
 - `nn::nd_optim::NdGalore`/`galore_subspace` (Zhao 2024) : Adam dans le sous-espace
   dominant rang-r du gradient (top-r vec. singuliers via jacobi_eigenvectors,
@@ -12,7 +21,7 @@
   erreur↓ en r, nulle au rang plein) ; gradient bas-rang reconstruit exact (sous-rang→résidu) ;
   convergence sur cible bas-rang, état 2×4≠4×4 ; sous-rang n'atteint pas ; fallback vecteur=Adam ;
   déterminisme. lm_command vert (galore).
-- docs : roadmap #48 📋→✅ ; CHANGELOG ; REFERENCE. 561 tests core (+5) ; 8 gates (à confirmer).
+- docs : roadmap #48 📋→✅ ; CHANGELOG ; REFERENCE. 561 tests core (+5) ; 8 gates verts ✓ ; commit 2a41f3e.
 
 ## Session 2026-06-18 — volet 77 : YaRN (#60) — extension de contexte RoPE
 - `nn::yarn` (Peng 2023) : `yarn_frequencies` (interpolation NTK-by-parts : garde

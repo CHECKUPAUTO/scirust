@@ -11,6 +11,7 @@ pub mod conv2d;
 pub mod conv2d_transpose;
 pub mod conv_utils;
 pub mod deeponet;
+pub mod dora;
 pub mod dropout;
 pub mod embedding;
 pub mod ensemble;

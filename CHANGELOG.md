@@ -19,6 +19,16 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **DoRA — adaptation low-rank décomposée poids** (`nn::dora::DoraLinear`, Liu et al.
+  2024, roadmap #73) : PEFT qui décompose un poids gelé `W₀` en **magnitude** (vecteur
+  par colonne `m`) × **direction** (normalisée), la direction étant pilotée par une
+  mise à jour low-rank LoRA `BA` : `W' = m ⊙ (W₀+BA)/‖W₀+BA‖_col`. Seuls `m`, `A`, `B`
+  s'entraînent. Backward de la normalisation par colonne en **forme close** (`u=V/‖V‖`,
+  `∂L/∂V=(m/‖V‖)(gw−u·s)`, `∂L/∂m=s`). Oracle honnête : init `B=0, m=‖W₀‖_col` ⇒ poids
+  effectif **= W₀ exactement** (l'adaptation part de la fonction pré-entraînée) +
+  **gradient check** (différences finies centrales vs analytique, params génériques) +
+  récupère une cible générée par DoRA (perte ÷100 par descente de gradient) +
+  déterminisme bit-exact. Couche de bibliothèque (nouveau module).
 - **GaLore — projection low-rank des gradients** (`nn::nd_optim::NdGalore`/
   `galore_subspace`, Zhao et al. 2024, roadmap #48) : optimiseur à **mémoire
   réduite** — pour un paramètre matriciel, le gradient `G` est projeté sur son
