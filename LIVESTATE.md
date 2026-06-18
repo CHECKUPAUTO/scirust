@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 89 : Mamba-2 / SSD (#50) — dualité espace-d'états ↔ attention
+- `nn::nd_layers::ssd_dual`/`NdMamba2` (Dao & Gu 2024) : A scalaire par pas ⇒ récurrence
+  Hₜ=aₜHₜ₋₁+xₜBₜᵀ, yₜ=HₜCₜ **exactement** = forme quadratique masquée Y=(L⊙CBᵀ)X,
+  L[i,j]=∏_{j<k≤i}aₖ. cumlog = préfixe-somme (matmul triangulaire), L=exp(diff) masquée AVANT
+  exp (diff⊙mask→exp→⊙mask) ⇒ pas d'inf·0=NaN. a_log=log a (=Δ·A), aucun op log.
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (3, core) : dual ≡ récurrence séquentielle (la dualité) ; gradient check (x,B,C,a_log) ;
+  NdMamba2 entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #50 📋→✅ ; CHANGELOG. 591 tests core (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 88 : FNO (#75) — opérateur neuronal de Fourier
 - `nn::fno::FnoSpectralConv1d`/`NdFno` (Li 2021) : DFT réelle = matrices cos/sin fixes (matmul
   déterministe, différentiable, sans FFT ni complexe) ; garder `modes` basses fréqs, poids
@@ -13,7 +23,7 @@
   **apprend la dérivation** (d/dx↔×ik) et généralise à phase non vue (MSE test <0.02, convexe) ;
   NdFno entraîne (MSE↓ <0.6×) + déterminisme. Bug harnais évité : 1 forward/tape (sinon un
   paramètre ré-inputé N fois ⇒ gradient éclaté sur N nœuds).
-- docs : roadmap #75 📋→✅ ; CHANGELOG. 588 tests core (+4) ; 8 gates verts (à confirmer).
+- docs : roadmap #75 📋→✅ ; CHANGELOG. 588 tests core (+4) ; 8 gates verts ✓ ; commit 451e6be.
 
 ## Session 2026-06-18 — volet 87 : Hyena (#56) — convolutions longues implicites + gating
 - `nn::nd_layers::hyena_long_conv`/`NdHyena` (Poli 2023) : mélangeur sans attention. Conv

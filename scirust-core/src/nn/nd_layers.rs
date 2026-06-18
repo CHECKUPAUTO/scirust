@@ -1783,6 +1783,136 @@ impl NdHyena {
     }
 }
 
+/// **Mamba-2 / Structured State-Space Duality (SSD)** scan (Dao & Gu, ICML 2024,
+/// arXiv:2405.21060). Mamba-2 restricts the SSM state matrix to a **scalar** decay
+/// `aₜ` per step (instead of Mamba's per-channel diagonal `A`). That restriction
+/// makes the linear recurrence
+///
+/// ```text
+/// Hₜ = aₜ·Hₜ₋₁ + xₜ·Bₜᵀ   (state d×n) ,   yₜ = Hₜ·Cₜ
+/// ```
+///
+/// **exactly equal** to a single masked "attention-like" quadratic form (the
+/// *duality*):
+///
+/// ```text
+/// Y = ( L ⊙ (C·Bᵀ) ) · X ,   L[i,j] = ∏_{j<k≤i} aₖ  (i ≥ j, else 0)
+/// ```
+///
+/// computed here on the tape: the cumulative log-decay `cumlogᵢ = Σ_{k≤i} a_logₖ`
+/// is a prefix-sum (matmul with a lower-triangular ones matrix), `L = exp(cumlogᵢ −
+/// cumlogⱼ)` masked causal, and `Y = (L ⊙ C·Bᵀ)·X`. `a_log = log a` is the parameter
+/// (in Mamba-2 `a_logₜ = Δₜ·A`), so no `log` op is needed. `x` is `(seq, d)`; `b`,`c`
+/// are `(seq, n)`; `a_log` is `(seq, 1)`; returns `(seq, d)`. Deterministic; matches
+/// the sequential recurrence and is gradient-checked.
+pub fn ssd_dual<'t>(
+    tape: &'t NdTape,
+    x: NdVar<'t>,
+    b: NdVar<'t>,
+    c: NdVar<'t>,
+    a_log: NdVar<'t>,
+) -> NdVar<'t> {
+    let seq = x.shape()[0];
+    // Lower-triangular **inclusive** ones (i ≥ j): serves both as the prefix-sum
+    // operator (cumlogᵢ = Σ_{k≤i} a_logₖ) and the causal mask.
+    let mut tri = vec![0f32; seq * seq];
+    for i in 0..seq
+    {
+        for j in 0..=i
+        {
+            tri[i * seq + j] = 1.0;
+        }
+    }
+    let lt = tape.input(TensorND::new(tri.clone(), vec![seq, seq]));
+    let mask = tape.input(TensorND::new(tri, vec![seq, seq]));
+    let cumlog = lt.matmul(a_log); // (seq,1)
+    let diff = cumlog.sub(cumlog.transpose_last2()); // cumlogᵢ − cumlogⱼ  (seq,seq)
+    // Mask *before* exp so the exponent stays bounded in the upper triangle
+    // (avoids inf·0 = NaN), then mask again to zero those entries exactly.
+    let l = diff.mul(mask).exp().mul(mask); // L[i,j] = ∏_{j<k≤i} aₖ, causal
+    let cbt = c.matmul(b.transpose_last2()); // C_i·B_j  (seq,seq)
+    l.mul(cbt).matmul(x) // (L ⊙ C·Bᵀ)·X  → (seq,d)
+}
+
+/// **Mamba-2 block** (SSD): from the input it projects the value stream `x`, the
+/// state vectors `B`/`C`, and a scalar step `Δ = softplus(·)`; the per-step scalar
+/// decay is `a_logₜ = Δₜ·A` with a learnable `A = −exp(A_raw) < 0` (contractive),
+/// runs the [`ssd_dual`] quadratic scan, adds a gated skip `D⊙x` and projects back.
+/// Deterministic; trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
+pub struct NdMamba2 {
+    x_proj: NdLinear,
+    b_proj: NdLinear,
+    c_proj: NdLinear,
+    dt_proj: NdLinear,
+    out_proj: NdLinear,
+    a_raw: TensorND,  // (1,1); A = −exp(a_raw)
+    d_skip: TensorND, // (1, d_inner)
+    a_idx: Option<usize>,
+    d_idx: Option<usize>,
+}
+
+impl NdMamba2 {
+    /// New layer; `d_inner` is the value width, `n` the state size.
+    pub fn new(d_model: usize, d_inner: usize, n: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            x_proj: NdLinear::new(d_model, d_inner, rng),
+            b_proj: NdLinear::new(d_model, n, rng),
+            c_proj: NdLinear::new(d_model, n, rng),
+            dt_proj: NdLinear::new(d_model, 1, rng),
+            out_proj: NdLinear::new(d_inner, d_model, rng),
+            a_raw: TensorND::zeros(&[1, 1]), // A = −1 at init
+            d_skip: TensorND::zeros(&[1, d_inner]),
+            a_idx: None,
+            d_idx: None,
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let xv = self.x_proj.forward(tape, x); // (seq, d_inner)
+        let b = self.b_proj.forward(tape, x); // (seq, n)
+        let c = self.c_proj.forward(tape, x); // (seq, n)
+        // Δ = softplus(dt_proj) > 0, built as log(1+e^z) = z + softplus... use exp form:
+        // softplus(z) = log(1+e^z); without a log op, use Δ = e^{dt} (>0) directly.
+        let dt = self.dt_proj.forward(tape, x).exp(); // (seq,1), Δ > 0
+        let a_raw = tape.input(self.a_raw.clone());
+        self.a_idx = Some(a_raw.idx());
+        let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
+        let a_scalar = a_raw.exp().mul(neg1); // A = −exp(a_raw) < 0
+        let a_log = dt.mul(a_scalar); // a_logₜ = Δₜ·A < 0  (seq,1)
+        let scan = ssd_dual(tape, xv, b, c, a_log); // (seq, d_inner)
+        let skip = tape.input(self.d_skip.clone());
+        self.d_idx = Some(skip.idx());
+        let y = scan.add(skip.mul(xv)); // gated skip D⊙x
+        self.out_proj.forward(tape, y) // (seq, d_model)
+    }
+
+    /// Trainable parameters in a fixed order.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let (a_idx, d_idx) = (self.a_idx, self.d_idx);
+        let mut params = self.x_proj.parameters();
+        params.extend(self.b_proj.parameters());
+        params.extend(self.c_proj.parameters());
+        params.extend(self.dt_proj.parameters());
+        params.extend(self.out_proj.parameters());
+        if let Some(i) = a_idx
+        {
+            params.push(NdParam {
+                value: &mut self.a_raw,
+                grad_idx: i,
+            });
+        }
+        if let Some(i) = d_idx
+        {
+            params.push(NdParam {
+                value: &mut self.d_skip,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2576,6 +2706,163 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "Hyena did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Sequential plain-`Vec` reference for the scalar-decay SSM that the SSD dual
+    /// form must equal: `Hₜ = aₜHₜ₋₁ + xₜBₜᵀ`, `yₜ = HₜCₜ`.
+    fn ssd_sequential(
+        x: &[f32],
+        b: &[f32],
+        c: &[f32],
+        a_log: &[f32],
+        seq: usize,
+        d: usize,
+        n: usize,
+    ) -> Vec<f32> {
+        let mut h = vec![0f32; d * n]; // state (d,n)
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            let a_t = a_log[t].exp();
+            for k in 0..d
+            {
+                for i in 0..n
+                {
+                    h[k * n + i] = a_t * h[k * n + i] + x[t * d + k] * b[t * n + i];
+                }
+            }
+            for k in 0..d
+            {
+                let mut acc = 0f32;
+                for i in 0..n
+                {
+                    acc += h[k * n + i] * c[t * n + i];
+                }
+                out[t * d + k] = acc;
+            }
+        }
+        out
+    }
+
+    /// **The duality** (Mamba-2/SSD): the tape `ssd_dual` quadratic form equals the
+    /// sequential linear recurrence.
+    #[test]
+    fn ssd_dual_matches_sequential() {
+        let (seq, d, n) = (6usize, 3usize, 4usize);
+        let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let b: Vec<f32> = (0..seq * n).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let c: Vec<f32> = (0..seq * n)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+        let a_log: Vec<f32> = (0..seq).map(|i| -(0.2 + 0.05 * i as f32)).collect();
+        let want = ssd_sequential(&x, &b, &c, &a_log, seq, d, n);
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x, vec![seq, d]));
+        let bv = t.input(TensorND::new(b, vec![seq, n]));
+        let cv = t.input(TensorND::new(c, vec![seq, n]));
+        let av = t.input(TensorND::new(a_log, vec![seq, 1]));
+        let got = t.value(ssd_dual(&t, xv, bv, cv, av));
+        for (g, w) in got.data.iter().zip(&want)
+        {
+            assert!((g - w).abs() < 1e-4, "ssd duality: got {g}, want {w}");
+        }
+    }
+
+    /// `ssd_dual` gradients (w.r.t. x, B, C, a_log) match finite differences.
+    #[test]
+    fn ssd_dual_gradient_check() {
+        let (seq, d, n) = (5usize, 2usize, 3usize);
+        let x: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.4 - 0.5).sin()).collect();
+        let b: Vec<f32> = (0..seq * n).map(|i| 0.5 + 0.3 * (i as f32).cos()).collect();
+        let c: Vec<f32> = (0..seq * n)
+            .map(|i| (i as f32 * 0.25 - 0.1).sin())
+            .collect();
+        let a_log: Vec<f32> = (0..seq).map(|i| -(0.3 + 0.05 * i as f32)).collect();
+        let loss_of = |xx: &[f32], bb: &[f32], cc: &[f32], aa: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let xv = t.input(TensorND::new(xx.to_vec(), vec![seq, d]));
+            let bv = t.input(TensorND::new(bb.to_vec(), vec![seq, n]));
+            let cv = t.input(TensorND::new(cc.to_vec(), vec![seq, n]));
+            let av = t.input(TensorND::new(aa.to_vec(), vec![seq, 1]));
+            let y = ssd_dual(&t, xv, bv, cv, av);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let xv = t.input(TensorND::new(x.clone(), vec![seq, d]));
+        let bv = t.input(TensorND::new(b.clone(), vec![seq, n]));
+        let cv = t.input(TensorND::new(c.clone(), vec![seq, n]));
+        let av = t.input(TensorND::new(a_log.clone(), vec![seq, 1]));
+        let y = ssd_dual(&t, xv, bv, cv, av);
+        let grads = t.backward(y.mul(y).sum());
+        let (gx, gb, gc, ga) = (
+            grads[xv.idx()].clone(),
+            grads[bv.idx()].clone(),
+            grads[cv.idx()].clone(),
+            grads[av.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "ssd grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gx, &x, &|p| loss_of(p, &b, &c, &a_log));
+        check(&gb, &b, &|p| loss_of(&x, p, &c, &a_log));
+        check(&gc, &c, &|p| loss_of(&x, &b, p, &a_log));
+        check(&ga, &a_log, &|p| loss_of(&x, &b, &c, p));
+    }
+
+    /// The `NdMamba2` block trains (MSE↓ to a target) and is bit-for-bit
+    /// deterministic across identical runs.
+    #[test]
+    fn nd_mamba2_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (5usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(13);
+            let mut layer = NdMamba2::new(d_model, 6, 4, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..120
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(
+            last < first * 0.6,
+            "Mamba-2 did not learn: {first} -> {last}"
+        );
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
