@@ -133,6 +133,53 @@ fn compute_log_moment(alpha: f64, q: f64, sigma: f64) -> f64 {
     alpha * q * q / (2.0 * sigma * sigma)
 }
 
+// ----- Rényi DP accountant (Mironov, CSF 2017) (#78) ---------------------------
+
+/// **Rényi differential privacy** of the Gaussian mechanism (sensitivity 1, noise
+/// multiplier `sigma`) at order `alpha > 1`: `RDP(α) = α / (2σ²)` (Mironov 2017,
+/// Cor. 3). Composition is **additive** in RDP — far easier and tighter than
+/// composing `(ε, δ)` pairs directly.
+pub fn gaussian_rdp(alpha: f64, sigma: f64) -> f64 {
+    assert!(
+        alpha > 1.0 && sigma > 0.0,
+        "gaussian_rdp: need alpha>1, sigma>0"
+    );
+    alpha / (2.0 * sigma * sigma)
+}
+
+/// Convert an RDP guarantee `rdp_eps` at order `alpha` into `(ε, δ)`-DP (Mironov
+/// 2017, Prop. 3): `ε = rdp_eps + ln(1/δ)/(α − 1)`. The `α − 1` (not `α`) is what
+/// makes this the *tight* conversion.
+pub fn rdp_to_dp(rdp_eps: f64, alpha: f64, delta: f64) -> f64 {
+    assert!(
+        alpha > 1.0 && delta > 0.0 && delta < 1.0,
+        "rdp_to_dp: need alpha>1, delta in (0,1)"
+    );
+    rdp_eps + (1.0 / delta).ln() / (alpha - 1.0)
+}
+
+/// **RDP accountant** for `steps` compositions of the Gaussian mechanism at noise
+/// multiplier `sigma`: the total RDP is `steps · α/(2σ²)`; convert at every order
+/// in a grid and keep the **tightest** `ε` for the target `delta`. Returns
+/// `(ε, best_α)`. Much tighter than naive linear `(ε, δ)` composition (which pays
+/// a `√steps`-type penalty), as the tests show.
+pub fn rdp_gaussian_epsilon(steps: usize, sigma: f64, delta: f64) -> (f64, f64) {
+    // A grid of orders: fine just above 1, then integers out to 256.
+    let mut alphas: Vec<f64> = (1..20).map(|i| 1.0 + i as f64 * 0.05).collect();
+    alphas.extend((2..=256).map(|a| a as f64));
+    let mut best = (f64::INFINITY, 0.0);
+    for &alpha in &alphas
+    {
+        let total_rdp = steps as f64 * gaussian_rdp(alpha, sigma);
+        let eps = rdp_to_dp(total_rdp, alpha, delta);
+        if eps < best.0
+        {
+            best = (eps, alpha);
+        }
+    }
+    best
+}
+
 /// Clip gradient vector to maximum L2 norm.
 ///
 /// If ||g||_2 > clip, scale g by clip / ||g||_2.
@@ -235,5 +282,40 @@ mod tests {
         // After clipping, norm should be 1.0 (before noise)
         // After noise, values differ from original
         assert_ne!(grads[0], 2.0);
+    }
+
+    /// Gaussian RDP and the Mironov RDP→DP conversion match their closed forms.
+    #[test]
+    fn rdp_gaussian_and_conversion_exact() {
+        // RDP(α) = α/(2σ²): (2, 1) → 1; (4, 2) → 0.5.
+        assert!((gaussian_rdp(2.0, 1.0) - 1.0).abs() < 1e-12);
+        assert!((gaussian_rdp(4.0, 2.0) - 0.5).abs() < 1e-12);
+        // ε = RDP + ln(1/δ)/(α−1): (1, 2, 0.01) → 1 + ln(100)/1.
+        let eps = rdp_to_dp(1.0, 2.0, 0.01);
+        assert!((eps - (1.0 + 100f64.ln())).abs() < 1e-9, "eps = {eps}");
+    }
+
+    /// **The RDP accountant, tested.** For composing many Gaussian steps the RDP
+    /// accountant gives an `ε` far below naive linear `(ε, δ)` composition, and it
+    /// behaves monotonically (more steps ⇒ larger ε, more noise ⇒ smaller ε).
+    #[test]
+    fn rdp_accountant_is_tighter_than_basic_composition() {
+        let (steps, sigma, delta) = (100usize, 4.0f64, 1e-5f64);
+        let (eps_rdp, alpha) = rdp_gaussian_epsilon(steps, sigma, delta);
+        assert!(alpha > 1.0 && eps_rdp.is_finite());
+
+        // Naive composition: each step is (ε₀, δ/steps)-DP via the analytic Gaussian
+        // ε₀ = √(2·ln(1.25/δ₀))/σ, composed linearly to (steps·ε₀, δ).
+        let delta0 = delta / steps as f64;
+        let eps0 = (2.0 * (1.25 / delta0).ln()).sqrt() / sigma;
+        let eps_basic = steps as f64 * eps0;
+        assert!(
+            eps_rdp < 0.5 * eps_basic,
+            "RDP {eps_rdp} not much tighter than basic {eps_basic}"
+        );
+
+        // Monotonicity.
+        assert!(rdp_gaussian_epsilon(200, sigma, delta).0 > eps_rdp); // more steps
+        assert!(rdp_gaussian_epsilon(steps, 8.0, delta).0 < eps_rdp); // more noise
     }
 }

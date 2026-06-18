@@ -4,7 +4,9 @@
 use scirust_core::nn::PcgEngine;
 use scirust_core::nn::calibration::{expected_calibration_error, temperature_scale};
 use scirust_core::nn::conformal::{ConformalQuantileRegressor, ConformalRegressor};
-use scirust_core::nn::ibp::{IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds};
+use scirust_core::nn::ibp::{
+    BabResult, IbpLinear, IbpMlp, Interval, certified_robust, crown_bounds, verify_robustness,
+};
 use scirust_core::nn::nd_layers::NdLinear;
 use scirust_core::nn::pinn::solve_harmonic;
 use scirust_core::nn::smoothing::SmoothedClassifier;
@@ -12,6 +14,7 @@ use scirust_core::quantization::{
     awq_quantize, gptq_hessian, quantize_gptq, quantize_per_channel, ternary_matmul,
     ternary_quantize,
 };
+use scirust_core::quantum::{Mps, gates};
 use scirust_evo::{CmaEs, GeneticAlgorithm};
 use scirust_som_dataset::build_training_set;
 use scirust_som_inference::{evaluate, ownership_majority_baseline};
@@ -61,7 +64,8 @@ pub fn run_certify(args: &[String]) -> u8 {
     let box_in = Interval::around(&centre, eps);
     // CROWN before moving the layers into the IBP MLP.
     let crown = crown_bounds(&il1, &il2, &box_in);
-    let mlp = IbpMlp::new(vec![il1, il2]);
+    let layers = vec![il1, il2];
+    let mlp = IbpMlp::new(layers.clone());
     let pred = mlp.forward(&centre);
     let argmax = pred
         .iter()
@@ -101,6 +105,51 @@ pub fn run_certify(args: &[String]) -> u8 {
         println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
     }
     println!("    robustness: {}", robust_str(&crown));
+    let zono = mlp.certify_zonotope(&box_in);
+    println!(
+        "  Zonotope bounds (AI²/DeepZ, avg width {:.4}):",
+        width(&zono)
+    );
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", zono.lo[c], zono.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&zono));
+    let deeppoly = mlp.certify_deeppoly(&box_in);
+    println!(
+        "  DeepPoly bounds (relational polyhedra, avg width {:.4}):",
+        width(&deeppoly)
+    );
+    for c in 0..out_f
+    {
+        println!(
+            "    class {c}: [{:.4}, {:.4}]",
+            deeppoly.lo[c], deeppoly.hi[c]
+        );
+    }
+    println!("    robustness: {}", robust_str(&deeppoly));
+    // Complete branch-and-bound: a *decision*, not just a bound — Robust, a concrete
+    // counterexample, or Unknown (refines DeepPoly by splitting the input box).
+    match verify_robustness(&layers, &box_in, argmax, 1e-3, 100_000)
+    {
+        BabResult::Robust =>
+        {
+            println!("  Branch-and-bound (complete): CERTIFIED — class {argmax} provably unchanged")
+        },
+        BabResult::Unsafe(cx) => println!(
+            "  Branch-and-bound (complete): UNSAFE — counterexample at {cx:?} (class {})",
+            mlp.forward(&cx)
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(i, _)| i)
+                .unwrap()
+        ),
+        BabResult::Unknown =>
+        {
+            println!("  Branch-and-bound (complete): UNKNOWN (box budget/tolerance reached)")
+        },
+    }
 
     // Randomized smoothing: a *probabilistic* L2 certificate (Cohen et al. 2019),
     // the complement to the deterministic IBP/CROWN bounds above. For a half-space
@@ -532,6 +581,68 @@ pub fn run_pinn(args: &[String]) -> u8 {
         "  max |u(x) − sin x| over a uniform grid: {:.4}",
         sol.max_error
     );
+    0
+}
+
+/// `quantum [--seed N] [--qubits Q] [--chi C]` — MPS / Tensor-Train quantum-circuit
+/// simulator: shows an exact GHZ state, then runs a random circuit and reports the
+/// bond dimension reached and the MPS memory footprint versus a dense `2ⁿ`
+/// state-vector. Deterministic in `--seed`.
+pub fn run_quantum(args: &[String]) -> u8 {
+    let seed = flag_u64(args, "--seed", 1);
+    let qubits = (flag_u64(args, "--qubits", 12) as usize).clamp(2, 28);
+    let chi = (flag_u64(args, "--chi", 16) as usize).max(1);
+    let inv = std::f32::consts::FRAC_1_SQRT_2;
+
+    // Exact GHZ on 4 qubits: (|0000⟩ + |1111⟩)/√2.
+    let mut ghz = Mps::zero(4);
+    ghz.apply_1qubit_gate(0, &gates::H);
+    for q in 0..3
+    {
+        ghz.apply_2qubit_gate(q, &gates::CNOT, 8);
+    }
+    let sv = ghz.to_statevector();
+
+    // Random circuit (Ry layers + CNOT brickwork), bond capped at chi.
+    let mut rng = PcgEngine::new(seed);
+    let mut mps = Mps::zero(qubits);
+    for _ in 0..6
+    {
+        for q in 0..qubits
+        {
+            mps.apply_1qubit_gate(q, &gates::ry(rng.float_signed() * 3.0));
+        }
+        for q in (0..qubits - 1).step_by(2)
+        {
+            mps.apply_2qubit_gate(q, &gates::CNOT, chi);
+        }
+        for q in (1..qubits - 1).step_by(2)
+        {
+            mps.apply_2qubit_gate(q, &gates::CNOT, chi);
+        }
+    }
+    let dense = 1u128 << qubits;
+    let mps_store = mps.storage() as u128;
+
+    println!("MPS quantum-circuit simulator — pure Rust, deterministic (seed {seed})");
+    println!("  in-house truncated SVD (nalgebra, zero FFI) · real f32 amplitudes");
+    println!(
+        "  GHZ(4) exact: |0000⟩ = {:.4}, |1111⟩ = {:.4}  (target {inv:.4})",
+        sv[0b0000], sv[0b1111]
+    );
+    println!("  random circuit: {qubits} qubits · 6 layers · bond cap χ = {chi}");
+    println!("    bond dimension reached: {}", mps.max_bond());
+    println!(
+        "    MPS storage: {mps_store} amplitudes  vs dense 2^{qubits} = {dense}  ({:.3e}× smaller)",
+        dense as f64 / mps_store as f64
+    );
+    if qubits <= 14
+    {
+        println!(
+            "    norm ⟨ψ|ψ⟩ = {:.5}  (= 1 when χ captures the entanglement; below 1 = truncation loss)",
+            mps.norm_sqr()
+        );
+    }
     0
 }
 

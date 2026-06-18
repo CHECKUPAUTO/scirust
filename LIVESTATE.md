@@ -1,7 +1,388 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-17
+> Dernière mise à jour : 2026-06-18
+
+## Session 2026-06-18 — volet 106 : simulateur quantique MPS / Tensor-Train
+- `quantum::Mps`/`MpsNode` : état n-qubits en chaîne de tenseurs rang-3 (au lieu de 2ⁿ) ⇒ coût
+  O(n·χ³) tant que l'intrication est modérée. Porte 1q in place ; porte 2q = contraction θ +
+  application 4×4 + SVD tronquée (tn::ops::truncated_svd, Rust pur/nalgebra, ZÉRO FFI) à χ.
+  Amplitudes réelles f32 (H/X/Z/CNOT/CZ/Ry) ; complexe = futur.
+- Décision archi (réponse au msg validation) : PAS d'openblas/cuSOLVER (FFI, brise zéro-FFI +
+  déterminisme) ni faer (redondant nalgebra). SVD maison existante. Le code de Gemini avait un
+  pseudo_svd MOCK + la porte non appliquée → corrigés (vraie SVD + vraie application).
+- Réutilise : la TT-compression existe déjà (tn::tt_decompose, nn::tt_linear) ⇒ même machinerie.
+- Bibliothèque seule (nouveau module quantum). Pas de CLI ni multilingue (pour l'instant).
+- Tests (4, core) : MPS ≡ statevector dense (circuit aléatoire 5q/40 portes, oracle vérité-terrain)
+  + Bell (bond 2) + GHZ + troncation saine (produit→bond1, cap χ=1 fidélité>0.5) + déterminisme.
+- docs : CHANGELOG. 624 tests core (+4) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 105 : synergie — commandes CLI kvcache/guard/attest (8 langues)
+- `scirust-cli::synergy` : 3 commandes (kvcache/guard/attest) exposant les primitives de synergie,
+  déterministes par --seed. kvcache : ratio compression + fidélité cosinus attention (+ --budget
+  soft-paging) ; guard : couverture empirique ≥ 1−α + verdicts ; attest : journal hash-chaîné +
+  vérif + rejet falsification + tamper-evidence.
+- Nouvelles commandes CLI ⇒ docs multilingues : docs/REFERENCE.md (3 lignes) + les 8
+  Documentation*.md (FR base + EN/AR/DE/ES/JA/KO/ZH, 3 bullets chacun, via sous-agents).
+- Vérifié en exécution : kvcache 2.67× + cosinus 0.99998 (budget 32 ⇒ 96 évincés) ; guard 91.3%
+  (≥90%) Accept/Abstain/Reject ; attest chaîne OK + falsification rejetée + têtes distinctes.
+- docs : CHANGELOG + REFERENCE + Documentation×8. 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 104 : synergie SLHAv2 — codec KV accéléré SIMD (bit-exact)
+- `scirust_simd::ops::dequantize_int4_into` (câblé dans nn::elastic_kv_cache::dequantize_int4) :
+  déquant INT4 via kernel SIMD mul_f32 ; élémentaire (pas de réduction) ⇒ bit-identique scalaire et
+  inter-plateformes (déterminisme préservé ; réductions cosinus/attention restent scalaires).
+- Bibliothèque seule (scirust-simd + core). Pas de CLI ni multilingue.
+- Tests (1, scirust-simd) : SIMD ≡ scalaire bit-exact pour toute longueur (y compris <1 lane) +
+  plage d'échelles. (gate 5 portable-simd + gate 4 AVX2 runtime.)
+- docs : CHANGELOG. 620 core + 1 simd ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 103 : synergie CCOS — guard à garantie statistique
+- `nn::guard::StatisticalGuard` : porte Accept/Abstain/Reject sur l'ensemble conforme (#21).
+  Couverture vraie classe ≥ 1−α sans hypothèse de distribution ⇒ pour le guard.rs de CCOS.
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::guard.
+- Tests (2, core) : couverture empirique ≥ 1−α (fraîches, déterministe) ; verdicts
+  confiant→Accept / partagé→Abstain / plat→Reject.
+- docs : CHANGELOG. 620 tests core (+2) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 102 : synergie CCOS — pont d'attestation hash-chaîné
+- `scirust_runtime::attest` : journal d'inférences hash-chaîné (SHA-256), rejouable, à la forme
+  de l'event_log de CCOS. InferenceEvent {seq, engagement modèle, hash entrée/sortie, entry_hash} ;
+  entry = H(prev ‖ seq ‖ commitment ‖ in ‖ out). attest_and_record vérifie l'authenticité
+  (Freivalds vinfer #80) AVANT d'ajouter ⇒ chaîne d'inférences réelles, ingérable par CCOS.
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue). Nouveau module.
+- Tests (3, runtime) : chaîne vérifie + replay (même tête) ; falsification/réordonnancement
+  détectés ; inférence authentique attestée + falsifiée rejetée (journal inchangé).
+- docs : CHANGELOG. 618 core + 7 runtime (+3) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 101 : synergie CCOS/SLHAv2 — KV-cache compressé élastique
+- `nn::elastic_kv_cache` : primitive partagée SLHAv2 (compression KV-cache CPU) + CCOS (paging
+  borné). Tuile INT4 deux niveaux (base + résidu, « residual tracking » SLHAv2) à **échelles
+  adaptatives par groupe** (cosine-aware, quantize_int4_grouped) ⇒ fidélité cosinus >0.99 ;
+  ElasticKvCache à budget (évince la plus ancienne, soft-paging ; new_grouped pour le grouping) ;
+  attention via contiguous_attention (#63) ⇒ écart = uniquement l'erreur de compression. Codec
+  exposé (quantize_int4[_grouped]/dequantize/KvTile/cosine_similarity) pour SLHAv2/CCOS.
+- Contexte : SLHAv2 (public) = compression KV-cache déjà bâtie sur un crate « scirust »
+  (SciRustSlhaTile) ; CCOS = causal-context OS (graphe causal pagé, event-log hash-chaîné).
+  Première brique de synergie ; suites possibles : pont d'attestation/event-log (vinfer #80 + DiFR
+  #5 → event_log CCOS), guard à garantie statistique (conformal/ensembles), signature PQ (SLHAv2).
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::elastic_kv_cache.
+- Tests (5, core) : fidélité cosinus >0.95 (résidu > base) + déterminisme ; **grouping cosine-aware
+  améliore la fidélité de base** (magnitudes hétérogènes, tile jamais pire) ; attention compressée ≈
+  pleine (cosinus >0.99) ; ratio ≥3× vs f32 ; budget borné + bit-exact.
+- docs : CHANGELOG. 618 tests core (+5) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 100 : Reluplex (#4) — vérification complète SMT — ROADMAP 80/80 ✅
+- `nn::ibp::reluplex_verify`/`reluplex_unstable_count` (Katz 2017) : recherche SAT d'un
+  contre-exemple par case-splitting **paresseux** des phases ReLU (neurones stables = phase forcée,
+  jamais scindés ; seuls les instables scindés ⇒ 2^instables feuilles vs 2^cachés du MILP). Feuille
+  = patron affine, LP 2D exact (partagé #31). Distinct de #26 (split entrée) et #31 (eager).
+- Bibliothèque seule (pas de CLI ni multilingue). Module nn::ibp.
+- Tests (3, core) : accord avec MILP (balayage rayons, 2 méthodes exactes) ; contre-exemple réel
+  (SAT) ; scinde moins que tous les neurones (élimination par bornes) à petit rayon ; déterministe.
+- docs : roadmap #4 📋→✅ ; CHANGELOG. 613 tests core (+3) ; 8 gates verts (à confirmer).
+- **🎉 LES 80 ITEMS DE LA ROADMAP RECHERCHE SONT ✅ (80/80).**
+
+## Session 2026-06-18 — volet 99 : Inférence vérifiable (#80) — Freivalds + engagement + Fiat-Shamir
+- `scirust_runtime::vinfer` : modèle linéaire entier sur GF(2³¹−1) engagé par hash ; vérif sortie
+  batchée Y par Freivalds (W·(X·r)=Y·r, r par Fiat-Shamir de hash(engagement,X,Y)). Compact
+  (O(out·in+in·b) vs O(out·in·b)), sain (faux Y passe ≤ (1/p)^k). Pas de ZK (vérifieur a les poids).
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue). Nouveau module.
+- Tests (4, runtime) : accepte inférence correcte + déterministe ; 1000 falsifications toutes
+  rejetées (soundness) ; engagement lie le modèle ; Fiat-Shamir lie la sortie (sortie d'autres
+  entrées rejetée).
+- docs : roadmap #80 📋→✅ ; CHANGELOG. 610 core + 7 runtime ; 8 gates verts ✓ ; commit 4dc3436.
+
+## Session 2026-06-18 — volet 98 : DiFR (#5) — vérification d'inférence malgré le non-déterminisme
+- `scirust_runtime::difr::difr_verify` (2025) : référence canonique via reproducible_dot (f64,
+  indépendant de l'ordre) + enveloppe d'erreur FP saine (γ·Σ|termes| propagée, ReLU 1-Lipschitz).
+  Accepte tout ordre de sommation f32 honnête, rejette la falsification au-delà de l'enveloppe.
+  Prolonge proof bit-exact (qui rejetterait une sortie honnête entre matériels). Nouveau module.
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue).
+- Tests (3, runtime) : accepte un ordre de sommation différent ; enveloppe saine (1000 ordres
+  tous acceptés) & fine (<0.001 échelle) ; rejette falsification (change la classe) + déterminisme.
+- docs : roadmap #5 📋→✅ ; CHANGELOG. 610 core + 3 runtime ; 8 gates verts ✓ ; commit 831746a.
+
+## Session 2026-06-18 — volet 97 : MILP (#31) — vérification exacte
+- `nn::ibp::milp_min_margin`/`milp_verify_robustness` (Tjeng 2019) : réseau ReLU 2-entrées
+  1-couche. Patrons d'activation ReLU = binaires MILP ⇒ énumérés ; par patron le réseau est affine,
+  marge logitₜ−logⱼ minimisée sur boîte ∩ demi-espaces d'activation par énumération de sommets 2D
+  (lp_min_2d). Min global exact ; >0 ⇒ Robust sinon Unsafe(contre-exemple exact).
+- Bibliothèque seule (pas de CLI ni multilingue). Module nn::ibp.
+- Tests (2, core) : = force brute (grille 120², min ≤ tout échantillon + proche) + témoin atteint
+  + déterminisme ; contre-exemple réel (grande boîte) + borne ≥ DeepPoly (sain) & strictement plus
+  serré quelque part.
+- docs : roadmap #31 📋→✅ ; CHANGELOG. 610 tests core (+2) ; 8 gates verts ✓ ; commit 2e160fa.
+
+## Session 2026-06-18 — volet 96 : Branch-and-bound (#26) — vérification complète
+- `nn::ibp::verify_robustness`/`BabResult` (GCP-CROWN, Zhang 2022) : BaB sur le domaine d'entrée.
+  Marges par classe (fusionnées en dernière couche) bornées par DeepPoly ; toutes >0 ⇒ Robust ;
+  sinon sonde centre ⇒ contre-exemple ; sinon scinde axe le plus large + récurse. Décide
+  (Robust/Unsafe/Unknown). Split ReLU + plans coupants NON implémentés (documenté).
+- CLI : exposé dans `certify`. Pas de nouvelle commande ⇒ pas de multilingue.
+- Tests (3, core) : Robust sain (5000 pts) + déterministe ; rayon BaB > DeepPoly seul (+ région
+  sup. saine, 3000 pts) ; Unsafe = vrai contre-exemple (mal classé, dans boîte).
+- docs : roadmap #26 📋→✅ ; CHANGELOG. 608 tests core (+3) ; 8 gates verts ✓ ; commit e10de3a.
+
+## Session 2026-06-18 — volet 95 : DeepPoly (#28) — domaine abstrait relationnel
+- `nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly` (Singh 2019) : bornes basse/haute
+  **affines en les entrées** par neurone (back-substitution), relaxation ReLU asymétrique
+  (corde sup (u/(u−l))(y−l), inf λy à aire min λ=1 si u>−l sinon 0). Plus serré qu'IBP à toute
+  profondeur (vs crown_bounds limité 2 couches).
+- CLI : exposé dans `certify` (à côté IBP/CROWN/zonotope/smoothing). Pas de nouvelle commande
+  ⇒ pas de multilingue.
+- Tests (2, core) : sain (4000 pts ∈ boîte, MLP 3 couches) + déterministe ; plus serré qu'IBP
+  sur relu(x)+relu(−x)=|x| (DeepPoly exact [0,1] vs IBP [0,2]).
+- docs : roadmap #28 📋→✅ ; CHANGELOG. 605 tests core (+2) ; 8 gates verts ✓ ; commit dec7fbc.
+
+## Session 2026-06-18 — volet 94 : CROWN-IBP (#30) — entraînement certifié
+- `nn::crown_ibp::CrownIbpMlp` (Zhang 2020) : propagation IBP **différentiable** sur la tape
+  (centre·W+b, rayon·|W| avec |W|=relu(W)+relu(−W) ; ReLU-intervalle [relu(l),relu(u)]) ⇒ logits
+  robustes (vraie classe borne inf, autres borne sup), loss = cross-entropy ⇒ réseau prouvablement
+  robuste. Mesure du rayon certifié via IbpMlp (plain f32) existant. Nouveau module.
+- Bibliothèque seule (entraînement, pas de CLI ni multilingue).
+- Tests (2, core) : IBP tape ≡ IbpMlp référence + sain (2000 pts ∈ boîte) ; rayon certifié croît
+  (robuste-entraîné >> accuracy-only, +0.2 ℓ∞, tous deux 100 % justes) + déterminisme.
+- docs : roadmap #30 📋→✅ ; CHANGELOG. 603 tests core (+2) ; 8 gates verts ✓ ; commit a185017.
+
+## Session 2026-06-18 — volet 93 : Sophia (#44) — optimiseur 2e ordre clippé
+- `nn::nd_optim::NdSophia` (Liu 2023) : θ←θ−lr·clip(m/max(γ·h,eps),ρ), h=EMA Hessienne diagonale
+  par Hutchinson (ĥ=v⊙Hv, v∈{±1} seedé) via produit Hessien-vecteur en différences finies
+  (Hv≈(∇L(θ+εv)−∇L(θ))/ε, exact pour quadratique). Ancien blocage « abs tape op » infondé
+  (clipping en f32 dans l'optimiseur). 2 gradients/pas (probe+step orchestrés) ⇒ hors lm --opt.
+- Bibliothèque seule (comme SAM, hors boucle lm). Module nd_optim.
+- Tests (1, core) : converge sur quadratique mal conditionné (courbures 4 vs 0.25, cond. 16)
+  + déterminisme bit-exact (probe seedé).
+- docs : roadmap #44 📋→✅ ; CHANGELOG. 601 tests core (+1) ; 8 gates verts ✓ ; commit 387a304.
+
+## Session 2026-06-18 — volet 92 : QuIP# (#64) — incohérence Hadamard + lattice E8
+- `quantization::quantize_quip`/`nearest_e8`/`random_hadamard_transform` (Tseng 2024) :
+  (1) incohérence = Hadamard randomisée (signes ±1 seedés + FWHT, orthogonale) ⇒ étale aberrants,
+  rétrécit la plage que les 2^bits niveaux couvrent (à budget égal) ; (2) codebook lattice E8
+  (D8 ∪ D8+½, décodeur Conway-Sloane) plus dense que la grille cubique à densité égale.
+- Bibliothèque seule (pas de CLI ni multilingue). Module quantization existant.
+- Tests (3, core) : RHT orthogonale (round-trip) + réduit plage aberrants (<0.6×) ; E8 valide
+  (coords alignées + somme paire) & < grille cubique en moyenne (4000 vecteurs) ; bout-en-bout
+  QuIP# < RTN scalaire 2-bit sur poids à aberrants + déterminisme (codes identiques).
+- docs : roadmap #64 📋→✅ ; CHANGELOG. 600 tests core (+3) ; 8 gates verts ✓ ; commit d1567d9.
+
+## Session 2026-06-18 — volet 91 : AQLM (#70) — quantification additive multi-codebook
+- `quantization::quantize_aqlm`/`AqlmResult` (Egiazarian 2024) : groupes de dim g, chaque groupe
+  ≈ somme de M mots de code (un par codebook, K mots chacun) ; codebooks appris par k-means
+  résiduel + optimisation alternée (ré-encodage glouton + ré-ajustement LS). Vectoriel ⇒ capte
+  la structure inter-dim. Module quantization existant.
+- Bibliothèque seule (pas de CLI ni multilingue).
+- Tests (2, core) : < 0.7× RTN scalaire à ~2-bit égal (M·log₂K/g) sur poids structurés ;
+  round-trip (longueur non divisible) + déterminisme (codes + bits identiques).
+- docs : roadmap #70 📋→✅ ; CHANGELOG. 597 tests core (+2) ; 8 gates verts ✓ ; commit 40a5be0.
+
+## Session 2026-06-18 — volet 90 : S5 (#52) — SSM MIMO + scan associatif parallèle
+- `nn::nd_layers::s5_scan`/`s5_parallel_scan`/`NdS5` (Smith 2023) : SSM MIMO diagonal (état
+  partagé n piloté par toutes entrées via B, lu via C ; hₜ=Ā⊙hₜ₋₁+xₜB, yₜ=hₜC) ; scan associatif
+  Hillis-Steele (combine (a₁,u₁)∘(a₂,u₂)=(a₂a₁,a₂u₁+u₂), ordre doublage fixe ⇒ déterministe).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (4, core) : scan parallèle ≡ séquentiel (aₜ variable ⇒ vrai associatif) ; s5_scan ≡
+  référence MIMO ; gradient check (x,Ā,B,C) ; NdS5 entraîne (MSE↓ <0.6×) + déterminisme.
+- docs : roadmap #52 📋→✅ ; CHANGELOG. 595 tests core (+4) ; 8 gates verts ✓ ; commit 55a31ad.
+
+## Session 2026-06-18 — volet 89 : Mamba-2 / SSD (#50) — dualité espace-d'états ↔ attention
+- `nn::nd_layers::ssd_dual`/`NdMamba2` (Dao & Gu 2024) : A scalaire par pas ⇒ récurrence
+  Hₜ=aₜHₜ₋₁+xₜBₜᵀ, yₜ=HₜCₜ **exactement** = forme quadratique masquée Y=(L⊙CBᵀ)X,
+  L[i,j]=∏_{j<k≤i}aₖ. cumlog = préfixe-somme (matmul triangulaire), L=exp(diff) masquée AVANT
+  exp (diff⊙mask→exp→⊙mask) ⇒ pas d'inf·0=NaN. a_log=log a (=Δ·A), aucun op log.
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (3, core) : dual ≡ récurrence séquentielle (la dualité) ; gradient check (x,B,C,a_log) ;
+  NdMamba2 entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #50 📋→✅ ; CHANGELOG. 591 tests core (+3) ; 8 gates verts ✓ ; commit ad0bfb2.
+
+## Session 2026-06-18 — volet 88 : FNO (#75) — opérateur neuronal de Fourier
+- `nn::fno::FnoSpectralConv1d`/`NdFno` (Li 2021) : DFT réelle = matrices cos/sin fixes (matmul
+  déterministe, différentiable, sans FFT ni complexe) ; garder `modes` basses fréqs, poids
+  complexe par mode R_k=Ar_k+iAi_k (mélange canaux via bmm), DFT⁻¹ (inverse unilatéral facteur-2).
+  Bloc σ(spectral+local). Nouveau module nn::fno.
+- Bibliothèque seule (couches gradient-checkées, pas de CLI ni multilingue).
+- Tests (4, core) : reconstruction exacte band-limité (DFT⁻¹∘DFT) ; gradient check (v, Ar, Ai) ;
+  **apprend la dérivation** (d/dx↔×ik) et généralise à phase non vue (MSE test <0.02, convexe) ;
+  NdFno entraîne (MSE↓ <0.6×) + déterminisme. Bug harnais évité : 1 forward/tape (sinon un
+  paramètre ré-inputé N fois ⇒ gradient éclaté sur N nœuds).
+- docs : roadmap #75 📋→✅ ; CHANGELOG. 588 tests core (+4) ; 8 gates verts ✓ ; commit 451e6be.
+
+## Session 2026-06-18 — volet 87 : Hyena (#56) — convolutions longues implicites + gating
+- `nn::nd_layers::hyena_long_conv`/`NdHyena` (Poli 2023) : mélangeur sans attention. Conv
+  causale par canal y[t,c]=Σ_τ h[τ,c]u[t−τ,c] = Σ_τ h[τ,:]⊙(Sτ·u) (matrices décalage Sτ
+  constantes ⇒ différentiable sans scatter). Filtre **implicite** : MLP(encodage positionnel)
+  ⊙ fenêtre exp(−γ·t̄) apprenable. Opérateur ordre 2 : z=x1⊙(h1*v), z=x2⊙(h2*z).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (3, core) : conv ≡ référence causale écrite à la main ; gradient check (u, h) ;
+  NdHyena entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #56 📋→✅ ; CHANGELOG. 584 tests core (+3) ; 8 gates verts ✓ ; commit 8ff9c98.
+
+## Session 2026-06-18 — volet 86 : xLSTM (#57) — sLSTM scalaire + mLSTM matriciel
+- `nn::nd_layers::slstm_scan`/`mlstm_scan`/`NdXlstm` (Beck 2024) : sLSTM (porte entrée
+  exponentielle iₜ=exp(ĩₜ) + normaliseur nₜ, hₜ=oₜ⊙cₜ/nₜ ; tanh=2σ(2x)−1, sortie bornée
+  (−1,1) ⇒ stable sans stabilisateur log omis) ; mLSTM (mémoire covariance d×d par produits
+  externes, dénominateur max(|nₜ·qₜ|,1) **exact** via |a|=relu(a)+relu(−a), max(a,1)=relu(a−1)+1).
+- Bibliothèque seule (couches gradient-checkées, pas de CLI ni multilingue). Module nd_layers.
+- Tests (4, core) : mLSTM ≡ référence (dénominateur actif) ; gradient check sLSTM (4 portes)
+  et mLSTM (q,k,v,iₜ,fₜ, régime lisse |nₜ·qₜ|<1) ; NdXlstm entraîne (MSE↓ <0.6×) + déterminisme.
+- docs : roadmap #57 📋→✅ ; CHANGELOG. 581 tests core (+4) ; 8 gates verts ✓ ; commit 27bf173.
+
+## Session 2026-06-18 — volet 85 : OmniQuant (#65) — clipping de poids apprenable
+- `quantization::omniquant_quantize` (Shao 2024) : facteur de coupe γ∈(0,1] par canal
+  (plage γ·max|w|), recherche sur grille incluant γ=1=RTN ⇒ ≤ RTN garanti.
+- Bibliothèque seule (pas de CLI ni multilingue). Module quantization existant.
+- Tests (2, core) : < RTN sur poids queue lourde (≥1 canal coupe) ; jamais pire que RTN
+  (uniforme→RTN) + déterminisme (codes/scales identiques).
+- docs : roadmap #65 📋→✅ ; CHANGELOG. 577 tests core (+2) ; 8 gates verts ✓ ; commit 38e3fb4.
+
+## Session 2026-06-18 — volet 84 : S4 / S4D (#51) — espace d'états structuré diagonal
+- `nn::nd_layers::s4_scan`/`NdS4` (Gu 2022) : SSM LTI diagonal (Ā=exp(Δ⊙A), B̄=Δ⊙B,
+  h_t=Ā⊙h_{t−1}+B̄⊙x_t, y_t=Σ_n C⊙h_t) ; init HiPPO diag A[:,j]=−(j+1). Paramètres fixes (vs Mamba sélectif).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (2, core) : gradient check (x, a_log, B, C, log_dt vs diff. finies, tol 3e-2) ;
+  NdS4 entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #51 📋→✅ ; CHANGELOG. 575 tests core (+2) ; 8 gates verts ✓ ; commit aafa3b3.
+
+## Session 2026-06-18 — volet 83 : AI²/zonotopes (#29) — domaine abstrait vérification
+- `nn::ibp::Zonotope`/`IbpMlp::certify_zonotope` (Gehr 2018) : affine exact, ReLU DeepZ
+  (λx+μ±μ, 1 générateur/neurone instable). Générateurs partagés ⇒ corrélations.
+- CLI : exposé dans `certify` (à côté IBP/CROWN). Pas de nouvelle commande ⇒ pas de multilingue.
+- Tests (3, core) : affine exact (=intervalle) ; soundness (4000 points ∈ boîte zonotope, MLP 3 couches) ;
+  plus serré qu'IBP sous corrélation (relu(x)−relu(x)≡0 : zono [−0.5,0.5] vs IBP [−1,1], sains).
+- docs : roadmap #29 📋→✅ ; CHANGELOG. 573 tests core (+3) ; 8 gates verts ✓ ; commit 7963ee5.
+
+## Session 2026-06-18 — volet 82 : EAGLE (#62) — décodage spéculatif niveau features
+- `nn::nd_decoder::EagleHead`/`generate_eagle` (Li 2024) : tête (feature, embed) → feature
+  suivant, autorégressée + tête LM gelée ⇒ brouillon, vérifié (préfixe + correction).
+  Ajout accesseurs `token_embedding`/`head_logits`/`d_model` ; `EagleHead::train` (MSE features, base gelée).
+- Bibliothèque seule (algorithme de décodage, pas de CLI ni multilingue). Module nd_decoder.
+- Tests (2, core) : exact = greedy pour tête **quelconque** (random) + déterminisme ;
+  tête entraînée (séquence périodique) ⇒ blocs acceptent >1 token (forwards<2·n), exact.
+  8/8 tests nd_decoder verts.
+- docs : roadmap #62 📋→✅ ; CHANGELOG. 571 tests core (+2) ; 8 gates verts ✓ ; commit dc62241.
+
+## Session 2026-06-18 — volet 81 : Medusa (#61) — décodage à têtes multiples
+- `nn::nd_decoder::MedusaHeads`/`generate_medusa` (Cai 2024) : têtes (tête j → token +j+2
+  depuis l'état caché) ⇒ brouillon multi-token 1 forward, vérifié (préfixe + correction).
+  Ajout `NdDecoderLM::forward_hidden`/`forward_with_hidden` ; `MedusaHeads::train` (base gelée).
+- Bibliothèque seule (algorithme de décodage, pas de CLI ni multilingue). Module nd_decoder.
+- Tests (2, core) : exact = greedy pour têtes **quelconques** (random) + déterminisme ;
+  têtes entraînées (séquence périodique mémorisée) ⇒ blocs acceptent >1 token (forwards<2·n),
+  toujours exact. 6/6 tests nd_decoder verts.
+- docs : roadmap #61 📋→✅ ; CHANGELOG. 569 tests core (+2) ; 8 gates verts ✓ ; commit 48459a0.
+
+## Session 2026-06-18 — volet 80 : PagedAttention (#63) — KV-cache paginé
+- `nn::paged_attention::PagedKvCache` (Kwon/vLLM 2023) : blocs d'un pool + table de blocs ;
+  append/gather/attention indexée via la table (softmax(qKᵀ/√d)·V). reserve_decoy() = fragmentation.
+- Bibliothèque seule (mécanisme interne, pas de CLI ni multilingue). Nouveau module.
+- Tests (3, core) : gather bit-identique sous fragmentation (leurres interleavés) + comptabilité
+  blocs ⌈len/bs⌉ ; attention paginée **bit-identique** au cache contigu (même ordre arith) +
+  déterminisme ; cas vide + division exacte en blocs.
+- docs : roadmap #63 📋→✅ ; CHANGELOG. 567 tests core (+3) ; 8 gates verts ✓ ; commit 66a48be.
+
+## Session 2026-06-18 — volet 79 : DoRA (#73) — LoRA magnitude/direction
+- `nn::dora::DoraLinear` (Liu 2024) : W'=m⊙(W₀+BA)/‖W₀+BA‖_col ; W₀ gelé, m/A/B entraînés.
+  Backward de la normalisation par colonne en forme close (∂L/∂V=(m/‖V‖)(gw−u·s), ∂L/∂m=s).
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::dora.
+- Tests (3, core) : init B=0,m=‖W₀‖_col ⇒ W'=W₀ exact (+ forward = map de base) ;
+  gradient check (diff. finies centrales eps=1e-3, tol 3e-2, params génériques B≠0) ;
+  récupère une cible DoRA (perte ÷100, GD) + déterminisme.
+- docs : roadmap #73 📋→✅ ; CHANGELOG. 564 tests core (+3) ; 8 gates verts ✓ ; commit 3521006.
+
+## Session 2026-06-18 — volet 78 : GaLore (#48) — projection low-rank des gradients
+- `nn::nd_optim::NdGalore`/`galore_subspace` (Zhao 2024) : Adam dans le sous-espace
+  dominant rang-r du gradient (top-r vec. singuliers via jacobi_eigenvectors,
+  rafraîchi tous update_gap pas) ⇒ états compressés rank×max(m,n). Vecteurs → Adam.
+- CLI : `lm --opt galore` (famille d'optimiseurs). REFERENCE mise à jour.
+- Tests (5 core + 1 CLI) : P orthonormal + projection orthogonale optimale (Pythagore,
+  erreur↓ en r, nulle au rang plein) ; gradient bas-rang reconstruit exact (sous-rang→résidu) ;
+  convergence sur cible bas-rang, état 2×4≠4×4 ; sous-rang n'atteint pas ; fallback vecteur=Adam ;
+  déterminisme. lm_command vert (galore).
+- docs : roadmap #48 📋→✅ ; CHANGELOG ; REFERENCE. 561 tests core (+5) ; 8 gates verts ✓ ; commit 2a41f3e.
+
+## Session 2026-06-18 — volet 77 : YaRN (#60) — extension de contexte RoPE
+- `nn::yarn` (Peng 2023) : `yarn_frequencies` (interpolation NTK-by-parts : garde
+  haute fréq, interpole basse fréq θ/s, rampe γ), `rope_apply_freqs`/`rope_yarn`
+  (rotation, convention emboîtée = RoPE existante), `yarn_attention_scale` (0.1·ln(s)+1).
+- Bibliothèque seule (primitive positionnelle, pas de CLI ni multilingue). Nouveau module.
+- Tests (6, core) : position relative préservée (⟨rope(q,m),rope(k,n)⟩=g(m−n)) ;
+  angle basse-fréq à s·L revient exactement à l'entraînement (L) ; bornes NTK-by-parts
+  (haute inchangée, basse=θ/s, rampe monotone) ; scale=1 ≡ RoPE simple ; déterminisme.
+- docs : roadmap #60 📋→✅ ; CHANGELOG. 556 tests core (+6) ; 8 gates verts ✓ ; commit b875205.
+
+## Session 2026-06-18 — volet 76 : Learn then Test (#37) — contrôle de risques multiples
+- `nn::conformal::learn_then_test`/`hoeffding_pvalue` (Angelopoulos 2021) : contrôle
+  distribution-free de risques multiples **arbitraires** (non emboîtés). p-value de
+  Hoeffding p=exp(−2n(α−R̂)₊²) pour H₀:R(λ)>α + correction Bonferroni (p≤δ/m) ⇒ FWER≤δ.
+  Plus général que RCPS #36 (pas d'hypothèse de monotonie). Réutilise l'infra conformal.
+- Bibliothèque seule (pas de CLI ni multilingue). Module `nn::conformal` existant.
+- Tests (3, core) : p-value forme close (saturation à 1) ; **FWER≤δ vérifié par
+  simulation** (2000 essais, toutes configs sur frontière R=α : FWER mesuré ≤ 0,1 vs
+  sélection naïve qui échoue >90 %) ; puissance (sûres retenues, non-sûres rejetées) +
+  déterminisme. 16/16 tests conformal verts.
+- docs : roadmap #37 📋→✅ ; CHANGELOG. 550 tests core (+3) ; 8 gates verts ✓ ; commit 8d0d766.
+
+## Session 2026-06-17 — volet 75 : Rényi DP accountant (#78) — budget confidentialité
+- `dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon` (Mironov 2017) : RDP gaussien
+  α/(2σ²) + conversion Mironov ε=RDP+ln(1/δ)/(α−1) optimisée sur α. Renforce DP-SGD.
+- Bibliothèque seule (pas de CLI ni multilingue). Module `dp` existant.
+- Tests (2, core) : RDP/conversion exactes (formes closes) ; ε ≪ composition basique
+  (steps=100,σ=4,δ=1e-5 : ~15 vs ~143) + monotonie.
+- docs : roadmap #78 📋→✅ ; CHANGELOG. 547 tests core (+2) ; 8 gates verts ✓ ; commit 1af31eb.
+
+## Session 2026-06-17 — volet 74 : Watermark LLM (#79) — provenance auditable
+- `nn::watermark` (Kirchenbauer 2023) : partition vert/rouge seedée (hash
+  (seed,prev,token)), `apply_green_bias` (biais logits verts), `detect_z` (test z
+  (g−γn)/√(nγ(1−γ)) sans accès au modèle).
+- Bibliothèque seule (pas de CLI ni multilingue). Pilier audit/provenance (nouveau).
+- Tests (3, core) : fraction verte ≈ γ ; biais sur tokens verts seulement ; texte
+  filigrané détecté (z≫8) vs naturel (z≈0) + mauvais seed non détecté + déterminisme.
+- Note : piège Rust 2024 `gen` mot-clé réservé (renommé `draw`) — déjà vu (RWKV).
+- docs : roadmap #79 📋→✅ ; CHANGELOG. 545 tests core (+3) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 73 : DeepONet (#76) — apprentissage d'opérateurs
+- `nn::deeponet::DeepONet` (Lu 2021) : G(u)(y)=Σ b_k(u)·t_k(y) ; trunk cosinus fixe +
+  branch linéaire (POD-DeepONet) ⇒ convexe, exact pour opérateurs linéaires.
+- Bibliothèque seule (pas de CLI ni multilingue). Standalone (GD analytique).
+- Tests (2, core) : apprend l'antidérivée, généralise à fonctions non vues (MSE test
+  < 0,01, < 0,1× baseline) ; déterminisme.
+- docs : roadmap #76 📋→✅ ; CHANGELOG. 542 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 72 : Deep Ensembles (#40) — incertitude épistémique
+- `nn::ensemble::DeepEnsemble` (Lakshminarayanan 2017) : N MLP ReLU seedés (tape +
+  NdAdam) ; predict→(moy, écart-type) = estimation + incertitude épistémique.
+- Bibliothèque seule (pas de CLI ni multilingue). Réutilise NdLinear/relu/NdAdam.
+- Tests (2, core) : MSE ensemble ≤ moy membres (Jensen) + écart-type ≫ OOD (x=4
+  vs x=0) ; déterminisme bit-exact.
+- docs : roadmap #40 📋→✅ ; CHANGELOG. 540 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 71 : LLM.int8() (#71) — matmul mixte int8/fp32
+- `quantization::int8_mixed_matmul` (Dettmers 2022) : colonnes de features outliers
+  (>seuil) en fp32, reste en int8 ; X·W = int8(normal) + fp32(outlier). Réutilise
+  compute_scale/quantize_tensor/matmul_int8.
+- Bibliothèque seule (pas de CLI ni multilingue).
+- Tests (2, core) : erreur vs fp < 0,5× int8 simple (activations à outliers ×75) ;
+  sans outliers = int8 pur ; déterminisme.
+- docs : roadmap #71 📋→✅ ; CHANGELOG. 538 tests core (+2) ; 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 70 : fix SIMD — bug d'alignement (corrigé)
+- `scirust-simd::portable` : `add_f32/f64_inplace`, `dot_f32/f64`, `fma_f32`
+  découpaient chaque opérande indépendamment (`as_simd`) ⇒ lanes décalées si
+  alignements différents ⇒ résultats **faux non déterministes** (flake
+  `test_add_f32_inplace` ~30–50 %). Réécrit en `chunks_exact` (appariement bloc k
+  identique). + `needless_return` complex.rs corrigé.
+- Test de régression : tous les décalages relatifs (add/dot/fma vs scalaire) ;
+  12/12 lancers verts. Déterminisme rétabli (cœur de la thèse scirust).
+- docs : CHANGELOG (Corrigé). Pas de changement de roadmap (bug fix). 8 gates (à confirmer).
+
+## Session 2026-06-17 — volet 69 : RCPS (#36) — contrôle de risque (PAC)
+- `nn::conformal::hoeffding_ucb` + `rcps_select` (Bates 2021) : contrôle d'un risque
+  borné (au-delà de la couverture) via borne Hoeffding ; plus petit λ dont UCB ≤ α
+  ⇒ R(λ̂)≤α w.p. 1−δ.
+- Bibliothèque seule (comme APS/RAPS/ACI). Complète le pilier conformal.
+- Tests (2, core) : UCB = moyenne + slack exact, rcps_select choisit le bon λ ;
+  risque test ≤ α sur données fraîches (borne conservatrice).
+- docs : roadmap #36 📋→✅ ; CHANGELOG. 536 tests core (+2) ; 8 gates (à confirmer).
 
 ## Session 2026-06-17 — volet 68 : Prodigy (#46) — Adam sans learning-rate
 - `nn::nd_optim::NdProdigy` + `ProdigyConfig` (Mishchenko & Defazio 2023) :

@@ -81,9 +81,10 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `ode <f(t,y)> <y0> <t0> <t1> [h] [--method]` | intègre dy/dt=f (RK4 / DOPRI5 adaptatif) | `scirust-solvers`+`-symbolic` |
 | `fem-heat <nodes> <length> <source>` | chaleur 1D −u″=source (éléments finis linéaires) | `scirust-solvers` |
 | `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
+| `quantum [--seed N] [--qubits Q] [--chi C]` | simulateur de circuit quantique MPS / Tensor-Train (chaîne de tenseurs rang-3, SVD tronquée maison, zéro FFI) ; montre un état GHZ exact et compare l'empreinte mémoire MPS à un vecteur d'état dense 2ⁿ | `scirust-core::quantum` |
 | `pinn [--seed N] [--steps S]` | réseau physics-informed : résout le BVP `u''=−u` (résidu de PDE dans la loss), vérifié vs `sin x` | `scirust-core::nn::pinn` |
 | `bpe "<corpus>" [--vocab N] [--encode "<text>"] [--bytes]` | tokenizer BPE déterministe (entraînement + encode/decode ; `--bytes` = byte-level lossless) | `scirust-learning` |
-| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix\|soap\|lookahead\|lamb\|adan\|adafactor\|shampoo\|prodigy]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
+| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix\|soap\|lookahead\|lamb\|adan\|adafactor\|shampoo\|prodigy\|galore]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
 | `deltanet [--seed N] [--steps S]` | entraîne une couche DeltaNet (attention linéaire à règle delta) à ajuster une séquence ; rapporte la baisse de MSE | `scirust-core::nn::nd_layers` |
 | `mamba [--seed N] [--steps S]` | entraîne une couche Mamba (scan sélectif S6, état-espace) à ajuster une séquence ; rapporte la baisse de MSE | `scirust-core::nn::nd_layers` |
 | `retnet [--seed N] [--steps S]` | entraîne une couche RetNet (rétention, attention linéaire récurrente ≡ parallèle) à ajuster une séquence | `scirust-core::nn::nd_layers` |
@@ -95,6 +96,9 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `certify [--seed N] [--eps E]` | bornes de sortie prouvées d'un MLP ReLU sur une boîte L∞ — **IBP** (couche par couche) **et CROWN** (relaxation linéaire, plus serrée) côte à côte | `scirust-core::nn::ibp` |
 | `conformal [--seed N] [--alpha A]` | intervalles conformes à couverture garantie sans hypothèse de distribution | `scirust-core::nn::conformal` |
 | `calibrate [--seed N]` | temperature scaling : ajuste `T` pour réduire l'erreur de calibration (ECE) sans changer l'accuracy | `scirust-core::nn::calibration` |
+| `kvcache [--seed N] [--budget B]` | KV-cache compressé élastique (tuiles INT4 base+résidu, échelles par groupe) — affiche le ratio de compression et la fidélité cosinus de l'attention vs pleine précision ; `--budget` montre le soft-paging borné (synergie SLHAv2/CCOS) | `scirust-core::nn::elastic_kv_cache` |
+| `guard [--seed N] [--alpha A]` | guard à garantie statistique — couverture conforme sans hypothèse de distribution (≥ 1−α) + verdicts Accept/Abstain/Reject (pour le guard de CCOS) | `scirust-core::nn::guard` |
+| `attest [--seed N]` | journal d'attestation hash-chaîné d'inférences **vérifiables** (Freivalds, #80) — vérifie la chaîne, rejette une inférence falsifiée, démontre l'inviolabilité (pont vers l'event-log de CCOS) | `scirust-runtime::attest` |
 | `gptq [--seed N] [--samples S] [--damp D]` | quantification int8 GPTQ (feedback d'erreur d'ordre 2) ; affiche la réduction d'erreur de calibration vs round-to-nearest | `scirust-core::quantization` |
 | `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
 | `bitnet [--seed N]` | quantification ternaire BitNet b1.58 (`{-1,0,+1}`, ~1,58 bit/poids) ; vérifie le matmul sans multiplication | `scirust-core::quantization` |
