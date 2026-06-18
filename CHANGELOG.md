@@ -6,6 +6,19 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
+- **Journal d'attestation hash-chaîné** (`scirust_runtime::attest`) : le pont de l'**inférence
+  vérifiable** de scirust (`vinfer` #80) vers l'`event_log` de **CCOS**. Chaque `InferenceEvent`
+  fige l'engagement du modèle, le hash de l'entrée et le hash de la sortie, et se chaîne au
+  précédent par un **hash SHA-256** (`entréeₙ = H(entréeₙ₋₁ ‖ seq ‖ engagement ‖ entrée ‖ sortie)`)
+  — exactement la forme append-only et inviolable de CCOS, donc les inférences d'un runtime scirust
+  s'ingèrent dans son journal d'audit. Recalculer la chaîne re-dérive la **même tête** (replay
+  déterministe) ; toute mutation ou réordonnancement la **casse**. `attest_and_record` vérifie en
+  plus, *avant* d'ajouter, que la paire `(entrée, sortie)` est une inférence **authentique** du
+  modèle engagé (Freivalds sur `GF(p)`, #80) — la chaîne n'atteste donc que des inférences réelles.
+  Oracle honnête : la chaîne se vérifie et se rejoue (même tête) ; falsification d'un événement /
+  réordonnancement **détectés** ; une inférence authentique est attestée et chaînée tandis qu'une
+  sortie **falsifiée est rejetée** (journal inchangé). Complète la pile de preuve (#3, `proof`,
+  DiFR #5, `vinfer` #80).
 - **KV-cache compressé élastique** (`nn::elastic_kv_cache`) : la primitive déterministe
   partagée derrière **SLHAv2** (compresser le KV-cache pour faire tourner un LLM dans le cache
   du CPU plutôt que sur un GPU hors de prix) et **CCOS** (paging à mémoire bornée), bâtie sur la

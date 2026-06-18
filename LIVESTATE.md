@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 102 : synergie CCOS — pont d'attestation hash-chaîné
+- `scirust_runtime::attest` : journal d'inférences hash-chaîné (SHA-256), rejouable, à la forme
+  de l'event_log de CCOS. InferenceEvent {seq, engagement modèle, hash entrée/sortie, entry_hash} ;
+  entry = H(prev ‖ seq ‖ commitment ‖ in ‖ out). attest_and_record vérifie l'authenticité
+  (Freivalds vinfer #80) AVANT d'ajouter ⇒ chaîne d'inférences réelles, ingérable par CCOS.
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue). Nouveau module.
+- Tests (3, runtime) : chaîne vérifie + replay (même tête) ; falsification/réordonnancement
+  détectés ; inférence authentique attestée + falsifiée rejetée (journal inchangé).
+- docs : CHANGELOG. 618 core + 7 runtime (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 101 : synergie CCOS/SLHAv2 — KV-cache compressé élastique
 - `nn::elastic_kv_cache` : primitive partagée SLHAv2 (compression KV-cache CPU) + CCOS (paging
   borné). Tuile INT4 deux niveaux (base + résidu, « residual tracking » SLHAv2) à **échelles

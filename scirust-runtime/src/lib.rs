@@ -292,6 +292,7 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
     }
     Ok(out)
 }
+pub mod attest;
 pub mod difr;
 pub mod enclave;
 pub mod proof;
