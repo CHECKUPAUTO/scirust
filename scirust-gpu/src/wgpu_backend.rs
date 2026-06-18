@@ -168,12 +168,7 @@ impl WgpuContext {
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
     /// (unary). For binary ops `a` and `b` must share a shape; the result stays
     /// in VRAM. For relu, pass `b = a` (it is ignored).
-    pub fn ew_resident(
-        &self,
-        a: &GpuMatrix,
-        b: &GpuMatrix,
-        op: u32,
-    ) -> BackendResult<GpuMatrix> {
+    pub fn ew_resident(&self, a: &GpuMatrix, b: &GpuMatrix, op: u32) -> BackendResult<GpuMatrix> {
         if op < 2 && (a.rows != b.rows || a.cols != b.cols)
         {
             return Err(BackendError::ShapeMismatch(format!(
@@ -258,8 +253,14 @@ impl WgpuContext {
     }
 
     /// Download a storage buffer back to CPU.
-    pub fn download_buffer(&self, buf: &wgpu::Buffer, elems: usize, bytes: u64) -> BackendResult<Vec<f32>> {
-        if elems == 0 {
+    pub fn download_buffer(
+        &self,
+        buf: &wgpu::Buffer,
+        elems: usize,
+        bytes: u64,
+    ) -> BackendResult<Vec<f32>> {
+        if elems == 0
+        {
             return Ok(Vec::new());
         }
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -268,17 +269,22 @@ impl WgpuContext {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = self.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("download") },
-        );
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("download"),
+            });
         encoder.copy_buffer_to_buffer(buf, 0, &staging, 0, bytes);
         self.queue.submit(Some(encoder.finish()));
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
         self.device.poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| BackendError::Unavailable("wgpu"))?
+        rx.recv()
+            .map_err(|_| BackendError::Unavailable("wgpu"))?
             .map_err(|_| BackendError::Unavailable("wgpu"))?;
         let data = slice.get_mapped_range();
         let out: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
@@ -313,7 +319,8 @@ impl WgpuContext {
         b: &crate::tensor::GpuTensor,
         op: u32,
     ) -> BackendResult<crate::tensor::GpuTensor> {
-        if op < 2 && (a.rows != b.rows || a.cols != b.cols) {
+        if op < 2 && (a.rows != b.rows || a.cols != b.cols)
+        {
             return Err(BackendError::ShapeMismatch(format!(
                 "elementwise shape mismatch: {}×{} vs {}×{}",
                 a.rows, a.cols, b.rows, b.cols
@@ -327,26 +334,41 @@ impl WgpuContext {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        if n > 0 {
+        if n > 0
+        {
             let params: [u32; 4] = [n as u32, op, 0, 0];
-            let p_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("ew-params"),
-                contents: bytemuck::cast_slice(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ew-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ew"),
                 layout: &self.ew_pipeline.get_bind_group_layout(0),
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: a.buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: b.buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
                 ],
             });
-            let mut encoder = self.device.create_command_encoder(
-                &wgpu::CommandEncoderDescriptor { label: Some("ew") },
-            );
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ew") });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("ew"),
@@ -682,13 +704,7 @@ impl WgpuContext {
 
 /// One-shot row-major `C = A·B`. Acquires a fresh [`WgpuContext`]; for repeated
 /// calls (e.g. an autograd backward pass) prefer a cached [`crate::WgpuEngine`].
-pub fn wgpu_gemm(
-    a: &[f32],
-    b: &[f32],
-    m: usize,
-    k: usize,
-    n: usize,
-) -> BackendResult<Vec<f32>> {
+pub fn wgpu_gemm(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> BackendResult<Vec<f32>> {
     if m == 0 || n == 0
     {
         return Ok(Vec::new());

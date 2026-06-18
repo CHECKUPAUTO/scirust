@@ -61,16 +61,13 @@ impl Default for KahanSum {
 ///
 /// Seuil: `1.17549435e-38` = plus petit float normalisé (f32::MIN_POSITIVE).
 pub fn sanitize_f32(x: f32) -> f32 {
-    if x.abs() < 1.17549435e-38 {
-        0.0
-    } else {
-        x
-    }
+    if x.abs() < 1.17549435e-38 { 0.0 } else { x }
 }
 
 /// Sanitize toutes les valeurs d'une slice.
 pub fn sanitize_slice(data: &mut [f32]) {
-    for x in data.iter_mut() {
+    for x in data.iter_mut()
+    {
         *x = sanitize_f32(*x);
     }
 }
@@ -85,15 +82,19 @@ pub fn sanitize_slice(data: &mut [f32]) {
 /// patterns binaires différents (`0x80000000` vs `0x00000000`) mais
 /// sont mathématiquement égaux.
 pub fn verify_bit_exact(a: &[f32], b: &[f32]) -> Result<(), String> {
-    if a.len() != b.len() {
+    if a.len() != b.len()
+    {
         return Err(format!("length mismatch: {} vs {}", a.len(), b.len()));
     }
-    for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+    for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate()
+    {
         let xb = x.to_bits();
         let yb = y.to_bits();
-        if xb != yb {
+        if xb != yb
+        {
             // Tolérance pour le zéro signé
-            if x == 0.0 && y == 0.0 {
+            if x == 0.0 && y == 0.0
+            {
                 continue;
             }
             return Err(format!(
@@ -107,7 +108,12 @@ pub fn verify_bit_exact(a: &[f32], b: &[f32]) -> Result<(), String> {
 
 /// Relative Frobenius error.
 pub fn rel_err(a: &[f32], b: &[f32]) -> f32 {
-    let num: f32 = a.iter().zip(b).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt();
+    let num: f32 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f32>()
+        .sqrt();
     let den: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-30);
     num / den
 }
@@ -130,14 +136,26 @@ pub fn crypto_gemm_zq(
     n: usize,
     q: i32,
 ) -> Result<Vec<i32>, String> {
-    if a.len() != m * k || b.len() != k * n {
-        return Err(format!("shape mismatch: A({}*{})={}, B({}*{})={}", m, k, a.len(), k, n, b.len()));
+    if a.len() != m * k || b.len() != k * n
+    {
+        return Err(format!(
+            "shape mismatch: A({}*{})={}, B({}*{})={}",
+            m,
+            k,
+            a.len(),
+            k,
+            n,
+            b.len()
+        ));
     }
     let mut out = vec![0i32; m * n];
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut sum: i32 = 0;
-            for p in 0..k {
+            for p in 0..k
+            {
                 // Réduction modulaire immédiate après chaque produit
                 let prod = ((a[i * k + p] as i64 * b[p * n + j] as i64) % q as i64) as i32;
                 sum = (sum + prod) % q;
@@ -182,14 +200,26 @@ pub fn fixed_point_gemm_q16(
     k: usize,
     n: usize,
 ) -> Result<Vec<i32>, String> {
-    if a.len() != m * k || b.len() != k * n {
-        return Err(format!("shape mismatch: A({}*{})={}, B({}*{})={}", m, k, a.len(), k, n, b.len()));
+    if a.len() != m * k || b.len() != k * n
+    {
+        return Err(format!(
+            "shape mismatch: A({}*{})={}, B({}*{})={}",
+            m,
+            k,
+            a.len(),
+            k,
+            n,
+            b.len()
+        ));
     }
     let mut out = vec![0i32; m * n];
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut sum: i64 = 0; // i64 pour éviter l'overflow
-            for p in 0..k {
+            for p in 0..k
+            {
                 let product = a[i * k + p] as i64 * b[p * n + j] as i64;
                 sum += product >> 16; // Réalignement Q16
             }
@@ -207,14 +237,18 @@ pub fn fixed_point_gemm_q32(
     k: usize,
     n: usize,
 ) -> Result<Vec<i64>, String> {
-    if a.len() != m * k || b.len() != k * n {
+    if a.len() != m * k || b.len() != k * n
+    {
         return Err(format!("shape mismatch"));
     }
     let mut out = vec![0i64; m * n];
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut sum: i128 = 0; // i128 pour accumulation sans overflow
-            for p in 0..k {
+            for p in 0..k
+            {
                 let product = a[i * k + p] as i128 * b[p * n + j] as i128;
                 sum += product >> 32;
             }
@@ -244,20 +278,26 @@ pub fn deterministic_fp32_gemm(
     ta: bool,
     tb: bool,
 ) -> BackendResult<()> {
-    if m == 0 || n == 0 {
+    if m == 0 || n == 0
+    {
         return Ok(());
     }
-    if k == 0 {
-        for v in c.iter_mut() {
+    if k == 0
+    {
+        for v in c.iter_mut()
+        {
             *v = sanitize_f32(*v * beta);
         }
         return Ok(());
     }
 
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut acc = KahanSum::new();
-            for q in 0..k {
+            for q in 0..k
+            {
                 let av = sanitize_f32(if ta { a[q * m + i] } else { a[i * k + q] });
                 let bv = sanitize_f32(if tb { b[j * k + q] } else { b[q * n + j] });
                 acc.add(av * bv);
@@ -274,13 +314,22 @@ pub fn deterministic_fp32_gemm(
 
 /// Quantifier f32 → i8 symétrique, per-tensor scale.
 pub fn quantize_symmetric_i8(data: &[f32]) -> (Vec<i8>, f32) {
-    if data.is_empty() {
+    if data.is_empty()
+    {
         return (Vec::new(), 1.0);
     }
     let max_abs = data.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
-    let scale = if max_abs < f32::EPSILON { 1.0 } else { max_abs / 127.0 };
+    let scale = if max_abs < f32::EPSILON
+    {
+        1.0
+    }
+    else
+    {
+        max_abs / 127.0
+    };
     let inv_scale = 1.0 / scale;
-    let q: Vec<i8> = data.iter()
+    let q: Vec<i8> = data
+        .iter()
         .map(|&x| ((x * inv_scale).round() as i32).clamp(-127, 127) as i8)
         .collect();
     (q, scale)
@@ -297,15 +346,19 @@ pub fn int8_deterministic_gemm(
     k: usize,
     n: usize,
 ) -> Result<Vec<f32>, String> {
-    if a_q.len() != m * k || b_q.len() != k * n {
+    if a_q.len() != m * k || b_q.len() != k * n
+    {
         return Err(format!("shape mismatch"));
     }
     let mut out = vec![0.0f32; m * n];
     let scale = scale_a * scale_b;
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut acc: i32 = 0;
-            for q in 0..k {
+            for q in 0..k
+            {
                 acc += a_q[i * k + q] as i32 * b_q[q * n + j] as i32;
             }
             out[i * n + j] = sanitize_f32(acc as f32 * scale);
@@ -324,15 +377,19 @@ pub fn int16_deterministic_gemm(
     k: usize,
     n: usize,
 ) -> Result<Vec<f32>, String> {
-    if a_q.len() != m * k || b_q.len() != k * n {
+    if a_q.len() != m * k || b_q.len() != k * n
+    {
         return Err(format!("shape mismatch"));
     }
     let mut out = vec![0.0f32; m * n];
     let scale = scale_a * scale_b;
-    for i in 0..m {
-        for j in 0..n {
+    for i in 0..m
+    {
+        for j in 0..n
+        {
             let mut acc: i64 = 0; // i64 pour INT16
-            for q in 0..k {
+            for q in 0..k
+            {
                 acc += a_q[i * k + q] as i64 * b_q[q * n + j] as i64;
             }
             out[i * n + j] = sanitize_f32(acc as f32 * scale);
@@ -344,9 +401,11 @@ pub fn int16_deterministic_gemm(
 /// Réduction déterministe (sum) via Kahan + ordre fixe.
 pub fn deterministic_reduce_sum(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; outer];
-    for i in 0..outer {
+    for i in 0..outer
+    {
         let mut acc = KahanSum::new();
-        for k in 0..axis_size {
+        for k in 0..axis_size
+        {
             acc.add(sanitize_f32(data[i * axis_size + k]));
         }
         out[i] = sanitize_f32(acc.value());
@@ -356,7 +415,8 @@ pub fn deterministic_reduce_sum(data: &[f32], outer: usize, axis_size: usize) ->
 
 /// Réduction déterministe (mean) via Kahan + ordre fixe.
 pub fn deterministic_reduce_mean(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> {
-    if axis_size == 0 {
+    if axis_size == 0
+    {
         return vec![0.0; outer];
     }
     deterministic_reduce_sum(data, outer, axis_size)
@@ -370,9 +430,7 @@ pub fn deterministic_reduce_mean(data: &[f32], outer: usize, axis_size: usize) -
 // =========================================================================
 
 /// Re-export des kernels WGSL depuis `kernels.rs`.
-pub use crate::kernels::{
-    CRYPTO_GEMM_WGSL, FIXED_POINT_Q16_GEMM_WGSL, WGSL_SANITIZE_F32,
-};
+pub use crate::kernels::{CRYPTO_GEMM_WGSL, FIXED_POINT_Q16_GEMM_WGSL, WGSL_SANITIZE_F32};
 
 #[cfg(test)]
 mod tests {
@@ -397,17 +455,26 @@ mod tests {
     #[test]
     fn fixed_point_q16_roundtrip() {
         let values = vec![1.5f32, -3.25, 0.0, 127.0, -128.0];
-        for &v in &values {
+        for &v in &values
+        {
             let q = float_to_q16(v);
             let back = q16_to_float(q);
-            assert!((back - v).abs() < 1.0 / Q16_SCALE as f32, "{} roundtrip failed", v);
+            assert!(
+                (back - v).abs() < 1.0 / Q16_SCALE as f32,
+                "{} roundtrip failed",
+                v
+            );
         }
     }
 
     #[test]
     fn fixed_point_q16_gemm_is_bit_exact() {
-        let a: Vec<i32> = (0..16).map(|i| float_to_q16((i as f32 - 8.0) * 0.1)).collect();
-        let b: Vec<i32> = (0..8).map(|i| float_to_q16((i as f32 - 4.0) * 0.2)).collect();
+        let a: Vec<i32> = (0..16)
+            .map(|i| float_to_q16((i as f32 - 8.0) * 0.1))
+            .collect();
+        let b: Vec<i32> = (0..8)
+            .map(|i| float_to_q16((i as f32 - 4.0) * 0.2))
+            .collect();
         let r1 = fixed_point_gemm_q16(&a, &b, 4, 4, 2).unwrap();
         let r2 = fixed_point_gemm_q16(&a, &b, 4, 4, 2).unwrap();
         assert_eq!(r1, r2);
@@ -427,13 +494,19 @@ mod tests {
     fn kahan_sum_is_more_accurate_than_naive() {
         let mut naive: f32 = 0.0;
         let mut ks = KahanSum::new();
-        for _ in 0..100000 {
+        for _ in 0..100000
+        {
             naive += 0.00001;
             ks.add(0.00001);
         }
         let err_naive = (naive - 1.0).abs();
         let err_kahan = (ks.value() - 1.0).abs();
-        assert!(err_kahan < err_naive, "Kahan {} < naive {}", err_kahan, err_naive);
+        assert!(
+            err_kahan < err_naive,
+            "Kahan {} < naive {}",
+            err_kahan,
+            err_naive
+        );
     }
 
     #[test]
@@ -441,7 +514,8 @@ mod tests {
         let data: Vec<f32> = (0..1000).map(|i| (i as f32 * 0.1).sin()).collect();
         let mut ks1 = KahanSum::new();
         let mut ks2 = KahanSum::new();
-        for &v in &data {
+        for &v in &data
+        {
             ks1.add(v);
             ks2.add(v);
         }
@@ -488,7 +562,11 @@ mod tests {
         let data: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1 - 3.0).sin()).collect();
         let (q, scale) = quantize_symmetric_i8(&data);
         let deq: Vec<f32> = q.iter().map(|&x| x as f32 * scale).collect();
-        let max_err: f32 = data.iter().zip(&deq).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let max_err: f32 = data
+            .iter()
+            .zip(&deq)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(max_err < scale * 0.6);
     }
 

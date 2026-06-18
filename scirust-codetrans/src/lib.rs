@@ -2359,7 +2359,9 @@ pub fn common_subexpression_elimination(expr: &Expr) -> Expr {
                             });
                             continue;
                         }
-                        else if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(val_str) {
+                        else if let std::collections::hash_map::Entry::Vacant(e) =
+                            seen.entry(val_str)
+                        {
                             counter += 1;
                             let tmp_name = format!("__cse_tmp_{}", counter);
                             new_stmts.push(Expr::Let {
@@ -2514,9 +2516,7 @@ fn references_var(expr: &Expr, var: &str) -> bool {
         {
             references_var(cond, var)
                 || references_var(then_branch, var)
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|e| references_var(e, var))
+                || else_branch.as_ref().is_some_and(|e| references_var(e, var))
         },
         Expr::Block(stmts) => stmts.iter().any(|s| references_var(s, var)),
         Expr::Assign { value, .. } => references_var(value, var),
@@ -3874,11 +3874,15 @@ impl TransformEngine {
                         right: right.clone(),
                     })
                 }
-                else { self.apply_rule_recursive(rule, right, depth + 1).map(|new_right| Expr::BinOp {
-                        op: *op,
-                        left: left.clone(),
-                        right: Box::new(new_right),
-                    }) }
+                else
+                {
+                    self.apply_rule_recursive(rule, right, depth + 1)
+                        .map(|new_right| Expr::BinOp {
+                            op: *op,
+                            left: left.clone(),
+                            right: Box::new(new_right),
+                        })
+                }
             },
             Expr::UnaryOp { op, expr: e } =>
             {

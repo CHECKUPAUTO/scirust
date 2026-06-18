@@ -269,7 +269,7 @@ pub fn chroma(signal: &[f64], sample_rate: usize, n_fft: usize) -> Vec<Vec<f64>>
         }
         let freq = k as f64 * freq_per_bin;
         let midi = 69.0 + 12.0 * (freq / 440.0).log2();
-        let pitch_class = ((midi as usize) % 12);
+        let pitch_class = (midi as usize) % 12;
         chroma[0][pitch_class] += mag;
     }
 
@@ -300,7 +300,7 @@ pub fn chroma_vector(signal: &[f64], sample_rate: usize) -> Vec<f64> {
         }
         let freq = k as f64 * freq_per_bin;
         let midi = 69.0 + 12.0 * (freq / 440.0).log2();
-        let pitch_class = ((midi as usize) % 12);
+        let pitch_class = (midi as usize) % 12;
         chroma[pitch_class] += mag;
     }
 

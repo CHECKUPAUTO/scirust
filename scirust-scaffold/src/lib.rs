@@ -3994,13 +3994,12 @@ fn has_return_in_all_paths(stmts: &[Statement], is_void: bool) -> bool {
                 then_branch,
                 else_branch,
                 ..
-            }
-                if !else_branch.is_empty()
-                => {
-                    has_return = has_return
-                        || (has_return_in_all_paths(then_branch, false)
-                            && has_return_in_all_paths(else_branch, false));
-                },
+            } if !else_branch.is_empty() =>
+            {
+                has_return = has_return
+                    || (has_return_in_all_paths(then_branch, false)
+                        && has_return_in_all_paths(else_branch, false));
+            },
             _ =>
             {},
         }

@@ -2394,7 +2394,7 @@ fn ln_gamma(z: f64) -> f64 {
         return (std::f64::consts::PI / (-std::f64::consts::PI * z).sin()).ln() - ln_gamma(1.0 - z);
     }
     let z = z - 1.0;
-    
+
     0.5 * (2.0 * std::f64::consts::PI).ln() + (z + 0.5) * (z + 7.0 / 24.0 / (z + 1.0)).ln()
         - (z + 7.0 / 24.0 / (z + 1.0))
         + 1.0 / (12.0 * (z + 1.0))

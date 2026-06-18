@@ -7,10 +7,10 @@
 //! The fusion planner takes a linear sequence of ops and merges compatible
 //! adjacent operations into the fused GEMM kernel.
 
-use crate::kernels;
-use crate::wgpu_backend::WgpuContext;
 use crate::BackendResult;
+use crate::kernels;
 use crate::kernels::FusedAct;
+use crate::wgpu_backend::WgpuContext;
 use wgpu::util::DeviceExt;
 
 /// A node in a fusion graph. GEMM nodes are fused with their downstream
@@ -57,67 +57,107 @@ impl FusedLayer {
         let k = self.k;
         let elems = m * n;
 
-        if elems == 0 {
+        if elems == 0
+        {
             return Ok(Vec::new());
         }
 
-        let mut c = if let Some(bi) = bias {
+        let mut c = if let Some(bi) = bias
+        {
             bi.to_vec()
-        } else {
+        }
+        else
+        {
             vec![0.0f32; elems]
         };
 
         let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
 
-        let a_buf = ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fused-a"),
-            contents: bytemuck::cast_slice(a),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let b_buf = ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fused-b"),
-            contents: bytemuck::cast_slice(b),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let c_buf = ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fused-c"),
-            contents: bytemuck::cast_slice(&c),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let a_buf = ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fused-a"),
+                contents: bytemuck::cast_slice(a),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_buf = ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fused-b"),
+                contents: bytemuck::cast_slice(b),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let c_buf = ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fused-c"),
+                contents: bytemuck::cast_slice(&c),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         let params: [u32; 8] = [
-            m as u32, k as u32, n as u32,
-            ta as u32, tb as u32,
+            m as u32,
+            k as u32,
+            n as u32,
+            ta as u32,
+            tb as u32,
             1.0f32.to_bits(), // alpha
-            if bias.is_some() { 1.0f32.to_bits() } else { 0.0f32.to_bits() }, // beta
+            if bias.is_some()
+            {
+                1.0f32.to_bits()
+            }
+            else
+            {
+                0.0f32.to_bits()
+            }, // beta
             self.act as u32,
         ];
-        let p_buf = ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fused-p"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let p_buf = ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fused-p"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let shader = ctx.device().create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fused-gemm"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(kernels::FUSED_GEMM_WGSL)),
-        });
-        let pipeline = ctx.device().create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("fused-gemm"),
-            layout: None,
-            module: &shader,
-            entry_point: "main",
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        });
+        let shader = ctx
+            .device()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("fused-gemm"),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
+                    kernels::FUSED_GEMM_WGSL,
+                )),
+            });
+        let pipeline = ctx
+            .device()
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("fused-gemm"),
+                layout: None,
+                module: &shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
 
         let bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fused"),
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: a_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: c_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: p_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -128,9 +168,11 @@ impl FusedLayer {
             mapped_at_creation: false,
         });
 
-        let mut encoder = ctx.device().create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("fused") },
-        );
+        let mut encoder = ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fused"),
+            });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("fused"),
@@ -145,9 +187,12 @@ impl FusedLayer {
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
         ctx.device().poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| crate::BackendError::Unavailable("wgpu"))?
+        rx.recv()
+            .map_err(|_| crate::BackendError::Unavailable("wgpu"))?
             .map_err(|_| crate::BackendError::Unavailable("wgpu"))?;
 
         let data = slice.get_mapped_range();
@@ -162,12 +207,7 @@ impl FusedLayer {
 ///
 /// Returns a `FusedLayer` if fusion is possible, or `None` if the sequence
 /// cannot be fused (e.g., shapes incompatible).
-pub fn plan_fusion(
-    m: usize,
-    k: usize,
-    n: usize,
-    act: Option<FusedAct>,
-) -> FusedLayer {
+pub fn plan_fusion(m: usize, k: usize, n: usize, act: Option<FusedAct>) -> FusedLayer {
     FusedLayer {
         m,
         k,
@@ -179,13 +219,15 @@ pub fn plan_fusion(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wgpu_backend::WgpuContext;
-    use crate::ops;
     use crate::RawComputeBackend;
+    use crate::ops;
+    use crate::wgpu_backend::WgpuContext;
 
     #[test]
     fn test_fused_gemm_relu() {
-        let Some(_ctx) = WgpuContext::new().ok() else {
+        let Some(_ctx) = WgpuContext::new().ok()
+        else
+        {
             return;
         };
         // Fused tiled SGEMM test requires hardware adapter — validated by
@@ -195,7 +237,9 @@ mod tests {
 
     #[test]
     fn test_fused_gemm_gelu() {
-        let Some(_ctx) = WgpuContext::new().ok() else {
+        let Some(_ctx) = WgpuContext::new().ok()
+        else
+        {
             return;
         };
         eprintln!("wgpu: fused test skipped (validated via non-fused path)");

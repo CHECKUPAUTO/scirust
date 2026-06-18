@@ -8,9 +8,9 @@
 //! tape — the tape's value storage can become a `DeviceTensor::Gpu(Arc<GpuTensor>)`
 //! and ops that detect a GPU target dispatch through wgpu rather than CPU.
 
-use std::sync::Arc;
 use crate::wgpu_backend::WgpuContext;
 use crate::{BackendError, BackendResult};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// A float tensor resident in GPU memory (a wgpu storage buffer + shape).
@@ -29,19 +29,23 @@ impl GpuTensor {
         let elems = rows * cols;
         let _bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
 
-        let buf = if data.is_empty() {
+        let buf = if data.is_empty()
+        {
             ctx.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("gpu-tensor-empty"),
                 size: 4,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             })
-        } else {
-            ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("gpu-tensor"),
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            })
+        }
+        else
+        {
+            ctx.device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("gpu-tensor"),
+                    contents: bytemuck::cast_slice(data),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                })
         };
 
         Self {
@@ -54,7 +58,8 @@ impl GpuTensor {
 
     /// Download from GPU to CPU `Vec<f32>`.
     pub fn download(&self, ctx: &WgpuContext) -> BackendResult<Vec<f32>> {
-        if self.elems == 0 {
+        if self.elems == 0
+        {
             return Ok(Vec::new());
         }
         let bytes = (self.elems * std::mem::size_of::<f32>()) as u64;
@@ -74,9 +79,11 @@ impl GpuTensor {
         let k = if ta { self.rows } else { self.cols };
         let n = if tb { other.rows } else { other.cols };
         let kb = if tb { other.cols } else { other.rows };
-        if k != kb {
+        if k != kb
+        {
             return Err(BackendError::ShapeMismatch(format!(
-                "inner dims: op(A) {}×{}, op(B) {}×{}", m, k, kb, n
+                "inner dims: op(A) {}×{}, op(B) {}×{}",
+                m, k, kb, n
             )));
         }
         let elems = m * n;
@@ -87,7 +94,8 @@ impl GpuTensor {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        if m != 0 && n != 0 && k != 0 {
+        if m != 0 && n != 0 && k != 0
+        {
             ctx.encode_gemm(&self.buf, &other.buf, &c_buf, m, k, n, ta, tb, 1.0, 0.0);
         }
         Ok(GpuTensor {
@@ -125,7 +133,9 @@ mod tests {
 
     #[test]
     fn test_gpu_tensor_upload_download() {
-        let Some(ctx) = get_ctx() else {
+        let Some(ctx) = get_ctx()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
@@ -140,7 +150,9 @@ mod tests {
 
     #[test]
     fn test_gpu_tensor_matmul() {
-        let Some(ctx) = get_ctx() else {
+        let Some(ctx) = get_ctx()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
@@ -156,7 +168,9 @@ mod tests {
 
     #[test]
     fn test_gpu_tensor_add() {
-        let Some(ctx) = get_ctx() else {
+        let Some(ctx) = get_ctx()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };

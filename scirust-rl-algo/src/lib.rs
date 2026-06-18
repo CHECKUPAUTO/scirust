@@ -275,12 +275,11 @@ impl Algorithm {
         {
             match instr
             {
-                Instruction::Jump(offset) | Instruction::JumpIf(offset, _)
-                    if *offset < 0
-                    => {
-                        backward_jumps += 1;
-                        max_offset = max_offset.max(offset.abs() as i64);
-                    },
+                Instruction::Jump(offset) | Instruction::JumpIf(offset, _) if *offset < 0 =>
+                {
+                    backward_jumps += 1;
+                    max_offset = max_offset.max(offset.abs() as i64);
+                },
                 _ =>
                 {},
             }
@@ -362,7 +361,8 @@ impl ProblemSpec {
         let mut passed = 0;
         for (input, expected) in &self.test_cases
         {
-            if let Ok(output) = algo.execute(input) {
+            if let Ok(output) = algo.execute(input)
+            {
                 let ok = expected.iter().zip(&output).all(|(e, o)| e == o)
                     && expected.len() == output.len();
                 if ok
@@ -2426,7 +2426,8 @@ impl InvariantInferrer {
 
             for input in inputs
             {
-                if let Ok(output) = algo.execute(input) {
+                if let Ok(output) = algo.execute(input)
+                {
                     if reg < output.len()
                     {
                         all_outputs.push(output[reg]);

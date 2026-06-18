@@ -58,11 +58,11 @@ mod wgpu_backend;
 #[cfg(feature = "wgpu")]
 pub use chain::GpuChain;
 #[cfg(feature = "wgpu")]
-pub use conv_gpu::{cpu_col2im, cpu_im2col, COL2IM_WGSL, IM2COL_WGSL};
+pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};
 #[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
 #[cfg(feature = "wgpu")]
-pub use fusion::{plan_fusion, FusedLayer, FusionNode};
+pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 #[cfg(feature = "wgpu")]
 pub use tensor::GpuTensor;
 #[cfg(feature = "wgpu")]
@@ -121,14 +121,20 @@ fn check_gemm_dims(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Backen
     {
         return Err(BackendError::ShapeMismatch(format!(
             "A has {} elements, expected m*k = {}*{} = {}",
-            a.len(), m, k, m * k
+            a.len(),
+            m,
+            k,
+            m * k
         )));
     }
     if b.len() != k * n
     {
         return Err(BackendError::ShapeMismatch(format!(
             "B has {} elements, expected k*n = {}*{} = {}",
-            b.len(), k, n, k * n
+            b.len(),
+            k,
+            n,
+            k * n
         )));
     }
     Ok(())
@@ -230,7 +236,8 @@ impl GpuAccelerator {
     }
 
     pub fn device_name(&self) -> &'static str {
-        match self {
+        match self
+        {
             GpuAccelerator::Cpu(b) => b.device_name(),
             GpuAccelerator::Wgpu(b) => b.device_name(),
             GpuAccelerator::Cuda(b) => b.device_name(),
@@ -245,7 +252,8 @@ impl GpuAccelerator {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<f32>> {
-        match self {
+        match self
+        {
             GpuAccelerator::Cpu(backend) => backend.gemm_f32(a, b, m, k, n),
             GpuAccelerator::Wgpu(backend) => backend.gemm_f32(a, b, m, k, n),
             GpuAccelerator::Cuda(backend) => backend.gemm_f32(a, b, m, k, n),
@@ -283,7 +291,9 @@ mod tests {
 
     #[test]
     fn shape_mismatch_is_reported() {
-        let err = CpuBackend.gemm_f32(&[1.0, 2.0], &[1.0], 2, 2, 1).unwrap_err();
+        let err = CpuBackend
+            .gemm_f32(&[1.0, 2.0], &[1.0], 2, 2, 1)
+            .unwrap_err();
         assert!(matches!(err, BackendError::ShapeMismatch(_)));
     }
 
