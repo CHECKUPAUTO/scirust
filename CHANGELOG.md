@@ -19,6 +19,19 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Hyena — convolutions longues implicites + gating** (`nn::nd_layers::hyena_long_conv`/
+  `NdHyena`, Poli et al. 2023, roadmap #56) : un mélangeur de tokens **sans attention**. La
+  portée longue vient d'une **convolution causale** dont le filtre n'est pas stocké tap par
+  tap mais **généré** par un petit MLP à partir d'un encodage positionnel fixe, puis fenêtré
+  par une décroissance exponentielle apprenable `exp(−γ·t̄)` par canal — c'est ce qui permet
+  des filtres **longs à peu de paramètres** (le coeur de Hyena). L'équivalent du rôle de
+  l'attention (la dépendance aux données) est fourni par un **gating multiplicatif** :
+  `z=x1⊙(h1*v)` puis `z=x2⊙(h2*z)` (ordre 2). La convolution causale par canal
+  `y[t,c]=Σ_τ h[τ,c]·u[t−τ,c]` est exprimée sur la tape comme `Σ_τ h[τ,:]⊙(Sτ·u)` avec des
+  **matrices de décalage constantes** `Sτ` (distribuer le matmul sur les taps apprenables ⇒
+  différentiable en `u` et `h` sans op scatter). Oracle honnête : conv ≡ référence causale
+  écrite à la main ; **gradient check** par différences finies (`u`, `h`) ; entraînement
+  `NdHyena` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de séquence.
 - **xLSTM — sLSTM scalaire + mLSTM matriciel** (`nn::nd_layers::slstm_scan`/`mlstm_scan`/
   `NdXlstm`, Beck et al. 2024, roadmap #57) : le LSTM étendu remplace les portes sigmoïdes
   de l'entrée par une **porte exponentielle** `iₜ=exp(ĩₜ)` accompagnée d'un **état

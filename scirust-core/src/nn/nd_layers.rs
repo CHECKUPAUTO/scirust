@@ -1609,6 +1609,180 @@ impl NdXlstm {
     }
 }
 
+/// **Hyena causal long convolution** (Poli et al., *Hyena Hierarchy*, ICML 2023,
+/// arXiv:2302.10866). A per-channel causal convolution of a signal `u` with a
+/// filter `h` whose taps are indexed by **lag**:
+///
+/// ```text
+/// y[t,c] = Σ_{τ=0}^{t} h[τ,c]·u[t−τ,c]
+/// ```
+///
+/// expressed on the tape as `y = Σ_τ h[τ,:] ⊙ (Sτ·u)`, where each `Sτ` is the
+/// **constant** shift-down-by-`τ` matrix (1 on its `τ`-th lower sub-diagonal).
+/// Distributing the matmul over the (learnable) taps keeps the whole thing
+/// differentiable in both `u` and `h` without a scatter op. `u` and `h` are
+/// `(seq, d)`; returns `(seq, d)`. Causal, deterministic; gradient-checked.
+pub fn hyena_long_conv<'t>(tape: &'t NdTape, u: NdVar<'t>, h: NdVar<'t>) -> NdVar<'t> {
+    let us = u.shape();
+    let (seq, d) = (us[0], us[1]);
+    let mut y = tape.input(TensorND::zeros(&[seq, d]));
+    for tau in 0..seq
+    {
+        // Sτ : (seq×seq), Sτ[t, t−τ] = 1 ⇒ (Sτ·u)[t] = u[t−τ] (0 for t<τ).
+        let mut sdata = vec![0f32; seq * seq];
+        for t in tau..seq
+        {
+            sdata[t * seq + (t - tau)] = 1.0;
+        }
+        let s = tape.input(TensorND::new(sdata, vec![seq, seq]));
+        let shifted = s.matmul(u); // (seq,d): row t = u[t−τ]
+        let tap = h.gather(&[tau]); // (1,d): filter tap at lag τ
+        y = y.add(tap.mul(shifted)); // += h[τ,:] ⊙ shifted
+    }
+    y
+}
+
+/// **Hyena implicit filter** — the convolution filter is not stored tap-by-tap but
+/// **generated** by a small MLP from a fixed positional encoding, then windowed by
+/// a learnable per-channel exponential decay: `h[t,:] = MLP(pe(t)) ⊙ exp(−γ·t̄)`
+/// with `t̄ = t/seq` and `γ = exp(log_decay) > 0`. This is what lets Hyena express
+/// **long** filters with **few** parameters (sub-quadratic) — the defining trick.
+struct HyenaFilter {
+    mlp1: NdLinear,      // pos_dim → hidden
+    mlp2: NdLinear,      // hidden → d_model
+    log_decay: TensorND, // (1, d_model)
+    pos_dim: usize,
+    decay_idx: Option<usize>,
+}
+
+impl HyenaFilter {
+    fn new(d_model: usize, hidden: usize, pos_dim: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            mlp1: NdLinear::new(pos_dim, hidden, rng),
+            mlp2: NdLinear::new(hidden, d_model, rng),
+            log_decay: TensorND::zeros(&[1, d_model]), // γ = 1 at init
+            pos_dim,
+            decay_idx: None,
+        }
+    }
+
+    /// Generate the `(seq, d_model)` filter for a sequence of length `seq`.
+    fn forward<'t>(&mut self, tape: &'t NdTape, seq: usize) -> NdVar<'t> {
+        // Fixed positional encoding: [1, t̄, sin(2πf t̄), cos(2πf t̄), …].
+        let mut pe = vec![0f32; seq * self.pos_dim];
+        for t in 0..seq
+        {
+            let tb = t as f32 / seq.max(1) as f32;
+            pe[t * self.pos_dim] = 1.0;
+            if self.pos_dim > 1
+            {
+                pe[t * self.pos_dim + 1] = tb;
+            }
+            let (mut col, mut freq) = (2usize, 1.0f32);
+            while col < self.pos_dim
+            {
+                pe[t * self.pos_dim + col] = (std::f32::consts::TAU * freq * tb).sin();
+                col += 1;
+                if col < self.pos_dim
+                {
+                    pe[t * self.pos_dim + col] = (std::f32::consts::TAU * freq * tb).cos();
+                    col += 1;
+                }
+                freq += 1.0;
+            }
+        }
+        let pev = tape.input(TensorND::new(pe, vec![seq, self.pos_dim]));
+        let hraw = self.mlp2.forward(tape, self.mlp1.forward(tape, pev).relu()); // (seq,d_model)
+        // Window: exp(−γ·t̄), γ = exp(log_decay) per channel.
+        let mut tvec = vec![0f32; seq];
+        for (t, tv) in tvec.iter_mut().enumerate()
+        {
+            *tv = t as f32 / seq.max(1) as f32;
+        }
+        let tv = tape.input(TensorND::new(tvec, vec![seq, 1]));
+        let dec = tape.input(self.log_decay.clone());
+        self.decay_idx = Some(dec.idx());
+        let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
+        let window = tv.mul(dec.exp()).mul(neg1).exp(); // (seq,d_model)
+        hraw.mul(window)
+    }
+
+    fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let dec_idx = self.decay_idx;
+        let mut params = self.mlp1.parameters();
+        params.extend(self.mlp2.parameters());
+        if let Some(i) = dec_idx
+        {
+            params.push(NdParam {
+                value: &mut self.log_decay,
+                grad_idx: i,
+            });
+        }
+        params
+    }
+}
+
+/// **Hyena operator** (order 2) — an attention-free token mixer (Poli et al.,
+/// ICML 2023). From the input it projects three branches `(v, x1, x2)`, then
+/// interleaves **implicit long convolutions** (an MLP-generated filter +
+/// [`hyena_long_conv`]) with **data-controlled multiplicative gating**:
+///
+/// ```text
+/// z = x1 ⊙ (h1 * v) ;   z = x2 ⊙ (h2 * z) ;   out = W_o·z
+/// ```
+///
+/// The long range comes from the convolutions, the input-dependence (the role
+/// attention plays) from the elementwise gates. Deterministic; trainable through
+/// the N-D tape. `(seq, d_model) → (seq, d_model)`. (The short FIR pre-convolution
+/// of the original is omitted; this is the core long-conv + gating operator.)
+pub struct NdHyena {
+    v_proj: NdLinear,
+    x1_proj: NdLinear,
+    x2_proj: NdLinear,
+    out_proj: NdLinear,
+    filt1: HyenaFilter,
+    filt2: HyenaFilter,
+}
+
+impl NdHyena {
+    /// New layer; `hidden`/`pos_dim` size the implicit filter MLP.
+    pub fn new(d_model: usize, hidden: usize, pos_dim: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            v_proj: NdLinear::new(d_model, d_model, rng),
+            x1_proj: NdLinear::new(d_model, d_model, rng),
+            x2_proj: NdLinear::new(d_model, d_model, rng),
+            out_proj: NdLinear::new(d_model, d_model, rng),
+            filt1: HyenaFilter::new(d_model, hidden, pos_dim, rng),
+            filt2: HyenaFilter::new(d_model, hidden, pos_dim, rng),
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let seq = x.shape()[0];
+        let v = self.v_proj.forward(tape, x);
+        let x1 = self.x1_proj.forward(tape, x);
+        let x2 = self.x2_proj.forward(tape, x);
+        let h1 = self.filt1.forward(tape, seq);
+        let h2 = self.filt2.forward(tape, seq);
+        let z = x1.mul(hyena_long_conv(tape, v, h1)); // x1 ⊙ (h1 * v)
+        let z = x2.mul(hyena_long_conv(tape, z, h2)); // x2 ⊙ (h2 * z)
+        self.out_proj.forward(tape, z)
+    }
+
+    /// Trainable parameters (three input projections, output projection, and the
+    /// two implicit filter generators).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.v_proj.parameters();
+        params.extend(self.x1_proj.parameters());
+        params.extend(self.x2_proj.parameters());
+        params.extend(self.out_proj.parameters());
+        params.extend(self.filt1.parameters());
+        params.extend(self.filt2.parameters());
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2287,6 +2461,121 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "xLSTM did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// Plain-`Vec` reference for the per-channel causal convolution.
+    fn hyena_conv_reference(u: &[f32], h: &[f32], seq: usize, d: usize) -> Vec<f32> {
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for c in 0..d
+            {
+                let mut acc = 0f32;
+                for tau in 0..=t
+                {
+                    acc += h[tau * d + c] * u[(t - tau) * d + c];
+                }
+                out[t * d + c] = acc;
+            }
+        }
+        out
+    }
+
+    /// `hyena_long_conv` matches the hand-written causal convolution.
+    #[test]
+    fn hyena_long_conv_matches_reference() {
+        let (seq, d) = (5usize, 3usize);
+        let u: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let h: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let want = hyena_conv_reference(&u, &h, seq, d);
+        let t = NdTape::new();
+        let uv = t.input(TensorND::new(u, vec![seq, d]));
+        let hv = t.input(TensorND::new(h, vec![seq, d]));
+        let got = t.value(hyena_long_conv(&t, uv, hv));
+        for (g, w) in got.data.iter().zip(&want)
+        {
+            assert!((g - w).abs() < 1e-5, "hyena conv: got {g}, want {w}");
+        }
+    }
+
+    /// `hyena_long_conv` gradients (w.r.t. signal `u` and filter `h`) match finite
+    /// differences — the convolution is linear and smooth in both.
+    #[test]
+    fn hyena_long_conv_gradient_check() {
+        let (seq, d) = (5usize, 3usize);
+        let u: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let h: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let loss_of = |uu: &[f32], hh: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let uv = t.input(TensorND::new(uu.to_vec(), vec![seq, d]));
+            let hv = t.input(TensorND::new(hh.to_vec(), vec![seq, d]));
+            let y = hyena_long_conv(&t, uv, hv);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let uv = t.input(TensorND::new(u.clone(), vec![seq, d]));
+        let hv = t.input(TensorND::new(h.clone(), vec![seq, d]));
+        let y = hyena_long_conv(&t, uv, hv);
+        let grads = t.backward(y.mul(y).sum());
+        let (gu, gh) = (grads[uv.idx()].clone(), grads[hv.idx()].clone());
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "hyena conv grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gu, &u, &|p| loss_of(p, &h));
+        check(&gh, &h, &|p| loss_of(&u, p));
+    }
+
+    /// The `NdHyena` operator trains (MSE↓ to a target sequence) and is bit-for-bit
+    /// deterministic across identical runs.
+    #[test]
+    fn nd_hyena_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (6usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(7);
+            let mut layer = NdHyena::new(d_model, 8, 5, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.03);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "Hyena did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());

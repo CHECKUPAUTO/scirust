@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 87 : Hyena (#56) — convolutions longues implicites + gating
+- `nn::nd_layers::hyena_long_conv`/`NdHyena` (Poli 2023) : mélangeur sans attention. Conv
+  causale par canal y[t,c]=Σ_τ h[τ,c]u[t−τ,c] = Σ_τ h[τ,:]⊙(Sτ·u) (matrices décalage Sτ
+  constantes ⇒ différentiable sans scatter). Filtre **implicite** : MLP(encodage positionnel)
+  ⊙ fenêtre exp(−γ·t̄) apprenable. Opérateur ordre 2 : z=x1⊙(h1*v), z=x2⊙(h2*z).
+- Bibliothèque seule (couche gradient-checkée, pas de CLI ni multilingue). Module nd_layers.
+- Tests (3, core) : conv ≡ référence causale écrite à la main ; gradient check (u, h) ;
+  NdHyena entraîne (MSE↓ <0.6×) + déterminisme bit-exact.
+- docs : roadmap #56 📋→✅ ; CHANGELOG. 584 tests core (+3) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 86 : xLSTM (#57) — sLSTM scalaire + mLSTM matriciel
 - `nn::nd_layers::slstm_scan`/`mlstm_scan`/`NdXlstm` (Beck 2024) : sLSTM (porte entrée
   exponentielle iₜ=exp(ĩₜ) + normaliseur nₜ, hₜ=oₜ⊙cₜ/nₜ ; tanh=2σ(2x)−1, sortie bornée
@@ -11,7 +21,7 @@
 - Bibliothèque seule (couches gradient-checkées, pas de CLI ni multilingue). Module nd_layers.
 - Tests (4, core) : mLSTM ≡ référence (dénominateur actif) ; gradient check sLSTM (4 portes)
   et mLSTM (q,k,v,iₜ,fₜ, régime lisse |nₜ·qₜ|<1) ; NdXlstm entraîne (MSE↓ <0.6×) + déterminisme.
-- docs : roadmap #57 📋→✅ ; CHANGELOG. 581 tests core (+4) ; 8 gates verts (à confirmer).
+- docs : roadmap #57 📋→✅ ; CHANGELOG. 581 tests core (+4) ; 8 gates verts ✓ ; commit 27bf173.
 
 ## Session 2026-06-18 — volet 85 : OmniQuant (#65) — clipping de poids apprenable
 - `quantization::omniquant_quantize` (Shao 2024) : facteur de coupe γ∈(0,1] par canal
