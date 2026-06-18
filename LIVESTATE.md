@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 105 : synergie — commandes CLI kvcache/guard/attest (8 langues)
+- `scirust-cli::synergy` : 3 commandes (kvcache/guard/attest) exposant les primitives de synergie,
+  déterministes par --seed. kvcache : ratio compression + fidélité cosinus attention (+ --budget
+  soft-paging) ; guard : couverture empirique ≥ 1−α + verdicts ; attest : journal hash-chaîné +
+  vérif + rejet falsification + tamper-evidence.
+- Nouvelles commandes CLI ⇒ docs multilingues : docs/REFERENCE.md (3 lignes) + les 8
+  Documentation*.md (FR base + EN/AR/DE/ES/JA/KO/ZH, 3 bullets chacun, via sous-agents).
+- Vérifié en exécution : kvcache 2.67× + cosinus 0.99998 (budget 32 ⇒ 96 évincés) ; guard 91.3%
+  (≥90%) Accept/Abstain/Reject ; attest chaîne OK + falsification rejetée + têtes distinctes.
+- docs : CHANGELOG + REFERENCE + Documentation×8. 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 104 : synergie SLHAv2 — codec KV accéléré SIMD (bit-exact)
 - `scirust_simd::ops::dequantize_int4_into` (câblé dans nn::elastic_kv_cache::dequantize_int4) :
   déquant INT4 via kernel SIMD mul_f32 ; élémentaire (pas de réduction) ⇒ bit-identique scalaire et

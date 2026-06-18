@@ -6,6 +6,14 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
+- **Commandes CLI de la synergie** (`scirust kvcache | guard | attest`) : exposent les primitives
+  ci-dessous en ligne de commande, déterministes par `--seed`. `kvcache [--budget B]` compresse une
+  séquence KV et affiche le **ratio de compression** + la **fidélité cosinus** de l'attention vs
+  pleine précision (et le soft-paging borné avec `--budget`) ; `guard [--alpha A]` calibre le guard
+  et affiche la **couverture empirique** (≥ 1−α) + des verdicts Accept/Abstain/Reject ; `attest`
+  enregistre des inférences vérifiables dans le **journal hash-chaîné**, vérifie la chaîne, rejette
+  une inférence falsifiée et démontre l'inviolabilité. Documentées dans `docs/REFERENCE.md` et dans
+  les **8 langues** (`Documentation*.md`).
 - **Guard à garantie statistique** (`nn::guard::StatisticalGuard`) : une porte de réponse à
   **garantie de couverture sans hypothèse de distribution**, pour alimenter le `guard` de **CCOS**
   (valider/abstenir sur la sortie d'un modèle) sans seuil ad-hoc. À partir des probabilités de
