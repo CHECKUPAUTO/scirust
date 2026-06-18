@@ -12,6 +12,7 @@ pub mod numeric;
 pub mod quickstart;
 pub mod reasoning;
 pub mod symbolic;
+pub mod synergy;
 
 /// One registered command for the help listing.
 struct Command {
@@ -404,6 +405,9 @@ pub fn run(args: &[String]) -> u8 {
         Some("certify") => learning::run_certify(rest),
         Some("conformal") => learning::run_conformal(rest),
         Some("calibrate") => learning::run_calibrate(rest),
+        Some("kvcache") => synergy::run_kvcache(rest),
+        Some("guard") => synergy::run_guard(rest),
+        Some("attest") => synergy::run_attest(rest),
         Some("pinn") => learning::run_pinn(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),

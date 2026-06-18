@@ -5,6 +5,66 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
+- **Commandes CLI de la synergie** (`scirust kvcache | guard | attest`) : exposent les primitives
+  ci-dessous en ligne de commande, déterministes par `--seed`. `kvcache [--budget B]` compresse une
+  séquence KV et affiche le **ratio de compression** + la **fidélité cosinus** de l'attention vs
+  pleine précision (et le soft-paging borné avec `--budget`) ; `guard [--alpha A]` calibre le guard
+  et affiche la **couverture empirique** (≥ 1−α) + des verdicts Accept/Abstain/Reject ; `attest`
+  enregistre des inférences vérifiables dans le **journal hash-chaîné**, vérifie la chaîne, rejette
+  une inférence falsifiée et démontre l'inviolabilité. Documentées dans `docs/REFERENCE.md` et dans
+  les **8 langues** (`Documentation*.md`).
+- **Guard à garantie statistique** (`nn::guard::StatisticalGuard`) : une porte de réponse à
+  **garantie de couverture sans hypothèse de distribution**, pour alimenter le `guard` de **CCOS**
+  (valider/abstenir sur la sortie d'un modèle) sans seuil ad-hoc. À partir des probabilités de
+  classe d'une décision, le guard forme l'**ensemble de prédiction conforme** (#21,
+  `ConformalClassifier`) et en tire un verdict : une seule classe franchit `1−q̂` ⇒ **Accept** ;
+  plusieurs ⇒ **Abstain** (ambigu) ; aucune ⇒ **Reject** (hors-distribution). La calibration
+  conforme garantit que la vraie classe est dans l'ensemble avec proba **≥ 1−α** sur données
+  échangeables, *quelle que soit la distribution* — le guard ne laisse donc prouvablement pas
+  filer la bonne réponse plus d'une fraction `α` du temps. Oracle honnête : **couverture empirique
+  ≥ 1−α** sur données fraîches (3-classes, déterministe) + logique de verdict (confiant→Accept,
+  partagé→Abstain, plat/OOD→Reject). Les deep ensembles (#40) donnent un signal épistémique
+  complémentaire pour le flag OOD.
+- **Codec KV accéléré SIMD, bit-exact** (`scirust_simd::ops::dequantize_int4_into`, câblé dans
+  `nn::elastic_kv_cache`) : la déquantification INT4 (`out[i]=code[i]·échelle`) passe par le kernel
+  SIMD `mul_f32` ; étant **élémentaire** (pas de réduction) et un produit IEEE-754 identique par
+  lane et en scalaire, le résultat est **bit-identique entre largeurs SIMD et plateformes** — le
+  chemin rapide du codec KV **sans casser le déterminisme** (les réductions cosinus/attention
+  restent sur le chemin déterministe). Oracle : SIMD ≡ scalaire **bit-exact** pour toute longueur
+  (y compris < une lane) et une plage d'échelles.
+- **Journal d'attestation hash-chaîné** (`scirust_runtime::attest`) : le pont de l'**inférence
+  vérifiable** de scirust (`vinfer` #80) vers l'`event_log` de **CCOS**. Chaque `InferenceEvent`
+  fige l'engagement du modèle, le hash de l'entrée et le hash de la sortie, et se chaîne au
+  précédent par un **hash SHA-256** (`entréeₙ = H(entréeₙ₋₁ ‖ seq ‖ engagement ‖ entrée ‖ sortie)`)
+  — exactement la forme append-only et inviolable de CCOS, donc les inférences d'un runtime scirust
+  s'ingèrent dans son journal d'audit. Recalculer la chaîne re-dérive la **même tête** (replay
+  déterministe) ; toute mutation ou réordonnancement la **casse**. `attest_and_record` vérifie en
+  plus, *avant* d'ajouter, que la paire `(entrée, sortie)` est une inférence **authentique** du
+  modèle engagé (Freivalds sur `GF(p)`, #80) — la chaîne n'atteste donc que des inférences réelles.
+  Oracle honnête : la chaîne se vérifie et se rejoue (même tête) ; falsification d'un événement /
+  réordonnancement **détectés** ; une inférence authentique est attestée et chaînée tandis qu'une
+  sortie **falsifiée est rejetée** (journal inchangé). Complète la pile de preuve (#3, `proof`,
+  DiFR #5, `vinfer` #80).
+- **KV-cache compressé élastique** (`nn::elastic_kv_cache`) : la primitive déterministe
+  partagée derrière **SLHAv2** (compresser le KV-cache pour faire tourner un LLM dans le cache
+  du CPU plutôt que sur un GPU hors de prix) et **CCOS** (paging à mémoire bornée), bâtie sur la
+  quantification et le déterminisme de scirust. Une paire clé/valeur d'attention est compressée
+  en une `KvTile` par quantification **INT4 à deux niveaux** (base symétrique + **résidu** INT4 —
+  le « residual tracking » de SLHAv2), chaque niveau à **échelles adaptatives par groupe**
+  (`quantize_int4_grouped` : une échelle plus fine par groupe de canaux ⇒ « adaptive scaling »
+  cosine-aware de SLHAv2, dans l'esprit per-canal de KVQuant #68), ce qui porte la fidélité
+  **cosinus** au-delà de 0,99 tout en réduisant l'empreinte plusieurs fois par rapport au `f32`. L'`ElasticKvCache` conserve ces
+  tuiles sous un **budget** optionnel et évince la plus ancienne au dépassement (soft-paging /
+  mémoire élastique — l'abstraction de paging commune avec CCOS), et sert l'attention directement
+  depuis les tuiles compressées en réutilisant `contiguous_attention` (#63), si bien que le seul
+  écart avec un cache pleine précision est l'erreur de compression (mesurée). Oracle honnête :
+  reconstruction à **fidélité cosinus** élevée (>0,95, le niveau résidu battant strictement la
+  base seule) ; **attention compressée ≈ pleine** (cosinus >0,99) ; **ratio de compression** ≥3×
+  vs `f32` ; cache **borné** sous budget (la plus ancienne évincée) et **bit-exact déterministe**.
+  Codec exposé (`quantize_int4`/`dequantize_int4`/`KvTile`/`cosine_similarity`) pour être consommé
+  par SLHAv2/CCOS. Rejoint KVQuant (#68) et PagedAttention (#63) dans la pile KV-cache.
+
 ### Corrigé
 - **SIMD `portable` — bug d'alignement (résultats faux, non déterministe)** :
   `add_f32/f64_inplace`, `dot_f32/f64` et `fma_f32` (`scirust-simd::portable`)

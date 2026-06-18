@@ -3,6 +3,61 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 105 : synergie — commandes CLI kvcache/guard/attest (8 langues)
+- `scirust-cli::synergy` : 3 commandes (kvcache/guard/attest) exposant les primitives de synergie,
+  déterministes par --seed. kvcache : ratio compression + fidélité cosinus attention (+ --budget
+  soft-paging) ; guard : couverture empirique ≥ 1−α + verdicts ; attest : journal hash-chaîné +
+  vérif + rejet falsification + tamper-evidence.
+- Nouvelles commandes CLI ⇒ docs multilingues : docs/REFERENCE.md (3 lignes) + les 8
+  Documentation*.md (FR base + EN/AR/DE/ES/JA/KO/ZH, 3 bullets chacun, via sous-agents).
+- Vérifié en exécution : kvcache 2.67× + cosinus 0.99998 (budget 32 ⇒ 96 évincés) ; guard 91.3%
+  (≥90%) Accept/Abstain/Reject ; attest chaîne OK + falsification rejetée + têtes distinctes.
+- docs : CHANGELOG + REFERENCE + Documentation×8. 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 104 : synergie SLHAv2 — codec KV accéléré SIMD (bit-exact)
+- `scirust_simd::ops::dequantize_int4_into` (câblé dans nn::elastic_kv_cache::dequantize_int4) :
+  déquant INT4 via kernel SIMD mul_f32 ; élémentaire (pas de réduction) ⇒ bit-identique scalaire et
+  inter-plateformes (déterminisme préservé ; réductions cosinus/attention restent scalaires).
+- Bibliothèque seule (scirust-simd + core). Pas de CLI ni multilingue.
+- Tests (1, scirust-simd) : SIMD ≡ scalaire bit-exact pour toute longueur (y compris <1 lane) +
+  plage d'échelles. (gate 5 portable-simd + gate 4 AVX2 runtime.)
+- docs : CHANGELOG. 620 core + 1 simd ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 103 : synergie CCOS — guard à garantie statistique
+- `nn::guard::StatisticalGuard` : porte Accept/Abstain/Reject sur l'ensemble conforme (#21).
+  Couverture vraie classe ≥ 1−α sans hypothèse de distribution ⇒ pour le guard.rs de CCOS.
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::guard.
+- Tests (2, core) : couverture empirique ≥ 1−α (fraîches, déterministe) ; verdicts
+  confiant→Accept / partagé→Abstain / plat→Reject.
+- docs : CHANGELOG. 620 tests core (+2) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 102 : synergie CCOS — pont d'attestation hash-chaîné
+- `scirust_runtime::attest` : journal d'inférences hash-chaîné (SHA-256), rejouable, à la forme
+  de l'event_log de CCOS. InferenceEvent {seq, engagement modèle, hash entrée/sortie, entry_hash} ;
+  entry = H(prev ‖ seq ‖ commitment ‖ in ‖ out). attest_and_record vérifie l'authenticité
+  (Freivalds vinfer #80) AVANT d'ajouter ⇒ chaîne d'inférences réelles, ingérable par CCOS.
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue). Nouveau module.
+- Tests (3, runtime) : chaîne vérifie + replay (même tête) ; falsification/réordonnancement
+  détectés ; inférence authentique attestée + falsifiée rejetée (journal inchangé).
+- docs : CHANGELOG. 618 core + 7 runtime (+3) ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 101 : synergie CCOS/SLHAv2 — KV-cache compressé élastique
+- `nn::elastic_kv_cache` : primitive partagée SLHAv2 (compression KV-cache CPU) + CCOS (paging
+  borné). Tuile INT4 deux niveaux (base + résidu, « residual tracking » SLHAv2) à **échelles
+  adaptatives par groupe** (cosine-aware, quantize_int4_grouped) ⇒ fidélité cosinus >0.99 ;
+  ElasticKvCache à budget (évince la plus ancienne, soft-paging ; new_grouped pour le grouping) ;
+  attention via contiguous_attention (#63) ⇒ écart = uniquement l'erreur de compression. Codec
+  exposé (quantize_int4[_grouped]/dequantize/KvTile/cosine_similarity) pour SLHAv2/CCOS.
+- Contexte : SLHAv2 (public) = compression KV-cache déjà bâtie sur un crate « scirust »
+  (SciRustSlhaTile) ; CCOS = causal-context OS (graphe causal pagé, event-log hash-chaîné).
+  Première brique de synergie ; suites possibles : pont d'attestation/event-log (vinfer #80 + DiFR
+  #5 → event_log CCOS), guard à garantie statistique (conformal/ensembles), signature PQ (SLHAv2).
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::elastic_kv_cache.
+- Tests (5, core) : fidélité cosinus >0.95 (résidu > base) + déterminisme ; **grouping cosine-aware
+  améliore la fidélité de base** (magnitudes hétérogènes, tile jamais pire) ; attention compressée ≈
+  pleine (cosinus >0.99) ; ratio ≥3× vs f32 ; budget borné + bit-exact.
+- docs : CHANGELOG. 618 tests core (+5) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 100 : Reluplex (#4) — vérification complète SMT — ROADMAP 80/80 ✅
 - `nn::ibp::reluplex_verify`/`reluplex_unstable_count` (Katz 2017) : recherche SAT d'un
   contre-exemple par case-splitting **paresseux** des phases ReLU (neurones stables = phase forcée,

@@ -285,3 +285,6 @@ Nouvelles commandes CLI :
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — quantification int8 des poids GPTQ ; affiche la réduction d'erreur de calibration par rapport au round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — quantification int8 des poids AWQ consciente des activations ; affiche l'exposant de mise à l'échelle sélectionné et la réduction d'erreur de calibration par rapport au round-to-nearest.
 - `scirust bitnet [--seed N]` — quantification ternaire {-1,0,+1} des poids BitNet b1.58 (~1,58 bit/poids) ; vérifie la multiplication matricielle sans multiplication.
+- `scirust kvcache [--seed N] [--budget B]` — KV-cache compressé élastique (tuiles INT4 base+résidu, échelles par groupe) ; affiche le ratio de compression et la fidélité cosinus de l'attention vs pleine précision, `--budget` montrant le soft-paging borné (synergie SLHAv2/CCOS).
+- `scirust guard [--seed N] [--alpha A]` — guard à garantie statistique ; couverture conforme sans hypothèse de distribution (≥ 1−α) plus verdicts Accept/Abstain/Reject (pour un guard de réponse CCOS).
+- `scirust attest [--seed N]` — journal d'attestation hash-chaîné d'inférences vérifiables (Freivalds, #80) ; vérifie la chaîne, rejette une inférence falsifiée, et démontre l'inviolabilité (le pont vers l'event-log de CCOS).

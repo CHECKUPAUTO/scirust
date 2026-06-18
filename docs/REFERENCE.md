@@ -95,6 +95,9 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `certify [--seed N] [--eps E]` | bornes de sortie prouvées d'un MLP ReLU sur une boîte L∞ — **IBP** (couche par couche) **et CROWN** (relaxation linéaire, plus serrée) côte à côte | `scirust-core::nn::ibp` |
 | `conformal [--seed N] [--alpha A]` | intervalles conformes à couverture garantie sans hypothèse de distribution | `scirust-core::nn::conformal` |
 | `calibrate [--seed N]` | temperature scaling : ajuste `T` pour réduire l'erreur de calibration (ECE) sans changer l'accuracy | `scirust-core::nn::calibration` |
+| `kvcache [--seed N] [--budget B]` | KV-cache compressé élastique (tuiles INT4 base+résidu, échelles par groupe) — affiche le ratio de compression et la fidélité cosinus de l'attention vs pleine précision ; `--budget` montre le soft-paging borné (synergie SLHAv2/CCOS) | `scirust-core::nn::elastic_kv_cache` |
+| `guard [--seed N] [--alpha A]` | guard à garantie statistique — couverture conforme sans hypothèse de distribution (≥ 1−α) + verdicts Accept/Abstain/Reject (pour le guard de CCOS) | `scirust-core::nn::guard` |
+| `attest [--seed N]` | journal d'attestation hash-chaîné d'inférences **vérifiables** (Freivalds, #80) — vérifie la chaîne, rejette une inférence falsifiée, démontre l'inviolabilité (pont vers l'event-log de CCOS) | `scirust-runtime::attest` |
 | `gptq [--seed N] [--samples S] [--damp D]` | quantification int8 GPTQ (feedback d'erreur d'ordre 2) ; affiche la réduction d'erreur de calibration vs round-to-nearest | `scirust-core::quantization` |
 | `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
 | `bitnet [--seed N]` | quantification ternaire BitNet b1.58 (`{-1,0,+1}`, ~1,58 bit/poids) ; vérifie le matmul sans multiplication | `scirust-core::quantization` |
