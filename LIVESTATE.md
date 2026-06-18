@@ -3,6 +3,14 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 83 : AI²/zonotopes (#29) — domaine abstrait vérification
+- `nn::ibp::Zonotope`/`IbpMlp::certify_zonotope` (Gehr 2018) : affine exact, ReLU DeepZ
+  (λx+μ±μ, 1 générateur/neurone instable). Générateurs partagés ⇒ corrélations.
+- CLI : exposé dans `certify` (à côté IBP/CROWN). Pas de nouvelle commande ⇒ pas de multilingue.
+- Tests (3, core) : affine exact (=intervalle) ; soundness (4000 points ∈ boîte zonotope, MLP 3 couches) ;
+  plus serré qu'IBP sous corrélation (relu(x)−relu(x)≡0 : zono [−0.5,0.5] vs IBP [−1,1], sains).
+- docs : roadmap #29 📋→✅ ; CHANGELOG. 573 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 82 : EAGLE (#62) — décodage spéculatif niveau features
 - `nn::nd_decoder::EagleHead`/`generate_eagle` (Li 2024) : tête (feature, embed) → feature
   suivant, autorégressée + tête LM gelée ⇒ brouillon, vérifié (préfixe + correction).
@@ -11,7 +19,7 @@
 - Tests (2, core) : exact = greedy pour tête **quelconque** (random) + déterminisme ;
   tête entraînée (séquence périodique) ⇒ blocs acceptent >1 token (forwards<2·n), exact.
   8/8 tests nd_decoder verts.
-- docs : roadmap #62 📋→✅ ; CHANGELOG. 571 tests core (+2) ; 8 gates (à confirmer).
+- docs : roadmap #62 📋→✅ ; CHANGELOG. 571 tests core (+2) ; 8 gates verts ✓ ; commit dc62241.
 
 ## Session 2026-06-18 — volet 81 : Medusa (#61) — décodage à têtes multiples
 - `nn::nd_decoder::MedusaHeads`/`generate_medusa` (Cai 2024) : têtes (tête j → token +j+2

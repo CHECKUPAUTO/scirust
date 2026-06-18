@@ -19,6 +19,17 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **AI² / zonotopes — domaine abstrait pour la vérification** (`nn::ibp::Zonotope`/
+  `IbpMlp::certify_zonotope`, Gehr et al. 2018, roadmap #29) : propagation par
+  **zonotopes** (centre + générateurs, `{c+Σεᵢgᵢ : εᵢ∈[−1,1]}`) — les couches affines
+  sont **exactes**, la ReLU est relaxée façon **DeepZ** (`y=λx+μ±μ`, `λ=u/(u−l)`,
+  `μ=−λl/2`, un générateur frais par neurone instable). Les `εᵢ` partagés capturent les
+  **corrélations** linéaires que les intervalles perdent. Oracle honnête : affine exacte
+  (= forward intervalle) + **soundness** (des milliers de points échantillonnés dans la
+  boîte d'entrée tombent dans la boîte zonotope d'un MLP ReLU 3 couches) + **plus serré
+  qu'IBP sous corrélation** (réseau `relu(x)−relu(x)` ≡ 0 : zonotope `[−0,5;0,5]` vs IBP
+  `[−1;1]`, les deux sains). Étend `nn::ibp` (IBP #1, CROWN #2) ; affiché dans la CLI
+  `certify` à côté d'IBP et CROWN.
 - **EAGLE — décodage spéculatif au niveau features** (`nn::nd_decoder::EagleHead`/
   `generate_eagle`, Li et al. 2024, roadmap #62) : là où Medusa prédit des *tokens*
   futurs, EAGLE brouillonne au niveau **feature** — une tête légère mappe

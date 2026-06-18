@@ -174,6 +174,158 @@ impl IbpMlp {
         }
         cur
     }
+
+    /// Certified output box via **zonotope** propagation (AI² / DeepZ): sound, and
+    /// usually **tighter than IBP** because the generators track inter-neuron
+    /// correlations that plain intervals discard.
+    pub fn certify_zonotope(&self, input: &Interval) -> Interval {
+        let mut z = Zonotope::from_interval(input);
+        for (i, layer) in self.layers.iter().enumerate()
+        {
+            z = layer.forward_zonotope(&z);
+            if i + 1 < self.layers.len()
+            {
+                z = relu_zonotope(&z);
+            }
+        }
+        z.interval()
+    }
+}
+
+/// A **zonotope** over `n` dimensions: a center `c` plus `m` generator vectors,
+/// concretizing to `{ c + Σ εᵢ gᵢ : εᵢ ∈ [−1, 1] }`. Affine maps transform it
+/// **exactly**; ReLU is over-approximated (DeepZ). The shared `εᵢ` let it track
+/// linear **correlations** between coordinates that an [`Interval`] cannot — the
+/// abstract domain behind AI² (Gehr et al., IEEE S&P 2018).
+#[derive(Clone, Debug)]
+pub struct Zonotope {
+    /// Center, length `n`.
+    pub center: Vec<f32>,
+    /// Generator vectors, each length `n`.
+    pub generators: Vec<Vec<f32>>,
+}
+
+impl Zonotope {
+    /// The zonotope exactly representing an input box: one generator per dimension
+    /// of nonzero radius.
+    pub fn from_interval(iv: &Interval) -> Self {
+        let n = iv.lo.len();
+        let center: Vec<f32> = (0..n).map(|i| 0.5 * (iv.lo[i] + iv.hi[i])).collect();
+        let mut generators = Vec::new();
+        for i in 0..n
+        {
+            let r = 0.5 * (iv.hi[i] - iv.lo[i]);
+            if r != 0.0
+            {
+                let mut g = vec![0.0f32; n];
+                g[i] = r;
+                generators.push(g);
+            }
+        }
+        Self { center, generators }
+    }
+
+    /// Per-dimension radius `Σᵢ |gᵢ|` (total generator spread).
+    pub fn radii(&self) -> Vec<f32> {
+        let n = self.center.len();
+        let mut r = vec![0.0f32; n];
+        for g in &self.generators
+        {
+            for (i, ri) in r.iter_mut().enumerate()
+            {
+                *ri += g[i].abs();
+            }
+        }
+        r
+    }
+
+    /// The tightest enclosing box (interval concretization).
+    pub fn interval(&self) -> Interval {
+        let r = self.radii();
+        let n = self.center.len();
+        Interval {
+            lo: (0..n).map(|i| self.center[i] - r[i]).collect(),
+            hi: (0..n).map(|i| self.center[i] + r[i]).collect(),
+        }
+    }
+}
+
+impl IbpLinear {
+    /// Affine forward of a zonotope — **exact**: `c → c·W + b`, each generator
+    /// `g → g·W` (generators are unaffected by the bias).
+    pub fn forward_zonotope(&self, z: &Zonotope) -> Zonotope {
+        assert_eq!(z.center.len(), self.in_f, "forward_zonotope: input size");
+        let map = |v: &[f32], bias: bool| -> Vec<f32> {
+            let mut out = vec![0.0f32; self.out_f];
+            for (o, oo) in out.iter_mut().enumerate()
+            {
+                let mut acc = if bias { self.b[o] } else { 0.0 };
+                for (i, &vi) in v.iter().enumerate()
+                {
+                    acc += vi * self.w[i * self.out_f + o];
+                }
+                *oo = acc;
+            }
+            out
+        };
+        Zonotope {
+            center: map(&z.center, true),
+            generators: z.generators.iter().map(|g| map(g, false)).collect(),
+        }
+    }
+}
+
+/// ReLU on a zonotope (**DeepZ**, Singh et al. 2018): per neuron with bounds
+/// `[l, u]` (from the zonotope) — if `l ≥ 0` keep it, if `u ≤ 0` zero it, else apply
+/// the minimal-area relaxation `y = λx + μ` with one fresh noise term of magnitude
+/// `μ`, where `λ = u/(u−l)` and `μ = −λl/2`. Sound: it encloses `max(0, x)` for every
+/// `x ∈ [l, u]`, while the shared old generators (scaled by `λ`) preserve correlation.
+pub fn relu_zonotope(z: &Zonotope) -> Zonotope {
+    let n = z.center.len();
+    let iv = z.interval();
+    let mut new_center = vec![0.0f32; n];
+    let mut lambda = vec![0.0f32; n];
+    let mut mu = vec![0.0f32; n]; // fresh-generator magnitude (0 ⇒ stable neuron)
+    for j in 0..n
+    {
+        let (l, u) = (iv.lo[j], iv.hi[j]);
+        if l >= 0.0
+        {
+            lambda[j] = 1.0;
+            new_center[j] = z.center[j];
+        }
+        else if u <= 0.0
+        {
+            new_center[j] = 0.0; // lambda[j] stays 0
+        }
+        else
+        {
+            let lam = u / (u - l);
+            lambda[j] = lam;
+            mu[j] = -lam * l * 0.5; // > 0
+            new_center[j] = lam * z.center[j] + mu[j];
+        }
+    }
+    // Scale existing generators by λ per dimension (keeps correlations).
+    let mut generators: Vec<Vec<f32>> = z
+        .generators
+        .iter()
+        .map(|g| (0..n).map(|j| lambda[j] * g[j]).collect())
+        .collect();
+    // One fresh generator per unstable neuron.
+    for (j, &m) in mu.iter().enumerate()
+    {
+        if m != 0.0
+        {
+            let mut g = vec![0.0f32; n];
+            g[j] = m;
+            generators.push(g);
+        }
+    }
+    Zonotope {
+        center: new_center,
+        generators,
+    }
 }
 
 /// Given a certified output box, is class `target` **provably** the argmax over
@@ -460,5 +612,84 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The zonotope affine map is **exact**: its interval concretization equals the
+    /// (exact) interval affine forward.
+    #[test]
+    fn zonotope_affine_is_exact() {
+        let mut rng = PcgEngine::new(2);
+        let lin = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let box_in = Interval::around(&[0.1, -0.4, 0.6, 0.2], 0.15);
+        let zi = lin
+            .forward_zonotope(&Zonotope::from_interval(&box_in))
+            .interval();
+        let ii = lin.forward_interval(&box_in);
+        for k in 0..3
+        {
+            assert!((zi.lo[k] - ii.lo[k]).abs() < 1e-5, "lo mismatch at {k}");
+            assert!((zi.hi[k] - ii.hi[k]).abs() < 1e-5, "hi mismatch at {k}");
+        }
+    }
+
+    /// **Soundness of the zonotope abstraction**: thousands of concrete points from
+    /// the input box land inside the certified zonotope box, for a 3-layer ReLU MLP.
+    #[test]
+    fn zonotope_mlp_soundness() {
+        let mut rng = PcgEngine::new(8);
+        let mlp = IbpMlp::new(vec![
+            IbpLinear::from_nd_linear(&NdLinear::new(4, 8, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(8, 6, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(6, 3, &mut rng)),
+        ]);
+        let box_in = Interval::around(&[0.2, -0.5, 0.7, -0.1], 0.1);
+        let cert = mlp.certify_zonotope(&box_in);
+
+        let mut srng = PcgEngine::new(321);
+        for _ in 0..4000
+        {
+            let x = sample(&box_in, &mut srng);
+            let y = mlp.forward(&x);
+            for (k, &yk) in y.iter().enumerate()
+            {
+                assert!(
+                    yk >= cert.lo[k] - 1e-4 && yk <= cert.hi[k] + 1e-4,
+                    "zonotope unsound at out {k}: {yk} not in [{}, {}]",
+                    cert.lo[k],
+                    cert.hi[k]
+                );
+            }
+        }
+    }
+
+    /// **Zonotopes beat IBP when correlations matter.** The network computes
+    /// `relu(x) − relu(x)` (always 0): IBP loses the correlation and reports
+    /// `[−1, 1]`, while the zonotope keeps the shared noise symbol and reports a
+    /// **strictly tighter** box — both sound (they contain 0).
+    #[test]
+    fn zonotope_tighter_than_ibp_under_correlation() {
+        // x ∈ [-1,1]; L1: x ↦ (x, x); L2: (a,b) ↦ a − b.
+        let l1 = IbpLinear::new(vec![1.0, 1.0], vec![0.0, 0.0], 1, 2);
+        let l2 = IbpLinear::new(vec![1.0, -1.0], vec![0.0], 2, 1);
+        let mlp = IbpMlp::new(vec![l1, l2]);
+        let box_in = Interval {
+            lo: vec![-1.0],
+            hi: vec![1.0],
+        };
+        let ibp = mlp.certify(&box_in);
+        let zono = mlp.certify_zonotope(&box_in);
+
+        let ibp_w = ibp.hi[0] - ibp.lo[0];
+        let zono_w = zono.hi[0] - zono.lo[0];
+        assert!(
+            zono_w < ibp_w - 1e-4,
+            "zonotope {zono_w} not tighter than IBP {ibp_w}"
+        );
+        // Both sound: the true output (0) is contained.
+        assert!(
+            zono.lo[0] <= 0.0 && zono.hi[0] >= 0.0,
+            "zonotope excludes truth"
+        );
+        assert!(ibp.lo[0] <= 0.0 && ibp.hi[0] >= 0.0);
     }
 }

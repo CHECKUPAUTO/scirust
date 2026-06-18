@@ -101,6 +101,16 @@ pub fn run_certify(args: &[String]) -> u8 {
         println!("    class {c}: [{:.4}, {:.4}]", crown.lo[c], crown.hi[c]);
     }
     println!("    robustness: {}", robust_str(&crown));
+    let zono = mlp.certify_zonotope(&box_in);
+    println!(
+        "  Zonotope bounds (AI²/DeepZ, avg width {:.4}):",
+        width(&zono)
+    );
+    for c in 0..out_f
+    {
+        println!("    class {c}: [{:.4}, {:.4}]", zono.lo[c], zono.hi[c]);
+    }
+    println!("    robustness: {}", robust_str(&zono));
 
     // Randomized smoothing: a *probabilistic* L2 certificate (Cohen et al. 2019),
     // the complement to the deterministic IBP/CROWN bounds above. For a half-space
