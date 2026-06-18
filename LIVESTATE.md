@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 97 : MILP (#31) — vérification exacte
+- `nn::ibp::milp_min_margin`/`milp_verify_robustness` (Tjeng 2019) : réseau ReLU 2-entrées
+  1-couche. Patrons d'activation ReLU = binaires MILP ⇒ énumérés ; par patron le réseau est affine,
+  marge logitₜ−logⱼ minimisée sur boîte ∩ demi-espaces d'activation par énumération de sommets 2D
+  (lp_min_2d). Min global exact ; >0 ⇒ Robust sinon Unsafe(contre-exemple exact).
+- Bibliothèque seule (pas de CLI ni multilingue). Module nn::ibp.
+- Tests (2, core) : = force brute (grille 120², min ≤ tout échantillon + proche) + témoin atteint
+  + déterminisme ; contre-exemple réel (grande boîte) + borne ≥ DeepPoly (sain) & strictement plus
+  serré quelque part.
+- docs : roadmap #31 📋→✅ ; CHANGELOG. 610 tests core (+2) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 96 : Branch-and-bound (#26) — vérification complète
 - `nn::ibp::verify_robustness`/`BabResult` (GCP-CROWN, Zhang 2022) : BaB sur le domaine d'entrée.
   Marges par classe (fusionnées en dernière couche) bornées par DeepPoly ; toutes >0 ⇒ Robust ;
@@ -11,7 +22,7 @@
 - CLI : exposé dans `certify`. Pas de nouvelle commande ⇒ pas de multilingue.
 - Tests (3, core) : Robust sain (5000 pts) + déterministe ; rayon BaB > DeepPoly seul (+ région
   sup. saine, 3000 pts) ; Unsafe = vrai contre-exemple (mal classé, dans boîte).
-- docs : roadmap #26 📋→✅ ; CHANGELOG. 608 tests core (+3) ; 8 gates verts (à confirmer).
+- docs : roadmap #26 📋→✅ ; CHANGELOG. 608 tests core (+3) ; 8 gates verts ✓ ; commit e10de3a.
 
 ## Session 2026-06-18 — volet 95 : DeepPoly (#28) — domaine abstrait relationnel
 - `nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly` (Singh 2019) : bornes basse/haute

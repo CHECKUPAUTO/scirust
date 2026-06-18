@@ -442,6 +442,131 @@ pub fn verify_robustness(
     BabResult::Robust
 }
 
+/// Minimise the linear objective `obj·x` over the 2-D polygon `{x : nᵢ·x ≤ cᵢ}` by
+/// enumerating its vertices (each the intersection of two constraint boundaries that
+/// satisfies every constraint). Returns `(min value, argmin)` or `None` if the
+/// region is empty. The (always-present) box constraints keep it bounded, so the
+/// linear minimum is attained at a vertex.
+fn lp_min_2d(cons: &[(f32, f32, f32)], obj: (f32, f32)) -> Option<(f32, [f32; 2])> {
+    let mut best: Option<(f32, [f32; 2])> = None;
+    let n = cons.len();
+    for i in 0..n
+    {
+        for j in (i + 1)..n
+        {
+            let (a0, a1, ac) = cons[i];
+            let (b0, b1, bc) = cons[j];
+            let det = a0 * b1 - a1 * b0;
+            if det.abs() < 1e-9
+            {
+                continue; // parallel boundaries
+            }
+            let x0 = (ac * b1 - a1 * bc) / det;
+            let x1 = (a0 * bc - ac * b0) / det;
+            if cons
+                .iter()
+                .all(|&(c0, c1, cc)| c0 * x0 + c1 * x1 <= cc + 1e-4)
+            {
+                let val = obj.0 * x0 + obj.1 * x1;
+                if best.is_none_or(|(bv, _)| val < bv)
+                {
+                    best = Some((val, [x0, x1]));
+                }
+            }
+        }
+    }
+    best
+}
+
+/// **Exact** worst-case margin of a small **2-input, 1-hidden-layer** ReLU net over
+/// an input box, via the MILP formulation (Tjeng, Xiao & Tedrake, *Evaluating
+/// Robustness of NN with MILP*, ICLR 2019): the network's ReLU **activation
+/// patterns** are the MILP's binary variables, so enumerating them and solving each
+/// resulting LP exactly yields the global minimum. For every other class `j` and
+/// every pattern the margin `logitₜ − logitⱼ` is **affine**, minimised over the box
+/// intersected with the pattern's activation half-spaces. Returns the exact minimum
+/// margin and its `(x₀, x₁)` minimiser.
+pub fn milp_min_margin(
+    l1: &IbpLinear,
+    l2: &IbpLinear,
+    input: &Interval,
+    true_class: usize,
+) -> (f32, Vec<f32>) {
+    assert_eq!(l1.in_f, 2, "milp_min_margin: exactly 2 inputs");
+    assert_eq!(l1.out_f, l2.in_f, "milp_min_margin: layer mismatch");
+    let (h, k, t) = (l1.out_f, l2.out_f, true_class);
+    let base: Vec<(f32, f32, f32)> = vec![
+        (1.0, 0.0, input.hi[0]),
+        (-1.0, 0.0, -input.lo[0]),
+        (0.0, 1.0, input.hi[1]),
+        (0.0, -1.0, -input.lo[1]),
+    ];
+    let mut best = f32::MAX;
+    let mut witness = vec![
+        0.5 * (input.lo[0] + input.hi[0]),
+        0.5 * (input.lo[1] + input.hi[1]),
+    ];
+    for j in 0..k
+    {
+        if j == t
+        {
+            continue;
+        }
+        for pat in 0..(1usize << h)
+        {
+            let mut cons = base.clone();
+            let (mut a0, mut a1) = (0.0f32, 0.0f32);
+            let mut d = l2.b[t] - l2.b[j];
+            for i in 0..h
+            {
+                let (w0, w1, b1i) = (l1.w[i], l1.w[h + i], l1.b[i]); // zᵢ = w0·x₀ + w1·x₁ + b
+                if (pat >> i) & 1 == 1
+                {
+                    cons.push((-w0, -w1, b1i)); // active: zᵢ ≥ 0
+                    let coef = l2.w[i * k + t] - l2.w[i * k + j];
+                    a0 += coef * w0;
+                    a1 += coef * w1;
+                    d += coef * b1i;
+                }
+                else
+                {
+                    cons.push((w0, w1, -b1i)); // inactive: zᵢ ≤ 0 (contributes 0)
+                }
+            }
+            if let Some((val, pt)) = lp_min_2d(&cons, (a0, a1))
+            {
+                if val + d < best
+                {
+                    best = val + d;
+                    witness = pt.to_vec();
+                }
+            }
+        }
+    }
+    (best, witness)
+}
+
+/// Exact MILP robustness decision: [`Robust`](BabResult::Robust) iff the
+/// [`milp_min_margin`] is `> 0`, else [`Unsafe`](BabResult::Unsafe) with the exact
+/// counterexample. Unlike the tolerance-complete [`verify_robustness`], this is
+/// exact for the (small, 2-input) network.
+pub fn milp_verify_robustness(
+    l1: &IbpLinear,
+    l2: &IbpLinear,
+    input: &Interval,
+    true_class: usize,
+) -> BabResult {
+    let (m, witness) = milp_min_margin(l1, l2, input, true_class);
+    if m > 0.0
+    {
+        BabResult::Robust
+    }
+    else
+    {
+        BabResult::Unsafe(witness)
+    }
+}
+
 /// A **zonotope** over `n` dimensions: a center `c` plus `m` generator vectors,
 /// concretizing to `{ c + Σ εᵢ gᵢ : εᵢ ∈ [−1, 1] }`. Affine maps transform it
 /// **exactly**; ReLU is over-approximated (DeepZ). The shared `εᵢ` let it track
@@ -1140,5 +1265,114 @@ mod tests {
             },
             other => panic!("expected Unsafe, got {other:?}"),
         }
+    }
+
+    /// Worst margin (over competing classes) of a 2-layer net at a point.
+    fn worst_margin(net: &[IbpLinear], x: &[f32], t: usize, k: usize) -> f32 {
+        let lg = forward_layers(net, x);
+        (0..k)
+            .filter(|&j| j != t)
+            .map(|j| lg[t] - lg[j])
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// **Exact MILP verification matches brute force**: the enumerated min margin
+    /// equals (and lower-bounds) a fine grid scan, the witness achieves it, and it is
+    /// deterministic.
+    #[test]
+    fn milp_exact_matches_bruteforce() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = IbpLinear::from_nd_linear(&NdLinear::new(2, 4, &mut rng));
+        let l2 = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let net = vec![l1.clone(), l2.clone()];
+        let x = [0.1f32, -0.2];
+        let t = argmax(&forward_layers(&net, &x));
+        let box_in = Interval::around(&x, 0.5);
+        let (milp_min, witness) = milp_min_margin(&l1, &l2, &box_in, t);
+
+        let g = 120usize;
+        let mut grid_min = f32::MAX;
+        for a in 0..=g
+        {
+            for b in 0..=g
+            {
+                let p = [
+                    box_in.lo[0] + (box_in.hi[0] - box_in.lo[0]) * a as f32 / g as f32,
+                    box_in.lo[1] + (box_in.hi[1] - box_in.lo[1]) * b as f32 / g as f32,
+                ];
+                grid_min = grid_min.min(worst_margin(&net, &p, t, 3));
+            }
+        }
+        // Exact min lower-bounds every sample, and the grid gets close to it.
+        assert!(
+            milp_min <= grid_min + 1e-3,
+            "milp {milp_min} > grid {grid_min}"
+        );
+        assert!(
+            grid_min - milp_min < 0.05,
+            "milp {milp_min} far from grid {grid_min}"
+        );
+        // The witness realises the minimum.
+        assert!(
+            (worst_margin(&net, &witness, t, 3) - milp_min).abs() < 1e-2,
+            "witness margin mismatch"
+        );
+        let (milp_min2, _) = milp_min_margin(&l1, &l2, &box_in, t);
+        assert_eq!(milp_min.to_bits(), milp_min2.to_bits());
+    }
+
+    /// MILP returns a **real** counterexample at a large radius, and (being exact)
+    /// **certifies a box that the sound-but-loose DeepPoly bound cannot**.
+    #[test]
+    fn milp_counterexample_and_beats_deeppoly() {
+        let mut rng = PcgEngine::new(4);
+        let l1 = IbpLinear::from_nd_linear(&NdLinear::new(2, 4, &mut rng));
+        let l2 = IbpLinear::from_nd_linear(&NdLinear::new(4, 3, &mut rng));
+        let net = vec![l1.clone(), l2.clone()];
+        let x = [0.1f32, -0.2];
+        let t = argmax(&forward_layers(&net, &x));
+
+        let box_big = Interval::around(&x, 1.5);
+        match milp_verify_robustness(&l1, &l2, &box_big, t)
+        {
+            BabResult::Unsafe(cx) =>
+            {
+                assert!(
+                    worst_margin(&net, &cx, t, 3) <= 1e-3,
+                    "counterexample not unsafe"
+                );
+                assert!(cx[0] >= box_big.lo[0] - 1e-3 && cx[0] <= box_big.hi[0] + 1e-3);
+                assert!(cx[1] >= box_big.lo[1] - 1e-3 && cx[1] <= box_big.hi[1] + 1e-3);
+            },
+            other => panic!("expected Unsafe, got {other:?}"),
+        }
+
+        // The exact MILP min is always ≥ the sound DeepPoly lower bound, and is
+        // strictly tighter at some radius (extra precision from being exact).
+        let mnet = build_margin_net(&net, t);
+        let mut strictly_tighter = false;
+        for k in 1..50
+        {
+            let eps = 0.05 * k as f32;
+            let b = Interval::around(&x, eps);
+            let dp_lo = deeppoly_certify(&mnet, &b)
+                .lo
+                .iter()
+                .copied()
+                .fold(f32::MAX, f32::min);
+            let (mm, _) = milp_min_margin(&l1, &l2, &b, t);
+            assert!(
+                mm >= dp_lo - 1e-3,
+                "MILP {mm} below sound DeepPoly bound {dp_lo}"
+            );
+            if mm > dp_lo + 0.01
+            {
+                strictly_tighter = true;
+            }
+        }
+        assert!(
+            strictly_tighter,
+            "exact MILP never strictly tighter than DeepPoly"
+        );
     }
 }

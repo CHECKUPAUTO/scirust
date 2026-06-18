@@ -19,6 +19,20 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **MILP — vérification *exacte*** (`nn::ibp::milp_min_margin`/`milp_verify_robustness`, Tjeng
+  et al. 2019, roadmap #31) : la vérification exacte d'un réseau ReLU par la formulation MILP.
+  L'observation clé : les **patrons d'activation** des ReLU sont précisément les variables
+  **binaires** du MILP, et sur le domaine d'un patron fixé le réseau est **affine**. Pour un petit
+  réseau (2 entrées, 1 couche cachée) on **énumère** les patrons et on résout chaque LP
+  **exactement** — la marge `logitₜ − logitⱼ` y est affine, minimisée sur la boîte intersectée
+  avec les demi-espaces d'activation du patron par **énumération des sommets** du polygone 2D (pas
+  de simplexe fragile : robuste et exact). Le minimum global sur tous les patrons et toutes les
+  classes concurrentes est donc **exact** ; `> 0` ⇒ robuste, sinon l'argmin est un **contre-exemple
+  exact**. Oracle honnête : le minimum énumérée **égale la force brute** (il minore toute valeur
+  d'une grille fine et la grille s'en approche), le contre-exemple est **réel** (marge ≤ 0, dans la
+  boîte), et — étant exact — il est **≥ la borne inférieure (saine) de DeepPoly** partout et
+  **strictement plus serré** à certains rayons ; déterministe. Distinct du branch-and-bound (#26),
+  complet **à tolérance près** : MILP est exact (tranche même la frontière de mesure nulle).
 - **Branch-and-bound — vérification *complète*** (`nn::ibp::verify_robustness`/`BabResult`,
   GCP-CROWN, Zhang et al. 2022, roadmap #26) : là où IBP/CROWN/DeepPoly donnent **une** borne
   *saine mais incomplète*, le branch-and-bound **décide**. Il borne les **marges** par classe
