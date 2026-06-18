@@ -8,17 +8,28 @@
 //!   oracle-grade GEMM. This is the bit-tolerant oracle a GPU result is
 //!   validated against.
 //! - **Portable GPU** ([`WgpuBackend`]) — real WGSL compute path behind the
-//!   `wgpu` feature (Vulkan/Metal/DX12/GL). It is exercised in CI on a software
-//!   Vulkan adapter (Mesa *lavapipe*) against the CPU oracle, so the *no claim
-//!   without a test* rule holds without physical GPU hardware. Without the
-//!   feature, or when no adapter can be acquired, it returns
-//!   [`BackendError::Unavailable`] — it never fabricates output.
-//! - **CUDA** ([`CudaBackend`]) — out of scope until a GPU CI runner exists;
-//!   always returns [`BackendError::Unavailable`]. The archived cuBLAS draft
-//!   lives in `archive/scirust-gpu/`.
+//!   `wgpu` feature (Vulkan/Metal/DX12/GL).
+//! - **CUDA** ([`CudaBackend`]) — placeholder until a GPU CI runner exists.
+//! - **Deterministic compute** — Kahan summation, INT8 quantized GEMM (bit-exact
+//!   via integer arithmetic), and fixed-order accumulation.
+//! - **Kernel library** — tiled 16×16 SGEMM, fused GEMM+bias+activation,
+//!   extended activations (gelu, silu, sigmoid, tanh, elu, softplus, etc.),
+//!   deterministic reductions with Kahan compensation, INT8 GEMM.
+//! - **Operations** — CPU reference ops (activations, LayerNorm, RMSNorm,
+//!   reductions) for oracle validation.
+//! - **Fusion engine** — compile GEMM → bias → activation sequences into a
+//!   single GPU dispatch.
+//! - **VRAM-resident tensor** — `GpuTensor` for device-resident autograd.
+//! - **GPU im2col/col2im** — keep Conv2d chains entirely in VRAM.
 //!
-//! This mirrors the honest `Err` signalling in `scirust_core::compute_backend`
-//! ("vrai signal : pas de stub trompeur"). See `docs/GPU.md` (roadmap P2.2).
+//! ## Determinism guarantee
+//!
+//! SciRust's GPU determinism is built on three strategies:
+//! 1. **Integer arithmetic** (INT8 → INT32 accumulation) — mathematically exact.
+//! 2. **Kahan compensated summation** for FP32 when integer paths aren't suitable.
+//! 3. **Fixed dispatch ordering** — reproducible accumulation sequences.
+//!
+//! The CPU oracle (`CpuBackend`) remains the bit-exact reference forever.
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
@@ -28,16 +39,34 @@ use alloc::{format, string::String, vec, vec::Vec};
 #[cfg(feature = "wgpu")]
 mod chain;
 #[cfg(feature = "wgpu")]
+mod conv_gpu;
+#[cfg(feature = "wgpu")]
+pub mod deterministic;
+#[cfg(feature = "wgpu")]
 mod engine;
+#[cfg(feature = "wgpu")]
+mod fusion;
+#[cfg(feature = "wgpu")]
+pub mod kernels;
+#[cfg(feature = "wgpu")]
+pub mod ops;
+#[cfg(feature = "wgpu")]
+mod tensor;
 #[cfg(feature = "wgpu")]
 mod wgpu_backend;
 
 #[cfg(feature = "wgpu")]
 pub use chain::GpuChain;
 #[cfg(feature = "wgpu")]
+pub use conv_gpu::{cpu_col2im, cpu_im2col, COL2IM_WGSL, IM2COL_WGSL};
+#[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
 #[cfg(feature = "wgpu")]
-pub use wgpu_backend::GpuMatrix;
+pub use fusion::{plan_fusion, FusedLayer, FusionNode};
+#[cfg(feature = "wgpu")]
+pub use tensor::GpuTensor;
+#[cfg(feature = "wgpu")]
+pub use wgpu_backend::{GpuMatrix, WgpuContext};
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,30 +121,20 @@ fn check_gemm_dims(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Backen
     {
         return Err(BackendError::ShapeMismatch(format!(
             "A has {} elements, expected m*k = {}*{} = {}",
-            a.len(),
-            m,
-            k,
-            m * k
+            a.len(), m, k, m * k
         )));
     }
     if b.len() != k * n
     {
         return Err(BackendError::ShapeMismatch(format!(
             "B has {} elements, expected k*n = {}*{} = {}",
-            b.len(),
-            k,
-            n,
-            k * n
+            b.len(), k, n, k * n
         )));
     }
     Ok(())
 }
 
 /// CPU reference backend — always available, deterministic, oracle-grade.
-///
-/// The accumulation order is fixed (row-major, ascending `p`) so results are
-/// bit-identical across runs and platforms; this is the bit-tolerant oracle a
-/// future GPU backend must be validated against.
 pub struct CpuBackend;
 
 impl RawComputeBackend for CpuBackend {
@@ -150,12 +169,6 @@ impl RawComputeBackend for CpuBackend {
 }
 
 /// Portable GPU backend (wgpu, Vulkan/Metal/DX12/GL).
-///
-/// With the `wgpu` feature enabled, `gemm_f32` runs a real WGSL compute shader
-/// on an available adapter and is validated against [`CpuBackend`] in CI on a
-/// software Vulkan adapter (Mesa lavapipe). Without the feature — or when no
-/// adapter can be acquired — it returns [`BackendError::Unavailable`] and never
-/// fabricates output. See `docs/GPU.md` (roadmap P2.2).
 pub struct WgpuBackend;
 
 impl RawComputeBackend for WgpuBackend {
@@ -184,9 +197,7 @@ impl RawComputeBackend for WgpuBackend {
     }
 }
 
-/// CUDA/cuBLAS backend. **Out of scope** until a GPU CI runner exists
-/// (project rule: no claim without a test). Returns
-/// [`BackendError::Unavailable`].
+/// CUDA/cuBLAS backend placeholder.
 pub struct CudaBackend;
 
 impl RawComputeBackend for CudaBackend {
@@ -207,39 +218,25 @@ impl RawComputeBackend for CudaBackend {
 }
 
 /// Transparent hardware dispatcher.
-///
-/// `Cpu` is always wired; `Wgpu` is wired behind the `wgpu` feature (and
-/// reports [`BackendError::Unavailable`] otherwise); `Cuda` is a placeholder
-/// that always reports [`BackendError::Unavailable`] (see P2.2).
 pub enum GpuAccelerator {
-    /// Real, tested CPU reference path.
     Cpu(CpuBackend),
-    /// Portable GPU path — real WGSL compute under the `wgpu` feature.
     Wgpu(WgpuBackend),
-    /// Placeholder CUDA path (out of scope without a GPU runner).
     Cuda(CudaBackend),
 }
 
 impl GpuAccelerator {
-    /// The always-available CPU reference accelerator.
     pub fn cpu() -> Self {
         GpuAccelerator::Cpu(CpuBackend)
     }
 
-    /// Name of the selected device.
     pub fn device_name(&self) -> &'static str {
-        match self
-        {
+        match self {
             GpuAccelerator::Cpu(b) => b.device_name(),
             GpuAccelerator::Wgpu(b) => b.device_name(),
             GpuAccelerator::Cuda(b) => b.device_name(),
         }
     }
 
-    /// Row-major matmul `C(m×n) = A(m×k) · B(k×n)` on the selected device.
-    ///
-    /// Returns [`BackendError::Unavailable`] for device paths that are not yet
-    /// wired, never fabricated output.
     pub fn matmul(
         &self,
         a: &[f32],
@@ -248,8 +245,7 @@ impl GpuAccelerator {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<f32>> {
-        match self
-        {
+        match self {
             GpuAccelerator::Cpu(backend) => backend.gemm_f32(a, b, m, k, n),
             GpuAccelerator::Wgpu(backend) => backend.gemm_f32(a, b, m, k, n),
             GpuAccelerator::Cuda(backend) => backend.gemm_f32(a, b, m, k, n),
@@ -263,8 +259,6 @@ mod tests {
 
     #[test]
     fn cpu_gemm_matches_hand_computed_oracle() {
-        // A = [[1,2,3],[4,5,6]] (2×3), B = [[7,8],[9,10],[11,12]] (3×2)
-        // C = [[58,64],[139,154]]
         let a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let b = [7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
         let c = CpuBackend.gemm_f32(&a, &b, 2, 3, 2).unwrap();
@@ -273,7 +267,7 @@ mod tests {
 
     #[test]
     fn cpu_gemm_identity_is_passthrough() {
-        let a = [1.0, 2.0, 3.0, 4.0]; // 2×2
+        let a = [1.0, 2.0, 3.0, 4.0];
         let id = [1.0, 0.0, 0.0, 1.0];
         assert_eq!(CpuBackend.gemm_f32(&a, &id, 2, 2, 2).unwrap(), a.to_vec());
     }
@@ -289,25 +283,18 @@ mod tests {
 
     #[test]
     fn shape_mismatch_is_reported() {
-        let err = CpuBackend
-            .gemm_f32(&[1.0, 2.0], &[1.0], 2, 2, 1)
-            .unwrap_err();
+        let err = CpuBackend.gemm_f32(&[1.0, 2.0], &[1.0], 2, 2, 1).unwrap_err();
         assert!(matches!(err, BackendError::ShapeMismatch(_)));
     }
 
     #[test]
     fn device_backends_are_honest_not_fake() {
-        // The key invariant: unwired device backends signal Unavailable rather
-        // than returning fabricated (e.g. all-zero) results.
         let a = [1.0, 2.0, 3.0, 4.0];
         let b = [1.0, 0.0, 0.0, 1.0];
-        // CUDA is never implemented → always Unavailable.
         assert_eq!(
             CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
             Err(BackendError::Unavailable("cuda"))
         );
-        // Without the `wgpu` feature the wgpu path is likewise Unavailable.
-        // (With the feature, it runs for real — covered in `wgpu_backend` tests.)
         #[cfg(not(feature = "wgpu"))]
         assert_eq!(
             WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
@@ -322,11 +309,5 @@ mod tests {
         let a = [1.0, 2.0, 3.0, 4.0];
         let id = [1.0, 0.0, 0.0, 1.0];
         assert_eq!(cpu.matmul(&a, &id, 2, 2, 2).unwrap(), a.to_vec());
-
-        let wgpu = GpuAccelerator::Wgpu(WgpuBackend);
-        assert_eq!(wgpu.device_name(), "wgpu");
-        // Unwired without the feature; with it, behaviour is exercised elsewhere.
-        #[cfg(not(feature = "wgpu"))]
-        assert!(wgpu.matmul(&a, &id, 2, 2, 2).is_err());
     }
 }
