@@ -1,0 +1,16 @@
+[package]
+name = "scirust-rl-algo"
+version = "0.1.0"
+edition = "2021"
+description = "Reinforcement learning for algorithm discovery and meta-learning"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-learning = { path = "../scirust-learning" }
+scirust-evo = { path = "../scirust-evo" }
+serde = { version = "1", features = ["derive"] }
+rand = "0.8"
+
+[dev-dependencies]
+serde_json = "1"

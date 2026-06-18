@@ -368,7 +368,10 @@ impl RelationExtractor {
                 {
                     e2.start - e1.end
                 }
-                else { e1.start.saturating_sub(e2.end) };
+                else
+                {
+                    e1.start.saturating_sub(e2.end)
+                };
                 if dist <= self.config.max_entity_distance
                 {
                     let confidence =
@@ -522,11 +525,10 @@ impl RelationClassifier {
         let mut best: Option<(String, f64)> = None;
         for ((s, o, pred), &weight) in &self.pattern_weights
         {
-            if s == subject && o == object
-                && best.as_ref().is_none_or(|(_, w)| weight > *w)
-                {
-                    best = Some((pred.clone(), weight));
-                }
+            if s == subject && o == object && best.as_ref().is_none_or(|(_, w)| weight > *w)
+            {
+                best = Some((pred.clone(), weight));
+            }
         }
         best
     }

@@ -2091,6 +2091,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-algogen"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-evo",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-arena"
 version = "0.1.0"
 dependencies = [
@@ -2110,6 +2120,16 @@ dependencies = [
 [[package]]
 name = "scirust-autodiff"
 version = "0.1.0"
+
+[[package]]
+name = "scirust-automl"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-evo",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "scirust-bridge"
@@ -2139,6 +2159,14 @@ dependencies = [
  "scirust-symbolic",
  "scirust-symreg",
  "scirust-tn",
+]
+
+[[package]]
+name = "scirust-codetrans"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2443,12 +2471,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-rl-algo"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "scirust-core",
+ "scirust-evo",
+ "scirust-learning",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-runtime"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
  "scirust-edge",
  "sha2",
+]
+
+[[package]]
+name = "scirust-scaffold"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2611,6 +2659,17 @@ name = "scirust-symreg"
 version = "0.1.0"
 dependencies = [
  "scirust-symbolic",
+]
+
+[[package]]
+name = "scirust-synthesis"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "scirust-evo",
+ "scirust-symbolic",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

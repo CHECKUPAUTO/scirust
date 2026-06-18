@@ -47,6 +47,7 @@ members = [
     "scirust-learning",
     "scirust-symbolic",
     "scirust-symreg",
+    "scirust-synthesis",
     "scirust-solvers",
     "scirust-reasoning",
     "scirust-bridge",
@@ -78,6 +79,7 @@ members = [
     "scirust-som/crates/frontend",
     "scirust-som/crates/cli",
     "scirust-cli",
+    "scirust-codetrans",
     "scirust-som/crates/visualizer",
     "examples/industrial_monitor",
     "scirust-signal",
@@ -98,6 +100,12 @@ members = [
     "scirust-vision",
     "scirust-audio",
     "scirust-graph",
+    "scirust-algogen",
+    "scirust-automl",
+    "scirust-rl-algo",
+    "scirust-synthesis",
+    "scirust-codetrans",
+    "scirust-scaffold",
 ]
 exclude = [
     "scirust-rustc-driver",

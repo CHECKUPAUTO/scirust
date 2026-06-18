@@ -1,0 +1,12 @@
+[package]
+name = "scirust-scaffold"
+version = "0.1.0"
+edition = "2021"
+description = "Algorithmic scaffolding: DSL-based algorithm generation, templating, code generation"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]

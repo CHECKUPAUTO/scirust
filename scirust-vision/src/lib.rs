@@ -291,11 +291,14 @@ pub fn lbp(image: &Image, x: usize, y: usize) -> u8 {
     {
         let nx = x as isize + dx;
         let ny = y as isize + dy;
-        if nx >= 0 && nx < image.width as isize && ny >= 0 && ny < image.height as isize
+        if nx >= 0
+            && nx < image.width as isize
+            && ny >= 0
+            && ny < image.height as isize
             && image.get(nx as usize, ny as usize) >= center
-            {
-                pattern |= 1 << i;
-            }
+        {
+            pattern |= 1 << i;
+        }
     }
     pattern
 }
@@ -770,11 +773,14 @@ pub fn canny(image: &Image, low_thresh: f64, high_thresh: f64) -> Image {
                     {
                         let nx = x as i32 + dx;
                         let ny = y as i32 + dy;
-                        if nx >= 0 && nx < w as i32 && ny >= 0 && ny < h as i32
+                        if nx >= 0
+                            && nx < w as i32
+                            && ny >= 0
+                            && ny < h as i32
                             && edges[ny as usize * w + nx as usize] == 1.0
-                            {
-                                has_strong = true;
-                            }
+                        {
+                            has_strong = true;
+                        }
                     }
                 }
                 edges[idx] = if has_strong { 1.0 } else { 0.0 };
