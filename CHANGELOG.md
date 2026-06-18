@@ -19,6 +19,21 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **xLSTM — sLSTM scalaire + mLSTM matriciel** (`nn::nd_layers::slstm_scan`/`mlstm_scan`/
+  `NdXlstm`, Beck et al. 2024, roadmap #57) : le LSTM étendu remplace les portes sigmoïdes
+  de l'entrée par une **porte exponentielle** `iₜ=exp(ĩₜ)` accompagnée d'un **état
+  normaliseur** `nₜ=fₜnₜ₋₁+iₜ`, la sortie étant `hₜ=oₜ⊙(cₜ/nₜ)`. Comme `cₜ/nₜ` est une
+  moyenne pondérée positive de `zₜ=tanh∈(−1,1)`, la sortie reste bornée dans (−1,1) : la
+  récurrence est **stable sans le stabilisateur log** (omis, c'est un pur dispositif
+  numérique qui s'annule dans le ratio). `tanh` est construit à partir du seul op `sigmoid`
+  via l'identité exacte `tanh(x)=2σ(2x)−1`. La variante **mLSTM** porte une mémoire
+  covariance `d×d` mise à jour par produits externes `vₜᵀkₜ`, lue par requête, avec le
+  dénominateur stabilisant `max(|nₜ·qₜ|,1)` reconstruit **exactement** via `|a|=relu(a)+
+  relu(−a)` et `max(a,1)=relu(a−1)+1` (aucun nouvel op, garde fidèle). Oracle honnête :
+  mLSTM ≡ récurrence de référence écrite à la main (dénominateur actif) ; **gradient check**
+  par différences finies (sLSTM : 4 portes ; mLSTM : q,k,v,iₜ,fₜ, régime lisse) ;
+  entraînement `NdXlstm` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de
+  séquence (Mamba, S4, RWKV, RetNet, GLA, HGRN, DeltaNet).
 - **OmniQuant — clipping de poids apprenable** (`quantization::omniquant_quantize`, Shao
   et al. 2024, roadmap #65) : le round-to-nearest quantifie chaque canal sur sa plage
   **complète** `[−max|w|, max|w|]` — avec des poids à queue lourde, la plupart des niveaux

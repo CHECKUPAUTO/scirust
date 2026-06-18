@@ -1462,6 +1462,153 @@ impl NdRwkv {
     }
 }
 
+/// **sLSTM cell** — the scalar-memory xLSTM recurrence (Beck et al., *xLSTM:
+/// Extended Long Short-Term Memory*, NeurIPS 2024, arXiv:2405.04517). It extends
+/// the LSTM with an **exponential input gate** and a **normaliser state**:
+///
+/// ```text
+/// iₜ = exp(ĩₜ)            (exponential input gate)
+/// fₜ = σ(f̃ₜ)             (forget gate ∈ (0,1))
+/// zₜ = tanh(z̃ₜ)          (cell input)
+/// oₜ = σ(õₜ)             (output gate ∈ (0,1))
+/// cₜ = fₜ·cₜ₋₁ + iₜ·zₜ    (cell state)
+/// nₜ = fₜ·nₜ₋₁ + iₜ       (normaliser state)
+/// hₜ = oₜ ⊙ (cₜ / nₜ)
+/// ```
+///
+/// `tanh` is built from the available `sigmoid` op via the exact identity
+/// `tanh(x) = 2σ(2x) − 1`. The log-space stabiliser state `mₜ` is **omitted**: it
+/// cancels exactly in the ratio `cₜ/nₜ` (a pure numerical device) and the bounded
+/// inputs used here keep `exp` finite; the normaliser `nₜ ≥ iₜ = exp(ĩₜ) > 0` is
+/// provably positive so the division is always well-defined. Because `cₜ/nₜ` is a
+/// positive-weighted average of `zₜ ∈ (−1,1)`, the output is intrinsically bounded
+/// in `(−1,1)` (stable without the stabiliser). Recurrent gate connections (memory
+/// mixing) are omitted — gates come from the (projected) input, and each channel
+/// runs an independent scalar cell. Pre-activations `i_pre`/`f_pre`/`z_pre`/`o_pre`
+/// are `(seq, d)`; returns `(seq, d)`. Unrolled on the tape; gradient-checked.
+pub fn slstm_scan<'t>(
+    tape: &'t NdTape,
+    i_pre: NdVar<'t>,
+    f_pre: NdVar<'t>,
+    z_pre: NdVar<'t>,
+    o_pre: NdVar<'t>,
+) -> NdVar<'t> {
+    let xs = i_pre.shape();
+    let (seq, d) = (xs[0], xs[1]);
+    let two = tape.input(TensorND::new(vec![2.0f32], vec![1, 1]));
+    let one = tape.input(TensorND::new(vec![1.0f32], vec![1, 1]));
+    let mut c = tape.input(TensorND::zeros(&[1, d])); // cell state c_0 = 0
+    let mut n = tape.input(TensorND::zeros(&[1, d])); // normaliser n_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let i_t = i_pre.gather(&[t]).exp(); // exponential input gate
+        let f_t = f_pre.gather(&[t]).sigmoid(); // forget gate ∈ (0,1)
+        let z_t = z_pre.gather(&[t]).mul(two).sigmoid().mul(two).sub(one); // tanh
+        let o_t = o_pre.gather(&[t]).sigmoid(); // output gate ∈ (0,1)
+        c = f_t.mul(c).add(i_t.mul(z_t)); // cₜ = fₜcₜ₋₁ + iₜzₜ
+        n = f_t.mul(n).add(i_t); // nₜ = fₜnₜ₋₁ + iₜ
+        outs.push(o_t.mul(c.div(n))); // hₜ = oₜ⊙(cₜ/nₜ)
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **mLSTM cell** — the matrix-memory xLSTM recurrence (Beck et al., *xLSTM*).
+/// Replaces the scalar cell of [`slstm_scan`] with a `d×d` covariance memory
+/// updated by key/value **outer products**, with a query read-out:
+///
+/// ```text
+/// iₜ = exp(ĩₜ),  fₜ = σ(f̃ₜ)             (scalar gates)
+/// Cₜ = fₜ·Cₜ₋₁ + iₜ·(vₜᵀ kₜ)            (d×d matrix state)
+/// nₜ = fₜ·nₜ₋₁ + iₜ·kₜ                   (normaliser, 1×d)
+/// hₜ = (Cₜ qₜᵀ) / max(|nₜ·qₜ|, 1)
+/// ```
+///
+/// The stabilising denominator is built from the **exact** identities
+/// `|a| = relu(a) + relu(−a)` and `max(a,1) = relu(a−1) + 1`, so no new op is
+/// needed and the guard is faithful (not omitted). `q`/`k`/`v` are `(seq, d)`; the
+/// scalar pre-gates `i_pre`/`f_pre` are `(seq, 1)`; returns `(seq, d)`. Unrolled on
+/// the tape; forward-checked against a reference recurrence and gradient-checked.
+pub fn mlstm_scan<'t>(
+    tape: &'t NdTape,
+    q: NdVar<'t>,
+    k: NdVar<'t>,
+    v: NdVar<'t>,
+    i_pre: NdVar<'t>,
+    f_pre: NdVar<'t>,
+) -> NdVar<'t> {
+    let qs = q.shape();
+    let (seq, d) = (qs[0], qs[1]);
+    let one = tape.input(TensorND::new(vec![1.0f32], vec![1, 1]));
+    let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
+    let mut cmat = tape.input(TensorND::zeros(&[d, d])); // C_0 = 0
+    let mut n = tape.input(TensorND::zeros(&[1, d])); // n_0 = 0
+    let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
+    for t in 0..seq
+    {
+        let q_t = q.gather(&[t]); // (1,d)
+        let k_t = k.gather(&[t]); // (1,d)
+        let v_t = v.gather(&[t]); // (1,d)
+        let i_t = i_pre.gather(&[t]).exp(); // (1,1) exp gate
+        let f_t = f_pre.gather(&[t]).sigmoid(); // (1,1) forget gate
+        let outer = v_t.reshape(&[d, 1]).matmul(k_t); // vₜᵀkₜ  (d,d)
+        cmat = f_t.mul(cmat).add(i_t.mul(outer)); // Cₜ
+        n = f_t.mul(n).add(i_t.mul(k_t)); // nₜ
+        let hraw = cmat.matmul(q_t.reshape(&[d, 1])); // Cₜqₜᵀ  (d,1)
+        let dot = n.mul(q_t).sum().reshape(&[1, 1]); // nₜ·qₜ   (1,1)
+        let abs = dot.relu().add(dot.mul(neg1).relu()); // |nₜ·qₜ|
+        let denom = abs.sub(one).relu().add(one); // max(|·|,1)
+        outs.push(hraw.div(denom).reshape(&[1, d])); // hₜ
+    }
+    outs[0].cat0(&outs[1..])
+}
+
+/// **xLSTM block** (sLSTM variant): from the input `x` it projects the four sLSTM
+/// pre-activations (input/forget/cell/output), runs the [`slstm_scan`] scalar
+/// recurrence and projects the hidden state back. Deterministic; trainable through
+/// the N-D tape. `(seq, d_model) → (seq, d_model)`. (The matrix-memory variant is
+/// available as the standalone [`mlstm_scan`].)
+pub struct NdXlstm {
+    i_proj: NdLinear,
+    f_proj: NdLinear,
+    z_proj: NdLinear,
+    o_proj: NdLinear,
+    out_proj: NdLinear,
+}
+
+impl NdXlstm {
+    /// New layer with seeded projections; `d` is the sLSTM cell width.
+    pub fn new(d_model: usize, d: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            i_proj: NdLinear::new(d_model, d, rng),
+            f_proj: NdLinear::new(d_model, d, rng),
+            z_proj: NdLinear::new(d_model, d, rng),
+            o_proj: NdLinear::new(d_model, d, rng),
+            out_proj: NdLinear::new(d, d_model, rng),
+        }
+    }
+
+    /// Forward over a `(seq, d_model)` sequence.
+    pub fn forward<'t>(&mut self, tape: &'t NdTape, x: NdVar<'t>) -> NdVar<'t> {
+        let i_pre = self.i_proj.forward(tape, x);
+        let f_pre = self.f_proj.forward(tape, x);
+        let z_pre = self.z_proj.forward(tape, x);
+        let o_pre = self.o_proj.forward(tape, x);
+        let h = slstm_scan(tape, i_pre, f_pre, z_pre, o_pre);
+        self.out_proj.forward(tape, h)
+    }
+
+    /// Trainable parameters (four gate projections + output projection).
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        let mut params = self.i_proj.parameters();
+        params.extend(self.f_proj.parameters());
+        params.extend(self.z_proj.parameters());
+        params.extend(self.o_proj.parameters());
+        params.extend(self.out_proj.parameters());
+        params
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1901,6 +2048,245 @@ mod tests {
         };
         let (first, last) = run();
         assert!(last < first * 0.6, "S4 did not learn: {first} -> {last}");
+        let (first2, last2) = run();
+        assert_eq!(first.to_bits(), first2.to_bits());
+        assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// `slstm_scan` gradients (w.r.t. the four gate pre-activations) match finite
+    /// differences — the exp/forget/cell-input/output recurrence is smooth.
+    #[test]
+    fn slstm_scan_gradient_check() {
+        let (seq, d) = (4usize, 3usize);
+        let ip: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.4).sin()).collect();
+        let fp: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.5).cos()).collect();
+        let zp: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.25 - 0.2).sin())
+            .collect();
+        let op: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 + 0.1).cos())
+            .collect();
+
+        let loss_of = |a: &[f32], b: &[f32], c: &[f32], e: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let iv = t.input(TensorND::new(a.to_vec(), vec![seq, d]));
+            let fv = t.input(TensorND::new(b.to_vec(), vec![seq, d]));
+            let zv = t.input(TensorND::new(c.to_vec(), vec![seq, d]));
+            let ov = t.input(TensorND::new(e.to_vec(), vec![seq, d]));
+            let y = slstm_scan(&t, iv, fv, zv, ov);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let iv = t.input(TensorND::new(ip.clone(), vec![seq, d]));
+        let fv = t.input(TensorND::new(fp.clone(), vec![seq, d]));
+        let zv = t.input(TensorND::new(zp.clone(), vec![seq, d]));
+        let ov = t.input(TensorND::new(op.clone(), vec![seq, d]));
+        let y = slstm_scan(&t, iv, fv, zv, ov);
+        let grads = t.backward(y.mul(y).sum());
+        let (gi, gf, gz, go) = (
+            grads[iv.idx()].clone(),
+            grads[fv.idx()].clone(),
+            grads[zv.idx()].clone(),
+            grads[ov.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "slstm grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gi, &ip, &|p| loss_of(p, &fp, &zp, &op));
+        check(&gf, &fp, &|p| loss_of(&ip, p, &zp, &op));
+        check(&gz, &zp, &|p| loss_of(&ip, &fp, p, &op));
+        check(&go, &op, &|p| loss_of(&ip, &fp, &zp, p));
+    }
+
+    /// A plain-`Vec` reference for the mLSTM matrix-memory recurrence — proves the
+    /// tape forward (outer products, query read-out, `max(|nₜ·qₜ|,1)` denominator).
+    #[allow(clippy::too_many_arguments)]
+    fn mlstm_reference(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        ip: &[f32],
+        fp: &[f32],
+        seq: usize,
+        d: usize,
+    ) -> Vec<f32> {
+        let mut cmat = vec![0f32; d * d];
+        let mut n = vec![0f32; d];
+        let mut out = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            let it = ip[t].exp();
+            let ft = 1.0 / (1.0 + (-fp[t]).exp());
+            for a in 0..d
+            {
+                for b in 0..d
+                {
+                    cmat[a * d + b] = ft * cmat[a * d + b] + it * v[t * d + a] * k[t * d + b];
+                }
+            }
+            for (b, nb) in n.iter_mut().enumerate()
+            {
+                *nb = ft * *nb + it * k[t * d + b];
+            }
+            let mut dot = 0f32;
+            for b in 0..d
+            {
+                dot += n[b] * q[t * d + b];
+            }
+            let denom = dot.abs().max(1.0);
+            for a in 0..d
+            {
+                let mut hr = 0f32;
+                for b in 0..d
+                {
+                    hr += cmat[a * d + b] * q[t * d + b];
+                }
+                out[t * d + a] = hr / denom;
+            }
+        }
+        out
+    }
+
+    /// The tape-unrolled `mlstm_scan` matches the hand-written matrix recurrence
+    /// (with the stabilising denominator active for these moderate inputs).
+    #[test]
+    fn mlstm_scan_matches_reference() {
+        let (seq, d) = (4usize, 3usize);
+        let q: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let k: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+        let ip: Vec<f32> = (0..seq).map(|i| 0.2 + 0.1 * i as f32).collect();
+        let fp: Vec<f32> = (0..seq).map(|i| 0.5 - 0.1 * i as f32).collect();
+        let want = mlstm_reference(&q, &k, &v, &ip, &fp, seq, d);
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q, vec![seq, d]));
+        let kv = t.input(TensorND::new(k, vec![seq, d]));
+        let vv = t.input(TensorND::new(v, vec![seq, d]));
+        let iv = t.input(TensorND::new(ip, vec![seq, 1]));
+        let fv = t.input(TensorND::new(fp, vec![seq, 1]));
+        let got = t.value(mlstm_scan(&t, qv, kv, vv, iv, fv));
+        for (g, w) in got.data.iter().zip(&want)
+        {
+            assert!((g - w).abs() < 1e-4, "mlstm forward: got {g}, want {w}");
+        }
+    }
+
+    /// `mlstm_scan` gradients match finite differences. Keys/queries are kept small
+    /// so `|nₜ·qₜ| < 1` and the denominator sits on its flat `max(·,1)=1` branch:
+    /// the recurrence is smooth (the `relu`-built guard is independently tested).
+    #[test]
+    fn mlstm_scan_gradient_check() {
+        let (seq, d) = (4usize, 3usize);
+        let q: Vec<f32> = (0..seq * d)
+            .map(|i| 0.15 * (i as f32 * 0.3 - 0.5).sin())
+            .collect();
+        let k: Vec<f32> = (0..seq * d)
+            .map(|i| 0.15 * (i as f32 * 0.2 + 0.4).cos())
+            .collect();
+        let v: Vec<f32> = (0..seq * d)
+            .map(|i| (i as f32 * 0.17 - 0.3).sin())
+            .collect();
+        let ip: Vec<f32> = (0..seq).map(|i| 0.2 + 0.1 * i as f32).collect();
+        let fp: Vec<f32> = (0..seq).map(|i| 0.5 - 0.1 * i as f32).collect();
+
+        let loss_of = |qq: &[f32], kk: &[f32], vv: &[f32], ii: &[f32], ff: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let qv = t.input(TensorND::new(qq.to_vec(), vec![seq, d]));
+            let kv = t.input(TensorND::new(kk.to_vec(), vec![seq, d]));
+            let vv = t.input(TensorND::new(vv.to_vec(), vec![seq, d]));
+            let iv = t.input(TensorND::new(ii.to_vec(), vec![seq, 1]));
+            let fv = t.input(TensorND::new(ff.to_vec(), vec![seq, 1]));
+            let y = mlstm_scan(&t, qv, kv, vv, iv, fv);
+            t.value(y.mul(y).sum()).data[0]
+        };
+        let t = NdTape::new();
+        let qv = t.input(TensorND::new(q.clone(), vec![seq, d]));
+        let kv = t.input(TensorND::new(k.clone(), vec![seq, d]));
+        let vv = t.input(TensorND::new(v.clone(), vec![seq, d]));
+        let iv = t.input(TensorND::new(ip.clone(), vec![seq, 1]));
+        let fv = t.input(TensorND::new(fp.clone(), vec![seq, 1]));
+        let y = mlstm_scan(&t, qv, kv, vv, iv, fv);
+        let grads = t.backward(y.mul(y).sum());
+        let (gq, gk, gv, gi, gf) = (
+            grads[qv.idx()].clone(),
+            grads[kv.idx()].clone(),
+            grads[vv.idx()].clone(),
+            grads[iv.idx()].clone(),
+            grads[fv.idx()].clone(),
+        );
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 3e-2,
+                    "mlstm grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gq, &q, &|p| loss_of(p, &k, &v, &ip, &fp));
+        check(&gk, &k, &|p| loss_of(&q, p, &v, &ip, &fp));
+        check(&gv, &v, &|p| loss_of(&q, &k, p, &ip, &fp));
+        check(&gi, &ip, &|p| loss_of(&q, &k, &v, p, &fp));
+        check(&gf, &fp, &|p| loss_of(&q, &k, &v, &ip, p));
+    }
+
+    /// The `NdXlstm` layer trains (MSE↓ to a target sequence) and is bit-for-bit
+    /// deterministic across identical runs.
+    #[test]
+    fn nd_xlstm_trains_and_is_deterministic() {
+        use crate::nn::nd_optim::NdAdam;
+        let (seq, d_model) = (5usize, 4usize);
+        let run = || -> (f32, f32) {
+            let mut rng = PcgEngine::new(11);
+            let mut layer = NdXlstm::new(d_model, 6, &mut rng);
+            let x: Vec<f32> = (0..seq * d_model)
+                .map(|i| (i as f32 * 0.3 - 1.0).sin())
+                .collect();
+            let target: Vec<f32> = (0..seq * d_model).map(|i| (i as f32 * 0.2).cos()).collect();
+            let mut opt = NdAdam::with_lr(0.05);
+            let (mut first, mut last) = (0f32, 0f32);
+            for step in 0..150
+            {
+                let tape = NdTape::new();
+                let xv = tape.input(TensorND::new(x.clone(), vec![seq, d_model]));
+                let tv = tape.input(TensorND::new(target.clone(), vec![seq, d_model]));
+                let out = layer.forward(&tape, xv);
+                let loss = mse(out, tv);
+                let lval = tape.value(loss).data[0];
+                if step == 0
+                {
+                    first = lval;
+                }
+                last = lval;
+                let grads = tape.backward(loss);
+                opt.step(&mut layer.parameters(), &grads);
+            }
+            (first, last)
+        };
+        let (first, last) = run();
+        assert!(last < first * 0.6, "xLSTM did not learn: {first} -> {last}");
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
