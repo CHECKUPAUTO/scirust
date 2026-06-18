@@ -19,6 +19,19 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **GaLore — projection low-rank des gradients** (`nn::nd_optim::NdGalore`/
+  `galore_subspace`, Zhao et al. 2024, roadmap #48) : optimiseur à **mémoire
+  réduite** — pour un paramètre matriciel, le gradient `G` est projeté sur son
+  propre sous-espace dominant rang-`r` `P` (top-`r` vecteurs singuliers gauches via
+  `jacobi_eigenvectors`, rafraîchi tous les `update_gap` pas), Adam tourne sur le
+  petit gradient projeté `PᵀG` puis l'update est remonté par `P`. Les états passent
+  de `m×n` à `rank×max(m,n)` ; les vecteurs retombent sur Adam. Oracle honnête :
+  `P` **orthonormal** (`PᵀP=I`) et projection **orthogonale optimale** (identité de
+  Pythagore `‖G−PPᵀG‖²=‖G‖²−‖PᵀG‖²`, erreur décroissante en `r`, nulle au rang
+  plein) + gradient **bas-rang reconstruit exactement** (sous-rang ⇒ résidu) +
+  **convergence sur une cible bas-rang** avec état compressé `2×4` (≠ `4×4`) +
+  sous-rang ne l'atteint pas + déterminisme bit-exact. Rejoint la famille
+  d'optimiseurs ; CLI `lm --opt galore`.
 - **YaRN — extension de contexte RoPE** (`nn::yarn`, Peng et al. 2023, roadmap #60) :
   étend le contexte utilisable d'un modèle RoPE d'un facteur `s` par interpolation
   **NTK-by-parts** — `yarn_frequencies` garde intactes les dimensions **haute

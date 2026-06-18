@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 78 : GaLore (#48) — projection low-rank des gradients
+- `nn::nd_optim::NdGalore`/`galore_subspace` (Zhao 2024) : Adam dans le sous-espace
+  dominant rang-r du gradient (top-r vec. singuliers via jacobi_eigenvectors,
+  rafraîchi tous update_gap pas) ⇒ états compressés rank×max(m,n). Vecteurs → Adam.
+- CLI : `lm --opt galore` (famille d'optimiseurs). REFERENCE mise à jour.
+- Tests (5 core + 1 CLI) : P orthonormal + projection orthogonale optimale (Pythagore,
+  erreur↓ en r, nulle au rang plein) ; gradient bas-rang reconstruit exact (sous-rang→résidu) ;
+  convergence sur cible bas-rang, état 2×4≠4×4 ; sous-rang n'atteint pas ; fallback vecteur=Adam ;
+  déterminisme. lm_command vert (galore).
+- docs : roadmap #48 📋→✅ ; CHANGELOG ; REFERENCE. 561 tests core (+5) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 77 : YaRN (#60) — extension de contexte RoPE
 - `nn::yarn` (Peng 2023) : `yarn_frequencies` (interpolation NTK-by-parts : garde
   haute fréq, interpole basse fréq θ/s, rampe γ), `rope_apply_freqs`/`rope_yarn`
@@ -11,7 +22,7 @@
 - Tests (6, core) : position relative préservée (⟨rope(q,m),rope(k,n)⟩=g(m−n)) ;
   angle basse-fréq à s·L revient exactement à l'entraînement (L) ; bornes NTK-by-parts
   (haute inchangée, basse=θ/s, rampe monotone) ; scale=1 ≡ RoPE simple ; déterminisme.
-- docs : roadmap #60 📋→✅ ; CHANGELOG. 556 tests core (+6) ; 8 gates (à confirmer).
+- docs : roadmap #60 📋→✅ ; CHANGELOG. 556 tests core (+6) ; 8 gates verts ✓ ; commit b875205.
 
 ## Session 2026-06-18 — volet 76 : Learn then Test (#37) — contrôle de risques multiples
 - `nn::conformal::learn_then_test`/`hoeffding_pvalue` (Angelopoulos 2021) : contrôle

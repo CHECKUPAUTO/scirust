@@ -83,7 +83,7 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `tt "r;r" [--factors d] [--max-rank r] [--tol t] [--max-err e]` | compression tensor-train (TT-SVD) d'une matrice | `scirust-tn` |
 | `pinn [--seed N] [--steps S]` | réseau physics-informed : résout le BVP `u''=−u` (résidu de PDE dans la loss), vérifié vs `sin x` | `scirust-core::nn::pinn` |
 | `bpe "<corpus>" [--vocab N] [--encode "<text>"] [--bytes]` | tokenizer BPE déterministe (entraînement + encode/decode ; `--bytes` = byte-level lossless) | `scirust-learning` |
-| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix\|soap\|lookahead\|lamb\|adan\|adafactor\|shampoo\|prodigy]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
+| `lm ["t0,t1,.."] [--seed N] [--steps S] [--lr R] [--opt adam\|adamw\|lion\|schedule-free\|ademamix\|soap\|lookahead\|lamb\|adan\|adafactor\|shampoo\|prodigy\|galore]` | entraîne un petit LM décodeur causal (tape N-D) à mémoriser une séquence de tokens | `scirust-core` |
 | `deltanet [--seed N] [--steps S]` | entraîne une couche DeltaNet (attention linéaire à règle delta) à ajuster une séquence ; rapporte la baisse de MSE | `scirust-core::nn::nd_layers` |
 | `mamba [--seed N] [--steps S]` | entraîne une couche Mamba (scan sélectif S6, état-espace) à ajuster une séquence ; rapporte la baisse de MSE | `scirust-core::nn::nd_layers` |
 | `retnet [--seed N] [--steps S]` | entraîne une couche RetNet (rétention, attention linéaire récurrente ≡ parallèle) à ajuster une séquence | `scirust-core::nn::nd_layers` |
