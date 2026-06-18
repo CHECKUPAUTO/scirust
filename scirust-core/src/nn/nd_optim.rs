@@ -1894,6 +1894,173 @@ impl NdSam {
     }
 }
 
+/// Hyper-parameters for [`NdSophia`]. [`Default`]: `lr = 0.1`, `β1 = 0.96` (gradient
+/// EMA), `β2 = 0.99` (Hessian EMA), `gamma = 1.0` (Hessian scaling), `rho = 1.0`
+/// (per-coordinate update clip), `eps = 1e-2` (positive denominator floor).
+#[derive(Clone, Copy, Debug)]
+pub struct SophiaConfig {
+    /// Learning rate `η`.
+    pub lr: f32,
+    /// Gradient-EMA decay.
+    pub beta1: f32,
+    /// Hessian-EMA decay.
+    pub beta2: f32,
+    /// Diagonal-Hessian scaling `γ`.
+    pub gamma: f32,
+    /// Per-coordinate update clip `ρ`.
+    pub rho: f32,
+    /// Positive floor on the denominator.
+    pub eps: f32,
+}
+
+impl Default for SophiaConfig {
+    fn default() -> Self {
+        Self {
+            lr: 0.1,
+            beta1: 0.96,
+            beta2: 0.99,
+            gamma: 1.0,
+            rho: 1.0,
+            eps: 1e-2,
+        }
+    }
+}
+
+/// **Sophia** (Liu et al., *Sophia: A Scalable Stochastic Second-order Optimizer*,
+/// 2023, arXiv:2305.14342): scale each coordinate's momentum by an estimate of the
+/// **diagonal Hessian** and **clip** the result, so flat directions take a bounded
+/// sign-like step while sharp directions take a Newton-like step:
+///
+/// ```text
+/// θ ← θ − lr · clip( m / max(γ·h, eps), ρ )
+/// ```
+///
+/// The diagonal Hessian is estimated by a **Hutchinson** probe with a
+/// **finite-difference** Hessian-vector product: with a seeded sign vector
+/// `v ∈ {±1}`, `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` and `ĥ = v ⊙ Hv` (for a quadratic this is
+/// the **exact** Hessian diagonal). Like [`NdSam`] this needs **two** gradient
+/// evaluations per step, so the caller orchestrates it: compute `∇L(θ)`, call
+/// [`probe`](Self::probe) (perturbs `θ` by `εv`), compute `∇L(θ+εv)`, then call
+/// [`step`](Self::step) (restores `θ` and applies the update). Library optimiser
+/// (outside the single-gradient `lm --opt` loop, as with SAM). Seeded ⇒ **bit-for-bit
+/// deterministic**.
+pub struct NdSophia {
+    cfg: SophiaConfig,
+    t: u64,
+    rng: crate::nn::PcgEngine,
+    m: Vec<Vec<f32>>,
+    h: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>, // last probe's ±1 directions
+    eps_fd: f32,      // last probe's finite-difference step
+}
+
+impl NdSophia {
+    /// New optimizer with the given config and Hutchinson seed.
+    pub fn new(cfg: SophiaConfig, seed: u64) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            rng: crate::nn::PcgEngine::new(seed),
+            m: Vec::new(),
+            h: Vec::new(),
+            v: Vec::new(),
+            eps_fd: 0.0,
+        }
+    }
+
+    /// Sophia at learning rate `lr` with the default schedule and Hutchinson `seed`.
+    pub fn with_lr_seed(lr: f32, seed: u64) -> Self {
+        Self::new(
+            SophiaConfig {
+                lr,
+                ..SophiaConfig::default()
+            },
+            seed,
+        )
+    }
+
+    /// Steps taken.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// **Probe** phase: draw a seeded `±1` direction `v` and perturb `θ ← θ + εv`
+    /// (the caller then evaluates `∇L(θ+εv)`).
+    pub fn probe(&mut self, params: &mut [NdParam], eps_fd: f32) {
+        if self.v.len() != params.len()
+        {
+            self.v = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        self.eps_fd = eps_fd;
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            for (pv, vv) in p.value.data.iter_mut().zip(self.v[k].iter_mut())
+            {
+                let s = if self.rng.next_u32() & 1 == 0
+                {
+                    1.0
+                }
+                else
+                {
+                    -1.0
+                };
+                *vv = s;
+                *pv += eps_fd * s;
+            }
+        }
+    }
+
+    /// **Step** phase: restore `θ`, form the finite-difference Hessian-vector product
+    /// from `grad` (at `θ`) and `grad_plus` (at `θ+εv`), update the moment/Hessian
+    /// EMAs, and apply the clipped second-order update.
+    pub fn step(&mut self, params: &mut [NdParam], grad: &[TensorND], grad_plus: &[TensorND]) {
+        assert_eq!(
+            self.v.len(),
+            params.len(),
+            "NdSophia: step before probe / parameter count changed"
+        );
+        if self.m.is_empty()
+        {
+            self.m = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+            self.h = self.m.clone();
+        }
+        let SophiaConfig {
+            lr,
+            beta1,
+            beta2,
+            gamma,
+            rho,
+            eps,
+        } = self.cfg;
+        self.t += 1;
+        let bc1 = 1.0 - beta1.powi(self.t as i32); // bias correction for m
+        let efd = self.eps_fd;
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grad[p.grad_idx].data;
+            let gp = &grad_plus[p.grad_idx].data;
+            for i in 0..p.value.data.len()
+            {
+                p.value.data[i] -= efd * self.v[k][i]; // restore θ
+                let hv = (gp[i] - g[i]) / efd; // FD Hessian-vector product
+                let hhat = self.v[k][i] * hv; // Hutchinson diagonal estimate
+                self.m[k][i] = beta1 * self.m[k][i] + (1.0 - beta1) * g[i];
+                self.h[k][i] = beta2 * self.h[k][i] + (1.0 - beta2) * hhat;
+                let m_hat = self.m[k][i] / bc1;
+                let denom = (gamma * self.h[k][i]).max(eps);
+                let upd = (m_hat / denom).clamp(-rho, rho);
+                p.value.data[i] -= lr * upd;
+            }
+        }
+    }
+}
+
 /// Hyper-parameters for [`NdProdigy`]. [`Default`] follows the paper: base step
 /// `γ = 1.0` (Prodigy adapts the effective rate, so 1.0 needs no tuning),
 /// `β1 = 0.9`, `β2 = 0.999`, `eps = 1e-8`, and a tiny initial distance estimate
@@ -3301,6 +3468,60 @@ mod tests {
             assert!((xi - ti).abs() < 0.05, "SAM off: {xi} vs {ti}");
         }
         assert_eq!(run(), x);
+    }
+
+    /// **Sophia** rescales momentum by the estimated diagonal Hessian, so it
+    /// converges on an **ill-conditioned** diagonal quadratic (curvatures 4 vs 0.25,
+    /// condition number 16) where the per-coordinate Newton-like step neutralises the
+    /// conditioning. The finite-difference Hutchinson probe is exact for a quadratic.
+    /// Bit-for-bit deterministic (seeded `±1` probe).
+    #[test]
+    fn nd_sophia_converges_and_is_deterministic() {
+        let target = [1.0f32, -0.8, 0.5];
+        let curv = [4.0f32, 1.0, 0.25]; // diagonal Hessian (ill-conditioned)
+        let grad_at = |x: &[f32]| -> Vec<f32> {
+            x.iter()
+                .zip(&target)
+                .zip(&curv)
+                .map(|((&xi, &ti), &a)| a * (xi - ti))
+                .collect()
+        };
+        let run = || {
+            let mut x = TensorND::new(vec![0.0; 3], vec![3]);
+            let mut opt = NdSophia::with_lr_seed(0.3, 42);
+            let eps_fd = 1e-2;
+            for _ in 0..400
+            {
+                let g0 = grad_at(&x.data); // ∇L(θ)
+                opt.probe(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    eps_fd,
+                );
+                let g1 = grad_at(&x.data); // ∇L(θ+εv)
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &[TensorND::new(g0, vec![3])],
+                    &[TensorND::new(g1, vec![3])],
+                );
+            }
+            x.data
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "Sophia off: {xi} vs {ti}");
+        }
+        let x2 = run();
+        for (a, b) in x.iter().zip(&x2)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
     }
 
     /// **Prodigy is parameter-free.** From a tiny `d₀ = 1e-6` it grows its distance

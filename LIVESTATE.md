@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 93 : Sophia (#44) — optimiseur 2e ordre clippé
+- `nn::nd_optim::NdSophia` (Liu 2023) : θ←θ−lr·clip(m/max(γ·h,eps),ρ), h=EMA Hessienne diagonale
+  par Hutchinson (ĥ=v⊙Hv, v∈{±1} seedé) via produit Hessien-vecteur en différences finies
+  (Hv≈(∇L(θ+εv)−∇L(θ))/ε, exact pour quadratique). Ancien blocage « abs tape op » infondé
+  (clipping en f32 dans l'optimiseur). 2 gradients/pas (probe+step orchestrés) ⇒ hors lm --opt.
+- Bibliothèque seule (comme SAM, hors boucle lm). Module nd_optim.
+- Tests (1, core) : converge sur quadratique mal conditionné (courbures 4 vs 0.25, cond. 16)
+  + déterminisme bit-exact (probe seedé).
+- docs : roadmap #44 📋→✅ ; CHANGELOG. 601 tests core (+1) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 92 : QuIP# (#64) — incohérence Hadamard + lattice E8
 - `quantization::quantize_quip`/`nearest_e8`/`random_hadamard_transform` (Tseng 2024) :
   (1) incohérence = Hadamard randomisée (signes ±1 seedés + FWHT, orthogonale) ⇒ étale aberrants,
@@ -12,7 +22,7 @@
 - Tests (3, core) : RHT orthogonale (round-trip) + réduit plage aberrants (<0.6×) ; E8 valide
   (coords alignées + somme paire) & < grille cubique en moyenne (4000 vecteurs) ; bout-en-bout
   QuIP# < RTN scalaire 2-bit sur poids à aberrants + déterminisme (codes identiques).
-- docs : roadmap #64 📋→✅ ; CHANGELOG. 600 tests core (+3) ; 8 gates verts (à confirmer).
+- docs : roadmap #64 📋→✅ ; CHANGELOG. 600 tests core (+3) ; 8 gates verts ✓ ; commit d1567d9.
 
 ## Session 2026-06-18 — volet 91 : AQLM (#70) — quantification additive multi-codebook
 - `quantization::quantize_aqlm`/`AqlmResult` (Egiazarian 2024) : groupes de dim g, chaque groupe

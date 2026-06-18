@@ -19,6 +19,22 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **Sophia — optimiseur de 2e ordre clippé** (`nn::nd_optim::NdSophia`, Liu et al. 2023, roadmap
+  #44) : Sophia met à l'échelle le momentum de chaque coordonnée par une estimation de la
+  **Hessienne diagonale** et **clippe** le résultat : `θ ← θ − lr·clip(m/max(γ·h,eps),ρ)`. Les
+  directions plates (petite courbure `h`) prennent un pas borné de type signe ; les directions
+  courbées prennent un pas de type **Newton** `m/h` — d'où une robustesse au mauvais
+  conditionnement. La Hessienne diagonale est estimée par un **estimateur de Hutchinson** avec un
+  **produit Hessien-vecteur en différences finies** : avec un vecteur de signes `v∈{±1}` seedé,
+  `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` et `ĥ = v⊙Hv` (pour un quadratique c'est la Hessienne diagonale
+  **exacte**, mon ancien blocage « il faut un op `abs` sur la tape » était infondé — le clipping
+  se fait dans l'optimiseur en `f32`, pas sur la tape). Comme SAM, cela demande **deux** calculs
+  de gradient par pas, donc l'appelant orchestre `probe` (perturbe `θ` de `εv`) puis `step`
+  (restaure `θ`, applique la mise à jour) — optimiseur **de bibliothèque hors de la boucle
+  `lm --opt`** (à un seul gradient). Oracle honnête : **converge sur un quadratique mal
+  conditionné** (courbures 4 vs 0,25, conditionnement 16) là où le pas Newton par coordonnée
+  neutralise le conditionnement + déterminisme bit-exact (probe seedé). Rejoint la famille
+  d'optimiseurs (Adam, Lion, Muon, Shampoo, SOAP, Adafactor, LAMB, Adan, Prodigy, SAM, …).
 - **QuIP# — incohérence Hadamard + codebook lattice E8** (`quantization::quantize_quip`/
   `nearest_e8`/`random_hadamard_transform`, Tseng et al. 2024, roadmap #64) : deux idées. (1) Le
   **traitement d'incohérence** : multiplier les poids par une **transformée de Hadamard
