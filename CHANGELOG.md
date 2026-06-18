@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
+- **KV-cache compressé élastique** (`nn::elastic_kv_cache`) : la primitive déterministe
+  partagée derrière **SLHAv2** (compresser le KV-cache pour faire tourner un LLM dans le cache
+  du CPU plutôt que sur un GPU hors de prix) et **CCOS** (paging à mémoire bornée), bâtie sur la
+  quantification et le déterminisme de scirust. Une paire clé/valeur d'attention est compressée
+  en une `KvTile` par quantification **INT4 à deux niveaux** (base symétrique + **résidu** INT4 —
+  le « residual tracking » de SLHAv2), ce qui porte la fidélité **cosinus** au-delà de 0,99 tout
+  en réduisant l'empreinte plusieurs fois par rapport au `f32`. L'`ElasticKvCache` conserve ces
+  tuiles sous un **budget** optionnel et évince la plus ancienne au dépassement (soft-paging /
+  mémoire élastique — l'abstraction de paging commune avec CCOS), et sert l'attention directement
+  depuis les tuiles compressées en réutilisant `contiguous_attention` (#63), si bien que le seul
+  écart avec un cache pleine précision est l'erreur de compression (mesurée). Oracle honnête :
+  reconstruction à **fidélité cosinus** élevée (>0,95, le niveau résidu battant strictement la
+  base seule) ; **attention compressée ≈ pleine** (cosinus >0,99) ; **ratio de compression** ≥3×
+  vs `f32` ; cache **borné** sous budget (la plus ancienne évincée) et **bit-exact déterministe**.
+  Codec exposé (`quantize_int4`/`dequantize_int4`/`KvTile`/`cosine_similarity`) pour être consommé
+  par SLHAv2/CCOS. Rejoint KVQuant (#68) et PagedAttention (#63) dans la pile KV-cache.
+
 ### Corrigé
 - **SIMD `portable` — bug d'alignement (résultats faux, non déterministe)** :
   `add_f32/f64_inplace`, `dot_f32/f64` et `fma_f32` (`scirust-simd::portable`)
