@@ -5,18 +5,20 @@
 
 ## Session 2026-06-18 — volet 101 : synergie CCOS/SLHAv2 — KV-cache compressé élastique
 - `nn::elastic_kv_cache` : primitive partagée SLHAv2 (compression KV-cache CPU) + CCOS (paging
-  borné). Tuile INT4 deux niveaux (base + résidu, « residual tracking » SLHAv2) ⇒ fidélité cosinus
-  >0.99 ; ElasticKvCache à budget (évince la plus ancienne, soft-paging) ; attention via
-  contiguous_attention (#63) ⇒ écart = uniquement l'erreur de compression. Codec exposé
-  (quantize_int4/dequantize_int4/KvTile/cosine_similarity) pour SLHAv2/CCOS.
+  borné). Tuile INT4 deux niveaux (base + résidu, « residual tracking » SLHAv2) à **échelles
+  adaptatives par groupe** (cosine-aware, quantize_int4_grouped) ⇒ fidélité cosinus >0.99 ;
+  ElasticKvCache à budget (évince la plus ancienne, soft-paging ; new_grouped pour le grouping) ;
+  attention via contiguous_attention (#63) ⇒ écart = uniquement l'erreur de compression. Codec
+  exposé (quantize_int4[_grouped]/dequantize/KvTile/cosine_similarity) pour SLHAv2/CCOS.
 - Contexte : SLHAv2 (public) = compression KV-cache déjà bâtie sur un crate « scirust »
   (SciRustSlhaTile) ; CCOS = causal-context OS (graphe causal pagé, event-log hash-chaîné).
   Première brique de synergie ; suites possibles : pont d'attestation/event-log (vinfer #80 + DiFR
   #5 → event_log CCOS), guard à garantie statistique (conformal/ensembles), signature PQ (SLHAv2).
 - Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::elastic_kv_cache.
-- Tests (4, core) : fidélité cosinus >0.95 (résidu > base) + déterminisme ; attention compressée ≈
+- Tests (5, core) : fidélité cosinus >0.95 (résidu > base) + déterminisme ; **grouping cosine-aware
+  améliore la fidélité de base** (magnitudes hétérogènes, tile jamais pire) ; attention compressée ≈
   pleine (cosinus >0.99) ; ratio ≥3× vs f32 ; budget borné + bit-exact.
-- docs : CHANGELOG. 617 tests core (+4) ; 8 gates verts (à confirmer).
+- docs : CHANGELOG. 618 tests core (+5) ; 8 gates verts (à confirmer).
 
 ## Session 2026-06-18 — volet 100 : Reluplex (#4) — vérification complète SMT — ROADMAP 80/80 ✅
 - `nn::ibp::reluplex_verify`/`reluplex_unstable_count` (Katz 2017) : recherche SAT d'un

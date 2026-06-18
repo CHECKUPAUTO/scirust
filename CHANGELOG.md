@@ -11,8 +11,10 @@ versions sémantiques à partir de la prochaine release taguée.
   du CPU plutôt que sur un GPU hors de prix) et **CCOS** (paging à mémoire bornée), bâtie sur la
   quantification et le déterminisme de scirust. Une paire clé/valeur d'attention est compressée
   en une `KvTile` par quantification **INT4 à deux niveaux** (base symétrique + **résidu** INT4 —
-  le « residual tracking » de SLHAv2), ce qui porte la fidélité **cosinus** au-delà de 0,99 tout
-  en réduisant l'empreinte plusieurs fois par rapport au `f32`. L'`ElasticKvCache` conserve ces
+  le « residual tracking » de SLHAv2), chaque niveau à **échelles adaptatives par groupe**
+  (`quantize_int4_grouped` : une échelle plus fine par groupe de canaux ⇒ « adaptive scaling »
+  cosine-aware de SLHAv2, dans l'esprit per-canal de KVQuant #68), ce qui porte la fidélité
+  **cosinus** au-delà de 0,99 tout en réduisant l'empreinte plusieurs fois par rapport au `f32`. L'`ElasticKvCache` conserve ces
   tuiles sous un **budget** optionnel et évince la plus ancienne au dépassement (soft-paging /
   mémoire élastique — l'abstraction de paging commune avec CCOS), et sert l'attention directement
   depuis les tuiles compressées en réutilisant `contiguous_attention` (#63), si bien que le seul

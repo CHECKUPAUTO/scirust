@@ -5,12 +5,15 @@
 //!
 //! An attention key/value pair is compressed into a [`KvTile`] by **two-level INT4**
 //! quantization: a symmetric INT4 base plus an INT4 **residual** (SLHAv2's residual
-//! tracking), which lifts the cosine fidelity to the 0.99+ range while shrinking the
-//! footprint several-fold versus `f32`. The [`ElasticKvCache`] holds those tiles
-//! under an optional **budget** and evicts the oldest when over it (soft-paging /
-//! elastic memory), and serves attention straight from the compressed tiles —
-//! reusing [`contiguous_attention`] so the only difference from a full-precision
-//! cache is the (small, measured) compression error.
+//! tracking), each with **per-group adaptive scales** (a finer scale per channel
+//! group, so groups of very different magnitude are all resolved — the cosine-aware
+//! / adaptive scaling SLHAv2 uses, akin to KVQuant's per-channel keys). That lifts
+//! the cosine fidelity past 0.99 while shrinking the footprint several-fold versus
+//! `f32`. The [`ElasticKvCache`] holds those tiles under an optional **budget** and
+//! evicts the oldest when over it (soft-paging / elastic memory), and serves
+//! attention straight from the compressed tiles — reusing [`contiguous_attention`]
+//! so the only difference from a full-precision cache is the (small, measured)
+//! compression error.
 //!
 //! Everything is pure, **deterministic** `f32`/`i8` arithmetic (no RNG, fixed order),
 //! so eviction decisions and attention outputs are bit-for-bit reproducible.
@@ -45,6 +48,34 @@ pub fn dequantize_int4(codes: &[i8], scale: f32) -> Vec<f32> {
     codes.iter().map(|&c| c as f32 * scale).collect()
 }
 
+/// **Cosine-aware** grouped INT4 quantization: split `x` into chunks of `group_size`
+/// and give each its **own** absmax scale, so a low-magnitude group is not crushed by
+/// a high-magnitude one (adaptive scaling). `group_size = x.len()` reduces to a single
+/// scale ([`quantize_int4`]). Returns the codes and one scale per group.
+pub fn quantize_int4_grouped(x: &[f32], group_size: usize) -> (Vec<i8>, Vec<f32>) {
+    let g = group_size.clamp(1, x.len().max(1));
+    let mut codes = Vec::with_capacity(x.len());
+    let mut scales = Vec::with_capacity(x.len().div_ceil(g));
+    for chunk in x.chunks(g)
+    {
+        let (c, s) = quantize_int4(chunk);
+        codes.extend(c);
+        scales.push(s);
+    }
+    (codes, scales)
+}
+
+/// Inverse of [`quantize_int4_grouped`].
+pub fn dequantize_int4_grouped(codes: &[i8], scales: &[f32], group_size: usize) -> Vec<f32> {
+    let g = group_size.clamp(1, codes.len().max(1));
+    let mut out = Vec::with_capacity(codes.len());
+    for (chunk, &s) in codes.chunks(g).zip(scales)
+    {
+        out.extend(dequantize_int4(chunk, s));
+    }
+    out
+}
+
 /// Cosine similarity `⟨a,b⟩ / (‖a‖‖b‖)` — the fidelity metric SLHAv2 reports against
 /// full attention (`1.0` for identical vectors).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -64,67 +95,82 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (na.sqrt() * nb.sqrt())
 }
 
+/// Two-level grouped INT4 code of `x`: an INT4 base, then an INT4 quantization of the
+/// residual `x − dequant(base)`, both with per-group scales.
+type TwoLevel = (Vec<i8>, Vec<f32>, Vec<i8>, Vec<f32>);
+fn compress_vec(x: &[f32], group_size: usize) -> TwoLevel {
+    let (base, base_scales) = quantize_int4_grouped(x, group_size);
+    let recon = dequantize_int4_grouped(&base, &base_scales, group_size);
+    let residual: Vec<f32> = x.iter().zip(&recon).map(|(&a, &b)| a - b).collect();
+    let (res, res_scales) = quantize_int4_grouped(&residual, group_size);
+    (base, base_scales, res, res_scales)
+}
+
 /// A compressed key/value pair: a **two-level INT4** code (base + residual) per
-/// vector, each with its own scale. Reconstructs to `base + residual`.
+/// vector, with **per-group scales**. Reconstructs to `base + residual`.
 #[derive(Clone)]
 pub struct KvTile {
     k_base: Vec<i8>,
+    k_base_scales: Vec<f32>,
     k_res: Vec<i8>,
-    k_base_scale: f32,
-    k_res_scale: f32,
+    k_res_scales: Vec<f32>,
     v_base: Vec<i8>,
+    v_base_scales: Vec<f32>,
     v_res: Vec<i8>,
-    v_base_scale: f32,
-    v_res_scale: f32,
-}
-
-/// Two-level INT4 code of `x`: an INT4 base, then an INT4 quantization of the
-/// residual `x − dequant(base)`.
-fn compress_vec(x: &[f32]) -> (Vec<i8>, f32, Vec<i8>, f32) {
-    let (base, base_scale) = quantize_int4(x);
-    let recon = dequantize_int4(&base, base_scale);
-    let residual: Vec<f32> = x.iter().zip(&recon).map(|(&a, &b)| a - b).collect();
-    let (res, res_scale) = quantize_int4(&residual);
-    (base, base_scale, res, res_scale)
+    v_res_scales: Vec<f32>,
+    group_size: usize,
 }
 
 impl KvTile {
-    /// Compress a `(key, value)` pair (both length `d`).
+    /// Compress a `(key, value)` pair (both length `d`) with a **single** scale per
+    /// vector (the simplest tile).
     pub fn compress(k: &[f32], v: &[f32]) -> Self {
+        Self::compress_grouped(k, v, k.len().max(1))
+    }
+
+    /// Compress with **per-group** adaptive scales of width `group_size` (cosine-aware;
+    /// smaller groups = finer scales = higher fidelity, a few more scale bytes).
+    pub fn compress_grouped(k: &[f32], v: &[f32], group_size: usize) -> Self {
         assert_eq!(k.len(), v.len(), "KvTile: key/value length mismatch");
-        let (k_base, k_base_scale, k_res, k_res_scale) = compress_vec(k);
-        let (v_base, v_base_scale, v_res, v_res_scale) = compress_vec(v);
+        let g = group_size.clamp(1, k.len().max(1));
+        let (k_base, k_base_scales, k_res, k_res_scales) = compress_vec(k, g);
+        let (v_base, v_base_scales, v_res, v_res_scales) = compress_vec(v, g);
         Self {
             k_base,
+            k_base_scales,
             k_res,
-            k_base_scale,
-            k_res_scale,
+            k_res_scales,
             v_base,
+            v_base_scales,
             v_res,
-            v_base_scale,
-            v_res_scale,
+            v_res_scales,
+            group_size: g,
         }
     }
 
     /// Reconstruct the key (`base + residual`).
     pub fn key(&self) -> Vec<f32> {
-        let b = dequantize_int4(&self.k_base, self.k_base_scale);
-        let r = dequantize_int4(&self.k_res, self.k_res_scale);
+        let b = dequantize_int4_grouped(&self.k_base, &self.k_base_scales, self.group_size);
+        let r = dequantize_int4_grouped(&self.k_res, &self.k_res_scales, self.group_size);
         b.iter().zip(&r).map(|(&x, &y)| x + y).collect()
     }
 
     /// Reconstruct the value (`base + residual`).
     pub fn value(&self) -> Vec<f32> {
-        let b = dequantize_int4(&self.v_base, self.v_base_scale);
-        let r = dequantize_int4(&self.v_res, self.v_res_scale);
+        let b = dequantize_int4_grouped(&self.v_base, &self.v_base_scales, self.group_size);
+        let r = dequantize_int4_grouped(&self.v_res, &self.v_res_scales, self.group_size);
         b.iter().zip(&r).map(|(&x, &y)| x + y).collect()
     }
 
-    /// Packed compressed footprint in bytes: four INT4 code arrays (½ byte each) plus
-    /// four `f32` scales.
+    /// Packed compressed footprint in bytes: the INT4 codes (½ byte each) plus the
+    /// per-group `f32` scales.
     pub fn packed_bytes(&self) -> usize {
         let nibbles = self.k_base.len() + self.k_res.len() + self.v_base.len() + self.v_res.len();
-        nibbles.div_ceil(2) + 4 * std::mem::size_of::<f32>()
+        let scales = self.k_base_scales.len()
+            + self.k_res_scales.len()
+            + self.v_base_scales.len()
+            + self.v_res_scales.len();
+        nibbles.div_ceil(2) + scales * std::mem::size_of::<f32>()
     }
 }
 
@@ -134,17 +180,26 @@ impl KvTile {
 /// tiles. Deterministic.
 pub struct ElasticKvCache {
     d: usize,
-    budget: usize, // max resident tiles (0 = unbounded)
+    budget: usize,     // max resident tiles (0 = unbounded)
+    group_size: usize, // per-group scale width for the tile codec
     tiles: VecDeque<KvTile>,
     evicted: usize,
 }
 
 impl ElasticKvCache {
-    /// New cache for `d`-dimensional keys/values. `budget = 0` means unbounded.
+    /// New cache for `d`-dimensional keys/values with a single scale per vector.
+    /// `budget = 0` means unbounded.
     pub fn new(d: usize, budget: usize) -> Self {
+        Self::new_grouped(d, budget, d.max(1))
+    }
+
+    /// New cache using **per-group** adaptive scales of width `group_size` (higher
+    /// fidelity for heterogeneous channels).
+    pub fn new_grouped(d: usize, budget: usize, group_size: usize) -> Self {
         Self {
             d,
             budget,
+            group_size: group_size.clamp(1, d.max(1)),
             tiles: VecDeque::new(),
             evicted: 0,
         }
@@ -155,7 +210,8 @@ impl ElasticKvCache {
     pub fn append(&mut self, k: &[f32], v: &[f32]) {
         assert_eq!(k.len(), self.d, "append: key length must be d");
         assert_eq!(v.len(), self.d, "append: value length must be d");
-        self.tiles.push_back(KvTile::compress(k, v));
+        self.tiles
+            .push_back(KvTile::compress_grouped(k, v, self.group_size));
         if self.budget != 0 && self.tiles.len() > self.budget
         {
             self.tiles.pop_front();
@@ -230,6 +286,45 @@ mod tests {
         // Deterministic.
         let tile2 = KvTile::compress(&k, &v);
         assert_eq!(tile.key(), tile2.key());
+    }
+
+    /// **Cosine-aware grouped scaling** strictly improves fidelity over a single
+    /// scale when channel magnitudes are heterogeneous: a global scale is too coarse
+    /// for the smaller (but non-negligible) channels, while per-group scales resolve
+    /// each. Shown at the base INT4 level (the primitive); the grouped tile is never
+    /// worse than the single-scale tile, at only a few extra scale bytes.
+    #[test]
+    fn grouped_scaling_improves_fidelity() {
+        let d = 128usize;
+        let mut rng = PcgEngine::new(5);
+        // Moderate, heterogeneous per-group magnitudes (every channel still matters).
+        let mut k = vec![0.0f32; d];
+        for (i, ki) in k.iter_mut().enumerate()
+        {
+            let mag = [0.3f32, 0.6, 1.5, 3.0][(i / 32) % 4];
+            *ki = mag * rng.float_signed();
+        }
+        // Base level: grouped scales beat a single global scale.
+        let (cs, ss) = quantize_int4(&k);
+        let single_base = cosine_similarity(&k, &dequantize_int4(&cs, ss));
+        let (cg, sg) = quantize_int4_grouped(&k, 32);
+        let grouped_base = cosine_similarity(&k, &dequantize_int4_grouped(&cg, &sg, 32));
+        assert!(
+            grouped_base > single_base + 1e-3,
+            "grouped base {grouped_base} not better than single {single_base}"
+        );
+        // The full (residual) grouped tile is never worse than the single-scale tile.
+        let cos_single = cosine_similarity(&k, &KvTile::compress(&k, &k).key());
+        let cos_grouped = cosine_similarity(&k, &KvTile::compress_grouped(&k, &k, 32).key());
+        assert!(
+            cos_grouped >= cos_single - 1e-6,
+            "grouped tile worse: {cos_grouped} vs {cos_single}"
+        );
+        // The footprint grows only by the extra per-group scales (stays compact).
+        assert!(
+            KvTile::compress_grouped(&k, &k, 32).packed_bytes()
+                <= KvTile::compress(&k, &k).packed_bytes() + 8 * 8 + 16
+        );
     }
 
     /// Attention over the **compressed** cache matches full-precision attention to
