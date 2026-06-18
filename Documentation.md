@@ -315,7 +315,46 @@ scirust-industrial run --config config.json --cycles 100 --report report.json
 scirust-industrial doctor --config config.json
 ```
 
-### 10.9 Exemple d'Intégration Complète (`industrial-monitor`)
+### 10.9 Détection d'Intrusions Réseau (`scirust-ids`)
+
+Système de détection d'intrusions (IDS) complet intégré au pipeline SciRust :
+
+- **Capture réseau** — trait `NetworkCapture` + `SimulatedCapture`, conversion `RawPacket` → `Flow`
+- **Parseurs protocoles** — HTTP (path traversal, command injection, méthodes dangereuses), DNS (domain length, tunneling TXT, NXDOMAIN), SSH (version downgrade)
+- **Détecteurs d'attaques** :
+  - `PortScanDetector` — scan vertical, horizontal, complet
+  - `DdosDetector` — SYN flood, RST flood, volumétrique, applicatif
+  - `BruteForceDetector` — password, dictionary, credential stuffing
+  - `DnsTunnelDetector` — tunneling DNS (exfiltration)
+  - `BeaconDetector` — beaconing C2 (régularité temporelle)
+- **Apprentissage ML** — autoencodeur de reconstruction pour détection d'anomalies non supervisée, calibration de seuil automatique
+- **Corrélation d'alertes** — multi-attack, escalation (scan → brute force), attaques coordonnées
+- **Export SIEM** — JSON, NDJSON, CEF (ArcSight), Syslog (RFC 5424), LEEF (QRadar)
+- **Moteur intégré** — orchestre capture → parsing → détection → corrélation → ML → SIEM
+
+```rust
+use scirust_ids::*;
+
+let mut engine = IdsEngine::with_defaults();
+let mut window = FlowWindow::new(0.0, 60.0);
+// ... remplir window avec des flux réseau ...
+let report = engine.analyze(&window, 1000.0);
+
+// Corréler et exporter
+let mut correlator = AlertCorrelator::with_defaults();
+let correlations = correlator.add_results(&report.results, report.timestamp);
+
+let mut siem = SiemExporter::with_defaults();
+siem.push_results(&report.results, report.timestamp, "my-ids");
+let json = siem.flush().unwrap();
+```
+
+```bash
+cargo test -p scirust-ids   # 66 tests, 0 failures
+cargo run -p ids_demo       # Démo 4 scénarios d'attaque
+```
+
+### 10.10 Exemple d'Intégration Complète (`industrial-monitor`)
 
 L'exemple `industrial_monitor` démontre la chaîne complète :
 
