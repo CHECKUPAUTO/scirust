@@ -1,5 +1,0 @@
-.git
-node_modules
-*.rs
-Cargo.*
-target

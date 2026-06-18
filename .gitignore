@@ -7,6 +7,13 @@ Cargo.lock
 *.dylib
 *.dll
 
+# Compiled binaries (no compiled artifacts in git)
+scirust-rustc-driver/scirustc
+scirust-rustc-driver/test
+scirust-rustc-driver/target/
+*.exe
+*.out
+
 # IDE
 .idea/
 .vscode/
@@ -44,6 +51,3 @@ systemd/turboquant-*.service
 # Only the curated facade SBOM under docs/sbom/ is tracked.
 *.cdx.json
 !docs/sbom/*.cdx.json
-
-# Excluded rustc-driver has its own (untracked) build dir
-scirust-rustc-driver/target/
