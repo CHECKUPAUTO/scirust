@@ -256,22 +256,16 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 
 ## N-D 自动微分与研究驱动的扩展
 
-在二维反向模式带之外，SciRust 现提供 **N-D 自动微分带**，其每个算子都通过有限差分
-梯度检查验证，并在其上构建了有研究支撑的深度学习栈。每项能力对应一篇论文并附带
-测试；完整对应关系（已完成 20 项中的 14 项）见 `docs/RESEARCH_ROADMAP.md`。
+在二维反向模式带之外，SciRust 现提供 **N-D 自动微分带**，其每个算子都通过有限差分梯度检查验证，并在其上构建了有研究支撑的深度学习栈。每项能力对应一篇特定论文，并附带一个诚实的测试（算子的梯度检查，或保证的可靠性/预言机测试）；完整对应关系——现已**完成全部 80 篇候选论文中的 80 篇**——见 `docs/RESEARCH_ROADMAP.md`。
 
-- **因果解码器语言模型**，端到端训练（词元与可学习位置嵌入、因果多头注意力、
-  融合且数值稳定的 softmax 交叉熵），可精确过拟合一个固定序列。
-- **LLaMA 系列层**：RMSNorm、SwiGLU、Pre-RMSNorm 的 LLaMA 块、RoPE（已测试相对
-  位置性质）以及分组/多查询注意力。
-- **确定性优化器**：Adam、AdamW、Lion、Muon（Newton–Schulz）、Schedule-Free、AdEMAMix 与 SOAP（Shampoo 特征基中的 Adam）。
-- **可认证 AI**：区间界传播（IBP）**与 CROWN**（基于线性松弛的更紧界）给出可证明的输出界与鲁棒性证书。
-- **可复现归约**：与顺序无关的求和/均值/点积，无论线程数均按位相同。
-- **推理**：精确（保持输出）投机解码、分块在线 softmax 的 FlashAttention、DeltaNet 的 delta 规则线性注意力层、Mamba 的选择性状态空间层、RetNet 的保留层、GLA 的门控线性注意力层，以及 HGRN 的门控线性 RNN 层。
-- **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE，以及将 PDE 残差放入损失以求解边值问题的物理信息神经网络（PINN）。
-- **压缩**：Wanda 剪枝（感知激活）与 SmoothQuant，以及 GPTQ（二阶误差反馈的 int8 权重量化，CLI `scirust gptq`）和 AWQ（感知激活的基于搜索的 int8 权重量化，CLI `scirust awq`）。
+- **因果解码器语言模型与高效解码**：一个端到端训练的解码器（词元与可学习位置嵌入、因果多头注意力、融合且数值稳定的 softmax 交叉熵），可精确过拟合一个固定序列；此外还有精确（保持输出）的投机解码、Medusa 多头与 EAGLE 特征级草稿，以及一个分页 KV 缓存注意力（vLLM 风格），在碎片化下保持位完全一致。
+- **LLaMA 系列与注意力**：RMSNorm、SwiGLU、Pre-RMSNorm 块、旋转位置嵌入（RoPE，已测试相对位置性质）、通过批量矩阵乘法广播实现的分组/多查询注意力、ALiBi 线性位置偏置、一个分块在线 softmax 的 FlashAttention，以及 YaRN 上下文扩展。
+- **高效序列模型**（每个都在带上展开并经过梯度检查）：Mamba 选择性状态空间与 Mamba-2/SSD（状态空间 ↔ 注意力的对偶性）、S4/S4D 与 S5（采用并行结合扫描的 MIMO）、RWKV、RetNet、GLA、HGRN、DeltaNet、xLSTM（sLSTM + mLSTM），以及 Hyena（隐式长卷积）。
+- **确定性优化器**（全部位对位可重现）：Adam、AdamW、Lion、Muon（Newton–Schulz 正交化动量）、Schedule-Free、AdEMAMix、SOAP、Shampoo、Adafactor、LAMB、Adan、Prodigy、Lookahead、SAM、GaLore（低秩投影状态）以及 Sophia（裁剪对角 Hessian 的二阶方法）。
+- **量化、压缩与 PEFT**（每个都在四舍五入到最近值的基准下测试）：SmoothQuant、GPTQ、AWQ、NF4、SqueezeLLM、SpQR、KVQuant、LLM.int8()、OmniQuant、BitNet b1.58 三值、QuIP#（Hadamard 非相干 + E8 格）以及 AQLM（加性多码本）；Wanda/幅度/彩票剪枝；以及 LoRA / DoRA 适配器。
+- **可认证 AI 与完备验证**：区间界传播、CROWN、zonotope（AI²/DeepZ）、DeepPoly（关系多面体）、随机平滑、GloRo Lipschitz 界，以及 CROWN-IBP **认证训练**（一个可微的 IBP 界增大认证半径）；此外还有**完备**验证器——分支定界、一个精确的 MILP 形式化，以及一个 Reluplex 风格的惰性 SMT 搜索——它们判定鲁棒性并返回具体的反例（针对小型 ReLU 网络）。
+- **不确定性与校准**：无分布的保形预测（split、CQR、自适应 APS/RAPS、风险控制 RCPS、Learn-then-Test、在线 ACI）、温度缩放，以及带认知不确定性的深度集成。
+- **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE、一个物理信息神经网络（PINN）、一个学习算子并泛化的 Fourier 神经算子（FNO）、DeepONet，以及一个 Kolmogorov–Arnold 网络（KAN）。
+- **可重现性、隐私与审计**：与顺序无关的浮点求和/均值/点积（无论线程数均位完全一致）、带 Rényi-DP 核算器的 DP-SGD、带检测 z 检验的 LLM 水印、**DiFR**（尽管浮点非确定性仍能验证一次推理，方法是围绕可重现的参考构造一个可靠的 FP 误差包络），以及一个**可验证推理**论证（有限域 Freivalds + 模型承诺 + Fiat-Shamir——密码学可靠性，而非零知识）。
 
-两个 CLI 命令暴露了这些工作：`scirust certify`（IBP **与 CROWN** 界并排显示、鲁棒性）与
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（训练 N-D 解码器语言模型）。
-
-第三个命令 `scirust conformal` 生成具有保证覆盖率的保形预测区间（无分布假设）。
+CLI 命令暴露了这项工作的大部分内容，包括 `scirust certify`（IBP、CROWN、zonotope、DeepPoly 与随机平滑界并排显示，外加一个完备的分支定界判定）、`scirust lm --opt …`（用上述任一优化器训练 N-D 解码器语言模型）、`scirust conformal`、`scirust calibrate`、序列模型演示（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量化器（`gptq`、`awq`、`bitnet`）以及 `scirust pinn`。
