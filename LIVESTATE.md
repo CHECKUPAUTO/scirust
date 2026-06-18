@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 98 : DiFR (#5) — vérification d'inférence malgré le non-déterminisme
+- `scirust_runtime::difr::difr_verify` (2025) : référence canonique via reproducible_dot (f64,
+  indépendant de l'ordre) + enveloppe d'erreur FP saine (γ·Σ|termes| propagée, ReLU 1-Lipschitz).
+  Accepte tout ordre de sommation f32 honnête, rejette la falsification au-delà de l'enveloppe.
+  Prolonge proof bit-exact (qui rejetterait une sortie honnête entre matériels). Nouveau module.
+- Bibliothèque seule (scirust-runtime ; pas de CLI ni multilingue).
+- Tests (3, runtime) : accepte un ordre de sommation différent ; enveloppe saine (1000 ordres
+  tous acceptés) & fine (<0.001 échelle) ; rejette falsification (change la classe) + déterminisme.
+- docs : roadmap #5 📋→✅ ; CHANGELOG. 610 tests core + 3 runtime ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 97 : MILP (#31) — vérification exacte
 - `nn::ibp::milp_min_margin`/`milp_verify_robustness` (Tjeng 2019) : réseau ReLU 2-entrées
   1-couche. Patrons d'activation ReLU = binaires MILP ⇒ énumérés ; par patron le réseau est affine,
@@ -12,7 +22,7 @@
 - Tests (2, core) : = force brute (grille 120², min ≤ tout échantillon + proche) + témoin atteint
   + déterminisme ; contre-exemple réel (grande boîte) + borne ≥ DeepPoly (sain) & strictement plus
   serré quelque part.
-- docs : roadmap #31 📋→✅ ; CHANGELOG. 610 tests core (+2) ; 8 gates verts (à confirmer).
+- docs : roadmap #31 📋→✅ ; CHANGELOG. 610 tests core (+2) ; 8 gates verts ✓ ; commit 2e160fa.
 
 ## Session 2026-06-18 — volet 96 : Branch-and-bound (#26) — vérification complète
 - `nn::ibp::verify_robustness`/`BabResult` (GCP-CROWN, Zhang 2022) : BaB sur le domaine d'entrée.

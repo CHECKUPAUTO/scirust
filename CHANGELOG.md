@@ -19,6 +19,23 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **DiFR — vérification d'inférence malgré le non-déterminisme** (`scirust_runtime::difr::difr_verify`,
+  2025, roadmap #5) : les certificats [`proof`] vérifient une inférence par **ré-exécution
+  bit-exacte** — ce qui ne marche que si le vérificateur reproduit l'arithmétique du prouveur à
+  l'identique. Or sur un **matériel différent** (largeurs SIMD, FMA, nombre de threads) la sommation
+  flottante est **non-déterministe**, donc un contrôle bit-exact rejetterait des sorties pourtant
+  honnêtes. DiFR vérifie *malgré* cela : il recompute une **référence canonique** avec
+  `reproducible_dot` (produits et somme accumulés en `f64`, indépendant de l'ordre) et accepte la
+  sortie revendiquée ssi elle se trouve dans une **enveloppe d'erreur flottante saine** de cette
+  référence. *Tout* calcul `f32` honnête — dans *n'importe quel* ordre de sommation — est
+  prouvablement dans l'enveloppe (donc accepté) ; une sortie **falsifiée** au-delà est rejetée.
+  L'enveloppe est la borne d'arrondi du produit scalaire `γ·Σ|termes|` propagée à travers les
+  couches (la ReLU est 1-lipschitzienne, elle la transmet sans l'amplifier) et reste **minuscule**
+  (quelques ppm de l'échelle d'activation), si bien que le contrôle attrape toute falsification
+  signifiante. Oracle honnête : accepte un calcul `f32` dans un **ordre de sommation différent** ;
+  enveloppe **saine** (1000 ordres aléatoires, tous acceptés) et **fine** (< 0,001 de l'échelle) ;
+  **rejette** une falsification (au-delà de l'enveloppe, ici de quoi changer la classe prédite) ;
+  déterministe. Prolonge la sommation reproductible (#3) et l'outillage de preuve d'inférence.
 - **MILP — vérification *exacte*** (`nn::ibp::milp_min_margin`/`milp_verify_robustness`, Tjeng
   et al. 2019, roadmap #31) : la vérification exacte d'un réseau ReLU par la formulation MILP.
   L'observation clé : les **patrons d'activation** des ReLU sont précisément les variables
