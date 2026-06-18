@@ -3,6 +3,17 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 95 : DeepPoly (#28) — domaine abstrait relationnel
+- `nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly` (Singh 2019) : bornes basse/haute
+  **affines en les entrées** par neurone (back-substitution), relaxation ReLU asymétrique
+  (corde sup (u/(u−l))(y−l), inf λy à aire min λ=1 si u>−l sinon 0). Plus serré qu'IBP à toute
+  profondeur (vs crown_bounds limité 2 couches).
+- CLI : exposé dans `certify` (à côté IBP/CROWN/zonotope/smoothing). Pas de nouvelle commande
+  ⇒ pas de multilingue.
+- Tests (2, core) : sain (4000 pts ∈ boîte, MLP 3 couches) + déterministe ; plus serré qu'IBP
+  sur relu(x)+relu(−x)=|x| (DeepPoly exact [0,1] vs IBP [0,2]).
+- docs : roadmap #28 📋→✅ ; CHANGELOG. 605 tests core (+2) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 94 : CROWN-IBP (#30) — entraînement certifié
 - `nn::crown_ibp::CrownIbpMlp` (Zhang 2020) : propagation IBP **différentiable** sur la tape
   (centre·W+b, rayon·|W| avec |W|=relu(W)+relu(−W) ; ReLU-intervalle [relu(l),relu(u)]) ⇒ logits
@@ -11,7 +22,7 @@
 - Bibliothèque seule (entraînement, pas de CLI ni multilingue).
 - Tests (2, core) : IBP tape ≡ IbpMlp référence + sain (2000 pts ∈ boîte) ; rayon certifié croît
   (robuste-entraîné >> accuracy-only, +0.2 ℓ∞, tous deux 100 % justes) + déterminisme.
-- docs : roadmap #30 📋→✅ ; CHANGELOG. 603 tests core (+2) ; 8 gates verts (à confirmer).
+- docs : roadmap #30 📋→✅ ; CHANGELOG. 603 tests core (+2) ; 8 gates verts ✓ ; commit a185017.
 
 ## Session 2026-06-18 — volet 93 : Sophia (#44) — optimiseur 2e ordre clippé
 - `nn::nd_optim::NdSophia` (Liu 2023) : θ←θ−lr·clip(m/max(γ·h,eps),ρ), h=EMA Hessienne diagonale

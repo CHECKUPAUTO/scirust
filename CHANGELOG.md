@@ -19,6 +19,20 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **DeepPoly — domaine abstrait relationnel** (`nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly`,
+  Singh et al. 2019, roadmap #28) : un vérificateur de robustesse plus précis qu'IBP. Là où IBP
+  traite chaque neurone par un simple intervalle (perdant toute corrélation), DeepPoly garde pour
+  chaque neurone une **borne basse et haute affines en les entrées** du réseau et les **back-
+  substitue** couche par couche. La relaxation ReLU est **asymétrique** : pour un pré-activation de
+  plage `[l,u]` instable, la borne supérieure est la **corde** `z ≤ (u/(u−l))(y−l)` et la borne
+  inférieure `z ≥ λy` avec `λ` choisi pour **minimiser l'aire** de la relaxation (`λ=1` si `u>−l`,
+  sinon `0`). Comme les bornes restent affines, les corrélations sont préservées et le résultat est
+  plus serré qu'IBP — **à n'importe quelle profondeur** (là où `crown_bounds` était limité à 2
+  couches). Oracle honnête : **sain** (4000 points échantillonnés ∈ boîte certifiée, MLP 3 couches)
+  + **strictement plus serré qu'IBP** sur `relu(x)+relu(−x)=|x|` sur `x∈[−1,1]` (DeepPoly donne la
+  boîte **exacte** [0,1] car le `x` s'annule dans la borne supérieure, vs IBP [0,2]) + déterminisme.
+  Exposé dans la CLI `certify` (à côté d'IBP, CROWN, zonotopes, smoothing). Prolonge IBP (#1) /
+  CROWN (#2) / zonotopes (#29).
 - **CROWN-IBP — entraînement certifié (vérifié)** (`nn::crown_ibp::CrownIbpMlp`, Zhang et al.
   2020, roadmap #30) : l'entraînement ordinaire minimise la perte aux entrées *concrètes* — un
   réseau peut les ajuster parfaitement et pourtant **changer de prédiction** sous une perturbation

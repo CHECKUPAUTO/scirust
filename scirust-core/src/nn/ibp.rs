@@ -190,6 +190,130 @@ impl IbpMlp {
         }
         z.interval()
     }
+
+    /// Certified output box via **DeepPoly** (Singh et al., POPL 2019): the
+    /// **relational polyhedral** abstract domain. Usually **tighter than IBP** (and
+    /// applicable at any depth, unlike the 2-layer [`crown_bounds`]) because it keeps
+    /// each neuron's lower/upper bound as an **affine function of the inputs** and
+    /// back-substitutes, so correlations like `relu(x) + relu(−x) = |x|` are tracked.
+    pub fn certify_deeppoly(&self, input: &Interval) -> Interval {
+        deeppoly_certify(&self.layers, input)
+    }
+}
+
+/// An affine bound `coeffs · input + cst` over the input box.
+type Aff = (Vec<f32>, f32);
+
+/// Concretize an affine bound over the box `[lo, hi]`: its maximum (`maximize`) or
+/// minimum picks, per coordinate, the box end that extremises `cⱼ·inputⱼ`.
+fn dp_concretize(aff: &Aff, lo: &[f32], hi: &[f32], maximize: bool) -> f32 {
+    let mut v = aff.1;
+    for (i, &c) in aff.0.iter().enumerate()
+    {
+        let pick = if (c >= 0.0) == maximize { hi[i] } else { lo[i] };
+        v += c * pick;
+    }
+    v
+}
+
+/// **DeepPoly** certified output box (Singh et al., POPL 2019). Each neuron keeps a
+/// lower and upper bound that is **affine in the network inputs** (eager
+/// back-substitution): an affine layer composes the bounds (choosing the previous
+/// layer's lower/upper bound per the weight sign), and a ReLU on a neuron with
+/// concrete range `[l, u]` is relaxed by the chord upper bound
+/// `z ≤ (u/(u−l))·(y − l)` and the **area-minimising** lower bound `z ≥ λ·y` with
+/// `λ = 1` if `u > −l` else `0`. Sound, and tighter than IBP because the affine
+/// relations track inter-neuron correlations.
+pub fn deeppoly_certify(layers: &[IbpLinear], input: &Interval) -> Interval {
+    assert!(!layers.is_empty(), "deeppoly: empty network");
+    let d_in = input.lo.len();
+    // Input neurons: lower = upper = identity (coordinate selector).
+    let mut lower: Vec<Aff> = (0..d_in)
+        .map(|i| {
+            let mut c = vec![0.0f32; d_in];
+            c[i] = 1.0;
+            (c, 0.0)
+        })
+        .collect();
+    let mut upper: Vec<Aff> = lower.clone();
+    for (li, layer) in layers.iter().enumerate()
+    {
+        let (inf, outf) = (layer.in_f, layer.out_f);
+        let mut new_lower: Vec<Aff> = Vec::with_capacity(outf);
+        let mut new_upper: Vec<Aff> = Vec::with_capacity(outf);
+        for o in 0..outf
+        {
+            let (mut lc, mut uc) = (vec![0.0f32; d_in], vec![0.0f32; d_in]);
+            let (mut lcon, mut ucon) = (layer.b[o], layer.b[o]);
+            for i in 0..inf
+            {
+                let w = layer.w[i * outf + o];
+                // Positive weight keeps the orientation, negative flips it.
+                let (up_src, lo_src) = if w >= 0.0
+                {
+                    (&upper[i], &lower[i])
+                }
+                else
+                {
+                    (&lower[i], &upper[i])
+                };
+                for k in 0..d_in
+                {
+                    uc[k] += w * up_src.0[k];
+                    lc[k] += w * lo_src.0[k];
+                }
+                ucon += w * up_src.1;
+                lcon += w * lo_src.1;
+            }
+            new_lower.push((lc, lcon));
+            new_upper.push((uc, ucon));
+        }
+        lower = new_lower;
+        upper = new_upper;
+        // ReLU after every layer except the last.
+        if li + 1 < layers.len()
+        {
+            for o in 0..outf
+            {
+                let l = dp_concretize(&lower[o], &input.lo, &input.hi, false);
+                let u = dp_concretize(&upper[o], &input.lo, &input.hi, true);
+                if l >= 0.0
+                {
+                    // Stable-active: identity (keep the bounds).
+                }
+                else if u <= 0.0
+                {
+                    // Stable-inactive: zero.
+                    lower[o] = (vec![0.0f32; d_in], 0.0);
+                    upper[o] = (vec![0.0f32; d_in], 0.0);
+                }
+                else
+                {
+                    // Unstable: chord upper bound, area-minimising lower bound.
+                    let slope = u / (u - l);
+                    for c in upper[o].0.iter_mut()
+                    {
+                        *c *= slope;
+                    }
+                    upper[o].1 = slope * (upper[o].1 - l);
+                    let lam = if u > -l { 1.0f32 } else { 0.0f32 };
+                    for c in lower[o].0.iter_mut()
+                    {
+                        *c *= lam;
+                    }
+                    lower[o].1 *= lam;
+                }
+            }
+        }
+    }
+    let outf = layers.last().unwrap().out_f;
+    let lo = (0..outf)
+        .map(|o| dp_concretize(&lower[o], &input.lo, &input.hi, false))
+        .collect();
+    let hi = (0..outf)
+        .map(|o| dp_concretize(&upper[o], &input.lo, &input.hi, true))
+        .collect();
+    Interval { lo, hi }
 }
 
 /// A **zonotope** over `n` dimensions: a center `c` plus `m` generator vectors,
@@ -691,5 +815,69 @@ mod tests {
             "zonotope excludes truth"
         );
         assert!(ibp.lo[0] <= 0.0 && ibp.hi[0] >= 0.0);
+    }
+
+    /// **DeepPoly is sound**: 4000 sampled inputs of a 3-layer ReLU MLP land inside
+    /// the certified box (and the result is deterministic).
+    #[test]
+    fn deeppoly_mlp_soundness() {
+        let mut rng = PcgEngine::new(8);
+        let mlp = IbpMlp::new(vec![
+            IbpLinear::from_nd_linear(&NdLinear::new(4, 8, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(8, 6, &mut rng)),
+            IbpLinear::from_nd_linear(&NdLinear::new(6, 3, &mut rng)),
+        ]);
+        let box_in = Interval::around(&[0.2, -0.5, 0.7, -0.1], 0.1);
+        let cert = mlp.certify_deeppoly(&box_in);
+        assert_eq!(cert.lo, mlp.certify_deeppoly(&box_in).lo); // deterministic
+
+        let mut srng = PcgEngine::new(321);
+        for _ in 0..4000
+        {
+            let x = sample(&box_in, &mut srng);
+            let y = mlp.forward(&x);
+            for (k, &yk) in y.iter().enumerate()
+            {
+                assert!(
+                    yk >= cert.lo[k] - 1e-4 && yk <= cert.hi[k] + 1e-4,
+                    "deeppoly unsound at out {k}: {yk} not in [{}, {}]",
+                    cert.lo[k],
+                    cert.hi[k]
+                );
+            }
+        }
+    }
+
+    /// **DeepPoly beats IBP via relational bounds.** The network computes
+    /// `relu(x) + relu(−x) = |x|` over `x ∈ [−1, 1]`. IBP treats the two ReLUs
+    /// independently and reports `[0, 2]`; DeepPoly keeps each bound affine in `x`,
+    /// so the `x` cancels in the upper bound and it reports the **exact** `[0, 1]`.
+    #[test]
+    fn deeppoly_tighter_than_ibp_on_abs() {
+        // L1: x ↦ (x, −x); L2: (a, b) ↦ a + b.
+        let l1 = IbpLinear::new(vec![1.0, -1.0], vec![0.0, 0.0], 1, 2);
+        let l2 = IbpLinear::new(vec![1.0, 1.0], vec![0.0], 2, 1);
+        let mlp = IbpMlp::new(vec![l1, l2]);
+        let box_in = Interval {
+            lo: vec![-1.0],
+            hi: vec![1.0],
+        };
+        let ibp = mlp.certify(&box_in);
+        let dp = mlp.certify_deeppoly(&box_in);
+
+        assert!(
+            (dp.hi[0] - dp.lo[0]) < (ibp.hi[0] - ibp.lo[0]) - 1e-4,
+            "deeppoly [{}, {}] not tighter than IBP [{}, {}]",
+            dp.lo[0],
+            dp.hi[0],
+            ibp.lo[0],
+            ibp.hi[0]
+        );
+        // Sound and in fact exact: |x| over [−1,1] is [0, 1].
+        assert!(
+            dp.lo[0] <= 1e-5 && (dp.hi[0] - 1.0).abs() < 1e-5,
+            "deeppoly box {dp:?}"
+        );
+        assert!(ibp.lo[0] <= 0.0 && ibp.hi[0] >= 1.0); // IBP sound but loose ([0,2])
     }
 }

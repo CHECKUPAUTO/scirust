@@ -111,6 +111,19 @@ pub fn run_certify(args: &[String]) -> u8 {
         println!("    class {c}: [{:.4}, {:.4}]", zono.lo[c], zono.hi[c]);
     }
     println!("    robustness: {}", robust_str(&zono));
+    let deeppoly = mlp.certify_deeppoly(&box_in);
+    println!(
+        "  DeepPoly bounds (relational polyhedra, avg width {:.4}):",
+        width(&deeppoly)
+    );
+    for c in 0..out_f
+    {
+        println!(
+            "    class {c}: [{:.4}, {:.4}]",
+            deeppoly.lo[c], deeppoly.hi[c]
+        );
+    }
+    println!("    robustness: {}", robust_str(&deeppoly));
 
     // Randomized smoothing: a *probabilistic* L2 certificate (Cohen et al. 2019),
     // the complement to the deterministic IBP/CROWN bounds above. For a half-space
