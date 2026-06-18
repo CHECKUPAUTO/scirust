@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 82 : EAGLE (#62) — décodage spéculatif niveau features
+- `nn::nd_decoder::EagleHead`/`generate_eagle` (Li 2024) : tête (feature, embed) → feature
+  suivant, autorégressée + tête LM gelée ⇒ brouillon, vérifié (préfixe + correction).
+  Ajout accesseurs `token_embedding`/`head_logits`/`d_model` ; `EagleHead::train` (MSE features, base gelée).
+- Bibliothèque seule (algorithme de décodage, pas de CLI ni multilingue). Module nd_decoder.
+- Tests (2, core) : exact = greedy pour tête **quelconque** (random) + déterminisme ;
+  tête entraînée (séquence périodique) ⇒ blocs acceptent >1 token (forwards<2·n), exact.
+  8/8 tests nd_decoder verts.
+- docs : roadmap #62 📋→✅ ; CHANGELOG. 571 tests core (+2) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 81 : Medusa (#61) — décodage à têtes multiples
 - `nn::nd_decoder::MedusaHeads`/`generate_medusa` (Cai 2024) : têtes (tête j → token +j+2
   depuis l'état caché) ⇒ brouillon multi-token 1 forward, vérifié (préfixe + correction).
@@ -11,7 +21,7 @@
 - Tests (2, core) : exact = greedy pour têtes **quelconques** (random) + déterminisme ;
   têtes entraînées (séquence périodique mémorisée) ⇒ blocs acceptent >1 token (forwards<2·n),
   toujours exact. 6/6 tests nd_decoder verts.
-- docs : roadmap #61 📋→✅ ; CHANGELOG. 569 tests core (+2) ; 8 gates (à confirmer).
+- docs : roadmap #61 📋→✅ ; CHANGELOG. 569 tests core (+2) ; 8 gates verts ✓ ; commit 48459a0.
 
 ## Session 2026-06-18 — volet 80 : PagedAttention (#63) — KV-cache paginé
 - `nn::paged_attention::PagedKvCache` (Kwon/vLLM 2023) : blocs d'un pool + table de blocs ;

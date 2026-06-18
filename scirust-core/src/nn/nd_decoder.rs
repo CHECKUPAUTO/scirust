@@ -108,6 +108,29 @@ impl NdDecoderLM {
         (logits, h)
     }
 
+    /// The model (embedding) width `d_model`.
+    pub fn d_model(&self) -> usize {
+        self.tok.table().shape[1]
+    }
+
+    /// The (frozen) token embedding row for `token` (length `d_model`) — EAGLE
+    /// conditions its feature autoregression on the previous token's embedding.
+    pub fn token_embedding(&self, token: usize) -> Vec<f32> {
+        let t = self.tok.table();
+        let dim = t.shape[1];
+        t.data[token * dim..(token + 1) * dim].to_vec()
+    }
+
+    /// Map a single hidden feature (length `d_model`) through the LM head to
+    /// vocabulary logits — lets EAGLE turn a *predicted* feature into a token.
+    pub fn head_logits(&mut self, feature: &[f32]) -> Vec<f32> {
+        let dm = feature.len();
+        let tape = NdTape::new();
+        let f = tape.input(TensorND::new(feature.to_vec(), vec![1, dm]));
+        let logits = self.head.forward(&tape, f);
+        tape.value(logits).data.clone()
+    }
+
     /// Next-token cross-entropy: feed `tokens[..n-1]`, predict `tokens[1..]`.
     /// Returns the scalar mean loss. Needs `tokens.len() >= 2`.
     pub fn loss<'t>(&mut self, tape: &'t NdTape, tokens: &[usize]) -> NdVar<'t> {
@@ -456,6 +479,169 @@ pub fn generate_medusa(
     (seq[prompt.len()..].to_vec(), forwards)
 }
 
+/// **EAGLE autoregression head** (Li et al., ICML 2024). Where Medusa predicts
+/// future tokens with independent heads, EAGLE drafts at the **feature** level: a
+/// lightweight head maps `(feature_t, embedding(token_{t+1})) → feature_{t+1}`, and
+/// the frozen LM head turns that predicted feature into the next token. Chaining it
+/// gives a higher-quality autoregressive draft from cheap steps; [`generate_eagle`]
+/// verifies the draft so the output stays exactly greedy.
+pub struct EagleHead {
+    net: NdLinear, // (2·d_model) → d_model
+    d_model: usize,
+}
+
+impl EagleHead {
+    /// New head over a `2·d_model → d_model` projection, seeded init.
+    pub fn new(d_model: usize, rng: &mut PcgEngine) -> Self {
+        Self {
+            net: NdLinear::new(2 * d_model, d_model, rng),
+            d_model,
+        }
+    }
+
+    /// Trainable parameters of the head.
+    pub fn parameters(&mut self) -> Vec<NdParam<'_>> {
+        self.net.parameters()
+    }
+
+    /// Predict the next hidden feature from the current `feature` and the embedding
+    /// `embed` of the next token (both length `d_model`).
+    pub fn predict_feature(&mut self, feature: &[f32], embed: &[f32]) -> Vec<f32> {
+        assert_eq!(feature.len(), self.d_model, "EAGLE: feature width");
+        assert_eq!(embed.len(), self.d_model, "EAGLE: embed width");
+        let mut x = feature.to_vec();
+        x.extend_from_slice(embed); // (2·d_model)
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(x, vec![1, 2 * self.d_model]));
+        let f = self.net.forward(&tape, xv);
+        tape.value(f).data.clone()
+    }
+
+    /// Train the head (base model **frozen**) to regress the next feature: from the
+    /// base hidden states `H` of `seq`, fit `head(H[i], embed(seq[i+1])) ≈ H[i+1]`
+    /// by MSE. Inputs/targets are detached constants (no gradient into the base).
+    pub fn train(&mut self, model: &mut NdDecoderLM, seq: &[usize], steps: usize, lr: f32) {
+        let l = seq.len();
+        let dm = self.d_model;
+        if l < 2
+        {
+            return;
+        }
+        // Frozen base features, then build (feature, next-embed) → next-feature.
+        let tape0 = NdTape::new();
+        let h = model.forward_hidden(&tape0, seq);
+        let hval = tape0.value(h).clone(); // (L, d_model)
+        let mut x = Vec::with_capacity((l - 1) * 2 * dm);
+        let mut y = Vec::with_capacity((l - 1) * dm);
+        for i in 0..l - 1
+        {
+            x.extend_from_slice(&hval.data[i * dm..(i + 1) * dm]);
+            x.extend_from_slice(&model.token_embedding(seq[i + 1]));
+            y.extend_from_slice(&hval.data[(i + 1) * dm..(i + 2) * dm]);
+        }
+        let mut opt = NdAdam::with_lr(lr);
+        for _ in 0..steps
+        {
+            let tape = NdTape::new();
+            let xv = tape.input(TensorND::new(x.clone(), vec![l - 1, 2 * dm]));
+            let yv = tape.input(TensorND::new(y.clone(), vec![l - 1, dm]));
+            let pred = self.net.forward(&tape, xv);
+            let diff = pred.sub(yv);
+            let loss = diff.mul(diff).sum(); // Σ (pred − target)²
+            let grads = tape.backward(loss);
+            let mut params = self.parameters();
+            opt.step(&mut params, &grads);
+        }
+    }
+}
+
+/// **EAGLE decoding** (Li et al., ICML 2024, greedy variant). The base model
+/// forwards the committed sequence; from its last feature the [`EagleHead`] drafts
+/// up to `k − 1` further tokens by autoregressing at the feature level (each
+/// predicted feature passed through the frozen LM head), and a single verification
+/// forward accepts the longest prefix matching the base model's argmax, committing
+/// a greedy correction/bonus.
+///
+/// The output is **exactly** `model.generate_greedy(prompt, n_new)` for *any* head;
+/// a good (trained) head merely commits more tokens per block. Returns
+/// `(new_tokens, base_forward_count)`. Requires `k >= 1`.
+pub fn generate_eagle(
+    model: &mut NdDecoderLM,
+    eagle: &mut EagleHead,
+    prompt: &[usize],
+    n_new: usize,
+    k: usize,
+) -> (Vec<usize>, usize) {
+    assert!(k >= 1, "k must be >= 1");
+    assert!(!prompt.is_empty(), "empty prompt");
+    assert!(
+        prompt.len() + n_new <= model.max_seq(),
+        "prompt + n_new exceeds max_seq"
+    );
+    let mut seq = prompt.to_vec();
+    let mut forwards = 0usize;
+
+    while seq.len() - prompt.len() < n_new
+    {
+        let remaining = n_new - (seq.len() - prompt.len());
+
+        // 1. One base forward → next token + last feature; autoregress the draft.
+        let tape = NdTape::new();
+        let (logits, hidden) = model.forward_with_hidden(&tape, &seq);
+        forwards += 1;
+        let lv = tape.value(logits);
+        let vocab = lv.shape[1];
+        let last = seq.len() - 1;
+        let base_next = argmax_row(&lv.data[last * vocab..(last + 1) * vocab]);
+        let hv = tape.value(hidden);
+        let dm = hv.shape[1];
+        let mut feature = hv.data[last * dm..(last + 1) * dm].to_vec();
+
+        let mut block = vec![base_next];
+        let mut tok = base_next;
+        for _ in 1..k
+        {
+            let emb = model.token_embedding(tok);
+            feature = eagle.predict_feature(&feature, &emb);
+            tok = argmax_row(&model.head_logits(&feature));
+            block.push(tok);
+        }
+        block.truncate(remaining);
+
+        // 2. One verification forward over seq + block.
+        let mut check = seq.clone();
+        check.extend(&block);
+        let tape2 = NdTape::new();
+        let preds = model.predict(&tape2, &check);
+        forwards += 1;
+
+        // 3. Accept the matching prefix; correct the first mismatch.
+        let base = seq.len() - 1;
+        let mut accepted = 0;
+        for (i, &bi) in block.iter().enumerate()
+        {
+            if preds[base + i] == bi
+            {
+                seq.push(bi);
+                accepted += 1;
+            }
+            else
+            {
+                seq.push(preds[base + i]);
+                break;
+            }
+        }
+        // 4. All accepted ⇒ a bonus greedy token.
+        if accepted == block.len() && seq.len() - prompt.len() < n_new
+        {
+            seq.push(preds[base + block.len()]);
+        }
+    }
+
+    seq.truncate(prompt.len() + n_new);
+    (seq[prompt.len()..].to_vec(), forwards)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,6 +870,72 @@ mod tests {
         assert!(
             fwds < 2 * n,
             "trained heads should accept >1 token in some block (forwards {fwds} not < {})",
+            2 * n
+        );
+    }
+
+    /// **EAGLE decoding is exact** for *any* feature head (even random), and is
+    /// deterministic.
+    #[test]
+    fn nd_eagle_decoding_is_exact() {
+        let cfg = tiny_cfg();
+        let prompt = [1usize, 2];
+        let n = 5;
+
+        let mut reference = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let greedy = reference.generate_greedy(&prompt, n);
+
+        let mut model = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let mut eagle = EagleHead::new(cfg.d_model, &mut PcgEngine::new(88));
+        let (out, fwds) = generate_eagle(&mut model, &mut eagle, &prompt, n, 4);
+        assert_eq!(out, greedy, "EAGLE output must equal greedy");
+        assert!(fwds <= 2 * n);
+
+        let mut model2 = NdDecoderLM::new(cfg, &mut PcgEngine::new(7));
+        let mut eagle2 = EagleHead::new(cfg.d_model, &mut PcgEngine::new(88));
+        let (out2, _) = generate_eagle(&mut model2, &mut eagle2, &prompt, n, 4);
+        assert_eq!(out2, out);
+    }
+
+    /// **A trained EAGLE head accelerates decoding** while staying exact: after the
+    /// base overfits a periodic sequence and the feature head learns to regress the
+    /// next feature, at least one verification block commits more than one token, so
+    /// the base-forward count drops below `2·n` — output still exactly greedy.
+    #[test]
+    fn nd_eagle_trained_head_accepts_multiple_tokens() {
+        let cfg = NdDecoderConfig {
+            vocab: 4,
+            d_model: 16,
+            n_heads: 2,
+            d_ff: 32,
+            n_layers: 2,
+            max_seq: 16,
+        };
+        let seq: Vec<usize> = (0..12).map(|i| i % 3).collect();
+
+        let mut model = NdDecoderLM::new(cfg, &mut PcgEngine::new(1));
+        let mut opt = NdAdam::with_lr(0.05);
+        for _ in 0..300
+        {
+            let t = NdTape::new();
+            let loss = model.loss(&t, &seq);
+            let grads = t.backward(loss);
+            let mut params = model.parameters();
+            opt.step(&mut params, &grads);
+        }
+
+        let prompt = [0usize, 1, 2, 0];
+        let n = 6;
+        let greedy = model.generate_greedy(&prompt, n);
+
+        let mut eagle = EagleHead::new(cfg.d_model, &mut PcgEngine::new(2));
+        eagle.train(&mut model, &seq, 500, 0.02);
+        let (out, fwds) = generate_eagle(&mut model, &mut eagle, &prompt, n, 4);
+
+        assert_eq!(out, greedy, "trained EAGLE must still equal greedy");
+        assert!(
+            fwds < 2 * n,
+            "trained EAGLE should accept >1 token in some block (forwards {fwds} not < {})",
             2 * n
         );
     }

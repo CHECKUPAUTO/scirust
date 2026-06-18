@@ -19,6 +19,16 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **EAGLE — décodage spéculatif au niveau features** (`nn::nd_decoder::EagleHead`/
+  `generate_eagle`, Li et al. 2024, roadmap #62) : là où Medusa prédit des *tokens*
+  futurs, EAGLE brouillonne au niveau **feature** — une tête légère mappe
+  `(feature_t, embed(token_{t+1})) → feature_{t+1}`, et la tête LM **gelée** transforme
+  la feature prédite en token ; chaînée, elle donne un brouillon **autorégressif**
+  vérifié par une passe (préfixe accepté + correction greedy). `NdDecoderLM` expose
+  `token_embedding`/`head_logits`/`d_model` ; `EagleHead::train` ajuste la tête par MSE
+  sur les features du modèle gelé. Oracle honnête : sortie **exactement = greedy** pour
+  une tête **quelconque** (vérification) + déterminisme + tête **entraînée** ⇒ ≥1 bloc
+  accepte >1 token (forwards < 2·n) en restant exact. Couche de bibliothèque.
 - **Medusa — décodage à têtes multiples** (`nn::nd_decoder::MedusaHeads`/`generate_medusa`,
   Cai et al. 2024, roadmap #61) : accélère le décodage en attachant au modèle de base
   des **têtes supplémentaires** (tête `j` prédit le token à `+j+2` depuis l'état caché),
