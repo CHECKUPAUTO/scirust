@@ -211,6 +211,22 @@ pub mod ops {
         }
     }
 
+    /// Dequantize symmetric **INT4** codes to `f32`: `out[i] = codes[i] as f32 *
+    /// scale`. The multiply runs through the SIMD [`mul_f32`] kernel; because it is
+    /// element-wise (no reduction) and an IEEE-754 multiply is identical per lane and
+    /// scalar, the result is **bit-identical across SIMD widths and platforms** — the
+    /// fast path for scirust's KV-cache codec without breaking determinism.
+    pub fn dequantize_int4_into(codes: &[i8], scale: f32, out: &mut [f32]) {
+        assert_eq!(
+            codes.len(),
+            out.len(),
+            "dequantize_int4_into: length mismatch"
+        );
+        let codes_f: Vec<f32> = codes.iter().map(|&c| c as f32).collect();
+        let scale_v = vec![scale; codes.len()];
+        mul_f32(&codes_f, &scale_v, out);
+    }
+
     /// Element-wise `out[i] = a[i] + b[i]` for `f64`.
     pub fn add_f64(a: &[f64], b: &[f64], out: &mut [f64]) {
         assert_eq!(a.len(), b.len());
@@ -516,6 +532,30 @@ mod tests {
         let mut out = vec![0.0f32; 5];
         ops::add_f32(&a, &b, &mut out);
         assert_eq!(out, vec![11.0, 22.0, 33.0, 44.0, 55.0]);
+    }
+
+    /// The SIMD INT4 dequantizer is **bit-identical** to the scalar reference for every
+    /// length (incl. lengths that don't fill a SIMD lane) and a range of scales — so
+    /// the KV-cache codec's fast read path stays deterministic.
+    #[test]
+    fn dequantize_int4_simd_matches_scalar_bit_exact() {
+        for len in [0usize, 1, 3, 7, 8, 9, 16, 31, 128, 257]
+        {
+            let codes: Vec<i8> = (0..len)
+                .map(|i| ((i as i32 * 5 - 17).rem_euclid(15) - 7) as i8)
+                .collect();
+            for &scale in &[0.0f32, 0.0429, 0.5, 1.0, 2.5, 1e-3]
+            {
+                let mut simd = vec![0.0f32; len];
+                ops::dequantize_int4_into(&codes, scale, &mut simd);
+                let scalar: Vec<f32> = codes.iter().map(|&c| c as f32 * scale).collect();
+                assert_eq!(
+                    simd.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    scalar.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    "len {len}, scale {scale}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -6,6 +6,25 @@ versions sémantiques à partir de la prochaine release taguée.
 ## [Non publié]
 
 ### Ajouté — synergie d'écosystème (CCOS, SLHAv2)
+- **Guard à garantie statistique** (`nn::guard::StatisticalGuard`) : une porte de réponse à
+  **garantie de couverture sans hypothèse de distribution**, pour alimenter le `guard` de **CCOS**
+  (valider/abstenir sur la sortie d'un modèle) sans seuil ad-hoc. À partir des probabilités de
+  classe d'une décision, le guard forme l'**ensemble de prédiction conforme** (#21,
+  `ConformalClassifier`) et en tire un verdict : une seule classe franchit `1−q̂` ⇒ **Accept** ;
+  plusieurs ⇒ **Abstain** (ambigu) ; aucune ⇒ **Reject** (hors-distribution). La calibration
+  conforme garantit que la vraie classe est dans l'ensemble avec proba **≥ 1−α** sur données
+  échangeables, *quelle que soit la distribution* — le guard ne laisse donc prouvablement pas
+  filer la bonne réponse plus d'une fraction `α` du temps. Oracle honnête : **couverture empirique
+  ≥ 1−α** sur données fraîches (3-classes, déterministe) + logique de verdict (confiant→Accept,
+  partagé→Abstain, plat/OOD→Reject). Les deep ensembles (#40) donnent un signal épistémique
+  complémentaire pour le flag OOD.
+- **Codec KV accéléré SIMD, bit-exact** (`scirust_simd::ops::dequantize_int4_into`, câblé dans
+  `nn::elastic_kv_cache`) : la déquantification INT4 (`out[i]=code[i]·échelle`) passe par le kernel
+  SIMD `mul_f32` ; étant **élémentaire** (pas de réduction) et un produit IEEE-754 identique par
+  lane et en scalaire, le résultat est **bit-identique entre largeurs SIMD et plateformes** — le
+  chemin rapide du codec KV **sans casser le déterminisme** (les réductions cosinus/attention
+  restent sur le chemin déterministe). Oracle : SIMD ≡ scalaire **bit-exact** pour toute longueur
+  (y compris < une lane) et une plage d'échelles.
 - **Journal d'attestation hash-chaîné** (`scirust_runtime::attest`) : le pont de l'**inférence
   vérifiable** de scirust (`vinfer` #80) vers l'`event_log` de **CCOS**. Chaque `InferenceEvent`
   fige l'engagement du modèle, le hash de l'entrée et le hash de la sortie, et se chaîne au

@@ -43,9 +43,14 @@ pub fn quantize_int4(x: &[f32]) -> (Vec<i8>, f32) {
     (codes, scale)
 }
 
-/// Reconstruct a vector from INT4 codes and a scale (`codeᵢ · scale`).
+/// Reconstruct a vector from INT4 codes and a scale (`codeᵢ · scale`). Runs through
+/// the SIMD-accelerated [`scirust_simd::ops::dequantize_int4_into`] kernel, which is
+/// **bit-identical** to the scalar form (element-wise, no reduction), so the codec is
+/// faster yet stays deterministic across platforms.
 pub fn dequantize_int4(codes: &[i8], scale: f32) -> Vec<f32> {
-    codes.iter().map(|&c| c as f32 * scale).collect()
+    let mut out = vec![0.0f32; codes.len()];
+    scirust_simd::ops::dequantize_int4_into(codes, scale, &mut out);
+    out
 }
 
 /// **Cosine-aware** grouped INT4 quantization: split `x` into chunks of `group_size`

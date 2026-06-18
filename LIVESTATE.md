@@ -3,6 +3,23 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 104 : synergie SLHAv2 — codec KV accéléré SIMD (bit-exact)
+- `scirust_simd::ops::dequantize_int4_into` (câblé dans nn::elastic_kv_cache::dequantize_int4) :
+  déquant INT4 via kernel SIMD mul_f32 ; élémentaire (pas de réduction) ⇒ bit-identique scalaire et
+  inter-plateformes (déterminisme préservé ; réductions cosinus/attention restent scalaires).
+- Bibliothèque seule (scirust-simd + core). Pas de CLI ni multilingue.
+- Tests (1, scirust-simd) : SIMD ≡ scalaire bit-exact pour toute longueur (y compris <1 lane) +
+  plage d'échelles. (gate 5 portable-simd + gate 4 AVX2 runtime.)
+- docs : CHANGELOG. 620 core + 1 simd ; 8 gates verts (à confirmer).
+
+## Session 2026-06-18 — volet 103 : synergie CCOS — guard à garantie statistique
+- `nn::guard::StatisticalGuard` : porte Accept/Abstain/Reject sur l'ensemble conforme (#21).
+  Couverture vraie classe ≥ 1−α sans hypothèse de distribution ⇒ pour le guard.rs de CCOS.
+- Bibliothèque seule (pas de CLI ni multilingue). Nouveau module nn::guard.
+- Tests (2, core) : couverture empirique ≥ 1−α (fraîches, déterministe) ; verdicts
+  confiant→Accept / partagé→Abstain / plat→Reject.
+- docs : CHANGELOG. 620 tests core (+2) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 102 : synergie CCOS — pont d'attestation hash-chaîné
 - `scirust_runtime::attest` : journal d'inférences hash-chaîné (SHA-256), rejouable, à la forme
   de l'event_log de CCOS. InferenceEvent {seq, engagement modèle, hash entrée/sortie, entry_hash} ;
