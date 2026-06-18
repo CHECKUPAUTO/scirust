@@ -259,24 +259,16 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 
 ## N-D 自動微分と研究駆動の拡張
 
-2 次元の逆モードテープに加え、SciRust は各演算子を有限差分の勾配チェックで検証した
-**N-D 自動微分テープ**と、その上に研究に裏付けられた深層学習スタックを提供します。
-各機能は特定の論文に対応し、テストとともに提供されます。完全な対応（20 件中 14 件
-完了）は `docs/RESEARCH_ROADMAP.md` で管理しています。
+2 次元の逆モードテープに加え、SciRust は現在、各演算子を有限差分の勾配チェックで検証した**N-D 自動微分テープ**と、その上に構築された研究に裏付けられた深層学習スタックを提供する。各機能は特定の論文に対応し、正直なテスト（演算子に対する勾配チェック、保証に対する健全性/オラクルテスト）とともに提供される。完全な対応関係は、現在**候補となる 80 件の論文すべて（80 件中 80 件）が完了**しており、`docs/RESEARCH_ROADMAP.md` で管理されている。
 
-- **因果デコーダ言語モデル**、エンドツーエンド学習（トークンと学習位置埋め込み、
-  因果マルチヘッド注意、融合かつ数値的に安定な softmax クロスエントロピー）。系列を
-  厳密に過学習します。
-- **LLaMA 系レイヤ**：RMSNorm、SwiGLU、Pre-RMSNorm の LLaMA ブロック、RoPE
-  （相対位置性質をテスト済み）、グループ化/マルチクエリ注意。
-- **決定的オプティマイザ**：Adam、AdamW、Lion、Muon（Newton–Schulz）、Schedule-Free、AdEMAMix、SOAP（Shampoo の固有基底における Adam）。
-- **認証可能な AI**：区間境界伝播（IBP）**と CROWN**（線形緩和によるより厳しい境界）が証明可能な出力境界とロバスト性証明書を提供。
-- **再現可能なリダクション**：順序非依存の和/平均/内積。スレッド数によらずビット同一。
-- **推論**：厳密（出力保存）な投機的デコード、タイル化オンライン softmax の FlashAttention、DeltaNet のデルタ則線形アテンション層、Mamba の選択的状態空間層、RetNet のリテンション層、GLA のゲート付き線形アテンション層、および HGRN のゲート付き線形 RNN 層。
-- **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE、および PDE 残差を損失に組み込んで境界値問題を解く物理情報ニューラルネットワーク（PINN）。
-- **圧縮**：Wanda 枝刈り（活性化考慮）と SmoothQuant、さらに GPTQ（2 次の誤差フィードバックによる int8 重み量子化、CLI `scirust gptq`）と AWQ（活性化を考慮した探索ベースの int8 重み量子化、CLI `scirust awq`）。
+- **因果デコーダ言語モデルと効率的なデコード**：エンドツーエンドで学習されたデコーダ（トークンと学習位置埋め込み、因果マルチヘッド注意、融合かつ数値的に安定な softmax クロスエントロピー）であり、固定された系列を厳密に過学習する。加えて、厳密（出力保存）な投機的デコード、Medusa のマルチヘッドおよび EAGLE の特徴量レベルのドラフティング、そして断片化の下でもビット単位で同一なページ化 KV キャッシュ注意（vLLM スタイル）。
+- **LLaMA 系とアテンション**：RMSNorm、SwiGLU、Pre-RMSNorm ブロック、RoPE（相対位置性質をテスト済み）、バッチ化 matmul のブロードキャストによるグループ化/マルチクエリ注意、ALiBi の線形位置バイアス、タイル化オンライン softmax の FlashAttention、および YaRN コンテキスト拡張。
+- **効率的な系列モデル**（いずれもテープ上で展開され勾配チェック済み）：Mamba の選択的状態空間と Mamba-2/SSD（状態空間 ↔ アテンションの双対性）、S4/S4D と S5（並列結合スキャンを伴う MIMO）、RWKV、RetNet、GLA、HGRN、DeltaNet、xLSTM（sLSTM + mLSTM）、および Hyena（暗黙的な長畳み込み）。
+- **決定論的オプティマイザ**（すべてビット単位で再現可能）：Adam、AdamW、Lion、Muon（Newton–Schulz による直交化モーメンタム）、Schedule-Free、AdEMAMix、SOAP、Shampoo、Adafactor、LAMB、Adan、Prodigy、Lookahead、SAM、GaLore（低ランク射影状態）、および Sophia（クリップされた対角ヘッシアンの 2 次法）。
+- **量子化、圧縮、PEFT**（いずれも最近接丸めとの比較でテスト済み）：SmoothQuant、GPTQ、AWQ、NF4、SqueezeLLM、SpQR、KVQuant、LLM.int8()、OmniQuant、BitNet b1.58 の三値、QuIP#（Hadamard 非コヒーレンス + E8 格子）、および AQLM（加法的マルチコードブック）。Wanda/マグニチュード/lottery 枝刈り。そして LoRA / DoRA アダプタ。
+- **認証可能な AI と完全な検証**：区間境界伝播（IBP）、CROWN、ゾノトープ（AI²/DeepZ）、DeepPoly（関係的ポリヘドラ）、ランダム化平滑化、GloRo の Lipschitz 境界、および CROWN-IBP **認証付き学習**（微分可能な IBP 境界が認証半径を拡大する）。加えて**完全な**検証器 — 分枝限定法、厳密な MILP 定式化、および Reluplex スタイルの遅延 SMT 探索 — はロバスト性を決定し、具体的な反例を返す（小規模な ReLU ネットに対して）。
+- **不確実性とキャリブレーション**：分布非依存の共形予測（split、CQR、適応的な APS/RAPS、リスク制御の RCPS、Learn-then-Test、オンライン ACI）、温度スケーリング、および認識論的不確実性を伴う深層アンサンブル。
+- **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE、物理情報ニューラルネットワーク（PINN）、演算子を学習して汎化する Fourier Neural Operator（FNO）、DeepONet、および Kolmogorov–Arnold ネットワーク（KAN）。
+- **再現性、プライバシー、監査**：順序非依存の浮動小数点の和/平均/内積（スレッド数によらずビット単位で同一）、Rényi-DP アカウンタントを伴う DP-SGD、検出 z 検定を伴う LLM 透かし、**DiFR**（再現可能な参照の周りの健全な FP 誤差包絡を介して、浮動小数点の非決定性にもかかわらず推論を検証する）、および**検証可能推論**の論証（有限体 Freivalds + モデルコミットメント + Fiat-Shamir — 暗号学的健全性であり、ゼロ知識ではない）。
 
-2 つの CLI コマンドがこれらを公開します：`scirust certify`（IBP **と CROWN** の境界を並べて表示、およびロバスト性）と
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（N-D デコーダ LM の学習）。
-
-3 つ目のコマンド `scirust conformal` は、分布非依存で被覆率を保証する共形予測区間を生成します。
+CLI コマンドはこの作業の多くを公開しており、`scirust certify`（IBP、CROWN、ゾノトープ、DeepPoly、ランダム化平滑化の境界を並べて表示、加えて完全な分枝限定法による決定）、`scirust lm --opt …`（上記いずれかのオプティマイザで N-D デコーダ LM を学習）、`scirust conformal`、`scirust calibrate`、系列モデルのデモ（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量子化器（`gptq`、`awq`、`bitnet`）、および `scirust pinn` を含む。

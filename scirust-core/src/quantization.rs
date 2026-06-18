@@ -1689,6 +1689,160 @@ mod tests_kvquant {
     }
 }
 
+// ----- LLM.int8() : décomposition mixte int8 / fp16 (#71) ----------------------
+
+/// **LLM.int8()** (Dettmers et al., NeurIPS 2022): a mixed-precision matmul
+/// `X·W` (`X` is `m×k`, `W` is `k×n`). Transformer activations have a few
+/// **outlier feature columns** of huge magnitude; quantizing them with everything
+/// else to int8 inflates the scale and crushes the resolution of the normal
+/// features. LLM.int8() keeps those columns (and the matching `W` rows) in **full
+/// precision** and quantizes the rest to **int8**:
+/// `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. A column is an
+/// outlier if any `|X[i,j]|` exceeds `threshold` (the paper's default is 6.0). The
+/// int8 scale, computed with the outliers removed, then resolves the bulk finely,
+/// so the result is close to fp while most of the matmul stays integer.
+pub fn int8_mixed_matmul(
+    x: &[f32],
+    w: &[f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    threshold: f32,
+) -> Vec<f32> {
+    assert_eq!(x.len(), m * k, "int8_mixed_matmul: X size mismatch");
+    assert_eq!(w.len(), k * n, "int8_mixed_matmul: W size mismatch");
+    // Outlier feature columns of X (any row exceeds the threshold).
+    let outlier: Vec<bool> = (0..k)
+        .map(|j| (0..m).any(|i| x[i * k + j].abs() > threshold))
+        .collect();
+
+    // int8 path: X and W with the outlier columns / rows zeroed (so the scale
+    // reflects the normal range and the zeros contribute nothing to the product).
+    let mut x_int = x.to_vec();
+    let mut w_int = w.to_vec();
+    for (j, &is_out) in outlier.iter().enumerate()
+    {
+        if is_out
+        {
+            for i in 0..m
+            {
+                x_int[i * k + j] = 0.0;
+            }
+            for l in 0..n
+            {
+                w_int[j * n + l] = 0.0;
+            }
+        }
+    }
+    let sx = compute_scale(&x_int);
+    let sw = compute_scale(&w_int);
+    let acc = matmul_int8(
+        &quantize_tensor(&x_int, sx),
+        &quantize_tensor(&w_int, sw),
+        m,
+        k,
+        n,
+    );
+    let mut out: Vec<f32> = acc.iter().map(|&a| a as f32 * sx * sw).collect();
+
+    // fp32 path: add the exact contribution of the outlier columns.
+    for (j, &is_out) in outlier.iter().enumerate()
+    {
+        if is_out
+        {
+            for i in 0..m
+            {
+                let xij = x[i * k + j];
+                for l in 0..n
+                {
+                    out[i * n + l] += xij * w[j * n + l];
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests_llm_int8 {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    fn naive_matmul(x: &[f32], w: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for l in 0..n
+            {
+                let mut s = 0.0f32;
+                for j in 0..k
+                {
+                    s += x[i * k + j] * w[j * n + l];
+                }
+                out[i * n + l] = s;
+            }
+        }
+        out
+    }
+
+    /// **The LLM.int8() insight, tested.** With a few outlier feature columns,
+    /// plain int8 (quantize everything) loses huge accuracy — the outliers set the
+    /// scale and crush the bulk. The mixed decomposition keeps the outliers in fp32
+    /// and is far closer to the fp result. Deterministic.
+    #[test]
+    fn int8_mixed_beats_plain_int8() {
+        let mut rng = PcgEngine::new(23);
+        let (m, k, n) = (6usize, 16usize, 8usize);
+        let mut x = vec![0.0f32; m * k];
+        for i in 0..m
+        {
+            for j in 0..k
+            {
+                let v = rng.float_signed();
+                // Columns 3 and 10 are outlier features (≈ ×75 the bulk).
+                x[i * k + j] = if j == 3 || j == 10 { v * 30.0 } else { v * 0.4 };
+            }
+        }
+        let w: Vec<f32> = (0..k * n).map(|_| rng.float_signed()).collect();
+
+        let fp = naive_matmul(&x, &w, m, k, n);
+        let mixed = int8_mixed_matmul(&x, &w, m, k, n, 6.0);
+
+        // Plain int8: quantize all of X and all of W.
+        let (sx, sw) = (compute_scale(&x), compute_scale(&w));
+        let plain_acc = matmul_int8(&quantize_tensor(&x, sx), &quantize_tensor(&w, sw), m, k, n);
+        let plain: Vec<f32> = plain_acc.iter().map(|&a| a as f32 * sx * sw).collect();
+
+        let err = |a: &[f32], b: &[f32]| -> f32 {
+            a.iter().zip(b).map(|(&p, &q)| (p - q) * (p - q)).sum()
+        };
+        let (e_mixed, e_plain) = (err(&mixed, &fp), err(&plain, &fp));
+        assert!(
+            e_mixed < 0.5 * e_plain,
+            "LLM.int8 not better than plain int8: {e_mixed} vs {e_plain}"
+        );
+        // Determinism.
+        assert_eq!(mixed, int8_mixed_matmul(&x, &w, m, k, n, 6.0));
+    }
+
+    /// With no outliers below the threshold, LLM.int8() reduces to a pure int8
+    /// matmul (no fp32 correction added) — and still approximates fp well.
+    #[test]
+    fn int8_mixed_no_outliers_is_plain_int8() {
+        let (m, k, n) = (4usize, 8usize, 4usize);
+        let x: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.1).sin()).collect();
+        let w: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.2).cos()).collect();
+        let mixed = int8_mixed_matmul(&x, &w, m, k, n, 6.0);
+        let (sx, sw) = (compute_scale(&x), compute_scale(&w));
+        let plain_acc = matmul_int8(&quantize_tensor(&x, sx), &quantize_tensor(&w, sw), m, k, n);
+        let plain: Vec<f32> = plain_acc.iter().map(|&a| a as f32 * sx * sw).collect();
+        for (a, b) in mixed.iter().zip(&plain)
+        {
+            assert!((a - b).abs() < 1e-6, "no-outlier mismatch: {a} vs {b}");
+        }
+    }
+}
+
 // ----- NEON int8 (aarch64) : matmul entier accelere, bit-exact vs scalaire -----
 
 /// Produit scalaire int8 sur k elements contigus, accumulation i32 (NEON aarch64).
@@ -1763,5 +1917,837 @@ mod tests_neon {
             matmul_int8_neon(&a, &b, m, k, n),
             "NEON != scalaire (doit etre bit-exact)"
         );
+    }
+}
+
+// ===== OmniQuant — learnable weight clipping (Shao et al., ICLR 2024) ==========
+
+/// Result of [`omniquant_quantize`]: per-output-channel symmetric codes with the
+/// learned clip factors and scales.
+pub struct OmniQuantResult {
+    /// Quantized weights `(in_features, out_features)` row-major, codes in
+    /// `[−qmax, qmax]`.
+    pub codes: Vec<i8>,
+    /// Per-output-channel dequantization scale.
+    pub scales: Vec<f32>,
+    /// Per-output-channel learned clip factor `γ ∈ (0, 1]` (`1` = round-to-nearest).
+    pub clips: Vec<f32>,
+    /// Input features.
+    pub in_features: usize,
+    /// Output features.
+    pub out_features: usize,
+}
+
+impl OmniQuantResult {
+    /// Reconstruct the dequantized weight matrix `(in_features, out_features)`.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let mut w = vec![0.0f32; self.in_features * self.out_features];
+        for i in 0..self.in_features
+        {
+            for o in 0..self.out_features
+            {
+                w[i * self.out_features + o] =
+                    self.codes[i * self.out_features + o] as f32 * self.scales[o];
+            }
+        }
+        w
+    }
+}
+
+/// Symmetric quantization error of a channel at clip factor `gamma` (range
+/// `γ·max|w|`): `Σ (w − q·scale)²` with `q = clamp(round(w/scale), ±qmax)`.
+fn omniquant_channel_error(col: &[f32], maxabs: f32, qmax: f32, gamma: f32) -> (f32, f32) {
+    let scale = gamma * maxabs / qmax;
+    if scale == 0.0
+    {
+        return (0.0, 1.0);
+    }
+    let mut err = 0.0f32;
+    for &w in col
+    {
+        let q = (w / scale).round().clamp(-qmax, qmax);
+        let d = w - q * scale;
+        err += d * d;
+    }
+    (err, scale)
+}
+
+/// **OmniQuant** weight quantization with **Learnable Weight Clipping** (Shao et
+/// al., ICLR 2024, arXiv:2308.13137). Round-to-nearest quantizes each output
+/// channel over its full range `[−max|w|, max|w|]`; with heavy-tailed weights that
+/// wastes most code levels on rare outliers. OmniQuant instead learns a per-channel
+/// clip factor `γ ∈ (0, 1]` that **shrinks** the range to `γ·max|w|`, trading a
+/// little clipping error on the outliers for much finer steps on the bulk — found
+/// here by a deterministic search over a grid that **includes `γ = 1`** (plain
+/// RTN), so the result is never worse than RTN and strictly better whenever
+/// outliers are present. `bits ≤ 8`, symmetric; weights are `(in, out)` row-major.
+pub fn omniquant_quantize(
+    weight: &[f32],
+    in_features: usize,
+    out_features: usize,
+    bits: u32,
+    grid: usize,
+) -> OmniQuantResult {
+    assert_eq!(weight.len(), in_features * out_features, "weight size");
+    assert!((2..=8).contains(&bits), "omniquant: bits in 2..=8");
+    assert!(grid >= 1, "omniquant: grid >= 1");
+    let qmax = ((1i32 << (bits - 1)) - 1) as f32;
+    let mut scales = vec![1.0f32; out_features];
+    let mut clips = vec![1.0f32; out_features];
+    let mut codes = vec![0i8; in_features * out_features];
+
+    let mut col = vec![0.0f32; in_features];
+    for o in 0..out_features
+    {
+        for i in 0..in_features
+        {
+            col[i] = weight[i * out_features + o];
+        }
+        let maxabs = col.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+        if maxabs == 0.0
+        {
+            continue;
+        }
+        // Search γ over the grid (g/grid for g=1..=grid ⇒ includes γ=1 = RTN).
+        let (mut best_err, mut best_gamma, mut best_scale) = (f32::INFINITY, 1.0, maxabs / qmax);
+        for g in 1..=grid
+        {
+            let gamma = g as f32 / grid as f32;
+            let (err, scale) = omniquant_channel_error(&col, maxabs, qmax, gamma);
+            if err < best_err
+            {
+                best_err = err;
+                best_gamma = gamma;
+                best_scale = scale;
+            }
+        }
+        scales[o] = best_scale;
+        clips[o] = best_gamma;
+        for i in 0..in_features
+        {
+            let q = (col[i] / best_scale).round().clamp(-qmax, qmax);
+            codes[i * out_features + o] = q as i8;
+        }
+    }
+    OmniQuantResult {
+        codes,
+        scales,
+        clips,
+        in_features,
+        out_features,
+    }
+}
+
+#[cfg(test)]
+mod omniquant_tests {
+    use super::*;
+    use crate::nn::rng::PcgEngine;
+
+    /// Round-to-nearest reconstruction error over the **full** range (γ = 1).
+    fn rtn_error(weight: &[f32], in_f: usize, out_f: usize, bits: u32) -> f32 {
+        let qmax = ((1i32 << (bits - 1)) - 1) as f32;
+        let mut err = 0.0f32;
+        for o in 0..out_f
+        {
+            let mut maxabs = 0.0f32;
+            for i in 0..in_f
+            {
+                maxabs = maxabs.max(weight[i * out_f + o].abs());
+            }
+            let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+            for i in 0..in_f
+            {
+                let w = weight[i * out_f + o];
+                let q = (w / scale).round().clamp(-qmax, qmax);
+                let d = w - q * scale;
+                err += d * d;
+            }
+        }
+        err
+    }
+
+    fn omniquant_error(res: &OmniQuantResult, weight: &[f32]) -> f32 {
+        res.dequantize()
+            .iter()
+            .zip(weight)
+            .map(|(&d, &w)| (d - w) * (d - w))
+            .sum()
+    }
+
+    /// **OmniQuant beats round-to-nearest** on heavy-tailed weights: learning a
+    /// per-channel clip that ignores the rare outliers shrinks the step size on the
+    /// bulk, cutting the reconstruction error well below RTN — and at least one
+    /// channel actually clips (`γ < 1`).
+    #[test]
+    fn omniquant_beats_rtn_on_heavy_tailed_weights() {
+        let mut rng = PcgEngine::new(7);
+        let (in_f, out_f) = (64usize, 8usize);
+        let mut w = vec![0.0f32; in_f * out_f];
+        for v in w.iter_mut()
+        {
+            // Bulk ~ small Gaussian-ish; rare large outliers.
+            let mut x = (rng.float_signed() + rng.float_signed()) * 0.1;
+            if rng.float() < 0.03
+            {
+                x += rng.float_signed() * 5.0;
+            }
+            *v = x;
+        }
+        let res = omniquant_quantize(&w, in_f, out_f, 4, 64);
+        let e_omni = omniquant_error(&res, &w);
+        let e_rtn = rtn_error(&w, in_f, out_f, 4);
+        assert!(
+            e_omni < e_rtn,
+            "OmniQuant not better than RTN: omni={e_omni} rtn={e_rtn}"
+        );
+        assert!(
+            res.clips.iter().any(|&g| g < 1.0),
+            "no channel learned to clip"
+        );
+    }
+
+    /// OmniQuant is **never worse than RTN** (the grid includes `γ = 1`): on
+    /// outlier-free near-uniform weights it falls back to RTN, and it is
+    /// deterministic.
+    #[test]
+    fn omniquant_never_worse_than_rtn_and_deterministic() {
+        let mut rng = PcgEngine::new(3);
+        let (in_f, out_f) = (32usize, 4usize);
+        let w: Vec<f32> = (0..in_f * out_f).map(|_| rng.float_signed()).collect();
+        let res = omniquant_quantize(&w, in_f, out_f, 4, 32);
+        let e_omni = omniquant_error(&res, &w);
+        let e_rtn = rtn_error(&w, in_f, out_f, 4);
+        assert!(
+            e_omni <= e_rtn + 1e-6,
+            "omni {e_omni} worse than rtn {e_rtn}"
+        );
+        // Determinism: same codes/scales on a repeat.
+        let res2 = omniquant_quantize(&w, in_f, out_f, 4, 32);
+        assert_eq!(res.codes, res2.codes);
+        assert_eq!(
+            res.scales.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+            res2.scales.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}
+
+// ====================================================================
+// AQLM — Additive Quantization for Language Models (Egiazarian et al.,
+// ICML 2024, arXiv:2401.06118). Roadmap #70.
+// ====================================================================
+
+/// Result of [`quantize_aqlm`]: `num_codebooks` learned codebooks (each
+/// `codebook_size` codewords of dimension `group_size`) plus, per weight group, one
+/// code index into **each** codebook. The group is reconstructed by **summing** the
+/// chosen codewords — *additive* quantization.
+pub struct AqlmResult {
+    codebooks: Vec<Vec<f32>>, // M codebooks, each K·g floats (row-major K×g)
+    codes: Vec<usize>,        // n_groups · M, codes[i·M + m] = index into codebook m
+    group_size: usize,
+    num_codebooks: usize,
+    codebook_size: usize,
+    n_weights: usize,
+}
+
+impl AqlmResult {
+    /// Reconstruct the weights: each group is `Σ_m codebook_m[code_m]`.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let (g, m) = (self.group_size, self.num_codebooks);
+        let n_groups = self.codes.len().checked_div(m).unwrap_or(0);
+        let mut out = vec![0.0f32; n_groups * g];
+        for i in 0..n_groups
+        {
+            for (cb, codebook) in self.codebooks.iter().enumerate()
+            {
+                let a = self.codes[i * m + cb];
+                for t in 0..g
+                {
+                    out[i * g + t] += codebook[a * g + t];
+                }
+            }
+        }
+        out.truncate(self.n_weights);
+        out
+    }
+
+    /// The flat code indices (`n_groups · num_codebooks`).
+    pub fn codes(&self) -> &[usize] {
+        &self.codes
+    }
+
+    /// Effective bits per weight: `num_codebooks·log₂(codebook_size)/group_size`
+    /// (codebook storage is amortised over all groups).
+    pub fn bits_per_weight(&self) -> f32 {
+        self.num_codebooks as f32 * (self.codebook_size as f32).log2() / self.group_size as f32
+    }
+}
+
+/// Index of the nearest codeword in a flat `K×g` codebook to vector `v` (squared
+/// L2; ties to the lower index — deterministic).
+fn nearest_codeword(codebook: &[f32], k: usize, g: usize, v: &[f32]) -> usize {
+    let mut best = 0usize;
+    let mut bd = f32::INFINITY;
+    for j in 0..k
+    {
+        let mut d = 0.0f32;
+        for t in 0..g
+        {
+            let e = v[t] - codebook[j * g + t];
+            d += e * e;
+        }
+        if d < bd
+        {
+            bd = d;
+            best = j;
+        }
+    }
+    best
+}
+
+/// Deterministic vector k-means: `k` centroids of dimension `g` fitted to `data`
+/// (evenly-spaced initialisation, `iters` Lloyd steps; empty clusters keep their
+/// previous value). Returns a flat `K×g` codebook.
+fn vec_kmeans(data: &[Vec<f32>], k: usize, g: usize, iters: usize) -> Vec<f32> {
+    let n = data.len();
+    let mut cents = vec![0.0f32; k * g];
+    if n == 0
+    {
+        return cents;
+    }
+    for j in 0..k
+    {
+        let idx = (j * n / k).min(n - 1);
+        cents[j * g..j * g + g].copy_from_slice(&data[idx][..g]);
+    }
+    for _ in 0..iters
+    {
+        let mut sum = vec![0.0f32; k * g];
+        let mut cnt = vec![0usize; k];
+        for v in data
+        {
+            let a = nearest_codeword(&cents, k, g, v);
+            for t in 0..g
+            {
+                sum[a * g + t] += v[t];
+            }
+            cnt[a] += 1;
+        }
+        for j in 0..k
+        {
+            if cnt[j] > 0
+            {
+                for t in 0..g
+                {
+                    cents[j * g + t] = sum[j * g + t] / cnt[j] as f32;
+                }
+            }
+        }
+    }
+    cents
+}
+
+/// **AQLM** — additive (multi-codebook) quantization. The weights are split into
+/// groups of `group_size`; each group vector is approximated by the **sum** of one
+/// codeword taken from each of `num_codebooks` learned codebooks (each with
+/// `codebook_size` entries). Codebooks are initialised by **residual k-means** and
+/// then refined by **alternating optimisation** — repeatedly re-encode every group
+/// (greedy residual assignment) and re-fit each codebook by least squares given the
+/// other codebooks' current contributions (AQLM's beam search is simplified here to
+/// greedy residual assignment). Because the codewords are *vectors*, additive
+/// quantization captures cross-dimension structure that scalar round-to-nearest
+/// cannot, so it reconstructs better at the same low bit budget. Deterministic.
+pub fn quantize_aqlm(
+    w: &[f32],
+    group_size: usize,
+    num_codebooks: usize,
+    codebook_size: usize,
+    iters: usize,
+) -> AqlmResult {
+    let (g, m, k) = (group_size, num_codebooks, codebook_size);
+    assert!(g >= 1 && m >= 1 && k >= 1, "AQLM: sizes must be ≥ 1");
+    let n_weights = w.len();
+    let n_groups = n_weights.div_ceil(g);
+    // Split (zero-padding the final partial group).
+    let mut groups: Vec<Vec<f32>> = Vec::with_capacity(n_groups);
+    for i in 0..n_groups
+    {
+        let mut grp = vec![0.0f32; g];
+        for (t, gt) in grp.iter_mut().enumerate()
+        {
+            let idx = i * g + t;
+            if idx < n_weights
+            {
+                *gt = w[idx];
+            }
+        }
+        groups.push(grp);
+    }
+    // Initialise codebooks by residual k-means.
+    let mut codebooks: Vec<Vec<f32>> = Vec::with_capacity(m);
+    let mut residual: Vec<Vec<f32>> = groups.clone();
+    for _ in 0..m
+    {
+        let cents = vec_kmeans(&residual, k, g, iters);
+        for grp in residual.iter_mut()
+        {
+            let a = nearest_codeword(&cents, k, g, grp);
+            for t in 0..g
+            {
+                grp[t] -= cents[a * g + t];
+            }
+        }
+        codebooks.push(cents);
+    }
+    // Greedy residual encoding of every group across all codebooks.
+    let encode_all = |codebooks: &[Vec<f32>]| -> Vec<usize> {
+        let mut codes = vec![0usize; n_groups * m];
+        for (i, grp) in groups.iter().enumerate()
+        {
+            let mut r = grp.clone();
+            for (cb, codebook) in codebooks.iter().enumerate()
+            {
+                let a = nearest_codeword(codebook, k, g, &r);
+                codes[i * m + cb] = a;
+                for t in 0..g
+                {
+                    r[t] -= codebook[a * g + t];
+                }
+            }
+        }
+        codes
+    };
+    // Alternating refinement: re-encode, then re-fit each codebook by LS on the
+    // partial residual (group minus the other codebooks' contributions).
+    for _ in 0..iters
+    {
+        let codes = encode_all(&codebooks);
+        for cb in 0..m
+        {
+            let mut sum = vec![0.0f32; k * g];
+            let mut cnt = vec![0usize; k];
+            for (i, grp) in groups.iter().enumerate()
+            {
+                let mut pr = grp.clone();
+                for (mm, codebook) in codebooks.iter().enumerate()
+                {
+                    if mm == cb
+                    {
+                        continue;
+                    }
+                    let a = codes[i * m + mm];
+                    for t in 0..g
+                    {
+                        pr[t] -= codebook[a * g + t];
+                    }
+                }
+                let a = codes[i * m + cb];
+                for t in 0..g
+                {
+                    sum[a * g + t] += pr[t];
+                }
+                cnt[a] += 1;
+            }
+            for j in 0..k
+            {
+                if cnt[j] > 0
+                {
+                    for t in 0..g
+                    {
+                        codebooks[cb][j * g + t] = sum[j * g + t] / cnt[j] as f32;
+                    }
+                }
+            }
+        }
+    }
+    let codes = encode_all(&codebooks);
+    AqlmResult {
+        codebooks,
+        codes,
+        group_size: g,
+        num_codebooks: m,
+        codebook_size: k,
+        n_weights,
+    }
+}
+
+#[cfg(test)]
+mod aqlm_tests {
+    use super::*;
+    use crate::nn::rng::PcgEngine;
+
+    fn mse(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(&x, &y)| (x - y) * (x - y))
+            .sum::<f32>()
+            / a.len() as f32
+    }
+
+    /// Scalar symmetric round-to-nearest error at `bits` over the full range.
+    fn rtn_mse(w: &[f32], bits: u32) -> f32 {
+        let qmax = ((1i32 << (bits - 1)) - 1).max(1) as f32;
+        let maxabs = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+        let deq: Vec<f32> = w
+            .iter()
+            .map(|&x| (x / scale).round().clamp(-qmax, qmax) * scale)
+            .collect();
+        mse(w, &deq)
+    }
+
+    /// AQLM beats scalar RTN at a matched ~2-bit budget on **structured** weights
+    /// (groups built from a few prototype directions) — additive *vector* codebooks
+    /// capture cross-dimension structure scalar quantisation cannot.
+    #[test]
+    fn aqlm_beats_rtn_on_structured_weights() {
+        let (g, m, k) = (4usize, 2usize, 16usize); // 2·log2(16)/4 = 2 bits/weight
+        let n_groups = 256usize;
+        let mut rng = PcgEngine::new(20);
+        // A few prototype directions; each group ≈ scaled prototype + small noise.
+        let n_proto = 6usize;
+        let protos: Vec<Vec<f32>> = (0..n_proto)
+            .map(|_| (0..g).map(|_| rng.float_signed()).collect())
+            .collect();
+        let mut w = Vec::with_capacity(n_groups * g);
+        for i in 0..n_groups
+        {
+            let p = &protos[i % n_proto];
+            let scale = 0.5 + (i % 5) as f32 * 0.4;
+            for &pt in p.iter()
+            {
+                w.push(scale * pt + 0.03 * rng.float_signed());
+            }
+        }
+        let res = quantize_aqlm(&w, g, m, k, 8);
+        let deq = res.dequantize();
+        assert_eq!(deq.len(), w.len());
+        let e_aqlm = mse(&w, &deq);
+        let e_rtn = rtn_mse(&w, 2);
+        assert!(
+            e_aqlm < 0.7 * e_rtn,
+            "AQLM {e_aqlm} not better than 0.7·RTN {e_rtn}"
+        );
+        assert!((res.bits_per_weight() - 2.0).abs() < 1e-6);
+    }
+
+    /// Round-trip dimensions (incl. a non-divisible length) and bit-exact determinism.
+    #[test]
+    fn aqlm_roundtrip_shape_and_determinism() {
+        let mut rng = PcgEngine::new(21);
+        let w: Vec<f32> = (0..103).map(|_| rng.float_signed()).collect(); // not a multiple of g
+        let res = quantize_aqlm(&w, 4, 2, 8, 5);
+        assert_eq!(res.dequantize().len(), w.len());
+        let res2 = quantize_aqlm(&w, 4, 2, 8, 5);
+        assert_eq!(res.codes(), res2.codes());
+        let (d1, d2) = (res.dequantize(), res2.dequantize());
+        assert_eq!(
+            d1.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+            d2.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+        );
+    }
+}
+
+// ====================================================================
+// QuIP# — incoherence processing + E8 lattice codebook (Tseng et al.,
+// ICML 2024, arXiv:2402.04396). Roadmap #64.
+// ====================================================================
+
+/// In-place length-8 **fast Walsh-Hadamard transform**, normalised by `1/√8` so the
+/// transform is **orthogonal** and **involutory** (`FWHT(FWHT(x)) = x`).
+fn fwht8(a: &mut [f32; 8]) {
+    let mut len = 1usize;
+    while len < 8
+    {
+        let mut i = 0usize;
+        while i < 8
+        {
+            for j in i..i + len
+            {
+                let (x, y) = (a[j], a[j + len]);
+                a[j] = x + y;
+                a[j + len] = x - y;
+            }
+            i += len * 2;
+        }
+        len *= 2;
+    }
+    let inv = 1.0 / (8.0f32).sqrt();
+    for v in a.iter_mut()
+    {
+        *v *= inv;
+    }
+}
+
+/// Nearest point of the integer lattice **D8** (`{z ∈ ℤ⁸ : Σ zᵢ even}`) to `y`:
+/// round to nearest integers; if the coordinate sum is odd, flip the parity by
+/// re-rounding the single coordinate with the largest rounding error.
+fn nearest_d8(y: &[f32; 8]) -> [f32; 8] {
+    let mut f = [0.0f32; 8];
+    let mut sum = 0i64;
+    let (mut worst, mut worst_err) = (0usize, -1.0f32);
+    for (i, fi) in f.iter_mut().enumerate()
+    {
+        let r = y[i].round();
+        *fi = r;
+        sum += r as i64;
+        let e = (y[i] - r).abs();
+        if e > worst_err
+        {
+            worst_err = e;
+            worst = i;
+        }
+    }
+    if sum % 2 != 0
+    {
+        // Re-round the worst coordinate to its second-nearest integer (flips parity).
+        f[worst] += if y[worst] - f[worst] >= 0.0
+        {
+            1.0
+        }
+        else
+        {
+            -1.0
+        };
+    }
+    f
+}
+
+/// Nearest point of the **E8 lattice** (`D8 ∪ (D8 + ½·1)`) to `x` — the densest
+/// lattice packing in 8 dimensions, with a lower quantization error than the cubic
+/// (integer) grid at the **same** point density. Closed-form Conway-Sloane decoder:
+/// take the nearer of the best `D8` point and the best `D8 + ½` point.
+pub fn nearest_e8(x: &[f32; 8]) -> [f32; 8] {
+    let a = nearest_d8(x);
+    let mut xs = *x;
+    for v in xs.iter_mut()
+    {
+        *v -= 0.5;
+    }
+    let mut b = nearest_d8(&xs);
+    for v in b.iter_mut()
+    {
+        *v += 0.5;
+    }
+    let dist = |p: &[f32; 8]| -> f32 { (0..8).map(|i| (x[i] - p[i]).powi(2)).sum() };
+    if dist(&a) <= dist(&b) { a } else { b }
+}
+
+/// Apply the **random Hadamard transform** (the QuIP# incoherence step) block-wise
+/// over groups of 8: flip signs by a seeded `±1` diagonal, then a length-8 FWHT. The
+/// map is **orthogonal**; its inverse is [`inverse_random_hadamard_transform`]. Pads to a
+/// multiple of 8 with zeros. `seed` selects the (reproducible) sign pattern.
+pub fn random_hadamard_transform(w: &[f32], seed: u64) -> Vec<f32> {
+    let n = w.len();
+    let nb = n.div_ceil(8);
+    let mut rng = crate::nn::PcgEngine::new(seed);
+    let signs: Vec<f32> = (0..nb * 8)
+        .map(|_| if rng.next_u32() & 1 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let mut out = vec![0.0f32; nb * 8];
+    for b in 0..nb
+    {
+        let mut blk = [0.0f32; 8];
+        for (t, bt) in blk.iter_mut().enumerate()
+        {
+            let idx = b * 8 + t;
+            let v = if idx < n { w[idx] } else { 0.0 };
+            *bt = v * signs[idx];
+        }
+        fwht8(&mut blk);
+        out[b * 8..b * 8 + 8].copy_from_slice(&blk);
+    }
+    out
+}
+
+/// Inverse of [`random_hadamard_transform`] for the same `seed`: the length-8 FWHT
+/// (its own inverse) then the `±1` sign flip. Returns `len` values (drops the padding).
+pub fn inverse_random_hadamard_transform(wr: &[f32], seed: u64, len: usize) -> Vec<f32> {
+    let nb = wr.len() / 8;
+    let mut rng = crate::nn::PcgEngine::new(seed);
+    let signs: Vec<f32> = (0..nb * 8)
+        .map(|_| if rng.next_u32() & 1 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let mut out = vec![0.0f32; nb * 8];
+    for b in 0..nb
+    {
+        let mut blk = [0.0f32; 8];
+        blk.copy_from_slice(&wr[b * 8..b * 8 + 8]);
+        fwht8(&mut blk);
+        for (t, bt) in blk.iter().enumerate()
+        {
+            out[b * 8 + t] = bt * signs[b * 8 + t];
+        }
+    }
+    out.truncate(len);
+    out
+}
+
+/// Result of [`quantize_quip`]: the E8 lattice codes (stored as `2×` coordinates so
+/// half-integers fit an integer), the shared scale, the seed (to regenerate the
+/// sign pattern) and the original length.
+pub struct QuipResult {
+    codes: Vec<i16>, // 2× E8 coordinates, per (padded) weight
+    scale: f32,
+    seed: u64,
+    n_weights: usize,
+}
+
+impl QuipResult {
+    /// Reconstruct the weights: scale the E8 lattice points back, then invert the
+    /// random Hadamard transform.
+    pub fn dequantize(&self) -> Vec<f32> {
+        let wr: Vec<f32> = self
+            .codes
+            .iter()
+            .map(|&c| (c as f32 / 2.0) * self.scale)
+            .collect();
+        inverse_random_hadamard_transform(&wr, self.seed, self.n_weights)
+    }
+
+    /// The E8 codes (`2×` coordinates).
+    pub fn codes(&self) -> &[i16] {
+        &self.codes
+    }
+}
+
+/// **QuIP#** — quantize weights with **incoherence processing** + an **E8 lattice**
+/// codebook. First a [`random_hadamard_transform`] rotates the weights: this spreads
+/// outliers across coordinates (incoherence), shrinking the dynamic range so the
+/// fixed `2^bits` levels resolve the bulk far better at the **same** bit budget.
+/// The rotated weights are then quantized **block-wise in 8-D** to the nearest
+/// [`nearest_e8`] lattice point (scaled, bounded to `±qmax`), which has lower
+/// quantization error than the per-coordinate cubic grid at equal density.
+/// Deterministic. (QuIP#'s larger global Hadamard and curated E8P codebook are
+/// simplified here to a per-8-block Hadamard and the plain E8 lattice.)
+pub fn quantize_quip(w: &[f32], bits: u32, seed: u64) -> QuipResult {
+    assert!((1..=8).contains(&bits), "QuIP#: bits must be in 1..=8");
+    let n = w.len();
+    let wr = random_hadamard_transform(w, seed);
+    let qmax = ((1i32 << (bits - 1)) - 1).max(1) as f32;
+    let maxabs = wr.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+    let scale = if maxabs == 0.0 { 1.0 } else { maxabs / qmax };
+    let nb = wr.len() / 8;
+    let mut codes = vec![0i16; wr.len()];
+    for b in 0..nb
+    {
+        let mut y = [0.0f32; 8];
+        for (t, yt) in y.iter_mut().enumerate()
+        {
+            *yt = (wr[b * 8 + t] / scale).clamp(-qmax, qmax);
+        }
+        let e8 = nearest_e8(&y);
+        for t in 0..8
+        {
+            // Bound to the ±qmax box and store 2× (E8 coords are in ½ℤ).
+            let c = e8[t].clamp(-qmax, qmax);
+            codes[b * 8 + t] = (c * 2.0).round() as i16;
+        }
+    }
+    QuipResult {
+        codes,
+        scale,
+        seed,
+        n_weights: n,
+    }
+}
+
+#[cfg(test)]
+mod quip_tests {
+    use super::*;
+    use crate::nn::PcgEngine;
+
+    fn mse(a: &[f32], b: &[f32]) -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(&x, &y)| (x - y) * (x - y))
+            .sum::<f32>()
+            / a.len() as f32
+    }
+
+    /// The random Hadamard transform is **orthogonal** (round-trips to the input) and
+    /// **reduces the dynamic range** of an outlier-heavy weight (incoherence).
+    #[test]
+    fn rht_orthogonal_and_reduces_outliers() {
+        let mut w = vec![0.02f32; 64];
+        w[5] = 3.0; // a big outlier
+        w[40] = -2.5;
+        let wr = random_hadamard_transform(&w, 7);
+        let back = inverse_random_hadamard_transform(&wr, 7, w.len());
+        for (a, b) in back.iter().zip(&w)
+        {
+            assert!((a - b).abs() < 1e-5, "RHT not orthogonal: {a} vs {b}");
+        }
+        let max_w = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let max_wr = wr.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        assert!(
+            max_wr < 0.6 * max_w,
+            "incoherence did not reduce range: {max_wr} vs {max_w}"
+        );
+    }
+
+    /// The E8 decoder returns a **valid** lattice point (all-integer or all-half-integer
+    /// coords, even integer-sum) and, **on average**, quantizes better than the cubic
+    /// (integer) grid — the E8 packing gain.
+    #[test]
+    fn nearest_e8_valid_and_beats_cubic() {
+        let mut rng = PcgEngine::new(31);
+        let (mut e8_err, mut cubic_err) = (0.0f32, 0.0f32);
+        for _ in 0..4000
+        {
+            let mut x = [0.0f32; 8];
+            for v in x.iter_mut()
+            {
+                *v = 2.5 * rng.float_signed();
+            }
+            let p = nearest_e8(&x);
+            // Validity: coords all-even-or-all-odd in 2× form (all integer or all
+            // half-integer) with even coordinate sum (⇔ 2·Σ ≡ 0 mod 4).
+            let two_c: Vec<i64> = p.iter().map(|&c| (2.0 * c).round() as i64).collect();
+            let all_even = two_c.iter().all(|&t| t % 2 == 0);
+            let all_odd = two_c.iter().all(|&t| t % 2 != 0);
+            assert!(all_even || all_odd, "E8 point not lattice-aligned: {p:?}");
+            assert!(
+                two_c.iter().sum::<i64>() % 4 == 0,
+                "E8 even-sum violated: {p:?}"
+            );
+            e8_err += (0..8).map(|i| (x[i] - p[i]).powi(2)).sum::<f32>();
+            let cubic: Vec<f32> = x.iter().map(|v| v.round()).collect();
+            cubic_err += (0..8).map(|i| (x[i] - cubic[i]).powi(2)).sum::<f32>();
+        }
+        assert!(
+            e8_err < 0.95 * cubic_err,
+            "E8 lattice gain absent: E8 {e8_err} vs cubic {cubic_err}"
+        );
+    }
+
+    /// End-to-end: QuIP# reconstructs **outlier-heavy** weights better than scalar RTN
+    /// at a matched 2-bit budget (incoherence shrinks the range the fixed levels must
+    /// cover; the E8 lattice adds packing gain). Plus determinism.
+    #[test]
+    fn quip_beats_rtn_at_2bit() {
+        let mut rng = PcgEngine::new(33);
+        // Mostly small weights with sparse large outliers (the hard case for RTN).
+        let mut w: Vec<f32> = (0..512).map(|_| 0.05 * rng.float_signed()).collect();
+        for i in (0..512).step_by(37)
+        {
+            w[i] = 2.0 + rng.float_signed();
+        }
+        let res = quantize_quip(&w, 2, 5);
+        let deq = res.dequantize();
+        assert_eq!(deq.len(), w.len());
+        let e_quip = mse(&w, &deq);
+        // Scalar RTN at 2 bits over the full range.
+        let qmax = 1.0f32;
+        let maxabs = w.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
+        let s = maxabs / qmax;
+        let rtn: Vec<f32> = w
+            .iter()
+            .map(|&x| (x / s).round().clamp(-qmax, qmax) * s)
+            .collect();
+        let e_rtn = mse(&w, &rtn);
+        assert!(e_quip < e_rtn, "QuIP# {e_quip} not better than RTN {e_rtn}");
+        // Determinism.
+        let res2 = quantize_quip(&w, 2, 5);
+        assert_eq!(res.codes(), res2.codes());
     }
 }

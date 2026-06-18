@@ -5,7 +5,425 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Corrigé
+- **SIMD `portable` — bug d'alignement (résultats faux, non déterministe)** :
+  `add_f32/f64_inplace`, `dot_f32/f64` et `fma_f32` (`scirust-simd::portable`)
+  découpaient **chaque opérande indépendamment** via `as_simd`/`as_simd_mut`.
+  Quand deux slices avaient des alignements mémoire différents (fréquent : dépend
+  de l'allocation), les boucles SIMD du cœur appariaient des lanes **décalées** →
+  résultats **incorrects**, de façon **non déterministe** (d'où le test
+  `test_add_f32_inplace` qui échouait ~30–50 % des lancers). Réécrites avec
+  `chunks_exact`, qui apparie le bloc k de chaque slice à l'identique quel que
+  soit l'alignement. Ajout d'un test de régression couvrant tous les décalages
+  relatifs (add/dot/fma vs référence scalaire) ; 12/12 lancers verts. Au passage,
+  un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
+
 ### Ajouté — campagne « faire grandir scirust »
+- **Reluplex — vérification *complète* de style SMT** (`nn::ibp::reluplex_verify`/
+  `reluplex_unstable_count`, Katz et al. 2017, roadmap #4) : une recherche de **satisfiabilité**
+  d'un contre-exemple par **case-splitting des phases ReLU** — mais **paresseuse**, la signature de
+  Reluplex : un neurone dont l'intervalle de pré-activation reste entièrement d'un côté de 0 sur la
+  boîte est **stable**, donc sa phase est **forcée** (jamais scindée) ; seuls les neurones
+  **instables** sont scindés, soit `2^instables` feuilles au lieu des `2^cachés` de l'énumération
+  *eager* du MILP (#31). Sur chaque feuille (un patron ReLU complet) le réseau est affine et un
+  contre-exemple est cherché en minimisant chaque marge sur la région du patron (le **LP 2D exact**
+  partagé avec le vérificateur MILP) ; on renvoie le **premier** contre-exemple trouvé (SAT) ou
+  Robust. Distinct du branch-and-bound (#26, scinde le domaine d'entrée) et du MILP (#31, énumère
+  *tous* les patrons) par le **splitting paresseux des phases ReLU**. Oracle honnête : **accord avec
+  MILP** sur tout un balayage de rayons (deux méthodes exactes ⇒ mêmes décisions) ; contre-exemple
+  réel (marge ≤ 0, dans la boîte) ; à petit rayon, **moins de neurones scindés** que `cachés`
+  (élimination par bornes) ; déterministe. Réseau (2 entrées, 1 couche). **Clôt la pile de
+  vérification** (IBP, CROWN, zonotopes, DeepPoly, randomized smoothing, Lipschitz, CROWN-IBP, BaB,
+  MILP, Reluplex).
+- **Inférence vérifiable — argument cryptographique compact** (`scirust_runtime::vinfer`,
+  ZK-based Verifiable ML, roadmap #80) : prolonge les certificats `proof` de la ré-exécution
+  bit-exacte vers une **garantie de soundness succincte**. Le modèle (une couche linéaire entière
+  quantifiée sur le corps premier `GF(p)`, `p = 2³¹−1`) est **engagé** par le hachage de ses poids.
+  Pour vérifier une sortie batchée `Y` revendiquée pour des entrées `X`, le vérifieur exécute la
+  **vérification de Freivalds** sur `GF(p)` : tirer un `r` aléatoire et tester `W·(X·r) = Y·r`.
+  Calculer `W·(X·r)` coûte `O(out·in + in·b)` contre `O(out·in·b)` pour recalculer `Y = W·X`, donc
+  pour un batch c'est **succinct** (sous-linéaire dans le coût de recalcul). Un `Y` faux passe avec
+  proba `≤ 1/p` par défi, donc quelques défis donnent une erreur de soundness négligeable. Le défi
+  `r` est dérivé par **Fiat-Shamir** d'un hachage de `(engagement, X, Y)`, donc non-interactif et
+  **lié à la sortie revendiquée** (le prouveur ne peut pas adapter `Y` à un `r` connu). Oracle
+  honnête : accepte une inférence correcte (déterministe) ; **soundness** — sur 1000 falsifications
+  aléatoires d'une entrée de la sortie, **toutes** rejetées ; l'engagement **lie** le modèle
+  (vérifier contre l'engagement d'un autre modèle échoue) ; Fiat-Shamir **lie** la sortie (la sortie
+  valide d'**autres** entrées est rejetée pour `X`). Fournit la **soundness** cryptographique (la
+  sortie provient prouvablement du modèle engagé), **pas** le zero-knowledge — le vérifieur détient
+  les poids ; les zk-SNARK cachant les poids restent hors périmètre. Couronne la pile de preuve
+  (sommation reproductible #3, certificats `proof`, DiFR #5).
+- **DiFR — vérification d'inférence malgré le non-déterminisme** (`scirust_runtime::difr::difr_verify`,
+  2025, roadmap #5) : les certificats [`proof`] vérifient une inférence par **ré-exécution
+  bit-exacte** — ce qui ne marche que si le vérificateur reproduit l'arithmétique du prouveur à
+  l'identique. Or sur un **matériel différent** (largeurs SIMD, FMA, nombre de threads) la sommation
+  flottante est **non-déterministe**, donc un contrôle bit-exact rejetterait des sorties pourtant
+  honnêtes. DiFR vérifie *malgré* cela : il recompute une **référence canonique** avec
+  `reproducible_dot` (produits et somme accumulés en `f64`, indépendant de l'ordre) et accepte la
+  sortie revendiquée ssi elle se trouve dans une **enveloppe d'erreur flottante saine** de cette
+  référence. *Tout* calcul `f32` honnête — dans *n'importe quel* ordre de sommation — est
+  prouvablement dans l'enveloppe (donc accepté) ; une sortie **falsifiée** au-delà est rejetée.
+  L'enveloppe est la borne d'arrondi du produit scalaire `γ·Σ|termes|` propagée à travers les
+  couches (la ReLU est 1-lipschitzienne, elle la transmet sans l'amplifier) et reste **minuscule**
+  (quelques ppm de l'échelle d'activation), si bien que le contrôle attrape toute falsification
+  signifiante. Oracle honnête : accepte un calcul `f32` dans un **ordre de sommation différent** ;
+  enveloppe **saine** (1000 ordres aléatoires, tous acceptés) et **fine** (< 0,001 de l'échelle) ;
+  **rejette** une falsification (au-delà de l'enveloppe, ici de quoi changer la classe prédite) ;
+  déterministe. Prolonge la sommation reproductible (#3) et l'outillage de preuve d'inférence.
+- **MILP — vérification *exacte*** (`nn::ibp::milp_min_margin`/`milp_verify_robustness`, Tjeng
+  et al. 2019, roadmap #31) : la vérification exacte d'un réseau ReLU par la formulation MILP.
+  L'observation clé : les **patrons d'activation** des ReLU sont précisément les variables
+  **binaires** du MILP, et sur le domaine d'un patron fixé le réseau est **affine**. Pour un petit
+  réseau (2 entrées, 1 couche cachée) on **énumère** les patrons et on résout chaque LP
+  **exactement** — la marge `logitₜ − logitⱼ` y est affine, minimisée sur la boîte intersectée
+  avec les demi-espaces d'activation du patron par **énumération des sommets** du polygone 2D (pas
+  de simplexe fragile : robuste et exact). Le minimum global sur tous les patrons et toutes les
+  classes concurrentes est donc **exact** ; `> 0` ⇒ robuste, sinon l'argmin est un **contre-exemple
+  exact**. Oracle honnête : le minimum énumérée **égale la force brute** (il minore toute valeur
+  d'une grille fine et la grille s'en approche), le contre-exemple est **réel** (marge ≤ 0, dans la
+  boîte), et — étant exact — il est **≥ la borne inférieure (saine) de DeepPoly** partout et
+  **strictement plus serré** à certains rayons ; déterministe. Distinct du branch-and-bound (#26),
+  complet **à tolérance près** : MILP est exact (tranche même la frontière de mesure nulle).
+- **Branch-and-bound — vérification *complète*** (`nn::ibp::verify_robustness`/`BabResult`,
+  GCP-CROWN, Zhang et al. 2022, roadmap #26) : là où IBP/CROWN/DeepPoly donnent **une** borne
+  *saine mais incomplète*, le branch-and-bound **décide**. Il borne les **marges** par classe
+  (`logitₜ − logitⱼ`, fusionnées dans une dernière couche pour que DeepPoly suive la corrélation)
+  sur la boîte d'entrée ; si toutes les bornes inférieures sont `> 0` la boîte est **prouvée
+  robuste** ; sinon il sonde le **centre** de la boîte pour un **contre-exemple concret**, et à
+  défaut **scinde** la boîte le long de son axe le plus large et récurse. Comme les sous-boîtes
+  rétrécissent, la relaxation ReLU de DeepPoly devient exacte, si bien que la recherche **tranche**
+  (jusqu'à une tolérance) — prouvant des cas qu'une borne unique ne peut pas, et renvoyant un
+  contre-exemple réel quand la classe peut effectivement changer. Oracle honnête : `Robust` est
+  **sain** (5000 points échantillonnés bien classés) ; le **rayon ℓ∞ certifié dépasse strictement**
+  celui de DeepPoly seul (et la région supplémentaire est échantillonnée robuste) ; `Unsafe`
+  renvoie un **vrai** contre-exemple (mal classé, dans la boîte) ; déterministe. Exposé dans la CLI
+  `certify`. (Le branchement est sur le **domaine d'entrée** ; le split des ReLU instables et les
+  plans coupants de GCP-CROWN ne sont pas implémentés.) Couronne la pile de vérification (IBP #1,
+  CROWN #2, zonotopes #29, DeepPoly #28, CROWN-IBP #30).
+- **DeepPoly — domaine abstrait relationnel** (`nn::ibp::deeppoly_certify`/`IbpMlp::certify_deeppoly`,
+  Singh et al. 2019, roadmap #28) : un vérificateur de robustesse plus précis qu'IBP. Là où IBP
+  traite chaque neurone par un simple intervalle (perdant toute corrélation), DeepPoly garde pour
+  chaque neurone une **borne basse et haute affines en les entrées** du réseau et les **back-
+  substitue** couche par couche. La relaxation ReLU est **asymétrique** : pour un pré-activation de
+  plage `[l,u]` instable, la borne supérieure est la **corde** `z ≤ (u/(u−l))(y−l)` et la borne
+  inférieure `z ≥ λy` avec `λ` choisi pour **minimiser l'aire** de la relaxation (`λ=1` si `u>−l`,
+  sinon `0`). Comme les bornes restent affines, les corrélations sont préservées et le résultat est
+  plus serré qu'IBP — **à n'importe quelle profondeur** (là où `crown_bounds` était limité à 2
+  couches). Oracle honnête : **sain** (4000 points échantillonnés ∈ boîte certifiée, MLP 3 couches)
+  + **strictement plus serré qu'IBP** sur `relu(x)+relu(−x)=|x|` sur `x∈[−1,1]` (DeepPoly donne la
+  boîte **exacte** [0,1] car le `x` s'annule dans la borne supérieure, vs IBP [0,2]) + déterminisme.
+  Exposé dans la CLI `certify` (à côté d'IBP, CROWN, zonotopes, smoothing). Prolonge IBP (#1) /
+  CROWN (#2) / zonotopes (#29).
+- **CROWN-IBP — entraînement certifié (vérifié)** (`nn::crown_ibp::CrownIbpMlp`, Zhang et al.
+  2020, roadmap #30) : l'entraînement ordinaire minimise la perte aux entrées *concrètes* — un
+  réseau peut les ajuster parfaitement et pourtant **changer de prédiction** sous une perturbation
+  minime. CROWN-IBP entraîne au contraire sur une **borne certifiée de la perte du pire cas** sur
+  une boule ℓ∞ autour de chaque entrée, rendant le réseau **prouvablement** robuste. L'idée clé :
+  la **propagation par intervalles (IBP) est différentiable**. Pour une couche affine `y=x·W+b`,
+  la boîte se transforme en `centre'=centre·W+b`, `rayon'=rayon·|W|` — et `|W|=relu(W)+relu(−W)`,
+  donc toute la borne (y compris le `|W|` qui semblait exiger un op `abs` dédié) tourne sur la
+  tape N-D ; la ReLU sur un intervalle `[l,u]` devient `[relu(l),relu(u)]`. Les **logits robustes**
+  placent la vraie classe à sa borne **inférieure** et les autres à leur borne **supérieure**
+  (`zₜ=cₜ−rₜ`, `z_j=c_j+r_j`) : une cross-entropy faible dessus signifie que la vraie classe gagne
+  *même dans le pire cas* — le point est **certifié**. Oracle honnête : la propagation IBP sur la
+  tape **coïncide** avec le vérificateur de référence `IbpMlp` (plain `f32`) et est **saine**
+  (2000 points échantillonnés ∈ boîte certifiée) ; après entraînement certifié, le **rayon ℓ∞
+  certifié croît** nettement (réseau robuste-entraîné vs accuracy-only, tous deux classant juste à
+  100 %) + déterminisme bit-exact. Prolonge IBP (#1) / CROWN (#2) / zonotopes (#29) vers
+  l'entraînement.
+- **Sophia — optimiseur de 2e ordre clippé** (`nn::nd_optim::NdSophia`, Liu et al. 2023, roadmap
+  #44) : Sophia met à l'échelle le momentum de chaque coordonnée par une estimation de la
+  **Hessienne diagonale** et **clippe** le résultat : `θ ← θ − lr·clip(m/max(γ·h,eps),ρ)`. Les
+  directions plates (petite courbure `h`) prennent un pas borné de type signe ; les directions
+  courbées prennent un pas de type **Newton** `m/h` — d'où une robustesse au mauvais
+  conditionnement. La Hessienne diagonale est estimée par un **estimateur de Hutchinson** avec un
+  **produit Hessien-vecteur en différences finies** : avec un vecteur de signes `v∈{±1}` seedé,
+  `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` et `ĥ = v⊙Hv` (pour un quadratique c'est la Hessienne diagonale
+  **exacte**, mon ancien blocage « il faut un op `abs` sur la tape » était infondé — le clipping
+  se fait dans l'optimiseur en `f32`, pas sur la tape). Comme SAM, cela demande **deux** calculs
+  de gradient par pas, donc l'appelant orchestre `probe` (perturbe `θ` de `εv`) puis `step`
+  (restaure `θ`, applique la mise à jour) — optimiseur **de bibliothèque hors de la boucle
+  `lm --opt`** (à un seul gradient). Oracle honnête : **converge sur un quadratique mal
+  conditionné** (courbures 4 vs 0,25, conditionnement 16) là où le pas Newton par coordonnée
+  neutralise le conditionnement + déterminisme bit-exact (probe seedé). Rejoint la famille
+  d'optimiseurs (Adam, Lion, Muon, Shampoo, SOAP, Adafactor, LAMB, Adan, Prodigy, SAM, …).
+- **QuIP# — incohérence Hadamard + codebook lattice E8** (`quantization::quantize_quip`/
+  `nearest_e8`/`random_hadamard_transform`, Tseng et al. 2024, roadmap #64) : deux idées. (1) Le
+  **traitement d'incohérence** : multiplier les poids par une **transformée de Hadamard
+  randomisée** (signes ±1 seedés puis FWHT, *orthogonale*) étale les aberrants à travers les
+  coordonnées et **rétrécit la plage dynamique** ; à budget de bits **égal**, les `2^bits`
+  niveaux fixes résolvent alors bien mieux le gros des poids (le RTN scalaire devait, lui, étaler
+  ses rares niveaux sur toute la plage pour couvrir les aberrants). (2) Le codebook **lattice
+  E8** : quantifier les poids tournés par blocs de 8 vers le point le plus proche du **réseau
+  E8** (`D8 ∪ (D8+½·1)`, décodeur fermé de Conway-Sloane) — le plus dense en dimension 8, avec un
+  **moment quadratique** plus bas que la grille cubique à densité **égale** (gain de packing
+  ~14 %). Oracle honnête : la RHT est orthogonale (round-trip exact) et **réduit la plage** d'un
+  poids à aberrants ; le décodeur E8 renvoie un point **valide** du réseau (coords toutes
+  entières ou toutes demi-entières, somme paire) et quantifie **mieux que la grille cubique en
+  moyenne** (gain lattice mesuré sur 4000 vecteurs) ; bout-en-bout, QuIP# reconstruit **mieux que
+  le RTN** scalaire à budget 2-bit sur des poids à aberrants épars + déterminisme bit-exact. (Le
+  grand Hadamard global et le codebook E8P curé de QuIP# sont simplifiés ici en un Hadamard par
+  bloc de 8 et le réseau E8 nu.) Complète la famille de quantification (AQLM, GPTQ, AWQ, NF4,
+  SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
+- **AQLM — quantification additive multi-codebook** (`quantization::quantize_aqlm`/`AqlmResult`,
+  Egiazarian et al. 2024, roadmap #70) : au lieu de quantifier chaque poids **scalairement**, AQLM
+  découpe les poids en **groupes** de dimension `g` et approxime chaque groupe par la **somme**
+  d'un mot de code tiré de chacun de `M` codebooks appris (de `K` mots chacun). Les codebooks sont
+  initialisés par **k-means résiduel** puis affinés par **optimisation alternée** : ré-encoder
+  chaque groupe (assignation résiduelle gloutonne à travers les `M` codebooks) puis ré-ajuster
+  chaque codebook par moindres carrés sachant la contribution des autres (la beam search d'AQLM
+  est ici simplifiée en assignation gloutonne — documenté). Comme les mots de code sont des
+  **vecteurs**, la quantification additive capte la **structure inter-dimensions** que le
+  round-to-nearest scalaire ignore, d'où une bien meilleure reconstruction à bas budget. Oracle
+  honnête : erreur **< 0,7× RTN** scalaire à budget ~2-bit **égal** (`M·log₂K/g`) sur des poids
+  structurés (groupes bâtis sur quelques directions prototypes) + round-trip exact (longueur non
+  divisible, padding zéro) + déterminisme bit-exact. Rejoint la famille de quantification (GPTQ,
+  AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8, OmniQuant, BitNet).
+- **S5 — SSM MIMO + scan associatif parallèle** (`nn::nd_layers::s5_scan`/`s5_parallel_scan`/
+  `NdS5`, Smith et al. 2023, roadmap #52) : contrairement aux SSM **SISO par canal** de S4D
+  (chaque canal son propre état indépendant), S5 pilote un **unique état partagé** de dimension
+  `n` avec **toutes** les entrées via une matrice `B`, et lit `m` sorties via `C` (d'où *MIMO*) :
+  `hₜ=Ā⊙hₜ₋₁+xₜB`, `yₜ=hₜC`. La récurrence étant linéaire, elle se calcule par un **scan
+  associatif** : l'élément `(aₜ,uₜ)` représente la carte affine `h↦aₜ⊙h+uₜ`, et ces cartes se
+  composent par l'opérateur **associatif** `(a₁,u₁)∘(a₂,u₂)=(a₂⊙a₁, a₂⊙u₁+u₂)`. Un scan
+  inclusif de **Hillis-Steele** (ordre de doublage `log₂ seq` fixe ⇒ **déterministe**) produit
+  tous les états préfixes en parallèle. Oracle honnête : le **scan parallèle ≡ la récurrence
+  séquentielle** — testé avec `aₜ` **variable dans le temps** (un vrai scan associatif, pas le
+  cas trivial constant), ce qui prouve l'associativité qui licencie la parallélisation ;
+  `s5_scan` sur la tape ≡ référence MIMO écrite à la main (valide le câblage `B`/`C`) ;
+  **gradient check** (x, Ā, B, C) ; `NdS5` entraîne (MSE↓) + déterminisme bit-exact. Complète la
+  famille espace-d'états (Mamba, Mamba-2/SSD, S4).
+- **Mamba-2 / SSD — dualité espace-d'états ↔ attention** (`nn::nd_layers::ssd_dual`/`NdMamba2`,
+  Dao & Gu 2024, roadmap #50) : Mamba-2 restreint la matrice d'état du SSM à une **décroissance
+  scalaire** `aₜ` par pas (au lieu du `A` diagonal par canal de Mamba). Cette restriction rend
+  la récurrence linéaire `Hₜ=aₜHₜ₋₁+xₜBₜᵀ` (état `d×n`), `yₜ=HₜCₜ` **exactement égale** à une
+  unique forme quadratique masquée de type attention — la **dualité** : `Y=(L⊙CBᵀ)X` avec
+  `L[i,j]=∏_{j<k≤i}aₖ` pour `i≥j`. Calculée sur la tape : le log-décroissance cumulé
+  `cumlogᵢ=Σ_{k≤i}a_logₖ` est une **préfixe-somme** (matmul avec une matrice triangulaire de
+  uns), `L=exp(cumlogᵢ−cumlogⱼ)` masquée causale, `Y=(L⊙CBᵀ)X`. `a_log=log a` est le paramètre
+  (en Mamba-2 `a_logₜ=Δₜ·A`), donc **aucun op `log`** n'est requis ; le masque est appliqué
+  **avant** l'`exp` (`diff⊙mask`, puis `exp`, puis `⊙mask`) pour garder l'exposant borné dans le
+  triangle supérieur (évite `inf·0=NaN`) et y annuler exactement. Oracle honnête : la **forme
+  duale ≡ la récurrence séquentielle** écrite à la main (c'est littéralement la dualité du
+  papier) ; **gradient check** (x, B, C, a_log) ; `NdMamba2` entraîne (MSE↓) + déterminisme
+  bit-exact. Rejoint Mamba/S4/RWKV/RetNet/GLA/HGRN/DeltaNet/xLSTM/Hyena.
+- **FNO — opérateur neuronal de Fourier** (`nn::fno::FnoSpectralConv1d`/`NdFno`, Li et al.
+  2021, roadmap #75) : un opérateur neuronal apprend une application entre **fonctions** (p.ex.
+  condition initiale ↦ solution de PDE), pas entre vecteurs de taille fixe. FNO réalise
+  l'intégrale de noyau **globale** dans le **domaine de Fourier** : transformer le signal
+  échantillonné, garder les `modes` plus basses fréquences, multiplier chaque mode par un
+  **poids complexe appris** `R_k=Ar_k+iAi_k` (matrice `width×width`, mélange de canaux), puis
+  transformer en sens inverse. La DFT réelle et son inverse sont des **matrices cosinus/sinus
+  fixes** : tout le transform est un matmul ordinaire (déterministe) que la tape N-D dérive
+  directement — **sans FFT, sans type complexe, sans nouvel op** ; les poids par mode sont
+  appliqués par un matmul **par lots** (`bmm`) sur les modes. Bloc FNO complet :
+  `σ(SpectralConv(v)+W·v)`. Oracle honnête : reconstruction **exacte** d'un signal band-limité
+  aux modes gardés (DFT⁻¹∘DFT, valide les matrices + l'inverse unilatéral facteur-2) ;
+  **gradient check** par différences finies (signal, Ar, Ai) ; comme la dérivation est
+  diagonale en Fourier (`d/dx↔×ik`), une seule conv spectrale **apprend l'opérateur de
+  dérivation** `sin(ωx+φ)↦ω cos(ωx+φ)` et **généralise à une phase non vue** (MSE test <0,02,
+  ajustement convexe) ; déterminisme bit-exact. Rejoint la famille calcul scientifique
+  (Neural ODE, PINN, DeepONet, KAN).
+- **Hyena — convolutions longues implicites + gating** (`nn::nd_layers::hyena_long_conv`/
+  `NdHyena`, Poli et al. 2023, roadmap #56) : un mélangeur de tokens **sans attention**. La
+  portée longue vient d'une **convolution causale** dont le filtre n'est pas stocké tap par
+  tap mais **généré** par un petit MLP à partir d'un encodage positionnel fixe, puis fenêtré
+  par une décroissance exponentielle apprenable `exp(−γ·t̄)` par canal — c'est ce qui permet
+  des filtres **longs à peu de paramètres** (le coeur de Hyena). L'équivalent du rôle de
+  l'attention (la dépendance aux données) est fourni par un **gating multiplicatif** :
+  `z=x1⊙(h1*v)` puis `z=x2⊙(h2*z)` (ordre 2). La convolution causale par canal
+  `y[t,c]=Σ_τ h[τ,c]·u[t−τ,c]` est exprimée sur la tape comme `Σ_τ h[τ,:]⊙(Sτ·u)` avec des
+  **matrices de décalage constantes** `Sτ` (distribuer le matmul sur les taps apprenables ⇒
+  différentiable en `u` et `h` sans op scatter). Oracle honnête : conv ≡ référence causale
+  écrite à la main ; **gradient check** par différences finies (`u`, `h`) ; entraînement
+  `NdHyena` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de séquence.
+- **xLSTM — sLSTM scalaire + mLSTM matriciel** (`nn::nd_layers::slstm_scan`/`mlstm_scan`/
+  `NdXlstm`, Beck et al. 2024, roadmap #57) : le LSTM étendu remplace les portes sigmoïdes
+  de l'entrée par une **porte exponentielle** `iₜ=exp(ĩₜ)` accompagnée d'un **état
+  normaliseur** `nₜ=fₜnₜ₋₁+iₜ`, la sortie étant `hₜ=oₜ⊙(cₜ/nₜ)`. Comme `cₜ/nₜ` est une
+  moyenne pondérée positive de `zₜ=tanh∈(−1,1)`, la sortie reste bornée dans (−1,1) : la
+  récurrence est **stable sans le stabilisateur log** (omis, c'est un pur dispositif
+  numérique qui s'annule dans le ratio). `tanh` est construit à partir du seul op `sigmoid`
+  via l'identité exacte `tanh(x)=2σ(2x)−1`. La variante **mLSTM** porte une mémoire
+  covariance `d×d` mise à jour par produits externes `vₜᵀkₜ`, lue par requête, avec le
+  dénominateur stabilisant `max(|nₜ·qₜ|,1)` reconstruit **exactement** via `|a|=relu(a)+
+  relu(−a)` et `max(a,1)=relu(a−1)+1` (aucun nouvel op, garde fidèle). Oracle honnête :
+  mLSTM ≡ récurrence de référence écrite à la main (dénominateur actif) ; **gradient check**
+  par différences finies (sLSTM : 4 portes ; mLSTM : q,k,v,iₜ,fₜ, régime lisse) ;
+  entraînement `NdXlstm` (MSE↓) + déterminisme bit-exact. Rejoint la famille de modèles de
+  séquence (Mamba, S4, RWKV, RetNet, GLA, HGRN, DeltaNet).
+- **OmniQuant — clipping de poids apprenable** (`quantization::omniquant_quantize`, Shao
+  et al. 2024, roadmap #65) : le round-to-nearest quantifie chaque canal sur sa plage
+  **complète** `[−max|w|, max|w|]` — avec des poids à queue lourde, la plupart des niveaux
+  de code sont gaspillés sur de rares aberrants. OmniQuant apprend un **facteur de coupe**
+  `γ∈(0,1]` par canal qui **rétrécit** la plage à `γ·max|w|`, échangeant un peu d'erreur de
+  coupe sur les aberrants contre des pas bien plus fins sur le gros des poids — trouvé ici
+  par une recherche déterministe sur une grille qui **inclut `γ=1`** (RTN pur). Oracle
+  honnête : erreur de reconstruction **< RTN** sur poids à queue lourde (≥1 canal coupe
+  réellement) + **jamais pire** que RTN (γ=1 est candidat) + déterminisme bit-exact.
+  Rejoint la famille de quantification (GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8).
+- **S4 (S4D) — espace d'états structuré diagonal** (`nn::nd_layers::s4_scan`/`NdS4`,
+  Gu et al. 2022, roadmap #51) : SSM **linéaire invariant dans le temps** (contrairement
+  au `selective_scan` de Mamba dont les matrices dépendent de l'entrée) — `A` diagonal,
+  `B`/`C`/`Δ` sont des **paramètres fixes** ; discrétisation `Ā=exp(Δ⊙A)`, `B̄=Δ⊙B`,
+  récurrence `h_t=Ā⊙h_{t−1}+B̄⊙x_t` (état `(d,n)`) déroulée sur la tape, lecture
+  `y_t=Σ_n C⊙h_t`. Init **HiPPO** diagonale (S4D-Lin) `A[:,j]=−(j+1)`, `A<0` contractif.
+  La couche `NdS4` ajoute projections d'entrée/sortie + skip gaté `D⊙x`. Oracle :
+  **gradient check** (différences finies vs analytique sur x, a_log, B, C, log_dt) +
+  entraînement (MSE↓ vers une cible) + déterminisme bit-exact. Couche de bibliothèque.
+- **AI² / zonotopes — domaine abstrait pour la vérification** (`nn::ibp::Zonotope`/
+  `IbpMlp::certify_zonotope`, Gehr et al. 2018, roadmap #29) : propagation par
+  **zonotopes** (centre + générateurs, `{c+Σεᵢgᵢ : εᵢ∈[−1,1]}`) — les couches affines
+  sont **exactes**, la ReLU est relaxée façon **DeepZ** (`y=λx+μ±μ`, `λ=u/(u−l)`,
+  `μ=−λl/2`, un générateur frais par neurone instable). Les `εᵢ` partagés capturent les
+  **corrélations** linéaires que les intervalles perdent. Oracle honnête : affine exacte
+  (= forward intervalle) + **soundness** (des milliers de points échantillonnés dans la
+  boîte d'entrée tombent dans la boîte zonotope d'un MLP ReLU 3 couches) + **plus serré
+  qu'IBP sous corrélation** (réseau `relu(x)−relu(x)` ≡ 0 : zonotope `[−0,5;0,5]` vs IBP
+  `[−1;1]`, les deux sains). Étend `nn::ibp` (IBP #1, CROWN #2) ; affiché dans la CLI
+  `certify` à côté d'IBP et CROWN.
+- **EAGLE — décodage spéculatif au niveau features** (`nn::nd_decoder::EagleHead`/
+  `generate_eagle`, Li et al. 2024, roadmap #62) : là où Medusa prédit des *tokens*
+  futurs, EAGLE brouillonne au niveau **feature** — une tête légère mappe
+  `(feature_t, embed(token_{t+1})) → feature_{t+1}`, et la tête LM **gelée** transforme
+  la feature prédite en token ; chaînée, elle donne un brouillon **autorégressif**
+  vérifié par une passe (préfixe accepté + correction greedy). `NdDecoderLM` expose
+  `token_embedding`/`head_logits`/`d_model` ; `EagleHead::train` ajuste la tête par MSE
+  sur les features du modèle gelé. Oracle honnête : sortie **exactement = greedy** pour
+  une tête **quelconque** (vérification) + déterminisme + tête **entraînée** ⇒ ≥1 bloc
+  accepte >1 token (forwards < 2·n) en restant exact. Couche de bibliothèque.
+- **Medusa — décodage à têtes multiples** (`nn::nd_decoder::MedusaHeads`/`generate_medusa`,
+  Cai et al. 2024, roadmap #61) : accélère le décodage en attachant au modèle de base
+  des **têtes supplémentaires** (tête `j` prédit le token à `+j+2` depuis l'état caché),
+  qui produisent un **brouillon multi-token d'un seul forward** ; une passe de
+  vérification accepte le plus long préfixe correspondant à l'argmax du modèle puis
+  commet un token de correction/bonus. `NdDecoderLM` expose désormais
+  `forward_hidden`/`forward_with_hidden` (état caché post-LayerNorm) ; `MedusaHeads::train`
+  entraîne les têtes sur les états cachés du modèle **gelé**. Oracle honnête : sortie
+  **exactement = greedy** pour des têtes **quelconques** (même aléatoires — la vérification
+  garantit l'exactitude) + déterminisme + têtes **entraînées** ⇒ au moins un bloc accepte
+  >1 token (forwards < 2·n) tout en restant exact. Couche de bibliothèque.
+- **PagedAttention — KV-cache paginé** (`nn::paged_attention::PagedKvCache`, Kwon et al.
+  / vLLM 2023, roadmap #63) : le cache clés/valeurs du décodage est découpé en **blocs**
+  de taille fixe tirés d'un pool partagé, adressés indirectement par une **table de
+  blocs** (comme la pagination mémoire) ⇒ quasi zéro fragmentation. `append` remplit les
+  blocs à la demande, `gather_keys/values` reconstruit le cache contigu, et `attention`
+  fait le produit scalaire softmax en indexant clés/valeurs **à travers la table**.
+  Oracle honnête : avec des blocs **leurres** interleavés (layout physique non
+  séquentiel), le gather est **bit-identique** aux vecteurs insérés et l'attention
+  paginée est **bit-identique** à l'attention sur cache contigu (même ordre
+  arithmétique) — la pagination est prouvée sans coût numérique ; + comptabilité des
+  blocs (`⌈len/bloc⌉`) et cas vide + déterminisme. Couche de bibliothèque (nouveau module).
+- **DoRA — adaptation low-rank décomposée poids** (`nn::dora::DoraLinear`, Liu et al.
+  2024, roadmap #73) : PEFT qui décompose un poids gelé `W₀` en **magnitude** (vecteur
+  par colonne `m`) × **direction** (normalisée), la direction étant pilotée par une
+  mise à jour low-rank LoRA `BA` : `W' = m ⊙ (W₀+BA)/‖W₀+BA‖_col`. Seuls `m`, `A`, `B`
+  s'entraînent. Backward de la normalisation par colonne en **forme close** (`u=V/‖V‖`,
+  `∂L/∂V=(m/‖V‖)(gw−u·s)`, `∂L/∂m=s`). Oracle honnête : init `B=0, m=‖W₀‖_col` ⇒ poids
+  effectif **= W₀ exactement** (l'adaptation part de la fonction pré-entraînée) +
+  **gradient check** (différences finies centrales vs analytique, params génériques) +
+  récupère une cible générée par DoRA (perte ÷100 par descente de gradient) +
+  déterminisme bit-exact. Couche de bibliothèque (nouveau module).
+- **GaLore — projection low-rank des gradients** (`nn::nd_optim::NdGalore`/
+  `galore_subspace`, Zhao et al. 2024, roadmap #48) : optimiseur à **mémoire
+  réduite** — pour un paramètre matriciel, le gradient `G` est projeté sur son
+  propre sous-espace dominant rang-`r` `P` (top-`r` vecteurs singuliers gauches via
+  `jacobi_eigenvectors`, rafraîchi tous les `update_gap` pas), Adam tourne sur le
+  petit gradient projeté `PᵀG` puis l'update est remonté par `P`. Les états passent
+  de `m×n` à `rank×max(m,n)` ; les vecteurs retombent sur Adam. Oracle honnête :
+  `P` **orthonormal** (`PᵀP=I`) et projection **orthogonale optimale** (identité de
+  Pythagore `‖G−PPᵀG‖²=‖G‖²−‖PᵀG‖²`, erreur décroissante en `r`, nulle au rang
+  plein) + gradient **bas-rang reconstruit exactement** (sous-rang ⇒ résidu) +
+  **convergence sur une cible bas-rang** avec état compressé `2×4` (≠ `4×4`) +
+  sous-rang ne l'atteint pas + déterminisme bit-exact. Rejoint la famille
+  d'optimiseurs ; CLI `lm --opt galore`.
+- **YaRN — extension de contexte RoPE** (`nn::yarn`, Peng et al. 2023, roadmap #60) :
+  étend le contexte utilisable d'un modèle RoPE d'un facteur `s` par interpolation
+  **NTK-by-parts** — `yarn_frequencies` garde intactes les dimensions **haute
+  fréquence** (`r_p>β` ⇒ ordre local préservé), interpole pleinement les **basses
+  fréquences** (`r_p<α` ⇒ `θ_p→θ_p/s`), avec une rampe linéaire entre les deux
+  (`θ'_p=θ_p·((1−γ)/s+γ)`). `rope_apply_freqs`/`rope_yarn` appliquent la rotation
+  (convention emboîtée identique à la RoPE existante de `autodiff::nd`) ;
+  `yarn_attention_scale` donne la température `0.1·ln(s)+1`. Oracle honnête :
+  **propriété de position relative** `⟨rope(q,m),rope(k,n)⟩=g(m−n)` préservée malgré
+  les fréquences modifiées + l'angle d'une dimension basse fréquence à la longueur
+  **étendue** `s·L` revient **exactement** à sa valeur d'entraînement à `L` (alors
+  que la RoPE simple explose) + bornes NTK-by-parts (haute fréquence inchangée, basse
+  = `θ/s`, rampe monotone) + `scale=1` ≡ RoPE simple + déterminisme. Couche de
+  bibliothèque (primitive positionnelle, pas de CLI).
+- **Learn then Test (LtT)** (`nn::conformal::learn_then_test`/`hoeffding_pvalue`,
+  Angelopoulos et al. 2021, roadmap #37) : contrôle **distribution-free** de
+  **risques multiples arbitraires** (non emboîtés) par tests d'hypothèses. Chaque
+  configuration `λ` d'une grille devient une **p-value de Hoeffding** pour
+  `H₀: R(λ) > α` (`p = exp(−2n(α−R̂)₊²)`, super-uniforme sous le null), puis
+  correction **familiale de Bonferroni** au niveau `δ` : on retient les `λ` avec
+  `p ≤ δ/m`. Garantit que, avec proba `≥ 1−δ`, **toute** config retenue vérifie
+  `R(λ) ≤ α` (FWER `≤ δ`) — **sans** hypothèse de monotonie (contrairement à RCPS
+  #36). Oracle honnête : FWER vérifié **par simulation** (toutes les configs sur
+  la frontière `R=α` ⇒ FWER mesuré `≤ δ`, vs sélection naïve qui échoue ~toujours)
+  + puissance (les configs sûres sont retenues, les non-sûres rejetées) +
+  déterminisme. Couche de bibliothèque.
+- **Comptable RDP (Rényi DP)** (`dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon`,
+  Mironov 2017, roadmap #78) : comptabilité de budget de confidentialité par
+  **Rényi-DP**, plus serrée et plus principielle que la composition `(ε,δ)` naïve.
+  RDP du mécanisme gaussien `RDP(α)=α/(2σ²)` (additif en composition), conversion
+  Mironov `ε=RDP(α)+ln(1/δ)/(α−1)` (le `α−1` est ce qui la rend serrée), optimisée
+  sur une grille d'ordres α. Renforce le DP-SGD existant (#19). Oracle : RDP et
+  conversion exactes (formes closes) + `ε` **bien en dessous** de la composition
+  linéaire basique (qui paie une pénalité ~√étapes) + monotonie (plus d'étapes ⇒ ε
+  plus grand ; plus de bruit ⇒ ε plus petit). Couche de bibliothèque.
+- **Watermark pour LLM** (`nn::watermark`, Kirchenbauer et al. 2023, roadmap #79) :
+  filigrane statistique rendant le texte généré **auditable sans accès au modèle**.
+  Le token précédent seede une partition du vocabulaire en liste **verte** (fraction
+  γ) / rouge ; `apply_green_bias` ajoute `δ` aux logits verts pour orienter la
+  génération. Le détecteur, qui ne connaît que le seed et γ, recompte les tokens
+  verts : un texte filigrané en contient bien plus que la fraction γ attendue par
+  hasard, ce qu'un **test z** `(g−γn)/√(nγ(1−γ))` (`detect_z`) signale par une
+  p-value minuscule, tandis que le texte naturel score `z≈0`. Tout est un hash
+  déterministe de `(seed, prev, token)`. Oracle : fraction verte ≈ γ + biais
+  appliqué aux seuls tokens verts + texte filigrané détecté (z≫8) vs naturel (z≈0)
+  + un **mauvais seed ne détecte pas** (pas de fausse provenance) + déterminisme.
+  Couche de bibliothèque.
+- **DeepONet — apprentissage d'opérateurs** (`nn::deeponet::DeepONet`, Lu et al.
+  2021, roadmap #76) : apprend un **opérateur** `G : u ↦ G(u)` (fonction →
+  fonction) via une factorisation **branch × trunk** `G(u)(y) ≈ Σ_k b_k(u)·t_k(y)`
+  — la branch encode la fonction d'entrée `u` (échantillonnée à des capteurs
+  fixes), la trunk encode la position `y`. Variante **POD-DeepONet** (trunk cosinus
+  **fixe** `cos(kπy)` + branch **linéaire**) ⇒ ajustement **convexe**, exact pour
+  les opérateurs linéaires comme l'**antidérivée** `∫₀^y u`. Oracle : entraîné sur
+  certaines fonctions, il approxime l'antidérivée sur des fonctions **non vues** à
+  MSE test < 0,01 (≪ prédicteur constant) — la propriété d'apprentissage
+  d'opérateurs — + déterminisme. Couche de bibliothèque.
+- **Deep Ensembles** (`nn::ensemble::DeepEnsemble`, Lakshminarayanan, Pritzel &
+  Blundell 2017, roadmap #40) : incertitude prédictive par **ensemble seedé**. N
+  petits MLP ReLU (`1→hidden→1`) entraînés sur la tape N-D avec `NdAdam`, chacun
+  seedé différemment ; `predict(x)` renvoie `(moyenne, écart-type)` — l'estimation
+  ponctuelle et son **incertitude épistémique** (désaccord entre membres). Oracle :
+  la MSE de la moyenne d'ensemble est ≤ la MSE moyenne des membres (Jensen) +
+  l'écart-type est **bien plus grand hors-distribution** (loin de la plage
+  d'entraînement) qu'en-distribution + déterminisme bit-exact. Couche de
+  bibliothèque.
+- **LLM.int8()** (`quantization::int8_mixed_matmul`, Dettmers et al. 2022, roadmap
+  #71) : matmul mixte int8/fp32. Les activations des transformeurs ont quelques
+  **colonnes de features outliers** de très grande magnitude ; les quantifier en
+  int8 avec le reste gonfle l'échelle et écrase la résolution des features
+  normales. LLM.int8() garde ces colonnes (et les lignes de W correspondantes) en
+  **pleine précision** et quantifie le reste en **int8** :
+  `X·W = X_normal·W_normal (int8) + X_outlier·W_outlier (fp32)`. Une colonne est
+  outlier si un `|X[i,j]|` dépasse le seuil (défaut 6.0). Oracle : sur des
+  activations à colonnes outliers, l'erreur vs fp est **< 0,5×** celle de l'int8
+  simple ; sans outliers, se réduit à l'int8 pur ; déterminisme. Couche de
+  bibliothèque.
+- **RCPS — Risk-Controlling Prediction Sets** (`nn::conformal::hoeffding_ucb` +
+  `rcps_select`, Bates et al. 2021, roadmap #36) : là où le conformal contrôle la
+  *couverture*, RCPS contrôle un **risque borné quelconque** (perte dans [0,1] :
+  taux de faux négatifs, non-couverture, …) avec une garantie **haute probabilité
+  (PAC)**. Pour une famille de prédicteurs `C_λ` à risque non-croissant en λ, RCPS
+  choisit le plus petit `λ̂` dont la **borne de concentration de Hoeffding** sur le
+  risque est ≤ α (pour λ̂ et tout λ plus grand) ⇒ `R(λ̂) ≤ α` avec proba ≥ 1−δ.
+  Oracle : la borne dépasse la moyenne du bon écart + sélection exacte (cas
+  calculé) + sur données fraîches le risque empirique reste ≤ α (borne
+  conservatrice). Couche de bibliothèque.
 - **Prodigy** (`nn::nd_optim::NdProdigy` + `ProdigyConfig`, Mishchenko & Defazio
   2023, roadmap #46) : un Adam **sans learning-rate** (« parameter-free »). Il
   estime en ligne la distance `d ≈ ‖x₀ − x*‖` à la solution — via la corrélation

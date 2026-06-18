@@ -1894,6 +1894,173 @@ impl NdSam {
     }
 }
 
+/// Hyper-parameters for [`NdSophia`]. [`Default`]: `lr = 0.1`, `β1 = 0.96` (gradient
+/// EMA), `β2 = 0.99` (Hessian EMA), `gamma = 1.0` (Hessian scaling), `rho = 1.0`
+/// (per-coordinate update clip), `eps = 1e-2` (positive denominator floor).
+#[derive(Clone, Copy, Debug)]
+pub struct SophiaConfig {
+    /// Learning rate `η`.
+    pub lr: f32,
+    /// Gradient-EMA decay.
+    pub beta1: f32,
+    /// Hessian-EMA decay.
+    pub beta2: f32,
+    /// Diagonal-Hessian scaling `γ`.
+    pub gamma: f32,
+    /// Per-coordinate update clip `ρ`.
+    pub rho: f32,
+    /// Positive floor on the denominator.
+    pub eps: f32,
+}
+
+impl Default for SophiaConfig {
+    fn default() -> Self {
+        Self {
+            lr: 0.1,
+            beta1: 0.96,
+            beta2: 0.99,
+            gamma: 1.0,
+            rho: 1.0,
+            eps: 1e-2,
+        }
+    }
+}
+
+/// **Sophia** (Liu et al., *Sophia: A Scalable Stochastic Second-order Optimizer*,
+/// 2023, arXiv:2305.14342): scale each coordinate's momentum by an estimate of the
+/// **diagonal Hessian** and **clip** the result, so flat directions take a bounded
+/// sign-like step while sharp directions take a Newton-like step:
+///
+/// ```text
+/// θ ← θ − lr · clip( m / max(γ·h, eps), ρ )
+/// ```
+///
+/// The diagonal Hessian is estimated by a **Hutchinson** probe with a
+/// **finite-difference** Hessian-vector product: with a seeded sign vector
+/// `v ∈ {±1}`, `Hv ≈ (∇L(θ+εv) − ∇L(θ))/ε` and `ĥ = v ⊙ Hv` (for a quadratic this is
+/// the **exact** Hessian diagonal). Like [`NdSam`] this needs **two** gradient
+/// evaluations per step, so the caller orchestrates it: compute `∇L(θ)`, call
+/// [`probe`](Self::probe) (perturbs `θ` by `εv`), compute `∇L(θ+εv)`, then call
+/// [`step`](Self::step) (restores `θ` and applies the update). Library optimiser
+/// (outside the single-gradient `lm --opt` loop, as with SAM). Seeded ⇒ **bit-for-bit
+/// deterministic**.
+pub struct NdSophia {
+    cfg: SophiaConfig,
+    t: u64,
+    rng: crate::nn::PcgEngine,
+    m: Vec<Vec<f32>>,
+    h: Vec<Vec<f32>>,
+    v: Vec<Vec<f32>>, // last probe's ±1 directions
+    eps_fd: f32,      // last probe's finite-difference step
+}
+
+impl NdSophia {
+    /// New optimizer with the given config and Hutchinson seed.
+    pub fn new(cfg: SophiaConfig, seed: u64) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            rng: crate::nn::PcgEngine::new(seed),
+            m: Vec::new(),
+            h: Vec::new(),
+            v: Vec::new(),
+            eps_fd: 0.0,
+        }
+    }
+
+    /// Sophia at learning rate `lr` with the default schedule and Hutchinson `seed`.
+    pub fn with_lr_seed(lr: f32, seed: u64) -> Self {
+        Self::new(
+            SophiaConfig {
+                lr,
+                ..SophiaConfig::default()
+            },
+            seed,
+        )
+    }
+
+    /// Steps taken.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// **Probe** phase: draw a seeded `±1` direction `v` and perturb `θ ← θ + εv`
+    /// (the caller then evaluates `∇L(θ+εv)`).
+    pub fn probe(&mut self, params: &mut [NdParam], eps_fd: f32) {
+        if self.v.len() != params.len()
+        {
+            self.v = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+        }
+        self.eps_fd = eps_fd;
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            for (pv, vv) in p.value.data.iter_mut().zip(self.v[k].iter_mut())
+            {
+                let s = if self.rng.next_u32() & 1 == 0
+                {
+                    1.0
+                }
+                else
+                {
+                    -1.0
+                };
+                *vv = s;
+                *pv += eps_fd * s;
+            }
+        }
+    }
+
+    /// **Step** phase: restore `θ`, form the finite-difference Hessian-vector product
+    /// from `grad` (at `θ`) and `grad_plus` (at `θ+εv`), update the moment/Hessian
+    /// EMAs, and apply the clipped second-order update.
+    pub fn step(&mut self, params: &mut [NdParam], grad: &[TensorND], grad_plus: &[TensorND]) {
+        assert_eq!(
+            self.v.len(),
+            params.len(),
+            "NdSophia: step before probe / parameter count changed"
+        );
+        if self.m.is_empty()
+        {
+            self.m = params
+                .iter()
+                .map(|p| vec![0.0f32; p.value.data.len()])
+                .collect();
+            self.h = self.m.clone();
+        }
+        let SophiaConfig {
+            lr,
+            beta1,
+            beta2,
+            gamma,
+            rho,
+            eps,
+        } = self.cfg;
+        self.t += 1;
+        let bc1 = 1.0 - beta1.powi(self.t as i32); // bias correction for m
+        let efd = self.eps_fd;
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g = &grad[p.grad_idx].data;
+            let gp = &grad_plus[p.grad_idx].data;
+            for i in 0..p.value.data.len()
+            {
+                p.value.data[i] -= efd * self.v[k][i]; // restore θ
+                let hv = (gp[i] - g[i]) / efd; // FD Hessian-vector product
+                let hhat = self.v[k][i] * hv; // Hutchinson diagonal estimate
+                self.m[k][i] = beta1 * self.m[k][i] + (1.0 - beta1) * g[i];
+                self.h[k][i] = beta2 * self.h[k][i] + (1.0 - beta2) * hhat;
+                let m_hat = self.m[k][i] / bc1;
+                let denom = (gamma * self.h[k][i]).max(eps);
+                let upd = (m_hat / denom).clamp(-rho, rho);
+                p.value.data[i] -= lr * upd;
+            }
+        }
+    }
+}
+
 /// Hyper-parameters for [`NdProdigy`]. [`Default`] follows the paper: base step
 /// `γ = 1.0` (Prodigy adapts the effective rate, so 1.0 needs no tuning),
 /// `β1 = 0.9`, `β2 = 0.999`, `eps = 1e-8`, and a tiny initial distance estimate
@@ -2046,6 +2213,339 @@ impl NdProdigy {
             }
         }
         self.d = d_next;
+    }
+}
+
+// ===== GaLore — Gradient Low-Rank Projection (Zhao et al., ICML 2024) ==========
+
+/// Top-`rank` eigenvectors (by eigenvalue, **descending**) of a symmetric
+/// `dim×dim` Gram matrix `gram` (row-major), returned as a `dim×rank` row-major
+/// matrix whose **columns** form an orthonormal basis of the dominant subspace.
+/// Reuses [`jacobi_eigenvectors`] (which returns an unsorted eigenbasis) and ranks
+/// the columns by their Rayleigh quotient. This is GaLore's gradient-subspace
+/// projector `P`: for a gradient `G`, the rank-`r` projection `P Pᵀ G` is the best
+/// rank-`r` approximation of `G` (truncated SVD) when `gram = G Gᵀ`.
+pub fn galore_subspace(gram: &[f32], dim: usize, rank: usize) -> Vec<f32> {
+    assert_eq!(gram.len(), dim * dim, "galore_subspace: size mismatch");
+    let r = rank.min(dim).max(1);
+    let q = jacobi_eigenvectors(gram, dim); // columns = eigenvectors (unsorted)
+    // Eigenvalue of column j via Rayleigh quotient λ_j = q_jᵀ (gram q_j).
+    let mut eig: Vec<(f32, usize)> = (0..dim)
+        .map(|j| {
+            let mut lam = 0.0f32;
+            for a in 0..dim
+            {
+                let mut gqa = 0.0f32;
+                for b in 0..dim
+                {
+                    gqa += gram[a * dim + b] * q[b * dim + j];
+                }
+                lam += q[a * dim + j] * gqa;
+            }
+            (lam, j)
+        })
+        .collect();
+    // Descending eigenvalue; index tie-break keeps it deterministic.
+    eig.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut p = vec![0.0f32; dim * r];
+    for (col, &(_, j)) in eig.iter().take(r).enumerate()
+    {
+        for a in 0..dim
+        {
+            p[a * r + col] = q[a * dim + j];
+        }
+    }
+    p
+}
+
+/// `(rows×cols)ᵀ → (cols×rows)`, row-major.
+fn galore_transpose(a: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut t = vec![0.0f32; rows * cols];
+    for i in 0..rows
+    {
+        for j in 0..cols
+        {
+            t[j * rows + i] = a[i * cols + j];
+        }
+    }
+    t
+}
+
+/// `A(m×k) · B(k×n) → (m×n)`, row-major.
+fn galore_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let mut c = vec![0.0f32; m * n];
+    for i in 0..m
+    {
+        for p in 0..k
+        {
+            let aip = a[i * k + p];
+            if aip == 0.0
+            {
+                continue;
+            }
+            for j in 0..n
+            {
+                c[i * n + j] += aip * b[p * n + j];
+            }
+        }
+    }
+    c
+}
+
+/// **Gram matrix** `G Gᵀ` (`rows×rows`) of a row-major `rows×cols` matrix.
+fn galore_gram(g: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut gram = vec![0.0f32; rows * rows];
+    for i in 0..rows
+    {
+        for j in 0..rows
+        {
+            let mut s = 0.0f32;
+            for c in 0..cols
+            {
+                s += g[i * cols + c] * g[j * cols + c];
+            }
+            gram[i * rows + j] = s;
+        }
+    }
+    gram
+}
+
+/// GaLore hyper-parameters (Zhao et al., ICML 2024, arXiv:2403.03507). Adam runs
+/// inside a low-rank projection of the gradient, so its moment buffers shrink from
+/// `m×n` to `rank×max(m,n)`. [`Default`] is `lr = 1e-3`, standard Adam betas,
+/// `rank = 4`, projector refresh every `update_gap = 50` steps, `scale = 1`.
+#[derive(Clone, Copy, Debug)]
+pub struct GaloreConfig {
+    /// Learning rate.
+    pub lr: f32,
+    /// First-moment decay.
+    pub beta1: f32,
+    /// Second-moment decay.
+    pub beta2: f32,
+    /// Numerical epsilon.
+    pub eps: f32,
+    /// Projection rank `r` (subspace dimension).
+    pub rank: usize,
+    /// Steps a projector is reused before being recomputed from the gradient.
+    pub update_gap: usize,
+    /// GaLore α: rescales the projected-back update.
+    pub scale: f32,
+}
+
+impl Default for GaloreConfig {
+    fn default() -> Self {
+        Self {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            rank: 4,
+            update_gap: 50,
+            scale: 1.0,
+        }
+    }
+}
+
+/// Per-parameter GaLore state: dense (plain Adam) for vectors, low-rank for
+/// matrices.
+enum GaloreState {
+    /// Non-matrix parameter: full-size Adam moments.
+    Dense { m: Vec<f32>, v: Vec<f32> },
+    /// Matrix parameter: projector `P` (`a×r`) plus Adam moments in the projected
+    /// `r×b` space, where `(a, b) = (min, max)` of the parameter's two dims and
+    /// `transpose` records whether we operate on `Gᵀ` (when `rows > cols`).
+    LowRank {
+        transpose: bool,
+        a: usize,
+        b: usize,
+        r: usize,
+        proj: Vec<f32>,
+        m: Vec<f32>,
+        v: Vec<f32>,
+    },
+}
+
+/// **GaLore** — *Gradient Low-Rank Projection* (Zhao et al., ICML 2024). For a
+/// matrix parameter the gradient `G` is projected onto its own dominant rank-`r`
+/// subspace `P` (top-`r` left singular vectors, recomputed every `update_gap`
+/// steps), Adam runs on the small projected gradient `Pᵀ G`, and the resulting
+/// update is mapped back with `P`. The optimizer state thus shrinks from `m×n` to
+/// `rank×max(m,n)` while the update direction stays in the gradient's most
+/// informative subspace. Vector parameters fall back to plain Adam. Pure `f32` in
+/// fixed order ⇒ bit-for-bit deterministic.
+pub struct NdGalore {
+    cfg: GaloreConfig,
+    t: u64,
+    state: Vec<GaloreState>,
+}
+
+impl NdGalore {
+    /// New optimizer with the given config (no steps taken yet).
+    pub fn new(cfg: GaloreConfig) -> Self {
+        Self {
+            cfg,
+            t: 0,
+            state: Vec::new(),
+        }
+    }
+
+    /// GaLore at learning rate `lr` and projection `rank` (other fields default).
+    pub fn with_lr_rank(lr: f32, rank: usize) -> Self {
+        Self::new(GaloreConfig {
+            lr,
+            rank,
+            ..GaloreConfig::default()
+        })
+    }
+
+    /// Number of steps taken so far.
+    pub fn step_count(&self) -> u64 {
+        self.t
+    }
+
+    /// The projected-space moment-buffer length for parameter `i` (`rank×max(m,n)`
+    /// for a matrix), exposed so tests can confirm the memory reduction.
+    pub fn state_len(&self, i: usize) -> usize {
+        match &self.state[i]
+        {
+            GaloreState::Dense { m, .. } => m.len(),
+            GaloreState::LowRank { m, .. } => m.len(),
+        }
+    }
+
+    /// One GaLore update over `params` (same order on every call).
+    pub fn step(&mut self, params: &mut [NdParam], grads: &[TensorND]) {
+        if self.state.is_empty() && !params.is_empty()
+        {
+            self.state = params
+                .iter()
+                .map(|p| {
+                    if p.value.shape.len() == 2
+                    {
+                        let (rows, cols) = (p.value.shape[0], p.value.shape[1]);
+                        let transpose = rows > cols;
+                        let (a, b) = if transpose
+                        {
+                            (cols, rows)
+                        }
+                        else
+                        {
+                            (rows, cols)
+                        };
+                        let r = self.cfg.rank.min(a).max(1);
+                        GaloreState::LowRank {
+                            transpose,
+                            a,
+                            b,
+                            r,
+                            proj: Vec::new(),
+                            m: vec![0.0f32; r * b],
+                            v: vec![0.0f32; r * b],
+                        }
+                    }
+                    else
+                    {
+                        GaloreState::Dense {
+                            m: vec![0.0f32; p.value.data.len()],
+                            v: vec![0.0f32; p.value.data.len()],
+                        }
+                    }
+                })
+                .collect();
+        }
+        assert_eq!(
+            self.state.len(),
+            params.len(),
+            "NdGalore: parameter count changed between steps"
+        );
+        self.t += 1;
+        let GaloreConfig {
+            lr,
+            beta1,
+            beta2,
+            eps,
+            update_gap,
+            scale,
+            ..
+        } = self.cfg;
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+        let refresh = (self.t - 1) % update_gap.max(1) as u64 == 0;
+
+        for (k, p) in params.iter_mut().enumerate()
+        {
+            let g_full = &grads[p.grad_idx].data;
+            match &mut self.state[k]
+            {
+                GaloreState::Dense { m, v } =>
+                {
+                    for j in 0..p.value.data.len()
+                    {
+                        let gj = g_full[j];
+                        m[j] = beta1 * m[j] + (1.0 - beta1) * gj;
+                        v[j] = beta2 * v[j] + (1.0 - beta2) * gj * gj;
+                        let mhat = m[j] / bc1;
+                        let vhat = v[j] / bc2;
+                        p.value.data[j] -= lr * mhat / (vhat.sqrt() + eps);
+                    }
+                },
+                GaloreState::LowRank {
+                    transpose,
+                    a,
+                    b,
+                    r,
+                    proj,
+                    m,
+                    v,
+                } =>
+                {
+                    let (a, b, r) = (*a, *b, *r);
+                    // Orient the gradient so it is a×b (a = min dim).
+                    let g = if *transpose
+                    {
+                        galore_transpose(g_full, b, a) // stored rows×cols = b×a
+                    }
+                    else
+                    {
+                        g_full.clone()
+                    };
+                    // (Re)compute the projector P (a×r) from the gradient subspace.
+                    if refresh || proj.is_empty()
+                    {
+                        let gram = galore_gram(&g, a, b);
+                        *proj = galore_subspace(&gram, a, r);
+                    }
+                    // Project: R = Pᵀ G  (r×b).
+                    let pt = galore_transpose(proj, a, r); // r×a
+                    let rgrad = galore_matmul(&pt, &g, r, a, b);
+                    // Adam in the projected space → per-element update U (r×b).
+                    let mut u = vec![0.0f32; r * b];
+                    for j in 0..r * b
+                    {
+                        let gj = rgrad[j];
+                        m[j] = beta1 * m[j] + (1.0 - beta1) * gj;
+                        v[j] = beta2 * v[j] + (1.0 - beta2) * gj * gj;
+                        let mhat = m[j] / bc1;
+                        let vhat = v[j] / bc2;
+                        u[j] = mhat / (vhat.sqrt() + eps);
+                    }
+                    // Project back: ΔW = scale · P U  (a×b), re-orient, subtract.
+                    let dw = galore_matmul(proj, &u, a, r, b);
+                    let dw = if *transpose
+                    {
+                        galore_transpose(&dw, a, b) // a×b → b×a = rows×cols
+                    }
+                    else
+                    {
+                        dw
+                    };
+                    for (pj, &dj) in p.value.data.iter_mut().zip(&dw)
+                    {
+                        *pj -= lr * scale * dj;
+                    }
+                },
+            }
+        }
     }
 }
 
@@ -2970,6 +3470,60 @@ mod tests {
         assert_eq!(run(), x);
     }
 
+    /// **Sophia** rescales momentum by the estimated diagonal Hessian, so it
+    /// converges on an **ill-conditioned** diagonal quadratic (curvatures 4 vs 0.25,
+    /// condition number 16) where the per-coordinate Newton-like step neutralises the
+    /// conditioning. The finite-difference Hutchinson probe is exact for a quadratic.
+    /// Bit-for-bit deterministic (seeded `±1` probe).
+    #[test]
+    fn nd_sophia_converges_and_is_deterministic() {
+        let target = [1.0f32, -0.8, 0.5];
+        let curv = [4.0f32, 1.0, 0.25]; // diagonal Hessian (ill-conditioned)
+        let grad_at = |x: &[f32]| -> Vec<f32> {
+            x.iter()
+                .zip(&target)
+                .zip(&curv)
+                .map(|((&xi, &ti), &a)| a * (xi - ti))
+                .collect()
+        };
+        let run = || {
+            let mut x = TensorND::new(vec![0.0; 3], vec![3]);
+            let mut opt = NdSophia::with_lr_seed(0.3, 42);
+            let eps_fd = 1e-2;
+            for _ in 0..400
+            {
+                let g0 = grad_at(&x.data); // ∇L(θ)
+                opt.probe(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    eps_fd,
+                );
+                let g1 = grad_at(&x.data); // ∇L(θ+εv)
+                opt.step(
+                    &mut [NdParam {
+                        value: &mut x,
+                        grad_idx: 0,
+                    }],
+                    &[TensorND::new(g0, vec![3])],
+                    &[TensorND::new(g1, vec![3])],
+                );
+            }
+            x.data
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "Sophia off: {xi} vs {ti}");
+        }
+        let x2 = run();
+        for (a, b) in x.iter().zip(&x2)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
     /// **Prodigy is parameter-free.** From a tiny `d₀ = 1e-6` it grows its distance
     /// estimate `d` to the problem scale `‖x₀ − x*‖` and substantially reduces the
     /// quadratic loss — no learning-rate tuning. (On a deterministic quadratic the
@@ -3021,5 +3575,169 @@ mod tests {
         let (x2, d2) = run();
         assert_eq!(x, x2);
         assert_eq!(d.to_bits(), d2.to_bits());
+    }
+
+    // ----- GaLore (#48) -----------------------------------------------------
+
+    fn frob2(a: &[f32]) -> f32 {
+        a.iter().map(|&x| x * x).sum()
+    }
+
+    /// GaLore's projector is **orthonormal** (`PᵀP = I`) and `P Pᵀ` is the
+    /// **orthogonal** projector onto the top-`r` subspace: the reconstruction error
+    /// obeys the Pythagorean identity `‖G − PPᵀG‖² = ‖G‖² − ‖PᵀG‖²`, it **shrinks**
+    /// as the rank grows, and it vanishes once the rank reaches `rank(G)`.
+    #[test]
+    fn galore_subspace_orthonormal_and_projection_optimal() {
+        let mut rng = PcgEngine::new(11);
+        let (rows, cols) = (5usize, 3usize); // rank(G) = 3
+        let g: Vec<f32> = (0..rows * cols).map(|_| rng.float_signed()).collect();
+        let gram = galore_gram(&g, rows, cols);
+        let total = frob2(&g);
+        let mut prev_err = f32::INFINITY;
+        for r in 1..=3
+        {
+            let p = galore_subspace(&gram, rows, r);
+            // Orthonormality: PᵀP = I_r.
+            let pt = galore_transpose(&p, rows, r);
+            let gram_p = galore_matmul(&pt, &p, r, rows, r);
+            for i in 0..r
+            {
+                for j in 0..r
+                {
+                    let want = if i == j { 1.0 } else { 0.0 };
+                    assert!(
+                        (gram_p[i * r + j] - want).abs() < 1e-3,
+                        "PᵀP not identity at ({i},{j})"
+                    );
+                }
+            }
+            // Pythagoras: ‖G − PPᵀG‖² = ‖G‖² − ‖PᵀG‖².
+            let ptg = galore_matmul(&pt, &g, r, rows, cols);
+            let recon = galore_matmul(&p, &ptg, rows, r, cols);
+            let err2: f32 = g.iter().zip(&recon).map(|(&a, &b)| (a - b) * (a - b)).sum();
+            assert!(
+                (err2 - (total - frob2(&ptg))).abs() < 1e-2,
+                "rank {r}: projection not orthogonal ({err2} vs {})",
+                total - frob2(&ptg)
+            );
+            assert!(err2 < prev_err + 1e-4, "error did not shrink at rank {r}");
+            prev_err = err2;
+        }
+        assert!(
+            prev_err < 1e-3,
+            "full-rank reconstruction not exact: {prev_err}"
+        );
+    }
+
+    /// A genuinely low-rank gradient is reconstructed **exactly** at the matching
+    /// rank, and under-ranking leaves a residual — so the rank is doing real work.
+    #[test]
+    fn galore_preserves_low_rank_gradient() {
+        let mut rng = PcgEngine::new(5);
+        let (rows, cols, rho) = (6usize, 4usize, 2usize);
+        let a: Vec<f32> = (0..rows * rho).map(|_| rng.float_signed()).collect();
+        let b: Vec<f32> = (0..rho * cols).map(|_| rng.float_signed()).collect();
+        let g = galore_matmul(&a, &b, rows, rho, cols); // exactly rank ρ
+        let gram = galore_gram(&g, rows, cols);
+        let recon_err = |r: usize| -> f32 {
+            let p = galore_subspace(&gram, rows, r);
+            let pt = galore_transpose(&p, rows, r);
+            let ptg = galore_matmul(&pt, &g, r, rows, cols);
+            let recon = galore_matmul(&p, &ptg, rows, r, cols);
+            g.iter().zip(&recon).map(|(&x, &y)| (x - y) * (x - y)).sum()
+        };
+        assert!(recon_err(rho) < 1e-3, "rank-ρ projection not exact");
+        assert!(recon_err(1) > 1e-2, "rank-1 should leave a residual");
+    }
+
+    /// Run GaLore on the matrix objective `½‖W − W*‖²` and return `(W, state_len)`.
+    fn galore_matrix_run(
+        target: &[f32],
+        rows: usize,
+        cols: usize,
+        rank: usize,
+        gap: usize,
+        steps: usize,
+    ) -> (Vec<f32>, usize) {
+        let mut w = TensorND::new(vec![0.0; rows * cols], vec![rows, cols]);
+        let mut opt = NdGalore::new(GaloreConfig {
+            lr: 0.1,
+            rank,
+            update_gap: gap,
+            ..GaloreConfig::default()
+        });
+        for _ in 0..steps
+        {
+            let gd: Vec<f32> = w
+                .data
+                .iter()
+                .zip(target)
+                .map(|(&wi, &ti)| wi - ti)
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![rows, cols])];
+            opt.step(
+                &mut [NdParam {
+                    value: &mut w,
+                    grad_idx: 0,
+                }],
+                &grads,
+            );
+        }
+        let slen = opt.state_len(0);
+        (w.data, slen)
+    }
+
+    /// **GaLore converges on a low-rank target with a compressed optimizer state.**
+    /// For a rank-2 target `W*`, GaLore with `rank = 2` reaches it (the gradient
+    /// stays in `W*`'s subspace), its moment buffer is `2×4` not `4×4` (the memory
+    /// win), under-ranking (`rank = 1`) cannot reach it, and the whole run is
+    /// bit-for-bit deterministic.
+    #[test]
+    fn nd_galore_converges_on_low_rank_target() {
+        let mut rng = PcgEngine::new(3);
+        let (n, rho) = (4usize, 2usize);
+        let u: Vec<f32> = (0..n * rho).map(|_| rng.float_signed()).collect();
+        let v: Vec<f32> = (0..rho * n).map(|_| rng.float_signed()).collect();
+        let target = galore_matmul(&u, &v, n, rho, n); // rank-2 W*
+
+        // Fixed projector (huge gap) isolates the convergence claim.
+        let (w, slen) = galore_matrix_run(&target, n, n, rho, 100_000, 2000);
+        for (wi, ti) in w.iter().zip(&target)
+        {
+            assert!((wi - ti).abs() < 0.05, "GaLore off: {wi} vs {ti}");
+        }
+        assert_eq!(slen, rho * n, "state not compressed to rank×n");
+        assert!(slen < n * n, "no memory reduction");
+
+        // Under-ranking leaves a residual.
+        let (w1, _) = galore_matrix_run(&target, n, n, 1, 100_000, 2000);
+        let res: f32 = w1
+            .iter()
+            .zip(&target)
+            .map(|(&wi, &ti)| (wi - ti) * (wi - ti))
+            .sum();
+        assert!(res > 1e-2, "rank-1 GaLore should not reach a rank-2 target");
+
+        // Determinism (including the refresh path at the default gap).
+        let again = galore_matrix_run(&target, n, n, rho, 50, 300);
+        let once = galore_matrix_run(&target, n, n, rho, 50, 300);
+        assert_eq!(again.0, once.0);
+    }
+
+    /// Vector parameters fall back to plain Adam and still minimise the quadratic.
+    #[test]
+    fn nd_galore_vector_param_uses_adam() {
+        let target = [1.0f32, -0.5, 0.3];
+        let run = || {
+            let mut opt = NdGalore::with_lr_rank(0.1, 2);
+            quad_run(&target, 800, |p, g| opt.step(p, g))
+        };
+        let x = run();
+        for (xi, ti) in x.iter().zip(&target)
+        {
+            assert!((xi - ti).abs() < 0.05, "GaLore-Adam off: {xi} vs {ti}");
+        }
+        assert_eq!(run(), x);
     }
 }

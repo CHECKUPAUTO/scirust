@@ -581,31 +581,56 @@ from its weights to its build.
 Beyond the 2-D reverse-mode tape, SciRust now provides an **N-D autograd tape**
 whose every operator is validated by a finite-difference gradient check, and on
 top of it a research-backed deep-learning stack. Each capability maps to a
-specific paper and ships with a test; the full mapping (14 of 20 items delivered)
-is tracked in `docs/RESEARCH_ROADMAP.md`.
+specific paper and ships with an honest test (a gradient check for an operator, a
+soundness/oracle test for a guarantee); the full mapping — now **all 80 of 80
+candidate papers delivered** — is tracked in `docs/RESEARCH_ROADMAP.md`.
 
-- **Causal decoder language model**, trained end-to-end (token and learned
-  positional embeddings, causal multi-head attention, a fused, numerically
-  stable softmax cross-entropy), which overfits a fixed sequence exactly —
-  end-to-end evidence that the stack learns.
-- **LLaMA-family layers**: RMSNorm, SwiGLU, a Pre-RMSNorm LLaMA block, rotary
-  position embeddings (RoPE, with the relative-position property tested), and
-  grouped-/multi-query attention expressed through batched-matmul broadcasting.
-- **Deterministic optimizers**: Adam, AdamW (decoupled weight decay), Lion, and
-  Muon (Newton–Schulz orthogonalized momentum), Schedule-Free, AdEMAMix, and SOAP (Adam in Shampoo's eigenbasis) — all bit-for-bit reproducible.
-- **Certifiable AI**: Interval Bound Propagation **and CROWN** (tighter
-  linear-relaxation bounds) yield provable output bounds
-  for ReLU MLPs and a robustness certificate, validated by soundness sampling.
-- **Reproducible reductions**: order-independent floating-point sum/mean/dot
-  (canonical ordering + exact expansion), bit-identical regardless of thread
-  count — the foundation for bit-exact multi-thread training.
-- **Inference**: exact (output-preserving) speculative decoding, a tiled
-  online-softmax FlashAttention, a DeltaNet delta-rule linear-attention layer, a Mamba selective state-space layer, a RetNet retention layer, a GLA gated-linear-attention layer, and an HGRN gated-linear-RNN layer.
-- **Scientific bridge**: a Neural ODE that backpropagates through an RK4 solver, and a Physics-Informed Neural Network (PINN) that puts a PDE residual in the loss to solve a boundary-value problem.
-- **Compression**: Wanda activation-aware pruning and SmoothQuant, and GPTQ (second-order error-feedback int8 weight quantization, CLI `scirust gptq`), and AWQ (activation-aware search-based int8 weight quantization, CLI `scirust awq`), extending the
-  deterministic int8 path.
+- **Causal decoder LM & efficient decoding**: an end-to-end trained decoder
+  (token and learned positional embeddings, causal multi-head attention, a fused
+  numerically stable softmax cross-entropy) that overfits a fixed sequence
+  exactly; plus exact (output-preserving) speculative decoding, Medusa multi-head
+  and EAGLE feature-level drafting, and a paged-KV-cache attention (vLLM-style)
+  that is bit-identical under fragmentation.
+- **LLaMA-family & attention**: RMSNorm, SwiGLU, a Pre-RMSNorm block, rotary
+  position embeddings (RoPE, relative-position property tested), grouped-/multi-
+  query attention via batched-matmul broadcasting, ALiBi linear position bias, a
+  tiled online-softmax FlashAttention, and YaRN context extension.
+- **Efficient sequence models** (each unrolled on the tape and gradient-checked):
+  Mamba selective state-space and Mamba-2/SSD (the state-space ↔ attention
+  duality), S4/S4D and S5 (MIMO with a parallel associative scan), RWKV, RetNet,
+  GLA, HGRN, DeltaNet, xLSTM (sLSTM + mLSTM), and Hyena (implicit long convolution).
+- **Deterministic optimizers** (all bit-for-bit reproducible): Adam, AdamW, Lion,
+  Muon (Newton–Schulz orthogonalized momentum), Schedule-Free, AdEMAMix, SOAP,
+  Shampoo, Adafactor, LAMB, Adan, Prodigy, Lookahead, SAM, GaLore (low-rank-
+  projected states), and Sophia (clipped diagonal-Hessian second order).
+- **Quantization, compression & PEFT** (each tested below round-to-nearest):
+  SmoothQuant, GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8(), OmniQuant,
+  BitNet b1.58 ternary, QuIP# (Hadamard incoherence + E8 lattice), and AQLM
+  (additive multi-codebook); Wanda/magnitude/lottery pruning; and LoRA / DoRA
+  adapters.
+- **Certifiable AI and complete verification**: Interval Bound Propagation, CROWN,
+  zonotopes (AI²/DeepZ), DeepPoly (relational polyhedra), randomized smoothing,
+  GloRo Lipschitz bounds, and CROWN-IBP **certified training** (a differentiable
+  IBP bound grows the certified radius); plus **complete** verifiers — branch-and-
+  bound, an exact MILP formulation, and a Reluplex-style lazy SMT search — that
+  decide robustness and return concrete counterexamples (for small ReLU nets).
+- **Uncertainty & calibration**: distribution-free conformal prediction (split,
+  CQR, adaptive APS/RAPS, risk-controlling RCPS, Learn-then-Test, online ACI),
+  temperature scaling, and deep ensembles with epistemic uncertainty.
+- **Scientific bridge**: a Neural ODE backpropagating through an RK4 solver, a
+  Physics-Informed Neural Network (PINN), a Fourier Neural Operator (FNO) that
+  learns an operator and generalizes, DeepONet, and a Kolmogorov–Arnold network (KAN).
+- **Reproducibility, privacy & audit**: order-independent floating-point sum/mean/
+  dot (bit-identical regardless of thread count), DP-SGD with a Rényi-DP
+  accountant, an LLM watermark with a detection z-test, **DiFR** (verify an
+  inference despite floating-point non-determinism, via a sound FP-error envelope
+  around the reproducible reference), and a **verifiable-inference** argument
+  (finite-field Freivalds + a model commitment + Fiat-Shamir — cryptographic
+  soundness, not zero-knowledge).
 
-Two CLI commands surface this work: `scirust certify` (IBP **and CROWN** bounds, side by side, and robustness)
-and `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (train the N-D decoder LM).
-
-A third command, `scirust conformal`, produces distribution-free conformal-prediction intervals with a guaranteed coverage level.
+CLI commands surface much of this work, including `scirust certify` (IBP, CROWN,
+zonotope, DeepPoly and randomized-smoothing bounds side by side, plus a complete
+branch-and-bound decision), `scirust lm --opt …` (train the N-D decoder LM with
+any of the optimizers above), `scirust conformal`, `scirust calibrate`, the
+sequence-model demos (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), the
+quantizers (`gptq`, `awq`, `bitnet`), and `scirust pinn`.

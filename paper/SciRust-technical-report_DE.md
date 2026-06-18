@@ -260,26 +260,19 @@ Erwartete Leistung auf dem Numenta Anomaly Benchmark (NAB) zielt auf einen F1-Sc
 Über das 2-D-Rückwärtsband hinaus bietet SciRust nun ein **N-D-Autograd-Band**,
 dessen Operatoren jeweils per Finite-Differenzen-Gradientenprüfung validiert sind,
 und darauf einen forschungsgestützten Deep-Learning-Stack. Jede Fähigkeit
-entspricht einer Arbeit und wird mit einem Test geliefert; die vollständige
-Zuordnung (14 von 20 fertig) führt `docs/RESEARCH_ROADMAP.md`.
+entspricht einer bestimmten Arbeit und wird mit einem ehrlichen Test geliefert
+(eine Gradientenprüfung für einen Operator, ein Korrektheits-/Orakel-Test für
+eine Garantie); die vollständige Zuordnung – nun sind **alle 80 von 80
+Kandidaten-Arbeiten fertig** – führt `docs/RESEARCH_ROADMAP.md`.
 
-- **Kausales Decoder-Sprachmodell**, durchgängig trainiert (Token- und
-  Positions-Embeddings, kausale Attention, fusionierte stabile Softmax-
-  Kreuzentropie), das eine Sequenz exakt lernt.
-- **LLaMA-Schichten**: RMSNorm, SwiGLU, Pre-RMSNorm-LLaMA-Block, RoPE (mit
-  getesteter Relativpositions-Eigenschaft) und gruppierte/Multi-Query-Attention.
-- **Deterministische Optimierer**: Adam, AdamW, Lion, Muon (Newton–Schulz), Schedule-Free, AdEMAMix und SOAP (Adam in Shampoos Eigenbasis).
-- **Zertifizierbare KI**: Interval Bound Propagation **und CROWN** (engere
-  Schranken durch lineare Relaxation) liefern beweisbare
-  Ausgabeschranken und ein Robustheitszertifikat.
-- **Reproduzierbare Reduktionen**: reihenfolgenunabhängige Summe/Mittel/
-  Skalarprodukt, bit-identisch unabhängig von der Thread-Anzahl.
-- **Inferenz**: exaktes spekulatives Decoding, gekacheltes Online-Softmax-
-  FlashAttention, eine DeltaNet-Schicht für lineare Aufmerksamkeit mit Delta-Regel, eine Mamba-Schicht mit selektivem Zustandsraum, eine RetNet-Retention-Schicht, eine GLA-Schicht für gegatete lineare Aufmerksamkeit und eine HGRN-Schicht für ein gegatetes lineares RNN.
-- **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser, und ein physikinformiertes neuronales Netz (PINN), das ein PDE-Residuum in die Verlustfunktion legt, um ein Randwertproblem zu lösen.
-- **Kompression**: Wanda-Pruning (aktivierungsbewusst) und SmoothQuant sowie GPTQ (int8-Gewichtsquantisierung mit Fehler-Feedback zweiter Ordnung, CLI `scirust gptq`) und AWQ (aktivierungsbewusste, suchbasierte int8-Gewichtsquantisierung, CLI `scirust awq`).
+- **Kausales Decoder-Sprachmodell & effizientes Decoding**: ein durchgängig trainierter Decoder (Token- und gelernte Positions-Embeddings, kausale Multi-Head-Attention, eine fusionierte numerisch stabile Softmax-Kreuzentropie), der eine feste Sequenz exakt lernt; dazu exaktes (ausgabeerhaltendes) spekulatives Decoding, Medusa-Multi-Head- und EAGLE-Feature-Level-Drafting sowie eine Paged-KV-Cache-Attention (vLLM-Stil), die unter Fragmentierung bit-identisch ist.
+- **LLaMA-Familie & Attention**: RMSNorm, SwiGLU, ein Pre-RMSNorm-Block, rotierende Positions-Embeddings (`RoPE`, getestete Relativpositions-Eigenschaft), gruppierte/Multi-Query-Attention via Batched-Matmul-Broadcasting, ALiBi-lineare Positions-Verzerrung, eine gekachelte Online-Softmax-FlashAttention und YaRN-Kontexterweiterung.
+- **Effiziente Sequenzmodelle** (jeweils auf dem Band abgerollt und gradientengeprüft): Mamba mit selektivem Zustandsraum und Mamba-2/SSD (die Dualität Zustandsraum ↔ Attention), S4/S4D und S5 (MIMO mit einem parallelen assoziativen Scan), RWKV, RetNet, GLA, HGRN, DeltaNet, xLSTM (sLSTM + mLSTM) und Hyena (implizite lange Faltung).
+- **Deterministische Optimierer** (alle bit-für-bit reproduzierbar): Adam, AdamW, Lion, Muon (Newton–Schulz-orthogonalisiertes Momentum), Schedule-Free, AdEMAMix, SOAP, Shampoo, Adafactor, LAMB, Adan, Prodigy, Lookahead, SAM, GaLore (niedrigrangig projizierte Zustände) und Sophia (geclippte diagonale Hessian-Methode zweiter Ordnung).
+- **Quantisierung, Kompression & PEFT** (jeweils gegen Round-to-Nearest getestet): SmoothQuant, `GPTQ`, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8(), OmniQuant, ternäres BitNet b1.58, QuIP# (Hadamard-Inkohärenz + E8-Gitter) und AQLM (additive Multi-Codebuch-Quantisierung); Wanda-/Magnitude-/Lottery-Pruning; sowie LoRA- / DoRA-Adapter.
+- **Zertifizierbare KI und vollständige Verifizierung**: Interval Bound Propagation, CROWN, Zonotope (AI²/DeepZ), DeepPoly (relationale Polyeder), Randomized Smoothing, GloRo-Lipschitz-Schranken und CROWN-IBP **zertifiziertes Training** (eine differenzierbare IBP-Schranke vergrößert den zertifizierten Radius); dazu **vollständige** Verifizierer – Branch-and-Bound, eine exakte MILP-Formulierung und eine Reluplex-artige Lazy-SMT-Suche –, die über Robustheit entscheiden und konkrete Gegenbeispiele liefern (für kleine ReLU-Netze).
+- **Unsicherheit & Kalibrierung**: verteilungsfreie konforme Prädiktion (split, CQR, adaptives APS/RAPS, risikokontrollierendes RCPS, Learn-then-Test, online ACI), Temperatur-Skalierung und Deep Ensembles mit epistemischer Unsicherheit.
+- **Wissenschaftliche Brücke**: ein Neural ODE mit Backprop durch einen RK4-Löser, ein physikinformiertes neuronales Netz (PINN), ein Fourier Neural Operator (FNO), der einen Operator lernt und generalisiert, DeepONet und ein Kolmogorov–Arnold-Netz (KAN).
+- **Reproduzierbarkeit, Privatsphäre & Audit**: reihenfolgenunabhängige Gleitkomma-Summe/-Mittel/-Skalarprodukt (bit-identisch unabhängig von der Thread-Anzahl), DP-SGD mit einem Rényi-DP-Accountant, ein LLM-Wasserzeichen mit einem Erkennungs-z-Test, **DiFR** (Verifikation einer Inferenz trotz Gleitkomma-Nichtdeterminismus, via einer fundierten FP-Fehler-Hülle um die reproduzierbare Referenz) und ein Argument für **verifizierbare Inferenz** (Finite-Field-Freivalds + ein Modell-Commitment + Fiat-Shamir – kryptographische Korrektheit, nicht Zero-Knowledge).
 
-Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schranken nebeneinander/Robustheit)
-und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (Training des N-D-Decoder-LM).
-
-Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.
+CLI-Befehle erschließen einen Großteil dieser Arbeit, darunter `scirust certify` (IBP-, CROWN-, Zonotop-, DeepPoly- und Randomized-Smoothing-Schranken nebeneinander, dazu eine vollständige Branch-and-Bound-Entscheidung), `scirust lm --opt …` (Training des N-D-Decoder-LM mit einem beliebigen der obigen Optimierer), `scirust conformal`, `scirust calibrate`, die Sequenzmodell-Demos (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), die Quantisierer (`gptq`, `awq`, `bitnet`) und `scirust pinn`.

@@ -344,6 +344,81 @@ impl AdaptiveConformal {
     }
 }
 
+/// **Hoeffding** upper confidence bound on the mean of `n` i.i.d. losses in
+/// `[0, 1]` with empirical mean `mean`, at confidence `1 − delta`:
+/// `mean + √(ln(1/δ) / (2n))`. The bound holds with probability `≥ 1 − delta`.
+pub fn hoeffding_ucb(mean: f32, n: usize, delta: f32) -> f32 {
+    assert!(delta > 0.0 && delta < 1.0, "delta must be in (0,1)");
+    if n == 0
+    {
+        return f32::INFINITY;
+    }
+    mean + ((1.0 / delta).ln() / (2.0 * n as f32)).sqrt()
+}
+
+/// **RCPS** — Risk-Controlling Prediction Sets (Bates et al., 2021). Conformal
+/// prediction controls *coverage*; RCPS controls a **general bounded risk** (any
+/// loss in `[0, 1]` — false-negative rate, miscoverage, …) with a
+/// **high-probability** (PAC) guarantee. Given a family of predictors `C_λ` whose
+/// risk is **non-increasing** in `λ` (larger `λ` ⇒ smaller risk, e.g. larger sets),
+/// `risks[i]` is the empirical risk of `C_{λ_i}` on a calibration set of size `n`
+/// (with `λ` increasing in `i`). RCPS returns the index of the **smallest** `λ̂`
+/// such that the Hoeffding upper bound on the risk is `≤ alpha` for `λ̂` **and all
+/// larger** `λ` — guaranteeing `R(λ̂) ≤ alpha` with probability `≥ 1 − delta`.
+/// Returns `None` if no `λ` controls the risk.
+pub fn rcps_select(risks: &[f32], n: usize, alpha: f32, delta: f32) -> Option<usize> {
+    // Scan from the largest λ (smallest risk) leftward; keep the smallest index
+    // whose UCB — and every UCB to its right — is ≤ alpha. Stop at the first
+    // violation (rigorous even if the empirical risk isn't perfectly monotone).
+    let mut hat = None;
+    for i in (0..risks.len()).rev()
+    {
+        if hoeffding_ucb(risks[i], n, delta) <= alpha
+        {
+            hat = Some(i);
+        }
+        else
+        {
+            break;
+        }
+    }
+    hat
+}
+
+/// **Hoeffding p-value** for the one-sided null `H₀: R(λ) > α`, from the empirical
+/// risk `emp_risk` of `n` i.i.d. losses in `[0, 1]`. By Hoeffding's inequality the
+/// least-favourable null `R(λ) = α` makes
+/// `p = exp(−2n·(α − R̂)₊²)` **super-uniform** (`P(p ≤ u) ≤ u`) — exactly the
+/// validity a multiple-testing procedure needs. Returns `1` when `R̂ ≥ α` (no
+/// evidence the risk is controlled).
+pub fn hoeffding_pvalue(emp_risk: f32, n: usize, alpha: f32) -> f32 {
+    let slack = (alpha - emp_risk).max(0.0);
+    (-2.0 * n as f32 * slack * slack).exp()
+}
+
+/// **Learn then Test** (Angelopoulos et al., 2021) — distribution-free control of
+/// **arbitrary, non-nested** risks by multiple hypothesis testing. Given a grid of
+/// candidate configurations with empirical risks `emp_risks` (losses in `[0, 1]`,
+/// each from `n` i.i.d. points), turn every candidate into a [`hoeffding_pvalue`]
+/// for `H₀: R(λ) > α` and apply the **Bonferroni** family-wise correction at level
+/// `delta`: select every `λ` whose `p ≤ delta / m` (`m` = grid size). This
+/// guarantees that, with probability `≥ 1 − delta`, **every** returned
+/// configuration truly satisfies `R(λ) ≤ α` (family-wise error rate `≤ delta`) —
+/// with **no** assumption that risk is monotone in the index (unlike RCPS, which
+/// needs a nested family). Returns the selected indices. Pure, deterministic.
+pub fn learn_then_test(emp_risks: &[f32], n: usize, alpha: f32, delta: f32) -> Vec<usize> {
+    assert!(delta > 0.0 && delta < 1.0, "delta must be in (0,1)");
+    let m = emp_risks.len();
+    if m == 0
+    {
+        return Vec::new();
+    }
+    let threshold = delta / m as f32;
+    (0..m)
+        .filter(|&i| hoeffding_pvalue(emp_risks[i], n, alpha) <= threshold)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,5 +824,128 @@ mod tests {
             "static conformal ({static_cov}) not clearly worse than ACI ({aci_cov})"
         );
         assert_eq!(run(), (aci_cov, static_cov)); // determinism
+    }
+
+    /// Hoeffding UCB exceeds the mean by the right slack, and `rcps_select` picks
+    /// the smallest `λ` whose UCB (and every larger one) clears `alpha`.
+    #[test]
+    fn rcps_select_picks_smallest_controlling_lambda() {
+        // n=10000, delta=0.05 → slack √(ln20/20000) ≈ 0.01224.
+        let ucb = hoeffding_ucb(0.5, 10000, 0.05);
+        assert!(ucb > 0.5 && (ucb - 0.5 - 0.01224).abs() < 1e-3, "ucb={ucb}");
+        // risks non-increasing; UCB ≤ 0.1 first at index 3 (0.05→0.062); index 2
+        // (0.12→0.132) violates.
+        let risks = [0.5, 0.3, 0.12, 0.05, 0.01];
+        assert_eq!(rcps_select(&risks, 10000, 0.1, 0.05), Some(3));
+        // Impossible target: no λ controls a risk below the slack.
+        assert_eq!(rcps_select(&risks, 10000, 0.001, 0.05), None);
+    }
+
+    /// **The RCPS guarantee, tested.** RCPS calibrates a threshold so the upper
+    /// confidence bound on the miscoverage risk is ≤ `alpha`; on fresh data the
+    /// empirical risk stays ≤ `alpha` (the concentration bound is conservative).
+    #[test]
+    fn rcps_controls_risk_on_fresh_data() {
+        let mut rng = PcgEngine::new(31);
+        let noise = |r: &mut PcgEngine| (r.float_signed() + r.float_signed()).abs();
+        let (alpha, delta) = (0.1f32, 0.1f32);
+        let n_cal = 2000usize;
+        let cal: Vec<f32> = (0..n_cal).map(|_| noise(&mut rng)).collect();
+        // λ grid (increasing) → risk(λ) = fraction of scores > λ (non-increasing).
+        let grid: Vec<f32> = (0..=40).map(|k| k as f32 * 0.05).collect(); // 0.0 .. 2.0
+        let risks: Vec<f32> = grid
+            .iter()
+            .map(|&lam| cal.iter().filter(|&&s| s > lam).count() as f32 / n_cal as f32)
+            .collect();
+        let idx = rcps_select(&risks, n_cal, alpha, delta).expect("RCPS finds a threshold");
+        let lam_hat = grid[idx];
+        assert!(hoeffding_ucb(risks[idx], n_cal, delta) <= alpha + 1e-6);
+        assert!(lam_hat < 2.0, "RCPS threshold vacuous");
+        // Fresh test set: empirical risk stays ≤ alpha.
+        let n_test = 6000usize;
+        let test_risk =
+            (0..n_test).filter(|_| noise(&mut rng) > lam_hat).count() as f32 / n_test as f32;
+        assert!(
+            test_risk <= alpha,
+            "RCPS test risk {test_risk} exceeds alpha {alpha}"
+        );
+    }
+
+    /// The Hoeffding p-value matches its closed form and saturates at 1.
+    #[test]
+    fn hoeffding_pvalue_closed_form() {
+        // R̂ ≥ α ⇒ no evidence ⇒ p = 1.
+        assert_eq!(hoeffding_pvalue(0.30, 100, 0.20), 1.0);
+        assert_eq!(hoeffding_pvalue(0.20, 100, 0.20), 1.0);
+        // R̂ < α ⇒ p = exp(−2n(α−R̂)²): n=200, α−R̂=0.1 ⇒ exp(−4) ≈ 0.0183.
+        let p = hoeffding_pvalue(0.10, 200, 0.20);
+        assert!((p - (-4.0f32).exp()).abs() < 1e-6, "p = {p}");
+    }
+
+    /// **The Learn-then-Test guarantee, tested by simulation.** With *every*
+    /// candidate sitting on the boundary `R(λ) = α` (so all nulls are true), LtT's
+    /// Bonferroni correction keeps the family-wise error rate — the chance of
+    /// selecting *any* candidate — below `delta`, while the naive "select whenever
+    /// `R̂ ≤ α`" rule fails almost always. This is the whole point of the multiple-
+    /// testing correction, shown empirically.
+    #[test]
+    fn ltt_controls_family_wise_error_rate() {
+        let mut rng = PcgEngine::new(2024);
+        let (m, n, alpha, delta) = (20usize, 500usize, 0.20f32, 0.10f32);
+        let trials = 2000usize;
+        let (mut ltt_fail, mut naive_fail) = (0usize, 0usize);
+        for _ in 0..trials
+        {
+            // Each candidate's empirical risk: mean of n Bernoulli(α) losses.
+            let risks: Vec<f32> = (0..m)
+                .map(|_| (0..n).filter(|_| rng.float() < alpha).count() as f32 / n as f32)
+                .collect();
+            // LtT (Bonferroni): a false rejection iff *any* candidate is selected.
+            if !learn_then_test(&risks, n, alpha, delta).is_empty()
+            {
+                ltt_fail += 1;
+            }
+            // Naive: select any candidate whose empirical risk is ≤ α (no test).
+            if risks.iter().any(|&r| r <= alpha)
+            {
+                naive_fail += 1;
+            }
+        }
+        let ltt_fwer = ltt_fail as f32 / trials as f32;
+        let naive_fwer = naive_fail as f32 / trials as f32;
+        assert!(
+            ltt_fwer <= delta,
+            "LtT FWER {ltt_fwer} exceeds delta {delta}"
+        );
+        assert!(
+            naive_fwer > 0.9,
+            "naive selection should fail almost always, got {naive_fwer}"
+        );
+    }
+
+    /// LtT has **power**: candidates whose true risk is well below `α` are selected
+    /// with enough data, and candidates above `α` are not — and the result is
+    /// deterministic.
+    #[test]
+    fn ltt_selects_good_and_rejects_bad() {
+        let mut rng = PcgEngine::new(7);
+        let (n, alpha, delta) = (4000usize, 0.20f32, 0.10f32);
+        // True risks: two safe (0.05, 0.10), two unsafe (0.30, 0.45).
+        let true_risks = [0.05f32, 0.10, 0.30, 0.45];
+        let emp: Vec<f32> = true_risks
+            .iter()
+            .map(|&p| (0..n).filter(|_| rng.float() < p).count() as f32 / n as f32)
+            .collect();
+        let selected = learn_then_test(&emp, n, alpha, delta);
+        assert!(
+            selected.contains(&0) && selected.contains(&1),
+            "missed safe λ"
+        );
+        assert!(
+            !selected.contains(&2) && !selected.contains(&3),
+            "kept unsafe λ"
+        );
+        // Determinism.
+        assert_eq!(learn_then_test(&emp, n, alpha, delta), selected);
     }
 }

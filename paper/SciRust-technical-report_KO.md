@@ -258,22 +258,46 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
 
 2차원 역방향 모드 테이프를 넘어, SciRust는 이제 모든 연산자가 유한차분 그래디언트
 체크로 검증되는 **N-D 자동미분 테이프**와 그 위에 연구로 뒷받침된 딥러닝 스택을
-제공합니다. 각 기능은 특정 논문에 대응하며 테스트와 함께 제공됩니다. 전체 대응
-관계(20개 중 14개 완료)는 `docs/RESEARCH_ROADMAP.md`에서 추적합니다.
+제공합니다. 각 기능은 특정 논문에 대응하며 정직한 테스트(연산자에 대한 그래디언트
+체크, 보장에 대한 건전성/오라클 테스트)와 함께 제공됩니다. 전체 대응 관계 — 이제
+**후보 논문 80개 전부 완료** — 는 `docs/RESEARCH_ROADMAP.md`에서 추적합니다.
 
-- **인과적 디코더 언어 모델**, 엔드투엔드 학습(토큰 및 학습 위치 임베딩, 인과적
-  멀티헤드 어텐션, 융합되고 수치적으로 안정적인 softmax 교차 엔트로피). 시퀀스를
-  정확히 과적합합니다.
-- **LLaMA 계열 레이어**: RMSNorm, SwiGLU, Pre-RMSNorm LLaMA 블록, RoPE(상대 위치
-  성질 검증), 그룹/멀티쿼리 어텐션.
-- **결정론적 옵티마이저**: Adam, AdamW, Lion, Muon(Newton–Schulz), Schedule-Free, AdEMAMix 및 SOAP(Shampoo의 고유기저에서의 Adam).
-- **인증 가능한 AI**: 구간 경계 전파(IBP) **및 CROWN**(선형 완화 기반의 더 조밀한 경계)이 증명 가능한 출력 경계와 견고성 인증서를 제공.
-- **재현 가능한 리덕션**: 순서 무관 합/평균/내적, 스레드 수와 무관하게 비트 단위 동일.
-- **추론**: 정확한(출력 보존) 추측 디코딩, 타일형 온라인 softmax FlashAttention, DeltaNet 델타 규칙 선형 어텐션 레이어, Mamba 선택적 상태공간 레이어, RetNet 리텐션 레이어, GLA 게이트 선형 어텐션 레이어, 그리고 HGRN 게이트 선형 RNN 레이어.
-- **과학적 가교**: RK4 솔버를 통해 역전파하는 Neural ODE, 그리고 PDE 잔차를 손실에 넣어 경계값 문제를 푸는 물리 정보 신경망(PINN).
-- **압축**: Wanda 가지치기(활성화 인식)와 SmoothQuant, 그리고 GPTQ(2차 오차 피드백 기반 int8 가중치 양자화, CLI `scirust gptq`), 그리고 AWQ(활성화 인식 기반 탐색 방식 int8 가중치 양자화, CLI `scirust awq`).
+- **인과적 디코더 LM 및 효율적 디코딩**: 엔드투엔드 학습된 디코더(토큰 및 학습 위치
+  임베딩, 인과적 멀티헤드 어텐션, 융합되고 수치적으로 안정적인 softmax 교차 엔트로피)로
+  고정 시퀀스를 정확히 과적합합니다. 또한 정확한(출력 보존) 추측 디코딩, Medusa 멀티헤드
+  및 EAGLE 특징 수준 드래프팅, 그리고 단편화 상황에서도 비트 단위로 동일한 페이지드 KV
+  캐시 어텐션(vLLM 방식)을 제공합니다.
+- **LLaMA 계열 및 어텐션**: RMSNorm, SwiGLU, Pre-RMSNorm 블록, 회전 위치 임베딩(`RoPE`,
+  상대 위치 성질 검증), 배치 행렬곱 브로드캐스팅을 통한 그룹/멀티쿼리 어텐션, ALiBi 선형
+  위치 편향, 타일형 온라인 softmax FlashAttention, 그리고 YaRN 컨텍스트 확장.
+- **효율적 시퀀스 모델**(각각 테이프 상에서 펼쳐지고 그래디언트 체크됨): `Mamba` 선택적
+  상태공간 및 `Mamba`-2/SSD(상태공간 ↔ 어텐션 쌍대성), S4/S4D 및 S5(병렬 결합 스캔을 사용하는
+  MIMO), RWKV, RetNet, GLA, HGRN, DeltaNet, xLSTM(sLSTM + mLSTM), 그리고 Hyena(암시적 장거리
+  컨볼루션).
+- **결정론적 옵티마이저**(모두 비트 단위로 재현 가능): Adam, AdamW, Lion, Muon(Newton–Schulz
+  직교화 모멘텀), Schedule-Free, AdEMAMix, SOAP, Shampoo, Adafactor, LAMB, Adan, Prodigy,
+  Lookahead, SAM, GaLore(저랭크 투영 상태), 그리고 Sophia(클리핑된 대각 헤시안 2차).
+- **양자화, 압축 및 PEFT**(각각 최근접 반올림 대비 테스트됨): SmoothQuant, `GPTQ`, AWQ, NF4,
+  SqueezeLLM, SpQR, KVQuant, LLM.int8(), OmniQuant, BitNet b1.58 삼진, QuIP#(Hadamard 비간섭성 +
+  E8 격자), 그리고 AQLM(가산적 다중 코드북). Wanda/크기 기반/로터리 가지치기. 그리고 LoRA /
+  DoRA 어댑터.
+- **인증 가능한 AI 및 완전한 검증**: 구간 경계 전파(IBP), CROWN, 조노토프(AI²/DeepZ), DeepPoly
+  (관계형 다면체), 무작위 평활화, GloRo 립시츠 경계, 그리고 CROWN-IBP **인증 학습**(미분
+  가능한 IBP 경계가 인증 반경을 키움). 또한 **완전한** 검증기 — 분기 한정, 정확한 MILP 정식화,
+  그리고 Reluplex 방식의 지연 SMT 탐색 — 가 견고성을 결정하고 구체적인 반례를 반환합니다
+  (소규모 ReLU 망에 대해).
+- **불확실성 및 보정**: 분포 무관 컨포멀 예측(split, CQR, 적응형 APS/RAPS, 리스크 제어 RCPS,
+  Learn-then-Test, 온라인 ACI), 온도 스케일링, 그리고 인식적 불확실성을 갖춘 딥 앙상블.
+- **과학적 가교**: RK4 솔버를 통해 역전파하는 Neural ODE, 물리 정보 신경망(PINN), 연산자를
+  학습하고 일반화하는 푸리에 신경 연산자(FNO), DeepONet, 그리고 Kolmogorov–Arnold 망(KAN).
+- **재현성, 프라이버시 및 감사**: 순서 무관 부동소수점 합/평균/내적(스레드 수와 무관하게 비트
+  단위 동일), Rényi-DP 어카운턴트를 갖춘 DP-SGD, 탐지 z-검정을 갖춘 LLM 워터마크, **DiFR**
+  (재현 가능한 기준값 주위의 건전한 부동소수점 오차 봉투를 통해, 부동소수점 비결정성에도
+  불구하고 추론을 검증), 그리고 **검증 가능한 추론** 논증(유한체 Freivalds + 모델 커밋먼트 +
+  Fiat-Shamir — 영지식이 아닌 암호학적 건전성).
 
-두 가지 CLI 명령이 이를 노출합니다: `scirust certify`(IBP **및 CROWN** 경계를 나란히, 견고성)와
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`(N-D 디코더 LM 학습).
-
-세 번째 명령 `scirust conformal`은 분포 가정 없이 커버리지를 보장하는 컨포멀 예측 구간을 생성합니다.
+CLI 명령이 이 작업의 상당 부분을 노출하며, 여기에는 `scirust certify`(IBP, CROWN, 조노토프,
+DeepPoly 및 무작위 평활화 경계를 나란히, 그리고 완전한 분기 한정 결정), `scirust lm --opt …`
+(위 옵티마이저 중 무엇으로든 N-D 디코더 LM 학습), `scirust conformal`, `scirust calibrate`,
+시퀀스 모델 데모(`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), 양자화기(`gptq`, `awq`,
+`bitnet`), 그리고 `scirust pinn`이 포함됩니다.

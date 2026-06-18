@@ -256,29 +256,69 @@ El rendimiento esperado en el Numenta Anomaly Benchmark (NAB) apunta a una puntu
 ## Autodiferenciación N-D y extensiones de investigación
 
 Más allá del grafo 2-D en modo inverso, SciRust ofrece ahora un **grafo de
-autodiferenciación N-D** cuyos operadores se validan con comprobación de
+autodiferenciación N-D** cuyos operadores se validan todos con comprobación de
 gradiente por diferencias finitas, y sobre él una pila de aprendizaje profundo
-respaldada por la investigación. Cada capacidad corresponde a un artículo y se
-entrega con una prueba; la correspondencia completa (14 de 20 entregados) se
-sigue en `docs/RESEARCH_ROADMAP.md`.
+respaldada por la investigación. Cada capacidad corresponde a un artículo
+concreto y se entrega con una prueba honesta (una comprobación de gradiente para
+un operador, una prueba de solidez/oráculo para una garantía); la
+correspondencia completa —ahora con **los 80 de 80 artículos candidatos
+entregados**— se sigue en `docs/RESEARCH_ROADMAP.md`.
 
-- **Modelo de lenguaje decodificador causal**, entrenado de extremo a extremo
-  (embeddings de token y posición, atención causal, entropía cruzada softmax
-  fusionada y estable), que memoriza una secuencia exactamente.
-- **Capas estilo LLaMA**: RMSNorm, SwiGLU, bloque LLaMA Pre-RMSNorm, RoPE
-  (propiedad de posición relativa probada) y atención agrupada / multi-consulta.
-- **Optimizadores deterministas**: Adam, AdamW, Lion, Muon (Newton–Schulz), Schedule-Free, AdEMAMix y SOAP (Adam en la base propia de Shampoo).
-- **IA certificable**: la propagación por intervalos (IBP) **y CROWN** (cotas
-  más ajustadas por relajación lineal) dan cotas de salida
-  demostrables y un certificado de robustez.
-- **Reducciones reproducibles**: suma/media/producto escalar independientes del
-  orden, idénticas bit a bit sin importar el número de hilos.
-- **Inferencia**: decodificación especulativa exacta, FlashAttention con softmax
-  en línea por bloques, una capa DeltaNet de atención lineal con regla delta, una capa Mamba de espacio de estados selectivo, una capa de retención RetNet, una capa de atención lineal con compuerta GLA y una capa de RNN lineal con compuerta HGRN.
-- **Puente científico**: una Neural ODE con retropropagación a través de RK4, y una red neuronal informada por la física (PINN) que coloca un residuo de EDP en la pérdida para resolver un problema de contorno.
-- **Compresión**: poda Wanda (consciente de activaciones) y SmoothQuant, y GPTQ (cuantización int8 de pesos por retroalimentación de error de segundo orden, CLI `scirust gptq`), y AWQ (cuantización int8 de pesos basada en búsqueda y consciente de activaciones, CLI `scirust awq`).
+- **Modelo de lenguaje decodificador causal y decodificación eficiente**: un
+  decodificador entrenado de extremo a extremo (embeddings de token y de
+  posición aprendidos, atención multi-cabeza causal, una entropía cruzada softmax
+  fusionada y numéricamente estable) que memoriza exactamente una secuencia fija;
+  más decodificación especulativa exacta (que preserva la salida), borrador
+  multi-cabeza Medusa y a nivel de características EAGLE, y una atención con caché
+  KV paginada (estilo vLLM) que es idéntica bit a bit bajo fragmentación.
+- **Familia LLaMA y atención**: RMSNorm, SwiGLU, un bloque Pre-RMSNorm,
+  embeddings de posición rotatorios (RoPE, con propiedad de posición relativa
+  probada), atención agrupada / multi-consulta mediante difusión de matmul por
+  lotes, sesgo de posición lineal ALiBi, una FlashAttention con softmax en línea
+  por bloques, y la extensión de contexto YaRN.
+- **Modelos de secuencias eficientes** (cada uno desplegado en el grafo y con
+  comprobación de gradiente): Mamba de espacio de estados selectivo y Mamba-2/SSD
+  (la dualidad espacio de estados ↔ atención), S4/S4D y S5 (MIMO con un escaneo
+  asociativo paralelo), RWKV, RetNet, GLA, HGRN, DeltaNet, xLSTM (sLSTM + mLSTM) y
+  Hyena (convolución larga implícita).
+- **Optimizadores deterministas** (todos reproducibles bit a bit): Adam, AdamW,
+  Lion, Muon (momento ortogonalizado por Newton–Schulz), Schedule-Free, AdEMAMix,
+  SOAP, Shampoo, Adafactor, LAMB, Adan, Prodigy, Lookahead, SAM, GaLore (estados
+  proyectados de bajo rango) y Sophia (segundo orden con Hessiano diagonal
+  recortado).
+- **Cuantización, compresión y PEFT** (cada uno probado frente a redondeo al más
+  cercano): SmoothQuant, GPTQ, AWQ, NF4, SqueezeLLM, SpQR, KVQuant, LLM.int8(),
+  OmniQuant, BitNet b1.58 ternario, QuIP# (incoherencia de Hadamard + retículo E8)
+  y AQLM (multi-libro de códigos aditivo); poda Wanda / por magnitud / lottery; y
+  adaptadores LoRA / DoRA.
+- **IA certificable y verificación completa**: propagación por intervalos (IBP),
+  CROWN, zonotopos (AI²/DeepZ), DeepPoly (poliedros relacionales), suavizado
+  aleatorizado, cotas de Lipschitz GloRo y **entrenamiento certificado** CROWN-IBP
+  (una cota IBP diferenciable hace crecer el radio certificado); más verificadores
+  **completos** —ramificación y acotación (branch-and-bound), una formulación MILP
+  exacta y una búsqueda SMT perezosa estilo Reluplex— que deciden la robustez y
+  devuelven contraejemplos concretos (para redes ReLU pequeñas).
+- **Incertidumbre y calibración**: predicción conforme sin supuestos de
+  distribución (split, CQR, APS/RAPS adaptativos, RCPS con control de riesgo,
+  Learn-then-Test, ACI en línea), escalado de temperatura, y ensembles profundos
+  con incertidumbre epistémica.
+- **Puente científico**: una Neural ODE con retropropagación a través de un
+  solucionador RK4, una red neuronal informada por la física (PINN), un operador
+  neuronal de Fourier (FNO) que aprende un operador y generaliza, DeepONet y una
+  red de Kolmogórov–Arnold (KAN).
+- **Reproducibilidad, privacidad y auditoría**: suma/media/producto escalar de
+  punto flotante independiente del orden (idéntico bit a bit sin importar el
+  número de hilos), DP-SGD con un contador de Rényi-DP, una marca de agua para LLM
+  con una prueba z de detección, **DiFR** (verificar una inferencia pese al
+  no-determinismo de punto flotante, mediante una envolvente sólida de error de FP
+  alrededor de la referencia reproducible) y un argumento de **inferencia
+  verificable** (Freivalds en cuerpo finito + un compromiso del modelo +
+  Fiat-Shamir — solidez criptográfica, no conocimiento cero).
 
-Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**, en paralelo, y robustez) y
-`scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (entrenar el LM decodificador N-D).
-
-Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.
+Los comandos CLI exponen buena parte de este trabajo, incluyendo `scirust
+certify` (cotas IBP, CROWN, zonotopo, DeepPoly y suavizado aleatorizado en
+paralelo, más una decisión completa por ramificación y acotación), `scirust lm
+--opt …` (entrenar el LM decodificador N-D con cualquiera de los optimizadores
+anteriores), `scirust conformal`, `scirust calibrate`, las demostraciones de
+modelos de secuencias (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), los
+cuantizadores (`gptq`, `awq`, `bitnet`) y `scirust pinn`.
