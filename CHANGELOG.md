@@ -19,6 +19,23 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **CROWN-IBP — entraînement certifié (vérifié)** (`nn::crown_ibp::CrownIbpMlp`, Zhang et al.
+  2020, roadmap #30) : l'entraînement ordinaire minimise la perte aux entrées *concrètes* — un
+  réseau peut les ajuster parfaitement et pourtant **changer de prédiction** sous une perturbation
+  minime. CROWN-IBP entraîne au contraire sur une **borne certifiée de la perte du pire cas** sur
+  une boule ℓ∞ autour de chaque entrée, rendant le réseau **prouvablement** robuste. L'idée clé :
+  la **propagation par intervalles (IBP) est différentiable**. Pour une couche affine `y=x·W+b`,
+  la boîte se transforme en `centre'=centre·W+b`, `rayon'=rayon·|W|` — et `|W|=relu(W)+relu(−W)`,
+  donc toute la borne (y compris le `|W|` qui semblait exiger un op `abs` dédié) tourne sur la
+  tape N-D ; la ReLU sur un intervalle `[l,u]` devient `[relu(l),relu(u)]`. Les **logits robustes**
+  placent la vraie classe à sa borne **inférieure** et les autres à leur borne **supérieure**
+  (`zₜ=cₜ−rₜ`, `z_j=c_j+r_j`) : une cross-entropy faible dessus signifie que la vraie classe gagne
+  *même dans le pire cas* — le point est **certifié**. Oracle honnête : la propagation IBP sur la
+  tape **coïncide** avec le vérificateur de référence `IbpMlp` (plain `f32`) et est **saine**
+  (2000 points échantillonnés ∈ boîte certifiée) ; après entraînement certifié, le **rayon ℓ∞
+  certifié croît** nettement (réseau robuste-entraîné vs accuracy-only, tous deux classant juste à
+  100 %) + déterminisme bit-exact. Prolonge IBP (#1) / CROWN (#2) / zonotopes (#29) vers
+  l'entraînement.
 - **Sophia — optimiseur de 2e ordre clippé** (`nn::nd_optim::NdSophia`, Liu et al. 2023, roadmap
   #44) : Sophia met à l'échelle le momentum de chaque coordonnée par une estimation de la
   **Hessienne diagonale** et **clippe** le résultat : `θ ← θ − lr·clip(m/max(γ·h,eps),ρ)`. Les

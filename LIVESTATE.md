@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 94 : CROWN-IBP (#30) — entraînement certifié
+- `nn::crown_ibp::CrownIbpMlp` (Zhang 2020) : propagation IBP **différentiable** sur la tape
+  (centre·W+b, rayon·|W| avec |W|=relu(W)+relu(−W) ; ReLU-intervalle [relu(l),relu(u)]) ⇒ logits
+  robustes (vraie classe borne inf, autres borne sup), loss = cross-entropy ⇒ réseau prouvablement
+  robuste. Mesure du rayon certifié via IbpMlp (plain f32) existant. Nouveau module.
+- Bibliothèque seule (entraînement, pas de CLI ni multilingue).
+- Tests (2, core) : IBP tape ≡ IbpMlp référence + sain (2000 pts ∈ boîte) ; rayon certifié croît
+  (robuste-entraîné >> accuracy-only, +0.2 ℓ∞, tous deux 100 % justes) + déterminisme.
+- docs : roadmap #30 📋→✅ ; CHANGELOG. 603 tests core (+2) ; 8 gates verts (à confirmer).
+
 ## Session 2026-06-18 — volet 93 : Sophia (#44) — optimiseur 2e ordre clippé
 - `nn::nd_optim::NdSophia` (Liu 2023) : θ←θ−lr·clip(m/max(γ·h,eps),ρ), h=EMA Hessienne diagonale
   par Hutchinson (ĥ=v⊙Hv, v∈{±1} seedé) via produit Hessien-vecteur en différences finies
@@ -11,7 +21,7 @@
 - Bibliothèque seule (comme SAM, hors boucle lm). Module nd_optim.
 - Tests (1, core) : converge sur quadratique mal conditionné (courbures 4 vs 0.25, cond. 16)
   + déterminisme bit-exact (probe seedé).
-- docs : roadmap #44 📋→✅ ; CHANGELOG. 601 tests core (+1) ; 8 gates verts (à confirmer).
+- docs : roadmap #44 📋→✅ ; CHANGELOG. 601 tests core (+1) ; 8 gates verts ✓ ; commit 387a304.
 
 ## Session 2026-06-18 — volet 92 : QuIP# (#64) — incohérence Hadamard + lattice E8
 - `quantization::quantize_quip`/`nearest_e8`/`random_hadamard_transform` (Tseng 2024) :
