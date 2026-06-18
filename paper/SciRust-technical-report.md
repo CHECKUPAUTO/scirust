@@ -627,10 +627,19 @@ candidate papers delivered** — is tracked in `docs/RESEARCH_ROADMAP.md`.
   around the reproducible reference), and a **verifiable-inference** argument
   (finite-field Freivalds + a model commitment + Fiat-Shamir — cryptographic
   soundness, not zero-knowledge).
+- **Quantum / tensor-network simulation**: an MPS (Matrix Product State / Tensor
+  Train) quantum-circuit simulator (`quantum::Mps`) that stores an n-qubit state
+  as a chain of rank-3 tensors — O(n·χ³) instead of 2ⁿ while entanglement stays
+  moderate — with one- and two-qubit gates and bond-dimension truncation via the
+  in-house pure-Rust truncated SVD (no FFI); validated to reproduce a dense
+  state-vector exactly (random 5-qubit circuit, Bell, GHZ). The same contraction +
+  truncated-SVD machinery underlies the Tensor-Train weight compression
+  (`tn::tt_decompose`).
 
 CLI commands surface much of this work, including `scirust certify` (IBP, CROWN,
 zonotope, DeepPoly and randomized-smoothing bounds side by side, plus a complete
 branch-and-bound decision), `scirust lm --opt …` (train the N-D decoder LM with
 any of the optimizers above), `scirust conformal`, `scirust calibrate`, the
 sequence-model demos (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), the
-quantizers (`gptq`, `awq`, `bitnet`), and `scirust pinn`.
+quantizers (`gptq`, `awq`, `bitnet`), `scirust pinn`, and `scirust quantum`
+(the MPS quantum-circuit simulator).

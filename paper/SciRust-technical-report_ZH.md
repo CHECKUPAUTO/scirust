@@ -267,5 +267,6 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 - **不确定性与校准**：无分布的保形预测（split、CQR、自适应 APS/RAPS、风险控制 RCPS、Learn-then-Test、在线 ACI）、温度缩放，以及带认知不确定性的深度集成。
 - **科学桥梁**：通过 RK4 求解器反向传播的神经 ODE、一个物理信息神经网络（PINN）、一个学习算子并泛化的 Fourier 神经算子（FNO）、DeepONet，以及一个 Kolmogorov–Arnold 网络（KAN）。
 - **可重现性、隐私与审计**：与顺序无关的浮点求和/均值/点积（无论线程数均位完全一致）、带 Rényi-DP 核算器的 DP-SGD、带检测 z 检验的 LLM 水印、**DiFR**（尽管浮点非确定性仍能验证一次推理，方法是围绕可重现的参考构造一个可靠的 FP 误差包络），以及一个**可验证推理**论证（有限域 Freivalds + 模型承诺 + Fiat-Shamir——密码学可靠性，而非零知识）。
+- **量子 / 张量网络模拟**：一个 MPS（矩阵乘积态 / Tensor Train）量子电路模拟器（`quantum::Mps`），将 n 量子比特态存储为一条秩为 3 的张量链——在纠缠保持适中时为 O(n·χ³) 而非 2ⁿ——配备单/双量子比特门以及通过自研纯 Rust 截断 SVD 实现的键维截断（无 FFI）；经验证可精确重现稠密态矢量（随机 5 量子比特电路、Bell、GHZ）。同样的收缩 + 截断 SVD 机制也支撑着 Tensor-Train 权重压缩（`tn::tt_decompose`）。
 
-CLI 命令暴露了这项工作的大部分内容，包括 `scirust certify`（IBP、CROWN、zonotope、DeepPoly 与随机平滑界并排显示，外加一个完备的分支定界判定）、`scirust lm --opt …`（用上述任一优化器训练 N-D 解码器语言模型）、`scirust conformal`、`scirust calibrate`、序列模型演示（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量化器（`gptq`、`awq`、`bitnet`）以及 `scirust pinn`。
+CLI 命令暴露了这项工作的大部分内容，包括 `scirust certify`（IBP、CROWN、zonotope、DeepPoly 与随机平滑界并排显示，外加一个完备的分支定界判定）、`scirust lm --opt …`（用上述任一优化器训练 N-D 解码器语言模型）、`scirust conformal`、`scirust calibrate`、序列模型演示（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量化器（`gptq`、`awq`、`bitnet`）以及 `scirust pinn`、`scirust quantum`（MPS 量子电路模拟器）。

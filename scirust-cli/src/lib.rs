@@ -409,6 +409,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("guard") => synergy::run_guard(rest),
         Some("attest") => synergy::run_attest(rest),
         Some("pinn") => learning::run_pinn(rest),
+        Some("quantum") => learning::run_quantum(rest),
         Some("gptq") => learning::run_gptq(rest),
         Some("awq") => learning::run_awq(rest),
         Some("bitnet") => learning::run_bitnet(rest),

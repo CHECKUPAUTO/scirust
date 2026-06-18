@@ -106,6 +106,12 @@ impl Mps {
         self.nodes.iter().map(|nd| nd.dr).max().unwrap_or(1)
     }
 
+    /// Total number of stored `f32` amplitudes across all nodes — the MPS memory
+    /// footprint, to compare against the `2ⁿ` of a dense state-vector.
+    pub fn storage(&self) -> usize {
+        self.nodes.iter().map(|nd| nd.data.len()).sum()
+    }
+
     /// Apply a one-qubit gate (`2×2` row-major) to qubit `q` in place. No SVD needed.
     pub fn apply_1qubit_gate(&mut self, q: usize, gate: &[f32; 4]) {
         let node = &self.nodes[q];

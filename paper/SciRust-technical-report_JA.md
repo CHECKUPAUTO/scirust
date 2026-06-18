@@ -270,5 +270,6 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 - **不確実性とキャリブレーション**：分布非依存の共形予測（split、CQR、適応的な APS/RAPS、リスク制御の RCPS、Learn-then-Test、オンライン ACI）、温度スケーリング、および認識論的不確実性を伴う深層アンサンブル。
 - **科学的橋渡し**：RK4 ソルバを通して逆伝播する Neural ODE、物理情報ニューラルネットワーク（PINN）、演算子を学習して汎化する Fourier Neural Operator（FNO）、DeepONet、および Kolmogorov–Arnold ネットワーク（KAN）。
 - **再現性、プライバシー、監査**：順序非依存の浮動小数点の和/平均/内積（スレッド数によらずビット単位で同一）、Rényi-DP アカウンタントを伴う DP-SGD、検出 z 検定を伴う LLM 透かし、**DiFR**（再現可能な参照の周りの健全な FP 誤差包絡を介して、浮動小数点の非決定性にもかかわらず推論を検証する）、および**検証可能推論**の論証（有限体 Freivalds + モデルコミットメント + Fiat-Shamir — 暗号学的健全性であり、ゼロ知識ではない）。
+- **量子 / テンソルネットワークシミュレーション**：n 量子ビット状態をランク 3 テンソルの連鎖として格納する MPS（行列積状態 / Tensor Train）量子回路シミュレータ（`quantum::Mps`） — もつれが中程度に留まる限り 2ⁿ ではなく O(n·χ³) — であり、1 量子ビットおよび 2 量子ビットのゲートと、自製の純 Rust 打ち切り SVD（FFI なし）によるボンド次元の打ち切りを備える；密な状態ベクトルを厳密に再現することを検証済み（ランダムな 5 量子ビット回路、Bell、GHZ）。同じ縮約 + 打ち切り SVD の機構が Tensor-Train による重み圧縮（`tn::tt_decompose`）の基盤となっている。
 
-CLI コマンドはこの作業の多くを公開しており、`scirust certify`（IBP、CROWN、ゾノトープ、DeepPoly、ランダム化平滑化の境界を並べて表示、加えて完全な分枝限定法による決定）、`scirust lm --opt …`（上記いずれかのオプティマイザで N-D デコーダ LM を学習）、`scirust conformal`、`scirust calibrate`、系列モデルのデモ（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量子化器（`gptq`、`awq`、`bitnet`）、および `scirust pinn` を含む。
+CLI コマンドはこの作業の多くを公開しており、`scirust certify`（IBP、CROWN、ゾノトープ、DeepPoly、ランダム化平滑化の境界を並べて表示、加えて完全な分枝限定法による決定）、`scirust lm --opt …`（上記いずれかのオプティマイザで N-D デコーダ LM を学習）、`scirust conformal`、`scirust calibrate`、系列モデルのデモ（`mamba`、`deltanet`、`retnet`、`gla`、`hgrn`、`rwkv`）、量子化器（`gptq`、`awq`、`bitnet`）、`scirust pinn`、`scirust quantum`（MPS 量子回路シミュレータ）を含む。

@@ -188,3 +188,4 @@ New CLI commands:
 - `scirust kvcache [--seed N] [--budget B]` — elastic compressed KV-cache (INT4 base+residual tiles, per-group scales); reports the compression ratio and the cosine fidelity of attention vs full precision, with `--budget` showing bounded soft-paging (SLHAv2/CCOS synergy).
 - `scirust guard [--seed N] [--alpha A]` — statistically-guaranteed guard; distribution-free conformal coverage (≥ 1−α) plus Accept/Abstain/Reject verdicts (for a CCOS response guard).
 - `scirust attest [--seed N]` — hash-chained attestation log of verifiable inferences (Freivalds, #80); verifies the chain, rejects a forged inference, and shows tamper-evidence (the CCOS event-log bridge).
+- `scirust quantum [--seed N] [--qubits Q] [--chi C]` — MPS / Tensor-Train quantum-circuit simulator (in-house truncated SVD, zero FFI); shows an exact GHZ state and reports the bond dimension and the MPS memory footprint versus a dense 2ⁿ state-vector.

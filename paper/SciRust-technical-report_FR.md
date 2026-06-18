@@ -314,10 +314,19 @@ candidats sur 80 sont livrés** — est suivie dans `docs/RESEARCH_ROADMAP.md`.
   la référence reproductible), et un argument d'**inférence vérifiable** (Freivalds
   en corps fini + un engagement sur le modèle + Fiat-Shamir — validité
   cryptographique, pas zero-knowledge).
+- **Simulation quantique / réseaux de tenseurs** : un simulateur de circuit
+  quantique MPS (Matrix Product State / Tensor Train) (`quantum::Mps`) qui stocke
+  un état à n qubits comme une chaîne de tenseurs de rang 3 — O(n·χ³) au lieu de
+  2ⁿ tant que l'intrication reste modérée — avec des portes à un et deux qubits et
+  une troncature de la dimension de lien via la SVD tronquée maison en Rust pur
+  (sans FFI) ; validé pour reproduire exactement un vecteur d'état dense (circuit
+  aléatoire à 5 qubits, Bell, GHZ). La même machinerie de contraction + SVD
+  tronquée sous-tend la compression de poids Tensor-Train (`tn::tt_decompose`).
 
 Des commandes CLI exposent une grande partie de ces travaux, notamment `scirust certify`
 (bornes IBP, CROWN, zonotope, DeepPoly et lissage aléatoire côte à côte, plus une
 décision complète par branch-and-bound), `scirust lm --opt …` (entraînement du LM
 décodeur N-D avec n'importe lequel des optimiseurs ci-dessus), `scirust conformal`,
 `scirust calibrate`, les démos de modèles de séquence (`mamba`, `deltanet`, `retnet`,
-`gla`, `hgrn`, `rwkv`), les quantificateurs (`gptq`, `awq`, `bitnet`), et `scirust pinn`.
+`gla`, `hgrn`, `rwkv`), les quantificateurs (`gptq`, `awq`, `bitnet`), `scirust pinn`, et `scirust quantum`
+(le simulateur de circuit quantique MPS).
