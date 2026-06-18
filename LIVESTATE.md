@@ -3,6 +3,16 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 77 : YaRN (#60) — extension de contexte RoPE
+- `nn::yarn` (Peng 2023) : `yarn_frequencies` (interpolation NTK-by-parts : garde
+  haute fréq, interpole basse fréq θ/s, rampe γ), `rope_apply_freqs`/`rope_yarn`
+  (rotation, convention emboîtée = RoPE existante), `yarn_attention_scale` (0.1·ln(s)+1).
+- Bibliothèque seule (primitive positionnelle, pas de CLI ni multilingue). Nouveau module.
+- Tests (6, core) : position relative préservée (⟨rope(q,m),rope(k,n)⟩=g(m−n)) ;
+  angle basse-fréq à s·L revient exactement à l'entraînement (L) ; bornes NTK-by-parts
+  (haute inchangée, basse=θ/s, rampe monotone) ; scale=1 ≡ RoPE simple ; déterminisme.
+- docs : roadmap #60 📋→✅ ; CHANGELOG. 556 tests core (+6) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 76 : Learn then Test (#37) — contrôle de risques multiples
 - `nn::conformal::learn_then_test`/`hoeffding_pvalue` (Angelopoulos 2021) : contrôle
   distribution-free de risques multiples **arbitraires** (non emboîtés). p-value de
@@ -13,7 +23,7 @@
   simulation** (2000 essais, toutes configs sur frontière R=α : FWER mesuré ≤ 0,1 vs
   sélection naïve qui échoue >90 %) ; puissance (sûres retenues, non-sûres rejetées) +
   déterminisme. 16/16 tests conformal verts.
-- docs : roadmap #37 📋→✅ ; CHANGELOG. 550 tests core (+3) ; 8 gates (à confirmer).
+- docs : roadmap #37 📋→✅ ; CHANGELOG. 550 tests core (+3) ; 8 gates verts ✓ ; commit 8d0d766.
 
 ## Session 2026-06-17 — volet 75 : Rényi DP accountant (#78) — budget confidentialité
 - `dp::gaussian_rdp`/`rdp_to_dp`/`rdp_gaussian_epsilon` (Mironov 2017) : RDP gaussien

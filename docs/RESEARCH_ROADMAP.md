@@ -133,7 +133,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 | 57 | Beck et al., *xLSTM* (NeurIPS 2024, arXiv:2405.04517) | `NdXlstm` : LSTM étendu (sLSTM scalaire + mLSTM matriciel), récurrence déroulée ; gradient check | `nn::nd_layers` | 📋 | L |
 | 58 | Qin et al., *HGRN : Hierarchically Gated RNN* (NeurIPS 2023, arXiv:2311.04823) | `hgrn` + `NdHgrn` : RNN linéaire à intégration leaky par canal, porte d'oubli **bornée inférieurement** `f=lb+(1−lb)σ(·)` (la borne `lb` fixe l'horizon mémoire minimal, croissant par couche) ; match référence + gradient check (c,f) + entraînement ; CLI `hgrn` | `nn::nd_layers` | ✅ | M |
 | 59 | Press, Smith & Lewis, *ALiBi* (ICLR 2022, arXiv:2108.12409) | `alibi_slopes` + `alibi_bias` (biais d'attention **linéaire en distance**, pentes `2^(−8h/H)`) + `NdMultiHeadAttention::with_alibi` ; oracle : pentes géométriques + biais linéaire/causal/Toeplitz + poids softmax décroissants (∝ exp(−pente·dist)) + attention déterministe | `nn::nd_layers` | ✅ | S |
-| 60 | Peng et al., *YaRN* (arXiv:2309.00071) | `rope_yarn` : extension de contexte RoPE (interpolation NTK-by-parts) ; propriété de position relative testée | `autodiff::nd`, `nn::nd_layers` | 📋 | M |
+| 60 | Peng et al., *YaRN* (arXiv:2309.00071) | `nn::yarn` : `yarn_frequencies`/`rope_yarn` — extension de contexte RoPE par **interpolation NTK-by-parts** (garde les hautes fréquences, interpole les basses) + température `yarn_attention_scale` ; oracle : propriété de **position relative** préservée + angle basse-fréquence ramené en distribution à `s·L` + `scale=1` ≡ RoPE simple | `nn::yarn` | ✅ | M |
 
 ## Tier 12 — Décodage & inférence efficaces (au-delà du spéculatif #10)
 

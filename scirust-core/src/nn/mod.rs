@@ -46,6 +46,7 @@ pub mod tt_linear;
 pub mod vision;
 pub mod vit;
 pub mod watermark;
+pub mod yarn;
 
 pub use activation::{ReLU, Sigmoid};
 pub use audio::{AudioEncoder, CTCLoss};

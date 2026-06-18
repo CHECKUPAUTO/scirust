@@ -19,6 +19,20 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **YaRN — extension de contexte RoPE** (`nn::yarn`, Peng et al. 2023, roadmap #60) :
+  étend le contexte utilisable d'un modèle RoPE d'un facteur `s` par interpolation
+  **NTK-by-parts** — `yarn_frequencies` garde intactes les dimensions **haute
+  fréquence** (`r_p>β` ⇒ ordre local préservé), interpole pleinement les **basses
+  fréquences** (`r_p<α` ⇒ `θ_p→θ_p/s`), avec une rampe linéaire entre les deux
+  (`θ'_p=θ_p·((1−γ)/s+γ)`). `rope_apply_freqs`/`rope_yarn` appliquent la rotation
+  (convention emboîtée identique à la RoPE existante de `autodiff::nd`) ;
+  `yarn_attention_scale` donne la température `0.1·ln(s)+1`. Oracle honnête :
+  **propriété de position relative** `⟨rope(q,m),rope(k,n)⟩=g(m−n)` préservée malgré
+  les fréquences modifiées + l'angle d'une dimension basse fréquence à la longueur
+  **étendue** `s·L` revient **exactement** à sa valeur d'entraînement à `L` (alors
+  que la RoPE simple explose) + bornes NTK-by-parts (haute fréquence inchangée, basse
+  = `θ/s`, rampe monotone) + `scale=1` ≡ RoPE simple + déterminisme. Couche de
+  bibliothèque (primitive positionnelle, pas de CLI).
 - **Learn then Test (LtT)** (`nn::conformal::learn_then_test`/`hoeffding_pvalue`,
   Angelopoulos et al. 2021, roadmap #37) : contrôle **distribution-free** de
   **risques multiples arbitraires** (non emboîtés) par tests d'hypothèses. Chaque
