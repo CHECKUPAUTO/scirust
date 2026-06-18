@@ -295,9 +295,15 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
   (재현 가능한 기준값 주위의 건전한 부동소수점 오차 봉투를 통해, 부동소수점 비결정성에도
   불구하고 추론을 검증), 그리고 **검증 가능한 추론** 논증(유한체 Freivalds + 모델 커밋먼트 +
   Fiat-Shamir — 영지식이 아닌 암호학적 건전성).
+- **양자 / 텐서 네트워크 시뮬레이션**: n-큐비트 상태를 랭크-3 텐서의 사슬로 저장하는 MPS(행렬
+  곱 상태 / Tensor Train) 양자 회로 시뮬레이터(`quantum::Mps`) — 얽힘이 적당한 수준을 유지하는
+  한 2ⁿ 대신 O(n·χ³) — 로, 1-큐비트 및 2-큐비트 게이트와 자체 구현 순수 Rust 절단 SVD(FFI 없음)를
+  통한 본드 차원 절단을 제공하며, 밀집 상태 벡터를 정확히 재현함이 검증되었습니다(무작위 5-큐비트
+  회로, Bell, GHZ). 동일한 수축 + 절단 SVD 기계가 Tensor-Train 가중치 압축(`tn::tt_decompose`)의
+  기반이 됩니다.
 
 CLI 명령이 이 작업의 상당 부분을 노출하며, 여기에는 `scirust certify`(IBP, CROWN, 조노토프,
 DeepPoly 및 무작위 평활화 경계를 나란히, 그리고 완전한 분기 한정 결정), `scirust lm --opt …`
 (위 옵티마이저 중 무엇으로든 N-D 디코더 LM 학습), `scirust conformal`, `scirust calibrate`,
 시퀀스 모델 데모(`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), 양자화기(`gptq`, `awq`,
-`bitnet`), 그리고 `scirust pinn`이 포함됩니다.
+`bitnet`), `scirust pinn`, 그리고 `scirust quantum`(MPS 양자 회로 시뮬레이터)이 포함됩니다.
