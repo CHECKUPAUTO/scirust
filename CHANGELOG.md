@@ -19,6 +19,17 @@ versions sémantiques à partir de la prochaine release taguée.
   un `needless_return` dans `complex.rs` (chemin `portable-simd`) corrigé.
 
 ### Ajouté — campagne « faire grandir scirust »
+- **PagedAttention — KV-cache paginé** (`nn::paged_attention::PagedKvCache`, Kwon et al.
+  / vLLM 2023, roadmap #63) : le cache clés/valeurs du décodage est découpé en **blocs**
+  de taille fixe tirés d'un pool partagé, adressés indirectement par une **table de
+  blocs** (comme la pagination mémoire) ⇒ quasi zéro fragmentation. `append` remplit les
+  blocs à la demande, `gather_keys/values` reconstruit le cache contigu, et `attention`
+  fait le produit scalaire softmax en indexant clés/valeurs **à travers la table**.
+  Oracle honnête : avec des blocs **leurres** interleavés (layout physique non
+  séquentiel), le gather est **bit-identique** aux vecteurs insérés et l'attention
+  paginée est **bit-identique** à l'attention sur cache contigu (même ordre
+  arithmétique) — la pagination est prouvée sans coût numérique ; + comptabilité des
+  blocs (`⌈len/bloc⌉`) et cas vide + déterminisme. Couche de bibliothèque (nouveau module).
 - **DoRA — adaptation low-rank décomposée poids** (`nn::dora::DoraLinear`, Liu et al.
   2024, roadmap #73) : PEFT qui décompose un poids gelé `W₀` en **magnitude** (vecteur
   par colonne `m`) × **direction** (normalisée), la direction étant pilotée par une

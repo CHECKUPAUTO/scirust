@@ -32,6 +32,7 @@ pub mod nd_decoder;
 pub mod nd_layers;
 pub mod nd_optim;
 pub mod neural_ode;
+pub mod paged_attention;
 pub mod peft;
 pub mod pinn;
 pub mod pool;

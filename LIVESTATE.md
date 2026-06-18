@@ -3,6 +3,15 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-06-18
 
+## Session 2026-06-18 — volet 80 : PagedAttention (#63) — KV-cache paginé
+- `nn::paged_attention::PagedKvCache` (Kwon/vLLM 2023) : blocs d'un pool + table de blocs ;
+  append/gather/attention indexée via la table (softmax(qKᵀ/√d)·V). reserve_decoy() = fragmentation.
+- Bibliothèque seule (mécanisme interne, pas de CLI ni multilingue). Nouveau module.
+- Tests (3, core) : gather bit-identique sous fragmentation (leurres interleavés) + comptabilité
+  blocs ⌈len/bs⌉ ; attention paginée **bit-identique** au cache contigu (même ordre arith) +
+  déterminisme ; cas vide + division exacte en blocs.
+- docs : roadmap #63 📋→✅ ; CHANGELOG. 567 tests core (+3) ; 8 gates (à confirmer).
+
 ## Session 2026-06-18 — volet 79 : DoRA (#73) — LoRA magnitude/direction
 - `nn::dora::DoraLinear` (Liu 2024) : W'=m⊙(W₀+BA)/‖W₀+BA‖_col ; W₀ gelé, m/A/B entraînés.
   Backward de la normalisation par colonne en forme close (∂L/∂V=(m/‖V‖)(gw−u·s), ∂L/∂m=s).
@@ -10,7 +19,7 @@
 - Tests (3, core) : init B=0,m=‖W₀‖_col ⇒ W'=W₀ exact (+ forward = map de base) ;
   gradient check (diff. finies centrales eps=1e-3, tol 3e-2, params génériques B≠0) ;
   récupère une cible DoRA (perte ÷100, GD) + déterminisme.
-- docs : roadmap #73 📋→✅ ; CHANGELOG. 564 tests core (+3) ; 8 gates (à confirmer).
+- docs : roadmap #73 📋→✅ ; CHANGELOG. 564 tests core (+3) ; 8 gates verts ✓ ; commit 3521006.
 
 ## Session 2026-06-18 — volet 78 : GaLore (#48) — projection low-rank des gradients
 - `nn::nd_optim::NdGalore`/`galore_subspace` (Zhao 2024) : Adam dans le sous-espace

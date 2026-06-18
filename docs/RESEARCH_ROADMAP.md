@@ -141,7 +141,7 @@ fondamentaux (certifiable, déterministe, implémentable, testable).
 |---|--------|---------------------------|--------|--------|--------|
 | 61 | Cai et al., *Medusa* (ICML 2024, arXiv:2401.10774) | `generate_medusa` : **têtes de décodage multiples** + attention en arbre ; oracle : sortie **exactement** = greedy | `nn::nd_decoder` | 📋 | M |
 | 62 | Li et al., *EAGLE* (ICML 2024, arXiv:2401.15077) | `generate_eagle` : décodage spéculatif au niveau **features** (autorégression sur l'avant-dernière couche) ; sortie exacte | `nn::nd_decoder` | 📋 | M |
-| 63 | Kwon et al., *PagedAttention / vLLM* (SOSP 2023, arXiv:2309.06180) | `PagedKvCache` : KV-cache **paginé** (blocs), zéro-copie ; oracle : sorties identiques au cache contigu | `nn::nd_decoder` | 📋 | M |
+| 63 | Kwon et al., *PagedAttention / vLLM* (SOSP 2023, arXiv:2309.06180) | `nn::paged_attention::PagedKvCache` : KV-cache **paginé** (blocs d'un pool, table de blocs), attention indexée **via la table** ; oracle : gather **bit-identique** sous fragmentation (blocs leurres interleavés) + `attention` paginée **bit-identique** au cache contigu + comptabilité des blocs/cas vide | `nn::paged_attention` | ✅ | M |
 
 ## Tier 13 — Quantification & compression (au-delà de GPTQ/AWQ/SmoothQuant #15)
 
