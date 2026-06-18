@@ -1,0 +1,22 @@
+[package]
+name = "scirust-industrial"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Industrial CLI — discover, configure, scaffold, and run industrial monitoring pipelines"
+
+[[bin]]
+name = "scirust-industrial"
+path = "src/main.rs"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-integration = { path = "../scirust-integration" }
+scirust-opcua = { path = "../scirust-opcua" }
+scirust-mqtt = { path = "../scirust-mqtt" }
+scirust-signal = { path = "../scirust-signal" }
+scirust-pdm = { path = "../scirust-pdm" }
+scirust-func-safety = { path = "../scirust-func-safety" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }

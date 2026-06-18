@@ -283,3 +283,7 @@ Zwei CLI-Befehle erschließen dies: `scirust certify` (IBP- **und CROWN**-Schran
 und `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (Training des N-D-Decoder-LM).
 
 Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Prädiktionsintervalle mit garantierter Überdeckung.
+
+## 15. Industrielle & Automobil-Überwachung (v0.14)
+
+SciRust v0.14 führt ein Subsystem für **Produktionslinienüberwachung** in der Automobilfertigung ein: 7 Crates + dedizierte CLI für Signalverarbeitung, PLC-Anbindung, Predictive Maintenance und funktionale Sicherheit nach ISO 26262 — 1047 Tests (0 Fehler). Kern-Crates: `scirust-signal` (FFT, Fenster, Lagerdiagnose, Ordnungsanalyse), `scirust-opcua` (Trait + 8 Simulationssensoren), `scirust-mqtt` (SparkPlug B), `scirust-pdm` (Health Index, RUL, CUSUM, Fehlerdetektoren), `scirust-mlops` (Drift, Shadow-Deployment, signiertes OTA), `scirust-func-safety` (ASIL A-D, Traceability, Fault Injection, Degraded Mode, Audit), `scirust-integration` (Backend+Pipeline), `scirust-industrial` (CLI: discover, test, gen-config, scaffold, run, doctor).

@@ -1,0 +1,16 @@
+[package]
+name = "scirust-pdm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Predictive Maintenance — Health Index, RUL estimation, fault detection for industrial machinery"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-signal = { path = "../scirust-signal" }
+scirust-events-core = { path = "../scirust-events-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+rand = "0.8"

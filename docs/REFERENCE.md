@@ -22,7 +22,7 @@ Un changement n'est livrable que si les six passent :
 | Format | `cargo fmt --all -- --check` | style rustfmt du workspace |
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | zéro lint, code + tests + benches |
 | Build | `cargo build --workspace --all-targets` | compilation complète |
-| Tests | `cargo test --workspace` | toute la suite (650+ tests) |
+| Tests | `cargo test --workspace` | toute la suite (1047 tests) |
 | Multi-arch | `cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu` | chemins NEON/SVE (`rustup target add aarch64-unknown-linux-gnu` une fois) |
 | Licences/Sécurité | `cargo deny check` | advisories, licences, sources (`cargo install cargo-deny`) |
 
@@ -99,6 +99,26 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
 | `bitnet [--seed N]` | quantification ternaire BitNet b1.58 (`{-1,0,+1}`, ~1,58 bit/poids) ; vérifie le matmul sans multiplication | `scirust-core::quantization` |
 | `info` / `help` / `version` | méta | — |
+
+
+### `scirust-industrial` — CLI d'intégration industrielle
+
+```bash
+cargo install --path scirust-industrial  # fournit le binaire `scirust-industrial`
+```
+
+| Commande | Effet | Adossé à |
+|----------|-------|----------|
+| `discover --simulated [--filter] [--endpoint]` | Liste les capteurs disponibles sur le serveur OPC-UA | `scirust-opcua` |
+| `test-opcua --simulated [--endpoint] [--samples N]` | Teste la connexion OPC-UA et lit des valeurs | `scirust-opcua` |
+| `test-mqtt --simulated [--host] [--port] [--topic]` | Teste la connexion MQTT et publie un message | `scirust-mqtt` |
+| `gen-config --output F --template T [--stations N] [--line-id]` | Génère un fichier de configuration de pipeline | `scirust-integration` |
+| `scaffold --name N --output O --template T` | Génère un projet de surveillance complet | `scirust-integration` |
+| `run --config F [--cycles N] [--report F]` | Lance un pipeline de surveillance depuis config | `scirust-integration` |
+| `doctor --config F` | Diagnostique les problèmes d'intégration (8 checks) | `scirust-integration` |
+
+Templates : `minimal`, `automotive`, `bearing`, `pdm`.
+Voir [`docs/AUTOMOTIVE_ROADMAP.md`](AUTOMOTIVE_ROADMAP.md) pour le guide complet.
 
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`
 ne fait que les regrouper derrière une interface unique et découvrable.
@@ -251,3 +271,13 @@ ce fichier n'en est que l'index opérationnel.
 | `LIVESTATE.md` | journal de bord inter-sessions (état mesuré) |
 | `docs/QUICKSTART.md`, `docs/MNIST.md`, `docs/ARCHITECTURE.md`, `docs/GPU.md` | guides |
 | `paper/SciRust-technical-report*.md` | rapport technique (8 langues) |
+| `docs/AUTOMOTIVE_ROADMAP.md` | Extension automobile / Industrie 4.0 — axes, priorités, métriques |
+| `docs/INDUSTRIAL_ROADMAP.md` | Feuille de route adoption industrielle (P0/P1/P2) |
+| `scirust-signal/` | Traitement du signal : FFT, fenêtres, features, diagnostic roulements, analyse d'ordre |
+| `scirust-opcua/` | Connecteur OPC-UA : trait `OpcuaClient`, simulateur 8 capteurs |
+| `scirust-mqtt/` | Publication MQTT : trait `MqttPublisher`, format SparkPlug B |
+| `scirust-pdm/` | Maintenance prédictive : Health Index, RUL, CUSUM, détecteurs |
+| `scirust-mlops/` | MLOps industriel : drift, shadow deploy, OTA signé |
+| `scirust-func-safety/` | Sûreté de fonctionnement : ASIL A-D, traçabilité, fault injection, audit |
+| `scirust-integration/` | Kit d'intégration : Backend, PipelineConfig, Pipeline, templates |
+| `examples/industrial_monitor/` | Exemple d'intégration complète : OPC-UA → Signal → Events → RUL → MQTT → Safety → MLOps |

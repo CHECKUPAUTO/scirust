@@ -1,0 +1,10 @@
+[package]
+name = "scirust-signal"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust signal processing — FFT, window functions, time/frequency features for industrial monitoring"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+serde = { version = "1", features = ["derive"] }

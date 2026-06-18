@@ -280,3 +280,7 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（N-D デコーダ LM の学習）。
 
 3 つ目のコマンド `scirust conformal` は、分布非依存で被覆率を保証する共形予測区間を生成します。
+
+## 15. 産業・自動車向け監視 (v0.14)
+
+SciRust v0.14 は自動車製造向けの**生産ライン監視**サブシステムを導入します。7 つのクレートと専用 CLI が信号処理、PLC 接続、予知保全、ISO 26262 機能安全をカバーし、1047 テスト（0 失敗）。主要クレート: `scirust-signal`（FFT、窓関数、ベアリング診断、次数分析）、`scirust-opcua`（トレイト + 8 シミュレーションセンサー）、`scirust-mqtt`（SparkPlug B）、`scirust-pdm`（ヘルスインデックス、RUL、CUSUM、故障検出器）、`scirust-mlops`（ドリフト、シャドウデプロイ、署名付き OTA）、`scirust-func-safety`（ASIL A-D、トレーサビリティ、故障注入、縮退モード、監査）、`scirust-integration`（Pipeline 統一）、`scirust-industrial`（CLI: discover、test、gen-config、scaffold、run、doctor）。

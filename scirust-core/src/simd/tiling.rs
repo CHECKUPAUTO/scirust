@@ -218,6 +218,7 @@ pub fn matmul_tiled_f32(
 /// Matmul tuilée pour ARM64 NEON (Intrinsèques matériels natifs).
 #[inline]
 #[cfg(target_arch = "aarch64")]
+#[allow(clippy::too_many_arguments)]
 pub fn matmul_neon_tiled_f32(
     alpha: f32,
     a: &[f32],

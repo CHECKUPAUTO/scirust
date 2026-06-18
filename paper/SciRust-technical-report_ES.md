@@ -282,3 +282,7 @@ Dos comandos CLI exponen este trabajo: `scirust certify` (cotas IBP **y CROWN**,
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (entrenar el LM decodificador N-D).
 
 Un tercer comando, `scirust conformal`, produce intervalos de predicción conformes con cobertura garantizada, sin supuestos de distribución.
+
+## 15. Monitoreo Industrial y Automotriz (v0.14)
+
+SciRust v0.14 introduce un subsistema para **monitoreo de líneas de producción** automotriz: 7 crates + CLI dedicado que cubren procesamiento de señales, conectividad PLC, mantenimiento predictivo y seguridad funcional ISO 26262 — con 1047 tests (0 fallos). Crate clave: `scirust-signal` (FFT, ventanas, diagnóstico de rodamientos, análisis de orden), `scirust-opcua` (trait + 8 sensores simulados), `scirust-mqtt` (SparkPlug B), `scirust-pdm` (Health Index, RUL, CUSUM, detectores de fallos), `scirust-mlops` (deriva, shadow deploy, OTA), `scirust-func-safety` (ASIL A-D, trazabilidad, fault injection, modo degradado, auditoría), `scirust-integration` (Pipeline unificado), `scirust-industrial` (CLI: discover, test, gen-config, scaffold, run, doctor).

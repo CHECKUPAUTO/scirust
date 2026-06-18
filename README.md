@@ -38,7 +38,7 @@ by measurements.
 Every result below is reproduced by code in this repository and documented in the
 technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-report.md)).
 
-- **Deep-learning core + reverse-mode autodiff** — 810 passing workspace tests (0 failures; measured 2026-06-14); an MLP reaches 97.70% on MNIST.
+- **Deep-learning core + reverse-mode autodiff** — 1047 passing workspace tests (0 failures; measured 2026-06-18); an MLP reaches 97.70% on MNIST.
 - **N-D autograd stack, research-backed and gradient-checked** — a complete causal **decoder LM** (token + positional embeddings, causal attention, fused softmax cross-entropy) that trains end-to-end and overfits a sequence *exactly*; LLaMA-family layers (**RMSNorm**, **SwiGLU**, **RoPE**, **grouped/multi-query attention**); a **LoRA** low-rank adapter (frozen base + trainable `B·A`, gradient-checked); deterministic optimizers (**Adam, AdamW, Lion, Muon, Schedule-Free, AdEMAMix, SOAP** — Adam in Shampoo's eigenbasis, with a from-scratch Jacobi eigensolver — plus **Lookahead, LAMB, Adan**); **exact speculative decoding** and **FlashAttention** (online softmax); a **DeltaNet** delta-rule linear-attention layer, a **Mamba** selective state-space layer (S6 input-dependent scan), a **RetNet** retention layer (recurrent form proven equal to the parallel form), a **GLA** gated-linear-attention layer (data-dependent forget gate), and an **HGRN** gated-linear-RNN token mixer, all linear-time recurrences unrolled on the tape; a **Neural ODE** (backprop through an RK4 solver); a **Physics-Informed Neural Network** that solves a boundary-value problem with the PDE residual in the loss (recovers `sin x` to ~4 decimals). Every op is validated by a finite-difference gradient check. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 - **Certifiable & reproducible** — **Interval Bound Propagation** and **CROWN** (linear-relaxation back-substitution, provably *tighter* than IBP) give *provable* output bounds and robustness certificates for ReLU MLPs, shown side by side (`scirust certify`); **conformal prediction** gives distribution-free prediction sets with a *guaranteed* coverage level (`scirust conformal`); **temperature scaling** recalibrates over-confident probabilities (lowers the expected calibration error without touching accuracy, `scirust calibrate`); **order-independent floating-point reductions** are bit-identical regardless of thread count; **Wanda** pruning, **SmoothQuant**, **GPTQ** (second-order error-feedback weight quantization — beats round-to-nearest on calibration error, `scirust gptq`), **AWQ** (activation-aware search-based per-channel scaling, `scirust awq`), **BitNet b1.58** (ternary `{−1,0,+1}` weights, ~1.58 bit/weight, with a verified multiplication-free matmul, `scirust bitnet`), and **NF4** (QLoRA's 4-bit NormalFloat — quantile-matched levels that beat uniform 4-bit on Gaussian weights) extend the deterministic int8 path.
 - **Portable GPU compute (wgpu, optional)** — a real WGSL `f32` GEMM behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI, plumbed into the autograd tape (`Var::matmul_gpu` forward + backward via `WgpuEngine`) **and** into Conv2d's im2col GEMMs (forward + backward). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
@@ -47,6 +47,7 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
 - **Evolutionary optimization** (`scirust-evo`) — NSGA-II recovers the ZDT1 Pareto front to within ~1e-3; the simplified single-objective optimizers are honest about their limits (see the report).
+- **Industrial & automotive monitoring** (`scirust-signal`, `scirust-opcua`, `scirust-mqtt`, `scirust-pdm`, `scirust-mlops`, `scirust-func-safety`, `scirust-integration`) — signal processing (FFT, windows, bearing BPFO/BPFI/BSF diagnostics, order analysis), OPC-UA PLC connectivity with 8 simulated sensors, MQTT SparkPlug B publishing, predictive maintenance (Health Index, RUL, CUSUM, 4 fault detectors), industrial MLOps (drift, shadow deploy, signed OTA), ISO 26262 functional safety (ASIL A-D, fault injection, degraded mode, hash-chained audit log), integration kit (unified Backend/Pipeline/Config/templates), and a dedicated `scirust-industrial` CLI (discover, test, gen-config, scaffold, run, doctor).
 
 ## What's in it?
 
@@ -85,6 +86,13 @@ scirust analyze src/main.rs           # ownership analysis of a real Rust file
 scirust analyze src/main.rs --sarif   # same, as SARIF 2.1.0 for CI code scanning
 scirust verify emit  model.qsr1 model.proof    # seal an inference certificate
 scirust verify verify model.proof model.qsr1   # re-check it bit-for-bit
+
+# Industrial monitoring (scirust-industrial CLI)
+scirust-industrial discover --simulated                  # browse available PLC sensors
+scirust-industrial gen-config --template automotive --stations 3
+scirust-industrial scaffold --name line3-monitor --template automotive
+scirust-industrial run --config config.json --cycles 100
+scirust-industrial doctor --config config.json           # diagnose integration issues
 ```
 
 `scirust quickstart` prints a decreasing loss and reaches 4/4 on a
@@ -144,11 +152,18 @@ scirust-core = { path = "path/to/scirust-core" }
 ## Architecture
 
 ```
-scirust-core/    Core compute, autograd, layers (~12k loc)
-scirust-simd/    SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/     CPU reference backend + real wgpu GEMM (feature `wgpu`, tested on lavapipe)
-scirust-som/     Ownership Model: real-Rust analyzer + Transformer pipeline
-examples/        Quickstart, MNIST training, benchmarks
+scirust-core/          Core compute, autograd, layers (~12k loc)
+scirust-simd/          SIMD CPU kernels (AVX2, SSE2, NEON)
+scirust-gpu/           CPU reference backend + real wgpu GEMM (feature `wgpu`, tested on lavapipe)
+scirust-signal/        Signal processing: FFT, windows, bearing diagnostics, order analysis
+scirust-opcua/         OPC-UA connector: trait + 8 simulated industrial sensors
+scirust-mqtt/          MQTT publishing: SparkPlug B payloads, severity classification
+scirust-pdm/           Predictive maintenance: Health Index, RUL, CUSUM, fault detectors
+scirust-mlops/         Industrial MLOps: drift detection, shadow deployment, signed OTA
+scirust-func-safety/   Functional safety: ASIL A-D, fault injection, degraded mode, audit log
+scirust-integration/   Integration kit: Backend, Pipeline, config, code templates
+scirust-som/           Ownership Model: real-Rust analyzer + Transformer pipeline
+examples/              Quickstart, MNIST training, industrial_monitor, benchmarks
 ```
 
 ## Documentation

@@ -1,0 +1,12 @@
+[package]
+name = "scirust-mqtt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust MQTT bridge — publish detected events to MQTT brokers for Industry 4.0 dashboards"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-events-core = { path = "../scirust-events-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

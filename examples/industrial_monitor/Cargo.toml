@@ -1,0 +1,18 @@
+[package]
+name = "industrial-monitor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+scirust-core = { path = "../../scirust-core" }
+scirust-signal = { path = "../../scirust-signal" }
+scirust-events-core = { path = "../../scirust-events-core" }
+scirust-events-models = { path = "../../scirust-events-models" }
+scirust-events-runtime = { path = "../../scirust-events-runtime" }
+scirust-opcua = { path = "../../scirust-opcua" }
+scirust-mqtt = { path = "../../scirust-mqtt" }
+scirust-pdm = { path = "../../scirust-pdm" }
+scirust-func-safety = { path = "../../scirust-func-safety" }
+scirust-mlops = { path = "../../scirust-mlops" }
+rand = "0.8"

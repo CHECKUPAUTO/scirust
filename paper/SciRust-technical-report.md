@@ -551,7 +551,103 @@ The crate provides a CDCL SAT solver and an E-Graph engine for equality saturati
 ### 14.4 Conclusion
 The addition of neuro-symbolic capabilities positions SciRust as a versatile platform for AGI research, enabling models that can both learn from data and reason over structured knowledge.
 
-## 15. Conclusion
+## 15. Industrial & Automotive Production Line Monitoring
+
+SciRust v0.14 introduces a dedicated subsystem for **industrial monitoring** of production
+lines, with a focus on automotive manufacturing. This spans signal processing, PLC
+connectivity, predictive maintenance, and functional safety compliance.
+
+### 15.1 Signal Processing (`scirust-signal`)
+
+A pure-Rust DSP library provides the primitives needed for vibration-based machinery
+diagnostics:
+
+- **FFT:** in-place radix-2 Cooley-Tukey forward/inverse, with real-valued half-spectrum output
+- **Five window functions:** Hanning, Hamming, Blackman, Blackman-Harris (4-term), Flat-top
+- **Time-domain features:** RMS, crest factor, kurtosis (excess), skewness, zero-crossing rate, autocorrelation, energy, Shannon entropy
+- **Spectral features:** Power Spectral Density, spectral centroid, spread, entropy, rolloff, band power, spectral flatness
+- **Bearing diagnostics:** BPFO (Ball Pass Frequency Outer), BPFI (Inner), BSF (Ball Spin), FTF (Fundamental Train Frequency) computed from bearing geometry (pitch diameter, ball diameter, number of balls, contact angle); fault detection searches for harmonics of characteristic frequencies in an envelope spectrum
+- **Order analysis:** order tracking via tachometer pulses, constant-angle resampling, and order spectrum computation for variable-speed rotating machinery, invariant to shaft speed changes
+
+### 15.2 OPC-UA Connector (`scirust-opcua`)
+
+An abstraction layer connects industrial PLCs and SCADA systems to the SciRust event
+pipeline:
+
+- **`OpcuaClient` trait:** connect, disconnect, browse, read, subscribe, poll
+- **`SimulatedOpcuaClient`:** 8 pre-configured sensor types (3-axis vibration, motor/coolant temperature, hydraulic pressure, motor current, coolant flow) with realistic dynamics (random walk, sine wave, step changes, noise) for development and CI testing without real hardware
+- **Bridge function** `values_to_event_stream` converts batched OPC-UA values into a SciRust `EventStream` for downstream processing
+
+### 15.3 MQTT Publishing (`scirust-mqtt`)
+
+A publishing layer sends detected industrial events to MQTT brokers for Industry 4.0
+dashboards and alerting systems:
+
+- **`MqttPublisher` trait:** connect, disconnect, publish, publish_event
+- **SparkPlug B-compatible payloads** with severity classification (Info/Warning/Critical derived from confidence scores)
+- **`SimulatedMqttPublisher`:** in-memory message buffer for testing, with event counting by severity
+- **`MonitoringStation` configuration struct** maps physical stations to sensor configurations, MQTT topics, detection parameters, and confidence thresholds
+
+### 15.4 Predictive Maintenance (`scirust-pdm`)
+
+A predictive maintenance module provides degradation tracking and fault detection for
+industrial machinery:
+
+- **Health Index:** multi-sensor indicator fusion into a 0..1 score with EMA smoothing and ISO 13374 health state classification (Good/Degraded/Warning/Critical/Failed)
+- **RUL estimation:** Linear (least-squares fit) and Exponential (log-linear fit) Remaining Useful Life estimators with 95% confidence intervals
+- **Change detection:** CUSUM (Cumulative Sum, ISO 7870) and Page-Hinkley tests for detecting regime shifts in process signals
+- **Specialized fault detectors:**
+  - `ImbalanceDetector` — detects dominant 1x shaft frequency component with declining harmonics
+  - `MisalignmentDetector` — identifies strong 2x/3x shaft frequency components
+  - `BearingFaultDetector` — searches envelope spectrum for BPFO/BPFI/BSF characteristic frequencies
+  - `CavitationDetector` — tracks high kurtosis (> 4) and elevated high-frequency band power ratio
+
+### 15.5 Industrial MLOps (`scirust-mlops`)
+
+ML operations for continuous industrial deployment and monitoring:
+
+- **Drift detection:** Data drift via Population Stability Index (PSI < 0.1: no drift, > 0.25: significant), model drift via relative MAE exceeding baseline
+- **Shadow deployment:** parallel execution of production and candidate models with Promote/Keep/Inconclusive recommendation based on metric improvement
+- **Signed OTA:** Over-The-Air model distribution with cryptographic signature, hash verification, and tamper detection
+
+### 15.6 Functional Safety (`scirust-func-safety`)
+
+Safety-critical infrastructure for ISO 26262 / IEC 61508 compliance in automotive
+applications:
+
+- **ASIL A-D configuration:** auto-generated safety configurations (lockstep, watchdog timeout, max latency budget, hardware redundancy) per integrity level; MC/DC coverage requirements (50%-100%) and fault injection test counts (10-200)
+- **Requirement traceability matrix:** requirements-to-code-to-tests mapping with coverage reporting and JSON export for certification dossiers
+- **Fault injection testing:** 6 fault types (bit-flip, stuck-at, noise injection, zero-out, scale shift, overflow) applied to weight tensors with output delta measurement and safe-state detection
+- **Degraded mode controller:** 4-level graceful degradation (Full → Reduced → Safety → Emergency) with hysteresis, sensor failure counters, and production halt capability
+- **Hash-chained audit log:** tamper-evident decision journal with per-entry hash chaining and full-chain integrity verification
+
+### 15.7 Integration Kit (`scirust-integration`)
+
+A unifying library that bridges the industrial crates into a turnkey pipeline:
+
+- **`Backend` abstraction:** unified OPC-UA + MQTT interface with compile-time backend selection (simulated, `real-opcua`, `real-mqtt`) and automatic simulated fallback
+- **`PipelineConfig`:** complete JSON-based configuration covering backend type, OPC-UA and MQTT endpoints, per-station sensor lists with baselines and failure thresholds, bearing geometry, shaft frequency, and ASIL level
+- **`Pipeline`:** full monitoring pipeline: backend polling → signal feature extraction → Health Index update → RUL prediction → CUSUM change detection → event detection → MQTT publishing → audit logging
+
+### 15.8 Industrial CLI (`scirust-industrial`)
+
+A dedicated command-line tool streamlines industrial integration:
+
+| Command | Purpose |
+|---------|---------|
+| `discover` | Browse OPC-UA server for available sensor nodes |
+| `test-opcua` | Test OPC-UA connection and read sensor values |
+| `test-mqtt` | Test MQTT broker connectivity |
+| `gen-config` | Generate a pipeline configuration file from templates (automotive, bearing, pdm) |
+| `scaffold` | Generate a complete monitoring project with Cargo.toml, main.rs, config.json |
+| `run` | Execute a monitoring pipeline from a JSON configuration file |
+| `doctor` | Run 8 diagnostic checks (config validity, backend connectivity, OPC-UA browse, MQTT publish, pipeline execution, audit chain integrity) |
+
+The `industrial_monitor` example ties the full chain together: OPC-UA → Signal Processing → Event Detection → Health Index → RUL Estimation → CUSUM → MQTT Publishing → Audit Log → Functional Safety → MLOps Drift detection.
+
+With the new industrial crates, SciRust passes **1047 tests** across the workspace (0 failures).
+
+## 16. Conclusion
 
 SciRust is a pure-Rust deep learning framework — a hybrid runtime and transpiler — on
 which four capabilities were built and validated: a portable GPU and Tensor Core

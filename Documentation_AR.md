@@ -113,7 +113,105 @@ fn main() {
 }
 ```
 
-## 7. الخاتمة
+## 8. المراقبة الصناعية والسيارات (v0.14-dev)
+
+يتضمن SciRust الآن مجموعة من الكراتات (crates) **لمراقبة خطوط الإنتاج الصناعية**، خاصة في مجال السيارات.
+
+### 8.1 معالجة الإشارات (`scirust-signal`)
+
+معالجة إشارات Rust خالصة لتحليل الاهتزازات وتشخيص الآلات:
+
+- **FFT Radix-2** (Cooley-Tukey، أمامي + عكسي)
+- **النوافذ**: Hanning، Hamming، Blackman، Blackman-Harris، Flat-top
+- **خصائص المجال الزمني**: RMS، عامل القمة، التفرطح، الانحراف، معدل عبور الصفر، الارتباط الذاتي، الطاقة، الإنتروبيا
+- **خصائص المجال الترددي**: PSD، المركز الطيفي، الانتشار، الإنتروبيا الطيفية، التدحرج، قدرة النطاق، التسطيح
+- **تشخيص المحامل**: حساب BPFO، BPFI، BSF، FTF، كشف ترددات الأعطال في طيف الغلاف
+- **تحليل الرتب**: تتبع الرتب، إعادة العينات بزاوية ثابتة، طيف الرتب للآلات الدوارة متغيرة السرعة
+
+### 8.2 موصل OPC-UA (`scirust-opcua`)
+
+يربط PLC/SCADA الصناعية بخط أنابيب SciRust:
+
+- **السمة `OpcuaClient`**: تجريد لقراءة المتغيرات والاشتراك والتصفح
+- **`SimulatedOpcuaClient`**: 8 مستشعرات محاكاة (اهتزاز 3 محاور، درجة حرارة المحرك/المبرد، ضغط هيدروليكي، تيار المحرك، تدفق المبرد)
+- **الجسر**: تحويل قيم OPC-UA → `EventStream` SciRust
+- جاهز للتكامل مع مكدس OPC-UA حقيقي (crate `opcua`) عبر أعلام الميزات
+
+### 8.3 نشر MQTT (`scirust-mqtt`)
+
+ينشر الأحداث المكتشفة إلى وسطاء MQTT من أجل الصناعة 4.0:
+
+- **السمة `MqttPublisher`**: تجريد للنشر
+- **صيغة SparkPlug B**: حمولات متوافقة مع الصناعة 4.0
+- **الشدة**: Info / Warning / Critical (مشتقة من درجة الثقة)
+- **`SimulatedMqttPublisher`**: خلفية اختبار بدون وسيط حقيقي
+- **`MonitoringStation`**: تكوين المحطة
+
+### 8.4 الصيانة التنبؤية (`scirust-pdm`)
+
+وحدات الصيانة التنبؤية للآلات الصناعية:
+
+- **مؤشر الصحة**: درجة 0..1 تجمع بين عدة مؤشرات مستشعرات، مع تنعيم EMA وتصنيف ISO 13374 (Good/Degraded/Warning/Critical/Failed)
+- **RUL (العمر المتبقي)**: مقدرات خطية وأسية بفواصل ثقة 95%
+- **كشف التغيير**: CUSUM (ISO 7870) و Page-Hinkley لكشف تحول النظام
+- **كاشفات متخصصة**: `ImbalanceDetector`، `MisalignmentDetector`، `BearingFaultDetector`، `CavitationDetector`
+
+### 8.5 MLOps الصناعي (`scirust-mlops`)
+
+عمليات ML للنشر الصناعي المستمر:
+
+- **كشف الانحراف**: انحراف البيانات عبر Population Stability Index (PSI)، انحراف النموذج عبر MAE النسبي
+- **النشر الظل**: تنفيذ متوازٍ لنموذج الإنتاج/المرشح، توصية Promote/Keep/Inconclusive
+- **OTA موقع**: توزيع النماذج عبر الأثير بتوقيع مشفر وتحقق من السلامة
+
+### 8.6 السلامة الوظيفية (`scirust-func-safety`)
+
+الامتثال لـ ISO 26262 / IEC 61508 للذكاء الاصطناعي في السيارات:
+
+- **ASIL A-D**: مستويات السلامة، تكوين تلقائي (lockstep، watchdog، أقصى زمن انتقال، التكرار)
+- **تتبع المتطلبات**: مصفوفة المتطلبات → الكود → الاختبارات، تصدير JSON، تقرير الشهادة
+- **حقن الأعطال**: 6 أنواع أعطال (bit-flip، stuck-at، ضوضاء، zero-out، scale-shift، overflow)، اختبارات دفعية
+- **الوضع المتدهور**: 4 مستويات (Full → Reduced → Safety → Emergency)، تباطؤ، الحالة الآمنة
+- **سجل تدقيق بسلسلة التجزئة**: سجل غير قابل للتغيير لقرارات السلامة، التحقق من سلامة السلسلة
+
+### 8.7 طقم التكامل (`scirust-integration`)
+
+مكتبة موحدة لتبسيط التكامل الصناعي:
+
+- **`Backend`**: تجريد موحد OPC-UA + MQTT مع أعلام الميزات (`real-opcua`، `real-mqtt`)
+- **`BackendFactory`**: إنشاء تلقائي، ارتداد من المحاكاة → الحقيقي
+- **`PipelineConfig`**: تكوين JSON كامل (الخلفية، المحطات، المستشعرات، مؤشر الصحة، RUL، الانحراف)
+- **`Pipeline`**: خط أنابيب كامل Backend → Signal → Events → Health → RUL → MQTT → Audit
+- **القوالب**: إنشاء المشاريع (`minimal`، `automotive`، `bearing`، `pdm`)
+
+### 8.8 CLI الصناعي (`scirust-industrial`)
+
+أداة سطر أوامر لتسهيل التكامل:
+
+```bash
+scirust-industrial discover --simulated                    # تصفح مستشعرات PLC المتاحة
+scirust-industrial test-opcua --simulated --samples 5       # اختبار اتصال OPC-UA
+scirust-industrial test-mqtt --simulated                    # اختبار اتصال MQTT
+scirust-industrial gen-config --output config.json --template automotive --stations 3
+scirust-industrial scaffold --name line3-monitor --template automotive
+scirust-industrial run --config config.json --cycles 100 --report report.json
+scirust-industrial doctor --config config.json             # تشخيص مشاكل التكامل
+```
+
+### 8.9 مثال التكامل الكامل (`industrial-monitor`)
+
+يوضح مثال `industrial_monitor` السلسلة الكاملة:
+
+```
+OPC-UA (PLC) → معالجة الإشارات → كشف الأحداث → مؤشر الصحة
+→ تقدير RUL → CUSUM → نشر MQTT → سجل التدقيق → السلامة الوظيفية → انحراف MLOps
+```
+
+```bash
+cargo run -p industrial-monitor
+```
+
+## 9. الخاتمة
 
 SciRust هو إطار العمل المفضل لأولئك الذين يعطون الأولوية لـ **الفهم** و **الصرامة** على السرعة الخام أو سهولة Python. إنه أداة قوية لبناء ذكاء اصطناعي جدير بالثقة، من البحث إلى الأنظمة المدمجة.
 
@@ -158,3 +256,65 @@ SciRust هو إطار العمل المفضل لأولئك الذين يعطون
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — تكميم أوزان int8 بطريقة GPTQ؛ يُبلِغ عن مقدار انخفاض خطأ المعايرة مقارنةً بـ round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — تكميم أوزان int8 مدرك للتنشيط بطريقة AWQ؛ يُبلِغ عن أُسّ القياس المختار ومقدار انخفاض خطأ المعايرة مقارنةً بـ round-to-nearest.
 - `scirust bitnet [--seed N]` — تكميم أوزان BitNet b1.58 الثلاثي {-1,0,+1} (~1.58 بت/وزن)؛ يتحقّق من ضرب المصفوفات الخالي من عمليات الضرب.
+
+## ‏14. CLI الصناعي — المرجع الكامل
+
+CLI `scirust-industrial` ييسر دمج SciRust مع الأنظمة الصناعية الحقيقية.
+
+### التثبيت
+
+```bash
+cargo install --path scirust-industrial   # يوفر ثنائي `scirust-industrial`
+# أو في المكان: cargo run -p scirust-industrial -- <أمر>
+```
+
+### الأوامر
+
+| الأمر | الوصف | الخيارات |
+|-------|-------|----------|
+| `discover` | يسرد المستشعرات المتاحة على خادم OPC-UA | `--endpoint`، `--filter`، `--simulated` |
+| `test-opcua` | يختبر اتصال OPC-UA ويقرأ القيم | `--endpoint`، `--simulated`، `--samples N` |
+| `test-mqtt` | يختبر اتصال وسيط MQTT وينشر رسالة | `--host`، `--port`، `--simulated`، `--topic` |
+| `gen-config` | يولد ملف تكوين خط الأنابيب | `--output`، `--template`، `--stations N`، `--line-id` |
+| `scaffold` | يولد مشروع مراقبة كامل | `--name`، `--output`، `--template` |
+| `run` | يشغل خط أنابيب مراقبة من التكوين | `--config`، `--cycles N`، `--report` |
+| `doctor` | يشخص مشاكل التكامل | `--config` |
+
+### القوالب
+
+| القالب | الوصف |
+|--------|-------|
+| `minimal` | محطة واحدة، خلفية محاكاة، كشف الارتفاعات |
+| `automotive` | خط سيارات متعدد المحطات مع تشخيص المحامل، RUL، MQTT، تدقيق |
+| `bearing` | كشف أعطال المحامل (غلاف FFT، BPFO/BPFI/BSF) |
+| `pdm` | صيانة تنبؤية (مؤشر الصحة، RUL، CUSUM) |
+
+### تدفق التكامل الموصى به
+
+```bash
+# 1. إنشاء مشروع
+scirust-industrial scaffold --name line3-monitor --template automotive
+
+# 2. التحقق من أن كل شيء يعمل
+cd line3-monitor
+scirust-industrial doctor --config config.json
+
+# 3. تخصيص التكوين
+# تحرير config.json: نقطة نهاية OPC-UA، وسيط MQTT، المستشعرات، العتبات
+
+# 4. التبديل إلى الوضع الحقيقي (اختياري)
+# تحرير Cargo.toml: إلغاء التعليق على ميزات real-opcua / real-mqtt
+# تحرير config.json: backend_type "opcua"
+
+# 5. بدء المراقبة
+scirust-industrial run --config config.json --cycles 1000
+```
+
+### التحول من وضع المحاكاة إلى الوضع الحقيقي
+
+يعمل وضع المحاكاة بدون أي أجهزة. للانتقال إلى الإنتاج:
+
+1. **OPC-UA حقيقي**: أضف `features = ["real-opcua"]` إلى `scirust-integration` في `Cargo.toml`، أضف التبعية `opcua = "0.13"`، وغير `backend_type` إلى `"opcua"` في `config.json`.
+2. **MQTT حقيقي**: أضف `features = ["real-mqtt"]`، أضف `rumqttc = "0.24"`، وقم بتكوين `host`/`port` للوسيط.
+
+يتولى `BackendFactory` الارتداد التلقائي: إذا فشلت الخلفية الحقيقية، يرتد إلى وضع المحاكاة.

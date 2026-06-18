@@ -1,0 +1,28 @@
+[package]
+name = "scirust-integration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Integration Kit — backend abstraction, auto-config, and code templates for industrial deployment"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-signal = { path = "../scirust-signal" }
+scirust-events-core = { path = "../scirust-events-core" }
+scirust-events-models = { path = "../scirust-events-models" }
+scirust-events-runtime = { path = "../scirust-events-runtime" }
+scirust-opcua = { path = "../scirust-opcua" }
+scirust-mqtt = { path = "../scirust-mqtt" }
+scirust-pdm = { path = "../scirust-pdm" }
+scirust-func-safety = { path = "../scirust-func-safety" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["simulated"]
+# Use simulated backends (no real PLC/broker needed)
+simulated = []
+# Use real OPC-UA backend (requires opcua crate — add as dep when enabling)
+real-opcua = []
+# Use real MQTT backend (requires rumqttc crate — add as dep when enabling)
+real-mqtt = []

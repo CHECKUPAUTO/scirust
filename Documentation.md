@@ -203,6 +203,133 @@ let result = layer.fuzzy_and(&a, &b); // 0.56
 
 
 
+## 10. Surveillance Industrielle et Automobile (v0.14-dev)
+
+SciRust inclut désormais un ensemble de crates pour la **surveillance de lignes de production industrielles**, notamment dans le domaine automobile.
+
+### 10.1 Traitement du Signal (`scirust-signal`)
+
+Traitement du signal pur-Rust pour l'analyse vibratoire et le diagnostic de machines :
+
+- **FFT radix-2** (Cooley-Tukey, forward + inverse)
+- **Fenêtres** : Hanning, Hamming, Blackman, Blackman-Harris, Flat-top
+- **Features temporelles** : RMS, facteur de crête, kurtosis, skewness, taux de passage par zéro, autocorrélation, énergie, entropie
+- **Features spectrales** : PSD, centroïde spectral, étalement, entropie spectrale, rolloff, puissance de bande, flatness
+- **Diagnostic de roulements** : BPFO, BPFI, BSF, FTF avec détection de défauts dans le spectre d'enveloppe
+- **Analyse d'ordre** : order tracking, rééchantillonnage angulaire, spectre d'ordre pour machines à vitesse variable
+
+```rust
+use scirust_signal::{fft_real, hanning, rms, kurtosis, crest_factor};
+
+let signal: Vec<f64> = (0..1024).map(|i| (i as f64 * 0.1).sin()).collect();
+let window = hanning(1024);
+let r = rms(&signal);
+let k = kurtosis(&signal);
+let cf = crest_factor(&signal);
+```
+
+### 10.2 Connecteur OPC-UA (`scirust-opcua`)
+
+Connecte les PLC/SCADA industriels au pipeline SciRust :
+
+- **Trait `OpcuaClient`** : abstraction pour lecture de variables, abonnement, browse
+- **`SimulatedOpcuaClient`** : 8 capteurs simulés (vibration 3 axes, température moteur/liquide, pression hydraulique, courant moteur, débit liquide)
+- **Bridge** : conversion des valeurs OPC-UA → `EventStream` SciRust
+- Prêt pour l'intégration d'un vrai stack OPC-UA (crate `opcua`) via feature flag
+
+### 10.3 Publication MQTT (`scirust-mqtt`)
+
+Publie les événements détectés vers des brokers MQTT pour l'Industrie 4.0 :
+
+- **Trait `MqttPublisher`** : abstraction de publication
+- **Format SparkPlug B** : payloads compatibles Industrie 4.0
+- **Sévérité** : Info / Warning / Critical (dérivée du score de confiance)
+- **`SimulatedMqttPublisher`** : backend de test sans broker réel
+- **`MonitoringStation`** : configuration de station de surveillance
+
+### 10.4 Maintenance Prédictive (`scirust-pdm`)
+
+Modules de maintenance prédictive pour machines industrielles :
+
+- **Health Index** : score 0..1 combinant plusieurs indicateurs capteurs, avec lissage EMA et classification ISO 13374 (Good/Degraded/Warning/Critical/Failed)
+- **RUL (Remaining Useful Life)** : estimateurs linéaire et exponentiel avec intervalles de confiance 95%
+- **Détection de changement** : CUSUM (ISO 7870) et Page-Hinkley pour détection de régime
+- **Détecteurs spécialisés** :
+  - `ImbalanceDetector` : déséquilibre rotor (pic 1x RPM dominant)
+  - `MisalignmentDetector` : désalignement (pics 2x/3x RPM)
+  - `BearingFaultDetector` : défauts de roulement (BPFO/BPFI/BSF/FTF)
+  - `CavitationDetector` : cavitation de pompe (haute kurtosis + bande HF)
+
+### 10.5 MLOps Industriel (`scirust-mlops`)
+
+Opérations ML pour le déploiement industriel continu :
+
+- **Détection de dérive** : Data drift via Population Stability Index (PSI), Model drift via MAE relative
+- **Shadow deployment** : exécution parallèle modèle production / modèle candidat, recommandation Promote/Keep/Inconclusive
+- **OTA signé** : distribution de modèles Over-The-Air avec signature cryptographique et vérification d'intégrité
+
+### 10.6 Sûreté de Fonctionnement (`scirust-func-safety`)
+
+Conformité ISO 26262 / IEC 61508 pour l'IA automobile :
+
+- **ASIL A-D** : niveaux d'intégrité, configuration automatique (lockstep, watchdog, latence max, redondance)
+- **Traçabilité exigences** : matrice exigences → code → tests, export JSON, rapport de certification
+- **Fault injection** : 6 types de fautes (bit-flip, stuck-at, noise, zero-out, scale-shift, overflow), tests par lots
+- **Mode dégradé** : 4 niveaux (Full → Reduced → Safety → Emergency), hystérésis, safe state
+- **Audit log hash-chainé** : journal immuable des décisions de sécurité, vérification d'intégrité de chaîne
+
+### 10.7 Kit d'Intégration (`scirust-integration`)
+
+Librairie unificatrice pour simplifier l'intégration industrielle :
+
+- **`Backend`** : abstraction unifiée OPC-UA + MQTT avec feature flags (`real-opcua`, `real-mqtt`)
+- **`BackendFactory`** : création automatique, fallback simulé → réel
+- **`PipelineConfig`** : configuration JSON complète (backend, stations, capteurs, Health Index, RUL, drift)
+- **`Pipeline`** : pipeline complet Backend → Signal → Events → Health → RUL → MQTT → Audit
+- **Templates** : génération de projets (`minimal`, `automotive`, `bearing`, `pdm`)
+
+### 10.8 CLI Industriel (`scirust-industrial`)
+
+Outil en ligne de commande pour faciliter l'intégration :
+
+```bash
+# Découvrir les capteurs disponibles sur le PLC
+scirust-industrial discover --simulated
+
+# Tester la connexion OPC-UA
+scirust-industrial test-opcua --simulated --samples 5
+
+# Tester la connexion MQTT
+scirust-industrial test-mqtt --simulated
+
+# Générer un fichier de configuration
+scirust-industrial gen-config --output config.json --template automotive --stations 3
+
+# Générer un projet complet de surveillance
+scirust-industrial scaffold --name line3-monitor --template automotive
+
+# Lancer le pipeline de surveillance
+scirust-industrial run --config config.json --cycles 100 --report report.json
+
+# Diagnostiquer les problèmes d'intégration
+scirust-industrial doctor --config config.json
+```
+
+### 10.9 Exemple d'Intégration Complète (`industrial-monitor`)
+
+L'exemple `industrial_monitor` démontre la chaîne complète :
+
+```
+OPC-UA (PLC) → Signal Processing → Event Detection → Health Index
+→ RUL Estimation → CUSUM → MQTT Publishing → Audit Log → Functional Safety → MLOps Drift
+```
+
+```bash
+cargo run -p industrial-monitor
+```
+
+---
+
 ## 11. Nouvelles Fonctionnalités (v0.14-dev)
 
 ### Checkpointing & Reprise d'Entraînement
@@ -284,4 +411,66 @@ Nouvelles commandes CLI :
 - `scirust pinn [--seed N] [--steps S]` — réseau informé par la physique ; résout le BVP `u''=−u` (résidu de l'EDP dans la loss), vérifié vs `sin x`.
 - `scirust gptq [--seed N] [--samples S] [--damp D]` — quantification int8 des poids GPTQ ; affiche la réduction d'erreur de calibration par rapport au round-to-nearest.
 - `scirust awq [--seed N] [--samples S] [--grid G]` — quantification int8 des poids AWQ consciente des activations ; affiche l'exposant de mise à l'échelle sélectionné et la réduction d'erreur de calibration par rapport au round-to-nearest.
-- `scirust bitnet [--seed N]` — quantification ternaire {-1,0,+1} des poids BitNet b1.58 (~1,58 bit/poids) ; vérifie la multiplication matricielle sans multiplication.
+- **scirust bitnet [--seed N]** — quantification ternaire {-1,0,+1} des poids BitNet b1.58 (~1,58 bit/poids) ; vérifie la multiplication matricielle sans multiplication.
+
+## 14. CLI Industriel — Référence Complète
+
+Le CLI `scirust-industrial` facilite l'intégration de SciRust avec les systèmes industriels réels.
+
+### Installation
+
+```bash
+cargo install --path scirust-industrial   # fournit le binaire `scirust-industrial`
+# ou en place : cargo run -p scirust-industrial -- <commande>
+```
+
+### Commandes
+
+| Commande | Description | Options |
+|----------|-------------|---------|
+| `discover` | Liste les capteurs disponibles sur le serveur OPC-UA | `--endpoint`, `--filter`, `--simulated` |
+| `test-opcua` | Teste la connexion OPC-UA et lit des valeurs | `--endpoint`, `--simulated`, `--samples N` |
+| `test-mqtt` | Teste la connexion MQTT et publie un message | `--host`, `--port`, `--simulated`, `--topic` |
+| `gen-config` | Génère un fichier de configuration de pipeline | `--output`, `--template`, `--stations N`, `--line-id` |
+| `scaffold` | Génère un projet de surveillance complet | `--name`, `--output`, `--template` |
+| `run` | Lance un pipeline de surveillance depuis un fichier de config | `--config`, `--cycles N`, `--report` |
+| `doctor` | Diagnostique les problèmes d'intégration | `--config` |
+
+### Templates disponibles pour `gen-config` et `scaffold`
+
+| Template | Description |
+|----------|-------------|
+| `minimal` | 1 station, backend simulé, détection de spikes |
+| `automotive` | Ligne automobile multi-stations avec diagnostic roulement, RUL, MQTT, audit |
+| `bearing` | Détection de défauts de roulement (FFT enveloppe, BPFO/BPFI/BSF) |
+| `pdm` | Maintenance prédictive (Health Index, RUL, CUSUM) |
+
+### Flux d'intégration recommandé
+
+```bash
+# 1. Scaffold un projet
+scirust-industrial scaffold --name line3-monitor --template automotive
+
+# 2. Vérifier que tout fonctionne
+cd line3-monitor
+scirust-industrial doctor --config config.json
+
+# 3. Personnaliser la configuration
+# Éditer config.json : endpoint OPC-UA, broker MQTT, capteurs, seuils
+
+# 4. Passer en mode réel (optionnel)
+# Éditer Cargo.toml : décommenter les features real-opcua / real-mqtt
+# Éditer config.json : backend_type "opcua"
+
+# 5. Lancer la surveillance
+scirust-industrial run --config config.json --cycles 1000
+```
+
+### Passage du mode simulé au mode réel
+
+Le mode simulé fonctionne sans aucun matériel. Pour passer en production :
+
+1. **OPC-UA réel** : Ajouter `features = ["real-opcua"]` à `scirust-integration` dans `Cargo.toml`, ajouter la dépendance `opcua = "0.13"`, et changer `backend_type` en `"opcua"` dans `config.json`.
+2. **MQTT réel** : Ajouter `features = ["real-mqtt"]`, ajouter `rumqttc = "0.24"`, et configurer `host`/`port` du broker.
+
+Le `BackendFactory` gère automatiquement le fallback : si le backend réel échoue, il bascule vers le mode simulé.

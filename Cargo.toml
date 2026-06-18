@@ -79,6 +79,15 @@ members = [
     "scirust-som/crates/cli",
     "scirust-cli",
     "scirust-som/crates/visualizer",
+    "examples/industrial_monitor",
+    "scirust-signal",
+    "scirust-opcua",
+    "scirust-mqtt",
+    "scirust-pdm",
+    "scirust-mlops",
+    "scirust-func-safety",
+    "scirust-integration",
+    "scirust-industrial",
 ]
 exclude = [
     "scirust-rustc-driver",

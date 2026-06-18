@@ -275,3 +275,7 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan`（训练 N-D 解码器语言模型）。
 
 第三个命令 `scirust conformal` 生成具有保证覆盖率的保形预测区间（无分布假设）。
+
+## 15. 工业与汽车监控 (v0.14)
+
+SciRust v0.14 引入了**生产线监控**子系统，针对汽车制造：7 个 crate + 专用 CLI，覆盖信号处理、PLC 连接、预测性维护和 ISO 26262 功能安全 — 1047 个测试（零失败）。核心 crate：`scirust-signal`（FFT、窗函数、轴承诊断、阶次分析）、`scirust-opcua`（trait + 8 个模拟传感器）、`scirust-mqtt`（SparkPlug B）、`scirust-pdm`（健康指数、RUL、CUSUM、故障检测器）、`scirust-mlops`（漂移检测、影子部署、OTA 签名）、`scirust-func-safety`（ASIL A-D、可追溯性、故障注入、降级模式、审计）、`scirust-integration`（Pipeline 统一）、`scirust-industrial`（CLI：discover、test、gen-config、scaffold、run、doctor）。

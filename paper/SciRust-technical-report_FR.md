@@ -286,3 +286,22 @@ test ; la correspondance complète (14 des 20 éléments livrés) est suivie dan
 Deux commandes CLI exposent ces travaux : `scirust certify` (bornes IBP **et CROWN**, côte à côte, et robustesse) et `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan` (entraînement du LM décodeur N-D).
 
 Une troisième commande, `scirust conformal`, produit des intervalles de prédiction conformes à couverture garantie, sans hypothèse de distribution.
+
+## 15. Surveillance Industrielle et Automobile (v0.14)
+
+SciRust v0.14 introduit un sous-système dédié à la **surveillance de lignes de production**,
+notamment pour la fabrication automobile. Sept crates et un CLI dédié couvrent le
+traitement du signal, la connectivité PLC, la maintenance prédictive et la sûreté de
+fonctionnement ISO 26262 :
+
+- **scirust-signal** — FFT radix-2, fenêtres (5 types), features temps/fréquence, diagnostic roulements (BPFO/BPFI/BSF/FTF), analyse d'ordre
+- **scirust-opcua** — trait `OpcuaClient` + simulateur 8 capteurs industriels
+- **scirust-mqtt** — trait `MqttPublisher` + payloads SparkPlug B
+- **scirust-pdm** — Health Index (ISO 13374), RUL linéaire/exponentiel, CUSUM, Page-Hinkley, 4 détecteurs de défauts
+- **scirust-mlops** — détection de dérive (PSI), shadow deployment, OTA signé
+- **scirust-func-safety** — ASIL A-D, traçabilité exigences, fault injection (6 types), mode dégradé (4 niveaux), audit log hash-chainé
+- **scirust-integration** — librairie unificatrice (Backend, PipelineConfig, Pipeline, templates)
+- **scirust-industrial** — CLI (discover, test-opcua, test-mqtt, gen-config, scaffold, run, doctor)
+
+L'ensemble passe 1047 tests (0 échec) et inclut un exemple de bout en bout (`industrial_monitor`)
+couvrant toute la chaîne : OPC-UA → Signal → Events → Health → RUL → CUSUM → MQTT → Audit → Safety → MLOps.

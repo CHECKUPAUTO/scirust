@@ -1,0 +1,13 @@
+[package]
+name = "scirust-opcua"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust OPC-UA bridge — connect industrial PLC/SCADA data streams to SciRust event pipeline"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-events-core = { path = "../scirust-events-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
