@@ -1,16 +1,28 @@
 //! WGSL compute shader library — tiled GEMM, deterministic reductions,
-//! extended activations, fused kernels, and quantized (INT8/INT16) GEMM.
+//! extended activations, fused kernels, quantized (INT8/INT16) GEMM,
+//! crypto Zq GEMM, and fixed-point Q15.16 GEMM.
 //!
 //! All kernels are inline WGSL constants compiled at runtime by wgpu.
 //! The tiled GEMM uses 16×16 workgroups with shared-memory tiling for
 //! ~10-50× throughput over the naive per-cell kernel on real hardware.
 //! Quantized kernels use integer arithmetic (inherently deterministic).
+//! Crypto kernels use modular reduction for bit-exact reproducibility.
+
+/// WGSL helper: sanitize subnormals to zero (FTZ/DAZ portability).
+pub const WGSL_SANITIZE_F32: &str = r#"
+fn sanitize_f32(val: f32) -> f32 {
+    if (abs(val) < 1.17549435e-38f) {
+        return 0.0f;
+    }
+    return val;
+}
+"#;
 
 // ---------------------------------------------------------------------------
-// Tiled 16×16 SGEMM — shared-memory optimised
+// Standard GEMM (naive, per-cell)
 // ---------------------------------------------------------------------------
 
-/// Tiled GEMM: `C = alpha·op(A)·op(B) + beta·C`, 16×16 tiles,
+/// GEMM: `C = alpha·op(A)·op(B) + beta·C`
 /// shared memory for A and B tiles. Workgroup = 16×16 threads,
 /// one thread per output cell once the tile accumulation is done.
 pub const TILED_GEMM_WGSL: &str = r#"
@@ -322,3 +334,62 @@ pub enum ReduceOp {
     Max = 2,
     Norm = 3,
 }
+
+// ---------------------------------------------------------------------------
+// Crypto GEMM: Zq modular reduction (Voie 1 — Bit-exact absolu)
+// ---------------------------------------------------------------------------
+
+pub const CRYPTO_GEMM_WGSL: &str = r#"
+struct P { m: u32, k: u32, n: u32, q: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32 };
+
+@group(0) @binding(0) var<storage, read>       a: array<i32>;
+@group(0) @binding(1) var<storage, read>       b: array<i32>;
+@group(0) @binding(2) var<storage, read_write> c: array<i32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
+    var sum: i32 = 0i;
+    let q: i32 = i32(p.q);
+    for (var k: u32 = 0u; k < p.k; k = k + 1u) {
+        let av = a[i * p.k + k];
+        let bv = b[k * p.n + j];
+        let prod = (av * bv) % q;
+        sum = (sum + prod) % q;
+    }
+    if (sum < 0i) { sum = sum + q; }
+    c[i * p.n + j] = sum;
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Fixed-point Q15.16 GEMM (Voie 2 — Bit-exact via entiers)
+// ---------------------------------------------------------------------------
+
+pub const FIXED_POINT_Q16_GEMM_WGSL: &str = r#"
+struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32, _pad4: u32 };
+
+@group(0) @binding(0) var<storage, read>       a: array<i32>;
+@group(0) @binding(1) var<storage, read>       b: array<i32>;
+@group(0) @binding(2) var<storage, read_write> c: array<i32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
+    var sum: i32 = 0i;
+    for (var k: u32 = 0u; k < p.k; k = k + 1u) {
+        let av = a[i * p.k + k];
+        let bv = b[k * p.n + j];
+        let product_q32 = av * bv;
+        let product_q16 = product_q32 >> 16i;
+        sum = sum + product_q16;
+    }
+    c[i * p.n + j] = sum;
+}
+"#;
