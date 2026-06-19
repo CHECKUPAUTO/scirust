@@ -345,3 +345,23 @@ The simulated mode works without any hardware. To go to production:
 2. **Real MQTT**: Add `features = ["real-mqtt"]`, add `rumqttc = "0.24"`, and configure broker `host`/`port`.
 
 The `BackendFactory` handles automatic fallback: if the real backend fails, it falls back to simulated mode.
+
+## 15. Pattern Detection
+
+- **scirust-vision**: Computer vision — CNN layers, convolution, HOG, LBP, Haar, Canny edge detection, Otsu thresholding, connected components, NMS
+- **scirust-audio**: Audio recognition — MFCC, chroma features, pitch tracking (YIN), onset detection, spectral features (centroid, bandwidth, rolloff, flatness, entropy)
+- **scirust-graph**: Graph patterns — subgraph isomorphism, graph isomorphism, motif discovery, community detection (label propagation, Girvan-Newman), modularity, betweenness centrality
+- **scirust-sequential**: Sequential patterns — HMM (forward/backward/Viterbi/Baum-Welch), CRF, sequence labeling (BIO), edit distance, DTW, KMP, Boyer-Moore
+- **scirust-multivariate**: Multivariate analysis — PCA, ICA, K-Means++, Mahalanobis distance, MDS, CCA, silhouette score
+- **scirust-unsupervised**: Unsupervised detection — autoencoder, isolation forest, DBSCAN, LOF, GMM (EM algorithm), One-Class SVM
+- **scirust-seasonal**: Seasonal patterns — STL decomposition, ACF/PACF, periodogram, Fourier analysis, Mann-Kendall trend test, seasonal CUSUM
+- **scirust-nlp-advanced**: Advanced NLP — NER (rule-based + statistical), LDA topic modeling, relation extraction, TextRank, RAKE, MinHash, NaiveBayes, document similarity
+
+## 16. Algorithm Creation
+
+- **scirust-automl**: AutoML — hyperparameter optimization (random/grid/Bayesian GP), model selection with t-test, ensembles (voting/averaging), feature engineering, cross-validation
+- **scirust-synthesis**: Program synthesis — 30+ expression constructors, sketch-based synthesis, bottom-up/top-down/GP/beam search, expression rewriting, common subexpression elimination
+- **scirust-algogen**: Algorithm generation — sorting (10 strategies), searching (8 strategies), graph algorithms (shortest path, spanning tree, max flow, coloring), DP, divide-and-conquer, Big-O complexity analysis
+- **scirust-codetrans**: Code-to-code transformation — AST with 23 node types, pattern matching engine, 20 optimization rules (constant folding, DCE, CSE, LICM, strength reduction), refactoring, Rust→Python/C transpilation
+- **scirust-rl-algo**: RL algorithm discovery — REINFORCE with baseline, Actor-Critic, Q-Learning, simulated annealing, beam search, MCTS with progressive widening, meta-learning, CEGAR verification
+- **scirust-scaffold**: Algorithmic scaffolding — DSL-based algorithm description, code generation (Rust/Python/C/pseudocode), 16 built-in templates, scaffold generator, code analysis, documentation generation

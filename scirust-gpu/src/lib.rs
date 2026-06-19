@@ -41,9 +41,9 @@ mod chain;
 #[cfg(feature = "wgpu")]
 mod conv_gpu;
 #[cfg(feature = "wgpu")]
-mod deterministic_gpu;
-#[cfg(feature = "wgpu")]
 pub mod deterministic;
+#[cfg(feature = "wgpu")]
+mod deterministic_gpu;
 #[cfg(feature = "wgpu")]
 mod engine;
 #[cfg(feature = "wgpu")]

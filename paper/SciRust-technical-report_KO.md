@@ -281,3 +281,27 @@ Numenta Anomaly Benchmark (NAB)에서의 기대 퍼포먼스는 여러 스레드
 ## 15. 산업 및 자동차 모니터링 (v0.14)
 
 SciRust v0.14는 자동차 제조를 위한 **생산 라인 모니터링** 하위 시스템을 도입합니다. 7개 크레이트 + 전용 CLI가 신호 처리, PLC 연결, 예측 유지보수, ISO 26262 기능 안전을 포괄하며 1047개 테스트(0 실패). 핵심 크레이트: `scirust-signal`(FFT, 윈도우, 베어링 진단, 차수 분석), `scirust-opcua`(트레이트 + 8개 시뮬레이션 센서), `scirust-mqtt`(SparkPlug B), `scirust-pdm`(건강 지수, RUL, CUSUM, 결함 검출기), `scirust-mlops`(드리프트, 섀도우 배포, OTA 서명), `scirust-func-safety`(ASIL A-D, 추적성, 결함 주입, 성능 저하 모드, 감사), `scirust-integration`(Pipeline 통합), `scirust-industrial`(CLI: discover, test, gen-config, scaffold, run, doctor).
+
+## 16. 패턴 탐지 및 알고리즘 생성
+
+SciRust는 모든 도메인에 걸친 패턴 탐지와 자동 알고리즘 생성을 위한 14개 크레이트로 구성된 종합 스위트를 제공합니다.
+
+**패턴 탐지 (8 크레이트):**
+- `scirust-vision`: 이미지 패턴 — CNN 합성곱, HOG, LBP, Haar 특징, Canny 에지 검출, Otsu 임계값 처리
+- `scirust-audio`: 오디오 패턴 — MFCC, 크로마, 피치 YIN, 온셋 검출, 스펙트럼 중심/대역폭/롤오프
+- `scirust-graph`: 그래프 패턴 — 부분 그래프 동형성, 모티프 발견, 커뮤니티 탐지, 매개 중심성
+- `scirust-sequential`: 시퀀스 패턴 — HMM, CRF, Viterbi, Baum-Welch, DTW, KMP, Boyer-Moore
+- `scirust-multivariate`: 다변량 패턴 — PCA, ICA, K-Means++, 마할라노비스 거리, MDS, CCA
+- `scirust-unsupervised`: 비지도 패턴 — 오토인코더, 아이솔레이션 포레스트, DBSCAN, LOF, GMM, One-Class SVM
+- `scirust-seasonal`: 계절성 패턴 — STL, ACF/PACF, Mann-Kendall, 계절 CUSUM
+- `scirust-nlp-advanced`: 텍스트 패턴 — NER, LDA, TextRank, MinHash, NaiveBayes, 관계 추출
+
+**알고리즘 생성 (6 크레이트):**
+- `scirust-automl`: AutoML — 베이지안 최적화, 모델 선택, 피처 엔지니어링
+- `scirust-synthesis`: 프로그램 합성 — 스케치 기반, 상향식, 유전 프로그래밍, 빔 탐색
+- `scirust-algogen`: 알고리즘 생성 — 정렬/검색/그래프/DP/DaC, 복잡도 분석 포함
+- `scirust-codetrans`: 코드 변환 — AST 최적화, 리팩토링, 트랜스파일
+- `scirust-rl-algo`: RL 발견 — REINFORCE, Actor-Critic, Q-Learning, MCTS, 메타 학습
+- `scirust-scaffold`: 알고리즘 스캐폴딩 — DSL, 다중 언어 코드 생성, 16개 템플릿
+
+모든 구현은 순수 Rust, 제로 FFI, 포괄적인 테스트 커버리지를 갖추고 있습니다.

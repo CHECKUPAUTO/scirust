@@ -468,6 +468,88 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
         ));
     }
 
+    // Check 8: Pattern detection crates
+    let pattern_crates = vec![
+        (
+            "scirust-vision",
+            "Computer vision: CNN layers, convolution 2D, max/avg pooling, activation functions (ReLU, Sigmoid, Softmax), HOG descriptor, LBP features, Haar-like features, NMS, template matching, Otsu thresholding, connected components, flood fill, Canny edge detection.",
+        ),
+        (
+            "scirust-audio",
+            "Audio recognition: Goertzel algorithm, magnitude/power spectrum, Mel filterbank, MFCC + deltas, chroma features, onset detection, YIN pitch tracking, spectral centroid/bandwidth/rolloff/flatness/entropy/contrast, AudioFeatureSet.",
+        ),
+        (
+            "scirust-graph",
+            "Graph patterns: Graph type (undirected, adjacency list), BFS/DFS, shortest path, subgraph isomorphism (VF2-like), graph isomorphism, motif discovery, label propagation, modularity, Girvan-Newman, edge betweenness, clustering coefficient, degree distribution, density, diameter, betweenness centrality.",
+        ),
+        (
+            "scirust-sequential",
+            "Sequential patterns: HMM (forward/backward/Viterbi/Baum-Welch with log-space), CRF (linear-chain, forward-backward, Viterbi, NLL), sequence labeling (BIO), Needleman-Wunsch, Levenshtein, KMP, Boyer-Moore, LCS, DTW (full + banded + path).",
+        ),
+        (
+            "scirust-multivariate",
+            "Multivariate analysis: PCA (Jacobi eigenvalues), ICA (FastICA), K-Means++ clustering, elbow method, silhouette score, Mahalanobis distance outlier detection, classical MDS, CCA.",
+        ),
+        (
+            "scirust-unsupervised",
+            "Unsupervised: Autoencoder (encode/decode/anomaly), Isolation Forest (iTree, path-length scoring), DBSCAN, Local Outlier Factor, Gaussian Mixture Model (EM, BIC/AIC), One-Class SVM (RBF kernel, SMO).",
+        ),
+        (
+            "scirust-seasonal",
+            "Seasonal: STL decomposition (Loess), ACF/PACF/Durbin-Levinson, periodogram, Fourier analysis, windowed FFT, zero-crossing cycle estimation, moving average decomposition, X-11 style, Mann-Kendall trend test, Sen's slope, seasonal CUSUM, binary segmentation.",
+        ),
+        (
+            "scirust-nlp-advanced",
+            "NLP: NER (rule-based + statistical with BIO tagging), LDA (Gibbs sampling, perplexity, UMass coherence), relation extraction, Naive Bayes, TF-IDF, cosine/Jaccard similarity, TextRank, RAKE keyword extraction, MinHash, tokenizer.",
+        ),
+    ];
+    passed.push(format!(
+        "Pattern detection crates: {} available ({})",
+        pattern_crates.len(),
+        pattern_crates
+            .iter()
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+
+    // Check 9: Algorithm creation crates
+    let algo_crates = vec![
+        (
+            "scirust-automl",
+            "AutoML: PipelineConfig, PipelineTemplate, StandardScaler/Normalizer/PCA/PolynomialFeatures preprocessing, Linear/RandomForest/GradientBoosting/NeuralNetwork models, HyperOptimizer (random/grid/Bayesian GP with Matern 5/2 + EI), ModelSelector (paired t-test), ensembles (voting/averaging/stacking), FeatureEngineer (polynomial/interaction/variance/correlation/MI), k-fold CV, time-series CV, AutoML orchestrator.",
+        ),
+        (
+            "scirust-synthesis",
+            "Program synthesis: SExpr grammar (30+ constructors), Sketch with holes, bottom-up enumeration, top-down type-directed synthesis, genetic programming (tournament/crossover/mutation), beam search, cost model, expression simplification (x+0->x etc.), constant folding, CSE, inductive bias, Occam's razor, incremental synthesis, extrapolation checking.",
+        ),
+        (
+            "scirust-algogen",
+            "Algorithm generation: 10 sort strategies (bubble/insertion/selection/merge/quick/heap/counting/radix/intro/tim), 8 search strategies (linear/binary/jump/exponential/interpolation/BST/hash/Fibonacci), graph (Dijkstra/A*/Bellman-Ford/Floyd-Warshall, Prim/Kruskal/Boruvka, Ford-Fulkerson/Edmonds-Karp/Dinic), DP generation, DaC generation, complexity analysis (fit O(1)/O(log n)/O(n)/O(n log n)/O(n^2)), evolutionary optimization.",
+        ),
+        (
+            "scirust-codetrans",
+            "Code transformation: AST (Lit/Var/BinOp/UnaryOp/Call/If/Let/While/For/Assign/Block/Return/Function/Struct/Enum/Match), pattern matching with variables, 20 optimization rules (constant folding, identity, strength reduction, boolean simplification), DCE, CSE, LICM, refactoring (extract function, rename, inline, loop-to-iterator, match-to-if-let), transpilation (Rust->Python, Rust->C), pattern database.",
+        ),
+        (
+            "scirust-rl-algo",
+            "RL algorithm discovery: Instruction set (13 ops), Algorithm execution, AlgoEnv/ProblemSpec, REINFORCE with baseline, Actor-Critic (TD(0)), Q-Learning with experience replay, simulated annealing, beam search, MCTS with progressive widening, meta-learning (templates, transfer), invariant inference (constant/monotonic/parity), CEGAR verification, test suite generation.",
+        ),
+        (
+            "scirust-scaffold",
+            "Algorithmic scaffolding: DSL (tokenizer/parser/Algorithm AST), code generation (RustGenerator/PythonGenerator/CGenerator with CodeStyle), 16 built-in templates (bubble_sort, merge_sort, binary_search, bfs, dfs, dijkstra, etc.), scaffold_new/scaffold_test/scaffold_bench, code analysis (infinite loop/unused variable/complexity estimation), documentation generation (ascii diagrams, examples).",
+        ),
+    ];
+    passed.push(format!(
+        "Algorithm creation crates: {} available ({})",
+        algo_crates.len(),
+        algo_crates
+            .iter()
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+
     // Print results
     println!("--- Passed ({}) ---", passed.len());
     for p in &passed
@@ -494,6 +576,18 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
             "\n  {} issue(s) found. Resolve before production use.",
             issues.len()
         );
+    }
+
+    println!("\n--- Pattern Detection Crates ---");
+    for (name, desc) in &pattern_crates
+    {
+        println!("  {:<25} {}", name, desc);
+    }
+
+    println!("\n--- Algorithm Creation Crates ---");
+    for (name, desc) in &algo_crates
+    {
+        println!("  {:<25} {}", name, desc);
     }
 
     Ok(())

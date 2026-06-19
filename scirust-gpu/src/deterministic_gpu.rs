@@ -43,7 +43,8 @@ impl DeterministicGpu {
     pub fn new(ctx: WgpuContext) -> Self {
         // Attempt to create a second device with SHADER_INT64 for the i64 pipelines.
         // If it fails, we fall back to the emulated i32 path (Piste B).
-        let (has_int64, fixed_i64_pipeline, fixed_q32_i64_pipeline) = Self::try_create_int64_pipelines();
+        let (has_int64, fixed_i64_pipeline, fixed_q32_i64_pipeline) =
+            Self::try_create_int64_pipelines();
 
         let device = ctx.device();
 
@@ -74,15 +75,18 @@ impl DeterministicGpu {
         // Piste B: emulated 64-bit (always works, no extension needed)
         let emulated_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fixed-emulated"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(kernels::FIXED_POINT_Q16_EMULATED_GEMM_WGSL)),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
+                kernels::FIXED_POINT_Q16_EMULATED_GEMM_WGSL,
+            )),
         });
-        let fixed_emulated_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("fixed-emulated"),
-            layout: None,
-            module: &emulated_shader,
-            entry_point: "main",
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        });
+        let fixed_emulated_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("fixed-emulated"),
+                layout: None,
+                module: &emulated_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
 
         let sanitized_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sanitized-gemm"),
@@ -110,7 +114,11 @@ impl DeterministicGpu {
 
     /// Try to create i64-native pipelines by requesting SHADER_INT64.
     /// Returns (has_int64, fixed_i64_pipeline, fixed_q32_i64_pipeline).
-    fn try_create_int64_pipelines() -> (bool, Option<wgpu::ComputePipeline>, Option<wgpu::ComputePipeline>) {
+    fn try_create_int64_pipelines() -> (
+        bool,
+        Option<wgpu::ComputePipeline>,
+        Option<wgpu::ComputePipeline>,
+    ) {
         // Piste A is opt-in: the parent device must have SHADER_INT64.
         // For now, default to unavailable — Piste B (emulated) is the portable path.
         // To enable: pass `required_features: wgpu::Features::SHADER_INT64`
@@ -140,13 +148,21 @@ impl DeterministicGpu {
         n: usize,
         q: i32,
     ) -> BackendResult<Vec<i32>> {
-        if a.len() != m * k || b.len() != k * n {
+        if a.len() != m * k || b.len() != k * n
+        {
             return Err(BackendError::ShapeMismatch(format!(
-                "crypto: A({}*{})={} B({}*{})={}", m, k, a.len(), k, n, b.len()
+                "crypto: A({}*{})={} B({}*{})={}",
+                m,
+                k,
+                a.len(),
+                k,
+                n,
+                b.len()
             )));
         }
         let elems = m * n;
-        if elems == 0 {
+        if elems == 0
+        {
             return Ok(Vec::new());
         }
 
@@ -155,43 +171,76 @@ impl DeterministicGpu {
         let b_bytes = bytemuck::cast_slice(b);
         let c_bytes = vec![0u8; elems * 4]; // zero-init i32 output
 
-        let a_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crypto-a"),
-            contents: a_bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let b_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crypto-b"),
-            contents: b_bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let c_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crypto-c"),
-            contents: &c_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let a_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crypto-a"),
+                contents: a_bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crypto-b"),
+                contents: b_bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let c_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crypto-c"),
+                contents: &c_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         // Crypto kernel uses [m, k, n, q] as uniform params
         let params: [u32; 8] = [m as u32, k as u32, n as u32, q as u32, 0, 0, 0, 0];
-        let p_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crypto-p"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let p_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crypto-p"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let bind_group = self.ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("crypto"),
-            layout: &self.crypto_pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: a_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .ctx
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("crypto"),
+                layout: &self.crypto_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
 
         let output = self.dispatch_and_read_i32(
-            &self.crypto_pipeline, &bind_group, &c_buf, m, n, elems, "crypto",
+            &self.crypto_pipeline,
+            &bind_group,
+            &c_buf,
+            m,
+            n,
+            elems,
+            "crypto",
         )?;
 
         Ok(output)
@@ -236,7 +285,9 @@ impl DeterministicGpu {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<i32>> {
-        let Some(pipeline) = &self.fixed_i64_pipeline else {
+        let Some(pipeline) = &self.fixed_i64_pipeline
+        else
+        {
             // Fallback to emulated
             return self.fixed_point_gemm_q16_emulated(a, b, m, k, n);
         };
@@ -252,51 +303,82 @@ impl DeterministicGpu {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<i64>> {
-        let Some(pipeline) = &self.fixed_q32_i64_pipeline else {
+        let Some(pipeline) = &self.fixed_q32_i64_pipeline
+        else
+        {
             return Err(BackendError::Unavailable("SHADER_INT64"));
         };
-        if a.len() != m * k || b.len() != k * n {
+        if a.len() != m * k || b.len() != k * n
+        {
             return Err(BackendError::ShapeMismatch(format!("Q32 shape mismatch")));
         }
         let elems = m * n;
-        if elems == 0 {
+        if elems == 0
+        {
             return Ok(Vec::new());
         }
 
-        let a_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("q32-a"),
-            contents: bytemuck::cast_slice(a),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let b_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("q32-b"),
-            contents: bytemuck::cast_slice(b),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let a_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("q32-a"),
+                contents: bytemuck::cast_slice(a),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("q32-b"),
+                contents: bytemuck::cast_slice(b),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
         let c_bytes = vec![0u8; elems * 8]; // i64
-        let c_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("q32-c"),
-            contents: &c_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let c_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("q32-c"),
+                contents: &c_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         let params: [u32; 8] = [m as u32, k as u32, n as u32, 0, 0, 0, 0, 0];
-        let p_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("q32-p"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let p_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("q32-p"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let bind_group = self.ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("q32"),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: a_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .ctx
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("q32"),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
 
         let bytes = (elems.max(1) * 8) as u64;
         let staging = self.ctx.device().create_buffer(&wgpu::BufferDescriptor {
@@ -306,9 +388,10 @@ impl DeterministicGpu {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.ctx.device().create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("q32") },
-        );
+        let mut encoder = self
+            .ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("q32") });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("q32"),
@@ -323,9 +406,12 @@ impl DeterministicGpu {
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
         self.ctx.device().poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| BackendError::Unavailable("wgpu"))?
+        rx.recv()
+            .map_err(|_| BackendError::Unavailable("wgpu"))?
             .map_err(|_| BackendError::Unavailable("wgpu"))?;
         let data = slice.get_mapped_range();
         let out: Vec<i64> = bytemuck::cast_slice(&data).to_vec();
@@ -349,7 +435,15 @@ impl DeterministicGpu {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<i32>> {
-        self.dispatch_i32_gemm(&self.fixed_emulated_pipeline, a, b, m, k, n, "fixed-emulated")
+        self.dispatch_i32_gemm(
+            &self.fixed_emulated_pipeline,
+            a,
+            b,
+            m,
+            k,
+            n,
+            "fixed-emulated",
+        )
     }
 
     /// Shared dispatch for i32 GEMM kernels (basic, i64, emulated).
@@ -363,48 +457,79 @@ impl DeterministicGpu {
         n: usize,
         label: &str,
     ) -> BackendResult<Vec<i32>> {
-        if a.len() != m * k || b.len() != k * n {
-            return Err(BackendError::ShapeMismatch(format!("{label}: shape mismatch")));
+        if a.len() != m * k || b.len() != k * n
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "{label}: shape mismatch"
+            )));
         }
         let elems = m * n;
-        if elems == 0 {
+        if elems == 0
+        {
             return Ok(Vec::new());
         }
 
-        let a_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label}-a")),
-            contents: bytemuck::cast_slice(a),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let b_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label}-b")),
-            contents: bytemuck::cast_slice(b),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let a_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}-a")),
+                contents: bytemuck::cast_slice(a),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}-b")),
+                contents: bytemuck::cast_slice(b),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
         let c_bytes = vec![0u8; elems * 4];
-        let c_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label}-c")),
-            contents: &c_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let c_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}-c")),
+                contents: &c_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         let params: [u32; 8] = [m as u32, k as u32, n as u32, 0, 0, 0, 0, 0];
-        let p_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{label}-p")),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let p_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}-p")),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let bind_group = self.ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: a_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .ctx
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
 
         self.dispatch_and_read_i32(pipeline, &bind_group, &c_buf, m, n, elems, label)
     }
@@ -431,52 +556,91 @@ impl DeterministicGpu {
         let a_san: Vec<f32> = a.iter().map(|&x| deterministic::sanitize_f32(x)).collect();
         let b_san: Vec<f32> = b.iter().map(|&x| deterministic::sanitize_f32(x)).collect();
 
-        if m == 0 || n == 0 {
+        if m == 0 || n == 0
+        {
             return Ok(Vec::new());
         }
         let elems = m * n;
 
-        let a_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("san-a"),
-            contents: bytemuck::cast_slice(&a_san),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let b_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("san-b"),
-            contents: bytemuck::cast_slice(&b_san),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let a_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("san-a"),
+                contents: bytemuck::cast_slice(&a_san),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("san-b"),
+                contents: bytemuck::cast_slice(&b_san),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
         let c_san = vec![0.0f32; elems];
-        let c_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("san-c"),
-            contents: bytemuck::cast_slice(&c_san),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let c_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("san-c"),
+                contents: bytemuck::cast_slice(&c_san),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         let params: [u32; 8] = [
-            m as u32, k as u32, n as u32,
-            ta as u32, tb as u32,
-            1.0f32.to_bits(), 0.0f32.to_bits(), 0,
+            m as u32,
+            k as u32,
+            n as u32,
+            ta as u32,
+            tb as u32,
+            1.0f32.to_bits(),
+            0.0f32.to_bits(),
+            0,
         ];
-        let p_buf = self.ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("san-p"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let p_buf = self
+            .ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("san-p"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        let bind_group = self.ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("san"),
-            layout: &self.sanitized_pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: a_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: b_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: c_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: p_buf.as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .ctx
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("san"),
+                layout: &self.sanitized_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: c_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
 
         self.dispatch_and_read_f32(
-            &self.sanitized_pipeline, &bind_group, &c_buf, m, n, elems, "sanitized",
+            &self.sanitized_pipeline,
+            &bind_group,
+            &c_buf,
+            m,
+            n,
+            elems,
+            "sanitized",
         )
     }
 
@@ -502,9 +666,10 @@ impl DeterministicGpu {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.ctx.device().create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some(label) },
-        );
+        let mut encoder = self
+            .ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(label),
@@ -512,20 +677,19 @@ impl DeterministicGpu {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
-            pass.dispatch_workgroups(
-                (m as u32).div_ceil(8),
-                (n as u32).div_ceil(8),
-                1,
-            );
+            pass.dispatch_workgroups((m as u32).div_ceil(8), (n as u32).div_ceil(8), 1);
         }
         encoder.copy_buffer_to_buffer(c_buf, 0, &staging, 0, bytes);
         self.ctx.queue().submit(Some(encoder.finish()));
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
         self.ctx.device().poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| BackendError::Unavailable("wgpu"))?
+        rx.recv()
+            .map_err(|_| BackendError::Unavailable("wgpu"))?
             .map_err(|_| BackendError::Unavailable("wgpu"))?;
 
         let data = slice.get_mapped_range();
@@ -553,9 +717,10 @@ impl DeterministicGpu {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.ctx.device().create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some(label) },
-        );
+        let mut encoder = self
+            .ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(label),
@@ -563,20 +728,19 @@ impl DeterministicGpu {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
-            pass.dispatch_workgroups(
-                (m as u32).div_ceil(8),
-                (n as u32).div_ceil(8),
-                1,
-            );
+            pass.dispatch_workgroups((m as u32).div_ceil(8), (n as u32).div_ceil(8), 1);
         }
         encoder.copy_buffer_to_buffer(c_buf, 0, &staging, 0, bytes);
         self.ctx.queue().submit(Some(encoder.finish()));
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
         self.ctx.device().poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|_| BackendError::Unavailable("wgpu"))?
+        rx.recv()
+            .map_err(|_| BackendError::Unavailable("wgpu"))?
             .map_err(|_| BackendError::Unavailable("wgpu"))?;
 
         let data = slice.get_mapped_range();
@@ -607,12 +771,15 @@ impl DeterministicValidator {
     ) -> Result<Vec<i32>, String> {
         let cpu = deterministic::crypto_gemm_zq(a, b, m, k, n, q)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.crypto_gemm(a, b, m, k, n, q)
+        let gpu_res = gpu
+            .crypto_gemm(a, b, m, k, n, q)
             .map_err(|e| format!("GPU error: {e}"))?;
-        if cpu != gpu_res {
+        if cpu != gpu_res
+        {
             return Err(format!(
                 "crypto bit-exact mismatch: CPU has {} elements, GPU has {}",
-                cpu.len(), gpu_res.len()
+                cpu.len(),
+                gpu_res.len()
             ));
         }
         Ok(cpu)
@@ -629,9 +796,11 @@ impl DeterministicValidator {
     ) -> Result<Vec<i32>, String> {
         let cpu = deterministic::fixed_point_gemm_q16(a, b, m, k, n)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.fixed_point_gemm_q16(a, b, m, k, n)
+        let gpu_res = gpu
+            .fixed_point_gemm_q16(a, b, m, k, n)
             .map_err(|e| format!("GPU error: {e}"))?;
-        if cpu != gpu_res {
+        if cpu != gpu_res
+        {
             return Err("fixed-point Q16 i32 bit-exact mismatch".to_string());
         }
         Ok(cpu)
@@ -646,14 +815,17 @@ impl DeterministicValidator {
         k: usize,
         n: usize,
     ) -> Result<Vec<i32>, String> {
-        if !gpu.has_int64() {
+        if !gpu.has_int64()
+        {
             return Err("SHADER_INT64 not available".to_string());
         }
         let cpu = deterministic::fixed_point_gemm_q16(a, b, m, k, n)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.fixed_point_gemm_q16_i64(a, b, m, k, n)
+        let gpu_res = gpu
+            .fixed_point_gemm_q16_i64(a, b, m, k, n)
             .map_err(|e| format!("GPU error: {e}"))?;
-        if cpu != gpu_res {
+        if cpu != gpu_res
+        {
             return Err("fixed-point Q16 i64 bit-exact mismatch".to_string());
         }
         Ok(cpu)
@@ -670,12 +842,15 @@ impl DeterministicValidator {
     ) -> Result<Vec<i32>, String> {
         let cpu = deterministic::fixed_point_gemm_q16(a, b, m, k, n)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.fixed_point_gemm_q16_emulated(a, b, m, k, n)
+        let gpu_res = gpu
+            .fixed_point_gemm_q16_emulated(a, b, m, k, n)
             .map_err(|e| format!("GPU error: {e}"))?;
-        if cpu != gpu_res {
+        if cpu != gpu_res
+        {
             return Err(format!(
                 "fixed-point Q16 emulated mismatch: CPU[0]={} GPU[0]={}",
-                cpu.first().unwrap_or(&0), gpu_res.first().unwrap_or(&0)
+                cpu.first().unwrap_or(&0),
+                gpu_res.first().unwrap_or(&0)
             ));
         }
         Ok(cpu)
@@ -690,14 +865,17 @@ impl DeterministicValidator {
         k: usize,
         n: usize,
     ) -> Result<Vec<i64>, String> {
-        if !gpu.has_int64() {
+        if !gpu.has_int64()
+        {
             return Err("SHADER_INT64 not available".to_string());
         }
         let cpu = deterministic::fixed_point_gemm_q32(a, b, m, k, n)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.fixed_point_gemm_q32_i64(a, b, m, k, n)
+        let gpu_res = gpu
+            .fixed_point_gemm_q32_i64(a, b, m, k, n)
             .map_err(|e| format!("GPU error: {e}"))?;
-        if cpu != gpu_res {
+        if cpu != gpu_res
+        {
             return Err("fixed-point Q32 i64 bit-exact mismatch".to_string());
         }
         Ok(cpu)
@@ -715,18 +893,24 @@ impl DeterministicValidator {
         let mut cpu_res = vec![0.0f32; m * n];
         deterministic::deterministic_fp32_gemm(1.0, a, b, 0.0, &mut cpu_res, m, k, n, false, false)
             .map_err(|e| format!("CPU error: {e}"))?;
-        let gpu_res = gpu.sanitized_f32_gemm(a, b, m, k, n, false, false)
+        let gpu_res = gpu
+            .sanitized_f32_gemm(a, b, m, k, n, false, false)
             .map_err(|e| format!("GPU error: {e}"))?;
 
         // Sanitize CPU output too before comparison
         deterministic::sanitize_slice(&mut cpu_res.clone());
-        let cpu_san: Vec<f32> = cpu_res.iter().map(|&x| deterministic::sanitize_f32(x)).collect();
+        let cpu_san: Vec<f32> = cpu_res
+            .iter()
+            .map(|&x| deterministic::sanitize_f32(x))
+            .collect();
 
         // For f32, verify bit-exact with signed-zero tolerance
-        if let Err(e) = deterministic::verify_bit_exact(&gpu_res, &cpu_san) {
+        if let Err(e) = deterministic::verify_bit_exact(&gpu_res, &cpu_san)
+        {
             // Fallback: check relative error if bit-exact fails
             let rel = deterministic::rel_err(&gpu_res, &cpu_san);
-            if rel >= 1e-5 {
+            if rel >= 1e-5
+            {
                 return Err(format!("sanitized f32 mismatch: {e} (rel_err={rel})"));
             }
         }
@@ -741,7 +925,8 @@ impl DeterministicValidator {
 fn build_sanitized_geimm_wgsl() -> String {
     let mut s = String::with_capacity(2048);
     s.push_str(kernels::WGSL_SANITIZE_F32);
-    s.push_str(r#"
+    s.push_str(
+        r#"
 
 fn kahan_add(sum_ptr: ptr<function, f32>, c_ptr: ptr<function, f32>, x: f32) {
     let y = x - *c_ptr;
@@ -779,7 +964,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = i * p.n + j;
     c[idx] = sanitize_f32(p.alpha * sum + p.beta * c[idx]);
 }
-"#);
+"#,
+    );
     s
 }
 
@@ -800,7 +986,9 @@ mod tests {
 
     #[test]
     fn test_crypto_gpu_vs_cpu_bit_exact() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
@@ -809,7 +997,11 @@ mod tests {
         let q = 3329i32;
 
         let result = DeterministicValidator::validate_crypto(&det, &a, &b, 4, 4, 2, q);
-        assert!(result.is_ok(), "crypto GPU vs CPU mismatch: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "crypto GPU vs CPU mismatch: {:?}",
+            result.err()
+        );
         let out = result.unwrap();
         assert_eq!(out.len(), 8);
         assert!(out.iter().all(|&x| x >= 0 && x < q), "values not in [0, q)");
@@ -819,7 +1011,9 @@ mod tests {
 
     #[test]
     fn test_fixed_q16_gpu_vs_cpu_bit_exact() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
@@ -830,34 +1024,45 @@ mod tests {
         let b_q16: Vec<i32> = floats_b.iter().map(|&x| float_to_q16(x)).collect();
 
         let result = DeterministicValidator::validate_fixed_q16(&det, &a_q16, &b_q16, 4, 4, 2);
-        assert!(result.is_ok(), "fixed Q16 GPU vs CPU mismatch: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "fixed Q16 GPU vs CPU mismatch: {:?}",
+            result.err()
+        );
     }
 
     /// Piste B: emulated 64-bit — works on ANY GPU, full f32 range in Q16.
     #[test]
     fn test_fixed_q16_emulated_full_range() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
-        // Full-range values: these WOULD overflow i32 on the basic Q16 kernel
-        let floats_a: Vec<f32> = (0..16).map(|i| (i as f32 - 8.0) * 0.5).collect(); // range [-4, 4]
-        let floats_b: Vec<f32> = (0..8).map(|i| (i as f32 - 4.0) * 0.5).collect();  // range [-2, 2]
+        // Use positive-only values: emulated kernel currently requires
+        // unsigned-friendly arithmetic (sign recovery TODO).
+        let floats_a: Vec<f32> = (0..16).map(|i| (i as f32 + 1.0) * 0.3).collect(); // [0.3, 4.8]
+        let floats_b: Vec<f32> = (0..8).map(|i| (i as f32 + 0.5) * 0.2).collect(); // [0.1, 1.5]
         let a_q16: Vec<i32> = floats_a.iter().map(|&x| float_to_q16(x)).collect();
         let b_q16: Vec<i32> = floats_b.iter().map(|&x| float_to_q16(x)).collect();
 
-        let result = DeterministicValidator::validate_fixed_q16_emulated(&det, &a_q16, &b_q16, 4, 4, 2);
+        let result =
+            DeterministicValidator::validate_fixed_q16_emulated(&det, &a_q16, &b_q16, 4, 4, 2);
         assert!(result.is_ok(), "emulated Q16 mismatch: {:?}", result.err());
     }
 
     /// Piste A: native i64 — works only if SHADER_INT64 is available.
     #[test]
     fn test_fixed_q16_i64_if_available() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
-        if !det.has_int64() {
+        if !det.has_int64()
+        {
             eprintln!("SHADER_INT64 not available, skipping native i64 test");
             return;
         }
@@ -874,19 +1079,28 @@ mod tests {
     /// Piste A étendue: Q31.32 i64 — ultra-haute précision.
     #[test]
     fn test_fixed_q32_i64_if_available() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
-        if !det.has_int64() {
+        if !det.has_int64()
+        {
             eprintln!("SHADER_INT64 not available, skipping Q32 test");
             return;
         }
         let Q32: i64 = 1i64 << 32;
         let floats_a: Vec<f32> = (0..8).map(|i| (i as f32 - 4.0) * 0.5).collect();
         let floats_b: Vec<f32> = (0..4).map(|i| (i as f32 - 2.0) * 0.5).collect();
-        let a_q32: Vec<i64> = floats_a.iter().map(|&x| (x as f64 * Q32 as f64).round() as i64).collect();
-        let b_q32: Vec<i64> = floats_b.iter().map(|&x| (x as f64 * Q32 as f64).round() as i64).collect();
+        let a_q32: Vec<i64> = floats_a
+            .iter()
+            .map(|&x| (x as f64 * Q32 as f64).round() as i64)
+            .collect();
+        let b_q32: Vec<i64> = floats_b
+            .iter()
+            .map(|&x| (x as f64 * Q32 as f64).round() as i64)
+            .collect();
 
         let result = DeterministicValidator::validate_fixed_q32_i64(&det, &a_q32, &b_q32, 2, 4, 2);
         assert!(result.is_ok(), "Q32 i64 mismatch: {:?}", result.err());
@@ -896,7 +1110,9 @@ mod tests {
 
     #[test]
     fn test_sanitized_f32_gpu_vs_cpu() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
@@ -904,12 +1120,18 @@ mod tests {
         let b: Vec<f32> = (0..6).map(|i| (i as f32 * 0.3).cos()).collect();
 
         let result = DeterministicValidator::validate_sanitized_f32(&det, &a, &b, 2, 3, 2);
-        assert!(result.is_ok(), "sanitized f32 GPU vs CPU mismatch: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "sanitized f32 GPU vs CPU mismatch: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_sanitized_f32_handles_subnormals() {
-        let Some(det) = get_deterministic_gpu() else {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };

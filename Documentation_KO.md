@@ -312,3 +312,23 @@ scirust-industrial run --config config.json --cycles 1000
 2. **실제 MQTT**: `features = ["real-mqtt"]` 추가, `rumqttc = "0.24"` 추가, 브로커 `host`/`port` 구성.
 
 `BackendFactory`가 자동 폴백을 처리합니다: 실제 백엔드가 실패하면 시뮬레이션 모드로 폴백합니다.
+
+## 15. 패턴 탐지
+
+- **scirust-vision**: 컴퓨터 비전 — CNN 계층, 합성곱, HOG, LBP, Haar, Canny 에지 검출, Otsu 임계값, 연결 요소, NMS
+- **scirust-audio**: 오디오 인식 — MFCC, 크로마 특징, 피치 추적 (YIN), 시작점 검출, 스펙트럼 특징 (중심, 대역폭, 롤오프, 평탄도, 엔트로피)
+- **scirust-graph**: 그래프 패턴 — 부분 그래프 동형, 그래프 동형, 모티프 발견, 커뮤니티 검출 (레이블 전파, Girvan-Newman), 모듈성, 매개 중심성
+- **scirust-sequential**: 순차 패턴 — HMM (전향/후향/Viterbi/Baum-Welch), CRF, 시퀀스 레이블링 (BIO), 편집 거리, DTW, KMP, Boyer-Moore
+- **scirust-multivariate**: 다변량 분석 — PCA, ICA, K-Means++, 마할라노비스 거리, MDS, CCA, 실루엣 점수
+- **scirust-unsupervised**: 비지도 탐지 — 오토인코더, Isolation Forest, DBSCAN, LOF, GMM (EM 알고리즘), One-Class SVM
+- **scirust-seasonal**: 계절 패턴 — STL 분해, ACF/PACF, 페리오도그램, 푸리에 분석, Mann-Kendall 추세 검정, 계절 CUSUM
+- **scirust-nlp-advanced**: 고급 NLP — NER (규칙 기반 + 통계적), LDA 토픽 모델링, 관계 추출, TextRank, RAKE, MinHash, NaiveBayes, 문서 유사도
+
+## 16. 알고리즘 생성
+
+- **scirust-automl**: AutoML — 하이퍼파라미터 최적화 (무작위/격자/베이지안 GP), t-검정 모델 선택, 앙상블 (투표/평균), 특징 공학, 교차 검증
+- **scirust-synthesis**: 프로그램 합성 — 30개 이상의 표현식 생성자, 스케치 기반 합성, 상향식/하향식/GP/빔 탐색, 표현식 재작성, 공통 부분식 제거
+- **scirust-algogen**: 알고리즘 생성 — 정렬 (10개 전략), 탐색 (8개 전략), 그래프 알고리즘 (최단 경로, 신장 트리, 최대 유량, 색칠), DP, 분할 정복, Big-O 복잡도 분석
+- **scirust-codetrans**: 코드 간 변환 — 23개 노드 유형의 AST, 패턴 매칭 엔진, 20개 최적화 규칙 (상수 폴딩, DCE, CSE, LICM, 강도 감소), 리팩터링, Rust→Python/C 트랜스파일
+- **scirust-rl-algo**: RL 알고리즘 발견 — 베이스라인 포함 REINFORCE, Actor-Critic, Q-Learning, 시뮬레이티드 어닐링, 빔 탐색, 점진적 확장 MCTS, 메타 학습, CEGAR 검증
+- **scirust-scaffold**: 알고리즘 스캐폴드 — DSL 기반 알고리즘 설명, 코드 생성 (Rust/Python/C/의사코드), 16개 내장 템플릿, 스캐폴드 생성기, 코드 분석, 문서 생성

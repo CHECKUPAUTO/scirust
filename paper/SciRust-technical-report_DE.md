@@ -287,3 +287,27 @@ Ein dritter Befehl, `scirust conformal`, erzeugt verteilungsfreie konforme Präd
 ## 15. Industrielle & Automobil-Überwachung (v0.14)
 
 SciRust v0.14 führt ein Subsystem für **Produktionslinienüberwachung** in der Automobilfertigung ein: 7 Crates + dedizierte CLI für Signalverarbeitung, PLC-Anbindung, Predictive Maintenance und funktionale Sicherheit nach ISO 26262 — 1047 Tests (0 Fehler). Kern-Crates: `scirust-signal` (FFT, Fenster, Lagerdiagnose, Ordnungsanalyse), `scirust-opcua` (Trait + 8 Simulationssensoren), `scirust-mqtt` (SparkPlug B), `scirust-pdm` (Health Index, RUL, CUSUM, Fehlerdetektoren), `scirust-mlops` (Drift, Shadow-Deployment, signiertes OTA), `scirust-func-safety` (ASIL A-D, Traceability, Fault Injection, Degraded Mode, Audit), `scirust-integration` (Backend+Pipeline), `scirust-industrial` (CLI: discover, test, gen-config, scaffold, run, doctor).
+
+## 16. Mustererkennung & Algorithmenerstellung
+
+SciRust bietet eine umfassende Suite von 14 Crates zur Mustererkennung in allen Domänen und zur automatischen Algorithmengenerierung:
+
+**Mustererkennung (8 Crates):**
+- `scirust-vision`: Bildmuster — CNN-Faltung, HOG, LBP, Haar-Merkmale, Canny-Kantenerkennung, Otsu-Schwellwertverfahren
+- `scirust-audio`: Audiomuster — MFCC, Chroma, Pitch YIN, Onset-Erkennung, spektraler Schwerpunkt/Bandbreite/Rolloff
+- `scirust-graph`: Graphmuster — Subgraph-Isomorphismus, Motif-Erkennung, Community-Erkennung, Betweenness-Zentralität
+- `scirust-sequential`: Sequenzielle Muster — HMM, CRF, Viterbi, Baum-Welch, DTW, KMP, Boyer-Moore
+- `scirust-multivariate`: Multivariate Muster — PCA, ICA, K-Means++, Mahalanobis, MDS, CCA
+- `scirust-unsupervised`: Unüberwachte Muster — Autoencoder, Isolation Forest, DBSCAN, LOF, GMM, One-Class SVM
+- `scirust-seasonal`: Saisonale Muster — STL, ACF/PACF, Mann-Kendall, saisonaler CUSUM
+- `scirust-nlp-advanced`: Textmuster — NER, LDA, TextRank, MinHash, NaiveBayes, Relationsextraktion
+
+**Algorithmenerstellung (6 Crates):**
+- `scirust-automl`: AutoML — Bayes'sche Optimierung, Modellauswahl, Feature Engineering
+- `scirust-synthesis`: Programmsynthese — skizzenbasiert, Bottom-Up, genetische Programmierung, Beam Search
+- `scirust-algogen`: Algorithmengenerierung — Sortieren/Suchen/Graphen/DP/DaC mit Komplexitätsanalyse
+- `scirust-codetrans`: Codetransformation — AST-Optimierung, Refactoring, Transpilation
+- `scirust-rl-algo`: RL-Entdeckung — REINFORCE, Actor-Critic, Q-Learning, MCTS, Meta-Lernen
+- `scirust-scaffold`: Algorithmisches Scaffolding — DSL, mehrsprachige Codegenerierung, 16 Vorlagen
+
+Alle Implementierungen sind reines Rust, ohne FFI, mit umfassender Testabdeckung.

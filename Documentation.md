@@ -513,3 +513,138 @@ Le mode simulé fonctionne sans aucun matériel. Pour passer en production :
 2. **MQTT réel** : Ajouter `features = ["real-mqtt"]`, ajouter `rumqttc = "0.24"`, et configurer `host`/`port` du broker.
 
 Le `BackendFactory` gère automatiquement le fallback : si le backend réel échoue, il bascule vers le mode simulé.
+
+## 15. Détection de Motifs (Pattern Detection)
+
+SciRust propose huit crates spécialisées dans la détection de motifs et de régularités à travers différents types de données.
+
+### 15.1 Vision par Ordinateur (`scirust-vision`)
+
+Détection de motifs visuels dans les images et vidéos :
+- **CNN** — réseaux convolutifs pour classification, segmentation et détection d'objets
+- **HOG** (Histogram of Oriented Gradients) — descripteur de forme pour la détection de piétons et objets
+- **LBP** (Local Binary Patterns) — descripteur de texture invariant à l'illumination
+- **Haar** — cascades de classifieurs pour la détection rapide de visages
+- **Canny** — détection de contours avec seuillage par hystérésis
+- **Otsu** — binarisation automatique par seuillage adaptatif
+- **NMS** (Non-Maximum Suppression) — suppression des détections redondantes
+- **Template Matching** — correspondance de gabarits par corrélation normalisée
+
+### 15.2 Reconnaissance Audio (`scirust-audio`)
+
+Extraction et reconnaissance de motifs dans les signaux audio :
+- **MFCC** (Mel-Frequency Cepstral Coefficients) — coefficients cepstraux pour la reconnaissance vocale
+- **Chroma** — vecteurs chromatiques pour l'analyse harmonique et la détection d'accords
+- **YIN** — suivi de hauteur tonale (pitch tracking) robuste par autocorrélation
+- **Onset Detection** — détection des débuts de notes via flux spectral
+- **Spectral Features** — centroïde, étalement, rolloff, flatness et entropie spectrale
+
+### 15.3 Motifs de Graphes (`scirust-graph`)
+
+Analyse structurelle des graphes pour la découverte de motifs topologiques :
+- **Isomorphisme de sous-graphes** — recherche de motifs exacts dans un graphe hôte (VF2)
+- **Découverte de motifs** (motif discovery) — énumération et comptage de sous-graphes fréquents
+- **Détection de communautés** — Louvain, Leiden, label propagation, modularité
+- **Centralité d'intermédiarité** (betweenness centrality) — identification des nœuds-ponts
+
+### 15.4 Motifs Séquentiels (`scirust-sequential`)
+
+Modélisation et recherche de motifs dans les séquences temporelles et textuelles :
+- **HMM** (Modèles de Markov Cachés) — modélisation d'états latents dans les séquences
+- **CRF** (Champs Aléatoires Conditionnels) — étiquetage de séquences avec contraintes de transition
+- **Viterbi** — décodage du chemin d'états le plus probable
+- **Baum-Welch** — estimation des paramètres HMM par EM
+- **DTW** (Dynamic Time Warping) — alignement temporel de séquences à vitesses variables
+- **KMP** (Knuth-Morris-Pratt) — recherche exacte de motifs dans un texte
+- **Boyer-Moore** — recherche rapide de motifs par sauts de caractères
+
+### 15.5 Analyse Multivariée (`scirust-multivariate`)
+
+Extraction de motifs dans les données multidimensionnelles :
+- **PCA** (Analyse en Composantes Principales) — réduction dimensionnelle par variance maximale
+- **ICA** (Analyse en Composantes Indépendantes) — séparation de sources par indépendance statistique
+- **K-Means++** — partitionnement avec initialisation optimisée des centroïdes
+- **Mahalanobis** — distance tenant compte de la covariance pour la détection d'anomalies
+- **MDS** (Multidimensional Scaling) — projection en basse dimension préservant les distances
+- **CCA** (Analyse de Corrélation Canonique) — recherche de relations entre deux ensembles de variables
+
+### 15.6 Détection Non Supervisée (`scirust-unsupervised`)
+
+Détection de motifs anormaux sans étiquettes :
+- **Autoencodeur** — reconstruction et score d'anomalie par erreur résiduelle
+- **Forêt d'isolement** (Isolation Forest) — partitionnement aléatoire pour isoler les anomalies
+- **DBSCAN** — clustering par densité avec identification automatique du bruit
+- **LOF** (Local Outlier Factor) — facteur local d'aberration basé sur la densité du voisinage
+- **GMM** (Modèles de Mélange Gaussien) — détection par probabilité sous le modèle
+- **One-Class SVM** — frontière de décision autour des données normales
+
+### 15.7 Motifs Saisonniers (`scirust-seasonal`)
+
+Détection de cycles et de tendances dans les séries temporelles :
+- **STL** — décomposition saisonnière et de tendance par LOESS
+- **ACF/PACF** — fonctions d'autocorrélation et autocorrélation partielle pour l'identification de périodicités
+- **Mann-Kendall** — test non paramétrique de tendance monotone
+- **CUSUM saisonnier** — détection de ruptures dans les séries avec composante saisonnière
+
+### 15.8 NLP Avancé (`scirust-nlp-advanced`)
+
+Traitement avancé du langage naturel pour la détection de motifs textuels :
+- **NER** (Reconnaissance d'Entités Nommées) — extraction de personnes, lieux, organisations
+- **LDA** (Allocation de Dirichlet Latente) — modélisation thématique de corpus
+- **TextRank** — extraction de phrases clés et résumé automatique par graphe
+- **MinHash** — estimation rapide de similarité par hachage sensible à la localité (LSH)
+- **NaiveBayes** — classification textuelle probabiliste avec lissage de Laplace
+
+## 16. Création d'Algorithmes (Algorithm Creation)
+
+SciRust offre six crates dédiées à la génération, la synthèse et l'optimisation automatique d'algorithmes.
+
+### 16.1 AutoML (`scirust-automl`)
+
+Automatisation du pipeline d'apprentissage automatique :
+- **Optimisation bayésienne** — recherche efficace d'hyperparamètres par modélisation par processus gaussien
+- **Sélection de modèles** — comparaison automatique et classement de candidats
+- **Ensembles** — stacking, bagging, boosting et voting de modèles
+- **Feature engineering** — génération, transformation et sélection automatique de caractéristiques
+
+### 16.2 Synthèse de Programmes (`scirust-synthesis`)
+
+Génération automatique de code par synthèse inductive :
+- **30+ opérateurs** — bibliothèque d'opérations mathématiques et logiques composables
+- **Sketch-based** — synthèse guidée par un squelette partiel de programme
+- **Stratégies de recherche** — bottom-up (synthèse ascendante), top-down (descendante), programmation génétique (GP), beam search
+
+### 16.3 Génération d'Algorithmes (`scirust-algogen`)
+
+Création automatique d'algorithmes classiques par composition :
+- **Tri** — 10 stratégies (quick, merge, heap, bubble, insertion, selection, shell, counting, radix, bucket)
+- **Recherche** — 8 stratégies (binaire, linéaire, exponentielle, Fibonacci, saut, interpolation, ternaire, A*)
+- **Graphes** — Dijkstra, Bellman-Ford, Floyd-Warshall, Kruskal, Prim, Tarjan
+- **Programmation dynamique** — knapsack, LCS, LIS, édition de distance
+- **Diviser pour Régner** — Strassen, Karatsuba, exponentiation rapide
+- **Analyse de complexité** — estimation automatique en temps et espace (notation O)
+
+### 16.4 Transformation de Code (`scirust-codetrans`)
+
+Manipulation et optimisation de code source par AST :
+- **AST** — représentation en arbre syntaxique abstrait pour Rust, Python et C
+- **20 règles d'optimisation** — constant folding, inlining, dead code elimination, copy propagation, strength reduction
+- **Refactoring** — renommage, extraction de fonction, simplification conditionnelle
+- **Transpilation** — conversion automatique Rust → Python et Rust → C
+
+### 16.5 RL pour la Découverte d'Algorithmes (`scirust-rl-algo`)
+
+Recherche d'algorithmes par renforcement :
+- **REINFORCE** — gradient de politique pour l'exploration d'espaces de programmes
+- **Actor-Critic** — apprentissage de politique avec fonction de valeur
+- **Q-Learning** — recherche d'algorithmes par valeur d'état-action
+- **MCTS** (Monte Carlo Tree Search) — exploration arborescente pour la synthèse constructive
+- **Méta-apprentissage** — apprentissage de stratégies de synthèse transférables entre domaines
+
+### 16.6 Échafaudage de Code (`scirust-scaffold`)
+
+Génération de code structuré par templates et DSL :
+- **DSL** — langage dédié à la description d'architectures algorithmiques
+- **Génération multi-langage** — sortie en Rust, Python, C et pseudocode
+- **16 templates** — squelettes de projets pré-configurés pour cas d'usage courants
+- **Analyse de code** — inspection, métriques et validation du code généré

@@ -324,3 +324,23 @@ El modo simulado funciona sin ningún hardware. Para pasar a producción:
 2. **MQTT real**: Añadir `features = ["real-mqtt"]`, añadir `rumqttc = "0.24"`, y configurar `host`/`port` del broker.
 
 El `BackendFactory` gestiona automáticamente el fallback: si el backend real falla, cambia al modo simulado.
+
+## 15. Detección de Patrones
+
+- **scirust-vision**: Visión artificial — capas CNN, convolución, HOG, LBP, Haar, detección de bordes Canny, umbralización Otsu, componentes conectados, NMS
+- **scirust-audio**: Reconocimiento de audio — MFCC, características cromáticas, seguimiento de tono (YIN), detección de onset, características espectrales (centroide, ancho de banda, rolloff, planitud, entropía)
+- **scirust-graph**: Patrones de grafos — isomorfismo de subgrafos, isomorfismo de grafos, descubrimiento de motivos, detección de comunidades (propagación de etiquetas, Girvan-Newman), modularidad, centralidad de intermediación
+- **scirust-sequential**: Patrones secuenciales — HMM (forward/backward/Viterbi/Baum-Welch), CRF, etiquetado de secuencias (BIO), distancia de edición, DTW, KMP, Boyer-Moore
+- **scirust-multivariate**: Análisis multivariante — PCA, ICA, K-Means++, distancia de Mahalanobis, MDS, CCA, coeficiente de silueta
+- **scirust-unsupervised**: Detección no supervisada — autoencoder, isolation forest, DBSCAN, LOF, GMM (algoritmo EM), One-Class SVM
+- **scirust-seasonal**: Patrones estacionales — descomposición STL, ACF/PACF, periodograma, análisis de Fourier, prueba de tendencia Mann-Kendall, CUSUM estacional
+- **scirust-nlp-advanced**: NLP avanzado — NER (basado en reglas + estadístico), modelado de temas LDA, extracción de relaciones, TextRank, RAKE, MinHash, NaiveBayes, similitud de documentos
+
+## 16. Creación de Algoritmos
+
+- **scirust-automl**: AutoML — optimización de hiperparámetros (aleatoria/cuadrícula/GP Bayesiano), selección de modelos con prueba t, ensambles (votación/promediado), ingeniería de características, validación cruzada
+- **scirust-synthesis**: Síntesis de programas — más de 30 constructores de expresiones, síntesis basada en bocetos, búsqueda ascendente/descendente/GP/haz, reescritura de expresiones, eliminación de subexpresiones comunes
+- **scirust-algogen**: Generación de algoritmos — ordenamiento (10 estrategias), búsqueda (8 estrategias), algoritmos de grafos (camino más corto, árbol de expansión, flujo máximo, coloración), DP, divide y vencerás, análisis de complejidad Big-O
+- **scirust-codetrans**: Transformación código-a-código — AST con 23 tipos de nodos, motor de coincidencia de patrones, 20 reglas de optimización (plegado de constantes, DCE, CSE, LICM, reducción de fuerza), refactorización, transpilación Rust→Python/C
+- **scirust-rl-algo**: Descubrimiento de algoritmos RL — REINFORCE con línea base, Actor-Critic, Q-Learning, recocido simulado, búsqueda por haz, MCTS con ampliación progresiva, meta-aprendizaje, verificación CEGAR
+- **scirust-scaffold**: Andamiaje algorítmico — descripción de algoritmos basada en DSL, generación de código (Rust/Python/C/pseudocódigo), 16 plantillas integradas, generador de andamios, análisis de código, generación de documentación

@@ -2055,7 +2055,7 @@ impl MctsEngine {
             let mut path: Vec<usize> = Vec::new();
             let current = &mut root;
 
-            while current.is_expanded && !current.children.is_empty()
+            if current.is_expanded && !current.children.is_empty()
             {
                 if let Some(idx) = current.best_child(self.exploration_constant)
                 {

@@ -284,3 +284,27 @@ Numenta Anomaly Benchmark (NAB) における期待されるパフォーマンス
 ## 15. 産業・自動車向け監視 (v0.14)
 
 SciRust v0.14 は自動車製造向けの**生産ライン監視**サブシステムを導入します。7 つのクレートと専用 CLI が信号処理、PLC 接続、予知保全、ISO 26262 機能安全をカバーし、1047 テスト（0 失敗）。主要クレート: `scirust-signal`（FFT、窓関数、ベアリング診断、次数分析）、`scirust-opcua`（トレイト + 8 シミュレーションセンサー）、`scirust-mqtt`（SparkPlug B）、`scirust-pdm`（ヘルスインデックス、RUL、CUSUM、故障検出器）、`scirust-mlops`（ドリフト、シャドウデプロイ、署名付き OTA）、`scirust-func-safety`（ASIL A-D、トレーサビリティ、故障注入、縮退モード、監査）、`scirust-integration`（Pipeline 統一）、`scirust-industrial`（CLI: discover、test、gen-config、scaffold、run、doctor）。
+
+## 16. パターン検出とアルゴリズム創出
+
+SciRust は、全領域にわたるパターン検出と自動アルゴリズム生成のための 14 個のクレートからなる包括的なスイートを提供します。
+
+**パターン検出（8 クレート）：**
+- `scirust-vision`：画像パターン — CNN 畳み込み、HOG、LBP、Haar 特徴量、Canny エッジ検出、大津の閾値処理
+- `scirust-audio`：音声パターン — MFCC、クロマ、ピッチ YIN、オンセット検出、スペクトル重心/帯域幅/ロールオフ
+- `scirust-graph`：グラフパターン — 部分グラフ同型性、モチーフ発見、コミュニティ検出、媒介中心性
+- `scirust-sequential`：系列パターン — HMM、CRF、Viterbi、Baum-Welch、DTW、KMP、Boyer-Moore
+- `scirust-multivariate`：多変量パターン — PCA、ICA、K-Means++、マハラノビス距離、MDS、CCA
+- `scirust-unsupervised`：教師なしパターン — オートエンコーダ、孤立森、DBSCAN、LOF、GMM、One-Class SVM
+- `scirust-seasonal`：季節パターン — STL、ACF/PACF、Mann-Kendall、季節 CUSUM
+- `scirust-nlp-advanced`：テキストパターン — NER、LDA、TextRank、MinHash、NaiveBayes、関係抽出
+
+**アルゴリズム創出（6 クレート）：**
+- `scirust-automl`：AutoML — ベイズ最適化、モデル選択、特徴量エンジニアリング
+- `scirust-synthesis`：プログラム合成 — スケッチベース、ボトムアップ、遺伝的プログラミング、ビームサーチ
+- `scirust-algogen`：アルゴリズム生成 — ソート/検索/グラフ/DP/DaC（複雑度解析付き）
+- `scirust-codetrans`：コード変換 — AST 最適化、リファクタリング、トランスパイル
+- `scirust-rl-algo`：RL 発見 — REINFORCE、Actor-Critic、Q-Learning、MCTS、メタ学習
+- `scirust-scaffold`：アルゴリズム足場 — DSL、多言語コード生成、16 テンプレート
+
+全ての実装は純粋 Rust、ゼロ FFI、包括的なテストカバレッジを備えています。

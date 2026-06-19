@@ -286,3 +286,27 @@ Un tercer comando, `scirust conformal`, produce intervalos de predicción confor
 ## 15. Monitoreo Industrial y Automotriz (v0.14)
 
 SciRust v0.14 introduce un subsistema para **monitoreo de líneas de producción** automotriz: 7 crates + CLI dedicado que cubren procesamiento de señales, conectividad PLC, mantenimiento predictivo y seguridad funcional ISO 26262 — con 1047 tests (0 fallos). Crate clave: `scirust-signal` (FFT, ventanas, diagnóstico de rodamientos, análisis de orden), `scirust-opcua` (trait + 8 sensores simulados), `scirust-mqtt` (SparkPlug B), `scirust-pdm` (Health Index, RUL, CUSUM, detectores de fallos), `scirust-mlops` (deriva, shadow deploy, OTA), `scirust-func-safety` (ASIL A-D, trazabilidad, fault injection, modo degradado, auditoría), `scirust-integration` (Pipeline unificado), `scirust-industrial` (CLI: discover, test, gen-config, scaffold, run, doctor).
+
+## 16. Detección de Patrones y Creación de Algoritmos
+
+SciRust proporciona un conjunto completo de 14 crates para la detección de patrones en todos los dominios y la generación automática de algoritmos:
+
+**Detección de Patrones (8 crates):**
+- `scirust-vision`: Patrones de imagen — convolución CNN, HOG, LBP, características Haar, detección de bordes Canny, umbralización Otsu
+- `scirust-audio`: Patrones de audio — MFCC, chroma, pitch YIN, detección de onset, centroide/ancho de banda/rolloff espectral
+- `scirust-graph`: Patrones de grafos — isomorfismo de subgrafos, descubrimiento de motivos, detección de comunidades, centralidad de intermediación
+- `scirust-sequential`: Patrones secuenciales — HMM, CRF, Viterbi, Baum-Welch, DTW, KMP, Boyer-Moore
+- `scirust-multivariate`: Patrones multivariantes — PCA, ICA, K-Means++, Mahalanobis, MDS, CCA
+- `scirust-unsupervised`: Patrones no supervisados — autoencoder, bosque de aislamiento, DBSCAN, LOF, GMM, SVM de una clase
+- `scirust-seasonal`: Patrones estacionales — STL, ACF/PACF, Mann-Kendall, CUSUM estacional
+- `scirust-nlp-advanced`: Patrones de texto — NER, LDA, TextRank, MinHash, NaiveBayes, extracción de relaciones
+
+**Creación de Algoritmos (6 crates):**
+- `scirust-automl`: AutoML — optimización bayesiana, selección de modelos, ingeniería de características
+- `scirust-synthesis`: Síntesis de programas — basada en bocetos, ascendente, programación genética, búsqueda en haz
+- `scirust-algogen`: Generación de algoritmos — ordenamiento/búsqueda/grafos/DP/DaC con análisis de complejidad
+- `scirust-codetrans`: Transformación de código — optimización AST, refactorización, transpilación
+- `scirust-rl-algo`: Descubrimiento por RL — REINFORCE, Actor-Crítico, Q-Learning, MCTS, meta-aprendizaje
+- `scirust-scaffold`: Andamiaje algorítmico — DSL, generación de código multi-lenguaje, 16 plantillas
+
+Todas las implementaciones son Rust puro, cero FFI, con cobertura completa de pruebas.

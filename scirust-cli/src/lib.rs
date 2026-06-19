@@ -327,6 +327,86 @@ const GROUPS: &[(&str, &[Command])] = &[
             },
         ],
     ),
+    (
+        "PATTERN DETECTION CRATES",
+        &[
+            Command {
+                name: "scirust-vision",
+                args: "",
+                about: "Computer vision: CNN, conv2D, pooling, HOG, LBP, Haar-like, NMS, template matching, Otsu, Canny.",
+            },
+            Command {
+                name: "scirust-audio",
+                args: "",
+                about: "Audio: Goertzel, spectrum, Mel filterbank, MFCC+deltas, chroma, onset, YIN pitch, spectral features.",
+            },
+            Command {
+                name: "scirust-graph",
+                args: "",
+                about: "Graph: BFS/DFS, shortest path, subgraph isomorphism (VF2), motif discovery, label propagation, modularity, centrality.",
+            },
+            Command {
+                name: "scirust-sequential",
+                args: "",
+                about: "Sequential: HMM forward/backward/Viterbi/Baum-Welch, CRF, Needleman-Wunsch, DTW (full+banded+path).",
+            },
+            Command {
+                name: "scirust-multivariate",
+                args: "",
+                about: "Multivariate: PCA (Jacobi), ICA (FastICA), K-Means++, silhouette, Mahalanobis, MDS, CCA.",
+            },
+            Command {
+                name: "scirust-unsupervised",
+                args: "",
+                about: "Unsupervised: Autoencoder, Isolation Forest, DBSCAN, LOF, GMM (EM, BIC/AIC), One-Class SVM.",
+            },
+            Command {
+                name: "scirust-seasonal",
+                args: "",
+                about: "Seasonal: STL, ACF/PACF, periodogram, X-11, Mann-Kendall, Sen's slope, seasonal CUSUM, binary segmentation.",
+            },
+            Command {
+                name: "scirust-nlp-advanced",
+                args: "",
+                about: "NLP: NER (BIO), LDA (Gibbs), relation extraction, TF-IDF, TextRank, RAKE, MinHash, tokenizer.",
+            },
+        ],
+    ),
+    (
+        "ALGORITHM CREATION CRATES",
+        &[
+            Command {
+                name: "scirust-automl",
+                args: "",
+                about: "AutoML: preprocessing, model selection, hyperparameter optimization (Bayesian GP, grid, random), ensembles.",
+            },
+            Command {
+                name: "scirust-synthesis",
+                args: "",
+                about: "Program synthesis: SExpr grammar, Sketch, bottom-up/top-down enumeration, genetic programming, beam search.",
+            },
+            Command {
+                name: "scirust-algogen",
+                args: "",
+                about: "Algorithm generation: 10 sorts, 8 searches, graph algos, DP, DaC, complexity fitting, evolutionary optimization.",
+            },
+            Command {
+                name: "scirust-codetrans",
+                args: "",
+                about: "Code transformation: AST, pattern matching, 20 opt rules, DCE, CSE, LICM, refactoring, Rust->Python/C transpilation.",
+            },
+            Command {
+                name: "scirust-rl-algo",
+                args: "",
+                about: "RL algorithm discovery: REINFORCE, Actor-Critic, Q-Learning, MCTS, meta-learning, CEGAR, invariant inference.",
+            },
+            Command {
+                name: "scirust-scaffold",
+                args: "",
+                about: "Algorithmic scaffolding: DSL, code gen (Rust/Python/C), 16 templates, code analysis, doc generation.",
+            },
+        ],
+    ),
 ];
 
 fn print_help() {
@@ -376,7 +456,15 @@ fn print_info() {
     println!("  • Ownership analysis of real Rust source (`analyze`, `som train`).");
     println!("  • Symbolic math: differentiation, simplification, solving (`diff`/`solve`/…).");
     println!("  • Evolutionary optimization (`evo`).");
-    println!("  • Verifiable, reproducible inference certificates (`verify`).\n");
+    println!("  • Verifiable, reproducible inference certificates (`verify`).");
+    println!("  • Pattern detection: 8 crates for vision, audio, graph, sequential, multivariate,");
+    println!(
+        "    unsupervised, seasonal, and NLP analysis (`scirust-vision`, `scirust-audio`, …)."
+    );
+    println!(
+        "  • Algorithm creation: 6 crates for AutoML, program synthesis, algorithm generation,"
+    );
+    println!("    code transformation, RL discovery, and scaffolding (`scirust-automl`, …).\n");
     println!("Docs: README.md · docs/REFERENCE.md · `cargo doc --workspace --no-deps --open`");
 }
 

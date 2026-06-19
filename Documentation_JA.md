@@ -317,3 +317,23 @@ scirust-industrial run --config config.json --cycles 1000
 2. **実 MQTT**: `features = ["real-mqtt"]` を追加し、`rumqttc = "0.24"` を追加し、ブローカーの `host`/`port` を設定。
 
 `BackendFactory` が自動フォールバックを処理：実バックエンドが失敗した場合、シミュレーションモードにフォールバックします。
+
+## 15. パターン検出
+
+- **scirust-vision**: コンピュータビジョン — CNN 層、畳み込み、HOG、LBP、Haar、Canny エッジ検出、Otsu 閾値処理、連結成分、NMS
+- **scirust-audio**: 音声認識 — MFCC、クロマ特徴、ピッチ追跡 (YIN)、オンセット検出、スペクトル特徴（重心、帯域幅、ロールオフ、平坦度、エントロピー）
+- **scirust-graph**: グラフパターン — 部分グラフ同型性、グラフ同型性、モチーフ発見、コミュニティ検出（ラベル伝播、Girvan-Newman）、モジュラリティ、媒介中心性
+- **scirust-sequential**: 系列パターン — HMM（前向き/後向き/Viterbi/Baum-Welch）、CRF、系列ラベリング (BIO)、編集距離、DTW、KMP、Boyer-Moore
+- **scirust-multivariate**: 多変量解析 — PCA、ICA、K-Means++、マハラノビス距離、MDS、CCA、シルエットスコア
+- **scirust-unsupervised**: 教師なし検出 — オートエンコーダ、Isolation Forest、DBSCAN、LOF、GMM（EM アルゴリズム）、One-Class SVM
+- **scirust-seasonal**: 季節パターン — STL 分解、ACF/PACF、ピリオドグラム、フーリエ解析、Mann-Kendall 傾向検定、季節 CUSUM
+- **scirust-nlp-advanced**: 高度な NLP — NER（ルールベース + 統計的）、LDA トピックモデリング、関係抽出、TextRank、RAKE、MinHash、NaiveBayes、文書類似度
+
+## 16. アルゴリズム作成
+
+- **scirust-automl**: AutoML — ハイパーパラメータ最適化（ランダム/グリッド/ベイズ GP）、t 検定によるモデル選択、アンサンブル（投票/平均化）、特徴量エンジニアリング、交差検証
+- **scirust-synthesis**: プログラム合成 — 30 以上の式コンストラクタ、スケッチベース合成、ボトムアップ/トップダウン/GP/ビームサーチ、式書き換え、共通部分式除去
+- **scirust-algogen**: アルゴリズム生成 — ソート（10 戦略）、探索（8 戦略）、グラフアルゴリズム（最短経路、全域木、最大流、彩色）、DP、分割統治、Big-O 複雑度解析
+- **scirust-codetrans**: コード間変換 — 23 ノード型の AST、パターンマッチングエンジン、20 の最適化ルール（定数畳み込み、DCE、CSE、LICM、強度低減）、リファクタリング、Rust→Python/C トランスパイル
+- **scirust-rl-algo**: RL アルゴリズム発見 — ベースライン付き REINFORCE、Actor-Critic、Q-Learning、焼きなまし法、ビームサーチ、漸進的拡大 MCTS、メタ学習、CEGAR 検証
+- **scirust-scaffold**: アルゴリズムスキャフォールド — DSL ベースのアルゴリズム記述、コード生成（Rust/Python/C/疑似コード）、16 の組込みテンプレート、スキャフォールドジェネレータ、コード解析、ドキュメント生成

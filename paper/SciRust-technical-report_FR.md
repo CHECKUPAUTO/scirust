@@ -305,3 +305,27 @@ fonctionnement ISO 26262 :
 
 L'ensemble passe 1047 tests (0 échec) et inclut un exemple de bout en bout (`industrial_monitor`)
 couvrant toute la chaîne : OPC-UA → Signal → Events → Health → RUL → CUSUM → MQTT → Audit → Safety → MLOps.
+
+## 16. Détection de Motifs & Création d'Algorithmes
+
+SciRust fournit une suite complète de 14 crates pour la détection de motifs dans tous les domaines et la génération automatique d'algorithmes :
+
+**Détection de motifs (8 crates) :**
+- `scirust-vision` : Motifs d'images — convolution CNN, HOG, LBP, caractéristiques de Haar, détection de contours Canny, seuillage d'Otsu
+- `scirust-audio` : Motifs audio — MFCC, chroma, pitch YIN, détection d'onset, centroïde/largeur de bande/rolloff spectral
+- `scirust-graph` : Motifs de graphes — isomorphisme de sous-graphes, découverte de motifs, détection de communautés, centralité d'intermédiarité
+- `scirust-sequential` : Motifs séquentiels — HMM, CRF, Viterbi, Baum-Welch, DTW, KMP, Boyer-Moore
+- `scirust-multivariate` : Motifs multivariés — PCA, ICA, K-Means++, Mahalanobis, MDS, CCA
+- `scirust-unsupervised` : Motifs non supervisés — autoencodeur, forêt d'isolation, DBSCAN, LOF, GMM, SVM à une classe
+- `scirust-seasonal` : Motifs saisonniers — STL, ACF/PACF, Mann-Kendall, CUSUM saisonnier
+- `scirust-nlp-advanced` : Motifs textuels — NER, LDA, TextRank, MinHash, NaiveBayes, extraction de relations
+
+**Création d'algorithmes (6 crates) :**
+- `scirust-automl` : AutoML — optimisation bayésienne, sélection de modèles, ingénierie de caractéristiques
+- `scirust-synthesis` : Synthèse de programmes — basée sur esquisses, ascendante, programmation génétique, recherche par faisceau
+- `scirust-algogen` : Génération d'algorithmes — tri/recherche/graphes/DP/DaC avec analyse de complexité
+- `scirust-codetrans` : Transformation de code — optimisation AST, refactorisation, transpilation
+- `scirust-rl-algo` : Découverte par RL — REINFORCE, Actor-Critic, Q-Learning, MCTS, méta-apprentissage
+- `scirust-scaffold` : Échafaudage algorithmique — DSL, génération de code multi-langage, 16 modèles
+
+Toutes les implémentations sont en Rust pur, zéro FFI, avec une couverture de tests complète.

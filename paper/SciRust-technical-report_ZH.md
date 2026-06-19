@@ -279,3 +279,27 @@ $$ \text{Event}(t) = \mathbb{I}(S(W_t) > \tau) $$
 ## 15. 工业与汽车监控 (v0.14)
 
 SciRust v0.14 引入了**生产线监控**子系统，针对汽车制造：7 个 crate + 专用 CLI，覆盖信号处理、PLC 连接、预测性维护和 ISO 26262 功能安全 — 1047 个测试（零失败）。核心 crate：`scirust-signal`（FFT、窗函数、轴承诊断、阶次分析）、`scirust-opcua`（trait + 8 个模拟传感器）、`scirust-mqtt`（SparkPlug B）、`scirust-pdm`（健康指数、RUL、CUSUM、故障检测器）、`scirust-mlops`（漂移检测、影子部署、OTA 签名）、`scirust-func-safety`（ASIL A-D、可追溯性、故障注入、降级模式、审计）、`scirust-integration`（Pipeline 统一）、`scirust-industrial`（CLI：discover、test、gen-config、scaffold、run、doctor）。
+
+## 16. 模式检测与算法创建
+
+SciRust 提供了全面的 14 个 crate 套件，用于跨所有领域的模式检测和自动算法生成：
+
+**模式检测（8 个 crate）：**
+- `scirust-vision`：图像模式 — CNN 卷积、HOG、LBP、Haar 特征、Canny 边缘检测、Otsu 阈值法
+- `scirust-audio`：音频模式 — MFCC、色度、音高 YIN、起始检测、频谱质心/带宽/滚降
+- `scirust-graph`：图模式 — 子图同构、模体发现、社区检测、介数中心性
+- `scirust-sequential`：序列模式 — HMM、CRF、Viterbi、Baum-Welch、DTW、KMP、Boyer-Moore
+- `scirust-multivariate`：多元模式 — PCA、ICA、K-Means++、马氏距离、MDS、CCA
+- `scirust-unsupervised`：无监督模式 — 自编码器、隔离森林、DBSCAN、LOF、GMM、单类 SVM
+- `scirust-seasonal`：季节性模式 — STL、ACF/PACF、Mann-Kendall、季节性 CUSUM
+- `scirust-nlp-advanced`：文本模式 — NER、LDA、TextRank、MinHash、朴素贝叶斯、关系抽取
+
+**算法创建（6 个 crate）：**
+- `scirust-automl`：AutoML — 贝叶斯优化、模型选择、特征工程
+- `scirust-synthesis`：程序合成 — 基于草图、自底向上、遗传规划、束搜索
+- `scirust-algogen`：算法生成 — 排序/搜索/图/DP/DaC，含复杂度分析
+- `scirust-codetrans`：代码变换 — AST 优化、重构、转译
+- `scirust-rl-algo`：RL 发现 — REINFORCE、Actor-Critic、Q-Learning、MCTS、元学习
+- `scirust-scaffold`：算法脚手架 — DSL、多语言代码生成、16 个模板
+
+所有实现均为纯 Rust，零 FFI，测试覆盖率全面。

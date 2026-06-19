@@ -424,7 +424,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let av = i64(a[i * p.k + k]);
         let bv = i64(b[k * p.n + j]);
         let product = av * bv;
-        sum = sum + (product >> 32u);  // Q32 × Q32 → Q64 → shift → Q32
+        sum = sum + (product >> 16u);  // Q32 → Q16 realignment
     }
 
     c[i * p.n + j] = i32(sum);
@@ -457,7 +457,7 @@ struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u3
 // Retourne (hi, lo) où lo est toujours positif et hi contient le signe
 fn split_i32(val: i32) -> vec2<i32> {
     let lo = val & 0xFFFF;            // bits 0..15, toujours positif
-    let hi = val >> 16i;              // bits 16..31, porte le signe
+    let hi = val >> 16u;              // bits 16..31, porte le signe
     return vec2(hi, lo);
 }
 
@@ -467,7 +467,7 @@ fn recombine_q16(hi: i32, lo: i32) -> i32 {
     // lo contient les 32 bits bas du produit complet Q64
     // On ne garde que les 16 bits hauts de 'lo' pour le réalignement
     let lo_shifted = lo >> 16u;
-    let hi_shifted = hi << 16i;
+    let hi_shifted = hi << 16u;
     return hi_shifted + lo_shifted;
 }
 
@@ -498,7 +498,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let carry1 = sum_lo >> 16u;                // retenue vers bits 16+
         sum_lo = sum_lo & 0xFFFF;                  // garde seulement bits 0..15
         sum_hi = sum_hi + carry1 + phl + plh;      // milieu + retenue
-        sum_hi = sum_hi + (phh << 16i);             // bits hauts avec décalage
+        sum_hi = sum_hi + (phh << 16u);             // bits hauts avec décalage
     }
 
     c[i * p.n + j] = recombine_q16(sum_hi, sum_lo);

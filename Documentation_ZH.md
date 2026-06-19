@@ -337,3 +337,23 @@ scirust-industrial run --config config.json --cycles 1000
 2. **真实 MQTT**：添加 `features = ["real-mqtt"]`，添加 `rumqttc = "0.24"`，并配置代理 `host`/`port`。
 
 `BackendFactory` 自动处理回退：如果真实后端失败，会回退到模拟模式。
+
+## 15. 模式检测
+
+- **scirust-vision**: 计算机视觉 — CNN 层、卷积、HOG、LBP、Haar、Canny 边缘检测、Otsu 阈值分割、连通组件、NMS
+- **scirust-audio**: 音频识别 — MFCC、色度特征、音高追踪 (YIN)、起始点检测、频谱特征（质心、带宽、滚降、平坦度、熵）
+- **scirust-graph**: 图模式 — 子图同构、图同构、模体发现、社区检测（标签传播、Girvan-Newman）、模块度、介数中心性
+- **scirust-sequential**: 序列模式 — HMM（前向/后向/Viterbi/Baum-Welch）、CRF、序列标注 (BIO)、编辑距离、DTW、KMP、Boyer-Moore
+- **scirust-multivariate**: 多元分析 — PCA、ICA、K-Means++、马氏距离、MDS、CCA、轮廓系数
+- **scirust-unsupervised**: 无监督检测 — 自编码器、隔离森林、DBSCAN、LOF、GMM（EM 算法）、One-Class SVM
+- **scirust-seasonal**: 季节性模式 — STL 分解、ACF/PACF、周期图、傅里叶分析、Mann-Kendall 趋势检验、季节性 CUSUM
+- **scirust-nlp-advanced**: 高级 NLP — NER（基于规则 + 统计）、LDA 主题建模、关系抽取、TextRank、RAKE、MinHash、NaiveBayes、文档相似度
+
+## 16. 算法创建
+
+- **scirust-automl**: AutoML — 超参数优化（随机/网格/贝叶斯 GP）、基于 t 检验的模型选择、集成方法（投票/平均）、特征工程、交叉验证
+- **scirust-synthesis**: 程序合成 — 30 余种表达式构造器、基于草图的合成、自底向上/自顶向下/GP/束搜索、表达式重写、公共子表达式消除
+- **scirust-algogen**: 算法生成 — 排序（10 种策略）、搜索（8 种策略）、图算法（最短路径、生成树、最大流、着色）、动态规划、分治法、大 O 复杂度分析
+- **scirust-codetrans**: 代码到代码转换 — 含 23 种节点类型的 AST、模式匹配引擎、20 条优化规则（常量折叠、DCE、CSE、LICM、强度削减）、重构、Rust→Python/C 转译
+- **scirust-rl-algo**: RL 算法发现 — REINFORCE 含基线、Actor-Critic、Q-Learning、模拟退火、束搜索、渐进扩展 MCTS、元学习、CEGAR 验证
+- **scirust-scaffold**: 算法脚手架 — 基于 DSL 的算法描述、代码生成（Rust/Python/C/伪代码）、16 个内置模板、脚手架生成器、代码分析、文档生成

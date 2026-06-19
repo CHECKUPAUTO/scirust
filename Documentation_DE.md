@@ -343,3 +343,23 @@ Der simulierte Modus funktioniert ohne Hardware. Für den Produktivbetrieb:
 2. **Echtes MQTT**: `features = ["real-mqtt"]` hinzufügen, `rumqttc = "0.24"` hinzufügen, und Broker `host`/`port` konfigurieren.
 
 Die `BackendFactory` verwaltet automatisches Fallback: Wenn das echte Backend fehlschlägt, fällt es auf den simulierten Modus zurück.
+
+## 15. Mustererkennung
+
+- **scirust-vision**: Computer Vision — CNN-Schichten, Faltung, HOG, LBP, Haar, Canny-Kantenerkennung, Otsu-Schwellwertverfahren, verbundene Komponenten, NMS
+- **scirust-audio**: Audioerkennung — MFCC, Chroma-Merkmale, Tonhöhenverfolgung (YIN), Onset-Erkennung, spektrale Merkmale (Zentroid, Bandbreite, Rolloff, Flachheit, Entropie)
+- **scirust-graph**: Graphmuster — Subgraph-Isomorphismus, Graph-Isomorphismus, Motiverkennung, Community-Erkennung (Label Propagation, Girvan-Newman), Modularität, Betweenness-Zentralität
+- **scirust-sequential**: Sequenzielle Muster — HMM (forward/backward/Viterbi/Baum-Welch), CRF, Sequenzkennzeichnung (BIO), Edit-Distanz, DTW, KMP, Boyer-Moore
+- **scirust-multivariate**: Multivariate Analyse — PCA, ICA, K-Means++, Mahalanobis-Distanz, MDS, CCA, Silhouettenkoeffizient
+- **scirust-unsupervised**: Unüberwachte Erkennung — Autoencoder, Isolation Forest, DBSCAN, LOF, GMM (EM-Algorithmus), One-Class SVM
+- **scirust-seasonal**: Saisonale Muster — STL-Dekomposition, ACF/PACF, Periodogramm, Fourier-Analyse, Mann-Kendall-Trendtest, saisonaler CUSUM
+- **scirust-nlp-advanced**: Erweitertes NLP — NER (regelbasiert + statistisch), LDA-Themenmodellierung, Relationsextraktion, TextRank, RAKE, MinHash, NaiveBayes, Dokumentähnlichkeit
+
+## 16. Algorithmenerstellung
+
+- **scirust-automl**: AutoML — Hyperparameteroptimierung (zufällig/Raster/Bayesian GP), Modellauswahl mit t-Test, Ensembles (Voting/Mittelwertbildung), Feature Engineering, Kreuzvalidierung
+- **scirust-synthesis**: Programmsynthese — über 30 Ausdruckskonstruktoren, skizzenbasierte Synthese, Bottom-up/Top-down/GP/Beam-Suche, Ausdrucksumschreibung, Eliminierung gemeinsamer Teilausdrücke
+- **scirust-algogen**: Algorithmengenerierung — Sortierung (10 Strategien), Suche (8 Strategien), Graphalgorithmen (kürzester Pfad, Spannbaum, maximaler Fluss, Färbung), DP, Divide-and-Conquer, Big-O-Komplexitätsanalyse
+- **scirust-codetrans**: Code-zu-Code-Transformation — AST mit 23 Knotentypen, Musterabgleichsengine, 20 Optimierungsregeln (Constant Folding, DCE, CSE, LICM, Strength Reduction), Refactoring, Rust→Python/C-Transpilation
+- **scirust-rl-algo**: RL-Algorithmenerkennung — REINFORCE mit Baseline, Actor-Critic, Q-Learning, simuliertes Abkühlen, Beam-Suche, MCTS mit progressiver Erweiterung, Meta-Learning, CEGAR-Verifikation
+- **scirust-scaffold**: Algorithmisches Scaffolding — DSL-basierte Algorithmenbeschreibung, Codegenerierung (Rust/Python/C/Pseudocode), 16 integrierte Vorlagen, Scaffold-Generator, Codeanalyse, Dokumentationsgenerierung

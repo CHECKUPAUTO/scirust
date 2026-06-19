@@ -739,3 +739,27 @@ any of the optimizers above), `scirust conformal`, `scirust calibrate`, the
 sequence-model demos (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), the
 quantizers (`gptq`, `awq`, `bitnet`), `scirust pinn`, and `scirust quantum`
 (the MPS quantum-circuit simulator).
+
+## 16. Pattern Detection & Algorithm Creation
+
+SciRust provides a comprehensive suite of 14 crates for pattern detection across all domains and automatic algorithm generation:
+
+**Pattern Detection (8 crates):**
+- `scirust-vision`: Image patterns — CNN convolution, HOG, LBP, Haar features, Canny edge detection, Otsu thresholding
+- `scirust-audio`: Audio patterns — MFCC, chroma, pitch YIN, onset detection, spectral centroid/bandwidth/rolloff
+- `scirust-graph`: Graph patterns — subgraph isomorphism, motif discovery, community detection, betweenness centrality
+- `scirust-sequential`: Sequential patterns — HMM, CRF, Viterbi, Baum-Welch, DTW, KMP, Boyer-Moore
+- `scirust-multivariate`: Multivariate patterns — PCA, ICA, K-Means++, Mahalanobis, MDS, CCA
+- `scirust-unsupervised`: Unsupervised patterns — autoencoder, isolation forest, DBSCAN, LOF, GMM, One-Class SVM
+- `scirust-seasonal`: Seasonal patterns — STL, ACF/PACF, Mann-Kendall, seasonal CUSUM
+- `scirust-nlp-advanced`: Text patterns — NER, LDA, TextRank, MinHash, NaiveBayes, relation extraction
+
+**Algorithm Creation (6 crates):**
+- `scirust-automl`: AutoML — Bayesian optimization, model selection, feature engineering
+- `scirust-synthesis`: Program synthesis — sketch-based, bottom-up, genetic programming, beam search
+- `scirust-algogen`: Algorithm generation — sorting/searching/graph/DP/DaC with complexity analysis
+- `scirust-codetrans`: Code transformation — AST optimization, refactoring, transpilation
+- `scirust-rl-algo`: RL discovery — REINFORCE, Actor-Critic, Q-Learning, MCTS, meta-learning
+- `scirust-scaffold`: Algorithmic scaffolding — DSL, multi-language code generation, 16 templates
+
+All implementations are pure Rust, zero FFI, with comprehensive test coverage.
