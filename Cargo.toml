@@ -90,6 +90,7 @@ members = [
     "scirust-bms",
     "scirust-grid",
     "scirust-shm",
+    "scirust-biomed",
     "scirust-mlops",
     "scirust-func-safety",
     "scirust-integration",

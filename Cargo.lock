@@ -2132,6 +2132,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-biomed"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
 name = "scirust-bms"
 version = "0.1.0"
 dependencies = [
