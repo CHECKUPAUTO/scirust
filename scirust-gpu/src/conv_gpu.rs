@@ -104,6 +104,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 /// CPU reference im2col (deterministic, for validation).
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_im2col(
     input: &[f32],
     batch: usize,
@@ -153,6 +154,7 @@ pub fn cpu_im2col(
 }
 
 /// CPU reference col2im (deterministic, for validation).
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_col2im(
     col: &[f32],
     batch: usize,

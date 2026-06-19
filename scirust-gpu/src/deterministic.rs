@@ -61,7 +61,7 @@ impl Default for KahanSum {
 ///
 /// Seuil: `1.17549435e-38` = plus petit float normalisé (f32::MIN_POSITIVE).
 pub fn sanitize_f32(x: f32) -> f32 {
-    if x.abs() < 1.17549435e-38 { 0.0 } else { x }
+    if x.abs() < f32::MIN_POSITIVE { 0.0 } else { x }
 }
 
 /// Sanitize toutes les valeurs d'une slice.
@@ -239,7 +239,7 @@ pub fn fixed_point_gemm_q32(
 ) -> Result<Vec<i64>, String> {
     if a.len() != m * k || b.len() != k * n
     {
-        return Err(format!("shape mismatch"));
+        return Err("shape mismatch".to_string());
     }
     let mut out = vec![0i64; m * n];
     for i in 0..m
@@ -266,6 +266,7 @@ pub fn fixed_point_gemm_q32(
 ///
 /// `C(i,j) = alpha * sum_q(A(i,q) * B(q,j)) + beta * C(i,j)`
 /// Accumulation en ordre fixe (ascendant q) avec KahanSum.
+#[allow(clippy::too_many_arguments)]
 pub fn deterministic_fp32_gemm(
     alpha: f32,
     a: &[f32],
@@ -348,7 +349,7 @@ pub fn int8_deterministic_gemm(
 ) -> Result<Vec<f32>, String> {
     if a_q.len() != m * k || b_q.len() != k * n
     {
-        return Err(format!("shape mismatch"));
+        return Err("shape mismatch".to_string());
     }
     let mut out = vec![0.0f32; m * n];
     let scale = scale_a * scale_b;
@@ -379,7 +380,7 @@ pub fn int16_deterministic_gemm(
 ) -> Result<Vec<f32>, String> {
     if a_q.len() != m * k || b_q.len() != k * n
     {
-        return Err(format!("shape mismatch"));
+        return Err("shape mismatch".to_string());
     }
     let mut out = vec![0.0f32; m * n];
     let scale = scale_a * scale_b;
@@ -441,7 +442,7 @@ mod tests {
 
     #[test]
     fn crypto_gemm_is_bit_exact() {
-        let a: Vec<i32> = (0..16).map(|i| i).collect();
+        let a: Vec<i32> = (0..16).collect();
         let b: Vec<i32> = (0..8).map(|i| (i * 7) % 100).collect();
         let q = 3329i32; // Kyber
         let r1 = crypto_gemm_zq(&a, &b, 4, 4, 2, q).unwrap();

@@ -46,6 +46,7 @@ pub fn cpu_activation(data: &[f32], op: EwOp) -> Vec<f32> {
 }
 
 /// CPU reference for deterministic reduction along the last axis.
+#[allow(clippy::needless_range_loop)]
 pub fn cpu_reduce_sum(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; outer];
     for i in 0..outer
@@ -67,6 +68,7 @@ pub fn cpu_reduce_mean(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32>
 }
 
 /// CPU reference for max reduction along the last axis.
+#[allow(clippy::needless_range_loop)]
 pub fn cpu_reduce_max(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> {
     if axis_size == 0
     {
@@ -85,6 +87,7 @@ pub fn cpu_reduce_max(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> 
 }
 
 /// CPU reference for L2 norm reduction along the last axis.
+#[allow(clippy::needless_range_loop)]
 pub fn cpu_reduce_norm(data: &[f32], outer: usize, axis_size: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; outer];
     for i in 0..outer

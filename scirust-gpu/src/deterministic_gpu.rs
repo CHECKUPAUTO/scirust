@@ -310,7 +310,9 @@ impl DeterministicGpu {
         };
         if a.len() != m * k || b.len() != k * n
         {
-            return Err(BackendError::ShapeMismatch(format!("Q32 shape mismatch")));
+            return Err(BackendError::ShapeMismatch(
+                "Q32 shape mismatch".to_string(),
+            ));
         }
         let elems = m * n;
         if elems == 0
@@ -447,6 +449,7 @@ impl DeterministicGpu {
     }
 
     /// Shared dispatch for i32 GEMM kernels (basic, i64, emulated).
+    #[allow(clippy::too_many_arguments)]
     fn dispatch_i32_gemm(
         &self,
         pipeline: &wgpu::ComputePipeline,
@@ -543,6 +546,7 @@ impl DeterministicGpu {
     /// Before dispatch, all inputs are sanitized (subnormals → 0.0).
     /// GPU kernel uses Kahan accumulation and forced FMA.
     /// Result is validated against CPU oracle within bit tolerance.
+    #[allow(clippy::too_many_arguments)]
     pub fn sanitized_f32_gemm(
         &self,
         a: &[f32],
@@ -648,6 +652,7 @@ impl DeterministicGpu {
     // Internal dispatch helpers
     // =====================================================================
 
+    #[allow(clippy::too_many_arguments)]
     fn dispatch_and_read_f32(
         &self,
         pipeline: &wgpu::ComputePipeline,
@@ -699,6 +704,7 @@ impl DeterministicGpu {
         Ok(out)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn dispatch_and_read_i32(
         &self,
         pipeline: &wgpu::ComputePipeline,
@@ -976,7 +982,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deterministic::{float_to_q16, q16_to_float};
+    use crate::deterministic::float_to_q16;
 
     fn get_deterministic_gpu() -> Option<DeterministicGpu> {
         WgpuContext::new().ok().map(DeterministicGpu::new)
@@ -1090,16 +1096,16 @@ mod tests {
             eprintln!("SHADER_INT64 not available, skipping Q32 test");
             return;
         }
-        let Q32: i64 = 1i64 << 32;
+        let q32: i64 = 1i64 << 32;
         let floats_a: Vec<f32> = (0..8).map(|i| (i as f32 - 4.0) * 0.5).collect();
         let floats_b: Vec<f32> = (0..4).map(|i| (i as f32 - 2.0) * 0.5).collect();
         let a_q32: Vec<i64> = floats_a
             .iter()
-            .map(|&x| (x as f64 * Q32 as f64).round() as i64)
+            .map(|&x| (x as f64 * q32 as f64).round() as i64)
             .collect();
         let b_q32: Vec<i64> = floats_b
             .iter()
-            .map(|&x| (x as f64 * Q32 as f64).round() as i64)
+            .map(|&x| (x as f64 * q32 as f64).round() as i64)
             .collect();
 
         let result = DeterministicValidator::validate_fixed_q32_i64(&det, &a_q32, &b_q32, 2, 4, 2);

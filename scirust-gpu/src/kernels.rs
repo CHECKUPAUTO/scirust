@@ -453,22 +453,43 @@ struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u3
 @group(0) @binding(2) var<storage, read_write> c: array<i32>;
 @group(0) @binding(3) var<uniform>             p: P;
 
-// Décompose i32 en signe + 2 x u16 (|lo| < 65536, |hi| < 32768)
-// Retourne (hi, lo) où lo est toujours positif et hi contient le signe
-fn split_i32(val: i32) -> vec2<i32> {
-    let lo = val & 0xFFFF;            // bits 0..15, toujours positif
-    let hi = val >> 16u;              // bits 16..31, porte le signe
-    return vec2(hi, lo);
-}
+// Compute (av * bv) >> 16 for NON-NEGATIVE Q15.16 inputs using only u32 ops.
+//
+// The full 32x32 product needs 64 bits; we build it as two u32 halves
+// (p_hi, p_lo) with explicit carry propagation, then realign Q32 -> Q16.
+// The previous version multiplied full 16-bit halves directly into i32, which
+// overflows (e.g. a_lo*b_lo can reach 2^32); doing the carries in u32 is exact.
+//
+// Bit-exact with the i64 CPU oracle `fixed_point_gemm_q16` for av, bv >= 0.
+// (Signed inputs use a floor-shift in the oracle; the unsigned magnitude path
+// here matches only for non-negative operands — signed support is future work.)
+fn q16_mul_pos(av: i32, bv: i32) -> i32 {
+    let ua = u32(av);
+    let ub = u32(bv);
+    let a_lo = ua & 0xFFFFu;
+    let a_hi = ua >> 16u;
+    let b_lo = ub & 0xFFFFu;
+    let b_hi = ub >> 16u;
 
-// Recombine (hi, lo) en i32 avec décalage Q16:
-//   result = (hi << 16) + (lo >> 16)   ← réalignement Q32 → Q16
-fn recombine_q16(hi: i32, lo: i32) -> i32 {
-    // lo contient les 32 bits bas du produit complet Q64
-    // On ne garde que les 16 bits hauts de 'lo' pour le réalignement
-    let lo_shifted = lo >> 16u;
-    let hi_shifted = hi << 16u;
-    return hi_shifted + lo_shifted;
+    // Partial products, each < 2^32 so each fits in a u32.
+    let ll = a_lo * b_lo;
+    let lh = a_lo * b_hi;
+    let hl = a_hi * b_lo;
+    let hh = a_hi * b_hi;
+
+    // cross = lh + hl (the 2^16 column); detect the wrap into bit 32.
+    let cross = lh + hl;
+    let cross_carry = select(0u, 1u, cross < lh);
+
+    // Low 32 bits of the product: ll + (cross << 16); detect carry into bit 32.
+    let p_lo = ll + (cross << 16u);
+    let p_lo_carry = select(0u, 1u, p_lo < ll);
+
+    // High 32 bits: hh + (cross >> 16) + cross overflow + low-half carry.
+    let p_hi = hh + (cross >> 16u) + (cross_carry << 16u) + p_lo_carry;
+
+    // (P >> 16) low 32 bits = (p_hi << 16) | (p_lo >> 16).
+    return i32((p_hi << 16u) | (p_lo >> 16u));
 }
 
 @compute @workgroup_size(8, 8)
@@ -477,31 +498,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let j = gid.y;
     if (i >= p.m || j >= p.n) { return; }
 
-    var sum_hi: i32 = 0i;
-    var sum_lo: i32 = 0i;
-
+    var sum: i32 = 0i;
     for (var k: u32 = 0u; k < p.k; k = k + 1u) {
-        let av = a[i * p.k + k];
-        let bv = b[k * p.n + j];
-
-        let a_split = split_i32(av);   // (a_hi, a_lo)
-        let b_split = split_i32(bv);   // (b_hi, b_lo)
-
-        // Produit étendu: (a_hi*b_hi) << 32 + (a_hi*b_lo + a_lo*b_hi) << 16 + a_lo*b_lo
-        let phh = a_split.x * b_split.x;  // a_hi * b_hi  → bits 32..63
-        let phl = a_split.x * b_split.y;  // a_hi * b_lo  → bits 16..47
-        let plh = a_split.y * b_split.x;  // a_lo * b_hi  → bits 16..47
-        let pll = a_split.y * b_split.y;  // a_lo * b_lo  → bits 0..31
-
-        // Accumulation 64-bit dans (sum_hi, sum_lo)
-        sum_lo = sum_lo + pll;                    // bits 0..31
-        let carry1 = sum_lo >> 16u;                // retenue vers bits 16+
-        sum_lo = sum_lo & 0xFFFF;                  // garde seulement bits 0..15
-        sum_hi = sum_hi + carry1 + phl + plh;      // milieu + retenue
-        sum_hi = sum_hi + (phh << 16u);             // bits hauts avec décalage
+        sum = sum + q16_mul_pos(a[i * p.k + k], b[k * p.n + j]);
     }
-
-    c[i * p.n + j] = recombine_q16(sum_hi, sum_lo);
+    c[i * p.n + j] = sum;
 }
 "#;
 
