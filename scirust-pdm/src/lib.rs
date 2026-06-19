@@ -10,11 +10,13 @@
 //! - **detectors** — Specialized fault detectors (imbalance, misalignment, bearing, cavitation)
 
 pub mod change_detection;
+pub mod conformal_guard;
 pub mod detectors;
 pub mod health;
 pub mod rul;
 
 pub use change_detection::{CUSUM, ChangePoint, PageHinkley};
+pub use conformal_guard::{ConformalGuard, GuardVerdict};
 pub use detectors::{
     BearingFaultDetector, CavitationDetector, FaultReport, FaultSeverity, FaultType,
     ImbalanceDetector, MisalignmentDetector,
