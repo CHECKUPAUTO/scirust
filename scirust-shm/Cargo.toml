@@ -1,0 +1,10 @@
+[package]
+name = "scirust-shm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Structural Health Monitoring — modal analysis, damage detection, Paris-law fatigue"
+
+[dependencies]
+scirust-signal = { path = "../scirust-signal" }
+serde = { version = "1", features = ["derive"] }

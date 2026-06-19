@@ -2320,6 +2320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-grid"
+version = "0.1.0"
+dependencies = [
+ "scirust-signal",
+ "serde",
+]
+
+[[package]]
 name = "scirust-ids"
 version = "0.1.0"
 dependencies = [
@@ -2529,6 +2537,14 @@ name = "scirust-sequential"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
+ "serde",
+]
+
+[[package]]
+name = "scirust-shm"
+version = "0.1.0"
+dependencies = [
+ "scirust-signal",
  "serde",
 ]
 
