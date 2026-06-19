@@ -11,12 +11,14 @@
 
 pub mod change_detection;
 pub mod conformal_guard;
+pub mod conformal_rul;
 pub mod detectors;
 pub mod health;
 pub mod rul;
 
 pub use change_detection::{CUSUM, ChangePoint, PageHinkley};
 pub use conformal_guard::{ConformalGuard, GuardVerdict};
+pub use conformal_rul::ConformalRul;
 pub use detectors::{
     BearingFaultDetector, CavitationDetector, FaultReport, FaultSeverity, FaultType,
     ImbalanceDetector, MisalignmentDetector,
