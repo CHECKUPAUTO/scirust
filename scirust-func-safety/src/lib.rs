@@ -15,9 +15,11 @@ pub mod audit;
 pub mod degraded_mode;
 pub mod fault_injection;
 pub mod requirements;
+pub mod simplex;
 
 pub use asil::{AsilConfig, AsilLevel, SafetyGoal};
 pub use audit::{AuditChain, AuditEntry, AuditLog};
 pub use degraded_mode::{DegradationAction, DegradationLevel, DegradedModeController};
 pub use fault_injection::{FaultInjector, FaultResult, FaultType};
 pub use requirements::{Requirement, RequirementStatus, TraceabilityMatrix};
+pub use simplex::{SafetyDecision, SimplexMonitor};
