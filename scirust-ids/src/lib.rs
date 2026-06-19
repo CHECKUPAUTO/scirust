@@ -98,7 +98,7 @@ mod tests {
 
         for port in 1..=30
         {
-            let mut f = Flow::new("attacker.com", "10.0.0.2", 40000 + port as u16, port);
+            let mut f = Flow::new("attacker.com", "10.0.0.2", 40000 + port, port);
             f.start_time = port as f64 * 0.1;
             f.end_time = f.start_time + 0.05;
             f.packets_out = 1;
@@ -189,7 +189,7 @@ mod tests {
 
         for port in 1..=25
         {
-            let mut f = Flow::new("attacker", "10.0.0.2", 40000 + port as u16, port);
+            let mut f = Flow::new("attacker", "10.0.0.2", 40000 + port, port);
             f.start_time = port as f64 * 0.1;
             f.end_time = f.start_time + 0.05;
             f.packets_out = 1;

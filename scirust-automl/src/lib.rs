@@ -806,6 +806,7 @@ pub struct LinearModel {
 }
 
 impl LinearModel {
+    #[allow(clippy::needless_range_loop)]
     pub fn fit(x: &[Vec<f64>], y: &[f64], is_classification: bool, reg: f64) -> Self {
         let n = x.len();
         if n == 0
@@ -882,6 +883,7 @@ fn sigmoid(x: f64) -> f64 {
 }
 
 /// Cholesky-based solver for symmetric positive-definite systems.
+#[allow(clippy::needless_range_loop)]
 fn solve_symmetric(a: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
     let n = b.len();
     if n == 0
@@ -1818,6 +1820,7 @@ impl GaussianProcess {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     pub fn predict(&self, x_star: &[f64]) -> (f64, f64) {
         if self.x_train.is_empty()
         {
@@ -2779,6 +2782,7 @@ impl FeatureEngineer {
     }
 
     /// Filter features by pairwise correlation
+    #[allow(clippy::needless_range_loop)]
     pub fn correlation_filter(&self, x: &[Vec<f64>]) -> FeatureSet {
         let n_feat = x.first().map(|r| r.len()).unwrap_or(0);
         let n = x.len() as f64;
@@ -2839,6 +2843,7 @@ impl FeatureEngineer {
     }
 
     /// Run the full feature engineering pipeline.
+    #[allow(clippy::too_many_arguments)]
     pub fn engineer(
         &self,
         x: &[Vec<f64>],
@@ -3294,7 +3299,7 @@ mod tests {
         for _ in 0..1000
         {
             let v = rng.uniform(10.0, 20.0);
-            assert!(v >= 10.0 && v < 20.0);
+            assert!((10.0..20.0).contains(&v));
         }
     }
 
@@ -3317,7 +3322,7 @@ mod tests {
         for _ in 0..100
         {
             let v = d.sample(&mut rng);
-            assert!(v >= 0.0 && v < 10.0);
+            assert!((0.0..10.0).contains(&v));
         }
     }
 
@@ -3328,7 +3333,7 @@ mod tests {
         for _ in 0..100
         {
             let v = d.sample(&mut rng);
-            assert!(v >= 1.0 && v <= 10.0, "value {} out of range", v);
+            assert!((1.0..=10.0).contains(&v), "value {} out of range", v);
         }
     }
 
@@ -3339,7 +3344,7 @@ mod tests {
         for _ in 0..100
         {
             let v = d.sample(&mut rng) as i64;
-            assert!(v >= 5 && v <= 15);
+            assert!((5..=15).contains(&v));
         }
     }
 
@@ -3352,7 +3357,7 @@ mod tests {
         for _ in 0..100
         {
             let v = d.sample(&mut rng);
-            assert!(v >= 0.0 && v <= 1.0);
+            assert!((0.0..=1.0).contains(&v));
         }
     }
 
@@ -3373,7 +3378,7 @@ mod tests {
         for &v in &pts
         {
             let i = v as i64;
-            assert!(i >= 1 && i <= 10, "{} out of range", i);
+            assert!((1..=10).contains(&i), "{} out of range", i);
         }
     }
 
@@ -3554,7 +3559,7 @@ mod tests {
         };
         let cv = time_series_cv(&config, &x, &y, 3, Metric::R2, false, &mut rng);
         assert!(!cv.folds.is_empty());
-        assert!(cv.folds.len() >= 1);
+        assert!(!cv.folds.is_empty());
     }
 
     // ---- Gaussian Process / Bayesian Optimization ----

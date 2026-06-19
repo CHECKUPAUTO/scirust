@@ -172,7 +172,7 @@ impl AlertCorrelator {
             if unique_detectors.len() >= 2
             {
                 let alert_ids = alerts.iter().map(|a| a.id).collect();
-                let detector_names: Vec<&str> = unique_detectors.iter().copied().collect();
+                let detector_names: Vec<&str> = unique_detectors.to_vec();
                 let confidence = 0.7 + (alerts.len() as f32 * 0.05).min(0.3);
 
                 new_correlations.push(CorrelationResult {

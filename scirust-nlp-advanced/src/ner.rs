@@ -45,17 +45,11 @@ impl std::fmt::Display for EntityType {
 impl EntityType {
     /// Parse a short BIO tag like "B-PER" into `(IsBegin, EntityType)`.
     pub fn from_bio_tag(tag: &str) -> Option<(bool, Self)> {
-        let (prefix, label) = if tag.starts_with("B-")
+        let (prefix, label) = match tag.split_once('-')
         {
-            (true, &tag[2..])
-        }
-        else if tag.starts_with("I-")
-        {
-            (false, &tag[2..])
-        }
-        else
-        {
-            return None;
+            Some(("B", rest)) => (true, rest),
+            Some(("I", rest)) => (false, rest),
+            _ => return None,
         };
         let ty = match label
         {

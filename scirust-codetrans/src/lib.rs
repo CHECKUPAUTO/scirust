@@ -1378,9 +1378,9 @@ fn sexpr_to_pattern(sexpr: &SExpr) -> Result<Pattern, String> {
             {
                 Ok(Pattern::Wildcard)
             }
-            else if s.starts_with('$')
+            else if let Some(rest) = s.strip_prefix('$')
             {
-                Ok(Pattern::Any(PatternVar(s[1..].to_string())))
+                Ok(Pattern::Any(PatternVar(rest.to_string())))
             }
             else if let Ok(v) = s.parse::<i64>()
             {
@@ -3304,7 +3304,7 @@ impl PatternDatabase {
     }
 
     pub fn sort_by_priority(&mut self) {
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|r| std::cmp::Reverse(r.priority));
     }
 
     pub fn from_json(json: &str) -> Result<Self, String> {
@@ -4128,8 +4128,8 @@ mod tests {
 
     #[test]
     fn test_parse_literal_float() {
-        let expr = parse_expr("3.14").unwrap();
-        assert_eq!(expr, Expr::Lit(Literal::Float(3.14)));
+        let expr = parse_expr("2.5").unwrap();
+        assert_eq!(expr, Expr::Lit(Literal::Float(2.5)));
     }
 
     #[test]

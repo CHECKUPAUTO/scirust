@@ -57,7 +57,7 @@ pub fn goertzel_magnitude(signal: &[f64], sample_rate: usize, freq: f64) -> f64 
     let omega = 2.0 * PI * k as f64 / n;
     let coeff = 2.0 * omega.cos();
 
-    let mut s0 = 0.0;
+    let mut s0;
     let mut s1 = 0.0;
     let mut s2 = 0.0;
 
@@ -458,6 +458,7 @@ pub fn pitch_autocorrelation(
 }
 
 /// Pitch tracking using YIN algorithm (simplified).
+#[allow(clippy::needless_range_loop)]
 pub fn pitch_yin(signal: &[f64], sample_rate: usize, min_freq: f64, max_freq: f64) -> Option<f64> {
     let min_lag = (sample_rate as f64 / max_freq) as usize;
     let max_lag = (sample_rate as f64 / min_freq).min(signal.len() as f64 / 2.0) as usize;
@@ -810,6 +811,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn test_onset_detection() {
         // Create signal with onset (sudden amplitude change)
         let mut signal = vec![0.0; 4000];
@@ -856,7 +858,7 @@ mod tests {
         assert!(sr > 0.0);
 
         let sf = spectral_flatness(&sig.samples);
-        assert!(sf >= 0.0 && sf <= 1.0);
+        assert!((0.0..=1.0).contains(&sf));
 
         let se = spectral_entropy(&sig.samples);
         assert!(se >= 0.0);

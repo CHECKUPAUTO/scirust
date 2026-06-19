@@ -146,6 +146,7 @@ impl MinHash {
     }
 
     /// Compute the MinHash signature for a set of strings.
+    #[allow(clippy::needless_range_loop)]
     pub fn compute_signature(&self, tokens: &[String]) -> Vec<u64> {
         let mut signature = vec![u64::MAX; self.num_hashes];
         for tok in tokens
@@ -343,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn test_minhash_similar() {
         let mh = MinHash::new(200, 42);
         let a: Vec<String> = (0..50).map(|i| format!("word{}", i)).collect();

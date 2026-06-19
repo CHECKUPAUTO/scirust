@@ -439,10 +439,10 @@ mod tests {
         ];
         let bow = BagOfWords::build(&docs, 1);
         assert_eq!(bow.len(), 3);
-        let vec = bow.vectorize(&vec!["hello".into(), "rust".into()]);
+        let vec = bow.vectorize(&["hello".into(), "rust".into()]);
         assert_eq!(vec.len(), 3);
         // hello appears once, rust appears once
-        assert!(vec.iter().any(|&x| x == 1.0));
+        assert!(vec.contains(&1.0));
     }
 
     #[test]
@@ -541,7 +541,7 @@ mod tests {
         let nb = NaiveBayes::train(&training);
         assert_eq!(nb.classes.len(), 2);
 
-        let pred = nb.predict(&vec!["good".into(), "great".into()]);
+        let pred = nb.predict(&["good".into(), "great".into()]);
         assert!(pred.is_some());
         let (cls, prob) = pred.unwrap();
         assert_eq!(cls, "positive");
@@ -555,7 +555,7 @@ mod tests {
             ("ham", vec!["meeting".into(), "tomorrow".into()]),
         ];
         let nb = NaiveBayes::train(&training);
-        let proba = nb.predict_proba(&vec!["buy".into(), "discount".into()]);
+        let proba = nb.predict_proba(&["buy".into(), "discount".into()]);
         assert_eq!(proba.len(), 2);
         let spam_prob: f64 = proba
             .iter()
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn test_naive_bayes_empty() {
         let nb = NaiveBayes::train(&[]);
-        assert!(nb.predict(&vec!["hello".into()]).is_none());
+        assert!(nb.predict(&["hello".into()]).is_none());
     }
 
     #[test]

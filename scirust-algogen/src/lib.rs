@@ -651,14 +651,7 @@ pub fn jump_search(data: &[i64], target: i64) -> Option<usize> {
     }
     let lo = prev.saturating_sub(step);
     let hi = n.min(prev + step);
-    for i in lo..hi
-    {
-        if data[i] == target
-        {
-            return Some(i);
-        }
-    }
-    None
+    (lo..hi).find(|&i| data[i] == target)
 }
 
 pub fn exponential_search(data: &[i64], target: i64) -> Option<usize> {
@@ -678,14 +671,7 @@ pub fn exponential_search(data: &[i64], target: i64) -> Option<usize> {
     }
     let lo = i / 2;
     let hi = n.min(i + 1);
-    for j in lo..hi
-    {
-        if data[j] == target
-        {
-            return Some(j);
-        }
-    }
-    None
+    (lo..hi).find(|&j| data[j] == target)
 }
 
 pub fn interpolation_search(data: &[i64], target: i64) -> Option<usize> {
@@ -1195,6 +1181,7 @@ fn bellman_ford(graph: &Graph, source: usize) -> Vec<Option<f64>> {
         .collect()
 }
 
+#[allow(clippy::needless_range_loop)]
 fn floyd_warshall(graph: &Graph) -> Vec<Vec<Option<f64>>> {
     let n = graph.vertices;
     let mut dist = vec![vec![f64::INFINITY; n]; n];
@@ -1356,6 +1343,7 @@ fn kruskal(graph: &Graph) -> Vec<(usize, usize, f64)> {
     mst
 }
 
+#[allow(clippy::needless_range_loop)]
 fn boruvka(graph: &Graph) -> Vec<(usize, usize, f64)> {
     let mut mst = Vec::new();
     let mut uf = UnionFind::new(graph.vertices);
@@ -1624,7 +1612,7 @@ pub fn graph_coloring(graph: &Graph) -> Vec<usize> {
     let n = graph.vertices;
     let adj = graph.adjacency();
     let mut degree: Vec<(usize, usize)> = (0..n).map(|i| (adj[i].len(), i)).collect();
-    degree.sort_by(|a, b| b.0.cmp(&a.0));
+    degree.sort_by_key(|b| std::cmp::Reverse(b.0));
     let mut colors = vec![usize::MAX; n];
     for &(_deg, u) in &degree
     {
@@ -1795,6 +1783,7 @@ pub fn dac_merge_sort(data: &[i64]) -> Vec<i64> {
 }
 
 /// Maximum subarray sum via divide-and-conquer (crossing Kadane).
+#[allow(clippy::needless_range_loop)]
 pub fn max_subarray(data: &[i64]) -> i64 {
     if data.is_empty()
     {
@@ -1937,6 +1926,7 @@ pub fn fit_complexity(sizes: &[usize], times: &[f64]) -> ComplexityClass {
     {
         return ComplexityClass::Unknown;
     }
+    #[allow(clippy::type_complexity)]
     let candidates: [(ComplexityClass, fn(f64) -> f64); 7] = [
         (ComplexityClass::Constant, |_n| 1.0),
         (ComplexityClass::Logarithmic, |n: f64| n.ln().max(1.0)),

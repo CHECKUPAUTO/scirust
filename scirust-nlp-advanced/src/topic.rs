@@ -170,6 +170,7 @@ impl Rng {
 ///
 /// `corpus` is a slice of documents, each represented as a vector of
 /// vocabulary indices (bag-of-words).
+#[allow(clippy::needless_range_loop)]
 pub fn fit_lda(corpus: &[Vec<usize>], config: LdaConfig) -> LdaModel {
     let vocab_size = corpus
         .iter()
@@ -283,6 +284,7 @@ pub fn fit_lda_from_text(
 /// Compute UMass coherence for topic `t` given the document-word matrix.
 ///
 /// Higher (less negative) is better.
+#[allow(clippy::needless_range_loop)]
 pub fn coherence_umass(
     topic_term: &[usize],
     doc_word_matrix: &[Vec<usize>],

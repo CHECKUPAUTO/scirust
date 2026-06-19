@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_inter_arrival_times() {
-        let flows = vec![Flow::new("a", "b", 1, 2), Flow::new("a", "b", 1, 2)];
+        let flows = [Flow::new("a", "b", 1, 2), Flow::new("a", "b", 1, 2)];
         let mut f1 = flows[0].clone();
         f1.start_time = 1.0;
         let mut f2 = flows[1].clone();

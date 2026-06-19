@@ -616,8 +616,8 @@ mod tests {
         tree.add_edge(1, 2, "prep");
         tree.add_edge(2, 3, "pobj");
         let features = dependency_path_features(&tree, 0, 1, 3, 4);
-        assert!(features.get("path_length").is_some());
-        assert!(features.get("direct_connection").is_some());
+        assert!(features.contains_key("path_length"));
+        assert!(features.contains_key("direct_connection"));
     }
 
     #[test]

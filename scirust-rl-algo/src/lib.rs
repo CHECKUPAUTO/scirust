@@ -829,6 +829,7 @@ impl FeedForwardNet {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     pub fn forward(&self, input: &[f64]) -> Vec<f64> {
         let mut hidden = vec![0.0; self.hidden_dim];
         for j in 0..self.hidden_dim
@@ -856,6 +857,7 @@ impl FeedForwardNet {
     }
 
     /// Train with SGD on a single sample.
+    #[allow(clippy::needless_range_loop)]
     pub fn train_sgd(&mut self, input: &[f64], target: &[f64], lr: f64) {
         // Forward
         let mut hidden = vec![0.0; self.hidden_dim];
@@ -1108,6 +1110,7 @@ impl ReinforceAgent {
     }
 
     /// Store an episode trajectory for later training.
+    #[allow(clippy::needless_range_loop)]
     pub fn train_episode(&mut self, trajectory: &EpisodeTrajectory) {
         let t = trajectory;
         // Compute discounted returns
@@ -1133,10 +1136,7 @@ impl ReinforceAgent {
             let feat = &t.features[i];
             let probs = self.policy_net.forward_softmax(feat);
             let mut policy_target = vec![0.0; self.action_dim];
-            for j in 0..self.action_dim
-            {
-                policy_target[j] = probs[j];
-            }
+            policy_target[..self.action_dim].copy_from_slice(&probs[..self.action_dim]);
             // REINFORCE gradient: increase log-prob of taken action scaled by advantage
             let log_prob = (probs[t.actions[i]].max(1e-10)).ln();
             let scale = (advantages[i] * log_prob).clamp(-10.0, 10.0);
@@ -2084,7 +2084,7 @@ impl MctsEngine {
                 // Progressive widening: limit children based on visits
                 let max_children =
                     (self.progressive_widening_constant * (leaf.visits as f64).sqrt()) as usize;
-                let max_children = max_children.max(2).min(10);
+                let max_children = max_children.clamp(2, 10);
 
                 if leaf.children.len() < max_children
                 {

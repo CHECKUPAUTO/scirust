@@ -2231,6 +2231,7 @@ impl PythonGenerator {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn emit_expr(&self, expr: &Expression, style: &CodeStyle) -> String {
         match expr
         {
@@ -2527,6 +2528,7 @@ impl CGenerator {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn emit_expr(&self, expr: &Expression, style: &CodeStyle) -> String {
         match expr
         {
@@ -3740,15 +3742,10 @@ fn estimate_space_complexity(algorithm: &Algorithm) -> String {
             _ => "O(n\u{00b2})".to_string(),
         }
     }
-    else if algorithm
-        .steps
-        .iter()
-        .any(|s| matches!(s, Statement::ForLoop { .. } | Statement::WhileLoop { .. }))
-    {
-        "O(1)".to_string()
-    }
     else
     {
+        // No auxiliary Vec/Map storage: loops use only constant scratch space,
+        // so auxiliary space complexity is O(1) whether or not loops are present.
         "O(1)".to_string()
     }
 }
@@ -4453,9 +4450,9 @@ mod tests {
 
     #[test]
     fn test_tokenize_float() {
-        let tokens = tokenize_line("3.14").unwrap();
+        let tokens = tokenize_line("2.5").unwrap();
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], Token::FloatLiteral(3.14));
+        assert_eq!(tokens[0], Token::FloatLiteral(2.5));
     }
 
     #[test]

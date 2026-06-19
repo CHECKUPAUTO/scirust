@@ -107,6 +107,7 @@ impl Default for TextRank {
 
 impl TextRank {
     /// Extract keywords from tokenized text.
+    #[allow(clippy::needless_range_loop)]
     pub fn extract(&self, tokens: &[String]) -> Vec<Keyword> {
         if tokens.is_empty()
         {
