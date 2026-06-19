@@ -18,6 +18,7 @@ pub mod bearing;
 pub mod complex;
 pub mod features;
 pub mod fft;
+pub mod mcsa;
 pub mod order;
 pub mod windows;
 
@@ -33,5 +34,6 @@ pub use features::{
     zero_crossing_rate,
 };
 pub use fft::{fft, fft_real, ifft};
+pub use mcsa::{BarSeverity, BrokenBarResult, analyze_broken_bar, slip};
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
