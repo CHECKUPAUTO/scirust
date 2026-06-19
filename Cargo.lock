@@ -2208,6 +2208,13 @@ name = "scirust-embedded"
 version = "0.1.0"
 
 [[package]]
+name = "scirust-estimation"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "scirust-events-core"
 version = "0.1.0"
 dependencies = [

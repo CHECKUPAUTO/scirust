@@ -1,0 +1,9 @@
+[package]
+name = "scirust-estimation"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust state estimation — deterministic Kalman/EKF filters and certified set-membership (interval) estimation"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

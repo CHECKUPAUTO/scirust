@@ -86,6 +86,7 @@ members = [
     "scirust-opcua",
     "scirust-mqtt",
     "scirust-pdm",
+    "scirust-estimation",
     "scirust-mlops",
     "scirust-func-safety",
     "scirust-integration",
