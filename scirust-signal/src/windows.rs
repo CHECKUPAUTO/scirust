@@ -2,7 +2,7 @@ use core::f64::consts::PI;
 
 /// Generate a Hanning (Hann) window of length `n`.
 ///
-/// w[k] = 0.5 * (1 - cos(2*pi*k/(n-1)))
+/// `w[k] = 0.5 * (1 - cos(2*pi*k/(n-1)))`
 pub fn hanning(n: usize) -> Vec<f64> {
     if n == 0
     {
@@ -20,7 +20,7 @@ pub fn hanning(n: usize) -> Vec<f64> {
 
 /// Generate a Hamming window of length `n`.
 ///
-/// w[k] = 0.54 - 0.46 * cos(2*pi*k/(n-1))
+/// `w[k] = 0.54 - 0.46 * cos(2*pi*k/(n-1))`
 pub fn hamming(n: usize) -> Vec<f64> {
     if n == 0
     {
@@ -38,7 +38,7 @@ pub fn hamming(n: usize) -> Vec<f64> {
 
 /// Generate a Blackman window of length `n`.
 ///
-/// w[k] = 0.42 - 0.5*cos(2*pi*k/(n-1)) + 0.08*cos(4*pi*k/(n-1))
+/// `w[k] = 0.42 - 0.5*cos(2*pi*k/(n-1)) + 0.08*cos(4*pi*k/(n-1))`
 pub fn blackman(n: usize) -> Vec<f64> {
     if n == 0
     {

@@ -1,6 +1,6 @@
 use crate::Complex;
 
-/// Power Spectral Density: |X[k]|^2 / N for each positive-frequency bin.
+/// Power Spectral Density: `|X[k]|^2 / N` for each positive-frequency bin.
 ///
 /// `spectrum` should be the output of `fft_real` (positive half only).
 /// Returns PSD values in the same order.

@@ -34,13 +34,13 @@ pub enum Instruction {
     Load(usize, i64),
     /// Store register value into another register
     Store(usize, usize),
-    /// Add: r[dst] = r[src1] + r[src2]
+    /// Add: `r[dst] = r[src1] + r[src2]`
     Add(usize, usize, usize),
-    /// Sub: r[dst] = r[src1] - r[src2]
+    /// Sub: `r[dst] = r[src1] - r[src2]`
     Sub(usize, usize, usize),
-    /// Mul: r[dst] = r[src1] * r[src2]
+    /// Mul: `r[dst] = r[src1] * r[src2]`
     Mul(usize, usize, usize),
-    /// Div: r[dst] = r[src1] / r[src2] (integer division, zero-safe)
+    /// Div: `r[dst] = r[src1] / r[src2]` (integer division, zero-safe)
     Div(usize, usize, usize),
     /// Compare: sets flags for JumpIf
     Cmp(usize, usize),

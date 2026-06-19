@@ -43,9 +43,9 @@ impl Default for LdaConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdaModel {
     pub config: LdaConfig,
-    /// Topic-term counts: topic_term[t][w] = count of word w in topic t.
+    /// Topic-term counts: `topic_term[t][w]` = count of word w in topic t.
     pub topic_term: Vec<Vec<usize>>,
-    /// Document-topic counts: doc_topic[d][t] = count of topic t in doc d.
+    /// Document-topic counts: `doc_topic[d][t]` = count of topic t in doc d.
     pub doc_topic: Vec<Vec<usize>>,
     /// Total words per topic.
     pub topic_count: Vec<usize>,

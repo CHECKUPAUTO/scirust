@@ -14,7 +14,7 @@ use std::f64::consts::PI;
 /// `tacho_times`: timestamps of each tacho pulse (e.g., once per revolution).
 /// `n_points`: number of output RPM samples (evenly spaced in time).
 ///
-/// Returns (time_values, rpm_values) where rpm_values[i] = 60 / (tacho_times[i+1] - tacho_times[i]).
+/// Returns (time_values, rpm_values) where `rpm_values[i] = 60 / (tacho_times[i+1] - tacho_times[i])`.
 pub fn rpm_profile(tacho_times: &[f64], n_points: usize) -> (Vec<f64>, Vec<f64>) {
     if tacho_times.len() < 2 || n_points < 2
     {
@@ -170,7 +170,7 @@ fn interpolate_linear(signal: &[f64], times: &[f64], t_target: f64) -> f64 {
 /// `angle_domain_signal`: the signal resampled to constant-angle increments.
 /// `samples_per_rev`: number of samples per revolution.
 ///
-/// Returns (orders, magnitudes) where orders[k] = k / samples_per_rev.
+/// Returns (orders, magnitudes) where `orders[k] = k / samples_per_rev`.
 pub fn order_spectrum(angle_domain_signal: &[f64], samples_per_rev: usize) -> (Vec<f64>, Vec<f64>) {
     use crate::fft_real;
 
