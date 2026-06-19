@@ -2132,6 +2132,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-bms"
+version = "0.1.0"
+dependencies = [
+ "scirust-estimation",
+ "scirust-pdm",
+ "serde",
+]
+
+[[package]]
 name = "scirust-bridge"
 version = "0.1.0"
 dependencies = [

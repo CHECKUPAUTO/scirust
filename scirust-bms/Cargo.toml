@@ -1,0 +1,11 @@
+[package]
+name = "scirust-bms"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Battery Management — deterministic SoC EKF, thermal-runaway early warning, conformal SoH bounds"
+
+[dependencies]
+scirust-estimation = { path = "../scirust-estimation" }
+scirust-pdm = { path = "../scirust-pdm" }
+serde = { version = "1", features = ["derive"] }
