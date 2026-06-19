@@ -49,7 +49,7 @@ impl PayloadParser for SshParser {
             if let Some(version_part) = banner.strip_prefix("SSH-")
             {
                 let parts: Vec<&str> = version_part.split('-').collect();
-                if parts.len() >= 1
+                if !parts.is_empty()
                 {
                     let version_nums: Vec<&str> = parts[0].split('.').collect();
                     if version_nums.len() >= 2

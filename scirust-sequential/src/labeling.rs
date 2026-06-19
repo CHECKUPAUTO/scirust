@@ -333,6 +333,7 @@ pub fn needleman_wunsch(
 /// Levenshtein edit distance between two slices.
 ///
 /// Returns the minimum number of insertions, deletions, and substitutions.
+#[allow(clippy::needless_range_loop)]
 pub fn edit_distance(seq1: &[usize], seq2: &[usize]) -> usize {
     let n = seq1.len();
     let m = seq2.len();

@@ -69,8 +69,8 @@ impl FaultInjector {
 
     /// Run a fault injection test on a single-layer inference.
     ///
-    /// `weights`: layer weight vector [n_neurons] (one weight per neuron for simplicity)
-    /// `inputs`: input vector [n_inputs] (must match weights length)
+    /// `weights`: layer weight vector `[n_neurons]` (one weight per neuron for simplicity)
+    /// `inputs`: input vector `[n_inputs]` (must match weights length)
     /// `fault_type`: type of fault to inject
     /// `target_neuron`: which weight/neuron to affect
     /// `original_output`: the expected (non-faulted) output scalar

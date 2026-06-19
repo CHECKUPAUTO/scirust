@@ -218,9 +218,6 @@ pub fn plan_fusion(m: usize, k: usize, n: usize, act: Option<FusedAct>) -> Fused
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::RawComputeBackend;
-    use crate::ops;
     use crate::wgpu_backend::WgpuContext;
 
     #[test]

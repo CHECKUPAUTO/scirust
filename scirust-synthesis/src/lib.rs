@@ -1178,6 +1178,7 @@ impl Rng {
 // Tree mutation operations
 // ============================================================================
 
+#[allow(clippy::redundant_closure)] // `f` is a `&mut dyn FnMut` reused across arms
 fn map_children(e: &SExpr, f: &mut dyn FnMut(&SExpr) -> SExpr) -> SExpr {
     match e
     {
@@ -1547,6 +1548,7 @@ fn fill_holes(e: &SExpr, fills: &[SExpr]) -> SExpr {
 
 /// Bottom-up synthesis: enumerates expressions from terminals up, bounded by
 /// `max_size`. At each size bucket the best `width` expressions are kept.
+#[allow(clippy::needless_range_loop)]
 pub fn bottom_up(
     variables: &[String],
     data: &[(Vec<f64>, f64)],
@@ -2020,7 +2022,7 @@ impl PartialEq for OrderedExpr {
 impl Eq for OrderedExpr {}
 impl PartialOrd for OrderedExpr {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 impl Ord for OrderedExpr {
@@ -2097,14 +2099,11 @@ pub fn genetic_programming(
                 pop[pa].clone()
             };
 
-            if rng.bool(0.25)
+            if rng.bool(0.25) && child.size() > 0
             {
-                if child.size() > 0
-                {
-                    let ix = rng.range(child.size());
-                    let fresh = gen_tree(&mut rng, 0, 3, variables);
-                    child = replace_at(&child, ix, &mut 0, &fresh);
-                }
+                let ix = rng.range(child.size());
+                let fresh = gen_tree(&mut rng, 0, 3, variables);
+                child = replace_at(&child, ix, &mut 0, &fresh);
             }
 
             if child.size() > max_size
@@ -2214,7 +2213,7 @@ pub fn beam_search(
         candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
         candidates.truncate(beam_width);
         beam = candidates;
-        if beam.first().map_or(false, |(f, _)| *f < 1e-12)
+        if beam.first().is_some_and(|(f, _)| *f < 1e-12)
         {
             break;
         }
@@ -2300,6 +2299,7 @@ pub fn sketch_complete(
     results
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enumerate_cartesian(
     bank: &[Vec<SExpr>],
     template: &SExpr,
@@ -2349,6 +2349,7 @@ fn enumerate_cartesian(
 // ============================================================================
 
 /// Split specification into train / test (80/20).
+#[allow(clippy::type_complexity)]
 pub fn train_test_split(data: &[(Vec<f64>, f64)]) -> (Vec<(Vec<f64>, f64)>, Vec<(Vec<f64>, f64)>) {
     let n = data.len();
     if n <= 1
@@ -2556,12 +2557,9 @@ pub fn try_polynomial_fit(
         {
             let expr = poly_to_expr(variables, &coeffs);
             let m = mse(&expr, variables, data);
-            if m.is_finite() && m < 1e-3
+            if m.is_finite() && m < 1e-3 && best.as_ref().is_none_or(|(_, bm)| m < *bm)
             {
-                if best.as_ref().map_or(true, |(_, bm)| m < *bm)
-                {
-                    best = Some((expr, m));
-                }
+                best = Some((expr, m));
             }
         }
     }

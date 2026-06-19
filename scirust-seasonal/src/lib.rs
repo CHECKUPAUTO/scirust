@@ -545,6 +545,7 @@ pub mod stl {
         }
 
         #[test]
+        #[allow(clippy::needless_range_loop)]
         fn stl_decomposition_sums_correctly() {
             let period = 12;
             let n = 120;
@@ -1885,6 +1886,7 @@ pub mod trend {
         }
 
         #[test]
+        #[allow(clippy::needless_range_loop)]
         fn cusum_detects_shift() {
             let mut data = vec![0.0; 100];
             for i in 50..100
@@ -2177,6 +2179,7 @@ pub mod changepoint {
         use super::*;
 
         #[test]
+        #[allow(clippy::needless_range_loop)]
         fn cusum_detects_level_shift() {
             let mut data = vec![0.0; 200];
             // Add seasonal pattern
@@ -2205,6 +2208,7 @@ pub mod changepoint {
         }
 
         #[test]
+        #[allow(clippy::needless_range_loop)]
         fn break_detection_finds_shift() {
             let mut data = vec![0.0; 240];
             let period = 12;
@@ -2232,6 +2236,7 @@ pub mod changepoint {
         }
 
         #[test]
+        #[allow(clippy::needless_range_loop)]
         fn binary_segmentation_finds_multiple() {
             let mut data = vec![0.0; 360];
             let period = 12;
@@ -2287,6 +2292,7 @@ mod integration_tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn full_pipeline() {
         let period = 12;
         let n = 240;

@@ -85,6 +85,7 @@ impl Matrix {
     }
 
     /// self × v (matrix-vector).
+    #[allow(clippy::needless_range_loop)]
     pub fn mul_vec(&self, v: &[f64]) -> Vec<f64> {
         assert_eq!(self.cols, v.len());
         let mut out = vec![0.0; self.rows];
@@ -362,23 +363,22 @@ fn jacobi_eigen(a: &Matrix) -> (Vec<f64>, Vec<Vec<f64>>) {
 
         // Compute rotation angle
         let diff = s.data[q][q] - s.data[p][p];
-        let t;
-        if s.data[p][p].abs() < 1e-15
+        let t = if s.data[p][p].abs() < 1e-15
         {
-            t = 1.0;
+            1.0
         }
         else
         {
             let tau = diff / (2.0 * s.data[p][q]);
-            t = if tau >= 0.0
+            if tau >= 0.0
             {
                 1.0 / (tau + (1.0 + tau * tau).sqrt())
             }
             else
             {
                 -1.0 / (-tau + (1.0 + tau * tau).sqrt())
-            };
-        }
+            }
+        };
 
         let c = 1.0 / (1.0 + t * t).sqrt();
         let s_val = t * c;
@@ -441,6 +441,7 @@ pub struct IcaResult {
 /// `n_components`: number of independent components to extract.
 /// `max_iter`: maximum iterations.
 /// `tol`: convergence tolerance.
+#[allow(clippy::needless_range_loop)]
 pub fn ica_fit(data: &Matrix, n_components: usize, max_iter: usize, tol: f64) -> IcaResult {
     let (centered, means) = data.center();
     let n = centered.rows;
@@ -585,6 +586,7 @@ pub fn ica_transform(data: &Matrix, ica: &IcaResult) -> Matrix {
     sep.mul(&centered.transpose()).transpose()
 }
 
+#[allow(clippy::needless_range_loop)]
 fn symmetric_decorrelate(w: &mut Matrix) {
     let k = w.rows;
     // WW^T
@@ -609,6 +611,7 @@ fn symmetric_decorrelate(w: &mut Matrix) {
     *w = temp2;
 }
 
+#[allow(clippy::needless_range_loop)]
 fn evecs_transpose(evecs: &[Vec<f64>]) -> Matrix {
     let n = evecs.len();
     let mut m = Matrix::zeros(n, n);
@@ -627,6 +630,7 @@ fn max_iters(k: usize) -> usize {
 }
 
 /// Moore-Penrose pseudo-inverse via SVD (simplified).
+#[allow(clippy::needless_range_loop)]
 fn pseudo_inverse(m: &Matrix) -> Matrix {
     let (u, s, vt) = svd(m);
     let mut inv = Matrix::zeros(m.cols, m.rows);
@@ -646,6 +650,7 @@ fn pseudo_inverse(m: &Matrix) -> Matrix {
 
 /// Thin SVD via Jacobi rotations (for small matrices).
 /// Returns (U, singular_values, V^T).
+#[allow(clippy::needless_range_loop)]
 fn svd(m: &Matrix) -> (Matrix, Vec<f64>, Matrix) {
     let n = m.rows;
     let p = m.cols;
@@ -720,6 +725,7 @@ pub struct KMeansResult {
 /// `k`: number of clusters.
 /// `max_iter`: maximum iterations.
 /// `tol`: convergence tolerance on centroid movement.
+#[allow(clippy::needless_range_loop)]
 pub fn kmeans_fit(data: &Matrix, k: usize, max_iter: usize, tol: f64) -> KMeansResult {
     let n = data.rows;
     let p = data.cols;
@@ -809,6 +815,7 @@ pub fn kmeans_fit(data: &Matrix, k: usize, max_iter: usize, tol: f64) -> KMeansR
     }
 }
 
+#[allow(clippy::needless_range_loop)]
 fn kmeans_pp_init(data: &Matrix, k: usize) -> Vec<Vec<f64>> {
     let n = data.rows;
     let mut centroids: Vec<Vec<f64>> = Vec::with_capacity(k);
@@ -904,6 +911,7 @@ pub fn elbow_method(data: &Matrix, max_k: usize, max_iter: usize) -> Vec<(usize,
 ///
 /// Returns average silhouette coefficient over all observations.
 /// Values range from -1 (bad) to +1 (good).
+#[allow(clippy::needless_range_loop)]
 pub fn silhouette_score(data: &Matrix, labels: &[usize]) -> f64 {
     let n = data.rows;
     if n <= 1
@@ -997,6 +1005,7 @@ fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
 
 /// Compute the Mahalanobis distance from a point to a centroid,
 /// given the inverse covariance matrix.
+#[allow(clippy::needless_range_loop)]
 pub fn mahalanobis_distance(point: &[f64], mean: &[f64], inv_cov: &Matrix) -> f64 {
     assert_eq!(point.len(), mean.len());
     assert_eq!(point.len(), inv_cov.rows);
@@ -1131,6 +1140,7 @@ pub struct MdsResult {
 ///
 /// `dist_matrix`: symmetric distance matrix (n × n).
 /// `n_components`: target dimensionality.
+#[allow(clippy::needless_range_loop)]
 pub fn classical_mds(dist_matrix: &Matrix, n_components: usize) -> MdsResult {
     let n = dist_matrix.rows;
     assert_eq!(n, dist_matrix.cols);
@@ -1314,7 +1324,7 @@ pub fn cca_fit(x: &Matrix, y: &Matrix, n_components: usize) -> CcaResult {
 
     for &idx in indices_a.iter().take(nc)
     {
-        let r = evals_a[idx].min(1.0).max(0.0).sqrt();
+        let r = evals_a[idx].clamp(0.0, 1.0).sqrt();
         correlations.push(r);
         weights_x.push(evecs_a[idx].clone());
     }
@@ -1739,7 +1749,10 @@ mod tests {
         // Correlations should be between 0 and 1
         for &r in &result.correlations
         {
-            assert!(r >= 0.0 && r <= 1.0 + 1e-6, "correlation out of range: {r}");
+            assert!(
+                (0.0..=1.0 + 1e-6).contains(&r),
+                "correlation out of range: {r}"
+            );
         }
         // First correlation should be high (data is linearly related)
         assert!(

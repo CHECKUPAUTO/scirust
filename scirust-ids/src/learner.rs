@@ -101,6 +101,7 @@ impl AnomalyModel {
     }
 
     /// Forward pass: encoder -> decoder.
+    #[allow(clippy::needless_range_loop)] // dense matrix loops index w1/w2/b by position
     fn forward(&self, input: &[f64]) -> (Vec<f64>, Vec<f64>) {
         assert_eq!(input.len(), self.config.input_features);
 
@@ -144,6 +145,7 @@ impl AnomalyModel {
     }
 
     /// Entraîner le modèle sur des données normales (autoencoding).
+    #[allow(clippy::needless_range_loop)] // dense backprop loops index w1/w2/b by position
     pub fn train(&mut self, normal_data: &[Vec<f64>]) {
         if normal_data.is_empty()
         {

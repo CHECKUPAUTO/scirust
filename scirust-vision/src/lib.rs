@@ -514,6 +514,7 @@ pub fn threshold(image: &Image, threshold_val: f64) -> Image {
 }
 
 /// Otsu's method for automatic threshold selection.
+#[allow(clippy::needless_range_loop)]
 pub fn otsu_threshold(image: &Image) -> f64 {
     let mut hist = vec![0u64; 256];
     let min = image.data.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -571,6 +572,7 @@ pub fn otsu_threshold(image: &Image) -> f64 {
 }
 
 /// Connected component labeling (4-connectivity).
+#[allow(clippy::needless_range_loop)]
 pub fn connected_components(binary: &Image) -> Vec<Vec<(usize, usize)>> {
     let w = binary.width;
     let h = binary.height;
@@ -980,7 +982,7 @@ mod tests {
         let t = otsu_threshold(&img);
         // Otsu should find a threshold between the two classes (50 and 200)
         assert!(
-            t >= 50.0 && t <= 200.0,
+            (50.0..=200.0).contains(&t),
             "Otsu threshold {} should be between 50 and 200",
             t
         );

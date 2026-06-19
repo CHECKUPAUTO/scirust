@@ -46,6 +46,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run clippy (scirust-gpu wgpu feature)
+        run: cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings
 
   build-test:
     name: Build & Test (nightly, x86_64)

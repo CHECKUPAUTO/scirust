@@ -23,6 +23,7 @@ struct FeatureCache {
 }
 
 impl FeatureCache {
+    #[allow(clippy::needless_range_loop)]
     fn new(
         observations: &[usize],
         n_tags: usize,
@@ -57,6 +58,7 @@ impl FeatureCache {
     }
 
     /// Dot product of feature vector at (t, prev, cur) with weights.
+    #[allow(clippy::needless_range_loop)]
     fn dot(&self, weights: &[f64], t: usize, prev: usize, cur: usize) -> f64 {
         let base = t * self.n_tags * self.n_tags * self.n_features;
         let offset = base + prev * self.n_tags * self.n_features + cur * self.n_features;
@@ -84,6 +86,7 @@ impl LinearChainCRF {
     }
 
     /// Forward-backward inference. Returns (log_alpha, log_beta, log_partition_function).
+    #[allow(clippy::needless_range_loop)]
     pub fn forward_backward(
         &self,
         observations: &[usize],
@@ -147,6 +150,7 @@ impl LinearChainCRF {
     }
 
     /// Viterbi decoding: find the best tag sequence.
+    #[allow(clippy::needless_range_loop)]
     pub fn decode(&self, observations: &[usize], features: &[Box<FeatureFn>]) -> (Vec<usize>, f64) {
         let t = observations.len();
         let n = self.n_tags;
@@ -224,6 +228,7 @@ impl LinearChainCRF {
     }
 
     /// Gradient of NLL with respect to weights for a single sequence.
+    #[allow(clippy::needless_range_loop)]
     pub fn gradient(
         &self,
         observations: &[usize],

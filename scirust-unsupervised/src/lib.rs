@@ -186,6 +186,7 @@ impl Autoencoder {
     }
 
     /// Train the autoencoder on a dataset via backpropagation.
+    #[allow(clippy::needless_range_loop)]
     pub fn train(&mut self, data: &[Vec<f64>]) {
         let lr = self.config.learning_rate;
         let input_dim = self.config.input_dim;
@@ -669,6 +670,7 @@ impl LocalOutlierFactor {
     }
 
     /// Compute LOF scores for all points.
+    #[allow(clippy::needless_range_loop)]
     pub fn fit_predict(&self, data: &[Vec<f64>]) -> Vec<f64> {
         let n = data.len();
         if n == 0
@@ -774,6 +776,7 @@ impl GaussianMixtureModel {
         log_prob.exp()
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn responsibilities(data: &[Vec<f64>], components: &[GaussianComponent]) -> Vec<Vec<f64>> {
         let n = data.len();
         let k = components.len();
@@ -823,6 +826,7 @@ impl GaussianMixtureModel {
     }
 
     /// Fit the GMM using the EM algorithm.
+    #[allow(clippy::needless_range_loop)]
     pub fn fit(&mut self, data: &[Vec<f64>]) {
         let n = data.len();
         let dim = data[0].len();
@@ -1035,6 +1039,7 @@ impl OneClassSvm {
     }
 
     /// Simplified training using sequential minimal optimization heuristic.
+    #[allow(clippy::needless_range_loop)]
     pub fn fit(&mut self, data: &[Vec<f64>]) {
         let n = data.len();
         let nu = self.config.nu;
@@ -1224,7 +1229,7 @@ mod tests {
         assert_eq!(output.len(), 4);
         for &v in &output
         {
-            assert!(v >= 0.0 && v <= 1.0, "output out of [0,1] range");
+            assert!((0.0..=1.0).contains(&v), "output out of [0,1] range");
         }
     }
 
@@ -1347,7 +1352,7 @@ mod tests {
         for sample in &data
         {
             let score = iforest.score(sample);
-            assert!(score >= 0.0 && score <= 1.0);
+            assert!((0.0..=1.0).contains(&score));
         }
     }
 

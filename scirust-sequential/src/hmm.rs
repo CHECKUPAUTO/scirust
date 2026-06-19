@@ -63,6 +63,7 @@ impl HMM {
 
     /// Forward algorithm: compute log alpha(t, i) for all t, i.
     /// Returns (log_alpha, log_likelihood).
+    #[allow(clippy::needless_range_loop)]
     pub fn forward(&self, observations: &[usize]) -> (Vec<f64>, f64) {
         let t = observations.len();
         let n = self.n_states;
@@ -130,6 +131,7 @@ impl HMM {
     }
 
     /// Viterbi algorithm: find the most likely state sequence.
+    #[allow(clippy::needless_range_loop)]
     pub fn viterbi(&self, observations: &[usize]) -> (Vec<usize>, f64) {
         let t = observations.len();
         let n = self.n_states;
@@ -266,10 +268,7 @@ impl HMM {
                 }
             }
 
-            for i in 0..n
-            {
-                self.log_pi[i] = accum_pi[i];
-            }
+            self.log_pi[..n].copy_from_slice(&accum_pi[..n]);
 
             for i in 0..n
             {
@@ -334,6 +333,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn backward_matches_forward_likelihood() {
         let hmm = weather_hmm();
         let obs = vec![0, 1, 2];

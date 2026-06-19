@@ -12,7 +12,7 @@ fn main() {
     let mut window = FlowWindow::new(0.0, 60.0);
     for port in 1..=40
     {
-        let mut f = Flow::new("192.168.1.100", "10.0.0.5", 40000 + port as u16, port);
+        let mut f = Flow::new("192.168.1.100", "10.0.0.5", 40000 + port, port);
         f.start_time = port as f64 * 0.5;
         f.end_time = f.start_time + 0.05;
         f.packets_out = 1;
