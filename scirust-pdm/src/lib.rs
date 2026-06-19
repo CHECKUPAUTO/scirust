@@ -14,6 +14,7 @@ pub mod conformal_guard;
 pub mod conformal_rul;
 pub mod detectors;
 pub mod health;
+pub mod iso10816;
 pub mod rul;
 
 pub use change_detection::{CUSUM, ChangePoint, PageHinkley};
@@ -24,4 +25,5 @@ pub use detectors::{
     ImbalanceDetector, MisalignmentDetector,
 };
 pub use health::{HealthIndex, HealthState};
+pub use iso10816::{Iso10816, MachineGroup, Support, VibrationZone};
 pub use rul::{ExponentialRulEstimator, LinearRulEstimator, RulEstimator, RulPrediction};
