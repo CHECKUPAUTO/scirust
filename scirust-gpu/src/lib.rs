@@ -41,6 +41,8 @@ mod chain;
 #[cfg(feature = "wgpu")]
 mod conv_gpu;
 #[cfg(feature = "wgpu")]
+mod deterministic_gpu;
+#[cfg(feature = "wgpu")]
 pub mod deterministic;
 #[cfg(feature = "wgpu")]
 mod engine;
@@ -59,6 +61,8 @@ mod wgpu_backend;
 pub use chain::GpuChain;
 #[cfg(feature = "wgpu")]
 pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};
+#[cfg(feature = "wgpu")]
+pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
 #[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
 #[cfg(feature = "wgpu")]

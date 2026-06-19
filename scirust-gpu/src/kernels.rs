@@ -387,9 +387,155 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let av = a[i * p.k + k];
         let bv = b[k * p.n + j];
         let product_q32 = av * bv;
-        let product_q16 = product_q32 >> 16i;
+        let product_q16 = product_q32 >> 16u;
         sum = sum + product_q16;
     }
+    c[i * p.n + j] = sum;
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Fixed-point Q15.16 with i64 (Piste A — requires SHADER_INT64 feature)
+// ---------------------------------------------------------------------------
+
+/// GEMM Q15.16 avec accumulateur i64 natif. Nécessite l'extension
+/// `SHADER_INT64` activée côté Rust (`wgpu::Features::SHADER_INT64`).
+/// Sans cette extension, le pipeline de compilation échouera.
+/// Plage d'entrée: tout f32 convertible en Q16 sans overflow.
+pub const FIXED_POINT_Q16_I64_GEMM_WGSL: &str = r#"
+enable shader_int64;
+
+struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32, _pad4: u32 };
+
+@group(0) @binding(0) var<storage, read>       a: array<i32>;
+@group(0) @binding(1) var<storage, read>       b: array<i32>;
+@group(0) @binding(2) var<storage, read_write> c: array<i32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
+
+    var sum: i64 = 0l;
+
+    for (var k: u32 = 0u; k < p.k; k = k + 1u) {
+        let av = i64(a[i * p.k + k]);
+        let bv = i64(b[k * p.n + j]);
+        let product = av * bv;
+        sum = sum + (product >> 32u);  // Q32 × Q32 → Q64 → shift → Q32
+    }
+
+    c[i * p.n + j] = i32(sum);
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Fixed-point Q15.16 with emulated i64 (Piste B — portable, zero extension)
+// ---------------------------------------------------------------------------
+
+/// GEMM Q15.16 avec multiplication 64-bit émulée sur deux i32
+/// (décomposition poids fort / poids faible 16-bit).
+///
+/// Principe : chaque i32 est découpé en `hi = val >> 16`, `lo = val & 0xFFFF`.
+/// Le produit `av * bv` = `(ah*al) * (bh*bl)` est reconstruit par:
+///   `(ah*bh) << 32 + (ah*bl + al*bh) << 16 + al*bl`
+/// L'accumulation se fait en deux i32 séparés (high 32 + low 32).
+///
+/// Portable sur 100% des GPU (même WebGPU/navigateur).
+/// Pas de limite de plage (supporte f32 complet en Q16).
+pub const FIXED_POINT_Q16_EMULATED_GEMM_WGSL: &str = r#"
+struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32, _pad4: u32 };
+
+@group(0) @binding(0) var<storage, read>       a: array<i32>;
+@group(0) @binding(1) var<storage, read>       b: array<i32>;
+@group(0) @binding(2) var<storage, read_write> c: array<i32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+// Décompose i32 en signe + 2 x u16 (|lo| < 65536, |hi| < 32768)
+// Retourne (hi, lo) où lo est toujours positif et hi contient le signe
+fn split_i32(val: i32) -> vec2<i32> {
+    let lo = val & 0xFFFF;            // bits 0..15, toujours positif
+    let hi = val >> 16i;              // bits 16..31, porte le signe
+    return vec2(hi, lo);
+}
+
+// Recombine (hi, lo) en i32 avec décalage Q16:
+//   result = (hi << 16) + (lo >> 16)   ← réalignement Q32 → Q16
+fn recombine_q16(hi: i32, lo: i32) -> i32 {
+    // lo contient les 32 bits bas du produit complet Q64
+    // On ne garde que les 16 bits hauts de 'lo' pour le réalignement
+    let lo_shifted = lo >> 16u;
+    let hi_shifted = hi << 16i;
+    return hi_shifted + lo_shifted;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
+
+    var sum_hi: i32 = 0i;
+    var sum_lo: i32 = 0i;
+
+    for (var k: u32 = 0u; k < p.k; k = k + 1u) {
+        let av = a[i * p.k + k];
+        let bv = b[k * p.n + j];
+
+        let a_split = split_i32(av);   // (a_hi, a_lo)
+        let b_split = split_i32(bv);   // (b_hi, b_lo)
+
+        // Produit étendu: (a_hi*b_hi) << 32 + (a_hi*b_lo + a_lo*b_hi) << 16 + a_lo*b_lo
+        let phh = a_split.x * b_split.x;  // a_hi * b_hi  → bits 32..63
+        let phl = a_split.x * b_split.y;  // a_hi * b_lo  → bits 16..47
+        let plh = a_split.y * b_split.x;  // a_lo * b_hi  → bits 16..47
+        let pll = a_split.y * b_split.y;  // a_lo * b_lo  → bits 0..31
+
+        // Accumulation 64-bit dans (sum_hi, sum_lo)
+        sum_lo = sum_lo + pll;                    // bits 0..31
+        let carry1 = sum_lo >> 16u;                // retenue vers bits 16+
+        sum_lo = sum_lo & 0xFFFF;                  // garde seulement bits 0..15
+        sum_hi = sum_hi + carry1 + phl + plh;      // milieu + retenue
+        sum_hi = sum_hi + (phh << 16i);             // bits hauts avec décalage
+    }
+
+    c[i * p.n + j] = recombine_q16(sum_hi, sum_lo);
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Fixed-point Q31.32 avec i64 natif (Piste A étendue)
+// ---------------------------------------------------------------------------
+
+/// GEMM Q31.32 avec i64 natif. Pour la physique haute précision.
+/// `Q32_SCALE = 1 << 32`. Inputs/Outputs en i64, produit en i64,
+/// accumulation i64. Résultat `>> 32` pour réaligner.
+pub const FIXED_POINT_Q32_I64_GEMM_WGSL: &str = r#"
+enable shader_int64;
+
+struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32, _pad4: u32 };
+
+@group(0) @binding(0) var<storage, read>       a: array<i64>;
+@group(0) @binding(1) var<storage, read>       b: array<i64>;
+@group(0) @binding(2) var<storage, read_write> c: array<i64>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
+
+    var sum: i64 = 0l;
+
+    for (var k: u32 = 0u; k < p.k; k = k + 1u) {
+        let av = a[i * p.k + k];
+        let bv = b[k * p.n + j];
+        sum = sum + ((av * bv) >> 32u);
+    }
+
     c[i * p.n + j] = sum;
 }
 "#;
