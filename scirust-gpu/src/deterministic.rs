@@ -167,6 +167,83 @@ pub fn crypto_gemm_zq(
     Ok(out)
 }
 
+/// Freivalds verification of `C = (A·B) mod q` over the prime field GF(q).
+///
+/// Draws `rounds` random probe vectors `r ∈ GF(q)^n` from a seeded splitmix64
+/// stream and checks `A·(B·r) ≡ C·r (mod q)`. A correct `C` passes every round;
+/// a wrong `C` survives a single round with probability ≤ 1/q (q prime), so the
+/// false-accept probability is bounded by `(1/q)^rounds`. Cost is
+/// `O(rounds·(k·n + m·k + m·n))` — no `O(m·k·n)` recomputation of the product.
+///
+/// This is the determinism story extended to *verifiability*: the GPU result is
+/// not only bit-exact but cheaply checkable without trusting the device.
+/// `q` must be prime and `≤ 2³¹` so a product of two reduced residues fits i64.
+#[allow(clippy::too_many_arguments)] // matrix dims + field modulus + RNG seed
+#[allow(clippy::needless_range_loop)] // dense GF(q) matrix-vector products
+pub fn freivalds_verify_zq(
+    a: &[i32],
+    b: &[i32],
+    c: &[i32],
+    m: usize,
+    k: usize,
+    n: usize,
+    q: i32,
+    rounds: usize,
+    seed: u64,
+) -> bool {
+    if a.len() != m * k || b.len() != k * n || c.len() != m * n || q <= 0
+    {
+        return false;
+    }
+    let qm = q as i64;
+    let mut state = seed;
+    let mut next_u64 = || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+
+    for _ in 0..rounds
+    {
+        // Random probe vector r ∈ [0, q)^n.
+        let r: Vec<i64> = (0..n).map(|_| (next_u64() % qm as u64) as i64).collect();
+
+        // x = B·r mod q   (length k)
+        let mut x = vec![0i64; k];
+        for i in 0..k
+        {
+            let mut acc = 0i64;
+            for j in 0..n
+            {
+                acc = (acc + (b[i * n + j] as i64).rem_euclid(qm) * r[j]) % qm;
+            }
+            x[i] = acc;
+        }
+
+        // Compare A·x mod q against C·r mod q, row by row.
+        for i in 0..m
+        {
+            let mut ax = 0i64;
+            for p in 0..k
+            {
+                ax = (ax + (a[i * k + p] as i64).rem_euclid(qm) * x[p]) % qm;
+            }
+            let mut cr = 0i64;
+            for j in 0..n
+            {
+                cr = (cr + (c[i * n + j] as i64).rem_euclid(qm) * r[j]) % qm;
+            }
+            if ax != cr
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 // =========================================================================
 // Voie 2: Virgule fixe Q15.16 (Physique)
 // =========================================================================
@@ -227,6 +304,36 @@ pub fn fixed_point_gemm_q16(
         }
     }
     Ok(out)
+}
+
+/// One Q15.16 dense layer: `y = relu?( (W · x) >> 16 + b )`, pure integer math.
+///
+/// `w` is row-major `out_dim × in_dim`, `x` is length `in_dim`, `b` is length
+/// `out_dim`; all in Q15.16. The matmul reuses [`fixed_point_gemm_q16`] (i64
+/// accumulation, per-term `>> 16`), then bias is added and — when `relu` — the
+/// result is clamped at zero. Every step is exact integer arithmetic, so this
+/// is the bit-exact oracle the GPU dense layer is validated against.
+#[allow(clippy::needless_range_loop)] // dense bias/activation over out_dim
+pub fn fixed_point_dense(
+    w: &[i32],
+    b: &[i32],
+    x: &[i32],
+    out_dim: usize,
+    in_dim: usize,
+    relu: bool,
+) -> Result<Vec<i32>, String> {
+    if w.len() != out_dim * in_dim || x.len() != in_dim || b.len() != out_dim
+    {
+        return Err("fixed_point_dense: shape mismatch".to_string());
+    }
+    let z = fixed_point_gemm_q16(w, x, out_dim, in_dim, 1)?;
+    let mut y = vec![0i32; out_dim];
+    for o in 0..out_dim
+    {
+        let v = z[o].wrapping_add(b[o]);
+        y[o] = if relu && v < 0 { 0 } else { v };
+    }
+    Ok(y)
 }
 
 /// GEMM en virgule fixe Q31.32 — précision maximale.
@@ -449,6 +556,26 @@ mod tests {
         let r2 = crypto_gemm_zq(&a, &b, 4, 4, 2, q).unwrap();
         assert_eq!(r1, r2); // Bit-exact vérifié
         assert!(r1.iter().all(|&x| x >= 0 && x < q), "all in [0, q)");
+    }
+
+    #[test]
+    fn freivalds_accepts_correct_zq() {
+        let a: Vec<i32> = (0..12).map(|i| (i * 5) % 100).collect();
+        let b: Vec<i32> = (0..6).map(|i| (i * 9 + 1) % 100).collect();
+        let q = 3329i32;
+        let c = crypto_gemm_zq(&a, &b, 4, 3, 2, q).unwrap();
+        assert!(freivalds_verify_zq(&a, &b, &c, 4, 3, 2, q, 4, 0x1234));
+    }
+
+    #[test]
+    fn freivalds_rejects_tampered_zq() {
+        let a: Vec<i32> = (0..12).map(|i| (i * 5) % 100).collect();
+        let b: Vec<i32> = (0..6).map(|i| (i * 9 + 1) % 100).collect();
+        let q = 3329i32;
+        let mut c = crypto_gemm_zq(&a, &b, 4, 3, 2, q).unwrap();
+        c[0] = (c[0] + 1) % q; // flip a single output element
+        // 6 rounds over GF(3329): false-accept bounded by (1/3329)^6; seeded.
+        assert!(!freivalds_verify_zq(&a, &b, &c, 4, 3, 2, q, 6, 0x1234));
     }
 
     // --- Voie 2: Virgule fixe ---

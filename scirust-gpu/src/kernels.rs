@@ -453,25 +453,26 @@ struct P { m: u32, k: u32, n: u32, _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u3
 @group(0) @binding(2) var<storage, read_write> c: array<i32>;
 @group(0) @binding(3) var<uniform>             p: P;
 
-// Compute (av * bv) >> 16 for NON-NEGATIVE Q15.16 inputs using only u32 ops.
+// Compute (av * bv) >> 16 for SIGNED Q15.16 inputs using only u32 ops.
 //
-// The full 32x32 product needs 64 bits; we build it as two u32 halves
-// (p_hi, p_lo) with explicit carry propagation, then realign Q32 -> Q16.
-// The previous version multiplied full 16-bit halves directly into i32, which
-// overflows (e.g. a_lo*b_lo can reach 2^32); doing the carries in u32 is exact.
+// The full signed 32x32 product needs 64 bits. We first build the UNSIGNED
+// 64-bit product of the bit patterns as two u32 halves (p_hi, p_lo) with
+// explicit carry propagation, then apply the standard signed correction
+// (subtract the other operand from the high word when an operand is negative)
+// to obtain the two's-complement signed product. The Q32 -> Q16 realignment
+// keeps only the low 32 bits, which equal bits [16..47] of the product
+// regardless of sign — matching `(prod >> 16) as i32` in the i64 oracle.
 //
-// Bit-exact with the i64 CPU oracle `fixed_point_gemm_q16` for av, bv >= 0.
-// (Signed inputs use a floor-shift in the oracle; the unsigned magnitude path
-// here matches only for non-negative operands — signed support is future work.)
-fn q16_mul_pos(av: i32, bv: i32) -> i32 {
-    let ua = u32(av);
-    let ub = u32(bv);
+// Bit-exact with the i64 CPU oracle `fixed_point_gemm_q16` for ALL signs.
+fn q16_mul(av: i32, bv: i32) -> i32 {
+    let ua = bitcast<u32>(av);
+    let ub = bitcast<u32>(bv);
     let a_lo = ua & 0xFFFFu;
     let a_hi = ua >> 16u;
     let b_lo = ub & 0xFFFFu;
     let b_hi = ub >> 16u;
 
-    // Partial products, each < 2^32 so each fits in a u32.
+    // Partial products of the bit patterns, each < 2^32 so each fits in a u32.
     let ll = a_lo * b_lo;
     let lh = a_lo * b_hi;
     let hl = a_hi * b_lo;
@@ -481,15 +482,20 @@ fn q16_mul_pos(av: i32, bv: i32) -> i32 {
     let cross = lh + hl;
     let cross_carry = select(0u, 1u, cross < lh);
 
-    // Low 32 bits of the product: ll + (cross << 16); detect carry into bit 32.
+    // Low 32 bits: ll + (cross << 16); detect carry into bit 32.
     let p_lo = ll + (cross << 16u);
     let p_lo_carry = select(0u, 1u, p_lo < ll);
 
-    // High 32 bits: hh + (cross >> 16) + cross overflow + low-half carry.
-    let p_hi = hh + (cross >> 16u) + (cross_carry << 16u) + p_lo_carry;
+    // High 32 bits of the UNSIGNED product.
+    var p_hi = hh + (cross >> 16u) + (cross_carry << 16u) + p_lo_carry;
+
+    // Signed correction: S = U - (av<0 ? ub<<32 : 0) - (bv<0 ? ua<<32 : 0).
+    // Both subtracted terms touch only bits >= 32, i.e. the high word.
+    if (av < 0) { p_hi = p_hi - ub; }
+    if (bv < 0) { p_hi = p_hi - ua; }
 
     // (P >> 16) low 32 bits = (p_hi << 16) | (p_lo >> 16).
-    return i32((p_hi << 16u) | (p_lo >> 16u));
+    return bitcast<i32>((p_hi << 16u) | (p_lo >> 16u));
 }
 
 @compute @workgroup_size(8, 8)
@@ -500,7 +506,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var sum: i32 = 0i;
     for (var k: u32 = 0u; k < p.k; k = k + 1u) {
-        sum = sum + q16_mul_pos(a[i * p.k + k], b[k * p.n + j]);
+        sum = sum + q16_mul(a[i * p.k + k], b[k * p.n + j]);
     }
     c[i * p.n + j] = sum;
 }

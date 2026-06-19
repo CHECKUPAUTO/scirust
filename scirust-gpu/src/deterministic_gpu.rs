@@ -246,6 +246,29 @@ impl DeterministicGpu {
         Ok(output)
     }
 
+    /// Run `C = (A·B) mod q` on GPU, then Freivalds-verify it over GF(q).
+    ///
+    /// Returns `(C, verified)`. A `true` verdict means a random GF(q) probe
+    /// confirmed `C = A·B` in `O(rounds·(mk+kn+mn))` without re-running the
+    /// product — the GPU result is bit-exact *and* cheaply checkable without
+    /// trusting the device. See [`deterministic::freivalds_verify_zq`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn crypto_gemm_verified(
+        &self,
+        a: &[i32],
+        b: &[i32],
+        m: usize,
+        k: usize,
+        n: usize,
+        q: i32,
+        rounds: usize,
+    ) -> BackendResult<(Vec<i32>, bool)> {
+        let c = self.crypto_gemm(a, b, m, k, n, q)?;
+        let verified =
+            deterministic::freivalds_verify_zq(a, b, &c, m, k, n, q, rounds, 0x00C0_FFEE);
+        Ok((c, verified))
+    }
+
     // =====================================================================
     // Voie 2: Fixed-point Q15.16 — integer GEMM with bit-shift
     // =====================================================================
@@ -446,6 +469,41 @@ impl DeterministicGpu {
             n,
             "fixed-emulated",
         )
+    }
+
+    /// One Q15.16 dense layer with the matmul on the GPU emulated path.
+    ///
+    /// `W·x` runs through the portable emulated-64-bit kernel (signed, no
+    /// `SHADER_INT64`); the bias add and optional ReLU are exact integer
+    /// ops on the host. Bit-exact with [`deterministic::fixed_point_dense`],
+    /// so a whole quantized MLP can be evaluated on the GPU with the CPU as a
+    /// bit-for-bit oracle. `w` is `out_dim × in_dim`, `x` is `in_dim`, both Q16.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fixed_point_dense_emulated(
+        &self,
+        w: &[i32],
+        b: &[i32],
+        x: &[i32],
+        out_dim: usize,
+        in_dim: usize,
+        relu: bool,
+    ) -> BackendResult<Vec<i32>> {
+        if b.len() != out_dim
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "dense bias: {} != out_dim {}",
+                b.len(),
+                out_dim
+            )));
+        }
+        let z = self.fixed_point_gemm_q16_emulated(w, x, out_dim, in_dim, 1)?;
+        let mut y = vec![0i32; out_dim];
+        for (o, yo) in y.iter_mut().enumerate()
+        {
+            let v = z[o].wrapping_add(b[o]);
+            *yo = if relu && v < 0 { 0 } else { v };
+        }
+        Ok(y)
     }
 
     /// Shared dispatch for i32 GEMM kernels (basic, i64, emulated).
@@ -1013,6 +1071,35 @@ mod tests {
         assert!(out.iter().all(|&x| x >= 0 && x < q), "values not in [0, q)");
     }
 
+    #[test]
+    fn test_crypto_gemm_verified_gpu() {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let a: Vec<i32> = (0..16).map(|i| (i * 3) % 100).collect();
+        let b: Vec<i32> = (0..8).map(|i| (i * 7) % 100).collect();
+        let q = 3329i32;
+
+        // The GPU GEMM is bit-exact AND Freivalds-verified.
+        let (c, ok) = det.crypto_gemm_verified(&a, &b, 4, 4, 2, q, 4).unwrap();
+        assert!(ok, "Freivalds rejected a correct GPU GEMM");
+        assert_eq!(
+            c,
+            deterministic::crypto_gemm_zq(&a, &b, 4, 4, 2, q).unwrap()
+        );
+
+        // A tampered result is caught by the verifier.
+        let mut bad = c.clone();
+        bad[0] = (bad[0] + 1) % q;
+        assert!(
+            !deterministic::freivalds_verify_zq(&a, &b, &bad, 4, 4, 2, q, 8, 0xBEEF),
+            "Freivalds accepted a tampered GPU GEMM"
+        );
+    }
+
     // --- Voie 2: Fixed-point Q16 ---
 
     #[test]
@@ -1046,8 +1133,7 @@ mod tests {
             eprintln!("wgpu: no adapter, skipping");
             return;
         };
-        // Use positive-only values: emulated kernel currently requires
-        // unsigned-friendly arithmetic (sign recovery TODO).
+        // Full positive range — the emulated u32 carry path stays exact.
         let floats_a: Vec<f32> = (0..16).map(|i| (i as f32 + 1.0) * 0.3).collect(); // [0.3, 4.8]
         let floats_b: Vec<f32> = (0..8).map(|i| (i as f32 + 0.5) * 0.2).collect(); // [0.1, 1.5]
         let a_q16: Vec<i32> = floats_a.iter().map(|&x| float_to_q16(x)).collect();
@@ -1056,6 +1142,70 @@ mod tests {
         let result =
             DeterministicValidator::validate_fixed_q16_emulated(&det, &a_q16, &b_q16, 4, 4, 2);
         assert!(result.is_ok(), "emulated Q16 mismatch: {:?}", result.err());
+    }
+
+    /// Piste B with SIGNED operands — the two's-complement correction must make
+    /// the emulated path bit-exact with the floor-shift i64 oracle for negatives.
+    #[test]
+    fn test_fixed_q16_emulated_signed() {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        // Mixed signs on both operands, plus magnitudes > 1 to exercise carries.
+        let floats_a: Vec<f32> = (0..16).map(|i| (i as f32 - 7.5) * 0.4).collect(); // [-3.0, 3.4]
+        let floats_b: Vec<f32> = (0..8).map(|i| (i as f32 - 3.5) * 0.3).collect(); // [-1.05, 1.35]
+        let a_q16: Vec<i32> = floats_a.iter().map(|&x| float_to_q16(x)).collect();
+        let b_q16: Vec<i32> = floats_b.iter().map(|&x| float_to_q16(x)).collect();
+
+        let result =
+            DeterministicValidator::validate_fixed_q16_emulated(&det, &a_q16, &b_q16, 4, 4, 2);
+        assert!(
+            result.is_ok(),
+            "signed emulated Q16 mismatch: {:?}",
+            result.err()
+        );
+    }
+
+    /// A 2-layer Q16 MLP (4 -> 3 -> 2, ReLU hidden) evaluated on the GPU
+    /// emulated path must be bit-for-bit identical to the CPU oracle.
+    #[test]
+    fn test_fixed_point_mlp_bit_exact_gpu_vs_cpu() {
+        let Some(det) = get_deterministic_gpu()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let to_q = |v: &[f32]| v.iter().map(|&x| float_to_q16(x)).collect::<Vec<i32>>();
+
+        // Layer 1: 3x4, Layer 2: 2x3 — mixed-sign weights exercise the signed path.
+        let w1 = to_q(&[
+            0.5, -0.3, 0.8, 0.2, -0.6, 0.1, 0.4, -0.7, 0.2, 0.9, -0.5, 0.3,
+        ]);
+        let b1 = to_q(&[0.1, -0.2, 0.05]);
+        let w2 = to_q(&[0.7, -0.4, 0.2, -0.1, 0.6, 0.3]);
+        let b2 = to_q(&[0.0, 0.15]);
+        let x = to_q(&[0.5, -0.3, 0.8, 0.2]);
+
+        // CPU oracle
+        let h_cpu = deterministic::fixed_point_dense(&w1, &b1, &x, 3, 4, true).unwrap();
+        let y_cpu = deterministic::fixed_point_dense(&w2, &b2, &h_cpu, 2, 3, false).unwrap();
+
+        // GPU emulated path
+        let h_gpu = det
+            .fixed_point_dense_emulated(&w1, &b1, &x, 3, 4, true)
+            .unwrap();
+        let y_gpu = det
+            .fixed_point_dense_emulated(&w2, &b2, &h_gpu, 2, 3, false)
+            .unwrap();
+
+        assert_eq!(h_cpu, h_gpu, "hidden layer GPU != CPU");
+        assert_eq!(y_cpu, y_gpu, "output layer GPU != CPU");
+        // ReLU must have clamped at least nothing-to-negative in the hidden layer.
+        assert!(h_cpu.iter().all(|&v| v >= 0), "ReLU left a negative value");
     }
 
     /// Piste A: native i64 — works only if SHADER_INT64 is available.
