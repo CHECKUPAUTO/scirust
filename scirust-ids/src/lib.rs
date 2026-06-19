@@ -66,6 +66,7 @@ pub mod detectors;
 pub mod engine;
 pub mod flow;
 pub mod learner;
+pub mod ot;
 pub mod parsers;
 pub mod protocols;
 pub mod siem;
@@ -80,6 +81,7 @@ pub use detectors::{
 pub use engine::{IdsConfig, IdsEngine, IdsReport};
 pub use flow::{Flow, FlowDirection, FlowWindow, Protocol};
 pub use learner::{AnomalyModel, IdsLearner, LearnerConfig};
+pub use ot::{ModbusEvent, ModbusProfile, OtGuard};
 pub use parsers::{MultiParser, ParsedPayload, dns::DnsParser, http::HttpParser, ssh::SshParser};
 pub use protocols::{
     count_by_key, flow_features, identify_protocol_from_payload, inter_arrival_times,
