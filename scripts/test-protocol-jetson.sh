@@ -18,7 +18,7 @@
 #   git clone https://github.com/CHECKUPAUTO/scirust.git
 #   # 2. install the nightly Rust toolchain (the repo pins nightly)
 #   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-#   rustup toolchain install nightly --component rustfmt clippy
+#   rustup toolchain install nightly -c rustfmt -c clippy
 #   # 3. run the protocol
 #   ./test-protocol-jetson.sh --repo ./scirust
 #
