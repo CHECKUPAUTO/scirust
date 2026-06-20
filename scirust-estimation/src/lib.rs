@@ -21,6 +21,7 @@ pub mod kalman;
 pub mod linalg;
 pub mod particle;
 pub mod smoother;
+pub mod ud;
 pub mod ukf;
 
 pub use ekf::Ekf;
@@ -30,4 +31,5 @@ pub use kalman::KalmanFilter;
 pub use linalg::Mat;
 pub use particle::ParticleFilter;
 pub use smoother::RtsSmoother;
+pub use ud::UdFilter;
 pub use ukf::Ukf;
