@@ -11,6 +11,9 @@
 
 use scirust_signal::{Complex, fft_real, hanning};
 
+pub mod operational;
+pub use operational::{mac, power_spectral_density};
+
 /// Hann-windowed magnitude half-spectrum of a vibration response (`signal.len()`
 /// a power of two).
 pub fn magnitude_spectrum(signal: &[f64]) -> Vec<f64> {
