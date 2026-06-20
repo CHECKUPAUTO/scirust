@@ -143,6 +143,10 @@ mod tests {
         }
         let loc = locate_leak(&a, &b, l, c, fs);
         assert_eq!(loc.lag_samples, 0);
-        assert!((loc.dist_from_a - 40.0).abs() < 0.5, "got {}", loc.dist_from_a);
+        assert!(
+            (loc.dist_from_a - 40.0).abs() < 0.5,
+            "got {}",
+            loc.dist_from_a
+        );
     }
 }

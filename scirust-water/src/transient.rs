@@ -56,7 +56,10 @@ mod tests {
         let rho = 1000.0;
         let free = (k / rho).sqrt(); // ~1483 m/s
         let c = korteweg_wave_speed(k, rho, 200e9, 0.5, 0.01);
-        assert!(c < free, "pipe wall must lower the wave speed: {c} vs {free}");
+        assert!(
+            c < free,
+            "pipe wall must lower the wave speed: {c} vs {free}"
+        );
         // Steel is stiff, so the reduction is modest — still ~1190 m/s.
         assert!((1150.0..1250.0).contains(&c), "got {c}");
     }
@@ -66,7 +69,13 @@ mod tests {
         // Same water, a far more compliant pipe (PVC-like, E=3 GPa) drops c hard.
         let stiff = korteweg_wave_speed(2.2e9, 1000.0, 200e9, 0.5, 0.01);
         let soft = korteweg_wave_speed(2.2e9, 1000.0, 3e9, 0.5, 0.01);
-        assert!(soft < stiff, "compliant pipe must be slower: {soft} vs {stiff}");
-        assert!(soft < 600.0, "PVC wave speed should be well under 600 m/s: {soft}");
+        assert!(
+            soft < stiff,
+            "compliant pipe must be slower: {soft} vs {stiff}"
+        );
+        assert!(
+            soft < 600.0,
+            "PVC wave speed should be well under 600 m/s: {soft}"
+        );
     }
 }

@@ -18,5 +18,5 @@
 pub mod leak;
 pub mod transient;
 
-pub use leak::{locate_leak, LeakLocation};
+pub use leak::{LeakLocation, locate_leak};
 pub use transient::{joukowsky_surge, korteweg_wave_speed};

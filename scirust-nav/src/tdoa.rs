@@ -129,8 +129,16 @@ mod tests {
         let t = arrivals(&sensors, src, speed, 0.123);
         let sol = tdoa_locate_2d(&sensors, &t, speed, None, 50).unwrap();
         assert!(sol.converged, "should converge");
-        assert!((sol.position[0] - src[0]).abs() < 1e-6, "x {:?}", sol.position);
-        assert!((sol.position[1] - src[1]).abs() < 1e-6, "y {:?}", sol.position);
+        assert!(
+            (sol.position[0] - src[0]).abs() < 1e-6,
+            "x {:?}",
+            sol.position
+        );
+        assert!(
+            (sol.position[1] - src[1]).abs() < 1e-6,
+            "y {:?}",
+            sol.position
+        );
         assert!(sol.residual_rms < 1e-6);
     }
 
@@ -141,8 +149,16 @@ mod tests {
         let src = [8.0, 5.0];
         let t = arrivals(&sensors, src, speed, 0.0);
         let sol = tdoa_locate_2d(&sensors, &t, speed, Some([5.0, 5.0]), 100).unwrap();
-        assert!((sol.position[0] - src[0]).abs() < 1e-4, "x {:?}", sol.position);
-        assert!((sol.position[1] - src[1]).abs() < 1e-4, "y {:?}", sol.position);
+        assert!(
+            (sol.position[0] - src[0]).abs() < 1e-4,
+            "x {:?}",
+            sol.position
+        );
+        assert!(
+            (sol.position[1] - src[1]).abs() < 1e-4,
+            "y {:?}",
+            sol.position
+        );
     }
 
     #[test]

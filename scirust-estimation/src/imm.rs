@@ -101,14 +101,17 @@ impl Imm {
             for i in 0..k
             {
                 let w = self.pi[i][j] * self.mu[i] / cbar[j];
-                let dx: Vec<f64> = self.x[i].iter().zip(&x_mix[j]).map(|(a, b)| a - b).collect();
+                let dx: Vec<f64> = self.x[i]
+                    .iter()
+                    .zip(&x_mix[j])
+                    .map(|(a, b)| a - b)
+                    .collect();
                 // P_mix += w (P_i + dx dxᵀ)
                 for r0 in 0..n
                 {
                     for c0 in 0..n
                     {
-                        p_mix[j].data[r0 * n + c0] +=
-                            w * (self.p[i].get(r0, c0) + dx[r0] * dx[c0]);
+                        p_mix[j].data[r0 * n + c0] += w * (self.p[i].get(r0, c0) + dx[r0] * dx[c0]);
                     }
                 }
             }
@@ -149,8 +152,7 @@ impl Imm {
             }
             self.p[j] = Mat::identity(n).sub(&kh).matmul(&pp);
             // Gaussian likelihood of the innovation.
-            likelihood[j] =
-                (-0.5 * y * y / s).exp() / (2.0 * core::f64::consts::PI * s).sqrt();
+            likelihood[j] = (-0.5 * y * y / s).exp() / (2.0 * core::f64::consts::PI * s).sqrt();
         }
 
         // 4. Mode-probability update.

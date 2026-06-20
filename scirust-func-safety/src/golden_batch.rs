@@ -44,9 +44,7 @@ pub fn dtw(a: &[Vec<f64>], b: &[Vec<f64>]) -> DtwResult {
         for j in 1..=m
         {
             let c = d(i - 1, j - 1);
-            let best = cost[i - 1][j]
-                .min(cost[i][j - 1])
-                .min(cost[i - 1][j - 1]);
+            let best = cost[i - 1][j].min(cost[i][j - 1]).min(cost[i - 1][j - 1]);
             cost[i][j] = c + best;
         }
     }
@@ -158,7 +156,14 @@ impl GoldenBatch {
         report: &BatchReport,
         timestamp: f64,
     ) {
-        let decision = if report.conforming { "RELEASE" } else { "REJECT" };
+        let decision = if report.conforming
+        {
+            "RELEASE"
+        }
+        else
+        {
+            "REJECT"
+        };
         let desc = format!(
             "golden-batch comparison: worst var {} ratio {:.3} at step {} (DTW {:.3})",
             report.worst_variable, report.worst_ratio, report.worst_step, report.dtw_distance
@@ -210,7 +215,14 @@ mod tests {
         let n = 100;
         let golden_traj: Vec<Vec<f64>> = (0..n)
             .map(|k| {
-                let temp = if k < 30 { 20.0 + 17.0 * (k as f64 / 30.0) } else { 37.0 };
+                let temp = if k < 30
+                {
+                    20.0 + 17.0 * (k as f64 / 30.0)
+                }
+                else
+                {
+                    37.0
+                };
                 vec![temp]
             })
             .collect();
@@ -241,7 +253,10 @@ mod tests {
             .zip(&candidate)
             .map(|(g, s)| (g[0] - s[0]).abs())
             .fold(0.0_f64, f64::max);
-        assert!(pointwise_max > 1.0, "pointwise should violate tol: {pointwise_max}");
+        assert!(
+            pointwise_max > 1.0,
+            "pointwise should violate tol: {pointwise_max}"
+        );
     }
 
     #[test]
@@ -251,7 +266,11 @@ mod tests {
         // Inject a pH spike (variable 1) at step 40, well beyond 0.05.
         traj[40][1] += 0.5;
         let report = golden.compare(&traj);
-        assert!(!report.conforming, "should reject, ratio {}", report.worst_ratio);
+        assert!(
+            !report.conforming,
+            "should reject, ratio {}",
+            report.worst_ratio
+        );
         assert_eq!(report.worst_variable, 1);
         assert_eq!(report.worst_step, 40);
         assert!(report.worst_ratio > 1.0);

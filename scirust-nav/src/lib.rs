@@ -22,4 +22,4 @@ pub mod tdoa;
 
 pub use fusion::GnssInsFusion;
 pub use ins::Ins2d;
-pub use tdoa::{tdoa_locate_2d, TdoaSolution};
+pub use tdoa::{TdoaSolution, tdoa_locate_2d};

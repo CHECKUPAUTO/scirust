@@ -86,7 +86,9 @@ mod tests {
     use super::*;
 
     fn sample_firmware() -> Vec<u8> {
-        (0..1024u32).map(|i| (i.wrapping_mul(31) ^ 0xA5) as u8).collect()
+        (0..1024u32)
+            .map(|i| (i.wrapping_mul(31) ^ 0xA5) as u8)
+            .collect()
     }
 
     #[test]

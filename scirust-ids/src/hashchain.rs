@@ -34,7 +34,9 @@ pub fn chain(prev: u64, block_digest: u64) -> u64 {
 /// Chain a sequence of block digests into a single fingerprint (seeded from the
 /// FNV offset).
 pub fn chain_all(block_digests: &[u64]) -> u64 {
-    block_digests.iter().fold(FNV_OFFSET, |acc, &d| chain(acc, d))
+    block_digests
+        .iter()
+        .fold(FNV_OFFSET, |acc, &d| chain(acc, d))
 }
 
 #[cfg(test)]

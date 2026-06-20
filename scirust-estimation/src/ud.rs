@@ -102,15 +102,25 @@ impl UdFilter {
         // Bierman recursion: accumulate the (unnormalised) gain k and update U, D.
         let mut k = vec![0.0; n];
         let mut alpha = r + f[0] * g[0];
-        self.d[0] = if alpha != 0.0 { r * self.d[0] / alpha } else { 0.0 };
+        self.d[0] = if alpha != 0.0
+        {
+            r * self.d[0] / alpha
+        }
+        else
+        {
+            0.0
+        };
         k[0] = g[0];
         for j in 1..n
         {
             let beta = alpha;
             alpha = beta + f[j] * g[j];
-            self.d[j] = if alpha != 0.0 {
+            self.d[j] = if alpha != 0.0
+            {
                 beta * self.d[j] / alpha
-            } else {
+            }
+            else
+            {
                 0.0
             };
             let lambda = if beta != 0.0 { f[j] / beta } else { 0.0 };
