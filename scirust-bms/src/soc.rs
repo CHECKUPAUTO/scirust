@@ -86,6 +86,20 @@ impl BatteryEkf {
     pub fn v1(&self) -> f64 {
         self.ekf.state()[1]
     }
+
+    /// Usable capacity currently assumed by the coulomb-counting model (As).
+    pub fn capacity_as(&self) -> f64 {
+        self.params.q_cap
+    }
+
+    /// Update the assumed usable capacity (As) — used by the dual estimator to
+    /// feed the recursive SoH estimate back into SoC tracking.
+    pub fn set_capacity(&mut self, q_as: f64) {
+        if q_as > 0.0
+        {
+            self.params.q_cap = q_as;
+        }
+    }
 }
 
 #[cfg(test)]

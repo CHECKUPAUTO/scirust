@@ -12,11 +12,13 @@
 //! Every estimator is bit-reproducible and validated against an oracle.
 
 pub mod capacity;
+pub mod dual;
 pub mod soc;
 pub mod soh;
 pub mod thermal;
 
 pub use capacity::RlsCapacity;
+pub use dual::DualEstimator;
 pub use soc::{BatteryEkf, CellParams};
 pub use soh::ConformalSoh;
 pub use thermal::{ThermalGuard, ThermalState};
