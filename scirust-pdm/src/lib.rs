@@ -9,6 +9,7 @@
 //! - **change_detection** — CUSUM, Page-Hinkley test for regime shifts
 //! - **detectors** — Specialized fault detectors (imbalance, misalignment, bearing, cavitation)
 
+pub mod adaptive_guard;
 pub mod change_detection;
 pub mod conformal_guard;
 pub mod conformal_rul;
@@ -17,6 +18,7 @@ pub mod health;
 pub mod iso10816;
 pub mod rul;
 
+pub use adaptive_guard::AdaptiveGuard;
 pub use change_detection::{CUSUM, ChangePoint, PageHinkley};
 pub use conformal_guard::{ConformalGuard, GuardVerdict};
 pub use conformal_rul::ConformalRul;
