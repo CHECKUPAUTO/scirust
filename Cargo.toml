@@ -88,6 +88,7 @@ members = [
     "scirust-pdm",
     "scirust-estimation",
     "scirust-nav",
+    "scirust-water",
     "scirust-control",
     "scirust-bms",
     "scirust-grid",
