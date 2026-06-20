@@ -11,6 +11,8 @@
 
 pub mod conformal_beats;
 pub mod ecg;
+pub mod hrv;
 
 pub use conformal_beats::ConformalBeats;
 pub use ecg::{RhythmClass, classify_rhythm, detect_r_peaks, heart_rate_bpm, rr_intervals};
+pub use hrv::{HrvMetrics, compute_hrv};

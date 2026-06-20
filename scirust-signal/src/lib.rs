@@ -34,6 +34,9 @@ pub use features::{
     zero_crossing_rate,
 };
 pub use fft::{fft, fft_real, ifft};
-pub use mcsa::{BarSeverity, BrokenBarResult, analyze_broken_bar, slip};
+pub use mcsa::{
+    BarSeverity, BrokenBarResult, EccentricityResult, analyze_broken_bar, analyze_eccentricity,
+    slip,
+};
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

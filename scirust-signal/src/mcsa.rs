@@ -155,6 +155,55 @@ pub fn analyze_broken_bar(
     }
 }
 
+/// Outcome of an air-gap eccentricity MCSA evaluation.
+#[derive(Debug, Clone)]
+pub struct EccentricityResult {
+    /// Supply fundamental amplitude (linear).
+    pub fundamental: f64,
+    /// Strongest of the `f ± k·f_rotor` sidebands relative to the fundamental (dB).
+    pub sideband_db: f64,
+    /// Whether the sideband exceeds `threshold_db` (eccentricity flagged).
+    pub eccentric: bool,
+}
+
+/// Mixed air-gap eccentricity MCSA: sidebands appear around the supply at
+/// `f_supply ± k·f_rotor`, where `f_rotor` is the rotor mechanical frequency
+/// (Hz). The strongest sideband relative to the fundamental (dB) flags
+/// eccentricity above `threshold_db` (e.g. `−50`). These lines sit far from the
+/// fundamental, so a ±2-bin search is safe.
+pub fn analyze_eccentricity(
+    current: &[f64],
+    sample_rate: f64,
+    supply_hz: f64,
+    rotor_freq_hz: f64,
+    k_harmonic: u32,
+    threshold_db: f64,
+) -> EccentricityResult {
+    let n = current.len();
+    let win = hanning(n);
+    let windowed: Vec<f64> = current.iter().zip(&win).map(|(&x, &w)| x * w).collect();
+    let spec = fft_real(&windowed);
+
+    let fundamental = peak_mag_near(&spec, n, sample_rate, supply_hz, 2);
+    let off = k_harmonic as f64 * rotor_freq_hz;
+    let lower = peak_mag_near(&spec, n, sample_rate, supply_hz - off, 2);
+    let upper = peak_mag_near(&spec, n, sample_rate, supply_hz + off, 2);
+    let strongest = lower.max(upper);
+    let sideband_db = if fundamental > 0.0 && strongest > 0.0
+    {
+        20.0 * (strongest / fundamental).log10()
+    }
+    else
+    {
+        f64::NEG_INFINITY
+    };
+    EccentricityResult {
+        fundamental,
+        sideband_db,
+        eccentric: sideband_db >= threshold_db,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +259,34 @@ mod tests {
         assert!((s - 0.03).abs() < 1e-9, "slip = {s}");
         // No load: rotor at synchronous speed -> s = 0.
         assert_eq!(slip(50.0, 2, 25.0), 0.0);
+    }
+
+    #[test]
+    fn detects_air_gap_eccentricity() {
+        // Supply 50 Hz, rotor 12.5 Hz -> sidebands at 37.5 / 62.5 Hz.
+        let (n, sr, supply, f_rot) = (4096usize, 4096.0, 50.0, 12.5);
+        let ratio = 10f64.powf(-45.0 / 20.0);
+        let current: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sr;
+                (2.0 * PI * supply * t).sin()
+                    + ratio * (2.0 * PI * (supply - f_rot) * t).sin()
+                    + ratio * (2.0 * PI * (supply + f_rot) * t).sin()
+            })
+            .collect();
+        let r = analyze_eccentricity(&current, sr, supply, f_rot, 1, -50.0);
+        assert!(r.eccentric, "sideband_db = {}", r.sideband_db);
+        assert!(
+            (r.sideband_db - (-45.0)).abs() < 2.0,
+            "sideband_db = {}",
+            r.sideband_db
+        );
+
+        // Healthy motor: no eccentricity sidebands.
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * supply * i as f64 / sr).sin())
+            .collect();
+        let h = analyze_eccentricity(&clean, sr, supply, f_rot, 1, -50.0);
+        assert!(!h.eccentric, "false eccentricity, db = {}", h.sideband_db);
     }
 }
