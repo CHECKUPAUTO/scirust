@@ -15,6 +15,7 @@
 //! SciRust upholds, extended to estimation.
 
 pub mod ekf;
+pub mod imm;
 pub mod interval;
 pub mod kalman;
 pub mod linalg;
@@ -23,6 +24,7 @@ pub mod smoother;
 pub mod ukf;
 
 pub use ekf::Ekf;
+pub use imm::{Imm, ImmModel};
 pub use interval::IntervalFilter;
 pub use kalman::KalmanFilter;
 pub use linalg::Mat;
