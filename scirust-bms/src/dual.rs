@@ -2,8 +2,8 @@
 //!
 //! A SoC EKF that uses a *fixed* rated capacity drifts as the cell ages, because
 //! its coulomb-counting term assumes a capacity the cell no longer has. The dual
-//! estimator runs the [`BatteryEkf`](crate::soc::BatteryEkf) alongside the
-//! [`RlsCapacity`](crate::capacity::RlsCapacity): each completed charge/discharge
+//! estimator runs the [`BatteryEkf`] alongside the
+//! [`RlsCapacity`]: each completed charge/discharge
 //! segment is one capacity measurement (`Q = charge / ΔSoC`, with `ΔSoC` from the
 //! voltage-anchored EKF), and the updated capacity is fed *back* into the EKF, so
 //! SoC and SoH are tracked jointly. Deterministic.
