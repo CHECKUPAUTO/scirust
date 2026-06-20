@@ -9,7 +9,9 @@
 use scirust_signal::{Complex, fft_real, hanning};
 use serde::{Deserialize, Serialize};
 
+pub mod power_quality;
 pub mod symmetrical;
+pub use power_quality::{EventSpan, VoltageEvent, classify_voltage, cycle_rms, detect_events};
 pub use symmetrical::{symmetrical_components, voltage_unbalance_factor};
 
 /// Windowed half-spectrum of `signal` (Hann window, low leakage).

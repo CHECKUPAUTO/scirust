@@ -37,8 +37,8 @@ pub use features::{
 };
 pub use fft::{fft, fft_real, ifft};
 pub use mcsa::{
-    BarSeverity, BrokenBarResult, EccentricityResult, analyze_broken_bar, analyze_eccentricity,
-    slip,
+    BarSeverity, BrokenBarResult, EccentricityResult, MotorDiagnosis, MotorFault,
+    analyze_broken_bar, analyze_eccentricity, diagnose_motor, slip,
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

@@ -204,6 +204,62 @@ pub fn analyze_eccentricity(
     }
 }
 
+/// Dominant motor fault from a unified MCSA diagnosis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotorFault {
+    /// No fault signature above threshold.
+    Healthy,
+    /// Broken rotor bar(s).
+    BrokenBar,
+    /// Air-gap eccentricity.
+    Eccentricity,
+}
+
+/// Combined MCSA diagnosis: runs the broken-bar and eccentricity analyses and
+/// reports the dominant fault.
+#[derive(Debug, Clone)]
+pub struct MotorDiagnosis {
+    pub broken_bar: BrokenBarResult,
+    pub eccentricity: EccentricityResult,
+    pub dominant: MotorFault,
+}
+
+/// Diagnose a motor from one stator-current capture. `slip` is per-unit;
+/// `rotor_freq_hz` is the rotor mechanical frequency. A fault is declared when
+/// its primary sideband exceeds `fault_db` (e.g. `−50`); the stronger of the two
+/// signatures wins.
+pub fn diagnose_motor(
+    current: &[f64],
+    sample_rate: f64,
+    supply_hz: f64,
+    slip: f64,
+    rotor_freq_hz: f64,
+    fault_db: f64,
+) -> MotorDiagnosis {
+    let broken_bar = analyze_broken_bar(current, sample_rate, supply_hz, slip, 1);
+    let eccentricity =
+        analyze_eccentricity(current, sample_rate, supply_hz, rotor_freq_hz, 1, fault_db);
+    let bb_fault = broken_bar.sideband_db >= fault_db;
+    let ecc_fault = eccentricity.sideband_db >= fault_db;
+    let dominant = if bb_fault && (!ecc_fault || broken_bar.sideband_db >= eccentricity.sideband_db)
+    {
+        MotorFault::BrokenBar
+    }
+    else if ecc_fault
+    {
+        MotorFault::Eccentricity
+    }
+    else
+    {
+        MotorFault::Healthy
+    };
+    MotorDiagnosis {
+        broken_bar,
+        eccentricity,
+        dominant,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +344,44 @@ mod tests {
             .collect();
         let h = analyze_eccentricity(&clean, sr, supply, f_rot, 1, -50.0);
         assert!(!h.eccentric, "false eccentricity, db = {}", h.sideband_db);
+    }
+
+    #[test]
+    fn unified_diagnosis_distinguishes_faults() {
+        let (n, sr, supply) = (4096usize, 4096.0, 50.0);
+        let (s, f_rot) = (0.03, 12.5); // broken-bar sidebands 47/53, ecc 37.5/62.5
+        let bb_ratio = 10f64.powf(-45.0 / 20.0);
+        let ecc_ratio = 10f64.powf(-45.0 / 20.0);
+
+        // Broken-bar-only current.
+        let bb_sig: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sr;
+                (2.0 * PI * supply * t).sin()
+                    + bb_ratio * (2.0 * PI * supply * (1.0 - 2.0 * s) * t).sin()
+                    + bb_ratio * (2.0 * PI * supply * (1.0 + 2.0 * s) * t).sin()
+            })
+            .collect();
+        let d = diagnose_motor(&bb_sig, sr, supply, s, f_rot, -50.0);
+        assert_eq!(d.dominant, MotorFault::BrokenBar, "{:?}", d.dominant);
+
+        // Eccentricity-only current.
+        let ecc_sig: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sr;
+                (2.0 * PI * supply * t).sin()
+                    + ecc_ratio * (2.0 * PI * (supply - f_rot) * t).sin()
+                    + ecc_ratio * (2.0 * PI * (supply + f_rot) * t).sin()
+            })
+            .collect();
+        let d2 = diagnose_motor(&ecc_sig, sr, supply, s, f_rot, -50.0);
+        assert_eq!(d2.dominant, MotorFault::Eccentricity, "{:?}", d2.dominant);
+
+        // Clean current.
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * supply * i as f64 / sr).sin())
+            .collect();
+        let d3 = diagnose_motor(&clean, sr, supply, s, f_rot, -50.0);
+        assert_eq!(d3.dominant, MotorFault::Healthy, "{:?}", d3.dominant);
     }
 }
