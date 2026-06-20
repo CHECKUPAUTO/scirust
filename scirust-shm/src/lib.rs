@@ -11,7 +11,9 @@
 
 use scirust_signal::{Complex, fft_real, hanning};
 
+pub mod fdd;
 pub mod operational;
+pub use fdd::{first_singular_spectrum, jacobi_eigen, mode_shape};
 pub use operational::{mac, power_spectral_density};
 
 /// Hann-windowed magnitude half-spectrum of a vibration response (`signal.len()`
