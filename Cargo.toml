@@ -92,6 +92,7 @@ members = [
     "scirust-grid",
     "scirust-shm",
     "scirust-biomed",
+    "scirust-hvac",
     "scirust-spc",
     "scirust-robotics",
     "scirust-metrology",

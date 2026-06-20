@@ -1,0 +1,9 @@
+[package]
+name = "scirust-hvac"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust HVAC / building analytics — air-handling-unit fault detection and NILM energy disaggregation"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

@@ -2344,6 +2344,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-hvac"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "scirust-ids"
 version = "0.1.0"
 dependencies = [
