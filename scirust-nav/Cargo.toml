@@ -1,0 +1,10 @@
+[package]
+name = "scirust-nav"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust navigation — deterministic loosely-coupled GNSS/INS fusion and TDOA multilateration"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+scirust-estimation = { path = "../scirust-estimation" }

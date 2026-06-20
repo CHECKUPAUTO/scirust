@@ -87,6 +87,7 @@ members = [
     "scirust-mqtt",
     "scirust-pdm",
     "scirust-estimation",
+    "scirust-nav",
     "scirust-control",
     "scirust-bms",
     "scirust-grid",

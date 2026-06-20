@@ -2464,6 +2464,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-nav"
+version = "0.1.0"
+dependencies = [
+ "scirust-estimation",
+ "serde",
+]
+
+[[package]]
 name = "scirust-neuro-symbolic"
 version = "0.1.0"
 dependencies = [
