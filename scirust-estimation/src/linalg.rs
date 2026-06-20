@@ -203,6 +203,38 @@ impl Mat {
         }
         Some(inv)
     }
+
+    /// Lower-triangular Cholesky factor `L` with `L·Lᵀ = self` for a symmetric
+    /// positive-definite matrix; `None` if not positive-definite.
+    pub fn cholesky(&self) -> Option<Mat> {
+        assert_eq!(self.rows, self.cols, "cholesky needs square matrix");
+        let n = self.rows;
+        let mut l = Mat::zeros(n, n);
+        for i in 0..n
+        {
+            for j in 0..=i
+            {
+                let mut sum = self.data[i * n + j];
+                for k in 0..j
+                {
+                    sum -= l.data[i * n + k] * l.data[j * n + k];
+                }
+                if i == j
+                {
+                    if sum <= 0.0
+                    {
+                        return None;
+                    }
+                    l.data[i * n + j] = sum.sqrt();
+                }
+                else
+                {
+                    l.data[i * n + j] = sum / l.data[j * n + j];
+                }
+            }
+        }
+        Some(l)
+    }
 }
 
 #[cfg(test)]
