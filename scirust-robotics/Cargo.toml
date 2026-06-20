@@ -1,0 +1,9 @@
+[package]
+name = "scirust-robotics"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust robotics — jerk-limited trajectories, planar kinematics, ISO/TS 15066 speed-and-separation monitoring"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

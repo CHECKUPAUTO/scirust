@@ -1,0 +1,10 @@
+[package]
+name = "scirust-spc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Statistical Process Control — Shewhart/EWMA/CUSUM charts, Western Electric rules, Hotelling T² multivariate SPC"
+
+[dependencies]
+scirust-estimation = { path = "../scirust-estimation" }
+serde = { version = "1", features = ["derive"] }

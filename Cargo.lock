@@ -2187,6 +2187,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-control"
+version = "0.1.0"
+dependencies = [
+ "scirust-estimation",
+ "serde",
+]
+
+[[package]]
 name = "scirust-core"
 version = "0.1.0"
 dependencies = [
@@ -2402,6 +2410,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-metrology"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "scirust-mlops"
 version = "0.1.0"
 dependencies = [
@@ -2512,6 +2527,13 @@ dependencies = [
  "scirust-learning",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "scirust-robotics"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2684,6 +2706,14 @@ dependencies = [
  "scirust-som-pcg",
  "scirust-som-symbolic",
  "scirust-som-tokenizer",
+]
+
+[[package]]
+name = "scirust-spc"
+version = "0.1.0"
+dependencies = [
+ "scirust-estimation",
+ "serde",
 ]
 
 [[package]]

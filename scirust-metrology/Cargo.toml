@@ -1,0 +1,9 @@
+[package]
+name = "scirust-metrology"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust metrology — GUM uncertainty propagation, Allan variance, sensor drift / recalibration scheduling"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

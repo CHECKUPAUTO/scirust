@@ -1,0 +1,10 @@
+[package]
+name = "scirust-control"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust control — deterministic PID, LQR, box-QP and MPC with certified input-constraint satisfaction, plus loop monitoring"
+
+[dependencies]
+scirust-estimation = { path = "../scirust-estimation" }
+serde = { version = "1", features = ["derive"] }
