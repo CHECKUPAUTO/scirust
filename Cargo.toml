@@ -96,6 +96,7 @@ members = [
     "scirust-robotics",
     "scirust-metrology",
     "scirust-mlops",
+    "scirust-reliability",
     "scirust-func-safety",
     "scirust-integration",
     "scirust-industrial",

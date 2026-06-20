@@ -2518,6 +2518,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-reliability"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "scirust-rl-algo"
 version = "0.1.0"
 dependencies = [

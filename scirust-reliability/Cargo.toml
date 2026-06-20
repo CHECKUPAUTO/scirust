@@ -1,0 +1,9 @@
+[package]
+name = "scirust-reliability"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust reliability — IEC 61508 PFD/PFH for MooN architectures, SIL mapping, Markov availability"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

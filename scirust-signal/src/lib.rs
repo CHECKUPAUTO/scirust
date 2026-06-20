@@ -15,6 +15,7 @@
 //! - **Order analysis** — order tracking, resampling for variable-speed rotating machinery
 
 pub mod bearing;
+pub mod cepstrum;
 pub mod complex;
 pub mod envelope;
 pub mod features;
@@ -24,6 +25,7 @@ pub mod order;
 pub mod windows;
 
 pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing_faults, ftf};
+pub use cepstrum::{dominant_quefrency, real_cepstrum};
 /// Re-export commonly used types.
 pub use complex::Complex;
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
