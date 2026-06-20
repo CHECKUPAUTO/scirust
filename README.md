@@ -175,6 +175,7 @@ examples/              Quickstart, MNIST training, industrial_monitor, benchmark
 - [`docs/GPU.md`](docs/GPU.md) — Portable wgpu compute (status, testing, roadmap)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
+- [`docs/TEST_PROTOCOL.md`](docs/TEST_PROTOCOL.md) — Functional acceptance protocol: `scripts/test-protocol.sh` runs every gate, every crate's oracle tests, and a cross-process determinism check in one command
 - [`docs/sbom/`](docs/sbom/) — CycloneDX SBOM (reproducible, regenerated in CI & attached to releases)
 - [`docs/GROWTH_PLAN.md`](docs/GROWTH_PLAN.md) — Vision, non-negotiable fundamentals, and the ambitious growth plan
 - [`docs/RELEASING.md`](docs/RELEASING.md) — Release process & branch-protection runbook
