@@ -16,6 +16,7 @@
 
 pub mod bearing;
 pub mod complex;
+pub mod envelope;
 pub mod features;
 pub mod fft;
 pub mod mcsa;
@@ -25,6 +26,7 @@ pub mod windows;
 pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing_faults, ftf};
 /// Re-export commonly used types.
 pub use complex::Complex;
+pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{
     band_power, psd, spectral_centroid, spectral_entropy, spectral_flatness, spectral_rolloff,
     spectral_spread,
