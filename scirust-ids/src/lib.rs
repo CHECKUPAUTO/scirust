@@ -65,10 +65,13 @@ pub mod correlator;
 pub mod detectors;
 pub mod engine;
 pub mod flow;
+pub mod hashchain;
 pub mod learner;
 pub mod ot;
 pub mod ot_dnp3;
+pub mod ot_firmware;
 pub mod ot_goose;
+pub mod ot_plc;
 pub mod parsers;
 pub mod protocols;
 pub mod siem;
@@ -85,7 +88,9 @@ pub use flow::{Flow, FlowDirection, FlowWindow, Protocol};
 pub use learner::{AnomalyModel, IdsLearner, LearnerConfig};
 pub use ot::{ModbusEvent, ModbusProfile, OtGuard};
 pub use ot_dnp3::{Dnp3Event, Dnp3Guard, Dnp3Profile};
+pub use ot_firmware::{Attestation, FirmwareBaseline};
 pub use ot_goose::{GooseFrame, GooseMonitor, GooseVerdict};
+pub use ot_plc::{PlcBaseline, PlcRung, PlcVerdict};
 pub use parsers::{MultiParser, ParsedPayload, dns::DnsParser, http::HttpParser, ssh::SshParser};
 pub use protocols::{
     count_by_key, flow_features, identify_protocol_from_payload, inter_arrival_times,
