@@ -170,3 +170,10 @@ directly, or `scripts/test-protocol.sh --only <gate>`.
   that matter are gated explicitly (`simd`, `gpu`).
 - The data-dependent example binaries (MNIST/CIFAR/sentiment) are not run by
   `--with-examples`; their training data is not part of the repository.
+- **Disk:** a full `--all-targets` debug tree for the whole workspace is
+  ~25–30 GB. The script sets `CARGO_INCREMENTAL=0` (as CI does) to keep the tree
+  small, reclaims the aarch64 cross-tree right after that gate, and refuses to
+  start with a clear message if free space is below the scope's need (~30 GB for
+  build/test, ~3 GB for `--only fmt,clippy`). On a constrained machine, run the
+  heavy gates one at a time and `cargo clean` between them, or run the light
+  gates locally and let CI carry the full build/test/cross matrix.

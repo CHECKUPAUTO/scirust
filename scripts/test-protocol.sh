@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SciRust — Full Functional Acceptance Protocol
+# SciRust -- Full Functional Acceptance Protocol
 # -----------------------------------------------------------------------------
 # One command that certifies the ENTIRE platform: every crate's oracle tests,
 # every quality gate CI enforces, cross-process determinism, cross-architecture
@@ -49,6 +49,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 cd "$ROOT"
 
+# Match CI's build hygiene and keep the debug tree small: incremental artifacts
+# can double target/ and have overflowed constrained containers mid-run.
+export CARGO_INCREMENTAL=0
+export RUST_BACKTRACE=1
+
 # ---- options ----------------------------------------------------------------
 QUICK=0; STRICT=0; CLEAN=1; WITH_EXAMPLES=0; LIST=0
 ONLY=""; SKIP=""
@@ -78,10 +83,11 @@ if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
 else
   C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GRN=""; C_YEL=""; C_BLU=""; C_CYN=""
 fi
-hr()   { printf '%s\n' "${C_DIM}────────────────────────────────────────────────────────────────────────${C_RESET}"; }
-ok()   { printf '%s✓ %s%s\n' "$C_GRN" "$*" "$C_RESET"; }
-bad()  { printf '%s✗ %s%s\n' "$C_RED" "$*" "$C_RESET"; }
-warn() { printf '%s• %s%s\n' "$C_YEL" "$*" "$C_RESET"; }
+BAR="$(printf '%.0s-' {1..72})"
+hr()   { printf '%s%s%s\n' "$C_DIM" "$BAR" "$C_RESET"; }
+ok()   { printf '%s+ %s%s\n' "$C_GRN" "$*" "$C_RESET"; }
+bad()  { printf '%sx %s%s\n' "$C_RED" "$*" "$C_RESET"; }
+warn() { printf '%s* %s%s\n' "$C_YEL" "$*" "$C_RESET"; }
 info() { printf '%s%s%s\n'   "$C_CYN" "$*" "$C_RESET"; }
 
 # ---- evidence bundle --------------------------------------------------------
@@ -108,7 +114,7 @@ run_gate() {
   local id="$1" req="$2" desc="$3" cmd="$4"
   local log="$LOG_DIR/${id}.log"
   hr
-  printf '  %s▶ [%s]%s %s\n' "$C_BOLD" "$id" "$C_RESET" "$desc"
+  printf '  %s> [%s]%s %s\n' "$C_BOLD" "$id" "$C_RESET" "$desc"
   printf '    %s$ %s%s\n' "$C_DIM" "$cmd" "$C_RESET"
   local start dur rc
   start=$(date +%s)
@@ -117,10 +123,10 @@ run_gate() {
   dur=$(( $(date +%s) - start ))
   if [[ $rc -eq 0 ]]; then
     record "$id" "$req" PASS "$dur" ""
-    ok "[$id] PASS (${dur}s)  → $(basename "$log")"
+    ok "[$id] PASS (${dur}s)  -> $(basename "$log")"
   else
     record "$id" "$req" FAIL "$dur" "exit=$rc"
-    bad "[$id] FAIL (exit $rc, ${dur}s) — last lines:"
+    bad "[$id] FAIL (exit $rc, ${dur}s) -- last lines:"
     tail -n 18 "$log" | sed 's/^/        /'
   fi
   return $rc
@@ -131,10 +137,10 @@ skip_gate() {
   local id="$1" req="$2" reason="$3"
   if [[ $STRICT -eq 1 && "$req" == required ]]; then
     record "$id" "$req" FAIL 0 "missing prerequisite (--strict): $reason"
-    bad "[$id] FAIL (strict) — $reason"
+    bad "[$id] FAIL (strict) -- $reason"
   else
     record "$id" "$req" SKIP 0 "$reason"
-    warn "[$id] SKIP — $reason"
+    warn "[$id] SKIP -- $reason"
   fi
 }
 
@@ -143,8 +149,8 @@ print_plan() {
   local ids=(fmt clippy build test simd determinism doc aarch64 deny clippy-gpu gpu stable examples)
   info "Gate plan:"
   for id in "${ids[@]}"; do
-    if should_run "$id"; then printf '   %s•%s %s\n' "$C_GRN" "$C_RESET" "$id"
-    else printf '   %s·%s %s%s%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$id (excluded)" "$C_RESET"; fi
+    if should_run "$id"; then printf '   %s*%s %s\n' "$C_GRN" "$C_RESET" "$id"
+    else printf '   %s.%s %s%s%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$id (excluded)" "$C_RESET"; fi
   done
 }
 
@@ -152,13 +158,10 @@ print_plan() {
 #  HEADER / PREFLIGHT
 # =============================================================================
 [[ -t 1 ]] && { clear 2>/dev/null || true; }
-printf '%s' "$C_BOLD"
-cat <<'BANNER'
-╔════════════════════════════════════════════════════════════════════════╗
-║            SciRust — Full Functional Acceptance Protocol                ║
-╚════════════════════════════════════════════════════════════════════════╝
-BANNER
-printf '%s' "$C_RESET"
+EQBAR="$(printf '%.0s=' {1..72})"
+printf '%s%s\n' "$C_BOLD" "$EQBAR"
+printf '%s        SciRust - Full Functional Acceptance Protocol\n' "$C_BOLD"
+printf '%s%s%s\n' "$C_BOLD" "$EQBAR" "$C_RESET"
 info "Workspace : $ROOT"
 info "Started   : $(date -u '+%Y-%m-%dT%H:%M:%SZ')  (commit $(git rev-parse --short HEAD 2>/dev/null || echo '?'), branch $(git branch --show-current 2>/dev/null || echo '?'))"
 info "Evidence  : $LOG_DIR"
@@ -167,7 +170,7 @@ print_plan
 if [[ $LIST -eq 1 ]]; then echo; info "(--list) no gates executed."; exit 0; fi
 echo
 
-# Toolchain provenance — recorded into the evidence bundle.
+# Toolchain provenance -- recorded into the evidence bundle.
 {
   echo "# Toolchain"
   rustc -V 2>/dev/null || echo "rustc: MISSING"
@@ -178,11 +181,27 @@ echo
 } >"$LOG_DIR/toolchain.txt" 2>&1
 info "Toolchain : $(rustc -V 2>/dev/null || echo '?') / $(cargo -V 2>/dev/null || echo '?')"
 
-# Disk guard — the workspace build is large; bail early rather than ENOSPC mid-run.
+# Disk guard -- a full --all-targets debug tree for the workspace is ~25-30 GB.
+# Estimate free space and bail early with a clear message rather than ENOSPC
+# mid-run (which can wedge the whole container). The build/test gates are the
+# peak; lighter scopes (--only fmt,clippy) need far less.
 DISK_PCT="$(df -P "$ROOT" | awk 'NR==2{gsub("%","",$5); print $5}')"
-info "Disk      : ${DISK_PCT}% used on $(df -P "$ROOT" | awk 'NR==2{print $6}')"
+FREE_KB="$(df -P "$ROOT" | awk 'NR==2{print $4}')"
+FREE_GB=$(( FREE_KB / 1024 / 1024 ))
+info "Disk      : ${DISK_PCT}% used, ${FREE_GB} GB free on $(df -P "$ROOT" | awk 'NR==2{print $6}')"
+# How much headroom this scope needs (the heavy build/test gates dominate). With
+# CARGO_INCREMENTAL=0 the all-targets debug tree is ~20 GB; allow margin for the
+# transient doctest temps cargo writes under /tmp during the test gate.
+NEED_GB=24
+should_run build || should_run test || should_run simd || should_run aarch64 || NEED_GB=3
+if [[ "$FREE_GB" -lt "$NEED_GB" ]]; then
+  bad "Insufficient disk: ${FREE_GB} GB free, this scope needs ~${NEED_GB} GB."
+  warn "Reclaim with 'cargo clean' (or 'rm -rf target'), or run a lighter scope,"
+  warn "e.g. --only fmt,clippy  (the build/test gates are what need the space)."
+  exit 3
+fi
 if [[ "${DISK_PCT:-0}" -ge 95 ]]; then
-  bad "Refusing to start: disk ${DISK_PCT}% full. Free space or pass --no-clean off."
+  bad "Refusing to start: disk ${DISK_PCT}% full. Free space first ('cargo clean')."
   exit 3
 fi
 
@@ -194,7 +213,7 @@ fi
 echo
 
 # =============================================================================
-#  GATE 1 — Formatting
+#  GATE 1 -- Formatting
 # =============================================================================
 if should_run fmt; then
   run_gate fmt required "Formatting is canonical (rustfmt --check)" \
@@ -202,7 +221,7 @@ if should_run fmt; then
 fi
 
 # =============================================================================
-#  GATE 2 — Lints (the wall: -D warnings, all targets)
+#  GATE 2 -- Lints (the wall: -D warnings, all targets)
 # =============================================================================
 if should_run clippy; then
   run_gate clippy required "Lints clean across the workspace (-D warnings)" \
@@ -210,7 +229,7 @@ if should_run clippy; then
 fi
 
 # =============================================================================
-#  GATE 3 — Build everything (lib + bins + tests + examples)
+#  GATE 3 -- Build everything (lib + bins + tests + examples)
 # =============================================================================
 if should_run build; then
   run_gate build required "Whole workspace builds (--all-targets)" \
@@ -218,7 +237,7 @@ if should_run build; then
 fi
 
 # =============================================================================
-#  GATE 4 — THE functionality gate: every crate's oracle tests
+#  GATE 4 -- THE functionality gate: every crate's oracle tests
 # =============================================================================
 if should_run test; then
   run_gate test required "Every crate's oracle tests (unit + integration + doc)" \
@@ -233,7 +252,7 @@ if should_run test; then
         if ($i ~ /^ignored/) g+=$(i-1); } }
       END { printf "%d %d %d", p, f, g }' "$TLOG")
     T_GROUPS=$(grep -c 'test result:' "$TLOG" 2>/dev/null || echo 0)
-    info "    → ${T_PASS:-0} passed, ${T_FAIL:-0} failed, ${T_IGN:-0} ignored across ${T_GROUPS:-0} test groups"
+    info "    -> ${T_PASS:-0} passed, ${T_FAIL:-0} failed, ${T_IGN:-0} ignored across ${T_GROUPS:-0} test groups"
     echo "tests_passed=${T_PASS:-0}"   >>"$SUMMARY"
     echo "tests_failed=${T_FAIL:-0}"   >>"$SUMMARY"
     echo "tests_ignored=${T_IGN:-0}"   >>"$SUMMARY"
@@ -242,7 +261,7 @@ if should_run test; then
 fi
 
 # =============================================================================
-#  GATE 5 — Optional nightly portable-simd path
+#  GATE 5 -- Optional nightly portable-simd path
 # =============================================================================
 if should_run simd; then
   run_gate simd required "Portable-SIMD kernels (nightly feature) test" \
@@ -250,17 +269,17 @@ if should_run simd; then
 fi
 
 # =============================================================================
-#  GATE 6 — Cross-process determinism / reproducibility
+#  GATE 6 -- Cross-process determinism / reproducibility
 #  Numeric determinism is pinned by the workspace's golden / fixed-seed oracle
 #  tests. We re-run that determinism-tagged subset in TWO independent processes
-#  and require an identical set of green results — proving a computation is
+#  and require an identical set of green results -- proving a computation is
 #  bit-reproducible across process invocations, not merely within one.
 # =============================================================================
 if should_run determinism; then
   hr
-  printf '  %s▶ [determinism]%s Cross-process reproducibility of the oracle suite\n' "$C_BOLD" "$C_RESET"
+  printf '  %s> [determinism]%s Cross-process reproducibility of the oracle suite\n' "$C_BOLD" "$C_RESET"
   DET_FILTERS="deterministic determinism reproducib bit_exact bit_deterministic bit_reproducible golden"
-  printf '    %s$ cargo test --workspace -- %s   (×2 processes, compared)%s\n' "$C_DIM" "$DET_FILTERS" "$C_RESET"
+  printf '    %s$ cargo test --workspace -- %s   (x2 processes, compared)%s\n' "$C_DIM" "$DET_FILTERS" "$C_RESET"
   d_start=$(date +%s)
   cargo test --workspace --no-fail-fast -- $DET_FILTERS >"$LOG_DIR/determinism-run1.log" 2>&1; drc1=$?
   cargo test --workspace --no-fail-fast -- $DET_FILTERS >"$LOG_DIR/determinism-run2.log" 2>&1; drc2=$?
@@ -272,24 +291,24 @@ if should_run determinism; then
   DET_N=$(wc -l <"$LOG_DIR/determinism-sig1.txt" | tr -d ' ')
   if [[ $drc1 -ne 0 || $drc2 -ne 0 ]]; then
     record determinism required FAIL "$d_dur" "a determinism run did not pass (rc=$drc1/$drc2)"
-    bad "[determinism] FAIL — oracle re-run did not stay green (rc=$drc1/$drc2)"
+    bad "[determinism] FAIL -- oracle re-run did not stay green (rc=$drc1/$drc2)"
     tail -n 18 "$LOG_DIR/determinism-run1.log" | sed 's/^/        /'
   elif [[ "${DET_N:-0}" -lt 1 ]]; then
     record determinism required FAIL "$d_dur" "no determinism-tagged tests matched"
-    bad "[determinism] FAIL — filter matched zero tests (cannot verify reproducibility)"
+    bad "[determinism] FAIL -- filter matched zero tests (cannot verify reproducibility)"
   elif ! diff -q "$LOG_DIR/determinism-sig1.txt" "$LOG_DIR/determinism-sig2.txt" >/dev/null; then
     record determinism required FAIL "$d_dur" "the two process runs disagreed"
-    bad "[determinism] FAIL — runs diverged across processes:"
+    bad "[determinism] FAIL -- runs diverged across processes:"
     diff "$LOG_DIR/determinism-sig1.txt" "$LOG_DIR/determinism-sig2.txt" | head -20 | sed 's/^/        /'
   else
     record determinism required PASS "$d_dur" "$DET_N tests reproduced bit-for-bit across 2 processes"
-    ok "[determinism] PASS (${d_dur}s) — $DET_N determinism oracles identical across 2 independent processes"
+    ok "[determinism] PASS (${d_dur}s) -- $DET_N determinism oracles identical across 2 independent processes"
     echo "determinism_tests=$DET_N" >>"$SUMMARY"
   fi
 fi
 
 # =============================================================================
-#  GATE 7 — Documentation builds warning-free
+#  GATE 7 -- Documentation builds warning-free
 # =============================================================================
 if should_run doc; then
   run_gate doc required "Public docs build with no warnings (rustdoc -D warnings)" \
@@ -297,17 +316,28 @@ if should_run doc; then
 fi
 
 # =============================================================================
-#  GATE 8 — Cross-architecture compilation (aarch64 NEON/SVE paths)
+#  GATE 8 -- Cross-architecture compilation (aarch64 NEON/SVE paths)
 # =============================================================================
 if should_run aarch64; then
   if rustc --print target-list 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
     if ! rustup target list --installed 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
-      info "    installing aarch64-unknown-linux-gnu std (one-off)…"
+      info "    installing aarch64-unknown-linux-gnu std (one-off)..."
       rustup target add aarch64-unknown-linux-gnu >"$LOG_DIR/aarch64-target-add.log" 2>&1 || true
     fi
     if rustup target list --installed 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
+      # The aarch64 check builds a whole second-architecture tree (~10 GB). The
+      # host build/test/doc gates are finished by now, so on a tight disk reclaim
+      # the host debug tree first to make room (optional later gates rebuild it).
+      A64_FREE_GB=$(( $(df -P "$ROOT" | awk 'NR==2{print $4}') / 1024 / 1024 ))
+      if [[ "$A64_FREE_GB" -lt 14 && -d "$ROOT/target/debug" ]]; then
+        warn "    reclaiming host target/debug (${A64_FREE_GB} GB free) to fit the aarch64 tree"
+        rm -rf "$ROOT/target/debug" 2>/dev/null || true
+      fi
       run_gate aarch64 required "Cross-check NEON/SVE paths (aarch64)" \
         "cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu"
+      # Reclaim the second-architecture tree immediately -- it is ~10 GB and not
+      # needed once the check passes.
+      rm -rf "$ROOT/target/aarch64-unknown-linux-gnu" 2>/dev/null || true
     else
       skip_gate aarch64 required "aarch64 std unavailable (offline rustup?)"
     fi
@@ -317,7 +347,7 @@ if should_run aarch64; then
 fi
 
 # =============================================================================
-#  GATE 9 — License & security audit
+#  GATE 9 -- License & security audit
 # =============================================================================
 if should_run deny; then
   if cargo deny --version >/dev/null 2>&1; then
@@ -329,7 +359,7 @@ if should_run deny; then
 fi
 
 # =============================================================================
-#  OPTIONAL — scirust-gpu wgpu feature lint (compiles, no adapter needed)
+#  OPTIONAL -- scirust-gpu wgpu feature lint (compiles, no adapter needed)
 # =============================================================================
 if should_run clippy-gpu; then
   run_gate clippy-gpu optional "scirust-gpu wgpu-feature lints (-D warnings)" \
@@ -337,7 +367,7 @@ if should_run clippy-gpu; then
 fi
 
 # =============================================================================
-#  OPTIONAL — real wgpu compute path on a Vulkan adapter
+#  OPTIONAL -- real wgpu compute path on a Vulkan adapter
 # =============================================================================
 if should_run gpu; then
   if command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo >/dev/null 2>&1; then
@@ -349,7 +379,7 @@ if should_run gpu; then
 fi
 
 # =============================================================================
-#  OPTIONAL — stable toolchain build + test (CI's industrial gate)
+#  OPTIONAL -- stable toolchain build + test (CI's industrial gate)
 # =============================================================================
 if should_run stable; then
   if rustup toolchain list 2>/dev/null | grep -q '^stable'; then
@@ -361,13 +391,13 @@ if should_run stable; then
 fi
 
 # =============================================================================
-#  OPTIONAL — smoke-run the self-contained example binaries (--with-examples)
+#  OPTIONAL -- smoke-run the self-contained example binaries (--with-examples)
 #  Data-dependent demos (MNIST/CIFAR/sentiment) are skipped unless their data
 #  is present, so this never produces a false failure.
 # =============================================================================
 if [[ $WITH_EXAMPLES -eq 1 ]] && should_run examples; then
   hr
-  printf '  %s▶ [examples]%s Smoke-run data-free example binaries\n' "$C_BOLD" "$C_RESET"
+  printf '  %s> [examples]%s Smoke-run data-free example binaries\n' "$C_BOLD" "$C_RESET"
   ex_log="$LOG_DIR/examples.log"; : >"$ex_log"
   ex_fail=0; ex_ran=0
   # name|package|needs_data
@@ -379,7 +409,7 @@ if [[ $WITH_EXAMPLES -eq 1 ]] && should_run examples; then
   )
   for spec in "${ex_list[@]}"; do
     IFS='|' read -r nm pkg _ <<<"$spec"
-    printf '    • %s … ' "$nm"
+    printf '    * %s ... ' "$nm"
     if timeout 300 cargo run -q -p "$pkg" >>"$ex_log" 2>&1; then
       printf '%sok%s\n' "$C_GRN" "$C_RESET"; ex_ran=$((ex_ran+1))
     else
@@ -388,10 +418,10 @@ if [[ $WITH_EXAMPLES -eq 1 ]] && should_run examples; then
   done
   if [[ $ex_fail -eq 0 ]]; then
     record examples optional PASS 0 "$ex_ran example binaries ran clean"
-    ok "[examples] PASS — $ex_ran example binaries ran clean"
+    ok "[examples] PASS -- $ex_ran example binaries ran clean"
   else
     record examples optional FAIL 0 "$ex_fail example binaries failed (see examples.log)"
-    bad "[examples] FAIL — $ex_fail example binaries failed"
+    bad "[examples] FAIL -- $ex_fail example binaries failed"
   fi
 fi
 
@@ -419,7 +449,7 @@ for i in "${!GATE_ID[@]}"; do
     SKIP) col="$C_YEL"; [[ "$req" == required ]] && req_skip=$((req_skip+1)) ;;
     *)    col="$C_RESET" ;;
   esac
-  detail="$note"; [[ "$st" == PASS ]] && detail="${dur}s${note:+ — $note}"
+  detail="$note"; [[ "$st" == PASS ]] && detail="${dur}s${note:+ -- $note}"
   printf '  %-13s %-8s %s%-8s%s %s\n' "$id" "$req" "$col" "$st" "$C_RESET" "$detail"
 done
 
@@ -436,18 +466,18 @@ info "Evidence  : $LOG_DIR"
   echo "timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   echo "packages=$PKG_COUNT"
   for i in "${!GATE_ID[@]}"; do
-    echo "gate.${GATE_ID[$i]}=${GATE_STATUS[$i]} (${GATE_REQ[$i]}, ${GATE_DUR[$i]}s)${GATE_NOTE[$i]:+ — ${GATE_NOTE[$i]}}"
+    echo "gate.${GATE_ID[$i]}=${GATE_STATUS[$i]} (${GATE_REQ[$i]}, ${GATE_DUR[$i]}s)${GATE_NOTE[$i]:+ -- ${GATE_NOTE[$i]}}"
   done
 } >>"$SUMMARY"
 
 echo
 if [[ $req_fail -eq 0 && $req_skip -eq 0 ]]; then
-  printf '%s%s  VERDICT: PASS  %s — all required gates green (%d/%d gates passed).\n' "$C_BOLD" "$C_GRN" "$C_RESET" "$n_pass" "$n_total"
+  printf '%s%s  VERDICT: PASS  %s -- all required gates green (%d/%d gates passed).\n' "$C_BOLD" "$C_GRN" "$C_RESET" "$n_pass" "$n_total"
   echo "verdict=PASS" >>"$SUMMARY"; exit 0
 elif [[ $req_fail -eq 0 && $req_skip -gt 0 ]]; then
-  printf '%s%s  VERDICT: PASS (with gaps)  %s — %d required gate(s) skipped for missing prerequisites; coverage incomplete.\n' "$C_BOLD" "$C_YEL" "$C_RESET" "$req_skip"
+  printf '%s%s  VERDICT: PASS (with gaps)  %s -- %d required gate(s) skipped for missing prerequisites; coverage incomplete.\n' "$C_BOLD" "$C_YEL" "$C_RESET" "$req_skip"
   echo "verdict=PASS_WITH_GAPS" >>"$SUMMARY"; exit 0
 else
-  printf '%s%s  VERDICT: FAIL  %s — %d required gate(s) failed. See the evidence bundle.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$req_fail"
+  printf '%s%s  VERDICT: FAIL  %s -- %d required gate(s) failed. See the evidence bundle.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$req_fail"
   echo "verdict=FAIL" >>"$SUMMARY"; exit 1
 fi
