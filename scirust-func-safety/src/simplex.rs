@@ -99,6 +99,23 @@ impl SimplexMonitor {
         }
     }
 
+    /// Like [`decide`](Self::decide) but using an alternative **zonotope**
+    /// (AI²/DeepZ) certification that tracks inter-neuron correlations. It is
+    /// sound by construction; whether it is tighter than plain IBP is
+    /// network-dependent, so it is offered as a second sound certifier rather
+    /// than a strict improvement.
+    pub fn decide_zonotope(&self, x: &[f32], eps: f32) -> SafetyDecision {
+        let certified = self.net.certify_zonotope(&Interval::around(x, eps));
+        if self.envelope_contains(&certified)
+        {
+            SafetyDecision::Trusted(self.net.forward(x))
+        }
+        else
+        {
+            SafetyDecision::Fallback(self.fallback.clone())
+        }
+    }
+
     /// The action actually applied for `x` under uncertainty `eps` (always
     /// within the safe envelope).
     pub fn action(&self, x: &[f32], eps: f32) -> Vec<f32> {
@@ -187,6 +204,42 @@ mod tests {
                 b += eps / 8.0;
             }
             a += eps / 8.0;
+        }
+    }
+
+    #[test]
+    fn zonotope_certification_is_sound_and_action_is_safe() {
+        let m = monitor();
+        let net = demo_net();
+        let eps = 0.5;
+        let mut x0 = -1.0;
+        while x0 <= 5.0
+        {
+            let mut x1 = -1.0;
+            while x1 <= 5.0
+            {
+                let dz = m.decide_zonotope(&[x0, x1], eps);
+                // Applied action is always in-envelope.
+                assert!(dz.output()[0] >= -0.1 && dz.output()[0] <= 2.0);
+                if dz.is_trusted()
+                {
+                    // Soundness: every point of the input box is in-envelope.
+                    let mut a = x0 - eps;
+                    while a <= x0 + eps
+                    {
+                        let mut b = x1 - eps;
+                        while b <= x1 + eps
+                        {
+                            let y = net.forward(&[a, b]);
+                            assert!(y[0] >= -0.1 && y[0] <= 2.0, "zonotope unsound at ({a},{b})");
+                            b += eps / 4.0;
+                        }
+                        a += eps / 4.0;
+                    }
+                }
+                x1 += 0.5;
+            }
+            x0 += 0.5;
         }
     }
 }

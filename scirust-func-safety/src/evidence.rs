@@ -10,6 +10,7 @@
 //! verifiable-inference argument for soundness.
 
 use crate::asil::AsilLevel;
+use serde::{Deserialize, Serialize};
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
@@ -55,7 +56,7 @@ fn compute_entry(r: &EvidenceRecord) -> u64 {
 }
 
 /// One inference's evidence, linked to the previous entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvidenceRecord {
     /// Position in the chain.
     pub seq: u64,
@@ -94,7 +95,7 @@ pub fn verify_chain(records: &[EvidenceRecord]) -> bool {
 }
 
 /// An append-only, tamper-evident evidence dossier.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EvidencePack {
     records: Vec<EvidenceRecord>,
 }
@@ -153,6 +154,18 @@ impl EvidencePack {
     /// Verify the whole dossier.
     pub fn verify(&self) -> bool {
         verify_chain(&self.records)
+    }
+
+    /// Serialize the dossier to JSON (a portable, archivable certification
+    /// artifact).
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| e.to_string())
+    }
+
+    /// Parse a dossier from JSON. Call [`verify`](Self::verify) on the result —
+    /// a forged JSON is detected exactly as an in-memory tamper would be.
+    pub fn from_json(s: &str) -> Result<Self, String> {
+        serde_json::from_str(s).map_err(|e| e.to_string())
     }
 }
 
@@ -231,5 +244,24 @@ mod tests {
         // Different second record -> different root.
         p.record(0x1111, 1, 2, AsilLevel::C, true);
         assert_ne!(a, p.root());
+    }
+
+    #[test]
+    fn json_round_trips_and_still_verifies() {
+        let pack = build();
+        let json = pack.to_json().expect("serialize");
+        let back = EvidencePack::from_json(&json).expect("parse");
+        assert_eq!(back.len(), pack.len());
+        assert_eq!(back.root(), pack.root());
+        assert!(back.verify(), "round-tripped dossier must verify");
+
+        // A forged JSON (an output fingerprint edited) fails verification.
+        let forged = json.replacen(
+            &pack.records()[0].output_hash.to_string(),
+            &(pack.records()[0].output_hash ^ 1).to_string(),
+            1,
+        );
+        let bad = EvidencePack::from_json(&forged).expect("parse");
+        assert!(!bad.verify(), "forged dossier must not verify");
     }
 }
