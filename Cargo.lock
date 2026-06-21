@@ -2369,12 +2369,16 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "scirust-core",
+ "scirust-estimation",
  "scirust-func-safety",
+ "scirust-ids",
  "scirust-integration",
  "scirust-mqtt",
+ "scirust-nav",
  "scirust-opcua",
  "scirust-pdm",
  "scirust-signal",
+ "scirust-water",
  "serde",
  "serde_json",
 ]

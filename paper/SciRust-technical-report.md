@@ -645,7 +645,53 @@ A dedicated command-line tool streamlines industrial integration:
 
 The `industrial_monitor` example ties the full chain together: OPC-UA → Signal Processing → Event Detection → Health Index → RUL Estimation → CUSUM → MQTT Publishing → Audit Log → Functional Safety → MLOps Drift detection.
 
-With the new industrial crates, SciRust passes **1047 tests** across the workspace (0 failures).
+### 15.1 Extended verticals: estimation, navigation, water, OT security, GMP
+
+The monitoring stack was broadened into a set of deterministic, oracle-tested
+verticals, each reachable from the `scirust-industrial` CLI:
+
+- **State estimation** (`scirust-estimation`) — beyond the classical Kalman filter:
+  an **Interacting Multiple Models** filter (a Markov-switching bank that moves
+  probability mass onto a maneuver model when the target maneuvers) and a
+  **Bierman–Thornton UD square-root filter** that carries the covariance in factored
+  form `P = U·D·Uᵀ`, so it stays positive-semidefinite by construction. The UD form
+  agrees with a textbook Kalman filter to ~1e-15 in state while keeping every
+  variance non-negative under near-singular updates (`track-imm`, `track-ud`).
+- **Navigation** (`scirust-nav`) — loosely-coupled **GNSS/INS fusion** (the IMU
+  drives a high-rate prediction; intermittent GNSS fixes correct it, the covariance
+  growing during an outage and shrinking on re-acquisition) and **TDOA**
+  multilateration (Gauss–Newton on range-difference residuals), which also locates
+  partial-discharge / acoustic-emission sources (`nav-fusion`, `nav-tdoa`).
+- **Water networks** (`scirust-water`) — acoustic **leak correlation** (the leak
+  position from the cross-correlation peak lag) and water-hammer physics (Joukowsky
+  surge, Korteweg wave speed) (`water-leak`, `water-surge`).
+- **OT cybersecurity** (`scirust-ids`) — **firmware attestation** and **PLC ladder
+  integrity** on a tamper-evident hash chain, including a write-set audit that flags
+  the Stuxnet pattern — a rung driving a safety-critical output the golden program
+  never wrote (`ot-firmware`, `ot-plc`).
+- **GMP / 21 CFR Part 11** (`scirust-func-safety`) — a **golden-batch comparator**
+  that DTW-aligns a candidate batch to the golden reference (absorbing a phase lag a
+  pointwise check would fail), checks per-variable tolerance, and writes the
+  RELEASE/REJECT verdict into the existing hash-chained audit log (`golden-batch`).
+
+### 15.2 One-command acceptance and on-device validation
+
+The whole platform is certified by a single executable protocol
+(`scripts/test-protocol.sh`, documented in `docs/TEST_PROTOCOL.md`): it runs every
+CI gate, **every crate's oracle tests**, a two-process determinism re-run, the
+aarch64 cross-check, warning-free docs and the supply-chain audit, then emits a
+PASS/FAIL verdict and a timestamped evidence bundle. A Jetson-native variant
+(`scripts/test-protocol-jetson.sh`) runs it **on the device**, where the build and
+test gates *execute* the NEON int8 / aarch64 SIMD kernels rather than merely
+cross-compiling them.
+
+The current workspace spans **89 crates / ~158 000 lines of Rust** with **~1 900
+test functions**. The acceptance protocol passes **12/12 gates on x86_64**
+(1 884 tests, 0 failures) and **10/10 gates natively on an NVIDIA Jetson AGX Thor**
+(aarch64; 1 886 tests, 0 failures; the portable wgpu GEMM validated against the CPU
+oracle on the device's Vulkan adapter; 92–93 determinism oracles reproduced
+bit-for-bit across two independent processes). The same deterministic core therefore
+certifies green from cloud x86 to embedded ARM.
 
 ## 16. Conclusion
 

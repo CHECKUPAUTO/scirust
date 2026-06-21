@@ -47,7 +47,8 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
 - **Symbolic regression** — a hybrid genetic-gradient engine recovers closed-form laws (structure and constants) from data, fitting constants with the framework's own symbolic differentiation.
 - **Evolutionary optimization** (`scirust-evo`) — NSGA-II recovers the ZDT1 Pareto front to within ~1e-3; the simplified single-objective optimizers are honest about their limits (see the report).
-- **Industrial & automotive monitoring** (`scirust-signal`, `scirust-opcua`, `scirust-mqtt`, `scirust-pdm`, `scirust-mlops`, `scirust-func-safety`, `scirust-integration`) — signal processing (FFT, windows, bearing BPFO/BPFI/BSF diagnostics, order analysis), OPC-UA PLC connectivity with 8 simulated sensors, MQTT SparkPlug B publishing, predictive maintenance (Health Index, RUL, CUSUM, 4 fault detectors), industrial MLOps (drift, shadow deploy, signed OTA), ISO 26262 functional safety (ASIL A-D, fault injection, degraded mode, hash-chained audit log), integration kit (unified Backend/Pipeline/Config/templates), and a dedicated `scirust-industrial` CLI (discover, test, gen-config, scaffold, run, doctor).
+- **Industrial & automotive monitoring** (`scirust-signal`, `scirust-opcua`, `scirust-mqtt`, `scirust-pdm`, `scirust-mlops`, `scirust-func-safety`, `scirust-integration`) — signal processing (FFT, windows, bearing BPFO/BPFI/BSF diagnostics, order analysis), OPC-UA PLC connectivity with 8 simulated sensors, MQTT SparkPlug B publishing, predictive maintenance (Health Index, RUL, CUSUM, 4 fault detectors), industrial MLOps (drift, shadow deploy, signed OTA), ISO 26262 functional safety (ASIL A-D, fault injection, degraded mode, hash-chained audit log), integration kit (unified Backend/Pipeline/Config/templates), and a dedicated `scirust-industrial` CLI (discover, test, gen-config, scaffold, run, doctor — plus the vertical demos below).
+- **State estimation, navigation, water & OT security** (`scirust-estimation`, `scirust-nav`, `scirust-water`, `scirust-ids`, `scirust-func-safety`) — Kalman / IMM / **UD square-root** filters (covariance positive-semidefinite by construction), **GNSS/INS fusion** and **TDOA** multilateration, acoustic **leak correlation** and water-hammer physics (Joukowsky/Korteweg), OT **firmware attestation** and **PLC ladder integrity** (Stuxnet write-set detection) on a tamper-evident hash chain, and a **GMP golden-batch** comparator (DTW alignment + hash-chained 21 CFR Part 11 audit). All reachable from the `scirust-industrial` CLI: `nav-tdoa`, `nav-fusion`, `track-imm`, `track-ud`, `water-leak`, `water-surge`, `ot-firmware`, `ot-plc`, `golden-batch`. Validated on x86 and natively on a **Jetson AGX Thor** via [`docs/TEST_PROTOCOL.md`](docs/TEST_PROTOCOL.md).
 - **Pattern detection** (`scirust-vision`, `scirust-audio`, `scirust-graph`, `scirust-sequential`, `scirust-multivariate`, `scirust-unsupervised`, `scirust-seasonal`, `scirust-nlp-advanced`) — computer vision (CNN, HOG, LBP, Canny, Otsu, NMS), audio (MFCC, chroma, pitch YIN, onset detection), graph patterns (subgraph isomorphism, motif discovery, community detection, betweenness), sequential (HMM, CRF, DTW, KMP/Boyer-Moore), multivariate (PCA, ICA, K-Means++, MDS, CCA), unsupervised (autoencoder, isolation forest, DBSCAN, LOF, GMM), seasonal (STL, ACF/PACF, Mann-Kendall, CUSUM), NLP (NER, LDA, TextRank, MinHash, NaiveBayes).
 - **Algorithm creation** (`scirust-automl`, `scirust-synthesis`, `scirust-algogen`, `scirust-codetrans`, `scirust-rl-algo`, `scirust-scaffold`) — AutoML (Bayesian optimization, GP surrogate, model selection, ensembles), program synthesis (30+ ops, sketch-based, bottom-up/top-down/GP/beam search), algorithm generation (sort/search/graph/DP/DaC, complexity analysis), code transformation (AST, pattern matching, 20 optimization rules, refactoring, Rust→Python/C transpilation), RL-based discovery (REINFORCE, Actor-Critic, Q-Learning, MCTS, meta-learning), scaffolding (DSL, code gen, 16 templates, docs).
 
@@ -95,6 +96,17 @@ scirust-industrial gen-config --template automotive --stations 3
 scirust-industrial scaffold --name line3-monitor --template automotive
 scirust-industrial run --config config.json --cycles 100
 scirust-industrial doctor --config config.json           # diagnose integration issues
+
+# Vertical demos (deterministic, real crate APIs)
+scirust-industrial nav-tdoa                 # TDOA: locate an emitter from arrival-time differences
+scirust-industrial nav-fusion --outage 10   # GNSS/INS fusion through a 10-step GNSS outage
+scirust-industrial track-imm                # IMM filter swings onto the maneuver model
+scirust-industrial track-ud                 # UD square-root Kalman ≡ textbook Kalman, covariance PSD
+scirust-industrial water-leak               # acoustic leak correlation (locate a known leak)
+scirust-industrial water-surge              # Joukowsky surge + Korteweg wave speed
+scirust-industrial ot-firmware              # firmware attestation: clean vs tampered image
+scirust-industrial ot-plc                   # PLC integrity + Stuxnet critical-write detection
+scirust-industrial golden-batch             # GMP golden-batch comparator (DTW + audit chain)
 ```
 
 `scirust quickstart` prints a decreasing loss and reaches 4/4 on a
@@ -175,6 +187,7 @@ examples/              Quickstart, MNIST training, industrial_monitor, benchmark
 - [`docs/GPU.md`](docs/GPU.md) — Portable wgpu compute (status, testing, roadmap)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — How the autograd tape works
 - [`docs/REFERENCE.md`](docs/REFERENCE.md) — Exhaustive command/binary/API reference
+- [`docs/TEST_PROTOCOL.md`](docs/TEST_PROTOCOL.md) — Functional acceptance protocol: `scripts/test-protocol.sh` runs every gate, every crate's oracle tests, and a cross-process determinism check in one command
 - [`docs/sbom/`](docs/sbom/) — CycloneDX SBOM (reproducible, regenerated in CI & attached to releases)
 - [`docs/GROWTH_PLAN.md`](docs/GROWTH_PLAN.md) — Vision, non-negotiable fundamentals, and the ambitious growth plan
 - [`docs/RELEASING.md`](docs/RELEASING.md) — Release process & branch-protection runbook

@@ -4,7 +4,7 @@ version = "0.14.0"
 edition = "2021"
 publish = false
 rust-version = "1.85"
-description = "SciRust — Industrial-grade deep learning framework in pure Rust"
+description = "SciRust — pure-Rust deterministic deep-learning & scientific-computing platform with certifiable industrial verticals (estimation, navigation, water, OT security, functional safety), validated from cloud x86 to embedded ARM (Jetson)"
 license-file = "LICENSE.md"
 repository = "https://github.com/CHECKUPAUTO/scirust"
 
