@@ -13,6 +13,7 @@ pub mod quickstart;
 pub mod reasoning;
 pub mod symbolic;
 pub mod synergy;
+pub mod trader;
 
 /// One registered command for the help listing.
 struct Command {
@@ -328,6 +329,14 @@ const GROUPS: &[(&str, &[Command])] = &[
         ],
     ),
     (
+        "CRYPTO TRADING (AUDITABLE)",
+        &[Command {
+            name: "trader",
+            args: "run|predict|audit|info [args]",
+            about: "Auditable crypto-trading pipeline: certified predictions, LLM narration, proof-sealed decisions.",
+        }],
+    ),
+    (
         "PATTERN DETECTION CRATES",
         &[
             Command {
@@ -541,6 +550,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("rwkv") => nlp::run_rwkv(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
+        Some("trader") => trader::run(rest),
         Some(other) =>
         {
             eprintln!("unknown command: `{other}`\n");
@@ -659,5 +669,22 @@ mod tests {
         assert_eq!(run(&s(&["verify"])), 2);
         assert_eq!(run(&s(&["diff"])), 2);
         assert_eq!(run(&s(&["eval"])), 2);
+    }
+
+    #[test]
+    fn trader_subcommands_work() {
+        assert_eq!(run(&s(&["trader", "info"])), 0);
+        assert_eq!(
+            run(&s(&[
+                "trader", "run", "--steps", "2", "--output",
+                "/tmp/scirust_cli_trader_test.json"
+            ])),
+            0
+        );
+        assert_eq!(
+            run(&s(&["trader", "audit", "/tmp/scirust_cli_trader_test.json"])),
+            0
+        );
+        assert_eq!(run(&s(&["trader", "predict"])), 0);
     }
 }

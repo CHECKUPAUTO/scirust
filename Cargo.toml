@@ -84,6 +84,7 @@ members = [
     "scirust-som/crates/visualizer",
     "examples/industrial_monitor",
     "scirust-signal",
+    "scirust-trader",
     "scirust-opcua",
     "scirust-mqtt",
     "scirust-pdm",
@@ -131,3 +132,4 @@ exclude = [
     "scirust-burn-bridge",
 ]
 resolver = "2"
+license = "LicenseRef-CheckupAuto-Dual"
