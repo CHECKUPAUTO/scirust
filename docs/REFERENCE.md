@@ -124,6 +124,28 @@ cargo install --path scirust-industrial  # fournit le binaire `scirust-industria
 Templates : `minimal`, `automotive`, `bearing`, `pdm`.
 Voir [`docs/AUTOMOTIVE_ROADMAP.md`](AUTOMOTIVE_ROADMAP.md) pour le guide complet.
 
+**Démos des verticales** (scénarios déterministes exécutés contre l'API réelle des
+crates — sans stub) :
+
+| Commande | Effet | Adossé à |
+|----------|-------|----------|
+| `nav-tdoa [--speed M]` | Multilatération TDOA : localise un émetteur depuis les différences de temps d'arrivée | `scirust-nav` |
+| `nav-fusion [--steps N] [--outage K]` | Fusion GNSS/INS avec coupure GNSS ; montre la croissance puis le rappel de l'incertitude | `scirust-nav` |
+| `track-imm [--steps N]` | Filtre IMM : bascule sur le modèle de manœuvre lors d'une manœuvre | `scirust-estimation` |
+| `track-ud [--steps N]` | Filtre de Kalman racine-carrée UD vs Kalman classique (accord + covariance PSD) | `scirust-estimation` |
+| `water-leak [--pipe-length M] [--wave-speed M] [--sample-rate Hz] [--leak-at M]` | Localisation acoustique de fuite par corrélation croisée | `scirust-water` |
+| `water-surge [--rho] [--wave-speed] [--delta-v] [--bulk] [--e-pipe] [--diameter] [--wall]` | Coup de bélier : surpression de Joukowsky + vitesse d'onde de Korteweg | `scirust-water` |
+| `ot-firmware [--size N] [--block N] [--tamper-block I]` | Attestation de firmware : image saine vs altérée | `scirust-ids` |
+| `ot-plc` | Intégrité d'automate PLC + détection d'écriture critique (motif Stuxnet) | `scirust-ids` |
+| `golden-batch [--lag K]` | Comparateur de lot « golden » GMP (alignement DTW + audit chaîné 21 CFR Part 11) | `scirust-func-safety` |
+
+Exemple :
+```bash
+scirust-industrial nav-tdoa                 # localise un émetteur à ~1e-14 m du vrai point
+scirust-industrial ot-plc                   # détecte l'écriture Stuxnet sur la sortie critique #99
+scirust-industrial golden-batch --lag 10    # RELEASE/REJECT avec journal d'audit intègre
+```
+
 Les binaires ci-dessous restent disponibles individuellement ; `scirust`
 ne fait que les regrouper derrière une interface unique et découvrable.
 

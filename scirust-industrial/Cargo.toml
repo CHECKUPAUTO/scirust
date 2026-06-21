@@ -17,6 +17,10 @@ scirust-mqtt = { path = "../scirust-mqtt" }
 scirust-signal = { path = "../scirust-signal" }
 scirust-pdm = { path = "../scirust-pdm" }
 scirust-func-safety = { path = "../scirust-func-safety" }
+scirust-estimation = { path = "../scirust-estimation" }
+scirust-nav = { path = "../scirust-nav" }
+scirust-water = { path = "../scirust-water" }
+scirust-ids = { path = "../scirust-ids" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
