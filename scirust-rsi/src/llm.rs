@@ -161,6 +161,151 @@ impl LlmRefine {
     }
 }
 
+// ===========================================================================
+// Real Claude API generator (optional `anthropic` feature)
+// ===========================================================================
+
+/// A [`Generator`] backed by Anthropic's Claude Messages API.
+///
+/// Enabled by the `anthropic` cargo feature; off by default so the core engine
+/// stays dependency-light and fully offline. Uses blocking HTTP (`ureq`); there
+/// is no official Rust SDK, so this calls the REST endpoint directly.
+///
+/// ```no_run
+/// # #[cfg(feature = "anthropic")] {
+/// use scirust_rsi::llm::{LlmRefine, Critic, anthropic::ClaudeGenerator};
+/// use scirust_rsi::Guard;
+///
+/// struct Tests;
+/// impl Critic for Tests {
+///     fn score(&mut self, candidate: &str) -> f64 { run_tests(candidate) }
+/// }
+///
+/// // Reads ANTHROPIC_API_KEY from the environment; default model claude-opus-4-8.
+/// let mut gen = ClaudeGenerator::from_env().unwrap().max_tokens(2048);
+/// let (best, fit, report) = LlmRefine::new(1)
+///     .samples(4)
+///     .task("Improve this Rust function so all tests pass.")
+///     .run("// seed\n", &mut gen, &mut Tests, &Guard::new().max_iters(8).target(1.0));
+/// # let _ = (best, fit, report);
+/// # }
+/// # fn run_tests(_: &str) -> f64 { 1.0 }
+/// ```
+#[cfg(feature = "anthropic")]
+pub mod anthropic {
+    use super::Generator;
+    use rand::rngs::StdRng;
+
+    /// Anthropic Messages API endpoint.
+    const API_URL: &str = "https://api.anthropic.com/v1/messages";
+    /// Pinned API version header value.
+    const API_VERSION: &str = "2023-06-01";
+    /// Default model — the latest, most capable Claude model.
+    pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
+
+    /// A [`Generator`] that calls the Claude Messages API.
+    #[derive(Debug, Clone)]
+    pub struct ClaudeGenerator {
+        api_key: String,
+        model: String,
+        max_tokens: u32,
+        system: Option<String>,
+        timeout_secs: u64,
+    }
+
+    impl ClaudeGenerator {
+        /// Build a generator with an explicit API key. Defaults: model
+        /// [`DEFAULT_MODEL`], 1024 max tokens, 120s request timeout.
+        pub fn new(api_key: impl Into<String>) -> Self {
+            Self {
+                api_key: api_key.into(),
+                model: DEFAULT_MODEL.to_string(),
+                max_tokens: 1024,
+                system: None,
+                timeout_secs: 120,
+            }
+        }
+
+        /// Build a generator reading the key from `ANTHROPIC_API_KEY`. Returns
+        /// `Err` with the variable name if it is unset.
+        pub fn from_env() -> Result<Self, String> {
+            let key = std::env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| "ANTHROPIC_API_KEY is not set".to_string())?;
+            Ok(Self::new(key))
+        }
+
+        /// Select the model (e.g. `"claude-sonnet-4-6"`). Defaults to [`DEFAULT_MODEL`].
+        pub fn model(mut self, model: impl Into<String>) -> Self {
+            self.model = model.into();
+            self
+        }
+
+        /// Cap output tokens per completion.
+        pub fn max_tokens(mut self, n: u32) -> Self {
+            self.max_tokens = n.max(1);
+            self
+        }
+
+        /// Set a system prompt applied to every request.
+        pub fn system(mut self, system: impl Into<String>) -> Self {
+            self.system = Some(system.into());
+            self
+        }
+
+        /// Per-request timeout in seconds.
+        pub fn timeout_secs(mut self, secs: u64) -> Self {
+            self.timeout_secs = secs.max(1);
+            self
+        }
+
+        /// One Messages API call. Returns the first text block, or `None` on a
+        /// transport error or a refusal (empty content).
+        fn call(&self, prompt: &str) -> Option<String> {
+            let mut body = serde_json::json!({
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "messages": [{ "role": "user", "content": prompt }],
+            });
+            // Note: temperature / top_p / thinking are intentionally omitted —
+            // the latest Claude models reject sampling params (400).
+            if let Some(sys) = &self.system
+            {
+                body["system"] = serde_json::Value::String(sys.clone());
+            }
+
+            let agent = ureq::AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(self.timeout_secs))
+                .build();
+
+            let resp = agent
+                .post(API_URL)
+                .set("x-api-key", &self.api_key)
+                .set("anthropic-version", API_VERSION)
+                .set("content-type", "application/json")
+                .send_json(body)
+                .ok()?;
+
+            let json: serde_json::Value = resp.into_json().ok()?;
+            // content is an array of blocks; return the first text block.
+            json.get("content")?
+                .as_array()?
+                .iter()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .and_then(|b| b.get("text"))
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        }
+    }
+
+    impl Generator for ClaudeGenerator {
+        fn propose(&mut self, prompt: &str, n: usize, _rng: &mut StdRng) -> Vec<String> {
+            // One call per requested sample. Failed/refused calls are skipped, so
+            // the loop simply records no improvement that round (never panics).
+            (0..n).filter_map(|_| self.call(prompt)).collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

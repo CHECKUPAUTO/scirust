@@ -50,6 +50,21 @@ For the LLM path, implement `Generator::propose` (one call to your model) and
 best-of-`n` self-refine loop. See `src/llm.rs` and `examples/llm_refine.rs`.
 Every `Guard` also accepts a wall-clock `time_budget` (`Guard::time_budget`).
 
+A ready-made Claude-backed generator ships behind the optional `anthropic`
+feature — no need to write the HTTP yourself:
+
+```toml
+scirust-rsi = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master", features = ["anthropic"] }
+```
+
+```rust
+use scirust_rsi::llm::anthropic::ClaudeGenerator;
+let mut generator = ClaudeGenerator::from_env()?      // reads ANTHROPIC_API_KEY
+    .model("claude-opus-4-8")                          // default model
+    .max_tokens(2048);
+// hand `&mut generator` to `LlmRefine::run` alongside your `Critic`.
+```
+
 ## 3. The agent loop in ~20 lines
 
 ```rust
