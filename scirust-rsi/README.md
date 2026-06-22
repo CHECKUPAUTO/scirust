@@ -57,6 +57,7 @@ cargo run -p scirust-rsi --example rsi_demo        # all five loops, offline
 cargo run -p scirust-rsi --example llm_refine      # LLM self-refine (mock model)
 cargo run -p scirust-rsi --example nn_evolution    # (1+λ)-ES trains a real scirust-core MLP
 cargo run -p scirust-rsi --example optimizer_bench # ES vs PBT neuro-evolution on the same MLP (reproducible)
+cargo run -p scirust-rsi --example expert_iteration_nn  # Expert Iteration trains a real MLP (expert = local search)
 cargo run -p scirust-rsi --example claude_refine --features anthropic   # live Claude (needs ANTHROPIC_API_KEY)
 cargo test  -p scirust-rsi
 ```
