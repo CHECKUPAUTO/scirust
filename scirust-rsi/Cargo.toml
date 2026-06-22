@@ -1,0 +1,16 @@
+[package]
+name = "scirust-rsi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Recursive Self-Improvement — bounded, sandboxed self-improvement loops (Self-Refine, STaR, Expert Iteration, (1+λ)-ES with the 1/5 rule, Population-Based Training) with explicit safety guards and convergence guarantees"
+license-file = "../LICENSE.md"
+repository = "https://github.com/CHECKUPAUTO/scirust"
+
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

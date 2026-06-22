@@ -2563,6 +2563,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-rsi"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "rand_distr",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-runtime"
 version = "0.1.0"
 dependencies = [
