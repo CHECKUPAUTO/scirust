@@ -22,6 +22,7 @@
 
 pub use scirust_core as core;
 pub use scirust_learning as learning;
+pub use scirust_rsi as rsi;
 pub use scirust_simd as simd;
 pub use scirust_solvers as solvers;
 pub use scirust_symbolic as symbolic;

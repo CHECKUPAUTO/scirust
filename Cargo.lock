@@ -2082,6 +2082,7 @@ dependencies = [
  "rand",
  "scirust-core",
  "scirust-learning",
+ "scirust-rsi",
  "scirust-simd",
  "scirust-solvers",
  "scirust-symbolic",
