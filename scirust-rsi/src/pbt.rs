@@ -13,7 +13,7 @@
 //!
 //! Implement [`PbtTask`] and call [`Pbt::run`].
 
-use crate::{Fitness, Guard, Report, StopReason, rng_from_seed};
+use crate::{Fitness, Guard, LoopState, Report, rng_from_seed};
 use rand::Rng;
 use rand::rngs::StdRng;
 
@@ -99,20 +99,12 @@ impl Pbt {
 
         let mut best_params = pop[0].params.clone();
         let mut best_hyper = pop[0].hyper.clone();
-        let mut best_so_far = f64::NEG_INFINITY;
-
-        let mut history = Vec::with_capacity(guard.max_iters);
-        let mut accepted = 0usize;
-        let mut since_improve = 0usize;
-        let mut iterations = 0usize;
-        let mut stop_reason = StopReason::MaxIterations;
+        let mut ctrl = LoopState::new(guard, f64::NEG_INFINITY);
 
         let n_replace = ((self.pop_size as f64) * self.exploit_frac).floor() as usize;
 
-        for gen in 0..guard.max_iters
+        while ctrl.next_iter()
         {
-            iterations = gen + 1;
-
             // 1. Train every member for a few steps.
             for m in pop.iter_mut()
             {
@@ -148,46 +140,18 @@ impl Pbt {
 
             // 4. Track the (monotone) best member.
             let gen_best = order[0];
-            if pop[gen_best].score > best_so_far + guard.min_delta
+            if ctrl.offer(pop[gen_best].score)
             {
-                best_so_far = pop[gen_best].score;
                 best_params = pop[gen_best].params.clone();
                 best_hyper = pop[gen_best].hyper.clone();
-                accepted += 1;
-                since_improve = 0;
             }
-            else
+            if ctrl.done()
             {
-                since_improve += 1;
-            }
-            history.push(best_so_far);
-
-            if let Some(t) = guard.target
-            {
-                if best_so_far >= t
-                {
-                    stop_reason = StopReason::TargetReached;
-                    break;
-                }
-            }
-            if guard.patience > 0 && since_improve >= guard.patience
-            {
-                stop_reason = StopReason::Converged;
                 break;
             }
         }
 
-        (
-            best_params,
-            best_hyper,
-            Report {
-                iterations,
-                accepted,
-                best_fitness: best_so_far,
-                history,
-                stop_reason,
-            },
-        )
+        (best_params, best_hyper, ctrl.into_report())
     }
 }
 

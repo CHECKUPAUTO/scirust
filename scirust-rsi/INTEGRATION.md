@@ -42,6 +42,13 @@ engine via `scirust::rsi`.
 | A fast policy you can augment with search | `ExpertIterationTask` | `ExpertIteration` |
 | You tune hyper-parameters during training | `PbtTask` | `Pbt` |
 | A continuous objective `Fn(&[f64]) -> Fitness` | — | `OnePlusLambda` |
+| **An LLM proposes candidates** | `Generator` + `Critic` | `LlmRefine` |
+| Wire a loop from plain closures (no new type) | — | `adapters::FnRefine` |
+
+For the LLM path, implement `Generator::propose` (one call to your model) and
+`Critic::score` (your evaluator), then run `LlmRefine` — a bounded, elitist
+best-of-`n` self-refine loop. See `src/llm.rs` and `examples/llm_refine.rs`.
+Every `Guard` also accepts a wall-clock `time_budget` (`Guard::time_budget`).
 
 ## 3. The agent loop in ~20 lines
 

@@ -10,7 +10,7 @@
 //! is the simplest classical algorithm that adapts its own search parameters,
 //! and it has provable convergence on the sphere.
 
-use crate::{Fitness, Guard, Report, StopReason, rng_from_seed};
+use crate::{Fitness, Guard, LoopState, Report, rng_from_seed};
 use rand_distr::{Distribution, Normal};
 
 /// Self-adapting `(1+λ)` evolution strategy.
@@ -70,23 +70,14 @@ impl OnePlusLambda {
     {
         let mut rng = rng_from_seed(self.seed);
         let normal = Normal::new(0.0, 1.0).unwrap();
-        let dim = x0.len();
 
         let mut parent = x0;
-        let mut parent_fit = f(&parent);
         let mut sigma = self.sigma0;
-
-        let mut history = Vec::with_capacity(guard.max_iters);
-        let mut accepted = 0usize;
-        let mut since_improve = 0usize;
         let mut successes_in_window = 0usize;
-        let mut iterations = 0usize;
-        let mut stop_reason = StopReason::MaxIterations;
+        let mut ctrl = LoopState::new(guard, f(&parent));
 
-        for gen in 0..guard.max_iters
+        while ctrl.next_iter()
         {
-            iterations = gen + 1;
-
             // Sample λ offspring and find the best one.
             let mut best_child = parent.clone();
             let mut best_child_fit = f64::NEG_INFINITY;
@@ -105,23 +96,14 @@ impl OnePlusLambda {
             }
 
             // Elitist (1+λ) selection -> monotone parent fitness.
-            let improved = best_child_fit > parent_fit + guard.min_delta;
-            if improved
+            if ctrl.offer(best_child_fit)
             {
                 parent = best_child;
-                parent_fit = best_child_fit;
-                accepted += 1;
                 successes_in_window += 1;
-                since_improve = 0;
             }
-            else
-            {
-                since_improve += 1;
-            }
-            history.push(parent_fit);
 
             // Rechenberg's 1/5 rule: adapt σ once per window.
-            if (gen + 1) % self.window == 0
+            if ctrl.iterations().is_multiple_of(self.window)
             {
                 let ps = successes_in_window as f64 / self.window as f64;
                 if ps > 0.2
@@ -132,36 +114,17 @@ impl OnePlusLambda {
                 {
                     sigma *= self.c; // struggling -> refine
                 }
-                debug_assert!(dim == parent.len());
                 successes_in_window = 0;
             }
 
-            if let Some(t) = guard.target
+            if ctrl.done()
             {
-                if parent_fit >= t
-                {
-                    stop_reason = StopReason::TargetReached;
-                    break;
-                }
-            }
-            if guard.patience > 0 && since_improve >= guard.patience
-            {
-                stop_reason = StopReason::Converged;
                 break;
             }
         }
 
-        (
-            parent,
-            parent_fit,
-            Report {
-                iterations,
-                accepted,
-                best_fitness: parent_fit,
-                history,
-                stop_reason,
-            },
-        )
+        let best_fit = ctrl.best_fit();
+        (parent, best_fit, ctrl.into_report())
     }
 }
 

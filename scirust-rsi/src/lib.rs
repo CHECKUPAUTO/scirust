@@ -27,9 +27,12 @@
 //! | [`expert_iteration`] | **Expert Iteration** | distil a search-augmented "expert" back into the policy |
 //! | [`evo`] | **(1+λ)-ES + Rechenberg's 1/5 rule** | the optimiser self-tunes its own mutation strength |
 //! | [`pbt`] | **Population-Based Training** | members copy winners and perturb their own hyper-parameters |
+//! | [`llm`] | **LLM-driven self-refine** | a language model proposes candidates; best-of-`n`, elitist |
 //!
-//! All five are driven by the same elitist primitive, [`ascend`], so they share
-//! the same termination and non-regression guarantees.
+//! All of them share one elitist controller (termination, non-regression, and a
+//! wall-clock [`Guard::time_budget`]); [`ascend`] exposes it directly. The
+//! [`adapters`] module lets you build a loop from plain closures, no new type
+//! needed.
 //!
 //! ## Quick start
 //!
@@ -51,12 +54,18 @@
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
+pub mod adapters;
+mod control;
 pub mod evo;
 pub mod expert_iteration;
+pub mod llm;
 pub mod pbt;
 pub mod refine;
 pub mod star;
+
+pub(crate) use control::LoopState;
 
 /// A scalar quality score. **Higher is always better.** Loops *maximise* it; to
 /// minimise a cost, return its negation (see the crate-level example).
@@ -75,6 +84,8 @@ pub enum StopReason {
     TargetReached,
     /// No strict improvement for `patience` consecutive iterations.
     Converged,
+    /// The wall-clock time budget was exhausted before another iteration began.
+    TimeBudget,
 }
 
 /// Termination policy shared by every loop in this crate.
@@ -96,6 +107,9 @@ pub struct Guard {
     pub target: Option<Fitness>,
     /// An improvement must exceed the incumbent by more than this to count.
     pub min_delta: Fitness,
+    /// Optional wall-clock budget. Checked before each iteration begins, so the
+    /// loop stops once this elapses (it never interrupts an iteration mid-flight).
+    pub time_budget: Option<Duration>,
 }
 
 impl Default for Guard {
@@ -105,6 +119,7 @@ impl Default for Guard {
             patience: 0,
             target: None,
             min_delta: 0.0,
+            time_budget: None,
         }
     }
 }
@@ -136,6 +151,12 @@ impl Guard {
     /// Minimum margin a candidate must beat the incumbent by to be adopted.
     pub fn min_delta(mut self, d: Fitness) -> Self {
         self.min_delta = d;
+        self
+    }
+
+    /// Stop once this much wall-clock time has elapsed (checked between iterations).
+    pub fn time_budget(mut self, d: Duration) -> Self {
+        self.time_budget = Some(d);
         self
     }
 }
@@ -202,56 +223,23 @@ where
     P: FnMut(&S, usize, &mut StdRng) -> (S, Fitness),
 {
     let mut best = initial;
-    let mut best_fit = init_fit;
-    let mut history = Vec::with_capacity(guard.max_iters);
-    let mut accepted = 0usize;
-    let mut since_improve = 0usize;
-    let mut stop_reason = StopReason::MaxIterations;
-    let mut iterations = 0usize;
+    let mut ctrl = LoopState::new(guard, init_fit);
 
-    for iter in 0..guard.max_iters
+    while ctrl.next_iter()
     {
-        iterations = iter + 1;
+        let iter = ctrl.iterations() - 1; // 0-based index for the caller
         let (cand, cand_fit) = propose(&best, iter, rng);
-
-        if cand_fit > best_fit + guard.min_delta
+        if ctrl.offer(cand_fit)
         {
             best = cand;
-            best_fit = cand_fit;
-            accepted += 1;
-            since_improve = 0;
         }
-        else
+        if ctrl.done()
         {
-            since_improve += 1;
-        }
-        history.push(best_fit);
-
-        if let Some(t) = guard.target
-        {
-            if best_fit >= t
-            {
-                stop_reason = StopReason::TargetReached;
-                break;
-            }
-        }
-        if guard.patience > 0 && since_improve >= guard.patience
-        {
-            stop_reason = StopReason::Converged;
             break;
         }
     }
 
-    (
-        best,
-        Report {
-            iterations,
-            accepted,
-            best_fitness: best_fit,
-            history,
-            stop_reason,
-        },
-    )
+    (best, ctrl.into_report())
 }
 
 /// Build a seeded, reproducible RNG. All loops route through this so a given

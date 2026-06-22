@@ -14,7 +14,7 @@
 //!
 //! Implement [`BootstrapTask`] and call [`Star::run`].
 
-use crate::{Fitness, Guard, Report, StopReason, rng_from_seed};
+use crate::{Fitness, Guard, LoopState, Report, rng_from_seed};
 use rand::rngs::StdRng;
 
 /// A task that can be improved by self-training on its own correct attempts.
@@ -93,19 +93,11 @@ impl Star {
         let problems = task.problems();
 
         let mut best = task.base_model();
-        let mut best_fit = task.evaluate(&best);
+        let mut ctrl = LoopState::new(guard, task.evaluate(&best));
         let mut dataset: Vec<(T::Problem, T::Solution)> = Vec::new();
 
-        let mut history = Vec::with_capacity(guard.max_iters);
-        let mut accepted = 0usize;
-        let mut since_improve = 0usize;
-        let mut iterations = 0usize;
-        let mut stop_reason = StopReason::MaxIterations;
-
-        for iter in 0..guard.max_iters
+        while ctrl.next_iter()
         {
-            iterations = iter + 1;
-
             // 1+2. Attempt every problem; keep the correct traces.
             if !self.accumulate
             {
@@ -129,44 +121,17 @@ impl Star {
             let cand_fit = task.evaluate(&candidate);
 
             // 4. Elitist adoption.
-            if cand_fit > best_fit + guard.min_delta
+            if ctrl.offer(cand_fit)
             {
                 best = candidate;
-                best_fit = cand_fit;
-                accepted += 1;
-                since_improve = 0;
             }
-            else
+            if ctrl.done()
             {
-                since_improve += 1;
-            }
-            history.push(best_fit);
-
-            if let Some(t) = guard.target
-            {
-                if best_fit >= t
-                {
-                    stop_reason = StopReason::TargetReached;
-                    break;
-                }
-            }
-            if guard.patience > 0 && since_improve >= guard.patience
-            {
-                stop_reason = StopReason::Converged;
                 break;
             }
         }
 
-        (
-            best,
-            Report {
-                iterations,
-                accepted,
-                best_fitness: best_fit,
-                history,
-                stop_reason,
-            },
-        )
+        (best, ctrl.into_report())
     }
 }
 
