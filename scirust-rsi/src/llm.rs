@@ -33,8 +33,10 @@
 //! }
 //! ```
 
+use crate::star::BootstrapTask;
 use crate::{Fitness, Guard, LoopState, Report, rng_from_seed};
 use rand::rngs::StdRng;
+use std::cell::RefCell;
 
 /// A source of candidate solutions — typically an LLM, but anything that turns a
 /// prompt into textual candidates qualifies.
@@ -158,6 +160,163 @@ impl LlmRefine {
 
         let best_fit = ctrl.best_fit();
         (best, best_fit, ctrl.into_report())
+    }
+}
+
+// ===========================================================================
+// Generator -> STaR bridge: LLM-driven bootstrapping
+// ===========================================================================
+
+/// A task whose answers can be *checked*, enabling LLM-driven STaR bootstrapping.
+///
+/// The verifier is what makes self-training sound: only answers that pass
+/// [`is_correct`](VerifiableTask::is_correct) become few-shot examples for the
+/// next round.
+pub trait VerifiableTask {
+    /// The problems to solve, as prompt strings.
+    fn problems(&self) -> Vec<String>;
+
+    /// Is `answer` correct for `problem`? Only verified answers are kept.
+    fn is_correct(&self, problem: &str, answer: &str) -> bool;
+
+    /// Optional task preamble woven into every prompt (e.g. instructions).
+    fn preamble(&self) -> String {
+        String::new()
+    }
+}
+
+/// Adapter turning a [`Generator`] + a [`VerifiableTask`] into a STaR
+/// [`BootstrapTask`](crate::star::BootstrapTask).
+///
+/// The "model" STaR improves is the set of **verified `(problem, answer)`
+/// examples** accumulated so far; each round they are fed back as few-shot
+/// context, so the system literally teaches itself from its own correct
+/// reasoning. Drive it with [`Star`](crate::star::Star):
+///
+/// ```
+/// use scirust_rsi::llm::{Generator, VerifiableTask, LlmStar};
+/// use scirust_rsi::star::Star;
+/// use scirust_rsi::Guard;
+/// use rand::{Rng, rngs::StdRng};
+///
+/// // A generator that gets more reliable as it sees more worked examples.
+/// struct Mock;
+/// impl Generator for Mock {
+///     fn propose(&mut self, prompt: &str, n: usize, rng: &mut StdRng) -> Vec<String> {
+///         let shots = prompt.matches("Answer: ").count();
+///         let p = (0.15 + 0.2 * shots as f64).min(1.0);
+///         let (a, b) = parse_last(prompt);
+///         (0..n).map(|_| if rng.gen_bool(p) { (a + b).to_string() } else { "0".into() }).collect()
+///     }
+/// }
+/// struct Sums;
+/// impl VerifiableTask for Sums {
+///     fn problems(&self) -> Vec<String> { (1..=6).map(|a| format!("{a}+{}", a + 1)).collect() }
+///     fn is_correct(&self, p: &str, ans: &str) -> bool {
+///         let (a, b) = parse(p);
+///         ans.trim().parse::<i64>() == Ok(a + b)
+///     }
+/// }
+/// # fn parse(s: &str) -> (i64, i64) {
+/// #     let (a, b) = s.split_once('+').unwrap();
+/// #     (a.trim().parse().unwrap(), b.trim().parse().unwrap())
+/// # }
+/// # fn parse_last(prompt: &str) -> (i64, i64) {
+/// #     let line = prompt.rsplit("Problem: ").next().unwrap();
+/// #     parse(line.split('\n').next().unwrap())
+/// # }
+///
+/// let task = LlmStar::new(Mock, Sums);
+/// let (_model, report) = Star::new(1).samples(8).run(&task, &Guard::new().max_iters(20).target(1.0));
+/// assert!(report.is_monotone());
+/// ```
+pub struct LlmStar<G: Generator, T: VerifiableTask> {
+    generator: RefCell<G>,
+    task: T,
+    eval_seed: u64,
+}
+
+impl<G: Generator, T: VerifiableTask> LlmStar<G, T> {
+    /// Wrap a generator and a verifiable task.
+    pub fn new(generator: G, task: T) -> Self {
+        Self {
+            generator: RefCell::new(generator),
+            task,
+            eval_seed: 0xE7A1,
+        }
+    }
+
+    /// Seed used to make [`evaluate`](BootstrapTask::evaluate) deterministic for
+    /// a given model (so elitist adoption is meaningful).
+    pub fn eval_seed(mut self, seed: u64) -> Self {
+        self.eval_seed = seed;
+        self
+    }
+
+    /// Render the few-shot prompt: preamble, worked examples, then the problem.
+    fn render_prompt(&self, examples: &[(String, String)], problem: &str) -> String {
+        let mut p = self.task.preamble();
+        if !p.is_empty()
+        {
+            p.push_str("\n\n");
+        }
+        for (q, a) in examples
+        {
+            p.push_str(&format!("Problem: {q}\nAnswer: {a}\n\n"));
+        }
+        p.push_str(&format!("Problem: {problem}\nAnswer:"));
+        p
+    }
+}
+
+impl<G: Generator, T: VerifiableTask> BootstrapTask for LlmStar<G, T> {
+    type Problem = String;
+    type Solution = String;
+    /// The model is the accumulated few-shot context.
+    type Model = Vec<(String, String)>;
+
+    fn problems(&self) -> Vec<String> {
+        self.task.problems()
+    }
+
+    fn base_model(&self) -> Self::Model {
+        Vec::new()
+    }
+
+    fn attempt(&self, model: &Self::Model, problem: &String, rng: &mut StdRng) -> String {
+        let prompt = self.render_prompt(model, problem);
+        self.generator
+            .borrow_mut()
+            .propose(&prompt, 1, rng)
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+    }
+
+    fn is_correct(&self, problem: &String, sol: &String) -> bool {
+        self.task.is_correct(problem, sol)
+    }
+
+    fn learn(&self, _base: &Self::Model, data: &[(String, String)]) -> Self::Model {
+        // The verified attempts *are* the new model (the few-shot context).
+        data.to_vec()
+    }
+
+    fn evaluate(&self, model: &Self::Model) -> Fitness {
+        let problems = self.task.problems();
+        if problems.is_empty()
+        {
+            return 0.0;
+        }
+        let mut rng = rng_from_seed(self.eval_seed);
+        let correct = problems
+            .iter()
+            .filter(|p| {
+                let ans = self.attempt(model, p, &mut rng);
+                self.task.is_correct(p, &ans)
+            })
+            .count();
+        correct as f64 / problems.len() as f64
     }
 }
 
@@ -392,5 +551,67 @@ mod tests {
         );
         assert_eq!(report.stop_reason, crate::StopReason::Converged);
         assert_eq!(report.accepted, 0);
+    }
+
+    // --- LlmStar (Generator -> STaR) -------------------------------------
+
+    fn parse_sum(problem: &str) -> (i64, i64) {
+        let (a, b) = problem.split_once('+').unwrap();
+        (a.trim().parse().unwrap(), b.trim().parse().unwrap())
+    }
+
+    /// Mock that gets more reliable as it sees more worked examples in-context
+    /// — so accumulating verified examples (STaR) lifts its accuracy.
+    struct ShotMock;
+    impl Generator for ShotMock {
+        fn propose(&mut self, prompt: &str, n: usize, rng: &mut StdRng) -> Vec<String> {
+            let shots = prompt.matches("Answer: ").count();
+            let p = (0.15 + 0.2 * shots as f64).min(1.0);
+            // Parse the trailing "Problem: a+b" line.
+            let last = prompt.rsplit("Problem: ").next().unwrap();
+            let (a, b) = parse_sum(last.split('\n').next().unwrap());
+            (0..n)
+                .map(|_| {
+                    if rng.gen_bool(p)
+                    {
+                        (a + b).to_string()
+                    }
+                    else
+                    {
+                        "0".to_string()
+                    }
+                })
+                .collect()
+        }
+    }
+
+    struct Sums;
+    impl VerifiableTask for Sums {
+        fn problems(&self) -> Vec<String> {
+            (1..=6).map(|a| format!("{a}+{}", a + 1)).collect()
+        }
+        fn is_correct(&self, problem: &str, answer: &str) -> bool {
+            let (a, b) = parse_sum(problem);
+            answer.trim().parse::<i64>() == Ok(a + b)
+        }
+    }
+
+    #[test]
+    fn llm_star_bootstraps_from_its_own_correct_answers() {
+        use crate::star::Star;
+        let task = LlmStar::new(ShotMock, Sums);
+        let base = task.evaluate(&task.base_model());
+        let (model, report) = Star::new(7)
+            .samples(8)
+            .run(&task, &Guard::new().max_iters(25).target(1.0));
+
+        assert!(report.is_monotone(), "accuracy must not regress");
+        assert!(report.best_fitness >= base);
+        assert!(
+            report.best_fitness > 0.8,
+            "self-training should lift accuracy, got {}",
+            report.best_fitness
+        );
+        assert!(!model.is_empty(), "should have harvested few-shot examples");
     }
 }

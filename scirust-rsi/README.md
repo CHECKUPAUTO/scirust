@@ -50,10 +50,13 @@ let (x, fit, report) =
 assert!(report.is_monotone());
 ```
 
-Run the full demo:
+Run the examples:
 
 ```sh
-cargo run -p scirust-rsi --example rsi_demo
+cargo run -p scirust-rsi --example rsi_demo        # all five loops, offline
+cargo run -p scirust-rsi --example llm_refine      # LLM self-refine (mock model)
+cargo run -p scirust-rsi --example nn_evolution    # (1+λ)-ES trains a real scirust-core MLP
+cargo run -p scirust-rsi --example claude_refine --features anthropic   # live Claude (needs ANTHROPIC_API_KEY)
 cargo test  -p scirust-rsi
 ```
 

@@ -23,3 +23,7 @@ anthropic = ["dep:ureq", "dep:serde_json"]
 
 [dev-dependencies]
 serde_json = "1"
+# For the `nn_evolution` example: train a real scirust-core ReLU MLP with the
+# gradient-free (1+λ)-ES, and compare against a scirust-learning baseline.
+scirust-core = { path = "../scirust-core" }
+scirust-learning = { path = "../scirust-learning" }
