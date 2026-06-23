@@ -58,6 +58,7 @@ cargo run -p scirust-rsi --example llm_refine      # LLM self-refine (mock model
 cargo run -p scirust-rsi --example nn_evolution    # (1+λ)-ES trains a real scirust-core MLP
 cargo run -p scirust-rsi --example optimizer_bench # ES vs PBT neuro-evolution on the same MLP (reproducible)
 cargo run -p scirust-rsi --example expert_iteration_nn  # Expert Iteration trains a real MLP (expert = local search)
+cargo run -p scirust-rsi --example compare_report  # overlay several runs' curves into one HTML comparison report
 cargo run -p scirust-rsi --example claude_refine --features anthropic   # live Claude (needs ANTHROPIC_API_KEY)
 cargo test  -p scirust-rsi
 ```
@@ -78,6 +79,9 @@ Common flags: `--dim --seed --max-iters --target --patience --time-ms --json --c
 `--csv` writes the convergence curve (`iteration,best_fitness`); `--html` writes
 a self-contained report with an inline-SVG chart + stats table. The same data is
 available programmatically via `Report::history_csv()` / `Report::to_html()`.
+To compare several runs at once, `compare_html(title, &[(label, &report), …])`
+overlays their convergence curves (one colour per run + legend) into a single
+self-contained HTML report — see the `compare_report` example.
 
 ## Optional features
 
