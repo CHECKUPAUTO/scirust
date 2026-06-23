@@ -36,6 +36,7 @@ COMMON OPTIONS:
     --patience <N>       stop after N stalls         (default 0 = off)
     --time-ms <N>        wall-clock budget in ms     (optional)
     --json               print the Report as JSON
+    --csv <path>         write the convergence curve (iteration,best_fitness)
     -h, --help           this message
 
 METHOD OPTIONS:
@@ -138,6 +139,23 @@ fn main() {
         let head: Vec<String> = best.iter().take(8).map(|v| format!("{v:.4}")).collect();
         let tail = if best.len() > 8 { ", …" } else { "" };
         println!("best x     : [{}{}]", head.join(", "), tail);
+    }
+
+    // Optional: dump the convergence curve as CSV for plotting/diffing.
+    if let Some(path) = opts.get("csv")
+    {
+        match std::fs::write(&path, report.history_csv())
+        {
+            Ok(()) => eprintln!(
+                "wrote convergence curve to {path} ({} rows)",
+                report.history.len()
+            ),
+            Err(e) =>
+            {
+                eprintln!("failed to write {path}: {e}");
+                std::process::exit(1);
+            },
+        }
     }
 }
 

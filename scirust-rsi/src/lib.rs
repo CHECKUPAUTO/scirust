@@ -195,6 +195,29 @@ impl Report {
             _ => 0.0,
         }
     }
+
+    /// Fraction of iterations that adopted a strictly-better candidate.
+    pub fn acceptance_rate(&self) -> f64 {
+        if self.iterations == 0
+        {
+            0.0
+        }
+        else
+        {
+            self.accepted as f64 / self.iterations as f64
+        }
+    }
+
+    /// The best-so-far convergence curve as CSV (`iteration,best_fitness`, with a
+    /// header and 1-based iteration index). Plot it or diff runs — no deps.
+    pub fn history_csv(&self) -> String {
+        let mut out = String::from("iteration,best_fitness\n");
+        for (i, v) in self.history.iter().enumerate()
+        {
+            out.push_str(&format!("{},{}\n", i + 1, v));
+        }
+        out
+    }
 }
 
 // ===========================================================================
@@ -346,5 +369,23 @@ mod tests {
         let back: Report = serde_json::from_str(&s).unwrap();
         assert_eq!(back.iterations, 3);
         assert!(back.is_monotone());
+    }
+
+    #[test]
+    fn report_csv_and_acceptance_rate() {
+        let r = Report {
+            iterations: 4,
+            accepted: 2,
+            best_fitness: 1.5,
+            history: vec![0.0, 1.0, 1.0, 1.5],
+            stop_reason: StopReason::MaxIterations,
+        };
+        assert!((r.acceptance_rate() - 0.5).abs() < 1e-12);
+        let csv = r.history_csv();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "iteration,best_fitness");
+        assert_eq!(lines[1], "1,0");
+        assert_eq!(lines[4], "4,1.5");
+        assert_eq!(lines.len(), 1 + r.history.len());
     }
 }
