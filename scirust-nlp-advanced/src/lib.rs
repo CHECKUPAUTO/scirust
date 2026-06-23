@@ -15,9 +15,16 @@
 //! | `keyword` | TF-IDF, TextRank, and RAKE keyword extraction |
 //! | `similarity` | Cosine, Jaccard, and MinHash document similarity |
 //! | `tokenize` | Low-level whitespace + punctuation tokenizer |
+//! | `bloom` | Bloom filter — probabilistic membership / dedup pre-filter |
+//! | `lsh` | MinHash-LSH band-and-bucket near-duplicate index |
+//! | `trie` | Byte-radix trie — shared-prefix physical compaction |
+//! | `huffman` | Entropy-optimal prefix-free coding (reversible) |
 
+pub mod bloom;
 pub mod classify;
+pub mod huffman;
 pub mod keyword;
+pub mod lsh;
 pub mod ner;
 pub mod relation;
 pub mod similarity;
