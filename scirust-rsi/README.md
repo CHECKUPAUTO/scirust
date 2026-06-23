@@ -74,9 +74,10 @@ cargo run -p scirust-rsi --bin scirust-rsi -- pbt    --objective rosenbrock --po
 cargo run -p scirust-rsi --bin scirust-rsi -- --help
 ```
 
-Common flags: `--dim --seed --max-iters --target --patience --time-ms --json --csv <path>`.
-`--csv` writes the convergence curve (`iteration,best_fitness`) for plotting or
-diffing runs; the same data is available programmatically via `Report::history_csv()`.
+Common flags: `--dim --seed --max-iters --target --patience --time-ms --json --csv <path> --html <path>`.
+`--csv` writes the convergence curve (`iteration,best_fitness`); `--html` writes
+a self-contained report with an inline-SVG chart + stats table. The same data is
+available programmatically via `Report::history_csv()` / `Report::to_html()`.
 
 ## Optional features
 

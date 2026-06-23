@@ -37,6 +37,7 @@ COMMON OPTIONS:
     --time-ms <N>        wall-clock budget in ms     (optional)
     --json               print the Report as JSON
     --csv <path>         write the convergence curve (iteration,best_fitness)
+    --html <path>        write a self-contained HTML report (SVG chart + stats)
     -h, --help           this message
 
 METHOD OPTIONS:
@@ -150,6 +151,21 @@ fn main() {
                 "wrote convergence curve to {path} ({} rows)",
                 report.history.len()
             ),
+            Err(e) =>
+            {
+                eprintln!("failed to write {path}: {e}");
+                std::process::exit(1);
+            },
+        }
+    }
+
+    // Optional: write a self-contained HTML report with an SVG convergence chart.
+    if let Some(path) = opts.get("html")
+    {
+        let title = format!("scirust-rsi: {method} on {objective} (dim {dim}, seed {seed})");
+        match std::fs::write(&path, report.to_html(&title))
+        {
+            Ok(()) => eprintln!("wrote HTML report to {path}"),
             Err(e) =>
             {
                 eprintln!("failed to write {path}: {e}");
