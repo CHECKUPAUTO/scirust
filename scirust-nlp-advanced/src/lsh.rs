@@ -57,27 +57,28 @@ impl MinHashLsh {
         // using the most of the signature budget (b*r closest to num_hashes).
         // best stores (b, r, s_star, err, budget).
         let mut best: Option<(usize, usize, f64, f64, usize)> = None;
-        for r in 2..=num_hashes {
-            for b in 2..=num_hashes {
-                if b * r > num_hashes {
+        for r in 2..=num_hashes
+        {
+            for b in 2..=num_hashes
+            {
+                if b * r > num_hashes
+                {
                     break;
                 }
                 let s_star = (1.0_f64 / b as f64).powf(1.0 / r as f64);
                 let err = (s_star - t).abs();
                 let budget = b * r;
-                let better = match &best {
+                let better = match &best
+                {
                     None => true,
-                    Some((_, _, _, prev_err, prev_budget)) => {
-                        if err + 1e-9 < *prev_err {
-                            true
-                        } else if (err - prev_err).abs() < 1e-9 && budget > *prev_budget {
-                            true
-                        } else {
-                            false
-                        }
-                    }
+                    Some((_, _, _, prev_err, prev_budget)) =>
+                    {
+                        err + 1e-9 < *prev_err
+                            || ((err - prev_err).abs() < 1e-9 && budget > *prev_budget)
+                    },
                 };
-                if better {
+                if better
+                {
                     best = Some((b, r, s_star, err, budget));
                 }
             }
@@ -106,8 +107,10 @@ impl MinHashLsh {
     /// key (FNV-1a over the bytes of the slice).
     fn bucket_key(slice: &[u64]) -> u64 {
         let mut h: u64 = 14695981039346656037;
-        for v in slice {
-            for &byte in v.to_le_bytes().iter() {
+        for v in slice
+        {
+            for &byte in v.to_le_bytes().iter()
+            {
                 h ^= byte as u64;
                 h = h.wrapping_mul(1099511628211);
             }
@@ -118,9 +121,11 @@ impl MinHashLsh {
     /// Insert an item (by `id`) under its precomputed `signature`. The item is
     /// added to every band's bucket matching its slice.
     pub fn insert(&mut self, id: usize, signature: &[u64]) {
-        for (bi, band) in self.bands.iter().enumerate() {
+        for (bi, band) in self.bands.iter().enumerate()
+        {
             let end = band.offset + band.rows;
-            if end > signature.len() {
+            if end > signature.len()
+            {
                 continue;
             }
             let key = Self::bucket_key(&signature[band.offset..end]);
@@ -140,15 +145,20 @@ impl MinHashLsh {
     pub fn query(&self, signature: &[u64]) -> Vec<usize> {
         let mut hits: Vec<usize> = Vec::new();
         let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        for (bi, band) in self.bands.iter().enumerate() {
+        for (bi, band) in self.bands.iter().enumerate()
+        {
             let end = band.offset + band.rows;
-            if end > signature.len() {
+            if end > signature.len()
+            {
                 continue;
             }
             let key = Self::bucket_key(&signature[band.offset..end]);
-            if let Some(ids) = self.band_index[bi].get(&key) {
-                for &id in ids {
-                    if seen.insert(id) {
+            if let Some(ids) = self.band_index[bi].get(&key)
+            {
+                for &id in ids
+                {
+                    if seen.insert(id)
+                    {
                         hits.push(id);
                     }
                 }
@@ -181,17 +191,26 @@ impl MinHashLsh {
     /// Find all near-duplicate pairs currently in the index. Returns a vec of
     /// `(id_a, id_b)` with `id_a < id_b`, each pair once.
     pub fn duplicate_pairs(&self) -> Vec<(usize, usize)> {
-        let mut pairs: std::collections::BTreeSet<(usize, usize)> = std::collections::BTreeSet::new();
-        for bucket_map in &self.band_index {
-            for ids in bucket_map.values() {
-                if ids.len() < 2 {
+        let mut pairs: std::collections::BTreeSet<(usize, usize)> =
+            std::collections::BTreeSet::new();
+        for bucket_map in &self.band_index
+        {
+            for ids in bucket_map.values()
+            {
+                if ids.len() < 2
+                {
                     continue;
                 }
-                for i in 0..ids.len() {
-                    for j in (i + 1)..ids.len() {
-                        let (a, b) = if ids[i] < ids[j] {
+                for i in 0..ids.len()
+                {
+                    for j in (i + 1)..ids.len()
+                    {
+                        let (a, b) = if ids[i] < ids[j]
+                        {
                             (ids[i], ids[j])
-                        } else {
+                        }
+                        else
+                        {
                             (ids[j], ids[i])
                         };
                         pairs.insert((a, b));
@@ -220,7 +239,8 @@ mod tests {
             "a completely different sentence about rust programming",
             "the quick brown fox jumps over a lazy dog", // near dup (1 word swap)
         ];
-        for (i, d) in docs.iter().enumerate() {
+        for (i, d) in docs.iter().enumerate()
+        {
             lsh.insert_doc(i, &toks(d));
         }
         let pairs = lsh.duplicate_pairs();
@@ -234,14 +254,20 @@ mod tests {
         lsh.insert_doc(0, &toks("alpha beta gamma delta epsilon zeta eta theta"));
         lsh.insert_doc(1, &toks("rust cargo crate module trait impl async await"));
         let pairs = lsh.duplicate_pairs();
-        assert!(pairs.is_empty(), "unrelated docs should not collide: {pairs:?}");
+        assert!(
+            pairs.is_empty(),
+            "unrelated docs should not collide: {pairs:?}"
+        );
     }
 
     #[test]
     fn query_returns_candidates() {
         let mut lsh = MinHashLsh::new(64, 0.7, 11);
         lsh.insert_doc(0, &toks("fix the database timeout in the query layer"));
-        lsh.insert_doc(1, &toks("refactor the database query layer timeout handling"));
+        lsh.insert_doc(
+            1,
+            &toks("refactor the database query layer timeout handling"),
+        );
         lsh.insert_doc(2, &toks("totally unrelated weather forecast for tomorrow"));
         let q = lsh.query_doc(&toks("fix the database timeout in the query layer"));
         assert!(q.contains(&0), "self-query must include self: {q:?}");
@@ -252,7 +278,8 @@ mod tests {
     fn determinism_same_seed_same_buckets() {
         let mut a = MinHashLsh::new(64, 0.8, 42);
         let mut b = MinHashLsh::new(64, 0.8, 42);
-        for (i, d) in ["x y z", "x y z", "x y w"].iter().enumerate() {
+        for (i, d) in ["x y z", "x y z", "x y w"].iter().enumerate()
+        {
             a.insert_doc(i, &toks(d));
             b.insert_doc(i, &toks(d));
         }

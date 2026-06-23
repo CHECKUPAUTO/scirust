@@ -36,13 +36,13 @@ impl BloomFilter {
     pub fn new(capacity: usize, p: f64, seed: u64) -> Self {
         let n = capacity.max(1);
         let pp = p.clamp(1e-9, 0.5);
-        let m = (-(n as f64) * pp.ln() / (std::f64::consts::LN_2 * std::f64::consts::LN_2))
-            .ceil() as usize;
+        let m = (-(n as f64) * pp.ln() / (std::f64::consts::LN_2 * std::f64::consts::LN_2)).ceil()
+            as usize;
         let m = m.max(64).next_power_of_two();
         let k = ((m as f64 / n as f64) * std::f64::consts::LN_2).round() as usize;
         let k = k.max(1);
         Self {
-            bits: vec![0u64; (m + 63) / 64],
+            bits: vec![0u64; m.div_ceil(64)],
             num_bits: m,
             num_hashes: k,
             seed,
@@ -55,16 +55,19 @@ impl BloomFilter {
     /// deterministic and independent enough for Bloom use.
     fn hashes(&self, data: &[u8]) -> (u64, u64) {
         let mut h1: u64 = 14695981039346656037; // FNV offset
-        for &b in data {
+        for &b in data
+        {
             h1 ^= b as u64;
             h1 = h1.wrapping_mul(1099511628211);
         }
         let mut h2: u64 = self.seed.wrapping_add(0x9E3779B97F4A7C15);
-        for &b in data {
+        for &b in data
+        {
             h2 ^= b as u64;
             h2 = h2.wrapping_mul(6364136223846793005);
         }
-        if h2 == 0 {
+        if h2 == 0
+        {
             h2 = 1;
         }
         (h1, h2)
@@ -85,7 +88,8 @@ impl BloomFilter {
     /// Insert an element. Idempotent on repeated insertions of the same value.
     pub fn insert(&mut self, data: &[u8]) {
         let (h1, h2) = self.hashes(data);
-        for i in 0..self.num_hashes {
+        for i in 0..self.num_hashes
+        {
             self.set_bit(self.bit_index(h1, h2, i));
         }
         self.inserted += 1;
@@ -140,7 +144,8 @@ impl BloomFilter {
         {
             return None;
         }
-        for (a, b) in self.bits.iter_mut().zip(other.bits.iter()) {
+        for (a, b) in self.bits.iter_mut().zip(other.bits.iter())
+        {
             *a |= *b;
         }
         self.inserted += other.inserted;
@@ -161,11 +166,16 @@ mod tests {
     #[test]
     fn absent_elements_are_never_reported_present() {
         let mut f = BloomFilter::new(1000, 0.01, 42);
-        for i in 0..500 {
+        for i in 0..500
+        {
             f.insert_str(&format!("item-{i}"));
         }
-        for i in 0..500 {
-            assert!(f.contains_str(&format!("item-{i}")), "inserted item missing");
+        for i in 0..500
+        {
+            assert!(
+                f.contains_str(&format!("item-{i}")),
+                "inserted item missing"
+            );
         }
         // Items never inserted: false positives possible but must be rare at p=0.01.
         let fp = (1000..2000)
@@ -178,7 +188,8 @@ mod tests {
     fn determinism_same_seed_same_bits() {
         let mut a = BloomFilter::new(200, 0.02, 7);
         let mut b = BloomFilter::new(200, 0.02, 7);
-        for w in ["alpha", "beta", "gamma", "delta"] {
+        for w in ["alpha", "beta", "gamma", "delta"]
+        {
             a.insert_str(w);
             b.insert_str(w);
         }
@@ -210,7 +221,8 @@ mod tests {
     fn fpr_stays_near_target() {
         let n = 5000;
         let mut f = BloomFilter::new(n, 0.01, 123);
-        for i in 0..n {
+        for i in 0..n
+        {
             f.insert_str(&format!("x-{i}"));
         }
         let fpr = f.estimated_fpr();
