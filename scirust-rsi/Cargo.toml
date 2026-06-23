@@ -14,8 +14,12 @@ serde = { version = "1", features = ["derive"] }
 # Optional — only pulled in by the `anthropic` feature (real Claude API generator).
 serde_json = { version = "1", optional = true }
 ureq = { version = "2", optional = true, features = ["json"] }
+rayon = { version = "1", optional = true }
 
 [features]
+# Parallel fitness evaluation for the (1+λ)-ES (bit-identical to the sequential
+# path; only fitness is parallelised). Off by default.
+parallel = ["dep:rayon"]
 # Off by default: the core engine stays dependency-light and offline. Enable to
 # get `llm::anthropic::ClaudeGenerator`, a `Generator` backed by the Claude
 # Messages API (blocking HTTP via ureq).

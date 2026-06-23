@@ -126,12 +126,108 @@ impl OnePlusLambda {
         let best_fit = ctrl.best_fit();
         (parent, best_fit, ctrl.into_report())
     }
+
+    /// Like [`optimize`](Self::optimize) but evaluates each generation's λ
+    /// offspring in **parallel** (rayon). Offspring are still *sampled*
+    /// sequentially, so the RNG draw order — and therefore the whole run — is
+    /// **bit-identical** to `optimize`; only fitness evaluation is parallelised.
+    /// Worth it when `f` is expensive. Requires the `parallel` feature.
+    #[cfg(feature = "parallel")]
+    pub fn optimize_parallel<F>(
+        &self,
+        x0: Vec<f64>,
+        f: F,
+        guard: &Guard,
+    ) -> (Vec<f64>, Fitness, Report)
+    where
+        F: Fn(&[f64]) -> Fitness + Sync,
+    {
+        use rayon::prelude::*;
+
+        let mut rng = rng_from_seed(self.seed);
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let mut parent = x0;
+        let mut sigma = self.sigma0;
+        let mut successes_in_window = 0usize;
+        let mut ctrl = LoopState::new(guard, f(&parent));
+
+        while ctrl.next_iter()
+        {
+            // Sample λ offspring sequentially (preserves the RNG draw order)...
+            let children: Vec<Vec<f64>> = (0..self.lambda)
+                .map(|_| {
+                    parent
+                        .iter()
+                        .map(|&p| p + sigma * normal.sample(&mut rng))
+                        .collect()
+                })
+                .collect();
+            // ...then evaluate their fitness in parallel.
+            let fits: Vec<Fitness> = children.par_iter().map(|c| f(c)).collect();
+
+            // Best child = first strictly-greater (identical to the sequential rule).
+            let mut best_child = parent.clone();
+            let mut best_child_fit = f64::NEG_INFINITY;
+            for (child, fit) in children.into_iter().zip(fits)
+            {
+                if fit > best_child_fit
+                {
+                    best_child_fit = fit;
+                    best_child = child;
+                }
+            }
+
+            if ctrl.offer(best_child_fit)
+            {
+                parent = best_child;
+                successes_in_window += 1;
+            }
+
+            if ctrl.iterations().is_multiple_of(self.window)
+            {
+                let ps = successes_in_window as f64 / self.window as f64;
+                if ps > 0.2
+                {
+                    sigma /= self.c;
+                }
+                else
+                {
+                    sigma *= self.c;
+                }
+                successes_in_window = 0;
+            }
+
+            if ctrl.done()
+            {
+                break;
+            }
+        }
+
+        let best_fit = ctrl.best_fit();
+        (parent, best_fit, ctrl.into_report())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bench;
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_is_bit_identical_to_sequential() {
+        let guard = Guard::new().max_iters(500);
+        let mk = || OnePlusLambda::new(0xABCD).lambda(12).sigma0(1.0);
+        let (xa, fa, ra) = mk().optimize(vec![4.0; 6], bench::sphere, &guard);
+        let (xb, fb, rb) = mk().optimize_parallel(vec![4.0; 6], bench::sphere, &guard);
+        assert_eq!(xa, xb, "best point must match exactly");
+        assert_eq!(fa, fb, "best fitness must match exactly");
+        assert_eq!(
+            ra.history, rb.history,
+            "convergence curve must match exactly"
+        );
+    }
 
     #[test]
     fn solves_sphere() {

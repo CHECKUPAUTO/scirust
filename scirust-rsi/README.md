@@ -78,6 +78,15 @@ Common flags: `--dim --seed --max-iters --target --patience --time-ms --json --c
 `--csv` writes the convergence curve (`iteration,best_fitness`) for plotting or
 diffing runs; the same data is available programmatically via `Report::history_csv()`.
 
+## Optional features
+
+| Feature | Adds |
+|---|---|
+| `anthropic` | `llm::anthropic::ClaudeGenerator` — a `Generator` backed by the Claude Messages API (blocking HTTP) |
+| `parallel` | `OnePlusLambda::optimize_parallel` — evaluates each generation's λ offspring with rayon, **bit-identical** to the sequential `optimize` (only fitness is parallelised; sampling stays sequential, so the RNG order and result are unchanged) |
+
+Both are off by default; the core stays dependency-light and fully offline.
+
 ## Extending
 
 Implement the trait for your task and hand it to the matching driver:
