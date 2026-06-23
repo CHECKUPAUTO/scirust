@@ -1,162 +1,322 @@
-//! Distributed training primitives — all-reduce, broadcast, barrier.
+//! In-process data-parallel collectives — a real, deterministic **all-reduce**,
+//! **broadcast**, and **barrier** across worker *threads* that share one group
+//! handle.
 //!
-//! Provides gradient synchronization across workers using a simple
-//! ring all-reduce algorithm. Works over TCP (no MPI dependency) for
-//! data-parallel training on CPU clusters.
+//! # Scope (honest)
 //!
-//! # Design
+//! This is the single-machine, multi-**thread** reduction used by data-parallel
+//! training: workers are threads, not processes, and they rendezvous through a
+//! shared [`WorkerGroup`] rather than over a socket. A multi-host TCP/RDMA
+//! transport is deliberately out of scope here — this module does not pretend to
+//! do inter-process networking.
 //!
-//! - `DistributedContext` manages worker rank, world size, and communication.
-//! - `all_reduce` averages gradients across all workers.
-//! - Communication uses a simple TCP ring topology (worker i ↔ worker (i+1)%N).
+//! # Determinism
 //!
-//! # Limitations
-//!
-//! - Single-node multi-process only (no multi-host yet).
-//! - No NCCL/RDMA — pure TCP, suitable for CPU clusters.
+//! [`all_reduce`] sums each worker's contribution in **ascending rank order**,
+//! so the averaged gradient is bit-identical regardless of thread scheduling —
+//! the same fixed-order discipline as the rest of the workspace.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Barrier, Mutex};
 
-/// Distributed training context for a single worker.
-#[derive(Debug, Clone)]
+/// Per-key, rank-indexed gradient contributions for one all-reduce round.
+type ContribSlots = HashMap<String, Vec<Option<Vec<f32>>>>;
+/// Per-key broadcast payloads published by rank 0.
+type BcastMap = HashMap<String, Vec<f32>>;
+
+/// Shared state for one in-process worker group. One handle is cloned into each
+/// worker thread (see [`DistributedContext::group`]).
+#[derive(Clone)]
+pub struct WorkerGroup {
+    world_size: usize,
+    barrier: Arc<Barrier>,
+    /// Per-key, rank-indexed contributions for the current all-reduce round.
+    slots: Arc<Mutex<ContribSlots>>,
+    /// Per-key broadcast payloads (published by rank 0).
+    bcast: Arc<Mutex<BcastMap>>,
+}
+
+impl WorkerGroup {
+    fn new(world_size: usize) -> Self {
+        assert!(world_size >= 1, "world_size must be >= 1");
+        Self {
+            world_size,
+            barrier: Arc::new(Barrier::new(world_size)),
+            slots: Arc::new(Mutex::new(HashMap::new())),
+            bcast: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+/// Per-worker context: this worker's `rank`, the `world_size`, and — for a real
+/// multi-worker run — the shared [`WorkerGroup`].
+#[derive(Clone)]
 pub struct DistributedContext {
-    /// Rank of this worker (0 .. world_size-1).
+    /// Rank of this worker (`0 .. world_size-1`).
     pub rank: usize,
     /// Total number of workers.
     pub world_size: usize,
-    /// Base port for communication (rank i uses port base + i).
-    pub base_port: u16,
+    group: Option<WorkerGroup>,
 }
 
 impl DistributedContext {
-    /// Create a single-worker context (no distribution).
+    /// A single-worker context — every collective is a no-op.
     pub fn single() -> Self {
         Self {
             rank: 0,
             world_size: 1,
-            base_port: 29500,
+            group: None,
         }
     }
 
-    /// Create a multi-worker context.
-    pub fn new(rank: usize, world_size: usize, base_port: u16) -> Self {
-        assert!(rank < world_size, "rank must be < world_size");
-        Self {
-            rank,
-            world_size,
-            base_port,
-        }
+    /// Build `world_size` contexts that share one in-process group. Hand
+    /// `contexts[r]` to the thread that acts as rank `r`.
+    pub fn group(world_size: usize) -> Vec<DistributedContext> {
+        let g = WorkerGroup::new(world_size);
+        (0..world_size)
+            .map(|rank| DistributedContext {
+                rank,
+                world_size,
+                group: Some(g.clone()),
+            })
+            .collect()
     }
 
-    /// Whether this is a distributed run.
+    /// Whether this is a multi-worker run.
     pub fn is_distributed(&self) -> bool {
         self.world_size > 1
     }
 }
 
-/// All-reduce gradients using a simple ring algorithm.
-///
-/// Each worker contributes its local gradients; after all-reduce,
-/// every worker has the element-wise average across all workers.
-///
-/// In single-worker mode, this is a no-op.
+/// All-reduce (mean): on return, every worker's `gradients` hold the element-wise
+/// average across all workers. Contributions are summed in ascending rank order,
+/// so the result is bit-identical run to run. Every worker must call this with
+/// the **same set of keys**, each of the same length. Single-worker mode is a
+/// no-op.
 pub fn all_reduce(
     ctx: &DistributedContext,
-    _gradients: &mut HashMap<String, Vec<f32>>,
+    gradients: &mut HashMap<String, Vec<f32>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if ctx.world_size <= 1
     {
-        return Ok(()); // No-op for single worker
+        return Ok(());
     }
+    let g = ctx.group.as_ref().ok_or_else(|| {
+        "multi-worker all_reduce needs a context from DistributedContext::group".to_string()
+    })?;
 
-    // Ring all-reduce: scatter-reduce + all-gather
-    // For simplicity, each gradient buffer is averaged manually.
-    // In production, this would use TCP sockets for inter-process comm.
-    //
-    // Pseudocode for 2-worker ring:
-    //   Worker 0 sends its buffer to worker 1, receives worker 1's buffer.
-    //   Each averages: (local + remote) / 2.
+    // Phase 1 — publish this rank's contribution for every key.
+    {
+        let mut slots = g.slots.lock().unwrap();
+        for (k, v) in gradients.iter()
+        {
+            let entry = slots
+                .entry(k.clone())
+                .or_insert_with(|| vec![None; g.world_size]);
+            entry[ctx.rank] = Some(v.clone());
+        }
+    }
+    g.barrier.wait();
 
-    // For now, we implement a single-process all-reduce that demonstrates
-    // the API contract. Real inter-process communication requires socket setup.
+    // Phase 2 — every worker reduces in ascending rank order and writes the mean.
+    {
+        let slots = g.slots.lock().unwrap();
+        let inv = 1.0f32 / g.world_size as f32;
+        for (k, v) in gradients.iter_mut()
+        {
+            let contribs = slots
+                .get(k)
+                .ok_or_else(|| "workers disagree on the gradient keys".to_string())?;
+            let mut acc = vec![0.0f32; v.len()];
+            for slot in contribs.iter()
+            {
+                let c = slot
+                    .as_ref()
+                    .ok_or_else(|| "a rank did not contribute this key".to_string())?;
+                for (a, &x) in acc.iter_mut().zip(c)
+                {
+                    *a += x;
+                }
+            }
+            for (dst, &a) in v.iter_mut().zip(&acc)
+            {
+                *dst = a * inv;
+            }
+        }
+    }
+    g.barrier.wait();
 
-    // The actual implementation would:
-    // 1. Open TCP connections to neighbors in the ring
-    // 2. Scatter-reduce: send 1/N chunk to next, receive from prev, accumulate
-    // 3. All-gather: circulate the reduced chunks
-    //
-    // This is a structural placeholder that documents the algorithm.
-
-    let _world_size = ctx.world_size;
-    let _rank = ctx.rank;
-
-    // In a real distributed setting with multiple processes,
-    // socket-based communication would go here.
-    // For single-process testing, this is a no-op.
-
+    // Phase 3 — rank 0 clears the round once everyone has finished reading.
+    if ctx.rank == 0
+    {
+        g.slots.lock().unwrap().clear();
+    }
+    g.barrier.wait();
     Ok(())
 }
 
-/// Synchronize all workers at a barrier.
+/// Block until every worker in the group has arrived.
 pub fn barrier(ctx: &DistributedContext) -> Result<(), Box<dyn std::error::Error>> {
     if ctx.world_size <= 1
     {
         return Ok(());
     }
-    // Real implementation would coordinate via TCP.
+    let g = ctx
+        .group
+        .as_ref()
+        .ok_or_else(|| "multi-worker barrier needs a group context".to_string())?;
+    g.barrier.wait();
     Ok(())
 }
 
-/// Broadcast a value from rank 0 to all workers.
-pub fn broadcast_f32(
+/// Broadcast a vector from rank 0 to every worker. Single-worker mode is a no-op.
+pub fn broadcast(
     ctx: &DistributedContext,
-    _value: &mut f32,
+    key: &str,
+    value: &mut Vec<f32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if ctx.world_size <= 1
     {
         return Ok(());
     }
-    // In production, rank 0 sends, others receive.
+    let g = ctx
+        .group
+        .as_ref()
+        .ok_or_else(|| "multi-worker broadcast needs a group context".to_string())?;
+    if ctx.rank == 0
+    {
+        g.bcast
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), value.clone());
+    }
+    g.barrier.wait();
     if ctx.rank != 0
     {
-        // Receive from rank 0
-        // *value = received_value;
+        let b = g.bcast.lock().unwrap();
+        *value = b
+            .get(key)
+            .ok_or_else(|| "rank 0 did not broadcast this key".to_string())?
+            .clone();
     }
+    g.barrier.wait();
+    if ctx.rank == 0
+    {
+        g.bcast.lock().unwrap().clear();
+    }
+    g.barrier.wait();
+    Ok(())
+}
+
+/// Broadcast a single `f32` from rank 0 to every worker.
+pub fn broadcast_f32(
+    ctx: &DistributedContext,
+    value: &mut f32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut v = vec![*value];
+    broadcast(ctx, "__scalar", &mut v)?;
+    *value = v[0];
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
 
     #[test]
-    fn test_single_worker_noop() {
+    fn single_worker_is_a_noop() {
         let ctx = DistributedContext::single();
         let mut grads = HashMap::new();
-        grads.insert("w".into(), vec![1.0, 2.0, 3.0]);
-
+        grads.insert("w".to_string(), vec![1.0, 2.0, 3.0]);
         all_reduce(&ctx, &mut grads).unwrap();
-        // Single worker: gradients unchanged
         assert_eq!(grads["w"], vec![1.0, 2.0, 3.0]);
+        barrier(&ctx).unwrap();
+        let mut x = 7.0f32;
+        broadcast_f32(&ctx, &mut x).unwrap();
+        assert_eq!(x, 7.0);
     }
 
     #[test]
-    fn test_single_worker_barrier() {
-        let ctx = DistributedContext::single();
-        barrier(&ctx).unwrap(); // No-op, should not hang
+    fn all_reduce_averages_across_threads_bit_exactly() {
+        let world = 4;
+        let ctxs = DistributedContext::group(world);
+        let handles: Vec<_> = ctxs
+            .into_iter()
+            .map(|ctx| {
+                thread::spawn(move || {
+                    // rank r contributes [r+1, 2*(r+1)] under key "g".
+                    let r = ctx.rank as f32;
+                    let mut grads = HashMap::new();
+                    grads.insert("g".to_string(), vec![r + 1.0, 2.0 * (r + 1.0)]);
+                    all_reduce(&ctx, &mut grads).unwrap();
+                    grads["g"].clone()
+                })
+            })
+            .collect();
+        let results: Vec<Vec<f32>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        // mean of [1,2,3,4] = 2.5 ; mean of [2,4,6,8] = 5.0 — every worker agrees.
+        for r in &results
+        {
+            assert_eq!(r, &vec![2.5, 5.0]);
+        }
     }
 
     #[test]
-    fn test_context_creation() {
-        let ctx = DistributedContext::new(2, 4, 29500);
-        assert_eq!(ctx.rank, 2);
-        assert_eq!(ctx.world_size, 4);
-        assert!(ctx.is_distributed());
+    fn two_rounds_reuse_the_group() {
+        let ctxs = DistributedContext::group(2);
+        let handles: Vec<_> = ctxs
+            .into_iter()
+            .map(|ctx| {
+                thread::spawn(move || {
+                    let r = ctx.rank as f32;
+                    let mut out = Vec::new();
+                    for round in 0..2
+                    {
+                        let mut g = HashMap::new();
+                        g.insert("g".to_string(), vec![r + round as f32]);
+                        all_reduce(&ctx, &mut g).unwrap();
+                        out.push(g["g"][0]);
+                    }
+                    out
+                })
+            })
+            .collect();
+        for h in handles
+        {
+            // round 0: mean(0,1)=0.5 ; round 1: mean(1,2)=1.5
+            assert_eq!(h.join().unwrap(), vec![0.5, 1.5]);
+        }
     }
 
     #[test]
-    #[should_panic]
-    fn test_invalid_rank() {
-        DistributedContext::new(5, 4, 29500); // rank >= world_size
+    fn broadcast_sends_rank0_to_all() {
+        let ctxs = DistributedContext::group(3);
+        let handles: Vec<_> = ctxs
+            .into_iter()
+            .map(|ctx| {
+                thread::spawn(move || {
+                    let mut v = if ctx.rank == 0 { 42.0f32 } else { 0.0 };
+                    broadcast_f32(&ctx, &mut v).unwrap();
+                    v
+                })
+            })
+            .collect();
+        for h in handles
+        {
+            assert_eq!(h.join().unwrap(), 42.0);
+        }
+    }
+
+    #[test]
+    fn group_assigns_distinct_ranks() {
+        let ctxs = DistributedContext::group(4);
+        assert_eq!(ctxs.len(), 4);
+        for (i, c) in ctxs.iter().enumerate()
+        {
+            assert_eq!(c.rank, i);
+            assert_eq!(c.world_size, 4);
+            assert!(c.is_distributed());
+        }
     }
 }

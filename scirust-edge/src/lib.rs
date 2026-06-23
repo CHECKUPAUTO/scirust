@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 //! scirust-edge : inference int8 deterministe a partir d'un artefact QSR1,
 //! no_std et sans allocation. Reproduit bit-pour-bit
 //! scirust-runtime::quant::QModel::infer (memes maths entieres).
@@ -356,5 +356,57 @@ mod proofs {
             sum += (a as i32) * (w as i32);
         }
         let _ = sum;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A header-only QSR1 artifact (no scales/weights/bias) — enough to exercise
+    /// parsing, buffer sizing and the resource certificate.
+    fn header(in_f: u32, out_f: u32) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"QSR1");
+        b.extend_from_slice(&1u32.to_le_bytes()); // one layer
+        b.extend_from_slice(&0u32.to_le_bytes()); // tag = 0 (Linear)
+        b.extend_from_slice(&in_f.to_le_bytes());
+        b.extend_from_slice(&out_f.to_le_bytes());
+        b.extend_from_slice(&1.0f32.to_le_bytes()); // input scale
+        b.push(0u8); // relu = false
+        b.extend_from_slice(&0u32.to_le_bytes()); // ns = 0
+        b.extend_from_slice(&0u32.to_le_bytes()); // nw = 0
+        b.extend_from_slice(&0u32.to_le_bytes()); // nb = 0
+        b
+    }
+
+    #[test]
+    fn rejects_bad_magic() {
+        assert_eq!(
+            buffer_requirements(b"NOPE0000", 1),
+            Err(EdgeError::BadMagic)
+        );
+    }
+
+    #[test]
+    fn rejects_empty_model() {
+        let mut empty = b"QSR1".to_vec();
+        empty.extend_from_slice(&0u32.to_le_bytes());
+        assert_eq!(buffer_requirements(&empty, 1), Err(EdgeError::EmptyModel));
+    }
+
+    #[test]
+    fn rejects_truncated_header() {
+        let mut m = header(2, 3);
+        m.truncate(10);
+        assert!(buffer_requirements(&m, 1).is_err());
+    }
+
+    #[test]
+    fn buffer_requirements_reads_layer_shapes() {
+        let m = header(2, 3);
+        assert_eq!(buffer_requirements(&m, 1).unwrap(), (3, 3, 3));
+        assert_eq!(buffer_requirements(&m, 4).unwrap(), (12, 12, 12));
+        assert!(resource_certificate(&m, 1).is_ok());
     }
 }

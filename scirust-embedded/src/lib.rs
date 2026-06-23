@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 /// Virgule fixe Q16.16 pour le déterminisme sur microcontrôleurs sans FPU.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -71,5 +71,41 @@ impl<const IN: usize, const OUT: usize> StaticLinear<IN, OUT> {
                 output.data[b][j] = acc;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn q16_roundtrips_and_arithmetic() {
+        let a = Q16_16::from_f32(1.5);
+        let b = Q16_16::from_f32(2.0);
+        assert!((a.to_f32() - 1.5).abs() < 1e-3);
+        assert!((a.add(b).to_f32() - 3.5).abs() < 1e-3);
+        assert!((a.mul(b).to_f32() - 3.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn static_linear_forward_is_deterministic_fixed_point() {
+        let weight = StaticTensor::<Q16_16, 2, 2> {
+            data: [
+                [Q16_16::from_f32(1.0), Q16_16::from_f32(0.0)],
+                [Q16_16::from_f32(0.0), Q16_16::from_f32(2.0)],
+            ],
+        };
+        let bias = StaticTensor::<Q16_16, 1, 2> {
+            data: [[Q16_16::from_f32(0.5), Q16_16::from_f32(-1.0)]],
+        };
+        let layer = StaticLinear::<2, 2> { weight, bias };
+        let input = StaticTensor::<Q16_16, 1, 2> {
+            data: [[Q16_16::from_f32(3.0), Q16_16::from_f32(4.0)]],
+        };
+        let mut out = StaticTensor::<Q16_16, 1, 2>::new(Q16_16(0));
+        layer.forward(&input, &mut out);
+        // y0 = 0.5 + 3*1 + 4*0 = 3.5 ; y1 = -1 + 3*0 + 4*2 = 7
+        assert!((out.data[0][0].to_f32() - 3.5).abs() < 1e-2);
+        assert!((out.data[0][1].to_f32() - 7.0).abs() < 1e-2);
     }
 }

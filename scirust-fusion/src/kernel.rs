@@ -82,8 +82,8 @@ impl FusedKernel {
             },
             KernelType::SsmScan =>
             {
-                // SSM scan — séquentiel, pas de fusion possible
-                unimplemented!("SsmScan kernel not yet implemented")
+                // SSM scan — séquentiel par nature (récurrence diagonale).
+                self.execute_ssm_scan(inputs, output);
             },
             KernelType::Identity =>
             {
@@ -97,6 +97,44 @@ impl FusedKernel {
     }
 
     // ============= Implémentations des kernels fusionnés =============
+
+    /// Diagonal state-space-model scan (the Mamba / S4D recurrence). Sequential
+    /// by nature: a per-state vector `h` (length `N`) starts at zero and evolves
+    /// `h[i] ← a[i]·h[i] + b[i]·x[t]`, emitting `y[t] = Σ_i c[i]·h[i]`. The inner
+    /// reduction stays in fixed (ascending-`i`) order, so the result is
+    /// bit-identical run to run — the determinism discipline of the workspace.
+    ///
+    /// Input contract:
+    /// - `inputs[0] = x` — the scalar input sequence, length `T`
+    /// - `inputs[1] = a` — per-state decay (diagonal `A`), length `N`
+    /// - `inputs[2] = b` — input projection `B`, length `N`
+    /// - `inputs[3] = c` — output projection `C`, length `N`
+    /// - `output      = y` — length `T` (must equal `x.len()`)
+    fn execute_ssm_scan(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        assert!(inputs.len() >= 4, "SsmScan needs x, a, b, c");
+        let x = inputs[0];
+        let (a, b, c) = (inputs[1], inputs[2], inputs[3]);
+        let n = a.len();
+        assert_eq!(b.len(), n, "b must match the state dimension");
+        assert_eq!(c.len(), n, "c must match the state dimension");
+        assert_eq!(
+            output.len(),
+            x.len(),
+            "output length must equal the sequence length"
+        );
+
+        let mut h = vec![0.0f32; n];
+        for (t, &xt) in x.iter().enumerate()
+        {
+            let mut y = 0.0f32;
+            for (((hi, &ai), &bi), &ci) in h.iter_mut().zip(a).zip(b).zip(c)
+            {
+                *hi = ai * *hi + bi * xt;
+                y += ci * *hi;
+            }
+            output[t] = y;
+        }
+    }
 
     /// Matmul + SiLU en un seul passage.
     ///
@@ -457,5 +495,32 @@ mod tests {
         // y0 = relu(1*1 + 2*0) = 1 ; y1 = relu(1*0 + 2*(-1)) = relu(-2) = 0
         assert_eq!(out, [1.0, 0.0]);
         assert_eq!(k.op_count(), 2);
+    }
+
+    #[test]
+    fn ssm_scan_matches_the_diagonal_recurrence() {
+        let k = FusedKernel::new(KernelType::SsmScan, vec![0, 1, 2, 3], vec![], vec![]);
+
+        // N=1, a=0.5, b=1, c=1 → impulse response is the geometric decay 0.5^t.
+        let x = [1.0f32, 0.0, 0.0];
+        let (a, b, c) = ([0.5f32], [1.0f32], [1.0f32]);
+        let mut out = [0.0f32; 3];
+        k.execute(&[&x, &a, &b, &c], &mut out);
+        assert_eq!(out, [1.0, 0.5, 0.25]);
+
+        // N=2 mixing two states with different decays:
+        // a=[0.5,0], b=[1,1], c=[1,2], x=[1,1]
+        //  t0: h=[1,1]   → y = 1*1   + 2*1 = 3
+        //  t1: h=[1.5,1] → y = 1*1.5 + 2*1 = 3.5
+        let x2 = [1.0f32, 1.0];
+        let (a2, b2, c2) = ([0.5f32, 0.0], [1.0f32, 1.0], [1.0f32, 2.0]);
+        let mut out2 = [0.0f32; 2];
+        k.execute(&[&x2, &a2, &b2, &c2], &mut out2);
+        assert_eq!(out2, [3.0, 3.5]);
+
+        // Deterministic: identical inputs give bit-identical output.
+        let mut again = [0.0f32; 2];
+        k.execute(&[&x2, &a2, &b2, &c2], &mut again);
+        assert_eq!(out2, again);
     }
 }

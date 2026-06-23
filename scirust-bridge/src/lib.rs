@@ -1,4 +1,4 @@
-//! IA Bridge (NLP → math pipeline) stub.
+//! IA Bridge: a natural-language → symbolic-math pipeline.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -80,5 +80,30 @@ pub fn parse_natural(text: &str) -> NaturalCommand {
         action,
         expression: expr,
         variables: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_runs_a_full_nlp_to_math_pass() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), 3.0);
+        let out = Pipeline::new().with_vars(vars).run("x^2 + 1").unwrap();
+        assert_eq!(out.value, 10.0);
+        assert!(!out.parsed.is_empty());
+        assert!(!out.derivative.is_empty());
+        assert!(!out.rust_code.is_empty());
+    }
+
+    #[test]
+    fn parse_natural_classifies_intent() {
+        assert_eq!(parse_natural("please simplify x + x").action, "simplify");
+        assert_eq!(parse_natural("derive x^2").action, "derive");
+        assert_eq!(parse_natural("solve x - 1").action, "solve");
+        assert_eq!(parse_natural("evaluate x").action, "evaluate");
+        assert_eq!(parse_natural("hello there").action, "unknown");
     }
 }

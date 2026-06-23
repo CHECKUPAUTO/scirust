@@ -2364,7 +2364,17 @@ impl Tape {
                             },
                             _ =>
                             {
-                                // d>2: gradient set to zero (not yet implemented)
+                                // The TT backprop above is derived for a 2-core
+                                // decomposition. A >2-core gradient is a distinct
+                                // (longer) derivation — rather than silently emit a
+                                // wrong (zero) gradient, refuse it explicitly so a
+                                // mis-configured layer fails loudly instead of
+                                // training on garbage.
+                                panic!(
+                                    "TtContract backward currently supports a 2-core \
+                                     decomposition (got {dd} cores); build the TT layer \
+                                     with 2 factors, e.g. tt_decompose_auto(.., 2)"
+                                );
                             },
                         }
 
