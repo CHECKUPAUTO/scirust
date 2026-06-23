@@ -57,14 +57,18 @@ pub fn size_position(pred: &CertifiedPrediction, cfg: &RiskConfig) -> Position {
     let midpoint = pred.bounds.midpoint;
     let uncertainty = pred.bounds.uncertainty;
     let action = pred.action;
-    let confidence = if uncertainty > 0.0 {
+    let confidence = if uncertainty > 0.0
+    {
         (1.0 - uncertainty / midpoint.abs().max(1e-6)).clamp(0.0, 1.0)
-    } else {
+    }
+    else
+    {
         1.0
     };
 
     // Stop-loss: entry ± k × uncertainty (opposite side of the trade).
-    let (stop_loss, take_profit) = match action {
+    let (stop_loss, take_profit) = match action
+    {
         Action::Long => (
             entry - cfg.stop_loss_k * uncertainty,
             entry + cfg.stop_loss_k * uncertainty * 2.0,
@@ -78,36 +82,55 @@ pub fn size_position(pred: &CertifiedPrediction, cfg: &RiskConfig) -> Position {
 
     // Position size: fraction of capital scaled by confidence.
     let base_size = cfg.capital * cfg.max_position_fraction;
-    let size = match action {
+    let size = match action
+    {
         Action::Flat => 0.0,
         _ => base_size * confidence,
     };
 
     // Max loss if stop is hit: fraction of position value at risk.
-    let max_loss_frac = match action {
+    let max_loss_frac = match action
+    {
         Action::Long => (entry - stop_loss).abs() / entry,
         Action::Short => (stop_loss - entry).abs() / entry,
         Action::Flat => 0.0,
     };
     let max_loss = size * max_loss_frac;
-    let max_loss_pct = if cfg.capital > 0.0 { max_loss / cfg.capital } else { 0.0 };
+    let max_loss_pct = if cfg.capital > 0.0
+    {
+        max_loss / cfg.capital
+    }
+    else
+    {
+        0.0
+    };
 
     // Gate checks.
     let allowed;
     let reason;
-    if action == Action::Flat {
+    if action == Action::Flat
+    {
         allowed = false;
         reason = "flat: no position".to_string();
-    } else if confidence < cfg.min_confidence {
+    }
+    else if confidence < cfg.min_confidence
+    {
         allowed = false;
-        reason = format!("confidence {:.3} < min {:.3}", confidence, cfg.min_confidence);
-    } else if max_loss_pct > cfg.max_drawdown {
+        reason = format!(
+            "confidence {:.3} < min {:.3}",
+            confidence, cfg.min_confidence
+        );
+    }
+    else if max_loss_pct > cfg.max_drawdown
+    {
         allowed = false;
         reason = format!(
             "max_loss_pct {:.4} > max_drawdown {:.4}",
             max_loss_pct, cfg.max_drawdown
         );
-    } else {
+    }
+    else
+    {
         allowed = true;
         reason = format!("allowed: size={:.2} confidence={:.3}", size, confidence);
     }
@@ -148,18 +171,24 @@ impl DrawdownTracker {
     /// Record a realized PnL and update drawdown.
     pub fn record_pnl(&mut self, pnl: f32, cfg: &RiskConfig) {
         self.current += pnl;
-        if self.current > self.peak {
+        if self.current > self.peak
+        {
             self.peak = self.current;
         }
-        let dd = if self.peak > 0.0 {
+        let dd = if self.peak > 0.0
+        {
             (self.peak - self.current) / self.peak
-        } else {
+        }
+        else
+        {
             0.0
         };
-        if dd > self.max_drawdown_seen {
+        if dd > self.max_drawdown_seen
+        {
             self.max_drawdown_seen = dd;
         }
-        if dd >= cfg.max_drawdown {
+        if dd >= cfg.max_drawdown
+        {
             self.circuit_breaker_triggered = true;
         }
     }
@@ -186,22 +215,22 @@ pub struct BacktestResult {
 
 /// Run a simplified backtest: for each decision, compute position, simulate
 /// the next-bar return, and update the drawdown tracker.
-pub fn run_backtest(
-    predictions: &[CertifiedPrediction],
-    cfg: &RiskConfig,
-) -> BacktestResult {
+pub fn run_backtest(predictions: &[CertifiedPrediction], cfg: &RiskConfig) -> BacktestResult {
     let mut tracker = DrawdownTracker::new(cfg.capital);
     let mut num_trades = 0;
     let mut num_allowed = 0;
     let mut num_blocked = 0;
 
-    for pred in predictions {
-        if tracker.should_halt() {
+    for pred in predictions
+    {
+        if tracker.should_halt()
+        {
             break;
         }
         num_trades += 1;
         let pos = size_position(pred, cfg);
-        if !pos.allowed {
+        if !pos.allowed
+        {
             num_blocked += 1;
             continue;
         }
@@ -230,7 +259,12 @@ mod tests {
     use crate::certify::{CertifiedBounds, Interval};
     use std::collections::BTreeMap;
 
-    fn make_pred(action: Action, midpoint: f32, uncertainty: f32, close: f32) -> CertifiedPrediction {
+    fn make_pred(
+        action: Action,
+        midpoint: f32,
+        uncertainty: f32,
+        close: f32,
+    ) -> CertifiedPrediction {
         CertifiedPrediction {
             symbol: "BTC/USDT".to_string(),
             action,
@@ -281,8 +315,10 @@ mod tests {
     #[test]
     fn low_confidence_blocks_position() {
         let pred = make_pred(Action::Long, 0.001, 0.01, 50_000.0);
-        let mut cfg = RiskConfig::default();
-        cfg.min_confidence = 0.9;
+        let cfg = RiskConfig {
+            min_confidence: 0.9,
+            ..Default::default()
+        };
         let pos = size_position(&pred, &cfg);
         assert!(!pos.allowed);
         assert!(pos.reason.contains("confidence"));
@@ -292,15 +328,8 @@ mod tests {
     fn excessive_loss_blocks_position() {
         // Midpoint=0.5 (50% return), uncertainty=0.1 (10%), stop_k=100 → wide stop.
         let pred = make_pred(Action::Long, 0.5, 0.1, 100.0);
-        let mut cfg = RiskConfig::default();
-        cfg.max_drawdown = 0.01;
-        cfg.stop_loss_k = 100.0;
-        cfg.min_confidence = 0.0;
-        let pos = size_position(&pred, &cfg);
-        // stop = 100 - 100*0.1 = 100 - 10 = 90 → max_loss_frac = 10/100 = 0.1
-        // size = 10000 * 0.1 * 0.8 = 800 → max_loss = 800*0.1 = 80
-        // max_loss_pct = 80/10000 = 0.008 < 0.01... still under.
-        // Use max_position_fraction = 1.0 instead.
+        // A default-capital config leaves max_loss_pct under the cap; use a
+        // smaller capital with max_position_fraction = 1.0 to force a block.
         let cfg2 = RiskConfig {
             capital: 1000.0,
             max_position_fraction: 1.0,
@@ -313,7 +342,11 @@ mod tests {
         // max_loss = 800 * 0.1 = 80
         // max_loss_pct = 80/1000 = 0.08 > 0.01 → blocked
         assert!(!pos.allowed, "should be blocked, reason: {}", pos.reason);
-        assert!(pos.reason.contains("max_loss_pct"), "reason: {}", pos.reason);
+        assert!(
+            pos.reason.contains("max_loss_pct"),
+            "reason: {}",
+            pos.reason
+        );
     }
 
     #[test]
@@ -346,8 +379,10 @@ mod tests {
         let preds: Vec<CertifiedPrediction> = (0..20)
             .map(|_| make_pred(Action::Long, -0.05, 0.001, 50_000.0))
             .collect();
-        let mut cfg = RiskConfig::default();
-        cfg.max_drawdown = 0.02;
+        let cfg = RiskConfig {
+            max_drawdown: 0.02,
+            ..Default::default()
+        };
         let result = run_backtest(&preds, &cfg);
         assert!(result.circuit_breaker_triggered);
         assert!(result.num_trades < 20);

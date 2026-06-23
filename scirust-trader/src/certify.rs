@@ -71,37 +71,43 @@ impl CertifiedBounds {
 /// `weights[2]` = layer-1 weight matrix, etc.
 ///
 /// `input` is the feature vector; `eps` is the perturbation radius.
-pub fn certify(
-    weights: &ModelWeights,
-    input: &[f32],
-    eps: f32,
-) -> CertifiedBounds {
-    let mut bounds: Vec<Interval> =
-        input.iter().map(|&x| Interval::new(x - eps, x + eps)).collect();
+pub fn certify(weights: &ModelWeights, input: &[f32], eps: f32) -> CertifiedBounds {
+    let mut bounds: Vec<Interval> = input
+        .iter()
+        .map(|&x| Interval::new(x - eps, x + eps))
+        .collect();
 
     let mut i = 0;
-    while i < weights.layers.len() {
+    while i < weights.layers.len()
+    {
         let w_flat = &weights.layers[i];
-        if i + 1 >= weights.layers.len() {
+        if i + 1 >= weights.layers.len()
+        {
             break;
         }
         let b_flat = &weights.layers[i + 1];
         let in_dim = bounds.len();
         let out_dim = b_flat.len();
-        if w_flat.len() < in_dim * out_dim {
+        if w_flat.len() < in_dim * out_dim
+        {
             break;
         }
         let mut out_bounds = Vec::with_capacity(out_dim);
-        for j in 0..out_dim {
+        for j in 0..out_dim
+        {
             let mut lo = b_flat[j];
             let mut hi = b_flat[j];
-            for k in 0..in_dim {
+            for k in 0..in_dim
+            {
                 let w = w_flat[k * out_dim + j];
                 let (x_lo, x_hi) = (bounds[k].lo, bounds[k].hi);
-                if w >= 0.0 {
+                if w >= 0.0
+                {
                     lo += w * x_lo;
                     hi += w * x_hi;
-                } else {
+                }
+                else
+                {
                     lo += w * x_hi;
                     hi += w * x_lo;
                 }
@@ -110,17 +116,22 @@ pub fn certify(
         }
         bounds = out_bounds;
         i += 2;
-        if i < weights.layers.len() {
+        if i < weights.layers.len()
+        {
             // ReLU activation: [max(0, lo), max(0, hi)]
-            for b in &mut bounds {
+            for b in &mut bounds
+            {
                 b.lo = b.lo.max(0.0);
                 b.hi = b.hi.max(0.0);
             }
         }
     }
-    let out = if bounds.is_empty() {
+    let out = if bounds.is_empty()
+    {
         Interval::new(0.0, 0.0)
-    } else {
+    }
+    else
+    {
         bounds[0]
     };
     let midpoint = out.midpoint();

@@ -23,6 +23,7 @@ pub struct IndicatorSet {
 
 impl IndicatorSet {
     /// Compute all indicators from OHLCV slices.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_ohlcv(
         highs: &[f32],
         lows: &[f32],
@@ -55,9 +56,12 @@ impl IndicatorSet {
             .map(|i| {
                 let m = self.macd.get(i).copied().unwrap_or(f32::NAN);
                 let s = self.macd_signal.get(i).copied().unwrap_or(f32::NAN);
-                if m.is_nan() || s.is_nan() {
+                if m.is_nan() || s.is_nan()
+                {
                     f32::NAN
-                } else {
+                }
+                else
+                {
                     m - s
                 }
             })
@@ -70,16 +74,20 @@ impl IndicatorSet {
 pub fn sma(values: &[f32], period: usize) -> Vec<f32> {
     let n = values.len();
     let mut out = vec![f32::NAN; n];
-    if period == 0 || n < period {
+    if period == 0 || n < period
+    {
         return out;
     }
     let mut sum = 0.0f32;
-    for i in 0..n {
+    for i in 0..n
+    {
         sum += values[i];
-        if i >= period {
+        if i >= period
+        {
             sum -= values[i - period];
         }
-        if i + 1 >= period {
+        if i + 1 >= period
+        {
             out[i] = sum / period as f32;
         }
     }
@@ -90,22 +98,28 @@ pub fn sma(values: &[f32], period: usize) -> Vec<f32> {
 pub fn ema(values: &[f32], period: usize) -> Vec<f32> {
     let n = values.len();
     let mut out = vec![f32::NAN; n];
-    if period == 0 || n == 0 {
+    if period == 0 || n == 0
+    {
         return out;
     }
     let alpha = 2.0 / (period as f32 + 1.0);
     let mut prev_ema = f32::NAN;
     let mut sum = 0.0f32;
-    for i in 0..n {
+    for i in 0..n
+    {
         sum += values[i];
-        if i + 1 == period {
+        if i + 1 == period
+        {
             prev_ema = sum / period as f32;
             out[i] = prev_ema;
-        } else if i + 1 > period {
+        }
+        else if i + 1 > period
+        {
             prev_ema = alpha * values[i] + (1.0 - alpha) * prev_ema;
             out[i] = prev_ema;
         }
-        if i + 1 > period {
+        if i + 1 > period
+        {
             sum -= values[i + 1 - period];
         }
     }
@@ -116,23 +130,29 @@ pub fn ema(values: &[f32], period: usize) -> Vec<f32> {
 pub fn rsi(closes: &[f32], period: usize) -> Vec<f32> {
     let n = closes.len();
     let mut out = vec![f32::NAN; n];
-    if n <= period {
+    if n <= period
+    {
         return out;
     }
     let mut gains = 0.0f32;
     let mut losses = 0.0f32;
-    for i in 1..=period {
+    for i in 1..=period
+    {
         let diff = closes[i] - closes[i - 1];
-        if diff > 0.0 {
+        if diff > 0.0
+        {
             gains += diff;
-        } else {
+        }
+        else
+        {
             losses -= diff;
         }
     }
     let mut avg_gain = gains / period as f32;
     let mut avg_loss = losses / period as f32;
     out[period] = rsi_value(avg_gain, avg_loss);
-    for i in (period + 1)..n {
+    for i in (period + 1)..n
+    {
         let diff = closes[i] - closes[i - 1];
         let gain = if diff > 0.0 { diff } else { 0.0 };
         let loss = if diff < 0.0 { -diff } else { 0.0 };
@@ -145,9 +165,12 @@ pub fn rsi(closes: &[f32], period: usize) -> Vec<f32> {
 
 #[inline]
 fn rsi_value(avg_gain: f32, avg_loss: f32) -> f32 {
-    if avg_loss == 0.0 {
+    if avg_loss == 0.0
+    {
         100.0
-    } else {
+    }
+    else
+    {
         let rs = avg_gain / avg_loss;
         100.0 - 100.0 / (1.0 + rs)
     }
@@ -161,9 +184,12 @@ pub fn macd_line(closes: &[f32], fast: usize, slow: usize) -> Vec<f32> {
         .iter()
         .zip(ema_slow.iter())
         .map(|(f, s)| {
-            if f.is_nan() || s.is_nan() {
+            if f.is_nan() || s.is_nan()
+            {
                 f32::NAN
-            } else {
+            }
+            else
+            {
                 f - s
             }
         })
@@ -171,18 +197,14 @@ pub fn macd_line(closes: &[f32], fast: usize, slow: usize) -> Vec<f32> {
 }
 
 /// MACD signal line = EMA(MACD line, signal period).
-pub fn macd_signal_line(
-    closes: &[f32],
-    fast: usize,
-    slow: usize,
-    signal: usize,
-) -> Vec<f32> {
+pub fn macd_signal_line(closes: &[f32], fast: usize, slow: usize, signal: usize) -> Vec<f32> {
     let macd = macd_line(closes, fast, slow);
     let valid_start = slow - 1;
     let valid_macd: Vec<f32> = macd[valid_start..].to_vec();
     let sig = ema(&valid_macd, signal);
     let mut out = vec![f32::NAN; macd.len()];
-    for (i, v) in sig.iter().enumerate() {
+    for (i, v) in sig.iter().enumerate()
+    {
         out[valid_start + i] = *v;
     }
     out
@@ -192,24 +214,24 @@ pub fn macd_signal_line(
 pub fn atr(highs: &[f32], lows: &[f32], period: usize) -> Vec<f32> {
     let n = highs.len();
     let mut out = vec![f32::NAN; n];
-    if n <= period {
+    if n <= period
+    {
         return out;
     }
     let mut trs = Vec::with_capacity(n);
     trs.push(highs[0] - lows[0]);
-    for i in 1..n {
+    for i in 1..n
+    {
         let tr = (highs[i] - lows[i])
             .max((highs[i] - closes_safe(lows, i, i - 1)).abs())
             .max((lows[i] - closes_safe(lows, i, i - 1)).abs());
         trs.push(tr);
     }
-    let mut sum = 0.0f32;
-    for i in 0..period {
-        sum += trs[i];
-    }
+    let sum: f32 = trs[..period].iter().sum();
     let mut prev_atr = sum / period as f32;
     out[period - 1] = prev_atr;
-    for i in period..n {
+    for i in period..n
+    {
         prev_atr = (prev_atr * (period as f32 - 1.0) + trs[i]) / period as f32;
         out[i] = prev_atr;
     }
@@ -227,17 +249,20 @@ pub fn bollinger_band(closes: &[f32], period: usize, k: f32, upper: bool) -> Vec
     mid.iter()
         .enumerate()
         .map(|(i, m)| {
-            if m.is_nan() || i + 1 < period {
+            if m.is_nan() || i + 1 < period
+            {
                 return f32::NAN;
             }
             let window = &closes[i + 1 - period..=i];
             let mean = *m;
-            let var: f32 =
-                window.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / period as f32;
+            let var: f32 = window.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / period as f32;
             let std = var.sqrt();
-            if upper {
+            if upper
+            {
                 mean + k * std
-            } else {
+            }
+            else
+            {
                 mean - k * std
             }
         })
@@ -248,11 +273,13 @@ pub fn bollinger_band(closes: &[f32], period: usize, k: f32, upper: bool) -> Vec
 pub fn true_range(highs: &[f32], lows: &[f32], closes: &[f32]) -> Vec<f32> {
     let n = highs.len();
     let mut out = Vec::with_capacity(n);
-    if n == 0 {
+    if n == 0
+    {
         return out;
     }
     out.push(highs[0] - lows[0]);
-    for i in 1..n {
+    for i in 1..n
+    {
         let tr = (highs[i] - lows[i])
             .max((highs[i] - closes[i - 1]).abs())
             .max((lows[i] - closes[i - 1]).abs());
@@ -320,7 +347,8 @@ mod tests {
         let upper = bollinger_band(&closes, 20, 2.0, true);
         let lower = bollinger_band(&closes, 20, 2.0, false);
         let mid = sma(&closes, 20);
-        for i in 19..30 {
+        for i in 19..30
+        {
             assert!(upper[i] > mid[i]);
             assert!(lower[i] < mid[i]);
         }
@@ -332,7 +360,8 @@ mod tests {
         let lows: Vec<f32> = (0..20).map(|i| 99.0 + (i as f32).sin()).collect();
         let _closes: Vec<f32> = (0..20).map(|i| 99.5 + (i as f32).sin()).collect();
         let a = atr(&highs, &lows, 14);
-        for v in &a[13..] {
+        for v in &a[13..]
+        {
             assert!(!v.is_nan());
             assert!(*v >= 0.0);
         }
@@ -343,9 +372,7 @@ mod tests {
         let highs: Vec<f32> = (0..50).map(|i| 100.0 + (i as f32).sin()).collect();
         let lows: Vec<f32> = (0..50).map(|i| 99.0 + (i as f32).sin()).collect();
         let closes: Vec<f32> = (0..50).map(|i| 99.5 + (i as f32).sin()).collect();
-        let iset = IndicatorSet::from_ohlcv(
-            &highs, &lows, &closes, 14, 12, 26, 9, 14, 20, 2.0,
-        );
+        let iset = IndicatorSet::from_ohlcv(&highs, &lows, &closes, 14, 12, 26, 9, 14, 20, 2.0);
         assert_eq!(iset.rsi.len(), 50);
         assert_eq!(iset.macd.len(), 50);
         assert_eq!(iset.atr.len(), 50);

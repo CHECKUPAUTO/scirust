@@ -64,18 +64,37 @@ impl DecisionProof {
     /// Load a proof from a file.
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         let data = std::fs::read_to_string(path)?;
-        serde_json::from_str(&data).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Summary statistics for the dashboard.
     pub fn summary(&self) -> ProofSummary {
-        let longs = self.records.iter().filter(|r| r.prediction.action == crate::agent::Action::Long).count();
-        let shorts = self.records.iter().filter(|r| r.prediction.action == crate::agent::Action::Short).count();
-        let flats = self.records.iter().filter(|r| r.prediction.action == crate::agent::Action::Flat).count();
-        let avg_uncertainty: f32 = if self.records.is_empty() {
+        let longs = self
+            .records
+            .iter()
+            .filter(|r| r.prediction.action == crate::agent::Action::Long)
+            .count();
+        let shorts = self
+            .records
+            .iter()
+            .filter(|r| r.prediction.action == crate::agent::Action::Short)
+            .count();
+        let flats = self
+            .records
+            .iter()
+            .filter(|r| r.prediction.action == crate::agent::Action::Flat)
+            .count();
+        let avg_uncertainty: f32 = if self.records.is_empty()
+        {
             0.0
-        } else {
-            self.records.iter().map(|r| r.prediction.bounds.uncertainty).sum::<f32>()
+        }
+        else
+        {
+            self.records
+                .iter()
+                .map(|r| r.prediction.bounds.uncertainty)
+                .sum::<f32>()
                 / self.records.len() as f32
         };
         let consistent = self.records.iter().filter(|r| r.llm_consistent).count();
@@ -111,7 +130,8 @@ pub struct ProofSummary {
 /// prediction (not the narration — that's LLM-generated and non-deterministic).
 fn compute_manifest_hash(records: &[DecisionRecord]) -> String {
     let mut hasher = Sha256::new();
-    for record in records {
+    for record in records
+    {
         let json = serde_json::to_string(&record.prediction).unwrap_or_default();
         hasher.update(json.as_bytes());
         hasher.update(b"|");
@@ -152,7 +172,10 @@ mod tests {
 
     #[test]
     fn proof_roundtrips_json() {
-        let records = vec![make_record("BTC/USDT", Action::Long), make_record("ETH/USDT", Action::Short)];
+        let records = vec![
+            make_record("BTC/USDT", Action::Long),
+            make_record("ETH/USDT", Action::Short),
+        ];
         let proof = DecisionProof::from_records(&records);
         let json = proof.to_json();
         let parsed: DecisionProof = serde_json::from_str(&json).unwrap();

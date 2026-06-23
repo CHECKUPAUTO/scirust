@@ -11,8 +11,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "blocking", "default-tls"] }
+# Networking is opt-in (the `live` feature). The default build keeps SciRust
+# pure-Rust with no TLS/C dependency, so the whole workspace cross-compiles to
+# aarch64 and stays auditable; enable real HTTP (Binance/Ollama) with
+# `--features live`.
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "blocking", "default-tls"], optional = true }
 
 [features]
 default = []
-network-tests = []
+live = ["dep:reqwest"]
+network-tests = ["live"]
