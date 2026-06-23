@@ -12,6 +12,18 @@
 
 use crate::{Fitness, Guard, LoopState, Report, rng_from_seed};
 use rand_distr::{Distribution, Normal};
+use serde::{Deserialize, Serialize};
+
+/// A resumable checkpoint of an `(1+λ)`-ES search: the best point reached and the
+/// adapted step size `σ`. Serialize it (any serde format) to persist a run, then
+/// hand it to [`OnePlusLambda::resume`] to warm-start from where you left off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvoState {
+    /// Best parameter vector found so far.
+    pub point: Vec<f64>,
+    /// The mutation step size reached by the 1/5 rule.
+    pub sigma: f64,
+}
 
 /// Self-adapting `(1+λ)` evolution strategy.
 #[derive(Debug, Clone)]
@@ -68,11 +80,44 @@ impl OnePlusLambda {
     where
         F: Fn(&[f64]) -> Fitness,
     {
+        let (point, _sigma, report) = self.run_seq(x0, self.sigma0, &f, guard);
+        let best = report.best_fitness;
+        (point, best, report)
+    }
+
+    /// Run and return a resumable [`EvoState`] (best point + adapted σ) alongside
+    /// the report, so a later call can warm-start from where this one stopped.
+    pub fn optimize_resumable<F>(&self, x0: Vec<f64>, f: F, guard: &Guard) -> (EvoState, Report)
+    where
+        F: Fn(&[f64]) -> Fitness,
+    {
+        let (point, sigma, report) = self.run_seq(x0, self.sigma0, &f, guard);
+        (EvoState { point, sigma }, report)
+    }
+
+    /// Continue a search from a saved [`EvoState`] — a **warm start** from the
+    /// stored point and adapted σ. The RNG restarts from the strategy's seed, so
+    /// this is not a bit-identical continuation of the original stream; it resumes
+    /// the *search state*, which is what persistence/resume needs.
+    pub fn resume<F>(&self, state: &EvoState, f: F, guard: &Guard) -> (EvoState, Report)
+    where
+        F: Fn(&[f64]) -> Fitness,
+    {
+        let (point, sigma, report) = self.run_seq(state.point.clone(), state.sigma, &f, guard);
+        (EvoState { point, sigma }, report)
+    }
+
+    /// Shared sequential core: run from `(parent, sigma)` and return the final
+    /// point, the adapted σ, and the report.
+    fn run_seq<F>(&self, x0: Vec<f64>, sigma0: f64, f: &F, guard: &Guard) -> (Vec<f64>, f64, Report)
+    where
+        F: Fn(&[f64]) -> Fitness,
+    {
         let mut rng = rng_from_seed(self.seed);
         let normal = Normal::new(0.0, 1.0).unwrap();
 
         let mut parent = x0;
-        let mut sigma = self.sigma0;
+        let mut sigma = sigma0;
         let mut successes_in_window = 0usize;
         let mut ctrl = LoopState::new(guard, f(&parent));
 
@@ -123,8 +168,7 @@ impl OnePlusLambda {
             }
         }
 
-        let best_fit = ctrl.best_fit();
-        (parent, best_fit, ctrl.into_report())
+        (parent, sigma, ctrl.into_report())
     }
 
     /// Like [`optimize`](Self::optimize) but evaluates each generation's λ
@@ -213,6 +257,34 @@ impl OnePlusLambda {
 mod tests {
     use super::*;
     use crate::bench;
+
+    #[test]
+    fn resume_warm_starts_from_a_checkpoint() {
+        let opt = OnePlusLambda::new(7).lambda(10).sigma0(1.0);
+        // Short first leg -> checkpoint.
+        let (state, r1) =
+            opt.optimize_resumable(vec![4.0; 5], bench::sphere, &Guard::new().max_iters(100));
+        // Persist + reload the checkpoint (any serde format works).
+        let json = serde_json::to_string(&state).unwrap();
+        let reloaded: EvoState = serde_json::from_str(&json).unwrap();
+        assert_eq!(reloaded.point, state.point);
+        // Resume -> must not regress past the checkpoint's best.
+        let (state2, r2) = opt.resume(
+            &reloaded,
+            bench::sphere,
+            &Guard::new().max_iters(2000).target(-1e-8),
+        );
+        assert!(r1.is_monotone() && r2.is_monotone());
+        assert!(
+            r2.best_fitness >= r1.best_fitness,
+            "resume should not lose ground"
+        );
+        assert!(
+            r2.best_fitness > -1e-3,
+            "resumed run should keep converging"
+        );
+        assert!(state2.sigma > 0.0);
+    }
 
     #[cfg(feature = "parallel")]
     #[test]
