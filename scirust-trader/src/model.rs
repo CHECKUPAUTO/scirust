@@ -37,7 +37,8 @@ impl PricePredictor {
         let mut rng = PcgEngine::new(seed);
         let mut net = Sequential::new();
         let mut prev = input_dim;
-        for &h in hidden {
+        for &h in hidden
+        {
             net = net.add(Linear::new(prev, h, &KaimingNormal, &Zeros, &mut rng));
             net = net.add(ReLU::new());
             prev = h;
@@ -53,12 +54,7 @@ impl PricePredictor {
 
     /// Train one step: forward → MSE loss → backward → Adam step.
     /// Returns the loss value for logging.
-    pub fn train_step(
-        &mut self,
-        features: &[f32],
-        target: f32,
-        lr: f32,
-    ) -> f32 {
+    pub fn train_step(&mut self, features: &[f32], target: f32, lr: f32) -> f32 {
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(features.to_vec(), 1, features.len()));
         let pred = self.forward(&tape, x);
@@ -91,16 +87,19 @@ impl PricePredictor {
         let mut layers = Vec::new();
         let mut current = Vec::new();
         let mut last_prefix = String::new();
-        for key in keys {
+        for key in keys
+        {
             let tensor = sd.get(key).unwrap();
             let prefix = key.rsplit('.').nth(1).unwrap_or(key);
-            if prefix != last_prefix && !current.is_empty() {
+            if prefix != last_prefix && !current.is_empty()
+            {
                 layers.push(std::mem::take(&mut current));
             }
             current.extend_from_slice(&tensor.data);
             last_prefix = prefix.to_string();
         }
-        if !current.is_empty() {
+        if !current.is_empty()
+        {
             layers.push(current);
         }
         let fingerprint = weights_fingerprint(&layers);
@@ -116,11 +115,9 @@ impl PricePredictor {
 fn weights_fingerprint(layers: &[Vec<f32>]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    for layer in layers {
-        let bytes: Vec<u8> = layer
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
+    for layer in layers
+    {
+        let bytes: Vec<u8> = layer.iter().flat_map(|f| f.to_le_bytes()).collect();
         hasher.update(&bytes);
     }
     format!("{:x}", hasher.finalize())
@@ -144,16 +141,19 @@ pub fn build_features(
     lookback: usize,
 ) -> Vec<f32> {
     let n = closes.len();
-    if n == 0 {
+    if n == 0
+    {
         return Vec::new();
     }
     let last_close = closes[n - 1].max(1e-6);
     let mut features = Vec::with_capacity(lookback + 3);
     let start = n.saturating_sub(lookback);
-    for i in start..n {
-        features.push(closes[i] / last_close - 1.0);
+    for &c in &closes[start..n]
+    {
+        features.push(c / last_close - 1.0);
     }
-    while features.len() < lookback {
+    while features.len() < lookback
+    {
         features.insert(0, 0.0);
     }
     features.push(rsi_series.last().copied().unwrap_or(50.0) / 100.0);
@@ -181,7 +181,8 @@ mod tests {
         let target = 1.0f32;
         let initial_loss = model.train_step(&features, target, 0.01);
         let mut last_loss = initial_loss;
-        for _ in 0..20 {
+        for _ in 0..20
+        {
             last_loss = model.train_step(&features, target, 0.01);
         }
         assert!(

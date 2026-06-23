@@ -8,10 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::certify::{certify, CertifiedBounds, feature_attribution};
+use crate::certify::{CertifiedBounds, certify, feature_attribution};
 use crate::indicators::IndicatorSet;
 use crate::market::{MarketFeed, MarketSnapshot};
-use crate::model::{build_features, PricePredictor};
+use crate::model::{PricePredictor, build_features};
 use crate::proof::{DecisionProof, DecisionRecord};
 
 /// The action the agent can take.
@@ -24,17 +24,23 @@ pub enum Action {
 
 impl Action {
     pub fn from_prediction(pred: f32, threshold: f32) -> Self {
-        if pred > threshold {
+        if pred > threshold
+        {
             Action::Long
-        } else if pred < -threshold {
+        }
+        else if pred < -threshold
+        {
             Action::Short
-        } else {
+        }
+        else
+        {
             Action::Flat
         }
     }
 
     pub fn label(&self) -> &'static str {
-        match self {
+        match self
+        {
             Action::Long => "LONG",
             Action::Short => "SHORT",
             Action::Flat => "FLAT",
@@ -106,6 +112,7 @@ pub struct OllamaClient {
 }
 
 /// Request body for Ollama `/api/generate`.
+#[cfg(feature = "live")]
 #[derive(serde::Serialize)]
 struct OllamaRequest {
     model: String,
@@ -114,6 +121,7 @@ struct OllamaRequest {
 }
 
 /// Response body from Ollama `/api/generate` (non-streaming).
+#[cfg(feature = "live")]
 #[derive(serde::Deserialize)]
 struct OllamaResponse {
     response: String,
@@ -135,7 +143,12 @@ impl OllamaClient {
             .map(|(k, v)| format!("{}={:.4}", k, v))
             .collect();
         top_attrs.sort_by(|a, b| b.cmp(a));
-        let attrs_str = top_attrs.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        let attrs_str = top_attrs
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
         format!(
             "You are a crypto trading analyst. The SciRust model has produced a \
              CERTIFIED prediction (mathematically proven bounds via Interval Bound Propagation):\n\n\
@@ -169,6 +182,21 @@ impl OllamaClient {
 
     /// Call Ollama `/api/generate`. Returns the raw text response, or an
     /// error string prefixed with `[error]` if the call fails.
+    ///
+    /// Networking is opt-in: build with `--features live`. The default build
+    /// keeps SciRust pure-Rust (no TLS/C dependency) and returns an error
+    /// string instead of making a request.
+    #[cfg(not(feature = "live"))]
+    fn call_ollama(&self, _prompt: &str) -> String {
+        format!(
+            "[error: live feature disabled for {} at {} — build scirust-trader with --features live]",
+            self.model, self.base_url
+        )
+    }
+
+    /// Call Ollama `/api/generate`. Returns the raw text response, or an
+    /// error string prefixed with `[error]` if the call fails.
+    #[cfg(feature = "live")]
     fn call_ollama(&self, prompt: &str) -> String {
         let url = format!("{}/api/generate", self.base_url);
         let body = OllamaRequest {
@@ -183,8 +211,10 @@ impl OllamaClient {
             Ok(c) => c,
             Err(e) => return format!("[error: cannot build HTTP client: {}]", e),
         };
-        match client.post(&url).json(&body).send() {
-            Ok(resp) => match resp.json::<OllamaResponse>() {
+        match client.post(&url).json(&body).send()
+        {
+            Ok(resp) => match resp.json::<OllamaResponse>()
+            {
                 Ok(parsed) => parsed.response,
                 Err(e) => format!("[error: cannot parse Ollama response: {}]", e),
             },
@@ -205,7 +235,8 @@ impl LlmClient for OllamaClient {
         // 2. It does not contain any number that looks like a *return prediction*
         //    outside the certified bounds. We only flag numbers in [-1, 1] that
         //    appear near keywords like "predict", "return", "expected".
-        if narration.starts_with("[error") || narration.is_empty() {
+        if narration.starts_with("[error") || narration.is_empty()
+        {
             return false;
         }
         let lo = pred.bounds.output.lo;
@@ -213,18 +244,23 @@ impl LlmClient for OllamaClient {
         let tolerance = (hi - lo).abs().max(0.01) * 3.0;
         let keywords = ["predict", "return", "expected", "forecast"];
         let words: Vec<&str> = narration.split_whitespace().collect();
-        for (i, token) in words.iter().enumerate() {
+        for (i, token) in words.iter().enumerate()
+        {
             let cleaned = token
                 .trim_matches(|c: char| !c.is_ascii_digit() && c != '.' && c != '-' && c != '+');
-            if let Ok(v) = cleaned.parse::<f32>() {
+            if let Ok(v) = cleaned.parse::<f32>()
+            {
                 // Only flag small numbers (potential returns, not prices).
-                if v.abs() < 1.0 {
+                if v.abs() < 1.0
+                {
                     // Check if a keyword is nearby (within 5 words).
-                    let nearby = words[i.saturating_sub(5)..=i.min(words.len() - 1)].join(" ").to_lowercase();
-                    if keywords.iter().any(|kw| nearby.contains(kw)) {
-                        if v < lo - tolerance || v > hi + tolerance {
-                            return false;
-                        }
+                    let nearby = words[i.saturating_sub(5)..=i.min(words.len() - 1)]
+                        .join(" ")
+                        .to_lowercase();
+                    if keywords.iter().any(|kw| nearby.contains(kw))
+                        && (v < lo - tolerance || v > hi + tolerance)
+                    {
+                        return false;
                     }
                 }
             }
@@ -260,9 +296,8 @@ impl TradingAgent {
         let highs: Vec<f32> = snapshot.candles.iter().map(|c| c.high).collect();
         let lows: Vec<f32> = snapshot.candles.iter().map(|c| c.low).collect();
 
-        let indicators = IndicatorSet::from_ohlcv(
-            &highs, &lows, &closes, 14, 12, 26, 9, 14, 20, 2.0,
-        );
+        let indicators =
+            IndicatorSet::from_ohlcv(&highs, &lows, &closes, 14, 12, 26, 9, 14, 20, 2.0);
 
         let features = build_features(
             &closes,
@@ -314,11 +349,15 @@ impl TradingAgent {
         window: usize,
     ) -> Vec<DecisionRecord> {
         let mut records = Vec::with_capacity(num_steps);
-        for _ in 0..num_steps {
-            if let Some(snapshot) = feed.next_snapshot(window) {
+        for _ in 0..num_steps
+        {
+            if let Some(snapshot) = feed.next_snapshot(window)
+            {
                 let record = self.process(&snapshot);
                 records.push(record);
-            } else {
+            }
+            else
+            {
                 break;
             }
         }
@@ -377,7 +416,10 @@ mod tests {
         let record = agent.process(&snapshot);
         // The narration will be an error string (no Ollama at port 1).
         assert!(!record.narration.is_empty());
-        assert!(!record.llm_consistent, "error narration should be inconsistent");
+        assert!(
+            !record.llm_consistent,
+            "error narration should be inconsistent"
+        );
     }
 
     #[test]

@@ -676,13 +676,21 @@ mod tests {
         assert_eq!(run(&s(&["trader", "info"])), 0);
         assert_eq!(
             run(&s(&[
-                "trader", "run", "--steps", "2", "--output",
+                "trader",
+                "run",
+                "--steps",
+                "2",
+                "--output",
                 "/tmp/scirust_cli_trader_test.json"
             ])),
             0
         );
         assert_eq!(
-            run(&s(&["trader", "audit", "/tmp/scirust_cli_trader_test.json"])),
+            run(&s(&[
+                "trader",
+                "audit",
+                "/tmp/scirust_cli_trader_test.json"
+            ])),
             0
         );
         assert_eq!(run(&s(&["trader", "predict"])), 0);

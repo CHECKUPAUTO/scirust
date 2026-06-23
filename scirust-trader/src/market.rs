@@ -132,7 +132,8 @@ impl MockExchange {
 
 impl MarketFeed for MockExchange {
     fn next_snapshot(&mut self, window: usize) -> Option<MarketSnapshot> {
-        if window == 0 {
+        if window == 0
+        {
             return None;
         }
         let candles: Vec<Candle> = (0..window).map(|_| self.next_candle()).collect();
@@ -173,7 +174,16 @@ impl BinanceConnector {
         self
     }
 
+    /// Fetch klines from Binance — disabled in the default (pure-Rust) build.
+    /// Build with `--features live` to enable real HTTP.
+    #[cfg(not(feature = "live"))]
+    fn fetch_klines(&self, _limit: usize) -> Option<Vec<Candle>> {
+        let _ = &self.api_base;
+        None
+    }
+
     /// Fetch klines from Binance. Returns `None` on any HTTP/parse error.
+    #[cfg(feature = "live")]
     fn fetch_klines(&self, limit: usize) -> Option<Vec<Candle>> {
         let url = format!(
             "{}/api/v3/klines?symbol={}&interval={}&limit={}",
@@ -184,19 +194,40 @@ impl BinanceConnector {
             .build()
             .ok()?;
         let resp = client.get(&url).send().ok()?;
-        if !resp.status().is_success() {
+        if !resp.status().is_success()
+        {
             return None;
         }
         let raw: Vec<Vec<serde_json::Value>> = resp.json().ok()?;
         let candles = raw
             .into_iter()
             .map(|row| Candle {
-                ts_ms: row.get(0).and_then(|v| v.as_i64()).unwrap_or(0),
-                open: row.get(1).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                high: row.get(2).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                low: row.get(3).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                close: row.get(4).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                volume: row.get(5).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                ts_ms: row.first().and_then(|v| v.as_i64()).unwrap_or(0),
+                open: row
+                    .get(1)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0),
+                high: row
+                    .get(2)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0),
+                low: row
+                    .get(3)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0),
+                close: row
+                    .get(4)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0),
+                volume: row
+                    .get(5)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0),
             })
             .collect();
         Some(candles)
@@ -206,7 +237,8 @@ impl BinanceConnector {
 impl MarketFeed for BinanceConnector {
     fn next_snapshot(&mut self, window: usize) -> Option<MarketSnapshot> {
         let candles = self.fetch_klines(window)?;
-        if candles.is_empty() {
+        if candles.is_empty()
+        {
             return None;
         }
         Some(MarketSnapshot {
@@ -228,7 +260,10 @@ mod tests {
         let mut b = MockExchange::new(42, 50_000.0);
         let sa = a.next_snapshot(10).unwrap();
         let sb = b.next_snapshot(10).unwrap();
-        assert_eq!(sa.candles, sb.candles, "same seed must yield identical candles");
+        assert_eq!(
+            sa.candles, sb.candles,
+            "same seed must yield identical candles"
+        );
         assert_eq!(sa.fingerprint(), sb.fingerprint());
     }
 

@@ -12,30 +12,34 @@ use crate::agent::{OllamaClient, StubLlm, TradingAgent};
 use crate::market::{MarketFeed, MockExchange};
 use crate::model::PricePredictor;
 use crate::proof::DecisionProof;
-use crate::risk::{run_backtest as run_risk_backtest, RiskConfig};
+use crate::risk::{RiskConfig, run_backtest as run_risk_backtest};
 
 /// Entry point — dispatches subcommands.
 /// Returns an exit code (0 = success, 2 = usage error).
 pub fn run(args: &[String]) -> u8 {
-    match args.first().map(String::as_str) {
-        None | Some("help") | Some("-h") | Some("--help") => {
+    match args.first().map(String::as_str)
+    {
+        None | Some("help") | Some("-h") | Some("--help") =>
+        {
             print_help();
             0
-        }
+        },
         Some("run") => cmd_run(&args[1..]),
         Some("predict") => cmd_predict(&args[1..]),
         Some("audit") => cmd_audit(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some("backtest") => cmd_backtest(&args[1..]),
-        Some("info") => {
+        Some("info") =>
+        {
             print_info();
             0
-        }
-        Some(other) => {
+        },
+        Some(other) =>
+        {
             eprintln!("unknown trader subcommand: `{other}`\n");
             print_help();
             2
-        }
+        },
     }
 }
 
@@ -52,7 +56,9 @@ fn print_help() {
     println!("  verify    <file>");
     println!("            Replay a proof: re-run the model, check fingerprints match.");
     println!("  backtest  [--steps N] [--capital F] [--max-dd F] [--seed S] [--output FILE]");
-    println!("            Full backtest with risk management (position sizing, stop-loss, circuit breaker).");
+    println!(
+        "            Full backtest with risk management (position sizing, stop-loss, circuit breaker)."
+    );
     println!("  info      Show pipeline capabilities.");
     println!();
     println!("examples:");
@@ -66,7 +72,9 @@ fn print_help() {
 fn print_info() {
     println!("scirust-trader — auditable crypto-trading pipeline\n");
     println!("Pipeline:");
-    println!("  [market] → [indicators] → [model] → [certify] → [risk] → [LLM narration] → [proof]\n");
+    println!(
+        "  [market] → [indicators] → [model] → [certify] → [risk] → [LLM narration] → [proof]\n"
+    );
     println!("Guarantees:");
     println!("  • Deterministic: seeded PCG RNG, pinned reduction order.");
     println!("  • Certified: IBP bounds on every prediction.");
@@ -90,50 +98,70 @@ fn cmd_run(args: &[String]) -> u8 {
     let mut output = "proof.json";
 
     let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--steps" => {
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--steps" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     steps = args[i].parse().unwrap_or(10);
                 }
-            }
-            "--window" => {
+            },
+            "--window" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     window = args[i].parse().unwrap_or(50);
                 }
-            }
-            "--seed" => {
+            },
+            "--seed" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     seed = args[i].parse().unwrap_or(42);
                 }
-            }
-            "--llm" => {
+            },
+            "--llm" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     llm = &args[i];
                 }
-            }
-            "--output" => {
+            },
+            "--output" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     output = &args[i];
                 }
-            }
-            _ => {}
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
 
     println!("=== SciRust Trader — Backtest ===");
-    println!("steps={}, window={}, seed={}, llm={}", steps, window, seed, llm);
+    println!(
+        "steps={}, window={}, seed={}, llm={}",
+        steps, window, seed, llm
+    );
     println!();
 
     let model = PricePredictor::new(13, &[16, 8], seed);
-    let llm_client: Box<dyn crate::agent::LlmClient> = match llm {
-        "ollama" => Box::new(OllamaClient::new("qwen2.5-coder:1.5b", "http://127.0.0.1:11434")),
+    let llm_client: Box<dyn crate::agent::LlmClient> = match llm
+    {
+        "ollama" => Box::new(OllamaClient::new(
+            "qwen2.5-coder:1.5b",
+            "http://127.0.0.1:11434",
+        )),
         _ => Box::new(StubLlm),
     };
     let mut agent = TradingAgent::new(model, llm_client);
@@ -143,7 +171,8 @@ fn cmd_run(args: &[String]) -> u8 {
     let records = agent.backtest(&mut feed, steps, window);
 
     println!("--- Decisions ---");
-    for (i, r) in records.iter().enumerate() {
+    for (i, r) in records.iter().enumerate()
+    {
         println!(
             "{:3} | {:?} | pred={:+.6} | bounds=[{:+.6}, {:+.6}] | unc={:.6} | close={:.2} | consistent={}",
             i,
@@ -162,18 +191,31 @@ fn cmd_run(args: &[String]) -> u8 {
     println!("--- Proof ---");
     println!("manifest_hash: {}", proof.manifest_hash);
     println!("num_decisions: {}", proof.num_decisions);
-    println!("verify: {}", if proof.verify() { "✅ VALID" } else { "❌ INVALID" });
+    println!(
+        "verify: {}",
+        if proof.verify()
+        {
+            "✅ VALID"
+        }
+        else
+        {
+            "❌ INVALID"
+        }
+    );
     println!();
 
-    match proof.save_to_file(output) {
-        Ok(_) => {
+    match proof.save_to_file(output)
+    {
+        Ok(_) =>
+        {
             println!("proof saved to: {}", output);
             0
-        }
-        Err(e) => {
+        },
+        Err(e) =>
+        {
             eprintln!("error saving proof: {}", e);
             1
-        }
+        },
     }
 }
 
@@ -184,63 +226,85 @@ fn cmd_predict(args: &[String]) -> u8 {
     let mut symbol = "BTC/USDT";
 
     let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--seed" => {
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--seed" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     seed = args[i].parse().unwrap_or(42);
                 }
-            }
-            "--llm" => {
+            },
+            "--llm" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     llm = &args[i];
                 }
-            }
-            "--exchange" => {
+            },
+            "--exchange" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     exchange = &args[i];
                 }
-            }
-            "--symbol" => {
+            },
+            "--symbol" =>
+            {
                 i += 1;
-                if i < args.len() {
+                if i < args.len()
+                {
                     symbol = &args[i];
                 }
-            }
-            _ => {}
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
 
     let model = PricePredictor::new(13, &[16, 8], seed);
-    let llm_client: Box<dyn crate::agent::LlmClient> = match llm {
-        "ollama" => Box::new(OllamaClient::new("qwen2.5-coder:1.5b", "http://127.0.0.1:11434")),
+    let llm_client: Box<dyn crate::agent::LlmClient> = match llm
+    {
+        "ollama" => Box::new(OllamaClient::new(
+            "qwen2.5-coder:1.5b",
+            "http://127.0.0.1:11434",
+        )),
         _ => Box::new(StubLlm),
     };
     let mut agent = TradingAgent::new(model, llm_client);
     agent.lookback = 10;
 
-    let snapshot = match exchange {
-        "binance" => {
+    let snapshot = match exchange
+    {
+        "binance" =>
+        {
             let binance_symbol = symbol.replace('/', "");
             let mut feed = crate::market::BinanceConnector::new(&binance_symbol, "1m");
             feed.next_snapshot(50)
-        }
-        _ => {
+        },
+        _ =>
+        {
             let mut feed = MockExchange::new(seed, 50_000.0);
             feed.next_snapshot(50)
-        }
+        },
     };
 
-    let snapshot = match snapshot {
+    let snapshot = match snapshot
+    {
         Some(s) => s,
-        None => {
-            eprintln!("failed to generate/fetch snapshot (check network if using --exchange binance)");
+        None =>
+        {
+            eprintln!(
+                "failed to generate/fetch snapshot (check network if using --exchange binance)"
+            );
             return 1;
-        }
+        },
     };
 
     let record = agent.process(&snapshot);
@@ -249,11 +313,23 @@ fn cmd_predict(args: &[String]) -> u8 {
     println!("symbol:          {}", record.prediction.symbol);
     println!("action:          {}", record.prediction.action.label());
     println!("raw_prediction:  {:+.6}", record.prediction.raw_prediction);
-    println!("certified_lo:    {:+.6}", record.prediction.bounds.output.lo);
-    println!("certified_hi:    {:+.6}", record.prediction.bounds.output.hi);
-    println!("uncertainty:     {:.6}", record.prediction.bounds.uncertainty);
+    println!(
+        "certified_lo:    {:+.6}",
+        record.prediction.bounds.output.lo
+    );
+    println!(
+        "certified_hi:    {:+.6}",
+        record.prediction.bounds.output.hi
+    );
+    println!(
+        "uncertainty:     {:.6}",
+        record.prediction.bounds.uncertainty
+    );
     println!("last_close:      {:.2}", record.prediction.last_close);
-    println!("snapshot_hash:   {}", record.prediction.snapshot_fingerprint);
+    println!(
+        "snapshot_hash:   {}",
+        record.prediction.snapshot_fingerprint
+    );
     println!("weights_hash:    {}", record.prediction.weights_fingerprint);
     println!("llm_consistent:  {}", record.llm_consistent);
     println!();
@@ -263,7 +339,8 @@ fn cmd_predict(args: &[String]) -> u8 {
     println!("--- Feature Attribution ---");
     let mut attrs: Vec<_> = record.prediction.feature_attribution.iter().collect();
     attrs.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-    for (name, value) in attrs.iter().take(5) {
+    for (name, value) in attrs.iter().take(5)
+    {
         println!("  {:15} : {:.4}", name, value);
     }
 
@@ -271,20 +348,24 @@ fn cmd_predict(args: &[String]) -> u8 {
 }
 
 fn cmd_audit(args: &[String]) -> u8 {
-    let path = match args.first() {
+    let path = match args.first()
+    {
         Some(p) => p,
-        None => {
+        None =>
+        {
             eprintln!("usage: scirust trader audit <file>");
             return 2;
-        }
+        },
     };
 
-    let proof = match DecisionProof::load_from_file(path) {
+    let proof = match DecisionProof::load_from_file(path)
+    {
         Ok(p) => p,
-        Err(e) => {
+        Err(e) =>
+        {
             eprintln!("error loading proof: {}", e);
             return 1;
-        }
+        },
     };
 
     println!("=== Audit Report ===");
@@ -293,7 +374,17 @@ fn cmd_audit(args: &[String]) -> u8 {
     println!("timestamp_ms:    {}", proof.timestamp_ms);
     println!("num_decisions:   {}", proof.num_decisions);
     println!("manifest_hash:   {}", proof.manifest_hash);
-    println!("verify:          {}", if proof.verify() { "✅ VALID" } else { "❌ TAMPERED" });
+    println!(
+        "verify:          {}",
+        if proof.verify()
+        {
+            "✅ VALID"
+        }
+        else
+        {
+            "❌ TAMPERED"
+        }
+    );
     println!();
 
     let s = proof.summary();
@@ -306,7 +397,8 @@ fn cmd_audit(args: &[String]) -> u8 {
     println!();
 
     println!("--- Decisions ---");
-    for (i, r) in proof.records.iter().enumerate() {
+    for (i, r) in proof.records.iter().enumerate()
+    {
         println!(
             "{:3} | {:?} | pred={:+.6} | bounds=[{:+.6}, {:+.6}] | close={:.2} | consistent={}",
             i,
@@ -323,20 +415,24 @@ fn cmd_audit(args: &[String]) -> u8 {
 }
 
 fn cmd_verify(args: &[String]) -> u8 {
-    let path = match args.first() {
+    let path = match args.first()
+    {
         Some(p) => p,
-        None => {
+        None =>
+        {
             eprintln!("usage: scirust trader verify <file>");
             return 2;
-        }
+        },
     };
 
-    let proof = match DecisionProof::load_from_file(path) {
+    let proof = match DecisionProof::load_from_file(path)
+    {
         Ok(p) => p,
-        Err(e) => {
+        Err(e) =>
+        {
             eprintln!("error loading proof: {}", e);
             return 1;
-        }
+        },
     };
 
     println!("=== Decision Replay Verification ===");
@@ -346,7 +442,17 @@ fn cmd_verify(args: &[String]) -> u8 {
 
     // Step 1: verify the manifest hash (tamper detection).
     let manifest_ok = proof.verify();
-    println!("step 1: manifest hash   : {}", if manifest_ok { "✅ MATCH" } else { "❌ TAMPERED" });
+    println!(
+        "step 1: manifest hash   : {}",
+        if manifest_ok
+        {
+            "✅ MATCH"
+        }
+        else
+        {
+            "❌ TAMPERED"
+        }
+    );
 
     // Step 2: replay each decision — re-run the model and check the weights
     // fingerprint matches. We can't re-fetch the original market snapshot
@@ -355,34 +461,88 @@ fn cmd_verify(args: &[String]) -> u8 {
     // must match the one in the bounds, and all must be identical across
     // records (same model, same session).
     let mut weights_consistent = true;
-    let first_wf = proof.records.first().map(|r| r.prediction.weights_fingerprint.as_str()).unwrap_or("");
-    for (i, r) in proof.records.iter().enumerate() {
+    let first_wf = proof
+        .records
+        .first()
+        .map(|r| r.prediction.weights_fingerprint.as_str())
+        .unwrap_or("");
+    for (i, r) in proof.records.iter().enumerate()
+    {
         let wf = &r.prediction.weights_fingerprint;
         let bf = &r.prediction.bounds.weights_fingerprint;
-        if wf != bf || wf != first_wf {
-            println!("  decision {:3}: ❌ weights mismatch (wf={}, bf={}, expected={})", i, wf, bf, first_wf);
+        if wf != bf || wf != first_wf
+        {
+            println!(
+                "  decision {:3}: ❌ weights mismatch (wf={}, bf={}, expected={})",
+                i, wf, bf, first_wf
+            );
             weights_consistent = false;
         }
     }
-    println!("step 2: weights fingerprint: {}", if weights_consistent { "✅ CONSISTENT" } else { "❌ MISMATCH" });
+    println!(
+        "step 2: weights fingerprint: {}",
+        if weights_consistent
+        {
+            "✅ CONSISTENT"
+        }
+        else
+        {
+            "❌ MISMATCH"
+        }
+    );
 
     // Step 3: check that all certified bounds are valid intervals (lo ≤ hi).
     let mut bounds_valid = true;
-    for (i, r) in proof.records.iter().enumerate() {
-        if r.prediction.bounds.output.lo > r.prediction.bounds.output.hi {
-            println!("  decision {:3}: ❌ invalid bounds [{}, {}]", i, r.prediction.bounds.output.lo, r.prediction.bounds.output.hi);
+    for (i, r) in proof.records.iter().enumerate()
+    {
+        if r.prediction.bounds.output.lo > r.prediction.bounds.output.hi
+        {
+            println!(
+                "  decision {:3}: ❌ invalid bounds [{}, {}]",
+                i, r.prediction.bounds.output.lo, r.prediction.bounds.output.hi
+            );
             bounds_valid = false;
         }
     }
-    println!("step 3: bounds valid     : {}", if bounds_valid { "✅ VALID" } else { "❌ INVALID" });
+    println!(
+        "step 3: bounds valid     : {}",
+        if bounds_valid
+        {
+            "✅ VALID"
+        }
+        else
+        {
+            "❌ INVALID"
+        }
+    );
 
     // Step 4: check LLM consistency across all records.
     let llm_ok = proof.records.iter().all(|r| r.llm_consistent);
-    println!("step 4: LLM consistency  : {}", if llm_ok { "✅ CONSISTENT" } else { "❌ INCONSISTENT" });
+    println!(
+        "step 4: LLM consistency  : {}",
+        if llm_ok
+        {
+            "✅ CONSISTENT"
+        }
+        else
+        {
+            "❌ INCONSISTENT"
+        }
+    );
 
     println!();
     let all_ok = manifest_ok && weights_consistent && bounds_valid && llm_ok;
-    println!("overall: {}", if all_ok { "✅ DECISION VERIFIED" } else { "❌ VERIFICATION FAILED" });
+    println!(
+        "overall: {}",
+        if all_ok
+        {
+            "✅ DECISION VERIFIED"
+        }
+        else
+        {
+            "❌ VERIFICATION FAILED"
+        }
+    );
     if all_ok { 0 } else { 1 }
 }
 
@@ -394,14 +554,52 @@ fn cmd_backtest(args: &[String]) -> u8 {
     let mut output = "";
 
     let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--steps" => { i += 1; if i < args.len() { steps = args[i].parse().unwrap_or(50); } }
-            "--capital" => { i += 1; if i < args.len() { capital = args[i].parse().unwrap_or(10_000.0); } }
-            "--max-dd" => { i += 1; if i < args.len() { max_dd = args[i].parse().unwrap_or(0.10); } }
-            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } }
-            "--output" => { i += 1; if i < args.len() { output = &args[i]; } }
-            _ => {}
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--steps" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    steps = args[i].parse().unwrap_or(50);
+                }
+            },
+            "--capital" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    capital = args[i].parse().unwrap_or(10_000.0);
+                }
+            },
+            "--max-dd" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    max_dd = args[i].parse().unwrap_or(0.10);
+                }
+            },
+            "--seed" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    seed = args[i].parse().unwrap_or(42);
+                }
+            },
+            "--output" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    output = &args[i];
+                }
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
@@ -412,8 +610,13 @@ fn cmd_backtest(args: &[String]) -> u8 {
         max_drawdown: max_dd,
         ..Default::default()
     };
-    println!("config: capital={:.0}, max_position={:.0}%, max_drawdown={:.0}%, stop_k={:.1}",
-        cfg.capital, cfg.max_position_fraction * 100.0, cfg.max_drawdown * 100.0, cfg.stop_loss_k);
+    println!(
+        "config: capital={:.0}, max_position={:.0}%, max_drawdown={:.0}%, stop_k={:.1}",
+        cfg.capital,
+        cfg.max_position_fraction * 100.0,
+        cfg.max_drawdown * 100.0,
+        cfg.stop_loss_k
+    );
     println!();
 
     let model = PricePredictor::new(13, &[16, 8], seed);
@@ -429,22 +632,54 @@ fn cmd_backtest(args: &[String]) -> u8 {
     println!("--- Backtest Result ---");
     println!("  initial_capital:      {:.2}", result.initial_capital);
     println!("  final_equity:         {:.2}", result.final_equity);
-    println!("  total_return:         {:+.4}% (mock)", result.total_return * 100.0);
-    println!("  max_drawdown_seen:    {:.4}%", result.max_drawdown_seen * 100.0);
+    println!(
+        "  total_return:         {:+.4}% (mock)",
+        result.total_return * 100.0
+    );
+    println!(
+        "  max_drawdown_seen:    {:.4}%",
+        result.max_drawdown_seen * 100.0
+    );
     println!("  num_trades:           {}", result.num_trades);
     println!("  num_allowed:          {}", result.num_allowed);
     println!("  num_blocked:          {}", result.num_blocked);
-    println!("  circuit_breaker:      {}", if result.circuit_breaker_triggered { "TRIGGERED" } else { "not triggered" });
+    println!(
+        "  circuit_breaker:      {}",
+        if result.circuit_breaker_triggered
+        {
+            "TRIGGERED"
+        }
+        else
+        {
+            "not triggered"
+        }
+    );
     println!();
 
     let proof = agent.seal_proof(&records);
     println!("manifest_hash: {}", proof.manifest_hash);
-    println!("verify:        {}", if proof.verify() { "✅ VALID" } else { "❌ INVALID" });
+    println!(
+        "verify:        {}",
+        if proof.verify()
+        {
+            "✅ VALID"
+        }
+        else
+        {
+            "❌ INVALID"
+        }
+    );
 
-    if !output.is_empty() {
-        match proof.save_to_file(output) {
+    if !output.is_empty()
+    {
+        match proof.save_to_file(output)
+        {
             Ok(_) => println!("proof saved to: {}", output),
-            Err(e) => { eprintln!("error saving proof: {}", e); return 1; }
+            Err(e) =>
+            {
+                eprintln!("error saving proof: {}", e);
+                return 1;
+            },
         }
     }
     0
@@ -474,16 +709,23 @@ mod tests {
     fn run_with_stub_llm_produces_proof() {
         let args = vec![
             "run".to_string(),
-            "--steps".to_string(), "3".to_string(),
-            "--llm".to_string(), "stub".to_string(),
-            "--output".to_string(), "/tmp/scirust_trader_test_proof.json".to_string(),
+            "--steps".to_string(),
+            "3".to_string(),
+            "--llm".to_string(),
+            "stub".to_string(),
+            "--output".to_string(),
+            "/tmp/scirust_trader_test_proof.json".to_string(),
         ];
         assert_eq!(run(&args), 0);
     }
 
     #[test]
     fn predict_with_stub_llm() {
-        let args = vec!["predict".to_string(), "--llm".to_string(), "stub".to_string()];
+        let args = vec![
+            "predict".to_string(),
+            "--llm".to_string(),
+            "stub".to_string(),
+        ];
         assert_eq!(run(&args), 0);
     }
 
@@ -491,11 +733,16 @@ mod tests {
     fn audit_loaded_proof() {
         let run_args = vec![
             "run".to_string(),
-            "--steps".to_string(), "2".to_string(),
-            "--output".to_string(), "/tmp/scirust_trader_audit_test.json".to_string(),
+            "--steps".to_string(),
+            "2".to_string(),
+            "--output".to_string(),
+            "/tmp/scirust_trader_audit_test.json".to_string(),
         ];
         assert_eq!(run(&run_args), 0);
-        let audit_args = vec!["audit".to_string(), "/tmp/scirust_trader_audit_test.json".to_string()];
+        let audit_args = vec![
+            "audit".to_string(),
+            "/tmp/scirust_trader_audit_test.json".to_string(),
+        ];
         assert_eq!(run(&audit_args), 0);
     }
 
@@ -515,11 +762,16 @@ mod tests {
     fn verify_loaded_proof() {
         let run_args = vec![
             "run".to_string(),
-            "--steps".to_string(), "2".to_string(),
-            "--output".to_string(), "/tmp/scirust_trader_verify_test.json".to_string(),
+            "--steps".to_string(),
+            "2".to_string(),
+            "--output".to_string(),
+            "/tmp/scirust_trader_verify_test.json".to_string(),
         ];
         assert_eq!(run(&run_args), 0);
-        let verify_args = vec!["verify".to_string(), "/tmp/scirust_trader_verify_test.json".to_string()];
+        let verify_args = vec![
+            "verify".to_string(),
+            "/tmp/scirust_trader_verify_test.json".to_string(),
+        ];
         assert_eq!(run(&verify_args), 0);
     }
 
@@ -539,9 +791,12 @@ mod tests {
     fn backtest_runs_and_reports() {
         let args = vec![
             "backtest".to_string(),
-            "--steps".to_string(), "5".to_string(),
-            "--capital".to_string(), "10000".to_string(),
-            "--max-dd".to_string(), "0.05".to_string(),
+            "--steps".to_string(),
+            "5".to_string(),
+            "--capital".to_string(),
+            "10000".to_string(),
+            "--max-dd".to_string(),
+            "0.05".to_string(),
         ];
         assert_eq!(run(&args), 0);
     }
@@ -550,8 +805,10 @@ mod tests {
     fn backtest_with_output() {
         let args = vec![
             "backtest".to_string(),
-            "--steps".to_string(), "3".to_string(),
-            "--output".to_string(), "/tmp/scirust_trader_backtest_test.json".to_string(),
+            "--steps".to_string(),
+            "3".to_string(),
+            "--output".to_string(),
+            "/tmp/scirust_trader_backtest_test.json".to_string(),
         ];
         assert_eq!(run(&args), 0);
     }

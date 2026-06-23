@@ -3021,7 +3021,7 @@ dependencies = [
 name = "scirust-rsi"
 version = "0.1.0"
 dependencies = [
- "rand",
+ "rand 0.8.6",
  "rand_distr",
  "rayon",
  "scirust-core",
