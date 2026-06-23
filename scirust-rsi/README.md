@@ -62,6 +62,20 @@ cargo run -p scirust-rsi --example claude_refine --features anthropic   # live C
 cargo test  -p scirust-rsi
 ```
 
+## CLI
+
+A dependency-free `scirust-rsi` binary runs the loops on the built-in benchmark
+objectives (`sphere` / `rastrigin` / `rosenbrock`), seeded and reproducible:
+
+```sh
+cargo run -p scirust-rsi --bin scirust-rsi -- es     --objective rastrigin --dim 4 --seed 7 --max-iters 5000
+cargo run -p scirust-rsi --bin scirust-rsi -- refine --objective sphere    --dim 6 --patience 200
+cargo run -p scirust-rsi --bin scirust-rsi -- pbt    --objective rosenbrock --pop 24 --steps 8 --json
+cargo run -p scirust-rsi --bin scirust-rsi -- --help
+```
+
+Common flags: `--dim --seed --max-iters --target --patience --time-ms --json`.
+
 ## Extending
 
 Implement the trait for your task and hand it to the matching driver:
