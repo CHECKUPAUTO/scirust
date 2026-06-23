@@ -153,6 +153,103 @@ impl Pbt {
 
         (best_params, best_hyper, ctrl.into_report())
     }
+
+    /// Like [`run`](Self::run) but trains the population **in parallel** (rayon):
+    /// each member owns a deterministically-seeded RNG and is trained on its own
+    /// thread, which is the natural parallelism in PBT (members are independent
+    /// between the exploit/explore syncs). Worth it when [`PbtTask::step`] is
+    /// expensive. Requires the `parallel` feature.
+    ///
+    /// Per-member RNGs are seeded from the driver seed, so the run is
+    /// **reproducible** (same seed ⇒ same result, regardless of thread count).
+    /// It is *not* bit-identical to the sequential [`run`](Self::run): PBT draws
+    /// its random numbers in a different order when members advance
+    /// concurrently. Selection/perturbation still happens sequentially under a
+    /// single coordination RNG, so it stays deterministic.
+    #[cfg(feature = "parallel")]
+    pub fn run_parallel<T>(&self, task: &T, guard: &Guard) -> (Vec<f64>, T::Hyper, Report)
+    where
+        T: PbtTask + Sync,
+        T::Hyper: Send,
+    {
+        use rayon::prelude::*;
+
+        // One deterministic RNG per member (independent streams) + one shared
+        // coordination RNG for the sequential exploit/explore step.
+        const SPREAD: u64 = 0x9E37_79B9_7F4A_7C15; // golden-ratio odd constant
+        let mut rngs: Vec<StdRng> = (0..self.pop_size)
+            .map(|i| rng_from_seed(self.seed ^ SPREAD.wrapping_mul(i as u64 + 1)))
+            .collect();
+        let mut coord = rng_from_seed(self.seed);
+
+        let mut pop: Vec<Member<T::Hyper>> = rngs
+            .iter_mut()
+            .map(|r| {
+                let (params, hyper) = task.init_member(r);
+                Member {
+                    params,
+                    hyper,
+                    score: f64::NEG_INFINITY,
+                }
+            })
+            .collect();
+
+        let mut best_params = pop[0].params.clone();
+        let mut best_hyper = pop[0].hyper.clone();
+        let mut ctrl = LoopState::new(guard, f64::NEG_INFINITY);
+
+        let n_replace = ((self.pop_size as f64) * self.exploit_frac).floor() as usize;
+
+        while ctrl.next_iter()
+        {
+            // 1. Train every member in parallel, each with its own RNG.
+            pop.par_iter_mut()
+                .zip(rngs.par_iter_mut())
+                .for_each(|(m, r)| {
+                    for _ in 0..self.steps_per_gen
+                    {
+                        m.score = task.step(&mut m.params, &m.hyper, r);
+                    }
+                });
+
+            // 2. Rank by score (best first).
+            let mut order: Vec<usize> = (0..pop.len()).collect();
+            order.sort_by(|&a, &b| pop[b].score.partial_cmp(&pop[a].score).unwrap());
+
+            // 3. Exploit + explore under the coordination RNG (sequential).
+            if n_replace > 0
+            {
+                let top = &order[..n_replace.max(1)];
+                let bottom: Vec<usize> = order[pop.len() - n_replace..].to_vec();
+                for &loser in &bottom
+                {
+                    let winner = top[coord.gen_range(0..top.len())];
+                    let (w_params, w_hyper, w_score) = (
+                        pop[winner].params.clone(),
+                        pop[winner].hyper.clone(),
+                        pop[winner].score,
+                    );
+                    pop[loser].params = w_params;
+                    pop[loser].hyper = task.perturb(&w_hyper, &mut coord);
+                    pop[loser].score = w_score;
+                }
+            }
+
+            // 4. Track the (monotone) best member.
+            let gen_best = order[0];
+            if ctrl.offer(pop[gen_best].score)
+            {
+                best_params = pop[gen_best].params.clone();
+                best_hyper = pop[gen_best].hyper.clone();
+            }
+            if ctrl.done()
+            {
+                break;
+            }
+        }
+
+        (best_params, best_hyper, ctrl.into_report())
+    }
 }
 
 #[cfg(test)]
@@ -195,6 +292,28 @@ mod tests {
             params[0].abs() < 1e-3,
             "PBT should drive x to ~0, got {}",
             params[0]
+        );
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_pbt_is_reproducible_and_tunes_lr() {
+        let mk = || {
+            Pbt::new(2024)
+                .pop_size(24)
+                .steps_per_gen(1)
+                .run_parallel(&LrSearch, &Guard::new().max_iters(100).target(-1e-9))
+        };
+        let (pa, _la, ra) = mk();
+        let (pb, _lb, rb) = mk();
+        // Same seed ⇒ identical result, independent of thread scheduling.
+        assert_eq!(pa, pb, "parallel PBT must be reproducible");
+        assert_eq!(ra.history, rb.history, "convergence curve must be stable");
+        assert!(ra.is_monotone(), "best-so-far must not decrease");
+        assert!(
+            pa[0].abs() < 1e-3,
+            "PBT should drive x to ~0, got {}",
+            pa[0]
         );
     }
 

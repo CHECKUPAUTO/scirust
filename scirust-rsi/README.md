@@ -84,7 +84,7 @@ available programmatically via `Report::history_csv()` / `Report::to_html()`.
 | Feature | Adds |
 |---|---|
 | `anthropic` | `llm::anthropic::ClaudeGenerator` — a `Generator` backed by the Claude Messages API (blocking HTTP) |
-| `parallel` | `OnePlusLambda::optimize_parallel` — evaluates each generation's λ offspring with rayon, **bit-identical** to the sequential `optimize` (only fitness is parallelised; sampling stays sequential, so the RNG order and result are unchanged) |
+| `parallel` | rayon-backed parallel training. `OnePlusLambda::optimize_parallel` evaluates each generation's λ offspring in parallel, **bit-identical** to the sequential `optimize` (only fitness is parallelised; sampling stays sequential). `Pbt::run_parallel` trains the whole population concurrently — each member owns a deterministically-seeded RNG, so it stays **reproducible** (same seed ⇒ same result, any thread count) though not bit-identical to the sequential `run` |
 
 Both are off by default; the core stays dependency-light and fully offline.
 
