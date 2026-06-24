@@ -4,7 +4,9 @@
 use crate::nn::conv_utils::im2col_raw;
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
-use crate::tn::tt_decompose::{TTCores, interleave_weight, reconstruct_matrix};
+use crate::tn::tt_decompose::{
+    TTCores, interleave_weight, reconstruct_matrix, tt_contract_backward,
+};
 use matrixmultiply::sgemm;
 use std::cell::RefCell;
 
@@ -2294,6 +2296,21 @@ impl Tape {
 
                     let dims_2d: Vec<usize> = (0..dd).map(|i| in_dims[i] * out_dims[i]).collect();
 
+                    // General TT-contraction backward: reverse-mode through the
+                    // left-to-right matmul chain `reconstruct_tensor` performs.
+                    // Correct for any number of cores; `interleaved_tnd` is the
+                    // gradient on the contracted (interleaved) tensor.
+                    let cores_data: Vec<&[f32]> = (0..dd)
+                        .map(|k| values[core_indices[k]].as_cpu().data.as_slice())
+                        .collect();
+                    let d_cores = tt_contract_backward(
+                        &interleaved_tnd.data,
+                        &cores_data,
+                        &dims_2d,
+                        &ranks[..],
+                        dd,
+                    );
+
                     for k in 0..dd
                     {
                         let core_idx = core_indices[k];
@@ -2301,87 +2318,10 @@ impl Tape {
                         let n_k = in_dims[k] * out_dims[k];
                         let r_next = ranks[k + 1];
 
-                        let mut d_core_data = vec![0.0; r_k * n_k * r_next];
-
-                        match dd
-                        {
-                            2 =>
-                            {
-                                if k == 0
-                                {
-                                    // d_core_0 = d_interleaved @ core_1^T
-                                    // m=n_0, k=n_1, n=r_1
-                                    let core_1 = &values[core_indices[1]].as_cpu();
-                                    let m = dims_2d[0];
-                                    let kk = dims_2d[1];
-                                    let nn = r_next;
-                                    unsafe {
-                                        sgemm(
-                                            m,
-                                            kk,
-                                            nn,
-                                            1.0,
-                                            interleaved_tnd.data.as_ptr(),
-                                            dims_2d[1] as isize,
-                                            1,
-                                            core_1.data.as_ptr(),
-                                            1,
-                                            core_1.cols as isize,
-                                            0.0,
-                                            d_core_data.as_mut_ptr(),
-                                            nn as isize,
-                                            1,
-                                        );
-                                    }
-                                }
-                                else
-                                {
-                                    // d_core_1 = core_0^T @ d_interleaved
-                                    // m=r_1, k=n_0, n=n_1
-                                    let core_0 = &values[core_indices[0]].as_cpu();
-                                    let m = r_k;
-                                    let kk = dims_2d[0];
-                                    let nn = dims_2d[1];
-                                    unsafe {
-                                        sgemm(
-                                            m,
-                                            kk,
-                                            nn,
-                                            1.0,
-                                            core_0.data.as_ptr(),
-                                            1,
-                                            core_0.cols as isize,
-                                            interleaved_tnd.data.as_ptr(),
-                                            dims_2d[1] as isize,
-                                            1,
-                                            0.0,
-                                            d_core_data.as_mut_ptr(),
-                                            nn as isize,
-                                            1,
-                                        );
-                                    }
-                                }
-                            },
-                            _ =>
-                            {
-                                // The TT backprop above is derived for a 2-core
-                                // decomposition. A >2-core gradient is a distinct
-                                // (longer) derivation — rather than silently emit a
-                                // wrong (zero) gradient, refuse it explicitly so a
-                                // mis-configured layer fails loudly instead of
-                                // training on garbage.
-                                panic!(
-                                    "TtContract backward currently supports a 2-core \
-                                     decomposition (got {dd} cores); build the TT layer \
-                                     with 2 factors, e.g. tt_decompose_auto(.., 2)"
-                                );
-                            },
-                        }
-
                         let d_core_tensor = Tensor {
                             rows: r_k * n_k,
                             cols: r_next,
-                            data: d_core_data,
+                            data: d_cores[k].clone(),
                         };
                         grads[core_idx] = grads[core_idx].add(&d_core_tensor);
                     }

@@ -198,6 +198,102 @@ pub fn reconstruct_tensor(tt: &TTCores) -> Vec<f32> {
 /// resulting tensor has TT decomposition whose cores carry both an input mode
 /// `I_k` and an output mode `O_k`, which is the natural structure for a linear
 /// layer.
+/// Reverse-mode gradient of the TT-core contraction performed by
+/// [`reconstruct_tensor`]. Given `d_interleaved` — the gradient on the contracted
+/// (interleaved) tensor — return the gradient for each of the `d` cores.
+///
+/// `reconstruct_tensor` is a left-to-right chain of matmuls
+/// `acc_k = acc_{k-1} @ reshape(core_k)`; this differentiates that chain exactly,
+/// so it is correct for **any** number of cores (the hand-written `d == 2` path in
+/// the autodiff backward is just this same derivation specialized). Reductions
+/// stay in fixed (ascending) order, so the gradient is bit-identical run to run.
+///
+/// `cores[k]` is `(ranks[k], mode_dims[k], ranks[k+1])` row-major (with
+/// `ranks[0] = ranks[d] = 1`); `d_interleaved` has length `∏ mode_dims[k]`. Each
+/// returned `d_cores[k]` matches `cores[k]`'s layout.
+#[allow(clippy::needless_range_loop)]
+pub(crate) fn tt_contract_backward(
+    d_interleaved: &[f32],
+    cores: &[&[f32]],
+    mode_dims: &[usize],
+    ranks: &[usize],
+    d: usize,
+) -> Vec<Vec<f32>> {
+    debug_assert!(d >= 1);
+    // Forward sweep: store the left environments acc_k = contract(cores[0..=k]),
+    // each of shape (M_k, ranks[k+1]) with M_k = ∏_{j<=k} mode_dims[j].
+    let mut accs: Vec<Vec<f32>> = Vec::with_capacity(d);
+    accs.push(cores[0].to_vec()); // (mode_dims[0], ranks[1])
+    let mut m = mode_dims[0];
+    for k in 1..d
+    {
+        let r_k = ranks[k];
+        let r_next = ranks[k + 1];
+        let cols = mode_dims[k] * r_next;
+        let prev = &accs[k - 1]; // (m, r_k)
+        let mut next = vec![0.0f32; m * cols];
+        for i in 0..m
+        {
+            for j in 0..cols
+            {
+                let mut s = 0.0f32;
+                for t in 0..r_k
+                {
+                    s += prev[i * r_k + t] * cores[k][t * cols + j];
+                }
+                next[i * cols + j] = s;
+            }
+        }
+        accs.push(next); // (m * mode_dims[k], r_next) == (M_k, ranks[k+1])
+        m *= mode_dims[k];
+    }
+
+    // Backward sweep through the chain. `d_acc` starts as `d_interleaved` viewed as
+    // (M_{d-1}, ranks[d] = 1); each step k pops the core on the right.
+    let mut d_cores: Vec<Vec<f32>> = vec![Vec::new(); d];
+    let mut d_acc: Vec<f32> = d_interleaved.to_vec();
+    for k in (1..d).rev()
+    {
+        let r_k = ranks[k];
+        let r_next = ranks[k + 1];
+        let cols = mode_dims[k] * r_next;
+        m /= mode_dims[k]; // now M_{k-1}
+        let a = &accs[k - 1]; // (m, r_k)
+        // d_core_k = Aᵀ @ dP, with dP = d_acc viewed as (m, cols).
+        let mut dck = vec![0.0f32; r_k * cols];
+        for t in 0..r_k
+        {
+            for j in 0..cols
+            {
+                let mut s = 0.0f32;
+                for i in 0..m
+                {
+                    s += a[i * r_k + t] * d_acc[i * cols + j];
+                }
+                dck[t * cols + j] = s;
+            }
+        }
+        d_cores[k] = dck;
+        // d_acc <- dP @ Wkᵀ, with Wk = cores[k] of shape (r_k, cols).
+        let mut dprev = vec![0.0f32; m * r_k];
+        for i in 0..m
+        {
+            for t in 0..r_k
+            {
+                let mut s = 0.0f32;
+                for j in 0..cols
+                {
+                    s += d_acc[i * cols + j] * cores[k][t * cols + j];
+                }
+                dprev[i * r_k + t] = s;
+            }
+        }
+        d_acc = dprev;
+    }
+    d_cores[0] = d_acc; // (mode_dims[0], ranks[1]) == core_0 gradient
+    d_cores
+}
+
 pub(crate) fn interleave_weight(w: &[f32], in_dims: &[usize], out_dims: &[usize]) -> TensorND {
     let in_features: usize = in_dims.iter().product();
     let out_features: usize = out_dims.iter().product();
@@ -503,5 +599,106 @@ mod tests {
         let tt = tt_decompose_matrix(&w, &[2, 3], &[2, 2], 100, 0.0);
         // With full rank no compression; cores collectively store the full info
         assert!(tt.num_params() >= 24);
+    }
+
+    // -----------------------------------------------------------------------
+    // TT-core contraction gradient (reverse-mode) vs. finite differences
+    // -----------------------------------------------------------------------
+
+    /// Reconstruct from raw flat cores and dot with `g` — the scalar loss whose
+    /// gradient `tt_contract_backward` must reproduce.
+    fn tt_loss(cores_data: &[Vec<f32>], mode_dims: &[usize], ranks: &[usize], g: &[f32]) -> f32 {
+        let d = mode_dims.len();
+        let cores: Vec<TensorND> = (0..d)
+            .map(|k| {
+                TensorND::new(
+                    cores_data[k].clone(),
+                    vec![ranks[k], mode_dims[k], ranks[k + 1]],
+                )
+            })
+            .collect();
+        let tt = TTCores {
+            cores,
+            ranks: ranks.to_vec(),
+            mode_dims: mode_dims.to_vec(),
+        };
+        let recon = reconstruct_tensor(&tt);
+        recon.iter().zip(g.iter()).map(|(a, b)| a * b).sum()
+    }
+
+    /// Central-difference check of `tt_contract_backward` for a given TT shape.
+    fn check_tt_backward_fd(mode_dims: &[usize], ranks: &[usize], seeds: &[f32]) {
+        let d = mode_dims.len();
+        let core_len = |k: usize| ranks[k] * mode_dims[k] * ranks[k + 1];
+
+        // Deterministic, non-trivial cores.
+        let mut cores_data: Vec<Vec<f32>> = (0..d)
+            .map(|k| {
+                (0..core_len(k))
+                    .map(|i| ((i as f32) * 0.37 + seeds[k]).sin() * 0.8)
+                    .collect()
+            })
+            .collect();
+
+        // Fixed upstream gradient on the contracted tensor (length ∏ mode_dims).
+        let n_total: usize = mode_dims.iter().product();
+        let g: Vec<f32> = (0..n_total)
+            .map(|i| ((i as f32) * 0.5 + 0.3).cos())
+            .collect();
+
+        // Analytic gradient. (Immutable borrow ends here, freeing `cores_data`.)
+        let cores_refs: Vec<&[f32]> = cores_data.iter().map(|c| c.as_slice()).collect();
+        let analytic = tt_contract_backward(&g, &cores_refs, mode_dims, ranks, d);
+        drop(cores_refs);
+
+        // The gradient must be non-trivial — otherwise the check proves nothing.
+        let max_grad = analytic
+            .iter()
+            .flat_map(|c| c.iter())
+            .fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(max_grad > 1e-2, "gradient is degenerate (max = {max_grad})");
+
+        // `reconstruct_tensor` is multilinear, so the loss is affine in each single
+        // core entry: a central difference is analytically exact, only f32 roundoff
+        // separates it from the reverse-mode value.
+        let eps = 1e-2f32;
+        for k in 0..d
+        {
+            for j in 0..core_len(k)
+            {
+                let orig = cores_data[k][j];
+                cores_data[k][j] = orig + eps;
+                let lp = tt_loss(&cores_data, mode_dims, ranks, &g);
+                cores_data[k][j] = orig - eps;
+                let lm = tt_loss(&cores_data, mode_dims, ranks, &g);
+                cores_data[k][j] = orig;
+                let numeric = (lp - lm) / (2.0 * eps);
+                let a = analytic[k][j];
+                let tol = 1e-2 + 1e-2 * a.abs();
+                assert!(
+                    (numeric - a).abs() < tol,
+                    "core {k} elem {j}: analytic {a}, numeric {numeric}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_tt_contract_backward_fd_d3() {
+        // 3 cores, mode_dims = [2, 3, 2], ranks = [1, 2, 2, 1].
+        check_tt_backward_fd(&[2, 3, 2], &[1, 2, 2, 1], &[0.2, 1.1, 2.3]);
+    }
+
+    #[test]
+    fn test_tt_contract_backward_fd_d4() {
+        // 4 cores with non-uniform ranks — exercises the general N-core path.
+        check_tt_backward_fd(&[2, 3, 2, 2], &[1, 2, 3, 2, 1], &[0.5, 1.7, 0.9, 2.1]);
+    }
+
+    #[test]
+    fn test_tt_contract_backward_fd_d2_matches_specialized() {
+        // d == 2 must agree too — this is the case the autodiff backward used to
+        // special-case by hand.
+        check_tt_backward_fd(&[3, 4], &[1, 2, 1], &[0.4, 1.3]);
     }
 }

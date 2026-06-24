@@ -873,18 +873,36 @@ impl ParallelTape {
                 {
                     t_grads[input] = t_grads[input].add(&g);
                 },
+                // The fused ops below are not part of the data-parallel op set:
+                // `ParallelTape` carries the elementwise / matmul / nn-layer graph
+                // that data-parallel SGD builds via `alloc_node`, and nothing in the
+                // workspace ever allocates one of these on it. Rather than silently
+                // emit a zero gradient (which would let a mis-wired graph train on
+                // garbage), refuse them loudly — their backward lives on the
+                // sequential `Tape`, which implements all three.
                 Op::FlashAttention { .. } =>
                 {
-                    // FlashAttention backward non implémenté en parallèle
-                    // Le forward séquentiel gère la backward pass complète
+                    panic!(
+                        "FlashAttention backward is not available on ParallelTape; \
+                         run attention on the sequential `Tape`, whose backward \
+                         implements it"
+                    );
                 },
                 Op::Conv2dTransposeForward { .. } =>
                 {
-                    // Conv2dTranspose backward non implémenté en parallèle
+                    panic!(
+                        "Conv2dTranspose backward is not available on ParallelTape; \
+                         run the transposed convolution on the sequential `Tape`, \
+                         whose backward implements it"
+                    );
                 },
                 Op::TtContract { .. } =>
                 {
-                    // TtContract backward non implémenté en parallèle
+                    panic!(
+                        "TtContract backward is not available on ParallelTape; run \
+                         the TT-Linear layer on the sequential `Tape`, whose backward \
+                         implements the general N-core gradient"
+                    );
                 },
             }
         }
@@ -1113,5 +1131,35 @@ mod tests {
         assert!((tape.grad(x) - 2.0).abs() < 1e-6);
         tape.reset();
         assert!((tape.grad(x)).abs() < 1e-12);
+    }
+
+    #[test]
+    #[should_panic(expected = "TtContract backward is not available on ParallelTape")]
+    fn tt_contract_backward_is_refused_not_silently_zeroed() {
+        // A fused TT contraction has no data-parallel backward. The pass must fail
+        // loudly rather than silently return a zero gradient and train on garbage.
+        let tape = ParallelTape::new();
+        let x = tape.alloc_node(Node {
+            op: Op::Input,
+            shape: (1, 1),
+            saved: SavedData::None,
+        });
+        let y = tape.alloc_node(Node {
+            op: Op::TtContract {
+                input_idx: x,
+                core_indices: [0; 8],
+                num_cores: 2,
+                bias_idx: None,
+                in_dims: [2, 3, 0, 0, 0, 0, 0, 0],
+                out_dims: [2, 2, 0, 0, 0, 0, 0, 0],
+                ranks: [1, 2, 1, 0, 0, 0, 0, 0, 0],
+                d: 2,
+            },
+            shape: (1, 1),
+            saved: SavedData::None,
+        });
+        tape.set_value(x, &[1.0]);
+        tape.set_value(y, &[1.0]);
+        tape.backward(y);
     }
 }

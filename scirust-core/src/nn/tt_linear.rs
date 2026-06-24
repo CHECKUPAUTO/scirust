@@ -490,4 +490,85 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)] // outer index k mutates tt.cores[k] while reading analytic[k]
+    fn tt_backward_matches_finite_differences_d3() {
+        // End-to-end d == 3: this is the only test that proves the autodiff
+        // backward produces *correct* (not merely non-zero) core gradients for
+        // more than two cores — it exercises the `reverse.rs` wiring (interleave
+        // ordering + per-core reshape) that the `tt_contract_backward` unit test
+        // in tt_decompose.rs does not cover.
+        let in_dims = [2usize, 2, 2]; // in = 8
+        let out_dims = [2usize, 2, 2]; // out = 8
+        let (n_in, n_out) = (8usize, 8usize);
+
+        let mut linear = Linear::new(
+            n_in,
+            n_out,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut crate::nn::rng::PcgEngine::new(7),
+        );
+        for i in 0..(n_in * n_out)
+        {
+            linear.weight.data[i] = ((i as f32) * 0.21 + 0.5).sin();
+        }
+        let mut tt = tt_decompose(&linear, &in_dims, &out_dims, 100, 0.0);
+
+        let batch = 2;
+        let input = Tensor {
+            rows: batch,
+            cols: n_in,
+            data: (0..batch * n_in)
+                .map(|k| ((k as f32) * 0.17).cos())
+                .collect(),
+        };
+
+        // Scalar loss = sum of all outputs. The TT contraction is multilinear in
+        // the cores, so this loss is affine in each single core entry and a
+        // central difference is analytically exact (only f32 roundoff remains).
+        let loss_of = |tt: &mut TTLinear| -> f32 {
+            let tape = Tape::new();
+            let y = tt.forward(&tape, tape.input(input.clone()));
+            tape.value(y.idx()).data.iter().sum()
+        };
+
+        // Analytic gradients via reverse mode.
+        let analytic: Vec<Tensor> = {
+            let tape = Tape::new();
+            let y = tt.forward(&tape, tape.input(input.clone()));
+            let loss = y.sum();
+            tape.backward(loss.idx());
+            tt.core_indices.iter().map(|&idx| tape.grad(idx)).collect()
+        };
+
+        // Some gradient must be non-trivial, else the check proves nothing.
+        let max_grad = analytic
+            .iter()
+            .flat_map(|t| t.data.iter())
+            .fold(0.0f32, |m, &x| m.max(x.abs()));
+        assert!(max_grad > 1e-2, "gradient is degenerate (max = {max_grad})");
+
+        let eps = 1e-2f32;
+        for k in 0..tt.cores.len()
+        {
+            for j in 0..tt.cores[k].data.len()
+            {
+                let orig = tt.cores[k].data[j];
+                tt.cores[k].data[j] = orig + eps;
+                let lp = loss_of(&mut tt);
+                tt.cores[k].data[j] = orig - eps;
+                let lm = loss_of(&mut tt);
+                tt.cores[k].data[j] = orig;
+                let numeric = (lp - lm) / (2.0 * eps);
+                let a = analytic[k].data[j];
+                let tol = 2e-2 + 2e-2 * a.abs();
+                assert!(
+                    (numeric - a).abs() < tol,
+                    "core {k} elem {j}: analytic {a}, numeric {numeric}"
+                );
+            }
+        }
+    }
 }
