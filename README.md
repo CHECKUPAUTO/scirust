@@ -252,9 +252,13 @@ entirely. Parts of the repository were developed with the assistance of **SoulLi
 separate agent system maintained outside this repository; like OpenClaw-U, it is not part
 of the framework.
 
+
+
+
+
+
+
+
 ## License
 
-SciRust is **source-available** and dual-licensed: free for noncommercial and personal use
-under the **PolyForm Noncommercial 1.0.0** license, with a separate **commercial license**
-available. See [`LICENSE.md`](LICENSE.md) and [`LICENSING.md`](LICENSING.md). This is not an
-OSI-approved open-source license.
+Dual-licensed: [PolyForm Noncommercial 1.0.0](LICENSE.md) for noncommercial and personal use; commercial license required for any commercial use. See [LICENSING.md](LICENSING.md).
