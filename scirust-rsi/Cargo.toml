@@ -24,6 +24,14 @@ parallel = ["dep:rayon"]
 # get `llm::anthropic::ClaudeGenerator`, a `Generator` backed by the Claude
 # Messages API (blocking HTTP via ureq).
 anthropic = ["dep:ureq", "dep:serde_json"]
+# The `scirust-rsi-mcp` server: an MCP (Model Context Protocol) stdio server
+# exposing program evolution as a tool an LLM can call. Needs serde_json.
+mcp = ["dep:serde_json"]
+
+# MCP server binary — only built when the `mcp` feature is enabled.
+[[bin]]
+name = "scirust-rsi-mcp"
+required-features = ["mcp"]
 
 [dev-dependencies]
 serde_json = "1"

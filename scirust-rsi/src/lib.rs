@@ -62,6 +62,7 @@ pub mod evo;
 pub mod expert_iteration;
 pub mod llm;
 pub mod pbt;
+pub mod progevo;
 pub mod refine;
 pub mod star;
 

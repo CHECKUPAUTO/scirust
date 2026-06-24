@@ -84,11 +84,32 @@ To compare several runs at once, `compare_html(title, &[(label, &report), …])`
 overlays their convergence curves (one colour per run + legend) into a single
 self-contained HTML report — see the `compare_report` example.
 
+## Let an LLM evolve an algorithm for you (MCP server)
+
+`scirust-rsi-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server (JSON-RPC over stdio, `mcp` feature) exposing one tool,
+`evolve_algorithm`. Connect it to an MCP-capable client (Claude Desktop / Claude
+Code) and a non-technical user can just ask, in plain language, to evolve a
+program fitting some input→output examples — the model turns that into a tool
+call and relays the result.
+
+```sh
+cargo build -p scirust-rsi --bin scirust-rsi-mcp --features mcp --release
+claude mcp add scirust -- "$PWD/target/release/scirust-rsi-mcp"   # one-time
+```
+
+Then, in the LLM: *"Connect to the scirust MCP server and use `evolve_algorithm`
+to evolve a program reproducing 1→2, 2→4, 3→6."* The evolution runs locally and
+offline (no API key); the engine is `scirust_rsi::progevo::evolve`, with the
+crate's bounded / non-regressing / reproducible / sandboxed guarantees. Full
+walkthrough and the ready-to-paste command: [`MCP_QUICKSTART.md`](MCP_QUICKSTART.md).
+
 ## Optional features
 
 | Feature | Adds |
 |---|---|
 | `anthropic` | `llm::anthropic::ClaudeGenerator` — a `Generator` backed by the Claude Messages API (blocking HTTP) |
+| `mcp` | the `scirust-rsi-mcp` binary — an MCP stdio server exposing `evolve_algorithm` so an LLM can drive program evolution as a tool |
 | `parallel` | rayon-backed parallel training. `OnePlusLambda::optimize_parallel` evaluates each generation's λ offspring in parallel, **bit-identical** to the sequential `optimize` (only fitness is parallelised; sampling stays sequential). `Pbt::run_parallel` trains the whole population concurrently — each member owns a deterministically-seeded RNG, so it stays **reproducible** (same seed ⇒ same result, any thread count) though not bit-identical to the sequential `run` |
 
 Both are off by default; the core stays dependency-light and fully offline.
