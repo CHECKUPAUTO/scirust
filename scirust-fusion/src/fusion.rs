@@ -59,56 +59,42 @@ impl FusionPipeline {
         }
     }
 
-    /// Essaie de fusionner un sous-graphe à partir d'un nœud racine.
+    /// Build the maximal fusable chain starting at `root`: seed the group with
+    /// `root`, then greedily extend by a canonical pattern (`MatMul → ReLU`,
+    /// `Linear → SiLU`, …) as long as the last node has an unvisited, fusable
+    /// successor. Returns a kernel only when at least two ops were fused.
     fn try_fuse_from(
         &self,
         graph: &OpGraph,
         visited: &mut [bool],
         root: usize,
     ) -> Option<FusedKernel> {
-        // Collecter le sous-graphe nécessaire
-        let mut group = Vec::new();
-        let mut stack = vec![root];
-
-        while let Some(node) = stack.pop()
+        if visited[root]
         {
-            if visited[node]
+            return None;
+        }
+        // Seed the chain with the root, then walk forward along fusable edges.
+        let mut group = vec![root];
+        visited[root] = true;
+
+        loop
+        {
+            let last = *group.last().unwrap();
+            let next = self
+                .find_fusable_successors(graph, last)
+                .into_iter()
+                .find(|&n| !visited[n]);
+            match next
             {
-                continue;
-            }
-
-            // Essayer de prolonger la fusion avec les voisins
-            let _op = graph.op(node);
-
-            // Chercher un successeur qui peut être fusionné
-            let fused = self.try_extend(&group, graph, node, visited);
-
-            if fused
-            {
-                group.push(node);
-                visited[node] = true;
-                continue;
-            }
-
-            // Sinon, ajouter ce nœud comme kernel standalone
-            if !group.is_empty() && group.len() >= 2
-            {
-                let kernel = self.build_kernel(graph, &group);
-                return Some(kernel);
-            }
-
-            // Check if this node can be the start of a fusion group
-            // by looking at its successors
-            for next in self.find_fusable_successors(graph, node)
-            {
-                if !visited[next]
+                Some(n) =>
                 {
-                    stack.push(next);
-                }
+                    group.push(n);
+                    visited[n] = true;
+                },
+                None => break,
             }
         }
 
-        // Si le groupe a au moins 2 nœuds, construire le kernel
         if group.len() >= 2
         {
             Some(self.build_kernel(graph, &group))
@@ -141,25 +127,6 @@ impl FusionPipeline {
                 }
             })
             .collect()
-    }
-
-    /// Essaie d'étendre le groupe de fusion avec un nœud.
-    fn try_extend(
-        &self,
-        group: &[usize],
-        graph: &OpGraph,
-        node: usize,
-        _visited: &mut [bool],
-    ) -> bool {
-        if group.is_empty()
-        {
-            return false;
-        }
-        let group_op = graph.op(*group.last().unwrap());
-        let node_op = graph.op(node);
-
-        group_op.can_fuse_with(&node_op.kind)
-            && self.patterns.is_pattern(group_op.kind, node_op.kind)
     }
 
     /// Construit un kernel fusionné à partir d'un groupe de nœuds.
@@ -290,5 +257,57 @@ pub enum KernelType {
 impl Default for FusionPipeline {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::OpGraph;
+
+    /// `y = act(x @ w)` — a two-node fusable group on top of two inputs.
+    fn matmul_act_graph(act: OpKind) -> OpGraph {
+        let mut g = OpGraph::new();
+        let x = g.add_input(OpKind::Input, None);
+        let w = g.add_input(OpKind::Input, None);
+        let mm = g.add_binary(OpKind::MatMul, x, w, None);
+        let _y = g.add_unary(act, mm, None);
+        g
+    }
+
+    #[test]
+    fn fuses_matmul_relu_into_one_kernel() {
+        let pipeline = FusionPipeline::new();
+        let mut g = matmul_act_graph(OpKind::ReLU);
+        let kernels = pipeline.fuse(&mut g).expect("MatMul→ReLU should fuse");
+        assert!(
+            kernels
+                .iter()
+                .any(|k| k.kernel_type == KernelType::MatmulRelu),
+            "no MatmulRelu kernel produced: {:?}",
+            kernels.iter().map(|k| k.kernel_type).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fuses_matmul_silu_into_one_kernel() {
+        let pipeline = FusionPipeline::new();
+        let mut g = matmul_act_graph(OpKind::SiLU);
+        let kernels = pipeline.fuse(&mut g).expect("MatMul→SiLU should fuse");
+        assert!(
+            kernels
+                .iter()
+                .any(|k| k.kernel_type == KernelType::MatmulSilu)
+        );
+    }
+
+    #[test]
+    fn nothing_fusable_returns_none() {
+        let pipeline = FusionPipeline::new();
+        // A lone activation on an input matches no canonical pattern.
+        let mut g = OpGraph::new();
+        let x = g.add_input(OpKind::Input, None);
+        let _y = g.add_unary(OpKind::Tanh, x, None);
+        assert!(pipeline.fuse(&mut g).is_none());
     }
 }

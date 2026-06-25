@@ -328,3 +328,47 @@ impl Default for OpGraph {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn topo_order_lists_inputs_before_consumers() {
+        let mut g = OpGraph::new();
+        let x = g.add_input(OpKind::Input, None);
+        let w = g.add_input(OpKind::Input, None);
+        let mm = g.add_binary(OpKind::MatMul, x, w, None);
+        let y = g.add_unary(OpKind::ReLU, mm, None);
+        g.compute_topo_order();
+        assert_eq!(g.topo_order.len(), 4);
+        let pos = |n: usize| g.topo_order.iter().position(|&i| i == n).unwrap();
+        // Every edge points forward in the order.
+        assert!(pos(x) < pos(mm));
+        assert!(pos(w) < pos(mm));
+        assert!(pos(mm) < pos(y));
+    }
+
+    #[test]
+    fn can_fuse_with_matches_only_allowed_pairs() {
+        let mm = FusedOp::new(OpKind::MatMul, None);
+        assert!(mm.can_fuse_with(&OpKind::ReLU));
+        assert!(mm.can_fuse_with(&OpKind::SiLU));
+        // Softmax is not in the fusable-activation set.
+        assert!(!mm.can_fuse_with(&OpKind::Softmax));
+        // Activation → MatMul is allowed too (the reverse direction).
+        let relu = FusedOp::new(OpKind::ReLU, None);
+        assert!(relu.can_fuse_with(&OpKind::MatMul));
+    }
+
+    #[test]
+    fn subgraph_root_collects_all_dependencies() {
+        let mut g = OpGraph::new();
+        let x = g.add_input(OpKind::Input, None);
+        let w = g.add_input(OpKind::Input, None);
+        let mm = g.add_binary(OpKind::MatMul, x, w, None);
+        let y = g.add_unary(OpKind::ReLU, mm, None);
+        // Sorted + deduped → exactly the cone of `y`.
+        assert_eq!(g.get_subgraph_root(y), vec![x, w, mm, y]);
+    }
+}

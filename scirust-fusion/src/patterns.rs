@@ -198,3 +198,58 @@ impl Default for FusionPatterns {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_pairs_match_by_name() {
+        let p = FusionPatterns::new();
+        assert_eq!(
+            p.match_sequence(&[OpKind::MatMul, OpKind::ReLU])
+                .unwrap()
+                .name,
+            "matmul_relu"
+        );
+        assert_eq!(
+            p.match_sequence(&[OpKind::MatMul, OpKind::SiLU])
+                .unwrap()
+                .name,
+            "matmul_silu"
+        );
+        // `Any([MatMul, Linear])` also matches a Linear in the same slot.
+        assert_eq!(
+            p.match_sequence(&[OpKind::Linear, OpKind::ReLU])
+                .unwrap()
+                .name,
+            "matmul_relu"
+        );
+    }
+
+    #[test]
+    fn triple_pattern_matches() {
+        let p = FusionPatterns::new();
+        let m = p.match_sequence(&[OpKind::MatMul, OpKind::SiLU, OpKind::LayerNorm]);
+        assert_eq!(m.unwrap().name, "matmul_silu_layernorm");
+    }
+
+    #[test]
+    fn non_patterns_do_not_match() {
+        let p = FusionPatterns::new();
+        // There is no reversed activation → MatMul pattern.
+        assert!(!p.is_pattern(OpKind::ReLU, OpKind::MatMul));
+        // A length mismatch never matches a fixed-length pattern.
+        assert!(p.match_sequence(&[OpKind::MatMul]).is_none());
+    }
+
+    #[test]
+    fn high_gain_filters_by_threshold() {
+        let p = FusionPatterns::new();
+        let hi = p.high_gain_patterns(60.0);
+        assert!(hi.contains(&"matmul_silu_layernorm")); // 66%
+        assert!(hi.contains(&"two_layer_mlp")); // 66%
+        assert!(!hi.contains(&"matmul_relu")); // 50% — below threshold
+        assert_eq!(p.all_patterns().len(), 9);
+    }
+}

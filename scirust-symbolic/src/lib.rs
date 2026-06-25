@@ -686,24 +686,68 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
 
 // ── Optimizer (stub — numeric gradient descent) ──
 
+/// Momentum stochastic-gradient-descent optimizer.
 pub struct Optimizer {
     pub lr: f64,
     pub momentum: f64,
-    #[allow(dead_code)]
-    velocity: HashMap<usize, f64>,
+    pub max_iter: usize,
+    velocity: Vec<f64>,
 }
 
 impl Optimizer {
-    pub fn new(lr: f64, _max_iter: usize) -> Self {
+    pub fn new(lr: f64, max_iter: usize) -> Self {
         Self {
             lr,
             momentum: 0.9,
-            velocity: HashMap::new(),
+            max_iter,
+            velocity: Vec::new(),
         }
     }
 
     pub fn set_momentum(&mut self, m: f64) {
         self.momentum = m;
+    }
+
+    /// One in-place momentum update: `v ← momentum·v − lr·grad`, then
+    /// `params ← params + v`. The velocity is (re)initialised to match `params`.
+    pub fn step(&mut self, params: &mut [f64], grad: &[f64]) {
+        if self.velocity.len() != params.len()
+        {
+            self.velocity = vec![0.0; params.len()];
+        }
+        for ((p, v), g) in params
+            .iter_mut()
+            .zip(self.velocity.iter_mut())
+            .zip(grad.iter())
+        {
+            *v = self.momentum * *v - self.lr * *g;
+            *p += *v;
+        }
+    }
+
+    /// Minimize a scalar objective from `x0` with momentum SGD, taking the
+    /// gradient by central differences. Runs up to `max_iter` steps and returns
+    /// the final point.
+    pub fn minimize<F: Fn(&[f64]) -> f64>(&mut self, f: F, x0: &[f64]) -> Vec<f64> {
+        let mut x = x0.to_vec();
+        self.velocity = vec![0.0; x.len()];
+        let eps = 1e-6;
+        for _ in 0..self.max_iter
+        {
+            let mut g = vec![0.0; x.len()];
+            for i in 0..x.len()
+            {
+                let orig = x[i];
+                x[i] = orig + eps;
+                let fp = f(&x);
+                x[i] = orig - eps;
+                let fm = f(&x);
+                x[i] = orig;
+                g[i] = (fp - fm) / (2.0 * eps);
+            }
+            self.step(&mut x, &g);
+        }
+        x
     }
 }
 
@@ -1102,10 +1146,6 @@ pub fn parse_natural(input: &str) -> NaturalCommand {
     }
 }
 
-// ── Autodiff macros stub ──
-
-pub mod macros_stub {}
-
 // ── Derivative helpers for prelude ──
 
 pub fn derivative_1d<F: Fn(f64) -> f64>(f: F, x: f64) -> f64 {
@@ -1201,6 +1241,122 @@ mod tests {
         let coeffs = polynomial_fit(&xs, &ys, 1).unwrap();
         assert!((coeffs[0] - 1.0).abs() < 1e-6);
         assert!((coeffs[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn solve_linear_finds_the_root() {
+        // 2x - 4 = 0 → x = 2
+        let e = parse("2*x - 4").unwrap();
+        assert!((solve_linear(&e, "x").unwrap() - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn prove_equal_distinguishes_equivalent_from_different() {
+        assert!(prove_equal(
+            &parse("x + x").unwrap(),
+            &parse("2*x").unwrap()
+        ));
+        assert!(!prove_equal(&parse("x").unwrap(), &parse("x + 1").unwrap()));
+    }
+
+    #[test]
+    fn to_rust_code_emits_evaluable_source() {
+        let code = to_rust_code(&parse("x^2 + 1").unwrap());
+        assert!(code.contains(".powf(2)"), "got: {code}");
+        assert!(code.contains("+ 1"), "got: {code}");
+    }
+
+    #[test]
+    fn linear_regression_recovers_intercept_and_slope() {
+        // y = 1 + 2x
+        let (intercept, slope) =
+            linear_regression(&[0.0, 1.0, 2.0, 3.0], &[1.0, 3.0, 5.0, 7.0]).unwrap();
+        assert!((intercept - 1.0).abs() < 1e-6, "intercept {intercept}");
+        assert!((slope - 2.0).abs() < 1e-6, "slope {slope}");
+    }
+
+    #[test]
+    fn discover_patterns_detects_trend_and_stability() {
+        assert!(
+            discover_patterns(&[1.0, 2.0, 3.0, 4.0, 5.0]).contains(&"trend_upward".to_string())
+        );
+        assert!(discover_patterns(&[5.0, 5.0, 5.0, 5.0]).contains(&"stable".to_string()));
+    }
+
+    #[test]
+    fn pattern_memory_round_trips() {
+        let mut mem = PatternMemory::new();
+        mem.store("ramp", vec![1.0, 2.0, 3.0]);
+        assert_eq!(mem.recall("ramp"), Some(&[1.0, 2.0, 3.0][..]));
+        assert!(mem.recall("absent").is_none());
+    }
+
+    #[test]
+    fn finite_difference_helpers_match_known_gradients() {
+        // d/dx x^2 at 3 = 6
+        assert!((derivative_1d(|x| x * x, 3.0) - 6.0).abs() < 1e-4);
+        // ∇(x² + y²) at (1,2) = (2,4)
+        let (gx, gy) = gradient_2d(|x, y| x * x + y * y, 1.0, 2.0);
+        assert!((gx - 2.0).abs() < 1e-4 && (gy - 4.0).abs() < 1e-4);
+        // ∇(x² + y² + z²) at (1,2,3) = (2,4,6)
+        let (a, b, c) = gradient_3d(|x, y, z| x * x + y * y + z * z, 1.0, 2.0, 3.0);
+        assert!((a - 2.0).abs() < 1e-4 && (b - 4.0).abs() < 1e-4 && (c - 6.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn optimizer_minimizes_a_quadratic_bowl() {
+        // minimize (x-3)² + (y+1)² → (3, -1)
+        let mut opt = Optimizer::new(0.1, 1000);
+        let x = opt.minimize(|p| (p[0] - 3.0).powi(2) + (p[1] + 1.0).powi(2), &[0.0, 0.0]);
+        assert!((x[0] - 3.0).abs() < 1e-2, "x0 = {}", x[0]);
+        assert!((x[1] + 1.0).abs() < 1e-2, "x1 = {}", x[1]);
+    }
+
+    #[test]
+    fn optimizer_step_applies_a_momentum_update() {
+        // First step from zero velocity: v = -lr·grad, x += v.
+        let mut opt = Optimizer::new(0.1, 1);
+        let mut p = vec![1.0];
+        opt.step(&mut p, &[2.0]); // v = -0.1·2 = -0.2 → p = 0.8
+        assert!((p[0] - 0.8).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pipeline_parses_simplifies_and_evaluates() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), 2.0);
+        let out = Pipeline::new().with_vars(vars).run("x^2 + 1").unwrap();
+        assert!((out.value - 5.0).abs() < 1e-9, "value {}", out.value);
+        assert!(!out.rust_code.is_empty());
+        assert!(!out.simplified.is_empty());
+    }
+
+    #[test]
+    fn parse_natural_dispatches_intents() {
+        assert!(matches!(
+            parse_natural("solve x^2 = 4"),
+            NaturalCommand::Solve(_)
+        ));
+        assert!(matches!(
+            parse_natural("derive x^2"),
+            NaturalCommand::Derive(_)
+        ));
+        assert!(matches!(
+            parse_natural("2 + 2"),
+            NaturalCommand::Evaluate(_)
+        ));
+    }
+
+    #[test]
+    fn simplify_drops_identities() {
+        assert_eq!(
+            simplify(&parse("x * 1").unwrap()),
+            Expr::Var("x".to_string())
+        );
+        assert_eq!(
+            simplify(&parse("x + 0").unwrap()),
+            Expr::Var("x".to_string())
+        );
     }
 }
 

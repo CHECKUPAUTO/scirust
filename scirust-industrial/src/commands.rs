@@ -175,19 +175,17 @@ pub fn test_mqtt(host: &str, port: u16, simulated: bool, topic: &str) -> Result<
     Ok(())
 }
 
-/// GEN-CONFIG: Generate a pipeline configuration file
-pub fn gen_config(
-    output: &str,
+/// Build a [`PipelineConfig`] from a named template. Pure (no I/O), so the
+/// template dispatch is exercised directly by the test module.
+pub fn build_pipeline_config(
     template: &str,
     n_stations: usize,
     line_id: &str,
-) -> Result<(), String> {
-    println!("=== Generate Configuration ===\n");
-
-    let config = match template.to_lowercase().as_str()
+) -> Result<PipelineConfig, String> {
+    match template.to_lowercase().as_str()
     {
-        "minimal" | "basic" => PipelineConfig::default(),
-        "automotive" | "line" => PipelineConfig::automotive_line(line_id, n_stations),
+        "minimal" | "basic" => Ok(PipelineConfig::default()),
+        "automotive" | "line" => Ok(PipelineConfig::automotive_line(line_id, n_stations)),
         "bearing" =>
         {
             let mut cfg = PipelineConfig::default();
@@ -198,17 +196,26 @@ pub fn gen_config(
                 contact_angle_deg: 0.0,
             });
             cfg.stations[0].shaft_freq = Some(29.53);
-            cfg
+            Ok(cfg)
         },
-        "pdm" | "predictive" => PipelineConfig::default(),
-        _ =>
-        {
-            return Err(format!(
-                "Unknown template: {}. Use: minimal, automotive, bearing, pdm",
-                template
-            ));
-        },
-    };
+        "pdm" | "predictive" => Ok(PipelineConfig::default()),
+        _ => Err(format!(
+            "Unknown template: {}. Use: minimal, automotive, bearing, pdm",
+            template
+        )),
+    }
+}
+
+/// GEN-CONFIG: Generate a pipeline configuration file
+pub fn gen_config(
+    output: &str,
+    template: &str,
+    n_stations: usize,
+    line_id: &str,
+) -> Result<(), String> {
+    println!("=== Generate Configuration ===\n");
+
+    let config = build_pipeline_config(template, n_stations, line_id)?;
 
     let errors = config.validate();
     if !errors.is_empty()
@@ -329,62 +336,41 @@ pub fn run(config_path: &str, cycles: usize, report_path: Option<&str>) -> Resul
     Ok(())
 }
 
-/// DOCTOR: Diagnose integration issues
-pub fn doctor(config_path: &str) -> Result<(), String> {
-    println!("=== SciRust Industrial Doctor ===\n");
+/// Outcome of the diagnostic checks: human-readable pass/fail lines.
+#[derive(Debug, Clone, Default)]
+pub struct Diagnostics {
+    pub passed: Vec<String>,
+    pub issues: Vec<String>,
+}
 
-    let mut issues = Vec::new();
-    let mut passed = Vec::new();
+/// Run the configuration- and backend-level diagnostics for a given config
+/// (everything except reading the config file from disk). Pure with respect to
+/// the filesystem, so the test module can assert on the simulated path.
+pub fn run_diagnostics(config: &PipelineConfig) -> Diagnostics {
+    let mut d = Diagnostics::default();
 
-    // Check 1: Config file
-    let path = Path::new(config_path);
-    let config = if path.exists()
-    {
-        match PipelineConfig::from_file(path)
-        {
-            Ok(c) =>
-            {
-                passed.push(format!("Config file '{}' loaded successfully", config_path));
-                c
-            },
-            Err(e) =>
-            {
-                issues.push(format!("Config file error: {}", e));
-                PipelineConfig::default()
-            },
-        }
-    }
-    else
-    {
-        issues.push(format!(
-            "Config file '{}' not found (using defaults)",
-            config_path
-        ));
-        PipelineConfig::default()
-    };
-
-    // Check 2: Config validation
+    // Config validation
     let errors = config.validate();
     if errors.is_empty()
     {
-        passed.push("Config validation: OK".to_string());
+        d.passed.push("Config validation: OK".to_string());
     }
     else
     {
         for e in errors
         {
-            issues.push(format!("Config validation: {}", e));
+            d.issues.push(format!("Config validation: {}", e));
         }
     }
 
-    // Check 3: Backend type
+    // Backend type
     let backend_type =
         scirust_integration::backend::BackendType::parse_from_str(&config.backend_type);
     match backend_type
     {
         Some(bt) =>
         {
-            passed.push(format!(
+            d.passed.push(format!(
                 "Backend type '{}' is recognized",
                 config.backend_type
             ));
@@ -392,7 +378,7 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
             {
                 if bt == scirust_integration::backend::BackendType::OpcUa
                 {
-                    issues.push(format!(
+                    d.issues.push(format!(
                         "Backend '{}' requires the '{}' crate. Add the feature flag 'real-opcua' to scirust-integration in Cargo.toml",
                         config.backend_type, crate_name
                     ));
@@ -401,72 +387,128 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
         },
         None =>
         {
-            issues.push(format!("Unknown backend type: '{}'", config.backend_type));
+            d.issues
+                .push(format!("Unknown backend type: '{}'", config.backend_type));
         },
     }
 
-    // Check 4: Simulated backend test
+    // Simulated backend test
     let mut backend = BackendFactory::simulated();
     if backend.is_connected()
     {
-        passed.push("Simulated backend: connects successfully".to_string());
+        d.passed
+            .push("Simulated backend: connects successfully".to_string());
     }
     else
     {
-        issues.push("Simulated backend: failed to connect".to_string());
+        d.issues
+            .push("Simulated backend: failed to connect".to_string());
     }
 
-    // Check 5: OPC-UA browse test
+    // OPC-UA browse test
     let nodes = backend.opcua.browse("vibration").unwrap_or_default();
     if !nodes.is_empty()
     {
-        passed.push(format!(
+        d.passed.push(format!(
             "OPC-UA browse: found {} vibration nodes",
             nodes.len()
         ));
     }
     else
     {
-        issues.push("OPC-UA browse: no vibration nodes found".to_string());
+        d.issues
+            .push("OPC-UA browse: no vibration nodes found".to_string());
     }
 
-    // Check 6: MQTT publish test
+    // MQTT publish test
     let payload = br#"{"doctor": true}"#;
     if backend
         .mqtt
         .publish("scirust/doctor/test", payload, 1, false)
         .is_ok()
     {
-        passed.push("MQTT publish: test message sent".to_string());
+        d.passed.push("MQTT publish: test message sent".to_string());
     }
     else
     {
-        issues.push("MQTT publish: failed to send test message".to_string());
+        d.issues
+            .push("MQTT publish: failed to send test message".to_string());
     }
 
-    // Check 7: Pipeline test
+    // Pipeline test
     let mut test_pipeline = Pipeline::new(config.clone());
     test_pipeline.run(5);
     let test_status = test_pipeline.status();
     if test_status.audit_chain_valid
     {
-        passed.push("Pipeline: audit chain valid after 5 cycles".to_string());
+        d.passed
+            .push("Pipeline: audit chain valid after 5 cycles".to_string());
     }
     else
     {
-        issues.push("Pipeline: audit chain invalid".to_string());
+        d.issues.push("Pipeline: audit chain invalid".to_string());
     }
     if test_status.cycles_completed == 5
     {
-        passed.push("Pipeline: completed 5 cycles".to_string());
+        d.passed.push("Pipeline: completed 5 cycles".to_string());
     }
     else
     {
-        issues.push(format!(
+        d.issues.push(format!(
             "Pipeline: only completed {} of 5 cycles",
             test_status.cycles_completed
         ));
     }
+
+    d
+}
+
+/// DOCTOR: Diagnose integration issues
+pub fn doctor(config_path: &str) -> Result<(), String> {
+    println!("=== SciRust Industrial Doctor ===\n");
+
+    // Check 1: Config file (filesystem-dependent, kept here)
+    let path = Path::new(config_path);
+    let (config, mut load_note) = if path.exists()
+    {
+        match PipelineConfig::from_file(path)
+        {
+            Ok(c) => (
+                c,
+                Diagnostics {
+                    passed: vec![format!("Config file '{}' loaded successfully", config_path)],
+                    issues: Vec::new(),
+                },
+            ),
+            Err(e) => (
+                PipelineConfig::default(),
+                Diagnostics {
+                    passed: Vec::new(),
+                    issues: vec![format!("Config file error: {}", e)],
+                },
+            ),
+        }
+    }
+    else
+    {
+        (
+            PipelineConfig::default(),
+            Diagnostics {
+                passed: Vec::new(),
+                issues: vec![format!(
+                    "Config file '{}' not found (using defaults)",
+                    config_path
+                )],
+            },
+        )
+    };
+
+    // Checks 2-7
+    let rest = run_diagnostics(&config);
+    let mut passed = std::mem::take(&mut load_note.passed);
+    let mut issues = std::mem::take(&mut load_note.issues);
+    passed.extend(rest.passed);
+    issues.extend(rest.issues);
 
     // Check 8: Pattern detection crates
     let pattern_crates = vec![
@@ -591,4 +633,86 @@ pub fn doctor(config_path: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A unique scratch directory for one test (no external temp-dir crate).
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("scirust-ind-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn build_config_dispatches_templates() {
+        assert!(build_pipeline_config("minimal", 1, "L").is_ok());
+        assert!(build_pipeline_config("basic", 1, "L").is_ok());
+        // automotive → one station per requested station
+        let auto = build_pipeline_config("automotive", 4, "LINE-A").unwrap();
+        assert_eq!(
+            auto.stations.len(),
+            4,
+            "automotive line should have 4 stations"
+        );
+        // bearing → first station carries a bearing spec
+        let bearing = build_pipeline_config("bearing", 1, "L").unwrap();
+        assert!(
+            bearing.stations[0].bearing.is_some(),
+            "bearing template missing bearing config"
+        );
+        // unknown → error, not a silent default
+        assert!(build_pipeline_config("nope", 1, "L").is_err());
+    }
+
+    #[test]
+    fn diagnostics_pass_on_simulated_backend() {
+        let cfg = build_pipeline_config("minimal", 1, "L").unwrap();
+        let d = run_diagnostics(&cfg);
+        // The simulated backend must connect, browse, publish, and run cleanly.
+        assert!(
+            d.passed
+                .iter()
+                .any(|p| p.contains("Simulated backend: connects"))
+        );
+        assert!(d.passed.iter().any(|p| p.contains("OPC-UA browse: found")));
+        assert!(d.passed.iter().any(|p| p.contains("MQTT publish")));
+        assert!(d.passed.iter().any(|p| p.contains("audit chain valid")));
+        assert!(d.passed.iter().any(|p| p.contains("completed 5 cycles")));
+        // No infrastructure failure on the simulated path.
+        assert!(!d.issues.iter().any(|i| i.contains("failed to connect")));
+        assert!(!d.issues.iter().any(|i| i.contains("audit chain invalid")));
+    }
+
+    #[test]
+    fn scaffold_writes_project_files() {
+        let dir = temp_dir("scaffold");
+        scaffold("demoproj", dir.to_str().unwrap(), "minimal").unwrap();
+        let base = dir.join("demoproj");
+        assert!(base.join("src").is_dir(), "src/ not created");
+        let count = std::fs::read_dir(&base).unwrap().count();
+        assert!(count > 0, "no project files written");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gen_config_then_run_produces_a_report() {
+        let dir = temp_dir("run");
+        let cfg_path = dir.join("config.json");
+        let rep_path = dir.join("report.json");
+        gen_config(cfg_path.to_str().unwrap(), "minimal", 1, "L").unwrap();
+        assert!(cfg_path.is_file(), "config not written");
+        run(
+            cfg_path.to_str().unwrap(),
+            3,
+            Some(rep_path.to_str().unwrap()),
+        )
+        .unwrap();
+        let report = std::fs::read_to_string(&rep_path).unwrap();
+        assert!(!report.trim().is_empty(), "report file is empty");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -23,7 +23,8 @@
 //!
 //! // Detect and fuse canonical patterns (e.g. MatMul → ReLU).
 //! let pipeline = FusionPipeline::new();
-//! let _fused = pipeline.fuse(&mut graph);
+//! let fused = pipeline.fuse(&mut graph).expect("MatMul → ReLU fuses");
+//! assert_eq!(fused.len(), 1);
 //! ```
 
 mod fusion;

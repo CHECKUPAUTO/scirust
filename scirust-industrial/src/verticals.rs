@@ -4,6 +4,11 @@
 //! crate API and prints a report — no stubs, no randomness without a fixed seed.
 //! They exist so an evaluator can exercise navigation, state estimation, water
 //! diagnostics, OT security, and GMP batch comparison from the command line.
+//!
+//! Every scenario is split into a `*_run` function that returns the computed
+//! result and a thin `pub fn` that prints it. The `*_run` functions carry the
+//! numeric oracles exercised by the test module at the bottom of this file, so
+//! the verticals are verified end-to-end rather than merely "doesn't panic".
 
 use scirust_estimation::{Imm, ImmModel, KalmanFilter, Mat, UdFilter};
 use scirust_func_safety::{AuditLog, GoldenBatch};
@@ -37,9 +42,19 @@ fn dist2(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 // --- navigation --------------------------------------------------------------
 
+/// Result of the TDOA multilateration scenario.
+#[derive(Debug, Clone)]
+pub struct TdoaRun {
+    pub source: [f64; 2],
+    pub recovered: [f64; 2],
+    pub error: f64,
+    pub iterations: usize,
+    pub converged: bool,
+    pub residual_rms: f64,
+}
+
 /// NAV-TDOA: locate an emitter from time-difference-of-arrival across sensors.
-pub fn nav_tdoa(speed: f64) -> Result<(), String> {
-    println!("=== Navigation — TDOA multilateration ===\n");
+pub fn nav_tdoa_run(speed: f64) -> Result<TdoaRun, String> {
     let sensors = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
     let src = [3.0, 7.0];
     let t0 = 0.123; // unknown emission time — cancels in the differences
@@ -48,30 +63,59 @@ pub fn nav_tdoa(speed: f64) -> Result<(), String> {
         .map(|s| t0 + dist2(*s, src) / speed)
         .collect();
 
-    println!("wave speed       : {speed} m/s");
-    println!("sensors          : {sensors:?}");
-    println!("true source      : {src:?}\n");
-
     let sol = tdoa_locate_2d(&sensors, &arrivals, speed, None, 50)
         .ok_or("TDOA solve failed (degenerate sensor geometry)")?;
-    let err = dist2(sol.position, src);
+    Ok(TdoaRun {
+        source: src,
+        recovered: sol.position,
+        error: dist2(sol.position, src),
+        iterations: sol.iterations,
+        converged: sol.converged,
+        residual_rms: sol.residual_rms,
+    })
+}
+
+/// NAV-TDOA: locate an emitter from time-difference-of-arrival across sensors.
+pub fn nav_tdoa(speed: f64) -> Result<(), String> {
+    println!("=== Navigation — TDOA multilateration ===\n");
+    let sensors = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+    let r = nav_tdoa_run(speed)?;
+    println!("wave speed       : {speed} m/s");
+    println!("sensors          : {sensors:?}");
+    println!("true source      : {:?}\n", r.source);
     println!(
         "recovered source : [{:.4}, {:.4}]",
-        sol.position[0], sol.position[1]
+        r.recovered[0], r.recovered[1]
     );
-    println!("localization err : {err:.2e} m");
+    println!("localization err : {:.2e} m", r.error);
     println!(
         "Gauss–Newton     : {} iters, converged={}, residual RMS {:.2e} m",
-        sol.iterations, sol.converged, sol.residual_rms
+        r.iterations, r.converged, r.residual_rms
     );
     println!("\nSame geometry locates a partial-discharge / acoustic-emission source.");
     Ok(())
 }
 
+/// Result of the GNSS/INS fusion scenario.
+#[derive(Debug, Clone)]
+pub struct FusionRun {
+    pub steps: usize,
+    pub outage_start: usize,
+    pub outage_end: usize,
+    pub truth: [f64; 2],
+    pub fused: [f64; 2],
+    pub error: f64,
+    pub uncertainty_at_outage_end: f64,
+    pub uncertainty_final: f64,
+}
+
 /// NAV-FUSION: loosely-coupled GNSS/INS fusion with an optional GNSS outage.
-pub fn nav_fusion(steps: usize, outage: usize) -> Result<(), String> {
+pub fn nav_fusion_run(steps: usize, outage: usize) -> Result<FusionRun, String> {
     use scirust_nav::GnssInsFusion;
-    println!("=== Navigation — GNSS/INS fusion ===\n");
+    if steps == 0
+    {
+        return Err("steps must be > 0".into());
+    }
     let dt = 1.0;
     let vel = [1.0, 0.5];
     let mut truth = [0.0, 0.0];
@@ -102,23 +146,38 @@ pub fn nav_fusion(steps: usize, outage: usize) -> Result<(), String> {
         }
     }
 
-    let err = dist2(f.position(), truth);
-    println!("steps            : {steps}  (dt = {dt}s)");
+    Ok(FusionRun {
+        steps,
+        outage_start,
+        outage_end,
+        truth,
+        fused: f.position(),
+        error: dist2(f.position(), truth),
+        uncertainty_at_outage_end: unc_mid,
+        uncertainty_final: f.position_uncertainty(),
+    })
+}
+
+/// NAV-FUSION: loosely-coupled GNSS/INS fusion with an optional GNSS outage.
+pub fn nav_fusion(steps: usize, outage: usize) -> Result<(), String> {
+    println!("=== Navigation — GNSS/INS fusion ===\n");
+    let dt = 1.0;
+    let r = nav_fusion_run(steps, outage)?;
+    println!("steps            : {}  (dt = {dt}s)", r.steps);
     println!(
-        "GNSS outage      : steps [{outage_start}, {outage_end}) — {} step(s) dead-reckoned",
-        outage_end - outage_start
+        "GNSS outage      : steps [{}, {}) — {} step(s) dead-reckoned",
+        r.outage_start,
+        r.outage_end,
+        r.outage_end - r.outage_start
     );
-    println!("true position    : [{:.2}, {:.2}]", truth[0], truth[1]);
+    println!("true position    : [{:.2}, {:.2}]", r.truth[0], r.truth[1]);
     println!(
         "fused position   : [{:.2}, {:.2}]  (error {:.3} m)",
-        f.position()[0],
-        f.position()[1],
-        err
+        r.fused[0], r.fused[1], r.error
     );
     println!(
         "uncertainty σ    : {:.3} m at outage end → {:.3} m after re-acquisition",
-        unc_mid,
-        f.position_uncertainty()
+        r.uncertainty_at_outage_end, r.uncertainty_final
     );
     println!("\nThe covariance grows while GNSS is lost and is pulled back when fixes resume.");
     Ok(())
@@ -126,10 +185,24 @@ pub fn nav_fusion(steps: usize, outage: usize) -> Result<(), String> {
 
 // --- state estimation --------------------------------------------------------
 
+/// Result of the IMM tracking scenario.
+#[derive(Debug, Clone)]
+pub struct ImmRun {
+    pub steps: usize,
+    pub maneuver_at: usize,
+    pub mu_quiet_before: f64,
+    pub mu_quiet_after: f64,
+    pub peak_maneuver: f64,
+    pub peak_step: usize,
+}
+
 /// TRACK-IMM: an Interacting Multiple Models filter shifts probability onto the
 /// maneuver model when the target maneuvers.
-pub fn track_imm(steps: usize) -> Result<(), String> {
-    println!("=== Estimation — Interacting Multiple Models (IMM) ===\n");
+pub fn track_imm_run(steps: usize) -> Result<ImmRun, String> {
+    if steps < 4
+    {
+        return Err("steps must be >= 4 to bracket a maneuver".into());
+    }
     let dt = 1.0;
     let a = Mat::new(2, 2, vec![1.0, dt, 0.0, 1.0]); // constant-velocity
     let h = Mat::new(1, 2, vec![1.0, 0.0]); // measure position
@@ -180,17 +253,34 @@ pub fn track_imm(steps: usize) -> Result<(), String> {
             peak_step = k;
         }
     }
-    let mu = imm.mode_probabilities();
-    println!("steps            : {steps}, velocity reversal at step {maneuver_at}");
+    Ok(ImmRun {
+        steps,
+        maneuver_at,
+        mu_quiet_before,
+        mu_quiet_after: imm.mode_probabilities()[0],
+        peak_maneuver,
+        peak_step,
+    })
+}
+
+/// TRACK-IMM: an Interacting Multiple Models filter shifts probability onto the
+/// maneuver model when the target maneuvers.
+pub fn track_imm(steps: usize) -> Result<(), String> {
+    println!("=== Estimation — Interacting Multiple Models (IMM) ===\n");
+    let r = track_imm_run(steps)?;
+    println!(
+        "steps            : {}, velocity reversal at step {}",
+        r.steps, r.maneuver_at
+    );
     println!(
         "P(quiet model)   : {:.3} before maneuver → {:.3} once steady again",
-        mu_quiet_before, mu[0]
+        r.mu_quiet_before, r.mu_quiet_after
     );
     println!(
-        "P(maneuver model): peaks at {:.3} (step {peak_step}) when the target maneuvers",
-        peak_maneuver
+        "P(maneuver model): peaks at {:.3} (step {}) when the target maneuvers",
+        r.peak_maneuver, r.peak_step
     );
-    if peak_maneuver > 0.5
+    if r.peak_maneuver > 0.5
     {
         println!(
             "\n✓ The filter swings onto the maneuver model exactly when the target maneuvers,"
@@ -202,10 +292,21 @@ pub fn track_imm(steps: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Result of the UD square-root filter scenario.
+#[derive(Debug, Clone)]
+pub struct UdRun {
+    pub steps: usize,
+    pub max_state_diff: f64,
+    pub min_variance: f64,
+}
+
 /// TRACK-UD: the Bierman–Thornton square-root filter agrees with a textbook
 /// Kalman filter while keeping the covariance positive-semidefinite by factor.
-pub fn track_ud(steps: usize) -> Result<(), String> {
-    println!("=== Estimation — UD square-root Kalman filter ===\n");
+pub fn track_ud_run(steps: usize) -> Result<UdRun, String> {
+    if steps == 0
+    {
+        return Err("steps must be > 0".into());
+    }
     let dt = 1.0;
     let phi = Mat::new(2, 2, vec![1.0, dt, 0.0, 1.0]);
     let g = Mat::identity(2);
@@ -247,23 +348,50 @@ pub fn track_ud(steps: usize) -> Result<(), String> {
             min_var = min_var.min(v);
         }
     }
-    println!("steps                 : {steps}");
-    println!("max |UD − Kalman| state: {max_state_diff:.2e}  (should be ~0)");
-    println!("min UD variance        : {min_var:.2e}  (stays ≥ 0 by construction)");
+    Ok(UdRun {
+        steps,
+        max_state_diff,
+        min_variance: min_var,
+    })
+}
+
+/// TRACK-UD: the Bierman–Thornton square-root filter agrees with a textbook
+/// Kalman filter while keeping the covariance positive-semidefinite by factor.
+pub fn track_ud(steps: usize) -> Result<(), String> {
+    println!("=== Estimation — UD square-root Kalman filter ===\n");
+    let r = track_ud_run(steps)?;
+    println!("steps                 : {}", r.steps);
+    println!(
+        "max |UD − Kalman| state: {:.2e}  (should be ~0)",
+        r.max_state_diff
+    );
+    println!(
+        "min UD variance        : {:.2e}  (stays ≥ 0 by construction)",
+        r.min_variance
+    );
     println!("\nThe UD form carries P = U·D·Uᵀ, so the covariance can never go indefinite.");
     Ok(())
 }
 
 // --- water networks ----------------------------------------------------------
 
+/// Result of the acoustic leak-location scenario.
+#[derive(Debug, Clone)]
+pub struct LeakRun {
+    pub true_leak: f64,
+    pub located: f64,
+    pub error: f64,
+    pub lag_samples: i64,
+    pub peak_corr: f64,
+}
+
 /// WATER-LEAK: locate a leak on a pipe segment by acoustic cross-correlation.
-pub fn water_leak(
+pub fn water_leak_run(
     pipe_length: f64,
     wave_speed: f64,
     sample_rate: f64,
     leak_at: f64,
-) -> Result<(), String> {
-    println!("=== Water — acoustic leak correlation ===\n");
+) -> Result<LeakRun, String> {
     if !(0.0..=pipe_length).contains(&leak_at)
     {
         return Err(format!(
@@ -288,20 +416,66 @@ pub fn water_leak(
     }
 
     let loc = locate_leak(&a, &b, pipe_length, wave_speed, sample_rate);
+    Ok(LeakRun {
+        true_leak: leak_at,
+        located: loc.dist_from_a,
+        error: (loc.dist_from_a - leak_at).abs(),
+        lag_samples: loc.lag_samples as i64,
+        peak_corr: loc.peak_corr,
+    })
+}
+
+/// WATER-LEAK: locate a leak on a pipe segment by acoustic cross-correlation.
+pub fn water_leak(
+    pipe_length: f64,
+    wave_speed: f64,
+    sample_rate: f64,
+    leak_at: f64,
+) -> Result<(), String> {
+    println!("=== Water — acoustic leak correlation ===\n");
+    let r = water_leak_run(pipe_length, wave_speed, sample_rate, leak_at)?;
     println!(
         "pipe length      : {pipe_length} m   wave speed: {wave_speed} m/s   fs: {sample_rate} Hz"
     );
-    println!("true leak        : {leak_at:.2} m from sensor A");
+    println!("true leak        : {:.2} m from sensor A", r.true_leak);
     println!(
         "located leak     : {:.2} m from sensor A  (error {:.3} m)",
-        loc.dist_from_a,
-        (loc.dist_from_a - leak_at).abs()
+        r.located, r.error
     );
     println!(
         "correlation peak : lag {} samples, normalized corr {:.3}",
-        loc.lag_samples, loc.peak_corr
+        r.lag_samples, r.peak_corr
     );
     Ok(())
+}
+
+/// Result of the water-hammer transient scenario.
+#[derive(Debug, Clone)]
+pub struct SurgeRun {
+    pub delta_pressure: f64,
+    pub head_m: f64,
+    pub korteweg_speed: f64,
+    pub free_fluid_speed: f64,
+}
+
+/// WATER-SURGE: water-hammer pressure surge (Joukowsky) and wave speed (Korteweg).
+#[allow(clippy::too_many_arguments)]
+pub fn water_surge_run(
+    rho: f64,
+    wave_speed: f64,
+    delta_v: f64,
+    bulk: f64,
+    e_pipe: f64,
+    diameter: f64,
+    wall: f64,
+) -> Result<SurgeRun, String> {
+    let dp = joukowsky_surge(rho, wave_speed, delta_v);
+    Ok(SurgeRun {
+        delta_pressure: dp,
+        head_m: dp / (rho * 9.806_65),
+        korteweg_speed: korteweg_wave_speed(bulk, rho, e_pipe, diameter, wall),
+        free_fluid_speed: (bulk / rho).sqrt(),
+    })
 }
 
 /// WATER-SURGE: water-hammer pressure surge (Joukowsky) and wave speed (Korteweg).
@@ -316,19 +490,17 @@ pub fn water_surge(
     wall: f64,
 ) -> Result<(), String> {
     println!("=== Water — water-hammer transient ===\n");
-    let dp = joukowsky_surge(rho, wave_speed, delta_v);
-    let head = dp / (rho * 9.806_65);
-    let c_k = korteweg_wave_speed(bulk, rho, e_pipe, diameter, wall);
-    let c_free = (bulk / rho).sqrt();
+    let r = water_surge_run(rho, wave_speed, delta_v, bulk, e_pipe, diameter, wall)?;
     println!("fluid density    : {rho} kg/m³");
     println!("velocity change  : {delta_v} m/s");
     println!(
         "Joukowsky surge  : {:.3} MPa  (Δp = ρ·c·Δv at c = {wave_speed} m/s)",
-        dp / 1e6
+        r.delta_pressure / 1e6
     );
-    println!("  as head        : {head:.1} m of water column");
+    println!("  as head        : {:.1} m of water column", r.head_m);
     println!(
-        "Korteweg speed   : {c_k:.0} m/s  (free-fluid {c_free:.0} m/s; the elastic wall lowers it)"
+        "Korteweg speed   : {:.0} m/s  (free-fluid {:.0} m/s; the elastic wall lowers it)",
+        r.korteweg_speed, r.free_fluid_speed
     );
     println!("  pipe: K={bulk:.2e} Pa, E={e_pipe:.2e} Pa, D={diameter} m, wall={wall} m");
     Ok(())
@@ -336,10 +508,21 @@ pub fn water_surge(
 
 // --- OT cybersecurity --------------------------------------------------------
 
+/// Result of the firmware-attestation scenario.
+#[derive(Debug, Clone)]
+pub struct FirmwareRun {
+    pub clean: Attestation,
+    pub tampered: Attestation,
+    pub flipped_byte: usize,
+}
+
 /// OT-FIRMWARE: capture a firmware baseline, then attest a clean and a tampered
 /// image against it.
-pub fn ot_firmware(size: usize, block: usize, tamper_block: usize) -> Result<(), String> {
-    println!("=== OT security — firmware attestation ===\n");
+pub fn ot_firmware_run(
+    size: usize,
+    block: usize,
+    tamper_block: usize,
+) -> Result<FirmwareRun, String> {
     if size == 0 || block == 0
     {
         return Err("size and block must be > 0".into());
@@ -348,21 +531,35 @@ pub fn ot_firmware(size: usize, block: usize, tamper_block: usize) -> Result<(),
     let fw: Vec<u8> = (0..size).map(|_| (unif(&mut seed) * 256.0) as u8).collect();
     let base = FirmwareBaseline::capture(&fw, block);
 
-    println!("firmware         : {size} bytes, block size {block}");
-    println!("baseline chain   : {:#018x}", base.chain_digest());
-    match base.attest(&fw)
-    {
-        Attestation::Intact => println!("clean image      : INTACT ✓"),
-        other => println!("clean image      : unexpected {other:?}"),
-    }
+    let clean = base.attest(&fw);
 
     let mut bad = fw;
     let idx = (tamper_block * block).min(size - 1);
     bad[idx] ^= 0xFF; // flip one byte
-    match base.attest(&bad)
+    let tampered = base.attest(&bad);
+    Ok(FirmwareRun {
+        clean,
+        tampered,
+        flipped_byte: idx,
+    })
+}
+
+/// OT-FIRMWARE: capture a firmware baseline, then attest a clean and a tampered
+/// image against it.
+pub fn ot_firmware(size: usize, block: usize, tamper_block: usize) -> Result<(), String> {
+    println!("=== OT security — firmware attestation ===\n");
+    let r = ot_firmware_run(size, block, tamper_block)?;
+    println!("firmware         : {size} bytes, block size {block}");
+    match r.clean
+    {
+        Attestation::Intact => println!("clean image      : INTACT ✓"),
+        other => println!("clean image      : unexpected {other:?}"),
+    }
+    match r.tampered
     {
         Attestation::Tampered { first_bad_block } => println!(
-            "tampered image   : TAMPERED — first altered block #{first_bad_block} (byte {idx} flipped)"
+            "tampered image   : TAMPERED — first altered block #{first_bad_block} (byte {} flipped)",
+            r.flipped_byte
         ),
         Attestation::SizeMismatch { expected, actual } =>
         {
@@ -374,34 +571,60 @@ pub fn ot_firmware(size: usize, block: usize, tamper_block: usize) -> Result<(),
     Ok(())
 }
 
+fn plc_golden() -> Vec<PlcRung> {
+    vec![
+        PlcRung::new(vec![0x01, 0x02, 0x03], Some(10)),
+        PlcRung::new(vec![0x11, 0x12], Some(11)),
+        PlcRung::new(vec![0x21, 0x22, 0x23], None),
+    ]
+}
+
+/// Result of the PLC ladder-integrity scenario.
+#[derive(Debug, Clone)]
+pub struct PlcRun {
+    pub golden_verdict: PlcVerdict,
+    pub tampered_verdict: PlcVerdict,
+    pub unauthorized_writes: Vec<u16>,
+}
+
+/// OT-PLC: verify PLC ladder integrity and flag unauthorized writes to a
+/// safety-critical output (the Stuxnet pattern).
+pub fn ot_plc_run() -> PlcRun {
+    let base = PlcBaseline::capture(&plc_golden());
+    let golden_verdict = base.verify(&plc_golden());
+
+    // Attacker appends a rung that drives a safety-critical output (#99).
+    let mut tampered = plc_golden();
+    tampered.push(PlcRung::new(vec![0xDE, 0xAD, 0xBE, 0xEF], Some(99)));
+    let tampered_verdict = base.verify(&tampered);
+
+    let critical: BTreeSet<u16> = [99u16].into_iter().collect();
+    let unauthorized_writes = base.unauthorized_critical_writes(&tampered, &critical);
+    PlcRun {
+        golden_verdict,
+        tampered_verdict,
+        unauthorized_writes,
+    }
+}
+
 /// OT-PLC: verify PLC ladder integrity and flag unauthorized writes to a
 /// safety-critical output (the Stuxnet pattern).
 pub fn ot_plc() -> Result<(), String> {
     println!("=== OT security — PLC ladder integrity ===\n");
-    fn golden() -> Vec<PlcRung> {
-        vec![
-            PlcRung::new(vec![0x01, 0x02, 0x03], Some(10)),
-            PlcRung::new(vec![0x11, 0x12], Some(11)),
-            PlcRung::new(vec![0x21, 0x22, 0x23], None),
-        ]
-    }
-    let base = PlcBaseline::capture(&golden());
+    let base = PlcBaseline::capture(&plc_golden());
     println!(
         "golden program   : {} rungs, chain {:#018x}",
-        golden().len(),
+        plc_golden().len(),
         base.chain_digest()
     );
+    let r = ot_plc_run();
 
-    match base.verify(&golden())
+    match r.golden_verdict
     {
         PlcVerdict::Intact => println!("re-verify golden : INTACT ✓"),
         other => println!("re-verify golden : unexpected {other:?}"),
     }
-
-    // Attacker appends a rung that drives a safety-critical output (#99).
-    let mut tampered = golden();
-    tampered.push(PlcRung::new(vec![0xDE, 0xAD, 0xBE, 0xEF], Some(99)));
-    match base.verify(&tampered)
+    match r.tampered_verdict
     {
         PlcVerdict::RungCountChanged { expected, actual } =>
         {
@@ -412,10 +635,12 @@ pub fn ot_plc() -> Result<(), String> {
     }
 
     let critical: BTreeSet<u16> = [99u16].into_iter().collect();
-    let writes = base.unauthorized_critical_writes(&tampered, &critical);
     println!("critical outputs : {critical:?}");
-    println!("unauthorized writes to safety-critical outputs: {writes:?}");
-    if !writes.is_empty()
+    println!(
+        "unauthorized writes to safety-critical outputs: {:?}",
+        r.unauthorized_writes
+    );
+    if !r.unauthorized_writes.is_empty()
     {
         println!("\n⚠ Stuxnet-style write to a critical output the golden logic never drives.");
     }
@@ -424,11 +649,24 @@ pub fn ot_plc() -> Result<(), String> {
 
 // --- pharma / GMP ------------------------------------------------------------
 
+/// Result of the golden-batch comparator scenario.
+#[derive(Debug, Clone)]
+pub struct BatchRun {
+    pub reference_steps: usize,
+    pub candidate_steps: usize,
+    pub conforming: bool,
+    pub worst_ratio: f64,
+    pub worst_variable: usize,
+    pub worst_step: usize,
+    pub dtw_distance: f64,
+    pub audit_entries: usize,
+    pub audit_chain_valid: bool,
+}
+
 /// GOLDEN-BATCH: DTW-align a candidate batch to the golden reference, check the
 /// per-variable tolerance, and write the RELEASE/REJECT verdict to a hash-chained
 /// 21 CFR Part 11 audit log.
-pub fn golden_batch(lag: usize) -> Result<(), String> {
-    println!("=== GMP — golden-batch comparator (21 CFR Part 11) ===\n");
+pub fn golden_batch_run(lag: usize) -> Result<BatchRun, String> {
     // Golden temperature trajectory: ramp 20→37 °C then hold.
     let mut reference: Vec<Vec<f64>> = Vec::new();
     for k in 0..40
@@ -458,32 +696,193 @@ pub fn golden_batch(lag: usize) -> Result<(), String> {
     let mut log = AuditLog::new(64);
     gb.record_audit(&mut log, "BATCH-2026-001", &report, 1_750_000_000.0);
 
+    Ok(BatchRun {
+        reference_steps: reference.len(),
+        candidate_steps: candidate.len(),
+        conforming: report.conforming,
+        worst_ratio: report.worst_ratio,
+        worst_variable: report.worst_variable,
+        worst_step: report.worst_step,
+        dtw_distance: report.dtw_distance,
+        audit_entries: log.len(),
+        audit_chain_valid: log.verify_chain(),
+    })
+}
+
+/// GOLDEN-BATCH: DTW-align a candidate batch to the golden reference, check the
+/// per-variable tolerance, and write the RELEASE/REJECT verdict to a hash-chained
+/// 21 CFR Part 11 audit log.
+pub fn golden_batch(lag: usize) -> Result<(), String> {
+    println!("=== GMP — golden-batch comparator (21 CFR Part 11) ===\n");
+    let r = golden_batch_run(lag)?;
     println!(
         "golden steps     : {}, candidate steps: {} (lag {lag})",
-        reference.len(),
-        candidate.len()
+        r.reference_steps, r.candidate_steps
     );
-    println!("conforming       : {}", report.conforming);
+    println!("conforming       : {}", r.conforming);
     println!(
         "worst deviation  : {:.3}× tolerance on variable {} at step {}",
-        report.worst_ratio, report.worst_variable, report.worst_step
+        r.worst_ratio, r.worst_variable, r.worst_step
     );
-    println!("DTW distance     : {:.4}", report.dtw_distance);
+    println!("DTW distance     : {:.4}", r.dtw_distance);
     println!(
         "audit log        : {} entry(ies), chain intact: {}",
-        log.len(),
-        log.verify_chain()
+        r.audit_entries, r.audit_chain_valid
     );
     println!(
         "decision         : {}",
-        if report.conforming
-        {
-            "RELEASE"
-        }
-        else
-        {
-            "REJECT"
-        }
+        if r.conforming { "RELEASE" } else { "REJECT" }
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nav_tdoa_recovers_the_source() {
+        let r = nav_tdoa_run(1480.0).unwrap();
+        // Noise-free arrivals → Gauss–Newton should recover the source to mm.
+        assert!(r.converged, "TDOA did not converge");
+        assert!(r.error < 1e-3, "localization error too large: {}", r.error);
+        assert!(
+            r.residual_rms < 1e-6,
+            "residual RMS too large: {}",
+            r.residual_rms
+        );
+    }
+
+    #[test]
+    fn nav_fusion_uncertainty_recovers_after_outage() {
+        let r = nav_fusion_run(40, 8).unwrap();
+        // Covariance is pulled back below its outage-end value once fixes resume.
+        assert!(
+            r.uncertainty_final < r.uncertainty_at_outage_end,
+            "uncertainty did not recover: end={} final={}",
+            r.uncertainty_at_outage_end,
+            r.uncertainty_final
+        );
+        // The fused track stays near truth despite the dead-reckoned gap.
+        assert!(r.error < 5.0, "fusion error too large: {}", r.error);
+    }
+
+    #[test]
+    fn track_imm_swings_onto_the_maneuver_model() {
+        let r = track_imm_run(40).unwrap();
+        // Quiet model dominates before the reversal; maneuver model spikes at it.
+        assert!(
+            r.mu_quiet_before > 0.5,
+            "quiet model not dominant pre-maneuver"
+        );
+        assert!(
+            r.peak_maneuver > 0.5,
+            "maneuver model never took over: peak={}",
+            r.peak_maneuver
+        );
+        // The spike happens at/after the reversal, not before.
+        assert!(r.peak_step >= r.maneuver_at.saturating_sub(1));
+    }
+
+    #[test]
+    fn track_ud_matches_kalman_and_stays_psd() {
+        let r = track_ud_run(60).unwrap();
+        // UD square-root form is algebraically the Kalman filter → states agree.
+        assert!(
+            r.max_state_diff < 1e-6,
+            "UD and Kalman states diverged: {}",
+            r.max_state_diff
+        );
+        // Variances stay non-negative by construction (P = U·D·Uᵀ).
+        assert!(
+            r.min_variance >= 0.0,
+            "negative variance: {}",
+            r.min_variance
+        );
+    }
+
+    #[test]
+    fn water_leak_is_located_near_truth() {
+        let r = water_leak_run(100.0, 1200.0, 8000.0, 30.0).unwrap();
+        // Cross-correlation lag resolves the leak to within sample quantization.
+        assert!(r.error < 2.0, "leak location error too large: {}", r.error);
+        assert!(
+            r.peak_corr > 0.5,
+            "correlation peak too weak: {}",
+            r.peak_corr
+        );
+    }
+
+    #[test]
+    fn water_surge_obeys_joukowsky_and_korteweg() {
+        let (rho, c, dv) = (1000.0, 1200.0, 2.0);
+        let r = water_surge_run(rho, c, dv, 2.2e9, 2.0e11, 0.5, 0.01).unwrap();
+        // Joukowsky is exactly Δp = ρ·c·Δv.
+        assert!((r.delta_pressure - rho * c * dv).abs() < 1e-6);
+        // The elastic wall lowers the wave speed below the free-fluid value.
+        assert!(
+            r.korteweg_speed < r.free_fluid_speed,
+            "Korteweg speed {} not below free-fluid {}",
+            r.korteweg_speed,
+            r.free_fluid_speed
+        );
+    }
+
+    #[test]
+    fn ot_firmware_passes_clean_and_catches_tamper() {
+        let r = ot_firmware_run(4096, 256, 5).unwrap();
+        assert!(
+            matches!(r.clean, Attestation::Intact),
+            "clean image flagged"
+        );
+        match r.tampered
+        {
+            Attestation::Tampered { first_bad_block } =>
+            {
+                // The flipped byte sits in block tamper_block (5).
+                assert_eq!(first_bad_block, 5, "wrong block reported tampered");
+            },
+            other => panic!("tamper not detected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ot_plc_detects_unauthorized_critical_write() {
+        let r = ot_plc_run();
+        assert!(
+            matches!(r.golden_verdict, PlcVerdict::Intact),
+            "golden not intact"
+        );
+        // Appending a rung changes the rung count, which the baseline catches.
+        assert!(
+            matches!(r.tampered_verdict, PlcVerdict::RungCountChanged { .. }),
+            "tamper not detected: {:?}",
+            r.tampered_verdict
+        );
+        // The appended rung drives critical output #99 — flagged as unauthorized.
+        assert_eq!(r.unauthorized_writes, vec![99]);
+    }
+
+    #[test]
+    fn golden_batch_releases_a_lagged_but_conforming_run() {
+        let r = golden_batch_run(5).unwrap();
+        // DTW absorbs the pure phase lag → the batch conforms and is RELEASEd.
+        assert!(r.conforming, "lagged-but-identical batch wrongly rejected");
+        assert!(
+            r.worst_ratio <= 1.0,
+            "worst ratio exceeds tolerance: {}",
+            r.worst_ratio
+        );
+        // The 21 CFR Part 11 audit log holds exactly one hash-chained entry.
+        assert_eq!(r.audit_entries, 1);
+        assert!(r.audit_chain_valid, "audit chain broken");
+    }
+
+    #[test]
+    fn invalid_inputs_are_rejected() {
+        assert!(water_leak_run(100.0, 1200.0, 8000.0, 150.0).is_err());
+        assert!(ot_firmware_run(0, 256, 1).is_err());
+        assert!(track_imm_run(2).is_err());
+        assert!(nav_fusion_run(0, 0).is_err());
+    }
 }
