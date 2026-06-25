@@ -183,4 +183,92 @@ mod tests {
         let sensors = [[0.0, 0.0], [1.0, 0.0]];
         assert!(tdoa_locate_2d(&sensors, &[0.0, 0.1], 1.0, None, 10).is_none());
     }
+
+    #[test]
+    fn hand_derived_geometry_recovers_the_exact_source() {
+        // Pythagorean geometry solvable on paper. Sensors S0=(0,0), S1=(4,0),
+        // S2=(0,3); source P=(8,6). Distances are
+        //   d0 = √(8²+6²) = √100        = 10
+        //   d1 = √(4²+6²) = √52         = 2√13
+        //   d2 = √(8²+3²) = √73
+        // so the true range differences (speed = 1) are d1−d0 and d2−d0. Starting
+        // from the *centroid* (1⅓, 1) — no help given — Gauss–Newton must still
+        // walk to (8, 6). Independently derived: the recovered point equals the
+        // source and the residuals vanish.
+        let sensors = [[0.0, 0.0], [4.0, 0.0], [0.0, 3.0]];
+        let speed = 1.0;
+        let arrival = [10.0, 52.0_f64.sqrt(), 73.0_f64.sqrt()];
+        let sol = tdoa_locate_2d(&sensors, &arrival, speed, None, 200).unwrap();
+        assert!(sol.converged, "expected convergence");
+        // Must take more than one Newton step from the far centroid seed (guards
+        // against a solver that reports success without actually iterating).
+        assert!(sol.iterations > 1, "iters {}", sol.iterations);
+        assert!((sol.position[0] - 8.0).abs() < 1e-9, "x {:?}", sol.position);
+        assert!((sol.position[1] - 6.0).abs() < 1e-9, "y {:?}", sol.position);
+        assert!(sol.residual_rms < 1e-9, "rms {}", sol.residual_rms);
+    }
+
+    #[test]
+    fn negative_range_difference_when_source_hugs_a_later_sensor() {
+        // Source sits next to sensor 1, far from the reference sensor 0, so the
+        // measured range difference d1−d0 is strongly *negative*. A sign slip in
+        // the residual would diverge or land on the mirror point. By hand:
+        //   S0=(0,0) S1=(10,0) S2=(5,9), P=(9,1)
+        //   d0=√82≈9.0554, d1=√2≈1.4142 ⇒ meas1=d1−d0≈−7.6412 (< 0).
+        let sensors = [[0.0, 0.0], [10.0, 0.0], [5.0, 9.0]];
+        let src = [9.0, 1.0];
+        let speed = 1.0;
+        let arrival = arrivals(&sensors, src, speed, 0.0);
+        assert!(
+            speed * (arrival[1] - arrival[0]) < -7.0,
+            "this case must exercise a negative range difference"
+        );
+        let sol = tdoa_locate_2d(&sensors, &arrival, speed, None, 200).unwrap();
+        assert!((sol.position[0] - 9.0).abs() < 1e-8, "x {:?}", sol.position);
+        assert!((sol.position[1] - 1.0).abs() < 1e-8, "y {:?}", sol.position);
+    }
+
+    #[test]
+    fn collinear_sensors_are_rejected_as_a_degenerate_geometry() {
+        // Three sensors on one line span only a single direction, so the
+        // Jacobian rows are parallel and JᵀJ is singular — the problem is
+        // unobservable in the cross-line coordinate. The solve must bail with
+        // `None` (and must NOT panic on the singular normal matrix).
+        let sensors = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
+        let src = [1.0, 5.0];
+        let arrival = arrivals(&sensors, src, 1.0, 0.0);
+        assert!(tdoa_locate_2d(&sensors, &arrival, 1.0, None, 50).is_none());
+    }
+
+    #[test]
+    fn residual_rms_reports_the_geometric_misfit_of_inconsistent_data() {
+        // Feed self-consistent arrivals for source (6,4) on the unit-10 square,
+        // then corrupt sensor 2's timestamp by +1 ms. No location can satisfy all
+        // four hyperbolae, so the best fit carries a residual. The misfit RMS is a
+        // property of the geometry and the corruption — derived with an
+        // independent reference solver it is 0.50470203096… m; assert that value
+        // and that the converged estimate is pulled toward the corrupted sensor.
+        let sensors = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let src = [6.0, 4.0];
+        let speed = 1500.0;
+        let mut arrival = arrivals(&sensors, src, speed, 0.0);
+        arrival[2] += 1e-3;
+        let sol = tdoa_locate_2d(&sensors, &arrival, speed, None, 100).unwrap();
+        assert!(
+            (sol.residual_rms - 0.504_702_030_967).abs() < 1e-9,
+            "rms {}",
+            sol.residual_rms
+        );
+        // The estimate moves off the clean source toward the perturbed sensor 2.
+        assert!(
+            (sol.position[0] - 5.720_443).abs() < 1e-5,
+            "x {:?}",
+            sol.position
+        );
+        assert!(
+            (sol.position[1] - 3.570_680).abs() < 1e-5,
+            "y {:?}",
+            sol.position
+        );
+    }
 }

@@ -1,7 +1,9 @@
 //! Neural Architecture Search (NAS) for SciRust.
 //!
-//! Implements evolutionary architecture search over layer configurations,
-//! using NSGA-II for multi-objective optimization (accuracy vs FLOPs vs params).
+//! Evolutionary architecture search over layer configurations. The objective is
+//! a single scalarized fitness — a weighted sum of a zero-cost shape proxy and
+//! (negative) parameter/FLOP penalties (see [`NasSearch::evaluate`]) — optimized
+//! by truncation selection plus mutation.
 //!
 //! # Search Space
 //!
@@ -236,17 +238,18 @@ impl NasSearch {
         }
     }
 
-    /// Evaluate an architecture (simulated — returns estimated fitness).
+    /// Evaluate an architecture with a zero-cost proxy objective: reward a
+    /// moderate shape — about 4 layers and ~0.5M parameters (two Gaussian bumps
+    /// in `[0, 1]`) — then apply the configured (negative) linear penalties on
+    /// parameter count and FLOPs.
     pub fn evaluate(&self, arch: &Architecture) -> f64 {
-        // Simulated objective: prefer smaller models with reasonable capacity
         let capacity = arch.layers.len() as f64;
         let complexity = arch.params_m;
 
-        // Reward moderate complexity, penalize extreme values
-        let capacity_score = (-(capacity - 4.0).powi(2) / 8.0).exp();
-        let _complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp();
+        let capacity_score = (-(capacity - 4.0).powi(2) / 8.0).exp(); // peak at 4 layers
+        let complexity_score = (-(complexity - 0.5).powi(2) / 0.5).exp(); // peak at 0.5M params
 
-        self.config.accuracy_weight * capacity_score * 0.85
+        self.config.accuracy_weight * capacity_score * complexity_score
             + self.config.params_weight * complexity
             + self.config.flops_weight * (arch.flops / 1e9)
     }
@@ -372,5 +375,54 @@ mod tests {
         assert!(!population.is_empty());
         // Best fitness should be non-trivial
         assert!(population[0].fitness > 0.0);
+    }
+
+    fn arch(n_layers: usize, params_m: f64, flops: f64) -> Architecture {
+        Architecture {
+            layers: (0..n_layers)
+                .map(|_| LayerSpec::Linear {
+                    out_features: 128,
+                    activation: ActivationChoice::ReLU,
+                })
+                .collect(),
+            fitness: 0.0,
+            params_m,
+            flops,
+            accuracy: None,
+        }
+    }
+
+    #[test]
+    fn evaluate_rewards_moderate_shape_over_bloated() {
+        let search = NasSearch::new(NasConfig::default());
+        // ~4 layers and ~0.5M params sits at both Gaussian peaks; the deep, huge
+        // model is far from both and carries large linear penalties.
+        let moderate = arch(4, 0.5, 1.0e8);
+        let bloated = arch(8, 8.0, 5.0e9);
+        let sm = search.evaluate(&moderate);
+        let sb = search.evaluate(&bloated);
+        assert!(sm > sb, "moderate {sm} should beat bloated {sb}");
+        // The moderate-shape reward term alone is ~accuracy_weight (both bumps ≈1).
+        assert!(
+            sm > 0.9,
+            "moderate score {sm} should be near the reward peak"
+        );
+    }
+
+    #[test]
+    fn evolution_is_deterministic_and_sorted_best_first() {
+        let cfg = || NasConfig {
+            max_models: 40,
+            ..NasConfig::default()
+        };
+        let pa = NasSearch::new(cfg()).evolve(4, 8).unwrap();
+        let pb = NasSearch::new(cfg()).evolve(4, 8).unwrap();
+        // Same seed + config → identical search (deterministic).
+        assert_eq!(pa[0].fitness, pb[0].fitness);
+        // Population is returned sorted best-first.
+        for w in pa.windows(2)
+        {
+            assert!(w[0].fitness >= w[1].fitness, "population not sorted desc");
+        }
     }
 }

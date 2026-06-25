@@ -106,4 +106,66 @@ mod tests {
         let before = rls.capacity_as();
         assert_eq!(rls.update(0.0, 123.0), before);
     }
+
+    #[test]
+    fn single_segment_with_huge_p_recovers_charge_over_dsoc() {
+        // RLS gain with P→∞ is k = 1/x, so one update sets q̂ = y/x exactly:
+        // here y = 1944 As over ΔSoC = 0.3 ⇒ q̂ = 6480 As. p0 = 1e12 makes the
+        // λ term negligible, so the result is exact to ~7 significant figures.
+        let mut rls = RlsCapacity::new(7200.0, 1.0, 1e12);
+        let q = rls.update(0.3, 6480.0 * 0.3);
+        assert!((q - 6480.0).abs() < 1e-3, "q̂ = {q}, want 6480");
+        assert!((rls.capacity_as() - 6480.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn noiseless_segments_converge_to_true_capacity() {
+        // Every segment is the exact relation charge = Q·ΔSoC, so the estimate
+        // must converge to Q regardless of the (wrong) starting guess. With a
+        // large p0 the initial-guess prior (weight 1/p0) is negligible against
+        // the accumulated regressor energy Σx², so the fit reaches Q tightly.
+        let q_true = 1.7 * 3600.0; // 6120 As
+        let mut rls = RlsCapacity::new(2.4 * 3600.0, 1.0, 1e12);
+        let dsocs = [0.20, 0.35, 0.15, 0.40, 0.25, 0.30, 0.18, 0.42];
+        for &d in dsocs.iter().cycle().take(40)
+        {
+            rls.update(d, q_true * d);
+        }
+        assert!(
+            (rls.capacity_as() - q_true).abs() < 1e-3,
+            "got {}",
+            rls.capacity_as()
+        );
+        assert!((rls.soh(2.4 * 3600.0) - 1.7 / 2.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn soh_is_ratio_and_is_clamped() {
+        // SoH = capacity / nominal, clamped to [0, 1.5].
+        let nominal = 2.0 * 3600.0; // 7200 As
+        let rls = RlsCapacity::new(0.9 * nominal, 1.0, 1.0); // 90 %
+        assert!((rls.soh(nominal) - 0.9).abs() < 1e-12);
+
+        // 300 % capacity saturates at the 1.5 ceiling.
+        let over = RlsCapacity::new(3.0 * nominal, 1.0, 1.0);
+        assert_eq!(over.soh(nominal), 1.5);
+
+        // Invalid nominal ⇒ defined as 0 SoH (no divide-by-zero / sign flip).
+        assert_eq!(rls.soh(0.0), 0.0);
+        assert_eq!(rls.soh(-7200.0), 0.0);
+    }
+
+    #[test]
+    fn negligible_dsoc_leaves_state_untouched() {
+        // Below the 1e-9 guard the update is a no-op for BOTH q̂ and the internal
+        // covariance, so a subsequent real segment behaves identically to one on
+        // a fresh estimator.
+        let mk = || RlsCapacity::new(7200.0, 0.98, 5.0);
+        let mut touched = mk();
+        touched.update(1e-12, 999.0); // ignored
+        touched.update(1e-10, -42.0); // ignored
+        let mut fresh = mk();
+        let real = (0.3, 6480.0 * 0.3);
+        assert_eq!(touched.update(real.0, real.1), fresh.update(real.0, real.1));
+    }
 }

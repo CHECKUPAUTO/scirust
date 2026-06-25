@@ -5,9 +5,12 @@
 //! bit-for-bit, so this doubles as a **model checkpoint** format (save/load).
 //!
 //! The current implementation produces an ONNX-compatible JSON graph (the
-//! human-readable intermediate representation); a protobuf encoder and a
-//! faithful per-layer graph export (vs. the current representative template)
-//! are future extensions. See [`import_onnx_json`] / [`OnnxGraph::weights`].
+//! human-readable intermediate representation). The graph has one `Gemm`
+//! (weight + bias) per parameter pair with a `Relu` between layers, so it tracks
+//! the model's actual layer count and every node references an initializer that
+//! exists. It assumes a feed-forward `Gemm`/`Relu` topology; a protobuf encoder
+//! and faithful export of arbitrary per-layer ops are future extensions. See
+//! [`import_onnx_json`] / [`OnnxGraph::weights`].
 //!
 //! # Example
 //!
@@ -118,7 +121,6 @@ pub fn export_sequential_to_onnx_json(
     let param_indices = model.parameter_indices();
     let mut initializers = Vec::new();
     let mut nodes = Vec::new();
-    let mut node_id = 0usize;
 
     // Collect weights as initializers
     for (i, idx) in param_indices.iter().enumerate()
@@ -163,17 +165,14 @@ pub fn export_sequential_to_onnx_json(
         },
     };
 
-    // Build a simplified graph: MatMul -> Add -> ReLU -> MatMul -> Add
-    // This is representative of a 2-layer MLP.
-    // In a full implementation, each Module trait would export its ONNX node.
-
-    // Layer 1: Gemm (MatMul + Add with bias)
-    let out_dim_hidden: u64 = 256;
-    nodes.push(OnnxNode {
-        op_type: "Gemm".into(),
-        inputs: vec!["input".into(), "param_0".into(), "param_1".into()],
-        outputs: vec![format!("hidden_{}", node_id)],
-        attributes: vec![
+    // Build the computation graph from the ACTUAL parameter list: one Gemm
+    // (weight + bias) per layer with a ReLU between consecutive layers, so every
+    // node input references an initializer that exists. A trailing unpaired
+    // weight (a bias-less final layer) becomes a plain MatMul. This replaces the
+    // former hard-coded 2-layer template, which emitted dangling references to
+    // param_2/param_3 for any model that did not have exactly four parameters.
+    fn gemm_attrs() -> Vec<OnnxAttribute> {
+        vec![
             OnnxAttribute {
                 name: "alpha".into(),
                 value: OnnxAttrValue::Float { f: 1.0 },
@@ -186,46 +185,66 @@ pub fn export_sequential_to_onnx_json(
                 name: "transB".into(),
                 value: OnnxAttrValue::Int { i: 0 },
             },
-        ],
-        name: Some(format!("fc{}", node_id)),
-    });
-    node_id += 1;
+        ]
+    }
 
-    // ReLU
-    nodes.push(OnnxNode {
-        op_type: "Relu".into(),
-        inputs: vec![format!("hidden_{}", node_id - 1)],
-        outputs: vec![format!("hidden_{}", node_id)],
-        attributes: vec![],
-        name: Some(format!("relu{}", node_id)),
-    });
-    node_id += 1;
+    let n_params = param_indices.len();
+    let n_layers = n_params.div_ceil(2); // (weight, bias) pairs; a lone trailing weight is its own layer
+    let mut prev = "input".to_string();
+    for layer in 0..n_layers
+    {
+        let w_i = 2 * layer;
+        let has_bias = w_i + 1 < n_params;
+        let is_last = layer + 1 == n_layers;
+        let out_name = if is_last
+        {
+            "output".to_string()
+        }
+        else
+        {
+            format!("hidden_{}", layer)
+        };
+        let mut inputs = vec![prev.clone(), format!("param_{}", w_i)];
+        let (op_type, attributes) = if has_bias
+        {
+            inputs.push(format!("param_{}", w_i + 1));
+            ("Gemm".to_string(), gemm_attrs())
+        }
+        else
+        {
+            ("MatMul".to_string(), Vec::new())
+        };
+        nodes.push(OnnxNode {
+            op_type,
+            inputs,
+            outputs: vec![out_name.clone()],
+            attributes,
+            name: Some(format!("fc{}", layer)),
+        });
+        if is_last
+        {
+            prev = out_name;
+        }
+        else
+        {
+            let relu_out = format!("act_{}", layer);
+            nodes.push(OnnxNode {
+                op_type: "Relu".into(),
+                inputs: vec![out_name],
+                outputs: vec![relu_out.clone()],
+                attributes: Vec::new(),
+                name: Some(format!("relu{}", layer)),
+            });
+            prev = relu_out;
+        }
+    }
+    let _ = prev; // graph output is always named "output" by construction
 
-    // Layer 2: Gemm
-    nodes.push(OnnxNode {
-        op_type: "Gemm".into(),
-        inputs: vec![
-            format!("hidden_{}", node_id - 1),
-            "param_2".into(),
-            "param_3".into(),
-        ],
-        outputs: vec!["output".into()],
-        attributes: vec![
-            OnnxAttribute {
-                name: "alpha".into(),
-                value: OnnxAttrValue::Float { f: 1.0 },
-            },
-            OnnxAttribute {
-                name: "beta".into(),
-                value: OnnxAttrValue::Float { f: 1.0 },
-            },
-            OnnxAttribute {
-                name: "transB".into(),
-                value: OnnxAttrValue::Int { i: 0 },
-            },
-        ],
-        name: Some(format!("fc{}", node_id)),
-    });
+    // Output feature dimension = trailing dimension of the last initializer.
+    let out_dim: u64 = initializers
+        .last()
+        .and_then(|t| t.dims.last().copied())
+        .unwrap_or(0);
 
     let graph_output = OnnxValueInfo {
         name: "output".into(),
@@ -237,7 +256,7 @@ pub fn export_sequential_to_onnx_json(
                     dim_param: Some("batch_size".into()),
                 },
                 OnnxDim {
-                    dim_value: Some(out_dim_hidden),
+                    dim_value: Some(out_dim),
                     dim_param: None,
                 },
             ],
@@ -268,8 +287,9 @@ pub fn export_sequential_to_onnx_json(
 ///
 /// The model **weights** (the graph initializers) survive an export→import
 /// round-trip bit-for-bit — which is what model checkpointing (save/load)
-/// needs. Note that the exported *graph structure* is still a representative
-/// MLP template rather than a faithful per-layer export, so reconstructing an
+/// needs. The exported graph reflects the model's layer count (one `Gemm`/`Relu`
+/// per parameter pair) and is self-consistent — every node input resolves to an
+/// initializer — but it assumes a feed-forward topology, so reconstructing an
 /// arbitrary computation graph from the import is future work; today the import
 /// is a faithful **weight** loader.
 pub fn import_onnx_json(json: &str) -> Result<OnnxGraph, Box<dyn std::error::Error>> {
@@ -422,5 +442,61 @@ mod tests {
             weights[0].2.iter().any(|&v| v != 0.0),
             "weights should be non-zero"
         );
+    }
+
+    #[test]
+    fn exported_graph_matches_param_count_with_no_dangling_refs() {
+        use scirust_core::autodiff::reverse::{Tape, Tensor};
+        use scirust_core::nn::init::{KaimingNormal, Zeros};
+        use scirust_core::nn::rng::PcgEngine;
+        use scirust_core::nn::{Linear, Module};
+
+        let tape = Tape::new();
+        let mut rng = PcgEngine::new(11);
+        let mut lin = Linear::new(4, 3, &KaimingNormal, &Zeros, &mut rng);
+        let x = tape.input(Tensor::from_vec(vec![0.1, 0.2, 0.3, 0.4], 1, 4));
+        let _ = lin.forward(&tape, x);
+
+        let json = export_sequential_to_onnx_json(&tape, &lin, "lin", (-1, 4)).unwrap();
+        let g = import_onnx_json(&json).unwrap();
+
+        // A single Linear (2 params) → exactly one Gemm, no ReLU. The old
+        // hard-coded 2-layer template wrongly emitted two Gemms here.
+        let gemms = g.graph.nodes.iter().filter(|n| n.op_type == "Gemm").count();
+        let relus = g.graph.nodes.iter().filter(|n| n.op_type == "Relu").count();
+        assert_eq!(
+            gemms, 1,
+            "single Linear should export one Gemm, got {gemms}"
+        );
+        assert_eq!(relus, 0, "single layer should have no ReLU");
+
+        // Every param_* a node references must exist as an initializer — the old
+        // template emitted dangling param_2/param_3 references for this model.
+        let init_names: std::collections::HashSet<&str> = g
+            .graph
+            .initializers
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        for node in &g.graph.nodes
+        {
+            for inp in &node.inputs
+            {
+                if inp.starts_with("param_")
+                {
+                    assert!(
+                        init_names.contains(inp.as_str()),
+                        "node {:?} references missing initializer {inp}",
+                        node.name
+                    );
+                }
+            }
+        }
+
+        // The graph is connected: the (only) Gemm consumes "input" and produces
+        // "output".
+        let gemm = g.graph.nodes.iter().find(|n| n.op_type == "Gemm").unwrap();
+        assert_eq!(gemm.inputs[0], "input");
+        assert_eq!(gemm.outputs[0], "output");
     }
 }

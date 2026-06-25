@@ -63,6 +63,42 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn nonzero_initial_velocity_obeys_the_full_kinematic_law() {
+        // The earlier test starts from rest, so it never exercises the v₀·dt term.
+        // Here both the initial velocity and the acceleration are nonzero. Closed
+        // form: p(t) = p₀ + v₀·t + ½·a·t², v(t) = v₀ + a·t. With p₀=(1,−2),
+        // v₀=(3,1), a=(0.5,−0.4) at t=4 s:
+        //   pₓ = 1 + 3·4 + ½·0.5·16 = 17       p_y = −2 + 1·4 + ½·(−0.4)·16 = −1.2
+        //   vₓ = 3 + 0.5·4 = 5                 v_y = 1 + (−0.4)·4 = −0.6
+        let p0 = [1.0, -2.0];
+        let v0 = [3.0, 1.0];
+        let a = [0.5, -0.4];
+        let dt = 1e-3;
+        let steps = 4000;
+        let mut ins = Ins2d::new(p0, v0);
+        for _ in 0..steps
+        {
+            ins.propagate(a, dt);
+        }
+        let expect_p = [17.0, -1.2];
+        let expect_v = [5.0, -0.6];
+        for i in 0..2
+        {
+            assert!(
+                (ins.pos[i] - expect_p[i]).abs() < 1e-9,
+                "pos[{i}]={}",
+                ins.pos[i]
+            );
+            assert!(
+                (ins.vel[i] - expect_v[i]).abs() < 1e-9,
+                "vel[{i}]={}",
+                ins.vel[i]
+            );
+        }
+    }
+
+    #[test]
     fn a_constant_bias_drifts_quadratically() {
         // The signature failure mode: a small unmodelled acceleration bias
         // integrates into a position error that grows like t².

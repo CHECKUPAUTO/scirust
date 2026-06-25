@@ -321,19 +321,23 @@ impl Nsga2 {
     where
         F: Fn(&[MoIndividual]) -> Vec<Vec<f64>>,
     {
-        // Evaluate + rank the current population so selection sees valid ranks.
+        let n = self.pop_size;
+        // 1. Evaluate + rank the current parents so crowded-tournament selection
+        //    sees valid ranks and (per-front) crowding distances.
         let objs = objectives_fn(population);
         for (i, obj) in objs.iter().enumerate()
         {
             population[i].objectives = obj.clone();
         }
         self.non_dominated_sort(population);
-        self.crowding_distance(population);
+        self.assign_crowding_per_front(population);
 
-        let mut new_pop = Vec::with_capacity(self.pop_size);
+        // 2. Produce an offspring population Q of size `n` from the parents P
+        //    via crowded tournament selection + single-point crossover + mutation.
+        let mut offspring = Vec::with_capacity(n);
         {
             let mut rng = self.rng.borrow_mut();
-            while new_pop.len() < self.pop_size
+            while offspring.len() < n
             {
                 let p1 = Self::tournament_select(population, &mut rng);
                 let p2 = Self::tournament_select(population, &mut rng);
@@ -352,23 +356,64 @@ impl Nsga2 {
                 };
                 Self::mutate(&mut c1, &mut rng, self.mutation_rate, self.bounds);
                 Self::mutate(&mut c2, &mut rng, self.mutation_rate, self.bounds);
-                new_pop.push(c1);
-                if new_pop.len() < self.pop_size
+                offspring.push(c1);
+                if offspring.len() < n
                 {
-                    new_pop.push(c2);
+                    offspring.push(c2);
                 }
             }
         }
-        // Re-evaluate and rank the produced generation so callers can read the
-        // Pareto front (`rank == 1`) directly from the returned population.
-        let objs = objectives_fn(&new_pop);
+        // 3. Evaluate the offspring objectives.
+        let objs = objectives_fn(&offspring);
         for (i, obj) in objs.iter().enumerate()
         {
-            new_pop[i].objectives = obj.clone();
+            offspring[i].objectives = obj.clone();
         }
-        self.non_dominated_sort(&mut new_pop);
-        self.crowding_distance(&mut new_pop);
-        *population = new_pop;
+
+        // 4. Elitist (μ+λ) survival: combine R = P ∪ Q (size 2n) and rank the
+        //    union. This is what makes NSGA-II elitist — the best non-dominated
+        //    solutions found so far are never lost between generations.
+        let mut combined = std::mem::take(population);
+        combined.append(&mut offspring);
+        self.non_dominated_sort(&mut combined);
+
+        // 5. Fill the next generation one whole front at a time. The front that
+        //    does not fit entirely is truncated by *descending* crowding
+        //    distance (computed within that front) to preserve diversity.
+        let max_rank = combined.iter().map(|ind| ind.rank).max().unwrap_or(0);
+        let mut survivors: Vec<MoIndividual> = Vec::with_capacity(n);
+        let mut rank = 1;
+        while rank <= max_rank && survivors.len() < n
+        {
+            let mut front: Vec<MoIndividual> = combined
+                .iter()
+                .filter(|ind| ind.rank == rank)
+                .cloned()
+                .collect();
+            rank += 1;
+            if front.is_empty()
+            {
+                continue;
+            }
+            self.assign_crowding_per_front(&mut front);
+            if survivors.len() + front.len() <= n
+            {
+                survivors.append(&mut front);
+            }
+            else
+            {
+                front.sort_by(|a, b| {
+                    b.crowding_distance
+                        .partial_cmp(&a.crowding_distance)
+                        .unwrap()
+                });
+                let need = n - survivors.len();
+                survivors.extend(front.into_iter().take(need));
+            }
+        }
+        // `survivors` carry ranks/distances from the combined pool, so callers
+        // can read the current Pareto front directly via `rank == 1`.
+        *population = survivors;
     }
     fn non_dominated_sort(&self, pop: &mut [MoIndividual]) {
         let n = pop.len();
@@ -417,7 +462,12 @@ impl Nsga2 {
             cf = nf;
         }
     }
-    fn crowding_distance(&self, pop: &mut [MoIndividual]) {
+    /// Assign NSGA-II crowding distance to every member of a single Pareto
+    /// front. `pop` must be non-empty and contain individuals of one rank whose
+    /// `objectives` all have the same length; boundary points in each objective
+    /// receive infinite distance, interior points the sum of normalized
+    /// neighbour gaps.
+    fn assign_crowding_per_front(&self, pop: &mut [MoIndividual]) {
         let no = pop[0].objectives.len();
         let n = pop.len();
         for ind in pop.iter_mut()
@@ -508,107 +558,570 @@ pub fn rastrigin(x: &[f64]) -> f64 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn ga_sphere() {
-        let ga = GeneticAlgorithm {
-            pop_size: 50,
-            ..GeneticAlgorithm::default()
-        };
-        let mut pop = ga.init_pop(10);
-        for _ in 0..100
-        {
-            ga.evolve(&mut pop, |inds| {
-                inds.iter().map(|ind| -sphere(&ind.genome)).collect()
-            });
-        }
-        pop.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
-        assert!(pop[0].fitness > -1.0, "GA converge");
+    // ZDT1 objectives: f1 = x0, g = 1 + 9*mean(x_{1..}), f2 = g*(1 - sqrt(f1/g)).
+    // The true Pareto front is g == 1, i.e. f2 = 1 - sqrt(f1) for f1 in [0, 1].
+    fn zdt1(inds: &[MoIndividual]) -> Vec<Vec<f64>> {
+        inds.iter()
+            .map(|ind| {
+                let x = &ind.genome;
+                let f1 = x[0].clamp(0.0, 1.0);
+                let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
+                let h = 1.0 - (f1 / g).sqrt();
+                vec![f1, g * h]
+            })
+            .collect()
     }
 
-    #[test]
-    fn cmaes_sphere() {
-        let mut cma = CmaEs::new(10);
-        let mut theta = vec![2.0; 10];
-        for _ in 0..50
+    // Re-derived dominance oracle (minimization), independent of the crate's
+    // private `dominates`, used to certify the rank-1 set is a true Pareto set.
+    fn oracle_dominates(a: &[f64], b: &[f64]) -> bool {
+        let mut strictly_better = false;
+        for (ai, bi) in a.iter().zip(b)
         {
-            cma.step(&mut theta, |x| -sphere(x));
-        }
-        assert!(-sphere(&theta) > -2.0, "CMA-ES converge");
-    }
-
-    #[test]
-    fn openes_sphere() {
-        let openes = OpenEs::new(10);
-        let mut theta = vec![2.0; 10];
-        let mut best = f64::NEG_INFINITY;
-        for _ in 0..100
-        {
-            let r = openes.step(&mut theta, |x| -sphere(x));
-            if r > best
+            if ai > bi
             {
-                best = r;
+                return false;
+            }
+            if ai < bi
+            {
+                strictly_better = true;
             }
         }
-        assert!(best > -5.0, "OpenES converge");
+        strictly_better
+    }
+
+    // ----- benchmark functions: exact closed-form oracles -----
+
+    #[test]
+    fn sphere_known_values() {
+        assert_eq!(sphere(&[0.0, 0.0, 0.0]), 0.0);
+        assert_eq!(sphere(&[1.0, 2.0, 2.0]), 9.0);
+        assert_eq!(sphere(&[-3.0]), 9.0);
+        // Sum of squares is strictly positive away from the origin.
+        assert!(sphere(&[0.5, -0.5]) > 0.0);
     }
 
     #[test]
-    fn nsga2_zdt1() {
-        let nsga = Nsga2 {
-            pop_size: 50,
-            ..Nsga2::default()
-        };
-        let mut pop = nsga.init_pop(10);
-        for _ in 0..50
+    fn rastrigin_known_values() {
+        // Global optimum at the origin is exactly 0.
+        assert_eq!(rastrigin(&[0.0; 5]), 0.0);
+        // At integer coordinates cos(2*pi*k) == 1, so rastrigin == sum of squares.
+        assert!((rastrigin(&[1.0]) - 1.0).abs() < 1e-9);
+        assert!((rastrigin(&[2.0, -3.0]) - 13.0).abs() < 1e-9);
+        // Hand value: 0.25 - 10*cos(pi) + 10 = 20.25.
+        assert!((rastrigin(&[0.5]) - 20.25).abs() < 1e-9);
+        // Away from the optimum the value is strictly positive.
+        assert!(rastrigin(&[0.3, -0.7]) > 0.0);
+    }
+
+    // ----- Individual / MoIndividual constructors -----
+
+    #[test]
+    fn individual_new_initializes_fields() {
+        let ind = Individual::new(vec![1.0, -2.0, 3.0]);
+        assert_eq!(ind.genome, vec![1.0, -2.0, 3.0]);
+        // Unevaluated individuals must start at -inf so any real fitness wins.
+        assert_eq!(ind.fitness, f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn mo_individual_new_initializes_fields() {
+        let ind = MoIndividual::new(vec![0.5, 0.5]);
+        assert_eq!(ind.genome, vec![0.5, 0.5]);
+        assert!(ind.objectives.is_empty());
+        assert_eq!(ind.rank, 0);
+        assert_eq!(ind.crowding_distance, 0.0);
+    }
+
+    // ----- GA: structure of init_pop -----
+
+    #[test]
+    fn ga_init_pop_shape_and_bounds() {
+        let ga = GeneticAlgorithm::seeded(1);
+        let pop = ga.init_pop(7);
+        assert_eq!(pop.len(), ga.pop_size);
+        for ind in &pop
         {
-            nsga.evolve(&mut pop, |inds| {
-                inds.iter()
-                    .map(|ind| {
-                        let x = &ind.genome;
-                        let f1 = x[0].clamp(0.0, 1.0); // clamp pour éviter division par zéro
-                        let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
-                        let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
-                        vec![f1, g * h]
-                    })
-                    .collect()
+            assert_eq!(ind.genome.len(), 7);
+            for &g in &ind.genome
+            {
+                assert!(
+                    g >= ga.bounds.0 && g <= ga.bounds.1,
+                    "init gene {g} out of bounds {:?}",
+                    ga.bounds
+                );
+            }
+            assert_eq!(ind.fitness, f64::NEG_INFINITY);
+        }
+    }
+
+    // ----- GA: elitism preserves the best, best fitness is monotone -----
+
+    #[test]
+    fn ga_elitism_preserves_best_and_is_monotone() {
+        // Maximize sum of genome. The known optimum is dims * upper_bound.
+        let dims = 8usize;
+        let mut ga = GeneticAlgorithm::seeded(2024);
+        ga.pop_size = 60;
+        ga.elitism = 2;
+        let mut pop = ga.init_pop(dims);
+        let fit = |inds: &[Individual]| -> Vec<f64> {
+            inds.iter().map(|i| i.genome.iter().sum::<f64>()).collect()
+        };
+
+        let mut prev_best = f64::NEG_INFINITY;
+        for _ in 0..60
+        {
+            // Determine the incumbent best parent *before* this generation, by
+            // evaluating the parents exactly as `evolve` does internally.
+            let scores = fit(&pop);
+            let (bi, &incumbent_fit) = scores
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap();
+            let incumbent_genome = pop[bi].genome.clone();
+
+            ga.evolve(&mut pop, fit);
+
+            // Elitism guarantee (within this generation): the best parent is
+            // copied verbatim into the offspring, so it must still be present.
+            assert!(
+                pop.iter().any(|i| i.genome == incumbent_genome),
+                "elitism dropped the best parent (genome {incumbent_genome:?})"
+            );
+            // The best fitness of the new generation is at least the incumbent's
+            // and never decreases across generations.
+            let out_best = pop
+                .iter()
+                .filter(|i| i.fitness.is_finite())
+                .map(|i| i.fitness)
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!(
+                out_best >= incumbent_fit - 1e-12,
+                "best fitness dropped below incumbent {incumbent_fit} -> {out_best}"
+            );
+            assert!(
+                out_best >= prev_best - 1e-12,
+                "best fitness regressed across generations {prev_best} -> {out_best}"
+            );
+            prev_best = out_best;
+        }
+        // Converges to the known optimum (8 * 5.0 == 40.0).
+        let optimum = dims as f64 * ga.bounds.1;
+        assert!(
+            prev_best > optimum - 1e-6,
+            "GA did not reach the known optimum {optimum}, got {prev_best}"
+        );
+    }
+
+    #[test]
+    fn ga_minimizes_sphere_near_zero() {
+        let mut ga = GeneticAlgorithm::seeded(11);
+        ga.pop_size = 50;
+        let mut pop = ga.init_pop(6);
+        let start = pop
+            .iter()
+            .map(|i| sphere(&i.genome))
+            .fold(f64::INFINITY, f64::min);
+        for _ in 0..120
+        {
+            ga.evolve(&mut pop, |inds| {
+                inds.iter().map(|i| -sphere(&i.genome)).collect()
             });
         }
-        let front: Vec<&MoIndividual> = pop.iter().filter(|ind| ind.rank == 1).collect();
-        assert!(!front.is_empty(), "Pareto front not found");
+        let best = pop
+            .iter()
+            .map(|i| sphere(&i.genome))
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            best < start,
+            "GA did not improve over the initial population"
+        );
+        assert!(best < 0.1, "GA min sphere = {best}, expected < 0.1");
     }
 
     #[test]
-    fn nsga2_is_reproducible() {
-        // Two identically-seeded runs must produce bit-identical fronts.
-        let run = || {
-            let mut nsga = Nsga2::seeded(123);
-            nsga.pop_size = 40;
-            let mut pop = nsga.init_pop(6);
-            for _ in 0..30
+    fn ga_crossover_of_identical_parents_yields_that_parent() {
+        // With an all-identical population and no mutation, crossover of two
+        // identical parents reproduces the parent exactly, so the whole
+        // generation stays equal to the seed genome.
+        let mut ga = GeneticAlgorithm::seeded(3);
+        ga.pop_size = 16;
+        ga.mutation_rate = 0.0;
+        ga.elitism = 1;
+        ga.crossover_rate = 1.0;
+        let g = vec![1.5, -2.5, 0.75, 4.0];
+        let mut pop: Vec<Individual> = (0..ga.pop_size)
+            .map(|_| Individual::new(g.clone()))
+            .collect();
+        ga.evolve(&mut pop, |inds| {
+            inds.iter().map(|i| i.genome.iter().sum::<f64>()).collect()
+        });
+        assert_eq!(pop.len(), ga.pop_size);
+        for ind in &pop
+        {
+            assert_eq!(ind.genome, g, "identical-parent crossover changed a genome");
+        }
+    }
+
+    #[test]
+    fn ga_mutation_respects_bounds() {
+        // Force mutation on every individual every generation and assert genes
+        // stay clamped inside the configured bounds.
+        let mut ga = GeneticAlgorithm::seeded(4);
+        ga.pop_size = 40;
+        ga.mutation_rate = 1.0;
+        ga.bounds = (-1.0, 1.0);
+        let mut pop = ga.init_pop(5);
+        for _ in 0..30
+        {
+            ga.evolve(&mut pop, |inds| {
+                inds.iter().map(|i| -sphere(&i.genome)).collect()
+            });
+            for ind in &pop
             {
-                nsga.evolve(&mut pop, |inds| {
-                    inds.iter()
-                        .map(|ind| {
-                            let x = &ind.genome;
-                            let f1 = x[0].clamp(0.0, 1.0);
-                            let g = 1.0 + 9.0 * x[1..].iter().sum::<f64>() / (x.len() as f64 - 1.0);
-                            let h = if g > 0.0 { 1.0 - (f1 / g).sqrt() } else { 1.0 };
-                            vec![f1, g * h]
-                        })
-                        .collect()
+                for &gene in &ind.genome
+                {
+                    assert!(
+                        (-1.0..=1.0).contains(&gene),
+                        "gene {gene} escaped bounds after mutation"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ga_seeded_is_reproducible() {
+        let run = || {
+            let mut ga = GeneticAlgorithm::seeded(777);
+            ga.pop_size = 30;
+            let mut pop = ga.init_pop(5);
+            for _ in 0..25
+            {
+                ga.evolve(&mut pop, |inds| {
+                    inds.iter().map(|i| -sphere(&i.genome)).collect()
                 });
             }
             pop.iter()
-                .flat_map(|i| i.genome.clone())
-                .map(|v| v.to_bits())
+                .flat_map(|i| i.genome.iter().map(|v| v.to_bits()))
                 .collect::<Vec<u64>>()
         };
-        assert_eq!(run(), run(), "seeded NSGA-II must be bit-reproducible");
+        assert_eq!(run(), run(), "seeded GA must be bit-reproducible");
     }
 
     #[test]
-    fn bench_rastrigin() {
-        let x = vec![0.0; 10];
-        assert_eq!(rastrigin(&x), 0.0);
+    fn ga_default_matches_explicit_default_seed() {
+        let ga = GeneticAlgorithm::default();
+        assert_eq!(ga.pop_size, 100);
+        assert_eq!(ga.elitism, 2);
+        assert_eq!(ga.bounds, (-5.0, 5.0));
+        // Default must reuse the documented default seed: identical first draws.
+        let a = GeneticAlgorithm::default().init_pop(4);
+        let b = GeneticAlgorithm::seeded(EVO_DEFAULT_SEED).init_pop(4);
+        let bits = |p: &[Individual]| {
+            p.iter()
+                .flat_map(|i| i.genome.iter().map(|v| v.to_bits()))
+                .collect::<Vec<u64>>()
+        };
+        assert_eq!(bits(&a), bits(&b));
+    }
+
+    // ----- CMA-ES -----
+
+    #[test]
+    fn cmaes_lambda_mu_derivation() {
+        // lambda = 4 + floor(3 * ln(dims)); mu = lambda / 2.
+        for dims in [2usize, 4, 8, 16, 32]
+        {
+            let cma = CmaEs::seeded(dims, 0);
+            let expected_lambda = 4 + (3.0 * (dims as f64).ln()).floor() as usize;
+            assert_eq!(cma.lambda, expected_lambda, "lambda for dims={dims}");
+            assert_eq!(cma.mu, expected_lambda / 2, "mu for dims={dims}");
+        }
+    }
+
+    #[test]
+    fn cmaes_step_returns_lambda_offspring() {
+        let mut cma = CmaEs::seeded(6, 5);
+        let lambda = cma.lambda;
+        let mut theta = vec![1.0; 6];
+        let off = cma.step(&mut theta, |x| -sphere(x));
+        assert_eq!(off.len(), lambda);
+        for ind in &off
+        {
+            assert_eq!(ind.genome.len(), 6);
+            assert!(ind.fitness.is_finite());
+        }
+    }
+
+    #[test]
+    fn cmaes_recombination_is_weighted_mean_of_best_mu() {
+        // Oracle: after a step, theta must equal the rank-weighted mean of the
+        // best-mu offspring (weights mu, mu-1, ..., 1). Recompute independently.
+        let mut cma = CmaEs::seeded(4, 77);
+        let mu = cma.mu;
+        let mut theta = vec![2.0; 4];
+        let mut off = cma.step(&mut theta, |x| -sphere(x));
+        off.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+        let w: Vec<f64> = (0..mu).map(|i| (mu as f64 - i as f64).max(0.0)).collect();
+        let sw: f64 = w.iter().sum();
+        for (d, &actual) in theta.iter().enumerate()
+        {
+            let expected: f64 = (0..mu).map(|j| off[j].genome[d] * w[j] / sw).sum();
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "dim {d}: theta {actual} != weighted mean {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn cmaes_minimizes_sphere_near_zero() {
+        // This simplified ES has a fixed step size (no sigma adaptation), so in
+        // 8-D it converges to a small neighbourhood of the optimum rather than
+        // machine zero. Require a large relative improvement plus a loose, seed
+        // -robust absolute bound (the plateau sits well under 1.0).
+        let mut cma = CmaEs::seeded(8, 99);
+        let mut theta = vec![3.0; 8];
+        let start = sphere(&theta); // = 8 * 9 = 72
+        for _ in 0..80
+        {
+            cma.step(&mut theta, |x| -sphere(x));
+        }
+        let end = sphere(&theta);
+        assert!(
+            end < start * 0.05,
+            "CMA-ES gave <20x improvement: {start} -> {end}"
+        );
+        assert!(end < 1.5, "CMA-ES sphere = {end}, expected well under 1.5");
+    }
+
+    #[test]
+    fn cmaes_seeded_is_reproducible() {
+        let run = || {
+            let mut cma = CmaEs::seeded(6, 314);
+            let mut theta = vec![2.0; 6];
+            for _ in 0..30
+            {
+                cma.step(&mut theta, |x| -sphere(x));
+            }
+            theta.iter().map(|v| v.to_bits()).collect::<Vec<u64>>()
+        };
+        assert_eq!(run(), run(), "seeded CMA-ES must be bit-reproducible");
+    }
+
+    // ----- OpenES -----
+
+    #[test]
+    fn openes_gradient_points_uphill_on_linear_reward() {
+        // For a linear reward f(x)=sum(x), the ES natural-gradient estimate is
+        // +1 per component, so one step from the origin must increase sum(theta).
+        // (Sign oracle: a flipped update would *decrease* it.)
+        let oes = OpenEs::seeded(8, 1234);
+        let mut theta = vec![0.0; 8];
+        oes.step(&mut theta, |x| x.iter().sum::<f64>());
+        let moved: f64 = theta.iter().sum();
+        assert!(
+            moved > 0.0,
+            "OpenES moved downhill on a linear reward: {moved}"
+        );
+    }
+
+    #[test]
+    fn openes_step_returns_batch_maximum() {
+        // Oracle: capture every reward the optimizer actually evaluates this
+        // step and assert the returned value is exactly their maximum.
+        let oes = OpenEs::seeded(5, 11);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut theta = vec![1.0; 5];
+        let returned = oes.step(&mut theta, |x| {
+            let r = -sphere(x);
+            seen.borrow_mut().push(r);
+            r
+        });
+        let seen = seen.into_inner();
+        assert_eq!(
+            seen.len(),
+            oes.pop_size,
+            "step must evaluate pop_size samples"
+        );
+        let batch_max = seen.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert_eq!(
+            returned.to_bits(),
+            batch_max.to_bits(),
+            "step must return the batch maximum {batch_max}, returned {returned}"
+        );
+    }
+
+    #[test]
+    fn openes_minimizes_sphere_near_zero() {
+        let oes = OpenEs::seeded(8, 99);
+        let mut theta = vec![3.0; 8];
+        let start = sphere(&theta);
+        for _ in 0..250
+        {
+            oes.step(&mut theta, |x| -sphere(x));
+        }
+        let end = sphere(&theta);
+        assert!(end < start, "OpenES did not improve: {start} -> {end}");
+        assert!(end < 0.5, "OpenES sphere = {end}, expected < 0.5");
+    }
+
+    #[test]
+    fn openes_respects_bounds() {
+        let mut oes = OpenEs::seeded(4, 7);
+        oes.bounds = (-2.0, 2.0);
+        let mut theta = vec![0.0; 4];
+        for _ in 0..50
+        {
+            // Reward that pulls strongly toward +infinity; clamping must hold.
+            oes.step(&mut theta, |x| x.iter().sum::<f64>());
+            for &t in &theta
+            {
+                assert!((-2.0..=2.0).contains(&t), "theta {t} escaped bounds");
+            }
+        }
+    }
+
+    // ----- NSGA-II -----
+
+    #[test]
+    fn nsga2_init_pop_shape_and_bounds() {
+        let mut nsga = Nsga2::seeded(1);
+        nsga.bounds = (0.0, 1.0);
+        let pop = nsga.init_pop(9);
+        assert_eq!(pop.len(), nsga.pop_size);
+        for ind in &pop
+        {
+            assert_eq!(ind.genome.len(), 9);
+            for &g in &ind.genome
+            {
+                assert!((0.0..=1.0).contains(&g), "init gene {g} out of bounds");
+            }
+        }
+    }
+
+    #[test]
+    fn nsga2_rank1_set_is_a_true_pareto_set() {
+        // After evolution, no population member may dominate any rank-1 member.
+        let mut nsga = Nsga2::seeded(5);
+        nsga.pop_size = 50;
+        nsga.bounds = (0.0, 1.0);
+        let mut pop = nsga.init_pop(8);
+        for _ in 0..40
+        {
+            nsga.evolve(&mut pop, zdt1);
+        }
+        let front: Vec<&MoIndividual> = pop.iter().filter(|i| i.rank == 1).collect();
+        assert!(!front.is_empty(), "empty Pareto front");
+        for f in &front
+        {
+            for other in &pop
+            {
+                assert!(
+                    !oracle_dominates(&other.objectives, &f.objectives),
+                    "a rank-1 member is dominated: {:?} dominated by {:?}",
+                    f.objectives,
+                    other.objectives
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nsga2_elitism_keeps_per_objective_minimum_monotone() {
+        // Elitist (mu+lambda) survival => the best value reached for each
+        // objective can never get worse from one generation to the next.
+        // This property is what the non-elitist (full-replacement) variant
+        // violates.
+        let mut nsga = Nsga2::seeded(9);
+        nsga.pop_size = 40;
+        nsga.bounds = (0.0, 1.0);
+        let mut pop = nsga.init_pop(8);
+        nsga.evolve(&mut pop, zdt1);
+        let mut best0 = pop
+            .iter()
+            .map(|i| i.objectives[0])
+            .fold(f64::INFINITY, f64::min);
+        let mut best1 = pop
+            .iter()
+            .map(|i| i.objectives[1])
+            .fold(f64::INFINITY, f64::min);
+        for _ in 0..60
+        {
+            nsga.evolve(&mut pop, zdt1);
+            let m0 = pop
+                .iter()
+                .map(|i| i.objectives[0])
+                .fold(f64::INFINITY, f64::min);
+            let m1 = pop
+                .iter()
+                .map(|i| i.objectives[1])
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                m0 <= best0 + 1e-12,
+                "objective 0 minimum regressed {best0} -> {m0}"
+            );
+            assert!(
+                m1 <= best1 + 1e-12,
+                "objective 1 minimum regressed {best1} -> {m1}"
+            );
+            best0 = best0.min(m0);
+            best1 = best1.min(m1);
+        }
+    }
+
+    #[test]
+    fn nsga2_converges_to_known_zdt1_front() {
+        // The true ZDT1 front is f2 = 1 - sqrt(f1). Measure the mean distance of
+        // the rank-1 set to that curve and require convergence to a small value.
+        let mut nsga = Nsga2::seeded(5);
+        nsga.pop_size = 60;
+        nsga.bounds = (0.0, 1.0);
+        let mut pop = nsga.init_pop(10);
+        let gd = |pop: &[MoIndividual]| -> f64 {
+            let front: Vec<&MoIndividual> = pop.iter().filter(|i| i.rank == 1).collect();
+            let n = front.len().max(1) as f64;
+            front
+                .iter()
+                .map(|i| (i.objectives[1] - (1.0 - i.objectives[0].sqrt())).abs())
+                .sum::<f64>()
+                / n
+        };
+        nsga.evolve(&mut pop, zdt1);
+        let start = gd(&pop);
+        for _ in 0..80
+        {
+            nsga.evolve(&mut pop, zdt1);
+        }
+        let end = gd(&pop);
+        assert!(
+            end < start,
+            "NSGA-II did not improve toward the front: {start} -> {end}"
+        );
+        assert!(
+            end < 1e-2,
+            "mean distance to ZDT1 front = {end}, expected < 1e-2"
+        );
+    }
+
+    #[test]
+    fn nsga2_seeded_is_reproducible() {
+        let run = || {
+            let mut nsga = Nsga2::seeded(123);
+            nsga.pop_size = 40;
+            nsga.bounds = (0.0, 1.0);
+            let mut pop = nsga.init_pop(6);
+            for _ in 0..30
+            {
+                nsga.evolve(&mut pop, zdt1);
+            }
+            pop.iter()
+                .flat_map(|i| i.genome.iter().map(|v| v.to_bits()))
+                .collect::<Vec<u64>>()
+        };
+        assert_eq!(run(), run(), "seeded NSGA-II must be bit-reproducible");
     }
 }

@@ -233,4 +233,161 @@ mod tests {
         let recovered = fusion.position_uncertainty();
         assert!(recovered < outage, "a fix must shrink uncertainty");
     }
+
+    #[test]
+    fn predict_propagates_state_and_grows_covariance_by_the_exact_q() {
+        // Isolate the prediction. Pick σ_a = 2, dt = 1 so the discrete white-
+        // noise-acceleration block is clean integers per axis:
+        //   Q_axis = σ_a²·[[dt⁴/4, dt³/2],[dt³/2, dt²]] = 4·[[¼,½],[½,1]]
+        //          = [[1, 2],[2, 4]].
+        // Start from P = 0 so after one step P holds exactly Q. The mean moves by
+        // the constant-velocity transition plus ½·a·dt² control: from
+        // x=[0,0,1,−2] with a=[3,−1] over dt=1 ⇒ p=[0+1+1.5, 0−2−0.5]=[2.5,−2.5],
+        // v=[1+3, −2−1]=[4,−3].
+        let mut f = GnssInsFusion::new([0.0, 0.0], [1.0, -2.0], 2.0, 1.0, [0.0, 0.0, 0.0, 0.0]);
+        f.predict([3.0, -1.0], 1.0);
+        let p = f.position();
+        let v = f.velocity();
+        assert!(
+            (p[0] - 2.5).abs() < 1e-12 && (p[1] + 2.5).abs() < 1e-12,
+            "pos {p:?}"
+        );
+        assert!(
+            (v[0] - 4.0).abs() < 1e-12 && (v[1] + 3.0).abs() < 1e-12,
+            "vel {v:?}"
+        );
+        // Covariance now equals Q exactly: position variance 1, velocity 4, RMS
+        // position std = √((1+1)/2) = 1.
+        assert!(
+            (f.position_uncertainty() - 1.0).abs() < 1e-12,
+            "unc {}",
+            f.position_uncertainty()
+        );
+        assert!((f.p.get(0, 0) - 1.0).abs() < 1e-12, "Pxx {}", f.p.get(0, 0));
+        assert!(
+            (f.p.get(2, 2) - 4.0).abs() < 1e-12,
+            "Pvxvx {}",
+            f.p.get(2, 2)
+        );
+        assert!(
+            (f.p.get(0, 2) - 2.0).abs() < 1e-12,
+            "Pxvx {}",
+            f.p.get(0, 2)
+        );
+        assert!(
+            (f.p.get(2, 0) - 2.0).abs() < 1e-12,
+            "symmetry {}",
+            f.p.get(2, 0)
+        );
+    }
+
+    #[test]
+    fn noise_free_constant_velocity_fixes_track_the_truth_exactly() {
+        // A true constant-velocity body (no acceleration) with perfect, noise-free
+        // GNSS fixes. A correct loosely-coupled filter must converge to and then
+        // sit *on* the truth — both position and the (only indirectly observed)
+        // velocity. After 40 steps of dt=0.5 the body is at (40,20) moving (2,1).
+        let dt = 0.5;
+        let mut f = GnssInsFusion::new([0.0, 0.0], [2.0, 1.0], 0.1, 0.5, [2.0, 2.0, 2.0, 2.0]);
+        let tv = [2.0, 1.0];
+        let mut tp = [0.0, 0.0];
+        for _ in 0..40
+        {
+            f.predict([0.0, 0.0], dt);
+            tp[0] += tv[0] * dt;
+            tp[1] += tv[1] * dt;
+            f.update_gnss(tp);
+        }
+        let p = f.position();
+        let v = f.velocity();
+        assert!(
+            (p[0] - tp[0]).abs() < 1e-6 && (p[1] - tp[1]).abs() < 1e-6,
+            "pos {p:?} vs {tp:?}"
+        );
+        assert!(
+            (v[0] - tv[0]).abs() < 1e-6 && (v[1] - tv[1]).abs() < 1e-6,
+            "vel {v:?} vs {tv:?}"
+        );
+    }
+
+    #[test]
+    fn a_near_perfect_fix_snaps_position_and_corrects_velocity_via_cross_covariance() {
+        // One GNSS update with a tiny σ_gnss. The position should jump essentially
+        // onto the fix. Crucially, the *velocity* must also move, pulled through
+        // the position–velocity cross-covariance: with K = P·Hᵀ(H·P·Hᵀ)⁻¹ and a
+        // near-zero R, the velocity gain is P_pv/P_pp, so
+        //   Δv = (P_pv/P_pp)·innovation.
+        // Construct a known cross term with one noise-free predict. Starting from
+        // the diagonal P₀ = diag(4,4,4,4) (std 2 on every state) with σ_a = 0
+        // (so Q = 0), the prediction P ← F·P₀·Fᵀ with F coupling p ← v·dt gives,
+        // per axis:  P_pp = 4 + 4·dt², P_pv = 4·dt, P_vv = 4.
+        // At dt = 0.5 that is P_pp = 5, P_pv = 2, P_vv = 4.
+        let dt = 0.5;
+        let mut f = GnssInsFusion::new([0.0, 0.0], [0.0, 0.0], 0.0, 1e-4, [2.0, 2.0, 2.0, 2.0]);
+        f.predict([0.0, 0.0], dt);
+        // Confirm the constructed covariance matches the hand value before the fix.
+        assert!((f.p.get(0, 0) - 5.0).abs() < 1e-12, "Ppp {}", f.p.get(0, 0));
+        assert!((f.p.get(0, 2) - 2.0).abs() < 1e-12, "Ppv {}", f.p.get(0, 2));
+        let fix = [3.0, -5.0];
+        assert!(f.update_gnss(fix));
+        let p = f.position();
+        let v = f.velocity();
+        // Position snaps to the fix (R → 0).
+        assert!(
+            (p[0] - 3.0).abs() < 1e-3 && (p[1] + 5.0).abs() < 1e-3,
+            "pos {p:?}"
+        );
+        // Velocity correction = (P_pv/P_pp)·innovation = (2/5)·fix.
+        assert!((v[0] - 0.4 * 3.0).abs() < 1e-3, "vx {}", v[0]);
+        assert!((v[1] - 0.4 * -5.0).abs() < 1e-3, "vy {}", v[1]);
+    }
+
+    #[test]
+    fn velocity_is_recovered_from_position_fixes_alone() {
+        // GNSS measures position only (H has no velocity row), yet a constant-
+        // velocity body's speed is observable through the sequence of fixes. Start
+        // with a deliberately wrong velocity (0,0) and a large velocity prior;
+        // noise-free position fixes of a body moving (2,−1) must pull the velocity
+        // estimate to the truth.
+        let dt = 0.5;
+        let mut f = GnssInsFusion::new(
+            [0.0, 0.0],
+            [0.0, 0.0],
+            0.05,
+            0.2,
+            [1.0, 1.0, 10.0_f64.sqrt(), 10.0_f64.sqrt()],
+        );
+        let tv = [2.0, -1.0];
+        let mut tp = [0.0, 0.0];
+        for _ in 0..60
+        {
+            f.predict([0.0, 0.0], dt);
+            tp[0] += tv[0] * dt;
+            tp[1] += tv[1] * dt;
+            f.update_gnss(tp);
+        }
+        let v = f.velocity();
+        assert!((v[0] - tv[0]).abs() < 1e-3, "vx {} should approach 2", v[0]);
+        assert!(
+            (v[1] - tv[1]).abs() < 1e-3,
+            "vy {} should approach -1",
+            v[1]
+        );
+    }
+
+    #[test]
+    fn singular_innovation_covariance_is_rejected_without_mutating_state() {
+        // If GNSS noise is zero *and* the predicted position variance is zero, the
+        // innovation covariance S = H P Hᵀ + R is exactly zero and not invertible.
+        // update_gnss must report false and leave the state untouched (no NaNs
+        // from a division by a singular S).
+        let mut f = GnssInsFusion::new([1.0, 2.0], [3.0, 4.0], 0.0, 0.0, [0.0, 0.0, 1.0, 1.0]);
+        let before = f.x.clone();
+        let ok = f.update_gnss([99.0, -99.0]);
+        assert!(!ok, "singular S must be rejected");
+        assert_eq!(
+            f.x, before,
+            "state must be unchanged when the update is skipped"
+        );
+    }
 }

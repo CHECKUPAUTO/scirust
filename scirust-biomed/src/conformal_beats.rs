@@ -102,4 +102,40 @@ mod tests {
             1.0 - alpha
         );
     }
+
+    #[test]
+    fn predict_set_uses_the_hand_computed_threshold() {
+        // Four calibration beats whose true-class probabilities are
+        // 0.9, 0.8, 0.7, 0.6 -> nonconformity scores 1 - p = {0.1, 0.2, 0.3, 0.4}.
+        // At alpha = 0.5 the conformal rank is k = ceil((4+1)*(1-0.5)) = 3, so the
+        // calibrated quantile q is the 3rd-smallest score = 0.3. The prediction
+        // set is therefore {c : 1 - p_c <= 0.3} = {c : p_c >= 0.7}.
+        //
+        // Build 4-class rows (K = 4) with the desired true-class mass and the
+        // remainder spread over the other classes. Labels are 0,1,2,3.
+        let cal_probs: Vec<Vec<f32>> = vec![
+            vec![0.90, 0.04, 0.03, 0.03],
+            vec![0.10, 0.80, 0.05, 0.05],
+            vec![0.10, 0.10, 0.70, 0.10],
+            vec![0.15, 0.15, 0.10, 0.60],
+        ];
+        let cal_labels = [0usize, 1, 2, 3];
+        let cb = ConformalBeats::calibrate(&cal_probs, &cal_labels, 0.5);
+
+        // Class 0 at 0.72 clears the 0.7 inclusion threshold; the rest do not.
+        let set = cb.predict_set(&[0.72, 0.16, 0.08, 0.04]);
+        assert_eq!(set, vec![0], "set {set:?}");
+
+        // Just below threshold (0.68 < 0.7): the set is empty.
+        let empty = cb.predict_set(&[0.68, 0.20, 0.08, 0.04]);
+        assert!(empty.is_empty(), "set {empty:?}");
+
+        // Two classes both above 0.7 -> both appear (well-separated from 0.7).
+        let two = cb.predict_set(&[0.75, 0.72, 0.0, 0.0]);
+        assert_eq!(two, vec![0, 1], "set {two:?}");
+
+        // covers() agrees with set membership.
+        assert!(cb.covers(&[0.72, 0.16, 0.08, 0.04], 0));
+        assert!(!cb.covers(&[0.72, 0.16, 0.08, 0.04], 1));
+    }
 }

@@ -188,7 +188,6 @@ pub fn subgraph_isomorphism(pattern: &Graph, target: &Graph) -> Vec<HashMap<usiz
         pattern,
         target,
         mapping: HashMap::new(),
-        pattern_matched: vec![false; pattern.n_nodes],
         target_matched: vec![false; target.n_nodes],
     };
 
@@ -199,8 +198,10 @@ pub fn subgraph_isomorphism(pattern: &Graph, target: &Graph) -> Vec<HashMap<usiz
 struct IsoState<'a> {
     pattern: &'a Graph,
     target: &'a Graph,
+    // Pattern nodes are matched in increasing `depth` order, so the recursion
+    // depth already records which ones are bound; only the target side needs an
+    // explicit "already used" marker.
     mapping: HashMap<usize, usize>,
-    pattern_matched: Vec<bool>,
     target_matched: Vec<bool>,
 }
 
@@ -264,14 +265,12 @@ fn iso_recursive(state: &mut IsoState, depth: usize, mappings: &mut Vec<HashMap<
 
         // Make assignment
         state.mapping.insert(depth, t);
-        state.pattern_matched[depth] = true;
         state.target_matched[t] = true;
 
         iso_recursive(state, depth + 1, mappings);
 
         // Backtrack
         state.mapping.remove(&depth);
-        state.pattern_matched[depth] = false;
         state.target_matched[t] = false;
     }
 }
@@ -372,10 +371,10 @@ fn induced_subgraph(graph: &Graph, nodes: &[usize]) -> Graph {
             {
                 if i < mapped
                 {
-                    sub.add_edge(i, mapped);
-                    if let Some(label) = graph.edge_label(n, neighbor)
+                    match graph.edge_label(n, neighbor)
                     {
-                        sub.add_edge_labeled(i, mapped, label);
+                        Some(label) => sub.add_edge_labeled(i, mapped, label),
+                        None => sub.add_edge(i, mapped),
                     }
                 }
             }
@@ -384,14 +383,67 @@ fn induced_subgraph(graph: &Graph, nodes: &[usize]) -> Graph {
     sub
 }
 
+/// Canonical structural form of a (small) graph, invariant under node
+/// relabeling. Two graphs are isomorphic (ignoring labels) iff their canonical
+/// forms are equal.
+///
+/// For each permutation of the node ids we build the relabeled, sorted
+/// adjacency lists and keep the lexicographically smallest representative. This
+/// is exponential in the node count but is only ever applied to motifs (size 3
+/// or 4), where it is exact and cheap.
 fn canonical_form(graph: &Graph) -> Vec<Vec<usize>> {
-    // Simple canonical form: sorted adjacency lists
-    let mut adj: Vec<Vec<usize>> = graph.adjacency.clone();
-    for a in &mut adj
+    let n = graph.n_nodes;
+    let mut best: Option<Vec<Vec<usize>>> = None;
+
+    for perm in permutations(n)
     {
-        a.sort();
+        // perm[old] = new id for that node.
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (old, neighbors) in graph.adjacency.iter().enumerate()
+        {
+            for &nb in neighbors
+            {
+                adj[perm[old]].push(perm[nb]);
+            }
+        }
+        for a in &mut adj
+        {
+            a.sort_unstable();
+        }
+        let smaller = match &best
+        {
+            Some(current) => adj < *current,
+            None => true,
+        };
+        if smaller
+        {
+            best = Some(adj);
+        }
     }
-    adj
+
+    best.unwrap_or_default()
+}
+
+/// All permutations of `0..n` as `Vec<usize>` (Heap-free, recursive).
+fn permutations(n: usize) -> Vec<Vec<usize>> {
+    let mut items: Vec<usize> = (0..n).collect();
+    let mut result = Vec::new();
+    permute_recursive(&mut items, 0, &mut result);
+    result
+}
+
+fn permute_recursive(items: &mut Vec<usize>, start: usize, result: &mut Vec<Vec<usize>>) {
+    if start == items.len()
+    {
+        result.push(items.clone());
+        return;
+    }
+    for i in start..items.len()
+    {
+        items.swap(start, i);
+        permute_recursive(items, start + 1, result);
+        items.swap(start, i);
+    }
 }
 
 // ─── Community Detection ────────────────────────────────────────────────────
@@ -485,34 +537,39 @@ pub fn modularity(graph: &Graph, communities: &[usize]) -> f64 {
     q / (2.0 * m)
 }
 
-/// Girvan-Newman community detection (edge betweenness).
+/// Girvan-Newman community detection.
+///
+/// Repeatedly removes the edge with the highest betweenness until the graph
+/// splits into at least `n_communities` connected components, then returns the
+/// connected-component label of every node. If the graph cannot be split that
+/// far (i.e. all edges are removed first), the components of the resulting
+/// edgeless graph are returned.
 pub fn girvan_newman(graph: &Graph, n_communities: usize) -> Vec<usize> {
     let mut g = graph.clone();
-    let mut communities = (0..graph.n_nodes).collect::<Vec<usize>>();
 
-    while count_communities(&communities) < n_communities && g.n_edges() > 0
+    // A graph's communities under Girvan-Newman are its connected components.
+    // We remove the highest-betweenness edge until enough components appear.
+    loop
     {
-        // Compute edge betweenness
-        let betweenness = edge_betweenness(&g);
+        let components = connected_components(&g);
+        if count_communities(&components) >= n_communities || g.n_edges() == 0
+        {
+            return components;
+        }
 
-        // Remove edge with highest betweenness
-        if let Some((&(u, v), _)) = betweenness
+        // Compute edge betweenness and drop the single highest-scoring edge.
+        let betweenness = edge_betweenness(&g);
+        let Some((&(u, v), _)) = betweenness
             .iter()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        {
-            g.adjacency[u].retain(|&x| x != v);
-            g.adjacency[v].retain(|&x| x != u);
-
-            // Recompute communities
-            communities = label_propagation(&g, 100);
-        }
         else
         {
-            break;
-        }
-    }
+            return components;
+        };
 
-    communities
+        g.adjacency[u].retain(|&x| x != v);
+        g.adjacency[v].retain(|&x| x != u);
+    }
 }
 
 fn count_communities(communities: &[usize]) -> usize {
@@ -522,6 +579,42 @@ fn count_communities(communities: &[usize]) -> usize {
         seen.insert(c);
     }
     seen.len()
+}
+
+/// Label every node with the id of its connected component.
+///
+/// Component ids are assigned in increasing order of the smallest node they
+/// contain, so a connected graph always yields all-zeros and the labelling is
+/// deterministic.
+pub fn connected_components(graph: &Graph) -> Vec<usize> {
+    let mut component = vec![usize::MAX; graph.n_nodes];
+    let mut next = 0;
+
+    for start in 0..graph.n_nodes
+    {
+        if component[start] != usize::MAX
+        {
+            continue;
+        }
+        // BFS the component reachable from `start`.
+        component[start] = next;
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        while let Some(node) = queue.pop_front()
+        {
+            for &neighbor in &graph.adjacency[node]
+            {
+                if component[neighbor] == usize::MAX
+                {
+                    component[neighbor] = next;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        next += 1;
+    }
+
+    component
 }
 
 /// Compute edge betweenness centrality.
@@ -640,7 +733,12 @@ pub fn density(graph: &Graph) -> f64 {
     if max_edges < 1.0 { 0.0 } else { m / max_edges }
 }
 
-/// Diameter of the graph (longest shortest path).
+/// Diameter of the graph: the longest shortest-path distance between any pair
+/// of nodes that are actually connected.
+///
+/// Unreachable pairs (in a disconnected graph) are ignored rather than counted
+/// as infinite, so the result is the largest finite eccentricity. An empty or
+/// fully isolated graph has diameter `0`.
 pub fn diameter(graph: &Graph) -> usize {
     let mut max_dist = 0;
     for start in 0..graph.n_nodes
@@ -648,7 +746,7 @@ pub fn diameter(graph: &Graph) -> usize {
         let distances = bfs_distances(graph, start);
         for &d in &distances
         {
-            if d > max_dist
+            if d != usize::MAX && d > max_dist
             {
                 max_dist = d;
             }
@@ -773,6 +871,15 @@ mod tests {
         g
     }
 
+    /// Star S4: center node 0 connected to leaves 1, 2, 3.
+    fn star_graph() -> Graph {
+        let mut g = Graph::new(4);
+        g.add_edge(0, 1);
+        g.add_edge(0, 2);
+        g.add_edge(0, 3);
+        g
+    }
+
     #[test]
     fn test_graph_basic() {
         let g = triangle_graph();
@@ -806,11 +913,68 @@ mod tests {
     }
 
     #[test]
-    fn test_subgraph_isomorphism() {
+    fn test_subgraph_isomorphism_triangle_in_k4() {
+        // K4 contains exactly C(4,3) = 4 triangles, and each triangle has 3! = 6
+        // automorphisms, so an (induced) subgraph search for a triangle pattern
+        // must return 4 * 6 = 24 distinct vertex mappings.
         let pattern = triangle_graph();
         let target = complete_graph();
         let mappings = subgraph_isomorphism(&pattern, &target);
-        assert!(!mappings.is_empty());
+        assert_eq!(mappings.len(), 24, "triangle-in-K4 should have 24 mappings");
+
+        // Every mapping must be a genuine triangle: 3 distinct, mutually adjacent
+        // target nodes.
+        for m in &mappings
+        {
+            let img: Vec<usize> = (0..3).map(|p| m[&p]).collect();
+            assert_eq!(img.iter().collect::<HashSet<_>>().len(), 3);
+            assert!(target.are_adjacent(img[0], img[1]));
+            assert!(target.are_adjacent(img[1], img[2]));
+            assert!(target.are_adjacent(img[0], img[2]));
+        }
+    }
+
+    #[test]
+    fn test_subgraph_isomorphism_is_induced() {
+        // A "path" pattern 0-1-2 (no edge 0-2) must NOT match the triangle's
+        // node triple, because induced subgraph isomorphism requires the
+        // non-edge 0-2 to map to a non-edge — and the triangle has none.
+        let mut path = Graph::new(3);
+        path.add_edge(0, 1);
+        path.add_edge(1, 2);
+        let target = triangle_graph();
+        assert!(
+            subgraph_isomorphism(&path, &target).is_empty(),
+            "open path must not match a triangle under induced isomorphism"
+        );
+
+        // But the same path pattern DOES appear inside a 4-path 0-1-2-3.
+        let host = path_graph();
+        assert!(!subgraph_isomorphism(&path, &host).is_empty());
+    }
+
+    #[test]
+    fn test_graph_isomorphism_negatives() {
+        // Path P4 and star S4 both have 4 nodes and 3 edges but are NOT isomorphic
+        // (different degree sequences: [1,2,2,1] vs [3,1,1,1]).
+        let p4 = path_graph();
+        let star = star_graph();
+        assert!(!graph_isomorphism(&p4, &star));
+
+        // Triangle (3 edges) vs open path on 3 nodes (2 edges): different edge
+        // counts, so not isomorphic.
+        let tri = triangle_graph();
+        let mut path3 = Graph::new(3);
+        path3.add_edge(0, 1);
+        path3.add_edge(1, 2);
+        assert!(!graph_isomorphism(&tri, &path3));
+
+        // Two relabelings of P4 must be isomorphic.
+        let mut p4_relabeled = Graph::new(4);
+        p4_relabeled.add_edge(3, 2);
+        p4_relabeled.add_edge(2, 1);
+        p4_relabeled.add_edge(1, 0);
+        assert!(graph_isomorphism(&p4, &p4_relabeled));
     }
 
     #[test]
@@ -824,10 +988,52 @@ mod tests {
     }
 
     #[test]
-    fn test_find_motifs() {
+    fn test_find_motifs_complete_graph() {
+        // Every size-3 node subset of K4 induces a triangle, so there is exactly
+        // ONE motif class, with count C(4,3) = 4 and frequency 1.0.
         let g = complete_graph();
         let motifs = find_motifs(&g, 3);
-        assert!(!motifs.is_empty());
+        assert_eq!(motifs.len(), 1, "K4 has a single size-3 motif class");
+        assert_eq!(motifs[0].nodes, 3);
+        assert_eq!(motifs[0].edges, 3);
+        assert_eq!(motifs[0].count, 4);
+        assert!((motifs[0].frequency - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_find_motifs_canonical_merges_isomorphic() {
+        // Path P4 = 0-1-2-3. Its four size-3 subsets are:
+        //   {0,1,2} -> path (2 edges)   {1,2,3} -> path (2 edges)
+        //   {0,1,3} -> single edge      {0,2,3} -> single edge
+        // A correct canonical form must merge the two single-edge subgraphs
+        // (which differ only by which node is isolated) into ONE motif class.
+        let g = path_graph();
+        let motifs = find_motifs(&g, 3);
+        assert_eq!(
+            motifs.len(),
+            2,
+            "P4 size-3 motifs should be exactly 2 classes"
+        );
+
+        let mut by_edges: HashMap<usize, usize> = HashMap::new();
+        for m in &motifs
+        {
+            by_edges.insert(m.edges, m.count);
+        }
+        assert_eq!(
+            by_edges.get(&1),
+            Some(&2),
+            "two single-edge induced subgraphs"
+        );
+        assert_eq!(
+            by_edges.get(&2),
+            Some(&2),
+            "two open-path induced subgraphs"
+        );
+
+        // Frequencies must sum to 1 across all classes.
+        let total: f64 = motifs.iter().map(|m| m.frequency).sum();
+        assert!((total - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -839,18 +1045,50 @@ mod tests {
     }
 
     #[test]
-    fn test_modularity() {
+    fn test_modularity_single_community_complete_graph() {
+        // For K4 with every node in one community, modularity is exactly 0.
+        // Q = (1/2m) * sum_{i,j same comm} [A_ij - k_i*k_j/(2m)], summing over
+        // ALL ordered pairs including i==j (where A_ii = 0).
+        // K4: m=6, k_i=3 for all i, 2m=12.
+        //   12 off-diagonal pairs (i!=j): each A_ij - 9/12 = 1 - 0.75 = 0.25 -> +3.0
+        //   4 diagonal pairs   (i==j): each 0 - 9/12             = -0.75 -> -3.0
+        //   sum = 0 -> Q = 0 / 12 = 0.
         let g = complete_graph();
-        let communities = vec![0, 0, 0, 0];
-        let q = modularity(&g, &communities);
-        // For a complete graph with all nodes in one community, modularity should be positive
-        // Q = (1/2m) * sum_{ij in same community} [A_ij - k_i*k_j/(2m)]
-        // For K4: m=6, k_i=3 for all i, A_ij=1 for all i!=j
-        // Q = (1/12) * 16 * (1 - 9/12) = (1/12) * 16 * 0.25 = 4/12 = 0.333
+        let q = modularity(&g, &[0, 0, 0, 0]);
         assert!(
-            q > -1.0 && q <= 1.0,
-            "modularity should be in [-1, 1], got {}",
-            q
+            (q - 0.0).abs() < 1e-9,
+            "K4 single-community modularity should be 0, got {q}"
+        );
+    }
+
+    #[test]
+    fn test_modularity_two_communities_beats_trivial() {
+        // Two triangles 0-1-2 and 3-4-5 joined by a single bridge edge 2-3.
+        // m = 7 edges. Degrees: nodes 2 and 3 have degree 3, the rest degree 2.
+        // Splitting into the two obvious communities {0,1,2} and {3,4,5} gives
+        // (computed by the modularity definition above) Q = 25/70 = 0.357142857...
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (2, 3)]
+        {
+            g.add_edge(a, b);
+        }
+        let q_split = modularity(&g, &[0, 0, 0, 1, 1, 1]);
+        assert!(
+            (q_split - 25.0 / 70.0).abs() < 1e-9,
+            "two-community Q wrong: {q_split}"
+        );
+
+        // Putting everything in one community yields Q = 0 (up to rounding).
+        let q_all = modularity(&g, &[0, 0, 0, 0, 0, 0]);
+        assert!(
+            q_all.abs() < 1e-9,
+            "single-community Q should be 0, got {q_all}"
+        );
+
+        // The natural split must score strictly higher than the trivial grouping.
+        assert!(
+            q_split > q_all,
+            "split {q_split} should beat trivial {q_all}"
         );
     }
 
@@ -882,19 +1120,90 @@ mod tests {
     }
 
     #[test]
-    fn test_betweenness_centrality() {
+    fn test_betweenness_centrality_path() {
+        // P4 = 0-1-2-3. Unordered shortest-path pairs through each node:
+        //   node 1: {0,2},{0,3}            -> 2 pairs
+        //   node 2: {0,3},{1,3}            -> 2 pairs
+        //   endpoints 0,3: 0 pairs.
+        // networkx-style normalization for undirected n=4 is x * 2/((n-1)(n-2))
+        // = x * 2/6 = x/3, so node 1 and 2 score 2/3 and endpoints 0.
         let g = path_graph();
         let bc = betweenness_centrality(&g);
-        // Node 1 (middle) should have highest betweenness
-        assert!(bc[1] > bc[0]);
-        assert!(bc[1] > bc[3]);
+        assert!((bc[0] - 0.0).abs() < 1e-9);
+        assert!((bc[1] - 2.0 / 3.0).abs() < 1e-9, "got {}", bc[1]);
+        assert!((bc[2] - 2.0 / 3.0).abs() < 1e-9, "got {}", bc[2]);
+        assert!((bc[3] - 0.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_edge_betweenness() {
+    fn test_betweenness_centrality_star_and_complete() {
+        // Star S4: only the center (node 0) lies on shortest paths between the
+        // three leaf pairs {1,2},{1,3},{2,3} -> 3 pairs, normalized 3 * 2/6 = 1.0.
+        let star = star_graph();
+        let bc = betweenness_centrality(&star);
+        assert!(
+            (bc[0] - 1.0).abs() < 1e-9,
+            "star center should be 1.0, got {}",
+            bc[0]
+        );
+        for &leaf in &bc[1..]
+        {
+            assert!(leaf.abs() < 1e-9);
+        }
+
+        // K4: every pair is directly connected, so NO node is an intermediary;
+        // all betweenness scores are 0.
+        let k4 = complete_graph();
+        for c in betweenness_centrality(&k4)
+        {
+            assert!(c.abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_edge_betweenness_path() {
+        // P4 = 0-1-2-3. Raw (unordered) edge betweenness:
+        //   (0,1): pairs using it {0,1},{0,2},{0,3} -> 3
+        //   (1,2): {0,2},{0,3},{1,2},{1,3}          -> 4
+        //   (2,3): {0,3},{1,3},{2,3}                -> 3
+        // The implementation accumulates the directed value (twice the unordered
+        // one) and divides by (n-1)(n-2) = 6, i.e. unordered/3.
         let g = path_graph();
         let eb = edge_betweenness(&g);
-        assert!(!eb.is_empty());
+        assert_eq!(eb.len(), 3);
+        assert!((eb[&(0, 1)] - 1.0).abs() < 1e-9, "got {}", eb[&(0, 1)]);
+        assert!(
+            (eb[&(1, 2)] - 4.0 / 3.0).abs() < 1e-9,
+            "got {}",
+            eb[&(1, 2)]
+        );
+        assert!((eb[&(2, 3)] - 1.0).abs() < 1e-9, "got {}", eb[&(2, 3)]);
+        // The central edge must carry the most shortest-path traffic.
+        assert!(eb[&(1, 2)] > eb[&(0, 1)]);
+    }
+
+    #[test]
+    fn test_edge_betweenness_bridge_is_maximal() {
+        // Two triangles joined by a single bridge 2-3. The bridge must have the
+        // strictly highest edge betweenness, since every path between the two
+        // triangles must cross it.
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (2, 3)]
+        {
+            g.add_edge(a, b);
+        }
+        let eb = edge_betweenness(&g);
+        let bridge = eb[&(2, 3)];
+        for (&edge, &score) in &eb
+        {
+            if edge != (2, 3)
+            {
+                assert!(
+                    bridge > score,
+                    "bridge {bridge} must exceed {edge:?} = {score}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -906,8 +1215,233 @@ mod tests {
 
     #[test]
     fn test_nodes_within_distance() {
+        // P4 = 0-1-2-3 from node 0 within distance 2 reaches exactly
+        // 0@0, 1@1, 2@2 (node 3 is at distance 3, excluded).
         let g = path_graph();
-        let nodes = g.nodes_within_distance(0, 2);
-        assert!(nodes.len() >= 3); // nodes 0, 1, 2
+        let mut nodes = g.nodes_within_distance(0, 2);
+        nodes.sort();
+        assert_eq!(nodes, vec![(0, 0), (1, 1), (2, 2)]);
+    }
+
+    #[test]
+    fn test_shortest_path_disconnected_returns_none() {
+        // Nodes 2 and 3 are isolated from the 0-1 edge.
+        let mut g = Graph::new(4);
+        g.add_edge(0, 1);
+        assert_eq!(g.shortest_path(0, 1), Some(vec![0, 1]));
+        assert_eq!(g.shortest_path(0, 3), None);
+        // Trivial self path.
+        assert_eq!(g.shortest_path(2, 2), Some(vec![2]));
+    }
+
+    #[test]
+    fn test_clustering_coefficient_path_middle_is_zero() {
+        // In P4, node 1's two neighbors (0 and 2) are not adjacent, so its local
+        // clustering coefficient is 0.
+        let g = path_graph();
+        assert!((clustering_coefficient(&g, 1) - 0.0).abs() < 1e-9);
+        // A degree-1 node has fewer than two neighbors -> coefficient 0 by definition.
+        assert!((clustering_coefficient(&g, 0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_average_clustering_partial() {
+        // Triangle 0-1-2 plus a pendant node 3 attached to node 0.
+        // Node 0: neighbors {1,2,3}; only the pair (1,2) is connected out of 3
+        //         possible pairs -> cc = 1/3.
+        // Nodes 1,2: neighbors are each other and node 0, both connected -> cc = 1.
+        // Node 3: degree 1 -> cc = 0.
+        // Average = (1/3 + 1 + 1 + 0) / 4 = (7/3) / 4 = 7/12.
+        let mut g = Graph::new(4);
+        g.add_edge(0, 1);
+        g.add_edge(1, 2);
+        g.add_edge(2, 0);
+        g.add_edge(0, 3);
+        assert!((clustering_coefficient(&g, 0) - 1.0 / 3.0).abs() < 1e-9);
+        assert!((clustering_coefficient(&g, 1) - 1.0).abs() < 1e-9);
+        assert!((average_clustering(&g) - 7.0 / 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_diameter_cycle_and_disconnected() {
+        // C5: farthest pair is 2 hops apart in either direction -> diameter 2.
+        let mut c5 = Graph::new(5);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
+        {
+            c5.add_edge(a, b);
+        }
+        assert_eq!(diameter(&c5), 2);
+
+        // Disconnected: path 0-1-2 (component diameter 2) plus an isolated edge
+        // 3-4. Unreachable pairs must be ignored, so the diameter is the largest
+        // FINITE distance = 2, not usize::MAX.
+        let mut g = Graph::new(5);
+        for &(a, b) in &[(0, 1), (1, 2), (3, 4)]
+        {
+            g.add_edge(a, b);
+        }
+        assert_eq!(diameter(&g), 2);
+
+        // A fully isolated graph (no edges) has diameter 0.
+        assert_eq!(diameter(&Graph::new(3)), 0);
+    }
+
+    #[test]
+    fn test_connected_components() {
+        // Connected graph -> all nodes share component 0.
+        assert_eq!(connected_components(&triangle_graph()), vec![0, 0, 0]);
+
+        // Two triangles, no bridge -> components {0,1,2}=0 and {3,4,5}=1.
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)]
+        {
+            g.add_edge(a, b);
+        }
+        assert_eq!(connected_components(&g), vec![0, 0, 0, 1, 1, 1]);
+
+        // Isolated nodes each form their own component.
+        let mut h = Graph::new(4);
+        h.add_edge(0, 1);
+        assert_eq!(connected_components(&h), vec![0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn test_label_propagation_two_disjoint_triangles() {
+        // Two disconnected triangles must collapse into exactly two communities,
+        // with the three nodes of each triangle sharing one label.
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)]
+        {
+            g.add_edge(a, b);
+        }
+        let comm = label_propagation(&g, 100);
+        assert_eq!(count_communities(&comm), 2);
+        assert_eq!(comm[0], comm[1]);
+        assert_eq!(comm[1], comm[2]);
+        assert_eq!(comm[3], comm[4]);
+        assert_eq!(comm[4], comm[5]);
+        assert_ne!(comm[0], comm[3]);
+    }
+
+    #[test]
+    fn test_girvan_newman_splits_bridge() {
+        // Two triangles joined by a single bridge edge 2-3. Removing the bridge
+        // (highest edge betweenness) splits the graph into the two triangles, so
+        // requesting 2 communities must recover {0,1,2} and {3,4,5}.
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (2, 3)]
+        {
+            g.add_edge(a, b);
+        }
+        let comm = girvan_newman(&g, 2);
+        assert_eq!(count_communities(&comm), 2);
+        // Nodes within a triangle share a community; the two triangles differ.
+        assert_eq!(comm[0], comm[1]);
+        assert_eq!(comm[1], comm[2]);
+        assert_eq!(comm[3], comm[4]);
+        assert_eq!(comm[4], comm[5]);
+        assert_ne!(comm[0], comm[3]);
+
+        // Requesting a single community removes no edges: one component.
+        assert_eq!(count_communities(&girvan_newman(&g, 1)), 1);
+    }
+
+    #[test]
+    fn test_girvan_newman_path_peels_endpoints() {
+        // On P4, the most-central edge is (1,2). Removing it first yields two
+        // components {0,1} and {2,3}, satisfying a request for 2 communities.
+        let g = path_graph();
+        let comm = girvan_newman(&g, 2);
+        assert_eq!(count_communities(&comm), 2);
+        assert_eq!(comm[0], comm[1]);
+        assert_eq!(comm[2], comm[3]);
+        assert_ne!(comm[1], comm[2]);
+    }
+
+    #[test]
+    fn test_dfs_path_order_is_exact() {
+        // DFS from node 0 on a path must walk straight down it.
+        let g = path_graph();
+        assert_eq!(g.dfs(0), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_bfs_is_breadth_first_on_star() {
+        // BFS from the center of a star visits the center, then all leaves.
+        let g = star_graph();
+        let order = g.bfs(0);
+        assert_eq!(order[0], 0);
+        let mut leaves = order[1..].to_vec();
+        leaves.sort();
+        assert_eq!(leaves, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_degree_distribution_path() {
+        // P4 degree sequence is [1,2,2,1]: two nodes of degree 1, two of degree 2.
+        let g = path_graph();
+        let dist = degree_distribution(&g);
+        assert_eq!(dist.get(&1), Some(&2));
+        assert_eq!(dist.get(&2), Some(&2));
+        assert_eq!(dist.get(&3), None);
+    }
+
+    #[test]
+    fn test_density_path_and_empty() {
+        // P4: 3 edges out of max 4*3/2 = 6 -> density 0.5.
+        assert!((density(&path_graph()) - 0.5).abs() < 1e-9);
+        // No-edge graph has density 0; single node has density 0 (no possible edges).
+        assert!((density(&Graph::new(5)) - 0.0).abs() < 1e-9);
+        assert!((density(&Graph::new(1)) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_labeled_subgraph_isomorphism_respects_labels() {
+        // Pattern: a single A--B edge. Target: a 3-path with labels A-B-A so that
+        // node 0=A,1=B,2=A and edges 0-1,1-2. The A--B pattern should match the
+        // (0,1) and (1,2) edges but a C--D pattern should not match at all.
+        let mut pattern = Graph::new(2);
+        pattern.add_edge(0, 1);
+        pattern.set_node_label(0, "A");
+        pattern.set_node_label(1, "B");
+
+        let mut target = Graph::new(3);
+        target.add_edge(0, 1);
+        target.add_edge(1, 2);
+        target.set_node_label(0, "A");
+        target.set_node_label(1, "B");
+        target.set_node_label(2, "A");
+
+        let maps = subgraph_isomorphism(&pattern, &target);
+        // Mappings: {0->0,1->1} and {0->2,1->1}. (Pattern node 0 = "A", 1 = "B".)
+        assert_eq!(
+            maps.len(),
+            2,
+            "A-B edge should map onto both A-B target edges"
+        );
+        for m in &maps
+        {
+            assert_eq!(m[&1], 1, "pattern node B must map to the unique target B");
+            assert!(target.are_adjacent(m[&0], m[&1]));
+        }
+
+        // A pattern whose label is absent from the target yields no mapping.
+        let mut nope = Graph::new(2);
+        nope.add_edge(0, 1);
+        nope.set_node_label(0, "C");
+        nope.set_node_label(1, "D");
+        assert!(subgraph_isomorphism(&nope, &target).is_empty());
+    }
+
+    #[test]
+    fn test_edge_label_roundtrip() {
+        let mut g = Graph::new(3);
+        g.add_edge_labeled(0, 2, "bond");
+        // Labels are stored on the canonical (min,max) key and are direction-free.
+        assert_eq!(g.edge_label(0, 2), Some("bond"));
+        assert_eq!(g.edge_label(2, 0), Some("bond"));
+        assert_eq!(g.edge_label(0, 1), None);
+        assert!(g.are_adjacent(0, 2));
+        assert!(g.are_adjacent(2, 0));
     }
 }

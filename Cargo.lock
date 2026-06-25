@@ -2569,6 +2569,7 @@ dependencies = [
  "scirust-core",
  "scirust-signal",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

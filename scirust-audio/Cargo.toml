@@ -11,3 +11,4 @@ scirust-signal = { path = "../scirust-signal" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+serde_json = "1"

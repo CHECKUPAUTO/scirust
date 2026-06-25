@@ -202,4 +202,96 @@ mod tests {
         let rr_afib = vec![0.6, 1.0, 0.5, 1.1, 0.7, 0.95, 0.55, 1.05];
         assert_eq!(classify_rhythm(&rr_afib), RhythmClass::Irregular);
     }
+
+    #[test]
+    fn rr_intervals_convert_samples_to_seconds() {
+        // Peaks one second apart at 250 Hz are 250 samples apart -> RR = 1.0 s.
+        let rr = rr_intervals(&[0, 250, 500, 750], 250.0);
+        assert_eq!(rr.len(), 3);
+        for v in &rr
+        {
+            assert!((v - 1.0).abs() < 1e-12, "RR {v}");
+        }
+        // Uneven spacing at 200 Hz: gaps 100 and 300 samples -> 0.5 s and 1.5 s.
+        let rr2 = rr_intervals(&[0, 100, 400], 200.0);
+        assert!(
+            (rr2[0] - 0.5).abs() < 1e-12 && (rr2[1] - 1.5).abs() < 1e-12,
+            "{rr2:?}"
+        );
+        // Fewer than two peaks yields no intervals.
+        assert!(rr_intervals(&[42], 250.0).is_empty());
+        assert!(rr_intervals(&[], 250.0).is_empty());
+    }
+
+    #[test]
+    fn heart_rate_from_one_second_rr_is_exactly_60_bpm() {
+        // R-peaks spaced exactly 1.0 s apart (250 samples at fs = 250) -> 60 bpm.
+        let peaks: Vec<usize> = (0..10).map(|k| k * 250).collect();
+        let hr = heart_rate_bpm(&peaks, 250.0);
+        assert!((hr - 60.0).abs() < 1e-12, "HR {hr}");
+    }
+
+    #[test]
+    fn heart_rate_uses_mean_rr_not_per_beat_average() {
+        // Gaps 0.5 s and 1.5 s (mean RR = 1.0 s) -> 60/mean = 60 bpm, even though
+        // the per-beat rates (120 and 40 bpm) average to 80. This pins the
+        // "60 / mean(RR)" definition.
+        let hr = heart_rate_bpm(&[0, 100, 400], 200.0);
+        assert!((hr - 60.0).abs() < 1e-12, "HR {hr}");
+        // A single peak has no interval -> 0 bpm (not a panic / NaN).
+        assert_eq!(heart_rate_bpm(&[7], 250.0), 0.0);
+        assert_eq!(heart_rate_bpm(&[], 250.0), 0.0);
+    }
+
+    #[test]
+    fn detects_sixty_bpm_with_exact_indices() {
+        // RR = 1.0 s at fs = 250 (250 samples); first beat at 250.
+        let sr = 250.0;
+        let n = 2500;
+        let beats: Vec<usize> = (0..9).map(|k| 250 + k * 250).filter(|&b| b < n).collect();
+        let ecg = synth_ecg(&beats, n, sr);
+        let peaks = detect_r_peaks(&ecg, sr);
+        assert_eq!(peaks, beats, "exact peak indices");
+        let hr = heart_rate_bpm(&peaks, sr);
+        assert!((hr - 60.0).abs() < 0.5, "HR {hr}");
+    }
+
+    #[test]
+    fn refractory_period_rejects_too_close_peaks() {
+        // Two QRS complexes 152 ms apart (38 samples at 250 Hz) are inside the
+        // 200 ms refractory window, so the detector keeps only the first of the
+        // pair; a later well-separated beat is kept.
+        let sr = 250.0;
+        let beats = [200usize, 238, 700];
+        let ecg = synth_ecg(&beats, 1200, sr);
+        let peaks = detect_r_peaks(&ecg, sr);
+        assert_eq!(peaks, vec![200, 700], "refractory rejection, got {peaks:?}");
+    }
+
+    #[test]
+    fn degenerate_signals_yield_no_peaks() {
+        // Too short to differentiate.
+        assert!(detect_r_peaks(&[1.0, 2.0], 250.0).is_empty());
+        assert!(detect_r_peaks(&[], 250.0).is_empty());
+        // Flat (constant) signal: zero derivative everywhere -> no QRS energy.
+        assert!(detect_r_peaks(&[0.7; 500], 250.0).is_empty());
+    }
+
+    #[test]
+    fn classify_rhythm_edge_cases_and_exact_cv_threshold() {
+        // Empty input is reported as Normal (no rhythm to flag).
+        assert_eq!(classify_rhythm(&[]), RhythmClass::Normal);
+        // Two-value alternation a/b has coefficient of variation |a-b|/(a+b).
+        // a=0.6, b=0.9 -> CV = 0.3/1.5 = 0.20 > 0.15 -> Irregular (mean 0.75 s
+        // would otherwise be a normal 80 bpm rate, so irregularity must win).
+        assert_eq!(
+            classify_rhythm(&[0.6, 0.9, 0.6, 0.9]),
+            RhythmClass::Irregular
+        );
+        // a=0.72, b=0.88 -> CV = 0.16/1.6 = 0.10 < 0.15, mean 0.8 s = 75 bpm.
+        assert_eq!(
+            classify_rhythm(&[0.72, 0.88, 0.72, 0.88]),
+            RhythmClass::Normal
+        );
+    }
 }

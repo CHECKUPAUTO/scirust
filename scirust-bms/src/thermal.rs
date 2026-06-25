@@ -117,4 +117,68 @@ mod tests {
             temp += 0.05;
         }
     }
+
+    #[test]
+    fn ewma_rate_follows_exact_recursion() {
+        // β = 0.5, so ewmaₖ = 0.5·ewmaₖ₋₁ + 0.5·rateₖ. Hand trace at dt = 1:
+        //   sample 25 (no prior) → rate 0  → ewma 0
+        //   sample 27           → rate 2  → ewma 0.5·0   + 0.5·2 = 1.0
+        //   sample 29           → rate 2  → ewma 0.5·1.0 + 0.5·2 = 1.5
+        //   sample 29.5         → rate .5 → ewma 0.5·1.5 + 0.5·0.5 = 1.0
+        let mut g = ThermalGuard::new(100.0, 1000.0); // thresholds out of the way
+        g.update(25.0, 1.0);
+        assert!((g.rate() - 0.0).abs() < 1e-12);
+        g.update(27.0, 1.0);
+        assert!((g.rate() - 1.0).abs() < 1e-12, "ewma {}", g.rate());
+        g.update(29.0, 1.0);
+        assert!((g.rate() - 1.5).abs() < 1e-12, "ewma {}", g.rate());
+        g.update(29.5, 1.0);
+        assert!((g.rate() - 1.0).abs() < 1e-12, "ewma {}", g.rate());
+    }
+
+    #[test]
+    fn warning_fires_exactly_at_the_rate_threshold() {
+        // A single +2 °C/1 s step makes ewma = 0.5·0 + 0.5·2 = 1.0, which is
+        // exactly the warning rate ⇒ Warning (the comparison is `>=`).
+        let mut g = ThermalGuard::new(1.0, 60.0);
+        assert_eq!(g.update(25.0, 1.0), ThermalState::Normal);
+        assert_eq!(g.update(27.0, 1.0), ThermalState::Warning);
+        assert!((g.rate() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn critical_temperature_overrides_rate() {
+        // At/above the critical temperature the verdict is Critical regardless
+        // of how the rate compares to the warning threshold.
+        let mut g = ThermalGuard::new(1.0, 60.0);
+        g.update(25.0, 1.0);
+        // Jump straight to the critical temperature: rate is huge AND temp is
+        // critical — Critical must win over Warning.
+        assert_eq!(g.update(60.0, 1.0), ThermalState::Critical);
+        // Still critical while hot even if the rate has settled to ~0.
+        assert_eq!(g.update(60.0, 1.0), ThermalState::Critical);
+    }
+
+    #[test]
+    fn first_sample_and_zero_dt_yield_zero_rate() {
+        // No previous temperature ⇒ rate 0; and a non-positive dt is guarded so
+        // it can never produce a divide-by-zero or a spurious rate spike.
+        let mut g = ThermalGuard::new(1.0, 60.0);
+        assert_eq!(g.update(40.0, 1.0), ThermalState::Normal); // first sample
+        assert!((g.rate() - 0.0).abs() < 1e-12);
+        // dt = 0 with a big temperature jump: rate contribution is 0, ewma stays 0.
+        assert_eq!(g.update(55.0, 0.0), ThermalState::Normal);
+        assert!((g.rate() - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cooling_drives_the_smoothed_rate_negative() {
+        // A falling temperature gives a negative instantaneous rate, which pulls
+        // the EWMA below zero — and certainly never warns.
+        let mut g = ThermalGuard::new(1.0, 200.0);
+        g.update(80.0, 1.0); // prime
+        let st = g.update(70.0, 1.0); // rate = -10 ⇒ ewma = 0.5·0 + 0.5·(-10) = -5
+        assert_eq!(st, ThermalState::Normal);
+        assert!((g.rate() - (-5.0)).abs() < 1e-12, "ewma {}", g.rate());
+    }
 }

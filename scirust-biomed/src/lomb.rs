@@ -150,4 +150,87 @@ mod tests {
             "LF/HF {ratio} should be > 1 for LF-dominated HRV"
         );
     }
+
+    #[test]
+    fn lomb_power_matches_analytic_value_for_even_sampling() {
+        // Evenly-spaced pure sinusoid sampled over an integer number of periods.
+        // For N samples at amplitude A on a uniform grid spanning whole periods,
+        //   sum cos^2 = sum sin^2 = N/2, cross term = 0, so the Lomb power at the
+        //   true angular frequency is 0.5 * (A*N/2)^2 / (N/2) = A^2 * N / 4 EXACTLY.
+        // dt = 0.5 s, M = 10 samples/period -> f0 = 1/(M*dt) = 0.2 Hz; N = 400 = 40 periods.
+        let dt = 0.5;
+        let n = 400usize;
+        let a = 2.0;
+        let f0 = 0.2;
+        let w0 = 2.0 * PI * f0;
+        let times: Vec<f64> = (0..n).map(|j| j as f64 * dt).collect();
+        let values: Vec<f64> = times.iter().map(|&t| a * (w0 * t).cos()).collect();
+        let expected = a * a * n as f64 / 4.0; // = 400
+        let p = lomb_scargle_power(&times, &values, w0);
+        assert!(
+            (p - expected).abs() < 1e-9,
+            "LS power {p}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn lomb_power_subtracts_the_mean() {
+        // A large DC offset and a phase shift must not change the power: the
+        // periodogram is computed on the mean-subtracted signal. Same A, N as
+        // above -> still A^2 * N / 4 = 400.
+        let dt = 0.5;
+        let n = 400usize;
+        let a = 2.0;
+        let w0 = 2.0 * PI * 0.2;
+        let times: Vec<f64> = (0..n).map(|j| j as f64 * dt).collect();
+        let values: Vec<f64> = times.iter().map(|&t| a * (w0 * t).sin() + 137.0).collect();
+        let p = lomb_scargle_power(&times, &values, w0);
+        assert!((p - 400.0).abs() < 1e-7, "LS power {p}, expected 400");
+    }
+
+    #[test]
+    fn lomb_power_degenerate_inputs_are_zero() {
+        // Fewer than two samples, and a non-positive angular frequency, both
+        // return 0 rather than dividing by zero or producing NaN.
+        assert_eq!(lomb_scargle_power(&[1.0], &[3.0], 1.0), 0.0);
+        assert_eq!(lomb_scargle_power(&[], &[], 1.0), 0.0);
+        assert_eq!(
+            lomb_scargle_power(&[0.0, 1.0, 2.0], &[1.0, 2.0, 3.0], 0.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn band_power_oracles() {
+        let times: Vec<f64> = (0..400).map(|j| j as f64 * 0.5).collect();
+        let w0 = 2.0 * PI * 0.2;
+        let values: Vec<f64> = times.iter().map(|&t| 2.0 * (w0 * t).cos()).collect();
+
+        // A constant signal carries no spectral power -> the integral is 0.
+        let flat = vec![0.77; 400];
+        let bp_flat = band_power(&times, &flat, 0.04, 0.40, 0.005);
+        assert!(bp_flat.abs() < 1e-12, "band_power(flat) = {bp_flat}");
+
+        // A single-bin band [f0, f0] evaluates the periodogram once and scales by
+        // df, so it equals power(f0) * df exactly. power(0.2) = 400 -> 400*0.01 = 4.
+        let bp_single = band_power(&times, &values, 0.2, 0.2, 0.01);
+        assert!(
+            (bp_single - 4.0).abs() < 1e-7,
+            "single-bin band_power {bp_single}"
+        );
+
+        // An inverted band (f_lo > f_hi) integrates nothing -> 0.
+        assert_eq!(band_power(&times, &values, 0.30, 0.10, 0.005), 0.0);
+    }
+
+    #[test]
+    fn lf_hf_requires_at_least_four_intervals() {
+        // Too few intervals to estimate the spectrum -> all zeros (not NaN/Inf).
+        assert_eq!(lf_hf(&[0.8, 0.9, 0.85]), (0.0, 0.0, 0.0));
+        // With no high-frequency power the ratio saturates to +inf rather than
+        // dividing by zero: a constant tachogram has zero power in every band.
+        let (lf, hf, ratio) = lf_hf(&[0.8; 64]);
+        assert!(lf.abs() < 1e-12 && hf.abs() < 1e-12, "lf {lf} hf {hf}");
+        assert!(ratio.is_infinite() && ratio > 0.0, "ratio {ratio}");
+    }
 }
