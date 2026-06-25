@@ -95,7 +95,7 @@ impl Kernel {
             {
                 let dx = x as f64 - half as f64;
                 let dy = y as f64 - half as f64;
-                let val = -((dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp();
+                let val = (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp();
                 data[y * size + x] = val;
                 sum += val;
             }
@@ -118,6 +118,7 @@ impl Kernel {
 /// Apply 2D convolution with a kernel to an image.
 pub fn convolve2d(image: &Image, kernel: &Kernel) -> Image {
     let mut out = Image::new(image.width, image.height);
+    let half = kernel.size / 2;
 
     for y in 0..image.height
     {
@@ -128,11 +129,14 @@ pub fn convolve2d(image: &Image, kernel: &Kernel) -> Image {
             {
                 for kx in 0..kernel.size
                 {
-                    let ix = x + kx;
-                    let iy = y + ky;
-                    if ix < image.width && iy < image.height
+                    let ix = x as isize + kx as isize - half as isize;
+                    let iy = y as isize + ky as isize - half as isize;
+                    if ix >= 0
+                        && iy >= 0
+                        && (ix as usize) < image.width
+                        && (iy as usize) < image.height
                     {
-                        sum += image.get(ix, iy) * kernel.get(kx, ky);
+                        sum += image.get(ix as usize, iy as usize) * kernel.get(kx, ky);
                     }
                 }
             }
@@ -388,9 +392,12 @@ fn region_sum(image: &Image, x: usize, y: usize, w: usize, h: usize) -> f64 {
     {
         for dx in 0..w
         {
-            let px = (x + dx).min(image.width - 1);
-            let py = (y + dy).min(image.height - 1);
-            sum += image.get(px, py);
+            let px = x + dx;
+            let py = y + dy;
+            if px < image.width && py < image.height
+            {
+                sum += image.get(px, py);
+            }
         }
     }
     sum
@@ -825,19 +832,75 @@ mod tests {
 
     #[test]
     fn test_convolve2d() {
-        let img = test_image();
-        let kernel = Kernel::sobel_x();
-        let result = convolve2d(&img, &kernel);
+        // Convolving an impulse with the Laplacian kernel reproduces the kernel,
+        // centered on the impulse location.
+        let mut img = Image::new(5, 5);
+        img.set(2, 2, 1.0);
+        let result = convolve2d(&img, &Kernel::laplacian());
         assert_eq!(result.width, img.width);
         assert_eq!(result.height, img.height);
+        assert_eq!(result.get(2, 2), -4.0);
+        assert_eq!(result.get(1, 2), 1.0);
+        assert_eq!(result.get(3, 2), 1.0);
+        assert_eq!(result.get(2, 1), 1.0);
+        assert_eq!(result.get(2, 3), 1.0);
+        // Everything else must be zero.
+        for y in 0..5
+        {
+            for x in 0..5
+            {
+                let on_cross = (x == 2 && y == 2)
+                    || (x == 1 && y == 2)
+                    || (x == 3 && y == 2)
+                    || (x == 2 && y == 1)
+                    || (x == 2 && y == 3);
+                if !on_cross
+                {
+                    assert_eq!(result.get(x, y), 0.0, "expected 0 at ({}, {})", x, y);
+                }
+            }
+        }
     }
 
     #[test]
     fn test_max_pool2d() {
-        let img = test_image();
+        // 4x4 image, 1..=16 row-major, pool 2x2 -> max of each block.
+        let data: Vec<f64> = (1..=16).map(|v| v as f64).collect();
+        let img = Image::from_vec(4, 4, data);
         let pooled = max_pool2d(&img, 2);
-        assert_eq!(pooled.width, 4);
-        assert_eq!(pooled.height, 4);
+        assert_eq!(pooled.width, 2);
+        assert_eq!(pooled.height, 2);
+        assert_eq!(pooled.get(0, 0), 6.0); // max(1,2,5,6)
+        assert_eq!(pooled.get(1, 0), 8.0); // max(3,4,7,8)
+        assert_eq!(pooled.get(0, 1), 14.0); // max(9,10,13,14)
+        assert_eq!(pooled.get(1, 1), 16.0); // max(11,12,15,16)
+    }
+
+    #[test]
+    fn test_avg_pool2d() {
+        let data: Vec<f64> = (1..=16).map(|v| v as f64).collect();
+        let img = Image::from_vec(4, 4, data);
+        let pooled = avg_pool2d(&img, 2);
+        assert_eq!(pooled.width, 2);
+        assert_eq!(pooled.height, 2);
+        assert_eq!(pooled.get(0, 0), 3.5); // mean(1,2,5,6)
+        assert_eq!(pooled.get(1, 0), 5.5); // mean(3,4,7,8)
+        assert_eq!(pooled.get(0, 1), 11.5); // mean(9,10,13,14)
+        assert_eq!(pooled.get(1, 1), 13.5); // mean(11,12,15,16)
+    }
+
+    #[test]
+    fn test_sigmoid() {
+        let img = Image::from_vec(2, 2, vec![0.0, 100.0, -100.0, 0.0]);
+        let result = sigmoid(&img);
+        assert!((result.get(0, 0) - 0.5).abs() < 1e-12);
+        assert!((result.get(1, 1) - 0.5).abs() < 1e-12);
+        assert!((result.get(1, 0) - 1.0).abs() < 1e-12); // sigmoid(100) ≈ 1
+        assert!(result.get(0, 1).abs() < 1e-12); // sigmoid(-100) ≈ 0
+        for &v in &result.data
+        {
+            assert!(v > 0.0 && v <= 1.0);
+        }
     }
 
     #[test]
@@ -868,14 +931,20 @@ mod tests {
 
     #[test]
     fn test_lbp() {
-        let img = test_image();
-        let code = lbp(&img, 3, 3);
-        // LBP returns u8 (0-255), just verify it doesn't panic
-        let _ = code;
+        // Center (1,1)=0.5; only neighbor index 0 (-1,-1)=(0,0) and index 7 (1,1)=(2,2)
+        // are >= center. Bits 1<<0 and 1<<7 => 0b1000_0001 = 129.
+        let mut img = Image::new(3, 3);
+        img.set(1, 1, 0.5);
+        img.set(0, 0, 1.0);
+        img.set(2, 2, 1.0);
+        let code = lbp(&img, 1, 1);
+        assert_eq!(code, 0b1000_0001);
+        assert_eq!(code, 129);
     }
 
     #[test]
     fn test_haar_feature() {
+        // Block-diagonal 1s: tl=4, br=4, tr=0, bl=0 => tl+br-tr-bl = 8.0.
         let img = Image::from_vec(
             4,
             4,
@@ -884,7 +953,7 @@ mod tests {
             ],
         );
         let f = haar_feature(&img, 0, 0, 4, 4, HaarFeature::FourRectangle);
-        assert!(f.abs() > 0.0);
+        assert_eq!(f, 8.0);
     }
 
     #[test]
@@ -907,8 +976,9 @@ mod tests {
             class_id: 0,
             class_name: "a".into(),
         };
+        // Intersection 5x5=25; union 100+100-25=175; IoU = 25/175 = 1/7.
         let iou = b1.iou(&b2);
-        assert!(iou > 0.0 && iou < 1.0);
+        assert!((iou - 25.0 / 175.0).abs() < 1e-12);
     }
 
     #[test]
@@ -948,11 +1018,15 @@ mod tests {
 
     #[test]
     fn test_template_match() {
+        // Template's only nonzero pixel is its top-left; placing it so the image's
+        // (5,5)=1.0 aligns with the template top-left => best match at (5,5) with SSD 0.
         let mut image = Image::new(10, 10);
         image.set(5, 5, 1.0);
         let template = Image::from_vec(2, 2, vec![1.0, 0.0, 0.0, 0.0]);
         let results = template_match(&image, &template);
         assert!(!results.is_empty());
+        assert_eq!(results[0], (5, 5, 0.0));
+        assert_eq!(match_template_best(&image, &template), Some((5, 5, 0.0)));
     }
 
     #[test]
@@ -964,28 +1038,25 @@ mod tests {
 
     #[test]
     fn test_otsu() {
-        let mut img = Image::new(100, 100);
-        for y in 0..100
+        // 100 pixels: 40 at 0.0, 20 at 100.0, 40 at 255.0. min=0, max=255 => bin(v)=v.
+        // Between-class variance is maximized at the bin that splits the two dominant
+        // clusters {0} and {255}; the middle level 100 falls on the threshold => 100.0.
+        let mut data = vec![0.0; 100];
+        for v in data.iter_mut().take(40)
         {
-            for x in 0..100
-            {
-                if x < 50
-                {
-                    img.set(x, y, 50.0);
-                }
-                else
-                {
-                    img.set(x, y, 200.0);
-                }
-            }
+            *v = 0.0;
         }
+        for v in data.iter_mut().skip(40).take(20)
+        {
+            *v = 100.0;
+        }
+        for v in data.iter_mut().skip(60).take(40)
+        {
+            *v = 255.0;
+        }
+        let img = Image::from_vec(10, 10, data);
         let t = otsu_threshold(&img);
-        // Otsu should find a threshold between the two classes (50 and 200)
-        assert!(
-            (50.0..=200.0).contains(&t),
-            "Otsu threshold {} should be between 50 and 200",
-            t
-        );
+        assert_eq!(t, 100.0);
     }
 
     #[test]
@@ -1012,11 +1083,43 @@ mod tests {
         let edges = canny(&img, 0.1, 0.3);
         assert_eq!(edges.width, 20);
         assert_eq!(edges.height, 20);
+        // A strong vertical edge must produce at least one detected edge pixel
+        // near the drawn line (column 10). After Gaussian blur the gradient peaks
+        // on the two sides of the line, so check the columns around it.
+        let mut found = false;
+        for y in 1..19
+        {
+            for x in 8..=12
+            {
+                if edges.get(x, y) == 1.0
+                {
+                    found = true;
+                }
+            }
+        }
+        assert!(found, "canny should detect an edge near the vertical line");
     }
 
     #[test]
     fn test_gaussian_kernel() {
         let k = Kernel::gaussian(1.0);
+        let sum: f64 = k.data.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gaussian_center_is_peak() {
+        // A 2D Gaussian is maximal and positive at its center, decreasing with radius.
+        let k = Kernel::gaussian(1.0);
+        let half = k.size / 2;
+        let center = k.get(half, half);
+        assert!(center > 0.0);
+        assert!(center > k.get(0, 0)); // center exceeds corner
+        for &v in &k.data
+        {
+            assert!(v > 0.0); // all weights positive
+            assert!(center >= v); // center is the maximum
+        }
         let sum: f64 = k.data.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
     }

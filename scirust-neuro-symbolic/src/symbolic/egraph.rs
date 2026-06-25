@@ -30,7 +30,6 @@ pub enum ENode {
 pub struct EClass {
     pub id: usize,
     pub nodes: HashSet<ENode>,
-    pub parents: HashSet<(ENode, usize)>,
 }
 
 impl EGraph {
@@ -123,10 +122,6 @@ impl EGraph {
             for n in class_a.nodes
             {
                 class_b.nodes.insert(n);
-            }
-            for p in class_a.parents
-            {
-                class_b.parents.insert(p);
             }
         }
     }
@@ -236,5 +231,19 @@ mod tests {
         eg.union(x, y);
         eg.rebuild();
         assert!(eg.equivalent(fx, fy), "congruence: x≡y ⇒ sin(x)≡sin(y)");
+    }
+
+    #[test]
+    fn find_resolves_to_canonical_root() {
+        // union sets uf[a] = b, so after union(x, y) the root of x is y's class.
+        let mut eg = EGraph::new();
+        let x = eg.add_expr(&Expr::Var("x".into()));
+        let y = eg.add_expr(&Expr::Var("y".into()));
+        eg.union(x, y);
+        let root = eg.find(y);
+        // find on the non-root id x must resolve to the same canonical root.
+        assert_eq!(eg.find(x), root);
+        // The union direction makes y the root.
+        assert_eq!(root, y);
     }
 }

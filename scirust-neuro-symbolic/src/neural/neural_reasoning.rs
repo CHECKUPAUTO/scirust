@@ -34,12 +34,20 @@ impl Reasoner for DifferentiableLogicLayer {
 }
 
 impl DifferentiableReasoner for DifferentiableLogicLayer {
+    /// Combine all input tensors with the fuzzy-AND (product T-norm) semantics,
+    /// folding left-to-right: `forward([a, b, c]) = fuzzy_and(fuzzy_and(a, b), c)`.
+    /// The result therefore depends on every input, unlike a passthrough.
     fn forward(&self, inputs: &[Tensor]) -> Result<Tensor> {
         if inputs.is_empty()
         {
             return Err(crate::core::ReasoningError::Neural("No inputs".to_string()));
         }
-        Ok(inputs[0].clone())
+        let mut acc = inputs[0].clone();
+        for t in &inputs[1..]
+        {
+            acc = self.fuzzy_and(&acc, t);
+        }
+        Ok(acc)
     }
 }
 
@@ -63,5 +71,28 @@ mod tests {
 
         let or_res = layer.fuzzy_or(&a, &b);
         assert_eq!(or_res.data[0], 0.75);
+    }
+
+    #[test]
+    fn forward_folds_inputs_with_fuzzy_and() {
+        let layer = DifferentiableLogicLayer::new("AndLayer");
+        let a = Tensor::from_vec(vec![0.5], 1, 1);
+        let b = Tensor::from_vec(vec![0.5], 1, 1);
+        // forward([a, b]) = fuzzy_and(a, b) = 0.5 * 0.5 = 0.25 (depends on b).
+        let out = layer.forward(&[a.clone(), b]).unwrap();
+        assert!((out.data[0] - 0.25).abs() < 1e-6, "got {}", out.data[0]);
+
+        // Three inputs: 0.5 * 0.5 * 0.5 = 0.125.
+        let c = Tensor::from_vec(vec![0.5], 1, 1);
+        let d = Tensor::from_vec(vec![0.5], 1, 1);
+        let e = Tensor::from_vec(vec![0.5], 1, 1);
+        let out3 = layer.forward(&[c, d, e]).unwrap();
+        assert!((out3.data[0] - 0.125).abs() < 1e-6, "got {}", out3.data[0]);
+    }
+
+    #[test]
+    fn forward_rejects_empty_inputs() {
+        let layer = DifferentiableLogicLayer::new("AndLayer");
+        assert!(layer.forward(&[]).is_err());
     }
 }

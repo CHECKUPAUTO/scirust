@@ -239,42 +239,59 @@ impl LinearChainCRF {
         let t = observations.len();
         let n = self.n_tags;
         let cache = FeatureCache::new(observations, n, self.n_features, features);
-        let (log_alpha, log_beta, _ll) = self.forward_backward(observations, features);
+        let (log_alpha, log_beta, log_z) = self.forward_backward(observations, features);
 
         let mut grad = vec![0.0; self.n_features];
 
-        // Expected features: sum_t sum_prev sum_cur P(prev,cur|x) * f(prev,cur,x_t)
+        // Model expectation of features:
+        //   E[f_k] = sum_step sum_prev sum_cur P(prev@step-1, cur@step | x) * f_k(prev,cur,x_step)
+        // For step == 0 this reduces to the node/start marginal P(cur@0 | x) with the
+        // start "prev" index pinned to 0 (matching the feature-cache start convention).
+        // The single global log-partition `log_z` is the correct normalizer for every
+        // edge/node marginal.
         for step in 0..t
         {
-            let mut denom = NEG_INF;
-            for i in 0..n
-            {
-                denom = log_sum_exp(denom, log_alpha[step * n + i] + log_beta[step * n + i]);
-            }
             for prev in 0..n
             {
                 for cur in 0..n
                 {
-                    let log_prob = log_alpha[step * n + prev]
-                        + cache.dot(&self.weights, step, prev, cur)
-                        + log_beta[(if step + 1 < t { step + 1 } else { step }) * n + cur]
-                        - denom;
-                    if log_prob > NEG_INF + 10.0
+                    // Forward variable feeding into `step`: alpha at step-1 for step>=1,
+                    // and the start potential alpha[0][cur] for step==0.
+                    let log_forward = if step == 0
                     {
-                        let prob = log_prob.exp();
-                        let base = step * n * n * self.n_features
-                            + prev * n * self.n_features
-                            + cur * self.n_features;
-                        for k in 0..self.n_features
+                        // Only the start row (prev index 0) carries probability mass at
+                        // step 0; other prev rows are spurious duplicates of the same
+                        // node marginal, so skip them.
+                        if prev != 0
                         {
-                            grad[k] -= prob * cache.data[base + k];
+                            continue;
                         }
+                        log_alpha[cur]
+                    }
+                    else
+                    {
+                        log_alpha[(step - 1) * n + prev] + cache.dot(&self.weights, step, prev, cur)
+                    };
+
+                    let log_prob = log_forward + log_beta[step * n + cur] - log_z;
+                    let prob = log_prob.exp();
+                    if prob == 0.0
+                    {
+                        continue;
+                    }
+                    let base = step * n * n * self.n_features
+                        + prev * n * self.n_features
+                        + cur * self.n_features;
+                    for k in 0..self.n_features
+                    {
+                        grad[k] += prob * cache.data[base + k];
                     }
                 }
             }
         }
 
-        // Gold features: sum_t f(gold_{t-1}, gold_t, x_t)
+        // Empirical (gold) features: sum_step f(gold_{step-1}, gold_step, x_step).
+        // Gradient of the NLL is E_model[f] - empirical[f].
         let mut prev_tag = None;
         for (step, &cur) in gold_tags.iter().enumerate()
         {
@@ -283,7 +300,7 @@ impl LinearChainCRF {
                 + cur * self.n_features;
             for k in 0..self.n_features
             {
-                grad[k] += cache.data[base + k];
+                grad[k] -= cache.data[base + k];
             }
             prev_tag = Some(cur);
         }
@@ -351,5 +368,67 @@ mod tests {
         let gold = vec![0, 1, 2];
         let g = crf.gradient(&obs, &gold, &features);
         assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn crf_gradient_matches_finite_difference() {
+        let features = toy_features();
+        let mut crf = LinearChainCRF::new(3, 2);
+        crf.weights = vec![0.3, 0.5];
+        let obs = vec![0, 1, 2];
+        let gold = vec![0, 1, 2];
+
+        let analytic = crf.gradient(&obs, &gold, &features);
+
+        // Central finite-difference of the NLL.
+        let eps = 1e-6;
+        let mut numeric = [0.0; 2];
+        for (k, slot) in numeric.iter_mut().enumerate()
+        {
+            let mut wp = crf.clone();
+            wp.weights[k] += eps;
+            let mut wm = crf.clone();
+            wm.weights[k] -= eps;
+            let fp = wp.nll(&obs, &gold, &features);
+            let fm = wm.nll(&obs, &gold, &features);
+            *slot = (fp - fm) / (2.0 * eps);
+        }
+
+        // Independently hand-derived expected gradient.
+        let expected = [0.781_401_928_5, -1.672_873_397_2];
+        for k in 0..2
+        {
+            assert!(
+                (analytic[k] - numeric[k]).abs() < 1e-4,
+                "analytic vs numeric mismatch at {}: {} vs {}",
+                k,
+                analytic[k],
+                numeric[k]
+            );
+            assert!(
+                (analytic[k] - expected[k]).abs() < 1e-4,
+                "analytic vs expected mismatch at {}: {} vs {}",
+                k,
+                analytic[k],
+                expected[k]
+            );
+        }
+    }
+
+    #[test]
+    fn crf_nll_zero_weights_equals_log_num_paths() {
+        let features = toy_features();
+        // Default weights are all zero.
+        let crf = LinearChainCRF::new(3, 2);
+        let obs = vec![0, 1, 2];
+        let gold = vec![0, 1, 2];
+        let loss = crf.nll(&obs, &gold, &features);
+        let expected = 27.0f64.ln();
+        assert!(
+            (loss - expected).abs() < 1e-9,
+            "nll={} expected={}",
+            loss,
+            expected
+        );
     }
 }

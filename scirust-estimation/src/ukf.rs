@@ -250,6 +250,47 @@ mod tests {
     }
 
     #[test]
+    fn ukf_linear_equals_kalman_with_custom_params() {
+        // For a linear f and h the UKF is algebraically identical to the KF.
+        // n=1, alpha=0.5, kappa=0: lambda = 0.5^2*(1+0)-1 = -0.75, c = 0.25.
+        // predict (identity, q=0): mean=0, P = 1.0.
+        // update z=4: S = P+r = 2, K = P/S = 0.5, x = 0 + 0.5*4 = 2.0,
+        //   P = P - K*S*K = 1 - 0.5*2*0.5 = 0.5.
+        let mut ukf = Ukf::new(
+            vec![0.0],
+            Mat::new(1, 1, vec![1.0]),
+            Mat::new(1, 1, vec![0.0]),
+            Mat::new(1, 1, vec![1.0]),
+        )
+        .with_params(0.5, 2.0, 0.0);
+        ukf.predict(|x| x.to_vec());
+        ukf.update(&[4.0], |x| x.to_vec());
+        assert!((ukf.state()[0] - 2.0).abs() < 1e-9);
+        assert!((ukf.covariance().get(0, 0) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ukf_covariance_stays_psd_under_confident_measurements() {
+        // Regression guard: confident measurements (tiny r) on a CV model must
+        // not drive any variance negative.
+        let dt = 1.0;
+        let f_mat = Mat::new(2, 2, vec![1.0, dt, 0.0, 1.0]);
+        let f = move |x: &[f64]| f_mat.matvec(x);
+        let h = |x: &[f64]| vec![x[0]];
+        let q = Mat::diag(&[1e-9, 1e-9]);
+        let r = Mat::new(1, 1, vec![1e-8]);
+        let p0 = Mat::diag(&[1e6, 1e6]);
+        let mut ukf = Ukf::new(vec![0.0, 0.0], p0, q, r);
+        for k in 0..50
+        {
+            assert!(ukf.predict(&f));
+            assert!(ukf.update(&[k as f64], h));
+            assert!(ukf.covariance().get(0, 0) >= -1e-9);
+            assert!(ukf.covariance().get(1, 1) >= -1e-9);
+        }
+    }
+
+    #[test]
     fn cholesky_factorizes_spd() {
         let a = Mat::new(3, 3, vec![4.0, 2.0, 0.6, 2.0, 5.0, 1.0, 0.6, 1.0, 3.0]);
         let l = a.cholesky().expect("spd");

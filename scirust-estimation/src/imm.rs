@@ -209,6 +209,31 @@ mod tests {
     }
 
     #[test]
+    fn imm_single_model_step_matches_scalar_kalman() {
+        // Single mode reduces IMM to a scalar KF.
+        // predict: xp=0, pp = a*p*a + q = 1.
+        // update z=4: y = 4-0 = 4, s = h*pp*h + r = 1+1 = 2, K = pp*h/s = 1/2,
+        //   x = 0 + 0.5*4 = 2.0. estimate = mu0*x = 1*2.0 = 2.0.
+        // With one mode the normalized mode prob is always 1.0.
+        let m = ImmModel {
+            a: Mat::new(1, 1, vec![1.0]),
+            q: Mat::new(1, 1, vec![0.0]),
+            h: Mat::new(1, 1, vec![1.0]),
+            r: Mat::new(1, 1, vec![1.0]),
+        };
+        let mut imm = Imm::new(
+            vec![m],
+            vec![0.0],
+            Mat::new(1, 1, vec![1.0]),
+            vec![1.0],
+            vec![vec![1.0]],
+        );
+        imm.step(4.0);
+        assert!((imm.estimate()[0] - 2.0).abs() < 1e-12);
+        assert!((imm.mode_probabilities()[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn mode_probability_shifts_to_the_maneuver_model() {
         let dt = 1.0;
         // Mode 0: quiet CV (low Q). Mode 1: agile (high Q) for maneuvers.

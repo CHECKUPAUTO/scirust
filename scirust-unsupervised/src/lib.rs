@@ -26,21 +26,9 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn norm2(a: &[f64]) -> f64 {
     a.iter().map(|x| x * x).sum::<f64>().sqrt()
-}
-
-#[allow(dead_code)]
-fn normalize(a: &mut [f64]) {
-    let n = norm2(a);
-    if n > 0.0
-    {
-        for v in a.iter_mut()
-        {
-            *v /= n;
-        }
-    }
 }
 
 fn sigmoid(x: f64) -> f64 {
@@ -399,8 +387,7 @@ impl IsolationForest {
             return 0.0;
         }
         let n_f = n as f64;
-        2.0 * ((n_f - 1.0).ln() / std::f64::consts::LN_2 + 0.577_215_664_9)
-            - (2.0 * (n_f - 1.0) / n_f)
+        2.0 * ((n_f - 1.0).ln() + 0.577_215_664_9) - (2.0 * (n_f - 1.0) / n_f)
     }
 
     /// Fit the isolation forest on the dataset.
@@ -655,7 +642,7 @@ impl LocalOutlierFactor {
     }
 
     /// Local reachability density of point i.
-    fn lrd(_k_distances: &[f64], reachability: &[Vec<f64>], idx: usize) -> f64 {
+    fn lrd(reachability: &[Vec<f64>], idx: usize) -> f64 {
         let rd = &reachability[idx];
         if rd.is_empty()
         {
@@ -677,12 +664,12 @@ impl LocalOutlierFactor {
         {
             return Vec::new();
         }
-        let (k_distances, k_neighbors, reachability) = self.compute_distances(data);
+        let (_k_distances, k_neighbors, reachability) = self.compute_distances(data);
 
         let mut lrds = vec![0.0_f64; n];
         for i in 0..n
         {
-            lrds[i] = Self::lrd(&k_distances, &reachability, i);
+            lrds[i] = Self::lrd(&reachability, i);
         }
 
         let mut lof_scores = vec![1.0_f64; n];
@@ -1048,6 +1035,9 @@ impl OneClassSvm {
         let k = self.kernel_matrix(data);
         let mut alphas = vec![0.0_f64; n];
 
+        // Box-constraint upper bound for the nu-OCSVM dual: 0 <= alpha_i <= 1/(nu*n).
+        let upper = 1.0 / (nu * n as f64);
+
         // Initialize: set a fraction to 1/nu*n to represent support vectors
         let mut indices: Vec<usize> = (0..n).collect();
         rng.shuffle(&mut indices);
@@ -1070,7 +1060,7 @@ impl OneClassSvm {
                 let error = f_i - self.rho;
 
                 if (alphas[i] > 1e-8 && error < -self.config.tolerance)
-                    || (alphas[i] < nu / n as f64 + 1e-8 && error > self.config.tolerance)
+                    || (alphas[i] < upper + 1e-8 && error > self.config.tolerance)
                 {
                     // Find j with maximum |error_i - error_j|
                     let mut best_j = (i + 1) % n;
@@ -1109,8 +1099,7 @@ impl OneClassSvm {
                     let mut new_alpha_i = alphas[i] + (error - err_j) / eta;
                     let mut new_alpha_j = alphas[best_j] - (error - err_j) / eta;
 
-                    // Clip to [0, 1/n] for one-class
-                    let upper = 1.0 / n as f64;
+                    // Clip to [0, 1/(nu*n)] for one-class.
                     new_alpha_i = new_alpha_i.max(0.0).min(upper);
                     new_alpha_j = new_alpha_j.max(0.0).min(upper);
 
@@ -1126,12 +1115,23 @@ impl OneClassSvm {
                 }
             }
 
+            // Enforce the dual equality constraint sum(alpha) = 1. Box clipping
+            // during the joint update can perturb the sum, so renormalize.
+            let alpha_sum: f64 = alphas.iter().sum();
+            if alpha_sum > 1e-12
+            {
+                for a in alphas.iter_mut()
+                {
+                    *a /= alpha_sum;
+                }
+            }
+
             // Update rho
             let mut rho_sum = 0.0;
             let mut rho_count = 0;
             for i in 0..n
             {
-                if alphas[i] > 1e-8 && alphas[i] < nu / n as f64 - 1e-8
+                if alphas[i] > 1e-8 && alphas[i] < upper - 1e-8
                 {
                     let f_i: f64 = alphas.iter().enumerate().map(|(j, &a)| a * k[i][j]).sum();
                     rho_sum += f_i;
@@ -1332,9 +1332,30 @@ mod tests {
         let data = simple_2d_data();
         iforest.fit(&data);
 
-        let anomalies = iforest.detect_anomalies(&data, 0.6);
-        // Points at (5,5) cluster should have higher scores
+        // The (5,5) cluster (indices 6..10) is the planted outlier group; the
+        // dense (1,1) cluster (indices 0..6) is the inlier group. Anomaly scores
+        // are normalized as 2^(-avg_path / c(n)), so the planted outliers must
+        // score strictly above the inliers. We assert this relative ordering
+        // rather than a fixed threshold (which depends on the exact c(n) scale).
+        let scores = iforest.anomaly_scores(&data);
+        let max_inlier = scores[0..6].iter().cloned().fold(f64::MIN, f64::max);
+        let mean_outlier = scores[6..10].iter().sum::<f64>() / 4.0;
+        assert!(
+            mean_outlier > max_inlier,
+            "planted outliers should score above inliers: mean_outlier={} max_inlier={}",
+            mean_outlier,
+            max_inlier
+        );
+
+        // Detection with a threshold midway between the two groups must flag at
+        // least one of the planted outliers.
+        let threshold = (max_inlier + mean_outlier) / 2.0;
+        let anomalies = iforest.detect_anomalies(&data, threshold);
         assert!(!anomalies.is_empty(), "should detect at least one anomaly");
+        assert!(
+            anomalies.iter().any(|&i| (6..10).contains(&i)),
+            "a detected anomaly should be in the planted outlier group"
+        );
     }
 
     #[test]
@@ -1769,5 +1790,107 @@ mod tests {
         {
             assert_eq!(rng1.next_u64(), rng2.next_u64());
         }
+    }
+
+    // ---- Oracle tests (closed-form expected values) ----
+
+    #[test]
+    fn test_autoencoder_encode_of_zero_is_half() {
+        // encode returns sigmoid(dot(w,x)+b). For x = all-zeros, dot(w,0)=0 and
+        // the encoder bias is initialized to zeros, so each pre-activation is
+        // exactly 0 and sigmoid(0)=0.5 regardless of the random weights.
+        let config = AutoencoderConfig {
+            input_dim: 3,
+            hidden_dim: 2,
+            learning_rate: 0.1,
+            epochs: 0,
+        };
+        let ae = Autoencoder::new(config);
+        let hidden = ae.encode(&[0.0, 0.0, 0.0]);
+        assert_eq!(hidden.len(), 2);
+        for &h in &hidden
+        {
+            assert!((h - 0.5).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn test_gmm_single_component_fits_sample_mean_and_variance() {
+        // With k=1 every responsibility is exactly 1, so the M-step yields the
+        // population mean [1,1] and population variance [1,1]. The single-Gaussian
+        // log-likelihood of the four points is -11.351508265637381.
+        let config = GmmConfig {
+            n_components: 1,
+            max_iterations: 10,
+            tolerance: 1e-12,
+            seed: 42,
+        };
+        let mut gmm = GaussianMixtureModel::new(config);
+        let data = vec![
+            vec![0.0, 0.0],
+            vec![2.0, 0.0],
+            vec![0.0, 2.0],
+            vec![2.0, 2.0],
+        ];
+        gmm.fit(&data);
+        assert_eq!(gmm.components.len(), 1);
+        let comp = &gmm.components[0];
+        assert!((comp.mean[0] - 1.0).abs() < 1e-9);
+        assert!((comp.mean[1] - 1.0).abs() < 1e-9);
+        assert!((comp.variance[0] - 1.0).abs() < 1e-9);
+        assert!((comp.variance[1] - 1.0).abs() < 1e-9);
+        assert!((comp.weight - 1.0).abs() < 1e-12);
+        assert!((gmm.score(&data) - (-11.351508265637381)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_iforest_c_normalization_value() {
+        // c(n) = 2*(ln(n-1)+gamma) - 2*(n-1)/n. These are the canonical
+        // isolation-forest normalization constants.
+        assert!((IsolationForest::c(256) - 10.244770920116851).abs() < 1e-3);
+        assert!((IsolationForest::c(8) - 3.2962516279106264).abs() < 1e-3);
+        assert!((IsolationForest::c(5) - 2.327020052039781).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_dbscan_two_separated_pairs_exact_labels() {
+        // Points 0,1 are 0.1 apart (<= eps) and form cluster 1; points 2,3 are
+        // 0.1 apart and form cluster 2. The two pairs are ~7.07 apart so they
+        // never merge. Processing order 0..3 assigns cluster ids 1 then 2.
+        let config = DbscanConfig {
+            eps: 0.5,
+            min_pts: 2,
+        };
+        let dbscan = Dbscan::new(config);
+        let data = vec![
+            vec![0.0, 0.0],
+            vec![0.1, 0.0],
+            vec![5.0, 5.0],
+            vec![5.0, 5.1],
+        ];
+        let result = dbscan.fit(&data);
+        assert_eq!(result.n_clusters, 2);
+        assert_eq!(result.labels, vec![1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn test_one_class_svm_decision_at_support_vector() {
+        // decision_function(x) = sum_i alpha_i * rbf(x, sv_i) - rho. With a single
+        // support vector sv=[0,0], alpha=1, gamma=1 (bandwidth=1) and rho=0:
+        //   x=[0,0]: rbf=exp(0)=1 => decision = 1.0
+        //   x=[1,0]: rbf=exp(-1)=0.36787944117144233 => decision = 0.36787944117144233
+        let config = OneClassSvmConfig {
+            kernel_bandwidth: 1.0,
+            nu: 0.1,
+            max_iterations: 0,
+            tolerance: 1e-6,
+            seed: 42,
+        };
+        let mut svm = OneClassSvm::new(config);
+        svm.support_vectors = vec![vec![0.0, 0.0]];
+        svm.alphas = vec![1.0];
+        svm.rho = 0.0;
+        assert!((svm.decision_function(&[0.0, 0.0]) - 1.0).abs() < 1e-12);
+        assert!((svm.decision_function(&[1.0, 0.0]) - 0.36787944117144233).abs() < 1e-12);
     }
 }

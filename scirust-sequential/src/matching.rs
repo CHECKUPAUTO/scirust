@@ -201,10 +201,20 @@ pub fn dynamic_time_warping(seq1: &[f64], seq2: &[f64], step_size: Option<usize>
 
     for i in 1..=n
     {
-        let j_start = step_size
-            .map(|s| if i > s { i - s } else { 1 })
-            .unwrap_or(1);
-        let j_end = step_size.map(|s| i.saturating_add(s).min(m)).unwrap_or(m);
+        // Sakoe-Chiba band centered on the warping diagonal scaled by the length
+        // ratio, so that for unequal lengths the band still contains a feasible path
+        // reaching (n, m) instead of spuriously leaving every (n, m) cell at INFINITY.
+        let (j_start, j_end) = match step_size
+        {
+            Some(s) =>
+            {
+                let center = ((i * m + n / 2) / n).max(1).min(m);
+                let start = center.saturating_sub(s).max(1);
+                let end = center.saturating_add(s).min(m);
+                (start, end)
+            },
+            None => (1, m),
+        };
 
         for j in j_start..=j_end
         {
@@ -344,6 +354,32 @@ mod tests {
         assert_eq!(lcs.len(), longest_common_subsequence_len(&s1, &s2));
     }
 
+    /// Returns true if `sub` appears in order (not necessarily contiguous) within `seq`.
+    fn is_subsequence(sub: &[usize], seq: &[usize]) -> bool {
+        let mut it = seq.iter();
+        sub.iter().all(|x| it.any(|y| y == x))
+    }
+
+    #[test]
+    fn lcs_returns_actual_subsequence_values() {
+        let s1 = vec![1, 2, 3, 4, 5];
+        let s2 = vec![2, 4, 5, 1, 3];
+        let lcs = longest_common_subsequence(&s1, &s2);
+        assert_eq!(lcs.len(), 3);
+        assert!(
+            is_subsequence(&lcs, &s1),
+            "{:?} not a subsequence of {:?}",
+            lcs,
+            s1
+        );
+        assert!(
+            is_subsequence(&lcs, &s2),
+            "{:?} not a subsequence of {:?}",
+            lcs,
+            s2
+        );
+    }
+
     #[test]
     fn dtw_identical() {
         let seq = vec![1.0, 2.0, 3.0, 4.0];
@@ -369,6 +405,37 @@ mod tests {
         assert_eq!(path.first(), Some(&(0, 0)));
         assert_eq!(path.last(), Some(&(2, 2)));
         assert!(path.len() >= 3);
+    }
+
+    #[test]
+    fn dtw_with_path_exact_distance() {
+        let s1 = vec![1.0, 2.0, 3.0];
+        let s2 = vec![1.0, 3.0, 5.0];
+        let (dist, path) = dynamic_time_warping_with_path(&s1, &s2);
+        let expected = 5.0f64.sqrt();
+        assert!(
+            (dist - expected).abs() < 1e-10,
+            "dist={} expected={}",
+            dist,
+            expected
+        );
+        assert_eq!(path.first(), Some(&(0, 0)));
+        assert_eq!(path.last(), Some(&(2, 2)));
+    }
+
+    #[test]
+    fn dtw_banded_unequal_lengths_reaches_corner() {
+        // Optimal unconstrained DTW is 0 (every element of seq1 matches a 0 or the
+        // trailing 1 in seq2). A length-adaptive band must still reach dp[n][m].
+        let s1 = vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let s2 = vec![0.0, 1.0];
+        let banded = dynamic_time_warping(&s1, &s2, Some(1));
+        assert!(
+            banded.is_finite(),
+            "banded DTW returned non-finite: {}",
+            banded
+        );
+        assert!((banded - 0.0).abs() < 1e-10, "banded={}", banded);
     }
 
     #[test]

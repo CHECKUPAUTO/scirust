@@ -4,10 +4,14 @@ use scirust_symbolic::Expr;
 /// Symbolic regression via **multivariate linear least squares**.
 ///
 /// Fits `y ≈ b0 + b1·x0 + b2·x1 + …` by solving the normal equations and returns
-/// the model as a symbolic [`Expr`] over variables `x0, x1, …`. For non-linear,
-/// structure-discovering search (genetic programming with gradient-fit
-/// constants), see the dedicated `scirust-symreg` crate.
+/// the model as a symbolic [`Expr`] over variables `x0, x1, …` — *all* supplied
+/// input columns are fit. For non-linear, structure-discovering search (genetic
+/// programming with gradient-fit constants), see the dedicated `scirust-symreg`
+/// crate.
 pub struct NeuralSymbolicRegression {
+    /// Maximum number of input features (columns) the model will fit. Fitting
+    /// data with more columns than this budget is rejected with an error rather
+    /// than silently dropping dimensions.
     max_complexity: usize,
 }
 
@@ -24,7 +28,14 @@ impl NeuralSymbolicRegression {
                 "empty or mismatched training data".into(),
             ));
         }
-        let n_features = x[0].len().min(self.max_complexity.max(1));
+        let n_features = x[0].len();
+        if n_features > self.max_complexity.max(1)
+        {
+            return Err(ReasoningError::Symbolic(format!(
+                "input has {n_features} features but max_complexity is {}",
+                self.max_complexity
+            )));
+        }
         let p = n_features + 1; // + intercept
 
         // Normal equations: (AᵀA) b = Aᵀy
@@ -136,5 +147,35 @@ mod tests {
     fn rejects_empty_data() {
         let reg = NeuralSymbolicRegression::new(2);
         assert!(reg.fit(&[], &[]).is_err());
+    }
+
+    #[test]
+    fn regression_recovers_two_feature_plane() {
+        // Data lie exactly on y = 1 + 2*x0 + 5*x1.
+        let x = vec![
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+            vec![0.0, 1.0],
+            vec![1.0, 1.0],
+        ];
+        let y = vec![1.0, 3.0, 6.0, 8.0];
+        let reg = NeuralSymbolicRegression::new(4);
+        let expr = reg.fit(&x, &y).unwrap();
+
+        let mut vars = HashMap::new();
+        vars.insert("x0".to_string(), 2.0);
+        vars.insert("x1".to_string(), 3.0);
+        let pred = scirust_symbolic::eval(&expr, &vars).unwrap();
+        // 1 + 2*2 + 5*3 = 20
+        assert!((pred - 20.0).abs() < 1e-6, "expected ~20, got {pred}");
+    }
+
+    #[test]
+    fn rejects_more_features_than_budget() {
+        // 2 input columns but a budget of 1 ⇒ explicit error, not silent drop.
+        let reg = NeuralSymbolicRegression::new(1);
+        let x = vec![vec![0.0, 0.0], vec![1.0, 1.0]];
+        let y = vec![0.0, 2.0];
+        assert!(reg.fit(&x, &y).is_err());
     }
 }

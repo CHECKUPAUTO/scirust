@@ -153,12 +153,11 @@ scirust-opcua = {{ path = "../scirust-opcua" }}
 scirust-mqtt = {{ path = "../scirust-mqtt" }}
 serde_json = "1"
 
-# Uncomment for real OPC-UA backend:
-# scirust-integration = {{ path = "../scirust-integration", features = ["real-opcua"] }}
+# Real OPC-UA / MQTT transport backends are not implemented in
+# scirust-integration; only the simulated backend is available. Wiring a real
+# backend means adding e.g. the `opcua` or `rumqttc` crate and implementing the
+# OpcuaClient / MqttPublisher traits yourself.
 # opcua = "0.13"
-
-# Uncomment for real MQTT backend:
-# scirust-integration = {{ path = "../scirust-integration", features = ["real-mqtt"] }}
 # rumqttc = "0.24"
 "#,
         name = project_name
@@ -375,11 +374,9 @@ fn generate_readme(project_name: &str, kind: TemplateKind) -> String {
 # Run with simulated data (default)
 cargo run
 
-# Run with real OPC-UA backend (requires feature flag)
-# 1. Edit Cargo.toml to enable real-opcua feature
-# 2. Edit config.json to set backend_type to "opcua"
-# 3. Set endpoint to your PLC address
-cargo run
+# Real OPC-UA / MQTT transport backends are not implemented in
+# scirust-integration. To talk to a real PLC or broker you must implement the
+# OpcuaClient / MqttPublisher traits against a real transport crate.
 ```
 
 ## Configuration
@@ -485,8 +482,9 @@ mod tests {
             .iter()
             .find(|t| t.filename == "Cargo.toml")
             .unwrap();
-        assert!(cargo.content.contains("real-opcua"));
-        assert!(cargo.content.contains("real-mqtt"));
+        // Real backends are not implemented; the generated manifest documents
+        // the transport crates a user would need to wire one up themselves.
+        assert!(cargo.content.contains("not implemented"));
         assert!(cargo.content.contains("opcua"));
         assert!(cargo.content.contains("rumqttc"));
     }

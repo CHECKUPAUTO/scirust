@@ -38,14 +38,6 @@ impl Matrix {
         }
     }
 
-    pub fn get(&self, r: usize, c: usize) -> f64 {
-        self.data[r][c]
-    }
-
-    pub fn set(&mut self, r: usize, c: usize, v: f64) {
-        self.data[r][c] = v;
-    }
-
     /// Transpose.
     pub fn transpose(&self) -> Self {
         let mut t = Matrix::zeros(self.cols, self.rows);
@@ -141,24 +133,9 @@ impl Matrix {
         cov
     }
 
-    /// Extract a sub-matrix by row indices.
-    pub fn select_rows(&self, indices: &[usize]) -> Self {
-        let mut out = Matrix::zeros(indices.len(), self.cols);
-        for (oi, &ri) in indices.iter().enumerate()
-        {
-            out.data[oi] = self.data[ri].clone();
-        }
-        out
-    }
-
     /// Extract a single column as a Vec.
     pub fn col(&self, j: usize) -> Vec<f64> {
         (0..self.rows).map(|i| self.data[i][j]).collect()
-    }
-
-    /// Sum of all elements.
-    pub fn sum(&self) -> f64 {
-        self.data.iter().flat_map(|r| r.iter()).sum()
     }
 
     /// Frobenius norm.
@@ -363,9 +340,11 @@ fn jacobi_eigen(a: &Matrix) -> (Vec<f64>, Vec<Vec<f64>>) {
 
         // Compute rotation angle
         let diff = s.data[q][q] - s.data[p][p];
-        let t = if s.data[p][p].abs() < 1e-15
+        let t = if diff.abs() < 1e-15
         {
-            1.0
+            // Equal diagonals: tau == 0, the rotation is exactly 45 degrees.
+            // The sign matches the off-diagonal pivot convention.
+            if s.data[p][q] >= 0.0 { 1.0 } else { -1.0 }
         }
         else
         {
@@ -1095,7 +1074,19 @@ fn invert_matrix(m: &Matrix) -> Matrix {
     lt_inv.mul(&l_inv)
 }
 
+/// Ridge added to a non-positive Cholesky pivot to keep a near-singular or
+/// rank-deficient covariance invertible. Applied to the pivot itself (a
+/// Tikhonov-style regularization of the diagonal), so the factorization stays
+/// numerically meaningful instead of fabricating a tiny constant factor.
+const CHOLESKY_RIDGE: f64 = 1e-8;
+
 /// Cholesky decomposition: returns lower triangular L such that M = L * L^T.
+///
+/// If a diagonal pivot is non-positive (the input is not strictly
+/// positive-definite, e.g. a singular or rank-deficient covariance), the pivot
+/// is regularized to [`CHOLESKY_RIDGE`] before taking the square root. This is a
+/// documented ridge fallback: it keeps the factor well-defined and the matrix
+/// invertible rather than silently propagating a meaningless value.
 fn cholesky(m: &Matrix) -> Matrix {
     let n = m.rows;
     let mut l = Matrix::zeros(n, n);
@@ -1112,7 +1103,17 @@ fn cholesky(m: &Matrix) -> Matrix {
             if i == j
             {
                 let val = m.data[i][i] - s;
-                l.data[i][j] = if val > 0.0 { val.sqrt() } else { 1e-10 };
+                // Keep the true factor for any strictly-positive pivot (including
+                // legitimately small ones); only regularize a non-positive pivot,
+                // which signals the input is not positive-definite.
+                l.data[i][j] = if val > 0.0
+                {
+                    val.sqrt()
+                }
+                else
+                {
+                    CHOLESKY_RIDGE.sqrt()
+                };
             }
             else
             {
@@ -1309,10 +1310,8 @@ pub fn cca_fit(x: &Matrix, y: &Matrix, n_components: usize) -> CcaResult {
     // Solve generalized eigenproblem:
     // Sigma_xx^{-1} * Sigma_xy * Sigma_yy^{-1} * Sigma_yx * w = lambda * w
     let a = inv_xx.mul(&sigma_xy).mul(&inv_yy).mul(&sigma_yx);
-    let b = inv_yy.mul(&sigma_yx).mul(&inv_xx).mul(&sigma_xy);
 
     let (evals_a, evecs_a) = jacobi_eigen(&a);
-    let (evals_b, evecs_b) = jacobi_eigen(&b);
 
     // Sort by eigenvalue descending
     let mut indices_a: Vec<usize> = (0..p1).collect();
@@ -1326,25 +1325,27 @@ pub fn cca_fit(x: &Matrix, y: &Matrix, n_components: usize) -> CcaResult {
     {
         let r = evals_a[idx].clamp(0.0, 1.0).sqrt();
         correlations.push(r);
-        weights_x.push(evecs_a[idx].clone());
-    }
+        let w_x = evecs_a[idx].clone();
 
-    // Derive weights_y from weights_x: w_y = Sigma_yy^{-1} * Sigma_yx * w_x / lambda
-    let mut indices_b: Vec<usize> = (0..p2).collect();
-    indices_b.sort_by(|&i, &j| evals_b[j].partial_cmp(&evals_b[i]).unwrap());
-
-    for (ci, &idx_a) in indices_a.iter().take(nc).enumerate()
-    {
-        let lambda = evals_a[idx_a];
-        if lambda > 1e-12 && ci < indices_b.len()
+        // Derive weights_y from weights_x: w_y ∝ Sigma_yy^{-1} * Sigma_yx * w_x.
+        // This pairs the y-direction with the same canonical direction as w_x
+        // (consistent sign and index), unlike solving a separate eigenproblem
+        // whose eigenvectors have arbitrary sign/order.
+        let mut w_y = inv_yy.mul(&sigma_yx).mul_vec(&w_x);
+        let norm = w_y.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm > 1e-12
         {
-            let idx_b = indices_b[ci];
-            weights_y.push(evecs_b[idx_b].clone());
+            for v in &mut w_y
+            {
+                *v /= norm;
+            }
         }
         else
         {
-            weights_y.push(vec![0.0; p2]);
+            w_y = vec![0.0; p2];
         }
+        weights_x.push(w_x);
+        weights_y.push(w_y);
     }
 
     CcaResult {
@@ -1844,5 +1845,186 @@ mod tests {
         assert_eq!(result.coordinates.len(), 3);
         // Stress should be reasonable
         assert!(result.stress < 0.5);
+    }
+
+    // ── Oracle tests (hand-derived expected values) ──
+
+    #[test]
+    fn jacobi_eigen_nonzero_offdiag_with_zero_diagonal() {
+        // B = [[0,2],[2,3]]: char poly λ² - 3λ - 4 = (λ-4)(λ+1) → {4, -1}.
+        // The zero (0,0) diagonal must NOT force a 45° rotation; with the
+        // off-diagonal pivot present the correct rotation gives t = 0.5.
+        let b = Matrix::from_slice(&[&[0.0, 2.0], &[2.0, 3.0]]);
+        let (mut evals, _) = jacobi_eigen(&b);
+        evals.sort_by(|a, c| c.partial_cmp(a).unwrap());
+        assert!(
+            (evals[0] - 4.0).abs() < 1e-9,
+            "top eigenvalue: {}",
+            evals[0]
+        );
+        assert!(
+            (evals[1] - (-1.0)).abs() < 1e-9,
+            "second eigenvalue: {}",
+            evals[1]
+        );
+    }
+
+    #[test]
+    fn matrix_mul_vec_known() {
+        let m = Matrix::from_slice(&[&[1.0, 2.0], &[3.0, 4.0]]);
+        let v = m.mul_vec(&[1.0, 1.0]);
+        assert_eq!(v, vec![3.0, 7.0]);
+    }
+
+    #[test]
+    fn mahalanobis_distance_identity_cov() {
+        // d = sqrt(3² + 4²) = 5 with identity inverse-covariance.
+        let inv_cov = Matrix::from_slice(&[&[1.0, 0.0], &[0.0, 1.0]]);
+        let d = mahalanobis_distance(&[3.0, 4.0], &[0.0, 0.0], &inv_cov);
+        assert!((d - 5.0).abs() < 1e-12, "got {d}");
+    }
+
+    #[test]
+    fn mahalanobis_distance_diagonal_cov() {
+        // d² = 2·0.25·2 + 0 = 1 → d = 1 (a 2-unit step at std 2).
+        let inv_cov = Matrix::from_slice(&[&[0.25, 0.0], &[0.0, 1.0]]);
+        let d = mahalanobis_distance(&[2.0, 0.0], &[0.0, 0.0], &inv_cov);
+        assert!((d - 1.0).abs() < 1e-12, "got {d}");
+    }
+
+    #[test]
+    fn pca_known_2d_covariance_eigen() {
+        // Two perfectly correlated variables along (1,1).
+        // Centered cov = [[2,2],[2,2]] → eigenvalues {4, 0},
+        // top eigenvector ∝ (1/√2, 1/√2), variance ratio [1, 0].
+        let data = Matrix::from_slice(&[
+            &[-2.0, -2.0],
+            &[-1.0, -1.0],
+            &[0.0, 0.0],
+            &[1.0, 1.0],
+            &[2.0, 2.0],
+        ]);
+        let pca = pca_fit(&data);
+        assert!(
+            (pca.eigenvalues[0] - 4.0).abs() < 1e-9,
+            "top eigenvalue: {}",
+            pca.eigenvalues[0]
+        );
+        assert!(
+            pca.eigenvalues[1].abs() < 1e-9,
+            "second eigenvalue: {}",
+            pca.eigenvalues[1]
+        );
+        assert!((pca.explained_variance_ratio[0] - 1.0).abs() < 1e-9);
+        assert!(pca.explained_variance_ratio[1].abs() < 1e-9);
+        // Top eigenvector proportional to (1/√2, 1/√2) (sign-agnostic).
+        let inv_sqrt2 = 1.0 / 2.0_f64.sqrt();
+        let v0 = &pca.eigenvectors[0];
+        assert!(
+            (v0[0].abs() - inv_sqrt2).abs() < 1e-9 && (v0[1].abs() - inv_sqrt2).abs() < 1e-9,
+            "top eigenvector: {v0:?}"
+        );
+        assert!(
+            (v0[0] * v0[1]) > 0.0,
+            "eigenvector components must share sign: {v0:?}"
+        );
+    }
+
+    #[test]
+    fn classical_mds_equilateral_triangle() {
+        // Equilateral triangle, side 2: exactly embeddable in 2D → zero stress
+        // and all pairwise embedded distances = 2.
+        let dist = Matrix::from_slice(&[&[0.0, 2.0, 2.0], &[2.0, 0.0, 2.0], &[2.0, 2.0, 0.0]]);
+        let result = classical_mds(&dist, 2);
+        assert!(result.stress < 1e-9, "stress: {}", result.stress);
+        for i in 0..3
+        {
+            for j in (i + 1)..3
+            {
+                let mut d2 = 0.0;
+                for k in 0..2
+                {
+                    let diff = result.coordinates[i][k] - result.coordinates[j][k];
+                    d2 += diff * diff;
+                }
+                let d = d2.sqrt();
+                assert!((d - 2.0).abs() < 1e-6, "embedded dist [{i}][{j}] = {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn cca_perfect_linear_correlation() {
+        // Y = 2·X, both 5×1. Canonical correlation is exactly 1 and the
+        // canonical variates must be positively correlated (not anti-correlated).
+        let x = Matrix::from_slice(&[&[1.0], &[2.0], &[3.0], &[4.0], &[5.0]]);
+        let y = Matrix::from_slice(&[&[2.0], &[4.0], &[6.0], &[8.0], &[10.0]]);
+        let cca = cca_fit(&x, &y, 1);
+        assert!(
+            (cca.correlations[0] - 1.0).abs() < 1e-6,
+            "correlation: {}",
+            cca.correlations[0]
+        );
+        let (x_can, y_can) = cca_transform(&x, &y, &cca);
+        // Pearson correlation of the two canonical columns.
+        let xc: Vec<f64> = (0..5).map(|i| x_can.data[i][0]).collect();
+        let yc: Vec<f64> = (0..5).map(|i| y_can.data[i][0]).collect();
+        let mx = xc.iter().sum::<f64>() / 5.0;
+        let my = yc.iter().sum::<f64>() / 5.0;
+        let mut num = 0.0;
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        for i in 0..5
+        {
+            num += (xc[i] - mx) * (yc[i] - my);
+            dx += (xc[i] - mx).powi(2);
+            dy += (yc[i] - my).powi(2);
+        }
+        let corr = num / (dx.sqrt() * dy.sqrt());
+        assert!(
+            (corr - 1.0).abs() < 1e-6,
+            "canonical corr should be +1: {corr}"
+        );
+    }
+
+    #[test]
+    fn kmeans_two_separated_blobs_centroids() {
+        // Two obvious blobs of 3 points each; centroids (1/3,1/3) and (31/3,31/3),
+        // total inertia = 8/3 (each blob contributes 4/3).
+        let data = Matrix::from_slice(&[
+            &[0.0, 0.0],
+            &[0.0, 1.0],
+            &[1.0, 0.0],
+            &[10.0, 10.0],
+            &[10.0, 11.0],
+            &[11.0, 10.0],
+        ]);
+        let result = kmeans_fit(&data, 2, 100, 1e-9);
+        // First three and last three must be grouped together but separated.
+        assert_eq!(result.labels[0], result.labels[1]);
+        assert_eq!(result.labels[0], result.labels[2]);
+        assert_eq!(result.labels[3], result.labels[4]);
+        assert_eq!(result.labels[3], result.labels[5]);
+        assert_ne!(result.labels[0], result.labels[3]);
+        // Identify which centroid belongs to which blob (label swap tolerant).
+        let c_near = &result.centroids[result.labels[0]];
+        let c_far = &result.centroids[result.labels[3]];
+        assert!(
+            (c_near[0] - 1.0 / 3.0).abs() < 1e-9,
+            "near cx: {}",
+            c_near[0]
+        );
+        assert!(
+            (c_near[1] - 1.0 / 3.0).abs() < 1e-9,
+            "near cy: {}",
+            c_near[1]
+        );
+        assert!((c_far[0] - 31.0 / 3.0).abs() < 1e-9, "far cx: {}", c_far[0]);
+        assert!((c_far[1] - 31.0 / 3.0).abs() < 1e-9, "far cy: {}", c_far[1]);
+        assert!(
+            (result.inertia - 8.0 / 3.0).abs() < 1e-6,
+            "inertia: {}",
+            result.inertia
+        );
     }
 }

@@ -90,4 +90,21 @@ mod tests {
         let pl = ProbabilisticLogic::new(0.5);
         assert_eq!(pl.infer_probability("unknown").unwrap(), 0.0);
     }
+
+    #[test]
+    fn probabilistic_two_rules_noisy_or_and_threshold_false() {
+        let mut pl = ProbabilisticLogic::new(0.9);
+        pl.add_fact("x", 0.5);
+        pl.add_fact("y", 0.5);
+        pl.add_rule(vec!["x"], "e", 0.6);
+        pl.add_rule(vec!["y"], "e", 0.6);
+        pl.add_fact("e", 0.0);
+        // base P(e)=0 ⇒ complement = 1.0.
+        // rule1 = 0.6*0.5 = 0.3, rule2 = 0.6*0.5 = 0.3.
+        // complement = 1.0*(1-0.3)*(1-0.3) = 0.49 ⇒ P(e) = 0.51.
+        let p = pl.infer_probability("e").unwrap();
+        assert!((p - 0.51).abs() < 1e-9, "got {p}");
+        // 0.51 > 0.9 is false.
+        assert!(!pl.holds("e").unwrap());
+    }
 }

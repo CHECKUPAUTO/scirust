@@ -72,4 +72,18 @@ mod tests {
         assert_eq!(objects.len(), 1);
         assert_eq!(objects[0].0, "France");
     }
+
+    #[test]
+    fn kg_get_objects_returns_all_matches() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_triple("A", "likes", "B");
+        kg.add_triple("A", "likes", "C");
+        kg.add_triple("A", "hates", "D");
+        let objs = kg.get_objects("A", "likes");
+        assert_eq!(objs.len(), 2);
+        // triples is a HashSet, so sort before comparing.
+        let mut names: Vec<String> = objs.iter().map(|e| e.0.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec!["B".to_string(), "C".to_string()]);
+    }
 }

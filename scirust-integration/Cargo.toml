@@ -20,9 +20,7 @@ serde_json = "1"
 
 [features]
 default = ["simulated"]
-# Use simulated backends (no real PLC/broker needed)
+# Use simulated backends (no real PLC/broker needed). Real OPC-UA / MQTT
+# transport backends are not implemented in this crate; only the simulated
+# backend is available.
 simulated = []
-# Use real OPC-UA backend (requires opcua crate — add as dep when enabling)
-real-opcua = []
-# Use real MQTT backend (requires rumqttc crate — add as dep when enabling)
-real-mqtt = []

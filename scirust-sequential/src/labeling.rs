@@ -388,6 +388,16 @@ mod tests {
     }
 
     #[test]
+    fn needleman_wunsch_mismatch_gap_score() {
+        let seq1 = vec![1, 2, 3];
+        let seq2 = vec![1, 3];
+        let (a1, a2, score) = needleman_wunsch(&seq1, &seq2, 1.0, -1.0, -2.0);
+        assert!((score - 0.0).abs() < 1e-10, "score={}", score);
+        assert_eq!(a1, vec![Some(1), Some(2), Some(3)]);
+        assert_eq!(a2, vec![Some(1), None, Some(3)]);
+    }
+
+    #[test]
     fn edit_distance_identical() {
         assert_eq!(edit_distance(&[1, 2, 3], &[1, 2, 3]), 0);
     }

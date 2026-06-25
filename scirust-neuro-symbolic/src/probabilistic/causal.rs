@@ -6,6 +6,9 @@ use std::collections::{HashMap, HashSet};
 /// Pearl's `do(var = value)`: it severs the variable's incoming equation, fixes
 /// its value, and propagates the consequences downstream.
 pub struct CausalEngine {
+    /// Human-readable label for the model (e.g. `"X -> Z -> Y"`). Purely
+    /// descriptive: it plays no role in solving — the DAG structure comes
+    /// entirely from [`CausalEngine::add_equation`].
     pub graph_desc: String,
     /// node -> (intercept, [(parent, coefficient)])
     equations: HashMap<String, (f64, Vec<(String, f64)>)>,
@@ -115,5 +118,15 @@ mod tests {
         let v = e.intervene("Z", 100.0).unwrap();
         assert_eq!(v["Z"], 100.0);
         assert_eq!(v["Y"], 301.0);
+    }
+
+    #[test]
+    fn causal_evaluate_observational_baseline() {
+        // No intervention: exogenous X defaults to 0 ⇒ Z = 2*0 = 0, Y = 1 + 3*0 = 1.
+        let e = chain();
+        let v = e.evaluate();
+        assert_eq!(v["X"], 0.0);
+        assert_eq!(v["Z"], 0.0);
+        assert_eq!(v["Y"], 1.0);
     }
 }

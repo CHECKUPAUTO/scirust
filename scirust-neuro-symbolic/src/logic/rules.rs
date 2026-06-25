@@ -93,4 +93,15 @@ mod tests {
         re.add_rule("c", vec!["a", "b"]); // b unknown
         assert!(re.forward_chain().unwrap().is_empty());
     }
+
+    #[test]
+    fn rule_engine_forward_chain_derivation_order() {
+        // c is added before b, but c's body needs b, so b must be derived first.
+        let mut re = RuleEngine::new();
+        re.add_fact("a");
+        re.add_rule("c", vec!["a", "b"]);
+        re.add_rule("b", vec!["a"]);
+        let derived = re.forward_chain().unwrap();
+        assert_eq!(derived, vec!["b".to_string(), "c".to_string()]);
+    }
 }

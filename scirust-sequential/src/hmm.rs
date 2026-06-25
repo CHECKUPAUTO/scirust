@@ -268,7 +268,14 @@ impl HMM {
                 }
             }
 
-            self.log_pi[..n].copy_from_slice(&accum_pi[..n]);
+            // Normalize the accumulated initial-state mass into a valid probability
+            // distribution. Without this, multi-sequence training leaves sum_i pi_i
+            // equal to the number of sequences instead of 1.
+            let pi_norm = log_sum_exp_slice(&accum_pi);
+            for (dst, &acc) in self.log_pi.iter_mut().zip(accum_pi.iter())
+            {
+                *dst = acc - pi_norm;
+            }
 
             for i in 0..n
             {
@@ -388,5 +395,43 @@ mod tests {
         let obs = vec![0, 1, 2];
         let ll = hmm.log_probability(&obs);
         assert!((ll - hmm.forward(&obs).1).abs() < 1e-15);
+    }
+
+    #[test]
+    fn hmm_viterbi_exact_path_weather() {
+        let hmm = weather_hmm();
+        let obs = vec![0, 1, 2];
+        let (states, log_prob) = hmm.viterbi(&obs);
+        assert_eq!(states, vec![1, 0, 0]);
+        let expected = 0.00864f64.ln();
+        assert!(
+            (log_prob - expected).abs() < 1e-9,
+            "log_prob={} expected={}",
+            log_prob,
+            expected
+        );
+    }
+
+    #[test]
+    fn hmm_forward_exact_loglik_weather() {
+        let hmm = weather_hmm();
+        let obs = vec![0, 1, 2];
+        let (_, ll) = hmm.forward(&obs);
+        let expected = 0.02736f64.ln();
+        assert!(
+            (ll - expected).abs() < 1e-9,
+            "ll={} expected={}",
+            ll,
+            expected
+        );
+    }
+
+    #[test]
+    fn hmm_baum_welch_pi_is_normalized_multi_seq() {
+        let mut hmm = weather_hmm();
+        let seqs = vec![vec![0, 1, 2], vec![1, 0, 2]];
+        hmm.baum_welch(&seqs, 1, 1e-12);
+        let pi_sum: f64 = hmm.log_pi.iter().map(|&x| x.exp()).sum();
+        assert!((pi_sum - 1.0).abs() < 1e-9, "pi_sum={}", pi_sum);
     }
 }

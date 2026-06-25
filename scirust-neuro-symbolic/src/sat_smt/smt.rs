@@ -17,9 +17,8 @@ pub enum SmtExpr {
 /// This is intentionally narrow — it is *not* a general SMT solver — but it is a
 /// real, sound decision for the fragment it supports rather than a hardcoded
 /// answer. Unsupported shapes return an explicit error.
-pub struct SmtInterface {
-    pub solver_path: Option<String>,
-}
+#[derive(Default)]
+pub struct SmtInterface;
 
 /// Linear form: variable coefficients plus a constant term.
 struct Linear {
@@ -61,8 +60,8 @@ fn linearize(expr: &SmtExpr) -> Result<Linear> {
 }
 
 impl SmtInterface {
-    pub fn new(path: Option<String>) -> Self {
-        Self { solver_path: path }
+    pub fn new() -> Self {
+        Self
     }
 
     /// Decides satisfiability of a single linear equality constraint.
@@ -122,7 +121,7 @@ mod tests {
     #[test]
     fn satisfiable_equation_with_variable() {
         // x + 1 = 1  ⇒  x = 0  (SAT)
-        let smt = SmtInterface::new(None);
+        let smt = SmtInterface::new();
         let e = SmtExpr::Eq(Box::new(SmtExpr::Add(var("x"), cst(1.0))), cst(1.0));
         assert!(smt.check_sat(&e).unwrap());
     }
@@ -130,7 +129,7 @@ mod tests {
     #[test]
     fn contradictory_constants_are_unsat() {
         // 1 = 2 ⇒ UNSAT
-        let smt = SmtInterface::new(None);
+        let smt = SmtInterface::new();
         let e = SmtExpr::Eq(cst(1.0), cst(2.0));
         assert!(!smt.check_sat(&e).unwrap());
     }
@@ -138,14 +137,14 @@ mod tests {
     #[test]
     fn cancelling_variables_reduce_to_constants() {
         // x = x + 3  ⇒ 0 = 3 ⇒ UNSAT
-        let smt = SmtInterface::new(None);
+        let smt = SmtInterface::new();
         let e = SmtExpr::Eq(var("x"), Box::new(SmtExpr::Add(var("x"), cst(3.0))));
         assert!(!smt.check_sat(&e).unwrap());
     }
 
     #[test]
     fn non_equality_is_rejected_honestly() {
-        let smt = SmtInterface::new(None);
+        let smt = SmtInterface::new();
         assert!(smt.check_sat(&SmtExpr::Const(1.0)).is_err());
     }
 }

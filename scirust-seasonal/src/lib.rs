@@ -60,13 +60,6 @@ fn variance(data: &[f64]) -> f64 {
     data.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / data.len() as f64
 }
 
-/// Standard deviation.
-#[allow(dead_code)]
-#[inline]
-fn std_dev(data: &[f64]) -> f64 {
-    variance(data).sqrt()
-}
-
 /// Pad a centered array (shorter than n) to full length by repeating edge values.
 fn pad_centered(data: &mut Vec<f64>, target_len: usize) {
     let current_len = data.len();
@@ -90,6 +83,94 @@ fn pad_centered(data: &mut Vec<f64>, target_len: usize) {
     result.append(data);
     result.extend(right);
     *data = result;
+}
+
+/// Inverse of the standard normal CDF (quantile / probit), via Acklam's
+/// rational approximation. Accurate to ~1e-9 over the open interval (0, 1).
+fn inv_normal_cdf(p: f64) -> f64 {
+    if p <= 0.0
+    {
+        return f64::NEG_INFINITY;
+    }
+    if p >= 1.0
+    {
+        return f64::INFINITY;
+    }
+    // Coefficients for the rational approximation.
+    const A: [f64; 6] = [
+        -3.969683028665376e+01,
+        2.209460984245205e+02,
+        -2.759285104469687e+02,
+        1.38357751867269e+02,
+        -3.066479806614716e+01,
+        2.506628277459239e+00,
+    ];
+    const B: [f64; 5] = [
+        -5.447609879822406e+01,
+        1.615858368580409e+02,
+        -1.556989798598866e+02,
+        6.680131188771972e+01,
+        -1.328068155288572e+01,
+    ];
+    const C: [f64; 6] = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e+00,
+        -2.549732539343734e+00,
+        4.374664141464968e+00,
+        2.938163982698783e+00,
+    ];
+    const D: [f64; 4] = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e+00,
+        3.754408661907416e+00,
+    ];
+    const P_LOW: f64 = 0.02425;
+    const P_HIGH: f64 = 1.0 - P_LOW;
+
+    if p < P_LOW
+    {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    }
+    else if p <= P_HIGH
+    {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    }
+    else
+    {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    }
+}
+
+/// Two-sided Student-t critical value for confidence level `conf` (e.g. 0.95)
+/// with `df` degrees of freedom, via the Cornish-Fisher expansion in terms of
+/// the corresponding normal quantile. Accurate to a few parts in 1e-4 for df ≥ 2.
+fn t_critical(conf: f64, df: f64) -> f64 {
+    // Upper-tail probability of the two-sided interval: 1 - alpha/2.
+    let p = 0.5 + conf / 2.0;
+    let z = inv_normal_cdf(p);
+    if df <= 0.0 || !df.is_finite()
+    {
+        return z;
+    }
+    let z2 = z * z;
+    let z3 = z2 * z;
+    let z5 = z3 * z2;
+    let z7 = z5 * z2;
+    let z9 = z7 * z2;
+    let g1 = (z3 + z) / 4.0;
+    let g2 = (5.0 * z5 + 16.0 * z3 + 3.0 * z) / 96.0;
+    let g3 = (3.0 * z7 + 19.0 * z5 + 17.0 * z3 - 15.0 * z) / 384.0;
+    let g4 = (79.0 * z9 + 776.0 * z7 + 1482.0 * z5 - 1920.0 * z3 - 945.0 * z) / 92160.0;
+    z + g1 / df + g2 / df.powi(2) + g3 / df.powi(3) + g4 / df.powi(4)
 }
 
 /// Quantile of a sorted slice (linear interpolation).
@@ -149,6 +230,93 @@ fn centered_moving_average(data: &[f64], window: usize) -> Vec<f64> {
     // Even window: compute MA(window), then MA(2) of that
     let ma = moving_average(data, window);
     moving_average(&ma, 2)
+}
+
+/// Weighted running moving average of `window` size. Each window's value is the
+/// weighted mean of the points it covers; a window whose weights sum to zero
+/// falls back to the unweighted mean of that window.
+fn weighted_moving_average(data: &[f64], weights: &[f64], window: usize) -> Vec<f64> {
+    if window == 0 || data.is_empty()
+    {
+        return Vec::new();
+    }
+    let n = data.len();
+    if window > n
+    {
+        return vec![mean(data)];
+    }
+    let mut result = Vec::with_capacity(n - window + 1);
+    for start in 0..=n - window
+    {
+        let mut wsum = 0.0;
+        let mut vsum = 0.0;
+        let win = &data[start..start + window];
+        for (offset, &x) in win.iter().enumerate()
+        {
+            let w = weights.get(start + offset).copied().unwrap_or(1.0);
+            wsum += w;
+            vsum += w * x;
+        }
+        if wsum > f64::EPSILON
+        {
+            result.push(vsum / wsum);
+        }
+        else
+        {
+            result.push(win.iter().sum::<f64>() / window as f64);
+        }
+    }
+    result
+}
+
+/// Weighted centered moving average. For odd `window` this is a single weighted
+/// pass; for even `window` it averages two successive weighted passes to recenter.
+fn weighted_centered_moving_average(data: &[f64], weights: &[f64], window: usize) -> Vec<f64> {
+    if window == 0 || data.is_empty()
+    {
+        return Vec::new();
+    }
+    let n = data.len();
+    if window > n
+    {
+        return vec![mean(data)];
+    }
+    if window % 2 == 1
+    {
+        return weighted_moving_average(data, weights, window);
+    }
+    let ma = weighted_moving_average(data, weights, window);
+    moving_average(&ma, 2)
+}
+
+/// Bisquare (Tukey) robustness weights of a residual series:
+/// `w_i = (1 - (r_i / h)^2)^2` for `|r_i| < h`, else 0, with `h = 6 · MAD`.
+/// When all residuals are ~0 (`h ≈ 0`) every weight is 1.0.
+fn bisquare_weights(remainder: &[f64]) -> Vec<f64> {
+    let n = remainder.len();
+    let mut abs: Vec<f64> = remainder.iter().map(|r| r.abs()).collect();
+    abs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mad = quantile(&abs, 0.5);
+    let h = 6.0 * mad;
+    if h <= f64::EPSILON
+    {
+        return vec![1.0; n];
+    }
+    remainder
+        .iter()
+        .map(|&r| {
+            let u = (r / h).abs();
+            if u < 1.0
+            {
+                let t = 1.0 - u * u;
+                t * t
+            }
+            else
+            {
+                0.0
+            }
+        })
+        .collect()
 }
 
 /// Linear regression: returns (slope, intercept).
@@ -358,7 +526,10 @@ pub mod stl {
         let mut seasonal = vec![0.0; n];
         let mut remainder: Vec<f64> = data.to_vec();
 
-        for _outer in 0..=config.outer_iterations
+        // Robustness weights, all 1.0 on the first (non-robust) outer pass.
+        let mut robust_weights = vec![1.0; n];
+
+        for outer in 0..=config.outer_iterations
         {
             // Inner loop
             for _inner in 0..config.inner_iterations
@@ -370,10 +541,33 @@ pub mod stl {
                     .map(|(&y, &t)| y - t)
                     .collect();
 
-                // Step 2: Seasonal smoothing
+                // Step 2: Seasonal smoothing — smooth each cycle-subseries
+                // position-by-position and scatter the per-cycle smoothed values
+                // back to their original indices, yielding a full-length seasonal
+                // that may evolve cycle-to-cycle. Robustness weights down-weight
+                // outliers within each subseries.
                 let cycle_subseries = extract_cycle_subseries(&detrended, period);
-                let smoothed = smooth_cycle_subseries(&cycle_subseries, period, seasonal_window);
-                seasonal = reconstruct_seasonal(&smoothed, n, period);
+                let weight_subseries = extract_cycle_subseries(&robust_weights, period);
+                seasonal = smooth_cycle_subseries(
+                    &cycle_subseries,
+                    &weight_subseries,
+                    n,
+                    period,
+                    seasonal_window,
+                );
+
+                // Step 2b: Low-pass filter + detrend the seasonal. Smoothing each
+                // cycle-subseries lets trend leak into the seasonal (a ramped
+                // subseries is fit by a ramp, not a constant). Standard STL removes
+                // that leakage by subtracting a low-pass filter (a moving average of
+                // length `period`) of the seasonal, leaving a trend-free seasonal
+                // that may still evolve cycle-to-cycle.
+                let mut low_pass = centered_moving_average(&seasonal, period);
+                pad_centered(&mut low_pass, n);
+                for (s, &lp) in seasonal.iter_mut().zip(low_pass.iter())
+                {
+                    *s -= lp;
+                }
 
                 // Step 3: Deseasonalize
                 let deseasonalized: Vec<f64> = data
@@ -382,8 +576,12 @@ pub mod stl {
                     .map(|(&y, &s)| y - s)
                     .collect();
 
-                // Step 4: Trend smoothing
-                trend = centered_moving_average(&deseasonalized, trend_window);
+                // Step 4: Trend smoothing (robustness-weighted)
+                trend = weighted_centered_moving_average(
+                    &deseasonalized,
+                    &robust_weights,
+                    trend_window,
+                );
                 // Pad trend to full length
                 pad_centered(&mut trend, n);
             }
@@ -395,19 +593,12 @@ pub mod stl {
                 .map(|(&y, (&t, &s))| y - t - s)
                 .collect();
 
-            // Robustness weights (outer iterations)
-            if config.outer_iterations > 0
+            // Robustness weights for the NEXT outer iteration: bisquare weights of
+            // the residuals, w_i = (1 - (r_i / (6·MAD))^2)^2 for |r_i| < 6·MAD,
+            // else 0. These are fed back into the trend and seasonal smoothers.
+            if outer < config.outer_iterations
             {
-                let h = 6.0 * median_abs(&remainder);
-                for r in remainder.iter_mut()
-                {
-                    if r.abs() > h
-                    {
-                        *r = if *r > 0.0 { h } else { -h };
-                    }
-                }
-                // Re-weight the data for the next outer iteration
-                // In a full implementation, we'd re-derive trend from weighted data
+                robust_weights = bisquare_weights(&remainder);
             }
         }
 
@@ -431,44 +622,86 @@ pub mod stl {
         subseries
     }
 
-    /// Smooth each subseries with a moving average, then center.
-    fn smooth_cycle_subseries(subseries: &[Vec<f64>], period: usize, window: usize) -> Vec<f64> {
-        let mut smoothed = Vec::with_capacity(period);
-        for s in subseries.iter()
+    /// Smooth each cycle-subseries position-by-position and scatter the smoothed
+    /// values back to their original indices, producing a full-length seasonal of
+    /// length `n`. Each subseries (all values sharing a phase `i % period`) is
+    /// smoothed with a centered moving average of size `window`; the smoothed value
+    /// at cycle position `c` is written back to original index `c * period + phase`.
+    /// The result is then centered so each phase's subseries has mean zero, which
+    /// removes the trend/level contribution from the seasonal component.
+    fn smooth_cycle_subseries(
+        subseries: &[Vec<f64>],
+        weight_subseries: &[Vec<f64>],
+        n: usize,
+        period: usize,
+        window: usize,
+    ) -> Vec<f64> {
+        let mut seasonal = vec![0.0; n];
+        for (phase, s) in subseries.iter().enumerate()
         {
             if s.is_empty()
             {
-                smoothed.push(0.0);
                 continue;
             }
-            let ma = moving_average(s, window.min(s.len()));
-            // Use the centered value
-            let mid = ma.len() / 2;
-            smoothed.push(if ma.is_empty() { 0.0 } else { ma[mid] });
+            let weights = &weight_subseries[phase];
+            let smoothed = smooth_subseries_full(s, weights, window.min(s.len().max(1)));
+            // Scatter each smoothed value back to its original index. Do NOT center
+            // per-subseries here (that would erase the per-phase seasonal level);
+            // the seasonal is made trend-free by the caller's low-pass/detrend step.
+            for (cycle, &val) in smoothed.iter().enumerate()
+            {
+                let idx = cycle * period + phase;
+                if idx < n
+                {
+                    seasonal[idx] = val;
+                }
+            }
         }
-        // Center: subtract mean
-        let m = mean(&smoothed);
-        for v in smoothed.iter_mut()
-        {
-            *v -= m;
-        }
-        smoothed
+        seasonal
     }
 
-    /// Reconstruct full-length seasonal component from period-length smoothed values.
-    fn reconstruct_seasonal(smoothed: &[f64], n: usize, period: usize) -> Vec<f64> {
-        (0..n).map(|i| smoothed[i % period]).collect()
-    }
-
-    /// Median absolute deviation.
-    fn median_abs(data: &[f64]) -> f64 {
-        if data.is_empty()
+    /// Smooth a subseries to the SAME length as the input via a centered,
+    /// robustness-weighted moving average. Each output position is the weighted
+    /// mean of the `window` neighbors centered on it; near the ends the window
+    /// shrinks symmetrically so every position stays centered on available data.
+    fn smooth_subseries_full(s: &[f64], weights: &[f64], window: usize) -> Vec<f64> {
+        let len = s.len();
+        if len == 0
         {
-            return 0.0;
+            return Vec::new();
         }
-        let mut sorted: Vec<f64> = data.iter().map(|x| x.abs()).collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        quantile(&sorted, 0.5)
+        if window <= 1
+        {
+            return s.to_vec();
+        }
+        let half = window / 2;
+        (0..len)
+            .map(|i| {
+                // Symmetric half-width limited by both ends keeps the window
+                // centered on `i` even at the boundaries.
+                let reach = half.min(i).min(len - 1 - i);
+                let lo = i - reach;
+                let hi = i + reach;
+                let mut wsum = 0.0;
+                let mut vsum = 0.0;
+                for (offset, &x) in s[lo..=hi].iter().enumerate()
+                {
+                    let w = weights.get(lo + offset).copied().unwrap_or(1.0);
+                    wsum += w;
+                    vsum += w * x;
+                }
+                if wsum > f64::EPSILON
+                {
+                    vsum / wsum
+                }
+                else
+                {
+                    // All neighbors had zero robustness weight: fall back to the
+                    // unweighted center value.
+                    s[i]
+                }
+            })
+            .collect()
     }
 
     /// Extract trend component from STL result.
@@ -708,8 +941,9 @@ pub mod detection {
             };
         }
 
-        // Skip DC (bin 0), only look at positive frequencies up to Nyquist
-        let nyquist = power.len() / 2;
+        // Skip DC (bin 0), only look at positive frequencies up to Nyquist.
+        // fft_real returns fft_size/2 + 1 bins, so the true Nyquist bin is the last one.
+        let nyquist = power.len() - 1;
         let mut candidates: Vec<(usize, f64)> = (1..=nyquist.min(power.len() - 1))
             .map(|k| (k, power[k]))
             .collect();
@@ -868,6 +1102,31 @@ pub mod detection {
             (0..n)
                 .map(|i| (2.0 * std::f64::consts::PI * i as f64 / period as f64).sin())
                 .collect()
+        }
+
+        #[test]
+        fn acf_exact_lag1() {
+            // data = [1,2,3,4]; mean=2.5, centered=[-1.5,-0.5,0.5,1.5].
+            // var = Σc² = 5.0. The crate normalizes the autocovariance by Σc².
+            let data = [1.0, 2.0, 3.0, 4.0];
+            let a = acf(&data, 3);
+            assert!((a[0] - 1.0).abs() < 1e-12, "acf[0]={}", a[0]);
+            assert!((a[1] - 0.25).abs() < 1e-12, "acf[1]={}", a[1]);
+            assert!((a[2] - (-0.30)).abs() < 1e-12, "acf[2]={}", a[2]);
+            assert!((a[3] - (-0.45)).abs() < 1e-12, "acf[3]={}", a[3]);
+        }
+
+        #[test]
+        fn dominant_frequency_high_freq_not_missed() {
+            // A pure period-3 sine has its spectral peak at FFT bin round(256/3)=85.
+            // fft_real yields 129 bins; the true Nyquist is bin 128, so bin 85 is a
+            // valid positive-frequency component. The previous nyquist=len/2≈64 bound
+            // excluded it. 1/(85/256)=3.01 → period 3.
+            let data: Vec<f64> = (0..256)
+                .map(|i| (2.0 * std::f64::consts::PI * i as f64 / 3.0).sin())
+                .collect();
+            let result = dominant_frequency(&data);
+            assert_eq!(result.period, 3, "expected period 3, got {}", result.period);
         }
 
         #[test]
@@ -1168,7 +1427,9 @@ pub mod cyclic {
             cos_sum += val * angle.cos();
         }
 
-        let phase = sin_sum.atan2(cos_sum);
+        // The DFT convention is X_k = Σ x·(cos − i·sin), so the spectral phase is
+        // atan2(Im, Re) = atan2(−sin_sum, cos_sum). This matches detect_phase_fft.
+        let phase = (-sin_sum).atan2(cos_sum);
         // Normalize to [0, 2π)
         if phase < 0.0
         {
@@ -1268,6 +1529,33 @@ pub mod cyclic {
                 "expected ~{}, got {}",
                 period,
                 est
+            );
+        }
+
+        #[test]
+        fn detect_phase_matches_fft_sign() {
+            // For real x, X_k = Σ x·(cos − i·sin); for a pure sine Re≈0,
+            // Im = −Σsin² < 0, so atan2(Im, Re) = −π/2, normalized to 3π/2.
+            // detect_phase must agree with the DFT-based detect_phase_fft.
+            let n = 128;
+            let period = 32;
+            let data: Vec<f64> = (0..n)
+                .map(|i| (2.0 * std::f64::consts::PI * i as f64 / period as f64).sin())
+                .collect();
+            let phase = detect_phase(&data, period);
+            let expected = 3.0 * std::f64::consts::PI / 2.0; // ≈ 4.7124
+            assert!(
+                (phase - expected).abs() < 0.2,
+                "expected phase ~3π/2≈4.7124, got {}",
+                phase
+            );
+            // Sibling FFT-based implementation must give the same sign/value.
+            let phase_fft = detect_phase_fft(&data, period);
+            assert!(
+                (phase - phase_fft).abs() < 0.2,
+                "detect_phase ({}) and detect_phase_fft ({}) disagree",
+                phase,
+                phase_fft
             );
         }
 
@@ -1412,35 +1700,30 @@ pub mod adjustment {
                 }
             }
 
-            // Step 5: Smooth seasonal factors with 3×period MA
-            let smooth_window = 3 * period;
-            if smooth_window < n
+            // Step 5: Smooth the seasonal factors ACROSS cycles, per phase. Each
+            // phase's run of factors (positions phase, phase+period, …) is smoothed
+            // with a short moving average so the seasonal can evolve slowly while
+            // keeping every value aligned to its own phase. (The previous
+            // implementation smoothed the interleaved full-length series with a
+            // 3×period window and carried values forward across gaps, which mixed
+            // and misaligned phases and left the seasonal in the adjusted series.)
+            let smooth_cycles = 3;
+            for phase in 0..period
             {
-                let smoothed = moving_average(&seasonal, smooth_window);
-                let mut seasonal_smooth = vec![0.0; n];
-                // Map smoothed back to seasonal positions
-                for (i, &s) in smoothed.iter().enumerate()
+                let idxs: Vec<usize> = (phase..n).step_by(period).collect();
+                if idxs.len() < 2
                 {
-                    let base_idx = i + smooth_window / 2;
-                    if base_idx < n
-                    {
-                        seasonal_smooth[base_idx] = s;
-                    }
+                    continue;
                 }
-                // Fill gaps with nearest
-                let mut last = 0.0;
-                for s in seasonal_smooth.iter_mut()
+                let phase_series: Vec<f64> = idxs.iter().map(|&i| seasonal[i]).collect();
+                let win = smooth_cycles.min(phase_series.len());
+                let ma = moving_average(&phase_series, win);
+                let half = win / 2;
+                for (k, &i) in idxs.iter().enumerate()
                 {
-                    if *s == 0.0
-                    {
-                        *s = last;
-                    }
-                    else
-                    {
-                        last = *s;
-                    }
+                    let j = k.saturating_sub(half).min(ma.len() - 1);
+                    seasonal[i] = ma[j];
                 }
-                seasonal = seasonal_smooth;
             }
 
             // Step 6: Deseasonalize
@@ -1617,6 +1900,34 @@ pub mod adjustment {
         }
 
         #[test]
+        fn x11_removes_seasonal_to_constant() {
+            // data[i] = 100*(1 + 0.2 sin(2πi/12)) = const-trend(100) * seasonal.
+            // A correct multiplicative X-11 removes the seasonal factor, returning
+            // ~100 everywhere; residual variance must be small. The original series
+            // has seasonal variance ≈ (100*0.2)²/2 = 200.
+            let period = 12;
+            let n = 240;
+            let data: Vec<f64> = (0..n)
+                .map(|i| 100.0 * (1.0 + 0.2 * (2.0 * std::f64::consts::PI * i as f64 / 12.0).sin()))
+                .collect();
+            let original_var = variance(&data);
+            assert!(
+                original_var > 100.0,
+                "sanity: original seasonal variance should be large, got {}",
+                original_var
+            );
+            let adjusted = x11_adjustment(&data, period);
+            // Interior points only (edges of the MA-based trend are unreliable).
+            let interior = &adjusted[period..n - period];
+            let adj_var = variance(interior);
+            assert!(
+                adj_var < 1.0,
+                "X-11 should drive seasonal variance to ~0, got {}",
+                adj_var
+            );
+        }
+
+        #[test]
         fn deseasonalize_removes_seasonal() {
             let period = 12;
             let n = 240;
@@ -1750,16 +2061,15 @@ pub mod trend {
             0.0
         };
 
-        // t-distribution critical value (approximation for df = n-2)
+        // Student-t 0.975 critical value for a 95% CI with df = n - 2, via the
+        // Cornish-Fisher expansion (accurate for df >= 2).
         let t_crit = if n > 2
         {
-            // Approximate t critical value for 95% CI
-            let df = n as f64 - 2.0;
-            1.96 + 1.0 / df // rough approximation
+            t_critical(0.95, n as f64 - 2.0)
         }
         else
         {
-            1.96
+            t_critical(0.95, 1.0)
         };
 
         let ci_lower = slope - t_crit * se_slope;
@@ -1897,6 +2207,52 @@ pub mod trend {
             // CUSUM should increase after index 50
             assert!(cs[99] > cs[49], "CUSUM should detect the shift");
         }
+
+        #[test]
+        fn mann_kendall_exact_small_sample() {
+            // data = [1,2,3,4,5]: all C(5,2)=10 pairs are concordant increasing,
+            // so S = 10. var_s = 5·4·15/18 = 16.6667, sqrt ≈ 4.0825.
+            // Z = (S−1)/sqrt(var_s) = 9/4.0825 ≈ 2.2045.
+            // p = 2·(1−Φ(2.2045)) ≈ 0.0275.
+            let data = [1.0, 2.0, 3.0, 4.0, 5.0];
+            let (s, z, p) = mann_kendall(&data);
+            assert!((s - 10.0).abs() < 1e-12, "S={}", s);
+            assert!((z - 2.2045).abs() < 0.01, "Z={}", z);
+            assert!((p - 0.0275).abs() < 0.005, "p={}", p);
+        }
+
+        #[test]
+        fn sens_slope_median_of_pairwise() {
+            // data = [1,5,2,8] at x=0,1,2,3. Pairwise slopes (data[j]-data[i])/(j-i):
+            // 4, 0.5, 2.3333, -3, 1.5, 6 → sorted [-3, 0.5, 1.5, 2.3333, 4, 6].
+            // Linear-interpolated median: (1.5 + 2.3333)/2 = 1.91667.
+            let data = [1.0, 5.0, 2.0, 8.0];
+            let slope = sens_slope(&data);
+            assert!(
+                (slope - 1.916_666_666_666_666_5).abs() < 1e-9,
+                "Sen's slope={}",
+                slope
+            );
+        }
+
+        #[test]
+        fn cusum_exact_values() {
+            // data = [1,2,3,4], mean=2.5. Deviations: -1.5,-0.5,0.5,1.5.
+            // Cumulative: [-1.5, -2.0, -1.5, 0.0]; the closing 0.0 is invariant.
+            let data = [1.0, 2.0, 3.0, 4.0];
+            let cs = cusum(&data);
+            let expected = [-1.5, -2.0, -1.5, 0.0];
+            for (i, (&got, &want)) in cs.iter().zip(expected.iter()).enumerate()
+            {
+                assert!(
+                    (got - want).abs() < 1e-12,
+                    "cusum[{}]={} want {}",
+                    i,
+                    got,
+                    want
+                );
+            }
+        }
     }
 }
 
@@ -1905,6 +2261,27 @@ pub mod changepoint {
     //! seasonal break detection.
 
     use super::*;
+
+    /// Mean of each phase `i % period` over a series; returns a `period`-length
+    /// vector. Empty phases are 0.0.
+    fn phase_means(series: &[f64], period: usize) -> Vec<f64> {
+        let mut sums = vec![0.0; period];
+        let mut counts = vec![0usize; period];
+        for (i, &v) in series.iter().enumerate()
+        {
+            let p = i % period;
+            sums[p] += v;
+            counts[p] += 1;
+        }
+        for p in 0..period
+        {
+            if counts[p] > 0
+            {
+                sums[p] /= counts[p] as f64;
+            }
+        }
+        sums
+    }
 
     /// Seasonal CUSUM (Cumulative Sum) control chart.
     ///
@@ -2011,6 +2388,16 @@ pub mod changepoint {
         // Deseasonalize first
         let adjusted = super::adjustment::deseasonalize(data, period, true);
 
+        // Seasonal component (additive): the part removed by deseasonalizing.
+        // Averaged per phase so each change point can report the seasonal shift
+        // at its phase, mirroring `seasonal_cusum`.
+        let seasonal: Vec<f64> = data
+            .iter()
+            .zip(adjusted.iter())
+            .map(|(&y, &a)| y - a)
+            .collect();
+        let phase_seasonal = phase_means(&seasonal, period);
+
         let mut change_points = Vec::new();
         let mut last_cp = 0usize;
 
@@ -2051,15 +2438,27 @@ pub mod changepoint {
                 0.0
             };
 
-            // Combined criterion: significant mean shift or variance change
-            let critical_t = 1.96 + significance; // rough threshold
+            // Combined criterion: significant mean shift or variance change.
+            // `significance` is the two-sided alpha level; convert it to a
+            // Student-t critical value with df = (n_left - 1) + (n_right - 1).
+            // A non-positive alpha falls back to the conventional 0.05 level.
+            let alpha = if significance > 0.0 && significance < 1.0
+            {
+                significance
+            }
+            else
+            {
+                0.05
+            };
+            let df = (left.len() + right.len()) as f64 - 2.0;
+            let critical_t = t_critical(1.0 - alpha, df);
             if t_stat > critical_t || (f_stat > 2.0 || f_stat < 0.5)
             {
                 let magnitude = t_stat.max((f_stat - 1.0).abs());
                 change_points.push(ChangePoint {
                     index: i,
                     magnitude,
-                    seasonal_component: 0.0,
+                    seasonal_component: phase_seasonal[i % period],
                 });
                 last_cp = i;
             }
@@ -2084,6 +2483,15 @@ pub mod changepoint {
         {
             return Vec::new();
         }
+
+        // Per-phase seasonal contribution (phase mean minus the global mean), so
+        // each change point can report the seasonal value at its phase rather than
+        // a hard-coded 0.0.
+        let global_mean = mean(data);
+        let phase_seasonal: Vec<f64> = phase_means(data, period)
+            .into_iter()
+            .map(|m| m - global_mean)
+            .collect();
 
         let mut change_points = Vec::new();
         let mut segments: Vec<(usize, usize)> = vec![(0, n)];
@@ -2138,7 +2546,7 @@ pub mod changepoint {
                 change_points.push(ChangePoint {
                     index: best_split,
                     magnitude: best_gain,
-                    seasonal_component: 0.0,
+                    seasonal_component: phase_seasonal[best_split % period],
                 });
             }
             else

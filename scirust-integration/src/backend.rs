@@ -1,4 +1,4 @@
-use scirust_mqtt::MqttPublisher;
+use scirust_mqtt::{MqttPublisher, SimulatedMqttPublisher};
 use scirust_opcua::OpcuaClient;
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,11 @@ impl BackendType {
 pub struct Backend {
     pub backend_type: BackendType,
     pub opcua: Box<dyn scirust_opcua::OpcuaClient>,
-    pub mqtt: Box<dyn scirust_mqtt::MqttPublisher>,
+    /// The simulated MQTT publisher. It is held as a concrete type (rather than
+    /// a `Box<dyn MqttPublisher>`) so the pipeline report can read its publish
+    /// counters and per-severity breakdown directly; only the simulated
+    /// publisher is constructible in this crate.
+    pub mqtt: SimulatedMqttPublisher,
 }
 
 impl std::fmt::Debug for Backend {
@@ -121,52 +125,23 @@ impl BackendFactory {
                 Ok(Backend {
                     backend_type: BackendType::Simulated,
                     opcua: Box::new(opcua),
-                    mqtt: Box::new(mqtt),
+                    mqtt,
                 })
             },
-            BackendType::OpcUa =>
-            {
-                #[cfg(not(feature = "real-opcua"))]
-                {
-                    Err("Real OPC-UA backend requires the 'real-opcua' feature.\n\
-                         Add to Cargo.toml:\n  scirust-integration = { features = [\"real-opcua\"] }\n\
-                         And add the `opcua` crate as a dependency.\n\
-                         Falling back to simulated mode is recommended for development.".to_string())
-                }
-                #[cfg(feature = "real-opcua")]
-                {
-                    // Real implementation would go here:
-                    // let opcua = RealOpcuaClient::new(opcua_config);
-                    // ...
-                    Err(
-                        "real-opcua feature is enabled but implementation is not yet available. \
-                         Use simulated mode for now."
-                            .to_string(),
-                    )
-                }
-            },
-            BackendType::Mqtt =>
-            {
-                #[cfg(not(feature = "real-mqtt"))]
-                {
-                    Err("Real MQTT backend requires the 'real-mqtt' feature.\n\
-                         Add to Cargo.toml:\n  scirust-integration = { features = [\"real-mqtt\"] }\n\
-                         And add the `rumqttc` crate as a dependency.\n\
-                         Falling back to simulated mode is recommended for development.".to_string())
-                }
-                #[cfg(feature = "real-mqtt")]
-                {
-                    Err(
-                        "real-mqtt feature is enabled but implementation is not yet available. \
-                         Use simulated mode for now."
-                            .to_string(),
-                    )
-                }
-            },
-            BackendType::FileReplay =>
-            {
-                Err("File replay backend not yet implemented. Use simulated mode.".to_string())
-            },
+            BackendType::OpcUa => Err(
+                "Real OPC-UA transport backend is not implemented in this crate; \
+                     it would require the `opcua` crate. Use simulated mode."
+                    .to_string(),
+            ),
+            BackendType::Mqtt => Err(
+                "Real MQTT transport backend is not implemented in this crate; \
+                     it would require the `rumqttc` crate. Use simulated mode."
+                    .to_string(),
+            ),
+            BackendType::FileReplay => Err(
+                "File replay backend is not implemented in this crate. Use simulated mode."
+                    .to_string(),
+            ),
         }
     }
 
@@ -179,7 +154,7 @@ impl BackendFactory {
         Backend {
             backend_type: BackendType::Simulated,
             opcua: Box::new(opcua),
-            mqtt: Box::new(mqtt),
+            mqtt,
         }
     }
 
@@ -201,7 +176,7 @@ impl BackendFactory {
                 Backend {
                     backend_type: BackendType::Simulated,
                     opcua: Box::new(opcua),
-                    mqtt: Box::new(mqtt),
+                    mqtt,
                 }
             },
         }
@@ -262,7 +237,8 @@ mod tests {
         let result = BackendFactory::create(&opcua_cfg, &mqtt_cfg, BackendType::OpcUa);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("real-opcua"));
+        assert!(err.contains("OPC-UA"));
+        assert!(err.contains("not implemented"));
     }
 
     #[test]
@@ -272,7 +248,8 @@ mod tests {
         let result = BackendFactory::create(&opcua_cfg, &mqtt_cfg, BackendType::Mqtt);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("real-mqtt"));
+        assert!(err.contains("MQTT"));
+        assert!(err.contains("not implemented"));
     }
 
     #[test]

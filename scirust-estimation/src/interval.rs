@@ -86,6 +86,11 @@ impl IntervalFilter {
 
     /// Measurement update: intersect with `[z − meas, z + meas]` per component.
     pub fn update(&mut self, z: &[f64]) {
+        assert_eq!(
+            z.len(),
+            self.lo.len(),
+            "IntervalFilter::update: measurement dim mismatch"
+        );
         for (i, &zi) in z.iter().enumerate()
         {
             self.lo[i] = self.lo[i].max(zi - self.meas_max[i]);
@@ -144,6 +149,19 @@ mod tests {
         {
             assert!(w <= 2.0 * (drift + meas) + 1e-9, "box too wide: {w}");
         }
+    }
+
+    #[test]
+    fn interval_lower_upper_after_predict_then_update() {
+        // predict inflates by drift 0.1: [-1.1, 1.1].
+        // update intersects with [z-meas, z+meas] = [-0.3, 0.3]:
+        //   lo = max(-1.1, -0.3) = -0.3, hi = min(1.1, 0.3) = 0.3, width = 0.6.
+        let mut f = IntervalFilter::new(vec![-1.0], vec![1.0], vec![0.1], vec![0.3]);
+        f.predict();
+        f.update(&[0.0]);
+        assert!((f.lower()[0] - (-0.3)).abs() < 1e-12);
+        assert!((f.upper()[0] - 0.3).abs() < 1e-12);
+        assert!((f.width()[0] - 0.6).abs() < 1e-12);
     }
 
     #[test]

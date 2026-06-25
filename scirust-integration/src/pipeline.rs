@@ -4,6 +4,7 @@ use scirust_events_core::EventStream;
 use scirust_events_models::SpikeDetector;
 use scirust_events_runtime::EventRuntime;
 use scirust_func_safety::audit::AuditLog;
+use scirust_mqtt::MqttPublisher;
 use scirust_mqtt::event_to_payload;
 use scirust_pdm::change_detection::CUSUM;
 use scirust_pdm::health::HealthIndex;
@@ -23,6 +24,8 @@ pub struct PipelineStatus {
     pub audit_chain_valid: bool,
     pub backend_type: String,
     pub connected: bool,
+    /// Number of CUSUM drift change-points detected so far.
+    pub drift_alarms: u64,
 }
 
 /// Final report after pipeline execution.
@@ -42,6 +45,8 @@ pub struct PipelineReport {
     pub mqtt_info: usize,
     pub mqtt_warning: usize,
     pub mqtt_critical: usize,
+    /// Number of CUSUM drift change-points detected over the run.
+    pub drift_alarms: u64,
     pub duration_note: String,
 }
 
@@ -61,6 +66,11 @@ pub struct Pipeline {
     events_published: u64,
     sim_time: f64,
     subscribed_node_ids: Vec<String>,
+    /// Last successfully-read feature vector, used to carry forward values for
+    /// sensors that are momentarily absent from a poll instead of injecting 0.0.
+    last_features: Vec<f64>,
+    /// Number of cycles in which a CUSUM drift change-point fired.
+    drift_alarms: u64,
 }
 
 impl Pipeline {
@@ -99,7 +109,9 @@ impl Pipeline {
             config.settings.rul_window_size,
             config.settings.rul_min_observations,
         );
-        let cusum = CUSUM::new(0.1, 0.05, 0.5);
+        // Parameterize the drift detector from the configured drift threshold
+        // rather than a hardcoded constant, so config changes actually take effect.
+        let cusum = CUSUM::new(0.1, 0.05, config.settings.drift_threshold);
         let audit = AuditLog::new(config.settings.audit_log_size);
 
         Self {
@@ -115,6 +127,8 @@ impl Pipeline {
             events_published: 0,
             sim_time: 0.0,
             subscribed_node_ids: Vec::new(),
+            last_features: Vec::new(),
+            drift_alarms: 0,
         }
     }
 
@@ -164,27 +178,62 @@ impl Pipeline {
             _ => return 0,
         };
 
-        // Extract feature values in the ORDER of configured sensors
-        // This ensures HealthIndex gets the right number of features
-        let station = &self.config.stations[0];
-        let n_sensors = station.sensors.len();
-        let features: Vec<f64> = if values.len() >= n_sensors
-        {
-            // If we have enough values, take the first n_sensors in order
-            values.iter().take(n_sensors).map(|v| v.value).collect()
-        }
-        else
-        {
-            // Pad with zeros if not enough values
-            (0..n_sensors)
-                .map(|i| values.get(i).map(|v| v.value).unwrap_or(0.0))
-                .collect()
+        // Align polled values to configured sensors BY node_id (not by arrival
+        // order). The OPC-UA browse fallback may expose nodes with a namespace
+        // prefix (e.g. "ns=2;s=Vibration.X") while the config uses bare ids
+        // (e.g. "Vibration.X"), so we match either an exact id or a polled id
+        // that ends with the configured id.
+        // Snapshot the per-sensor config we need as owned locals so the rest of
+        // the cycle can take &mut self freely (audit/rul/health updates).
+        let sensor_ids: Vec<String> = self.config.stations[0]
+            .sensors
+            .iter()
+            .map(|s| s.node_id.clone())
+            .collect();
+        let station_id = self.config.stations[0].id.clone();
+        let min_confidence = self.config.stations[0].min_confidence;
+        let window_size = self.config.stations[0].window_size;
+        let window_stride = self.config.stations[0].window_stride;
+        let n_sensors = sensor_ids.len();
+
+        let lookup = |sensor_id: &str| -> Option<f64> {
+            values
+                .iter()
+                .find(|v| v.node_id == sensor_id || v.node_id.ends_with(sensor_id))
+                .map(|v| v.value)
         };
 
-        if features.is_empty()
+        // Assemble the feature vector in configured-sensor order. For a sensor
+        // that is genuinely absent from this poll, carry forward its last known
+        // value rather than injecting a fake 0.0 (which would masquerade as a
+        // perfectly healthy reading). If we have no prior value at all, skip the
+        // cycle instead of fabricating data.
+        let mut features: Vec<f64> = Vec::with_capacity(n_sensors);
+        let mut all_missing = true;
+        for (i, sensor_id) in sensor_ids.iter().enumerate()
+        {
+            if let Some(v) = lookup(sensor_id)
+            {
+                features.push(v);
+                all_missing = false;
+            }
+            else if let Some(&prev) = self.last_features.get(i)
+            {
+                features.push(prev);
+            }
+            else
+            {
+                // No reading now and none previously: skip this cycle.
+                return 0;
+            }
+        }
+
+        if features.is_empty() || all_missing
         {
             return 0;
         }
+
+        self.last_features = features.clone();
 
         // Update Health Index
         let hi = self.health.update(&features);
@@ -193,29 +242,45 @@ impl Pipeline {
         // Update RUL
         self.rul.update(hi, self.sim_time);
 
-        // CUSUM on first feature
-        if !features.is_empty()
+        // CUSUM drift detection on the first feature. Gated by configuration;
+        // when a change-point fires, surface it via the audit log and a drift
+        // counter instead of silently discarding the result.
+        if self.config.settings.enable_drift_detection
         {
-            let _ = self.cusum.update(features[0], 0.1);
+            if let Some(cp) = self.cusum.update(features[0], 0.1)
+            {
+                self.drift_alarms += 1;
+                self.audit.add(
+                    "drift_detected",
+                    &format!(
+                        "CUSUM change-point: dir={}, magnitude={:.3}",
+                        cp.direction, cp.magnitude
+                    ),
+                    &station_id,
+                    "alert",
+                    cp.magnitude as f32,
+                    self.sim_time,
+                );
+            }
         }
 
-        // Run event detection
-        let mut stream = EventStream::new(
-            features.iter().map(|f| *f as f32).collect(),
-            self.config.stations[0].window_size,
-            self.config.stations[0].window_stride,
-        );
+        // Run event detection over a window that actually fits the data. The
+        // per-cycle feature vector has length == sensor count, so clamp the
+        // configured window (and stride) to that length; otherwise next_window
+        // never yields and detection is dead.
+        let ws = window_size.min(features.len()).max(1);
+        let stride = window_stride.clamp(1, ws);
+        let mut stream = EventStream::new(features.iter().map(|f| *f as f32).collect(), ws, stride);
         let events = self.runtime.process_all(&mut stream);
         let cycle_events = events.len();
         self.events_detected += cycle_events as u64;
 
         // Publish events to MQTT
-        let station = &self.config.stations[0];
         for event in &events
         {
-            if event.confidence >= station.min_confidence
+            if event.confidence >= min_confidence
             {
-                let payload = event_to_payload(event, &station.id, None);
+                let payload = event_to_payload(event, &station_id, None);
                 if self.backend.mqtt.publish_event(&payload).is_ok()
                 {
                     self.events_published += 1;
@@ -233,7 +298,7 @@ impl Pipeline {
                 state.label(),
                 cycle_events
             ),
-            &station.id,
+            &station_id,
             if hi < 0.5 { "alert" } else { "pass" },
             hi as f32,
             self.sim_time,
@@ -273,18 +338,17 @@ impl Pipeline {
             audit_chain_valid: self.audit.verify_chain(),
             backend_type: self.backend.backend_type.label().to_string(),
             connected: self.backend.is_connected(),
+            drift_alarms: self.drift_alarms,
         }
     }
 
     /// Generate a final report.
     pub fn generate_report(&self) -> PipelineReport {
         let rul_pred = self.rul.predict();
-        // We can't downcast the trait object, so we use events_published as a proxy.
-        // In a real implementation, the MQTT publisher would track counts internally.
-        let mqtt_messages = self.events_published;
-        let mqtt_info = 0;
-        let mqtt_warning = 0;
-        let mqtt_critical = 0;
+        // The simulated MQTT publisher tracks every message it sends, so report
+        // its real counters rather than a proxy/hardcoded zeros.
+        let mqtt_messages = self.backend.mqtt.publish_count;
+        let (mqtt_info, mqtt_warning, mqtt_critical) = self.backend.mqtt.count_by_severity();
 
         PipelineReport {
             total_cycles: self.cycles_completed,
@@ -301,7 +365,11 @@ impl Pipeline {
             mqtt_info,
             mqtt_warning,
             mqtt_critical,
-            duration_note: format!("Ran {} cycles", self.cycles_completed),
+            drift_alarms: self.drift_alarms,
+            duration_note: format!(
+                "Ran {} cycles over {:.1}s of simulated time ({} drift alarm(s))",
+                self.cycles_completed, self.sim_time, self.drift_alarms
+            ),
         }
     }
 
@@ -395,5 +463,107 @@ mod tests {
         pipeline.run(3);
         pipeline.shutdown();
         // After shutdown, backend should be disconnected
+    }
+
+    /// Oracle for Bug 1 (dead event detection due to window_size > data length).
+    ///
+    /// With window_size clamped to the feature-vector length, a SpikeDetector
+    /// whose threshold is below the (always-positive) feature magnitudes must
+    /// emit at least one event per cycle, and those events (confidence == 1.0,
+    /// which clears the default min_confidence of 0.8) must be published.
+    ///
+    /// On the pre-fix code (window_size 32 vs 4 features) next_window never
+    /// yields, so total_events would be identically 0 and this test would fail.
+    #[test]
+    fn test_run_cycle_detects_event_when_window_fits() {
+        let mut config = PipelineConfig::default();
+        let n = config.stations[0].sensors.len();
+        config.stations[0].window_size = n;
+        config.stations[0].window_stride = n;
+        // Threshold well below the simulated feature magnitudes (temperature is
+        // ~25), and full-weight EMA so the detector fires on the first window.
+        config.stations[0].spike_threshold = 0.001;
+        config.stations[0].ema_alpha = 1.0;
+
+        let mut pipeline = Pipeline::new(config);
+        let report = pipeline.run(5);
+
+        assert!(
+            report.total_events > 0,
+            "expected events once the window fits the data, got {}",
+            report.total_events
+        );
+        assert!(
+            report.total_published > 0,
+            "events with confidence 1.0 must clear min_confidence and publish, got {}",
+            report.total_published
+        );
+    }
+
+    /// Oracle for HealthIndex math, exercised directly. Placing each feature at
+    /// the midpoint of its [baseline, failure] range yields normalized 0.5 per
+    /// sensor; equal weights keep the aggregate at 0.5; EMA on the first sample
+    /// is the identity, so HI == 0.5 exactly.
+    #[test]
+    fn test_health_index_known_midpoint() {
+        let mut hi = HealthIndex::new(vec![0.5, 1.0], vec![5.0, 10.0], vec![0.5, 0.5], 1.0);
+        let value = hi.update(&[2.75, 5.5]);
+        assert!(
+            (value - 0.5).abs() < 1e-12,
+            "expected HI == 0.5, got {}",
+            value
+        );
+    }
+
+    /// Oracle for Bug 3 / the hardcoded-zero MQTT report fields. After the
+    /// window fix, every fired event publishes (confidence 1.0 -> Critical ->
+    /// "/critical" topic). The report must mirror the publisher's own counters:
+    /// mqtt_messages == publish_count and the per-severity buckets ==
+    /// count_by_severity(). The bucket sum is NOT forced to equal publish_count
+    /// in general, but here all messages route to /critical so it holds too.
+    #[test]
+    fn test_generate_report_mqtt_severity_counts_match_publisher() {
+        let mut config = PipelineConfig::default();
+        let n = config.stations[0].sensors.len();
+        config.stations[0].window_size = n;
+        config.stations[0].window_stride = n;
+        config.stations[0].spike_threshold = 0.001;
+        config.stations[0].ema_alpha = 1.0;
+
+        let mut pipeline = Pipeline::new(config);
+        let report = pipeline.run(5);
+
+        let publish_count = pipeline.backend.mqtt.publish_count;
+        let (info, warning, critical) = pipeline.backend.mqtt.count_by_severity();
+
+        assert!(publish_count > 0, "expected published messages");
+        assert_eq!(report.mqtt_messages, publish_count);
+        assert_eq!(report.mqtt_info, info);
+        assert_eq!(report.mqtt_warning, warning);
+        assert_eq!(report.mqtt_critical, critical);
+        // SpikeDetector confidence is exactly 1.0 -> Critical severity.
+        assert_eq!(report.mqtt_critical as u64, publish_count);
+        assert_eq!(report.mqtt_info, 0);
+        assert_eq!(report.mqtt_warning, 0);
+    }
+
+    /// Oracle for the two previously-untested filesystem config functions:
+    /// PipelineConfig::save_to_file + PipelineConfig::from_file round-trip
+    /// through disk must preserve the automotive_line structure exactly.
+    #[test]
+    fn test_config_save_load_roundtrip_via_disk() {
+        use std::path::PathBuf;
+        let cfg = PipelineConfig::automotive_line("line-9", 2);
+
+        let mut path: PathBuf = std::env::temp_dir();
+        path.push(format!("scirust_cfg_roundtrip_{}.json", std::process::id()));
+
+        cfg.save_to_file(&path).unwrap();
+        let loaded = PipelineConfig::from_file(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.stations.len(), 2);
+        assert_eq!(loaded.stations[0].id, "line-9-station-001");
+        assert_eq!(loaded.stations[0].bearing.as_ref().unwrap().n_balls, 9);
     }
 }

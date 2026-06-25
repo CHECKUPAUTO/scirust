@@ -186,6 +186,13 @@ mod tests {
     }
 
     #[test]
+    fn particle_len_and_is_empty() {
+        let pf = ParticleFilter::new(500, |u| vec![u()], 7);
+        assert_eq!(pf.len(), 500);
+        assert!(!pf.is_empty());
+    }
+
+    #[test]
     fn run_is_deterministic() {
         let run = || {
             let mut pf = ParticleFilter::new(500, |u| vec![u()], 7);
