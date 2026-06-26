@@ -56,8 +56,12 @@ use std::marker::PhantomData;
 
 /// Une politique évaluable depuis une boucle SciRust.
 ///
-/// L'implémentation doit être `Send + Sync` pour permettre l'évaluation
-/// parallèle d'une population entière (NEAT, GA, ERL, etc.).
+/// La borne est volontairement `Send` (et **pas** `Sync`) : un
+/// [`burn::module::Module`] réel stocke ses poids dans des `Param`, dont
+/// l'initialisation paresseuse repose sur un `OnceCell` — `Send` mais
+/// `!Sync`. L'évaluation parallèle d'une population entière (NEAT, GA, ERL,
+/// etc.) se fait donc en **déplaçant** un individu possédé par worker
+/// (`rayon::into_par_iter`), jamais en partageant `&self` entre threads.
 ///
 /// **Important** : `forward` ne doit produire aucun tracking de gradient.
 /// L'usage avec un backend `Autodiff<_>` est une erreur d'utilisation —
@@ -162,24 +166,67 @@ pub type Result<T> = std::result::Result<T, BridgeError>;
 mod smoke_tests {
     use super::*;
 
-    /// Test que les bornes du trait `Policy` permettent bien `Send + Sync`.
-    /// Ce test compile-time est crucial pour l'usage parallèle (rayon).
-    #[test]
-    fn policy_is_send_sync() {
-        fn assert_send_sync<T: Send>() {}
+    use burn::backend::NdArray;
+    use burn::tensor::{Tensor, TensorData};
 
-        // On ne peut pas instancier un Policy générique sans un backend concret,
-        // donc on vérifie juste que la borne du trait est cohérente.
-        struct DummyPolicy;
-        // Note : pour un vrai test, voir tests/integration.rs qui utilise burn-ndarray.
-        let _ = std::any::type_name::<DummyPolicy>();
-        assert_send_sync::<DummyPolicy>();
+    type B = NdArray<f32>;
+
+    /// Politique concrète minimale : recopie l'entrée (identité).
+    /// Sert à exercer réellement la borne `Send` du trait et le chemin
+    /// `InferenceOnly::eval` avec un backend Burn concret.
+    struct IdentityPolicy;
+
+    impl Policy<B> for IdentityPolicy {
+        type Input = Tensor<B, 2>;
+        type Output = Tensor<B, 2>;
+
+        fn forward(&self, input: Tensor<B, 2>) -> Tensor<B, 2> {
+            input
+        }
+    }
+
+    /// Vérifie au compile-time que le bridge enveloppant une vraie `Policy`
+    /// est `Send` — c'est la borne exacte qu'expose le trait et la seule qui
+    /// soit tenable : un `burn::Module` réel est `Send` mais **pas** `Sync`
+    /// (ses `Param` utilisent un `OnceCell`). L'évaluation parallèle déplace
+    /// donc des individus possédés, elle ne partage pas `&self`.
+    #[test]
+    fn inference_only_is_send() {
+        fn assert_send<T: Send>() {}
+
+        assert_send::<IdentityPolicy>();
+        assert_send::<InferenceOnly<B, IdentityPolicy>>();
+    }
+
+    /// `eval` doit déléguer à `forward` sans altérer la donnée : ici l'identité
+    /// doit ressortir bit-pour-bit, et le device exposé doit être le bon.
+    #[test]
+    fn eval_delegates_to_forward_unchanged() {
+        let device = Default::default();
+        let bridge = InferenceOnly::<B, _>::new(IdentityPolicy, device);
+
+        let input = Tensor::<B, 2>::from_data(
+            TensorData::new(vec![1.0f32, -2.0, 3.5, 4.0], [2, 2]),
+            bridge.device(),
+        );
+        let out = bridge.eval(input);
+
+        assert_eq!(out.dims(), [2, 2]);
+        let got: Vec<f32> = out.into_data().to_vec().expect("to_vec");
+        assert_eq!(got, vec![1.0f32, -2.0, 3.5, 4.0]);
     }
 
     #[test]
     fn bridge_error_displays() {
-        let err = BridgeError::AutodiffBackendNotSupported;
-        let msg = format!("{err}");
-        assert!(msg.contains("inference-only"));
+        let autodiff = BridgeError::AutodiffBackendNotSupported;
+        assert!(format!("{autodiff}").contains("inference-only"));
+
+        let mismatch = BridgeError::InputShapeMismatch {
+            expected: vec![1, 4],
+            got: vec![1, 3],
+        };
+        let msg = format!("{mismatch}");
+        assert!(msg.contains("[1, 4]"), "expected shape in message: {msg}");
+        assert!(msg.contains("[1, 3]"), "got shape in message: {msg}");
     }
 }

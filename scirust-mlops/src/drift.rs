@@ -262,15 +262,20 @@ impl ModelDriftDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn test_psi_no_drift() {
-        let reference: Vec<f64> = (0..1000).map(|_| rand::random::<f64>() * 10.0).collect();
+        // Seeded StdRng (not thread_rng) so the "noisy" inputs are fixed and the
+        // PSI assertions are reproducible instead of flaky across CI runs.
+        let mut rng = StdRng::seed_from_u64(0xD1F7_0001);
+        let reference: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>() * 10.0).collect();
         let mut det = DataDriftDetector::from_reference(&reference, 10, 200, 0.25);
-        // Feed similar data
+        // Feed similar data drawn from the same uniform[0,10) distribution.
         for _ in 0..200
         {
-            det.add_sample(rand::random::<f64>() * 10.0);
+            det.add_sample(rng.gen::<f64>() * 10.0);
         }
         let report = det.check().unwrap();
         assert!(
@@ -283,12 +288,14 @@ mod tests {
 
     #[test]
     fn test_psi_drift_detected() {
-        let reference: Vec<f64> = (0..1000).map(|_| rand::random::<f64>() * 10.0).collect();
+        let mut rng = StdRng::seed_from_u64(0xD1F7_0002);
+        let reference: Vec<f64> = (0..1000).map(|_| rng.gen::<f64>() * 10.0).collect();
         let mut det = DataDriftDetector::from_reference(&reference, 10, 200, 0.25);
-        // Feed shifted data (mean shifted by +20)
+        // Feed shifted data drawn from uniform[20,30) — disjoint from the
+        // reference range, so PSI must spike.
         for _ in 0..200
         {
-            det.add_sample(20.0 + rand::random::<f64>() * 10.0);
+            det.add_sample(20.0 + rng.gen::<f64>() * 10.0);
         }
         let report = det.check().unwrap();
         assert!(
@@ -301,10 +308,11 @@ mod tests {
 
     #[test]
     fn test_model_drift_no_drift() {
+        let mut rng = StdRng::seed_from_u64(0xD1F7_0003);
         let mut det = ModelDriftDetector::new(50, 0.1, 2.0);
         for _ in 0..50
         {
-            det.add_observation(10.0, 10.0 + (rand::random::<f64>() - 0.5) * 0.1);
+            det.add_observation(10.0, 10.0 + (rng.gen::<f64>() - 0.5) * 0.1);
         }
         let report = det.check().unwrap();
         assert_eq!(report.drift_type, DriftType::NoDrift);

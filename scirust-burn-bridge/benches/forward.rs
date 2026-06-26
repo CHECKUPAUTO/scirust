@@ -15,7 +15,7 @@
 //! ```
 
 use burn::{
-    backend::{ndarray::NdArrayDevice, NdArray},
+    backend::{NdArray, ndarray::NdArrayDevice},
     module::Module,
     nn::{Linear, LinearConfig, Relu},
     tensor::{Tensor, TensorData},
@@ -56,7 +56,8 @@ impl<BB: burn::tensor::backend::Backend> Policy<BB> for BenchMlp<BB> {
 fn warmup(bridge: &InferenceOnly<B, BenchMlp<B>>, n: usize) {
     let input: Tensor<B, 2> =
         Tensor::from_data(TensorData::from([[0.1f32, 0.2, 0.3, 0.4]]), bridge.device());
-    for _ in 0..n {
+    for _ in 0..n
+    {
         let _ = bridge.eval(input.clone());
     }
 }
@@ -67,7 +68,8 @@ fn measure_single(bridge: &InferenceOnly<B, BenchMlp<B>>, n_iters: usize) -> f64
 
     let start = Instant::now();
     let mut sink = 0.0f32;
-    for _ in 0..n_iters {
+    for _ in 0..n_iters
+    {
         let out = bridge.eval(input.clone());
         // Force la matérialisation pour empêcher l'optimiseur d'éliminer le calcul.
         let v: Vec<f32> = out.into_data().to_vec().expect("to_vec");
@@ -86,7 +88,8 @@ fn measure_batch(bridge: &InferenceOnly<B, BenchMlp<B>>, batch_size: usize, n_it
 
     let start = Instant::now();
     let mut sink = 0.0f32;
-    for _ in 0..n_iters {
+    for _ in 0..n_iters
+    {
         let out = bridge.eval(input.clone());
         let v: Vec<f32> = out.into_data().to_vec().expect("to_vec");
         sink += v[0];
@@ -115,7 +118,8 @@ fn main() {
 
     // ── Single-input ────────────────────────────────────────────────
     println!("--- Single-input (batch=1) ---");
-    for &n in &[10_000usize, 100_000, 1_000_000] {
+    for &n in &[10_000usize, 100_000, 1_000_000]
+    {
         let throughput = measure_single(&bridge, n);
         println!(
             "  n={:>9} → {:>12.0} forwards/s ({:>6.2} µs each)",
@@ -128,7 +132,8 @@ fn main() {
 
     // ── Batched ─────────────────────────────────────────────────────
     println!("--- Batched (effective forward count = batch × iters) ---");
-    for &(batch, iters) in &[(32usize, 10_000usize), (256, 5_000), (1024, 1_000)] {
+    for &(batch, iters) in &[(32usize, 10_000usize), (256, 5_000), (1024, 1_000)]
+    {
         let throughput = measure_batch(&bridge, batch, iters);
         println!(
             "  batch={:>5} iters={:>6} → {:>12.0} forwards/s",
@@ -144,5 +149,7 @@ fn main() {
     println!("  - vérifier le profil release (lto = thin, opt-level = 3)");
     println!("  - profiler avec `perf` pour identifier le bottleneck");
     println!("  - mesurer aussi l'overhead allocation (Tensor::from_data + into_data)");
-    println!("  - migrer vers backend Wgpu pour le batched (latence réseau-côté-GPU négligeable au-delà de batch=256)");
+    println!(
+        "  - migrer vers backend Wgpu pour le batched (latence réseau-côté-GPU négligeable au-delà de batch=256)"
+    );
 }

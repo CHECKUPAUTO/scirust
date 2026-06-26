@@ -305,11 +305,26 @@ impl Lowerer {
                 let right = self
                     .lower_expr(&b.right)
                     .unwrap_or(Expression::Literal(Literal::Int(0)));
-                Some(Expression::BinaryOp {
-                    left: Box::new(left),
-                    op: lower_binop(&b.op),
-                    right: Box::new(right),
-                })
+                // Both operands are always visited (their ownership effects
+                // are real). The six arithmetic/equality operators the IR can
+                // name become a `BinaryOp`; every other operator (`%`, `<<`,
+                // `&`, `<`, `&&`, …) has no faithful `BinaryOp` variant, so we
+                // emit a `Call` tagged with the source operator rather than
+                // mislabelling it as `Add`. The consumer treats `BinaryOp` and
+                // `Call` identically (it recurses into both operands and
+                // ignores the operator), so ownership analysis is unchanged.
+                match binop_node(&b.op)
+                {
+                    Some(op) => Some(Expression::BinaryOp {
+                        left: Box::new(left),
+                        op,
+                        right: Box::new(right),
+                    }),
+                    None => Some(Expression::Call {
+                        name: binop_symbol(&b.op).to_string(),
+                        args: vec![left, right],
+                    }),
+                }
             },
             syn::Expr::Unary(u) => match u.op
             {
@@ -494,18 +509,64 @@ fn lower_lit(lit: &syn::Lit) -> Expression {
     Expression::Literal(l)
 }
 
-fn lower_binop(op: &syn::BinOp) -> BinaryOp {
+/// Map a `syn` binary operator to the IR's [`BinaryOp`], or `None` when the
+/// IR has no faithful variant for it. The IR can name only the four arithmetic
+/// operators and `==`/`!=`; everything else (`%`, bit-ops, shifts, ordering
+/// comparisons, `&&`/`||`) returns `None` and is lowered to a tagged `Call`
+/// instead of being mislabelled. Compound-assignment forms map to their base
+/// arithmetic operator when that base is representable.
+fn binop_node(op: &syn::BinOp) -> Option<BinaryOp> {
     match op
     {
-        syn::BinOp::Add(_) | syn::BinOp::AddAssign(_) => BinaryOp::Add,
-        syn::BinOp::Sub(_) | syn::BinOp::SubAssign(_) => BinaryOp::Sub,
-        syn::BinOp::Mul(_) | syn::BinOp::MulAssign(_) => BinaryOp::Mul,
-        syn::BinOp::Div(_) | syn::BinOp::DivAssign(_) => BinaryOp::Div,
-        syn::BinOp::Eq(_) => BinaryOp::Eq,
-        syn::BinOp::Ne(_) => BinaryOp::Ne,
-        // Other operators do not affect ownership; both operands are still
-        // visited. Map to Add as an ownership-neutral placeholder.
-        _ => BinaryOp::Add,
+        syn::BinOp::Add(_) | syn::BinOp::AddAssign(_) => Some(BinaryOp::Add),
+        syn::BinOp::Sub(_) | syn::BinOp::SubAssign(_) => Some(BinaryOp::Sub),
+        syn::BinOp::Mul(_) | syn::BinOp::MulAssign(_) => Some(BinaryOp::Mul),
+        syn::BinOp::Div(_) | syn::BinOp::DivAssign(_) => Some(BinaryOp::Div),
+        syn::BinOp::Eq(_) => Some(BinaryOp::Eq),
+        syn::BinOp::Ne(_) => Some(BinaryOp::Ne),
+        _ => None,
+    }
+}
+
+/// The source spelling of a binary operator, used as the `Call` name when the
+/// operator has no faithful [`BinaryOp`] variant. Exhaustive over the
+/// operators `binop_node` returns `None` for; the representable operators are
+/// listed too so the match stays total and future `syn` additions surface as a
+/// compile error rather than a silent wrong tag.
+fn binop_symbol(op: &syn::BinOp) -> &'static str {
+    match op
+    {
+        syn::BinOp::Add(_) => "+",
+        syn::BinOp::Sub(_) => "-",
+        syn::BinOp::Mul(_) => "*",
+        syn::BinOp::Div(_) => "/",
+        syn::BinOp::Rem(_) => "%",
+        syn::BinOp::And(_) => "&&",
+        syn::BinOp::Or(_) => "||",
+        syn::BinOp::BitXor(_) => "^",
+        syn::BinOp::BitAnd(_) => "&",
+        syn::BinOp::BitOr(_) => "|",
+        syn::BinOp::Shl(_) => "<<",
+        syn::BinOp::Shr(_) => ">>",
+        syn::BinOp::Eq(_) => "==",
+        syn::BinOp::Lt(_) => "<",
+        syn::BinOp::Le(_) => "<=",
+        syn::BinOp::Ne(_) => "!=",
+        syn::BinOp::Ge(_) => ">=",
+        syn::BinOp::Gt(_) => ">",
+        syn::BinOp::AddAssign(_) => "+=",
+        syn::BinOp::SubAssign(_) => "-=",
+        syn::BinOp::MulAssign(_) => "*=",
+        syn::BinOp::DivAssign(_) => "/=",
+        syn::BinOp::RemAssign(_) => "%=",
+        syn::BinOp::BitXorAssign(_) => "^=",
+        syn::BinOp::BitAndAssign(_) => "&=",
+        syn::BinOp::BitOrAssign(_) => "|=",
+        syn::BinOp::ShlAssign(_) => "<<=",
+        syn::BinOp::ShrAssign(_) => ">>=",
+        // `syn::BinOp` is `#[non_exhaustive]`; a new operator added upstream
+        // is an honest unknown rather than a fabricated symbol.
+        _ => "<binop>",
     }
 }
 
@@ -672,5 +733,370 @@ mod tests {
     #[test]
     fn rejects_invalid_rust() {
         assert!(lower_str("fn broken( {").is_err());
+    }
+
+    /// Lower a single-function program and return its `Function`, asserting
+    /// exactly one function was produced.
+    fn only_fn(src: &str) -> Function {
+        let lowered = lower_str(src).expect("valid rust");
+        let SomAst::Program(mut funcs) = lowered.ast;
+        assert_eq!(funcs.len(), 1, "expected exactly one function");
+        funcs.remove(0)
+    }
+
+    #[test]
+    fn exact_ast_for_typed_fn_with_binop_and_return() {
+        // Hand-derived oracle: params keep their declared types; the
+        // unannotated `let s` defaults to `Str`; `a + b` is the representable
+        // `Add`; `return s;` carries `s` as a move.
+        let f = only_fn("fn add(a: i32, b: i32) -> i32 { let s = a + b; return s; }");
+        let expected = Function {
+            name: "add".to_string(),
+            params: vec![
+                Param {
+                    name: "a".to_string(),
+                    ty: Type::Int,
+                },
+                Param {
+                    name: "b".to_string(),
+                    ty: Type::Int,
+                },
+            ],
+            body: vec![
+                Statement::VarDecl {
+                    name: "s".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::BinaryOp {
+                        left: Box::new(Expression::Variable("a".to_string())),
+                        op: BinaryOp::Add,
+                        right: Box::new(Expression::Variable("b".to_string())),
+                    }),
+                },
+                Statement::Return(Some(Expression::Variable("s".to_string()))),
+            ],
+        };
+        assert_eq!(f, expected);
+    }
+
+    #[test]
+    fn borrow_and_mut_borrow_lower_to_reference_nodes() {
+        // `&v` → shared Reference, `&mut v` → mutable Reference, both naming v.
+        let f = only_fn("fn f(v: String) { let r = &v; let m = &mut v; }");
+        assert_eq!(
+            f.body,
+            vec![
+                Statement::VarDecl {
+                    name: "r".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Reference {
+                        name: "v".to_string(),
+                        mutable: false,
+                    }),
+                },
+                Statement::VarDecl {
+                    name: "m".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Reference {
+                        name: "v".to_string(),
+                        mutable: true,
+                    }),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_blocks_produce_nested_scopes() {
+        // Two levels of `{ … }` nest into Scope(Scope(...)); each inner let is
+        // placed at the correct depth.
+        let f = only_fn("fn f() { let a = x; { let b = a; { let c = b; } } }");
+        let expected = vec![
+            Statement::VarDecl {
+                name: "a".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Variable("x".to_string())),
+            },
+            Statement::Scope(vec![
+                Statement::VarDecl {
+                    name: "b".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Variable("a".to_string())),
+                },
+                Statement::Scope(vec![Statement::VarDecl {
+                    name: "c".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Variable("b".to_string())),
+                }]),
+            ]),
+        ];
+        assert_eq!(f.body, expected);
+    }
+
+    #[test]
+    fn typed_let_carries_declared_type() {
+        // `let n: u64` → Int; `let r: &mut i32` → Ref(Int, true).
+        let f = only_fn("fn f() { let n: u64 = 5; let r: &mut i32 = q; }");
+        assert_eq!(
+            f.body,
+            vec![
+                Statement::VarDecl {
+                    name: "n".to_string(),
+                    ty: Type::Int,
+                    init: Some(Expression::Literal(Literal::Int(5))),
+                },
+                Statement::VarDecl {
+                    name: "r".to_string(),
+                    ty: Type::Ref(Box::new(Type::Int), true),
+                    init: Some(Expression::Variable("q".to_string())),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn call_lowers_value_arg_as_move_and_ref_arg_as_borrow() {
+        // `g(a, &b)`: first arg moves a (Variable), second borrows b
+        // (Reference). The whole call is an expression statement.
+        let f = only_fn("fn f(a: String, b: String) { g(a, &b); }");
+        assert_eq!(
+            f.body,
+            vec![Statement::Expression(Expression::Call {
+                name: "g".to_string(),
+                args: vec![
+                    Expression::Variable("a".to_string()),
+                    Expression::Reference {
+                        name: "b".to_string(),
+                        mutable: false,
+                    },
+                ],
+            })]
+        );
+    }
+
+    #[test]
+    fn dereference_lowers_to_dereference_node() {
+        let f = only_fn("fn f(p: i32) { let v = *p; }");
+        assert_eq!(
+            f.body,
+            vec![Statement::VarDecl {
+                name: "v".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::Dereference(Box::new(Expression::Variable(
+                    "p".to_string()
+                )))),
+            }]
+        );
+    }
+
+    #[test]
+    fn simple_assignment_lowers_to_assignment_node() {
+        let f = only_fn("fn f() { x = y; }");
+        assert_eq!(
+            f.body,
+            vec![Statement::Assignment {
+                lhs: "x".to_string(),
+                rhs: Expression::Variable("y".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn representable_operator_stays_a_binaryop() {
+        // Regression guard: `+` and `==` must remain real BinaryOp variants,
+        // not be downgraded to a Call by the unrepresentable-op handling.
+        let add = only_fn("fn f() { let z = a + b; }");
+        assert!(matches!(
+            &add.body[0],
+            Statement::VarDecl {
+                init: Some(Expression::BinaryOp {
+                    op: BinaryOp::Add,
+                    ..
+                }),
+                ..
+            }
+        ));
+        let eq = only_fn("fn f() { let z = a == b; }");
+        assert!(matches!(
+            &eq.body[0],
+            Statement::VarDecl {
+                init: Some(Expression::BinaryOp {
+                    op: BinaryOp::Eq,
+                    ..
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn unrepresentable_operator_lowers_to_tagged_call_not_fake_add() {
+        // The IR's BinaryOp has no `%`, `<<`, `<`, `&&`, … variant. These must
+        // NOT be silently relabelled as `Add`: they lower to a `Call` tagged
+        // with the source operator, preserving both operands' ownership uses.
+        for (src, sym) in [
+            ("fn f() { let z = a % b; }", "%"),
+            ("fn f() { let z = a << b; }", "<<"),
+            ("fn f() { let z = a < b; }", "<"),
+            ("fn f() { let z = a && b; }", "&&"),
+            ("fn f() { let z = a | b; }", "|"),
+            ("fn f() { let z = a >> b; }", ">>"),
+        ]
+        {
+            let f = only_fn(src);
+            assert_eq!(
+                f.body,
+                vec![Statement::VarDecl {
+                    name: "z".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Call {
+                        name: sym.to_string(),
+                        args: vec![
+                            Expression::Variable("a".to_string()),
+                            Expression::Variable("b".to_string()),
+                        ],
+                    }),
+                }],
+                "operator `{sym}` lowered wrong"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_unrepresentable_operator_keeps_outer_binaryop() {
+        // `(a << b) + c`: the outer `+` is a real Add whose left operand is the
+        // tagged `<<` Call — precedence and both operands preserved.
+        let f = only_fn("fn f() { let z = (a << b) + c; }");
+        assert_eq!(
+            f.body,
+            vec![Statement::VarDecl {
+                name: "z".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::BinaryOp {
+                    left: Box::new(Expression::Call {
+                        name: "<<".to_string(),
+                        args: vec![
+                            Expression::Variable("a".to_string()),
+                            Expression::Variable("b".to_string()),
+                        ],
+                    }),
+                    op: BinaryOp::Add,
+                    right: Box::new(Expression::Variable("c".to_string())),
+                }),
+            }]
+        );
+    }
+
+    #[test]
+    fn left_associativity_and_precedence_are_preserved() {
+        // `a - b - c` is `(a - b) - c` (left-assoc); `a + b * c` keeps `*`
+        // bound tighter than `+`. syn enforces this; assert we carry it through.
+        let sub = only_fn("fn f() { let z = a - b - c; }");
+        assert_eq!(
+            sub.body,
+            vec![Statement::VarDecl {
+                name: "z".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::BinaryOp {
+                    left: Box::new(Expression::BinaryOp {
+                        left: Box::new(Expression::Variable("a".to_string())),
+                        op: BinaryOp::Sub,
+                        right: Box::new(Expression::Variable("b".to_string())),
+                    }),
+                    op: BinaryOp::Sub,
+                    right: Box::new(Expression::Variable("c".to_string())),
+                }),
+            }]
+        );
+        let prec = only_fn("fn f() { let z = a + b * c; }");
+        assert_eq!(
+            prec.body,
+            vec![Statement::VarDecl {
+                name: "z".to_string(),
+                ty: Type::Str,
+                init: Some(Expression::BinaryOp {
+                    left: Box::new(Expression::Variable("a".to_string())),
+                    op: BinaryOp::Add,
+                    right: Box::new(Expression::BinaryOp {
+                        left: Box::new(Expression::Variable("b".to_string())),
+                        op: BinaryOp::Mul,
+                        right: Box::new(Expression::Variable("c".to_string())),
+                    }),
+                }),
+            }]
+        );
+    }
+
+    #[test]
+    fn unsupported_branch_is_dropped_without_losing_neighbours() {
+        // The `if` is skipped (recorded), but the lets on either side of it
+        // must both survive in order — guards against an off-by-one that eats a
+        // neighbouring statement.
+        let lowered = lower_str("fn f() { let a = x; if c { } let b = a; }").unwrap();
+        let SomAst::Program(funcs) = &lowered.ast;
+        assert_eq!(
+            funcs[0].body,
+            vec![
+                Statement::VarDecl {
+                    name: "a".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Variable("x".to_string())),
+                },
+                Statement::VarDecl {
+                    name: "b".to_string(),
+                    ty: Type::Str,
+                    init: Some(Expression::Variable("a".to_string())),
+                },
+            ]
+        );
+        assert!(
+            lowered
+                .unsupported
+                .iter()
+                .any(|u| u.contains("`if` expression"))
+        );
+    }
+
+    #[test]
+    fn malformed_inputs_error() {
+        // Several distinct syntax errors must all be rejected (not silently
+        // mis-parsed). Each is invalid Rust for a different reason.
+        for bad in [
+            "fn broken( {",        // unterminated parameter list
+            "fn f() { let = 1; }", // missing binding pattern
+            "fn f() { 1 + }",      // dangling operator
+            "struct {",            // unnamed struct, unterminated
+            "fn f( a: ) {}",       // missing parameter type
+        ]
+        {
+            assert!(lower_str(bad).is_err(), "expected error for: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn whole_program_with_multiple_functions_keeps_order_and_names() {
+        // Free fn + impl method + fn inside a mod all lower, in source order.
+        let src = r#"
+            fn first() {}
+            struct S;
+            impl S {
+                fn second(&self) {}
+            }
+            mod m {
+                fn third() {}
+            }
+        "#;
+        let lowered = lower_str(src).unwrap();
+        let SomAst::Program(funcs) = &lowered.ast;
+        let names: Vec<&str> = funcs.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["first", "second", "third"]);
+        // The inherent method records its `&self` receiver as a shared-ref param.
+        let second = &funcs[1];
+        assert_eq!(
+            second.params,
+            vec![Param {
+                name: "self".to_string(),
+                ty: Type::Ref(Box::new(Type::Str), false),
+            }]
+        );
     }
 }

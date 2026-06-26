@@ -77,6 +77,19 @@ mod tests {
     }
 
     #[test]
+    fn multiple_events_get_sequential_ids_skipping_quiet_windows() {
+        // Windows (stride 2, size 2): [5,5]=10 ≥ 10 fires, [0,0]=0 is quiet,
+        // [8,8]=16 fires → two events with ids 0 and 1.
+        let mut rt = EventRuntime::new(Box::new(SumThreshold(10.0)));
+        let mut stream = EventStream::new(vec![5.0, 5.0, 0.0, 0.0, 8.0, 8.0], 2, 2);
+        let events = rt.process_all(&mut stream);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, 0);
+        assert_eq!(events[1].id, 1);
+        assert!(events.iter().all(|e| e.label_en == "spike"));
+    }
+
+    #[test]
     fn detector_state_round_trips_through_srt1() {
         let rt = EventRuntime::new(Box::new(SumThreshold(1.0)));
         let mut params = HashMap::new();

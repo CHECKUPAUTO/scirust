@@ -13,7 +13,7 @@
 // ```
 
 use burn::{
-    backend::{ndarray::NdArrayDevice, NdArray},
+    backend::{NdArray, ndarray::NdArrayDevice},
     module::Module,
     nn::{Linear, LinearConfig, Tanh},
     tensor::{Tensor, TensorData},
@@ -115,7 +115,8 @@ fn main() {
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
     println!("--- Top-5 individus ---");
-    for (rank, (idx, fit)) in indexed.iter().take(5).enumerate() {
+    for (rank, (idx, fit)) in indexed.iter().take(5).enumerate()
+    {
         println!("  #{rank}: individu {idx:>4} → fitness = {fit:>8.4}");
     }
     println!();

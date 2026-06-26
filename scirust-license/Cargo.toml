@@ -1,0 +1,17 @@
+[package]
+name = "scirust-license"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "SciRust licensing — pure-Rust, deterministic module entitlement with hash-based (Lamport/Merkle, SHA-256 only) signed licenses; no FFI, no elliptic-curve dependency"
+license = "LicenseRef-CheckupAuto-Dual"
+repository = "https://github.com/CHECKUPAUTO/scirust"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[[bin]]
+name = "license-tool"
+path = "src/bin/license_tool.rs"

@@ -202,6 +202,8 @@ impl PageHinkley {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn test_cusum_detect_increase() {
@@ -246,10 +248,13 @@ mod tests {
 
     #[test]
     fn test_cusum_no_false_alarm() {
+        // Seeded StdRng so the bounded noise is fixed: the "no false alarm"
+        // guarantee is then a reproducible property, not a per-run gamble.
+        let mut rng = StdRng::seed_from_u64(0xCED5_0001);
         let mut cusum = CUSUM::new(10.0, 0.5, 5.0);
         for _ in 0..100
         {
-            let noisy = 10.0 + (rand::random::<f64>() - 0.5) * 0.5;
+            let noisy = 10.0 + (rng.gen::<f64>() - 0.5) * 0.5;
             assert!(
                 cusum.update(noisy, 1.0).is_none(),
                 "CUSUM false alarm on noisy data around target"
@@ -279,10 +284,11 @@ mod tests {
 
     #[test]
     fn test_page_hinkley_no_false_alarm() {
+        let mut rng = StdRng::seed_from_u64(0xCED5_0002);
         let mut ph = PageHinkley::new(0.0, 0.99, 50.0, 10);
         for _ in 0..200
         {
-            let noise = (rand::random::<f64>() - 0.5) * 0.2;
+            let noise = (rng.gen::<f64>() - 0.5) * 0.2;
             assert!(
                 ph.update(noise, 1.0).is_none(),
                 "Page-Hinkley false alarm on noise"

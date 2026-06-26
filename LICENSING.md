@@ -16,6 +16,15 @@ Any commercial use — use by or for a business with an anticipated commercial
 application, including use in or as part of a product or service offered for a fee —
 requires a separate commercial license.
 
+Commercial licenses are sold **per module**: a license unlocks exactly the domain
+modules you need (navigation, control, functional-safety, …) rather than the whole
+catalogue. The unlock is enforced cryptographically by the `scirust-license` crate —
+each license is a signed file listing the entitled modules, the licensee and a
+validity window; the runtime embeds only a public Merkle root and verifies the
+signature before granting access. See [`docs/PLAQUETTE_COMMERCIALE.md`](docs/PLAQUETTE_COMMERCIALE.md)
+for the module catalogue and bundles, and [`scirust-license/README.md`](scirust-license/README.md)
+for the mechanism.
+
 To obtain a commercial license, contact: contact@checkupauto.fr
 
 ## 3. Copyright

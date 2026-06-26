@@ -409,4 +409,392 @@ mod tests {
         assert_eq!(buffer_requirements(&m, 4).unwrap(), (12, 12, 12));
         assert!(resource_certificate(&m, 1).is_ok());
     }
+
+    /// One Linear layer of a QSR1 artifact. Weights are row-major `[in_f][out_f]`
+    /// (flat index `k * out_f + o`), exactly as consumed by `infer` and produced
+    /// by `scirust_runtime::quant::QModel::to_bytes`.
+    struct LayerSpec {
+        in_f: u32,
+        out_f: u32,
+        s_in: f32,
+        relu: bool,
+        scales: &'static [f32],
+        w: &'static [i8],
+        bias: &'static [i32],
+    }
+
+    /// Serialize a full multi-layer QSR1 artifact (header + scales + weights + bias).
+    /// Byte layout per layer: tag(4) in_f(4) out_f(4) s_in(4) relu(1) ns(4)
+    /// scales(ns*4) nw(4) weights(nw) nb(4) bias(nb*4).
+    fn model_bytes(layers: &[LayerSpec]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"QSR1");
+        b.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+        for l in layers
+        {
+            b.extend_from_slice(&0u32.to_le_bytes()); // tag 0 = Linear
+            b.extend_from_slice(&l.in_f.to_le_bytes());
+            b.extend_from_slice(&l.out_f.to_le_bytes());
+            b.extend_from_slice(&l.s_in.to_le_bytes());
+            b.push(if l.relu { 1 } else { 0 });
+            b.extend_from_slice(&(l.scales.len() as u32).to_le_bytes());
+            for &s in l.scales
+            {
+                b.extend_from_slice(&s.to_le_bytes());
+            }
+            b.extend_from_slice(&(l.w.len() as u32).to_le_bytes());
+            for &q in l.w
+            {
+                b.push(q as u8);
+            }
+            b.extend_from_slice(&(l.bias.len() as u32).to_le_bytes());
+            for &x in l.bias
+            {
+                b.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        b
+    }
+
+    /// Run `infer` with exactly-sized scratch buffers and return the logits.
+    fn run_infer(bytes: &[u8], input: &[f32], batch: usize) -> Vec<f32> {
+        let (na, nacc, nout) = buffer_requirements(bytes, batch).unwrap();
+        let mut act_a = vec![0i8; na];
+        let mut act_b = vec![0i8; na];
+        let mut acc = vec![0i32; nacc];
+        let mut out = vec![0.0f32; nout];
+        let m = infer(
+            bytes, input, batch, &mut act_a, &mut act_b, &mut acc, &mut out,
+        )
+        .unwrap();
+        out.truncate(m);
+        out
+    }
+
+    fn bits(v: &[f32]) -> Vec<u32> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    // --- Oracle: single Linear layer, hand-derived logits ---
+    //
+    // in_f=2, out_f=2, s_in=0.1, relu=false, scales=[0.01,0.02],
+    // w = [[1,2],[3,4]] (k*out_f+o), bias=[100,-50], input=[1.0,-1.0].
+    //
+    // quantize(input, 0.1): 1.0/0.1=10 -> 10 ; -1.0/0.1=-10 -> -10.
+    // o=0: 10*w[0]+(-10)*w[2] = 10*1 - 10*3 = -20 ; +bias 100 = 80 ;
+    //      logit = 80 * 0.1 * 0.01 = 0.08.
+    // o=1: 10*w[1]+(-10)*w[3] = 10*2 - 10*4 = -20 ; +bias -50 = -70 ;
+    //      logit = -70 * 0.1 * 0.02 = -0.14.
+    #[test]
+    fn infer_single_layer_matches_hand_derivation() {
+        let m = model_bytes(&[LayerSpec {
+            in_f: 2,
+            out_f: 2,
+            s_in: 0.1,
+            relu: false,
+            scales: &[0.01, 0.02],
+            w: &[1, 2, 3, 4],
+            bias: &[100, -50],
+        }]);
+        let out = run_infer(&m, &[1.0, -1.0], 1);
+        // The artifact stores s_in/scales as f32 and `infer` evaluates
+        // ((a as f32) * s_in) * scale left-to-right, so these literals are bit-exact.
+        assert_eq!(bits(&out), bits(&[0.08f32, -0.14f32]));
+    }
+
+    // --- Oracle: two layers, ReLU clamps a negative pre-activation to zero,
+    //     requantization is exact, batch=2 (ping-pong A->B->out) ---
+    //
+    // L0: in=2,out=2,s_in=0.5,relu=true,scales=[0.5,0.5],
+    //     w=[[100,-100],[-100,100]],bias=[0,0].
+    // L1: in=2,out=1,s_in=0.25,relu=false,scales=[1.0],w=[[2],[3]],bias=[7].
+    // input = [0.25,-0.25, 0.75,0.125]  (batch=2, in_f=2).
+    //
+    // quantize(.,0.5): 0.25->0.5->1 ; -0.25->-0.5->-1 ; 0.75->1.5->2 ; 0.125->0.25->0.
+    //   b0 cur=[1,-1] ; b1 cur=[2,0].
+    // L0 acc (k*out_f+o): b0 o0=1*100+(-1)*(-100)=200 ; o1=1*(-100)+(-1)*100=-200.
+    //                     b1 o0=2*100+0=200          ; o1=2*(-100)+0=-200.
+    // requant: m_arg=(0.5*0.5)/0.25=1.0 -> quantize_multiplier(1.0)=(2^30,0)
+    //          (mult hit 2^31 cap -> 2^30, shift 0). requant(acc)= (acc+1)/2 floor.
+    //   o0: (200+1)/2 floor =100 (>=0)        -> 100
+    //   o1: floor((-200+1)/2)=floor(-99.5)=-100 ; relu -> 0.
+    //   both batches: hidden=[100,0].
+    // L1 (last): a = 100*2 + 0*3 = 200 ; +bias 7 = 207 ; logit=207*0.25*1.0=51.75.
+    #[test]
+    fn infer_two_layer_relu_and_requant_exact() {
+        let m = model_bytes(&[
+            LayerSpec {
+                in_f: 2,
+                out_f: 2,
+                s_in: 0.5,
+                relu: true,
+                scales: &[0.5, 0.5],
+                w: &[100, -100, -100, 100],
+                bias: &[0, 0],
+            },
+            LayerSpec {
+                in_f: 2,
+                out_f: 1,
+                s_in: 0.25,
+                relu: false,
+                scales: &[1.0],
+                w: &[2, 3],
+                bias: &[7],
+            },
+        ]);
+        let out = run_infer(&m, &[0.25, -0.25, 0.75, 0.125], 2);
+        assert_eq!(bits(&out), bits(&[51.75f32, 51.75f32]));
+    }
+
+    // --- Oracle: input quantization saturates at +-127 (clamp before i8 cast) ---
+    //
+    // Single layer, s_in=0.1, so 100.0/0.1 = 1000 -> clamped to 127 ;
+    // -100.0/0.1 = -1000 -> clamped to -128.
+    // w=[[1],[1]] (in_f=2,out_f=1), bias=[0], scales=[1.0].
+    // acc = 127*1 + (-128)*1 = -1 ; +0 ; logit = -1 * 0.1 * 1.0 = -0.1.
+    #[test]
+    fn infer_input_quantization_saturates() {
+        let m = model_bytes(&[LayerSpec {
+            in_f: 2,
+            out_f: 1,
+            s_in: 0.1,
+            relu: false,
+            scales: &[1.0],
+            w: &[1, 1],
+            bias: &[0],
+        }]);
+        let out = run_infer(&m, &[100.0, -100.0], 1);
+        assert_eq!(bits(&out), bits(&[-0.1f32]));
+    }
+
+    // --- resource_certificate: every field hand-derived ---
+    //
+    // L0: in=3,out=5 (scales 5, w 15, bias 5) ; L1: in=5,out=4 (scales 4, w 20, bias 4).
+    // flash bytes: 4(magic)+4(nlayers)
+    //   + L0: 4+4+4+4+1+4 + 5*4 + 4 + 15 + 4 + 5*4  = 21 +20 +4 +15 +4 +20 = 84
+    //   + L1: 4+4+4+4+1+4 + 4*4 + 4 + 20 + 4 + 4*4  = 21 +16 +4 +20 +4 +16 = 81
+    //   total = 4+4+84+81 = 173.
+    // max_w = max(3,5,5,4)=5 ; max_out = max(5,4)=5 ; out_dim = 4.
+    // batch=2: act_each = 2*5=10 ; acc_bytes = 2*5*4=40 ; out_bytes = 2*4*4=32 ;
+    //          scratch = 10*2 + 40 + 32 = 92 ; mac = 2*(3*5 + 5*4) = 2*35 = 70.
+    #[test]
+    fn resource_certificate_fields_hand_derived() {
+        let m = model_bytes(&[
+            LayerSpec {
+                in_f: 3,
+                out_f: 5,
+                s_in: 0.02,
+                relu: true,
+                scales: &[0.001, 0.002, 0.003, 0.004, 0.005],
+                w: &[-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7],
+                bias: &[1, -2, 3, -4, 5],
+            },
+            LayerSpec {
+                in_f: 5,
+                out_f: 4,
+                s_in: 0.03,
+                relu: false,
+                scales: &[0.0011, 0.0022, 0.0033, 0.0044],
+                w: &[
+                    10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6, -7, -8, -9,
+                ],
+                bias: &[7, -8, 9, -10],
+            },
+        ]);
+        assert_eq!(m.len(), 173);
+        let c = resource_certificate(&m, 2).unwrap();
+        assert_eq!(c.layers, 2);
+        assert_eq!(c.batch, 2);
+        assert_eq!(c.out_dim, 4);
+        assert_eq!(c.flash_artifact_bytes, 173);
+        assert_eq!(c.act_bytes_each, 10);
+        assert_eq!(c.acc_bytes, 40);
+        assert_eq!(c.out_bytes, 32);
+        assert_eq!(c.scratch_ram_bytes, 92);
+        assert_eq!(c.mac_count, 70);
+        // buffer_requirements must agree (elements, not bytes).
+        assert_eq!(buffer_requirements(&m, 2).unwrap(), (10, 10, 8));
+        // mac scales linearly with batch.
+        assert_eq!(resource_certificate(&m, 1).unwrap().mac_count, 35);
+        assert_eq!(resource_certificate(&m, 3).unwrap().mac_count, 105);
+    }
+
+    // --- buffer_requirements: a layer that EXPANDS makes out_f the binding dim ---
+    //
+    // in=2 -> out=6 then 6 -> 3. max_w = max(2,6,6,3)=6 ; max_out = max(6,3)=6 ;
+    // last out_f = 3. batch=1 -> (6, 6, 3).
+    #[test]
+    fn buffer_requirements_accounts_for_expanding_layer() {
+        let m = model_bytes(&[
+            LayerSpec {
+                in_f: 2,
+                out_f: 6,
+                s_in: 0.1,
+                relu: true,
+                scales: &[0.01; 6],
+                w: &[0i8; 12],
+                bias: &[0i32; 6],
+            },
+            LayerSpec {
+                in_f: 6,
+                out_f: 3,
+                s_in: 0.1,
+                relu: false,
+                scales: &[0.01; 3],
+                w: &[0i8; 18],
+                bias: &[0i32; 3],
+            },
+        ]);
+        assert_eq!(buffer_requirements(&m, 1).unwrap(), (6, 6, 3));
+        assert_eq!(buffer_requirements(&m, 2).unwrap(), (12, 12, 6));
+    }
+
+    // --- infer must reject scratch buffers that are one element too small ---
+    #[test]
+    fn infer_rejects_undersized_buffers() {
+        let m = model_bytes(&[LayerSpec {
+            in_f: 2,
+            out_f: 2,
+            s_in: 0.1,
+            relu: false,
+            scales: &[0.01, 0.02],
+            w: &[1, 2, 3, 4],
+            bias: &[0, 0],
+        }]);
+        let input = [1.0f32, -1.0];
+        let (na, nacc, nout) = buffer_requirements(&m, 1).unwrap();
+        // Correctly-sized buffers succeed.
+        {
+            let mut a = vec![0i8; na];
+            let mut b = vec![0i8; na];
+            let mut acc = vec![0i32; nacc];
+            let mut out = vec![0.0f32; nout];
+            assert!(infer(&m, &input, 1, &mut a, &mut b, &mut acc, &mut out).is_ok());
+        }
+        // act_a short by one -> BufferTooSmall.
+        {
+            let mut a = vec![0i8; na - 1];
+            let mut b = vec![0i8; na];
+            let mut acc = vec![0i32; nacc];
+            let mut out = vec![0.0f32; nout];
+            assert_eq!(
+                infer(&m, &input, 1, &mut a, &mut b, &mut acc, &mut out),
+                Err(EdgeError::BufferTooSmall)
+            );
+        }
+        // acc short by one -> BufferTooSmall.
+        {
+            let mut a = vec![0i8; na];
+            let mut b = vec![0i8; na];
+            let mut acc = vec![0i32; nacc - 1];
+            let mut out = vec![0.0f32; nout];
+            assert_eq!(
+                infer(&m, &input, 1, &mut a, &mut b, &mut acc, &mut out),
+                Err(EdgeError::BufferTooSmall)
+            );
+        }
+        // out short by one -> BufferTooSmall.
+        {
+            let mut a = vec![0i8; na];
+            let mut b = vec![0i8; na];
+            let mut acc = vec![0i32; nacc];
+            let mut out = vec![0.0f32; nout - 1];
+            assert_eq!(
+                infer(&m, &input, 1, &mut a, &mut b, &mut acc, &mut out),
+                Err(EdgeError::BufferTooSmall)
+            );
+        }
+    }
+
+    // --- infer must reject an input slice shorter than batch*in_f ---
+    #[test]
+    fn infer_rejects_short_input() {
+        let m = model_bytes(&[LayerSpec {
+            in_f: 3,
+            out_f: 2,
+            s_in: 0.1,
+            relu: false,
+            scales: &[0.01, 0.02],
+            w: &[1, 2, 3, 4, 5, 6],
+            bias: &[0, 0],
+        }]);
+        let (na, nacc, nout) = buffer_requirements(&m, 2).unwrap();
+        let mut a = vec![0i8; na];
+        let mut b = vec![0i8; na];
+        let mut acc = vec![0i32; nacc];
+        let mut out = vec![0.0f32; nout];
+        // batch=2 needs 6 inputs; give 5.
+        let short = [0.1f32, 0.2, 0.3, 0.4, 0.5];
+        assert_eq!(
+            infer(&m, &short, 2, &mut a, &mut b, &mut acc, &mut out),
+            Err(EdgeError::Truncated)
+        );
+    }
+
+    // --- parse error paths: unknown tag, too many layers, truncated regions ---
+    #[test]
+    fn rejects_unknown_layer_tag() {
+        let mut m = header(2, 3);
+        // tag is the u32 right after magic(4)+nlayers(4) = offset 8.
+        m[8] = 9;
+        assert_eq!(buffer_requirements(&m, 1), Err(EdgeError::UnknownTag));
+    }
+
+    #[test]
+    fn rejects_too_many_layers() {
+        let mut m = b"QSR1".to_vec();
+        m.extend_from_slice(&((MAX_LAYERS as u32) + 1).to_le_bytes());
+        // Layer bodies are absent, but the layer-count check happens first.
+        assert_eq!(buffer_requirements(&m, 1), Err(EdgeError::TooManyLayers));
+    }
+
+    #[test]
+    fn rejects_truncated_weight_region() {
+        // Header declares nw=4 weights but only 2 bytes follow.
+        let mut b = b"QSR1".to_vec();
+        b.extend_from_slice(&1u32.to_le_bytes()); // 1 layer
+        b.extend_from_slice(&0u32.to_le_bytes()); // tag 0
+        b.extend_from_slice(&2u32.to_le_bytes()); // in_f
+        b.extend_from_slice(&2u32.to_le_bytes()); // out_f
+        b.extend_from_slice(&0.1f32.to_le_bytes()); // s_in
+        b.push(0u8); // relu
+        b.extend_from_slice(&0u32.to_le_bytes()); // ns = 0
+        b.extend_from_slice(&4u32.to_le_bytes()); // nw = 4 (claims 4)
+        b.push(1u8); // only 2 weight bytes present
+        b.push(2u8);
+        assert_eq!(buffer_requirements(&b, 1), Err(EdgeError::Truncated));
+    }
+
+    // --- The runtime artifact format roundtrips through edge byte builder:
+    //     the documented contract is bit-identical inference vs the std runtime.
+    //     Here we re-derive a 3-layer result fully by hand AND check determinism
+    //     across two independent buffer sets. ---
+    #[test]
+    fn infer_is_deterministic_across_runs() {
+        let m = model_bytes(&[
+            LayerSpec {
+                in_f: 3,
+                out_f: 4,
+                s_in: 0.05,
+                relu: true,
+                scales: &[0.002, 0.004, 0.001, 0.003],
+                w: &[10, -20, 30, 40, -50, 60, -70, 80, 15, -25, 35, -45],
+                bias: &[5, -3, 7, -9],
+            },
+            LayerSpec {
+                in_f: 4,
+                out_f: 2,
+                s_in: 0.03,
+                relu: false,
+                scales: &[0.0015, 0.0025],
+                w: &[11, -12, -14, 15, 17, -18, -20, 21],
+                bias: &[1, -2],
+            },
+        ]);
+        let input = [0.5f32, -0.3, 0.8, 0.1, 0.2, -0.4];
+        let a = run_infer(&m, &input, 2);
+        let b = run_infer(&m, &input, 2);
+        assert_eq!(bits(&a), bits(&b));
+        assert_eq!(a.len(), 4); // batch 2 * out_dim 2
+    }
 }

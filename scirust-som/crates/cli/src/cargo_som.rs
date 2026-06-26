@@ -9,10 +9,7 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("som")
-    {
-        args.remove(0);
-    }
-    ExitCode::from(scirust_som_cli::run(&args, "cargo som"))
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = scirust_som_cli::strip_cargo_subcommand(&args);
+    ExitCode::from(scirust_som_cli::run(args, "cargo som"))
 }

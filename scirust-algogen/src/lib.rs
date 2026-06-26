@@ -2559,6 +2559,58 @@ mod tests {
         assert_eq!(fit_complexity(&sizes, &times), ComplexityClass::Quadratic);
     }
 
+    #[test]
+    fn fit_complexity_classifies_exact_constant() {
+        // Flat timings: the Constant model (a fixed cost) fits with zero
+        // residual, while every growing model overshoots the small inputs.
+        let sizes = vec![10, 20, 40, 80, 160];
+        let times = vec![5.0; 5];
+        assert_eq!(fit_complexity(&sizes, &times), ComplexityClass::Constant);
+    }
+
+    #[test]
+    fn fit_complexity_classifies_exact_logarithmic() {
+        // times grow exactly as ln(n) — the Logarithmic model's own basis
+        // function (and for n ≥ 10 the model's .max(1.0) clamp is inert), so it
+        // is a perfect fit; Constant, the only earlier candidate, cannot match
+        // a non-flat curve.
+        let sizes = vec![10, 20, 40, 80, 160];
+        let times: Vec<f64> = sizes.iter().map(|&s| (s as f64).ln()).collect();
+        assert_eq!(fit_complexity(&sizes, &times), ComplexityClass::Logarithmic);
+    }
+
+    #[test]
+    fn fit_complexity_classifies_exact_linearithmic() {
+        // times grow exactly as n·ln(n): the Linearithmic model fits with zero
+        // residual, while the plain Linear model is off by the ln(n) factor.
+        let sizes = vec![10, 20, 40, 80, 160];
+        let times: Vec<f64> = sizes
+            .iter()
+            .map(|&s| {
+                let n = s as f64;
+                n * n.ln()
+            })
+            .collect();
+        assert_eq!(
+            fit_complexity(&sizes, &times),
+            ComplexityClass::Linearithmic
+        );
+    }
+
+    #[test]
+    fn fit_complexity_classifies_exact_cubic() {
+        // times grow exactly as n³.
+        let sizes = vec![10, 20, 40, 80, 160];
+        let times: Vec<f64> = sizes
+            .iter()
+            .map(|&s| {
+                let n = s as f64;
+                n * n * n
+            })
+            .collect();
+        assert_eq!(fit_complexity(&sizes, &times), ComplexityClass::Cubic);
+    }
+
     // ---- 34–36: comparison / serialisation / misc ----
 
     #[test]
@@ -2685,14 +2737,20 @@ mod tests {
     }
 
     #[test]
-    fn test_measure_complexity() {
+    fn measure_complexity_reports_the_requested_size_schedule() {
+        // measure_complexity is a wall-clock timing harness, so the *times* it
+        // returns are non-deterministic — asserting on their fitted complexity
+        // class is flaky (a sum over 80..400 i64s takes tens of nanoseconds, so
+        // the measurement is dominated by clock/cache noise and can fit Constant
+        // just as well as Linear). We therefore pin only the deterministic part
+        // of its contract: the size schedule it samples and the shape of its
+        // output. The classification logic itself is exercised exactly by the
+        // fit_complexity_classifies_exact_* tests above, which feed synthetic
+        // closed-form timings instead of a noisy clock.
         let (sizes, times) = measure_complexity(|d| d.iter().sum::<i64>(), 400, 5);
-        assert_eq!(sizes.len(), 5);
+        // size = max_size * (step + 1) / steps for step in 0..5.
+        assert_eq!(sizes, vec![80, 160, 240, 320, 400]);
         assert_eq!(times.len(), 5);
-        let cls = fit_complexity(&sizes, &times);
-        assert!(matches!(
-            cls,
-            ComplexityClass::Linear | ComplexityClass::Linearithmic
-        ));
+        assert!(times.iter().all(|t| t.is_finite() && *t >= 0.0));
     }
 }

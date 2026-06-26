@@ -1,26 +1,32 @@
 [package]
 name = "scirust-burn-bridge"
 publish = false
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.14.0"
+edition = "2021"
+rust-version = "1.85"
+authors = ["CheckupAuto"]
+license = "LicenseRef-CheckupAuto-Dual"
+repository = "https://github.com/CHECKUPAUTO/scirust"
 description = "Inference-only adapter between Burn neural networks and SciRust non-gradient algorithms"
 readme = "README.md"
 keywords = ["burn", "rust-ml", "evolutionary", "inference", "scirust"]
 categories = ["science"]
 
+# This crate depends on the heavy external `burn` crate and is intentionally
+# detached from the SciRust workspace (it is listed under `exclude` in the root
+# Cargo.toml). The empty `[workspace]` table below makes it its own workspace
+# root so it can build/test standalone without inheriting from the parent.
+[workspace]
+
 [dependencies]
-burn = { workspace = true }
-thiserror = { workspace = true }
+burn = { version = "0.20.1", default-features = false }
+thiserror = "2"
 
 [dev-dependencies]
 # burn-ndarray pour les tests d'intégration et benchmarks (CPU sans CUDA)
-burn-ndarray = { workspace = true }
+burn-ndarray = "0.20.1"
 # burn complet activé pour les modules nn::* dans les tests
-burn = { workspace = true, features = ["std", "ndarray"] }
+burn = { version = "0.20.1", features = ["std", "ndarray"] }
 
 [[bench]]
 name = "forward"

@@ -57,7 +57,21 @@ mod tests {
         let mut s = EventStream::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3, 2);
         assert_eq!(s.next_window().unwrap().data, vec![1.0, 2.0, 3.0]);
         assert_eq!(s.next_window().unwrap().data, vec![3.0, 4.0, 5.0]);
+        // Next window would need indices 5..8 but data ends at 6 → stop.
         assert!(s.next_window().is_none());
+    }
+
+    #[test]
+    fn windowing_handles_overlap_and_undersized_data() {
+        // stride 1 → fully overlapping size-2 windows over 4 points = 3 windows.
+        let mut s = EventStream::new(vec![10.0, 20.0, 30.0, 40.0], 2, 1);
+        assert_eq!(s.next_window().unwrap().data, vec![10.0, 20.0]);
+        assert_eq!(s.next_window().unwrap().data, vec![20.0, 30.0]);
+        assert_eq!(s.next_window().unwrap().data, vec![30.0, 40.0]);
+        assert!(s.next_window().is_none());
+        // A window larger than the data yields nothing (no partial/padded window).
+        let mut undersized = EventStream::new(vec![1.0, 2.0], 3, 1);
+        assert!(undersized.next_window().is_none());
     }
 
     struct SumThreshold(f32);

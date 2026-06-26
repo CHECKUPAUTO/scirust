@@ -108,7 +108,7 @@ impl EventDetector for EventClassifier {
 mod tests {
     use super::*;
     use scirust_core::autodiff::reverse::Tensor;
-    use scirust_core::nn::{KaimingNormal, Linear, PcgEngine, ReLU, Zeros};
+    use scirust_core::nn::{Linear, PcgEngine, Zeros};
 
     #[test]
     fn test_spike_detector_ema() {
@@ -129,23 +129,33 @@ mod tests {
     }
 
     #[test]
-    fn test_event_classifier() {
-        let mut rng = PcgEngine::new(42);
-        let model = Sequential::new()
-            .add(Linear::new(2, 2, &KaimingNormal, &Zeros, &mut rng))
-            .add(ReLU::new());
+    fn spike_detector_flags_a_threshold_crossing() {
+        let mut d = SpikeDetector::new(5.0, 0.5);
+        // max 4 → ema = 0.5·4 = 2.0 ≤ 5 → background, score 2/5 = 0.4.
+        let (s1, en1, _) = d.detect(&Tensor::from_vec(vec![1.0, 4.0, 2.0], 1, 3));
+        assert_eq!(en1, "background");
+        assert!((s1 - 0.4).abs() < 1e-6);
+        // max 12 → ema = 0.5·12 + 0.5·2 = 7.0 > 5 → spike, score 1.0.
+        let (s2, en2, fr2) = d.detect(&Tensor::from_vec(vec![12.0], 1, 1));
+        assert_eq!((en2.as_str(), fr2.as_str()), ("spike", "pic"));
+        assert_eq!(s2, 1.0);
+        assert!((d.ema - 7.0).abs() < 1e-6);
+    }
 
+    #[test]
+    fn classifier_argmax_maps_to_the_right_label() {
+        let mut rng = PcgEngine::new(1);
+        // Zeros weight + bias → the model outputs all zeros, so argmax picks the
+        // first index → label 0. This pins the argmax→label mapping exactly
+        // (the previous test only checked the labels were non-empty).
+        let model = Sequential::new().add(Linear::new(3, 4, &Zeros, &Zeros, &mut rng));
         let mut classifier = EventClassifier::new(
             model,
-            vec!["A".into(), "B".into()],
-            vec!["Alpha".into(), "Beta".into()],
+            vec!["a".into(), "b".into(), "c".into(), "d".into()],
+            vec!["A".into(), "B".into(), "C".into(), "D".into()],
         );
-
-        let data = vec![1.0, 0.5];
-        let tensor = Tensor::from_vec(data, 1, 2);
-        let (score, en, fr) = classifier.detect(&tensor);
-        assert!(score >= 0.0);
-        assert!(!en.is_empty());
-        assert!(!fr.is_empty());
+        let (score, en, fr) = classifier.detect(&Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        assert_eq!(score, 0.0);
+        assert_eq!((en.as_str(), fr.as_str()), ("a", "A"));
     }
 }

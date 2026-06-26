@@ -1,6 +1,9 @@
 # Build artifacts
 /target/
 examples/benchmarks/target/
+# scirust-burn-bridge is excluded from the root workspace (it pulls in the real
+# Burn crate), so it builds into its own target dir.
+scirust-burn-bridge/target/
 Cargo.lock
 *.rlib
 *.so

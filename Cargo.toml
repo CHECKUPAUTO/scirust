@@ -122,6 +122,7 @@ members = [
     "scirust-codetrans",
     "scirust-scaffold",
     "scirust-rsi",
+    "scirust-license",
 ]
 exclude = [
     "scirust-rustc-driver",

@@ -2868,6 +2868,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-license"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "scirust-macros"
 version = "0.1.0"
 dependencies = [

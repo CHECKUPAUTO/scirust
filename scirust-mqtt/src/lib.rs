@@ -101,12 +101,18 @@ pub fn event_to_payload(
 }
 
 fn format_unix_timestamp(ts: f64) -> String {
-    // Simple ISO 8601-like formatting
-    let total_secs = ts as i64;
-    let hours = (total_secs / 3600) % 24;
-    let minutes = (total_secs / 60) % 60;
-    let seconds = total_secs % 60;
-    let millis = ((ts - total_secs as f64) * 1000.0).round() as u32;
+    // Simple ISO 8601-like time-of-day formatting.
+    //
+    // Round to whole milliseconds *first*, then decompose, so that a
+    // fractional part rounding up to 1000 ms carries into the seconds field
+    // instead of being emitted as an invalid 4-digit ".1000Z". Using
+    // div/rem_euclid keeps `millis` in [0, 1000) even for negative inputs.
+    let total_millis = (ts * 1000.0).round() as i64;
+    let total_secs = total_millis.div_euclid(1000);
+    let millis = total_millis.rem_euclid(1000);
+    let hours = total_secs.div_euclid(3600) % 24;
+    let minutes = total_secs.div_euclid(60) % 60;
+    let seconds = total_secs.rem_euclid(60);
     format!("T{:02}:{:02}:{:02}.{:03}Z", hours, minutes, seconds, millis)
 }
 
@@ -185,7 +191,9 @@ pub struct SimulatedMqttPublisher {
     connected: bool,
     /// All published messages: (topic, payload, qos, retain)
     pub messages: Vec<(String, Vec<u8>, u8, bool)>,
-    /// Number of publishes attempted
+    /// Number of messages successfully published (failed publishes — e.g.
+    /// while disconnected or with an empty topic — are *not* counted and are
+    /// not recorded in `messages`). Always equals `messages.len()`.
     pub publish_count: u64,
     /// Last error message
     pub last_error: Option<String>,
@@ -202,24 +210,26 @@ impl SimulatedMqttPublisher {
         }
     }
 
-    /// Count events by severity.
+    /// Count events by severity, returned as `(info, warning, critical)`.
+    ///
+    /// Event topics have the shape `{base_topic}/{source}/{severity}`, so the
+    /// severity is always the final `/`-delimited segment. Matching that
+    /// trailing segment exactly avoids miscounting a source name that happens
+    /// to contain a severity word (e.g. a `line3-critical-spindle/info` topic
+    /// must count as *info*, not *critical*).
     pub fn count_by_severity(&self) -> (usize, usize, usize) {
         let mut info = 0;
         let mut warn = 0;
         let mut crit = 0;
         for (topic, _, _, _) in &self.messages
         {
-            if topic.contains("/critical")
+            match topic.rsplit('/').next().unwrap_or("")
             {
-                crit += 1;
-            }
-            else if topic.contains("/warning")
-            {
-                warn += 1;
-            }
-            else if topic.contains("/info")
-            {
-                info += 1;
+                "critical" => crit += 1,
+                "warning" => warn += 1,
+                "info" => info += 1,
+                _ =>
+                {},
             }
         }
         (info, warn, crit)
@@ -502,8 +512,13 @@ mod tests {
     #[test]
     fn test_publish_not_connected_errors() {
         let mut pubr = SimulatedMqttPublisher::new();
+        // A fresh publisher is not connected; publishing must fail with the
+        // exact broker error and must not record or count anything.
         let result = pubr.publish("test", b"data", 1, false);
-        assert!(result.is_err());
+        assert_eq!(result, Err("Not connected to broker".to_string()));
+        assert_eq!(pubr.last_error.as_deref(), Some("Not connected"));
+        assert_eq!(pubr.publish_count, 0);
+        assert!(pubr.messages.is_empty());
     }
 
     #[test]
@@ -554,5 +569,225 @@ mod tests {
         let count = publish_events(&mut pubr, &events, "station1", None).unwrap();
         assert_eq!(count, 2);
         assert_eq!(pubr.publish_count, 2);
+    }
+
+    // -- Oracle tests: state machine, message accounting, flag fidelity ------
+
+    #[test]
+    fn test_connect_sets_connected_state() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        // A fresh publisher starts disconnected.
+        assert!(!pubr.is_connected());
+        pubr.connect(&MqttConfig::default()).unwrap();
+        assert!(pubr.is_connected());
+    }
+
+    #[test]
+    fn test_publish_increments_count_by_exactly_n() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+        // connect() resets the buffers, so both start at zero.
+        assert_eq!(pubr.publish_count, 0);
+        assert_eq!(pubr.messages.len(), 0);
+
+        const N: u64 = 5;
+        for i in 0..N
+        {
+            pubr.publish(&format!("t/{i}"), b"x", 0, false).unwrap();
+        }
+        // Exactly N successful publishes recorded and counted.
+        assert_eq!(pubr.publish_count, N);
+        assert_eq!(pubr.messages.len(), N as usize);
+    }
+
+    #[test]
+    fn test_publish_preserves_topic_payload_qos_retain() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+
+        // Distinct values per field so a swap/drop bug would be caught.
+        pubr.publish("plant/line3/temp", &[0xDE, 0xAD], 2, true)
+            .unwrap();
+        pubr.publish("plant/line3/vibe", &[0xBE, 0xEF, 0x01], 0, false)
+            .unwrap();
+
+        assert_eq!(pubr.messages.len(), 2);
+
+        let (topic0, payload0, qos0, retain0) = &pubr.messages[0];
+        assert_eq!(topic0, "plant/line3/temp");
+        assert_eq!(payload0.as_slice(), &[0xDE, 0xAD]);
+        assert_eq!(*qos0, 2);
+        assert!(*retain0);
+
+        let (topic1, payload1, qos1, retain1) = &pubr.messages[1];
+        assert_eq!(topic1, "plant/line3/vibe");
+        assert_eq!(payload1.as_slice(), &[0xBE, 0xEF, 0x01]);
+        assert_eq!(*qos1, 0);
+        assert!(!*retain1);
+    }
+
+    #[test]
+    fn test_publish_empty_topic_errors_without_recording() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+        let result = pubr.publish("", b"data", 1, false);
+        assert_eq!(result, Err("Topic cannot be empty".to_string()));
+        assert_eq!(pubr.last_error.as_deref(), Some("Empty topic"));
+        // Failed publish must not be counted or recorded.
+        assert_eq!(pubr.publish_count, 0);
+        assert!(pubr.messages.is_empty());
+    }
+
+    #[test]
+    fn test_disconnect_resets_connected_and_blocks_publish() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+        pubr.publish("t/a", b"x", 1, false).unwrap();
+        assert!(pubr.is_connected());
+        assert_eq!(pubr.publish_count, 1);
+
+        pubr.disconnect().unwrap();
+        assert!(!pubr.is_connected());
+
+        // After disconnect, publishing is rejected and nothing new is recorded.
+        let result = pubr.publish("t/b", b"y", 1, false);
+        assert_eq!(result, Err("Not connected to broker".to_string()));
+        assert_eq!(pubr.publish_count, 1);
+        assert_eq!(pubr.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_publish_event_after_disconnect_errors() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+        pubr.disconnect().unwrap();
+
+        // config is still Some after disconnect, so the not-connected guard in
+        // publish() (not the not-configured guard) must be what rejects this.
+        let payload = event_to_payload(&make_test_event(), "motor1", None);
+        let result = pubr.publish_event(&payload);
+        assert_eq!(result, Err("Not connected to broker".to_string()));
+        assert!(pubr.messages.is_empty());
+    }
+
+    #[test]
+    fn test_reconnect_clears_previous_messages() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+        pubr.publish("t/a", b"x", 1, false).unwrap();
+        assert_eq!(pubr.messages.len(), 1);
+
+        // A second connect() must reset the message buffer and counter.
+        pubr.connect(&MqttConfig::default()).unwrap();
+        assert!(pubr.is_connected());
+        assert_eq!(pubr.publish_count, 0);
+        assert!(pubr.messages.is_empty());
+    }
+
+    #[test]
+    fn test_publish_event_uses_config_qos_and_no_retain() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        let cfg = MqttConfig {
+            qos: 2,
+            base_topic: "scirust/events".to_string(),
+            ..MqttConfig::default()
+        };
+        pubr.connect(&cfg).unwrap();
+
+        let event = make_test_event(); // confidence 0.96 -> Critical
+        let payload = event_to_payload(&event, "motor1", None);
+        pubr.publish_event(&payload).unwrap();
+
+        let (topic, recorded, qos, retain) = &pubr.messages[0];
+        // Topic = {base}/{source}/{severity-suffix}.
+        assert_eq!(topic, "scirust/events/motor1/critical");
+        // QoS comes from config; events are never retained.
+        assert_eq!(*qos, 2);
+        assert!(!*retain);
+        // Recorded payload round-trips back to the same event payload.
+        let decoded: EventPayload = serde_json::from_slice(recorded).unwrap();
+        assert_eq!(decoded.source, "motor1");
+        assert_eq!(decoded.event_id, event.id);
+        assert_eq!(decoded.severity, EventSeverity::Critical);
+        assert_eq!(decoded.confidence, event.confidence);
+    }
+
+    #[test]
+    fn test_event_payload_json_roundtrip_preserves_fields() {
+        let event = make_test_event();
+        let meta = serde_json::json!({ "bearing_fault": "BPFO" });
+        let payload = event_to_payload(&event, "spindle", Some(meta.clone()));
+
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let back: EventPayload = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(back.source, "spindle");
+        assert_eq!(back.event_id, 1);
+        assert_eq!(back.label_en, "spike");
+        assert_eq!(back.label_fr, "pic");
+        assert_eq!(back.confidence, 0.96);
+        assert_eq!(back.data_snapshot, Some(vec![1.0, 2.0]));
+        assert_eq!(back.severity, EventSeverity::Critical);
+        assert_eq!(back.metadata, Some(meta));
+        // UPPERCASE severity rename is honored on the wire.
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("\"severity\":\"CRITICAL\""));
+    }
+
+    // -- Regression: count_by_severity matches the trailing topic segment ----
+
+    #[test]
+    fn test_count_by_severity_handles_source_named_like_severity() {
+        let mut pubr = SimulatedMqttPublisher::new();
+        pubr.connect(&MqttConfig::default()).unwrap();
+
+        // Sources whose names embed a severity word must be classified by the
+        // *suffix*, not by a substring of the source segment.
+        // info x2, warning x2, critical x2 by hand.
+        let topics = [
+            "scirust/events/motor1/critical",
+            "scirust/events/info-sensor/critical",
+            "scirust/events/motor1/warning",
+            "scirust/events/warning-light/warning",
+            "scirust/events/motor1/info",
+            "scirust/events/critical-pump/info",
+        ];
+        for t in topics
+        {
+            pubr.publish(t, b"{}", 1, false).unwrap();
+        }
+
+        let (info, warn, crit) = pubr.count_by_severity();
+        assert_eq!((info, warn, crit), (2, 2, 2));
+    }
+
+    // -- Regression: millisecond rounding carries into seconds ---------------
+
+    #[test]
+    fn test_format_timestamp_values() {
+        // Hand-derived ISO-like time-of-day strings.
+        assert_eq!(format_unix_timestamp(0.0), "T00:00:00.000Z");
+        assert_eq!(format_unix_timestamp(1000.5), "T00:16:40.500Z");
+        assert_eq!(format_unix_timestamp(3661.25), "T01:01:01.250Z");
+        assert_eq!(format_unix_timestamp(86399.999), "T23:59:59.999Z");
+    }
+
+    #[test]
+    fn test_format_timestamp_millis_carry() {
+        // Fractional parts that round up to 1000 ms must carry into the next
+        // second and never emit an invalid 4-digit ".1000Z".
+        // 1000.9999 s = 16 min 40.9999 s -> rounds to 16:41.000.
+        assert_eq!(format_unix_timestamp(1000.9999), "T00:16:41.000Z");
+        // 59.9996 s -> rounds to 1 min 00.000 s.
+        assert_eq!(format_unix_timestamp(59.9996), "T00:01:00.000Z");
+        // 3599.9999 s = 59 min 59.9999 s -> rounds to 1 h 00:00.000.
+        assert_eq!(format_unix_timestamp(3599.9999), "T01:00:00.000Z");
+        // No produced millisecond field ever has 4 digits.
+        for ts in [0.0_f64, 1000.9999, 59.9996, 3599.9999, 86399.9999]
+        {
+            let s = format_unix_timestamp(ts);
+            let frac = s.trim_start_matches(|c| c != '.').trim_matches(['.', 'Z']);
+            assert_eq!(frac.len(), 3, "millis field not 3 digits for ts={ts}: {s}");
+        }
     }
 }
