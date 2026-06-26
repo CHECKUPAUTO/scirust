@@ -89,6 +89,15 @@ mod tests {
     }
 
     #[test]
+    fn sum_uncertainties_add_in_quadrature() {
+        // y = x1 + x2: sensitivities are 1, so u_c = sqrt(u1² + u2²).
+        // u1=3, u2=4 → u_c = 5 (the classic 3-4-5).
+        let f = |x: &[f64]| x[0] + x[1];
+        let uc = combined_uncertainty(f, &[10.0, 5.0], &[3.0, 4.0], 1e-4);
+        assert!((uc - 5.0).abs() < 1e-6, "uc {uc}");
+    }
+
+    #[test]
     fn nonlinear_model_propagates() {
         // y = sqrt(x), at x=4, u=0.1 -> u_y ≈ u/(2 sqrt x) = 0.025.
         let f = |x: &[f64]| x[0].sqrt();

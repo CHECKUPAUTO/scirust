@@ -71,6 +71,16 @@ mod tests {
     }
 
     #[test]
+    fn exact_allan_deviation_on_a_hand_computed_series() {
+        // data = [1,3,1,3], m=1 → bin means [1,3,1,3]; successive diffs² =
+        // 4+4+4 = 12; AVAR = 12 / (2·(4−1)) = 2; ADEV = sqrt(2).
+        let dev = allan_deviation(&[1.0, 3.0, 1.0, 3.0], 1).unwrap();
+        assert!((dev - 2.0_f64.sqrt()).abs() < 1e-12, "adev {dev}");
+        // Too few bins (m=2 → 2 bins is the minimum; m=3 → 1 bin) returns None.
+        assert!(allan_deviation(&[1.0, 3.0, 1.0, 3.0], 3).is_none());
+    }
+
+    #[test]
     fn white_noise_averages_down_with_tau() {
         // White noise: σ(τ) ∝ τ^{-1/2}, so σ decreases as m grows.
         let mut rng = Rng::new(0xA11A2);

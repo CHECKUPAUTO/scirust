@@ -448,6 +448,48 @@ mod tests {
             .fold(f64::INFINITY, f64::min)
     }
     #[test]
+    fn dominates_is_correct_for_minimization() {
+        // Both objectives (size, mse) are minimized: lower dominates.
+        assert!(dominates((1, 0.5), (2, 1.0))); // strictly better in both
+        assert!(dominates((1, 1.0), (2, 1.0))); // better size, equal mse
+        assert!(!dominates((2, 1.0), (1, 0.5))); // worse in both
+        assert!(!dominates((1, 0.5), (1, 0.5))); // equal does not dominate
+        assert!(!dominates((1, 2.0), (2, 1.0))); // trade-off: neither dominates
+    }
+
+    #[test]
+    fn pareto_insert_keeps_only_nondominated() {
+        let mut arch = vec![];
+        pareto_insert(&mut arch, 2, 1.0, &Const(0.0));
+        assert_eq!(arch.len(), 1);
+        // A dominating point replaces the one it dominates.
+        pareto_insert(&mut arch, 1, 0.5, &Const(0.0));
+        assert_eq!(arch.len(), 1);
+        assert_eq!((arch[0].0, arch[0].1), (1, 0.5));
+        // A dominated point is rejected.
+        pareto_insert(&mut arch, 3, 2.0, &Const(0.0));
+        assert_eq!(arch.len(), 1);
+        // A genuine trade-off (smaller size, worse mse) stays on the front.
+        pareto_insert(&mut arch, 0, 5.0, &Const(0.0));
+        assert_eq!(arch.len(), 2);
+    }
+
+    #[test]
+    fn discover_finds_the_identity_end_to_end() {
+        // Target y = x: the terminal `x` is an exact size-1 solution the GP must
+        // surface — a fast end-to-end check of gen_tree → fitness → tournament →
+        // pareto → polish → discover (the ignored tests above are debug-slow).
+        let data: Vec<(Vec<f64>, f64)> = (-3..=3).map(|i| (vec![i as f64], i as f64)).collect();
+        let front = discover(&data, &["x"], &[1, 2], 30, 6, 10, 20);
+        assert!(!front.is_empty());
+        let best = front
+            .iter()
+            .map(|&(_, m, _)| m)
+            .fold(f64::INFINITY, f64::min);
+        assert!(best < 1e-6, "discover failed to fit y=x: best mse {best}");
+    }
+
+    #[test]
     #[ignore = "integration GP (lent en debug): --release -- --ignored"]
     fn recovers_poly_plus_sin() {
         let mut data = vec![];

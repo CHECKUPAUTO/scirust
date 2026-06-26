@@ -50,6 +50,16 @@ mod tests {
     }
 
     #[test]
+    fn korteweg_matches_a_hand_computed_value() {
+        // c² = (K/ρ) / (1 + (K/E)(D/e))
+        //    = (2.2e9/1000) / (1 + (2.2e9/200e9)(0.5/0.01))
+        //    = 2.2e6 / (1 + 0.011·50) = 2.2e6 / 1.55 = 1_419_354.84
+        //  → c = 1191.37 m/s.
+        let c = korteweg_wave_speed(2.2e9, 1000.0, 200e9, 0.5, 0.01);
+        assert!((c - 1191.37).abs() < 0.1, "got {c}");
+    }
+
+    #[test]
     fn korteweg_is_below_the_free_fluid_sound_speed() {
         // Water in a steel pipe: K=2.2 GPa, ρ=1000, E=200 GPa, D=0.5 m, e=0.01 m.
         let k = 2.2e9_f64;

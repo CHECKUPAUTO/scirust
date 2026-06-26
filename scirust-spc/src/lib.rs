@@ -6,10 +6,14 @@
 //!   Electric run rules (catches shifts a single 3σ test misses).
 //! - [`EwmaChart`] — EWMA chart, sensitive to small sustained shifts.
 //! - [`HotellingT2`] — multivariate T² monitoring of correlated quality variables.
+//! - [`constants`] — Shewhart variable-chart constants (A2/A3/D3/D4/B3/B4, c4,
+//!   d2/d3) for subgroup X-bar / R / S charts, validated against the canonical
+//!   published tables.
 //!
 //! Pairs naturally with `scirust-pdm`'s conformal guard for a guaranteed
 //! false-alarm rate on the fault-detection layer.
 
+pub mod constants;
 pub mod ewma;
 pub mod hotelling;
 pub mod shewhart;

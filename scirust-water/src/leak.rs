@@ -100,6 +100,21 @@ mod tests {
     }
 
     #[test]
+    fn best_lag_recovers_a_planted_delay() {
+        // y is x delayed by exactly 5 samples → best lag is +5, and the
+        // normalised correlation at that lag is 1 (identical shifted signals).
+        let x = noise(200, 0x5A1);
+        let mut y = vec![0.0; x.len() + 5];
+        for (i, &v) in x.iter().enumerate()
+        {
+            y[i + 5] = v;
+        }
+        let (lag, corr) = best_lag(&x, &y, 20);
+        assert_eq!(lag, 5);
+        assert!((corr - 1.0).abs() < 1e-9, "corr {corr}");
+    }
+
+    #[test]
     fn recovers_a_known_leak_position() {
         // Geometry chosen so arrival delays are whole samples:
         // c = 1000 m/s, fs = 10 kHz → 10 samples per metre.
