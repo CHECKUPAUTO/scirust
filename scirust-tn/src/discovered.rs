@@ -114,4 +114,30 @@ mod forge_tests {
         assert!(err < 1e-9, "roundtrip L2 trop grand: {err}");
         assert!(comp.len() < flat.len(), "pas de compression");
     }
+
+    #[test]
+    fn full_rank_roundtrips_and_rank2_is_detected() {
+        let shape = [3usize, 3usize];
+        // SPD, diagonally dominant → full rank 3: exact round-trip, stored rank 3.
+        let full = [4.0, 1.0, 0.0, 1.0, 3.0, 1.0, 0.0, 1.0, 2.0];
+        let comp = compress(&full, &shape);
+        assert_eq!(comp[0] as usize, 3, "full-rank matrix should keep rank 3");
+        let mut rb = vec![0.0; 9];
+        reconstruct(&comp, &shape, &mut rb);
+        let err: f64 = full
+            .iter()
+            .zip(&rb)
+            .map(|(x, y)| (x - y).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(err < 1e-9, "full-rank roundtrip err {err}");
+
+        // Row 3 = row 1 + row 2 → rank 2, so one singular value is ~0.
+        let r2 = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0];
+        let comp2 = compress(&r2, &shape);
+        assert_eq!(
+            comp2[0] as usize, 2,
+            "rank-2 matrix should compress to rank 2"
+        );
+    }
 }

@@ -79,4 +79,16 @@ mod tests {
         let p = vec![200.0, 210.0, 195.0, 205.0, 198.0]; // small fluctuations
         assert!(disaggregate(&p, &library, 300.0, 100.0).is_empty());
     }
+
+    #[test]
+    fn a_step_matching_no_signature_is_detected_but_unlabeled() {
+        // A 700 W step is well above min_step but within tol of neither 150 nor
+        // 2000 W → the event is reported with appliance = None.
+        let library = [("fridge", 150.0), ("kettle", 2000.0)];
+        let p = vec![200.0, 200.0, 900.0, 900.0]; // +700 W
+        let events = disaggregate(&p, &library, 300.0, 100.0);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].appliance, None);
+        assert!((events[0].delta_w - 700.0).abs() < 1e-9);
+    }
 }

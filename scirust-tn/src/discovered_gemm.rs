@@ -60,4 +60,24 @@ mod forge_tests {
             assert!((got[i] - want[i]).abs() < 1e-9, "mismatch at {i}");
         }
     }
+
+    #[test]
+    fn gemm_identity_and_exact_2x2() {
+        // A · I = A.
+        let n = 3;
+        let a: Vec<f64> = (0..9).map(|i| i as f64 + 1.0).collect();
+        let mut ident = vec![0.0; 9];
+        for i in 0..n
+        {
+            ident[i * n + i] = 1.0;
+        }
+        let mut c = vec![0.0; 9];
+        compute_kernel(&mut c, &a, &ident, n);
+        assert_eq!(c, a);
+
+        // [[1,2],[3,4]] · [[5,6],[7,8]] = [[19,22],[43,50]].
+        let mut c2 = vec![0.0; 4];
+        compute_kernel(&mut c2, &[1.0, 2.0, 3.0, 4.0], &[5.0, 6.0, 7.0, 8.0], 2);
+        assert_eq!(c2, vec![19.0, 22.0, 43.0, 50.0]);
+    }
 }
