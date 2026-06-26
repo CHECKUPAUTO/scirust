@@ -99,12 +99,18 @@ pub fn relay_autotune(
     let mut crossings = Vec::new();
     let mut amax = f64::MIN;
     let mut amin = f64::MAX;
+    // Relay feedback: exactly one plant step per control period. The relay value
+    // is chosen from the previous output, applied once, and the returned value
+    // is the new measurement. (An earlier version called `plant(0.0)` first to
+    // "measure" — but the closure *advances* the plant, so that injected a
+    // spurious zero-input step every period and double-advanced the clock,
+    // distorting the limit cycle and halving the identified Tu.)
+    let mut y = 0.0; // plant assumed to start at rest
     for k in 0..steps
     {
-        let y = plant(0.0); // measure
         let e = setpoint - y;
         let sign = if e >= 0.0 { 1.0 } else { -1.0 };
-        let _ = plant(d * sign); // apply relay
+        y = plant(d * sign); // apply relay, read the resulting output
         if k > steps / 3
         {
             // settle, then record
@@ -205,22 +211,55 @@ mod tests {
     }
 
     #[test]
-    fn relay_autotune_recovers_plausible_gains() {
-        let dt = 0.05;
+    fn relay_autotune_recovers_the_ultimate_point_of_a_cubic_plant() {
+        // Plant G(s) = 1/(s+1)³ — three unity first-order lags in series. Its
+        // ultimate (−180° phase) point is ANALYTIC:
+        //   ∠G(jω) = −3·atan(ω) = −π  ⇒  ω_u = tan(π/3) = √3,
+        //   T_u = 2π/ω_u = 2π/√3 ≈ 3.6276 s,
+        //   |G(jω_u)| = 1/(1+ω_u²)^{3/2} = 1/8  ⇒  K_u = 1/|G| = 8.
+        // Relay feedback must rediscover this point: the limit-cycle period is
+        // T_u, and the describing-function gain 4d/(πa) recovers K_u to within
+        // the method's first-harmonic accuracy.
+        let dt = 0.01;
+        let (mut x1, mut x2, mut x3) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let plant = move |u: f64| -> f64 {
+            x1 += dt * (-x1 + u);
+            x2 += dt * (-x2 + x1);
+            x3 += dt * (-x3 + x2);
+            x3
+        };
+        let t = relay_autotune(plant, 0.0, 1.0, dt, 6000)
+            .expect("a cubic plant sustains a relay limit cycle");
+        let tu_exact = 2.0 * core::f64::consts::PI / 3.0_f64.sqrt();
+        // In practice this recovers Tu to ≈0.3% and Ku to ≈1%; the bands below
+        // leave generous margin for the describing-function approximation while
+        // still pinning the result to the analytic ultimate point.
+        assert!(
+            (t.tu - tu_exact).abs() / tu_exact < 0.03,
+            "Tu {} not within 3% of analytic {tu_exact}",
+            t.tu
+        );
+        assert!(
+            (t.ku - 8.0).abs() / 8.0 < 0.08,
+            "Ku {} not within 8% of analytic 8",
+            t.ku
+        );
+        // Ziegler–Nichols gains are the documented functions of (Ku, Tu).
+        assert!((t.kp - 0.6 * t.ku).abs() < 1e-12);
+        assert!((t.ki - 1.2 * t.ku / t.tu).abs() < 1e-12);
+        assert!((t.kd - 0.075 * t.ku * t.tu).abs() < 1e-12);
+    }
+
+    #[test]
+    fn relay_autotune_returns_none_without_enough_oscillation() {
+        // Too few steps to observe ≥3 relay switches ⇒ no usable estimate.
         let mut plant = Plant {
             y: 0.0,
             tau: 1.0,
             g: 1.0,
-            dt,
+            dt: 0.05,
         };
-        let mut step = move |u: f64| plant.step(u);
-        let tuning = relay_autotune(&mut step, 1.0, 1.0, dt, 4000);
-        // A first-order plant has no sustained oscillation under pure relay, so
-        // tuning may be None or yield finite gains; assert it does not panic and,
-        // if Some, gains are finite and positive.
-        if let Some(t) = tuning
-        {
-            assert!(t.ku.is_finite() && t.tu > 0.0 && t.kp > 0.0);
-        }
+        let step = move |u: f64| plant.step(u);
+        assert!(relay_autotune(step, 1.0, 1.0, 0.05, 6).is_none());
     }
 }
