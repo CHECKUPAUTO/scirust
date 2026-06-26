@@ -413,4 +413,32 @@ mod tests {
         assert_eq!(ids[MAX_VARS], SomVocab::UNK);
         assert_eq!(ids[MAX_VARS + 1], SomVocab::UNK);
     }
+
+    #[test]
+    fn encode_produces_exact_structured_ids() {
+        // vocab = VAR_BASE(7) + VAR_KINDS(7)·MAX_VARS(8) = 63.
+        assert_eq!(SomVocab::vocab_size(), 63);
+        // Special tokens map to their fixed ids.
+        assert_eq!(
+            SomVocab::encode(&[
+                SomToken::FnDecl("f".into()),
+                SomToken::Return,
+                SomToken::ScopeStart,
+                SomToken::ScopeEnd,
+                SomToken::Sep,
+            ]),
+            vec![2, 3, 4, 5, 6]
+        );
+        // Variable id = VAR_BASE + kind·MAX_VARS + slot, slots by first appearance.
+        // VarDecl kind=1, Use kind=3; x→slot 0, y→slot 1:
+        //   VarDecl x = 7 + 1·8 + 0 = 15 ; VarDecl y = 16 ; Use x = 7 + 3·8 + 0 = 31.
+        assert_eq!(
+            SomVocab::encode(&[
+                SomToken::VarDecl("x".into()),
+                SomToken::VarDecl("y".into()),
+                SomToken::Use("x".into()),
+            ]),
+            vec![15, 16, 31]
+        );
+    }
 }
