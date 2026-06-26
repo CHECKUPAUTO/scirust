@@ -113,9 +113,11 @@ impl LSTM {
 
         for t in 0..seq_len
         {
-            let x_t = input
-                .try_slice_rows(t * batch_size, (t + 1) * batch_size)
-                .unwrap();
+            // try_slice_rows takes (start, LEN), not (start, end): the time
+            // step t occupies rows [t*batch, t*batch + batch). Passing the end
+            // index as the length over-sliced for t >= 1 and ran off the input
+            // — the real "shape mismatch" the tests below were ignored to hide.
+            let x_t = input.try_slice_rows(t * batch_size, batch_size).unwrap();
 
             // gates = x_t @ W_ih^T + h @ W_hh^T + b_ih + b_hh
             let mut gates = x_t
@@ -240,7 +242,6 @@ mod test_lstm {
     }
 
     #[test]
-    #[ignore = "shape mismatch with Tensor API"]
     fn lstm_forward_runs_without_panic() {
         let mut rng = PcgEngine::new(42);
         let mut lstm = LSTM::new(5, 8, true, &mut rng);
@@ -251,7 +252,6 @@ mod test_lstm {
     }
 
     #[test]
-    #[ignore = "shape mismatch with Tensor API"]
     fn lstm_deterministic() {
         let mut rng_a = PcgEngine::new(42);
         let mut rng_b = PcgEngine::new(42);
@@ -259,8 +259,14 @@ mod test_lstm {
         let mut lstm_b = LSTM::new(4, 6, true, &mut rng_b);
         let tape_a = Tape::new();
         let tape_b = Tape::new();
-        let x_a = tape_a.input(Tensor::zeros(4, 4));
-        let x_b = tape_b.input(Tensor::zeros(4, 4));
+        // Non-zero input so determinism is a real check, not 0 == 0.
+        let mut xt = Tensor::zeros(4, 4);
+        for (i, v) in xt.data.iter_mut().enumerate()
+        {
+            *v = 0.1 * (i as f32 + 1.0);
+        }
+        let x_a = tape_a.input(xt.clone());
+        let x_b = tape_b.input(xt.clone());
         let out_a = lstm_a.forward_sequence(&tape_a, x_a, 2, 2);
         let out_b = lstm_b.forward_sequence(&tape_b, x_b, 2, 2);
         assert_eq!(
@@ -271,20 +277,29 @@ mod test_lstm {
     }
 
     #[test]
-    #[ignore = "shape mismatch with Tensor API"]
-    fn lstm_forward_non_zero_on_zero_input() {
+    fn lstm_forward_produces_nonzero_output() {
         let mut rng = PcgEngine::new(1);
         let mut lstm = LSTM::new(5, 8, true, &mut rng);
         let tape = Tape::new();
-        let x = tape.input(Tensor::zeros(4, 5));
+        // Non-zero input: with random weights the gates are non-zero, so the
+        // hidden state is non-zero. (A zero input with zero-init bias genuinely
+        // yields zero output, since the weights only ever multiply zeros.)
+        let mut xt = Tensor::zeros(4, 5);
+        for (i, v) in xt.data.iter_mut().enumerate()
+        {
+            *v = 0.2 * (i as f32 + 1.0);
+        }
+        let x = tape.input(xt);
         let out = lstm.forward_sequence(&tape, x, 2, 2);
         let val = tape.value(out.idx());
         let max_abs: f32 = val.data.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        assert!(max_abs > 0.0, "expected non-zero output from random init");
+        assert!(
+            max_abs > 0.0,
+            "expected non-zero output from non-zero input"
+        );
     }
 
     #[test]
-    #[ignore = "shape mismatch with Tensor API"]
     fn lstm_parameter_indices_present() {
         let mut rng = PcgEngine::new(42);
         let mut lstm = LSTM::new(10, 16, true, &mut rng);
@@ -300,7 +315,6 @@ mod test_lstm {
     }
 
     #[test]
-    #[ignore = "shape mismatch with Tensor API"]
     fn lstm_no_bias_parameter_indices() {
         let mut rng = PcgEngine::new(42);
         let mut lstm = LSTM::new(8, 12, false, &mut rng);
