@@ -659,7 +659,11 @@ pub fn to_rust_code(expr: &Expr) -> String {
 pub fn apply_trig_identity(expr: &Expr) -> Expr {
     match expr
     {
-        Expr::Pow(a, _) =>
+        // The half-angle identities sin²θ = (1 - cos 2θ)/2 and
+        // cos²θ = (1 + cos 2θ)/2 hold ONLY for the square. Matching any other
+        // exponent would silently rewrite e.g. sin³ into a false form, so the
+        // power must be exactly 2 (any other Pow falls through to `_` below).
+        Expr::Pow(a, b) if matches!(b.as_ref(), Expr::Const(n) if (*n - 2.0).abs() < 1e-12) =>
         {
             if let Expr::Sin(inner) = a.as_ref()
             {
@@ -672,6 +676,7 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
             }
             if let Expr::Cos(inner) = a.as_ref()
             {
+                // cos²(x) → (1 + cos(2x)) / 2
                 let cos_2x = Expr::Cos(Box::new(Expr::Mul(
                     Box::new(Expr::Const(2.0)),
                     inner.clone(),
@@ -1357,6 +1362,57 @@ mod tests {
             simplify(&parse("x + 0").unwrap()),
             Expr::Var("x".to_string())
         );
+    }
+
+    #[test]
+    fn trig_identity_rewrites_sin_squared_preserving_value() {
+        // sin²(x) → (1 - cos 2x)/2 is a TRUE identity: the rewrite must
+        // change the expression yet evaluate identically everywhere.
+        let sin2 = parse("sin(x)^2").unwrap();
+        let out = apply_trig_identity(&sin2);
+        assert_ne!(out, sin2, "the identity should fire on the square");
+        assert!(prove_equal(&out, &sin2), "sin² rewrite changed the value");
+        // Hand check at x = 0.7: sin(0.7)² = 0.41501642…
+        let mut b = HashMap::new();
+        b.insert("x".to_string(), 0.7);
+        assert!((eval(&out, &b).unwrap() - 0.7_f64.sin().powi(2)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn trig_identity_rewrites_cos_squared_preserving_value() {
+        // cos²(x) → (1 + cos 2x)/2, also a true identity.
+        let cos2 = parse("cos(x)^2").unwrap();
+        let out = apply_trig_identity(&cos2);
+        assert_ne!(out, cos2, "the identity should fire on the square");
+        assert!(prove_equal(&out, &cos2), "cos² rewrite changed the value");
+        let mut b = HashMap::new();
+        b.insert("x".to_string(), 0.7);
+        assert!((eval(&out, &b).unwrap() - 0.7_f64.cos().powi(2)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn trig_identity_leaves_non_square_powers_untouched() {
+        // The half-angle identity is FALSE for any exponent ≠ 2; firing on
+        // sin³ or cos⁵ would silently corrupt the expression. Regression
+        // guard for the `Pow(_, _)` wildcard that used to match any power.
+        let sin3 = parse("sin(x)^3").unwrap();
+        assert_eq!(apply_trig_identity(&sin3), sin3, "must not rewrite a cube");
+        let cos5 = parse("cos(x)^5").unwrap();
+        assert_eq!(
+            apply_trig_identity(&cos5),
+            cos5,
+            "must not rewrite a fifth power"
+        );
+    }
+
+    #[test]
+    fn trig_identity_leaves_unrelated_expressions_untouched() {
+        // A square of a non-trig base, and non-Pow nodes, are returned
+        // verbatim — the rewriter is a single, exact rule.
+        let poly = parse("x^2").unwrap();
+        assert_eq!(apply_trig_identity(&poly), poly, "x² is not a trig square");
+        let e = parse("sin(x) + 1").unwrap();
+        assert_eq!(apply_trig_identity(&e), e);
     }
 }
 
