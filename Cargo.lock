@@ -2647,6 +2647,7 @@ name = "scirust-control"
 version = "0.1.0"
 dependencies = [
  "scirust-estimation",
+ "scirust-license",
  "serde",
 ]
 

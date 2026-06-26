@@ -11,13 +11,19 @@
 //! - [`detect_oscillation`] — control-loop oscillation/stiction monitoring.
 //!
 //! Pure Rust, fixed-order `f64` ⇒ bit-reproducible control moves.
+//!
+//! Commercial use is gated by [`ControlModule`]: unlock the module against a
+//! signed entitlement ([`scirust_license`]) before building controllers. The raw
+//! constructors remain available for noncommercial use under the dual license.
 
+pub mod license;
 pub mod lqr;
 pub mod monitor;
 pub mod mpc;
 pub mod pid;
 pub mod qp;
 
+pub use license::ControlModule;
 pub use lqr::dlqr;
 pub use monitor::{OscillationReport, detect_oscillation};
 pub use mpc::LinearMpc;

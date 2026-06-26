@@ -7,4 +7,5 @@ description = "SciRust control — deterministic PID, LQR, box-QP and MPC with c
 
 [dependencies]
 scirust-estimation = { path = "../scirust-estimation" }
+scirust-license = { path = "../scirust-license" }
 serde = { version = "1", features = ["derive"] }
