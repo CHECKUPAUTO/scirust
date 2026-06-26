@@ -420,9 +420,9 @@ pub fn diff(expr: &Expr, var: &str) -> Expr {
                 },
                 _ =>
                 {
-                    // General case: treat as exp(b * ln(a))
-                    // derivative = a^b * (b' * ln(a) + b * a' / a)
-                    // Stub: fall back to unsimplified form
+                    // General case by logarithmic differentiation
+                    // (a^b = exp(b·ln a)): d/dx = a^b·(b'·ln a + b·a'/a).
+                    // Correct, but returned unsimplified.
                     Expr::Mul(
                         Box::new(expr.clone()),
                         Box::new(
@@ -689,7 +689,7 @@ pub fn apply_trig_identity(expr: &Expr) -> Expr {
     }
 }
 
-// ── Optimizer (stub — numeric gradient descent) ──
+// ── Optimizer: momentum SGD with numeric (central-difference) gradients ──
 
 /// Momentum stochastic-gradient-descent optimizer.
 pub struct Optimizer {
@@ -1027,7 +1027,7 @@ impl Neg for Dual {
     }
 }
 
-// ── SIMD operations stubs ──
+// ── Elementwise vector ops (scalar reference; the platform's SIMD is in scirust-simd) ──
 
 pub mod ops {
     pub fn add_f32(a: &[f32], b: &[f32], out: &mut [f32]) {
@@ -1056,6 +1056,7 @@ pub mod ops {
     }
 }
 
+/// Add 1.0 to each element (scalar reference implementation).
 pub fn simd_add_one(data: &mut [f32]) {
     for x in data
     {
@@ -1063,7 +1064,7 @@ pub fn simd_add_one(data: &mut [f32]) {
     }
 }
 
-// ── GPU dispatch stub ──
+// ── GPU/CPU dispatch (CPU-only build: always runs the CPU closure) ──
 
 pub mod dispatch {
     pub fn gpu_or_cpu<F, G, T>(_on_gpu: F, on_cpu: G) -> T
@@ -1075,7 +1076,7 @@ pub mod dispatch {
     }
 }
 
-// ── IA Bridge stubs ──
+// ── End-to-end expression pipeline (parse → simplify → diff → eval → codegen) ──
 
 pub struct Pipeline {
     vars: HashMap<String, f64>,

@@ -512,7 +512,11 @@ pub fn label_propagation(graph: &Graph, max_iterations: usize) -> Vec<usize> {
         .collect()
 }
 
-/// Louvain-like modularity optimization (simplified).
+/// Newman–Girvan modularity `Q` of a community assignment — how much more
+/// intra-community edge density the partition has than a degree-preserving
+/// random graph: `Q = (1/2m) Σ_ij [A_ij − k_i·k_j/(2m)] δ(c_i, c_j)`. Higher `Q`
+/// means stronger community structure. This *scores* a given partition; it does
+/// not optimise or detect communities (see `label_propagation` / `girvan_newman`).
 pub fn modularity(graph: &Graph, communities: &[usize]) -> f64 {
     let m = graph.n_edges() as f64;
     if m < 1.0
