@@ -5,14 +5,20 @@
 //! phasor** magnitude/phase, **THD** (total harmonic distortion), and a
 //! RoCoF-based **islanding** check. All built on the SciRust FFT, so a run is
 //! bit-reproducible — the determinism a protection relay needs.
+//!
+//! Commercial use is gated by [`GridModule`]: unlock the module against a signed
+//! entitlement ([`scirust_license`]) before running the analytics. The raw
+//! functions remain available for noncommercial use under the dual license.
 
 use scirust_signal::{Complex, fft_real, hanning};
 use serde::{Deserialize, Serialize};
 
 pub mod flicker;
+pub mod license;
 pub mod power_quality;
 pub mod symmetrical;
 pub use flicker::{flicker_severity, perceptibility_weight};
+pub use license::GridModule;
 pub use power_quality::{EventSpan, VoltageEvent, classify_voltage, cycle_rms, detect_events};
 pub use symmetrical::{symmetrical_components, voltage_unbalance_factor};
 

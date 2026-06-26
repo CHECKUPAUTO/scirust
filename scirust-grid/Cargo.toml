@@ -7,4 +7,5 @@ description = "SciRust power-grid analytics — frequency/RoCoF, synchrophasors,
 
 [dependencies]
 scirust-signal = { path = "../scirust-signal" }
+scirust-license = { path = "../scirust-license" }
 serde = { version = "1", features = ["derive"] }
