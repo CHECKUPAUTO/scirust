@@ -3011,6 +3011,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-retrieval"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+ "serde",
+]
+
+[[package]]
 name = "scirust-rl-algo"
 version = "0.1.0"
 dependencies = [

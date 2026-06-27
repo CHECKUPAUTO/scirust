@@ -123,6 +123,7 @@ members = [
     "scirust-scaffold",
     "scirust-rsi",
     "scirust-license",
+    "scirust-retrieval",
 ]
 exclude = [
     "scirust-rustc-driver",
