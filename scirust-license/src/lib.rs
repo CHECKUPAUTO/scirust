@@ -33,6 +33,7 @@
 //! ```
 
 pub mod cli;
+pub mod gate;
 pub mod hashsig;
 pub mod license;
 pub mod module;

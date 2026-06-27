@@ -111,7 +111,7 @@ fn challenge(commitment: &[u8; 32], x: &[i64], y: &[i64], idx: u32, batch: usize
             h.update(v.to_le_bytes());
         }
         let digest: [u8; 32] = h.finalize().into();
-        for chunk in digest.chunks_exact(4)
+        for chunk in digest.as_chunks::<4>().0
         {
             if r.len() == batch
             {
