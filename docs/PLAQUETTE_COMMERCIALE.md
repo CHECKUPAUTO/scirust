@@ -72,6 +72,7 @@ vivante.
 | `graph` | Isomorphisme de sous-graphes, découverte de motifs, détection de communautés |
 | `signal` | FFT, fenêtrage, descripteurs temps/fréquence |
 | `events` | Détection d'événements et d'anomalies en flux |
+| `retrieval` ⭐ | **Récupération sémantique pure (dense)** — index exact déterministe, recherche approchée des plus proches voisins (LSH), ré-ordonnancement par interaction tardive (ColBERT/MaxSim), métriques de pertinence (Recall@k, nDCG@k) et **boucle d'amélioration continue**. Une **alternative auditable au RAG**. *Add-on premium.* |
 
 ### 4.3 Verticales industrielles
 
@@ -151,12 +152,20 @@ rejetée.
 | Offre | Modules inclus | Cible |
 |---|---|---|
 | **Découverte** | `core` + 1 module au choix | Évaluation, PoC |
-| **Perception** | `core`, `vision`, `audio`, `signal`, `events` | Vision/son industriels |
-| **Industrie 4.0** | `core`, `estimation`, `control`, `predictive-maintenance`, `spc`, `industrial` | Monitoring & maintenance |
+| **Perception** | `core`, `vision`, `audio`, `signal`, `events`, `retrieval` | Vision/son industriels + recherche sémantique |
+| **Industrie 4.0** | `core`, `estimation`, `control`, `predictive-maintenance`, `spc`, `industrial`, `retrieval` | Monitoring & maintenance + base de connaissance |
 | **Énergie** | `core`, `battery`, `grid`, `metrology`, `mlops` | Réseaux & stockage |
 | **Sûreté critique** | `core`, `functional-safety`, `reliability`, `control`, `estimation` | Automobile / SIL |
 | **Sécurité OT** | `core`, `ot-security`, `events`, `signal` | Cybersécurité ICS |
 | **Catalogue complet** | tous les modules | Grands comptes, intégrateurs |
+
+> **Add-on Récupération sémantique (`retrieval`) — le « RAG-killer ».** Brique à
+> forte valeur ajoutée : récupération sémantique *pure*, déterministe et
+> auditable, là où le RAG greffe un générateur LLM stochastique. Inclus dans les
+> offres **Perception** et **Industrie 4.0**, ou en supplément de toute offre.
+> **Tarif de référence : 1 USD par machine et par mois** (par calculateur
+> déployé). La fenêtre mensuelle est portée par la date d'expiration de la
+> licence signée (`expires_at`) ; la machine est l'unité de décompte commercial.
 
 Au-delà des licences logicielles : **kits de certification** (dossiers de preuves
 prêts à l'audit), **support & SLA**, **intégration** (OPC-UA/MQTT, mise en

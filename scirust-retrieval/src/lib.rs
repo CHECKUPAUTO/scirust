@@ -20,6 +20,15 @@
 //! 4. [`metrics`] scores the ranking (Recall@k, MRR, MAP, nDCG@k) so the quality
 //!    claim is a measured number.
 //!
+//! ## Licensing
+//! Retrieval is a **premium add-on** (the "RAG-killer", sold in the *Perception*
+//! and *Industrie 4.0* bundles). The commercial entry points hang off a
+//! [`RetrievalAccess`] capability token, obtained by unlocking a verified
+//! `scirust-license` entitlement that covers
+//! [`Module::Retrieval`](scirust_license::Module::Retrieval) — see the
+//! [`license`] module. The example below uses the ungated constructors directly,
+//! which remain available as primitives.
+//!
 //! ```
 //! use scirust_retrieval::{SemanticRetriever, Encoder};
 //! use scirust_core::embed::EmbeddingEngine;
@@ -41,6 +50,7 @@ pub mod contrastive;
 pub mod feedback;
 pub mod hybrid;
 pub mod index;
+pub mod license;
 pub mod metrics;
 pub mod rerank;
 pub mod vector;
@@ -50,6 +60,7 @@ pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
 pub use feedback::ImprovementLoop;
 pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
 pub use index::DenseIndex;
+pub use license::RetrievalAccess;
 
 use std::fmt;
 

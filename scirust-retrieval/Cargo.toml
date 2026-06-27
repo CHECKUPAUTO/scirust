@@ -8,4 +8,5 @@ description = "SciRust pure semantic (dense transformer) retrieval — determini
 
 [dependencies]
 scirust-core = { path = "../scirust-core" }
+scirust-license = { path = "../scirust-license" }
 serde = { version = "1", features = ["derive"] }

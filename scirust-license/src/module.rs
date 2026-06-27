@@ -40,6 +40,10 @@ pub enum Module {
     Edge,
     /// Streaming event detection (`scirust-events-*`).
     Events,
+    /// Pure semantic (dense) retrieval — an auditable alternative to RAG
+    /// (`scirust-retrieval`). A premium add-on, sold in the Perception and
+    /// Industrie 4.0 bundles.
+    Retrieval,
 
     // ---- Industrial verticals (codes 50..=99) ----
     /// State estimation & sensor fusion (`scirust-estimation`).
@@ -87,7 +91,7 @@ pub enum Module {
 
 impl Module {
     /// Every module in the catalogue, in ascending `code` order.
-    pub const ALL: [Module; 31] = [
+    pub const ALL: [Module; 32] = [
         Module::Core,
         Module::TensorNetwork,
         Module::Nlp,
@@ -100,6 +104,7 @@ impl Module {
         Module::Evolution,
         Module::Edge,
         Module::Events,
+        Module::Retrieval,
         Module::Estimation,
         Module::Navigation,
         Module::Water,
@@ -139,6 +144,7 @@ impl Module {
             Module::Evolution => 10,
             Module::Edge => 11,
             Module::Events => 12,
+            Module::Retrieval => 13,
             Module::Estimation => 50,
             Module::Navigation => 51,
             Module::Water => 52,
@@ -178,6 +184,7 @@ impl Module {
             Module::Evolution => "evolution",
             Module::Edge => "edge",
             Module::Events => "events",
+            Module::Retrieval => "retrieval",
             Module::Estimation => "estimation",
             Module::Navigation => "navigation",
             Module::Water => "water",
@@ -204,7 +211,7 @@ impl Module {
     /// Parse a string id (as produced by [`Module::as_str`]).
     pub fn from_id(s: &str) -> Option<Module> {
         // `Industrial` is absent from `ALL` only because `ALL` is sized to the
-        // first 31; include it explicitly here so every id round-trips.
+        // first 32; include it explicitly here so every id round-trips.
         Module::ALL
             .iter()
             .copied()
@@ -228,6 +235,7 @@ impl Module {
             Module::Evolution => "Evolutionary search and neural architecture search",
             Module::Edge => "Edge and embedded deployment",
             Module::Events => "Streaming event and anomaly detection",
+            Module::Retrieval => "Pure semantic (dense) retrieval, an auditable alternative to RAG",
             Module::Estimation => "State estimation and sensor fusion",
             Module::Navigation => "Inertial and GNSS navigation",
             Module::Water => "Water-network and quality monitoring",
@@ -307,11 +315,21 @@ mod tests {
     }
 
     #[test]
-    fn industrial_is_reachable_even_though_all_is_31_wide() {
-        // ALL is sized to 31 for ergonomics; Industrial (code 69) must still be
+    fn industrial_is_reachable_even_though_all_is_32_wide() {
+        // ALL is sized to 32 for ergonomics; Industrial (code 69) must still be
         // a first-class, parseable module.
         assert_eq!(Module::from_id("industrial"), Some(Module::Industrial));
         assert_eq!(Module::Industrial.code(), 69);
+    }
+
+    #[test]
+    fn retrieval_is_a_first_class_premium_module() {
+        // The "RAG-killer" add-on: stable code 13 in the foundation range, a
+        // round-tripping id, and present in ALL (so it is gated like any other).
+        assert_eq!(Module::Retrieval.code(), 13);
+        assert_eq!(Module::Retrieval.as_str(), "retrieval");
+        assert_eq!(Module::from_id("retrieval"), Some(Module::Retrieval));
+        assert!(Module::ALL.contains(&Module::Retrieval));
     }
 
     /// Helper: every catalogue module including the one outside `ALL`.
