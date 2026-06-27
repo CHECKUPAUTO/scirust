@@ -105,35 +105,39 @@ pub fn size_position(pred: &CertifiedPrediction, cfg: &RiskConfig) -> Position {
         0.0
     };
 
-    // Gate checks.
-    let allowed;
-    let reason;
-    if action == Action::Flat
+    // Gate checks. (Single `let (allowed, reason) = if …` binding: a newer
+    // nightly clippy flags the late-init pattern under -D warnings.)
+    let (allowed, reason) = if action == Action::Flat
     {
-        allowed = false;
-        reason = "flat: no position".to_string();
+        (false, "flat: no position".to_string())
     }
     else if confidence < cfg.min_confidence
     {
-        allowed = false;
-        reason = format!(
-            "confidence {:.3} < min {:.3}",
-            confidence, cfg.min_confidence
-        );
+        (
+            false,
+            format!(
+                "confidence {:.3} < min {:.3}",
+                confidence, cfg.min_confidence
+            ),
+        )
     }
     else if max_loss_pct > cfg.max_drawdown
     {
-        allowed = false;
-        reason = format!(
-            "max_loss_pct {:.4} > max_drawdown {:.4}",
-            max_loss_pct, cfg.max_drawdown
-        );
+        (
+            false,
+            format!(
+                "max_loss_pct {:.4} > max_drawdown {:.4}",
+                max_loss_pct, cfg.max_drawdown
+            ),
+        )
     }
     else
     {
-        allowed = true;
-        reason = format!("allowed: size={:.2} confidence={:.3}", size, confidence);
-    }
+        (
+            true,
+            format!("allowed: size={:.2} confidence={:.3}", size, confidence),
+        )
+    };
 
     Position {
         action,
