@@ -38,6 +38,7 @@
 
 pub mod ann;
 pub mod contrastive;
+pub mod hybrid;
 pub mod index;
 pub mod metrics;
 pub mod rerank;
@@ -45,6 +46,7 @@ pub mod vector;
 
 pub use ann::LshIndex;
 pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
+pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
 pub use index::DenseIndex;
 
 use std::fmt;
