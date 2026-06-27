@@ -766,6 +766,41 @@ impl ParallelTape {
                     t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
                 },
+                Op::L2Normalize { input_idx } =>
+                {
+                    // Analytic backward: grad_x = (g − ŷ·(g·ŷ)) / n, per row, with
+                    // the dot summed left-to-right. The node's own value is ŷ, and
+                    // n is recomputed from the input (fixed-order f32).
+                    let y_hat = &values[i];
+                    let x = &values[input_idx];
+                    let (rows, cols) = (x.rows, x.cols);
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    for r in 0..rows
+                    {
+                        let mut sumsq = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let v = x.data[r * cols + c];
+                            sumsq += v * v;
+                        }
+                        let norm = sumsq.sqrt();
+                        if norm > 0.0
+                        {
+                            let mut s = 0.0f32;
+                            for c in 0..cols
+                            {
+                                s += g.data[r * cols + c] * y_hat.data[r * cols + c];
+                            }
+                            let inv = 1.0 / norm;
+                            for c in 0..cols
+                            {
+                                grad_x.data[r * cols + c] =
+                                    (g.data[r * cols + c] - y_hat.data[r * cols + c] * s) * inv;
+                            }
+                        }
+                    }
+                    t_grads[input_idx] = t_grads[input_idx].add(&grad_x);
+                },
                 Op::Conv2dForward {
                     input,
                     weight,

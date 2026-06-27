@@ -568,6 +568,8 @@ pub enum SavedData {
     LayerNormNormed(Tensor),
     /// Cached normalized input for BatchNorm backward
     BatchNormNormed(Tensor),
+    /// Cached row-wise L2-normalized output ŷ = x/‖x‖ for L2Normalize backward
+    L2Normalized(Tensor),
     /// Cached flash attention online-softmax state: m (running max) and l (running sum)
     FlashAttentionState {
         m: Tensor,
@@ -704,6 +706,9 @@ pub enum Op {
         gamma_idx: usize,
         beta_idx: usize,
         eps: f32,
+    },
+    L2Normalize {
+        input_idx: usize,
     },
     Conv2dForward {
         input: usize,
@@ -1993,6 +1998,48 @@ impl Tape {
                     grads[input_idx] = grads[input_idx].add(&grad_x);
                     grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
+                },
+                Op::L2Normalize { input_idx } =>
+                {
+                    // ŷ = x/‖x‖ per row. Jacobian (1/n)(I − ŷŷᵀ), so for upstream
+                    // grad g:  grad_x = (g − ŷ·(g·ŷ)) / n. The dot g·ŷ is summed
+                    // left-to-right (fixed order); n is recomputed from the input.
+                    let y_hat = match &nodes[i].saved
+                    {
+                        SavedData::L2Normalized(t) => Some(t),
+                        _ => None,
+                    };
+                    let input = &values[input_idx].as_cpu();
+                    let (rows, cols) = input.shape();
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    if let Some(yh) = y_hat
+                    {
+                        for r in 0..rows
+                        {
+                            let mut sumsq = 0.0f32;
+                            for c in 0..cols
+                            {
+                                let x = input.data[r * cols + c];
+                                sumsq += x * x;
+                            }
+                            let norm = sumsq.sqrt();
+                            if norm > 0.0
+                            {
+                                let mut s = 0.0f32;
+                                for c in 0..cols
+                                {
+                                    s += g.data[r * cols + c] * yh.data[r * cols + c];
+                                }
+                                let inv = 1.0 / norm;
+                                for c in 0..cols
+                                {
+                                    grad_x.data[r * cols + c] =
+                                        (g.data[r * cols + c] - yh.data[r * cols + c] * s) * inv;
+                                }
+                            }
+                        }
+                    }
+                    grads[input_idx] = grads[input_idx].add(&grad_x);
                 },
                 Op::Conv2dForward {
                     input,
@@ -3759,6 +3806,62 @@ impl<'t> Var<'t> {
         self.try_layer_norm(gamma, beta, eps).unwrap()
     }
 
+    /// Row-wise L2 normalisation: each row `r` becomes `x[r] / ‖x[r]‖₂`. A zero
+    /// row maps to zero (never `NaN`). The sum of squares is accumulated
+    /// left-to-right in `f32`, so the result is bit-reproducible across machines.
+    /// The normalised output is cached for the backward pass.
+    pub fn l2_normalize(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let (rows, cols) = a.shape();
+        let mut out = Tensor::zeros(rows, cols);
+        for r in 0..rows
+        {
+            let mut sumsq = 0.0f32;
+            for c in 0..cols
+            {
+                let x = a.data[r * cols + c];
+                sumsq += x * x;
+            }
+            let norm = sumsq.sqrt();
+            if norm > 0.0
+            {
+                let inv = 1.0 / norm;
+                for c in 0..cols
+                {
+                    out.data[r * cols + c] = a.data[r * cols + c] * inv;
+                }
+            }
+        }
+        let new_idx = self.tape.push_with_saved(
+            Op::L2Normalize {
+                input_idx: self.idx,
+            },
+            DeviceTensor::cpu(out.clone()),
+            SavedData::L2Normalized(out),
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    /// Row-wise cosine-similarity matrix `S = normalize(self) @ normalize(other)ᵀ`:
+    /// entry `(i, j)` is the cosine similarity between row `i` of `self` and row
+    /// `j` of `other`. Composed from [`Var::l2_normalize`] and `matmul`, so it is
+    /// fully differentiable with no new gradient rule. Errors if the row widths
+    /// (embedding dimensions) of `self` and `other` differ.
+    pub fn try_cosine_sim_matrix(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        let qn = self.l2_normalize();
+        let pn = other.l2_normalize();
+        qn.try_matmul(pn.transpose_2d())
+    }
+
+    /// Row-wise cosine-similarity matrix (panics on dimension mismatch; see
+    /// [`Var::try_cosine_sim_matrix`]).
+    pub fn cosine_sim_matrix(self, other: Var<'t>) -> Var<'t> {
+        self.try_cosine_sim_matrix(other).unwrap()
+    }
+
     pub fn max_pool2d(self, c: usize, h: usize, w: usize, kernel: usize, stride: usize) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let h_out = (h - kernel) / stride + 1;
@@ -4766,5 +4869,100 @@ mod tests {
         assert!((g.data[0] - 1.0).abs() < 1e-6);
         assert!((g.data[1] - 0.0).abs() < 1e-6);
         assert!((g.data[2] - 0.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod l2_normalize_tests {
+    use super::*;
+
+    #[test]
+    fn forward_normalizes_each_row_to_unit_norm() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![3.0, 4.0], 1, 2));
+        let y = x.l2_normalize();
+        let v = tape.value(y.idx());
+        // [3,4] / 5 = [0.6, 0.8]
+        assert!(
+            (v.data[0] - 0.6).abs() < 1e-6 && (v.data[1] - 0.8).abs() < 1e-6,
+            "{:?}",
+            v.data
+        );
+        let norm = (v.data[0] * v.data[0] + v.data[1] * v.data[1]).sqrt();
+        assert!((norm - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_zero_row_maps_to_zero_not_nan() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![0.0, 0.0, 0.0], 1, 3));
+        let y = x.l2_normalize();
+        assert_eq!(tape.value(y.idx()).data, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn backward_matches_hand_derived_jacobian_and_is_orthogonal_to_input() {
+        // x=[3,4]; loss = y[0] -> upstream g=[1,0]. n=5, ŷ=[0.6,0.8], s=g·ŷ=0.6.
+        // grad_x = (g − ŷ·s)/n = ([1,0] − 0.6·[0.6,0.8])/5 = [0.128, −0.096].
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![3.0, 4.0], 1, 2));
+        let y = x.l2_normalize();
+        let loss = y.try_slice_cols(0, 1).unwrap().sum();
+        tape.backward(loss.idx());
+        let g = tape.grad(x.idx());
+        assert!((g.data[0] - 0.128).abs() < 1e-5, "grad {:?}", g.data);
+        assert!((g.data[1] + 0.096).abs() < 1e-5, "grad {:?}", g.data);
+        // Invariant: the gradient of L2-normalize is orthogonal to the input.
+        let dot = g.data[0] * 3.0 + g.data[1] * 4.0;
+        assert!(
+            dot.abs() < 1e-5,
+            "grad must be orthogonal to input, got {dot}"
+        );
+    }
+
+    #[test]
+    fn backward_agrees_with_finite_differences() {
+        let x0 = [2.0f32, -1.0, 0.5, 3.0];
+        let analytic = {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(x0.to_vec(), 1, 4));
+            let loss = x.l2_normalize().sum();
+            tape.backward(loss.idx());
+            tape.grad(x.idx()).data
+        };
+        let loss_at = |xs: &[f32]| -> f32 {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(xs.to_vec(), 1, 4));
+            let y = x.l2_normalize();
+            tape.value(y.idx()).data.iter().sum()
+        };
+        let eps = 1e-3f32;
+        for i in 0..4
+        {
+            let mut xp = x0;
+            let mut xm = x0;
+            xp[i] += eps;
+            xm[i] -= eps;
+            let num = (loss_at(&xp) - loss_at(&xm)) / (2.0 * eps);
+            assert!(
+                (analytic[i] - num).abs() < 1e-2,
+                "grad[{i}] analytic {} vs finite-diff {}",
+                analytic[i],
+                num
+            );
+        }
+    }
+
+    #[test]
+    fn cosine_sim_matrix_diagonal_is_one_offdiagonal_is_cosine() {
+        // rows [1,0] and [0,2] -> normalized [1,0] and [0,1] -> Gram = identity.
+        let tape = Tape::new();
+        let q = tape.input(Tensor::from_vec(vec![1.0, 0.0, 0.0, 2.0], 2, 2));
+        let s = q.cosine_sim_matrix(q);
+        let v = tape.value(s.idx());
+        assert_eq!(v.shape(), (2, 2));
+        assert!((v.data[0] - 1.0).abs() < 1e-6, "S[0,0] {}", v.data[0]);
+        assert!((v.data[3] - 1.0).abs() < 1e-6, "S[1,1] {}", v.data[3]);
+        assert!(v.data[1].abs() < 1e-6, "S[0,1] {}", v.data[1]);
     }
 }
