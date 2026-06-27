@@ -39,7 +39,7 @@ pub mod license;
 pub mod module;
 
 pub use hashsig::{Hash, MerkleSig, MerkleSigner, verify};
-pub use license::License;
+pub use license::{License, node_fingerprint};
 pub use module::Module;
 
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,11 @@ pub enum LicenseError {
     },
     /// A required module is not covered by this (otherwise valid) license.
     NotEntitled(Module),
+    /// The license is node-locked to a different machine than the one presented.
+    NodeMismatch,
+    /// The license is node-locked, but verification was attempted without a
+    /// machine identifier. Use [`verify_license_on_node`] instead.
+    NodeRequired,
 }
 
 impl std::fmt::Display for LicenseError {
@@ -81,6 +86,17 @@ impl std::fmt::Display for LicenseError {
             LicenseError::NotEntitled(m) =>
             {
                 write!(f, "module '{m}' is not covered by this license")
+            },
+            LicenseError::NodeMismatch =>
+            {
+                write!(f, "license is bound to a different machine")
+            },
+            LicenseError::NodeRequired =>
+            {
+                write!(
+                    f,
+                    "license is node-locked; a machine identifier is required to verify it"
+                )
             },
         }
     }
@@ -205,21 +221,15 @@ impl Entitlements {
     }
 }
 
-/// Verify a signed license against a trusted public `root` at time `now` (Unix
-/// seconds), returning the [`Entitlements`] it grants.
-///
-/// Checks, in order: the signature parses, the signature verifies against
-/// `root` (binding licensee, modules and validity window), and the license is
-/// inside its validity window. Module-level gating is then done with
-/// [`Entitlements::require`].
-pub fn verify_license(
+/// Check a signed license's signature and validity window against `root` at
+/// `now`. Shared by both verify entry points; does **not** check the node lock.
+fn verify_signature_and_window(
     signed: &SignedLicense,
     root: &Hash,
     now: u64,
-) -> Result<Entitlements, LicenseError> {
+) -> Result<(), LicenseError> {
     let sig = MerkleSig::from_hex(&signed.signature).ok_or(LicenseError::MalformedSignature)?;
-    let digest = signed.license.digest();
-    if !verify(root, &digest, &sig)
+    if !verify(root, &signed.license.digest(), &sig)
     {
         return Err(LicenseError::BadSignature);
     }
@@ -230,12 +240,61 @@ pub fn verify_license(
             now,
         });
     }
-    Ok(Entitlements {
-        licensee: signed.license.licensee.clone(),
-        license_id: signed.license.license_id.clone(),
-        modules: signed.license.modules.clone(),
-        expires_at: signed.license.expires_at,
-    })
+    Ok(())
+}
+
+/// Build the entitlements granted by an already-verified license.
+fn entitlements_of(license: &License) -> Entitlements {
+    Entitlements {
+        licensee: license.licensee.clone(),
+        license_id: license.license_id.clone(),
+        modules: license.modules.clone(),
+        expires_at: license.expires_at,
+    }
+}
+
+/// Verify a signed license against a trusted public `root` at time `now` (Unix
+/// seconds), returning the [`Entitlements`] it grants.
+///
+/// Checks, in order: the signature parses, the signature verifies against `root`
+/// (binding licensee, modules, validity window and node lock), and the license
+/// is inside its validity window. Module-level gating is then done with
+/// [`Entitlements::require`].
+///
+/// This entry point is for **floating** (non-node-locked) licenses. A
+/// node-locked license is refused here with [`LicenseError::NodeRequired`] —
+/// verify it with [`verify_license_on_node`] so the machine can be checked.
+pub fn verify_license(
+    signed: &SignedLicense,
+    root: &Hash,
+    now: u64,
+) -> Result<Entitlements, LicenseError> {
+    verify_signature_and_window(signed, root, now)?;
+    if signed.license.is_node_locked()
+    {
+        return Err(LicenseError::NodeRequired);
+    }
+    Ok(entitlements_of(&signed.license))
+}
+
+/// Verify a signed license that may be node-locked, presenting this machine's
+/// opaque `machine_id`. Performs the same signature and validity checks as
+/// [`verify_license`], then enforces the node lock: a **floating** license is
+/// accepted on any machine, a **node-locked** license only when `machine_id`'s
+/// [`node_fingerprint`](license::node_fingerprint) matches the bound lock
+/// (otherwise [`LicenseError::NodeMismatch`]).
+pub fn verify_license_on_node(
+    signed: &SignedLicense,
+    root: &Hash,
+    now: u64,
+    machine_id: &str,
+) -> Result<Entitlements, LicenseError> {
+    verify_signature_and_window(signed, root, now)?;
+    if !signed.license.allows_node(machine_id)
+    {
+        return Err(LicenseError::NodeMismatch);
+    }
+    Ok(entitlements_of(&signed.license))
 }
 
 /// The demo vendor's secret seed.
@@ -377,5 +436,53 @@ mod tests {
         let signed = demo_vendor().issue_with_leaf(nav_license(), 7);
         let ent = verify_license(&signed, &demo_root(), 1_500).expect("valid under demo root");
         assert!(ent.allows(Module::Navigation));
+    }
+
+    #[test]
+    fn a_node_locked_license_verifies_only_on_its_machine() {
+        let v = vendor();
+        let signed = v.issue_with_leaf(nav_license().with_node_lock("press-line-07"), 8);
+        // Right machine → granted; wrong machine → NodeMismatch.
+        let ent =
+            verify_license_on_node(&signed, &v.root(), 1_500, "press-line-07").expect("right node");
+        assert!(ent.allows(Module::Navigation));
+        assert_eq!(
+            verify_license_on_node(&signed, &v.root(), 1_500, "press-line-99"),
+            Err(LicenseError::NodeMismatch),
+        );
+    }
+
+    #[test]
+    fn a_node_locked_license_is_refused_by_the_floating_verifier() {
+        let v = vendor();
+        let signed = v.issue_with_leaf(nav_license().with_node_lock("press-line-07"), 9);
+        // The node-blind entry point must not silently ignore the lock.
+        assert_eq!(
+            verify_license(&signed, &v.root(), 1_500),
+            Err(LicenseError::NodeRequired),
+        );
+    }
+
+    #[test]
+    fn a_floating_license_runs_on_any_node() {
+        let v = vendor();
+        let signed = v.issue_with_leaf(nav_license(), 10); // no node lock
+        assert!(verify_license(&signed, &v.root(), 1_500).is_ok());
+        // Presenting a machine id is harmless for a floating license.
+        assert!(verify_license_on_node(&signed, &v.root(), 1_500, "whatever").is_ok());
+    }
+
+    #[test]
+    fn editing_the_node_lock_breaks_the_signature() {
+        let v = vendor();
+        // Issue floating, then a customer tries to self-bind (or re-bind) the
+        // license to their machine by editing the JSON. The signature was over
+        // the original digest, so verification must fail.
+        let mut signed = v.issue_with_leaf(nav_license(), 11);
+        signed.license.node_lock = Some(node_fingerprint("attacker-box"));
+        assert_eq!(
+            verify_license_on_node(&signed, &v.root(), 1_500, "attacker-box"),
+            Err(LicenseError::BadSignature),
+        );
     }
 }

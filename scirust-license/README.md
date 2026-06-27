@@ -53,6 +53,43 @@ assert!(ent.require(Module::Water).is_err());     // not licensed
 A tampered module list, a signature from another vendor, an expired window, or a
 malformed signature each fail verification with a distinct `LicenseError`.
 
+## Node-locking (per-machine licenses)
+
+A license can be **bound to a single machine** — the basis for a per-machine
+commercial model (e.g. *$1 / machine / month*: monthly via `expires_at`,
+per-machine via the node lock).
+
+The crate deliberately does **not** read hardware itself — that would need
+platform-specific I/O and break the pure, deterministic, `no_std`-friendly
+posture. Instead the **host supplies an opaque machine id** (a provisioned UUID,
+`/etc/machine-id`, a TPM value — whatever the deployment trusts as stable). The
+license stores only its `node_fingerprint` (a domain-separated SHA-256), so the
+file never reveals the raw id, and the lock is part of the signed digest, so it
+cannot be edited or removed without breaking the signature.
+
+```rust
+use scirust_license::{Vendor, License, Module, verify_license, verify_license_on_node, LicenseError};
+
+let vendor = Vendor::from_seed(&[42u8; 32], 8);
+let root = vendor.root();
+
+// Bind the license to one machine at issue time.
+let license = License::new("Acme", "L-1", [Module::Navigation], 0, None)
+    .with_node_lock("press-line-07");
+let signed = vendor.issue_with_leaf(license, 0);
+
+// The runtime presents its own machine id; the right machine is granted…
+assert!(verify_license_on_node(&signed, &root, 1, "press-line-07").is_ok());
+// …a different machine is refused…
+assert_eq!(verify_license_on_node(&signed, &root, 1, "other").err(), Some(LicenseError::NodeMismatch));
+// …and the node-blind entry point refuses a locked license outright.
+assert_eq!(verify_license(&signed, &root, 1).err(), Some(LicenseError::NodeRequired));
+```
+
+A **floating** license (no `with_node_lock`) verifies on any machine, through
+either entry point. `verify_license` is for floating licenses; use
+`verify_license_on_node` wherever a license might be node-locked.
+
 ## CLI
 
 `license-tool` is the vendor + runtime toolchain (uses the bundled demo key when
@@ -65,6 +102,13 @@ license-tool issue  --licensee Acme --id L-1 --modules navigation,control \
                     --expires 1893456000 --leaf 0 > acme.license.json
 license-tool inspect acme.license.json     # verify + print entitlements
 license-tool check   acme.license.json --module navigation   # gate (exit 0/1)
+
+# Per-machine licensing: bind at issue time, present the machine id when verifying.
+license-tool issue   --licensee Acme --id L-2 --modules navigation \
+                     --node press-line-07 --leaf 1 > node.license.json
+license-tool inspect node.license.json                       # INVALID: node-locked
+license-tool inspect node.license.json --node press-line-07  # VALID, node: locked
+license-tool check   node.license.json --module navigation --node press-line-07
 ```
 
 ## Demo

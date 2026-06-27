@@ -5,7 +5,8 @@
 
 use crate::hashsig::{Hash, hex_decode, hex_encode};
 use crate::{
-    DEMO_HEIGHT, License, Module, SignedLicense, Vendor, demo_root, demo_seed, verify_license,
+    DEMO_HEIGHT, Entitlements, License, LicenseError, Module, SignedLicense, Vendor, demo_root,
+    demo_seed, verify_license, verify_license_on_node,
 };
 
 /// Captured result of a CLI invocation.
@@ -47,13 +48,16 @@ USAGE:
     license-tool modules
     license-tool keygen [--seed-hex HEX] [--height N]
     license-tool issue --licensee NAME --id ID --modules a,b,c \
-[--expires UNIX] [--leaf N] [--seed-hex HEX] [--height N]
-    license-tool inspect <file> [--root-hex HEX] [--now UNIX]
-    license-tool check <file> --module M [--root-hex HEX] [--now UNIX]
+[--expires UNIX] [--node MACHINE_ID] [--leaf N] [--seed-hex HEX] [--height N]
+    license-tool inspect <file> [--node MACHINE_ID] [--root-hex HEX] [--now UNIX]
+    license-tool check <file> --module M [--node MACHINE_ID] [--root-hex HEX] [--now UNIX]
 
 Notes:
     * With no --seed-hex/--root-hex, the bundled demo key is used.
-    * A real vendor keeps its seed offline; verifiers embed only the root.";
+    * A real vendor keeps its seed offline; verifiers embed only the root.
+    * --node binds a license to one machine (issue) and presents this machine's
+      id when verifying (inspect/check). A node-locked license fails to verify
+      without the matching --node.";
 
 /// Run a `license-tool` invocation. `args` excludes the program name; `now` is
 /// the current Unix time (injected for determinism).
@@ -161,7 +165,11 @@ fn cmd_issue(rest: &[String], now: u64) -> CliResult {
             vendor.capacity()
         ));
     }
-    let license = License::new(licensee, id, modules, now, expires);
+    let mut license = License::new(licensee, id, modules, now, expires);
+    if let Some(machine_id) = flags.get("node")
+    {
+        license = license.with_node_lock(machine_id);
+    }
     let signed = vendor.issue_with_leaf(license, leaf);
     CliResult::ok(format!("{}\n", signed.to_json()))
 }
@@ -193,7 +201,7 @@ fn cmd_inspect(rest: &[String], now: u64) -> CliResult {
         Some(Err(e)) => return CliResult::usage(e),
         None => now,
     };
-    match verify_license(&signed, &root, now)
+    match verify_node_aware(&signed, &root, now, flags.get("node"))
     {
         Ok(ent) =>
         {
@@ -204,11 +212,12 @@ fn cmd_inspect(rest: &[String], now: u64) -> CliResult {
                 None => "never".to_string(),
             };
             CliResult::ok(format!(
-                "VALID\n  licensee: {}\n  id:       {}\n  modules:  {}\n  expires:  {}\n  digest:   {}\n",
+                "VALID\n  licensee: {}\n  id:       {}\n  modules:  {}\n  expires:  {}\n  node:     {}\n  digest:   {}\n",
                 ent.licensee(),
                 ent.license_id(),
                 mods.join(", "),
                 expiry,
+                node_status(&signed),
                 signed.license.digest_hex(),
             ))
         },
@@ -253,7 +262,7 @@ fn cmd_check(rest: &[String], now: u64) -> CliResult {
         Some(Err(e)) => return CliResult::usage(e),
         None => now,
     };
-    match verify_license(&signed, &root, now)
+    match verify_node_aware(&signed, &root, now, flags.get("node"))
     {
         Ok(ent) => match ent.require(module)
         {
@@ -267,6 +276,30 @@ fn cmd_check(rest: &[String], now: u64) -> CliResult {
 fn load_license(path: &str) -> Result<SignedLicense, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     SignedLicense::from_json(&text).map_err(|e| format!("cannot parse {path}: {e}"))
+}
+
+/// Verify, choosing the node-aware path when a `--node` id is supplied. Without
+/// `--node`, a node-locked license is refused with `NodeRequired`.
+fn verify_node_aware(
+    signed: &SignedLicense,
+    root: &Hash,
+    now: u64,
+    node: Option<&str>,
+) -> Result<Entitlements, LicenseError> {
+    match node
+    {
+        Some(id) => verify_license_on_node(signed, root, now, id),
+        None => verify_license(signed, root, now),
+    }
+}
+
+/// One-line description of a license's node binding, for `inspect`.
+fn node_status(signed: &SignedLicense) -> String {
+    match signed.license.node_lock
+    {
+        None => "floating (any machine)".to_string(),
+        Some(fp) => format!("locked ({}…)", &hex_encode(&fp)[..16]),
+    }
 }
 
 fn parse_modules(s: &str) -> Result<Vec<Module>, String> {
@@ -472,6 +505,93 @@ mod tests {
         );
         assert_eq!(expired.exit, 1);
         assert!(expired.stdout.contains("expired"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn node_locked_license_only_verifies_on_the_bound_machine() {
+        // Issue a license bound to a specific machine via --node.
+        let issued = run(
+            &argv(&[
+                "issue",
+                "--licensee",
+                "Acme",
+                "--id",
+                "L-NODE",
+                "--modules",
+                "navigation",
+                "--node",
+                "press-line-07",
+            ]),
+            1_000,
+        );
+        assert_eq!(issued.exit, 0, "issue failed: {}", issued.stdout);
+        // The raw machine id must not appear in the signed license file.
+        assert!(
+            !issued.stdout.contains("press-line-07"),
+            "raw machine id leaked into the license: {}",
+            issued.stdout
+        );
+
+        let path = temp_path("nodelock.json");
+        std::fs::write(&path, issued.stdout.trim()).unwrap();
+        let p = path.to_string_lossy().to_string();
+
+        // Without --node, a node-locked license cannot be verified.
+        let blind = run(&argv(&["inspect", &p, "--now", "1500"]), 0);
+        assert_eq!(blind.exit, 1, "blind inspect should fail: {}", blind.stdout);
+        assert!(blind.stdout.contains("node-locked"));
+
+        // With the matching --node it is VALID and reported as locked.
+        let right = run(
+            &argv(&["inspect", &p, "--node", "press-line-07", "--now", "1500"]),
+            0,
+        );
+        assert_eq!(right.exit, 0, "right-node inspect failed: {}", right.stdout);
+        assert!(right.stdout.contains("VALID"));
+        assert!(right.stdout.contains("node:") && right.stdout.contains("locked"));
+
+        // With a different --node it is rejected.
+        let wrong = run(
+            &argv(&["inspect", &p, "--node", "press-line-99", "--now", "1500"]),
+            0,
+        );
+        assert_eq!(wrong.exit, 1);
+        assert!(wrong.stdout.contains("different machine"));
+
+        // check follows the same rule: granted on the right node, denied elsewhere.
+        let granted = run(
+            &argv(&[
+                "check",
+                &p,
+                "--module",
+                "navigation",
+                "--node",
+                "press-line-07",
+                "--now",
+                "1500",
+            ]),
+            0,
+        );
+        assert_eq!(granted.exit, 0);
+        assert!(granted.stdout.contains("GRANTED"));
+
+        let denied = run(
+            &argv(&[
+                "check",
+                &p,
+                "--module",
+                "navigation",
+                "--node",
+                "press-line-99",
+                "--now",
+                "1500",
+            ]),
+            0,
+        );
+        assert_eq!(denied.exit, 1);
+        assert!(denied.stdout.contains("DENIED"));
 
         let _ = std::fs::remove_file(&path);
     }
