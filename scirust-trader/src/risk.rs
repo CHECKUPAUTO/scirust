@@ -106,6 +106,7 @@ pub fn size_position(pred: &CertifiedPrediction, cfg: &RiskConfig) -> Position {
     };
 
     // Gate checks. (Single `let (allowed, reason) = if …` binding: a newer
+    // nightly clippy flags the earlier late-init pattern under -D warnings.)
     // nightly clippy flags the late-init pattern under -D warnings.)
     let (allowed, reason) = if action == Action::Flat
     {
