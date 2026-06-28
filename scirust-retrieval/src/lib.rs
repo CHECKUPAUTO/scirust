@@ -45,6 +45,7 @@
 //! assert_eq!(hits[0].id, 1);
 //! ```
 
+pub mod contrastive;
 pub mod index;
 pub mod ann;
 pub mod contrastive;
@@ -56,6 +57,7 @@ pub mod metrics;
 pub mod rerank;
 pub mod vector;
 
+pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
 pub use index::DenseIndex;
 pub use ann::LshIndex;
 pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
