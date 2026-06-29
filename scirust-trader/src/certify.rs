@@ -145,12 +145,22 @@ pub fn certify(weights: &ModelWeights, input: &[f32], eps: f32) -> CertifiedBoun
     }
 }
 
-/// Feature attribution placeholder — uses the indicator values themselves
-/// as a simple proxy. In a full implementation, this would call
-/// `scirust_core::xai::integrated_gradients`.
-pub fn feature_attribution(features: &[f32], names: &[String]) -> BTreeMap<String, f32> {
-    let total: f32 = features.iter().map(|f| f.abs()).sum::<f32>().max(1e-6);
-    features
+/// Feature attribution using Integrated Gradients.
+pub fn feature_attribution(
+    model: &mut crate::model::PricePredictor,
+    features: &[f32],
+    names: &[String],
+) -> BTreeMap<String, f32> {
+    use scirust_core::autodiff::reverse::Tensor;
+    use scirust_core::xai::integrated_gradients;
+
+    let input = Tensor::from_vec(features.to_vec(), 1, features.len());
+    let baseline = Tensor::zeros(1, features.len());
+
+    let attr = integrated_gradients(&input, &baseline, 20, |x| model.net.forward(x.tape(), *x));
+
+    let total: f32 = attr.data.iter().map(|f| f.abs()).sum::<f32>().max(1e-6);
+    attr.data
         .iter()
         .enumerate()
         .map(|(i, &f)| {
@@ -199,9 +209,10 @@ mod tests {
 
     #[test]
     fn attribution_sums_to_one() {
+        let mut model = PricePredictor::new(3, &[8], 42);
         let features = vec![0.5, -0.3, 0.2];
         let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let attr = feature_attribution(&features, &names);
+        let attr = feature_attribution(&mut model, &features, &names);
         let total: f32 = attr.values().sum();
         assert!((total - 1.0).abs() < 1e-5);
     }

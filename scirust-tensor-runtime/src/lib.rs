@@ -1,7 +1,7 @@
 //! A tiny tensor runtime: a named-register machine that executes compiled
 //! element-wise kernels and multi-operand contractions over [`TensorND`] values.
 
-use scirust_tensor_compile::{ContractionPlan, FusedKernel};
+use scirust_tensor_compile::{ContractionPlan, FusedKernel, TensorGraph, TensorOp, FusedOp};
 use scirust_tensor_core::TensorND;
 use std::collections::HashMap;
 
@@ -59,6 +59,61 @@ impl TensorRuntime {
         let r = plan.execute(&tensors)?;
         self.regs.insert(output.to_string(), r);
         Ok(())
+    }
+
+    /// Execute a full `TensorGraph`. This implementation currently uses the graph's
+    /// internal buffer indices as temporary register slots.
+    pub fn run_graph(&mut self, graph: &TensorGraph) -> Result<TensorND, String> {
+        let mut buffers = graph.buffers.clone();
+
+        for op in &graph.ops {
+            match op {
+                TensorOp::MatMul(a, b) => {
+                    let res = scirust_tensor_einsum::einsum("ij,jk->ik", &[&buffers[*a], &buffers[*b]])?;
+                    buffers.push(res);
+                }
+                TensorOp::Add(a, b) => {
+                    if buffers[*a].shape != buffers[*b].shape {
+                        return Err("Add: shape mismatch".to_string());
+                    }
+                    let data = buffers[*a].data.iter().zip(&buffers[*b].data).map(|(x, y)| x + y).collect();
+                    buffers.push(TensorND::new(data, buffers[*a].shape.clone()));
+                }
+                TensorOp::ReLU(a) => {
+                    let data = buffers[*a].data.iter().map(|x| x.max(0.0)).collect();
+                    buffers.push(TensorND::new(data, buffers[*a].shape.clone()));
+                }
+                TensorOp::Fused(fused) => {
+                    match fused {
+                        FusedOp::Linear { input_idx, weight_idx, bias_idx, activation } => {
+                            let mut res = scirust_tensor_einsum::einsum("ij,jk->ik", &[&buffers[*input_idx], &buffers[*weight_idx]])?;
+                            if let Some(b_idx) = bias_idx {
+                                // Simple bias addition (assumes bias is a row vector)
+                                if buffers[*b_idx].data.len() != res.shape[1] {
+                                    return Err("Bias dimension mismatch".to_string());
+                                }
+                                for r in 0..res.shape[0] {
+                                    for c in 0..res.shape[1] {
+                                        res.data[r * res.shape[1] + c] += buffers[*b_idx].data[c];
+                                    }
+                                }
+                            }
+                            if let Some(kernel) = activation {
+                                res = kernel.apply(&res);
+                            }
+                            buffers.push(res);
+                        }
+                        FusedOp::OptimizedContraction(_plan) => {
+                            // This is a simplification: OptimizedContraction in a graph
+                            // would need to know which buffers to use as inputs.
+                            return Err("OptimizedContraction in TensorGraph not yet fully implemented".to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        buffers.pop().ok_or_else(|| "Graph empty".to_string())
     }
 }
 

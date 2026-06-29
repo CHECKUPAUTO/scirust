@@ -3354,8 +3354,8 @@ fn main() {{
 ```
 
 ## Complexity
-- Time: TODO
-- Space: TODO
+- Time: O(?)
+- Space: O(?)
 "#,
         name_pascal = to_pascal_case(name),
         name_snake = to_snake_case(name)

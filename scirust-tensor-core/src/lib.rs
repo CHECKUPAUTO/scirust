@@ -9,26 +9,32 @@ pub struct TensorND {
 }
 
 impl TensorND {
-    /// Create a tensor from data and shape. Panics if `data.len()` does not match
-    /// the product of `shape`.
-    pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
+    /// Create a tensor from data and shape. Returns an error if `data.len()`
+    /// does not match the product of `shape`.
+    pub fn try_new(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
         let expected: usize = shape
             .iter()
             .product::<usize>()
             .max(if shape.is_empty() { 1 } else { 0 });
-        assert_eq!(
-            data.len(),
-            expected,
-            "TensorND::new: data length {} != product of shape {:?}",
-            data.len(),
-            shape
-        );
+        if data.len() != expected {
+            return Err(format!(
+                "TensorND::try_new: data length {} != product of shape {:?}",
+                data.len(),
+                shape
+            ));
+        }
         let strides = compute_strides(&shape);
-        Self {
+        Ok(Self {
             data,
             shape,
             strides,
-        }
+        })
+    }
+
+    /// Create a tensor from data and shape. Panics if `data.len()` does not match
+    /// the product of `shape`.
+    pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
+        Self::try_new(data, shape).expect("TensorND::new")
     }
 
     /// Zero-filled tensor of the given shape.

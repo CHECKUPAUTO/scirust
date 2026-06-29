@@ -505,6 +505,74 @@ pub fn match_template_best(image: &Image, template: &Image) -> Option<(usize, us
     template_match(image, template).into_iter().next()
 }
 
+// ─── Morphological Operations ───────────────────────────────────────────────
+
+/// Apply dilation to a binary image.
+pub fn dilate(image: &Image, size: usize) -> Image {
+    let mut out = Image::new(image.width, image.height);
+    let half = size / 2;
+
+    for y in 0..image.height
+    {
+        for x in 0..image.width
+        {
+            let mut max_val = 0.0;
+            for ky in 0..size
+            {
+                for kx in 0..size
+                {
+                    let ix = x as isize + kx as isize - half as isize;
+                    let iy = y as isize + ky as isize - half as isize;
+                    if ix >= 0
+                        && iy >= 0
+                        && (ix as usize) < image.width
+                        && (iy as usize) < image.height
+                    {
+                        max_val = max_val.max(image.get(ix as usize, iy as usize));
+                    }
+                }
+            }
+            out.set(x, y, max_val);
+        }
+    }
+    out
+}
+
+/// Apply erosion to a binary image.
+pub fn erode(image: &Image, size: usize) -> Image {
+    let mut out = Image::new(image.width, image.height);
+    let half = size / 2;
+
+    for y in 0..image.height
+    {
+        for x in 0..image.width
+        {
+            let mut min_val = 1.0;
+            for ky in 0..size
+            {
+                for kx in 0..size
+                {
+                    let ix = x as isize + kx as isize - half as isize;
+                    let iy = y as isize + ky as isize - half as isize;
+                    if ix >= 0
+                        && iy >= 0
+                        && (ix as usize) < image.width
+                        && (iy as usize) < image.height
+                    {
+                        min_val = min_val.min(image.get(ix as usize, iy as usize));
+                    }
+                    else
+                    {
+                        min_val = 0.0; // boundary is considered background
+                    }
+                }
+            }
+            out.set(x, y, min_val);
+        }
+    }
+    out
+}
+
 // ─── Image Segmentation ─────────────────────────────────────────────────────
 
 /// Simple threshold-based segmentation.
@@ -1139,5 +1207,19 @@ mod tests {
         assert_eq!(hist.len(), 256);
         let sum: f64 = hist.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_morphological() {
+        let mut img = Image::new(5, 5);
+        img.set(2, 2, 1.0);
+        let dilated = dilate(&img, 3);
+        assert_eq!(dilated.get(2, 2), 1.0);
+        assert_eq!(dilated.get(1, 1), 1.0);
+        assert_eq!(dilated.get(0, 0), 0.0);
+
+        let eroded = erode(&dilated, 3);
+        assert_eq!(eroded.get(2, 2), 1.0);
+        assert_eq!(eroded.get(1, 1), 0.0);
     }
 }

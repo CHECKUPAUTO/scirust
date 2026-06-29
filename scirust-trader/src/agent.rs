@@ -317,7 +317,7 @@ impl TradingAgent {
             .map(|i| format!("close_{}", i))
             .chain(["rsi", "macd_hist", "atr"].iter().map(|s| s.to_string()))
             .collect();
-        let attribution = feature_attribution(&features, &feature_names);
+        let attribution = feature_attribution(&mut self.model, &features, &feature_names);
 
         let pred = CertifiedPrediction {
             symbol: snapshot.symbol.clone(),

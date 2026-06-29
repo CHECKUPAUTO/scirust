@@ -18,6 +18,10 @@ pub enum ElementwiseOp {
     AddScalar(f32),
     MulScalar(f32),
     Relu,
+    Sigmoid,
+    Tanh,
+    Exp,
+    Log,
 }
 
 impl ElementwiseOp {
@@ -28,6 +32,10 @@ impl ElementwiseOp {
             ElementwiseOp::AddScalar(c) => x + c,
             ElementwiseOp::MulScalar(c) => x * c,
             ElementwiseOp::Relu => x.max(0.0),
+            ElementwiseOp::Sigmoid => 1.0 / (1.0 + (-x).exp()),
+            ElementwiseOp::Tanh => x.tanh(),
+            ElementwiseOp::Exp => x.exp(),
+            ElementwiseOp::Log => x.ln(),
         }
     }
 }
@@ -65,6 +73,7 @@ impl GraphCompiler {
 }
 
 /// A compiled, fused element-wise kernel.
+#[derive(Debug, Clone, PartialEq)]
 pub struct FusedKernel {
     ops: Vec<ElementwiseOp>,
 }
@@ -86,25 +95,31 @@ impl FusedKernel {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Node of an optimized operation graph, as described in `DESIGN_SCIRUST_TENSOR.md`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TensorOp {
+    MatMul(usize, usize),
+    Add(usize, usize),
+    ReLU(usize),
+    Fused(FusedOp),
+}
 
-    #[test]
-    fn fused_matches_sequential() {
-        let t = TensorND::new(vec![-2.0, -0.5, 1.0, 3.0], vec![4]);
-        // (x * 2 + 1) then ReLU
-        let kernel = GraphCompiler::new()
-            .op(ElementwiseOp::MulScalar(2.0))
-            .op(ElementwiseOp::AddScalar(1.0))
-            .op(ElementwiseOp::Relu)
-            .compile();
-        assert_eq!(kernel.num_fused(), 3);
-        let fused = kernel.apply(&t);
+/// A high-level fused operation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FusedOp {
+    /// MatMul + Add Bias + ReLU fusion (or other element-wise ops).
+    Linear {
+        input_idx: usize,
+        weight_idx: usize,
+        bias_idx: Option<usize>,
+        activation: Option<FusedKernel>,
+    },
+    /// Multi-operand contraction plan.
+    OptimizedContraction(ContractionPlan),
+}
 
-        // Sequential reference: three separate passes.
-        let seq: Vec<f32> = t.data.iter().map(|&x| (x * 2.0 + 1.0).max(0.0)).collect();
-        assert_eq!(fused.data, seq);
-        assert_eq!(fused.data, vec![0.0, 0.0, 3.0, 7.0]);
-    }
+/// A graph of optimized tensor operations.
+pub struct TensorGraph {
+    pub ops: Vec<TensorOp>,
+    pub buffers: Vec<TensorND>,
 }

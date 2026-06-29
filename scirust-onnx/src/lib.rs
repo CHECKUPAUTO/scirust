@@ -15,9 +15,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use scirust_onnx::export_to_onnx_json;
+//! use scirust_onnx::export_sequential_to_onnx_json;
 //!
-//! let json = export_to_onnx_json(&model, "my_model", (1, 784)).unwrap();
+//! let json = export_sequential_to_onnx_json(&tape, &model, "my_model", (1, 784)).unwrap();
 //! std::fs::write("model.onnx.json", json).unwrap();
 //! ```
 

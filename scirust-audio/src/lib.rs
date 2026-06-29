@@ -297,6 +297,34 @@ pub fn chroma(signal: &[f64], sample_rate: usize, n_fft: usize) -> Vec<Vec<f64>>
 }
 
 /// Chroma feature vector for a single frame.
+/// Compute Short-Time Fourier Transform (STFT) magnitude spectrogram.
+pub fn stft(signal: &[f64], n_fft: usize, hop_length: usize) -> Vec<Vec<f64>> {
+    if hop_length == 0 || signal.len() < n_fft
+    {
+        return Vec::new();
+    }
+
+    let n_frames = (signal.len() - n_fft) / hop_length + 1;
+    let mut spectrogram = Vec::with_capacity(n_frames);
+
+    for frame_idx in 0..n_frames
+    {
+        let start = frame_idx * hop_length;
+        let frame: Vec<f64> = signal[start..start + n_fft].to_vec();
+
+        // Apply Hamming window
+        let windowed: Vec<f64> = frame
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| x * (0.54 - 0.46 * (2.0 * PI * i as f64 / (n_fft - 1) as f64).cos()))
+            .collect();
+
+        spectrogram.push(magnitude_spectrum(&windowed));
+    }
+
+    spectrogram
+}
+
 pub fn chroma_vector(signal: &[f64], sample_rate: usize) -> Vec<f64> {
     let spectrum = magnitude_spectrum(signal);
     let freq_per_bin = sample_rate as f64 / signal.len() as f64;
@@ -1311,5 +1339,14 @@ mod tests {
         let back: AudioFeatureSet = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.to_vector().len(), features.to_vector().len());
         assert!((back.spectral_centroid - features.spectral_centroid).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_stft_spectrogram_shape() {
+        let sig = test_signal();
+        let spec = stft(&sig.samples, 512, 256);
+        // (4000 - 512) / 256 + 1 = 14 frames. Each magnitude bin 512/2 + 1 = 257.
+        assert_eq!(spec.len(), 14);
+        assert_eq!(spec[0].len(), 257);
     }
 }

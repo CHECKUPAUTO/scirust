@@ -3289,8 +3289,10 @@ dependencies = [
 name = "scirust-tensor-examples"
 version = "0.1.0"
 dependencies = [
+ "scirust-tensor-compile",
  "scirust-tensor-core",
  "scirust-tensor-einsum",
+ "scirust-tensor-runtime",
 ]
 
 [[package]]
@@ -3299,6 +3301,7 @@ version = "0.1.0"
 dependencies = [
  "scirust-tensor-compile",
  "scirust-tensor-core",
+ "scirust-tensor-einsum",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ use scirust_tensor_core::TensorND;
 use scirust_tensor_einsum::einsum;
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContractionPlan {
     pub operand_specs: Vec<Vec<char>>,
     pub output: Vec<char>,

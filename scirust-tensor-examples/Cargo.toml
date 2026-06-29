@@ -7,3 +7,5 @@ publish = false
 [dependencies]
 scirust-tensor-core = { path = "../scirust-tensor-core" }
 scirust-tensor-einsum = { path = "../scirust-tensor-einsum" }
+scirust-tensor-compile = { path = "../scirust-tensor-compile" }
+scirust-tensor-runtime = { path = "../scirust-tensor-runtime" }
