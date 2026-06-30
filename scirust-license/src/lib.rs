@@ -479,7 +479,13 @@ mod tests {
         // license to their machine by editing the JSON. The signature was over
         // the original digest, so verification must fail.
         let mut signed = v.issue_with_leaf(nav_license(), 11);
-        signed.license.node_lock = Some(node_fingerprint("attacker-box"));
+        // nav_license() is issued to "Acme Robotics" / "L-2026-001"; the attacker
+        // forges the matching salted fingerprint for their own machine.
+        signed.license.node_lock = Some(node_fingerprint(
+            "Acme Robotics",
+            "L-2026-001",
+            "attacker-box",
+        ));
         assert_eq!(
             verify_license_on_node(&signed, &v.root(), 1_500, "attacker-box"),
             Err(LicenseError::BadSignature),

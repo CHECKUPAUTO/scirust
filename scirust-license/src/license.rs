@@ -67,7 +67,11 @@ impl License {
     /// `no_std`-friendly posture. The host presents its own id at verification
     /// time via [`verify_license_on_node`](crate::verify_license_on_node).
     pub fn with_node_lock(mut self, machine_id: &str) -> Self {
-        self.node_lock = Some(node_fingerprint(machine_id));
+        self.node_lock = Some(node_fingerprint(
+            &self.licensee,
+            &self.license_id,
+            machine_id,
+        ));
         self
     }
 
@@ -154,20 +158,40 @@ impl License {
         match self.node_lock
         {
             None => true,
-            Some(fp) => fp == node_fingerprint(machine_id),
+            Some(fp) => fp == node_fingerprint(&self.licensee, &self.license_id, machine_id),
         }
     }
 }
 
-/// Fingerprint an opaque machine identifier for node-locking: a domain-separated
-/// SHA-256 of `machine_id`. Deterministic and pure — the same id always yields
-/// the same 32 bytes, and the raw id is never recoverable from the hash. The
-/// domain tag keeps these fingerprints from colliding with any other SHA-256 use
-/// in the platform.
-pub fn node_fingerprint(machine_id: &str) -> Hash {
+/// Fingerprint an opaque machine identifier for node-locking, **salted by the
+/// license identity** (`licensee` + `license_id`): a domain-separated, length-
+/// prefixed SHA-256. Deterministic and pure — same inputs always yield the same
+/// 32 bytes, no RNG.
+///
+/// Salting by the license identity means the *same machine* produces a
+/// *different* fingerprint under a different license, so stored fingerprints
+/// cannot be correlated across licenses and no single precomputed table covers
+/// more than one license. The raw id is never stored.
+///
+/// What this does **not** do: it does not, by itself, defeat a *targeted*
+/// brute-force of a low-entropy `machine_id` — an attacker holding the license
+/// file knows the salt and can hash candidate ids. The primary protection
+/// against that is a **high-entropy** `machine_id` (a provisioned UUID,
+/// `/etc/machine-id`, a TPM value), which the deployment chooses.
+pub fn node_fingerprint(licensee: &str, license_id: &str, machine_id: &str) -> Hash {
     let mut h = Sha256::new();
-    h.update(b"scirust-node-lock:v1\0");
-    h.update(machine_id.as_bytes());
+    h.update(b"scirust-node-lock:v2\0");
+    for field in [
+        licensee.as_bytes(),
+        license_id.as_bytes(),
+        machine_id.as_bytes(),
+    ]
+    {
+        // Length-prefix each field so no field-boundary shift can collide
+        // (e.g. licensee "ab"+id "c" must not equal licensee "a"+id "bc").
+        h.update((field.len() as u32).to_le_bytes());
+        h.update(field);
+    }
     h.finalize().into()
 }
 
@@ -274,11 +298,34 @@ mod tests {
 
     #[test]
     fn node_fingerprint_is_deterministic_and_distinguishing() {
-        // Same id → same hash; different id → different hash; raw id absent.
-        assert_eq!(node_fingerprint("machine-A"), node_fingerprint("machine-A"));
-        assert_ne!(node_fingerprint("machine-A"), node_fingerprint("machine-B"));
-        let fp = node_fingerprint("machine-A");
-        assert_ne!(fp, [0u8; 32], "fingerprint is not trivially zero");
+        // Same inputs → same hash; different id → different hash; non-trivial.
+        let a = node_fingerprint("Acme", "L-1", "machine-A");
+        assert_eq!(a, node_fingerprint("Acme", "L-1", "machine-A"));
+        assert_ne!(a, node_fingerprint("Acme", "L-1", "machine-B"));
+        assert_ne!(a, [0u8; 32], "fingerprint is not trivially zero");
+    }
+
+    #[test]
+    fn the_same_machine_is_unlinkable_across_licenses() {
+        // Salting by license identity means one machine yields different
+        // fingerprints under different licensees / license ids — no correlation.
+        let m = "press-line-07";
+        let base = node_fingerprint("Acme", "L-1", m);
+        assert_ne!(
+            base,
+            node_fingerprint("Acme", "L-2", m),
+            "differ by license id"
+        );
+        assert_ne!(
+            base,
+            node_fingerprint("Globex", "L-1", m),
+            "differ by licensee"
+        );
+        // The length-prefixing forbids a field-boundary collision.
+        assert_ne!(
+            node_fingerprint("ab", "c", m),
+            node_fingerprint("a", "bc", m),
+        );
     }
 
     #[test]
@@ -287,8 +334,11 @@ mod tests {
         let locked = floating.clone().with_node_lock("machine-A");
         // The lock is part of the signed encoding, so it shifts the digest.
         assert_ne!(floating.digest(), locked.digest());
-        // Only the fingerprint is stored — never the raw identifier.
-        assert_eq!(locked.node_lock, Some(node_fingerprint("machine-A")));
+        // Only the (license-salted) fingerprint is stored — never the raw id.
+        assert_eq!(
+            locked.node_lock,
+            Some(node_fingerprint("Acme", "L-1", "machine-A"))
+        );
         let json = serde_json::to_string(&locked).unwrap();
         assert!(
             !json.contains("machine-A"),
