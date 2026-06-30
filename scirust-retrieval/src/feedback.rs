@@ -22,6 +22,11 @@ pub struct ImprovementLoop {
     queries: Vec<Vec<f32>>,
     positives: Vec<Vec<f32>>,
     cfg: ContrastiveConfig,
+    /// Optional cap on the accumulated feedback replay buffer: when set, the
+    /// oldest recorded pair is dropped once the buffer exceeds it, so an agent
+    /// that runs indefinitely cannot grow the buffer without bound. `None`
+    /// (the default) preserves the original unbounded behaviour.
+    replay_cap: Option<usize>,
 }
 
 impl ImprovementLoop {
@@ -33,13 +38,37 @@ impl ImprovementLoop {
             queries: Vec::new(),
             positives: Vec::new(),
             cfg,
+            replay_cap: None,
         }
     }
 
+    /// Bound the accumulated feedback replay buffer to at most `cap` pairs
+    /// (oldest dropped first). `None` removes the cap. Backward-compatible: the
+    /// default is unbounded (`None`), matching the original behaviour.
+    pub fn with_replay_cap(mut self, cap: Option<usize>) -> Self {
+        self.replay_cap = cap;
+        self
+    }
+
+    /// The configured replay cap, if any.
+    pub fn replay_cap(&self) -> Option<usize> {
+        self.replay_cap
+    }
+
     /// Record one `(query, relevant-document)` pair as **base embeddings**.
+    /// If a `replay_cap` is set, evicts the oldest pair once the buffer exceeds
+    /// it (FIFO).
     pub fn record(&mut self, query: &[f32], positive: &[f32]) {
         self.queries.push(query.to_vec());
         self.positives.push(positive.to_vec());
+        if let Some(cap) = self.replay_cap
+        {
+            while self.queries.len() > cap && !self.queries.is_empty()
+            {
+                self.queries.remove(0);
+                self.positives.remove(0);
+            }
+        }
     }
 
     /// Number of accumulated feedback pairs.

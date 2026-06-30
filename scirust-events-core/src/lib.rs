@@ -1,6 +1,9 @@
 use scirust_core::autodiff::reverse::Tensor;
 use serde::{Deserialize, Serialize};
 
+pub mod episodic;
+pub use episodic::EpisodicEventLog;
+
 /// Représente un événement détecté avec ses métadonnées.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
