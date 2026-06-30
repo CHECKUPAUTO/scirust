@@ -9,20 +9,34 @@
 //! flagship retrievers hang off this token, so a caller without a valid license
 //! cannot build one through the blessed path.
 //!
-//! The lower-level building blocks ([`DenseIndex`](crate::DenseIndex),
-//! [`ProjectionHead`](crate::ProjectionHead), the vector and metric helpers)
-//! stay open — they are primitives. What the token gates is the *product*: the
-//! end-to-end retrievers a customer actually ships.
+//! The lower-level building blocks ([`DenseIndex`](crate::DenseIndex), the
+//! vector and metric helpers) stay open — they are primitives. What the token
+//! gates is the *product*: the end-to-end retrievers a customer actually ships.
 //!
 //! The gate is deterministic and pure-Rust like everything else here: the
 //! entitlement it checks comes from a hash-based signed license
 //! (`scirust-license`) — no FFI, no network, no clock beyond the `now` the caller
 //! passes to `verify_license`.
 //!
+//! The example brings its own embeddings via a trivial [`Encoder`](crate::Encoder),
+//! so it works in the pure (`default-features = false`) build too. With the
+//! default `learned` feature you could pass `scirust_core::embed::EmbeddingEngine`
+//! instead.
+//!
 //! ```
 //! use scirust_license::{demo_root, demo_vendor, verify_license, License, Module};
-//! use scirust_retrieval::RetrievalAccess;
-//! use scirust_core::embed::EmbeddingEngine;
+//! use scirust_retrieval::{Encoder, RetrievalAccess};
+//!
+//! // Bring your own embeddings — here a tiny deterministic encoder.
+//! struct Toy;
+//! impl Encoder for Toy {
+//!     fn embedding_dim(&self) -> usize { 3 }
+//!     fn encode(&mut self, text: &str) -> Vec<f32> {
+//!         let mut v = [0.0f32; 3];
+//!         for (i, b) in text.bytes().enumerate() { v[i % 3] += b as f32; }
+//!         v.to_vec()
+//!     }
+//! }
 //!
 //! // A license that covers the premium Retrieval module.
 //! let signed = demo_vendor().issue_with_leaf(
@@ -33,12 +47,14 @@
 //!
 //! // Unlock once, then build a retriever through the gated entry point.
 //! let access = RetrievalAccess::unlock(&ent).expect("entitled to Retrieval");
-//! let mut r = access.semantic_retriever(EmbeddingEngine::new(&["hello world"]));
+//! let mut r = access.semantic_retriever(Toy);
 //! r.index_text(0, "hello world").unwrap();
 //! assert_eq!(r.retrieve("hello world", 1)[0].id, 0);
 //! ```
 
-use crate::{ContrastiveConfig, Encoder, HybridRetriever, ImprovementLoop, SemanticRetriever};
+#[cfg(feature = "learned")]
+use crate::{ContrastiveConfig, ImprovementLoop};
+use crate::{Encoder, HybridRetriever, SemanticRetriever};
 
 scirust_license::module_gate! {
     /// Capability token proving entitlement to the premium **Retrieval** module
@@ -66,7 +82,9 @@ impl RetrievalAccess {
 
     /// Start a feedback-driven [`ImprovementLoop`] that re-trains a projection
     /// head (`dim_in` → `dim_out`, seeded `seed`, trained with `cfg`) as
-    /// relevance pairs accumulate. Gated premium entry point.
+    /// relevance pairs accumulate. Gated premium entry point. Requires the
+    /// `learned` feature (the loop trains via scirust-core autodiff).
+    #[cfg(feature = "learned")]
     pub fn improvement_loop(
         self,
         dim_in: usize,
@@ -81,8 +99,24 @@ impl RetrievalAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_core::embed::EmbeddingEngine;
     use scirust_license::{Entitlements, License, LicenseError, Module, Vendor, verify_license};
+
+    // A pure, deterministic encoder so the gate tests run in BOTH the lean and
+    // the `learned` builds — no scirust-core EmbeddingEngine needed.
+    struct Toy;
+    impl Encoder for Toy {
+        fn embedding_dim(&self) -> usize {
+            4
+        }
+        fn encode(&mut self, text: &str) -> Vec<f32> {
+            let mut v = [0.0f32; 4];
+            for (i, b) in text.bytes().enumerate()
+            {
+                v[i % 4] += b as f32 / 255.0;
+            }
+            v.to_vec()
+        }
+    }
 
     // A self-contained test vendor (distinct from the demo vendor). Each call
     // signs one license under a distinct one-time `leaf`, so no Lamport leaf is
@@ -99,10 +133,10 @@ mod tests {
         let access = RetrievalAccess::unlock(&ent).expect("entitled to Retrieval");
         assert_eq!(RetrievalAccess::MODULE, Module::Retrieval);
 
-        let mut r = access.semantic_retriever(EmbeddingEngine::new(&["rust is fast", "cats purr"]));
+        let mut r = access.semantic_retriever(Toy);
         r.index_text(0, "rust is fast").unwrap();
         r.index_text(1, "cats purr").unwrap();
-        // The gated retriever behaves exactly like the ungated one.
+        // Self-retrieval: the exact doc text encodes to its own vector, cosine 1.
         assert_eq!(r.retrieve("rust is fast", 2)[0].id, 0);
     }
 
@@ -117,14 +151,20 @@ mod tests {
     }
 
     #[test]
-    fn the_token_also_gates_hybrid_and_the_improvement_loop() {
+    fn the_token_also_gates_the_hybrid_retriever() {
         let ent = entitlements([Module::Retrieval], 0);
         let access = RetrievalAccess::unlock(&ent).expect("entitled");
-
         // Token is Copy, so it gates every flagship product without re-unlocking.
-        let h = access.hybrid_retriever(EmbeddingEngine::new(&["alpha beta"]), 60.0);
+        let h = access.hybrid_retriever(Toy, 60.0);
         assert!(h.is_empty());
+    }
 
+    #[cfg(feature = "learned")]
+    #[test]
+    fn the_token_also_gates_the_improvement_loop() {
+        use crate::ContrastiveConfig;
+        let ent = entitlements([Module::Retrieval], 0);
+        let access = RetrievalAccess::unlock(&ent).expect("entitled");
         let mut lp = access.improvement_loop(8, 4, 1, ContrastiveConfig::default());
         assert!(lp.is_empty());
         assert!(lp.train_cycle().is_empty()); // no feedback recorded yet

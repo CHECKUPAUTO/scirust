@@ -3,10 +3,7 @@
 //! A deterministic, pure-Rust dense-retrieval engine, positioned as an
 //! **auditable alternative to RAG**.
 
-pub mod ann;
-pub mod causal_rerank;
-pub mod contrastive;
-pub mod feedback;
+// Pure retrieval core — no scirust-core / scirust-graph dependency.
 pub mod forgetting;
 pub mod hybrid;
 pub mod index;
@@ -16,13 +13,27 @@ pub mod rag;
 pub mod rerank;
 pub mod vector;
 
-pub use ann::LshIndex;
-pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
-pub use feedback::ImprovementLoop;
+// `learned` extras — backed by scirust-core (autodiff/nn) and scirust-graph.
+#[cfg(feature = "learned")]
+pub mod ann;
+#[cfg(feature = "learned")]
+pub mod causal_rerank;
+#[cfg(feature = "learned")]
+pub mod contrastive;
+#[cfg(feature = "learned")]
+pub mod feedback;
+
 pub use forgetting::{BoundedSemanticMemory, DecaySchedule, DocMeta};
 pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
 pub use index::DenseIndex;
 pub use license::RetrievalAccess;
+
+#[cfg(feature = "learned")]
+pub use ann::LshIndex;
+#[cfg(feature = "learned")]
+pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
+#[cfg(feature = "learned")]
+pub use feedback::ImprovementLoop;
 
 use std::fmt;
 
@@ -78,6 +89,9 @@ pub trait Encoder {
     }
 }
 
+/// The default [`Encoder`] is scirust-core's MiniLLM transformer. Only available
+/// with the `learned` feature; the pure core brings its own embeddings.
+#[cfg(feature = "learned")]
 impl Encoder for scirust_core::embed::EmbeddingEngine {
     fn embedding_dim(&self) -> usize {
         self.dim()
@@ -136,7 +150,7 @@ impl<E: Encoder> SemanticRetriever<E> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "learned"))]
 mod tests {
     use super::*;
     use scirust_core::embed::EmbeddingEngine;
