@@ -63,9 +63,17 @@ The crate deliberately does **not** read hardware itself — that would need
 platform-specific I/O and break the pure, deterministic, `no_std`-friendly
 posture. Instead the **host supplies an opaque machine id** (a provisioned UUID,
 `/etc/machine-id`, a TPM value — whatever the deployment trusts as stable). The
-license stores only its `node_fingerprint` (a domain-separated SHA-256), so the
-file never reveals the raw id, and the lock is part of the signed digest, so it
-cannot be edited or removed without breaking the signature.
+license stores only its `node_fingerprint` — a domain-separated SHA-256 **salted
+by the license identity** (licensee + license id) — so the file never reveals the
+raw id, the *same* machine is unlinkable across different licenses, and the lock
+is part of the signed digest, so it cannot be edited or removed without breaking
+the signature.
+
+The license-identity salt defeats cross-license correlation and shared
+precomputation; it does **not**, by itself, stop a targeted brute-force of a
+*low-entropy* machine id (an attacker holding the file knows the salt). The
+primary defense there is a **high-entropy** machine id — which is exactly why a
+UUID / `/etc/machine-id` / TPM value is recommended above.
 
 ```rust
 use scirust_license::{Vendor, License, Module, verify_license, verify_license_on_node, LicenseError};
