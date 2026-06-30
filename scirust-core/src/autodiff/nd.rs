@@ -1,3 +1,5 @@
+//! Reverse-mode autodiff over **N-D tensors** (['TensorND']) with numpy-style
+//!
 #[cfg(test)] use std::sync::Arc;
 // Reverse-mode autodiff over **N-D tensors** ([`TensorND`]) with numpy-style
 // broadcasting — the N-D autograd path (roadmap P2.4).
@@ -18,6 +20,7 @@
 use std::cell::RefCell;
 
 use crate::tensor::tensor_nd::TensorND;
+use std::cell::RefCell;
 
 #[derive(Clone)]
 enum Op {
@@ -102,7 +105,7 @@ impl NdTape {
 
     /// The forward value of a node.
     pub fn value(&self, v: NdVar<'_>) -> TensorND {
-        self.nodes.borrow()[v.idx].value.clone()
+        self.nodes.borrow()[v.idx].value.to_contiguous()
     }
 
     /// Reverse-mode backward from a **scalar** root (shape `[1]`). Returns the
@@ -381,21 +384,21 @@ impl<'t> NdVar<'t> {
 
     /// Softmax over the last axis (e.g. attention weights over keys).
     pub fn softmax(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = softmax_lastaxis(&a);
         self.tape.push(Op::Softmax(self.idx), out)
     }
 
     /// Swap the last two axes (e.g. `Kᵀ` inside attention).
     pub fn transpose_last2(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = transpose_last2(&a);
         self.tape.push(Op::TransposeLast2(self.idx), out)
     }
 
     /// Reshape to `shape` (same number of elements; data order preserved).
     pub fn reshape(self, shape: &[usize]) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         assert_eq!(
             a.data.len(),
             shape.iter().product::<usize>(),
@@ -409,7 +412,7 @@ impl<'t> NdVar<'t> {
     /// no affine — the `gamma`/`beta` of a `LayerNorm` layer are applied as a
     /// separate `mul`/`add`.
     pub fn layernorm(self, eps: f32) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = layernorm_lastaxis(&a, eps);
         self.tape.push(Op::LayerNormLast(self.idx, eps), out)
     }
@@ -419,7 +422,7 @@ impl<'t> NdVar<'t> {
     /// is applied as a separate `mul`. Cheaper than `layernorm` (no centring);
     /// the LLaMA-family normalisation.
     pub fn rmsnorm(self, eps: f32) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = rmsnorm_lastaxis(&a, eps);
         self.tape.push(Op::RmsNormLast(self.idx, eps), out)
     }
@@ -427,7 +430,7 @@ impl<'t> NdVar<'t> {
     /// Elementwise logistic sigmoid `σ(x) = 1/(1+e^-x)` (e.g. the gate of SiLU /
     /// SwiGLU).
     pub fn sigmoid(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let data: Vec<f32> = a.data.iter().map(|&x| 1.0 / (1.0 + (-x).exp())).collect();
         let out = TensorND::new(data, a.shape.clone());
         self.tape.push(Op::Sigmoid(self.idx), out)
@@ -436,7 +439,7 @@ impl<'t> NdVar<'t> {
     /// Elementwise `exp(x)` — the discretisation `exp(Δ·A)` of a state-space
     /// model (e.g. Mamba's selective scan) and positive reparametrisations.
     pub fn exp(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let data: Vec<f32> = a.data.iter().map(|&x| x.exp()).collect();
         let out = TensorND::new(data, a.shape.clone());
         self.tape.push(Op::Exp(self.idx), out)
@@ -449,7 +452,7 @@ impl<'t> NdVar<'t> {
     /// attention score depend only on the **relative** position. `base` is
     /// typically `10000`.
     pub fn rope(self, base: f32) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = rope_lastaxis(&a, base, false);
         self.tape.push(Op::Rope(self.idx, base), out)
     }
@@ -468,7 +471,7 @@ impl<'t> NdVar<'t> {
 
     /// Elementwise ReLU.
     pub fn relu(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let data = a.data.iter().map(|&x| x.max(0.0)).collect();
         let out = TensorND::new(data, a.shape.clone());
         self.tape.push(Op::Relu(self.idx), out)
@@ -476,7 +479,7 @@ impl<'t> NdVar<'t> {
 
     /// Sum of all elements → scalar (shape `[1]`).
     pub fn sum(self) -> NdVar<'t> {
-        let a = self.tape.nodes.borrow()[self.idx].value.clone();
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let s: f32 = a.data.iter().sum();
         self.tape
             .push(Op::Sum(self.idx), TensorND::new(vec![s], vec![1]))
@@ -486,7 +489,7 @@ impl<'t> NdVar<'t> {
     /// `(indices.len(), dim)` stack of the selected rows. Gradients
     /// scatter-add back to the table (repeated indices accumulate).
     pub fn gather(self, indices: &[usize]) -> NdVar<'t> {
-        let w = self.tape.nodes.borrow()[self.idx].value.clone();
+        let w = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         assert_eq!(w.ndim(), 2, "gather: table must be 2-D (vocab, dim)");
         let (vocab, dim) = (w.shape[0], w.shape[1]);
         let mut data = Vec::with_capacity(indices.len() * dim);
@@ -532,7 +535,7 @@ impl<'t> NdVar<'t> {
     /// logits, `targets` holds one class index per row. Returns the scalar mean
     /// loss, computed with the log-sum-exp trick for numerical stability.
     pub fn cross_entropy(self, targets: &[usize]) -> NdVar<'t> {
-        let logits = self.tape.nodes.borrow()[self.idx].value.clone();
+        let logits = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         assert_eq!(
             logits.ndim(),
             2,
@@ -562,8 +565,8 @@ impl<'t> NdVar<'t> {
     fn pair(self, other: NdVar<'t>) -> (TensorND, TensorND) {
         let nodes = self.tape.nodes.borrow();
         (
-            nodes[self.idx].value.clone(),
-            nodes[other.idx].value.clone(),
+            nodes[self.idx].value.to_contiguous(),
+            nodes[other.idx].value.to_contiguous(),
         )
     }
 }
@@ -1012,6 +1015,7 @@ fn bmm_backward(a: &TensorND, b: &TensorND, g: &TensorND) -> (TensorND, TensorND
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     /// Build `loss = sum( relu(X·W + b) * V )` and return the scalar loss.
     /// `b` is `(1, out)` and broadcasts over the batch — exercising add/mul

@@ -429,6 +429,37 @@ impl TensorND {
     pub fn from_matrix(rows: usize, cols: usize, data: Vec<f32>) -> Self {
         Self::new(data, vec![rows, cols])
     }
+
+    pub fn is_contiguous(&self) -> bool {
+        self.strides == compute_strides(&self.shape)
+    }
+
+    pub fn to_contiguous(&self) -> Self {
+        if self.is_contiguous() {
+            return self.clone();
+        }
+        let numel = self.numel();
+        let mut new_data = vec![0.0f32; numel];
+        let new_strides = compute_strides(&self.shape);
+
+        let ndim = self.ndim();
+        let mut indices = vec![0usize; ndim];
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..numel {
+            let mut rem = i;
+            for j in 0..ndim {
+                indices[j] = rem / new_strides[j];
+                rem %= new_strides[j];
+            }
+            new_data[i] = self.data[self.offset(&indices)];
+        }
+
+        Self {
+            data: Arc::from(new_data),
+            shape: self.shape.clone(),
+            strides: new_strides,
+        }
+    }
 }
 
 // ------------------------------------------------------------------

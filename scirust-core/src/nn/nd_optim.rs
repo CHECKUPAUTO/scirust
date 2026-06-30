@@ -1,3 +1,5 @@
+//! A reusable **Adam** optimizer (Kingma & Ba, 2014) for the N-D layers
+//!
 #[cfg(test)] use std::sync::Arc;
 // A reusable **Adam** optimizer (Kingma & Ba, 2014) for the N-D layers
 // ([`crate::nn::nd_layers`], [`crate::nn::nd_decoder`]).
@@ -2565,6 +2567,7 @@ impl NdGalore {
 mod tests {
     use super::*;
     use crate::nn::PcgEngine;
+    use std::sync::Arc;
 
     /// Adam minimises a quadratic `Σ(xᵢ − targetᵢ)²` (gradient `2(x − target)`),
     /// driving `x` to the target — the standard optimizer oracle.
