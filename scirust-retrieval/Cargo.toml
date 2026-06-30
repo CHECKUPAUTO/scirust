@@ -7,7 +7,32 @@ publish = false
 description = "SciRust pure semantic (dense transformer) retrieval — deterministic exact index, late-interaction reranking, and ranking metrics; an auditable alternative to RAG"
 
 [dependencies]
-scirust-core = { path = "../scirust-core" }
-scirust-graph = { path = "../scirust-graph" }
+scirust-core = { path = "../scirust-core", optional = true }
+scirust-graph = { path = "../scirust-graph", optional = true }
 scirust-license = { path = "../scirust-license" }
 serde = { version = "1", features = ["derive"] }
+
+[features]
+default = ["learned"]
+# `learned` pulls the heavier scirust crates (scirust-core's autodiff/nn and
+# scirust-graph) and enables the modules backed by them: the MiniLLM transformer
+# encoder (`impl Encoder for EmbeddingEngine`), contrastive fine-tuning + the
+# feedback `ImprovementLoop`, the random-hyperplane LSH ANN index, and causal
+# reranking. Build with `default-features = false` for the **pure, deterministic
+# retrieval core** — exact `DenseIndex`, hybrid BM25 + RRF, RAG context
+# windowing, bounded semantic memory, late-interaction rerank, and the metrics —
+# with **zero** `scirust-core`/`scirust-graph` dependency, bringing your own
+# embeddings via the `Encoder` trait. This is the variant an external consumer
+# (e.g. ccos) depends on to keep its own zero-dependency, replay-exact posture.
+learned = ["dep:scirust-core", "dep:scirust-graph"]
+
+# The end-to-end demo and the contrastive benchmark exercise the learned stack
+# (EmbeddingEngine, contrastive training, the improvement loop), so they are only
+# built when `learned` is on. The pure core has no such target.
+[[example]]
+name = "rag_challenge"
+required-features = ["learned"]
+
+[[test]]
+name = "contrastive_benchmark"
+required-features = ["learned"]
