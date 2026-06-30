@@ -1,28 +1,22 @@
-#[cfg(test)]
-use std::sync::Arc;
-//! Reverse-mode autodiff over **N-D tensors** (['TensorND']) with numpy-style
+//! Reverse-mode autodiff over **N-D tensors** ([`TensorND`]) with numpy-style
+//! broadcasting — the N-D autograd path (roadmap P2.4).
 //!
-#[cfg(test)] use std::sync::Arc;
-// Reverse-mode autodiff over **N-D tensors** ([`TensorND`]) with numpy-style
-// broadcasting — the N-D autograd path (roadmap P2.4).
-//
-// This coexists with the production 2D [`crate::autodiff::reverse`] tape rather
-// than replacing it: the 2D tape stays the battle-tested default while this
-// module grows the N-D capability the compiler/IR ambitions need. Every
-// backward rule is validated by a **numerical gradient check** in the tests
-// (finite differences vs. the analytic gradient), the gold standard for
-// autodiff correctness.
-//
-// Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
-// `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
-// `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
-// a full transformer block (see `nn::nd_layers`). The shape building blocks
-// (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
+//! This coexists with the production 2D [`crate::autodiff::reverse`] tape rather
+//! than replacing it: the 2D tape stays the battle-tested default while this
+//! module grows the N-D capability the compiler/IR ambitions need. Every
+//! backward rule is validated by a **numerical gradient check** in the tests
+//! (finite differences vs. the analytic gradient), the gold standard for
+//! autodiff correctness.
+//!
+//! Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
+//! `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
+//! `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
+//! a full transformer block (see `nn::nd_layers`). The shape building blocks
+//! (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
 
 use std::cell::RefCell;
 
 use crate::tensor::tensor_nd::TensorND;
-use std::cell::RefCell;
 
 #[derive(Clone)]
 enum Op {

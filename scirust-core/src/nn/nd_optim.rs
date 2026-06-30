@@ -1,18 +1,13 @@
-#[cfg(test)]
-use std::sync::Arc;
 //! A reusable **Adam** optimizer (Kingma & Ba, 2014) for the N-D layers
+//! ([`crate::nn::nd_layers`], [`crate::nn::nd_decoder`]).
 //!
-#[cfg(test)] use std::sync::Arc;
-// A reusable **Adam** optimizer (Kingma & Ba, 2014) for the N-D layers
-// ([`crate::nn::nd_layers`], [`crate::nn::nd_decoder`]).
-//
-// The 2-D path keys its moments by tape-node index ([`crate::autodiff::optim`]);
-// here the parameters live *inside* the layers, so a layer exposes them as an
-// ordered list of [`NdParam`] (a mutable view of the values plus the index of
-// their gradient in a [`backward`](crate::autodiff::nd::NdTape::backward)
-// result). The optimizer holds the moment buffers aligned to that list. All
-// arithmetic is plain `f32` in a fixed order, so a run is **bit-for-bit
-// deterministic**.
+//! The 2-D path keys its moments by tape-node index ([`crate::autodiff::optim`]);
+//! here the parameters live *inside* the layers, so a layer exposes them as an
+//! ordered list of [`NdParam`] (a mutable view of the values plus the index of
+//! their gradient in a [`backward`](crate::autodiff::nd::NdTape::backward)
+//! result). The optimizer holds the moment buffers aligned to that list. All
+//! arithmetic is plain `f32` in a fixed order, so a run is **bit-for-bit
+//! deterministic**.
 
 use crate::tensor::tensor_nd::TensorND;
 

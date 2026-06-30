@@ -4,16 +4,20 @@
 //! **auditable alternative to RAG**.
 
 pub mod ann;
+pub mod contrastive;
 pub mod feedback;
 pub mod hybrid;
+pub mod index;
 pub mod license;
 pub mod metrics;
 pub mod rerank;
 pub mod vector;
 
 pub use ann::LshIndex;
+pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
 pub use feedback::ImprovementLoop;
 pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
+pub use index::DenseIndex;
 pub use license::RetrievalAccess;
 
 use std::fmt;

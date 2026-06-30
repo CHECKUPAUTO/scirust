@@ -464,7 +464,8 @@ impl TensorND {
     }
 
     pub fn to_contiguous(&self) -> Self {
-        if self.is_contiguous() {
+        if self.is_contiguous()
+        {
             return self.clone();
         }
         let numel = self.numel();
@@ -474,9 +475,11 @@ impl TensorND {
         let ndim = self.ndim();
         let mut indices = vec![0usize; ndim];
         #[allow(clippy::needless_range_loop)]
-        for i in 0..numel {
+        for i in 0..numel
+        {
             let mut rem = i;
-            for j in 0..ndim {
+            for j in 0..ndim
+            {
                 indices[j] = rem / new_strides[j];
                 rem %= new_strides[j];
             }
