@@ -1,5 +1,7 @@
 //! Graph pattern matching: subgraph isomorphism, motif discovery, community detection.
 
+pub mod dag;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 

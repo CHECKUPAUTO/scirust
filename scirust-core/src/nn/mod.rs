@@ -26,6 +26,7 @@ pub mod ibp;
 pub mod im2col_hpc;
 pub mod init;
 pub mod kan;
+pub mod kv_backend;
 pub mod layer_norm;
 pub mod linear;
 pub mod lipschitz;
