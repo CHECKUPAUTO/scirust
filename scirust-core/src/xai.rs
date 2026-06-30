@@ -9,10 +9,10 @@ pub fn integrated_gradients<F>(
     input: &Tensor,
     baseline: &Tensor,
     steps: usize,
-    model_fn: F,
+    mut model_fn: F,
 ) -> Tensor
 where
-    F: for<'t> Fn(&Var<'t>) -> Var<'t>,
+    F: for<'t> FnMut(&Var<'t>) -> Var<'t>,
 {
     let mut total_gradients = Tensor::zeros(input.rows, input.cols);
     let diff = input.sub(baseline);

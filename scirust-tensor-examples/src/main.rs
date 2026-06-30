@@ -1,8 +1,8 @@
 //! Demonstrates the scirust-tensor einsum engine on a few classic patterns.
 
+use scirust_tensor_compile::{ElementwiseOp, FusedOp, GraphCompiler, TensorGraph, TensorOp};
 use scirust_tensor_core::TensorND;
 use scirust_tensor_einsum::einsum;
-use scirust_tensor_compile::{GraphCompiler, ElementwiseOp, TensorGraph, TensorOp, FusedOp};
 use scirust_tensor_runtime::TensorRuntime;
 
 fn main() {
@@ -41,16 +41,12 @@ fn main() {
     let bias = TensorND::new(vec![-1.0, 5.0], vec![2]);
 
     let graph = TensorGraph {
-        ops: vec![
-            TensorOp::Fused(FusedOp::Linear {
-                input_idx: 0,
-                weight_idx: 1,
-                bias_idx: Some(2),
-                activation: Some(GraphCompiler::new()
-                    .op(ElementwiseOp::Relu)
-                    .compile()),
-            }),
-        ],
+        ops: vec![TensorOp::Fused(FusedOp::Linear {
+            input_idx: 0,
+            weight_idx: 1,
+            bias_idx: Some(2),
+            activation: Some(GraphCompiler::new().op(ElementwiseOp::Relu).compile()),
+        })],
         buffers: vec![input, weight, bias],
     };
 

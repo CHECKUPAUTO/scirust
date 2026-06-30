@@ -16,7 +16,8 @@ impl TensorND {
             .iter()
             .product::<usize>()
             .max(if shape.is_empty() { 1 } else { 0 });
-        if data.len() != expected {
+        if data.len() != expected
+        {
             return Err(format!(
                 "TensorND::try_new: data length {} != product of shape {:?}",
                 data.len(),

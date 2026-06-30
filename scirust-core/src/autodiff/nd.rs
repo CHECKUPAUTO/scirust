@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::sync::Arc;
 //! Reverse-mode autodiff over **N-D tensors** (['TensorND']) with numpy-style
 //!
 #[cfg(test)] use std::sync::Arc;

@@ -516,7 +516,7 @@ pub fn dilate(image: &Image, size: usize) -> Image {
     {
         for x in 0..image.width
         {
-            let mut max_val = 0.0;
+            let mut max_val: f64 = 0.0;
             for ky in 0..size
             {
                 for kx in 0..size
@@ -547,7 +547,7 @@ pub fn erode(image: &Image, size: usize) -> Image {
     {
         for x in 0..image.width
         {
-            let mut min_val = 1.0;
+            let mut min_val: f64 = 1.0;
             for ky in 0..size
             {
                 for kx in 0..size

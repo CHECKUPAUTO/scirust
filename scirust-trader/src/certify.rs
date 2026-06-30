@@ -152,6 +152,7 @@ pub fn feature_attribution(
     names: &[String],
 ) -> BTreeMap<String, f32> {
     use scirust_core::autodiff::reverse::Tensor;
+    use scirust_core::nn::Module;
     use scirust_core::xai::integrated_gradients;
 
     let input = Tensor::from_vec(features.to_vec(), 1, features.len());

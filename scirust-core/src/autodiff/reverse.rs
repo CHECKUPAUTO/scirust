@@ -896,7 +896,8 @@ impl Tape {
 
     pub fn try_value(&self, idx: usize) -> Result<Tensor, String> {
         let values = self.values.borrow();
-        if idx >= values.len() {
+        if idx >= values.len()
+        {
             return Err(format!("Tape::try_value: index {idx} out of bounds"));
         }
         Ok(values[idx].as_cpu().clone())

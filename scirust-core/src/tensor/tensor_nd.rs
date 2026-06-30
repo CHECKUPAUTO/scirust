@@ -160,8 +160,17 @@ impl TensorND {
     }
 
     // ------------------------------------------------------------------
-    //  Transpose (permutation d'axes) — ZERO COPY via stride manipulation
+    //  Transpose (permutation d'axes) — materialised contiguous copy
     // ------------------------------------------------------------------
+    // The N-D autodiff engine (`transpose_last2`, `batched_matmul`,
+    // `softmax_lastaxis`, `reshape`, …) uniformly assumes **contiguous
+    // row-major** storage — it reads `data[i*k + p]`-style. A zero-copy
+    // stride-only transpose would hand those ops a strided view they cannot
+    // read correctly (e.g. an attention `permute([1,0,2]).reshape(..)` would
+    // scramble the head/position axes, breaking causality). We therefore
+    // materialise a fresh contiguous tensor, honouring any strided *input* via
+    // `self.offset`. The cost is one copy per transpose — negligible next to
+    // the matmuls that surround it.
     pub fn transpose(&self, axes: &[usize]) -> Result<Self, String> {
         if axes.len() != self.ndim()
         {
@@ -190,11 +199,31 @@ impl TensorND {
         }
 
         let new_shape: Vec<usize> = axes.iter().map(|&a| self.shape[a]).collect();
-        let new_strides: Vec<usize> = axes.iter().map(|&a| self.strides[a]).collect();
-
-        // TRUE ZERO COPY: We share the same underlying data via Arc.
+        let new_strides = compute_strides(&new_shape);
+        let ndim = self.ndim();
+        let new_numel: usize = new_shape.iter().product();
+        let mut new_data = vec![0.0f32; new_numel];
+        let mut new_indices = vec![0usize; ndim];
+        let mut old_indices = vec![0usize; ndim];
+        #[allow(clippy::needless_range_loop)]
+        for flat_idx in 0..new_numel
+        {
+            // Decompose the output flat index into per-axis indices.
+            let mut rem = flat_idx;
+            for i in 0..ndim
+            {
+                new_indices[i] = rem / new_strides[i];
+                rem %= new_strides[i];
+            }
+            // Map back to the source (pre-permutation) multi-index.
+            for i in 0..ndim
+            {
+                old_indices[axes[i]] = new_indices[i];
+            }
+            new_data[flat_idx] = self.data[self.offset(&old_indices)];
+        }
         Ok(Self {
-            data: Arc::clone(&self.data),
+            data: Arc::from(new_data),
             shape: new_shape,
             strides: new_strides,
         })
