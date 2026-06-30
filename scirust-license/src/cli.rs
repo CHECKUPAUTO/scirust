@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(r.exit, 0);
         assert!(r.stdout.contains("navigation"));
         assert!(r.stdout.contains("industrial"));
-        // One line per module (31 in ALL + Industrial) plus the header.
+        // One line per module (32 in ALL + Industrial) plus the header.
         assert_eq!(r.stdout.lines().count(), Module::ALL.len() + 1 + 1);
     }
 
