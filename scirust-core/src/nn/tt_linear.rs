@@ -80,7 +80,7 @@ impl TTLinear {
                 let r_k = self.ranks[k];
                 let n_k = self.in_dims[k] * self.out_dims[k];
                 let r_next = self.ranks[k + 1];
-                crate::tensor::TensorND::new(c.data.clone(), vec![r_k, n_k, r_next])
+                crate::tensor::TensorND::new(c.data.to_vec(), vec![r_k, n_k, r_next])
             })
             .collect();
         let mode_dims: Vec<usize> = (0..self.in_dims.len())
@@ -266,7 +266,7 @@ pub fn tt_decompose(
             Tensor {
                 rows: r_k * n_k,
                 cols: r_next,
-                data: c.data.clone(),
+                data: c.data.to_vec(),
             }
         })
         .collect();

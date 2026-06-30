@@ -1,18 +1,19 @@
-//! Reverse-mode autodiff over **N-D tensors** ([`TensorND`]) with numpy-style
-//! broadcasting — the N-D autograd path (roadmap P2.4).
-//!
-//! This coexists with the production 2D [`crate::autodiff::reverse`] tape rather
-//! than replacing it: the 2D tape stays the battle-tested default while this
-//! module grows the N-D capability the compiler/IR ambitions need. Every
-//! backward rule is validated by a **numerical gradient check** in the tests
-//! (finite differences vs. the analytic gradient), the gold standard for
-//! autodiff correctness.
-//!
-//! Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
-//! `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
-//! `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
-//! a full transformer block (see `nn::nd_layers`). The shape building blocks
-//! (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
+#[cfg(test)] use std::sync::Arc;
+// Reverse-mode autodiff over **N-D tensors** ([`TensorND`]) with numpy-style
+// broadcasting — the N-D autograd path (roadmap P2.4).
+//
+// This coexists with the production 2D [`crate::autodiff::reverse`] tape rather
+// than replacing it: the 2D tape stays the battle-tested default while this
+// module grows the N-D capability the compiler/IR ambitions need. Every
+// backward rule is validated by a **numerical gradient check** in the tests
+// (finite differences vs. the analytic gradient), the gold standard for
+// autodiff correctness.
+//
+// Ops: elementwise `add`/`sub`/`mul` (broadcasting), 2-D `matmul`, **batched
+// `bmm`**, `relu`, `softmax` (last axis), `transpose_last2`, `reshape`,
+// `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
+// a full transformer block (see `nn::nd_layers`). The shape building blocks
+// (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
 
 use std::cell::RefCell;
 
@@ -193,7 +194,7 @@ impl NdTape {
                 {
                     // Reshape the upstream grad back to the input's shape.
                     let shape = nodes[a].value.shape.clone();
-                    accumulate(&mut grads[a], &TensorND::new(g.data.clone(), shape));
+                    accumulate(&mut grads[a], &TensorND::new(g.data.to_vec(), shape));
                 },
                 Op::Permute(a, ref perm) =>
                 {
@@ -222,7 +223,7 @@ impl NdTape {
                     let d: Vec<f32> = g
                         .data
                         .iter()
-                        .zip(&y.data)
+                        .zip(y.data.iter())
                         .map(|(&gi, &yi)| gi * yi * (1.0 - yi))
                         .collect();
                     accumulate(&mut grads[a], &TensorND::new(d, y.shape.clone()));
@@ -234,7 +235,7 @@ impl NdTape {
                     let d: Vec<f32> = g
                         .data
                         .iter()
-                        .zip(&y.data)
+                        .zip(y.data.iter())
                         .map(|(&gi, &yi)| gi * yi)
                         .collect();
                     accumulate(&mut grads[a], &TensorND::new(d, y.shape.clone()));
@@ -247,7 +248,7 @@ impl NdTape {
                 Op::Relu(a) =>
                 {
                     let av = &nodes[a].value;
-                    let mut d = g.data.clone();
+                    let mut d = g.data.to_vec();
                     for (gi, &x) in d.iter_mut().zip(av.data.iter())
                     {
                         if x <= 0.0
@@ -255,7 +256,7 @@ impl NdTape {
                             *gi = 0.0;
                         }
                     }
-                    accumulate(&mut grads[a], &TensorND::new(d, av.shape.clone()));
+                    accumulate(&mut grads[a], &TensorND::new(d, av.shape.to_vec()));
                 },
                 Op::Sum(a) =>
                 {
@@ -274,7 +275,7 @@ impl NdTape {
                     {
                         for c in 0..dim
                         {
-                            grads[a].data[ix * dim + c] += g.data[r * dim + c];
+                            grads[a].data_mut()[ix * dim + c] += g.data[r * dim + c];
                         }
                     }
                 },
@@ -400,7 +401,7 @@ impl<'t> NdVar<'t> {
             shape.iter().product::<usize>(),
             "reshape: element count mismatch"
         );
-        let out = TensorND::new(a.data.clone(), shape.to_vec());
+        let out = TensorND::new(a.data.to_vec(), shape.to_vec());
         self.tape.push(Op::Reshape(self.idx), out)
     }
 
@@ -510,7 +511,7 @@ impl<'t> NdVar<'t> {
         let first = &nodes[self.idx].value;
         let trailing: Vec<usize> = first.shape[1..].to_vec();
         let mut rows = first.shape[0];
-        let mut data = first.data.clone();
+        let mut data = first.data.to_vec();
         let mut idxs = vec![self.idx];
         for p in rest
         {
@@ -523,7 +524,7 @@ impl<'t> NdVar<'t> {
         drop(nodes);
         let mut shape = vec![rows];
         shape.extend_from_slice(&trailing);
-        let out = TensorND::new(data, shape);
+        let out = TensorND::new(data.to_vec(), shape);
         self.tape.push(Op::Cat(idxs), out)
     }
 
@@ -572,7 +573,12 @@ impl<'t> NdVar<'t> {
 /// Elementwise op on two equally-shaped tensors.
 fn ew(a: &TensorND, b: &TensorND, f: impl Fn(f32, f32) -> f32) -> TensorND {
     debug_assert_eq!(a.shape, b.shape);
-    let data = a.data.iter().zip(&b.data).map(|(&x, &y)| f(x, y)).collect();
+    let data = a
+        .data
+        .iter()
+        .zip(b.data.iter())
+        .map(|(&x, &y)| f(x, y))
+        .collect();
     TensorND::new(data, a.shape.clone())
 }
 
@@ -590,7 +596,7 @@ fn ew_broadcast(a: &TensorND, b: &TensorND, f: impl Fn(f32, f32) -> f32) -> Tens
 /// `acc += g` (same shape).
 fn accumulate(acc: &mut TensorND, g: &TensorND) {
     debug_assert_eq!(acc.shape, g.shape);
-    for (a, &x) in acc.data.iter_mut().zip(&g.data)
+    for (a, &x) in acc.data_mut().iter_mut().zip(g.data.iter())
     {
         *a += x;
     }
@@ -1353,8 +1359,8 @@ mod tests {
         let loss = a.add(b).sum();
         let grads = tape.backward(loss);
         assert_eq!(grads[b.idx()].shape, vec![1, 3]);
-        assert_eq!(grads[b.idx()].data, vec![2.0, 2.0, 2.0]);
-        assert_eq!(grads[a.idx()].data, vec![1.0; 6]);
+        assert_eq!(grads[b.idx()].data, Arc::from(vec![2.0, 2.0, 2.0]));
+        assert_eq!(grads[a.idx()].data, Arc::from(vec![1.0; 6]));
     }
 
     #[test]
@@ -1370,7 +1376,7 @@ mod tests {
         ));
         let c = a.matmul(b);
         // row0·cols: [1*1+2*0+3*1, 1*0+2*1+3*1] = [4, 5]; row1: [10, 11]
-        assert_eq!(tape.value(c).data, vec![4.0, 5.0, 10.0, 11.0]);
+        assert_eq!(tape.value(c).data, Arc::from(vec![4.0, 5.0, 10.0, 11.0]));
     }
 
     /// Batched matmul with a **broadcast** batch axis: forward matches a manual

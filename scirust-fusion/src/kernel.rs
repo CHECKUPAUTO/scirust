@@ -4,6 +4,9 @@
 //! en un seul passage sur la mémoire. Le calcul intermédiaire reste dans les
 //! registres CPU ou dans un tampon local de taille fixe.
 
+#[cfg(feature = "portable-simd")]
+use std::simd::{StdFloat, f32x4};
+
 use super::fusion::KernelType;
 
 /// Noyau fusionné — contient les données nécessaires à l'exécution.
@@ -196,10 +199,40 @@ impl FusedKernel {
             for out_row in 0..out_features
             {
                 let mut acc = 0.0f32;
-                for k in 0..in_features
+
+                #[cfg(feature = "portable-simd")]
                 {
-                    acc += x[x_off + k] * w[k * out_features + out_row];
+                    let mut acc_v = f32x4::splat(0.0);
+                    let mut k = 0;
+                    while k + 4 <= in_features
+                    {
+                        let xv = f32x4::from_slice(&x[x_off + k..x_off + k + 4]);
+                        // Weight access assumes row-major: W[k, out_row] = w[k * out_features + out_row]
+                        // This is non-contiguous in row-major, so we might need a better layout for SIMD
+                        // For now, we do scalar-like accumulation with SIMD for the reduction if possible.
+                        let wv = f32x4::from_array([
+                            w[k * out_features + out_row],
+                            w[(k + 1) * out_features + out_row],
+                            w[(k + 2) * out_features + out_row],
+                            w[(k + 3) * out_features + out_row],
+                        ]);
+                        acc_v += xv * wv;
+                        k += 4;
+                    }
+                    acc = acc_v.reduce_sum();
+                    for remain_k in k..in_features
+                    {
+                        acc += x[x_off + remain_k] * w[remain_k * out_features + out_row];
+                    }
                 }
+                #[cfg(not(feature = "portable-simd"))]
+                {
+                    for k in 0..in_features
+                    {
+                        acc += x[x_off + k] * w[k * out_features + out_row];
+                    }
+                }
+
                 output[o_off + out_row] = acc.max(0.0);
             }
         }

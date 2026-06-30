@@ -65,14 +65,14 @@ impl NdLinear {
     pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
         if let Some(i) = self.w_idx
         {
-            for (p, &g) in self.weight.data.iter_mut().zip(&grads[i].data)
+            for (p, &g) in self.weight.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * g;
             }
         }
         if let Some(i) = self.b_idx
         {
-            for (p, &g) in self.bias.data.iter_mut().zip(&grads[i].data)
+            for (p, &g) in self.bias.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * g;
             }
@@ -145,7 +145,7 @@ impl NdEmbedding {
     pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
         if let Some(i) = self.idx
         {
-            for (p, &g) in self.table.data.iter_mut().zip(&grads[i].data)
+            for (p, &g) in self.table.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * g;
             }
@@ -441,14 +441,14 @@ impl NdLayerNorm {
     pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
         if let Some(i) = self.g_idx
         {
-            for (p, &gv) in self.gamma.data.iter_mut().zip(&grads[i].data)
+            for (p, &gv) in self.gamma.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * gv;
             }
         }
         if let Some(i) = self.b_idx
         {
-            for (p, &gv) in self.beta.data.iter_mut().zip(&grads[i].data)
+            for (p, &gv) in self.beta.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * gv;
             }
@@ -506,7 +506,7 @@ impl NdRmsNorm {
     pub fn sgd_step(&mut self, grads: &[TensorND], lr: f32) {
         if let Some(i) = self.g_idx
         {
-            for (p, &gv) in self.gamma.data.iter_mut().zip(&grads[i].data)
+            for (p, &gv) in self.gamma.data_mut().iter_mut().zip(grads[i].data.iter())
             {
                 *p -= lr * gv;
             }
@@ -3892,7 +3892,7 @@ mod tests {
 
         // Gradient check on A and B (perturb after a few updates so B ≠ 0).
         let a0 = lora.a.data.clone();
-        let mut b0 = lora.b.data.clone();
+        let mut b0 = lora.b.data.to_vec();
         for v in b0.iter_mut()
         {
             *v = 0.1; // make B non-trivial for the check
@@ -3907,8 +3907,8 @@ mod tests {
             t.value(o.mul(o).sum()).data[0]
         };
         let mut lr = LoraLinear::new(w.clone(), in_f, out_f, r, 8.0, &mut PcgEngine::new(2));
-        lr.a = TensorND::new(a0.clone(), vec![in_f, r]);
-        lr.b = TensorND::new(b0.clone(), vec![r, out_f]);
+        lr.a = TensorND::new(a0.to_vec(), vec![in_f, r]);
+        lr.b = TensorND::new(b0.to_vec(), vec![r, out_f]);
         let t = NdTape::new();
         let xv = t.input(TensorND::new(x.clone(), vec![2, in_f]));
         let o = lr.forward(&t, xv);
@@ -4104,7 +4104,7 @@ mod tests {
             let t = NdTape::new();
             let xv = t.input(TensorND::new(xd.to_vec(), vec![seq, d_model]));
             let out = attn.forward(&t, xv);
-            t.value(out).data.clone()
+            t.value(out).data.to_vec()
         };
 
         let a = run(&base, &mut attn);

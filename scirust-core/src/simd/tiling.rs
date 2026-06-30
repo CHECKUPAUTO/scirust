@@ -139,6 +139,30 @@ pub fn matmul_tiled_f32(
     n: usize,
     config: Option<&TilingConfig>,
 ) {
+    matmul_tiled_strided_f32(alpha, a, b, beta, c, m, k, n, k, 1, n, 1, n, 1, config)
+}
+
+/// Matmul tuilée avec support complet des strides pour A, B et C.
+/// Permet d'éviter les copies lors des transpositions.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn matmul_tiled_strided_f32(
+    alpha: f32,
+    a: &[f32],
+    b: &[f32],
+    beta: f32,
+    c: &mut [f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    rs_a: usize,
+    cs_a: usize,
+    rs_b: usize,
+    cs_b: usize,
+    rs_c: usize,
+    cs_c: usize,
+    config: Option<&TilingConfig>,
+) {
     let det_config;
     let config = match config
     {
@@ -173,36 +197,35 @@ pub fn matmul_tiled_f32(
 
                 for i in ii..im
                 {
-                    let a_row_off = i * k;
-                    let c_row_off = i * n;
                     for p in pp..pk
                     {
-                        let alpha_a = alpha * a[a_row_off + p];
-                        let b_col_off = p * n;
+                        let alpha_a = alpha * a[i * rs_a + p * cs_a];
 
                         let mut j = jj;
-                        // Chemin portable_simd (nightly) ; sans la feature,
-                        // la boucle scalaire de queue couvre tout [jj, jn).
+
+                        // Vectorisation possible uniquement si les colonnes de B et C sont contiguës
                         #[cfg(feature = "portable-simd")]
-                        let a_val = f32x4::splat(alpha_a);
-                        #[cfg(feature = "portable-simd")]
-                        while j + 4 <= jn
+                        if cs_b == 1 && cs_c == 1
                         {
-                            let c_idx = c_row_off + j;
-                            let b_idx = b_col_off + j;
+                            let a_val = f32x4::splat(alpha_a);
+                            while j + 4 <= jn
+                            {
+                                let c_idx = i * rs_c + j;
+                                let b_idx = p * rs_b + j;
 
-                            let mut cv = f32x4::from_slice(&c[c_idx..c_idx + 4]);
-                            let bv = f32x4::from_slice(&b[b_idx..b_idx + 4]);
+                                let mut cv = f32x4::from_slice(&c[c_idx..c_idx + 4]);
+                                let bv = f32x4::from_slice(&b[b_idx..b_idx + 4]);
 
-                            cv += bv * a_val;
+                                cv += bv * a_val;
 
-                            cv.copy_to_slice(&mut c[c_idx..c_idx + 4]);
-                            j += 4;
+                                cv.copy_to_slice(&mut c[c_idx..c_idx + 4]);
+                                j += 4;
+                            }
                         }
 
                         while j < jn
                         {
-                            c[c_row_off + j] += alpha_a * b[b_col_off + j];
+                            c[i * rs_c + j * cs_c] += alpha_a * b[p * rs_b + j * cs_b];
                             j += 1;
                         }
                     }

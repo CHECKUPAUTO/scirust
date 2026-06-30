@@ -1,10 +1,12 @@
 pub mod autodiff;
 pub mod simd;
 pub mod gpu;
+pub mod fusion;
 
 pub use autodiff::AutodiffPass;
 pub use simd::SimdPass;
 pub use gpu::GpuPass;
+pub use fusion::FusionPass;
 
 use rustc_middle::mir::Body;
 use rustc_middle::ty::TyCtxt;
@@ -23,7 +25,12 @@ pub struct SciRustPassManager<'tcx> {
 
 impl<'tcx> SciRustPassManager<'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
-        Self { tcx, passes: Vec::new() }
+        let mut mgr = Self {
+            tcx,
+            passes: Vec::new(),
+        };
+        mgr.register(Box::new(FusionPass));
+        mgr
     }
 
     pub fn register(&mut self, pass: Box<dyn MirPass<'tcx>>) {

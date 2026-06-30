@@ -166,6 +166,8 @@ pub struct OpGraph {
     ops: Vec<FusedOp>,
     /// Topological sort order (mise à jour lors de la construction).
     pub topo_order: Vec<usize>,
+    /// Signature SRT1 du graphe pour la traçabilité.
+    pub srt1_fingerprint: Option<[u8; 32]>,
 }
 
 impl OpGraph {
@@ -174,6 +176,7 @@ impl OpGraph {
         Self {
             ops: Vec::new(),
             topo_order: Vec::new(),
+            srt1_fingerprint: None,
         }
     }
 
@@ -230,7 +233,32 @@ impl OpGraph {
     }
 
     /// Exécute le topological sort pour déterminer l'ordre d'exécution.
-    pub fn compute_topo_order(&mut self) {
+    /// Retourne `Err` si un cycle est détecté.
+    /// Calcule la signature SRT1 pour le graphe actuel.
+    /// Utilise SHA-256 pour garantir la reproductibilité inter-plateforme.
+    pub fn update_srt1_fingerprint(&mut self) {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        for op in &self.ops
+        {
+            // On utilise un hasher stable pour sérialiser le type d'op.
+            // Pour la démo, on utilise le nom du variant.
+            hasher.update(format!("{:?}", op.kind).as_bytes());
+            for &input in &op.inputs
+            {
+                hasher.update(input.to_le_bytes());
+            }
+        }
+        let result = hasher.finalize();
+        let mut fingerprint = [0u8; 32];
+        fingerprint.copy_from_slice(&result);
+        self.srt1_fingerprint = Some(fingerprint);
+    }
+
+    /// Exécute le topological sort pour déterminer l'ordre d'exécution.
+    /// Retourne `Err` si un cycle est détecté.
+    pub fn compute_topo_order(&mut self) -> Result<(), String> {
         let n = self.ops.len();
         let mut in_degree = vec![0usize; n];
         let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
@@ -264,8 +292,9 @@ impl OpGraph {
 
         if self.topo_order.len() != n
         {
-            panic!("OpGraph: cycle detected — not a DAG!");
+            return Err("OpGraph: cycle detected — not a DAG!".to_string());
         }
+        Ok(())
     }
 
     /// Retourne les opérations triées topologiquement.
@@ -340,7 +369,7 @@ mod tests {
         let w = g.add_input(OpKind::Input, None);
         let mm = g.add_binary(OpKind::MatMul, x, w, None);
         let y = g.add_unary(OpKind::ReLU, mm, None);
-        g.compute_topo_order();
+        g.compute_topo_order().expect("should be a DAG");
         assert_eq!(g.topo_order.len(), 4);
         let pos = |n: usize| g.topo_order.iter().position(|&i| i == n).unwrap();
         // Every edge points forward in the order.

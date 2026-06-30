@@ -2761,6 +2761,7 @@ dependencies = [
  "criterion",
  "scirust-core",
  "scirust-simd",
+ "sha2",
 ]
 
 [[package]]

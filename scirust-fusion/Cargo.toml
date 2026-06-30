@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 scirust-simd = { path = "../scirust-simd" }
+sha2 = "0.10"
+
+[features]
+portable-simd = []
 
 [dev-dependencies]
 criterion = "0.5"

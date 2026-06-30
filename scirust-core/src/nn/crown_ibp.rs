@@ -154,8 +154,18 @@ impl CrownIbpMlp {
         let xv = tape.input(TensorND::new(x.to_vec(), vec![1, x.len()]));
         let (c, r) = self.ibp_propagate(&tape, xv, eps);
         let (cv, rv) = (tape.value(c), tape.value(r));
-        let lo = cv.data.iter().zip(&rv.data).map(|(&c, &r)| c - r).collect();
-        let hi = cv.data.iter().zip(&rv.data).map(|(&c, &r)| c + r).collect();
+        let lo = cv
+            .data
+            .iter()
+            .zip(rv.data.iter())
+            .map(|(&c, &r)| c - r)
+            .collect();
+        let hi = cv
+            .data
+            .iter()
+            .zip(rv.data.iter())
+            .map(|(&c, &r)| c + r)
+            .collect();
         (lo, hi)
     }
 
@@ -196,7 +206,7 @@ impl CrownIbpMlp {
             .zip(&self.biases)
             .map(|(w, b)| {
                 let (din, dout) = (w.shape[0], w.shape[1]);
-                IbpLinear::new(w.data.clone(), b.data.clone(), din, dout)
+                IbpLinear::new(w.data.to_vec(), b.data.to_vec(), din, dout)
             })
             .collect();
         IbpMlp::new(layers)
@@ -324,7 +334,7 @@ mod tests {
             for _ in 0..200
             {
                 let tape = NdTape::new();
-                let xv = tape.input(TensorND::new(flat.clone(), vec![batch, 2]));
+                let xv = tape.input(TensorND::new(flat.to_vec(), vec![batch, 2]));
                 let loss = net.robust_loss(&tape, xv, eps, &labels);
                 let grads = tape.backward(loss);
                 opt.step(&mut net.parameters(), &grads);

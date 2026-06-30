@@ -79,8 +79,8 @@ impl IbpLinear {
     pub fn from_nd_linear(lin: &NdLinear) -> Self {
         let shape = &lin.weight().shape;
         Self::new(
-            lin.weight().data.clone(),
-            lin.bias().data.clone(),
+            lin.weight().data.to_vec(),
+            lin.bias().data.to_vec(),
             shape[0],
             shape[1],
         )

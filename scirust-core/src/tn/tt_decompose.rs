@@ -72,7 +72,7 @@ pub fn tt_decompose_tensor(t: &TensorND, max_rank: usize, tolerance: f32) -> TTC
     // Edge case: single-mode tensor, just wrap as one core.
     if d == 1
     {
-        let core = TensorND::new(t.data.clone(), vec![1, mode_dims[0], 1]);
+        let core = TensorND::new(t.data.to_vec(), vec![1, mode_dims[0], 1]);
         cores.push(core);
         return TTCores {
             cores,
@@ -82,7 +82,7 @@ pub fn tt_decompose_tensor(t: &TensorND, max_rank: usize, tolerance: f32) -> TTC
     }
 
     // Working buffer: starts as the full tensor in flat row-major.
-    let mut work: Vec<f32> = t.data.clone();
+    let mut work: Vec<f32> = t.data.to_vec();
     // After step k we'll have `work` interpreted as a (r_{k+1} * n_{k+1}, rest) matrix.
     // At step k, before SVD, `work` is a (r_k * n_k, rest_k) matrix where
     //   rest_k = ∏_{l>k} n_l.
@@ -141,12 +141,12 @@ pub fn reconstruct_tensor(tt: &TTCores) -> Vec<f32> {
 
     if d == 1
     {
-        return tt.cores[0].data.clone();
+        return tt.cores[0].data.to_vec();
     }
 
     // Accumulator starts as cores[0] reshaped to (n_0, r_1).
     // Note: cores[0] has shape (1, n_0, r_1); flattened that's (n_0, r_1) row-major.
-    let mut acc: Vec<f32> = tt.cores[0].data.clone();
+    let mut acc: Vec<f32> = tt.cores[0].data.to_vec();
     let mut acc_rows = tt.mode_dims[0];
     let mut acc_cols = tt.ranks[1];
 

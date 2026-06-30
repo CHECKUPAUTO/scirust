@@ -9,10 +9,11 @@
 // (pattern im2col déjà validé dans nn/.legacy/).
 
 use crate::autodiff::reverse::Tensor;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TensorND {
-    pub data: Vec<f32>,
+    pub data: Arc<[f32]>,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
 }
@@ -32,7 +33,7 @@ impl TensorND {
         );
         let strides = compute_strides(&shape);
         Self {
-            data,
+            data: Arc::from(data),
             shape,
             strides,
         }
@@ -41,7 +42,7 @@ impl TensorND {
     pub fn zeros(shape: &[usize]) -> Self {
         let numel: usize = shape.iter().product();
         Self {
-            data: vec![0.0; numel],
+            data: Arc::from(vec![0.0; numel]),
             shape: shape.to_vec(),
             strides: compute_strides(shape),
         }
@@ -50,7 +51,7 @@ impl TensorND {
     pub fn ones(shape: &[usize]) -> Self {
         let numel: usize = shape.iter().product();
         Self {
-            data: vec![1.0; numel],
+            data: Arc::from(vec![1.0; numel]),
             shape: shape.to_vec(),
             strides: compute_strides(shape),
         }
@@ -111,7 +112,11 @@ impl TensorND {
 
     pub fn set(&mut self, indices: &[usize], value: f32) {
         let off = self.offset(indices);
-        self.data[off] = value;
+        self.data_mut()[off] = value;
+    }
+
+    pub fn data_mut(&mut self) -> &mut [f32] {
+        Arc::make_mut(&mut self.data)
     }
 
     // ------------------------------------------------------------------
@@ -130,7 +135,7 @@ impl TensorND {
             ));
         }
         Ok(Self {
-            data: self.data.clone(),
+            data: Arc::clone(&self.data),
             shape: new_shape.to_vec(),
             strides: compute_strides(new_shape),
         })
@@ -155,7 +160,7 @@ impl TensorND {
     }
 
     // ------------------------------------------------------------------
-    //  Transpose (permutation d'axes)
+    //  Transpose (permutation d'axes) — ZERO COPY via stride manipulation
     // ------------------------------------------------------------------
     pub fn transpose(&self, axes: &[usize]) -> Result<Self, String> {
         if axes.len() != self.ndim()
@@ -185,37 +190,11 @@ impl TensorND {
         }
 
         let new_shape: Vec<usize> = axes.iter().map(|&a| self.shape[a]).collect();
-        let new_numel = self.numel();
-        let mut new_data = vec![0.0f32; new_numel];
-        let new_strides = compute_strides(&new_shape);
+        let new_strides: Vec<usize> = axes.iter().map(|&a| self.strides[a]).collect();
 
-        // Parcours tous les éléments et les place à leur nouvelle position
-        let ndim = self.ndim();
-        let mut new_indices = vec![0usize; ndim];
-        let mut old_indices = vec![0usize; ndim];
-        #[allow(clippy::needless_range_loop)]
-        for flat_idx in 0..new_numel
-        {
-            // Convertir flat_idx en indices dans le nouveau tenseur
-            let mut rem = flat_idx;
-            for i in 0..ndim
-            {
-                new_indices[i] = rem / new_strides[i];
-                rem %= new_strides[i];
-            }
-
-            // Trouver l'indice original
-            for i in 0..ndim
-            {
-                old_indices[axes[i]] = new_indices[i];
-            }
-
-            let old_flat = self.offset(&old_indices);
-            new_data[flat_idx] = self.data[old_flat];
-        }
-
+        // TRUE ZERO COPY: We share the same underlying data via Arc.
         Ok(Self {
-            data: new_data,
+            data: Arc::clone(&self.data),
             shape: new_shape,
             strides: new_strides,
         })
@@ -270,7 +249,7 @@ impl TensorND {
         }
 
         Ok(Self {
-            data: new_data,
+            data: Arc::from(new_data),
             shape: new_shape,
             strides: new_strides,
         })
@@ -390,7 +369,7 @@ impl TensorND {
             *slot = self.data[src_flat];
         }
         Ok(Self {
-            data,
+            data: Arc::from(data),
             shape: target_shape.to_vec(),
             strides: out_strides,
         })
@@ -402,7 +381,7 @@ impl TensorND {
     pub fn from_tensor_2d(t: &Tensor) -> Self {
         let (rows, cols) = t.shape();
         Self {
-            data: t.data.clone(),
+            data: Arc::from(t.data.clone()),
             shape: vec![rows, cols],
             strides: compute_strides(&[rows, cols]),
         }
@@ -418,7 +397,7 @@ impl TensorND {
             ));
         }
         Ok(Tensor::from_vec(
-            self.data.clone(),
+            self.data.to_vec(),
             self.shape[0],
             self.shape[1],
         ))
@@ -433,7 +412,7 @@ impl TensorND {
         let rows: usize = self.shape[..k].iter().product::<usize>().max(1);
         let cols: usize = self.shape[k..].iter().product::<usize>().max(1);
         debug_assert_eq!(rows * cols, self.data.len());
-        (rows, cols, self.data.clone())
+        (rows, cols, self.data.to_vec())
     }
 
     /// Maximum absolute element value (used for tolerance checks).
@@ -539,7 +518,7 @@ mod tests {
         let t2d = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
         let tnd = TensorND::from_tensor_2d(&t2d);
         assert_eq!(tnd.shape(), &[2, 3]);
-        assert_eq!(tnd.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(tnd.data, Arc::from(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
 
         let back = tnd.to_tensor_2d().unwrap();
         assert_eq!(back.shape(), (2, 3));
@@ -597,14 +576,16 @@ mod tests {
         assert_eq!(b.shape(), &[3, 4]);
         assert_eq!(
             b.data,
-            vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0]
+            Arc::from(vec![
+                1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0
+            ])
         );
 
         // Row vector [1,3] → [2,3]: the row replicated down.
         let r = TensorND::from_vec(vec![1.0, 2.0, 3.0], vec![1, 3]);
         assert_eq!(
             r.broadcast_to(&[2, 3]).unwrap().data,
-            vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
+            Arc::from(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
         );
 
         // Add leading axes: [4] → [2,3,4] replicates the vector 6 times.

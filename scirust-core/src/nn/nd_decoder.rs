@@ -128,7 +128,7 @@ impl NdDecoderLM {
         let tape = NdTape::new();
         let f = tape.input(TensorND::new(feature.to_vec(), vec![1, dm]));
         let logits = self.head.forward(&tape, f);
-        tape.value(logits).data.clone()
+        tape.value(logits).data.to_vec()
     }
 
     /// Next-token cross-entropy: feed `tokens[..n-1]`, predict `tokens[1..]`.
@@ -514,7 +514,7 @@ impl EagleHead {
         let tape = NdTape::new();
         let xv = tape.input(TensorND::new(x, vec![1, 2 * self.d_model]));
         let f = self.net.forward(&tape, xv);
-        tape.value(f).data.clone()
+        tape.value(f).data.to_vec()
     }
 
     /// Train the head (base model **frozen**) to regress the next feature: from the

@@ -29,7 +29,7 @@ impl FusionPipeline {
     /// Retourne une liste de kernels fusionnés si des motifs sont trouvés,
     /// ou None si aucune fusion n'est possible.
     pub fn fuse(&self, graph: &mut OpGraph) -> Option<Vec<FusedKernel>> {
-        graph.compute_topo_order();
+        graph.compute_topo_order().ok()?;
 
         let mut fused_kernels = Vec::new();
         let mut visited = vec![false; graph.len()];

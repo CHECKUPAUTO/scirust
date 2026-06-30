@@ -109,7 +109,7 @@ impl NeuralOde {
         {
             if let Some(i) = idx
             {
-                for (p, &g) in param.data.iter_mut().zip(&grads[i].data)
+                for (p, &g) in param.data_mut().iter_mut().zip(grads[i].data.iter())
                 {
                     *p -= lr * g;
                 }

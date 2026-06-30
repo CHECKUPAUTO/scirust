@@ -71,6 +71,33 @@ impl Pcg {
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+
+    /// Valide que le graphe respecte les invariants d'ownership.
+    /// Par exemple: un objet ne peut pas être déplacé s'il est emprunté.
+    pub fn validate_invariants(&self) -> Result<(), String> {
+        for (idx, node) in self.nodes.iter().enumerate()
+        {
+            if let PcgNode::Variable(_) = node
+            {
+                let is_borrowed = self.edges.iter().any(|(_f, t, e)| {
+                    *t == idx && (*e == PcgEdge::Borrows || *e == PcgEdge::MutBorrows)
+                });
+                let is_moved = self
+                    .edges
+                    .iter()
+                    .any(|(f, _t, e)| *f == idx && *e == PcgEdge::Moves);
+
+                if is_borrowed && is_moved
+                {
+                    return Err(format!(
+                        "Invariant violation: node {:?} is both borrowed and moved",
+                        node
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct PcgBuilder {
