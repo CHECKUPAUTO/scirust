@@ -197,7 +197,8 @@ impl IdsEngine {
                 .push_results(&all_results, timestamp, &self.config.hostname);
             for corr in &correlations
             {
-                self.siem.push_correlation(corr, &self.config.hostname);
+                self.siem
+                    .push_correlation(corr, timestamp, &self.config.hostname);
             }
             if let Ok(output) = self.siem.flush()
             {

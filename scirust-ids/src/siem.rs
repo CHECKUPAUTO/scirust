@@ -110,7 +110,11 @@ impl SiemEvent {
     }
 
     /// Convertir un résultat de corrélation en événement SIEM.
-    pub fn from_correlation(corr: &CorrelationResult, host: &str) -> Self {
+    ///
+    /// `timestamp` est l'instant Unix (secondes depuis l'epoch UTC) de la
+    /// corrélation ; il est propagé tel quel dans l'événement afin que
+    /// l'horodatage reflète le moment réel de détection.
+    pub fn from_correlation(corr: &CorrelationResult, host: &str, timestamp: f64) -> Self {
         let mut fields = HashMap::new();
         fields.insert(
             "correlation_type".to_string(),
@@ -120,7 +124,7 @@ impl SiemEvent {
         fields.insert("alert_count".to_string(), corr.alert_ids.len().to_string());
 
         Self {
-            timestamp: format_epoch(0.0),
+            timestamp: format_epoch(timestamp),
             host: host.to_string(),
             source: "scirust-ids/correlator".to_string(),
             severity: 8,
@@ -163,18 +167,50 @@ impl SiemEvent {
     }
 }
 
+/// Formater un timestamp Unix (secondes depuis l'epoch UTC) en date-heure
+/// ISO 8601 / RFC 3339 complète, p.ex. `2023-11-14T22:13:20.000Z`.
+///
+/// La conversion jour civil utilise l'algorithme de Howard Hinnant, sans
+/// dépendance externe, et gère correctement les années bissextiles. Elle
+/// est déterministe et ne panique jamais (les timestamps négatifs, avant
+/// l'epoch, sont pris en charge).
 fn format_epoch(ts: f64) -> String {
-    let total_secs = ts as i64;
-    let hours = (total_secs / 3600) % 24;
-    let minutes = (total_secs / 60) % 60;
-    let seconds = total_secs % 60;
+    // Partie entière (secondes) et fractionnaire (millisecondes), en gardant
+    // les millisecondes dans [0, 1000) même pour les timestamps négatifs.
+    let millis_total = (ts * 1000.0).round() as i64;
+    let mut total_secs = millis_total.div_euclid(1000);
+    let millis = millis_total.rem_euclid(1000);
+
+    let seconds = total_secs.rem_euclid(60);
+    total_secs = total_secs.div_euclid(60);
+    let minutes = total_secs.rem_euclid(60);
+    total_secs = total_secs.div_euclid(60);
+    let hours = total_secs.rem_euclid(24);
+    let days = total_secs.div_euclid(24);
+
+    let (year, month, day) = civil_from_days(days);
+
     format!(
-        "T{:02}:{:02}:{:02}.{:03}Z",
-        hours,
-        minutes,
-        seconds,
-        ((ts - total_secs as f64) * 1000.0).round() as u32
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hours, minutes, seconds, millis
     )
+}
+
+/// Convertir un nombre de jours depuis l'epoch Unix (1970-01-01) en date
+/// civile `(année, mois, jour)`. Algorithme de Howard Hinnant.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    // Décaler l'ère de sorte que le jour 0 soit le 0000-03-01.
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    let year = if month <= 2 { y + 1 } else { y };
+    (year, month, day)
 }
 
 /// Moteur d'export SIEM.
@@ -228,8 +264,11 @@ impl SiemExporter {
     }
 
     /// Ajouter une corrélation au buffer.
-    pub fn push_correlation(&mut self, corr: &CorrelationResult, host: &str) {
-        let event = SiemEvent::from_correlation(corr, host);
+    ///
+    /// `timestamp` est l'instant Unix (secondes depuis l'epoch UTC) de la
+    /// corrélation, propagé dans l'événement SIEM.
+    pub fn push_correlation(&mut self, corr: &CorrelationResult, timestamp: f64, host: &str) {
+        let event = SiemEvent::from_correlation(corr, host, timestamp);
         self.buffer.push(event);
     }
 
@@ -446,5 +485,62 @@ mod tests {
         let syslog = exporter.flush().unwrap();
         assert!(syslog.contains("<"));
         assert!(syslog.contains("scirust-ids"));
+    }
+
+    fn make_test_correlation() -> CorrelationResult {
+        CorrelationResult {
+            correlation_type: crate::correlator::CorrelationType::MultiAttack,
+            alert_ids: vec![1, 2, 3],
+            source_ip: "10.0.0.1".to_string(),
+            confidence: 0.9,
+            description: "multi attack".to_string(),
+            recommendation: "block".to_string(),
+        }
+    }
+
+    // Regression: format_epoch must produce a full ISO 8601 / RFC 3339 UTC
+    // datetime (with date), not a time-only string, and must not wrap the hour
+    // component modulo 24h. 1_700_000_000 s == 2023-11-14T22:13:20Z.
+    #[test]
+    fn test_format_epoch_full_iso8601() {
+        let s = format_epoch(1_700_000_000.0);
+        assert_eq!(s, "2023-11-14T22:13:20.000Z");
+        // Must carry a date, not just a time (old bug produced "T00:53:20.000Z").
+        assert!(s.starts_with("2023-11-14T"), "missing date component: {}", s);
+        assert!(!s.starts_with('T'), "time-only string regressed: {}", s);
+        // Epoch itself.
+        assert_eq!(format_epoch(0.0), "1970-01-01T00:00:00.000Z");
+        // Milliseconds are preserved.
+        assert_eq!(format_epoch(1_700_000_000.5), "2023-11-14T22:13:20.500Z");
+        // Leap-year date handling (2024 is a leap year): 2024-02-29T00:00:00Z.
+        assert_eq!(format_epoch(1_709_164_800.0), "2024-02-29T00:00:00.000Z");
+    }
+
+    // Regression: from_correlation must use the supplied timestamp rather than
+    // hardcoding the epoch (0.0), so correlation events keep their real time.
+    #[test]
+    fn test_from_correlation_uses_real_timestamp() {
+        let corr = make_test_correlation();
+        let event = SiemEvent::from_correlation(&corr, "ids-host", 1_700_000_000.0);
+        assert_eq!(event.timestamp, "2023-11-14T22:13:20.000Z");
+        assert_ne!(
+            event.timestamp,
+            format_epoch(0.0),
+            "correlation event still hardcodes the epoch"
+        );
+    }
+
+    // Regression: the same real timestamp must survive through the exporter path.
+    #[test]
+    fn test_push_correlation_preserves_timestamp() {
+        let mut exporter = SiemExporter::with_defaults();
+        let corr = make_test_correlation();
+        exporter.push_correlation(&corr, 1_700_000_000.0, "ids-host");
+        let json = exporter.flush().unwrap();
+        assert!(
+            json.contains("2023-11-14T22:13:20.000Z"),
+            "exported correlation lost its timestamp: {}",
+            json
+        );
     }
 }

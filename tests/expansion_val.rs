@@ -209,7 +209,9 @@ fn test_epsilon_greedy_explores_and_exploits() {
     let mut counts = std::collections::HashMap::new();
     for _ in 0..500
     {
-        let a = agent.act_epsilon_greedy(&"s", &actions, &mut rng);
+        let a = agent
+            .act_epsilon_greedy(&"s", &actions, &mut rng)
+            .expect("action set is non-empty");
         *counts.entry(a).or_insert(0) += 1;
     }
     assert!(counts.contains_key(&"left"));

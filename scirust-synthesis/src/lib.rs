@@ -782,7 +782,9 @@ pub fn simplify(expr: &SExpr) -> SExpr {
                 (SExpr::Const(0.0), _) => SExpr::Const(0.0),
                 (SExpr::Const(ca), SExpr::Const(cb)) if *cb != 0.0 => SExpr::Const(ca / cb),
                 (_, SExpr::Const(1.0)) => sa,
-                _ if sa == sb => SExpr::Const(1.0),
+                // Deliberately do NOT rewrite `x / x -> 1`: when the shared
+                // operand evaluates to zero the quotient is a domain error
+                // (see `eval`), and folding it to `1` would silently mask that.
                 _ => SExpr::Div(Box::new(sa), Box::new(sb)),
             }
         },
@@ -1358,7 +1360,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, max_depth: usize, variables: &[String])
     if rng.bool(p_term)
     {
         let r = rng.f64();
-        if r < 0.35
+        if r < 0.35 && !variables.is_empty()
         {
             SExpr::Var(variables[rng.range(variables.len())].clone())
         }
@@ -1555,6 +1557,14 @@ pub fn bottom_up(
     max_size: usize,
     width: usize,
 ) -> Vec<SExpr> {
+    // Terminals are seeded at size 1, so a `max_size` below 1 admits no
+    // expressions at all. Guard the degenerate case to avoid indexing `bank[1]`
+    // out of bounds.
+    if max_size == 0
+    {
+        return Vec::new();
+    }
+
     let mut bank: Vec<Vec<SExpr>> = vec![vec![]; max_size + 1];
 
     // Seed terminals at size 1
@@ -2045,7 +2055,17 @@ pub fn genetic_programming(
     size_penalty: f64,
     seeds: &[u64],
 ) -> Vec<(f64, SExpr)> {
-    let mut rng = Rng::new(seeds[0]);
+    // A zero-sized population produces nothing and would later panic on the
+    // `indices[..elite_n]` slice (elite_n is clamped to at least 1).
+    if pop_size == 0
+    {
+        return Vec::new();
+    }
+
+    // Fall back to a fixed seed when none is supplied so we never index an
+    // empty slice; determinism is preserved for any given `seeds`.
+    let seed = seeds.first().copied().unwrap_or(0);
+    let mut rng = Rng::new(seed);
     let mut pop: Vec<SExpr> = (0..pop_size)
         .map(|_| gen_tree(&mut rng, 0, 5, variables))
         .collect();
@@ -3209,9 +3229,64 @@ mod tests {
     }
 
     #[test]
-    fn test_x_div_x_is_1() {
+    fn test_simplify_x_div_x_preserves_domain_error() {
+        // `x / x` must NOT be folded to the constant 1: at x = 0 the original
+        // expression is a division-by-zero domain error, and rewriting it to
+        // `1` would silently change the function's domain.
         let x = SExpr::Var("x".into());
         let e = SExpr::Div(Box::new(x.clone()), Box::new(x));
-        assert_eq!(simplify(&e), SExpr::Const(1.0));
+        let s = simplify(&e);
+        assert_ne!(s, SExpr::Const(1.0));
+        assert_eq!(s, e);
+
+        // The simplified form still errors where the original does.
+        let mut zero = HashMap::new();
+        zero.insert("x".to_string(), 0.0);
+        assert!(eval(&s, &zero).is_err());
+
+        // And still agrees with the original elsewhere.
+        let mut two = HashMap::new();
+        two.insert("x".to_string(), 2.0);
+        assert_eq!(eval(&s, &two).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn test_bottom_up_max_size_zero_no_panic() {
+        // Previously indexed bank[1] out of bounds when max_size == 0.
+        let vars = vec!["x".to_string()];
+        let data: Vec<(Vec<f64>, f64)> = vec![(vec![1.0], 1.0)];
+        let out = bottom_up(&vars, &data, 0, 4);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_gen_tree_empty_variables_no_panic() {
+        // With no variables gen_tree must not index an empty slice; it should
+        // still produce a valid variable-free expression.
+        let mut rng = Rng::new(12345);
+        for _ in 0..64
+        {
+            let t = gen_tree(&mut rng, 0, 5, &[]);
+            assert!(t.free_vars().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_genetic_programming_empty_seeds_no_panic() {
+        // Previously indexed seeds[0] out of bounds on an empty seeds slice.
+        let vars = vec!["x".to_string()];
+        let data: Vec<(Vec<f64>, f64)> = vec![(vec![1.0], 1.0), (vec![2.0], 2.0)];
+        let out = genetic_programming(&vars, &data, 8, 2, 12, 0.01, &[]);
+        // Should complete without panicking (result may be empty or not).
+        let _ = out;
+    }
+
+    #[test]
+    fn test_genetic_programming_pop_size_zero_no_panic() {
+        // Previously panicked on the indices[..elite_n] slice (elite_n >= 1).
+        let vars = vec!["x".to_string()];
+        let data: Vec<(Vec<f64>, f64)> = vec![(vec![1.0], 1.0)];
+        let out = genetic_programming(&vars, &data, 0, 3, 12, 0.01, &[42]);
+        assert!(out.is_empty());
     }
 }

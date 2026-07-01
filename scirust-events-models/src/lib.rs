@@ -26,8 +26,11 @@ impl EventDetector for SpikeDetector {
             return (0.0, "none".into(), "aucun".into());
         }
 
-        let mut max_val = 0.0f32;
-        for &x in &window.data
+        // La fenêtre est non vide (garde ci-dessus) : on initialise le max avec
+        // le premier élément pour que les fenêtres entièrement négatives soient
+        // correctement prises en compte (ne pas biaiser vers 0.0).
+        let mut max_val = window.data[0];
+        for &x in &window.data[1..]
         {
             if x > max_val
             {
@@ -77,9 +80,15 @@ impl EventDetector for EventClassifier {
         let output_var = self.model.forward(&tape, input);
         let output = output_var.tape().value(output_var.idx());
 
+        // Sortie vide : rien à classer, on renvoie une confiance nulle.
+        if output.data.is_empty()
+        {
+            return (0.0, "unknown".into(), "inconnu".into());
+        }
+
         // Recherche de l'index du max (argmax)
         let mut max_idx = 0;
-        let mut max_val = -f32::INFINITY;
+        let mut max_val = output.data[0];
         for (i, &val) in output.data.iter().enumerate()
         {
             if val > max_val
@@ -88,6 +97,19 @@ impl EventDetector for EventClassifier {
                 max_idx = i;
             }
         }
+
+        // Le contrat EventDetector impose un score dans 0.0..=1.0. Les sorties du
+        // modèle sont des logits bruts ; on les convertit en probabilité via un
+        // softmax numériquement stable (décalé par le max) et on renvoie la
+        // probabilité de la classe argmax, garantie dans (0.0, 1.0].
+        let mut sum_exp = 0.0f32;
+        for &val in &output.data
+        {
+            sum_exp += (val - max_val).exp();
+        }
+        // sum_exp >= 1.0 (le terme argmax vaut exp(0) = 1), donc pas de division
+        // par zéro et le résultat reste borné par 1.0.
+        let confidence = 1.0 / sum_exp;
 
         let en = self
             .labels_en
@@ -100,7 +122,7 @@ impl EventDetector for EventClassifier {
             .cloned()
             .unwrap_or_else(|| "inconnu".into());
 
-        (max_val, en, fr)
+        (confidence, en, fr)
     }
 }
 
@@ -108,7 +130,7 @@ impl EventDetector for EventClassifier {
 mod tests {
     use super::*;
     use scirust_core::autodiff::reverse::Tensor;
-    use scirust_core::nn::{Linear, PcgEngine, Zeros};
+    use scirust_core::nn::{Linear, PcgEngine, SmallNormal, Zeros};
 
     #[test]
     fn test_spike_detector_ema() {
@@ -155,7 +177,49 @@ mod tests {
             vec!["A".into(), "B".into(), "C".into(), "D".into()],
         );
         let (score, en, fr) = classifier.detect(&Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
-        assert_eq!(score, 0.0);
+        // All-zero logits → uniform softmax over 4 classes → 1/4 confidence
+        // (the score is a probability in (0.0, 1.0], not a raw logit).
+        assert!((score - 0.25).abs() < 1e-6);
         assert_eq!((en.as_str(), fr.as_str()), ("a", "A"));
+    }
+
+    #[test]
+    fn spike_detector_handles_all_negative_window() {
+        // Regression: the max used to be seeded at 0.0, so an all-negative window
+        // reported 0.0 as its peak instead of the true (negative) maximum, which
+        // then leaked into the EMA. With alpha=1.0 the EMA equals the window max,
+        // so we can pin it exactly: max(-5, -3, -8) = -3, not 0.
+        let mut d = SpikeDetector::new(1.0, 1.0);
+        let (score, en, _) = d.detect(&Tensor::from_vec(vec![-5.0, -3.0, -8.0], 1, 3));
+        assert!((d.ema - (-3.0)).abs() < 1e-6);
+        assert_eq!(en, "background");
+        // score = ema / threshold = -3 / 1 = -3 (negative peak, not a fake 0).
+        assert!((score - (-3.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn classifier_confidence_stays_within_the_unit_range() {
+        // Regression: the classifier used to return the raw argmax logit as the
+        // confidence, violating the EventDetector 0.0..=1.0 contract. Even with a
+        // biased model whose logits are far outside that range, the reported score
+        // must now be a softmax probability inside (0.0, 1.0].
+        let mut rng = PcgEngine::new(7);
+        // Zeros weights + a large constant... but only Zeros bias is available, so
+        // use a deterministic SmallNormal weight to get non-degenerate logits and
+        // assert the *property* (bounded probability), independent of the argmax.
+        let model = Sequential::new().add(Linear::new(
+            3,
+            5,
+            &SmallNormal::new(3.0),
+            &Zeros,
+            &mut rng,
+        ));
+        let mut classifier = EventClassifier::new(
+            model,
+            vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()],
+            vec!["A".into(), "B".into(), "C".into(), "D".into(), "E".into()],
+        );
+        let (score, _, _) = classifier.detect(&Tensor::from_vec(vec![5.0, -4.0, 6.0], 1, 3));
+        assert!(score > 0.0 && score <= 1.0, "score {score} not in (0,1]");
     }
 }

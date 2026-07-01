@@ -92,13 +92,13 @@ pub fn spectral_entropy(spectrum: &[Complex]) -> f64 {
 
 /// Spectral rolloff: frequency below which `ratio` (e.g. 0.85) of total energy is contained.
 pub fn spectral_rolloff(spectrum: &[Complex], sample_rate: f64, ratio: f64) -> f64 {
-    let total: f64 = spectrum.iter().map(|c| c.mag_sq()).sum();
-    let threshold = total * ratio;
-    let n = spectrum.len() - 1;
-    if n == 0
+    if spectrum.len() <= 1
     {
         return 0.0;
     }
+    let total: f64 = spectrum.iter().map(|c| c.mag_sq()).sum();
+    let threshold = total * ratio;
+    let n = spectrum.len() - 1;
     let mut accum = 0.0;
     for (k, c) in spectrum.iter().enumerate()
     {
@@ -113,11 +113,11 @@ pub fn spectral_rolloff(spectrum: &[Complex], sample_rate: f64, ratio: f64) -> f
 
 /// Band power: sum of squared magnitudes in a frequency range [low_hz, high_hz].
 pub fn band_power(spectrum: &[Complex], sample_rate: f64, low_hz: f64, high_hz: f64) -> f64 {
-    let n = spectrum.len() - 1;
-    if n == 0
+    if spectrum.len() <= 1
     {
         return 0.0;
     }
+    let n = spectrum.len() - 1;
     let nyquist = sample_rate / 2.0;
     let mut power = 0.0;
     for (k, c) in spectrum.iter().enumerate()
@@ -213,5 +213,29 @@ mod tests {
         ];
         let bp = band_power(&spec, 8.0, 1.5, 2.5);
         assert!((bp - 9.0).abs() < EPS); // only 3.0^2 = 9 at bin 2 (2 Hz)
+    }
+
+    #[test]
+    fn test_spectral_rolloff_empty_does_not_panic() {
+        // Empty spectrum previously underflowed `spectrum.len() - 1`
+        // (panic in debug, wrap-to-usize::MAX in release).
+        let spec: Vec<Complex> = Vec::new();
+        assert_eq!(spectral_rolloff(&spec, 8.0, 0.85), 0.0);
+
+        // Single-bin (DC only) is also degenerate and must return 0.0.
+        let dc = vec![Complex::new(1.0, 0.0)];
+        assert_eq!(spectral_rolloff(&dc, 8.0, 0.85), 0.0);
+    }
+
+    #[test]
+    fn test_band_power_empty_does_not_panic() {
+        // Empty spectrum previously underflowed `spectrum.len() - 1`
+        // (panic in debug, wrap-to-usize::MAX in release).
+        let spec: Vec<Complex> = Vec::new();
+        assert_eq!(band_power(&spec, 8.0, 1.0, 2.0), 0.0);
+
+        // Single-bin (DC only) is also degenerate and must return 0.0.
+        let dc = vec![Complex::new(1.0, 0.0)];
+        assert_eq!(band_power(&dc, 8.0, 1.0, 2.0), 0.0);
     }
 }

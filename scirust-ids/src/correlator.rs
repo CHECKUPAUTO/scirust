@@ -91,6 +91,8 @@ pub struct AlertCorrelator {
     correlations: Vec<CorrelationResult>,
     /// Compteur d'incidents
     incident_count: u64,
+    /// Prochain identifiant d'alerte à attribuer
+    next_id: u64,
 }
 
 impl AlertCorrelator {
@@ -100,6 +102,7 @@ impl AlertCorrelator {
             active_alerts: Vec::new(),
             correlations: Vec::new(),
             incident_count: 0,
+            next_id: 1,
         }
     }
 
@@ -107,33 +110,56 @@ impl AlertCorrelator {
         Self::new(CorrelatorConfig::default())
     }
 
-    /// Ajouter une alerte au correlateur et tenter la corrélation.
-    pub fn add_alert(&mut self, alert: Alert) -> Vec<CorrelationResult> {
+    /// Enregistrer une alerte et purger les alertes expirées.
+    ///
+    /// Attribue un identifiant unique si l'alerte n'en possède pas (`id == 0`)
+    /// afin que les résultats de corrélation restent traçables.
+    fn store_alert(&mut self, mut alert: Alert) -> f64 {
         let now = alert.timestamp;
+        if alert.id == 0
+        {
+            alert.id = self.next_id;
+            self.next_id += 1;
+        }
         self.active_alerts.push(alert);
 
         // Nettoyer les alertes expirées
         self.active_alerts
             .retain(|a| now - a.timestamp < self.config.alert_ttl_secs);
 
+        now
+    }
+
+    /// Ajouter une alerte au correlateur et tenter la corrélation.
+    pub fn add_alert(&mut self, alert: Alert) -> Vec<CorrelationResult> {
+        let now = self.store_alert(alert);
+
         // Tenter la corrélation
         self.correlate(now)
     }
 
     /// Ajouter des résultats de détecteur directement.
+    ///
+    /// Toutes les alertes du lot sont enregistrées avant de corréler une seule
+    /// fois, ce qui évite de produire des `CorrelationResult` dupliqués lorsque
+    /// plusieurs résultats partagent la même fenêtre de corrélation.
     pub fn add_results(
         &mut self,
         results: &[DetectorResult],
         timestamp: f64,
     ) -> Vec<CorrelationResult> {
-        let mut correlations = Vec::new();
+        if results.is_empty()
+        {
+            return Vec::new();
+        }
+
+        let mut now = timestamp;
         for r in results
         {
             let alert = Alert::from_detector_result(r, 0, timestamp);
-            let mut corr = self.add_alert(alert);
-            correlations.append(&mut corr);
+            now = self.store_alert(alert);
         }
-        correlations
+        self.correlate(now)
     }
 
     /// Corréler les alertes actives.
@@ -300,6 +326,7 @@ impl AlertCorrelator {
         self.active_alerts.clear();
         self.correlations.clear();
         self.incident_count = 0;
+        self.next_id = 1;
     }
 }
 
@@ -392,5 +419,94 @@ mod tests {
             .iter()
             .any(|r| matches!(r.correlation_type, CorrelationType::MultiAttack));
         assert!(!has_multi, "should not correlate different sources");
+    }
+
+    fn make_result(source: &str, dest: &str, detector: &str) -> DetectorResult {
+        DetectorResult {
+            detector: detector.to_string(),
+            label_en: "test".to_string(),
+            label_fr: "test".to_string(),
+            confidence: 0.9,
+            severity: "CRITICAL".to_string(),
+            source_ip: source.to_string(),
+            destination_ip: dest.to_string(),
+            details: "test".to_string(),
+        }
+    }
+
+    // Regression: `add_results` used to call `add_alert` (and thus a full
+    // correlation pass) once per result. Once a group of alerts qualifies, every
+    // subsequent pass over the same batch re-emitted the correlation for that
+    // already-qualified group, producing duplicate `CorrelationResult`s and
+    // inflating `incident_count`. A batch must correlate exactly once.
+    //
+    // Three results from one source with distinct detectors: the group qualifies
+    // from the 2nd alert on, so the buggy per-alert loop emitted MultiAttack on
+    // both the 2nd and 3rd pass (>= 2 copies). The fix correlates once.
+    #[test]
+    fn test_add_results_no_duplicate_correlations() {
+        let mut corr = AlertCorrelator::with_defaults();
+
+        let results = vec![
+            make_result("10.0.0.1", "10.0.0.2", "port_scan"),
+            make_result("10.0.0.1", "10.0.0.2", "brute_force"),
+            make_result("10.0.0.1", "10.0.0.2", "beacon"),
+        ];
+
+        let out = corr.add_results(&results, 100.0);
+
+        let multi_count = out
+            .iter()
+            .filter(|r| matches!(r.correlation_type, CorrelationType::MultiAttack))
+            .count();
+        assert_eq!(multi_count, 1, "batch must emit a single MultiAttack result");
+        assert_eq!(
+            corr.incident_count() as usize,
+            out.len(),
+            "incident_count must match the number of returned correlations"
+        );
+    }
+
+    // Regression: alerts created inside `add_results` were built with a
+    // hard-coded id of 0, so every entry in `alert_ids` was 0 and the results
+    // were untraceable. Distinct alerts must receive distinct ids.
+    #[test]
+    fn test_add_results_assigns_unique_alert_ids() {
+        let mut corr = AlertCorrelator::with_defaults();
+
+        let results = vec![
+            make_result("10.0.0.1", "10.0.0.2", "port_scan"),
+            make_result("10.0.0.1", "10.0.0.2", "brute_force"),
+        ];
+
+        let out = corr.add_results(&results, 100.0);
+        assert!(!out.is_empty(), "should correlate multi-attack");
+
+        let multi = out
+            .iter()
+            .find(|r| matches!(r.correlation_type, CorrelationType::MultiAttack))
+            .expect("expected a MultiAttack correlation");
+
+        assert!(
+            multi.alert_ids.iter().all(|&id| id != 0),
+            "correlated alert ids must be assigned, got {:?}",
+            multi.alert_ids
+        );
+        let unique: std::collections::HashSet<u64> = multi.alert_ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            multi.alert_ids.len(),
+            "correlated alert ids must be unique, got {:?}",
+            multi.alert_ids
+        );
+    }
+
+    #[test]
+    fn test_add_results_empty_is_noop() {
+        let mut corr = AlertCorrelator::with_defaults();
+        let out = corr.add_results(&[], 100.0);
+        assert!(out.is_empty());
+        assert_eq!(corr.incident_count(), 0);
+        assert!(corr.active_alerts().is_empty());
     }
 }

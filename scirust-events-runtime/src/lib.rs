@@ -21,12 +21,16 @@ impl EventRuntime {
 
         while let Some(window) = stream.next_window()
         {
+            // `next_window` advances `current_offset` by `stride` before
+            // returning, so the window we just received actually started one
+            // stride earlier. Recover that start offset for the timestamp.
+            let window_start = stream.current_offset.saturating_sub(stream.stride);
             let (score, en, fr) = self.detector.detect(&window);
             if score >= 1.0
             {
                 events.push(Event {
                     id: count,
-                    timestamp: stream.current_offset as f64,
+                    timestamp: window_start as f64,
                     label_en: en,
                     label_fr: fr,
                     confidence: score,
@@ -87,6 +91,30 @@ mod tests {
         assert_eq!(events[0].id, 0);
         assert_eq!(events[1].id, 1);
         assert!(events.iter().all(|e| e.label_en == "spike"));
+    }
+
+    #[test]
+    fn event_timestamp_is_window_start_offset_not_next_offset() {
+        // Windows (stride 2, size 2): [1,1]=2 quiet, [6,6]=12 fires, [0,0]=0 quiet.
+        // The firing window starts at offset 2. `next_window` advances the
+        // stream's offset to 4 before returning, so a naive read of
+        // `current_offset` would report 4 (off by one stride).
+        let mut rt = EventRuntime::new(Box::new(SumThreshold(10.0)));
+        let mut stream = EventStream::new(vec![1.0, 1.0, 6.0, 6.0, 0.0, 0.0], 2, 2);
+        let events = rt.process_all(&mut stream);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, 2.0);
+    }
+
+    #[test]
+    fn event_timestamp_tracks_start_when_stride_differs_from_size() {
+        // Overlapping windows (stride 1, size 2) over [0,0,0,9,9]:
+        // [0,0]=0, [0,0]=0, [0,9]=9, [9,9]=18 fires at start offset 3.
+        let mut rt = EventRuntime::new(Box::new(SumThreshold(10.0)));
+        let mut stream = EventStream::new(vec![0.0, 0.0, 0.0, 9.0, 9.0], 2, 1);
+        let events = rt.process_all(&mut stream);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, 3.0);
     }
 
     #[test]

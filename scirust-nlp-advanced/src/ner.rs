@@ -122,9 +122,24 @@ impl Gazetteer {
         }
     }
 
-    /// Look up a token (case-insensitive).
+    /// Look up a surface form (case-insensitive).
+    ///
+    /// The `token` may be a single word or a whitespace-separated multi-word
+    /// phrase (e.g. `"Albert Einstein"`); it is matched against the stored
+    /// entries verbatim after lowercasing.
     pub fn lookup(&self, token: &str) -> Option<EntityType> {
         self.entries.get(&token.to_lowercase()).copied()
+    }
+
+    /// The largest number of whitespace-separated words in any stored entry
+    /// (0 if the gazetteer is empty).  Used to bound multi-word (n-gram)
+    /// matching so callers never have to scan more tokens than necessary.
+    pub fn max_entry_words(&self) -> usize {
+        self.entries
+            .keys()
+            .map(|k| k.split_whitespace().count())
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -363,7 +378,15 @@ pub struct TokenFeatures {
     pub next_shape: String,
     pub position_in_sentence: usize,
     pub sentence_length: usize,
+    /// Entity type of the gazetteer entry this token belongs to, if any.  For a
+    /// multi-word entry (e.g. `"Albert Einstein"`) every token of the matched
+    /// span carries the type.
     pub gazetteer_match: Option<EntityType>,
+    /// True when this token is the *first* token of a gazetteer match; false
+    /// for continuation tokens of a multi-word match (and when there is no
+    /// match).  Lets the classifier emit `B-` for the head and `I-` for the
+    /// tail of a multi-word entity.
+    pub gazetteer_begin: bool,
 }
 
 /// Compute a simplified word shape: uppercase → 'X', lowercase → 'x',
@@ -406,6 +429,45 @@ pub fn word_shape(word: &str) -> String {
 /// Extract features for every token in `tokens`.
 pub fn extract_features(tokens: &[String], gazetteer: &Gazetteer) -> Vec<TokenFeatures> {
     let n = tokens.len();
+
+    // Gazetteer matching. Entries may be multi-word (e.g. "Albert Einstein"),
+    // so a per-token lookup can never match them. Instead, tile the token
+    // stream with greedy longest-first matches: at each unclaimed position, try
+    // the longest window (bounded by the longest stored entry) and shrink until
+    // a stored entry matches. Every token of a match records the entity type;
+    // only the first token of a match is flagged as the beginning of the span.
+    let max_words = gazetteer.max_entry_words().min(n);
+    let mut gaz_match: Vec<Option<EntityType>> = vec![None; n];
+    let mut gaz_begin: Vec<bool> = vec![false; n];
+    if max_words >= 1
+    {
+        let mut i = 0;
+        while i < n
+        {
+            let mut matched = false;
+            let max_len = max_words.min(n - i);
+            for len in (1..=max_len).rev()
+            {
+                let phrase = tokens[i..i + len].join(" ");
+                if let Some(ty) = gazetteer.lookup(&phrase)
+                {
+                    gaz_begin[i] = true;
+                    for slot in gaz_match.iter_mut().skip(i).take(len)
+                    {
+                        *slot = Some(ty);
+                    }
+                    i += len;
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched
+            {
+                i += 1;
+            }
+        }
+    }
+
     let mut features = Vec::with_capacity(n);
     for (i, tok) in tokens.iter().enumerate()
     {
@@ -449,7 +511,8 @@ pub fn extract_features(tokens: &[String], gazetteer: &Gazetteer) -> Vec<TokenFe
             next_shape,
             position_in_sentence: i,
             sentence_length: n,
-            gazetteer_match: gazetteer.lookup(tok),
+            gazetteer_match: gaz_match[i],
+            gazetteer_begin: gaz_begin[i],
         });
     }
     features
@@ -495,10 +558,12 @@ impl StatisticalNer {
     }
 
     fn classify_token(&self, feat: &TokenFeatures) -> BioTag {
-        // Gazetteer match → highest priority
+        // Gazetteer match → highest priority. The first token of the matched
+        // (possibly multi-word) span begins the entity; the remaining tokens
+        // continue it, so a multi-word entry yields one contiguous span.
         if let Some(ty) = feat.gazetteer_match
         {
-            if feat.is_capitalized
+            if feat.gazetteer_begin
             {
                 return BioTag::Begin(ty);
             }
@@ -711,6 +776,61 @@ mod tests {
         assert_eq!(tags.len(), tokens.len());
         // "Albert" should be B-PER or similar
         assert!(matches!(tags[0], BioTag::Begin(EntityType::Person)));
+    }
+
+    #[test]
+    fn test_extract_features_multiword_gazetteer_match() {
+        // Regression: the gazetteer stores multi-word entries (e.g.
+        // "New York"), but features were looked up one token at a time, so a
+        // single token could never match a multi-word key. Before the fix both
+        // tokens of "New York" had `gazetteer_match == None`; now the whole
+        // span is matched, the head token begins it and the tail continues it.
+        let g = make_gazetteer();
+        let tokens: Vec<String> = "I live in New York now"
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        let feats = extract_features(&tokens, &g);
+
+        // "New" (index 3) begins a Location span; "York" (index 4) continues it.
+        assert_eq!(feats[3].gazetteer_match, Some(EntityType::Location));
+        assert!(feats[3].gazetteer_begin);
+        assert_eq!(feats[4].gazetteer_match, Some(EntityType::Location));
+        assert!(!feats[4].gazetteer_begin);
+
+        // Non-entity tokens stay unmatched.
+        assert_eq!(feats[0].gazetteer_match, None);
+        assert_eq!(feats[5].gazetteer_match, None);
+    }
+
+    #[test]
+    fn test_statistical_ner_multiword_gazetteer() {
+        // End-to-end: a multi-word gazetteer entry must drive the classifier
+        // and be recovered as a single contiguous entity via BIO tags. Before
+        // the fix "New York" produced no gazetteer-driven tags at all.
+        let ner = StatisticalNer::new(make_gazetteer());
+        let tokens: Vec<String> = "flights to New York depart"
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        let tags = ner.classify(&tokens);
+        assert_eq!(tags[2], BioTag::Begin(EntityType::Location));
+        assert_eq!(tags[3], BioTag::Inside(EntityType::Location));
+
+        let entities = extract_entities(&tokens, &tags);
+        let loc = entities
+            .iter()
+            .find(|e| e.entity_type == EntityType::Location)
+            .expect("New York should be recovered as one Location entity");
+        assert_eq!(loc.text, "New York");
+    }
+
+    #[test]
+    fn test_max_entry_words() {
+        let g = make_gazetteer();
+        // "Albert Einstein" / "New York" are 2 words; the rest are 1.
+        assert_eq!(g.max_entry_words(), 2);
+        assert_eq!(Gazetteer::new().max_entry_words(), 0);
     }
 
     #[test]

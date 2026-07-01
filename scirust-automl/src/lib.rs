@@ -138,14 +138,30 @@ impl ParamDistribution {
             },
             Self::IntRange { lo, hi } =>
             {
-                let range = (*hi - *lo + 1) as usize;
-                let step = (range as f64 / n as f64).ceil() as usize;
-                let step = step.max(1);
-                (*lo..=*hi)
-                    .step_by(step)
-                    .take(n)
-                    .map(|v| v as f64)
-                    .collect()
+                let (lo, hi) = if lo <= hi { (*lo, *hi) } else { (*hi, *lo) };
+                if n == 0
+                {
+                    return Vec::new();
+                }
+                if n == 1 || lo == hi
+                {
+                    return vec![((lo + hi) / 2) as f64];
+                }
+                // Endpoint-inclusive interpolation (matches `Uniform`), rounded to
+                // the nearest integer.  This guarantees both `lo` and `hi` appear.
+                // Deduplicate consecutive values so a range smaller than `n` does
+                // not yield repeated grid points.
+                let mut out: Vec<i64> = Vec::with_capacity(n);
+                for i in 0..n
+                {
+                    let t = i as f64 / (n - 1) as f64;
+                    let v = (lo as f64 + (hi - lo) as f64 * t).round() as i64;
+                    if out.last() != Some(&v)
+                    {
+                        out.push(v);
+                    }
+                }
+                out.into_iter().map(|v| v as f64).collect()
             },
         }
     }
@@ -995,17 +1011,50 @@ impl GradientBoosting {
         rng: &mut XorShift64,
     ) -> Self {
         let n = x.len();
-        let initial_pred = y.iter().sum::<f64>() / n as f64;
-        let mut residuals: Vec<f64> = y.iter().map(|yi| yi - initial_pred).collect();
+        let mean = if n == 0 { 0.0 } else { y.iter().sum::<f64>() / n as f64 };
+
+        // The running score `F` lives in the space that `predict` sums into:
+        //   regression      -> `F` is the target directly (least squares)
+        //   classification  -> `F` is the log-odds; `predict` applies `sigmoid`
+        // so classification must boost logistic pseudo-residuals `y - sigmoid(F)`
+        // in log-odds space rather than least-squares on the raw 0/1 labels.
+        let initial_pred = if is_classification
+        {
+            // log-odds of the mean label, clamped to keep it finite for the
+            // degenerate all-0 / all-1 cases.
+            let p = mean.clamp(1e-6, 1.0 - 1e-6);
+            (p / (1.0 - p)).ln()
+        }
+        else
+        {
+            mean
+        };
+
+        let mut scores: Vec<f64> = vec![initial_pred; n];
         let mut trees = Vec::new();
 
         for _ in 0..n_estimators
         {
+            // Negative gradient of the per-iteration loss:
+            //   classification: y - sigmoid(F)   (logistic / log-loss)
+            //   regression:     y - F            (squared error)
+            let residuals: Vec<f64> = if is_classification
+            {
+                y.iter()
+                    .zip(&scores)
+                    .map(|(yi, f)| yi - sigmoid(*f))
+                    .collect()
+            }
+            else
+            {
+                y.iter().zip(&scores).map(|(yi, f)| yi - f).collect()
+            };
+
             let tree = DecisionTree::fit(x, &residuals, max_depth, 5, false, rng);
             let preds = tree.predict(x);
-            for (r, p) in residuals.iter_mut().zip(&preds)
+            for (f, p) in scores.iter_mut().zip(&preds)
             {
-                *r -= learning_rate * p;
+                *f += learning_rate * p;
             }
             trees.push(tree);
         }
@@ -3469,6 +3518,80 @@ mod tests {
             let i = v as i64;
             assert!((1..=10).contains(&i), "{} out of range", i);
         }
+    }
+
+    #[test]
+    fn test_grid_points_int_range_includes_bounds() {
+        // Regression: `IntRange::grid_points` used a ceil'd step that could skip
+        // the upper bound (e.g. lo=0,hi=10,n=3 -> step 4 -> [0,4,8], no 10).
+        let d = ParamDistribution::IntRange { lo: 0, hi: 10 };
+        let pts = d.grid_points(3);
+        assert_eq!(pts.first().copied(), Some(0.0), "lower bound missing");
+        assert_eq!(pts.last().copied(), Some(10.0), "upper bound missing");
+        for &v in &pts
+        {
+            let i = v as i64;
+            assert!((0..=10).contains(&i), "{} out of range", i);
+        }
+
+        // A range smaller than `n` must not produce duplicate grid points.
+        let d2 = ParamDistribution::IntRange { lo: 1, hi: 3 };
+        let pts2 = d2.grid_points(10);
+        assert_eq!(pts2, vec![1.0, 2.0, 3.0]);
+
+        // Degenerate cases stay panic-free.
+        assert!(ParamDistribution::IntRange { lo: 5, hi: 5 }
+            .grid_points(4)
+            .iter()
+            .all(|&v| (v - 5.0).abs() < 1e-12));
+        assert!(ParamDistribution::IntRange { lo: 0, hi: 10 }
+            .grid_points(0)
+            .is_empty());
+    }
+
+    #[test]
+    fn test_gradient_boosting_classification_logistic() {
+        // Regression: classification GBT must boost logistic pseudo-residuals in
+        // log-odds space, not least-squares on raw 0/1 labels. With log-odds
+        // boosting the initial score is logit(mean) and predictions are proper
+        // probabilities that separate the two classes.
+        let x = vec![
+            vec![0.0],
+            vec![0.2],
+            vec![0.4],
+            vec![0.6],
+            vec![0.8],
+            vec![1.0],
+        ];
+        let y = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let mut rng = XorShift64::new(42);
+        let gb = GradientBoosting::fit(&x, &y, 30, 0.3, 3, true, &mut rng);
+
+        // initial_pred is logit(mean=0.5) == 0, not the raw mean 0.5.
+        assert!(
+            gb.initial_pred.abs() < 1e-9,
+            "initial_pred should be log-odds of the mean, got {}",
+            gb.initial_pred
+        );
+
+        let preds = gb.predict(&x);
+        // Sigmoid output stays a valid probability and separates the classes.
+        for &p in &preds
+        {
+            assert!((0.0..=1.0).contains(&p), "prediction {} not a probability", p);
+        }
+        assert!(
+            preds[0] < 0.5 && preds[5] > 0.5,
+            "classes not separated: {:?}",
+            preds
+        );
+
+        // All-positive labels must stay finite (no logit(1.0) blow-up).
+        let y_pos = vec![1.0; 6];
+        let mut rng2 = XorShift64::new(7);
+        let gb_pos = GradientBoosting::fit(&x, &y_pos, 10, 0.3, 2, true, &mut rng2);
+        assert!(gb_pos.initial_pred.is_finite());
+        assert!(gb_pos.predict(&x).iter().all(|p| p.is_finite()));
     }
 
     // ---- Metrics ----

@@ -50,12 +50,25 @@ impl ParticleFilter {
 
     /// Propagate each particle through `f`, then add diagonal Gaussian process
     /// noise with per-dimension standard deviations `proc_std`.
+    ///
+    /// If `proc_std` is shorter than the propagated state, the last entry is
+    /// broadcast to every trailing dimension (so a single-element slice acts as
+    /// an isotropic std); an empty `proc_std` adds no noise. This avoids
+    /// silently leaving trailing dimensions noise-free on a length mismatch.
     pub fn predict(&mut self, f: impl Fn(&[f64]) -> Vec<f64>, proc_std: &[f64]) {
         for p in self.particles.iter_mut()
         {
             let mut np = f(p);
-            for (v, &sd) in np.iter_mut().zip(proc_std)
+            for (i, v) in np.iter_mut().enumerate()
             {
+                // Draw one deterministic normal per dimension regardless of the
+                // std used, so the RNG stream stays independent of `proc_std`'s
+                // length. Missing entries reuse the last provided std (or zero).
+                let sd = match proc_std.len()
+                {
+                    0 => 0.0,
+                    len => proc_std[i.min(len - 1)],
+                };
                 *v += sd * next_normal(&mut self.rng);
             }
             *p = np;
@@ -190,6 +203,40 @@ mod tests {
         let pf = ParticleFilter::new(500, |u| vec![u()], 7);
         assert_eq!(pf.len(), 500);
         assert!(!pf.is_empty());
+    }
+
+    #[test]
+    fn predict_noises_trailing_dims_on_short_proc_std() {
+        // 3-D state, but only a 1-element `proc_std`. Before the fix, the `zip`
+        // truncated after dim 0, leaving dims 1 and 2 noise-free; the broadcast
+        // now applies the (single) std to every dimension.
+        let mut pf = ParticleFilter::new(400, |_| vec![0.0, 0.0, 0.0], 0x1234);
+        pf.predict(|p| p.to_vec(), &[1.0]);
+
+        // Spread across particles for each dimension: all three must be excited.
+        let dims = 3;
+        let n = pf.len() as f64;
+        for d in 0..dims
+        {
+            let mean: f64 = pf.particles.iter().map(|p| p[d]).sum::<f64>() / n;
+            let var: f64 =
+                pf.particles.iter().map(|p| (p[d] - mean).powi(2)).sum::<f64>() / n;
+            assert!(
+                var > 0.1,
+                "dim {d} received no process noise (var = {var}); trailing dims silently skipped"
+            );
+        }
+    }
+
+    #[test]
+    fn predict_empty_proc_std_adds_no_noise() {
+        // Empty `proc_std` must be a no-op on the noise (not a panic).
+        let mut pf = ParticleFilter::new(16, |_| vec![2.0, -1.0], 0x99);
+        pf.predict(|p| p.to_vec(), &[]);
+        for p in &pf.particles
+        {
+            assert_eq!(p, &vec![2.0, -1.0]);
+        }
     }
 
     #[test]

@@ -83,15 +83,15 @@ pub fn identify_protocol_from_payload(payload: &[u8], dst_port: u16) -> Protocol
     {
         return Protocol::Ssh;
     }
+    // FTP banner (same "220 " greeting as SMTP, disambiguated by port)
+    if payload.starts_with(b"220 ") && dst_port == 21
+    {
+        return Protocol::Ftp;
+    }
     // SMTP banner
     if payload.starts_with(b"220 ")
     {
         return Protocol::Smtp;
-    }
-    // FTP banner
-    if payload.starts_with(b"220 ") && dst_port == 21
-    {
-        return Protocol::Ftp;
     }
 
     Protocol::from_port(dst_port)
@@ -185,6 +185,21 @@ mod tests {
             identify_protocol_from_payload(payload, 8080),
             Protocol::Http
         );
+    }
+
+    #[test]
+    fn test_identify_protocol_ftp_banner_on_port_21() {
+        // FTP greeting shares the "220 " prefix with SMTP; the port 21 branch
+        // must win over the generic SMTP branch (previously unreachable).
+        let payload = b"220 (vsFTPd 3.0.3)\r\n";
+        assert_eq!(identify_protocol_from_payload(payload, 21), Protocol::Ftp);
+    }
+
+    #[test]
+    fn test_identify_protocol_smtp_banner_non_ftp_port() {
+        // A "220 " banner on a non-FTP port stays SMTP.
+        let payload = b"220 mail.example.com ESMTP Postfix\r\n";
+        assert_eq!(identify_protocol_from_payload(payload, 25), Protocol::Smtp);
     }
 
     #[test]

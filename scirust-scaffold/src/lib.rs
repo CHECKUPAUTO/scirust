@@ -2712,7 +2712,10 @@ impl CGenerator {
                 let args_str: Vec<String> = args.iter().map(|a| self.emit_expr(a, style)).collect();
                 format!("{}({})", name, args_str.join(", "))
             },
-            Expression::Len(v) => format!("{}_len", v),
+            // The C signature declares a `Vec<..>` input's length as
+            // `{name}_size` (see `generate`), so `len(v)` must reference the
+            // same variable rather than an undeclared `{v}_len`.
+            Expression::Len(v) => format!("{}_size", v),
             Expression::Range { start, end } =>
             {
                 let s = self.emit_expr(start, style);
@@ -4397,13 +4400,21 @@ fn visualize_steps(stmts: &[Statement], out: &mut String, indent: &str) {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len
+    // Count and slice by `char`s: byte-index slicing (`&s[..n]`) panics when the
+    // boundary lands inside a multibyte UTF-8 code point, and byte length would
+    // truncate multibyte names too aggressively.
+    if s.chars().count() <= max_len
     {
         s.to_string()
     }
+    else if max_len == 0
+    {
+        String::new()
+    }
     else
     {
-        format!("{}\u{2026}", &s[..max_len - 1])
+        let head: String = s.chars().take(max_len - 1).collect();
+        format!("{}\u{2026}", head)
     }
 }
 
@@ -5219,5 +5230,76 @@ algorithm with_comment
         // But for bubble_sort, "type" has a default of "i32", so it should also work
         let result2 = registry.instantiate("bubble_sort", &params);
         assert!(result2.is_ok());
+    }
+
+    // --- Audit regression tests ---
+
+    // Regression: the C backend used to emit `{v}_len` for `len(v)` while the
+    // function signature declares a `Vec<..>` input's length as `{v}_size`,
+    // producing C that references an undeclared variable. The two must match.
+    #[test]
+    fn test_c_len_matches_declared_size_param() {
+        let dsl = "algorithm sum\n  input: arr: Vec<i32>\n  output: total: i32\n  variables:\n    n: i32 = len(arr)\n  steps:\n    return n";
+        let algo = parse_algorithm(dsl).unwrap();
+        let code = generate_c(&algo, &CodeStyle::default());
+        // The declared length parameter.
+        assert!(
+            code.contains("int arr_size"),
+            "expected declared `int arr_size` param, got:\n{code}"
+        );
+        // `len(arr)` must reference that same declared variable ...
+        assert!(
+            code.contains("arr_size"),
+            "expected `len(arr)` to emit `arr_size`, got:\n{code}"
+        );
+        // ... and never the old undeclared `arr_len`.
+        assert!(
+            !code.contains("arr_len"),
+            "C output still references undeclared `arr_len`:\n{code}"
+        );
+    }
+
+    // Regression: `truncate` sliced by byte index (`&s[..n]`), which panics when
+    // the boundary falls inside a multibyte UTF-8 code point. It must operate on
+    // `char`s and never panic on valid UTF-8.
+    #[test]
+    fn test_truncate_multibyte_no_panic() {
+        // Each 'é' is two bytes; a byte-index slice at an odd offset would land
+        // mid-char and panic. Ten chars truncated to 5 must yield 4 chars + '…'.
+        let s = "éééééééééé";
+        let out = truncate(s, 5);
+        assert_eq!(out, "éééé\u{2026}");
+        assert_eq!(out.chars().count(), 5);
+    }
+
+    #[test]
+    fn test_truncate_counts_chars_not_bytes() {
+        // "café" is 4 chars but 5 bytes; it fits in a width-4 field untouched.
+        assert_eq!(truncate("café", 4), "café");
+        // Multibyte emoji (4 bytes each) must not be split.
+        let out = truncate("😀😀😀", 2);
+        assert_eq!(out, "😀\u{2026}");
+    }
+
+    #[test]
+    fn test_truncate_ascii_unchanged() {
+        // Guard the common ASCII path against regressions.
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello", 3), "he\u{2026}");
+        assert_eq!(truncate("abc", 0), "");
+    }
+
+    // `len` is a builtin only in call position (`len(x)`); as a bare identifier
+    // it is an ordinary variable and must parse/generate as such. This documents
+    // the by-design boundary (audit item L1444).
+    #[test]
+    fn test_len_as_plain_variable() {
+        let dsl = "algorithm uses_len\n  input: len: i32\n  output: result: i32\n  steps:\n    return len + 1";
+        let algo = parse_algorithm(dsl).unwrap();
+        let code = generate_rust(&algo, &CodeStyle::default());
+        assert!(
+            code.contains("len + 1"),
+            "expected `len` to be usable as a plain variable, got:\n{code}"
+        );
     }
 }

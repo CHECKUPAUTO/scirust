@@ -45,6 +45,16 @@ impl FusedKernel {
     ///
     /// Les données intermédiaires restent dans les registres / stack.
     pub fn execute(&self, inputs: &[&[f32]], output: &mut [f32]) {
+        // Kernels built by `FusionPipeline` leave the matmul dimensions unset
+        // (they default to 0), so `out_features` can legitimately be 0. Every
+        // matmul-family kernel derives its batch count via
+        // `output.len() / out_features`; guard the degenerate case up front so
+        // that path is never reached with a zero divisor. With no output
+        // columns there is nothing to compute, so leave `output` untouched.
+        if self.uses_matmul_dims() && self.params.out_features == 0
+        {
+            return;
+        }
         match self.kernel_type
         {
             KernelType::MatmulSilu =>
@@ -97,6 +107,21 @@ impl FusedKernel {
                 }
             },
         }
+    }
+
+    /// Whether this kernel derives its batch count from
+    /// `output.len() / out_features` (the matmul family). Those paths divide by
+    /// `out_features`, so `execute` guards them against a zero divisor.
+    fn uses_matmul_dims(&self) -> bool {
+        matches!(
+            self.kernel_type,
+            KernelType::MatmulSilu
+                | KernelType::MatmulRelu
+                | KernelType::MatmulSiluLayerNorm
+                | KernelType::MatmulLayerNorm
+                | KernelType::MatmulScale
+                | KernelType::TwoLayerMlp
+        )
     }
 
     // ============= Implémentations des kernels fusionnés =============
@@ -564,6 +589,37 @@ mod tests {
         k.execute(&[&x, &w], &mut out);
         // y = (x @ W) * scale = [1, 2] * 3 = [3, 6].
         assert_eq!(out, [3.0, 6.0]);
+    }
+
+    #[test]
+    fn matmul_kernels_with_unset_dims_do_not_divide_by_zero() {
+        // Non-regression: `FusionPipeline::build_kernel` never sets the matmul
+        // dimensions, so a pipeline-produced kernel keeps the default
+        // `out_features == 0`. Every matmul-family kernel computes its batch
+        // count as `output.len() / out_features`, which used to panic with an
+        // integer divide-by-zero. With the guard, `execute` returns without
+        // touching `output`.
+        for kt in [
+            KernelType::MatmulSilu,
+            KernelType::MatmulRelu,
+            KernelType::MatmulSiluLayerNorm,
+            KernelType::MatmulLayerNorm,
+            KernelType::MatmulScale,
+            KernelType::TwoLayerMlp,
+        ]
+        {
+            let k = FusedKernel::new(kt, vec![0, 1], vec![], vec![]);
+            assert_eq!(k.params.out_features, 0, "default params leave dims unset");
+
+            let x = [1.0f32, 2.0];
+            let w = [1.0f32, 0.0, 0.0, 1.0];
+            let sentinel = [42.0f32; 2];
+            let mut out = sentinel;
+            // Previously panicked (divide-by-zero) before reaching any compute.
+            k.execute(&[&x, &w, &w], &mut out);
+            // Degenerate (no output columns): output is left untouched.
+            assert_eq!(out, sentinel);
+        }
     }
 
     #[test]

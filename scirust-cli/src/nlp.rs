@@ -54,6 +54,26 @@ fn take_bool(args: &[String], name: &str) -> (bool, Vec<String>) {
     (present, rest)
 }
 
+/// Format the "% of initial" fragment for a `first → last` loss report.
+///
+/// Returns e.g. `"12.3% of initial"`. When the initial value is `0` (or not
+/// finite) the ratio `last / first` is `NaN`/`inf`, so we describe the change
+/// qualitatively instead of printing a meaningless `NaN%`.
+fn pct_of_initial(first: f32, last: f32) -> String {
+    if first.is_finite() && first != 0.0
+    {
+        format!("{:.1}% of initial", 100.0 * last / first)
+    }
+    else if last == first
+    {
+        "unchanged from initial".to_string()
+    }
+    else
+    {
+        "initial was 0".to_string()
+    }
+}
+
 /// `bpe "<corpus>" [--vocab N] [--encode "<text>"] [--bytes]` — train a
 /// deterministic byte-pair-encoding tokenizer on the corpus (documents
 /// separated by `;`), then encode/decode a piece of text. `--bytes` selects the
@@ -363,8 +383,8 @@ pub fn run_lm(args: &[String]) -> u8 {
     println!("  tokens: {tokens:?}");
     println!("  optimizer: {opt_kind}(lr={lr}), {steps} steps");
     println!(
-        "  loss: {first:.4} → {last:.4}  ({:.1}% of initial)",
-        100.0 * last / first
+        "  loss: {first:.4} → {last:.4}  ({})",
+        pct_of_initial(first, last)
     );
     println!("  next-token argmax: {preds:?}");
     println!("  targets:           {targets:?}");
@@ -801,5 +821,29 @@ mod tests {
         assert_eq!(run_lm(&s(&["1,2,3", "--steps", "0"])), 2); // steps ≥ 1
         assert_eq!(run_lm(&s(&["1,2,3", "--lr", "-1"])), 2); // lr > 0
         assert_eq!(run_lm(&s(&["1,2,3", "--seed", "x"])), 2); // bad seed
+    }
+
+    #[test]
+    fn pct_of_initial_never_reports_nan() {
+        // Normal case: a plain percentage.
+        assert_eq!(pct_of_initial(2.0, 1.0), "50.0% of initial");
+        assert_eq!(pct_of_initial(4.0, 4.0), "100.0% of initial");
+
+        // Degenerate case the L367 bug hit: an initial loss of exactly 0 used to
+        // print "NaN% of initial" (0.0 / 0.0). Guard it instead.
+        let both_zero = pct_of_initial(0.0, 0.0);
+        assert!(!both_zero.contains("NaN"), "got {both_zero:?}");
+        assert!(!both_zero.contains("inf"), "got {both_zero:?}");
+        assert_eq!(both_zero, "unchanged from initial");
+
+        // Initial 0 but last non-zero would have been "inf% of initial".
+        let zero_first = pct_of_initial(0.0, 1.0);
+        assert!(!zero_first.contains("NaN"), "got {zero_first:?}");
+        assert!(!zero_first.contains("inf"), "got {zero_first:?}");
+        assert_eq!(zero_first, "initial was 0");
+
+        // A non-finite initial (NaN) must not propagate a NaN into the report.
+        let nan_first = pct_of_initial(f32::NAN, 1.0);
+        assert!(!nan_first.contains("NaN"), "got {nan_first:?}");
     }
 }

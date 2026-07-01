@@ -91,7 +91,15 @@ impl EGraph {
     }
 
     /// Find the canonical (root) class ID with path compression.
+    ///
+    /// An ID that was never allocated (i.e. out of range of the union-find
+    /// array) has no equivalences, so it is treated as its own root and
+    /// returned unchanged rather than panicking.
     pub fn find(&mut self, id: usize) -> usize {
+        if id >= self.uf.len()
+        {
+            return id;
+        }
         let mut root = id;
         while self.uf[root] != root
         {
@@ -108,10 +116,13 @@ impl EGraph {
     }
 
     /// Merge the two E-classes containing `id1` and `id2`.
+    ///
+    /// If either ID was never allocated the call is a no-op, since there is no
+    /// class to merge.
     pub fn union(&mut self, id1: usize, id2: usize) {
         let a = self.find(id1);
         let b = self.find(id2);
-        if a == b
+        if a == b || a >= self.uf.len() || b >= self.uf.len()
         {
             return;
         }
@@ -231,6 +242,31 @@ mod tests {
         eg.union(x, y);
         eg.rebuild();
         assert!(eg.equivalent(fx, fy), "congruence: x≡y ⇒ sin(x)≡sin(y)");
+    }
+
+    #[test]
+    fn find_union_equivalent_tolerate_out_of_range_ids() {
+        // Public API accepting a raw usize must not panic on an ID that was
+        // never allocated (e.g. from an empty graph or a stale/foreign ID).
+        let mut eg = EGraph::new();
+        // Empty graph: any ID is out of range.
+        assert_eq!(eg.find(0), 0, "unknown id is its own root");
+        assert_eq!(eg.find(42), 42);
+        assert!(!eg.equivalent(1, 2), "distinct unknown ids are not equivalent");
+        assert!(eg.equivalent(7, 7), "an id is equivalent to itself");
+        // union involving an out-of-range id is a safe no-op.
+        eg.union(3, 4);
+        assert!(!eg.equivalent(3, 4));
+
+        // With one real class, mixing a real id with an out-of-range one is
+        // still safe and never merges.
+        let x = eg.add_expr(&Expr::Var("x".into()));
+        let bogus = eg.next_id + 100;
+        assert_eq!(eg.find(bogus), bogus);
+        eg.union(x, bogus);
+        assert!(!eg.equivalent(x, bogus));
+        // The real class is untouched.
+        assert_eq!(eg.find(x), x);
     }
 
     #[test]

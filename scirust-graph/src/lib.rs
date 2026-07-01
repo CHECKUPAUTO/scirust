@@ -475,15 +475,16 @@ pub fn label_propagation(graph: &Graph, max_iterations: usize) -> Vec<usize> {
                 *label_counts.entry(labels[neighbor]).or_insert(0) += 1;
             }
 
-            // Find most common label
-            let max_count = label_counts.values().max().unwrap_or(&0);
-            let candidates: Vec<usize> = label_counts
+            // Find most common label. `label_counts` is a HashMap, whose
+            // iteration order is randomized, so we break count ties by picking
+            // the smallest label to keep the result deterministic.
+            let max_count = label_counts.values().copied().max().unwrap_or(0);
+            let new_label = label_counts
                 .iter()
-                .filter(|(_, &c)| c == *max_count)
+                .filter(|(_, &c)| c == max_count)
                 .map(|(&l, _)| l)
-                .collect();
-
-            let new_label = candidates[0]; // deterministic: pick first
+                .min()
+                .unwrap_or(labels[node]);
             if labels[node] != new_label
             {
                 labels[node] = new_label;
@@ -564,10 +565,13 @@ pub fn girvan_newman(graph: &Graph, n_communities: usize) -> Vec<usize> {
         }
 
         // Compute edge betweenness and drop the single highest-scoring edge.
+        // `betweenness` is a HashMap with randomized iteration order, so ties on
+        // the betweenness score are broken by the (smaller) edge key to keep the
+        // choice — and hence the whole result — deterministic.
         let betweenness = edge_betweenness(&g);
-        let Some((&(u, v), _)) = betweenness
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        let Some((&(u, v), _)) = betweenness.iter().max_by(|&(ea, sa), &(eb, sb)| {
+            sa.partial_cmp(sb).unwrap().then_with(|| eb.cmp(ea))
+        })
         else
         {
             return components;
@@ -1437,6 +1441,64 @@ mod tests {
         nope.set_node_label(0, "C");
         nope.set_node_label(1, "D");
         assert!(subgraph_isomorphism(&nope, &target).is_empty());
+    }
+
+    #[test]
+    fn test_label_propagation_is_deterministic_on_ties() {
+        // Regression: among neighbor-label count ties, the algorithm must break
+        // ties deterministically (smallest label). Previously `candidates[0]`
+        // was taken from a HashMap whose iteration order is randomized, so the
+        // result varied run-to-run.
+        //
+        // A 4-cycle 0-1-2-3-0 starts with every node in its own community and is
+        // maximally tie-prone: on the first sweep each node sees two neighbors
+        // carrying two different labels, one each — a genuine count tie.
+        let mut g = Graph::new(4);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 3), (3, 0)]
+        {
+            g.add_edge(a, b);
+        }
+
+        // The exact result is fixed by the smallest-label tie-break; recompute it
+        // many times and require byte-for-byte identical output every run. Under
+        // the old code the randomized HashMap order made this flaky.
+        let reference = label_propagation(&g, 100);
+        for _ in 0..200
+        {
+            assert_eq!(
+                label_propagation(&g, 100),
+                reference,
+                "label_propagation must be deterministic across runs"
+            );
+        }
+    }
+
+    #[test]
+    fn test_girvan_newman_is_deterministic_on_ties() {
+        // Regression: when several edges share the maximal betweenness, the edge
+        // removed must be chosen deterministically. Previously `max_by` scanned a
+        // HashMap with randomized order, so the peeled edge — and the resulting
+        // partition — varied run-to-run.
+        //
+        // A 6-cycle is fully symmetric: all six edges have identical betweenness,
+        // so the first removal is a pure tie. Whatever partition the tie-break
+        // produces, it must be the SAME every single run.
+        let mut g = Graph::new(6);
+        for &(a, b) in &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)]
+        {
+            g.add_edge(a, b);
+        }
+
+        let reference = girvan_newman(&g, 2);
+        assert_eq!(count_communities(&reference), 2);
+        for _ in 0..200
+        {
+            assert_eq!(
+                girvan_newman(&g, 2),
+                reference,
+                "girvan_newman must pick the same edge on betweenness ties"
+            );
+        }
     }
 
     #[test]

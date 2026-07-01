@@ -225,7 +225,15 @@ pub fn pca_fit(data: &Matrix) -> PcaResult {
     let sorted_evecs: Vec<Vec<f64>> = indices.iter().map(|&i| eigenvectors[i].clone()).collect();
 
     let total_var: f64 = sorted_evals.iter().sum();
-    let explained_variance_ratio: Vec<f64> = sorted_evals.iter().map(|e| e / total_var).collect();
+    // Guard against constant data (zero total variance) to avoid NaN ratios.
+    let explained_variance_ratio: Vec<f64> = if total_var > 0.0
+    {
+        sorted_evals.iter().map(|e| e / total_var).collect()
+    }
+    else
+    {
+        vec![0.0; sorted_evals.len()]
+    };
 
     PcaResult {
         eigenvalues: sorted_evals,
@@ -753,6 +761,12 @@ pub fn kmeans_fit(data: &Matrix, k: usize, max_iter: usize, tol: f64) -> KMeansR
                 {
                     new_centroids[c][j] /= counts[c] as f64;
                 }
+            }
+            else
+            {
+                // Empty cluster: retain the previous centroid instead of
+                // collapsing it to the origin.
+                new_centroids[c].clone_from(&centroids[c]);
             }
         }
 
@@ -1526,6 +1540,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pca_constant_data_no_nan_ratios() {
+        // Constant columns => zero total variance. The explained-variance
+        // ratios must be finite (0.0), not NaN from a divide-by-zero.
+        let data = Matrix::from_slice(&[
+            &[3.0, 7.0],
+            &[3.0, 7.0],
+            &[3.0, 7.0],
+        ]);
+        let pca = pca_fit(&data);
+        for &r in &pca.explained_variance_ratio
+        {
+            assert!(r.is_finite(), "non-finite explained variance ratio: {r}");
+            assert!((r - 0.0).abs() < 1e-12, "expected 0.0 ratio, got {r}");
+        }
+    }
+
     // ── ICA ──
 
     #[test]
@@ -1855,6 +1886,30 @@ mod tests {
         let result = kmeans_fit(&data, 2, 100, 1e-6);
         assert_eq!(result.k, 2);
         assert!(result.inertia.abs() < 1e-10);
+    }
+
+    #[test]
+    fn kmeans_empty_cluster_centroid_not_at_origin() {
+        // All points coincide far from the origin. With k = 2 one cluster is
+        // necessarily empty. The emptied cluster must keep a sensible centroid
+        // (its previous position) rather than collapsing to the origin.
+        let data = Matrix::from_slice(&[
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+        ]);
+        let result = kmeans_fit(&data, 2, 100, 1e-6);
+        assert_eq!(result.k, 2);
+        // No centroid should have collapsed to the origin.
+        for (c, centroid) in result.centroids.iter().enumerate()
+        {
+            let dist_from_origin: f64 = centroid.iter().map(|&v| v * v).sum::<f64>().sqrt();
+            assert!(
+                dist_from_origin > 1e-6,
+                "centroid {c} collapsed to the origin: {centroid:?}"
+            );
+        }
     }
 
     #[test]

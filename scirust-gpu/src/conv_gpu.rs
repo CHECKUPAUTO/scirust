@@ -65,8 +65,22 @@ struct P {
 };
 
 @group(0) @binding(0) var<storage, read>       col: array<f32>;
-@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+// WGSL has no atomic<f32>, so the accumulator is a u32 atomic viewed as the
+// bit pattern of an f32. Concurrent columns accumulate via a compare-exchange
+// loop (see `atomic_add_f32`).
+@group(0) @binding(1) var<storage, read_write> output: array<atomic<u32>>;
 @group(0) @binding(2) var<uniform>             p: P;
+
+// Atomically add `val` to the f32 stored (as bits) at output[idx].
+fn atomic_add_f32(idx: u32, val: f32) {
+    var old_bits: u32 = atomicLoad(&output[idx]);
+    loop {
+        let new_bits = bitcast<u32>(bitcast<f32>(old_bits) + val);
+        let res = atomicCompareExchangeWeak(&output[idx], old_bits, new_bits);
+        if (res.exchanged) { break; }
+        old_bits = res.old_value;
+    }
+}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -97,8 +111,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let in_y_eff = in_y - p.pad;
         let in_x_eff = in_x - p.pad;
         let in_idx = ((b * p.channels + c_inner) * p.h + in_y_eff) * p.w + in_x_eff;
-        // Use atomicAdd for accumulation (multiple columns may write to same pixel)
-        atomicAdd(&output[in_idx], val);
+        // Accumulate atomically (multiple columns may write to the same pixel).
+        atomic_add_f32(in_idx, val);
     }
 }
 "#;
@@ -230,5 +244,29 @@ mod tests {
         let expected_rows = ch * k * k;
         let expected_cols = out_h * out_w;
         assert_eq!(col.len(), batch * expected_rows * expected_cols);
+    }
+
+    /// Regression: WGSL has no `atomic<f32>`, so `atomicAdd` on a
+    /// `var<storage> output: array<f32>` is invalid and fails shader
+    /// compilation. The col2im accumulator must be an atomic-u32 view driven
+    /// by a compare-exchange loop instead. See conv_gpu.rs COL2IM_WGSL.
+    #[test]
+    fn test_col2im_wgsl_uses_valid_atomic_accumulator() {
+        // The accumulator binding must be an atomic array (u32/i32 are the
+        // only atomic element types WGSL supports).
+        assert!(
+            COL2IM_WGSL.contains("array<atomic<u32>>"),
+            "col2im output binding must be array<atomic<u32>>",
+        );
+        // The invalid float `atomicAdd` must be gone; accumulation goes
+        // through the compare-exchange helper.
+        assert!(
+            !COL2IM_WGSL.contains("atomicAdd"),
+            "atomicAdd on a non-atomic array<f32> is invalid WGSL",
+        );
+        assert!(
+            COL2IM_WGSL.contains("atomicCompareExchangeWeak"),
+            "atomic f32 accumulation must use a compare-exchange loop",
+        );
     }
 }

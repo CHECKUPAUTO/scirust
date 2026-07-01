@@ -777,7 +777,14 @@ pub struct Tape {
     pub(crate) grads: RefCell<Vec<Tensor>>,
     grad_enabled: RefCell<bool>,
     pub(crate) gpu_engine: RefCell<Option<Box<dyn GpuEngine>>>,
+    /// PRNG driving stochastic ops (e.g. [`Var::dropout`]). Seeded
+    /// deterministically at construction so a fresh tape replays the same
+    /// stream, yet advances across calls so successive dropout masks differ.
+    rng: RefCell<PcgEngine>,
 }
+
+/// Default seed for a fresh [`Tape`]'s stochastic-op PRNG.
+const DEFAULT_DROPOUT_SEED: u64 = 0x5EED_C0DE;
 
 impl Tape {
     pub fn new() -> Self {
@@ -787,7 +794,21 @@ impl Tape {
             grads: RefCell::new(Vec::new()),
             grad_enabled: RefCell::new(true),
             gpu_engine: RefCell::new(None),
+            rng: RefCell::new(PcgEngine::new(DEFAULT_DROPOUT_SEED)),
         }
+    }
+
+    /// Reseed the PRNG that drives stochastic ops such as [`Var::dropout`].
+    /// Use this to make a training run reproducible: seeding then replaying the
+    /// same sequence of dropout calls yields the same masks.
+    pub fn set_seed(&self, seed: u64) {
+        *self.rng.borrow_mut() = PcgEngine::new(seed);
+    }
+
+    /// Draw the next `u32` from the tape's stochastic-op PRNG, advancing its
+    /// state so subsequent draws (and dropout calls) differ.
+    pub(crate) fn next_rand_u32(&self) -> u32 {
+        self.rng.borrow_mut().next_u32()
     }
 
     /// Attach a GPU engine for accelerated backward passes.
@@ -3597,7 +3618,10 @@ impl<'t> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let scale = 1.0 / (1.0 - p);
         let mut mask_data = vec![0.0f32; a.rows * a.cols];
-        let mut rng = PcgEngine::new(42);
+        // Draw a fresh seed from the tape's PRNG so successive dropout calls get
+        // distinct masks (stochastic), while a freshly-seeded tape stays
+        // reproducible. See `Tape::set_seed`.
+        let mut rng = PcgEngine::new(self.tape.next_rand_u32() as u64);
         for item in mask_data.iter_mut()
         {
             *item = if rng.float() < p { 0.0 } else { scale };
@@ -4848,5 +4872,41 @@ mod l2_normalize_tests {
         assert!((v.data[0] - 1.0).abs() < 1e-6, "S[0,0] {}", v.data[0]);
         assert!((v.data[3] - 1.0).abs() < 1e-6, "S[1,1] {}", v.data[3]);
         assert!(v.data[1].abs() < 1e-6, "S[0,1] {}", v.data[1]);
+    }
+
+    // Two dropout calls on the same tape must draw *different* masks. Before the
+    // fix the RNG was reseeded to a fixed value (42) each call, so every mask on
+    // every call was byte-identical — not stochastic.
+    #[test]
+    fn dropout_successive_calls_produce_different_masks() {
+        let tape = Tape::new();
+        tape.set_seed(1); // deterministic, but each call still advances the stream
+        let x = tape.input(Tensor::from_vec(vec![1.0f32; 4096], 64, 64));
+        let m1 = tape.value(x.dropout(0.5).idx());
+        let m2 = tape.value(x.dropout(0.5).idx());
+        assert_ne!(
+            m1.data, m2.data,
+            "successive dropout masks were identical — RNG not advancing"
+        );
+    }
+
+    // set_seed makes dropout reproducible: seeding two fresh tapes identically and
+    // replaying the same op sequence yields byte-identical masks.
+    #[test]
+    fn dropout_is_reproducible_after_set_seed() {
+        let make = || {
+            let tape = Tape::new();
+            tape.set_seed(12345);
+            let x = tape.input(Tensor::from_vec(vec![1.0f32; 1024], 32, 32));
+            let a = tape.value(x.dropout(0.3).idx()).data;
+            let b = tape.value(x.dropout(0.3).idx()).data;
+            (a, b)
+        };
+        let (a1, b1) = make();
+        let (a2, b2) = make();
+        assert_eq!(a1, a2, "first dropout not reproducible under set_seed");
+        assert_eq!(b1, b2, "second dropout not reproducible under set_seed");
+        // Sanity: the two calls within a run still differ (stochastic across calls).
+        assert_ne!(a1, b1, "the two calls should differ within a run");
     }
 }

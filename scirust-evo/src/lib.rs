@@ -65,19 +65,31 @@ impl GeneticAlgorithm {
     where
         F: Fn(&[Individual]) -> Vec<f64>,
     {
+        // Degenerate input: with an empty population there is nothing to select
+        // parents from, so evolution is a no-op rather than a panic.
+        if population.is_empty()
+        {
+            return;
+        }
         let fitnesses = fitness_fn(population);
         for (i, fit) in fitnesses.iter().enumerate()
         {
             population[i].fitness = *fit;
         }
         population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
-        let mut new_pop = population[..self.elitism].to_vec();
+        // Carry over the elite, clamping to the population size so a small
+        // population (e.g. smaller than `elitism`) cannot slice out of bounds.
+        let elite = self.elitism.min(population.len());
+        let mut new_pop = population[..elite].to_vec();
+        // Parents are drawn from the top half, but never from an empty range:
+        // with 0 or 1 survivors the pool is the single best individual.
+        let pool = (population.len() / 2).max(1);
         let mut rng = self.rng.borrow_mut();
         while new_pop.len() < self.pop_size
         {
-            let p1 = &population[rng.gen_range(0..population.len() / 2)];
-            let p2 = &population[rng.gen_range(0..population.len() / 2)];
-            let mut child = if rng.gen::<f64>() < self.crossover_rate
+            let p1 = &population[rng.gen_range(0..pool)];
+            let p2 = &population[rng.gen_range(0..pool)];
+            let mut child = if rng.gen::<f64>() < self.crossover_rate && !p1.genome.is_empty()
             {
                 let point = rng.gen_range(0..p1.genome.len());
                 let mut g = p1.genome[..point].to_vec();
@@ -809,6 +821,54 @@ mod tests {
                 .collect::<Vec<u64>>()
         };
         assert_eq!(run(), run(), "seeded GA must be bit-reproducible");
+    }
+
+    #[test]
+    fn ga_evolve_empty_population_is_noop() {
+        // A degenerate empty population must not panic on the elitism slice or
+        // the parent-selection range; evolution is simply a no-op.
+        let ga = GeneticAlgorithm::seeded(1);
+        let mut pop: Vec<Individual> = Vec::new();
+        ga.evolve(&mut pop, |inds| {
+            inds.iter().map(|i| i.genome.iter().sum::<f64>()).collect()
+        });
+        assert!(pop.is_empty());
+    }
+
+    #[test]
+    fn ga_evolve_tiny_population_does_not_panic() {
+        // With a single survivor the "top half" pool is empty (len/2 == 0);
+        // previously this produced an empty gen_range and panicked. The pool
+        // must fall back to the single best individual and fill to pop_size.
+        let mut ga = GeneticAlgorithm::seeded(2);
+        ga.pop_size = 4;
+        ga.elitism = 1;
+        ga.mutation_rate = 0.0;
+        let mut pop = vec![Individual::new(vec![1.0, 2.0, 3.0])];
+        ga.evolve(&mut pop, |inds| {
+            inds.iter().map(|i| i.genome.iter().sum::<f64>()).collect()
+        });
+        assert_eq!(pop.len(), ga.pop_size);
+    }
+
+    #[test]
+    fn ga_evolve_empty_genomes_does_not_panic() {
+        // Zero-length genomes make the crossover point range (0..genome.len())
+        // empty; crossover must be skipped instead of panicking.
+        let mut ga = GeneticAlgorithm::seeded(3);
+        ga.pop_size = 6;
+        ga.elitism = 1;
+        ga.crossover_rate = 1.0;
+        ga.mutation_rate = 1.0;
+        let mut pop: Vec<Individual> = (0..ga.pop_size)
+            .map(|_| Individual::new(Vec::new()))
+            .collect();
+        ga.evolve(&mut pop, |inds| vec![0.0; inds.len()]);
+        assert_eq!(pop.len(), ga.pop_size);
+        for ind in &pop
+        {
+            assert!(ind.genome.is_empty());
+        }
     }
 
     #[test]

@@ -67,6 +67,11 @@ impl HMM {
     pub fn forward(&self, observations: &[usize]) -> (Vec<f64>, f64) {
         let t = observations.len();
         let n = self.n_states;
+        if t == 0
+        {
+            // An empty sequence has probability 1 (log 0.0) and no alpha table.
+            return (Vec::new(), 0.0);
+        }
         let mut log_alpha = vec![NEG_INF; t * n];
 
         for i in 0..n
@@ -101,6 +106,10 @@ impl HMM {
     pub fn backward(&self, observations: &[usize]) -> Vec<f64> {
         let t = observations.len();
         let n = self.n_states;
+        if t == 0
+        {
+            return Vec::new();
+        }
         let mut log_beta = vec![NEG_INF; t * n];
 
         for i in 0..n
@@ -135,6 +144,11 @@ impl HMM {
     pub fn viterbi(&self, observations: &[usize]) -> (Vec<usize>, f64) {
         let t = observations.len();
         let n = self.n_states;
+        if t == 0
+        {
+            // No observations => empty path with log-probability 0.0 (prob 1).
+            return (Vec::new(), 0.0);
+        }
         let mut log_delta = vec![NEG_INF; t * n];
         let mut psi = vec![0usize; t * n];
 
@@ -424,6 +438,26 @@ mod tests {
             ll,
             expected
         );
+    }
+
+    #[test]
+    fn hmm_handles_empty_observations() {
+        let hmm = weather_hmm();
+        let empty: Vec<usize> = Vec::new();
+
+        // Before the fix these panicked (index-out-of-bounds / usize underflow).
+        let (log_alpha, ll) = hmm.forward(&empty);
+        assert!(log_alpha.is_empty());
+        assert_eq!(ll, 0.0);
+
+        let log_beta = hmm.backward(&empty);
+        assert!(log_beta.is_empty());
+
+        let (states, log_prob) = hmm.viterbi(&empty);
+        assert!(states.is_empty());
+        assert_eq!(log_prob, 0.0);
+
+        assert_eq!(hmm.log_probability(&empty), 0.0);
     }
 
     #[test]

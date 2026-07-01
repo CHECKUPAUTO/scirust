@@ -1824,7 +1824,7 @@ fn match_pattern_impl(pattern: &Pattern, expr: &Expr, bindings: &mut Bindings) -
             Expr::Return(Some(re)) => match_pattern_impl(rp, re, bindings),
             _ => false,
         },
-        Pattern::Return(None) => matches!(expr, Expr::Return(_)),
+        Pattern::Return(None) => matches!(expr, Expr::Return(None)),
         Pattern::Repeat(_) => true,
         Pattern::Rest(_) => true,
     }
@@ -2041,13 +2041,11 @@ pub fn optimization_rules() -> Vec<Rule> {
             80,
             "x * 2 -> x << 1",
         ),
-        Rule::new(
-            "div-to-shr",
-            parse_pattern("(/ $x 2)").unwrap(),
-            parse_pattern("(>> $x 1)").unwrap(),
-            80,
-            "x / 2 -> x >> 1",
-        ),
+        // NOTE: `x / 2 -> x >> 1` is intentionally NOT a rule here. Because these
+        // patterns are untyped, `$x` may be a signed value, and signed integer
+        // division truncates toward zero (`-3 / 2 == -1`) while an arithmetic
+        // right shift floors (`-3 >> 1 == -2`). A purely syntactic rewrite would
+        // silently change results for negative operands, so it is unsound.
         Rule::new(
             "double-neg",
             parse_pattern("(! (! $x))").unwrap(),
@@ -2115,17 +2113,19 @@ fn try_const_fold(expr: &Expr) -> Option<Literal> {
             {
                 BinOpKind::Add => match (&l, &r)
                 {
-                    (Literal::Int(a), Literal::Int(b)) => Some(Literal::Int(a + b)),
+                    // Decline to fold on overflow instead of panicking (debug) or
+                    // silently wrapping (release); the original expression stays.
+                    (Literal::Int(a), Literal::Int(b)) => a.checked_add(*b).map(Literal::Int),
                     (a, b) => Some(Literal::Float(a.as_f64()? + b.as_f64()?)),
                 },
                 BinOpKind::Sub => match (&l, &r)
                 {
-                    (Literal::Int(a), Literal::Int(b)) => Some(Literal::Int(a - b)),
+                    (Literal::Int(a), Literal::Int(b)) => a.checked_sub(*b).map(Literal::Int),
                     (a, b) => Some(Literal::Float(a.as_f64()? - b.as_f64()?)),
                 },
                 BinOpKind::Mul => match (&l, &r)
                 {
-                    (Literal::Int(a), Literal::Int(b)) => Some(Literal::Int(a * b)),
+                    (Literal::Int(a), Literal::Int(b)) => a.checked_mul(*b).map(Literal::Int),
                     (a, b) => Some(Literal::Float(a.as_f64()? * b.as_f64()?)),
                 },
                 BinOpKind::Div =>
@@ -2137,13 +2137,15 @@ fn try_const_fold(expr: &Expr) -> Option<Literal> {
                     }
                     match (&l, &r)
                     {
-                        (Literal::Int(a), Literal::Int(b)) if *b != 0 => Some(Literal::Int(a / b)),
+                        // `checked_div` also guards `i64::MIN / -1`, which overflows.
+                        (Literal::Int(a), Literal::Int(b)) => a.checked_div(*b).map(Literal::Int),
                         (a, _b) => Some(Literal::Float(a.as_f64()? / rv)),
                     }
                 },
                 BinOpKind::Rem => match (&l, &r)
                 {
-                    (Literal::Int(a), Literal::Int(b)) if *b != 0 => Some(Literal::Int(a % b)),
+                    // `checked_rem` also guards `i64::MIN % -1`, which overflows.
+                    (Literal::Int(a), Literal::Int(b)) => a.checked_rem(*b).map(Literal::Int),
                     _ => None,
                 },
                 BinOpKind::Eq => Some(Literal::Bool(
@@ -2340,8 +2342,15 @@ pub fn common_subexpression_elimination(expr: &Expr) -> Expr {
     {
         Expr::Block(stmts) =>
         {
+            // Each produced item is a rewritten statement, optionally tagged with a
+            // temp binding `(name, value)` that must be introduced *before* it. A
+            // `let` binds only within its own `body` (see `Expr::Let`), so the temp
+            // cannot be emitted as a sibling statement or the use would be out of
+            // scope; instead we later nest the remaining statements inside the
+            // `let` body. Items are collected left-to-right so a temp is only
+            // reused after it has been defined.
             let mut seen: HashMap<String, String> = HashMap::new();
-            let mut new_stmts = Vec::new();
+            let mut items: Vec<(Option<(String, Expr)>, Expr)> = Vec::new();
             let mut counter = 0u64;
             for stmt in stmts
             {
@@ -2353,10 +2362,13 @@ pub fn common_subexpression_elimination(expr: &Expr) -> Expr {
                     {
                         if let Some(tmp) = seen.get(&val_str)
                         {
-                            new_stmts.push(Expr::Assign {
-                                name: name.clone(),
-                                value: Box::new(Expr::Var(tmp.clone())),
-                            });
+                            items.push((
+                                None,
+                                Expr::Assign {
+                                    name: name.clone(),
+                                    value: Box::new(Expr::Var(tmp.clone())),
+                                },
+                            ));
                             continue;
                         }
                         else if let std::collections::hash_map::Entry::Vacant(e) =
@@ -2364,23 +2376,37 @@ pub fn common_subexpression_elimination(expr: &Expr) -> Expr {
                         {
                             counter += 1;
                             let tmp_name = format!("__cse_tmp_{}", counter);
-                            new_stmts.push(Expr::Let {
-                                name: tmp_name.clone(),
-                                value: value.clone(),
-                                body: Box::new(Expr::Block(vec![])),
-                            });
                             e.insert(tmp_name.clone());
-                            new_stmts.push(Expr::Assign {
-                                name: name.clone(),
-                                value: Box::new(Expr::Var(tmp_name)),
-                            });
+                            items.push((
+                                Some((tmp_name.clone(), (**value).clone())),
+                                Expr::Assign {
+                                    name: name.clone(),
+                                    value: Box::new(Expr::Var(tmp_name)),
+                                },
+                            ));
                             continue;
                         }
                     }
                 }
-                new_stmts.push(processed);
+                items.push((None, processed));
             }
-            Expr::Block(new_stmts)
+            // Fold from the end so each temp `let` scopes over everything that
+            // follows it within this block.
+            let mut tail: Vec<Expr> = Vec::new();
+            for (temp, stmt) in items.into_iter().rev()
+            {
+                tail.insert(0, stmt);
+                if let Some((tmp_name, tmp_value)) = temp
+                {
+                    let body = Expr::Block(std::mem::take(&mut tail));
+                    tail.push(Expr::Let {
+                        name: tmp_name,
+                        value: Box::new(tmp_value),
+                        body: Box::new(body),
+                    });
+                }
+            }
+            Expr::Block(tail)
         },
         other => other.clone(),
     }
@@ -3209,14 +3235,31 @@ fn transpile_c(expr: &Expr, indent: usize) -> String {
         },
         Expr::For { var, iter, body } =>
         {
-            let iter_str = transpile_c(iter, 0);
             let body_str = transpile_c(body, indent);
+            // A Rust `for` iterates over a range or an iterable, neither of which
+            // maps to a bare `i < <iter>` comparison in C. Handle range literals
+            // (`lo..hi` / `lo..=hi`) precisely; for anything else fall back to a
+            // half-open `[0, <iter>)` count loop.
+            let (init, cond) = match iter.as_ref()
+            {
+                Expr::BinOp {
+                    op: BinOpKind::Range,
+                    left,
+                    right,
+                } => (transpile_c(left, 0), format!("{} < {}", var, transpile_c(right, 0))),
+                Expr::BinOp {
+                    op: BinOpKind::RangeInclusive,
+                    left,
+                    right,
+                } => (transpile_c(left, 0), format!("{} <= {}", var, transpile_c(right, 0))),
+                other => ("0".to_string(), format!("{} < {}", var, transpile_c(other, 0))),
+            };
             format!(
-                "{}for (int {} = 0; {} < {}; {}++) {}",
+                "{}for (int {} = {}; {}; {}++) {}",
                 pad,
                 var,
-                var,
-                iter_str,
+                init,
+                cond,
                 var,
                 body_str.trim()
             )
@@ -4484,5 +4527,141 @@ mod tests {
         let expr = parse_expr("(+ (+ 1 2) (* 3 4))").unwrap();
         let cost = cost_estimate(&expr);
         assert!(cost > 3);
+    }
+
+    // --- Audit-bug regression tests ---
+
+    #[test]
+    fn test_const_fold_add_overflow_does_not_panic() {
+        // Regression: folding `i64::MAX + 1` must not panic (debug) or silently
+        // wrap (release); it should decline to fold and leave the expression.
+        let expr = Expr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(Expr::Lit(Literal::Int(i64::MAX))),
+            right: Box::new(Expr::Lit(Literal::Int(1))),
+        };
+        assert_eq!(try_const_fold(&expr), None);
+    }
+
+    #[test]
+    fn test_const_fold_mul_and_sub_overflow_decline() {
+        let mul = Expr::BinOp {
+            op: BinOpKind::Mul,
+            left: Box::new(Expr::Lit(Literal::Int(i64::MAX))),
+            right: Box::new(Expr::Lit(Literal::Int(2))),
+        };
+        assert_eq!(try_const_fold(&mul), None);
+        let sub = Expr::BinOp {
+            op: BinOpKind::Sub,
+            left: Box::new(Expr::Lit(Literal::Int(i64::MIN))),
+            right: Box::new(Expr::Lit(Literal::Int(1))),
+        };
+        assert_eq!(try_const_fold(&sub), None);
+        // i64::MIN / -1 and i64::MIN % -1 also overflow.
+        let div = Expr::BinOp {
+            op: BinOpKind::Div,
+            left: Box::new(Expr::Lit(Literal::Int(i64::MIN))),
+            right: Box::new(Expr::Lit(Literal::Int(-1))),
+        };
+        assert_eq!(try_const_fold(&div), None);
+    }
+
+    #[test]
+    fn test_const_fold_add_in_range_still_works() {
+        let expr = Expr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(Expr::Lit(Literal::Int(2))),
+            right: Box::new(Expr::Lit(Literal::Int(3))),
+        };
+        assert_eq!(try_const_fold(&expr), Some(Literal::Int(5)));
+    }
+
+    #[test]
+    fn test_no_div_to_shr_rule() {
+        // Regression: `x / 2 -> x >> 1` is unsound for signed negatives
+        // (-3 / 2 == -1 but -3 >> 1 == -2), so the rule must not exist.
+        assert!(optimization_rules().iter().all(|r| r.name != "div-to-shr"));
+    }
+
+    #[test]
+    fn test_transpile_c_for_over_range() {
+        // Regression: a `for i in 0..n` must not emit `i < (0 .. n)`.
+        let expr = parse_expr("(for i (.. 0 n) (assign acc (+ acc i)))").unwrap();
+        let c = transpile_rust_to_c(&expr);
+        assert!(c.contains("for (int i = 0; i < n; i++)"), "got: {}", c);
+        assert!(!c.contains(".."), "range leaked into C output: {}", c);
+    }
+
+    #[test]
+    fn test_transpile_c_for_over_inclusive_range() {
+        let expr = parse_expr("(for i (..= 1 n) (assign acc (+ acc i)))").unwrap();
+        let c = transpile_rust_to_c(&expr);
+        assert!(c.contains("for (int i = 1; i <= n; i++)"), "got: {}", c);
+    }
+
+    #[test]
+    fn test_cse_temp_is_in_scope() {
+        // Regression: the CSE temp must be introduced so the assignments that
+        // reference it are inside its `let` body (in scope), not dangling
+        // siblings.
+        let block = Expr::Block(vec![
+            Expr::Assign {
+                name: "a".to_string(),
+                value: Box::new(parse_expr("(* x y)").unwrap()),
+            },
+            Expr::Assign {
+                name: "b".to_string(),
+                value: Box::new(parse_expr("(* x y)").unwrap()),
+            },
+        ]);
+        let result = common_subexpression_elimination(&block);
+        // The whole block must reduce to a single `let __cse_tmp_1 = ...` whose
+        // body holds both assignments referencing the temp.
+        match &result
+        {
+            Expr::Block(stmts) =>
+            {
+                assert_eq!(stmts.len(), 1, "expected a single scoping let, got: {:?}", stmts);
+                match &stmts[0]
+                {
+                    Expr::Let { name, body, .. } =>
+                    {
+                        assert_eq!(name, "__cse_tmp_1");
+                        match body.as_ref()
+                        {
+                            Expr::Block(inner) =>
+                            {
+                                assert_eq!(inner.len(), 2);
+                                for stmt in inner
+                                {
+                                    match stmt
+                                    {
+                                        Expr::Assign { value, .. } => assert_eq!(
+                                            value.as_ref(),
+                                            &Expr::Var("__cse_tmp_1".to_string())
+                                        ),
+                                        other => panic!("expected assign, got {:?}", other),
+                                    }
+                                }
+                            },
+                            other => panic!("expected block body, got {:?}", other),
+                        }
+                    },
+                    other => panic!("expected let, got {:?}", other),
+                }
+            },
+            other => panic!("expected block, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_pattern_return_none_does_not_match_return_some() {
+        // Regression: Pattern::Return(None) must match only Expr::Return(None),
+        // mirroring how Pattern::If handles a missing else branch.
+        let pat = Pattern::Return(None);
+        let ret_some = Expr::Return(Some(Box::new(Expr::Lit(Literal::Int(1)))));
+        let ret_none = Expr::Return(None);
+        assert!(match_pattern(&pat, &ret_some).is_none());
+        assert!(match_pattern(&pat, &ret_none).is_some());
     }
 }

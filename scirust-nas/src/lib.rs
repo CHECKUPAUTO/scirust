@@ -194,7 +194,10 @@ impl NasSearch {
             + ((seed as usize) % (self.config.max_layers - self.config.min_layers + 1));
 
         let mut layers = Vec::new();
-        let mut rng = seed;
+        // xorshift is stuck at zero if the state is ever 0, which would make
+        // every layer identical (all `Linear(min_hidden, ReLU)`). Seed a
+        // nonzero constant for the degenerate input so the PRNG still varies.
+        let mut rng = if seed == 0 { 0x9E3779B97F4A7C15 } else { seed };
 
         for _i in 0..n_layers
         {
@@ -278,7 +281,9 @@ impl NasSearch {
         self.population.clear();
         for i in 0..pop_size
         {
-            let mut arch = self.random_architecture((self.config.seed + i as u64) * 0x9E3779B9);
+            let mut arch = self.random_architecture(
+                self.config.seed.wrapping_add(i as u64).wrapping_mul(0x9E3779B9),
+            );
             arch.fitness = self.evaluate(&arch);
             self.population.push(arch);
             self.evaluations += 1;
@@ -314,7 +319,11 @@ impl NasSearch {
                 if !child.layers.is_empty()
                 {
                     let idx = (gen * pop_size + i) % child.layers.len();
-                    let seed = (self.config.seed + (gen * pop_size + i) as u64) * 0x9E3779B9;
+                    let seed = self
+                        .config
+                        .seed
+                        .wrapping_add((gen * pop_size + i) as u64)
+                        .wrapping_mul(0x9E3779B9);
                     let rng = seed ^ (seed << 13);
                     let new_dim = self.config.min_hidden
                         + ((rng as usize) % (self.config.max_hidden - self.config.min_hidden + 1));
@@ -490,6 +499,44 @@ mod tests {
                 refit
             );
         }
+    }
+
+    #[test]
+    fn random_architecture_zero_seed_is_not_degenerate() {
+        // Before the fix, a zero seed left the xorshift state stuck at 0, so
+        // every layer collapsed to the same `Linear(min_hidden, ReLU)`.
+        let search = NasSearch::new(NasConfig::default());
+        let arch = search.random_architecture(0);
+        assert!(!arch.layers.is_empty());
+        // At least two distinct layer specs (dim or activation must vary).
+        let distinct = arch.layers.iter().any(|l| {
+            !matches!(
+                l,
+                LayerSpec::Linear {
+                    out_features,
+                    activation: ActivationChoice::ReLU,
+                } if *out_features == search.config.min_hidden
+            )
+        });
+        assert!(
+            distinct,
+            "zero-seed architecture is degenerate (all identical): {:?}",
+            arch.layers
+        );
+    }
+
+    #[test]
+    fn seed_arithmetic_does_not_overflow_on_extreme_seed() {
+        // `seed` is a public u64 field; a large value used to overflow the
+        // `+`/`*` seed derivation and panic in debug builds. It must now run.
+        let cfg = NasConfig {
+            seed: u64::MAX,
+            max_models: 40,
+            ..NasConfig::default()
+        };
+        let mut search = NasSearch::new(cfg);
+        let population = search.evolve(3, 8).unwrap();
+        assert!(!population.is_empty());
     }
 
     #[test]

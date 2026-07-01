@@ -29,7 +29,15 @@ pub fn certified_reach(
     horizon: usize,
 ) -> ReachResult {
     let in_envelope = |iv: &Interval| -> bool {
-        iv.lo.iter().zip(lo).all(|(c, l)| c >= l) && iv.hi.iter().zip(hi).all(|(c, h)| c <= h)
+        // `zip` stops at the shorter iterator, so a state dimension beyond
+        // `lo.len()`/`hi.len()` would be silently ignored and could leave the
+        // envelope while we still report containment. Containment is only a
+        // proof when the envelope constrains *every* state coordinate, so a
+        // dimension mismatch means we cannot certify safety.
+        iv.lo.len() == lo.len()
+            && iv.hi.len() == hi.len()
+            && iv.lo.iter().zip(lo).all(|(c, l)| c >= l)
+            && iv.hi.iter().zip(hi).all(|(c, h)| c <= h)
     };
     let mut cur = x0.clone();
     let mut boxes = vec![cur.clone()];
@@ -83,6 +91,26 @@ mod tests {
         let r = certified_reach(&net, &x0, &[-2.0], &[2.0], 10);
         assert!(!r.safe);
         assert_eq!(r.first_violation, Some(2), "boxes {:?}", r.boxes);
+    }
+
+    #[test]
+    fn envelope_shorter_than_state_is_not_certified_safe() {
+        // A 2-D initial box whose second coordinate [10, 12] is far outside any
+        // reasonable envelope, but the envelope only specifies bounds for the
+        // first coordinate. The truncating `zip` would ignore the second
+        // dimension and falsely report safe; a sound check must not.
+        let net = scalar_map(0.5);
+        let x0 = Interval {
+            lo: vec![-1.0, 10.0],
+            hi: vec![1.0, 12.0],
+        };
+        // Envelope covers only the first coordinate.
+        let r = certified_reach(&net, &x0, &[-2.0], &[2.0], 0);
+        assert!(
+            !r.safe,
+            "envelope shorter than state must not be certified safe: {r:?}"
+        );
+        assert_eq!(r.first_violation, Some(0));
     }
 
     #[test]

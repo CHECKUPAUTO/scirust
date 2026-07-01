@@ -73,6 +73,10 @@ impl<'a> CausalReranker<'a> {
     /// in either direction — `node` is an ancestor of a focus node, or a
     /// descendant of one), `0.0` if unreachable in either direction.
     fn proximity(&self, node: usize, focus: &HashSet<usize>) -> f32 {
+        if node >= self.dag.n_nodes()
+        {
+            return 0.0;
+        }
         if focus.contains(&node)
         {
             return 1.0;
@@ -103,6 +107,11 @@ impl<'a> CausalReranker<'a> {
     /// BFS shortest directed distance from `src` to `dst` (forward, along
     /// child edges). `Some(0)` if `src == dst`, `None` if unreachable.
     fn bfs_dist(&self, src: usize, dst: usize) -> Option<usize> {
+        // Out-of-range endpoints are unreachable (and would panic on indexing).
+        if src >= self.dag.n_nodes() || dst >= self.dag.n_nodes()
+        {
+            return None;
+        }
         if src == dst
         {
             return Some(0);
@@ -135,9 +144,18 @@ impl<'a> CausalReranker<'a> {
     /// `[0, 1]` (Jaccard). Documents that share the same causal ancestry as the
     /// focus are likely co-effects of a common cause.
     fn intervention_overlap(&self, node: usize, focus: &HashSet<usize>) -> f32 {
-        let a = self.dag.intervention_ancestors(node);
+        // Out-of-range nodes have no ancestry (and would panic on indexing).
+        let n = self.dag.n_nodes();
+        let a = if node < n
+        {
+            self.dag.intervention_ancestors(node)
+        }
+        else
+        {
+            HashSet::new()
+        };
         let mut b = HashSet::new();
-        for &f in focus
+        for &f in focus.iter().filter(|&&f| f < n)
         {
             for x in self.dag.intervention_ancestors(f)
             {
@@ -264,5 +282,33 @@ mod tests {
         });
         let ranked = reranker.rerank(&idx.search(&[1.0, 0.0], 2), &focus, &id_to_node);
         assert_eq!(ranked[0].id, 1); // similarity wins
+    }
+
+    #[test]
+    fn out_of_range_node_indices_do_not_panic() {
+        // Regression: a document mapped to a node index >= dag.n_nodes(), and a
+        // focus set containing an out-of-range node, must be treated as having
+        // no causal signal (proximity/overlap 0.0) rather than panicking on an
+        // out-of-bounds Vec index inside the DAG's BFS / ancestor walks.
+        let mut idx = DenseIndex::new(2);
+        doc(&mut idx, 1, &[1.0, 0.0]); // maps to a valid node
+        doc(&mut idx, 2, &[1.0, 0.0]); // maps to an out-of-range node
+        let mut dag = CausalDag::new(2);
+        dag.add_directed_edge(0, 1).unwrap();
+        let mut id_to_node = HashMap::new();
+        id_to_node.insert(1, 0);
+        id_to_node.insert(2, 99); // 99 >= n_nodes (2) — out of range
+        // Focus references both an in-range and an out-of-range node.
+        let focus: HashSet<usize> = [1, 42].into_iter().collect();
+        let reranker = CausalReranker::new(&dag);
+        let ranked = reranker.rerank(&idx.search(&[1.0, 0.0], 2), &focus, &id_to_node);
+        assert_eq!(ranked.len(), 2);
+        // The out-of-range document (id 2) gets no causal signal.
+        let doc2 = ranked.iter().find(|r| r.id == 2).unwrap();
+        assert!((doc2.causal_proximity - 0.0).abs() < 1e-6);
+        assert!((doc2.intervention_overlap - 0.0).abs() < 1e-6);
+        // The in-range ancestor (id 1, node 0 -> focus node 1) still scores.
+        let doc1 = ranked.iter().find(|r| r.id == 1).unwrap();
+        assert!((doc1.causal_proximity - 0.5).abs() < 1e-6);
     }
 }

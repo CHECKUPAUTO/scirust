@@ -12,10 +12,11 @@ impl TensorND {
     /// Create a tensor from data and shape. Returns an error if `data.len()`
     /// does not match the product of `shape`.
     pub fn try_new(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape
-            .iter()
-            .product::<usize>()
-            .max(if shape.is_empty() { 1 } else { 0 });
+        let expected = shape_product(&shape).ok_or_else(|| {
+            format!(
+                "TensorND::try_new: product of shape {shape:?} overflows usize"
+            )
+        })?;
         if data.len() != expected
         {
             return Err(format!(
@@ -40,10 +41,8 @@ impl TensorND {
 
     /// Zero-filled tensor of the given shape.
     pub fn zeros(shape: Vec<usize>) -> Self {
-        let n: usize = shape
-            .iter()
-            .product::<usize>()
-            .max(if shape.is_empty() { 1 } else { 0 });
+        let n = shape_product(&shape)
+            .unwrap_or_else(|| panic!("TensorND::zeros: product of shape {shape:?} overflows usize"));
         Self::new(vec![0.0; n], shape)
     }
 
@@ -78,10 +77,9 @@ impl TensorND {
 
     /// Reshape without copying data; errors if the element count changes.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<TensorND, String> {
-        let n: usize = new_shape
-            .iter()
-            .product::<usize>()
-            .max(if new_shape.is_empty() { 1 } else { 0 });
+        let n = shape_product(&new_shape).ok_or_else(|| {
+            format!("reshape: product of shape {new_shape:?} overflows usize")
+        })?;
         if n != self.data.len()
         {
             return Err(format!(
@@ -92,6 +90,14 @@ impl TensorND {
         }
         Ok(TensorND::new(self.data.clone(), new_shape))
     }
+}
+
+/// Number of elements described by `shape`, i.e. the product of its dimensions.
+///
+/// Returns `Some(1)` for an empty (scalar) shape and `None` if the product
+/// overflows `usize` instead of silently wrapping (release) or panicking (debug).
+fn shape_product(shape: &[usize]) -> Option<usize> {
+    shape.iter().try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
 
 /// Row-major strides for `shape`. Handles 0- and 1-D shapes without underflow.
@@ -135,5 +141,30 @@ mod tests {
         let r = t.reshape(vec![3, 2]).unwrap();
         assert_eq!(r.get(&[2, 1]), 6.0);
         assert!(t.reshape(vec![5]).is_err());
+    }
+
+    #[test]
+    fn shape_product_semantics() {
+        // Empty (scalar) shape has exactly one element.
+        assert_eq!(shape_product(&[]), Some(1));
+        // A zero dimension yields an empty tensor.
+        assert_eq!(shape_product(&[2, 0, 3]), Some(0));
+        assert_eq!(shape_product(&[2, 3, 4]), Some(24));
+        // An overflowing product is reported rather than wrapped/panicked.
+        assert_eq!(shape_product(&[usize::MAX, 2]), None);
+    }
+
+    #[test]
+    fn try_new_rejects_overflowing_shape() {
+        // Previously this wrapped the product (release) or panicked on overflow
+        // (debug); now it returns a clean error instead of touching `data.len()`.
+        let err = TensorND::try_new(vec![0.0], vec![usize::MAX, 2]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn reshape_rejects_overflowing_shape() {
+        let t = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        assert!(t.reshape(vec![usize::MAX, 2]).is_err());
     }
 }

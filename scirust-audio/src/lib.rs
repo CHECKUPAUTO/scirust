@@ -25,6 +25,10 @@ impl AudioSignal {
     }
 
     pub fn rms(&self) -> f64 {
+        if self.samples.is_empty()
+        {
+            return 0.0;
+        }
         let sum: f64 = self.samples.iter().map(|x| x * x).sum();
         (sum / self.samples.len() as f64).sqrt()
     }
@@ -76,6 +80,12 @@ pub fn goertzel_magnitude(signal: &[f64], sample_rate: usize, freq: f64) -> f64 
 /// Compute magnitude spectrum using DFT.
 pub fn magnitude_spectrum(signal: &[f64]) -> Vec<f64> {
     let n = signal.len();
+    // An empty signal has no spectrum. Without this guard the `k == 0` bin below
+    // computes `sqrt(0) / 0 == NaN`, poisoning every downstream feature.
+    if n == 0
+    {
+        return Vec::new();
+    }
     let mut magnitudes = Vec::with_capacity(n / 2 + 1);
 
     for k in 0..=n / 2
@@ -863,6 +873,17 @@ mod tests {
         assert!((zcr - 440.0 / 3999.0).abs() < 5e-3);
     }
 
+    #[test]
+    fn test_rms_empty_is_zero_not_nan() {
+        // Regression: RMS of an empty signal must be a finite 0.0, not NaN
+        // (0.0 / 0.0). Peak of an empty signal is likewise 0.0 by construction.
+        let empty = AudioSignal::new(Vec::new(), 8000);
+        let rms = empty.rms();
+        assert!(rms.is_finite(), "rms should be finite, got {rms}");
+        assert_eq!(rms, 0.0);
+        assert_eq!(empty.peak(), 0.0);
+    }
+
     // ── DFT / spectra ──────────────────────────────────────────────────────
 
     #[test]
@@ -880,6 +901,18 @@ mod tests {
                 assert!(m < 1e-9, "bin {k} should be ~0, got {m}");
             }
         }
+    }
+
+    #[test]
+    fn test_magnitude_spectrum_empty_input() {
+        // Regression: an empty signal must yield an empty spectrum, never a
+        // NaN-poisoned bin (the old `k == 0` path computed sqrt(0) / 0 == NaN).
+        let spectrum = magnitude_spectrum(&[]);
+        assert!(spectrum.is_empty(), "empty input -> empty spectrum");
+        // Downstream spectral features stay finite on empty input.
+        assert!(spectral_centroid(&[], 8000).is_finite());
+        assert!(spectral_flatness(&[]).is_finite());
+        assert!(spectral_entropy(&[]).is_finite());
     }
 
     #[test]

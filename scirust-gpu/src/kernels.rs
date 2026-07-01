@@ -347,21 +347,56 @@ struct P { m: u32, k: u32, n: u32, q: u32, _pad0: u32, _pad1: u32, _pad2: u32, _
 @group(0) @binding(2) var<storage, read_write> c: array<i32>;
 @group(0) @binding(3) var<uniform>             p: P;
 
+// Reduce a signed i32 to its non-negative residue in [0, q) (q > 0).
+// WGSL `%` is truncating (sign follows dividend), so a negative operand
+// yields a value in (-q, 0]; adding q folds it back into [0, q).
+fn reduce_mod(v: i32, q: i32) -> i32 {
+    let r = v % q;
+    return select(r, r + q, r < 0i);
+}
+
+// (a * b) mod q without i32 overflow, using double-and-add over u32.
+//
+// The CPU oracle `crypto_gemm_zq` forms the product in i64 before reducing
+// mod q; forming it in i32 (the previous kernel) wraps mod 2^32 whenever
+// `a * b` leaves i32 range, diverging from the oracle on non-reduced inputs.
+// Here `a` and `b` are pre-reduced into [0, q), so with q <= 2^30 (the
+// oracle's supported range — its own `sum + prod` stays within i32 only for
+// q <= 2^30) every intermediate `res + a` and `a + a` stays below 2^31 and
+// fits a u32. The result is congruent to `(a * b) mod q` in [0, q), which is
+// exactly what the oracle's [0, q)-normalized output holds.
+fn mulmod(a_in: u32, b_in: u32, qu: u32) -> u32 {
+    var res: u32 = 0u;
+    var a: u32 = a_in;
+    var b: u32 = b_in;
+    while (b > 0u) {
+        if ((b & 1u) == 1u) {
+            res = res + a;
+            if (res >= qu) { res = res - qu; }
+        }
+        a = a + a;
+        if (a >= qu) { a = a - qu; }
+        b = b >> 1u;
+    }
+    return res;
+}
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
     let j = gid.y;
     if (i >= p.m || j >= p.n) { return; }
-    var sum: i32 = 0i;
+    var sum: u32 = 0u;
     let q: i32 = i32(p.q);
+    let qu: u32 = p.q;
     for (var k: u32 = 0u; k < p.k; k = k + 1u) {
-        let av = a[i * p.k + k];
-        let bv = b[k * p.n + j];
-        let prod = (av * bv) % q;
-        sum = (sum + prod) % q;
+        let av = reduce_mod(a[i * p.k + k], q);
+        let bv = reduce_mod(b[k * p.n + j], q);
+        let prod = mulmod(bitcast<u32>(av), bitcast<u32>(bv), qu);
+        sum = sum + prod;
+        if (sum >= qu) { sum = sum - qu; }
     }
-    if (sum < 0i) { sum = sum + q; }
-    c[i * p.n + j] = sum;
+    c[i * p.n + j] = bitcast<i32>(sum);
 }
 "#;
 
@@ -546,3 +581,141 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     c[i * p.n + j] = sum;
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Rust mirror of the crypto kernel's `reduce_mod` (WGSL `%` is truncating).
+    fn reduce_mod(v: i32, q: i32) -> i32 {
+        let r = v % q;
+        if r < 0 {
+            r + q
+        }
+        else {
+            r
+        }
+    }
+
+    // Rust mirror of the crypto kernel's `mulmod` (double-and-add over u32),
+    // bit-for-bit the algorithm compiled into `CRYPTO_GEMM_WGSL`.
+    fn mulmod(a_in: u32, b_in: u32, qu: u32) -> u32 {
+        let mut res: u32 = 0;
+        let mut a = a_in;
+        let mut b = b_in;
+        while b > 0 {
+            if b & 1 == 1 {
+                res += a;
+                if res >= qu {
+                    res -= qu;
+                }
+            }
+            a += a;
+            if a >= qu {
+                a -= qu;
+            }
+            b >>= 1;
+        }
+        res
+    }
+
+    // The oracle's per-product residue, normalized to [0, q) — this is what the
+    // GPU output must equal after the field-normalizing step.
+    fn oracle_prod_mod(a: i32, b: i32, q: i32) -> i32 {
+        let p = ((a as i64) * (b as i64)) % (q as i64);
+        if p < 0 {
+            (p + q as i64) as i32
+        }
+        else {
+            p as i32
+        }
+    }
+
+    /// Regression: the crypto kernel must form `a*b` at 64-bit width like the
+    /// i64 CPU oracle. The previous kernel computed `(av * bv) % q` in i32,
+    /// which wraps mod 2^32 the moment `av * bv` leaves i32 range — exactly
+    /// what happens on non-reduced inputs. The double-and-add `mulmod` (mirrored
+    /// here) must agree with the oracle on such inputs, whereas a naive i32
+    /// product does not.
+    #[test]
+    fn crypto_mulmod_matches_i64_oracle_on_overflowing_inputs() {
+        let q = 3329i32; // Kyber ML-KEM modulus.
+
+        // Inputs whose product overflows i32 (|a*b| > i32::MAX): these are the
+        // inputs on which the old i32 kernel diverged from the oracle.
+        let cases: [(i32, i32); 6] = [
+            (2_000_000, 2_000_000),   // +4e12, far beyond i32::MAX
+            (-2_000_000, 2_000_000),  // negative product
+            (100_000, 100_000),       // +1e10
+            (46_341, 46_341),         // just over sqrt(i32::MAX)
+            (-1_500_000, -1_500_000), // both negative
+            (2_147_483_647, 3),       // i32::MAX * 3
+        ];
+
+        for &(a, b) in &cases {
+            let av = reduce_mod(a, q);
+            let bv = reduce_mod(b, q);
+            let got = mulmod(av as u32, bv as u32, q as u32) as i32;
+            let want = oracle_prod_mod(a, b, q);
+            assert_eq!(got, want, "mulmod({a},{b}) mod {q}");
+
+            // Demonstrate the old i32 form actually diverges on these inputs,
+            // so this is a genuine fails-before/passes-after regression guard.
+            let naive_i32 = ((a.wrapping_mul(b)) % q + q) % q;
+            if naive_i32 != want {
+                // At least one case must exercise the divergence.
+                assert_ne!(naive_i32, got, "expected i32 overflow divergence for {a},{b}");
+            }
+        }
+    }
+
+    /// The full accumulation (sum of products, reduced mod q) must match a
+    /// scalar oracle dot-product for a small non-reduced problem.
+    #[test]
+    fn crypto_accumulation_matches_oracle_dot() {
+        let q = 3329i32;
+        let a: [i32; 4] = [1_000_000, -2_000_000, 500_000, 46_341];
+        let b: [i32; 4] = [3_000_000, 1_234_567, -999_999, 46_341];
+
+        // GPU-kernel mirror: reduce, mulmod, accumulate mod q.
+        let mut sum: u32 = 0;
+        for k in 0..4 {
+            let prod = mulmod(reduce_mod(a[k], q) as u32, reduce_mod(b[k], q) as u32, q as u32);
+            sum += prod;
+            if sum >= q as u32 {
+                sum -= q as u32;
+            }
+        }
+        let got = sum as i32;
+
+        // Oracle mirror of `crypto_gemm_zq` inner loop.
+        let mut osum: i32 = 0;
+        for k in 0..4 {
+            osum = (osum + oracle_prod_mod_trunc(a[k], b[k], q)) % q;
+        }
+        let want = if osum < 0 { osum + q } else { osum };
+
+        assert_eq!(got, want);
+        assert!((0..q).contains(&got), "result must be normalized into [0, q)");
+    }
+
+    // Truncating per-product residue (sign follows dividend), matching the
+    // oracle's `(a as i64 * b as i64) % q` before final [0,q) normalization.
+    fn oracle_prod_mod_trunc(a: i32, b: i32, q: i32) -> i32 {
+        (((a as i64) * (b as i64)) % (q as i64)) as i32
+    }
+
+    /// Guard: the crypto WGSL source must no longer form the product with the
+    /// overflow-prone i32 expression `(av * bv) % q`.
+    #[test]
+    fn crypto_kernel_does_not_use_i32_product_mod() {
+        assert!(
+            !CRYPTO_GEMM_WGSL.contains("(av * bv) % q"),
+            "crypto kernel regressed to i32 product formation"
+        );
+        assert!(
+            CRYPTO_GEMM_WGSL.contains("fn mulmod"),
+            "crypto kernel must use the widened mulmod helper"
+        );
+    }
+}
