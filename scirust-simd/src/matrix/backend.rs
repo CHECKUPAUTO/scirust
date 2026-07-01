@@ -69,15 +69,35 @@ impl SimdBackend for ScalarBackend {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn sgemm_f32(
         &self,
-        _alpha: f32,
-        _a: MatrixView<f32>,
-        _b: MatrixView<f32>,
-        _beta: f32,
-        _c: MatrixViewMut<f32>,
+        alpha: f32,
+        a: MatrixView<f32>,
+        b: MatrixView<f32>,
+        beta: f32,
+        mut c: MatrixViewMut<f32>,
     ) {
-        // Naive triple-loop GEMM — correct but slow
+        // Naive triple-loop GEMM: C = alpha * A(m×k) * B(k×n) + beta * C(m×n).
+        // (Was an empty no-op, so every backend that delegates here silently left
+        // C unchanged — matrix products were wrong.)
+        let m = a.rows();
+        let k = a.cols();
+        let n = b.cols();
+        for i in 0..m
+        {
+            let a_row = a.row_slice(i).expect("A row");
+            let c_row = c.row_slice_mut(i).expect("C row");
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for p in 0..k
+                {
+                    acc += a_row[p] * b.row_slice(p).expect("B row")[j];
+                }
+                c_row[j] = alpha * acc + beta * c_row[j];
+            }
+        }
     }
 
     fn relu_f32(&self, v: &mut [f32]) {
@@ -134,3 +154,26 @@ pub struct Avx2Backend;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sse2Backend;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::matrix::view::{MatrixView, MatrixViewMut};
+
+    #[test]
+    fn scalar_sgemm_computes_alpha_ab_plus_beta_c() {
+        // A (2x3), B (3x2), C (2x2). A*B = [[58,64],[139,154]].
+        let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let b = [7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let mut c = [1.0f32, 1.0, 1.0, 1.0];
+        ScalarBackend.sgemm_f32(
+            2.0,
+            MatrixView::new(&a, 2, 3),
+            MatrixView::new(&b, 3, 2),
+            3.0,
+            MatrixViewMut::new(&mut c, 2, 2),
+        );
+        // 2*A*B + 3*C = [[119,131],[281,311]] (pre-fix this stayed [1,1,1,1]).
+        assert_eq!(c, [119.0, 131.0, 281.0, 311.0]);
+    }
+}

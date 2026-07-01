@@ -69,6 +69,18 @@ impl SimplexMonitor {
                 .all(|(&f, (&l, &h))| f >= l && f <= h),
             "fallback action must lie inside the safe envelope"
         );
+        // The envelope must cover EVERY output dimension of the network. Without
+        // this, a shorter envelope would silently leave the extra output dims
+        // unchecked (the containment test `zip`s to the shorter side), so the
+        // monitor could "trust" an action outside the envelope on those dims —
+        // defeating the module's core safety guarantee.
+        assert_eq!(
+            net.output_dim(),
+            lo.len(),
+            "SimplexMonitor: envelope dim ({}) must match network output dim ({})",
+            lo.len(),
+            net.output_dim()
+        );
         Self {
             net,
             lo,
@@ -78,8 +90,16 @@ impl SimplexMonitor {
     }
 
     /// Whether a certified output box lies fully inside the safe envelope.
+    ///
+    /// Fail-safe: the certified box must have exactly the envelope's
+    /// dimensionality. A box with a different length is never contained — this
+    /// prevents `zip` from silently skipping unchecked output dimensions (which
+    /// would let an out-of-envelope action be trusted). `SimplexMonitor::new`
+    /// already enforces the match, so this is defense in depth.
     fn envelope_contains(&self, out: &Interval) -> bool {
-        out.lo.iter().zip(&self.lo).all(|(o, l)| o >= l)
+        out.lo.len() == self.lo.len()
+            && out.hi.len() == self.hi.len()
+            && out.lo.iter().zip(&self.lo).all(|(o, l)| o >= l)
             && out.hi.iter().zip(&self.hi).all(|(o, h)| o <= h)
     }
 
@@ -241,5 +261,42 @@ mod tests {
             }
             x0 += 0.5;
         }
+    }
+
+    // net(x) = [x0, 100·x1] — a 2-output affine layer (no ReLU on the last layer).
+    fn two_output_net() -> IbpMlp {
+        IbpMlp::new(vec![IbpLinear::new(
+            vec![1.0, 0.0, 0.0, 100.0],
+            vec![0.0, 0.0],
+            2,
+            2,
+        )])
+    }
+
+    // Regression for the envelope-truncation bug: a length-1 envelope must NOT be
+    // accepted for a 2-output network (it would leave output dim 1 unchecked and
+    // let an out-of-envelope action be "trusted"). Construction must reject it.
+    #[test]
+    #[should_panic(expected = "output dim")]
+    fn new_rejects_envelope_shorter_than_network_output() {
+        let _ = SimplexMonitor::new(two_output_net(), vec![-2.0], vec![2.0], vec![0.0]);
+    }
+
+    // Every output dimension is actually checked: y[1] = 100·x1 leaves the
+    // envelope even though y[0] is inside, so the decision must fall back.
+    #[test]
+    fn every_output_dimension_is_checked() {
+        let m = SimplexMonitor::new(
+            two_output_net(),
+            vec![-2.0, -2.0],
+            vec![2.0, 2.0],
+            vec![0.0, 0.0],
+        );
+        let d = m.decide(&[0.5, 0.5], 0.0); // y = [0.5, 50.0]
+        assert!(
+            !d.is_trusted(),
+            "dim 1 (50) is outside [-2,2]; must fall back"
+        );
+        assert_eq!(d.output(), &[0.0, 0.0]);
     }
 }

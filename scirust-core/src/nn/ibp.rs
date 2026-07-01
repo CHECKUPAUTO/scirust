@@ -144,6 +144,14 @@ impl IbpMlp {
         Self { layers }
     }
 
+    /// The network's output dimensionality (units of the last affine layer).
+    pub fn output_dim(&self) -> usize {
+        self.layers
+            .last()
+            .expect("IbpMlp: needs at least one layer")
+            .out_f
+    }
+
     /// Concrete forward over the whole network.
     pub fn forward(&self, x: &[f32]) -> Vec<f32> {
         let mut cur = x.to_vec();
