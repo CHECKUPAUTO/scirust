@@ -2033,7 +2033,11 @@ mod tests {
         for s in &scores
         {
             assert!((0.0..=1.0).contains(s), "score out of range: {}", s);
-            assert!((s - 0.5).abs() < 1e-12, "root-leaf score should be 0.5: {}", s);
+            assert!(
+                (s - 0.5).abs() < 1e-12,
+                "root-leaf score should be 0.5: {}",
+                s
+            );
         }
     }
 

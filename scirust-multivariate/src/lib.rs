@@ -1544,11 +1544,7 @@ mod tests {
     fn pca_constant_data_no_nan_ratios() {
         // Constant columns => zero total variance. The explained-variance
         // ratios must be finite (0.0), not NaN from a divide-by-zero.
-        let data = Matrix::from_slice(&[
-            &[3.0, 7.0],
-            &[3.0, 7.0],
-            &[3.0, 7.0],
-        ]);
+        let data = Matrix::from_slice(&[&[3.0, 7.0], &[3.0, 7.0], &[3.0, 7.0]]);
         let pca = pca_fit(&data);
         for &r in &pca.explained_variance_ratio
         {

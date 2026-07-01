@@ -311,9 +311,12 @@ mod tests {
             .map(|ctx| {
                 thread::spawn(move || {
                     let mut grads = HashMap::new();
-                    let v = if ctx.rank == 0 {
+                    let v = if ctx.rank == 0
+                    {
                         vec![1.0f32, 2.0]
-                    } else {
+                    }
+                    else
+                    {
                         vec![10.0f32, 20.0, 30.0]
                     };
                     grads.insert("g".to_string(), v);

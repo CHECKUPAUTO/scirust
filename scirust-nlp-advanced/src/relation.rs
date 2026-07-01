@@ -727,7 +727,10 @@ mod tests {
             .map(String::from)
             .collect();
         let (subj, obj) = pat.matches(&sentence).expect("should match");
-        assert!(!subj.is_empty(), "subject placeholder must capture >= 1 token");
+        assert!(
+            !subj.is_empty(),
+            "subject placeholder must capture >= 1 token"
+        );
         // Anchor must be the first `is` that leaves a non-empty subject.
         assert_eq!(subj, "is really Alice");
         assert_eq!(obj, "happy");

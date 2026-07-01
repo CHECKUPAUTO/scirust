@@ -512,8 +512,7 @@ mod tests {
         // Baseline noise of 1.0 everywhere → RMS ≈ 1.0 regardless of length,
         // so a 1x peak of 12.0 gives ratio ≈ 12 (>> 5.0). The buggy energy
         // norm would give 12 / sqrt(~1143) ≈ 0.35 (< 5.0) → no detection.
-        let spectrum =
-            make_synthetic_spectrum(1000, &[(20, 12.0), (40, 1.0), (60, 1.0)]);
+        let spectrum = make_synthetic_spectrum(1000, &[(20, 12.0), (40, 1.0), (60, 1.0)]);
         let det = ImbalanceDetector::new(20.0, 5.0, 1.0);
         let report = det.detect(&spectrum, 2000.0, 0.0);
         assert!(
