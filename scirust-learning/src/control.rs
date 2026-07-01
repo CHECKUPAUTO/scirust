@@ -180,6 +180,7 @@ impl KalmanFilter {
     }
 
     /// Update the state with a measurement z
+    #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, z: &[f64]) {
         let n = self.x.len();
         let m = z.len();
@@ -226,60 +227,137 @@ impl KalmanFilter {
             }
         }
 
-        // K = P * H^T * S^-1
-        // For simplicity in this implementation, we only support 1D measurements for now or simple inversion
-        if m == 1
+        // K = P * H^T * S^-1  (general m-dimensional measurement update).
+        let s_inv = invert_matrix_gj(&s);
+
+        // P * H^T  (n x m)
+        let mut pht = vec![vec![0.0; m]; n];
+        for i in 0..n
         {
-            let s_inv = 1.0 / s[0][0];
-            let mut k = vec![0.0; n];
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..n
+            for j in 0..m
             {
-                let mut ph_t = 0.0;
-                #[allow(clippy::needless_range_loop)]
-                for j in 0..n
+                let mut acc = 0.0;
+                for k in 0..n
                 {
-                    ph_t += self.p[i][j] * self.h[0][j];
+                    acc += self.p[i][k] * self.h[j][k];
                 }
-                k[i] = ph_t * s_inv;
+                pht[i][j] = acc;
             }
+        }
 
-            // x = x + K * y
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..n
+        // K = (P H^T) * S^-1  (n x m)
+        let mut k_gain = vec![vec![0.0; m]; n];
+        for i in 0..n
+        {
+            for j in 0..m
             {
-                self.x[i] += k[i] * y[0];
-            }
-
-            // P = (I - K * H) * P
-            let mut kh = vec![vec![0.0; n]; n];
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..n
-            {
-                #[allow(clippy::needless_range_loop)]
-                for j in 0..n
+                let mut acc = 0.0;
+                for l in 0..m
                 {
-                    kh[i][j] = k[i] * self.h[0][j];
+                    acc += pht[i][l] * s_inv[l][j];
                 }
+                k_gain[i][j] = acc;
             }
-            let mut new_p = vec![vec![0.0; n]; n];
-            #[allow(clippy::needless_range_loop)]
-            for i in 0..n
+        }
+
+        // x = x + K * y
+        for i in 0..n
+        {
+            let mut acc = 0.0;
+            for j in 0..m
             {
-                #[allow(clippy::needless_range_loop)]
-                for j in 0..n
+                acc += k_gain[i][j] * y[j];
+            }
+            self.x[i] += acc;
+        }
+
+        // P = (I - K * H) * P
+        let mut kh = vec![vec![0.0; n]; n];
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0;
+                for l in 0..m
                 {
-                    let mut khp = 0.0;
-                    for k_idx in 0..n
+                    acc += k_gain[i][l] * self.h[l][j];
+                }
+                kh[i][j] = acc;
+            }
+        }
+        let mut new_p = vec![vec![0.0; n]; n];
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let mut khp = 0.0;
+                for k_idx in 0..n
+                {
+                    khp += kh[i][k_idx] * self.p[k_idx][j];
+                }
+                new_p[i][j] = self.p[i][j] - khp;
+            }
+        }
+        self.p = new_p;
+    }
+}
+
+/// Invert a square matrix by Gauss-Jordan elimination with partial pivoting.
+///
+/// Used for the Kalman innovation covariance `S` (m×m), which is positive
+/// definite for a valid filter (`S = H P Hᵀ + R`). A (near-)singular pivot is
+/// left as identity for that column rather than panicking.
+#[allow(clippy::needless_range_loop)]
+fn invert_matrix_gj(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let m = a.len();
+    // Augmented [A | I].
+    let mut aug: Vec<Vec<f64>> = (0..m)
+        .map(|i| {
+            let mut row = a[i].clone();
+            row.extend((0..m).map(|j| if i == j { 1.0 } else { 0.0 }));
+            row
+        })
+        .collect();
+
+    for col in 0..m
+    {
+        // Partial pivot: largest magnitude in this column at/below the diagonal.
+        let mut piv = col;
+        for r in (col + 1)..m
+        {
+            if aug[r][col].abs() > aug[piv][col].abs()
+            {
+                piv = r;
+            }
+        }
+        if aug[piv][col].abs() < 1e-12
+        {
+            continue; // singular column; skip (leaves identity there)
+        }
+        aug.swap(col, piv);
+
+        let d = aug[col][col];
+        for j in 0..(2 * m)
+        {
+            aug[col][j] /= d;
+        }
+        for r in 0..m
+        {
+            if r != col
+            {
+                let f = aug[r][col];
+                if f != 0.0
+                {
+                    for j in 0..(2 * m)
                     {
-                        khp += kh[i][k_idx] * self.p[k_idx][j];
+                        aug[r][j] -= f * aug[col][j];
                     }
-                    new_p[i][j] = self.p[i][j] - khp;
                 }
             }
-            self.p = new_p;
         }
     }
+
+    aug.iter().map(|row| row[m..(2 * m)].to_vec()).collect()
 }
 
 #[cfg(test)]
@@ -299,6 +377,28 @@ mod tests {
         // derivative = (8.0 - 10.0) / 1.0 = -2.0
         // output = 1.0 * 8.0 + 0.1 * 8.0 + 0.05 * (-2.0) = 8.0 + 0.8 - 0.1 = 8.7
         assert!((out2 - 8.7).abs() < 1e-10);
+    }
+
+    #[test]
+    fn kalman_multidim_update_moves_state_and_shrinks_covariance() {
+        // 2D state, 2D measurement, H = I. Prior x=[0,0], P=I, R=0.1 I, z=[1,1].
+        // The m>1 update path was previously a silent no-op; it must now move the
+        // state toward the measurement and shrink the covariance.
+        let mut kf = KalmanFilter::new(
+            vec![0.0, 0.0],
+            vec![vec![1.0, 0.0], vec![0.0, 1.0]], // P
+            vec![vec![1.0, 0.0], vec![0.0, 1.0]], // F
+            vec![vec![1.0, 0.0], vec![0.0, 1.0]], // H
+            vec![vec![0.0, 0.0], vec![0.0, 0.0]], // Q
+            vec![vec![0.1, 0.0], vec![0.0, 0.1]], // R
+        );
+        kf.update(&[1.0, 1.0]);
+        // K = P (P+R)^-1 = 1/1.1 I; x = K z = [1/1.1, 1/1.1].
+        assert!((kf.x[0] - 1.0 / 1.1).abs() < 1e-9, "x0={}", kf.x[0]);
+        assert!((kf.x[1] - 1.0 / 1.1).abs() < 1e-9, "x1={}", kf.x[1]);
+        // Posterior variance (I-K)P = 1/11 < 1 (prior); dims stay independent.
+        assert!(kf.p[0][0] > 0.0 && kf.p[0][0] < 0.5, "p00={}", kf.p[0][0]);
+        assert!(kf.p[0][1].abs() < 1e-9, "p01={}", kf.p[0][1]);
     }
 
     #[test]

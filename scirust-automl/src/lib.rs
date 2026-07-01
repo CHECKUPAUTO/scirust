@@ -1486,9 +1486,23 @@ impl CvResult {
     }
 }
 
-fn t_critical(_df: usize) -> f64 {
-    // Simplified: use 2.0 for small samples
-    2.0
+/// Two-tailed Student-t critical value at the 95% confidence level (alpha=0.05)
+/// for `df` degrees of freedom. Exact small-sample table for df 1..=30 and the
+/// normal asymptote (1.96) beyond; `df == 0` falls back to the df=1 value.
+/// (Previously this ignored `df` and always returned 2.0, so confidence-interval
+/// widths were wrong for small fold counts.)
+fn t_critical(df: usize) -> f64 {
+    const T95: [f64; 30] = [
+        12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160,
+        2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056,
+        2.052, 2.048, 2.045, 2.042,
+    ];
+    match df
+    {
+        0 => T95[0],
+        d if d <= 30 => T95[d - 1],
+        _ => 1.96,
+    }
 }
 
 /// Apply preprocessing steps to a dataset.
@@ -2808,6 +2822,39 @@ impl FeatureEngineer {
         }
     }
 
+    /// Top-`top_k` pairwise interaction columns (by |Pearson corr with `y`|),
+    /// returned as `(names, columns)` where each column has one value per sample.
+    /// Uses the same selection as [`interaction_features`], so names and columns
+    /// are consistent — this is what `engineer` appends to the feature matrix.
+    fn interaction_columns(
+        &self,
+        x: &[Vec<f64>],
+        y: &[f64],
+        top_k: usize,
+    ) -> (Vec<String>, Vec<Vec<f64>>) {
+        let n_feat = x.first().map(|r| r.len()).unwrap_or(0);
+        let mut interactions = Vec::new();
+        for i in 0..n_feat
+        {
+            for j in (i + 1)..n_feat
+            {
+                let col: Vec<f64> = x.iter().map(|row| row[i] * row[j]).collect();
+                let corr = pearson_correlation(&col, y);
+                interactions.push(((i, j), corr));
+            }
+        }
+        interactions.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+
+        let mut names = Vec::new();
+        let mut cols = Vec::new();
+        for &((i, j), _) in interactions.iter().take(top_k)
+        {
+            names.push(format!("x{}*x{}", i, j));
+            cols.push(x.iter().map(|row| row[i] * row[j]).collect());
+        }
+        (names, cols)
+    }
+
     /// Filter features by variance
     pub fn variance_threshold_filter(&self, x: &[Vec<f64>]) -> FeatureSet {
         let n_feat = x.first().map(|r| r.len()).unwrap_or(0);
@@ -2920,22 +2967,19 @@ impl FeatureEngineer {
 
         if use_interactions
         {
-            let inter = self.interaction_features(&current, y, 5);
-            let n_feat = current.first().map(|r| r.len()).unwrap_or(0);
-            for name in &inter.feature_names
+            // Append the top-k pairwise interaction columns AND their names from
+            // the SAME selection, so the feature matrix and `names` stay aligned.
+            // (Previously only names were added and the columns were an empty
+            // stub, leaving `names` longer than the actual feature rows.)
+            let (inter_names, inter_cols) = self.interaction_columns(&current, y, 5);
+            for (name, col) in inter_names.iter().zip(&inter_cols)
             {
                 names.push(name.clone());
-            }
-            // Recompute interactions on current feature set
-            let interaction_cols = generate_interaction_columns(&current, n_feat);
-            for col in interaction_cols.iter()
-            {
-                for row in current.iter_mut()
+                for (row, &v) in current.iter_mut().zip(col.iter())
                 {
-                    row.push(col[row.len() % col.len()]);
+                    row.push(v);
                 }
             }
-            let _ = n_feat;
         }
 
         if use_variance
@@ -3058,12 +3102,6 @@ fn apply_feature_selection(x: &[Vec<f64>], fs: &FeatureSet) -> Vec<Vec<f64>> {
     x.iter()
         .map(|row| fs.feature_indices.iter().map(|&j| row[j]).collect())
         .collect()
-}
-
-fn generate_interaction_columns(_x: &[Vec<f64>], _n_feat: usize) -> Vec<Vec<f64>> {
-    // Stub: called from engineer when use_interactions=true; real pairs are built inside
-    // interaction_features. For consistent shape we return empty here.
-    vec![]
 }
 
 // =========================================================================
@@ -3728,6 +3766,50 @@ mod tests {
         fn predict(&self, x: &[Vec<f64>]) -> Vec<f64> {
             (0..x.len()).map(|i| self.0[i % self.0.len()]).collect()
         }
+    }
+
+    #[test]
+    fn t_critical_varies_with_df() {
+        // Previously always 2.0 regardless of df. Now uses the real t-table.
+        assert!((t_critical(1) - 12.706).abs() < 1e-3);
+        assert!((t_critical(2) - 4.303).abs() < 1e-3);
+        assert!((t_critical(30) - 2.042).abs() < 1e-3);
+        assert!((t_critical(1000) - 1.96).abs() < 1e-9);
+        assert!(t_critical(1) > t_critical(5) && t_critical(5) > t_critical(30));
+    }
+
+    #[test]
+    fn engineer_interactions_add_columns_aligned_with_names() {
+        // use_interactions must append actual columns (not just names), keeping
+        // every row's width equal to names.len(). Previously names > row width.
+        let fe = FeatureEngineer::default();
+        let x = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![2.0, 1.0, 0.0],
+            vec![0.0, 3.0, 1.0],
+            vec![4.0, 2.0, 2.0],
+        ];
+        let y = vec![1.0, 2.0, 3.0, 4.0];
+        let (fx, names) = fe.engineer(&x, &y, false, true, false, false, false, 0);
+        for row in &fx
+        {
+            assert_eq!(
+                row.len(),
+                names.len(),
+                "row width {} != names {}",
+                row.len(),
+                names.len()
+            );
+        }
+        assert!(
+            fx[0].len() > 3,
+            "no interaction columns added: {}",
+            fx[0].len()
+        );
+        assert!(
+            names.iter().any(|n| n.contains('*')),
+            "no interaction name present"
+        );
     }
 
     #[test]
