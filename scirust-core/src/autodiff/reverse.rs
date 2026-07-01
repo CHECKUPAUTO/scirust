@@ -2404,7 +2404,7 @@ impl Tape {
                     q,
                     k,
                     v,
-                    mask: _mask,
+                    mask,
                     batch,
                     n_heads,
                     seq_len,
@@ -2413,20 +2413,19 @@ impl Tape {
                     block_size,
                 } =>
                 {
-                    // Restore saved m, l
-                    let (saved_m, saved_l) = match &nodes[i].saved
-                    {
-                        SavedData::FlashAttentionState { m, l } => (m, l),
-                        _ => panic!("FlashAttention backward: missing saved state"),
-                    };
-
+                    // Correct attention backward via a straightforward full
+                    // recomputation per query row (flash's memory win is in the
+                    // forward; the backward can afford the exact O(L^2) pass and
+                    // avoids the fragile tiled online-softmax reconstruction that
+                    // gave wrong gradients). Matches the forward's causal mask.
+                    let causal = mask.is_some();
+                    let _ = &nodes[i].saved; // saved m/l not needed for this path
                     let q_t = &values[q].as_cpu();
                     let k_t = &values[k].as_cpu();
                     let v_t = &values[v].as_cpu();
-                    let o_t = &values[i].as_cpu();
-                    let dv = o_t.cols;
+                    let dv = v_t.cols;
                     let total_heads = batch * n_heads;
-                    let s_len = seq_len;
+                    let l = seq_len; // self-attention: query length == key length
 
                     let mut dq = vec![0.0f32; q_t.data.len()];
                     let mut dk = vec![0.0f32; k_t.data.len()];
@@ -2434,229 +2433,105 @@ impl Tape {
 
                     for h in 0..total_heads
                     {
-                        let q_base = h * seq_len * d_head;
-                        let k_base = h * s_len * d_head;
-                        let v_base = h * s_len * dv;
-                        let o_base = h * seq_len * dv;
-                        let m_base = h * seq_len;
+                        let q_base = h * l * d_head;
+                        let k_base = h * l * d_head;
+                        let v_base = h * l * dv;
+                        let o_base = h * l * dv; // `g` (upstream) has O's layout
 
-                        for qi in (0..seq_len).step_by(block_size)
+                        #[allow(clippy::needless_range_loop)]
+                        for qi in 0..l
                         {
-                            let br = (seq_len - qi).min(block_size);
-
-                            // Replay the inner loop to recompute P_ij
-                            let mut m_i = vec![-f32::INFINITY; br];
-                            let mut l_i = vec![0.0f32; br];
-
-                            for kj in (0..s_len).step_by(block_size)
+                            // scores s[j] = scale * <Q_qi, K_j> with the causal mask.
+                            let mut s = vec![f32::NEG_INFINITY; l];
+                            let mut m = f32::NEG_INFINITY;
+                            for j in 0..l
                             {
-                                let bc = (s_len - kj).min(block_size);
-
-                                // S_ij = Q_i @ K_j^T
-                                let mut s_ij = vec![0.0f32; br * bc];
-                                for r in 0..br
+                                if causal && j > qi
                                 {
-                                    for c in 0..bc
-                                    {
-                                        let mut sum = 0.0f32;
-                                        for d in 0..d_head
-                                        {
-                                            sum += q_t.data[q_base + (qi + r) * d_head + d]
-                                                * k_t.data[k_base + (kj + c) * d_head + d];
-                                        }
-                                        s_ij[r * bc + c] = sum * scale;
-                                    }
+                                    continue;
                                 }
-
-                                // Recompute online softmax state
-                                let mut row_max = vec![-f32::INFINITY; br];
-                                for r in 0..br
+                                let mut dot = 0.0f32;
+                                for d in 0..d_head
                                 {
-                                    for c in 0..bc
-                                    {
-                                        row_max[r] = row_max[r].max(s_ij[r * bc + c]);
-                                    }
+                                    dot += q_t.data[q_base + qi * d_head + d]
+                                        * k_t.data[k_base + j * d_head + d];
                                 }
-
-                                let mut m_new = vec![-f32::INFINITY; br];
-                                for r in 0..br
+                                s[j] = dot * scale;
+                                if s[j] > m
                                 {
-                                    m_new[r] = m_i[r].max(row_max[r]);
-                                }
-
-                                let mut p_ij = vec![0.0f32; br * bc];
-                                let mut row_sum_p = vec![0.0f32; br];
-                                for r in 0..br
-                                {
-                                    for c in 0..bc
-                                    {
-                                        p_ij[r * bc + c] = (s_ij[r * bc + c] - m_new[r]).exp();
-                                        row_sum_p[r] += p_ij[r * bc + c];
-                                    }
-                                }
-
-                                let mut rescale = vec![0.0f32; br];
-                                for r in 0..br
-                                {
-                                    rescale[r] = (m_i[r] - m_new[r]).exp();
-                                }
-
-                                // Rescale l_i
-                                for r in 0..br
-                                {
-                                    l_i[r] = rescale[r] * l_i[r] + row_sum_p[r];
-                                    m_i[..br].copy_from_slice(&m_new[..br]);
-                                    m_i[r] = m_new[r];
+                                    m = s[j];
                                 }
                             }
 
-                            // Now compute gradients for this Q-block
-                            for kj in (0..s_len).step_by(block_size)
+                            // softmax p[j].
+                            let mut p = vec![0.0f32; l];
+                            let mut denom = 0.0f32;
+                            for j in 0..l
                             {
-                                let bc = (s_len - kj).min(block_size);
-
-                                // Recompute S_ij
-                                let mut s_ij = vec![0.0f32; br * bc];
-                                for r in 0..br
+                                if s[j].is_finite()
                                 {
-                                    for c in 0..bc
-                                    {
-                                        let mut sum = 0.0f32;
-                                        for d in 0..d_head
-                                        {
-                                            sum += q_t.data[q_base + (qi + r) * d_head + d]
-                                                * k_t.data[k_base + (kj + c) * d_head + d];
-                                        }
-                                        s_ij[r * bc + c] = sum * scale;
-                                    }
+                                    let e = (s[j] - m).exp();
+                                    p[j] = e;
+                                    denom += e;
                                 }
+                            }
+                            let inv = if denom > 0.0 { 1.0 / denom } else { 0.0 };
+                            for pj in p.iter_mut()
+                            {
+                                *pj *= inv;
+                            }
 
-                                // Recompute row_max
-                                let mut row_max = vec![-f32::INFINITY; br];
-                                for r in 0..br
+                            // dP[j] = <dO_qi, V_j>, and dpp = sum_j p[j] dP[j].
+                            let mut dp = vec![0.0f32; l];
+                            let mut dpp = 0.0f32;
+                            for j in 0..l
+                            {
+                                if p[j] == 0.0
                                 {
-                                    for c in 0..bc
-                                    {
-                                        row_max[r] = row_max[r].max(s_ij[r * bc + c]);
-                                    }
+                                    continue;
                                 }
-                                let mut m_new = vec![-f32::INFINITY; br];
-                                for r in 0..br
+                                let mut acc = 0.0f32;
+                                for d in 0..dv
                                 {
-                                    m_new[r] = m_i[r].max(row_max[r]);
+                                    acc += g.data[o_base + qi * dv + d]
+                                        * v_t.data[v_base + j * dv + d];
                                 }
+                                dp[j] = acc;
+                                dpp += p[j] * acc;
+                            }
 
-                                // P_ij
-                                let mut p_ij_unscaled = vec![0.0f32; br * bc];
-                                for r in 0..br
+                            // dV_j += p[j] * dO_qi.
+                            for j in 0..l
+                            {
+                                if p[j] == 0.0
                                 {
-                                    for c in 0..bc
-                                    {
-                                        p_ij_unscaled[r * bc + c] =
-                                            (s_ij[r * bc + c] - m_new[r]).exp();
-                                    }
+                                    continue;
                                 }
-
-                                // Final normalized P_ij
-                                let mut p_ij = vec![0.0f32; br * bc];
-                                for r in 0..br
+                                for d in 0..dv
                                 {
-                                    let row_idx = m_base + qi + r;
-                                    let m_final = saved_m.data[row_idx];
-                                    let l_final = saved_l.data[row_idx];
-
-                                    // P_ij_normalized = P_ij_unscaled * exp(m_new - m_final) / l_final
-                                    let factor = (m_new[r] - m_final).exp() / l_final;
-
-                                    for c in 0..bc
-                                    {
-                                        p_ij[r * bc + c] = p_ij_unscaled[r * bc + c] * factor;
-                                    }
+                                    dv_[v_base + j * dv + d] += p[j] * g.data[o_base + qi * dv + d];
                                 }
+                            }
 
-                                // dP = dO @ V_j^T: upstream gradient times V
-                                let mut dp = vec![0.0f32; br * bc];
-                                for r in 0..br
+                            // ds[j] = p[j] (dP[j] - dpp) * scale; propagate to Q, K.
+                            for j in 0..l
+                            {
+                                if p[j] == 0.0
                                 {
-                                    for d in 0..dv
-                                    {
-                                        let go = g.data[o_base + (qi + r) * dv + d];
-                                        if go == 0.0
-                                        {
-                                            continue;
-                                        }
-                                        for c in 0..bc
-                                        {
-                                            dp[r * bc + c] +=
-                                                go * v_t.data[v_base + (kj + c) * dv + d];
-                                        }
-                                    }
+                                    continue;
                                 }
-
-                                // Softmax gradient correction:
-                                // dL/dS = P .* (dP - sum_c(P .* dP))
-                                let mut ds = vec![0.0f32; br * bc];
-                                for r in 0..br
+                                let ds = p[j] * (dp[j] - dpp) * scale;
+                                for d in 0..d_head
                                 {
-                                    let mut sum_p_dp = 0.0f32;
-                                    for c in 0..bc
-                                    {
-                                        sum_p_dp += p_ij[r * bc + c] * dp[r * bc + c];
-                                    }
-                                    for c in 0..bc
-                                    {
-                                        ds[r * bc + c] =
-                                            p_ij[r * bc + c] * (dp[r * bc + c] - sum_p_dp);
-                                    }
-                                }
-
-                                // dQ contribution
-                                for r in 0..br
-                                {
-                                    for d in 0..d_head
-                                    {
-                                        let mut sum = 0.0f32;
-                                        for c in 0..bc
-                                        {
-                                            sum += ds[r * bc + c]
-                                                * k_t.data[k_base + (kj + c) * d_head + d];
-                                        }
-                                        dq[q_base + (qi + r) * d_head + d] += sum * scale;
-                                    }
-                                }
-
-                                // dK contribution
-                                for c in 0..bc
-                                {
-                                    for d in 0..d_head
-                                    {
-                                        let mut sum = 0.0f32;
-                                        for r in 0..br
-                                        {
-                                            sum += ds[r * bc + c]
-                                                * q_t.data[q_base + (qi + r) * d_head + d];
-                                        }
-                                        dk[k_base + (kj + c) * d_head + d] += sum * scale;
-                                    }
-                                }
-
-                                // dV contribution
-                                for c in 0..bc
-                                {
-                                    for d in 0..dv
-                                    {
-                                        let mut sum = 0.0f32;
-                                        for r in 0..br
-                                        {
-                                            sum += p_ij[r * bc + c]
-                                                * g.data[o_base + (qi + r) * dv + d];
-                                        }
-                                        dv_[v_base + (kj + c) * dv + d] += sum;
-                                    }
+                                    dq[q_base + qi * d_head + d] +=
+                                        ds * k_t.data[k_base + j * d_head + d];
+                                    dk[k_base + j * d_head + d] +=
+                                        ds * q_t.data[q_base + qi * d_head + d];
                                 }
                             }
                         }
                     }
+                    let _ = block_size;
 
                     let dq_t = Tensor::from_vec(dq, q_t.rows, q_t.cols);
                     let dk_t = Tensor::from_vec(dk, k_t.rows, k_t.cols);

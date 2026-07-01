@@ -408,4 +408,124 @@ mod tests {
             );
         }
     }
+
+    // Diagnostic: does the NON-causal backward match finite differences?
+    #[test]
+    fn flash_noncausal_backward_matches_finite_differences() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let tape = Tape::new();
+        let qv = tape.input(Tensor::from_vec(q.clone(), seq, d));
+        let kv = tape.input(Tensor::from_vec(k.clone(), seq, d));
+        let vv = tape.input(Tensor::from_vec(v.clone(), seq, d));
+        let (qi, ki, vi) = (qv.idx(), kv.idx(), vv.idx());
+        let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, false);
+        out.sum().backward();
+        let ana = [
+            tape.grad(qi).data.clone(),
+            tape.grad(ki).data.clone(),
+            tape.grad(vi).data.clone(),
+        ];
+        let loss = |q: &[f32], k: &[f32], v: &[f32]| -> f32 {
+            let t = Tape::new();
+            let qv = t.input(Tensor::from_vec(q.to_vec(), seq, d));
+            let kv = t.input(Tensor::from_vec(k.to_vec(), seq, d));
+            let vv = t.input(Tensor::from_vec(v.to_vec(), seq, d));
+            let o = flash_attention_forward(&t, qv, kv, vv, 1, 1, seq, d, scale, 2, false);
+            t.value(o.idx()).data.iter().sum()
+        };
+        let h = 1e-3f32;
+        for which in 0..3usize
+        {
+            let n = [&q, &k, &v][which].len();
+            for idx in 0..n
+            {
+                let (mut pq, mut pk, mut pv) = (q.clone(), k.clone(), v.clone());
+                let (mut mq, mut mk, mut mv) = (q.clone(), k.clone(), v.clone());
+                match which
+                {
+                    0 =>
+                    {
+                        pq[idx] += h;
+                        mq[idx] -= h;
+                    },
+                    1 =>
+                    {
+                        pk[idx] += h;
+                        mk[idx] -= h;
+                    },
+                    _ =>
+                    {
+                        pv[idx] += h;
+                        mv[idx] -= h;
+                    },
+                }
+                let num = (loss(&pq, &pk, &pv) - loss(&mq, &mk, &mv)) / (2.0 * h);
+                let a = ana[which][idx];
+                assert!(
+                    (a - num).abs() <= 2e-2 + 1e-2 * num.abs(),
+                    "noncausal grad mismatch (tensor {which} elem {idx}): analytic {a} vs numerical {num}"
+                );
+            }
+        }
+    }
+
+    // The causal backward must match finite differences AND respect the mask.
+    #[test]
+    fn flash_causal_backward_matches_finite_differences() {
+        let (q, k, v, seq, d, scale) = fixture();
+        let tape = Tape::new();
+        let qv = tape.input(Tensor::from_vec(q.clone(), seq, d));
+        let kv = tape.input(Tensor::from_vec(k.clone(), seq, d));
+        let vv = tape.input(Tensor::from_vec(v.clone(), seq, d));
+        let (qi, ki, vi) = (qv.idx(), kv.idx(), vv.idx());
+        let out = flash_attention_forward(&tape, qv, kv, vv, 1, 1, seq, d, scale, 2, true);
+        out.sum().backward();
+        let ana = [
+            tape.grad(qi).data.clone(),
+            tape.grad(ki).data.clone(),
+            tape.grad(vi).data.clone(),
+        ];
+        let loss = |q: &[f32], k: &[f32], v: &[f32]| -> f32 {
+            let t = Tape::new();
+            let qv = t.input(Tensor::from_vec(q.to_vec(), seq, d));
+            let kv = t.input(Tensor::from_vec(k.to_vec(), seq, d));
+            let vv = t.input(Tensor::from_vec(v.to_vec(), seq, d));
+            let o = flash_attention_forward(&t, qv, kv, vv, 1, 1, seq, d, scale, 2, true);
+            t.value(o.idx()).data.iter().sum()
+        };
+        let h = 1e-3f32;
+        for which in 0..3usize
+        {
+            let n = [&q, &k, &v][which].len();
+            for idx in 0..n
+            {
+                let (mut pq, mut pk, mut pv) = (q.clone(), k.clone(), v.clone());
+                let (mut mq, mut mk, mut mv) = (q.clone(), k.clone(), v.clone());
+                match which
+                {
+                    0 =>
+                    {
+                        pq[idx] += h;
+                        mq[idx] -= h;
+                    },
+                    1 =>
+                    {
+                        pk[idx] += h;
+                        mk[idx] -= h;
+                    },
+                    _ =>
+                    {
+                        pv[idx] += h;
+                        mv[idx] -= h;
+                    },
+                }
+                let num = (loss(&pq, &pk, &pv) - loss(&mq, &mk, &mv)) / (2.0 * h);
+                let a = ana[which][idx];
+                assert!(
+                    (a - num).abs() <= 2e-2 + 1e-2 * num.abs(),
+                    "causal grad mismatch (tensor {which} elem {idx}): analytic {a} vs numerical {num}"
+                );
+            }
+        }
+    }
 }
