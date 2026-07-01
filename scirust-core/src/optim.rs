@@ -135,7 +135,6 @@ pub struct LAMB {
     beta1: f32,
     beta2: f32,
     epsilon: f32,
-    #[allow(dead_code)]
     pub weight_decay: f32,
     m: HashMap<String, Vec<f32>>,
     v: HashMap<String, Vec<f32>>,
@@ -171,6 +170,14 @@ impl LAMB {
         let bias_correction1 = 1.0 - self.beta1.powi(self.t as i32);
         let bias_correction2 = 1.0 - self.beta2.powi(self.t as i32);
 
+        // First pass: build the per-element Adam direction (with decoupled weight
+        // decay folded in) and accumulate the per-tensor norms of the parameters
+        // and of the update. LAMB uses a single per-tensor ("layer-wise") trust
+        // ratio, so the norms must be computed over the whole tensor before any
+        // element is written back.
+        let mut update = vec![0.0f32; grad.len()];
+        let mut param_norm_sq = 0.0f32;
+        let mut update_norm_sq = 0.0f32;
         for i in 0..grad.len()
         {
             m[i] = self.beta1 * m[i] + (1.0 - self.beta1) * grad[i];
@@ -179,20 +186,30 @@ impl LAMB {
             let m_hat = m[i] / bias_correction1;
             let v_hat = v[i] / bias_correction2;
 
-            let update = m_hat / (v_hat.sqrt() + self.epsilon);
-            let param_norm = param.iter().map(|p| p * p).sum::<f32>().sqrt();
-            let update_norm = update;
+            let r = m_hat / (v_hat.sqrt() + self.epsilon) + self.weight_decay * param[i];
+            update[i] = r;
+            param_norm_sq += param[i] * param[i];
+            update_norm_sq += r * r;
+        }
 
-            let adaptive_lr = if param_norm > 0.0
-            {
-                self.learning_rate * (param_norm / (update_norm + self.epsilon))
-            }
-            else
-            {
-                self.learning_rate
-            };
+        let param_norm = param_norm_sq.sqrt();
+        let update_norm = update_norm_sq.sqrt();
 
-            param[i] -= adaptive_lr * update;
+        // Trust ratio = ||param|| / ||update||, defaulting to 1.0 when either norm
+        // vanishes (matching the reference implementation and NdLamb).
+        let trust_ratio = if param_norm > 0.0 && update_norm > 0.0
+        {
+            param_norm / update_norm
+        }
+        else
+        {
+            1.0
+        };
+
+        // Second pass: apply the scaled update.
+        for i in 0..grad.len()
+        {
+            param[i] -= self.learning_rate * trust_ratio * update[i];
         }
     }
 }
@@ -229,5 +246,86 @@ mod tests {
 
         optimizer.step("param_0", &grads, &mut params);
         assert_ne!(params[0], 1.0);
+    }
+
+    /// LAMB must apply a single per-tensor ("layer-wise") trust ratio
+    /// `r = ||param|| / ||update||`, honour decoupled `weight_decay`, and be
+    /// invariant to the internal element traversal order.
+    ///
+    /// Before the fix this test fails on all three counts: the trust ratio was
+    /// computed per element using the scalar update as its own norm and using a
+    /// param norm recomputed from `param` *while it was being mutated*, and
+    /// `weight_decay` was completely ignored.
+    #[test]
+    fn test_lamb_layerwise_trust_ratio_and_weight_decay() {
+        let lr = 0.1_f32;
+        let beta1 = 0.9_f32;
+        let beta2 = 0.999_f32;
+        let epsilon = 1e-8_f32;
+        let weight_decay = 0.5_f32;
+
+        let param = vec![1.0_f32, -2.0, 3.0, 0.5];
+        let grad = vec![0.3_f32, -0.1, 0.2, 0.4];
+
+        // Reference: exact single-step layer-wise LAMB (t == 1).
+        let bc1 = 1.0 - beta1;
+        let bc2 = 1.0 - beta2;
+        let mut update = vec![0.0_f32; param.len()];
+        let mut param_norm_sq = 0.0_f32;
+        let mut update_norm_sq = 0.0_f32;
+        for i in 0..param.len()
+        {
+            let m = (1.0 - beta1) * grad[i];
+            let v = (1.0 - beta2) * grad[i] * grad[i];
+            let m_hat = m / bc1;
+            let v_hat = v / bc2;
+            let r = m_hat / (v_hat.sqrt() + epsilon) + weight_decay * param[i];
+            update[i] = r;
+            param_norm_sq += param[i] * param[i];
+            update_norm_sq += r * r;
+        }
+        let trust = param_norm_sq.sqrt() / update_norm_sq.sqrt();
+        let expected: Vec<f32> = param
+            .iter()
+            .zip(&update)
+            .map(|(&p, &u)| p - lr * trust * u)
+            .collect();
+
+        let mut optimizer = LAMB::new(lr);
+        optimizer.weight_decay = weight_decay;
+        let mut params = param.clone();
+        optimizer.step("param_0", &grad, &mut params);
+
+        for (got, want) in params.iter().zip(&expected)
+        {
+            assert!(
+                (got - want).abs() < 1e-5,
+                "LAMB update mismatch: got {got}, want {want}"
+            );
+        }
+
+        // The effective per-element step is `-lr * trust * update[i]`. Since a
+        // single trust ratio scales every element, the ratio of two elements'
+        // steps must equal the ratio of their raw update directions. The old
+        // per-element code cannot reproduce this.
+        let step0 = params[0] - param[0];
+        let step2 = params[2] - param[2];
+        assert!(
+            (step0 / step2 - update[0] / update[2]).abs() < 1e-4,
+            "per-element steps are not scaled by a single trust ratio"
+        );
+
+        // weight_decay must actually influence the result: a decay of 0 gives a
+        // different update.
+        let mut opt_no_wd = LAMB::new(lr);
+        let mut params_no_wd = param.clone();
+        opt_no_wd.step("param_0", &grad, &mut params_no_wd);
+        assert!(
+            params_no_wd
+                .iter()
+                .zip(&params)
+                .any(|(a, b)| (a - b).abs() > 1e-6),
+            "weight_decay had no effect on the LAMB update"
+        );
     }
 }

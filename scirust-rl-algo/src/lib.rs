@@ -2046,44 +2046,85 @@ impl MctsEngine {
     }
 
     pub fn search(&self, problem: &ProblemSpec, root_algo: &Algorithm) -> (Algorithm, f64) {
+        let root = self.build_tree(problem, root_algo);
+
+        // Final decision: pick the child with the best average value. Unvisited
+        // children score as negative infinity so a visited, evaluated child is
+        // always preferred over an untried one.
+        let mean_value = |node: &MctsNode| -> f64 {
+            if node.visits == 0
+            {
+                f64::NEG_INFINITY
+            }
+            else
+            {
+                node.total_value / node.visits as f64
+            }
+        };
+        let best = root.children.iter().max_by(|(_, a), (_, b)| {
+            mean_value(a)
+                .partial_cmp(&mean_value(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        match best
+        {
+            Some((_, node)) =>
+            {
+                let score = evaluate_fitness(problem, &node.algorithm);
+                (node.algorithm.clone(), score)
+            },
+            None =>
+            {
+                let score = evaluate_fitness(problem, &root.algorithm);
+                (root.algorithm.clone(), score)
+            },
+        }
+    }
+
+    /// Run the MCTS iterations and return the fully searched root node.
+    ///
+    /// Exposes the search tree (visit counts and accumulated values) so callers
+    /// can apply their own final-move selection or inspect the search.
+    pub fn build_tree(&self, problem: &ProblemSpec, root_algo: &Algorithm) -> MctsNode {
         let mut root = MctsNode::new(root_algo.clone());
         let mut rng = self.rng.borrow_mut();
 
         for _ in 0..self.max_iterations
         {
-            // Selection
+            // Selection: descend from root following UCB1 while the current
+            // node is fully expanded and has children, recording the path of
+            // child indices taken.
             let mut path: Vec<usize> = Vec::new();
-            let current = &mut root;
-
-            if current.is_expanded && !current.children.is_empty()
             {
-                if let Some(idx) = current.best_child(self.exploration_constant)
+                let mut current = &root;
+                while current.is_expanded && !current.children.is_empty()
                 {
-                    path.push(idx);
-                    // SAFETY: workaround for borrow checker — we re-traverse from root
-                    break;
-                }
-                else
-                {
-                    break;
+                    match current.best_child(self.exploration_constant)
+                    {
+                        Some(idx) =>
+                        {
+                            path.push(idx);
+                            current = &current.children[idx].1;
+                        },
+                        None => break,
+                    }
                 }
             }
 
-            // Re-traverse from root safely
+            // Re-traverse the recorded path mutably to reach the selected leaf.
             let mut leaf = &mut root;
-            leaf.visits += 1;
             for &idx in &path
             {
                 leaf = &mut leaf.children[idx].1;
-                leaf.visits += 1;
             }
 
-            // Expansion
+            // Expansion: if the leaf has never been expanded, grow its children
+            // using progressive widening (children count grows with visits).
             if !leaf.is_expanded
             {
-                // Progressive widening: limit children based on visits
-                let max_children =
-                    (self.progressive_widening_constant * (leaf.visits as f64).sqrt()) as usize;
+                let max_children = (self.progressive_widening_constant
+                    * ((leaf.visits + 1) as f64).sqrt())
+                    as usize;
                 let max_children = max_children.clamp(2, 10);
 
                 if leaf.children.len() < max_children
@@ -2102,65 +2143,37 @@ impl MctsEngine {
                     }
                 }
                 leaf.is_expanded = true;
-
-                // Rollout
-                let rollout_value = self.rollout(problem, &leaf.algorithm, &mut rng);
-                leaf.total_value += rollout_value;
-
-                // Backpropagate
-                let mut back = &mut root;
-                back.total_value += rollout_value;
-                for &idx in &path
-                {
-                    back = &mut back.children[idx].1;
-                    back.total_value += rollout_value;
-                }
             }
-            else if !leaf.children.is_empty()
-            {
-                // Select child and rollout
-                let idx = rng.gen_range(0..leaf.children.len());
-                let child = &mut leaf.children[idx].1;
-                let rollout_value = self.rollout(problem, &child.algorithm, &mut rng);
-                child.total_value += rollout_value;
-                child.visits += 1;
 
-                // Backprop
-                let mut back = &mut root;
-                back.total_value += rollout_value;
-                for &idx in &path
-                {
-                    back = &mut back.children[idx].1;
-                    back.total_value += rollout_value;
-                }
-            }
-            else
+            // Pick the node to roll out: prefer an unvisited child of the leaf
+            // (the newly expanded frontier), otherwise roll out from the leaf
+            // itself. Extend the path so backpropagation reaches this node.
+            let rollout_child = leaf.children.iter().position(|(_, c)| c.visits == 0);
+            let rollout_value = match rollout_child
             {
-                // Leaf with no children — just rollout
-                let rollout_value = self.rollout(problem, &leaf.algorithm, &mut rng);
-                leaf.total_value += rollout_value;
+                Some(cidx) =>
+                {
+                    path.push(cidx);
+                    let child = &leaf.children[cidx].1;
+                    self.rollout(problem, &child.algorithm, &mut rng)
+                },
+                None => self.rollout(problem, &leaf.algorithm, &mut rng),
+            };
+
+            // Backpropagation: update visits and accumulated value for every
+            // node on the path, including the root and the rolled-out node.
+            root.visits += 1;
+            root.total_value += rollout_value;
+            let mut back = &mut root;
+            for &idx in &path
+            {
+                back = &mut back.children[idx].1;
+                back.visits += 1;
+                back.total_value += rollout_value;
             }
         }
 
-        // Return best child of root
-        let best = root.children.iter().max_by(|(_, a), (_, b)| {
-            a.total_value
-                .partial_cmp(&b.total_value)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        match best
-        {
-            Some((_, node)) =>
-            {
-                let score = evaluate_fitness(problem, &node.algorithm);
-                (node.algorithm.clone(), score)
-            },
-            None =>
-            {
-                let score = evaluate_fitness(problem, &root.algorithm);
-                (root.algorithm.clone(), score)
-            },
-        }
+        root
     }
 
     fn rollout(&self, problem: &ProblemSpec, algo: &Algorithm, rng: &mut StdRng) -> f64 {
@@ -2963,6 +2976,61 @@ mod tests {
         let (algo, score) = mcts.search(&problem, &root);
         assert!(!algo.instructions.is_empty());
         assert!(score.is_finite());
+    }
+
+    #[test]
+    fn test_mcts_actually_searches_tree() {
+        // Regression: previously a `break` in the selection branch aborted the
+        // iteration loop after root was expanded, so only root ever received
+        // visits/rollout value and every child stayed visits=0, value=0. This
+        // asserts that backpropagation actually reaches the children, i.e. the
+        // tree is genuinely searched across many iterations.
+        let problem = make_add_problem();
+        let root = Algorithm {
+            instructions: vec![Instruction::Return],
+            num_registers: 3,
+            stack_capacity: 16,
+        };
+        let iterations = 200;
+        let mcts = MctsEngine::new(1.4, iterations, 303);
+        let tree = mcts.build_tree(&problem, &root);
+
+        // Root must have been visited once per iteration.
+        assert_eq!(tree.visits, iterations as u64);
+        assert!(tree.is_expanded);
+        assert!(!tree.children.is_empty());
+
+        // Visits must actually flow into the children (this is exactly what the
+        // bug prevented). Buggy code: every child had visits == 0.
+        let child_visits: u64 = tree.children.iter().map(|(_, c)| c.visits).sum();
+        assert!(
+            child_visits > 0,
+            "no visits reached any child — tree search did not descend past root"
+        );
+
+        // With ~200 iterations spread over a handful of children, more than a
+        // single expansion+rollout must have occurred at the root level.
+        assert!(
+            child_visits >= 10,
+            "expected many child visits across {iterations} iterations, got {child_visits}"
+        );
+
+        // At least one child must have accumulated rollout value via
+        // backpropagation (buggy code left every child's total_value == 0).
+        let visited_children = tree.children.iter().filter(|(_, c)| c.visits > 0).count();
+        assert!(
+            visited_children > 0,
+            "no child accumulated any rollout — backpropagation never reached children"
+        );
+        let max_child_value = tree
+            .children
+            .iter()
+            .map(|(_, c)| c.total_value)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            max_child_value > 0.0,
+            "children carry no accumulated value — backpropagation is dead"
+        );
     }
 
     // --- Verification Tests ---

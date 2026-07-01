@@ -6,7 +6,7 @@
 //! 2. Regroupe les nœuds compatibles
 //! 3. Génère un `FusedKernel` pour chaque groupe
 
-use crate::graph::{OpGraph, OpKind};
+use crate::graph::{FusionConstant, OpGraph, OpKind};
 use crate::kernel::FusedKernel;
 use crate::patterns::FusionPatterns;
 
@@ -152,7 +152,23 @@ impl FusionPipeline {
             outputs.push(idx);
         }
 
-        FusedKernel::new(kernel_type, group.to_vec(), inputs, outputs)
+        let mut kernel = FusedKernel::new(kernel_type, group.to_vec(), inputs, outputs);
+
+        // `Scale` carries its factor as a scalar constant on the node, not as an
+        // input tensor. Lift it into the kernel params so `execute` has it.
+        if kernel_type == KernelType::MatmulScale
+        {
+            if let Some(&idx) = group.iter().find(|&&i| graph.op(i).kind == OpKind::Scale)
+            {
+                if let Some(FusionConstant::F32(s)) = &graph.op(idx).constant
+                {
+                    kernel.params.scale = *s;
+                }
+                // else: no scalar attached → keep the default (1.0, identity).
+            }
+        }
+
+        kernel
     }
 
     /// Détermine le type de kernel à générer.
@@ -264,6 +280,7 @@ impl Default for FusionPipeline {
 mod tests {
     use super::*;
     use crate::graph::OpGraph;
+    use crate::kernel::FusedKernel;
 
     /// `y = act(x @ w)` — a two-node fusable group on top of two inputs.
     fn matmul_act_graph(act: OpKind) -> OpGraph {
@@ -299,6 +316,50 @@ mod tests {
                 .iter()
                 .any(|k| k.kernel_type == KernelType::MatmulSilu)
         );
+    }
+
+    #[test]
+    fn matmul_scale_fuses_and_executes_with_two_inputs() {
+        use crate::graph::FusionConstant;
+
+        // Build y = (x @ W) * 2.5, where 2.5 is a scalar constant on the Scale node.
+        let mut g = OpGraph::new();
+        let x = g.add_input(OpKind::Input, None);
+        let w = g.add_input(OpKind::Input, None);
+        let mm = g.add_binary(OpKind::MatMul, x, w, None);
+        let _s = g.add_unary(OpKind::Scale, mm, Some(FusionConstant::F32(2.5)));
+
+        let pipeline = FusionPipeline::new();
+        let kernels = pipeline.fuse(&mut g).expect("MatMul→Scale should fuse");
+        let k = kernels
+            .iter()
+            .find(|k| k.kernel_type() == KernelType::MatmulScale)
+            .expect("a MatmulScale kernel");
+
+        // The scale is a constant, so only x and W are runtime inputs.
+        assert_eq!(k.inputs.len(), 2, "fused inputs must be exactly [x, W]");
+        assert_eq!(k.params().scale, 2.5, "scale constant must be lifted");
+
+        // Execute with two inputs — this used to panic on inputs[2]. The
+        // pipeline leaves matmul dims unset (a separate demo limitation), so we
+        // parameterize a kernel of the same type with the lifted scale.
+        let mut k = FusedKernel::new(
+            k.kernel_type(),
+            k.group.clone(),
+            k.inputs.clone(),
+            k.outputs.clone(),
+        );
+        k.params = crate::kernel::KernelParams {
+            in_features: 2,
+            out_features: 2,
+            scale: 2.5,
+            ..Default::default()
+        };
+        let xd = [1.0f32, 2.0];
+        let wd = [1.0f32, 0.0, 0.0, 1.0]; // identity
+        let mut out = [0.0f32; 2];
+        k.execute(&[&xd, &wd], &mut out);
+        assert_eq!(out, [2.5, 5.0]);
     }
 
     #[test]

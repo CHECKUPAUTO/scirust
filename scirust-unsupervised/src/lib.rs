@@ -607,10 +607,11 @@ impl LocalOutlierFactor {
             }
         }
 
-        // For each point, sorted neighbor indices by distance
+        // Pass 1: for each point, its k nearest neighbors and its k-distance.
+        // k-distances of *all* points must be known before reachability can be
+        // computed, since reachability of i w.r.t. j depends on k_distances[j].
         let mut k_distances = vec![0.0_f64; n];
         let mut k_neighbors: Vec<Vec<usize>> = Vec::with_capacity(n);
-        let mut reachability: Vec<Vec<f64>> = Vec::with_capacity(n);
 
         for i in 0..n
         {
@@ -626,16 +627,22 @@ impl LocalOutlierFactor {
                 dists[i][kn[kn.len() - 1]]
             };
             k_distances[i] = kd;
+            k_neighbors.push(kn);
+        }
 
-            // Reachability distance of i w.r.t. each neighbor j in kn
+        // Pass 2: reachability distance of i w.r.t. each neighbor j in its
+        // neighborhood, reach_dist(i, j) = max(dist(i, j), k_distance(j)).
+        let mut reachability: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n
+        {
+            let kn = &k_neighbors[i];
             let mut rd = Vec::with_capacity(kn.len());
-            for &j in &kn
+            for &j in kn
             {
                 let r = dists[i][j].max(k_distances[j]);
                 rd.push(r);
             }
             reachability.push(rd);
-            k_neighbors.push(kn);
         }
 
         (k_distances, k_neighbors, reachability)
@@ -1494,6 +1501,35 @@ mod tests {
         for s in &scores
         {
             assert!(*s < 2.0, "tight cluster points should have low LOF");
+        }
+    }
+
+    #[test]
+    fn test_lof_symmetric_all_ones() {
+        // Regression test for the reachability bug: reachability of point i
+        // w.r.t. neighbor j used k_distances[j] before it was filled for j > i,
+        // silently collapsing reach_dist(i, j) to the raw distance. On a
+        // perfectly symmetric configuration every point has identical local
+        // structure, so the correct LOF is exactly 1.0 for all points. The
+        // buggy code produced order-dependent values (~0.863, ~1.008, ~1.153).
+        let config = LofConfig { k: 3 };
+        let lof = LocalOutlierFactor::new(config);
+        let data = vec![
+            vec![0.0, 0.0],
+            vec![0.0, 1.0],
+            vec![1.0, 0.0],
+            vec![1.0, 1.0],
+        ];
+        let scores = lof.fit_predict(&data);
+        assert_eq!(scores.len(), data.len());
+        for (i, s) in scores.iter().enumerate()
+        {
+            assert!(
+                (s - 1.0).abs() < 1e-9,
+                "symmetric point {} should have LOF exactly 1.0, got {}",
+                i,
+                s
+            );
         }
     }
 

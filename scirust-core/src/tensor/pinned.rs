@@ -205,7 +205,10 @@ pub struct PinnedPool {
 
 impl PinnedPool {
     /// Crée un pool de `capacity` buffers de `elem_count` éléments de type T.
-    pub fn new<T>(capacity: usize, _elem_count: usize) -> Result<Self, PinError>
+    ///
+    /// Les buffers sont alloués (et pinés) immédiatement à la construction, de
+    /// sorte qu'aucune allocation n'a lieu pendant l'emprunt.
+    pub fn new<T>(capacity: usize, elem_count: usize) -> Result<Self, PinError>
     where
         T: Copy,
     {
@@ -214,7 +217,7 @@ impl PinnedPool {
 
         for _ in 0..capacity
         {
-            buffers.push(None);
+            buffers.push(Some(PinnedBuffer::new::<T>(elem_count)?));
             free_indices.push(buffers.len() - 1);
         }
 
@@ -226,40 +229,111 @@ impl PinnedPool {
 
     /// Emprunte un buffer du pool.
     ///
-    /// Retourne None si le pool est vide.
+    /// Retourne `Err(AllocationFailed)` si le pool est vide (tous les buffers
+    /// sont déjà empruntés).
     pub fn borrow<T>(&mut self) -> Result<PooledBuffer, PinError>
     where
         T: Copy,
     {
         let idx = self.free_indices.pop().ok_or(PinError::AllocationFailed)?;
-        let buf = PinnedBuffer::new::<T>(
-            self.buffers[idx]
-                .as_ref()
-                .ok_or(PinError::AllocationFailed)?
-                .len_bytes()
-                / std::mem::size_of::<T>(),
-        )?;
-        self.buffers[idx] = Some(buf);
+        // Le buffer a été pré-alloué à la construction ; on vérifie tout de même
+        // sa présence pour rester robuste face à un pool corrompu.
+        let buf = self.buffers[idx]
+            .as_ref()
+            .ok_or(PinError::AllocationFailed)?;
         Ok(PooledBuffer {
-            pool: std::ptr::null_mut(),
+            ptr: buf.as_ptr() as *mut u8,
+            len_bytes: buf.len_bytes(),
             idx,
             elem_size: std::mem::size_of::<T>(),
         })
     }
 
-    /// Rend un buffer au pool.
-    pub fn release(&mut self, _buf: &PooledBuffer) {
-        // En production, on garderait un Weak reference pour retrouver l'index.
-        // Ici on simplifie.
+    /// Rend un buffer au pool afin qu'il puisse être ré-emprunté.
+    pub fn release(&mut self, buf: &PooledBuffer) {
+        // On ne remet l'index dans la liste libre que s'il désigne bien un
+        // buffer du pool et qu'il n'y est pas déjà (évite les doubles release).
+        if buf.idx < self.buffers.len()
+            && self.buffers[buf.idx].is_some()
+            && !self.free_indices.contains(&buf.idx)
+        {
+            self.free_indices.push(buf.idx);
+        }
+    }
+
+    /// Nombre de buffers actuellement disponibles à l'emprunt.
+    #[inline]
+    pub fn available(&self) -> usize {
+        self.free_indices.len()
+    }
+
+    /// Capacité totale du pool (nombre de buffers).
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.buffers.len()
     }
 }
 
 /// Buffer emprunté du pool.
-#[allow(dead_code)]
+///
+/// Ne possède pas la mémoire : celle-ci reste la propriété du [`PinnedPool`]
+/// dont le buffer est issu. Le buffer doit être rendu via
+/// [`PinnedPool::release`] pour être ré-emprunté.
 pub struct PooledBuffer {
-    pool: *mut (),
+    ptr: *mut u8,
+    len_bytes: usize,
     idx: usize,
     elem_size: usize,
+}
+
+impl PooledBuffer {
+    /// Index du buffer dans le pool d'origine.
+    #[inline]
+    pub fn index(&self) -> usize {
+        self.idx
+    }
+
+    /// Taille en bytes du buffer emprunté.
+    #[inline]
+    pub fn len_bytes(&self) -> usize {
+        self.len_bytes
+    }
+
+    /// Nombre d'éléments de type `T` que le buffer peut contenir.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len_bytes / self.elem_size
+    }
+
+    /// Indique si le buffer est vide.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len_bytes == 0
+    }
+
+    /// Slice immutable typé sur la mémoire empruntée.
+    ///
+    /// # Safety
+    /// L'appelant doit utiliser le même type `T` que celui passé à
+    /// [`PinnedPool::borrow`] et garantir que le pool d'origine (propriétaire
+    /// de la mémoire) est encore vivant.
+    #[inline]
+    pub unsafe fn as_slice<T>(&self) -> &[T] {
+        let len = self.len_bytes / std::mem::size_of::<T>();
+        unsafe { std::slice::from_raw_parts(self.ptr as *const T, len) }
+    }
+
+    /// Slice mutable typé sur la mémoire empruntée.
+    ///
+    /// # Safety
+    /// L'appelant doit utiliser le même type `T` que celui passé à
+    /// [`PinnedPool::borrow`], garantir que le pool d'origine est encore
+    /// vivant, et qu'aucun autre alias mutable n'existe.
+    #[inline]
+    pub unsafe fn as_mut_slice<T>(&mut self) -> &mut [T] {
+        let len = self.len_bytes / std::mem::size_of::<T>();
+        unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut T, len) }
+    }
 }
 
 /// Type de tenseur pour le zero-copy.
@@ -271,4 +345,70 @@ pub enum MemoryLayout {
     Pinned,
     /// Mémoire GPU directe (unified)
     GpuUnified,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn borrow_succeeds_on_first_call() {
+        // Régression : auparavant `borrow` retournait toujours
+        // `Err(AllocationFailed)` car les buffers n'étaient jamais alloués à la
+        // construction du pool.
+        let mut pool = PinnedPool::new::<f32>(2, 16).expect("pool creation");
+        let buf = pool.borrow::<f32>().expect("first borrow must succeed");
+        assert_eq!(buf.len(), 16);
+        assert_eq!(buf.len_bytes(), 16 * std::mem::size_of::<f32>());
+    }
+
+    #[test]
+    fn borrow_release_cycle_reuses_buffers() {
+        let mut pool = PinnedPool::new::<f32>(2, 8).expect("pool creation");
+        assert_eq!(pool.capacity(), 2);
+        assert_eq!(pool.available(), 2);
+
+        let a = pool.borrow::<f32>().expect("borrow a");
+        let b = pool.borrow::<f32>().expect("borrow b");
+        assert_eq!(pool.available(), 0);
+
+        // Pool épuisé : le prochain emprunt échoue.
+        assert!(matches!(
+            pool.borrow::<f32>(),
+            Err(PinError::AllocationFailed)
+        ));
+
+        pool.release(&a);
+        assert_eq!(pool.available(), 1);
+
+        // Double release : ne doit pas gonfler la liste libre.
+        pool.release(&a);
+        assert_eq!(pool.available(), 1);
+
+        pool.release(&b);
+        assert_eq!(pool.available(), 2);
+
+        // Après release, on peut ré-emprunter les deux buffers.
+        let _c = pool.borrow::<f32>().expect("re-borrow c");
+        let _d = pool.borrow::<f32>().expect("re-borrow d");
+        assert_eq!(pool.available(), 0);
+    }
+
+    #[test]
+    fn pooled_buffer_is_writable_and_pinned() {
+        let mut pool = PinnedPool::new::<f32>(1, 4).expect("pool creation");
+        let mut buf = pool.borrow::<f32>().expect("borrow");
+
+        // La mémoire empruntée est réellement utilisable (initialisée à zéro).
+        // SAFETY: même type `T = f32` que pour `borrow`, pool encore vivant,
+        // buffer emprunté de manière exclusive.
+        unsafe {
+            let slice = buf.as_mut_slice::<f32>();
+            assert_eq!(slice, &[0.0f32; 4]);
+            slice.copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        }
+        unsafe {
+            assert_eq!(buf.as_slice::<f32>(), &[1.0, 2.0, 3.0, 4.0]);
+        }
+    }
 }

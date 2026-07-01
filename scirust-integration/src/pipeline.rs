@@ -75,7 +75,22 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Create a new pipeline from configuration.
-    pub fn new(config: PipelineConfig) -> Self {
+    ///
+    /// The pipeline is driven by the first configured station. A configuration
+    /// with zero stations is not usable, so any empty `stations` list is
+    /// backfilled with a single [`StationConfig::default`] here to guarantee an
+    /// index-safe, panic-free construction (deserialized JSON can legally carry
+    /// `"stations": []`). Use [`Pipeline::try_new`] when callers want to reject
+    /// such a configuration up front instead of running against a default
+    /// station.
+    pub fn new(mut config: PipelineConfig) -> Self {
+        if config.stations.is_empty()
+        {
+            config
+                .stations
+                .push(crate::config::StationConfig::default());
+        }
+
         let backend_type =
             BackendType::parse_from_str(&config.backend_type).unwrap_or(BackendType::Simulated);
 
@@ -88,7 +103,7 @@ impl Pipeline {
             Err(_) => BackendFactory::try_real_or_simulated(&opcua_cfg, &mqtt_cfg),
         };
 
-        // First station config drives the pipeline
+        // First station config drives the pipeline (guaranteed non-empty above).
         let station = &config.stations[0];
 
         let runtime = EventRuntime::new(Box::new(SpikeDetector::new(
@@ -130,6 +145,19 @@ impl Pipeline {
             last_features: Vec::new(),
             drift_alarms: 0,
         }
+    }
+
+    /// Create a new pipeline, rejecting an invalid configuration.
+    ///
+    /// Unlike [`Pipeline::new`], this validates the configuration first and
+    /// returns an error (rather than backfilling a default station) when the
+    /// config is unusable — most importantly when it declares no stations.
+    pub fn try_new(config: PipelineConfig) -> Result<Self, String> {
+        if config.stations.is_empty()
+        {
+            return Err("Pipeline configuration has no monitoring stations".to_string());
+        }
+        Ok(Self::new(config))
     }
 
     /// Initialize: subscribe to OPC-UA nodes matching configured sensors.
@@ -545,6 +573,61 @@ mod tests {
         assert_eq!(report.mqtt_critical as u64, publish_count);
         assert_eq!(report.mqtt_info, 0);
         assert_eq!(report.mqtt_warning, 0);
+    }
+
+    /// Non-regression oracle for the zero-stations panic. A config that
+    /// deserializes with an empty `stations` list (legal JSON) must not cause
+    /// `Pipeline::new`/`init`/`run_cycle` to index out of bounds. Before the
+    /// fix, `Pipeline::new` panicked on `config.stations[0]`; after the fix it
+    /// backfills a default station so construction and a run cycle both
+    /// succeed. `try_new` must instead reject the empty config with an error.
+    #[test]
+    fn test_pipeline_handles_zero_stations_config() {
+        let json = r#"{
+            "backend_type": "simulated",
+            "opcua": {
+                "endpoint": "opc.tcp://localhost:4840",
+                "application_name": "SciRust-Monitor",
+                "session_timeout_ms": 60000,
+                "sampling_interval_ms": 100.0
+            },
+            "mqtt": {
+                "host": "localhost",
+                "port": 1883,
+                "client_id": "scirust-monitor",
+                "base_topic": "scirust/events",
+                "username": null,
+                "password": null,
+                "keep_alive_secs": 60,
+                "qos": 1
+            },
+            "stations": [],
+            "settings": {
+                "max_cycles": 1000,
+                "audit_log_size": 10000,
+                "enable_rul": true,
+                "enable_fault_detectors": true,
+                "enable_drift_detection": true,
+                "enable_degraded_mode": true,
+                "rul_window_size": 100,
+                "rul_min_observations": 10,
+                "drift_window_size": 50,
+                "drift_threshold": 0.25
+            }
+        }"#;
+
+        let config = PipelineConfig::from_json_str(json).expect("empty stations must parse");
+        assert!(config.stations.is_empty());
+
+        // Strict path: try_new rejects the unusable config instead of panicking.
+        assert!(Pipeline::try_new(config.clone()).is_err());
+
+        // Lenient path: new backfills a default station and never indexes out
+        // of bounds, so construction and a full run cycle both succeed.
+        let mut pipeline = Pipeline::new(config);
+        assert_eq!(pipeline.config.stations.len(), 1);
+        let report = pipeline.run(3);
+        assert_eq!(report.total_cycles, 3);
     }
 
     /// Oracle for the two previously-untested filesystem config functions:

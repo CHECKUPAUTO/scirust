@@ -262,9 +262,14 @@ pub fn mfcc_delta2(mfccs: &[Vec<f64>]) -> Vec<Vec<f64>> {
 // ─── Chroma Features ────────────────────────────────────────────────────────
 
 /// Compute chroma features (pitch class profile).
-pub fn chroma(signal: &[f64], sample_rate: usize, n_fft: usize) -> Vec<Vec<f64>> {
+pub fn chroma(signal: &[f64], sample_rate: usize, _n_fft: usize) -> Vec<Vec<f64>> {
     let spectrum = magnitude_spectrum(signal);
-    let freq_per_bin = sample_rate as f64 / n_fft as f64;
+    // `magnitude_spectrum` runs a length-`signal.len()` DFT, so bin `k` sits at
+    // `k * sample_rate / signal.len()` Hz. Deriving the bin spacing from the
+    // (unused) `n_fft` argument would misplace every bin — and thus every pitch
+    // class — whenever `signal.len() != n_fft`. Use the actual signal length,
+    // matching `chroma_vector`.
+    let freq_per_bin = sample_rate as f64 / signal.len() as f64;
     let n_frames = 1; // simplified: single frame
     let mut chroma = vec![vec![0.0; 12]; n_frames];
 
@@ -1079,6 +1084,35 @@ mod tests {
         let c = chroma(&sig.samples, sig.sample_rate, 2048);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].len(), 12);
+    }
+
+    #[test]
+    fn test_chroma_identifies_a440_when_len_ne_nfft() {
+        // Regression: `chroma` must derive bin frequencies from the signal
+        // length (what `magnitude_spectrum` actually uses), not from `n_fft`.
+        // 3000 samples at 8 kHz -> 8000/3000 Hz/bin, and 440 Hz lands exactly on
+        // bin 165, so the correct spacing reads 440 Hz -> pitch class 9 (A).
+        // The old `sample_rate / n_fft` spacing (8000/2048 ≈ 3.9 Hz/bin) read
+        // bin 165 as ~644.5 Hz -> pitch class 4 (E). 3000/2048 is not near a
+        // power of two, so the error is not masked by octave equivalence.
+        let sample_rate = 8000;
+        let n = 3000;
+        let n_fft = 2048; // deliberately != n
+        let sig: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 440.0 * i as f64 / sample_rate as f64).sin())
+            .collect();
+        let c = chroma(&sig, sample_rate, n_fft);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].len(), 12);
+        let (argmax, _) = c[0]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap();
+        assert_eq!(
+            argmax, 9,
+            "A4 should map to pitch class 9 (A), got {argmax}"
+        );
     }
 
     #[test]

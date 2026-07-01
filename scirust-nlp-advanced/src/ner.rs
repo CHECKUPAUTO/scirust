@@ -150,6 +150,38 @@ pub struct RuleBasedNer {
     patterns: Vec<(String, EntityType, f64)>,
 }
 
+/// Lowercase `text` while recording, for every byte of the lowercased string,
+/// the byte offset of the character it originated from in `text`.
+///
+/// Returns `(lower, map)` where `map` has `lower.len() + 1` entries: `map[i]`
+/// is the original byte offset for lowercase byte `i`, and `map[lower.len()]`
+/// equals `text.len()`.  Every entry is guaranteed to fall on a `char`
+/// boundary of `text`, so slicing `text[map[a]..map[b]]` for any lowercase
+/// char boundaries `a <= b` never panics.
+///
+/// This is needed because `str::to_lowercase` may change the byte length of a
+/// string (e.g. `"İ"` (2 bytes) → `"i̇"` (3 bytes)); byte offsets found in the
+/// lowercased text therefore cannot be applied to the original text directly.
+fn lowercase_with_offsets(text: &str) -> (String, Vec<usize>) {
+    let mut lower = String::with_capacity(text.len());
+    let mut map = Vec::with_capacity(text.len() + 1);
+    let mut buf = [0u8; 4];
+    for (byte_idx, ch) in text.char_indices()
+    {
+        for lc in ch.to_lowercase()
+        {
+            let encoded = lc.encode_utf8(&mut buf);
+            for _ in 0..encoded.len()
+            {
+                map.push(byte_idx);
+            }
+            lower.push_str(encoded);
+        }
+    }
+    map.push(text.len());
+    (lower, map)
+}
+
 impl RuleBasedNer {
     pub fn new(gazetteer: Gazetteer) -> Self {
         Self {
@@ -166,9 +198,16 @@ impl RuleBasedNer {
     /// Extract entities from `text`.
     pub fn extract(&self, text: &str) -> Vec<Entity> {
         let mut entities = Vec::new();
-        let lower = text.to_lowercase();
+        // Case-insensitive search is done on the lowercased text, but the
+        // returned spans must refer to the *original* text.  Lowercasing can
+        // change the byte length of a string (e.g. Unicode "İ" → "i̇"), so
+        // offsets computed on `lower` cannot be applied to `text` directly.
+        // `lower_map` translates any byte offset in `lower` back to the byte
+        // offset of the originating character in `text`.
+        let (lower, lower_map) = lowercase_with_offsets(text);
 
-        // 1. Gazetteer lookup — match longest spans first
+        // 1. Gazetteer lookup — match longest spans first.
+        // Offsets in `matches` are byte offsets into `lower`.
         let mut matches: Vec<(usize, usize, EntityType)> = Vec::new();
         for (key, &ty) in &self.gazetteer.entries
         {
@@ -189,11 +228,14 @@ impl RuleBasedNer {
         {
             if *start >= last_end
             {
+                // Translate lowercase offsets back to original-text offsets.
+                let orig_start = lower_map[*start];
+                let orig_end = lower_map[*end];
                 entities.push(Entity {
-                    text: text[*start..*end].to_string(),
+                    text: text[orig_start..orig_end].to_string(),
                     entity_type: *ty,
-                    start: *start,
-                    end: *end,
+                    start: orig_start,
+                    end: orig_end,
                     score: 0.9,
                 });
                 last_end = *end;
@@ -208,15 +250,20 @@ impl RuleBasedNer {
             while let Some(pos) = lower[search_from..].find(pat_lower.as_str())
             {
                 let abs = search_from + pos;
-                let end = abs + pattern.len();
+                let end = abs + pat_lower.len();
+                // Translate lowercase offsets back to original-text offsets.
+                let orig_start = lower_map[abs];
+                let orig_end = lower_map[end];
                 // Only add if not already covered
-                if !entities.iter().any(|e| e.start <= abs && e.end > abs)
+                if !entities
+                    .iter()
+                    .any(|e| e.start <= orig_start && e.end > orig_start)
                 {
                     entities.push(Entity {
-                        text: text[abs..end].to_string(),
+                        text: text[orig_start..orig_end].to_string(),
                         entity_type: *ty,
-                        start: abs,
-                        end,
+                        start: orig_start,
+                        end: orig_end,
                         score: *score,
                     });
                 }
@@ -711,6 +758,65 @@ mod tests {
         assert_eq!(EntityType::Person.to_string(), "PER");
         assert_eq!(EntityType::Organization.to_string(), "ORG");
         assert_eq!(EntityType::Location.to_string(), "LOC");
+    }
+
+    #[test]
+    fn test_rule_based_ner_non_ascii_offsets() {
+        // Regression: lowercasing can change byte length (Unicode "İ" → "i̇"),
+        // so offsets found on the lowercased text must be mapped back to the
+        // original text. Before the fix this panicked with
+        // "byte index N is not a char boundary" or produced a corrupted slice.
+        let mut g = Gazetteer::new();
+        g.add("İé", EntityType::Location);
+        g.add("Café", EntityType::Organization);
+        let ner = RuleBasedNer::new(g);
+
+        // "İéé" is the minimal case that panicked on the original code:
+        // lowercasing "İé" grows by one byte, pushing the end offset into the
+        // trailing multibyte 'é' of the source text.
+        let text = "İéé and Café here";
+        let entities = ner.extract(text);
+
+        // Gazetteer matches must be exact slices of the ORIGINAL text and must
+        // preserve original casing.
+        let loc = entities
+            .iter()
+            .find(|e| e.entity_type == EntityType::Location)
+            .expect("İé should be found");
+        assert_eq!(loc.text, "İé");
+        assert_eq!(&text[loc.start..loc.end], "İé");
+
+        let org = entities
+            .iter()
+            .find(|e| e.entity_type == EntityType::Organization)
+            .expect("Café should be found");
+        assert_eq!(org.text, "Café");
+        assert_eq!(&text[org.start..org.end], "Café");
+
+        // Every entity span must be a valid, in-bounds slice of the original.
+        for e in &entities
+        {
+            assert!(e.end <= text.len());
+            assert!(text.is_char_boundary(e.start));
+            assert!(text.is_char_boundary(e.end));
+            assert_eq!(e.text, text[e.start..e.end]);
+        }
+    }
+
+    #[test]
+    fn test_rule_based_ner_non_ascii_pattern() {
+        // The pattern branch had the same offset bug (and additionally mixed a
+        // lowercased search offset with the original-case pattern length).
+        let mut ner = RuleBasedNer::new(Gazetteer::new());
+        ner.add_pattern("İé", EntityType::Misc, 0.8);
+        let text = "prefix İéé suffix";
+        let entities = ner.extract(text);
+        let m = entities
+            .iter()
+            .find(|e| e.entity_type == EntityType::Misc)
+            .expect("İé pattern should match");
+        assert_eq!(m.text, "İé");
+        assert_eq!(&text[m.start..m.end], "İé");
     }
 
     #[test]

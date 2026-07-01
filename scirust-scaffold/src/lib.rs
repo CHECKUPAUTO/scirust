@@ -58,6 +58,7 @@ pub enum Token {
     StringLiteral(String),
     Colon,
     Comma,
+    Dot,
     DotDot,
     LParen,
     RParen,
@@ -98,6 +99,7 @@ impl fmt::Display for Token {
             Token::StringLiteral(s) => write!(f, "\"{}\"", s),
             Token::Colon => write!(f, ":"),
             Token::Comma => write!(f, ","),
+            Token::Dot => write!(f, "."),
             Token::DotDot => write!(f, ".."),
             Token::LParen => write!(f, "("),
             Token::RParen => write!(f, ")"),
@@ -208,9 +210,6 @@ fn tokenize_line(trimmed: &str) -> Result<Vec<Token>, String> {
         ("swap", "swap"),
         ("true", "true"),
         ("false", "false"),
-        ("and", "and"),
-        ("or", "or"),
-        ("not", "not"),
     ]
     .iter()
     .copied()
@@ -304,13 +303,22 @@ fn tokenize_line(trimmed: &str) -> Result<Vec<Token>, String> {
                         break;
                     }
                 }
-                if let Some(&kw) = keywords.get(ident.as_str())
+                match ident.as_str()
                 {
-                    tokens.push(Token::Keyword(kw.to_string()));
-                }
-                else
-                {
-                    tokens.push(Token::Identifier(ident));
+                    "and" => tokens.push(Token::AndAnd),
+                    "or" => tokens.push(Token::OrOr),
+                    "not" => tokens.push(Token::Not),
+                    _ =>
+                    {
+                        if let Some(&kw) = keywords.get(ident.as_str())
+                        {
+                            tokens.push(Token::Keyword(kw.to_string()));
+                        }
+                        else
+                        {
+                            tokens.push(Token::Identifier(ident));
+                        }
+                    },
                 }
             },
             '"' =>
@@ -349,7 +357,7 @@ fn tokenize_line(trimmed: &str) -> Result<Vec<Token>, String> {
                 }
                 else
                 {
-                    return Err("Expected '..' for range".to_string());
+                    tokens.push(Token::Dot);
                 }
             },
             '(' =>
@@ -561,6 +569,7 @@ pub enum Expression {
         start: Box<Expression>,
         end: Box<Expression>,
     },
+    ArrayLiteral(Vec<Expression>),
 }
 
 impl Expression {
@@ -619,6 +628,11 @@ impl fmt::Display for Expression {
             },
             Expression::Len(v) => write!(f, "len({})", v),
             Expression::Range { start, end } => write!(f, "{}..{}", start, end),
+            Expression::ArrayLiteral(elems) =>
+            {
+                let elems_str: Vec<String> = elems.iter().map(|e| e.to_string()).collect();
+                write!(f, "[{}]", elems_str.join(", "))
+            },
         }
     }
 }
@@ -691,7 +705,7 @@ pub enum Statement {
     },
     ArrayAssign {
         array: String,
-        index: Expression,
+        indices: Vec<Expression>,
         value: Expression,
     },
     ForLoop {
@@ -1062,6 +1076,7 @@ impl Parser {
             Token::Keyword(k) if k == "swap" => self.parse_swap_stmt(),
             Token::Identifier(_) =>
             {
+                let ident_pos = self.pos;
                 let ident = if let Token::Identifier(n) = self.peek().clone()
                 {
                     self.pos += 1;
@@ -1085,16 +1100,31 @@ impl Parser {
                     },
                     Token::LBracket =>
                     {
-                        self.pos += 1;
-                        let index = self.parse_expression()?;
-                        self.expect("]")?;
+                        // One or more index accesses form the assignment target,
+                        // e.g. `arr[i] = v` or `dp[i][w] = v`.
+                        let mut indices = Vec::new();
+                        while matches!(self.peek(), Token::LBracket)
+                        {
+                            self.pos += 1;
+                            indices.push(self.parse_index()?);
+                            self.expect("]")?;
+                        }
                         self.expect("=")?;
                         let value = self.parse_expression()?;
                         Ok(Statement::ArrayAssign {
                             array: ident,
-                            index,
+                            indices,
                             value,
                         })
+                    },
+                    Token::Dot | Token::LParen =>
+                    {
+                        // A bare call statement such as `order.push(x)` or
+                        // `quick_sort(arr, low, high)`. Reparse the whole
+                        // expression starting from the identifier we consumed.
+                        self.pos = ident_pos;
+                        let expr = self.parse_expression()?;
+                        Ok(Statement::ExpressionStmt(expr))
                     },
                     _ => Err(format!(
                         "Unexpected token {} after identifier '{}'",
@@ -1229,6 +1259,25 @@ impl Parser {
 
     fn parse_expression(&mut self) -> Result<Expression, String> {
         self.parse_or()
+    }
+
+    /// Parse the contents of an index `[...]`, allowing a range slice such as
+    /// `arr[0..mid]`. The surrounding `[` / `]` are handled by the caller.
+    fn parse_index(&mut self) -> Result<Expression, String> {
+        let start = self.parse_expression()?;
+        if matches!(self.peek(), Token::DotDot)
+        {
+            self.pos += 1;
+            let end = self.parse_expression()?;
+            Ok(Expression::Range {
+                start: Box::new(start),
+                end: Box::new(end),
+            })
+        }
+        else
+        {
+            Ok(start)
+        }
     }
 
     fn parse_or(&mut self) -> Result<Expression, String> {
@@ -1433,10 +1482,33 @@ impl Parser {
                 self.expect(")")?;
                 Ok(expr)
             },
+            Token::LBracket =>
+            {
+                // Array/list literal: `[]`, `[a]`, `[a, b, ...]`.
+                self.pos += 1;
+                let mut elems = Vec::new();
+                if !matches!(self.peek(), Token::RBracket)
+                {
+                    loop
+                    {
+                        elems.push(self.parse_expression()?);
+                        if matches!(self.peek(), Token::Comma)
+                        {
+                            self.pos += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                self.expect("]")?;
+                Ok(Expression::ArrayLiteral(elems))
+            },
             Token::Identifier(id) =>
             {
                 self.pos += 1;
-                match self.peek()
+                // Build the base expression: a `len(..)` call, a function call,
+                // an `id..end` range, or a plain variable.
+                let mut expr = match self.peek()
                 {
                     Token::LParen =>
                     {
@@ -1453,49 +1525,89 @@ impl Parser {
                                 return Err("Expected variable argument to len()".to_string());
                             };
                             self.expect(")")?;
-                            return Ok(Expression::Len(arg));
+                            Expression::Len(arg)
                         }
-                        let mut args = Vec::new();
-                        if !matches!(self.peek(), Token::RParen)
+                        else
                         {
-                            loop
-                            {
-                                args.push(self.parse_expression()?);
-                                if matches!(self.peek(), Token::Comma)
-                                {
-                                    self.pos += 1;
-                                    continue;
-                                }
-                                break;
-                            }
+                            let args = self.parse_call_args()?;
+                            Expression::FunctionCall { name: id, args }
                         }
-                        self.expect(")")?;
-                        Ok(Expression::FunctionCall { name: id, args })
-                    },
-                    Token::LBracket =>
-                    {
-                        self.pos += 1;
-                        let index = self.parse_expression()?;
-                        self.expect("]")?;
-                        Ok(Expression::ArrayIndex {
-                            array: Box::new(Expression::Variable(id)),
-                            index: Box::new(index),
-                        })
                     },
                     Token::DotDot =>
                     {
                         self.pos += 1;
                         let end = self.parse_expression()?;
-                        Ok(Expression::Range {
+                        Expression::Range {
                             start: Box::new(Expression::Variable(id)),
                             end: Box::new(end),
-                        })
+                        }
                     },
-                    _ => Ok(Expression::Variable(id)),
+                    _ => Expression::Variable(id),
+                };
+                // Apply postfix accesses: indexing `[..]` (including chains such
+                // as `dp[i][w]`) and method calls `expr.method(..)`.
+                loop
+                {
+                    match self.peek()
+                    {
+                        Token::LBracket =>
+                        {
+                            self.pos += 1;
+                            let index = self.parse_index()?;
+                            self.expect("]")?;
+                            expr = Expression::ArrayIndex {
+                                array: Box::new(expr),
+                                index: Box::new(index),
+                            };
+                        },
+                        Token::Dot =>
+                        {
+                            self.pos += 1;
+                            let method = if let Token::Identifier(m) = self.peek().clone()
+                            {
+                                self.pos += 1;
+                                m
+                            }
+                            else
+                            {
+                                return Err(format!(
+                                    "Expected method name after '.', found {}",
+                                    self.peek()
+                                ));
+                            };
+                            self.expect("(")?;
+                            let mut args = vec![expr];
+                            args.extend(self.parse_call_args()?);
+                            expr = Expression::FunctionCall { name: method, args };
+                        },
+                        _ => break,
+                    }
                 }
+                Ok(expr)
             },
             _ => Err(format!("Unexpected token {} in expression", tok)),
         }
+    }
+
+    /// Parse a comma-separated argument list up to and including the closing
+    /// `)`. The opening `(` must already have been consumed.
+    fn parse_call_args(&mut self) -> Result<Vec<Expression>, String> {
+        let mut args = Vec::new();
+        if !matches!(self.peek(), Token::RParen)
+        {
+            loop
+            {
+                args.push(self.parse_expression()?);
+                if matches!(self.peek(), Token::Comma)
+                {
+                    self.pos += 1;
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(")")?;
+        Ok(args)
     }
 }
 
@@ -1849,7 +1961,7 @@ impl RustGenerator {
                 };
                 let mutable = "mut ";
                 out.push_str(&format!(
-                    "{}let {} {}= {}{}{}\n",
+                    "{}let {}{}{} = {}{}\n",
                     indent, mutable, var_name, type_ann, init, semi
                 ));
             },
@@ -1861,14 +1973,17 @@ impl RustGenerator {
             },
             Statement::ArrayAssign {
                 array,
-                index,
+                indices,
                 value,
             } =>
             {
                 let arr = self.convert_name(array, &style.variable_naming);
-                let idx = self.emit_expr(index, style);
+                let idx = indices
+                    .iter()
+                    .map(|i| format!("[{}]", self.emit_expr(i, style)))
+                    .collect::<String>();
                 let val = self.emit_expr(value, style);
-                out.push_str(&format!("{}{}[{}] = {}{}\n", indent, arr, idx, val, semi));
+                out.push_str(&format!("{}{}{} = {}{}\n", indent, arr, idx, val, semi));
             },
             Statement::ForLoop {
                 var,
@@ -2015,6 +2130,12 @@ impl RustGenerator {
                 let e = self.emit_expr(end, style);
                 format!("{}..{}", s, e)
             },
+            Expression::ArrayLiteral(elems) =>
+            {
+                let elems_str: Vec<String> =
+                    elems.iter().map(|e| self.emit_expr(e, style)).collect();
+                format!("vec![{}]", elems_str.join(", "))
+            },
         }
     }
 }
@@ -2134,13 +2255,16 @@ impl PythonGenerator {
             },
             Statement::ArrayAssign {
                 array,
-                index,
+                indices,
                 value,
             } =>
             {
-                let idx = self.emit_expr(index, style);
+                let idx = indices
+                    .iter()
+                    .map(|i| format!("[{}]", self.emit_expr(i, style)))
+                    .collect::<String>();
                 let val = self.emit_expr(value, style);
-                out.push_str(&format!("{}{}[{}] = {}\n", indent, array, idx, val));
+                out.push_str(&format!("{}{}{} = {}\n", indent, array, idx, val));
             },
             Statement::ForLoop {
                 var,
@@ -2290,6 +2414,12 @@ impl PythonGenerator {
                 let e = self.emit_expr(end, style);
                 format!("range({}, {})", s, e)
             },
+            Expression::ArrayLiteral(elems) =>
+            {
+                let elems_str: Vec<String> =
+                    elems.iter().map(|e| self.emit_expr(e, style)).collect();
+                format!("[{}]", elems_str.join(", "))
+            },
         }
     }
 }
@@ -2436,13 +2566,16 @@ impl CGenerator {
             },
             Statement::ArrayAssign {
                 array,
-                index,
+                indices,
                 value,
             } =>
             {
-                let idx = self.emit_expr(index, style);
+                let idx = indices
+                    .iter()
+                    .map(|i| format!("[{}]", self.emit_expr(i, style)))
+                    .collect::<String>();
                 let val = self.emit_expr(value, style);
-                out.push_str(&format!("{}{}[{}] = {};\n", indent, array, idx, val));
+                out.push_str(&format!("{}{}{} = {};\n", indent, array, idx, val));
             },
             Statement::ForLoop {
                 var,
@@ -2586,6 +2719,12 @@ impl CGenerator {
                 let e = self.emit_expr(end, style);
                 format!("{}..{}", s, e)
             },
+            Expression::ArrayLiteral(elems) =>
+            {
+                let elems_str: Vec<String> =
+                    elems.iter().map(|e| self.emit_expr(e, style)).collect();
+                format!("vec![{}]", elems_str.join(", "))
+            },
         }
     }
 }
@@ -2667,14 +2806,15 @@ fn emit_pseudocode_stmts(out: &mut String, stmts: &[Statement], level: usize) {
             },
             Statement::ArrayAssign {
                 array,
-                index,
+                indices,
                 value,
             } =>
             {
-                out.push_str(&format!(
-                    "{}{}[{}] \u{2190} {}\n",
-                    indent, array, index, value
-                ));
+                let idx = indices
+                    .iter()
+                    .map(|i| format!("[{}]", i))
+                    .collect::<String>();
+                out.push_str(&format!("{}{}{} \u{2190} {}\n", indent, array, idx, value));
             },
             Statement::ForLoop {
                 var,
@@ -3798,13 +3938,16 @@ fn collect_used_vars(stmts: &[Statement]) -> Vec<String> {
             },
             Statement::ArrayAssign {
                 array,
-                index,
+                indices,
                 value,
                 ..
             } =>
             {
                 vars.push(array.clone());
-                collect_expr_vars(index, &mut vars);
+                for index in indices
+                {
+                    collect_expr_vars(index, &mut vars);
+                }
                 collect_expr_vars(value, &mut vars);
             },
             Statement::ForLoop {
@@ -3876,6 +4019,13 @@ fn collect_expr_vars(expr: &Expression, vars: &mut Vec<String>) {
         {
             collect_expr_vars(start, vars);
             collect_expr_vars(end, vars);
+        },
+        Expression::ArrayLiteral(elems) =>
+        {
+            for e in elems
+            {
+                collect_expr_vars(e, vars);
+            }
         },
         _ =>
         {},
@@ -4629,6 +4779,32 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_rust_inline_let_well_formed() {
+        // Regression: an inline `let` with a type annotation used to emit a
+        // malformed statement (`let mut  x= : i32n + 1;`) because the format
+        // slots were in the wrong order. It must now be valid Rust:
+        // `let mut x: i32 = n + 1;`.
+        let dsl = "algorithm inc\n  input: n: i32\n  output: x: i32\n  steps:\n    let x: i32 = n + 1\n    return x";
+        let algo = parse_algorithm(dsl).unwrap();
+        let code = generate_rust(&algo, &CodeStyle::default());
+
+        assert!(
+            code.contains("let mut x: i32 = n + 1;"),
+            "expected well-formed let, got:\n{code}"
+        );
+        // Guard against the specific malformed shapes from the bug.
+        assert!(
+            !code.contains("let mut  "),
+            "double space after `let mut`:\n{code}"
+        );
+        assert!(
+            !code.contains("= : "),
+            "type annotation emitted after `=`:\n{code}"
+        );
+        assert!(!code.contains("x= "), "missing space before `=`:\n{code}");
+    }
+
+    #[test]
     fn test_generate_python() {
         let dsl = "algorithm find_max\n  input: arr: Vec<i32>\n  output: max_val: i32\n  variables:\n    max_val: i32 = arr[0]\n  steps:\n    for i in 1..len(arr)\n      if arr[i] > max_val\n        max_val = arr[i]\n    return max_val";
         let algo = parse_algorithm(dsl).unwrap();
@@ -4696,6 +4872,79 @@ mod tests {
         let algo = registry.instantiate("bubble_sort", &params).unwrap();
         assert_eq!(algo.name, "bubble_sort");
         assert_eq!(algo.inputs[0].type_name, "Vec<f64>");
+    }
+
+    #[test]
+    fn test_all_builtin_templates_instantiate() {
+        // Regression: every template shipped by create_template_library must
+        // instantiate with its own default params. Previously the DSL parser
+        // could not handle method calls (`order.push(x)`), the `and` keyword,
+        // 2D index assignment (`dp[i][w] = ..`), range slices (`arr[0..mid]`),
+        // bare call statements (`quick_sort(..)`) or list literals (`[a, b]`),
+        // so 7 of the 15 templates returned Err.
+        let registry = create_template_library();
+        let mut names: Vec<String> = registry.templates.keys().cloned().collect();
+        names.sort();
+        assert_eq!(names.len(), 15, "expected 15 built-in templates");
+        for name in &names
+        {
+            let defaults = registry.get(name).unwrap().default_params.clone();
+            let result = registry.instantiate(name, &defaults);
+            assert!(
+                result.is_ok(),
+                "template '{}' failed to instantiate: {}",
+                name,
+                result.err().unwrap_or_default()
+            );
+            assert_eq!(&result.unwrap().name, name);
+        }
+
+        // Spot-check the previously-broken constructs produced the right AST.
+        let dfs = registry.instantiate("dfs", &HashMap::new()).unwrap();
+        assert!(dfs.steps.iter().any(|s| matches!(
+            s,
+            Statement::ExpressionStmt(Expression::FunctionCall { name, .. }) if name == "push"
+        )));
+
+        let ks = registry
+            .instantiate("knapsack_01", &HashMap::new())
+            .unwrap();
+        fn has_2d_assign(stmts: &[Statement]) -> bool {
+            stmts.iter().any(|s| match s
+            {
+                Statement::ArrayAssign { indices, .. } => indices.len() == 2,
+                Statement::ForLoop { body, .. } | Statement::WhileLoop { body, .. } =>
+                {
+                    has_2d_assign(body)
+                },
+                Statement::IfStatement {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => has_2d_assign(then_branch) || has_2d_assign(else_branch),
+                _ => false,
+            })
+        }
+        assert!(
+            has_2d_assign(&ks.steps),
+            "knapsack_01 should have dp[i][w] ="
+        );
+
+        let two_sum = registry
+            .instantiate(
+                "two_sum",
+                &[("type".to_string(), "i32".to_string())]
+                    .iter()
+                    .cloned()
+                    .collect(),
+            )
+            .unwrap();
+        assert!(
+            two_sum
+                .steps
+                .iter()
+                .any(|s| matches!(s, Statement::Return(Some(Expression::ArrayLiteral(_)))))
+        );
     }
 
     #[test]
