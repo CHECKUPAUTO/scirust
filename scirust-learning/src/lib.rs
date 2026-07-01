@@ -486,7 +486,9 @@ mod tests {
         // Regression: the long MA period must stay at the intended 8 rather than
         // being clobbered to short_period + 1 (= 4). An oscillating series makes
         // the two configurations produce distinguishable crossover indices.
-        let data: Vec<f64> = (0..30).map(|i| 10.0 + 5.0 * (i as f64 * 0.6).sin()).collect();
+        let data: Vec<f64> = (0..30)
+            .map(|i| 10.0 + 5.0 * (i as f64 * 0.6).sin())
+            .collect();
         let signals: Vec<String> = discover_patterns(&data)
             .into_iter()
             .filter(|s| s.contains("MA crossover"))
@@ -495,7 +497,8 @@ mod tests {
         // With a long period of 8, the earliest possible crossover index is 8,
         // so no signal may reference an index below 8. The buggy long period of
         // 4 emitted a "bullish ... at index 4" signal, which this rejects.
-        for (offset, expected_dir) in [(4usize, "bullish"), (10, "bearish"), (15, "bullish")] {
+        for (offset, expected_dir) in [(4usize, "bullish"), (10, "bearish"), (15, "bullish")]
+        {
             let clobbered = format!("({}) at index {}", expected_dir, offset);
             assert!(
                 !signals.iter().any(|s| s.contains(&clobbered)),

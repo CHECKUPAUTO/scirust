@@ -3246,13 +3246,22 @@ fn transpile_c(expr: &Expr, indent: usize) -> String {
                     op: BinOpKind::Range,
                     left,
                     right,
-                } => (transpile_c(left, 0), format!("{} < {}", var, transpile_c(right, 0))),
+                } => (
+                    transpile_c(left, 0),
+                    format!("{} < {}", var, transpile_c(right, 0)),
+                ),
                 Expr::BinOp {
                     op: BinOpKind::RangeInclusive,
                     left,
                     right,
-                } => (transpile_c(left, 0), format!("{} <= {}", var, transpile_c(right, 0))),
-                other => ("0".to_string(), format!("{} < {}", var, transpile_c(other, 0))),
+                } => (
+                    transpile_c(left, 0),
+                    format!("{} <= {}", var, transpile_c(right, 0)),
+                ),
+                other => (
+                    "0".to_string(),
+                    format!("{} < {}", var, transpile_c(other, 0)),
+                ),
             };
             format!(
                 "{}for (int {} = {}; {}; {}++) {}",
@@ -4621,7 +4630,12 @@ mod tests {
         {
             Expr::Block(stmts) =>
             {
-                assert_eq!(stmts.len(), 1, "expected a single scoping let, got: {:?}", stmts);
+                assert_eq!(
+                    stmts.len(),
+                    1,
+                    "expected a single scoping let, got: {:?}",
+                    stmts
+                );
                 match &stmts[0]
                 {
                     Expr::Let { name, body, .. } =>

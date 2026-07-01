@@ -88,8 +88,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn act_epsilon_greedy_empty_actions_returns_none() {
@@ -100,11 +100,17 @@ mod tests {
 
         // epsilon = 1.0 forces the exploration branch.
         let explore: TabularAgent<&str, &str> = TabularAgent::new(0.1, 0.9, 1.0);
-        assert_eq!(explore.act_epsilon_greedy(&"s", &no_actions, &mut rng), None);
+        assert_eq!(
+            explore.act_epsilon_greedy(&"s", &no_actions, &mut rng),
+            None
+        );
 
         // epsilon = 0.0 forces the exploitation (max_by) branch.
         let exploit: TabularAgent<&str, &str> = TabularAgent::new(0.1, 0.9, 0.0);
-        assert_eq!(exploit.act_epsilon_greedy(&"s", &no_actions, &mut rng), None);
+        assert_eq!(
+            exploit.act_epsilon_greedy(&"s", &no_actions, &mut rng),
+            None
+        );
     }
 
     #[test]

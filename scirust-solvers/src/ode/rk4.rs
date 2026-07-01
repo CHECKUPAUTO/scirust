@@ -154,13 +154,7 @@ mod tests {
     /// point infini était tout de même poussé dans `out`.
     #[test]
     fn nan_on_final_update_is_not_recorded() {
-        let out = rk4_fixed(
-            |_, _, dy| dy[0] = f64::MAX / 2.0,
-            0.0,
-            1.0,
-            vec![0.0],
-            1e-6,
-        );
+        let out = rk4_fixed(|_, _, dy| dy[0] = f64::MAX / 2.0, 0.0, 1.0, vec![0.0], 1e-6);
         // Seul le point initial doit subsister : le pas ayant produit l'infini
         // est rejeté proprement.
         assert_eq!(out.len(), 1);
@@ -168,6 +162,9 @@ mod tests {
         assert_eq!(*t0, 0.0);
         assert!(y0.iter().all(|v| v.is_finite()));
         // Aucun point enregistré ne doit contenir de valeur non-finie.
-        assert!(out.iter().all(|(t, y)| t.is_finite() && y.iter().all(|v| v.is_finite())));
+        assert!(
+            out.iter()
+                .all(|(t, y)| t.is_finite() && y.iter().all(|v| v.is_finite()))
+        );
     }
 }

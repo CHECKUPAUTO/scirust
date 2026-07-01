@@ -589,12 +589,7 @@ mod tests {
     // Rust mirror of the crypto kernel's `reduce_mod` (WGSL `%` is truncating).
     fn reduce_mod(v: i32, q: i32) -> i32 {
         let r = v % q;
-        if r < 0 {
-            r + q
-        }
-        else {
-            r
-        }
+        if r < 0 { r + q } else { r }
     }
 
     // Rust mirror of the crypto kernel's `mulmod` (double-and-add over u32),
@@ -603,15 +598,19 @@ mod tests {
         let mut res: u32 = 0;
         let mut a = a_in;
         let mut b = b_in;
-        while b > 0 {
-            if b & 1 == 1 {
+        while b > 0
+        {
+            if b & 1 == 1
+            {
                 res += a;
-                if res >= qu {
+                if res >= qu
+                {
                     res -= qu;
                 }
             }
             a += a;
-            if a >= qu {
+            if a >= qu
+            {
                 a -= qu;
             }
             b >>= 1;
@@ -623,10 +622,12 @@ mod tests {
     // GPU output must equal after the field-normalizing step.
     fn oracle_prod_mod(a: i32, b: i32, q: i32) -> i32 {
         let p = ((a as i64) * (b as i64)) % (q as i64);
-        if p < 0 {
+        if p < 0
+        {
             (p + q as i64) as i32
         }
-        else {
+        else
+        {
             p as i32
         }
     }
@@ -652,7 +653,8 @@ mod tests {
             (2_147_483_647, 3),       // i32::MAX * 3
         ];
 
-        for &(a, b) in &cases {
+        for &(a, b) in &cases
+        {
             let av = reduce_mod(a, q);
             let bv = reduce_mod(b, q);
             let got = mulmod(av as u32, bv as u32, q as u32) as i32;
@@ -662,9 +664,13 @@ mod tests {
             // Demonstrate the old i32 form actually diverges on these inputs,
             // so this is a genuine fails-before/passes-after regression guard.
             let naive_i32 = ((a.wrapping_mul(b)) % q + q) % q;
-            if naive_i32 != want {
+            if naive_i32 != want
+            {
                 // At least one case must exercise the divergence.
-                assert_ne!(naive_i32, got, "expected i32 overflow divergence for {a},{b}");
+                assert_ne!(
+                    naive_i32, got,
+                    "expected i32 overflow divergence for {a},{b}"
+                );
             }
         }
     }
@@ -679,10 +685,16 @@ mod tests {
 
         // GPU-kernel mirror: reduce, mulmod, accumulate mod q.
         let mut sum: u32 = 0;
-        for k in 0..4 {
-            let prod = mulmod(reduce_mod(a[k], q) as u32, reduce_mod(b[k], q) as u32, q as u32);
+        for k in 0..4
+        {
+            let prod = mulmod(
+                reduce_mod(a[k], q) as u32,
+                reduce_mod(b[k], q) as u32,
+                q as u32,
+            );
             sum += prod;
-            if sum >= q as u32 {
+            if sum >= q as u32
+            {
                 sum -= q as u32;
             }
         }
@@ -690,13 +702,17 @@ mod tests {
 
         // Oracle mirror of `crypto_gemm_zq` inner loop.
         let mut osum: i32 = 0;
-        for k in 0..4 {
+        for k in 0..4
+        {
             osum = (osum + oracle_prod_mod_trunc(a[k], b[k], q)) % q;
         }
         let want = if osum < 0 { osum + q } else { osum };
 
         assert_eq!(got, want);
-        assert!((0..q).contains(&got), "result must be normalized into [0, q)");
+        assert!(
+            (0..q).contains(&got),
+            "result must be normalized into [0, q)"
+        );
     }
 
     // Truncating per-product residue (sign follows dividend), matching the

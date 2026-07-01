@@ -90,13 +90,7 @@ mod tests {
         // SparseA (2x2):
         // [1 0]
         // [0 2]
-        let sparse_a = CsrTensor::new(
-            vec![1.0, 2.0],
-            vec![0, 1],
-            vec![0, 1, 2],
-            2,
-            2,
-        );
+        let sparse_a = CsrTensor::new(vec![1.0, 2.0], vec![0, 1], vec![0, 1, 2], 2, 2);
 
         // DenseB (2x2, row-major):
         // [3 4]
@@ -121,13 +115,7 @@ mod tests {
         // SparseA (2x2) with an empty first row:
         // [0 0]
         // [0 1]
-        let sparse_a = CsrTensor::new(
-            vec![1.0],
-            vec![1],
-            vec![0, 0, 1],
-            2,
-            2,
-        );
+        let sparse_a = CsrTensor::new(vec![1.0], vec![1], vec![0, 0, 1], 2, 2);
 
         let dense_b = [3.0, 4.0, 5.0, 6.0];
 

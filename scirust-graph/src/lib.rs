@@ -569,9 +569,9 @@ pub fn girvan_newman(graph: &Graph, n_communities: usize) -> Vec<usize> {
         // the betweenness score are broken by the (smaller) edge key to keep the
         // choice — and hence the whole result — deterministic.
         let betweenness = edge_betweenness(&g);
-        let Some((&(u, v), _)) = betweenness.iter().max_by(|&(ea, sa), &(eb, sb)| {
-            sa.partial_cmp(sb).unwrap().then_with(|| eb.cmp(ea))
-        })
+        let Some((&(u, v), _)) = betweenness
+            .iter()
+            .max_by(|&(ea, sa), &(eb, sb)| sa.partial_cmp(sb).unwrap().then_with(|| eb.cmp(ea)))
         else
         {
             return components;

@@ -619,9 +619,26 @@ mod tests {
 
         // Every dispatched command must be documented in help.
         for cmd in [
-            "kvcache", "guard", "attest", "quantum", "certify", "conformal", "calibrate", "gptq",
-            "awq", "bitnet", "quickstart", "som", "evo", "cmaes", "diff", "solve", "tt", "verify",
-            "trader", "analyze",
+            "kvcache",
+            "guard",
+            "attest",
+            "quantum",
+            "certify",
+            "conformal",
+            "calibrate",
+            "gptq",
+            "awq",
+            "bitnet",
+            "quickstart",
+            "som",
+            "evo",
+            "cmaes",
+            "diff",
+            "solve",
+            "tt",
+            "verify",
+            "trader",
+            "analyze",
         ]
         {
             assert!(

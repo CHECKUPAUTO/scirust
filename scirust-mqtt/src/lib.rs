@@ -817,7 +817,10 @@ mod tests {
         // 3599.9999 s = 59 min 59.9999 s -> rounds to 1 h 00:00.000.
         assert_eq!(format_unix_timestamp(3599.9999), "1970-01-01T01:00:00.000Z");
         // 86399.9999 s carries the seconds -> minutes -> hours -> *day*.
-        assert_eq!(format_unix_timestamp(86399.9999), "1970-01-02T00:00:00.000Z");
+        assert_eq!(
+            format_unix_timestamp(86399.9999),
+            "1970-01-02T00:00:00.000Z"
+        );
         // No produced millisecond field ever has 4 digits.
         for ts in [0.0_f64, 1000.9999, 59.9996, 3599.9999, 86399.9999]
         {

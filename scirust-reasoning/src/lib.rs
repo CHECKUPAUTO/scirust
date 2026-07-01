@@ -140,23 +140,18 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
             bindings.insert((*v).clone(), val);
         }
 
-        match (
+        // When at least one side is undefined — outside the common domain — skip
+        // the point instead of concluding inequality (hence `if let`, not `match`).
+        if let (Ok(va), Ok(vb)) = (
             scirust_symbolic::eval(&expr_a, &bindings),
             scirust_symbolic::eval(&expr_b, &bindings),
         )
         {
-            (Ok(va), Ok(vb)) =>
+            if (va - vb).abs() > 1e-8
             {
-                if (va - vb).abs() > 1e-8
-                {
-                    return false;
-                }
-                agreeing += 1;
-            },
-            // At least one side is undefined here — outside the common domain, so
-            // skip this point instead of concluding inequality.
-            _ =>
-            {},
+                return false;
+            }
+            agreeing += 1;
         }
     }
 

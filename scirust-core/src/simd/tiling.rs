@@ -657,7 +657,21 @@ mod tests {
 
         let mut c_simd = c_init.clone();
         matmul_tiled_strided_f32(
-            alpha, &a, &b, beta, &mut c_simd, m, k, n, k, 1, n, 1, rs_c, cs_c, Some(&cfg),
+            alpha,
+            &a,
+            &b,
+            beta,
+            &mut c_simd,
+            m,
+            k,
+            n,
+            k,
+            1,
+            n,
+            1,
+            rs_c,
+            cs_c,
+            Some(&cfg),
         );
 
         let mut c_ref = c_init.clone();

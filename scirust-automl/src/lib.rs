@@ -1011,7 +1011,14 @@ impl GradientBoosting {
         rng: &mut XorShift64,
     ) -> Self {
         let n = x.len();
-        let mean = if n == 0 { 0.0 } else { y.iter().sum::<f64>() / n as f64 };
+        let mean = if n == 0
+        {
+            0.0
+        }
+        else
+        {
+            y.iter().sum::<f64>() / n as f64
+        };
 
         // The running score `F` lives in the space that `predict` sums into:
         //   regression      -> `F` is the target directly (least squares)
@@ -1203,7 +1210,15 @@ fn build_tree(
                     right_y.push(vy);
                 }
             }
-            if left_y.len() < min_samples_split || right_y.len() < min_samples_split
+            // `min_samples_split` gates whether this NODE may split (checked at
+            // the top of `build_tree`); it must not be re-imposed on each child —
+            // that conflates it with a `min_samples_leaf` of the same size, and
+            // makes any node with n < 2*min_samples_split unsplittable (a 6-sample
+            // fit with the default 5 could never split at all, so every tree
+            // collapsed to a single mean leaf). Children only need to be
+            // non-empty, which the tie-skip above already guarantees; keep a
+            // defensive check.
+            if left_y.is_empty() || right_y.is_empty()
             {
                 continue;
             }
@@ -3540,13 +3555,17 @@ mod tests {
         assert_eq!(pts2, vec![1.0, 2.0, 3.0]);
 
         // Degenerate cases stay panic-free.
-        assert!(ParamDistribution::IntRange { lo: 5, hi: 5 }
-            .grid_points(4)
-            .iter()
-            .all(|&v| (v - 5.0).abs() < 1e-12));
-        assert!(ParamDistribution::IntRange { lo: 0, hi: 10 }
-            .grid_points(0)
-            .is_empty());
+        assert!(
+            ParamDistribution::IntRange { lo: 5, hi: 5 }
+                .grid_points(4)
+                .iter()
+                .all(|&v| (v - 5.0).abs() < 1e-12)
+        );
+        assert!(
+            ParamDistribution::IntRange { lo: 0, hi: 10 }
+                .grid_points(0)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -3578,7 +3597,11 @@ mod tests {
         // Sigmoid output stays a valid probability and separates the classes.
         for &p in &preds
         {
-            assert!((0.0..=1.0).contains(&p), "prediction {} not a probability", p);
+            assert!(
+                (0.0..=1.0).contains(&p),
+                "prediction {} not a probability",
+                p
+            );
         }
         assert!(
             preds[0] < 0.5 && preds[5] > 0.5,
