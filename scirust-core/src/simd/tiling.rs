@@ -550,7 +550,21 @@ mod tests {
         // Résultat attendu = alpha * A*B + beta * C_init.
         let cfg = tiny_config();
         matmul_tiled_strided_f32(
-            alpha, &a, &b, beta, &mut c, m, k, n, k, 1, n, 1, rs_c, cs_c, Some(&cfg),
+            alpha,
+            &a,
+            &b,
+            beta,
+            &mut c,
+            m,
+            k,
+            n,
+            k,
+            1,
+            n,
+            1,
+            rs_c,
+            cs_c,
+            Some(&cfg),
         );
 
         let expected_c00 = 19.0 + 2.0 * 10.0; // 39

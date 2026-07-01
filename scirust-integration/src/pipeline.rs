@@ -86,7 +86,9 @@ impl Pipeline {
     pub fn new(mut config: PipelineConfig) -> Self {
         if config.stations.is_empty()
         {
-            config.stations.push(crate::config::StationConfig::default());
+            config
+                .stations
+                .push(crate::config::StationConfig::default());
         }
 
         let backend_type =

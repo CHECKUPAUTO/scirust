@@ -1109,7 +1109,10 @@ mod tests {
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .unwrap();
-        assert_eq!(argmax, 9, "A4 should map to pitch class 9 (A), got {argmax}");
+        assert_eq!(
+            argmax, 9,
+            "A4 should map to pitch class 9 (A), got {argmax}"
+        );
     }
 
     #[test]

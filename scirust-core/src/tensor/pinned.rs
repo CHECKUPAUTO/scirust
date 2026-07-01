@@ -238,7 +238,9 @@ impl PinnedPool {
         let idx = self.free_indices.pop().ok_or(PinError::AllocationFailed)?;
         // Le buffer a été pré-alloué à la construction ; on vérifie tout de même
         // sa présence pour rester robuste face à un pool corrompu.
-        let buf = self.buffers[idx].as_ref().ok_or(PinError::AllocationFailed)?;
+        let buf = self.buffers[idx]
+            .as_ref()
+            .ok_or(PinError::AllocationFailed)?;
         Ok(PooledBuffer {
             ptr: buf.as_ptr() as *mut u8,
             len_bytes: buf.len_bytes(),

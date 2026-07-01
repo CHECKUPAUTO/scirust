@@ -3766,7 +3766,11 @@ mod tests {
             ModelEnsemble::new(vec![(3.0, m1), (1.0, m2)], EnsembleMethod::Weighted, false);
         let preds = ensemble.predict(&x);
         assert_eq!(preds.len(), 1);
-        assert!((preds[0] - 5.0).abs() < 1e-9, "expected 5.0, got {}", preds[0]);
+        assert!(
+            (preds[0] - 5.0).abs() < 1e-9,
+            "expected 5.0, got {}",
+            preds[0]
+        );
     }
 
     #[test]

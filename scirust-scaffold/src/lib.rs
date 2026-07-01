@@ -2814,10 +2814,7 @@ fn emit_pseudocode_stmts(out: &mut String, stmts: &[Statement], level: usize) {
                     .iter()
                     .map(|i| format!("[{}]", i))
                     .collect::<String>();
-                out.push_str(&format!(
-                    "{}{}{} \u{2190} {}\n",
-                    indent, array, idx, value
-                ));
+                out.push_str(&format!("{}{}{} \u{2190} {}\n", indent, array, idx, value));
             },
             Statement::ForLoop {
                 var,
@@ -4796,8 +4793,14 @@ mod tests {
             "expected well-formed let, got:\n{code}"
         );
         // Guard against the specific malformed shapes from the bug.
-        assert!(!code.contains("let mut  "), "double space after `let mut`:\n{code}");
-        assert!(!code.contains("= : "), "type annotation emitted after `=`:\n{code}");
+        assert!(
+            !code.contains("let mut  "),
+            "double space after `let mut`:\n{code}"
+        );
+        assert!(
+            !code.contains("= : "),
+            "type annotation emitted after `=`:\n{code}"
+        );
         assert!(!code.contains("x= "), "missing space before `=`:\n{code}");
     }
 
@@ -4903,7 +4906,9 @@ mod tests {
             Statement::ExpressionStmt(Expression::FunctionCall { name, .. }) if name == "push"
         )));
 
-        let ks = registry.instantiate("knapsack_01", &HashMap::new()).unwrap();
+        let ks = registry
+            .instantiate("knapsack_01", &HashMap::new())
+            .unwrap();
         fn has_2d_assign(stmts: &[Statement]) -> bool {
             stmts.iter().any(|s| match s
             {
@@ -4920,7 +4925,10 @@ mod tests {
                 _ => false,
             })
         }
-        assert!(has_2d_assign(&ks.steps), "knapsack_01 should have dp[i][w] =");
+        assert!(
+            has_2d_assign(&ks.steps),
+            "knapsack_01 should have dp[i][w] ="
+        );
 
         let two_sum = registry
             .instantiate(
@@ -4931,10 +4939,12 @@ mod tests {
                     .collect(),
             )
             .unwrap();
-        assert!(two_sum.steps.iter().any(|s| matches!(
-            s,
-            Statement::Return(Some(Expression::ArrayLiteral(_)))
-        )));
+        assert!(
+            two_sum
+                .steps
+                .iter()
+                .any(|s| matches!(s, Statement::Return(Some(Expression::ArrayLiteral(_)))))
+        );
     }
 
     #[test]

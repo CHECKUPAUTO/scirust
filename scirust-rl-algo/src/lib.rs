@@ -2123,7 +2123,8 @@ impl MctsEngine {
             if !leaf.is_expanded
             {
                 let max_children = (self.progressive_widening_constant
-                    * ((leaf.visits + 1) as f64).sqrt()) as usize;
+                    * ((leaf.visits + 1) as f64).sqrt())
+                    as usize;
                 let max_children = max_children.clamp(2, 10);
 
                 if leaf.children.len() < max_children
