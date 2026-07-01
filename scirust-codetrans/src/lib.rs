@@ -3541,17 +3541,21 @@ impl TransformEngine {
     }
 
     fn apply_single_rule(&mut self, rule: &Rule, expr: &Expr) -> Option<Expr> {
-        let mut transformed = None;
+        let is_const_fold = rule.name.starts_with("const-fold-");
 
-        if rule.name.starts_with("const-fold-")
+        // Const-fold rules use a `result` replacement variable that is never
+        // bound by pattern matching; they must be evaluated exclusively via
+        // `apply_const_fold_rule`. Falling back to the generic `rule.apply`
+        // for them would substitute the unbound `result` variable and corrupt
+        // non-constant expressions into `Var("<unbound result>")`.
+        let transformed = if is_const_fold
         {
-            transformed = apply_const_fold_rule(rule, expr);
+            apply_const_fold_rule(rule, expr)
         }
-
-        if transformed.is_none()
+        else
         {
-            transformed = rule.apply(expr);
-        }
+            rule.apply(expr)
+        };
 
         if let Some(ref result) = transformed
         {
@@ -4397,6 +4401,42 @@ mod tests {
         let expr = parse_expr("(+ 2 3)").unwrap();
         let result = engine.apply_rule("const-fold-add", &expr).unwrap();
         assert_eq!(result, Expr::Lit(Literal::Int(5)));
+    }
+
+    #[test]
+    fn test_const_fold_leaves_non_constant_untouched() {
+        // Regression: const-fold rules must NOT fall back to the generic
+        // rule.apply, which would substitute the unbound `result` variable
+        // and corrupt `(+ a b)` into `Var("<unbound result>")`.
+        let mut engine = TransformEngine::with_rules(optimization_rules());
+        for (rule, src) in [
+            ("const-fold-add", "(+ a b)"),
+            ("const-fold-sub", "(- a b)"),
+            ("const-fold-mul", "(* a b)"),
+            ("const-fold-div", "(/ a b)"),
+        ]
+        {
+            let expr = parse_expr(src).unwrap();
+            let result = engine.apply_rule(rule, &expr);
+            assert!(
+                result.is_none(),
+                "{rule} on non-constant {src} should not apply, got {result:?}",
+            );
+        }
+
+        // A constant subexpression buried inside a non-constant one must still
+        // be folded (structural recursion still happens), without emitting the
+        // unbound-result garbage anywhere.
+        let expr = parse_expr("(+ a (+ 2 3))").unwrap();
+        let result = engine.apply_rule("const-fold-add", &expr).unwrap();
+        assert_eq!(
+            result,
+            Expr::BinOp {
+                op: BinOpKind::Add,
+                left: Box::new(Expr::Var("a".to_string())),
+                right: Box::new(Expr::Lit(Literal::Int(5))),
+            },
+        );
     }
 
     #[test]

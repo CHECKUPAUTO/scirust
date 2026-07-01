@@ -554,31 +554,21 @@ impl StandardScaler {
     }
 }
 
-pub struct Normalizer {
-    pub norms: Option<Vec<f64>>,
-}
+pub struct Normalizer;
 
 impl Normalizer {
-    pub fn fit(x: &[Vec<f64>]) -> Self {
-        if x.is_empty()
-        {
-            return Self { norms: None };
-        }
-        let norms: Vec<f64> = x
-            .iter()
-            .map(|row| {
-                let n2: f64 = row.iter().map(|v| v * v).sum();
-                n2.sqrt().max(1e-12)
-            })
-            .collect();
-        Self { norms: Some(norms) }
+    pub fn fit(_x: &[Vec<f64>]) -> Self {
+        // L2 row normalization is stateless: each row is scaled by its own
+        // norm, so there is nothing to learn from the training data. `fit`
+        // exists only to mirror the other preprocessors' API.
+        Self
     }
 
     pub fn transform(&self, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
         x.iter()
-            .enumerate()
-            .map(|(i, row)| {
-                let norm = self.norms.as_ref().map(|n| n[i]).unwrap_or(1.0).max(1e-12);
+            .map(|row| {
+                let n2: f64 = row.iter().map(|v| v * v).sum();
+                let norm = n2.sqrt().max(1e-12);
                 row.iter().map(|v| v / norm).collect()
             })
             .collect()
@@ -2457,33 +2447,94 @@ impl ModelEnsemble {
 
     pub fn predict(&self, x: &[Vec<f64>]) -> Vec<f64> {
         let n_samples = x.len();
+        let n_models = self.models.len();
+        if n_models == 0
+        {
+            return vec![0.0; n_samples];
+        }
         let all_preds: Vec<Vec<f64>> = self.models.iter().map(|(_, m)| m.predict(x)).collect();
         (0..n_samples)
             .map(|i| match self.method
             {
-                EnsembleMethod::Voting | EnsembleMethod::Averaging =>
+                // Simple (unweighted) mean of every model's prediction.
+                EnsembleMethod::Averaging =>
                 {
-                    let sum: f64 = self
-                        .models
-                        .iter()
-                        .zip(&all_preds)
-                        .map(|((w, _), p)| w * p[i])
-                        .sum();
-                    sum
+                    let sum: f64 = all_preds.iter().map(|p| p[i]).sum();
+                    sum / n_models as f64
                 },
+                // Regression: simple mean. Classification: majority vote over
+                // the (weight-aware) rounded class labels, ties broken toward
+                // the smaller label for determinism.
+                EnsembleMethod::Voting =>
+                {
+                    if self.is_classification
+                    {
+                        majority_vote(
+                            self.models
+                                .iter()
+                                .zip(&all_preds)
+                                .map(|((w, _), p)| (*w, p[i])),
+                        )
+                    }
+                    else
+                    {
+                        let sum: f64 = all_preds.iter().map(|p| p[i]).sum();
+                        sum / n_models as f64
+                    }
+                },
+                // Weighted mean: sum(w * p) / sum(w). Falls back to a simple
+                // mean when the weights sum to (approximately) zero.
                 EnsembleMethod::Weighted =>
                 {
-                    let sum: f64 = self
-                        .models
-                        .iter()
-                        .zip(&all_preds)
-                        .map(|((w, _), p)| w * p[i])
-                        .sum();
-                    sum
+                    let mut weighted_sum = 0.0;
+                    let mut weight_total = 0.0;
+                    for ((w, _), p) in self.models.iter().zip(&all_preds)
+                    {
+                        weighted_sum += w * p[i];
+                        weight_total += w;
+                    }
+                    if weight_total.abs() > 1e-12
+                    {
+                        weighted_sum / weight_total
+                    }
+                    else
+                    {
+                        all_preds.iter().map(|p| p[i]).sum::<f64>() / n_models as f64
+                    }
                 },
             })
             .collect()
     }
+}
+
+/// Weighted majority vote over class labels for a single sample.
+///
+/// Each model contributes its (non-negative) weight to the bucket for its
+/// rounded predicted label. The label with the largest accumulated weight
+/// wins; ties are broken toward the smaller label so the result is
+/// deterministic. Non-finite or negative weights are treated as zero.
+fn majority_vote(votes: impl Iterator<Item = (f64, f64)>) -> f64 {
+    let mut tally: Vec<(i64, f64)> = Vec::new();
+    for (w, pred) in votes
+    {
+        let label = pred.round() as i64;
+        let weight = if w.is_finite() && w > 0.0 { w } else { 0.0 };
+        match tally.iter_mut().find(|(l, _)| *l == label)
+        {
+            Some((_, acc)) => *acc += weight,
+            None => tally.push((label, weight)),
+        }
+    }
+    tally
+        .into_iter()
+        // Prefer higher weight; on a tie prefer the smaller label.
+        .min_by(|(la, wa), (lb, wb)| {
+            wb.partial_cmp(wa)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(la.cmp(lb))
+        })
+        .map(|(label, _)| label as f64)
+        .unwrap_or(0.0)
 }
 
 /// `ModelSelector` compares multiple models on a task and selects the best.
@@ -3669,6 +3720,72 @@ mod tests {
         assert!(r2 > 0.5, "Ensemble R2 too low: {}", r2);
     }
 
+    /// Deterministic model that always predicts a fixed value per sample,
+    /// regardless of the input features. Used to check ensemble aggregation
+    /// arithmetic exactly.
+    struct ConstModel(Vec<f64>);
+    impl Model for ConstModel {
+        fn predict(&self, x: &[Vec<f64>]) -> Vec<f64> {
+            (0..x.len()).map(|i| self.0[i % self.0.len()]).collect()
+        }
+    }
+
+    #[test]
+    fn test_ensemble_averaging_returns_mean_not_sum() {
+        // Two models predicting [1.0, 2.0] and [1.476, 1.524] respectively.
+        // With equal weights the true simple mean is [1.238, 1.762], NOT the
+        // sum [2.476, 3.524] that the buggy implementation produced.
+        let x = vec![vec![0.0], vec![0.0]];
+        let m1: Box<dyn Model> = Box::new(ConstModel(vec![1.0, 2.0]));
+        let m2: Box<dyn Model> = Box::new(ConstModel(vec![1.476, 1.524]));
+        let ensemble =
+            ModelEnsemble::new(vec![(1.0, m1), (1.0, m2)], EnsembleMethod::Averaging, false);
+        let preds = ensemble.predict(&x);
+        assert_eq!(preds.len(), 2);
+        assert!(
+            (preds[0] - 1.238).abs() < 1e-9,
+            "expected mean 1.238, got {}",
+            preds[0]
+        );
+        assert!(
+            (preds[1] - 1.762).abs() < 1e-9,
+            "expected mean 1.762, got {}",
+            preds[1]
+        );
+    }
+
+    #[test]
+    fn test_ensemble_weighted_is_convex_combination() {
+        // Weighted mean = sum(w*p)/sum(w). Weights 3 and 1 over predictions
+        // 4.0 and 8.0 -> (3*4 + 1*8) / 4 = 5.0, which must lie within the
+        // range of the inputs (a plain weighted sum would give 20.0).
+        let x = vec![vec![0.0]];
+        let m1: Box<dyn Model> = Box::new(ConstModel(vec![4.0]));
+        let m2: Box<dyn Model> = Box::new(ConstModel(vec![8.0]));
+        let ensemble =
+            ModelEnsemble::new(vec![(3.0, m1), (1.0, m2)], EnsembleMethod::Weighted, false);
+        let preds = ensemble.predict(&x);
+        assert_eq!(preds.len(), 1);
+        assert!((preds[0] - 5.0).abs() < 1e-9, "expected 5.0, got {}", preds[0]);
+    }
+
+    #[test]
+    fn test_ensemble_voting_classification_is_majority() {
+        // Three classifiers predict labels 1, 1, 0 (as probabilities). The
+        // majority class is 1; a continuous sum would give ~1.9.
+        let x = vec![vec![0.0]];
+        let m1: Box<dyn Model> = Box::new(ConstModel(vec![0.9]));
+        let m2: Box<dyn Model> = Box::new(ConstModel(vec![0.8]));
+        let m3: Box<dyn Model> = Box::new(ConstModel(vec![0.2]));
+        let ensemble = ModelEnsemble::new(
+            vec![(1.0, m1), (1.0, m2), (1.0, m3)],
+            EnsembleMethod::Voting,
+            true,
+        );
+        let preds = ensemble.predict(&x);
+        assert_eq!(preds, vec![1.0]);
+    }
+
     // ---- Feature Engineer ----
 
     #[test]
@@ -3809,6 +3926,35 @@ mod tests {
         let (processed, _) = apply_preprocessing(&x, &steps, None);
         assert_eq!(processed.len(), 3);
         assert_eq!(processed[0].len(), 2);
+    }
+
+    #[test]
+    fn test_normalizer_transform_recomputes_per_row_norm() {
+        // fit on 5 rows, transform 10 rows: the old implementation indexed
+        // stored training norms by target-row position and panicked when the
+        // transform target had more rows than the fit set. It must instead
+        // recompute each row's L2 norm at transform time.
+        let train: Vec<Vec<f64>> = (0..5).map(|i| vec![(i + 1) as f64, 0.0]).collect();
+        let val: Vec<Vec<f64>> = (0..10).map(|i| vec![0.0, (i + 1) as f64 * 2.0]).collect();
+
+        let steps = vec![PreprocessorKind::Normalizer];
+        let (_proc_train, procs) = apply_preprocessing(&train, &steps, None);
+        // Would panic with index-out-of-bounds before the fix.
+        let proc_val = apply_preprocessing(&val, &steps, Some(&procs)).0;
+
+        assert_eq!(proc_val.len(), 10);
+        // Every row is a unit vector along axis 1 regardless of the training set.
+        for row in &proc_val
+        {
+            assert!((row[0] - 0.0).abs() < 1e-9);
+            assert!((row[1] - 1.0).abs() < 1e-9);
+        }
+
+        // Direct transform of a single non-unit row is normalized to unit L2.
+        let n = Normalizer::fit(&train);
+        let out = n.transform(&[vec![3.0, 4.0]]);
+        assert!((out[0][0] - 0.6).abs() < 1e-9);
+        assert!((out[0][1] - 0.8).abs() < 1e-9);
     }
 
     #[test]

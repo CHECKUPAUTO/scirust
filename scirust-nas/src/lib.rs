@@ -194,9 +194,6 @@ impl NasSearch {
             + ((seed as usize) % (self.config.max_layers - self.config.min_layers + 1));
 
         let mut layers = Vec::new();
-        let mut total_params: f64 = 0.0;
-        let mut total_flops: f64 = 0.0;
-        let mut prev_dim = 784; // Default input (MNIST)
         let mut rng = seed;
 
         for _i in 0..n_layers
@@ -222,20 +219,42 @@ impl NasSearch {
                 out_features: out_dim,
                 activation,
             });
-
-            // Estimate params and FLOPs
-            total_params += (prev_dim * out_dim + out_dim) as f64;
-            total_flops += 2.0 * prev_dim as f64 * out_dim as f64;
-            prev_dim = out_dim;
         }
 
+        let (params_m, flops) = Self::layer_costs(&layers);
         Architecture {
             layers,
             fitness: 0.0,
-            params_m: total_params / 1_000_000.0,
-            flops: total_flops,
+            params_m,
+            flops,
             accuracy: None,
         }
+    }
+
+    /// Estimate `(params_m, flops)` for a chain of layers, mirroring the cost
+    /// model used when architectures are first sampled. Only `Linear` layers
+    /// contribute to the estimate; other layer kinds are treated as free but
+    /// still carry the running dimension forward where applicable.
+    ///
+    /// The input dimension is fixed at 784 (flattened MNIST), matching
+    /// [`NasSearch::random_architecture`].
+    fn layer_costs(layers: &[LayerSpec]) -> (f64, f64) {
+        let mut total_params: f64 = 0.0;
+        let mut total_flops: f64 = 0.0;
+        let mut prev_dim: usize = 784; // Default input (MNIST)
+
+        for layer in layers
+        {
+            if let LayerSpec::Linear { out_features, .. } = layer
+            {
+                let out_dim = *out_features;
+                total_params += (prev_dim * out_dim + out_dim) as f64;
+                total_flops += 2.0 * prev_dim as f64 * out_dim as f64;
+                prev_dim = out_dim;
+            }
+        }
+
+        (total_params / 1_000_000.0, total_flops)
     }
 
     /// Evaluate an architecture with a zero-cost proxy objective: reward a
@@ -304,6 +323,11 @@ impl NasSearch {
                         out_features: new_dim,
                         activation: ActivationChoice::GELU,
                     };
+                    // Recompute cost fields so the mutated child is scored with
+                    // its own parameter/FLOP counts, not the parent's.
+                    let (params_m, flops) = Self::layer_costs(&child.layers);
+                    child.params_m = params_m;
+                    child.flops = flops;
                     child.fitness = self.evaluate(&child);
                 }
 
@@ -407,6 +431,65 @@ mod tests {
             sm > 0.9,
             "moderate score {sm} should be near the reward peak"
         );
+    }
+
+    /// Independent reference cost model (input dim 784, Linear-only), used to
+    /// check that every architecture in the evolved population carries cost
+    /// fields consistent with its own layers rather than a stale ancestor's.
+    fn reference_costs(layers: &[LayerSpec]) -> (f64, f64) {
+        let mut params: f64 = 0.0;
+        let mut flops: f64 = 0.0;
+        let mut prev = 784usize;
+        for layer in layers
+        {
+            if let LayerSpec::Linear { out_features, .. } = layer
+            {
+                params += (prev * out_features + out_features) as f64;
+                flops += 2.0 * prev as f64 * *out_features as f64;
+                prev = *out_features;
+            }
+        }
+        (params / 1_000_000.0, flops)
+    }
+
+    #[test]
+    fn mutation_recomputes_params_and_flops() {
+        // With enough generations, mutation is guaranteed to fire, so if cost
+        // fields were left stale this population would contain an architecture
+        // whose params_m/flops disagree with its own layers.
+        let cfg = NasConfig {
+            max_models: 200,
+            ..NasConfig::default()
+        };
+        let mut search = NasSearch::new(cfg);
+        let population = search.evolve(6, 8).unwrap();
+
+        for a in &population
+        {
+            let (params_m, flops) = reference_costs(&a.layers);
+            assert!(
+                (a.params_m - params_m).abs() < 1e-9,
+                "stale params_m: stored {} vs recomputed {} for layers {:?}",
+                a.params_m,
+                params_m,
+                a.layers
+            );
+            assert!(
+                (a.flops - flops).abs() < 1e-3,
+                "stale flops: stored {} vs recomputed {} for layers {:?}",
+                a.flops,
+                flops,
+                a.layers
+            );
+            // Fitness must equal a fresh evaluation of the stored fields.
+            let refit = search.evaluate(a);
+            assert!(
+                (a.fitness - refit).abs() < 1e-12,
+                "fitness {} inconsistent with re-evaluation {}",
+                a.fitness,
+                refit
+            );
+        }
     }
 
     #[test]

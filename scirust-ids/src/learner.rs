@@ -276,6 +276,10 @@ pub struct IdsLearner {
     is_trained: bool,
     /// Scores d'anomalie récents
     recent_scores: Vec<f64>,
+    /// Minimums par feature calculés à l'entraînement (min-max)
+    feature_mins: Vec<f64>,
+    /// Maximums par feature calculés à l'entraînement (min-max)
+    feature_maxs: Vec<f64>,
 }
 
 impl IdsLearner {
@@ -286,6 +290,8 @@ impl IdsLearner {
             anomaly_buffer: Vec::new(),
             is_trained: false,
             recent_scores: Vec::new(),
+            feature_mins: Vec::new(),
+            feature_maxs: Vec::new(),
             config,
         }
     }
@@ -348,7 +354,34 @@ impl IdsLearner {
             .collect();
 
         self.model.train(&normalized);
+        // Conserver les paramètres de normalisation pour appliquer la même
+        // transformation min-max aux features lors de l'inférence.
+        self.feature_mins = mins;
+        self.feature_maxs = maxs;
         self.is_trained = true;
+    }
+
+    /// Applique la normalisation min-max apprise à l'entraînement.
+    ///
+    /// Les features au-delà de `input_features` sont ignorées; les features
+    /// manquantes sont traitées comme absentes (le modèle exige exactement
+    /// `input_features` valeurs, garanti par les appelants).
+    fn normalize_features(&self, features: &[f64]) -> Vec<f64> {
+        let n = self.config.input_features;
+        (0..n)
+            .map(|i| {
+                let v = features.get(i).copied().unwrap_or(0.0);
+                let range = self.feature_maxs[i] - self.feature_mins[i];
+                if range < f64::EPSILON
+                {
+                    0.0
+                }
+                else
+                {
+                    (v - self.feature_mins[i]) / range
+                }
+            })
+            .collect()
     }
 
     /// Classifier un flux: score d'anomalie.
@@ -357,7 +390,10 @@ impl IdsLearner {
         {
             return 0.0;
         }
-        let score = self.model.anomaly_score(features);
+        // Normaliser avec les mêmes paramètres qu'à l'entraînement avant de
+        // scorer, sinon l'inférence verrait une échelle différente du modèle.
+        let normalized = self.normalize_features(features);
+        let score = self.model.anomaly_score(&normalized);
         self.recent_scores.push(score);
         if self.recent_scores.len() > 1000
         {
@@ -506,5 +542,65 @@ mod tests {
         let mut learner = IdsLearner::with_defaults();
         let result = learner.detect(&[0.0; 10]);
         assert!(result.is_none());
+    }
+
+    /// Regression test for the raw-vs-normalized scale mismatch.
+    ///
+    /// `train()` min-max normalizes the buffer before fitting the model, so
+    /// inference MUST apply the same normalization. If `score()`/`detect()`
+    /// forwarded raw features, a held-out normal sample would score orders of
+    /// magnitude above the calibrated threshold and trigger a false positive.
+    #[test]
+    fn test_score_applies_training_normalization() {
+        // Deterministic normal traffic on a large, non-[0,1] scale so that the
+        // raw vs. normalized distinction is unambiguous.
+        let config = LearnerConfig {
+            input_features: 4,
+            hidden_size: 8,
+            epochs: 100,
+            ..Default::default()
+        };
+        let mut learner = IdsLearner::new(config);
+
+        let mut normal: Vec<Vec<f64>> = Vec::new();
+        for i in 0..200
+        {
+            // Values live roughly in [1000, 1100]: raw scale is ~1e3.
+            let sample: Vec<f64> = (0..4)
+                .map(|j| 1000.0 + 50.0 * (((i + j) as f64) * 0.1).sin())
+                .collect();
+            normal.push(sample);
+        }
+        // Hold out one sample that never took part in training.
+        let held_out: Vec<f64> = (0..4)
+            .map(|j| 1000.0 + 50.0 * (((37 + j) as f64) * 0.1).sin())
+            .collect();
+
+        learner.add_normal_samples(normal);
+        learner.train();
+        assert!(learner.is_trained());
+
+        let threshold = learner.model().threshold();
+        let held_out_score = learner.score(&held_out);
+
+        // With correct normalization the held-out normal sample stays within
+        // the training distribution: its score must not blow past the
+        // threshold. Before the fix this score was ~1e6 vs threshold ~1e-4.
+        assert!(
+            held_out_score <= threshold,
+            "held-out normal score {held_out_score} should stay <= threshold {threshold}; \
+             a huge score means raw (un-normalized) features were scored"
+        );
+        assert!(
+            learner.detect(&held_out).is_none(),
+            "a held-out normal sample must not be flagged as an anomaly"
+        );
+
+        // Sanity: a genuinely out-of-distribution sample is still flagged.
+        let anomaly = vec![100_000.0; 4];
+        assert!(
+            learner.detect(&anomaly).is_some(),
+            "a far out-of-distribution sample should still be detected"
+        );
     }
 }

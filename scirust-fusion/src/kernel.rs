@@ -350,12 +350,21 @@ impl FusedKernel {
     }
 
     /// Matmul + Scale.
+    ///
+    /// The scale factor is a compile-time scalar carried by the `Scale` node
+    /// (`FusionConstant::F32`), not a runtime input tensor — so only `x` and `W`
+    /// are needed here. See `FusionPipeline::build_kernel`, which lifts the
+    /// constant into `KernelParams::scale`.
+    ///
+    /// Input contract:
+    /// - `inputs[0] = x` — (batch × in_features)
+    /// - `inputs[1] = W` — (in_features × out_features), row-major
     fn execute_matmul_scale(&self, inputs: &[&[f32]], output: &mut [f32]) {
-        assert!(inputs.len() >= 2);
+        assert!(inputs.len() >= 2, "MatmulScale needs x, W");
 
         let x = inputs[0];
         let w = inputs[1];
-        let scale = inputs[2];
+        let scale = self.params.scale;
 
         let batch = output.len() / self.params.out_features;
         let in_features = self.params.in_features;
@@ -373,7 +382,7 @@ impl FusedKernel {
                 {
                     acc += x[x_off + k] * w[k * out_features + out_row];
                 }
-                output[o_off + out_row] = acc * scale[out_row];
+                output[o_off + out_row] = acc * scale;
             }
         }
     }
@@ -494,6 +503,8 @@ pub struct KernelParams {
     pub tile_size: usize,
     /// Epsilon pour LayerNorm.
     pub eps: f32,
+    /// Facteur d'échelle scalaire pour `MatmulScale` (constante, pas un input).
+    pub scale: f32,
 }
 
 impl Default for KernelParams {
@@ -503,6 +514,7 @@ impl Default for KernelParams {
             out_features: 0,
             tile_size: 64,
             eps: 1e-5,
+            scale: 1.0,
         }
     }
 }
@@ -519,6 +531,7 @@ mod tests {
             out_features: 2,
             tile_size: 64,
             eps: 1e-5,
+            scale: 1.0,
         };
         // x: (1x2) = [1, 2]; W: (2x2) row-major [k*out+o] = [[1, 0], [0, -1]]
         let x = [1.0f32, 2.0];
@@ -528,6 +541,29 @@ mod tests {
         // y0 = relu(1*1 + 2*0) = 1 ; y1 = relu(1*0 + 2*(-1)) = relu(-2) = 0
         assert_eq!(out, [1.0, 0.0]);
         assert_eq!(k.op_count(), 2);
+    }
+
+    #[test]
+    fn matmul_scale_uses_scalar_constant_not_a_third_input() {
+        // Non-regression: `execute_matmul_scale` used to read `inputs[2]`, which
+        // panicked because the scale is a scalar constant carried by the kernel,
+        // and the fused inputs are only [x, W]. It must run with two inputs.
+        let mut k = FusedKernel::new(KernelType::MatmulScale, vec![0, 1], vec![], vec![]);
+        k.params = KernelParams {
+            in_features: 2,
+            out_features: 2,
+            tile_size: 64,
+            eps: 1e-5,
+            scale: 3.0,
+        };
+        // x: (1x2) = [1, 2]; W: (2x2) row-major = [[1, 0], [0, 1]] (identity).
+        let x = [1.0f32, 2.0];
+        let w = [1.0f32, 0.0, 0.0, 1.0];
+        let mut out = [0.0f32; 2];
+        // Only two inputs — previously this indexed inputs[2] out of bounds.
+        k.execute(&[&x, &w], &mut out);
+        // y = (x @ W) * scale = [1, 2] * 3 = [3, 6].
+        assert_eq!(out, [3.0, 6.0]);
     }
 
     #[test]

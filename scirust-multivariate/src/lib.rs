@@ -584,10 +584,13 @@ fn symmetric_decorrelate(w: &mut Matrix) {
         };
         inv_sqrt_d.data[i][i] = s;
     }
-    // W = E * D^{-1/2} * E^T * W
-    let temp = inv_sqrt_d.mul(&evecs_transpose(&evecs));
-    let temp2 = temp.mul(w);
-    *w = temp2;
+    // W = E * D^{-1/2} * E^T * W. `evecs_transpose` returns E (eigenvectors as
+    // columns), so form the full self-adjoint operator (WW^T)^{-1/2} = E D^{-1/2} E^T
+    // and apply it. The previous code computed D^{-1/2} * E * W, a *different*
+    // (wrongly rotated) matrix — not the symmetric decorrelation FastICA needs.
+    let e = evecs_transpose(&evecs);
+    let op = e.mul(&inv_sqrt_d).mul(&e.transpose());
+    *w = op.mul(w);
 }
 
 #[allow(clippy::needless_range_loop)]
@@ -1050,10 +1053,19 @@ fn invert_matrix(m: &Matrix) -> Matrix {
     let n = m.rows;
     assert_eq!(n, m.cols);
 
-    // Cholesky decomposition: M = L * L^T
+    // Cholesky decomposition: M = L * L^T, then M^{-1} = L^{-T} * L^{-1}.
     let l = cholesky(m);
+    let l_inv = invert_lower_triangular(&l);
+    let lt_inv = l_inv.transpose();
+    lt_inv.mul(&l_inv)
+}
 
-    // Invert L (lower triangular)
+/// Invert a lower-triangular matrix `l` by forward substitution.
+///
+/// Assumes a non-zero diagonal, which [`cholesky`] guarantees by regularizing
+/// non-positive pivots with [`CHOLESKY_RIDGE`].
+fn invert_lower_triangular(l: &Matrix) -> Matrix {
+    let n = l.rows;
     let mut l_inv = Matrix::zeros(n, n);
     for i in 0..n
     {
@@ -1068,10 +1080,7 @@ fn invert_matrix(m: &Matrix) -> Matrix {
             l_inv.data[j][i] = -s / l.data[j][j];
         }
     }
-
-    // M^{-1} = L^{-T} * L^{-1}
-    let lt_inv = l_inv.transpose();
-    lt_inv.mul(&l_inv)
+    l_inv
 }
 
 /// Ridge added to a non-positive Cholesky pivot to keep a near-singular or
@@ -1303,13 +1312,22 @@ pub fn cca_fit(x: &Matrix, y: &Matrix, n_components: usize) -> CcaResult {
     };
     let sigma_yx = sigma_xy.transpose();
 
-    // Invert covariance matrices
-    let inv_xx = invert_matrix(&sigma_xx);
+    // Invert Sigma_yy.
     let inv_yy = invert_matrix(&sigma_yy);
 
-    // Solve generalized eigenproblem:
-    // Sigma_xx^{-1} * Sigma_xy * Sigma_yy^{-1} * Sigma_yx * w = lambda * w
-    let a = inv_xx.mul(&sigma_xy).mul(&inv_yy).mul(&sigma_yx);
+    // Solve the generalized eigenproblem
+    //   Sigma_xx^{-1} * Sigma_xy * Sigma_yy^{-1} * Sigma_yx * w = lambda * w.
+    // The operator Sigma_xx^{-1} * B (B = Sigma_xy Sigma_yy^{-1} Sigma_yx) is
+    // generally NOT symmetric, so it must not be fed to `jacobi_eigen` (which
+    // assumes a symmetric matrix). Symmetrize via the Cholesky factor of Sigma_xx:
+    // with Sigma_xx = L L^T and the substitution w = L^{-T} u, the problem becomes
+    // M u = lambda u where M = L^{-1} B L^{-T} is symmetric and shares the
+    // eigenvalues (the canonical correlations). Weights are recovered as w = L^{-T} u.
+    let b = sigma_xy.mul(&inv_yy).mul(&sigma_yx);
+    let l = cholesky(&sigma_xx);
+    let l_inv = invert_lower_triangular(&l);
+    let lt_inv = l_inv.transpose();
+    let a = l_inv.mul(&b).mul(&lt_inv);
 
     let (evals_a, evecs_a) = jacobi_eigen(&a);
 
@@ -1325,7 +1343,18 @@ pub fn cca_fit(x: &Matrix, y: &Matrix, n_components: usize) -> CcaResult {
     {
         let r = evals_a[idx].clamp(0.0, 1.0).sqrt();
         correlations.push(r);
-        let w_x = evecs_a[idx].clone();
+
+        // Map the symmetric eigenvector u back to the canonical weight
+        // w_x = L^{-T} * u, then normalize.
+        let mut w_x = lt_inv.mul_vec(&evecs_a[idx]);
+        let norm_x = w_x.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm_x > 1e-12
+        {
+            for v in &mut w_x
+            {
+                *v /= norm_x;
+            }
+        }
 
         // Derive weights_y from weights_x: w_y ∝ Sigma_yy^{-1} * Sigma_yx * w_x.
         // This pairs the y-direction with the same canonical direction as w_x
@@ -2025,6 +2054,91 @@ mod tests {
             (result.inertia - 8.0 / 3.0).abs() < 1e-6,
             "inertia: {}",
             result.inertia
+        );
+    }
+
+    #[test]
+    fn symmetric_decorrelate_is_symmetric_and_orthonormal() {
+        // Symmetric decorrelation applies the SELF-ADJOINT operator
+        // (WW^T)^{-1/2} = E D^{-1/2} E^T. The buggy form D^{-1/2} E W is still
+        // orthonormal but is the WRONG matrix (the operator it applies is not
+        // symmetric), so W_new * W_old^T = (WW^T)^{1/2} comes out non-symmetric.
+        let w_old = Matrix::from_slice(&[&[0.8, 0.3], &[0.1, 0.9]]);
+        let mut w = w_old.clone();
+        symmetric_decorrelate(&mut w);
+
+        // 1) Result is orthonormal: W W^T = I.
+        let wwt = w.mul(&w.transpose());
+        for i in 0..2
+        {
+            for j in 0..2
+            {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (wwt.data[i][j] - expected).abs() < 1e-9,
+                    "W not orthonormal at ({i},{j}): {}",
+                    wwt.data[i][j]
+                );
+            }
+        }
+
+        // 2) The applied operator is self-adjoint, so W_new * W_old^T must be
+        //    symmetric. This FAILS for the buggy D^{-1/2} * E * W formulation.
+        let m = w.mul(&w_old.transpose());
+        assert!(
+            (m.data[0][1] - m.data[1][0]).abs() < 1e-9,
+            "symmetric decorrelation operator not self-adjoint: {} vs {}",
+            m.data[0][1],
+            m.data[1][0]
+        );
+    }
+
+    #[test]
+    fn cca_recovers_second_pair_with_correlated_x_features() {
+        // The x view has correlated features, so Sigma_xx^{-1} is non-diagonal and
+        // the operator Sigma_xx^{-1} Sigma_xy Sigma_yy^{-1} Sigma_yx is non-symmetric.
+        // Feeding it straight to the symmetric Jacobi solver inflated the first
+        // canonical correlation to ~1.0 and lost the genuine second pair (~0.86 vs
+        // true ~0.99). Symmetrizing via the Cholesky factor of Sigma_xx recovers both.
+        let x = Matrix::from_slice(&[
+            &[1.0, 0.9, 2.0],
+            &[2.0, 1.7, 0.5],
+            &[3.0, 3.1, 3.0],
+            &[4.0, 3.8, 1.0],
+            &[5.0, 5.2, 4.0],
+            &[6.0, 5.9, 2.5],
+            &[7.0, 7.1, 5.0],
+            &[8.0, 8.0, 3.5],
+        ]);
+        let y = Matrix::from_slice(&[
+            &[1.1, 2.0],
+            &[1.9, 0.6],
+            &[3.2, 3.1],
+            &[3.7, 1.2],
+            &[5.1, 4.2],
+            &[6.2, 2.6],
+            &[6.9, 5.1],
+            &[8.1, 3.4],
+        ]);
+
+        let result = cca_fit(&x, &y, 2);
+        assert_eq!(result.correlations.len(), 2);
+        for &r in &result.correlations
+        {
+            assert!(
+                (0.0..=1.0 + 1e-9).contains(&r),
+                "correlation out of range: {r}"
+            );
+        }
+        assert!(
+            (result.correlations[0] - 0.999_56).abs() < 1e-3,
+            "first canonical correlation wrong: {}",
+            result.correlations[0]
+        );
+        assert!(
+            (result.correlations[1] - 0.990_80).abs() < 1e-3,
+            "second canonical correlation lost: {}",
+            result.correlations[1]
         );
     }
 }

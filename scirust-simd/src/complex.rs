@@ -79,24 +79,25 @@ fn as_f32_mut(s: &mut [Complex<f32>]) -> &mut [f32] {
 
 #[cfg(feature = "portable-simd")]
 pub fn complex_add_f32(dst: &mut [Complex<f32>], src: &[Complex<f32>]) {
+    use std::simd::f32x8;
     assert_eq!(dst.len(), src.len());
 
     let dst_f = as_f32_mut(dst);
     let src_f = as_f32(src);
 
-    let (pre, mid_dst, suf_dst) = dst_f.as_simd_mut::<8>();
-    let (_, mid_src, _) = src_f.as_simd::<8>();
-
-    for (d, s) in pre.iter_mut().zip(src_f.iter())
+    // Chunk both slices identically (chunk k = elements [8k..8k+8] of each),
+    // so the pairing is correct regardless of the buffers' runtime alignment.
+    // Splitting each slice independently with `as_simd`/`as_simd_mut` would pick
+    // per-slice scalar prefixes, mis-pairing lanes when the buffers differ mod 32.
+    let mut dc = dst_f.chunks_exact_mut(8);
+    let mut sc = src_f.chunks_exact(8);
+    for (d, s) in dc.by_ref().zip(sc.by_ref())
     {
-        *d += s;
+        let mut vd = f32x8::from_slice(d);
+        vd += f32x8::from_slice(s);
+        vd.copy_to_slice(d);
     }
-    for (vd, vs) in mid_dst.iter_mut().zip(mid_src.iter())
-    {
-        *vd += vs;
-    }
-    let offset = pre.len() + mid_dst.len() * 8;
-    for (d, s) in suf_dst.iter_mut().zip(src_f[offset..].iter())
+    for (d, s) in dc.into_remainder().iter_mut().zip(sc.remainder())
     {
         *d += s;
     }
@@ -307,6 +308,50 @@ mod tests {
         {
             assert!((c.re - 4.0).abs() < 1e-6);
             assert!((c.im - 1.0).abs() < 1e-6);
+        }
+    }
+
+    /// Regression: `complex_add_f32` must be correct **regardless of the two
+    /// buffers' relative alignment**. The previous portable-simd version split
+    /// `dst` and `src` independently with `as_simd`/`as_simd_mut`, each choosing
+    /// its own scalar prefix; when the buffers differed mod 32 the mid loop
+    /// paired mismatched chunks and `zip()` truncated, leaving a run of middle
+    /// `dst` elements never updated. Slicing from varied Complex offsets forces
+    /// every relative alignment (each Complex<f32> is 8 bytes, so offsetting by
+    /// 1..4 complexes covers all residues mod 32 bytes for the underlying f32).
+    #[test]
+    fn complex_add_correct_under_any_alignment() {
+        let n = 25usize;
+        for d_off in 0..5
+        {
+            for s_off in 0..5
+            {
+                let dbuf: Vec<Complex<f32>> = (0..n + d_off)
+                    .map(|i| Complex::new((i as f32 * 0.7).sin(), (i as f32 * 0.9).cos()))
+                    .collect();
+                let sbuf: Vec<Complex<f32>> = (0..n + s_off)
+                    .map(|i| Complex::new((i as f32 * 0.3).cos(), (i as f32 * 0.13) - 0.5))
+                    .collect();
+
+                let mut dst = dbuf.clone();
+                complex_add_f32(&mut dst[d_off..d_off + n], &sbuf[s_off..s_off + n]);
+
+                for k in 0..n
+                {
+                    let want_re = dbuf[d_off + k].re + sbuf[s_off + k].re;
+                    let want_im = dbuf[d_off + k].im + sbuf[s_off + k].im;
+                    assert!(
+                        (dst[d_off + k].re - want_re).abs() < 1e-6,
+                        "re d_off={d_off} s_off={s_off} k={k}: {} vs {want_re}",
+                        dst[d_off + k].re
+                    );
+                    assert!(
+                        (dst[d_off + k].im - want_im).abs() < 1e-6,
+                        "im d_off={d_off} s_off={s_off} k={k}: {} vs {want_im}",
+                        dst[d_off + k].im
+                    );
+                }
+            }
         }
     }
 

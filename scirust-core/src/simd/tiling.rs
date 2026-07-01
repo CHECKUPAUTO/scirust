@@ -175,11 +175,14 @@ pub fn matmul_tiled_strided_f32(
     };
     let (tile_m, tile_k, tile_n) = (config.tile_m, config.tile_k, config.tile_n);
 
-    // Initialiser C par beta
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..m * n
+    // Initialiser C par beta en respectant les strides de C, afin de ne
+    // toucher que les cellules logiques (i, j) et jamais le padding voisin.
+    for i in 0..m
     {
-        c[i] *= beta;
+        for j in 0..n
+        {
+            c[i * rs_c + j * cs_c] *= beta;
+        }
     }
 
     let mut ii = 0;
@@ -494,4 +497,77 @@ fn detect_l3_cache() -> usize {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Petite config déterministe pour forcer plusieurs tuiles (donc plusieurs
+    /// passages sur les mêmes cellules de C via l'axe K).
+    fn tiny_config() -> TilingConfig {
+        TilingConfig {
+            tile_m: 2,
+            tile_k: 2,
+            tile_n: 2,
+            simd_width: 4,
+            l2_cache_size: 262_144,
+            l2_fill_fraction: 0.9,
+        }
+    }
+
+    /// Non-régression: le beta-scaling de C doit respecter les strides de C.
+    ///
+    /// On stocke C comme un sous-bloc 2x2 d'une matrice ambiante 3x3 (rs_c = 3),
+    /// avec beta != 0. Avant le correctif, la boucle d'init faisait `c[i] *= beta`
+    /// sur les 4 premières cellules contiguës, ce qui (a) ne scalait pas les vraies
+    /// cellules C et (b) corrompait des cellules voisines. Après correctif, seules
+    /// les cellules logiques C[i*rs_c + j*cs_c] sont scalées et les voisines sont
+    /// intactes.
+    #[test]
+    fn beta_scaling_respects_c_strides() {
+        // C = 2x2, rangé dans une matrice 3x3 (ligne stride = 3, col stride = 1).
+        // Cellules C = indices {0,1,3,4}. Cellules voisines (padding) = {2,5,6,7,8}.
+        let m = 2usize;
+        let k = 2usize;
+        let n = 2usize;
+        let (rs_c, cs_c) = (3usize, 1usize);
+
+        // A (2x2) et B (2x2), contigus row-major.
+        let a = [1.0f32, 2.0, 3.0, 4.0];
+        let b = [5.0f32, 6.0, 7.0, 8.0];
+
+        // Produit A*B attendu (row-major 2x2):
+        // [1*5+2*7, 1*6+2*8] = [19, 22]
+        // [3*5+4*7, 3*6+4*8] = [43, 50]
+        let alpha = 1.0f32;
+        let beta = 2.0f32;
+
+        // Sentinelles distinctes pour distinguer chaque cellule.
+        let mut c = [10.0f32, 20.0, 999.0, 30.0, 40.0, 998.0, 997.0, 996.0, 995.0];
+
+        // Valeurs C logiques initiales: C[0,0]=10, C[0,1]=20, C[1,0]=30, C[1,1]=40.
+        // Résultat attendu = alpha * A*B + beta * C_init.
+        let cfg = tiny_config();
+        matmul_tiled_strided_f32(
+            alpha, &a, &b, beta, &mut c, m, k, n, k, 1, n, 1, rs_c, cs_c, Some(&cfg),
+        );
+
+        let expected_c00 = 19.0 + 2.0 * 10.0; // 39
+        let expected_c01 = 22.0 + 2.0 * 20.0; // 62
+        let expected_c10 = 43.0 + 2.0 * 30.0; // 103
+        let expected_c11 = 50.0 + 2.0 * 40.0; // 130
+
+        assert_eq!(c[0], expected_c00, "C[0,0]");
+        assert_eq!(c[1], expected_c01, "C[0,1]");
+        assert_eq!(c[3], expected_c10, "C[1,0]");
+        assert_eq!(c[4], expected_c11, "C[1,1]");
+
+        // Les cellules voisines (padding) doivent rester intactes.
+        assert_eq!(c[2], 999.0, "padding [0,2] must not be touched");
+        assert_eq!(c[5], 998.0, "padding [1,2] must not be touched");
+        assert_eq!(c[6], 997.0, "padding [2,0] must not be touched");
+        assert_eq!(c[7], 996.0, "padding [2,1] must not be touched");
+        assert_eq!(c[8], 995.0, "padding [2,2] must not be touched");
+    }
 }

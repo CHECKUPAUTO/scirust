@@ -14,6 +14,7 @@ pub enum EdgeError {
     TooManyLayers,
     EmptyModel,
     BufferTooSmall,
+    BadShape,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -110,9 +111,19 @@ fn parse(model: &[u8], metas: &mut [Meta; MAX_LAYERS]) -> Result<usize, EdgeErro
         }
         let in_f = rd_u32(model, &mut p)? as usize;
         let out_f = rd_u32(model, &mut p)? as usize;
+        // `infer` addresses weights as w[k * out_f + o] for k < in_f, o < out_f,
+        // and scales/bias as [o] for o < out_f. Enforce the declared region
+        // counts match those shapes so no accessor can read past its region.
+        // `in_f * out_f` uses checked arithmetic (in_f/out_f come from untrusted
+        // u32 and could overflow usize on 32-bit targets).
+        let expect_w = in_f.checked_mul(out_f).ok_or(EdgeError::BadShape)?;
         let s_in = rd_f32(model, &mut p)?;
         let relu = rd_u8(model, &mut p)? == 1;
         let ns = rd_u32(model, &mut p)? as usize;
+        if ns != out_f
+        {
+            return Err(EdgeError::BadShape);
+        }
         let off_scales = p;
         if p + ns * 4 > model.len()
         {
@@ -120,6 +131,10 @@ fn parse(model: &[u8], metas: &mut [Meta; MAX_LAYERS]) -> Result<usize, EdgeErro
         }
         p += ns * 4;
         let nw = rd_u32(model, &mut p)? as usize;
+        if nw != expect_w
+        {
+            return Err(EdgeError::BadShape);
+        }
         let off_w = p;
         if p + nw > model.len()
         {
@@ -127,6 +142,10 @@ fn parse(model: &[u8], metas: &mut [Meta; MAX_LAYERS]) -> Result<usize, EdgeErro
         }
         p += nw;
         let nb = rd_u32(model, &mut p)? as usize;
+        if nb != out_f
+        {
+            return Err(EdgeError::BadShape);
+        }
         let off_bias = p;
         if p + nb * 4 > model.len()
         {
@@ -363,8 +382,10 @@ mod proofs {
 mod tests {
     use super::*;
 
-    /// A header-only QSR1 artifact (no scales/weights/bias) — enough to exercise
-    /// parsing, buffer sizing and the resource certificate.
+    /// A single-layer QSR1 artifact with correctly-shaped, all-zero
+    /// scales/weights/bias — enough to exercise parsing, buffer sizing and the
+    /// resource certificate. Region counts satisfy the shape invariants
+    /// (ns == out_f, nw == in_f*out_f, nb == out_f) so `parse` accepts it.
     fn header(in_f: u32, out_f: u32) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(b"QSR1");
@@ -374,9 +395,13 @@ mod tests {
         b.extend_from_slice(&out_f.to_le_bytes());
         b.extend_from_slice(&1.0f32.to_le_bytes()); // input scale
         b.push(0u8); // relu = false
-        b.extend_from_slice(&0u32.to_le_bytes()); // ns = 0
-        b.extend_from_slice(&0u32.to_le_bytes()); // nw = 0
-        b.extend_from_slice(&0u32.to_le_bytes()); // nb = 0
+        b.extend_from_slice(&out_f.to_le_bytes()); // ns = out_f
+        b.extend(core::iter::repeat_n(0u8, out_f as usize * 4)); // scales
+        let nw = in_f * out_f;
+        b.extend_from_slice(&nw.to_le_bytes()); // nw = in_f*out_f
+        b.extend(core::iter::repeat_n(0u8, nw as usize)); // weights
+        b.extend_from_slice(&out_f.to_le_bytes()); // nb = out_f
+        b.extend(core::iter::repeat_n(0u8, out_f as usize * 4)); // bias
         b
     }
 
@@ -750,7 +775,8 @@ mod tests {
 
     #[test]
     fn rejects_truncated_weight_region() {
-        // Header declares nw=4 weights but only 2 bytes follow.
+        // in_f=2,out_f=2 => expect nw=4. Header declares the correct nw=4
+        // (so the shape check passes) but only 2 weight bytes actually follow.
         let mut b = b"QSR1".to_vec();
         b.extend_from_slice(&1u32.to_le_bytes()); // 1 layer
         b.extend_from_slice(&0u32.to_le_bytes()); // tag 0
@@ -758,11 +784,76 @@ mod tests {
         b.extend_from_slice(&2u32.to_le_bytes()); // out_f
         b.extend_from_slice(&0.1f32.to_le_bytes()); // s_in
         b.push(0u8); // relu
-        b.extend_from_slice(&0u32.to_le_bytes()); // ns = 0
-        b.extend_from_slice(&4u32.to_le_bytes()); // nw = 4 (claims 4)
-        b.push(1u8); // only 2 weight bytes present
+        b.extend_from_slice(&2u32.to_le_bytes()); // ns = 2 (== out_f)
+        b.extend_from_slice(&0.01f32.to_le_bytes()); // scale 0
+        b.extend_from_slice(&0.02f32.to_le_bytes()); // scale 1
+        b.extend_from_slice(&4u32.to_le_bytes()); // nw = 4 (== in_f*out_f)
+        b.push(1u8); // only 2 weight bytes present, 4 claimed
         b.push(2u8);
         assert_eq!(buffer_requirements(&b, 1), Err(EdgeError::Truncated));
+    }
+
+    // --- parse must reject region counts that do not match the layer shape ---
+    //
+    // Before the fix, `parse` only checked that each region fit in the buffer,
+    // never that nw == in_f*out_f, ns == out_f, nb == out_f. A too-small weight
+    // region (nw < in_f*out_f) that still fits the buffer was accepted, and
+    // `infer` then read model[off_w + k*out_f + o] up to in_f*out_f elements,
+    // indexing out of bounds (panic in std / test, UB in no_std).
+    #[test]
+    fn rejects_weight_count_not_matching_shape() {
+        // in_f=10, out_f=10 => expect nw=100, ns=10, nb=10. Declare nw=4 with 4
+        // real weight bytes present. Every region fits the buffer, so the old
+        // parser accepted it; the shape check must now reject it as BadShape.
+        let mut b = b"QSR1".to_vec();
+        b.extend_from_slice(&1u32.to_le_bytes()); // 1 layer
+        b.extend_from_slice(&0u32.to_le_bytes()); // tag 0 = Linear
+        b.extend_from_slice(&10u32.to_le_bytes()); // in_f
+        b.extend_from_slice(&10u32.to_le_bytes()); // out_f
+        b.extend_from_slice(&0.1f32.to_le_bytes()); // s_in
+        b.push(0u8); // relu
+        b.extend_from_slice(&10u32.to_le_bytes()); // ns = 10 (== out_f, valid)
+        b.extend(core::iter::repeat_n(0u8, 10 * 4)); // scales present
+        b.extend_from_slice(&4u32.to_le_bytes()); // nw = 4 (!= 100)
+        b.extend_from_slice(&[1u8, 2, 3, 4]); // 4 weight bytes present (fits)
+        b.extend_from_slice(&10u32.to_le_bytes()); // nb = 10 (== out_f, valid)
+        b.extend(core::iter::repeat_n(0u8, 10 * 4)); // bias present
+
+        // parse rejects up front...
+        assert_eq!(buffer_requirements(&b, 1), Err(EdgeError::BadShape));
+
+        // ...so infer never reaches the out-of-bounds read; it returns the
+        // error instead of panicking. Buffers are generously oversized here so
+        // that any failure is the parse guard, not BufferTooSmall.
+        let input = [0.0f32; 10];
+        let mut a = [0i8; 64];
+        let mut bb = [0i8; 64];
+        let mut acc = [0i32; 64];
+        let mut out = [0.0f32; 64];
+        assert_eq!(
+            infer(&b, &input, 1, &mut a, &mut bb, &mut acc, &mut out),
+            Err(EdgeError::BadShape)
+        );
+    }
+
+    // --- parse must reject a scale/bias count that does not match out_f ---
+    #[test]
+    fn rejects_scale_and_bias_count_not_matching_shape() {
+        // in_f=2,out_f=2 => expect ns=2, nw=4, nb=2. Declare ns=1 (too small).
+        let mut b = b"QSR1".to_vec();
+        b.extend_from_slice(&1u32.to_le_bytes()); // 1 layer
+        b.extend_from_slice(&0u32.to_le_bytes()); // tag 0
+        b.extend_from_slice(&2u32.to_le_bytes()); // in_f
+        b.extend_from_slice(&2u32.to_le_bytes()); // out_f
+        b.extend_from_slice(&0.1f32.to_le_bytes()); // s_in
+        b.push(0u8); // relu
+        b.extend_from_slice(&1u32.to_le_bytes()); // ns = 1 (!= out_f = 2)
+        b.extend_from_slice(&0.01f32.to_le_bytes()); // 1 scale present
+        b.extend_from_slice(&4u32.to_le_bytes()); // nw = 4
+        b.extend_from_slice(&[1u8, 2, 3, 4]); // weights
+        b.extend_from_slice(&2u32.to_le_bytes()); // nb = 2
+        b.extend(core::iter::repeat_n(0u8, 2 * 4)); // bias
+        assert_eq!(buffer_requirements(&b, 1), Err(EdgeError::BadShape));
     }
 
     // --- The runtime artifact format roundtrips through edge byte builder:
