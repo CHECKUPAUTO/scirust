@@ -1,4 +1,4 @@
-use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::autodiff::reverse::{concat_rows, Tape, Tensor, Var};
 use crate::nn::init::Initializer;
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;
@@ -46,7 +46,8 @@ impl<E: Module> Module for MoELayer<E> {
         let probs = tape.value(gate_probs.idx());
         let (rows, cols) = gate_probs.shape();
 
-        let mut output = tape.input(Tensor::zeros(rows, input.shape().1));
+        let out_cols = input.shape().1;
+        let mut row_outputs: Vec<Var<'t>> = Vec::with_capacity(rows);
 
         for i in 0..rows
         {
@@ -55,7 +56,7 @@ impl<E: Module> Module for MoELayer<E> {
                 row_probs.iter().cloned().enumerate().collect();
             indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-            let top_k = &indexed_probs[0..self.k];
+            let top_k = &indexed_probs[0..self.k.min(indexed_probs.len())];
             let mut row_output: Option<Var> = None;
 
             for &(expert_idx, prob) in top_k
@@ -71,16 +72,18 @@ impl<E: Module> Module for MoELayer<E> {
                 });
             }
 
-            if let Some(ro) = row_output
-            {
-                if i == 0
-                {
-                    output = ro;
-                }
-            }
+            // Every row contributes its own mixed-expert output. (Previously only
+            // row 0 was kept, silently dropping all other batch rows and returning
+            // a (1, out) tensor instead of (rows, out).)
+            row_outputs
+                .push(row_output.unwrap_or_else(|| tape.input(Tensor::zeros(1, out_cols))));
         }
 
-        output
+        if row_outputs.is_empty()
+        {
+            return tape.input(Tensor::zeros(rows, out_cols));
+        }
+        concat_rows(tape, &row_outputs)
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -115,5 +118,42 @@ impl<E: Module> Module for MoELayer<E> {
             }
         }
         map
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nn::init::{KaimingNormal, Zeros};
+
+    #[test]
+    fn moe_forward_processes_every_row() {
+        let mut rng = PcgEngine::new(7);
+        let mut moe = MoELayer::new(
+            4,
+            2,
+            1,
+            || Linear::new(4, 4, &KaimingNormal, &Zeros, &mut PcgEngine::new(99)),
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        );
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(
+            vec![
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0,
+            ],
+            3,
+            4,
+        ));
+        let out = moe.forward(&tape, x);
+        // Regression: the full (rows, out) tensor — pre-fix this collapsed to (1, 4).
+        assert_eq!(tape.value(out.idx()).shape(), (3, 4));
+        // Gradients must flow through every row without panicking.
+        let loss = out.sum();
+        tape.backward(loss.idx());
+        assert!(tape.value(out.idx()).data.iter().all(|v| v.is_finite()));
     }
 }
