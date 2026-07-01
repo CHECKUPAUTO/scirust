@@ -47,8 +47,8 @@ license-tool — SciRust module licensing
 USAGE:
     license-tool modules
     license-tool keygen [--seed-hex HEX] [--height N]
-    license-tool issue --licensee NAME --id ID --modules a,b,c \
-[--expires UNIX] [--node MACHINE_ID] [--leaf N] [--seed-hex HEX] [--height N]
+    license-tool issue --licensee NAME --id ID --modules a,b,c --leaf N \
+[--expires UNIX] [--node MACHINE_ID] [--seed-hex HEX] [--height N]
     license-tool inspect <file> [--node MACHINE_ID] [--root-hex HEX] [--now UNIX]
     license-tool check <file> --module M [--node MACHINE_ID] [--root-hex HEX] [--now UNIX]
 
@@ -108,11 +108,15 @@ fn cmd_keygen(rest: &[String]) -> CliResult {
         Err(e) => return CliResult::usage(e),
     };
     let vendor = Vendor::from_seed(&seed, height);
+    // `from_seed` clamps the requested height into a supported range, so report
+    // the *effective* height (capacity is 2^effective_height) rather than the
+    // possibly-clamped request, which would otherwise disagree with capacity.
+    let effective_height = vendor.capacity().trailing_zeros();
     CliResult::ok(format!(
         "root (public key): {}\ncapacity: {} one-time licenses (height {})\n",
         hex_encode(&vendor.root()),
         vendor.capacity(),
-        height
+        effective_height
     ))
 }
 
@@ -141,11 +145,21 @@ fn cmd_issue(rest: &[String], now: u64) -> CliResult {
         Some(Err(e)) => return CliResult::usage(e),
         None => None,
     };
+    // Each one-time leaf may sign at most one distinct license (reuse leaks
+    // Lamport secrets), so the caller must own leaf allocation explicitly: there
+    // is no safe default. Defaulting to 0 would make two `issue` runs without
+    // --leaf reuse the same leaf. Require it.
     let leaf = match flags.get("leaf").map(|s| parse_u64(s, "leaf"))
     {
         Some(Ok(v)) => v as u32,
         Some(Err(e)) => return CliResult::usage(e),
-        None => 0,
+        None =>
+        {
+            return CliResult::usage(format!(
+                "issue requires --leaf N (each leaf signs at most one license; \
+                 reusing a leaf is cryptographically unsafe)\n\n{USAGE}"
+            ));
+        },
     };
     let seed = match flags.seed(demo_seed())
     {
@@ -523,6 +537,8 @@ mod tests {
                 "navigation",
                 "--node",
                 "press-line-07",
+                "--leaf",
+                "0",
             ]),
             1_000,
         );
@@ -632,6 +648,8 @@ mod tests {
                 "L-1",
                 "--modules",
                 "water",
+                "--leaf",
+                "0",
             ]),
             1_000,
         );
@@ -659,5 +677,72 @@ mod tests {
         let r = run(&argv(&["inspect", "/no/such/license.json"]), 10);
         assert_eq!(r.exit, 1);
         assert!(r.stdout.contains("cannot read"));
+    }
+
+    // Regression: a requested --height beyond the signer's clamped range
+    // (1..=20) must report the *effective* height, consistent with capacity,
+    // not the unclamped request. Before the fix this printed "(height 30)"
+    // beside a capacity of 2^20.
+    #[test]
+    fn keygen_reports_the_effective_clamped_height_not_the_request() {
+        let r = run(&argv(&["keygen", "--height", "30"]), 100);
+        assert_eq!(r.exit, 0, "keygen failed: {}", r.stdout);
+        // Clamp ceiling is 20 → 2^20 == 1048576 one-time licenses.
+        assert!(
+            r.stdout.contains("capacity: 1048576 one-time licenses (height 20)"),
+            "expected effective height 20 next to its capacity, got: {}",
+            r.stdout
+        );
+        assert!(
+            !r.stdout.contains("(height 30)"),
+            "leaked the unclamped requested height: {}",
+            r.stdout
+        );
+    }
+
+    // Regression: `issue` must not silently default --leaf to 0. Two licenses
+    // issued without --leaf would otherwise both sign with leaf 0, reusing a
+    // one-time Lamport leaf (cryptographically unsafe). It is now required.
+    #[test]
+    fn issue_requires_an_explicit_leaf() {
+        let r = run(
+            &argv(&[
+                "issue",
+                "--licensee",
+                "Acme",
+                "--id",
+                "L-1",
+                "--modules",
+                "navigation",
+            ]),
+            1_000,
+        );
+        assert_eq!(r.exit, 2, "expected a usage error, got: {}", r.stdout);
+        assert!(
+            r.stdout.contains("--leaf"),
+            "usage error should mention --leaf: {}",
+            r.stdout
+        );
+    }
+
+    // With an explicit --leaf, issuing still succeeds (guards against the fix
+    // over-rejecting valid input).
+    #[test]
+    fn issue_with_an_explicit_leaf_succeeds() {
+        let r = run(
+            &argv(&[
+                "issue",
+                "--licensee",
+                "Acme",
+                "--id",
+                "L-1",
+                "--modules",
+                "navigation",
+                "--leaf",
+                "3",
+            ]),
+            1_000,
+        );
+        assert_eq!(r.exit, 0, "issue with --leaf failed: {}", r.stdout);
     }
 }

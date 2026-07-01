@@ -30,16 +30,26 @@ impl ContractionPlan {
         })
     }
 
-    fn sizes(&self, inputs: &[&TensorND]) -> BTreeMap<char, usize> {
+    fn sizes(&self, inputs: &[&TensorND]) -> Result<BTreeMap<char, usize>, String> {
         let mut sizes = BTreeMap::new();
-        for (spec, t) in self.operand_specs.iter().zip(inputs)
+        for (i, (spec, t)) in self.operand_specs.iter().zip(inputs).enumerate()
         {
+            if spec.len() != t.shape.len()
+            {
+                return Err(format!(
+                    "operand {} spec '{}' has rank {} but tensor has rank {}",
+                    i,
+                    spec.iter().collect::<String>(),
+                    spec.len(),
+                    t.shape.len()
+                ));
+            }
             for (p, &lab) in spec.iter().enumerate()
             {
                 sizes.insert(lab, t.shape[p]);
             }
         }
-        sizes
+        Ok(sizes)
     }
 
     /// Execute the contraction, returning the result tensor.
@@ -52,7 +62,7 @@ impl ContractionPlan {
                 inputs.len()
             ));
         }
-        let sizes = self.sizes(inputs);
+        let sizes = self.sizes(inputs)?;
         let mut work: Vec<(Vec<char>, TensorND)> = self
             .operand_specs
             .iter()
@@ -158,5 +168,19 @@ mod tests {
         let ab = einsum("ij,jk->ik", &[&a, &b]).unwrap();
         let abc = einsum("ik,kl->il", &[&ab, &c]).unwrap();
         assert_eq!(out.data, abc.data);
+    }
+
+    #[test]
+    fn spec_longer_than_tensor_rank_errs_not_panics() {
+        // First operand spec has rank 3 ("ijk") but the tensor is rank 2.
+        // `sizes` used to index `t.shape[2]` and panic; now it must return Err.
+        let a = TensorND::new((1..=6).map(|v| v as f32).collect(), vec![2, 3]);
+        let b = TensorND::new((1..=12).map(|v| v as f32).collect(), vec![3, 4]);
+        let plan = ContractionPlan::new("ijk,kl->il").unwrap();
+        let err = plan.execute(&[&a, &b]).unwrap_err();
+        assert!(
+            err.contains("rank"),
+            "expected a rank-mismatch error, got: {err}"
+        );
     }
 }

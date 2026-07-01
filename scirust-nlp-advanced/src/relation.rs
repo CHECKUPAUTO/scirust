@@ -160,14 +160,44 @@ pub struct RelationPattern {
 
 /// Find the starting index in `sentence` where all `fixed` tokens match
 /// (case-insensitive, `*` matches any token).  Returns the first index
-/// where the entire fixed sequence fits.
-fn find_fixed_start(sentence: &[String], fixed: &[&str]) -> Option<usize> {
+/// where the entire fixed sequence fits, subject to two capture guards:
+///
+/// - `min_start`: the fixed span must begin at or after this index, so any
+///   `{SUBJ}`/`{OBJ}` placeholder that precedes the fixed tokens captures at
+///   least `min_start` token(s).  Pass `1` when a placeholder precedes the
+///   fixed span (placeholders capture one or more tokens), `0` otherwise.
+/// - `require_trailing`: when `true`, the fixed span must leave at least one
+///   token after it, so a placeholder that follows the fixed tokens is
+///   non-empty.
+///
+/// Using these guards avoids the over-greedy first-occurrence behaviour where
+/// a fixed token that appears inside (or at the very start of) a placeholder's
+/// span would otherwise be chosen as the anchor, yielding an empty or
+/// swallowed capture on one side.
+fn find_fixed_start(
+    sentence: &[String],
+    fixed: &[&str],
+    min_start: usize,
+    require_trailing: bool,
+) -> Option<usize> {
     if fixed.is_empty()
     {
-        return Some(0);
+        // No fixed tokens: the anchor sits at `min_start`; only valid if the
+        // trailing capture (if required) would be non-empty.
+        if min_start > sentence.len() || (require_trailing && min_start >= sentence.len())
+        {
+            return None;
+        }
+        return Some(min_start);
     }
-    for start in 0..=sentence.len().saturating_sub(fixed.len())
+    let last_start = sentence.len().saturating_sub(fixed.len());
+    for start in min_start..=last_start
     {
+        let fixed_end = start + fixed.len();
+        if require_trailing && fixed_end >= sentence.len()
+        {
+            break;
+        }
         let mut ok = true;
         for (fi, ft) in fixed.iter().enumerate()
         {
@@ -223,9 +253,11 @@ impl RelationPattern {
             (Some(sp), Some(op)) if sp < op =>
             {
                 // {SUBJ} ... fixed ... {OBJ}
+                // {SUBJ} precedes the fixed span (needs >= 1 token) and {OBJ}
+                // follows it (needs >= 1 token).
                 let fixed_between: Vec<&str> =
                     self.tokens[sp + 1..op].iter().map(|s| s.as_str()).collect();
-                let fixed_start = find_fixed_start(sentence, &fixed_between)?;
+                let fixed_start = find_fixed_start(sentence, &fixed_between, 1, true)?;
                 let subj_words: Vec<String> = sentence[..fixed_start].to_vec();
                 let fixed_end = fixed_start + fixed_between.len();
                 let obj_words: Vec<String> = sentence[fixed_end..].to_vec();
@@ -234,9 +266,11 @@ impl RelationPattern {
             (Some(sp), Some(op)) if op < sp =>
             {
                 // {OBJ} ... fixed ... {SUBJ}
+                // {OBJ} precedes the fixed span (needs >= 1 token) and {SUBJ}
+                // follows it (needs >= 1 token).
                 let fixed_between: Vec<&str> =
                     self.tokens[op + 1..sp].iter().map(|s| s.as_str()).collect();
-                let fixed_start = find_fixed_start(sentence, &fixed_between)?;
+                let fixed_start = find_fixed_start(sentence, &fixed_between, 1, true)?;
                 let obj_words: Vec<String> = sentence[..fixed_start].to_vec();
                 let fixed_end = fixed_start + fixed_between.len();
                 let subj_words: Vec<String> = sentence[fixed_end..].to_vec();
@@ -257,7 +291,9 @@ impl RelationPattern {
                 }
                 else
                 {
-                    let fixed_start = find_fixed_start(sentence, &fixed_after)?;
+                    // {SUBJ} precedes the fixed span, so it must capture >= 1
+                    // token; there is no trailing placeholder.
+                    let fixed_start = find_fixed_start(sentence, &fixed_after, 1, false)?;
                     let subj_words: Vec<String> = sentence[..fixed_start].to_vec();
                     let subj = subj_words.join(" ");
                     Some((subj, String::new()))
@@ -275,7 +311,9 @@ impl RelationPattern {
                 }
                 else
                 {
-                    let fixed_start = find_fixed_start(sentence, &fixed_before)?;
+                    // The fixed span leads and {OBJ} follows it, so the fixed
+                    // span must leave >= 1 trailing token for the object.
+                    let fixed_start = find_fixed_start(sentence, &fixed_before, 0, true)?;
                     let fixed_end = fixed_start + fixed_before.len();
                     let obj_words: Vec<String> = sentence[fixed_end..].to_vec();
                     let obj = obj_words.join(" ");
@@ -669,5 +707,74 @@ mod tests {
     fn test_relation_classifier_default() {
         let clf = RelationClassifier::default();
         assert!(clf.pattern_weights.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: over-greedy capture from the first fixed-token occurrence.
+    // -----------------------------------------------------------------------
+
+    /// A fixed token appearing at the very start of the sentence must not be
+    /// chosen as the anchor when a `{SUBJ}` placeholder precedes it, which
+    /// would otherwise capture an empty subject (placeholders capture one or
+    /// more tokens).  Before the fix the first `is` (index 0) was picked,
+    /// yielding an empty subject and swallowing the rest into the object.
+    #[test]
+    fn test_pattern_subject_not_empty_from_leading_fixed_token() {
+        let pat = RelationPattern::new("{SUBJ} is {OBJ}", "is_a");
+        // "is" occurs at index 0 (leading) and again at index 3.
+        let sentence: Vec<String> = "is really Alice is happy"
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        let (subj, obj) = pat.matches(&sentence).expect("should match");
+        assert!(!subj.is_empty(), "subject placeholder must capture >= 1 token");
+        // Anchor must be the first `is` that leaves a non-empty subject.
+        assert_eq!(subj, "is really Alice");
+        assert_eq!(obj, "happy");
+    }
+
+    /// When a `{OBJ}` placeholder follows the fixed span, a fixed match flush
+    /// against the end of the sentence must not produce a match with an empty
+    /// object.  Before the fix `find_fixed_start` returned the trailing `born`
+    /// (index 2 == last index), yielding `Some(("", ""))`.
+    #[test]
+    fn test_pattern_object_empty_trailing_capture_is_no_match() {
+        let pat = RelationPattern::new("born {OBJ}", "born_place");
+        let sentence: Vec<String> = "Einstein was born"
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        assert!(
+            pat.matches(&sentence).is_none(),
+            "trailing object placeholder cannot be empty"
+        );
+    }
+
+    /// The object should capture the tokens immediately after the *earliest*
+    /// fixed anchor that still leaves a non-empty object.
+    #[test]
+    fn test_pattern_object_captures_after_fixed() {
+        let pat = RelationPattern::new("born in {OBJ}", "born_place");
+        let sentence: Vec<String> = "Einstein was born in Germany"
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        let (subj, obj) = pat.matches(&sentence).expect("should match");
+        assert_eq!(subj, "");
+        assert_eq!(obj, "Germany");
+    }
+
+    /// If the only fixed occurrence sits flush against the sentence boundary
+    /// so a required placeholder would be empty, the pattern must not match at
+    /// all rather than emit an empty capture.
+    #[test]
+    fn test_pattern_no_match_when_capture_would_be_empty() {
+        // Fixed span is the whole sentence, leaving nothing for {OBJ}.
+        let pat = RelationPattern::new("this is {OBJ}", "is_a");
+        let sentence: Vec<String> = "this is".split_whitespace().map(String::from).collect();
+        assert!(
+            pat.matches(&sentence).is_none(),
+            "trailing object placeholder cannot be empty"
+        );
     }
 }

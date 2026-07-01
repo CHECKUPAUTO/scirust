@@ -114,9 +114,11 @@ impl Pbt {
                 }
             }
 
-            // 2. Rank by score (best first).
+            // 2. Rank by score (best first). `total_cmp` is a total order, so a
+            //    NaN score (from a diverging task) sorts deterministically to the
+            //    bottom instead of panicking a `partial_cmp` unwrap.
             let mut order: Vec<usize> = (0..pop.len()).collect();
-            order.sort_by(|&a, &b| pop[b].score.partial_cmp(&pop[a].score).unwrap());
+            order.sort_by(|&a, &b| pop[b].score.total_cmp(&pop[a].score));
 
             // 3. Exploit + explore: the worst `n_replace` copy a top member and
             //    perturb its hyper-parameters.
@@ -212,9 +214,11 @@ impl Pbt {
                     }
                 });
 
-            // 2. Rank by score (best first).
+            // 2. Rank by score (best first). `total_cmp` is a total order, so a
+            //    NaN score (from a diverging task) sorts deterministically to the
+            //    bottom instead of panicking a `partial_cmp` unwrap.
             let mut order: Vec<usize> = (0..pop.len()).collect();
-            order.sort_by(|&a, &b| pop[b].score.partial_cmp(&pop[a].score).unwrap());
+            order.sort_by(|&a, &b| pop[b].score.total_cmp(&pop[a].score));
 
             // 3. Exploit + explore under the coordination RNG (sequential).
             if n_replace > 0
@@ -321,5 +325,31 @@ mod tests {
     fn pbt_population_must_be_at_least_two() {
         let p = Pbt::new(1).pop_size(0);
         assert_eq!(p.pop_size, 2);
+    }
+
+    /// A task whose `step` returns a NaN score (as a diverging numerical task
+    /// realistically can). Ranking must not panic on it.
+    struct NanTask;
+    impl PbtTask for NanTask {
+        type Hyper = ();
+
+        fn init_member(&self, _rng: &mut StdRng) -> (Vec<f64>, ()) {
+            (vec![0.0], ())
+        }
+        fn step(&self, _params: &mut Vec<f64>, _hyper: &(), _rng: &mut StdRng) -> Fitness {
+            f64::NAN
+        }
+        fn perturb(&self, _hyper: &(), _rng: &mut StdRng) {}
+    }
+
+    /// Regression: a NaN member score used to panic the `partial_cmp().unwrap()`
+    /// in the ranking sort. With `total_cmp` the run completes deterministically.
+    #[test]
+    fn pbt_ranking_tolerates_nan_scores() {
+        let (_params, _hyper, report) = Pbt::new(7)
+            .pop_size(8)
+            .steps_per_gen(1)
+            .run(&NanTask, &Guard::new().max_iters(10));
+        assert!(report.iterations >= 1, "run should complete without panicking");
     }
 }

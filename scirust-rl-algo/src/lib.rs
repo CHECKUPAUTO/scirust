@@ -911,12 +911,16 @@ impl FeedForwardNet {
             hidden_grad[i] = sum * relu_deriv(pre_hidden[i]);
         }
 
-        // Gradients for w1, b1
-        for (k, &x) in input.iter().enumerate()
+        // Gradients for w1, b1. `forward` zips `input` against `w1` (ignoring any
+        // trailing input elements beyond `input_dim`), so mirror that here by
+        // iterating over `w1` rows rather than the raw input length. Indexing
+        // `self.w1[k]` for every input element would panic when `input.len()`
+        // exceeds `input_dim`.
+        for (row, &x) in self.w1.iter_mut().zip(input.iter())
         {
             for i in 0..self.hidden_dim
             {
-                self.w1[k][i] -= lr * hidden_grad[i] * x;
+                row[i] -= lr * hidden_grad[i] * x;
             }
         }
         for i in 0..self.hidden_dim
@@ -1137,9 +1141,11 @@ impl ReinforceAgent {
             let probs = self.policy_net.forward_softmax(feat);
             let mut policy_target = vec![0.0; self.action_dim];
             policy_target[..self.action_dim].copy_from_slice(&probs[..self.action_dim]);
-            // REINFORCE gradient: increase log-prob of taken action scaled by advantage
-            let log_prob = (probs[t.actions[i]].max(1e-10)).ln();
-            let scale = (advantages[i] * log_prob).clamp(-10.0, 10.0);
+            // REINFORCE gradient: increase probability of the taken action when the
+            // advantage is positive (and decrease it when negative), scaled by the
+            // advantage. Scaling by the (always non-positive) log-prob would invert
+            // the sign and push probability away from good actions.
+            let scale = advantages[i].clamp(-10.0, 10.0);
             policy_target[t.actions[i]] += self.lr_policy * scale;
             // Normalize
             let sum: f64 = policy_target.iter().sum();
@@ -1413,7 +1419,10 @@ impl TabularQLearner {
         else
         {
             let ratio = state.tests_passed as f64 / state.total_tests as f64;
-            (ratio * 4.0).min(3.0) as usize
+            // Five buckets: 0.0, 0.25, 0.5, 0.75, 1.0 -> 0..=4. Clamp to 4 so a
+            // fully-passing ratio of 1.0 gets its own bucket instead of collapsing
+            // into the 0.75 bucket.
+            (ratio * 4.0).min(4.0) as usize
         };
 
         DiscretizedState {
@@ -3265,5 +3274,89 @@ mod tests {
         };
         let dom = most_common_instruction(&algo);
         assert_eq!(dom, Some(2)); // Add is index 2
+    }
+
+    // --- Regression tests for audit fixes ---
+
+    #[test]
+    fn test_reinforce_update_increases_prob_of_rewarded_action() {
+        // A single-step trajectory whose taken action earns a large positive
+        // reward should push the policy to assign *more* probability to that
+        // action. The earlier bug scaled the update by the (always non-positive)
+        // log-prob, which inverted the sign and pushed probability away.
+        let feat_dim = 3;
+        let action_dim = 4;
+        let mut agent = ReinforceAgent::new(
+            feat_dim, 8, action_dim, /*lr_policy=*/ 0.5, /*lr_value=*/ 0.1,
+            /*gamma=*/ 0.99, /*seed=*/ 42,
+        );
+
+        let feat = vec![1.0, -0.5, 0.25];
+        let action = 2usize;
+
+        let prob_before = agent.policy_net.forward_softmax(&feat)[action];
+
+        let mut traj = EpisodeTrajectory::new();
+        traj.push(&feat, action, /*reward=*/ 10.0); // value net ~0 => positive advantage
+        agent.train_episode(&traj);
+
+        let prob_after = agent.policy_net.forward_softmax(&feat)[action];
+
+        assert!(
+            prob_after > prob_before,
+            "REINFORCE should increase the probability of a rewarded action: \
+             before={prob_before}, after={prob_after}"
+        );
+    }
+
+    #[test]
+    fn test_correctness_bucket_distinguishes_partial_and_full_pass() {
+        let learner = TabularQLearner::new(0.1, 0.99, 0.1, 0.99, 7);
+        let algo = make_add_algo();
+
+        let three_of_four = AlgoSearchState {
+            algorithm: algo.clone(),
+            tests_passed: 3,
+            total_tests: 4,
+        };
+        let all_pass = AlgoSearchState {
+            algorithm: algo,
+            tests_passed: 4,
+            total_tests: 4,
+        };
+
+        let b_partial = learner.discretize_state(&three_of_four).correctness_bucket;
+        let b_full = learner.discretize_state(&all_pass).correctness_bucket;
+
+        // 0.75 -> bucket 3, 1.0 -> bucket 4; they must not collapse together.
+        assert_eq!(b_partial, 3);
+        assert_eq!(b_full, 4);
+        assert_ne!(
+            b_partial, b_full,
+            "0.75 and 1.0 correctness must map to distinct Q-learning buckets"
+        );
+    }
+
+    #[test]
+    fn test_train_sgd_tolerates_input_longer_than_input_dim() {
+        // `forward` ignores trailing input elements beyond `input_dim`; `train_sgd`
+        // must do the same rather than panic with an out-of-bounds index.
+        let mut rng = seeded_rng(123);
+        let input_dim = 3;
+        let mut net = FeedForwardNet::new(input_dim, 5, 2, &mut rng);
+
+        // Input longer than input_dim (4 > 3).
+        let long_input = vec![0.5, -0.25, 1.0, 0.75];
+        let target = vec![1.0, 0.0];
+
+        // Would panic before the fix.
+        net.train_sgd(&long_input, &target, 0.1);
+
+        // Only `input_dim` weight rows exist and forward still works on the
+        // (truncated) input.
+        assert_eq!(net.w1.len(), input_dim);
+        let out = net.forward(&long_input);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|v| v.is_finite()));
     }
 }

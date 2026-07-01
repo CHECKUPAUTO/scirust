@@ -314,7 +314,17 @@ fn countingsort(data: &mut [i64]) {
     }
     let min = *data.iter().min().unwrap();
     let max = *data.iter().max().unwrap();
-    let range = (max - min + 1) as usize;
+    // Compute the value span without overflowing (max - min can exceed i64::MAX)
+    // and fall back to a comparison sort when it would require an unreasonable
+    // allocation. Counting sort is only sensible for a narrow key range.
+    const MAX_RANGE: u128 = 1 << 24;
+    let span = (max as i128 - min as i128) as u128;
+    if span >= MAX_RANGE
+    {
+        heapsort(data);
+        return;
+    }
+    let range = span as usize + 1;
     let mut counts = vec![0usize; range];
     for &v in data.iter()
     {
@@ -336,20 +346,19 @@ fn radixsort(data: &mut [i64]) {
     {
         return;
     }
-    let min = *data.iter().min().unwrap();
-    for v in data.iter_mut()
-    {
-        *v -= min;
-    }
-    let max = *data.iter().max().unwrap();
-    let mut buf = vec![0i64; data.len()];
+    // Map i64 -> u64 by flipping the sign bit. This is order-preserving
+    // (i64::MIN -> 0, i64::MAX -> u64::MAX) and, unlike subtracting `min`,
+    // never overflows for any input range.
+    let mut keys: Vec<u64> = data.iter().map(|&v| (v as u64) ^ (1u64 << 63)).collect();
+    let max = keys.iter().copied().max().unwrap();
+    let mut buf = vec![0u64; keys.len()];
     let mut exp: u64 = 1;
-    while max as u64 / exp > 0
+    loop
     {
         let mut bucket = [0usize; 256];
-        for &v in data.iter()
+        for &v in keys.iter()
         {
-            let digit = ((v as u64) / exp) % 256;
+            let digit = (v / exp) % 256;
             bucket[digit as usize] += 1;
         }
         let mut pos = 0;
@@ -359,18 +368,24 @@ fn radixsort(data: &mut [i64]) {
             *b = pos;
             pos += cnt;
         }
-        for &v in data.iter()
+        for &v in keys.iter()
         {
-            let digit = ((v as u64) / exp) % 256;
+            let digit = (v / exp) % 256;
             buf[bucket[digit as usize]] = v;
             bucket[digit as usize] += 1;
         }
-        data.copy_from_slice(&buf);
+        keys.copy_from_slice(&buf);
+        // Stop once `exp` has covered the most significant digit of `max`.
+        // Guard against overflow of `exp *= 256` at the top of the u64 range.
+        if max / exp < 256
+        {
+            break;
+        }
         exp *= 256;
     }
-    for v in data.iter_mut()
+    for (d, &k) in data.iter_mut().zip(keys.iter())
     {
-        *v += min;
+        *d = (k ^ (1u64 << 63)) as i64;
     }
 }
 
@@ -1716,7 +1731,11 @@ pub fn lcs(a: &[i64], b: &[i64]) -> usize {
 
 /// Edit distance (Levenshtein).
 pub fn edit_distance(a: &str, b: &str) -> usize {
-    let (m, n) = (a.len(), b.len());
+    // Operate on Unicode scalar values, not raw bytes, so multi-byte
+    // characters count as a single edit unit.
+    let ac: Vec<char> = a.chars().collect();
+    let bc: Vec<char> = b.chars().collect();
+    let (m, n) = (ac.len(), bc.len());
     let mut prev = (0..=n).collect::<Vec<usize>>();
     let mut cur = vec![0usize; n + 1];
     for i in 1..=m
@@ -1724,7 +1743,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
         cur[0] = i;
         for j in 1..=n
         {
-            let cost = if a.as_bytes()[i - 1] == b.as_bytes()[j - 1]
+            let cost = if ac[i - 1] == bc[j - 1]
             {
                 0
             }
@@ -2250,6 +2269,30 @@ mod tests {
         assert!(check_sorted(&v));
     }
 
+    // Regression: counting sort must not overflow `max - min` nor attempt a
+    // gigantic allocation when the value span exceeds i64::MAX. It should
+    // degrade gracefully and still sort correctly.
+    #[test]
+    fn test_counting_sort_wide_range() {
+        let mut v = vec![i64::MAX, i64::MIN, 0, -1, 1, i64::MAX - 1, i64::MIN + 1];
+        let mut expected = v.clone();
+        expected.sort_unstable();
+        sort(&mut v, SortStrategy::Counting);
+        assert_eq!(v, expected);
+    }
+
+    // Regression: radix sort must not overflow when the range is wide enough
+    // that `v - min` or `exp *= 256` would wrap. The sign-bit mapping keeps it
+    // correct across the full i64 domain.
+    #[test]
+    fn test_radix_sort_wide_range() {
+        let mut v = vec![i64::MAX, i64::MIN, 0, -1, 1, i64::MAX - 3, i64::MIN + 7, 42, -42];
+        let mut expected = v.clone();
+        expected.sort_unstable();
+        sort(&mut v, SortStrategy::Radix);
+        assert_eq!(v, expected);
+    }
+
     #[test]
     fn test_timsort_like() {
         let mut v = test_vec(120, 9);
@@ -2517,6 +2560,21 @@ mod tests {
         assert_eq!(edit_distance("abc", "abc"), 0);
         assert!(is_dp_suitable(true, true));
         assert!(!is_dp_suitable(false, true));
+    }
+
+    // Regression: distance is measured in characters, not bytes. Multi-byte
+    // UTF-8 characters must count as a single edit unit.
+    #[test]
+    fn test_edit_distance_unicode() {
+        // Each string is a single character; substituting one for the other
+        // is exactly one edit, regardless of their byte lengths.
+        assert_eq!(edit_distance("é", "e"), 1); // "é" is 2 bytes, "e" is 1
+        assert_eq!(edit_distance("café", "cafe"), 1);
+        assert_eq!(edit_distance("naïve", "naive"), 1);
+        // Identical multi-byte strings have zero distance.
+        assert_eq!(edit_distance("héllo", "héllo"), 0);
+        // Emoji (4-byte) counts as one unit.
+        assert_eq!(edit_distance("a😀b", "ab"), 1);
     }
 
     // ---- 29–31: DaC ----

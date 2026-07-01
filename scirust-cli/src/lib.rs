@@ -204,11 +204,18 @@ const GROUPS: &[(&str, &[Command])] = &[
     ),
     (
         "TENSOR NETWORKS",
-        &[Command {
-            name: "tt",
-            args: "\"r;r\" [--factors d] [--max-rank r] [--tol t] [--max-err e]",
-            about: "Tensor-train (TT-SVD) compression of a matrix; reports ratio & error.",
-        }],
+        &[
+            Command {
+                name: "tt",
+                args: "\"r;r\" [--factors d] [--max-rank r] [--tol t] [--max-err e]",
+                about: "Tensor-train (TT-SVD) compression of a matrix; reports ratio & error.",
+            },
+            Command {
+                name: "quantum",
+                args: "[--seed N] [--qubits Q] [--chi C]",
+                about: "MPS quantum-circuit simulator (bond-capped SVD); GHZ check + storage savings.",
+            },
+        ],
     ),
     (
         "NLP",
@@ -286,6 +293,16 @@ const GROUPS: &[(&str, &[Command])] = &[
                 args: "[--seed N]",
                 about: "Temperature scaling: fit T to lower the expected calibration error (accuracy unchanged).",
             },
+            Command {
+                name: "guard",
+                args: "[--seed N] [--alpha A]",
+                about: "Statistical guard: conformal accept/abstain/reject with a distribution-free coverage guarantee.",
+            },
+            Command {
+                name: "attest",
+                args: "[--seed N]",
+                about: "Hash-chained attestation log of verifiable inferences; rejects forgeries, tamper-evident.",
+            },
         ],
     ),
     (
@@ -305,6 +322,11 @@ const GROUPS: &[(&str, &[Command])] = &[
                 name: "bitnet",
                 args: "[--seed N]",
                 about: "BitNet b1.58 ternary {-1,0,+1} quantization; verifies the multiplication-free matmul.",
+            },
+            Command {
+                name: "kvcache",
+                args: "[--seed N] [--budget B]",
+                about: "Elastic INT4 KV-cache compression; reports the ratio and attention cosine fidelity.",
             },
         ],
     ),
@@ -579,6 +601,34 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert_eq!(run(&s(&["frobnicate"])), 2);
+    }
+
+    /// The module promises `scirust help` "lists everything". Every command that
+    /// `run` actually dispatches must therefore appear in the help GROUPS. This
+    /// guards against dispatched-but-undocumented commands (regression: kvcache,
+    /// guard, attest, quantum were missing).
+    #[test]
+    fn help_lists_every_dispatched_command() {
+        // The first token of each help entry's `name` is the top-level command
+        // (e.g. "som train" -> "som"); META-only commands are covered too.
+        let listed: std::collections::HashSet<&str> = GROUPS
+            .iter()
+            .flat_map(|(_, cs)| cs.iter())
+            .map(|c| c.name.split(' ').next().unwrap())
+            .collect();
+
+        // Every dispatched command must be documented in help.
+        for cmd in [
+            "kvcache", "guard", "attest", "quantum", "certify", "conformal", "calibrate", "gptq",
+            "awq", "bitnet", "quickstart", "som", "evo", "cmaes", "diff", "solve", "tt", "verify",
+            "trader", "analyze",
+        ]
+        {
+            assert!(
+                listed.contains(cmd),
+                "dispatched command `{cmd}` is missing from `help`"
+            );
+        }
     }
 
     #[test]

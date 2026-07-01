@@ -1,4 +1,4 @@
-use crate::core::{Reasoner, Result};
+use crate::core::{Reasoner, ReasoningError, Result};
 use std::collections::HashSet;
 
 /// A propositional theorem prover based on **forward chaining**.
@@ -29,12 +29,24 @@ impl NeuralTheoremProver {
         {
             if let Some((body, head)) = p.split_once("->")
             {
+                let head = head.trim();
+                // A definite implication has exactly one arrow and a non-empty
+                // head atom. Reject premises like "a -> b -> c" (chained
+                // arrows, which `split_once` would mis-parse into the bogus
+                // head "b -> c") or "a ->" (empty head) instead of silently
+                // building a nonsensical rule.
+                if head.is_empty() || head.contains("->")
+                {
+                    return Err(ReasoningError::Logic(format!(
+                        "malformed implication premise: {p:?}"
+                    )));
+                }
                 let body_atoms: Vec<String> = body
                     .split('&')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                rules.push((body_atoms, head.trim().to_string()));
+                rules.push((body_atoms, head.to_string()));
             }
             else
             {
@@ -104,5 +116,23 @@ mod tests {
     fn unprovable_goal_returns_false() {
         let prover = NeuralTheoremProver::new(0);
         assert!(!prover.prove("z", &["a", "a -> b"]).unwrap());
+    }
+
+    #[test]
+    fn chained_arrows_are_rejected() {
+        let prover = NeuralTheoremProver::new(0);
+        // "a -> b -> c" is ambiguous; `split_once` would mis-parse the head as
+        // the bogus atom "b -> c" instead of erroring.
+        let err = prover.prove("c", &["a", "a -> b -> c"]).unwrap_err();
+        assert!(matches!(err, ReasoningError::Logic(_)));
+    }
+
+    #[test]
+    fn empty_head_is_rejected() {
+        let prover = NeuralTheoremProver::new(0);
+        // "a ->" has no head atom; previously it built a rule that derived the
+        // empty-string "fact" once `a` was known.
+        let err = prover.prove("a", &["a", "a ->"]).unwrap_err();
+        assert!(matches!(err, ReasoningError::Logic(_)));
     }
 }

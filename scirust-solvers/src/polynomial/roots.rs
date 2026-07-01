@@ -109,14 +109,26 @@ pub fn roots(p: &Polynomial) -> SolverResult<Vec<(f64, f64)>> {
 /// Filtre les racines réelles : celles dont la partie imaginaire est < eps.
 /// Trie par ordre croissant.
 pub fn real_roots(p: &Polynomial, eps: f64) -> SolverResult<Vec<f64>> {
-    let mut all = roots(p)?;
-    all.retain(|&(_, im)| im.abs() < eps);
-    let mut reals: Vec<f64> = all.into_iter().map(|(re, _)| re).collect();
-    reals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let all = roots(p)?;
+    let reals: Vec<f64> = all
+        .into_iter()
+        .filter(|&(_, im)| im.abs() < eps)
+        .map(|(re, _)| re)
+        .collect();
+    Ok(sort_and_dedup_reals(reals))
+}
+
+/// Trie par ordre croissant puis dédupe les racines réelles.
+///
+/// Utilise `total_cmp` plutôt que `partial_cmp().unwrap()` afin de garder un
+/// ordre total déterministe même si une racine dégénère en `NaN` (ce qui peut
+/// arriver sur des polynômes mal conditionnés) : `unwrap` paniquerait alors.
+fn sort_and_dedup_reals(mut reals: Vec<f64>) -> Vec<f64> {
+    reals.sort_by(|a, b| a.total_cmp(b));
     // Dédupe (deux racines complexes conjuguées peuvent donner deux versions
     // de la même racine réelle si la partie imaginaire est sous epsilon)
     reals.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    Ok(reals)
+    reals
 }
 
 #[cfg(test)]
@@ -177,6 +189,21 @@ mod tests {
         let r = real_roots(&p, 1e-6).unwrap();
         assert_eq!(r.len(), 1);
         assert_relative_eq!(r[0], 2.094_551_481_542_326_6, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn sort_with_nan_does_not_panic() {
+        // Régression : avec `partial_cmp().unwrap()`, un NaN dans la liste des
+        // racines réelles (possible sur un polynôme mal conditionné, où la
+        // partie imaginaire ~0 mais la partie réelle dégénère) faisait paniquer
+        // le tri. `total_cmp` garantit un ordre total sans panique.
+        let sorted = sort_and_dedup_reals(vec![3.0, f64::NAN, 1.0, 2.0]);
+        // Les valeurs finies restent triées ; NaN est ordonné de façon
+        // déterministe (en fin de liste) sans panique.
+        assert!(sorted.len() >= 3);
+        let finite: Vec<f64> = sorted.iter().copied().filter(|x| x.is_finite()).collect();
+        assert_eq!(finite, vec![1.0, 2.0, 3.0]);
+        assert!(sorted.iter().any(|x| x.is_nan()));
     }
 
     #[test]

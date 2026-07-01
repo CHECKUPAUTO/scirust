@@ -101,19 +101,53 @@ pub fn event_to_payload(
 }
 
 fn format_unix_timestamp(ts: f64) -> String {
-    // Simple ISO 8601-like time-of-day formatting.
+    // Full UTC ISO 8601 timestamp: `YYYY-MM-DDThh:mm:ss.sssZ`.
+    //
+    // `ts` is a Unix timestamp (seconds since 1970-01-01T00:00:00Z), so the
+    // rendered string must carry the *date* as well as the time-of-day —
+    // emitting time-of-day only (and wrapping modulo 24h) would drop the day
+    // and mislabel any timestamp beyond the first day.
     //
     // Round to whole milliseconds *first*, then decompose, so that a
     // fractional part rounding up to 1000 ms carries into the seconds field
     // instead of being emitted as an invalid 4-digit ".1000Z". Using
-    // div/rem_euclid keeps `millis` in [0, 1000) even for negative inputs.
+    // div/rem_euclid keeps every field non-negative even for pre-epoch
+    // (negative) inputs.
     let total_millis = (ts * 1000.0).round() as i64;
     let total_secs = total_millis.div_euclid(1000);
     let millis = total_millis.rem_euclid(1000);
-    let hours = total_secs.div_euclid(3600) % 24;
-    let minutes = total_secs.div_euclid(60) % 60;
-    let seconds = total_secs.rem_euclid(60);
-    format!("T{:02}:{:02}:{:02}.{:03}Z", hours, minutes, seconds, millis)
+
+    let days = total_secs.div_euclid(86_400);
+    let secs_of_day = total_secs.rem_euclid(86_400);
+    let hours = secs_of_day / 3600;
+    let minutes = (secs_of_day % 3600) / 60;
+    let seconds = secs_of_day % 60;
+
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hours, minutes, seconds, millis
+    )
+}
+
+/// Convert a count of days since the Unix epoch (1970-01-01) into the
+/// proleptic Gregorian `(year, month, day)`, where `month` is 1..=12.
+///
+/// Based on Howard Hinnant's `civil_from_days` algorithm; valid for the full
+/// range of `i64` day counts and fully deterministic.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    // Shift the epoch so the era starts on a 400-year boundary (0000-03-01).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097); // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11] (March = 0)
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    let year = if month <= 2 { y + 1 } else { y };
+    (year, month, day)
 }
 
 // ---------------------------------------------------------------------------
@@ -765,11 +799,11 @@ mod tests {
 
     #[test]
     fn test_format_timestamp_values() {
-        // Hand-derived ISO-like time-of-day strings.
-        assert_eq!(format_unix_timestamp(0.0), "T00:00:00.000Z");
-        assert_eq!(format_unix_timestamp(1000.5), "T00:16:40.500Z");
-        assert_eq!(format_unix_timestamp(3661.25), "T01:01:01.250Z");
-        assert_eq!(format_unix_timestamp(86399.999), "T23:59:59.999Z");
+        // Full UTC ISO 8601 timestamps, hand-derived from the Unix epoch.
+        assert_eq!(format_unix_timestamp(0.0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(format_unix_timestamp(1000.5), "1970-01-01T00:16:40.500Z");
+        assert_eq!(format_unix_timestamp(3661.25), "1970-01-01T01:01:01.250Z");
+        assert_eq!(format_unix_timestamp(86399.999), "1970-01-01T23:59:59.999Z");
     }
 
     #[test]
@@ -777,11 +811,13 @@ mod tests {
         // Fractional parts that round up to 1000 ms must carry into the next
         // second and never emit an invalid 4-digit ".1000Z".
         // 1000.9999 s = 16 min 40.9999 s -> rounds to 16:41.000.
-        assert_eq!(format_unix_timestamp(1000.9999), "T00:16:41.000Z");
+        assert_eq!(format_unix_timestamp(1000.9999), "1970-01-01T00:16:41.000Z");
         // 59.9996 s -> rounds to 1 min 00.000 s.
-        assert_eq!(format_unix_timestamp(59.9996), "T00:01:00.000Z");
+        assert_eq!(format_unix_timestamp(59.9996), "1970-01-01T00:01:00.000Z");
         // 3599.9999 s = 59 min 59.9999 s -> rounds to 1 h 00:00.000.
-        assert_eq!(format_unix_timestamp(3599.9999), "T01:00:00.000Z");
+        assert_eq!(format_unix_timestamp(3599.9999), "1970-01-01T01:00:00.000Z");
+        // 86399.9999 s carries the seconds -> minutes -> hours -> *day*.
+        assert_eq!(format_unix_timestamp(86399.9999), "1970-01-02T00:00:00.000Z");
         // No produced millisecond field ever has 4 digits.
         for ts in [0.0_f64, 1000.9999, 59.9996, 3599.9999, 86399.9999]
         {
@@ -789,5 +825,43 @@ mod tests {
             let frac = s.trim_start_matches(|c| c != '.').trim_matches(['.', 'Z']);
             assert_eq!(frac.len(), 3, "millis field not 3 digits for ts={ts}: {s}");
         }
+    }
+
+    // -- Regression: timestamp is a full ISO 8601 date+time, not time-of-day --
+
+    #[test]
+    fn test_format_timestamp_includes_date_and_does_not_wrap_24h() {
+        // A real-world Unix timestamp (2023-11-14T22:13:20.123Z). The buggy
+        // implementation emitted only the time-of-day wrapped modulo 24h
+        // ("T22:13:20.123Z"), silently dropping ~19700 days of date.
+        assert_eq!(
+            format_unix_timestamp(1_700_000_000.123),
+            "2023-11-14T22:13:20.123Z"
+        );
+
+        // Two timestamps exactly 24h apart must differ in the *date* field, not
+        // collapse to the same string as they did under modulo-24h wrapping.
+        let day0 = format_unix_timestamp(1_700_000_000.0);
+        let day1 = format_unix_timestamp(1_700_000_000.0 + 86_400.0);
+        assert_ne!(day0, day1);
+        assert_eq!(day0, "2023-11-14T22:13:20.000Z");
+        assert_eq!(day1, "2023-11-15T22:13:20.000Z");
+
+        // The output must be a parseable ISO 8601 calendar timestamp: a
+        // 4-digit year, `-`-separated date, `T`, time, and trailing `Z`.
+        let s = format_unix_timestamp(1_700_000_000.123);
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[7..8], "-");
+        assert_eq!(&s[10..11], "T");
+        assert!(s.ends_with('Z'));
+        assert_eq!(s.len(), "1970-01-01T00:00:00.000Z".len());
+    }
+
+    #[test]
+    fn test_format_timestamp_pre_epoch() {
+        // Negative (pre-1970) timestamps must borrow across the day boundary
+        // and never produce negative fields.
+        assert_eq!(format_unix_timestamp(-1.0), "1969-12-31T23:59:59.000Z");
+        assert_eq!(format_unix_timestamp(-0.5), "1969-12-31T23:59:59.500Z");
     }
 }

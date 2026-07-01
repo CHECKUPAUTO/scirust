@@ -436,7 +436,8 @@ impl SimdBackend {
         match self
         {
             SimdBackend::Avx512 => 16,
-            SimdBackend::Avx2 | SimdBackend::Sse2 => 4,
+            SimdBackend::Avx2 => 8, // 256-bit registers hold 8 f32 lanes
+            SimdBackend::Sse2 => 4,
             SimdBackend::Neon => 4,
             SimdBackend::Sve => 8, // typical for 256-bit SVE
             SimdBackend::Scalar => 1,
@@ -588,6 +589,18 @@ mod tests {
     fn test_detect_backend() {
         let backend = detect_simd_backend();
         assert!(backend.available());
+    }
+
+    #[test]
+    fn test_lane_width_matches_register_size() {
+        // lane_width is documented as the vector width in f32 elements, i.e.
+        // register-bit-width / 32. AVX2 uses 256-bit registers, so it must
+        // report 8 lanes (not 4, which is the SSE2/NEON 128-bit width).
+        assert_eq!(SimdBackend::Avx512.lane_width(), 16);
+        assert_eq!(SimdBackend::Avx2.lane_width(), 8);
+        assert_eq!(SimdBackend::Sse2.lane_width(), 4);
+        assert_eq!(SimdBackend::Neon.lane_width(), 4);
+        assert_eq!(SimdBackend::Scalar.lane_width(), 1);
     }
 
     #[test]

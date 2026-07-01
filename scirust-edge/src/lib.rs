@@ -84,6 +84,17 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
     (mult, shift)
 }
 fn requant_i32(acc: i32, mult: i64, shift: u32) -> i64 {
+    // `mult < 2^31` and `|acc| <= 2^31`, so `|acc*mult| < 2^62`. Once `shift >= 32`
+    // (i.e. `total = 31 + shift >= 63`) the rounding bias `2^(total-1)` dominates
+    // the product and the exact round-half-up result is unconditionally 0.
+    // Returning early keeps every shift below 64: a tiny scale ratio drives
+    // `shift` past 32, which would otherwise overflow the `1 << (total - 1)` /
+    // `>> total` shifts (panic in debug, silent wrap in release) and can even
+    // overflow the `31 + shift` add itself. Bit-exact for the normal shift <= 31.
+    if shift >= 32
+    {
+        return 0;
+    }
     let total = 31 + shift;
     (acc as i64 * mult + (1i64 << (total - 1))) >> total
 }
@@ -331,25 +342,29 @@ pub fn resource_certificate(model: &[u8], batch: usize) -> Result<ResourceCert, 
 mod proofs {
     use super::requant_i32;
 
-    // 1) requant_i32 : aucun overflow ni decalage hors limite dans le domaine documente
-    //    (mult issu de quantize_multiplier : 0 <= mult < 2^31 ; shift <= 32).
+    // 1) requant_i32 : aucun overflow ni decalage hors limite pour TOUT shift
+    //    (mult issu de quantize_multiplier : 0 <= mult < 2^31). Un ratio d'echelle
+    //    minuscule peut pousser shift bien au-dela de 32 ; le garde-fou total >= 63
+    //    ramene alors le decalage sous 64 et evite l'overflow.
     #[kani::proof]
-    fn requant_no_overflow_in_envelope() {
+    fn requant_no_overflow_any_shift() {
         let acc: i32 = kani::any();
         let mult: i64 = kani::any();
         let shift: u32 = kani::any();
         kani::assume(mult >= 0 && mult < (1i64 << 31));
-        kani::assume(shift <= 32);
         let _ = requant_i32(acc, mult, shift);
     }
 
-    // 2) Dents : hors enveloppe (shift >= 34 -> total-1 >= 64), requant_i32 DOIT paniquer.
+    // 2) Hors enveloppe (shift >= 32 -> total >= 63) le resultat exact
+    //    d'arrondi-au-plus-proche est 0 : requant_i32 le renvoie sans paniquer.
     #[kani::proof]
-    #[kani::should_panic]
-    fn requant_panics_outside_envelope() {
+    fn requant_returns_zero_outside_envelope() {
+        let acc: i32 = kani::any();
+        let mult: i64 = kani::any();
         let shift: u32 = kani::any();
-        kani::assume(shift >= 34 && shift <= 40);
-        let _ = requant_i32(0, 0, shift);
+        kani::assume(mult >= 0 && mult < (1i64 << 31));
+        kani::assume(shift >= 32);
+        assert!(requant_i32(acc, mult, shift) == 0);
     }
 
     // 3) Lemme de conception : pour une dimension de contraction K <= 131071,
@@ -498,6 +513,82 @@ mod tests {
 
     fn bits(v: &[f32]) -> Vec<u32> {
         v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    // --- Regression: requant_i32 must not overflow its shift on a tiny scale ratio ---
+    //
+    // `quantize_multiplier` maps a tiny multiplier `m` to `shift` growing without
+    // bound (one increment per halving below 0.5). For any `shift >= 32` we have
+    // `total = 31 + shift >= 63`, so `1i64 << (total - 1)` shifts by >= 62 and
+    // `>> total` shifts by >= 63; once `total - 1 >= 64` (shift >= 34) the old
+    // body panicked in debug ("shift left with overflow") and silently wrapped in
+    // release. The exact round-half-up result is unconditionally 0 there because
+    // `|acc * mult| < 2^62 <= 2^(total-1)`. These cases exercise the guard.
+    #[test]
+    fn requant_i32_tiny_scale_ratio_returns_zero_no_overflow() {
+        // Largest possible |acc * mult| in the reachable domain.
+        let mult = (1i64 << 31) - 1;
+        for shift in [32u32, 33, 34, 40, 60, 100, u32::MAX]
+        {
+            assert_eq!(requant_i32(i32::MAX, mult, shift), 0);
+            assert_eq!(requant_i32(i32::MIN, mult, shift), 0);
+            assert_eq!(requant_i32(0, mult, shift), 0);
+        }
+    }
+
+    // --- Regression: the normal (shift <= 31) domain is bit-for-bit unchanged ---
+    //
+    // These are the exact round-half-up values the pre-fix body produced; the
+    // guard must never alter them (bit-for-bit parity with scirust-runtime).
+    #[test]
+    fn requant_i32_normal_domain_unchanged() {
+        // shift=0 -> total=31 -> round-half-up of acc*mult/2^31.
+        // mult = 2^30, acc = 4 -> 4*2^30/2^31 = 2 exactly.
+        assert_eq!(requant_i32(4, 1i64 << 30, 0), 2);
+        // mult = 2^30, acc = 3 -> 3*2^30 + 2^30 = 4*2^30 -> >>31 = 2 (half up).
+        assert_eq!(requant_i32(3, 1i64 << 30, 0), 2);
+        // Negative, floor-after-bias: acc=-3, mult=2^30 -> (-3*2^30 + 2^30)>>31
+        // = (-2*2^30)>>31 = -1.
+        assert_eq!(requant_i32(-3, 1i64 << 30, 0), -1);
+        // Highest in-envelope shift (31 -> total=62, no overflow): with a small
+        // product the biased value stays below 2^62 and floors to 0.
+        assert_eq!(requant_i32(1, 1, 31), 0);
+    }
+
+    // --- Regression (end-to-end): a two-layer artifact whose inter-layer scale
+    //     ratio is tiny must run to completion instead of panicking in infer. ---
+    //
+    // m = (s_in_L0 * scale_o_L0) / s_in_L1 = (1e-6 * 1e-6) / 1e6 = 1e-18,
+    // driving quantize_multiplier's shift to ~60. Before the fix, requant_i32
+    // panicked/overflowed inside infer; after, the hidden activations requantize
+    // to 0 and inference produces the (finite) last-layer logits.
+    #[test]
+    fn infer_tiny_inter_layer_scale_ratio_does_not_panic() {
+        let m = model_bytes(&[
+            LayerSpec {
+                in_f: 2,
+                out_f: 2,
+                s_in: 1e-6,
+                relu: false,
+                scales: &[1e-6, 1e-6],
+                w: &[10, -20, 30, -40],
+                bias: &[1, 2],
+            },
+            LayerSpec {
+                in_f: 2,
+                out_f: 1,
+                s_in: 1e6,
+                relu: false,
+                scales: &[1.0],
+                w: &[5, 7],
+                bias: &[3],
+            },
+        ]);
+        // Runs without panicking; hidden layer requantizes to [0, 0], so the last
+        // layer sees acc = 0 and logit = (0 + bias[0]) * s_in_L1 * scales_L1[0]
+        // = 3 * 1e6 * 1.0 = 3e6.
+        let out = run_infer(&m, &[0.5, -0.5], 1);
+        assert_eq!(bits(&out), bits(&[3.0e6f32]));
     }
 
     // --- Oracle: single Linear layer, hand-derived logits ---

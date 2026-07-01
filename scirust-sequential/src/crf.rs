@@ -94,6 +94,12 @@ impl LinearChainCRF {
     ) -> (Vec<f64>, Vec<f64>, f64) {
         let t = observations.len();
         let n = self.n_tags;
+        if t == 0
+        {
+            // An empty sequence has no paths, so the partition function is
+            // log(0) = NEG_INF and both trellises are empty.
+            return (Vec::new(), Vec::new(), NEG_INF);
+        }
         let cache = FeatureCache::new(observations, n, self.n_features, features);
 
         // Forward: log_alpha[step][cur]
@@ -154,6 +160,11 @@ impl LinearChainCRF {
     pub fn decode(&self, observations: &[usize], features: &[Box<FeatureFn>]) -> (Vec<usize>, f64) {
         let t = observations.len();
         let n = self.n_tags;
+        if t == 0
+        {
+            // Nothing to decode: empty tag sequence with score log(0) = NEG_INF.
+            return (Vec::new(), NEG_INF);
+        }
         let cache = FeatureCache::new(observations, n, self.n_features, features);
 
         let mut log_delta = vec![NEG_INF; t * n];
@@ -413,6 +424,31 @@ mod tests {
                 expected[k]
             );
         }
+    }
+
+    #[test]
+    fn forward_backward_empty_observations_does_not_panic() {
+        let features = toy_features();
+        let mut crf = LinearChainCRF::new(3, 2);
+        crf.weights = vec![0.5, 0.3];
+        let obs: Vec<usize> = Vec::new();
+        // Previously underflowed `(t - 1) * n` and panicked on an empty slice.
+        let (log_alpha, log_beta, ll) = crf.forward_backward(&obs, &features);
+        assert!(log_alpha.is_empty());
+        assert!(log_beta.is_empty());
+        assert_eq!(ll, NEG_INF);
+    }
+
+    #[test]
+    fn decode_empty_observations_does_not_panic() {
+        let features = toy_features();
+        let mut crf = LinearChainCRF::new(3, 2);
+        crf.weights = vec![1.0, 1.0];
+        let obs: Vec<usize> = Vec::new();
+        // Previously underflowed `(t - 1) * n` and panicked.
+        let (tags, score) = crf.decode(&obs, &features);
+        assert!(tags.is_empty());
+        assert_eq!(score, NEG_INF);
     }
 
     #[test]

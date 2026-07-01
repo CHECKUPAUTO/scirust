@@ -605,16 +605,52 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
 
 // ── Proof ──
 
+/// Collect the set of free variable names appearing in `expr`.
+/// Returned in sorted order so callers see deterministic results.
+fn collect_vars(expr: &Expr, out: &mut std::collections::BTreeSet<String>) {
+    match expr
+    {
+        Expr::Const(_) => {},
+        Expr::Var(v) =>
+        {
+            out.insert(v.clone());
+        },
+        Expr::Add(a, b)
+        | Expr::Sub(a, b)
+        | Expr::Mul(a, b)
+        | Expr::Div(a, b)
+        | Expr::Pow(a, b) =>
+        {
+            collect_vars(a, out);
+            collect_vars(b, out);
+        },
+        Expr::Neg(a)
+        | Expr::Sin(a)
+        | Expr::Cos(a)
+        | Expr::Exp(a)
+        | Expr::Ln(a)
+        | Expr::Sqrt(a)
+        | Expr::Abs(a) => collect_vars(a, out),
+    }
+}
+
 /// Check if two expressions are equivalent by evaluating at random points.
 pub fn prove_equal(a: &Expr, b: &Expr) -> bool {
-    let vars = ["x", "y", "z", "u", "v", "w"];
+    // Bind every variable that appears in either expression, not just a fixed
+    // handful — otherwise an expression using e.g. `t` would fail to evaluate
+    // and be wrongly reported as "not equal". Sorted order keeps the sample
+    // points deterministic regardless of variable-name discovery order.
+    let mut var_set = std::collections::BTreeSet::new();
+    collect_vars(a, &mut var_set);
+    collect_vars(b, &mut var_set);
+    let vars: Vec<String> = var_set.into_iter().collect();
     for i in 0..20
     {
         let mut bindings = HashMap::new();
         for (j, v) in vars.iter().enumerate()
         {
             let val = ((i * 7919 + j * 6271 + 127) as f64 / 1000.0) % 20.0 - 10.0;
-            bindings.insert(v.to_string(), val);
+            bindings.insert(v.clone(), val);
         }
         match (eval(a, &bindings), eval(b, &bindings))
         {
@@ -1263,6 +1299,22 @@ mod tests {
             &parse("2*x").unwrap()
         ));
         assert!(!prove_equal(&parse("x").unwrap(), &parse("x + 1").unwrap()));
+    }
+
+    #[test]
+    fn prove_equal_handles_variables_outside_the_fixed_set() {
+        // `t` and `k` are not in the old hard-coded ["x","y","z","u","v","w"]
+        // sample set, so evaluation used to fail and report "not equal".
+        assert!(prove_equal(
+            &parse("t + t").unwrap(),
+            &parse("2*t").unwrap()
+        ));
+        assert!(prove_equal(
+            &parse("k*k").unwrap(),
+            &parse("k^2").unwrap()
+        ));
+        // Genuinely different expressions in such variables still compare unequal.
+        assert!(!prove_equal(&parse("t").unwrap(), &parse("t + 1").unwrap()));
     }
 
     #[test]

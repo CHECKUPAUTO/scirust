@@ -257,7 +257,10 @@ impl RulEstimator for ExponentialRulEstimator {
             }
             else
             {
-                f64::MIN.ln()
+                // HI is effectively zero (already failed). Use the smallest
+                // positive normal so ln() stays finite (ln(f64::MIN) is NaN
+                // since f64::MIN is negative); RUL then clamps to 0.
+                f64::MIN_POSITIVE.ln()
             };
             let ln_threshold = self.failure_threshold.ln();
             ((ln_hi - ln_threshold) / self.lambda).max(0.0)
@@ -334,6 +337,33 @@ mod tests {
             "expected RUL ~280, got {}",
             pred.remaining_hours
         );
+    }
+
+    #[test]
+    fn test_exponential_rul_zero_hi_no_nan() {
+        // Regression: when last_hi <= EPSILON but lambda > EPSILON, predict()
+        // must not produce NaN (previously ln(f64::MIN) yielded NaN).
+        let mut est = ExponentialRulEstimator::new(50, 5, 0.05);
+        // Establish a clear degradation trend (positive lambda).
+        for t in 0..10
+        {
+            est.update((-0.05 * t as f64).exp(), t as f64);
+        }
+        // Final observation: HI collapsed to zero (already failed).
+        est.update(0.0, 10.0);
+        assert!(est.lambda > f64::EPSILON, "lambda should be positive");
+        let pred = est.predict();
+        assert!(
+            pred.remaining_hours.is_finite(),
+            "remaining_hours must be finite, got {}",
+            pred.remaining_hours
+        );
+        assert!(
+            pred.lower_bound_hours.is_finite() && pred.upper_bound_hours.is_finite(),
+            "bounds must be finite"
+        );
+        // A fully degraded HI means no remaining life.
+        assert_eq!(pred.remaining_hours, 0.0);
     }
 
     #[test]

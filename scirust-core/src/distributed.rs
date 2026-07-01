@@ -133,6 +133,16 @@ pub fn all_reduce(
                 let c = slot
                     .as_ref()
                     .ok_or_else(|| "a rank did not contribute this key".to_string())?;
+                if c.len() != acc.len()
+                {
+                    return Err(format!(
+                        "workers disagree on the length of gradient key {k:?} \
+                         (this rank has {}, another contributed {})",
+                        acc.len(),
+                        c.len()
+                    )
+                    .into());
+                }
                 for (a, &x) in acc.iter_mut().zip(c)
                 {
                     *a += x;
@@ -286,6 +296,36 @@ mod tests {
         {
             // round 0: mean(0,1)=0.5 ; round 1: mean(1,2)=1.5
             assert_eq!(h.join().unwrap(), vec![0.5, 1.5]);
+        }
+    }
+
+    #[test]
+    fn all_reduce_rejects_mismatched_lengths_instead_of_wrong_mean() {
+        // Both ranks contribute the *same* key "g" but with different lengths.
+        // The old code sized the accumulator to the local vector and used a
+        // truncating `zip`, silently dropping/zero-filling the extra elements and
+        // returning a wrong mean. Both ranks must instead observe an error.
+        let ctxs = DistributedContext::group(2);
+        let handles: Vec<_> = ctxs
+            .into_iter()
+            .map(|ctx| {
+                thread::spawn(move || {
+                    let mut grads = HashMap::new();
+                    let v = if ctx.rank == 0 {
+                        vec![1.0f32, 2.0]
+                    } else {
+                        vec![10.0f32, 20.0, 30.0]
+                    };
+                    grads.insert("g".to_string(), v);
+                    all_reduce(&ctx, &mut grads).is_err()
+                })
+            })
+            .collect();
+        // Every worker (not just the shorter one) must see the mismatch as an
+        // error rather than a silently corrupted average.
+        for h in handles
+        {
+            assert!(h.join().unwrap(), "mismatched lengths must be an error");
         }
     }
 

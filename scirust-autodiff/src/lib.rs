@@ -40,6 +40,22 @@ impl Dual {
     }
 }
 
+/// Combine a local derivative `factor` with a seed `deriv` via the chain rule.
+///
+/// This is `factor * deriv`, except that a zero seed always contributes exactly
+/// `0.0`. Without this guard, a constant (a primal with `deriv == 0`) evaluated
+/// at a domain edge where `factor` is non-finite (e.g. `1 / (2·√0)`) would turn
+/// `0 · ∞` into `NaN` and poison the gradient of unrelated variables when
+/// partial derivatives are taken one variable at a time.
+#[inline]
+fn chain(factor: f64, deriv: f64) -> f64 {
+    if deriv == 0.0 {
+        0.0
+    } else {
+        factor * deriv
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Arithmetic operators
 // ---------------------------------------------------------------------------
@@ -78,11 +94,13 @@ impl Mul for Dual {
 impl Div for Dual {
     type Output = Dual;
     fn div(self, rhs: Dual) -> Dual {
-        // quotient rule: (f/g)' = (f'·g - f·g') / g²
+        // quotient rule: (f/g)' = f'/g - f·g'/g²
+        // Split into per-operand chain-rule contributions so that a constant
+        // operand (seed 0) never turns a non-finite factor into a NaN.
         let denom = rhs.value * rhs.value;
         Dual {
             value: self.value / rhs.value,
-            deriv: (self.deriv * rhs.value - self.value * rhs.deriv) / denom,
+            deriv: chain(1.0 / rhs.value, self.deriv) - chain(self.value / denom, rhs.deriv),
         }
     }
 }
@@ -177,7 +195,7 @@ impl Div<Dual> for f64 {
         let denom = rhs.value * rhs.value;
         Dual {
             value: self / rhs.value,
-            deriv: (-self * rhs.deriv) / denom,
+            deriv: -chain(self / denom, rhs.deriv),
         }
     }
 }
@@ -190,7 +208,13 @@ impl Dual {
     pub fn powi(self, n: i32) -> Dual {
         // d/dx(x^n) = n·x^(n-1)
         let pow_val = self.value.powi(n);
-        let pow_deriv = n as f64 * self.value.powi(n - 1) * self.deriv;
+        // x^0 is the constant 1, so its derivative is 0 everywhere (including
+        // x = 0, where n·x^(n-1) would otherwise evaluate to 0·∞ = NaN).
+        let pow_deriv = if n == 0 {
+            0.0
+        } else {
+            chain(n as f64 * self.value.powi(n - 1), self.deriv)
+        };
         Dual {
             value: pow_val,
             deriv: pow_deriv,
@@ -199,7 +223,7 @@ impl Dual {
 
     pub fn powf(self, n: f64) -> Dual {
         let pow_val = self.value.powf(n);
-        let pow_deriv = n * self.value.powf(n - 1.0) * self.deriv;
+        let pow_deriv = chain(n * self.value.powf(n - 1.0), self.deriv);
         Dual {
             value: pow_val,
             deriv: pow_deriv,
@@ -210,7 +234,7 @@ impl Dual {
         let s = self.value.sqrt();
         Dual {
             value: s,
-            deriv: self.deriv / (2.0 * s),
+            deriv: chain(1.0 / (2.0 * s), self.deriv),
         }
     }
 
@@ -225,7 +249,7 @@ impl Dual {
     pub fn ln(self) -> Dual {
         Dual {
             value: self.value.ln(),
-            deriv: self.deriv / self.value,
+            deriv: chain(1.0 / self.value, self.deriv),
         }
     }
 
@@ -533,5 +557,67 @@ mod tests {
         tape.backward(y.idx);
         let expected = 1.0f64.exp() * (1.0f64.cos() - 1.0f64.sin());
         assert!((x.grad() - expected).abs() < 1e-10);
+    }
+
+    // -- Domain-edge derivative regressions (formerly NaN/Inf) -------------
+
+    #[test]
+    fn test_sqrt_zero_constant_no_nan() {
+        // sqrt(0) has value 0 but the naive derivative 0/(2·0) = NaN.
+        // A held-constant operand (primal) must not poison the seed.
+        let d = Dual::primal(0.0).sqrt();
+        assert_eq!(d.val(), 0.0);
+        assert!(d.grad().is_finite(), "sqrt(0) constant deriv was {}", d.grad());
+        assert_eq!(d.grad(), 0.0);
+    }
+
+    #[test]
+    fn test_sqrt_zero_partial_not_poisoned() {
+        // f(x, y) = x + sqrt(y); ∂f/∂x = 1 for all y, even at y = 0.
+        let (dx, _dy) = gradient_2d(|x, y| x + y.sqrt(), 5.0, 0.0);
+        assert_eq!(dx, 1.0);
+    }
+
+    #[test]
+    fn test_powi_zero_exponent_at_zero() {
+        // x^0 ≡ 1, so d/dx(x^0) = 0 everywhere, including x = 0
+        // (naive n·x^(n-1) = 0·∞ = NaN there).
+        let d = Dual::var(0.0).powi(0);
+        assert_eq!(d.val(), 1.0);
+        assert_eq!(d.grad(), 0.0);
+    }
+
+    #[test]
+    fn test_powf_zero_constant_no_nan() {
+        // primal(0)^0.5 has value 0 but naive deriv 0.5·0^(-0.5)·0 = NaN.
+        let d = Dual::primal(0.0).powf(0.5);
+        assert_eq!(d.val(), 0.0);
+        assert_eq!(d.grad(), 0.0);
+    }
+
+    #[test]
+    fn test_ln_zero_partial_not_poisoned() {
+        // f(x, y) = x + ln(y); ∂f/∂x = 1 regardless of y, even y = 0
+        // (where ln(y) itself is -∞ but must not corrupt ∂f/∂x).
+        let (dx, _dy) = gradient_2d(|x, y| x + y.ln(), 3.0, 0.0);
+        assert_eq!(dx, 1.0);
+    }
+
+    #[test]
+    fn test_div_constant_denominator_zero_not_poisoned() {
+        // f(x, y) = x + a/y with a a constant. ∂f/∂x = 1 even at y = 0,
+        // where the a/y term's derivative factor is non-finite.
+        let (dx, _dy) = gradient_2d(|x, y| x + Dual::primal(2.0) / y, 4.0, 0.0);
+        assert_eq!(dx, 1.0);
+    }
+
+    #[test]
+    fn test_div_regular_case_unchanged() {
+        // Refactored quotient rule must still be correct on ordinary input.
+        // d/dx((x+1)/x) at x = 2 = -1/x² = -0.25.
+        let x = Dual::var(2.0);
+        let f = (x + 1.0) / x;
+        assert!((f.val() - 1.5).abs() < 1e-12);
+        assert!((f.grad() - (-0.25)).abs() < 1e-12);
     }
 }

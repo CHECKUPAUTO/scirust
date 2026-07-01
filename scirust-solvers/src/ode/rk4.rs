@@ -92,14 +92,20 @@ where
             break;
         }
 
+        let mut nan_after_update = false;
         for i in 0..n
         {
             y[i] += h_act / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
             if !y[i].is_finite()
             {
                 // NaN détecté après mise à jour — on stoppe proprement
+                nan_after_update = true;
                 break;
             }
+        }
+        if nan_after_update
+        {
+            break;
         }
         t += h_act;
         out.push((t, y.clone()));
@@ -135,5 +141,33 @@ mod tests {
         let (_, y_final) = out.last().unwrap();
         assert_relative_eq!(y_final[0], -1.0, epsilon = 1e-8);
         assert!(y_final[1].abs() < 1e-7);
+    }
+
+    /// Régression : lorsqu'un NaN/inf apparaît lors de la mise à jour finale,
+    /// le point non-fini ne doit PAS être enregistré (guard NaN propre).
+    ///
+    /// La dérivée renvoie une constante `f64::MAX / 2.0` : chaque `k_i` et
+    /// chaque étape intermédiaire restent finis, mais la somme pondérée
+    /// `k1 + 2·k2 + 2·k3 + k4 = 6·C` déborde vers `+inf`, ce qui rend `y`
+    /// non-fini uniquement au moment de la mise à jour finale.
+    /// Avant le correctif, le `break` ne quittait que la boucle interne et le
+    /// point infini était tout de même poussé dans `out`.
+    #[test]
+    fn nan_on_final_update_is_not_recorded() {
+        let out = rk4_fixed(
+            |_, _, dy| dy[0] = f64::MAX / 2.0,
+            0.0,
+            1.0,
+            vec![0.0],
+            1e-6,
+        );
+        // Seul le point initial doit subsister : le pas ayant produit l'infini
+        // est rejeté proprement.
+        assert_eq!(out.len(), 1);
+        let (t0, y0) = &out[0];
+        assert_eq!(*t0, 0.0);
+        assert!(y0.iter().all(|v| v.is_finite()));
+        // Aucun point enregistré ne doit contenir de valeur non-finie.
+        assert!(out.iter().all(|(t, y)| t.is_finite() && y.iter().all(|v| v.is_finite())));
     }
 }

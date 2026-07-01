@@ -109,7 +109,10 @@ impl MomentsAccountant {
 
         for (i, &alpha) in self.orders.iter().enumerate()
         {
-            let eps = self.log_moments[i] - (self.delta.ln() / alpha);
+            // Abadi et al. (2016), Thm 2: for a target δ the tightest ε is
+            // min_α (α_M(λ) − ln δ) / λ. The whole numerator is divided by α,
+            // not just the ln δ term.
+            let eps = (self.log_moments[i] - self.delta.ln()) / alpha;
             if eps < best_eps
             {
                 best_eps = eps;
@@ -264,6 +267,35 @@ mod tests {
         // Should have consumed some privacy budget
         assert!(acc.epsilon > 0.0);
         assert_eq!(acc.steps, 1000);
+    }
+
+    /// Regression: the moments accountant must use the Abadi (2016) conversion
+    /// ε = min_α (α_M(λ) − ln δ) / λ — i.e. the *whole* numerator is divided by
+    /// α, not just the ln δ term. The earlier bug (`α_M − ln δ/α`) left the
+    /// log-moment undivided and over-estimated ε.
+    #[test]
+    fn test_moments_accountant_abadi_conversion() {
+        let (delta, q, sigma, steps) = (1e-5, 0.01, 1.1, 1000usize);
+        let mut acc = MomentsAccountant::new(delta, q, sigma);
+        for _ in 0..steps
+        {
+            acc.step();
+        }
+
+        // Closed form of the correct conversion. log_moments[i] = steps·α·q²/(2σ²),
+        // so ε(α) = steps·q²/(2σ²) − ln δ / α, minimized at the largest α (11.0).
+        let per_step = q * q / (2.0 * sigma * sigma);
+        let expected = acc
+            .orders
+            .iter()
+            .map(|&alpha| (steps as f64 * alpha * per_step - delta.ln()) / alpha)
+            .fold(f64::INFINITY, f64::min);
+
+        assert!((acc.epsilon - expected).abs() < 1e-9, "eps = {}", acc.epsilon);
+        // The buggy formula (α_M − ln δ/α) yields ≈ 1.5012 here; the correct one
+        // ≈ 1.0880. Guard against a regression back to the larger value.
+        assert!((acc.epsilon - 1.087_951_901_774_153).abs() < 1e-9);
+        assert!(acc.epsilon < 1.2);
     }
 
     #[test]

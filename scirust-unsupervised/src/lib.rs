@@ -60,6 +60,12 @@ impl Rng {
     }
 
     fn gen_range(&mut self, lo: usize, hi: usize) -> usize {
+        // Degenerate/empty range: return the lower bound instead of dividing by
+        // zero. Callers treating [lo, hi) as empty must guard the result anyway.
+        if hi <= lo
+        {
+            return lo;
+        }
         lo + (self.next_u64() as usize) % (hi - lo)
     }
 
@@ -322,6 +328,11 @@ impl IsolationForest {
         }
 
         let n_features = data[0].len();
+        if n_features == 0
+        {
+            // Zero-dimension rows carry no split information.
+            return IsolNode::Leaf { size: data.len() };
+        }
         let feature = rng.gen_range(0, n_features);
 
         // Find min and max for the selected feature
@@ -395,7 +406,12 @@ impl IsolationForest {
         let mut rng = Rng::new(self.config.seed);
         let n = data.len();
 
-        self.avg_path = Self::c(self.config.subsample_size);
+        // Normalize by the average path length for the *actual* subsample size.
+        // Trees are built on at most `n` rows, so when the dataset is smaller
+        // than the configured subsample_size the effective size is `n`; using the
+        // configured size here would miscalibrate the 2^(-avg/c) score scale.
+        let effective_subsample = self.config.subsample_size.min(n);
+        self.avg_path = Self::c(effective_subsample);
 
         self.trees.clear();
         for _ in 0..self.config.n_trees
@@ -823,8 +839,19 @@ impl GaussianMixtureModel {
     #[allow(clippy::needless_range_loop)]
     pub fn fit(&mut self, data: &[Vec<f64>]) {
         let n = data.len();
+        // Nothing to fit on empty data: leave the model with no components rather
+        // than indexing `data[0]`.
+        if n == 0
+        {
+            self.components.clear();
+            self.log_likelihood_history.clear();
+            return;
+        }
         let dim = data[0].len();
-        let k = self.config.n_components;
+        // Each component is seeded from a distinct sample, so we cannot have more
+        // components than samples. Clamp to avoid indexing `indices` out of bounds
+        // when n_components > n_samples.
+        let k = self.config.n_components.min(n);
         let mut rng = Rng::new(self.config.seed);
 
         // Initialize components via random sampling
@@ -1928,5 +1955,133 @@ mod tests {
         svm.rho = 0.0;
         assert!((svm.decision_function(&[0.0, 0.0]) - 1.0).abs() < 1e-12);
         assert!((svm.decision_function(&[1.0, 0.0]) - 0.36787944117144233).abs() < 1e-12);
+    }
+
+    // ---- Regression tests for degenerate-input fixes ----
+
+    #[test]
+    fn test_gmm_fit_empty_data_no_panic() {
+        // Regression: fit() read data[0] unconditionally and panicked on empty
+        // input. It should now leave the model empty instead.
+        let config = GmmConfig {
+            n_components: 3,
+            max_iterations: 10,
+            tolerance: 1e-6,
+            seed: 42,
+        };
+        let mut gmm = GaussianMixtureModel::new(config);
+        gmm.fit(&[]);
+        assert!(gmm.components.is_empty());
+        assert!(gmm.log_likelihood_history.is_empty());
+    }
+
+    #[test]
+    fn test_gmm_fit_more_components_than_samples_no_panic() {
+        // Regression: with n_components > n_samples the initializer indexed
+        // `indices[j]` out of bounds and panicked. The component count must be
+        // clamped to the number of samples, and weights must still sum to 1.
+        let config = GmmConfig {
+            n_components: 5,
+            max_iterations: 20,
+            tolerance: 1e-9,
+            seed: 42,
+        };
+        let mut gmm = GaussianMixtureModel::new(config);
+        let data = vec![vec![0.0, 0.0], vec![5.0, 5.0]];
+        gmm.fit(&data);
+        assert_eq!(gmm.components.len(), 2, "clamped to n_samples");
+        let weight_sum: f64 = gmm.components.iter().map(|c| c.weight).sum();
+        assert!(
+            (weight_sum - 1.0).abs() < 1e-9,
+            "mixture weights should sum to 1, got {}",
+            weight_sum
+        );
+        // Model is usable afterwards.
+        let labels = gmm.predict(&data);
+        assert_eq!(labels.len(), 2);
+    }
+
+    #[test]
+    fn test_rng_gen_range_empty_range_no_panic() {
+        // Regression: gen_range(lo, hi) computed `% (hi - lo)` and panicked with a
+        // remainder-by-zero when lo == hi. It should now return lo.
+        let mut rng = Rng::new(7);
+        assert_eq!(rng.gen_range(0, 0), 0);
+        assert_eq!(rng.gen_range(4, 4), 4);
+    }
+
+    #[test]
+    fn test_iforest_fit_zero_dimension_rows_no_panic() {
+        // Regression: building a tree selected a feature via gen_range(0, 0) on
+        // zero-dimension rows (remainder-by-zero) and, once that returned 0,
+        // indexed an empty row out of bounds. Fit must complete without panic and
+        // produce well-defined scores in [0, 1]. Zero-dim rows carry no split
+        // information, so every tree is a single Leaf of the subsample size; with
+        // the effective-subsample normalizer the path c(size) equals the
+        // normalizer c(size), giving score exactly 0.5 for all rows.
+        let config = IForestConfig {
+            n_trees: 5,
+            subsample_size: 4,
+            max_depth: 5,
+            seed: 42,
+        };
+        let mut iforest = IsolationForest::new(config);
+        let data: Vec<Vec<f64>> = vec![Vec::new(); 6];
+        iforest.fit(&data);
+        let scores = iforest.anomaly_scores(&data);
+        assert_eq!(scores.len(), 6);
+        for s in &scores
+        {
+            assert!((0.0..=1.0).contains(s), "score out of range: {}", s);
+            assert!((s - 0.5).abs() < 1e-12, "root-leaf score should be 0.5: {}", s);
+        }
+    }
+
+    #[test]
+    fn test_iforest_score_calibrated_to_effective_subsample() {
+        // Regression: when the dataset is smaller than the configured
+        // subsample_size, fit() normalized by c(subsample_size) instead of
+        // c(n). With n < subsample_size the effective subsample is n, so the
+        // normalizer must equal c(n). We verify this via a point that isolates
+        // at depth ~c(n): a lone far-away outlier in a small dataset should
+        // score close to 1 (very anomalous). With the buggy larger normalizer
+        // the score would be depressed well below the correctly-calibrated one.
+        let n = 8usize;
+        let mut data: Vec<Vec<f64>> = (0..n - 1).map(|i| vec![i as f64 * 0.01]).collect();
+        data.push(vec![1000.0]); // clear outlier
+
+        let make = |subsample_size: usize| {
+            let cfg = IForestConfig {
+                n_trees: 100,
+                subsample_size,
+                max_depth: 10,
+                seed: 123,
+            };
+            let mut f = IsolationForest::new(cfg);
+            f.fit(&data);
+            f
+        };
+
+        // subsample_size larger than n: effective subsample is n, so avg_path
+        // must be c(n), NOT c(subsample_size).
+        let big = make(256);
+        assert!(
+            (big.avg_path - IsolationForest::c(n)).abs() < 1e-12,
+            "normalizer must be c(n)={} not c(256)={}, got {}",
+            IsolationForest::c(n),
+            IsolationForest::c(256),
+            big.avg_path
+        );
+
+        // Correctly calibrated, the outlier scores strictly higher than under
+        // the (buggy) inflated normalizer would allow: compare against a forest
+        // whose subsample equals n exactly — the scores must match.
+        let exact = make(n);
+        assert!((big.avg_path - exact.avg_path).abs() < 1e-12);
+        let s_big = big.score(&data[n - 1]);
+        let s_exact = exact.score(&data[n - 1]);
+        assert!((s_big - s_exact).abs() < 1e-12);
+        // Sanity: the lone outlier is highly anomalous.
+        assert!(s_big > 0.5, "outlier should score high, got {}", s_big);
     }
 }

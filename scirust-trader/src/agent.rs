@@ -137,16 +137,20 @@ impl OllamaClient {
 
     /// Build the prompt for the LLM.
     fn build_prompt(pred: &CertifiedPrediction) -> String {
-        let mut top_attrs: Vec<String> = pred
-            .feature_attribution
-            .iter()
-            .map(|(k, v)| format!("{}={:.4}", k, v))
-            .collect();
-        top_attrs.sort_by(|a, b| b.cmp(a));
-        let attrs_str = top_attrs
+        let mut ranked: Vec<(&String, &f32)> = pred.feature_attribution.iter().collect();
+        // Rank by attribution magnitude (descending); tie-break on the feature
+        // name so the ordering stays deterministic across runs.
+        ranked.sort_by(|(a_name, a_val), (b_name, b_val)| {
+            b_val
+                .abs()
+                .partial_cmp(&a_val.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a_name.cmp(b_name))
+        });
+        let attrs_str = ranked
             .iter()
             .take(5)
-            .cloned()
+            .map(|(k, v)| format!("{}={:.4}", k, v))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -427,6 +431,94 @@ mod tests {
         assert_eq!(Action::from_prediction(0.01, 0.001), Action::Long);
         assert_eq!(Action::from_prediction(-0.01, 0.001), Action::Short);
         assert_eq!(Action::from_prediction(0.0, 0.001), Action::Flat);
+    }
+
+    fn make_pred_with_attrs(attrs: &[(&str, f32)]) -> CertifiedPrediction {
+        use crate::certify::Interval;
+        let feature_attribution = attrs
+            .iter()
+            .map(|(k, v)| (k.to_string(), *v))
+            .collect::<std::collections::BTreeMap<String, f32>>();
+        CertifiedPrediction {
+            symbol: "BTC/USDT".to_string(),
+            action: Action::Long,
+            raw_prediction: 0.01,
+            bounds: CertifiedBounds {
+                eps: 0.01,
+                output: Interval::new(-0.02, 0.04),
+                midpoint: 0.01,
+                uncertainty: 0.03,
+                weights_fingerprint: "wf".to_string(),
+            },
+            feature_attribution,
+            snapshot_fingerprint: "sf".to_string(),
+            weights_fingerprint: "wf".to_string(),
+            last_close: 50_000.0,
+        }
+    }
+
+    fn top_attrs_line(prompt: &str) -> &str {
+        prompt
+            .lines()
+            .find(|l| l.trim_start().starts_with("Top feature attributions:"))
+            .expect("prompt should contain the top feature attributions line")
+    }
+
+    #[test]
+    fn top_attributions_ranked_by_magnitude_not_lexicographically() {
+        // Names are chosen so lexicographic order is the OPPOSITE of magnitude
+        // order: "alpha" (sorts first) has the largest attribution, "zeta"
+        // (sorts last) has the smallest. More than 5 entries exercises take(5).
+        let pred = make_pred_with_attrs(&[
+            ("alpha", 0.90),
+            ("beta", 0.05),
+            ("gamma", 0.02),
+            ("delta", 0.015),
+            ("epsilon", 0.01),
+            ("zeta", 0.005),
+        ]);
+        let prompt = OllamaClient::build_prompt(&pred);
+        let line = top_attrs_line(&prompt);
+
+        // The largest-magnitude feature must lead, even though it sorts first
+        // lexicographically (old buggy reverse-lex sort would have put it last).
+        let listed = line
+            .split("Top feature attributions:")
+            .nth(1)
+            .unwrap()
+            .trim();
+        assert!(
+            listed.starts_with("alpha=0.9000"),
+            "top attribution should be the largest by magnitude, got: {listed}"
+        );
+
+        // The smallest-magnitude feature ("zeta") must be dropped by take(5),
+        // even though reverse-lex ordering would have ranked it first.
+        assert!(
+            !listed.contains("zeta"),
+            "smallest attribution should not appear in the top 5, got: {listed}"
+        );
+
+        // Verify the full descending-magnitude order of the top 5.
+        assert_eq!(
+            listed,
+            "alpha=0.9000, beta=0.0500, gamma=0.0200, delta=0.0150, epsilon=0.0100"
+        );
+    }
+
+    #[test]
+    fn top_attributions_tie_break_is_deterministic() {
+        // Equal magnitudes tie-break on the feature name (ascending) so the
+        // narration prompt is reproducible across runs.
+        let pred = make_pred_with_attrs(&[("b", 0.5), ("a", 0.5), ("c", 0.5)]);
+        let line = top_attrs_line(&OllamaClient::build_prompt(&pred)).to_string();
+        let listed = line
+            .split("Top feature attributions:")
+            .nth(1)
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(listed, "a=0.5000, b=0.5000, c=0.5000");
     }
 
     #[test]

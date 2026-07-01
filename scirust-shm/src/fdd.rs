@@ -68,7 +68,9 @@ pub fn jacobi_eigen(input: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
         }
     }
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&i, &j| a[j][j].partial_cmp(&a[i][i]).unwrap());
+    // `total_cmp` gives a deterministic descending order even if a diagonal
+    // entry is NaN (which `partial_cmp().unwrap()` would panic on).
+    order.sort_by(|&i, &j| a[j][j].total_cmp(&a[i][i]));
     let evals: Vec<f64> = order.iter().map(|&i| a[i][i]).collect();
     let evecs: Vec<Vec<f64>> = order
         .iter()
@@ -125,10 +127,26 @@ pub fn first_singular_spectrum(channels: &[Vec<f64>]) -> Vec<f64> {
 }
 
 /// Mode shape (dominant CPSD eigenvector) at the bin nearest `freq_hz`,
-/// normalised so its largest-magnitude entry is positive unit.
+/// normalised so its largest-magnitude entry is positive unit. The `freq_hz`→bin
+/// mapping is derived from the actual transform length; `n_fft` is only consulted
+/// as a fallback for degenerate (single-bin) spectra.
 pub fn mode_shape(channels: &[Vec<f64>], sample_rate: f64, n_fft: usize, freq_hz: f64) -> Vec<f64> {
+    if channels.is_empty()
+    {
+        return Vec::new();
+    }
     let spectra = channel_spectra(channels);
-    let bin = ((freq_hz * n_fft as f64 / sample_rate).round() as usize).min(spectra[0].len() - 1);
+    let nbins = spectra[0].len();
+    if nbins == 0
+    {
+        return Vec::new();
+    }
+    // `channel_spectra` transforms each channel at its own length, so the true
+    // FFT length is `(nbins - 1) * 2`, not the caller-supplied `n_fft`; using the
+    // latter would mis-map `freq_hz` to a bin whenever they disagree.
+    let fft_len = (nbins - 1) * 2;
+    let effective_fft = if fft_len == 0 { n_fft.max(1) } else { fft_len };
+    let bin = ((freq_hz * effective_fft as f64 / sample_rate).round() as usize).min(nbins - 1);
     let g = cpsd_at(&spectra, bin);
     let (_evals, evecs) = jacobi_eigen(&g);
     let mut shape = evecs.into_iter().next().unwrap_or_default();
@@ -200,5 +218,50 @@ mod tests {
         );
         // ...and is distinct from the other mode's shape.
         assert!(mac(&phi, &shape2) < 0.5, "shapes not separated");
+    }
+
+    // Regression (bug: mode_shape/first_singular_spectrum panic on empty input).
+    #[test]
+    fn empty_channels_do_not_panic() {
+        assert!(mode_shape(&[], 100.0, 256, 10.0).is_empty());
+        assert!(first_singular_spectrum(&[]).is_empty());
+    }
+
+    // Regression (bug: jacobi_eigen sort `partial_cmp().unwrap()` panics on NaN).
+    #[test]
+    fn jacobi_does_not_panic_on_nan_diagonal() {
+        let nan = f64::NAN;
+        // A NaN entry must not crash the descending sort; the call just returns.
+        let (evals, evecs) = jacobi_eigen(&[vec![nan, 0.0], vec![0.0, 1.0]]);
+        assert_eq!(evals.len(), 2);
+        assert_eq!(evecs.len(), 2);
+    }
+
+    // Regression (bug: bin mapping used caller `n_fft` instead of the actual FFT
+    // length). Passing a deliberately wrong `n_fft` must still recover the shape
+    // at the true frequency, because the bin is derived from the real transform.
+    #[test]
+    fn mode_shape_ignores_wrong_n_fft() {
+        let (n, sr) = (4096usize, 4096.0);
+        let shape = [1.0, 0.6];
+        let chan = |amp: f64| -> Vec<f64> {
+            (0..n)
+                .map(|i| {
+                    let t = i as f64 / sr;
+                    amp * (2.0 * PI * 12.0 * t).sin()
+                })
+                .collect()
+        };
+        let channels = vec![chan(shape[0]), chan(shape[1])];
+        // With n=4096 and sr=4096, the true FFT length is 4096 (1 Hz/bin) so
+        // 12 Hz -> bin 12. A caller-supplied `n_fft` of 2048 would (pre-fix) map
+        // 12 Hz -> bin 6, an empty bin, wrecking the recovered shape.
+        let wrong_n_fft = n / 2;
+        let phi = mode_shape(&channels, sr, wrong_n_fft, 12.0);
+        assert!(
+            mac(&phi, &shape) > 0.99,
+            "MAC {} shape {phi:?} (bin mapping should ignore wrong n_fft)",
+            mac(&phi, &shape)
+        );
     }
 }

@@ -19,10 +19,16 @@ pub struct Ekf {
 
 impl Ekf {
     /// Build from initial state/covariance and process/measurement noise.
+    ///
+    /// `R` is the measurement-noise covariance and must be square, but its
+    /// dimension `m` is the measurement dimension, which is only known per
+    /// `update` call (from `z`/`h_jac`); it is therefore checked against the
+    /// actual measurement in [`Ekf::update`] rather than here.
     pub fn new(x0: Vec<f64>, p0: Mat, q: Mat, r: Mat) -> Self {
         let n = x0.len();
         assert!(p0.rows == n && p0.cols == n, "P0 must be n×n");
         assert!(q.rows == n && q.cols == n, "Q must be n×n");
+        assert!(r.rows == r.cols, "R must be square (m×m)");
         Self { x: x0, p: p0, q, r }
     }
 
@@ -47,16 +53,27 @@ impl Ekf {
     }
 
     /// Measurement update with observation `z`, measurement function `h` and its
-    /// Jacobian `h_jac` (m×n). Returns `false` if the innovation covariance is
-    /// singular (state left unchanged).
+    /// Jacobian `h_jac` (m×n). Returns `false` (state left unchanged) if the
+    /// innovation covariance is singular, or if the per-call measurement
+    /// dimension is inconsistent — i.e. `z`, `h(x)`, the `m` rows of `h_jac`, or
+    /// the `m×m` noise covariance `R` disagree, or `h_jac` is not `m×n`.
     pub fn update<H, J>(&mut self, z: &[f64], h: H, h_jac: J) -> bool
     where
         H: Fn(&[f64]) -> Vec<f64>,
         J: Fn(&[f64]) -> Mat,
     {
+        let n = self.x.len();
         let hx = h(&self.x);
-        let y: Vec<f64> = z.iter().zip(&hx).map(|(zi, hi)| zi - hi).collect();
         let hj = h_jac(&self.x);
+        // The measurement dimension `m` is only fixed per call; check that the
+        // observation, prediction, Jacobian and `R` all agree before building
+        // `S = Hₓ·P·Hₓᵀ + R`, which would otherwise slice/add mismatched shapes.
+        let m = hx.len();
+        if z.len() != m || hj.rows != m || hj.cols != n || self.r.rows != m
+        {
+            return false;
+        }
+        let y: Vec<f64> = z.iter().zip(&hx).map(|(zi, hi)| zi - hi).collect();
         let hjt = hj.t();
         let s = hj.matmul(&self.p).matmul(&hjt).add(&self.r);
         let Some(s_inv) = s.inverse()
@@ -70,7 +87,6 @@ impl Ekf {
         {
             *xi += kyi;
         }
-        let n = self.x.len();
         let kh = k.matmul(&hj);
         self.p = Mat::identity(n).sub(&kh).matmul(&self.p);
         true
@@ -171,5 +187,60 @@ mod tests {
             last_err = ((ekf.state()[0] - px).powi(2) + (ekf.state()[1] - py).powi(2)).sqrt();
         }
         assert!(last_err < 1.0, "final position error {last_err} too high");
+    }
+
+    /// `R` is a covariance and must be square; a non-square `R` is a
+    /// construction-time invariant violation and should be rejected there.
+    #[test]
+    #[should_panic(expected = "R must be square")]
+    fn new_rejects_non_square_r() {
+        let p0 = Mat::identity(2);
+        let q = Mat::identity(2);
+        let r = Mat::zeros(1, 2); // not square
+        let _ = Ekf::new(vec![0.0, 0.0], p0, q, r);
+    }
+
+    /// The measurement dimension is per-call. If the observation / Jacobian /
+    /// `R` disagree on `m`, `update` must report failure and leave the state
+    /// untouched rather than panicking on a mismatched matrix add.
+    #[test]
+    fn update_rejects_measurement_dim_mismatch() {
+        // State dim n = 2, but R is 1×1 (m = 1).
+        let p0 = Mat::identity(2);
+        let q = Mat::identity(2);
+        let r = Mat::diag(&[0.1]);
+        let mut ekf = Ekf::new(vec![1.0, 2.0], p0, q, r);
+        let before = ekf.state().to_vec();
+
+        // Supply a 2-D measurement (m = 2) inconsistent with the 1×1 R.
+        let h = |x: &[f64]| vec![x[0], x[1]];
+        let h_jac = |_x: &[f64]| Mat::new(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
+        // Before the fix this panicked inside `Mat::add` ("add dim"); now it is
+        // reported as a failed update with the state left unchanged.
+        assert!(!ekf.update(&[0.5, 0.5], h, h_jac));
+        assert_eq!(ekf.state(), before.as_slice());
+
+        // A consistent 1-D measurement still updates normally.
+        let h1 = |x: &[f64]| vec![x[0]];
+        let h1_jac = |_x: &[f64]| Mat::new(1, 2, vec![1.0, 0.0]);
+        assert!(ekf.update(&[0.0], h1, h1_jac));
+        assert_ne!(ekf.state(), before.as_slice());
+    }
+
+    /// A `z` whose length disagrees with `h(x)` must not silently truncate the
+    /// innovation; it is a dimension mismatch and `update` returns `false`.
+    #[test]
+    fn update_rejects_short_observation() {
+        let p0 = Mat::identity(2);
+        let q = Mat::identity(2);
+        let r = Mat::diag(&[0.1, 0.1]);
+        let mut ekf = Ekf::new(vec![1.0, 2.0], p0, q, r);
+        let before = ekf.state().to_vec();
+
+        let h = |x: &[f64]| vec![x[0], x[1]]; // m = 2
+        let h_jac = |_x: &[f64]| Mat::new(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
+        // z has length 1 but h(x) has length 2.
+        assert!(!ekf.update(&[0.5], h, h_jac));
+        assert_eq!(ekf.state(), before.as_slice());
     }
 }

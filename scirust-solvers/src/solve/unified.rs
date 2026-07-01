@@ -152,8 +152,24 @@ fn solve_polynomial(coeffs: &[f64]) -> SolverResult<SolveResult> {
             if disc >= 0.0
             {
                 let sq = disc.sqrt();
-                let mut x1 = (-b - sq) / (2.0 * a);
-                let mut x2 = (-b + sq) / (2.0 * a);
+                // Formule stable : on évite la soustraction de deux quantités
+                // presque égales (annulation catastrophique) qui apparaît dans
+                // `(-b ± sq) / (2a)` quand `4ac ≪ b²` (racines bien séparées).
+                // On calcule d'abord `q = -½(b + signe(b)·sq)` — toujours une
+                // addition de termes de même signe — puis `x1 = q/a`, `x2 = c/q`.
+                let sign_b = if b < 0.0 { -1.0 } else { 1.0 };
+                let q = -0.5 * (b + sign_b * sq);
+                // `q` ne peut valoir 0 que si `disc == 0` et `b == 0`, càd racine
+                // double nulle (c == 0) ; on retombe alors sur la formule directe.
+                let (mut x1, mut x2) = if q.abs() < 1e-300
+                {
+                    let x = -b / (2.0 * a);
+                    (x, x)
+                }
+                else
+                {
+                    (q / a, c / q)
+                };
                 if x1 > x2
                 {
                     std::mem::swap(&mut x1, &mut x2);
@@ -214,6 +230,23 @@ mod tests {
         assert_eq!(reals.len(), 2);
         assert_relative_eq!(reals[0], 2.0, epsilon = 1e-12);
         assert_relative_eq!(reals[1], 3.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn solve_quadratic_well_separated_roots_no_cancellation() {
+        // x² - 1e8·x + 1 = 0. Racines très séparées : ≈ 1e8 et ≈ 1e-8.
+        // La formule naïve `(-b ± √disc)/(2a)` souffre d'annulation
+        // catastrophique sur la petite racine (donne ≈ 7.45e-9 au lieu de 1e-8).
+        let e = sym::parse("x^2 - 100000000*x + 1").unwrap();
+        let r = solve(&e, "x", HashMap::new()).unwrap();
+        let reals = r.real_roots();
+        assert_eq!(reals.len(), 2);
+        // Petite racine : doit être proche de 1e-8 à la précision machine
+        // relative, pas seulement à ~25 % comme avec la formule naïve.
+        assert_relative_eq!(reals[0], 1e-8, max_relative = 1e-10);
+        assert_relative_eq!(reals[1], 1e8, max_relative = 1e-12);
+        // Contrôle direct : le produit des racines vaut c/a = 1.
+        assert_relative_eq!(reals[0] * reals[1], 1.0, max_relative = 1e-10);
     }
 
     #[test]

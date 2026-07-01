@@ -584,4 +584,119 @@ mod tests {
         assert_eq!(c[7], 996.0, "padding [2,1] must not be touched");
         assert_eq!(c[8], 995.0, "padding [2,2] must not be touched");
     }
+
+    /// Non-régression: le chemin vectorisé (SIMD) doit lui aussi respecter
+    /// `rs_c` lorsque C est un sous-bloc row-strided d'une matrice ambiante
+    /// (`rs_c > n`, `cs_c == 1`). Le beta-scaling scale `c[i*rs_c + j]` et le
+    /// chemin SIMD accumule dans `c[i*rs_c + j]`: les deux doivent viser les
+    /// mêmes cellules. On force `tile_n >= 4` et `n >= 4` pour que le bloc
+    /// `while j + 4 <= jn` s'exécute réellement (ce que ne fait pas le test 2x2).
+    ///
+    /// Le résultat est comparé à une référence naïve stride-aware; les cellules
+    /// de padding (`j >= n`) doivent rester intactes.
+    #[cfg(feature = "portable-simd")]
+    #[test]
+    fn simd_path_respects_row_strided_c() {
+        // Référence naïve stride-aware: C = alpha*A*B + beta*C.
+        #[allow(clippy::too_many_arguments)]
+        fn naive_ref(
+            alpha: f32,
+            a: &[f32],
+            b: &[f32],
+            beta: f32,
+            c: &mut [f32],
+            m: usize,
+            k: usize,
+            n: usize,
+            rs_a: usize,
+            cs_a: usize,
+            rs_b: usize,
+            cs_b: usize,
+            rs_c: usize,
+            cs_c: usize,
+        ) {
+            for i in 0..m
+            {
+                for j in 0..n
+                {
+                    let mut acc = 0.0f32;
+                    for p in 0..k
+                    {
+                        acc += a[i * rs_a + p * cs_a] * b[p * rs_b + j * cs_b];
+                    }
+                    let idx = i * rs_c + j * cs_c;
+                    c[idx] = alpha * acc + beta * c[idx];
+                }
+            }
+        }
+
+        let m = 5usize;
+        let k = 4usize;
+        let n = 6usize; // >= 4 pour déclencher le bloc SIMD
+        let (rs_c, cs_c) = (8usize, 1usize); // C = sous-bloc row-strided (rs_c > n)
+
+        let a: Vec<f32> = (0..m * k).map(|x| x as f32 * 0.5 + 1.0).collect();
+        let b: Vec<f32> = (0..k * n).map(|x| x as f32 * 0.3 - 0.7).collect();
+
+        // Matrice ambiante pour C, avec padding distinct par cellule.
+        let ambient = (m - 1) * rs_c + n; // dernière cellule logique C[m-1, n-1]
+        let c_init: Vec<f32> = (0..ambient).map(|x| x as f32 * 0.11 + 0.2).collect();
+
+        let alpha = 1.3f32;
+        let beta = 0.7f32;
+
+        // Config qui produit plusieurs tuiles ET un tile_n >= 4 (bloc SIMD actif).
+        let cfg = TilingConfig {
+            tile_m: 2,
+            tile_k: 2,
+            tile_n: 4,
+            simd_width: 4,
+            l2_cache_size: 262_144,
+            l2_fill_fraction: 0.9,
+        };
+
+        let mut c_simd = c_init.clone();
+        matmul_tiled_strided_f32(
+            alpha, &a, &b, beta, &mut c_simd, m, k, n, k, 1, n, 1, rs_c, cs_c, Some(&cfg),
+        );
+
+        let mut c_ref = c_init.clone();
+        naive_ref(
+            alpha, &a, &b, beta, &mut c_ref, m, k, n, k, 1, n, 1, rs_c, cs_c,
+        );
+
+        // Les cellules logiques de C doivent correspondre à la référence.
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let idx = i * rs_c + j * cs_c;
+                let diff = (c_simd[idx] - c_ref[idx]).abs();
+                assert!(
+                    diff < 1e-3,
+                    "C[{i},{j}] (idx {idx}): simd={} ref={} diff={diff}",
+                    c_simd[idx],
+                    c_ref[idx]
+                );
+            }
+        }
+
+        // Les cellules de padding (colonnes j >= n de chaque ligne) doivent
+        // rester intactes: ni le beta-scaling ni le chemin SIMD ne doivent y toucher.
+        for i in 0..m
+        {
+            for j in n..rs_c
+            {
+                let idx = i * rs_c + j;
+                if idx >= ambient
+                {
+                    continue;
+                }
+                assert_eq!(
+                    c_simd[idx], c_init[idx],
+                    "padding [{i},{j}] (idx {idx}) must not be touched"
+                );
+            }
+        }
+    }
 }

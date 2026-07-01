@@ -90,12 +90,7 @@ fn main() {
             let task = FnRefine::new(
                 move |_rng: &mut StdRng| vec![start; dim],
                 move |v: &Vec<f64>| obj(v),
-                move |v: &Vec<f64>, rng: &mut StdRng| {
-                    let mut out = v.clone();
-                    let i = rng.gen_range(0..out.len());
-                    out[i] += step * rng.gen_range(-1.0..1.0);
-                    out
-                },
+                move |v: &Vec<f64>, rng: &mut StdRng| refine_step(v, step, rng),
             );
             SelfRefiner::new(seed).run(&task, &guard)
         },
@@ -173,6 +168,22 @@ fn main() {
             },
         }
     }
+}
+
+/// One elitist refine move: nudge a single random coordinate by `± step`.
+///
+/// Guards the degenerate empty-vector case (e.g. `--dim 0`) so that
+/// `gen_range(0..0)` never panics; an empty solution has nothing to mutate and
+/// is returned unchanged.
+fn refine_step(v: &[f64], step: f64, rng: &mut StdRng) -> Vec<f64> {
+    let mut out = v.to_vec();
+    if out.is_empty()
+    {
+        return out;
+    }
+    let i = rng.gen_range(0..out.len());
+    out[i] += step * rng.gen_range(-1.0..1.0);
+    out
 }
 
 fn build_guard(opts: &Opts) -> Guard {
@@ -292,4 +303,48 @@ fn report_json(r: &Report) -> String {
         r.is_monotone(),
         hist.join(",")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    /// `refine_step` on an empty solution (the `--dim 0` case) must not panic on
+    /// `gen_range(0..0)`; it returns the empty vector unchanged.
+    #[test]
+    fn refine_step_handles_empty_solution() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let out = refine_step(&[], 0.5, &mut rng);
+        assert!(out.is_empty());
+    }
+
+    /// A non-empty solution is nudged in exactly one coordinate.
+    #[test]
+    fn refine_step_nudges_one_coordinate() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let v = vec![1.0, 2.0, 3.0];
+        let out = refine_step(&v, 0.5, &mut rng);
+        assert_eq!(out.len(), v.len());
+        let changed = v.iter().zip(&out).filter(|(a, b)| a != b).count();
+        assert!(changed <= 1, "at most one coordinate should change");
+    }
+
+    /// End-to-end reproduction of `scirust-rsi refine --dim 0`: before the guard
+    /// this panicked inside the refine closure on the first iteration.
+    #[test]
+    fn refine_command_with_dim_zero_does_not_panic() {
+        let dim = 0usize;
+        let start = 3.0f64;
+        let step = 0.5f64;
+        let obj: fn(&[f64]) -> f64 = bench::sphere;
+        let task = FnRefine::new(
+            move |_rng: &mut StdRng| vec![start; dim],
+            move |v: &Vec<f64>| obj(v),
+            move |v: &Vec<f64>, rng: &mut StdRng| refine_step(v, step, rng),
+        );
+        let (best, report) = SelfRefiner::new(0).run(&task, &Guard::new().max_iters(16));
+        assert!(best.is_empty());
+        assert!(report.iterations <= 16);
+    }
 }

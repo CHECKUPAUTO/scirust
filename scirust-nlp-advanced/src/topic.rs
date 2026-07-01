@@ -191,6 +191,20 @@ pub fn fit_lda(corpus: &[Vec<usize>], config: LdaConfig) -> LdaModel {
     let mut doc_topic: Vec<Vec<usize>> = vec![vec![0; num_topics]; num_docs];
     let mut topic_count: Vec<usize> = vec![0; num_topics];
 
+    // With zero topics there is nothing to sample: return an empty (but
+    // well-formed) model instead of dividing/modulo-ing by zero below.
+    if num_topics == 0
+    {
+        return LdaModel {
+            config,
+            topic_term,
+            doc_topic,
+            topic_count,
+            vocab_size,
+            vocab,
+        };
+    }
+
     // z[d][i] = topic assignment for word position (d, i)
     let mut z: Vec<Vec<usize>> = Vec::with_capacity(num_docs);
     let mut rng = Rng::new(config.seed);
@@ -434,6 +448,31 @@ mod tests {
         let score = coherence_umass(&topic_term, &doc_word_matrix, 0);
         // Score should be finite and negative (UMass is typically negative)
         assert!(score.is_finite());
+    }
+
+    #[test]
+    fn test_lda_zero_topics_does_not_panic() {
+        // Regression: num_topics == 0 previously caused a modulo-by-zero
+        // panic during random initialization (and an underflow panic in the
+        // Gibbs loop).  A non-empty corpus makes the bug reachable.
+        let corpus = vec![vec![0, 1, 2], vec![1, 2, 0]];
+        let config = LdaConfig {
+            num_topics: 0,
+            iterations: 10,
+            seed: 1,
+            ..Default::default()
+        };
+        let model = fit_lda(&corpus, config);
+        // No topics means empty topic-dimensioned structures.
+        assert_eq!(model.topic_term.len(), 0);
+        assert_eq!(model.topic_count.len(), 0);
+        assert_eq!(model.doc_topic.len(), 2);
+        assert!(model.doc_topic.iter().all(|row| row.is_empty()));
+        // Vocabulary is still inferred from the corpus indices.
+        assert_eq!(model.vocab_size, 3);
+        // Derived distributions must also stay panic-free.
+        assert_eq!(model.topic_term_dist().len(), 0);
+        assert_eq!(model.doc_topic_dist().len(), 2);
     }
 
     #[test]

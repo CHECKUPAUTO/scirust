@@ -101,10 +101,18 @@ impl<E: Encoder> RagContext<E> {
         // We do not have the chunk text back from the index (it stores
         // embeddings), so the caller typically passes the chunk store too. To
         // keep this self-contained we keep a parallel text store.
+        let mut budget_hit = false;
         for h in &hits
         {
             if let Some(text) = self.text_for(h.id)
             {
+                // Once the char budget is exceeded, every remaining (lower-ranked)
+                // chunk is dropped from the end, so its text counts as trimmed.
+                if budget_hit
+                {
+                    trimmed += text.len();
+                    continue;
+                }
                 let piece = if prompt.ends_with(&self.sep) || prompt.is_empty()
                 {
                     text.clone()
@@ -117,8 +125,11 @@ impl<E: Encoder> RagContext<E> {
                 {
                     if used_chars + piece.len() > maxc
                     {
-                        // Stop adding more chunks once the char budget is hit.
-                        trimmed += piece.len();
+                        // This chunk does not fit: drop it and everything after it
+                        // ("chunks dropped from the end"). Count the chunk text
+                        // (not the separator) as trimmed context.
+                        trimmed += text.len();
+                        budget_hit = true;
                         continue;
                     }
                 }
@@ -254,6 +265,33 @@ mod tests {
             aug.chunk_ids.is_empty()
                 || aug.prompt.len() <= 10 + "Context:\n".len() + "\n---\n".len() + "rain".len()
         );
+    }
+
+    #[test]
+    fn char_budget_drops_from_the_end_and_counts_trimmed_text() {
+        // Vocab must contain both query terms so the encoder ranks the chunks.
+        let engine = BagOfWords::new(&["alpha", "beta"]);
+        let mut rag = RagContext::new(engine, "Context:\n", "\n---\n");
+        // Chunk 1: pure "alpha" (cosine 1 with query "alpha") but long (29 chars).
+        // Chunk 2: "alpha beta" (cosine ~0.707, lower-ranked) but short (10 chars).
+        rag.index_chunk(1, "alpha alpha alpha alpha alpha").unwrap();
+        rag.index_chunk(2, "alpha beta").unwrap();
+        // The top-ranked chunk 1 alone already blows the 20-char budget, so it is
+        // dropped — and, being "dropped from the end", so is the lower-ranked
+        // chunk 2 even though it would fit on its own. The buggy version skipped
+        // chunk 1 and kept chunk 2, reordering the results by size.
+        let aug = rag.augment("alpha", ContextBudget::Chars(20));
+        assert!(
+            aug.chunk_ids.is_empty(),
+            "no chunk fits the budget without violating relevance order, got {:?}",
+            aug.chunk_ids
+        );
+        // trimmed_chars counts the dropped chunk *text* (29 + 10), not the
+        // separators (the buggy version counted the separator and stopped
+        // counting after the first skip, reporting 34).
+        assert_eq!(aug.trimmed_chars, 29 + 10);
+        // Only the query survives in the prompt.
+        assert_eq!(aug.prompt, "Context:\n\n---\nalpha");
     }
 
     #[test]

@@ -258,9 +258,9 @@ pub fn discover_patterns(data: &[f64]) -> Vec<String> {
     // ---------- MA crossover detection ----------
     let short_period = 3.min(data.len() - 1);
     let long_period = 8.min(data.len() - 1);
-    // Ensure short < long
+    // Ensure short < long (cap the short period below the long period without
+    // clobbering the intended long period).
     let short_period = short_period.min(long_period - 1).max(1);
-    let long_period = (short_period + 1).min(data.len() - 1);
 
     let short_ma = sma(short_period);
     let long_ma = sma(long_period);
@@ -479,5 +479,46 @@ mod tests {
         let data: Vec<f64> = (0..50).map(|i| i as f64).collect();
         let r = discover_patterns(&data);
         assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn test_discover_patterns_long_ma_period_is_eight() {
+        // Regression: the long MA period must stay at the intended 8 rather than
+        // being clobbered to short_period + 1 (= 4). An oscillating series makes
+        // the two configurations produce distinguishable crossover indices.
+        let data: Vec<f64> = (0..30).map(|i| 10.0 + 5.0 * (i as f64 * 0.6).sin()).collect();
+        let signals: Vec<String> = discover_patterns(&data)
+            .into_iter()
+            .filter(|s| s.contains("MA crossover"))
+            .collect();
+
+        // With a long period of 8, the earliest possible crossover index is 8,
+        // so no signal may reference an index below 8. The buggy long period of
+        // 4 emitted a "bullish ... at index 4" signal, which this rejects.
+        for (offset, expected_dir) in [(4usize, "bullish"), (10, "bearish"), (15, "bullish")] {
+            let clobbered = format!("({}) at index {}", expected_dir, offset);
+            assert!(
+                !signals.iter().any(|s| s.contains(&clobbered)),
+                "unexpected clobbered-period signal {:?} in {:?}",
+                clobbered,
+                signals
+            );
+        }
+
+        // And the intended long-period=8 crossovers must be present.
+        assert!(
+            signals
+                .iter()
+                .any(|s| s.contains("(bullish)") && s.contains("at index 12")),
+            "missing expected long-period bullish crossover in {:?}",
+            signals
+        );
+        assert!(
+            signals
+                .iter()
+                .any(|s| s.contains("(bearish)") && s.contains("at index 18")),
+            "missing expected long-period bearish crossover in {:?}",
+            signals
+        );
     }
 }

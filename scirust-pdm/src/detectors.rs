@@ -161,8 +161,12 @@ impl ImbalanceDetector {
             0.0
         };
 
-        // Overall RMS estimate from spectrum
-        let total_rms: f64 = spectrum.iter().map(|m| m * m).sum::<f64>().sqrt();
+        // Overall RMS estimate from spectrum: sqrt(mean of squared magnitudes).
+        // Using the mean (not the raw L2 energy) keeps `min_ratio` independent of
+        // the spectrum length, so the threshold means the same thing regardless of
+        // how many bins the half-spectrum has.
+        let total_rms: f64 =
+            (spectrum.iter().map(|m| m * m).sum::<f64>() / spectrum.len() as f64).sqrt();
         if total_rms < f64::EPSILON
         {
             return None;
@@ -412,9 +416,15 @@ impl CavitationDetector {
         {
             return None;
         }
+        // Frequency spacing per bin, using the same convention as the other
+        // detectors (`freq_resolution = sample_rate / n_fft`). For a positive-
+        // frequency half-spectrum of `n` bins that includes DC and Nyquist,
+        // `n_fft = 2 * (n - 1)`, so bin `k` maps to `k * freq_resolution` Hz and
+        // the Nyquist bin lands at `sample_rate / 2`. Deriving it as `nyquist / n`
+        // would be off by one bin and shift the high-frequency cutoff.
         let nyquist = sample_rate / 2.0;
-        let bin_spacing = nyquist / n as f64;
-        let hf_bin = (self.hf_cutoff / bin_spacing).round() as usize;
+        let freq_resolution = nyquist / (n - 1) as f64;
+        let hf_bin = (self.hf_cutoff / freq_resolution).round() as usize;
         if hf_bin >= n
         {
             return None;
@@ -492,6 +502,40 @@ mod tests {
     }
 
     #[test]
+    fn test_imbalance_ratio_is_rms_not_energy() {
+        // Regression: the "1x to overall RMS" ratio must use RMS
+        // (sqrt of the *mean* squared magnitude), not the raw L2 energy
+        // (sqrt of the *sum*). With the L2 energy, the ratio shrinks by
+        // sqrt(n) as the spectrum grows, so a fixed `min_ratio` becomes
+        // spectrum-length dependent and this clear imbalance goes undetected.
+        //
+        // Baseline noise of 1.0 everywhere → RMS ≈ 1.0 regardless of length,
+        // so a 1x peak of 12.0 gives ratio ≈ 12 (>> 5.0). The buggy energy
+        // norm would give 12 / sqrt(~1143) ≈ 0.35 (< 5.0) → no detection.
+        let spectrum =
+            make_synthetic_spectrum(1000, &[(20, 12.0), (40, 1.0), (60, 1.0)]);
+        let det = ImbalanceDetector::new(20.0, 5.0, 1.0);
+        let report = det.detect(&spectrum, 2000.0, 0.0);
+        assert!(
+            report.is_some(),
+            "imbalance must be detected using RMS, not L2 energy, of the spectrum"
+        );
+        let r = report.unwrap();
+        assert_eq!(r.fault_type, FaultType::Imbalance);
+        // Reported ratio should be ~12 (peak / RMS≈1), not the tiny L2-based value.
+        let ratio = r
+            .details
+            .iter()
+            .find(|(k, _)| k == "1x_to_rms_ratio")
+            .map(|(_, v)| *v)
+            .expect("ratio detail present");
+        assert!(
+            ratio > 5.0,
+            "1x_to_rms_ratio should be RMS-based (~12), got {ratio}"
+        );
+    }
+
+    #[test]
     fn test_misalignment_detector_detects() {
         // 2x peak dominant
         let spectrum = make_synthetic_spectrum(200, &[(20, 3.0), (40, 10.0), (60, 5.0)]);
@@ -555,6 +599,45 @@ mod tests {
             // If kurtosis is borderline, just verify no crash
             println!("Kurtosis {} below threshold {}", k, det.min_kurtosis);
         }
+    }
+
+    #[test]
+    fn test_cavitation_bin_spacing_matches_freq_resolution() {
+        // Regression: bin spacing must follow the crate-wide convention
+        // `freq_resolution = sample_rate / n_fft`. For a half-spectrum of `n`
+        // bins that includes DC and Nyquist, `n_fft = 2*(n-1)`, so bin `k` is at
+        // `k * nyquist / (n-1)` Hz. Deriving it as `nyquist / n` is off by one
+        // bin and misplaces the high-frequency cutoff.
+        //
+        // n = 11, sample_rate = 20 → nyquist = 10.
+        //   correct: freq_resolution = 10/(11-1) = 1.0 Hz/bin → cutoff 5 Hz = bin 5
+        //   buggy:   bin_spacing     = 10/11    ≈ 0.909      → cutoff 5 Hz = bin 6
+        // Energy sits in bin 5. With the correct spacing bin 5 is in the HF band
+        // (>= cutoff) so hf_ratio = 0.5 and cavitation is flagged; with the buggy
+        // spacing bin 5 falls in the LF band so hf_ratio = 0 and it is missed.
+        let n = 11;
+        let mut spectrum = vec![0.0; n];
+        spectrum[0] = 1.0; // guaranteed low-frequency energy
+        spectrum[5] = 1.0; // energy exactly at the cutoff bin
+
+        // High-kurtosis signal (periodic impulses) to pass the kurtosis gate.
+        let mut signal = vec![0.0; 64];
+        for i in (0..64).step_by(16)
+        {
+            signal[i] = 10.0;
+        }
+        assert!(
+            scirust_signal::kurtosis(&signal) >= 4.0,
+            "test signal must clear the kurtosis gate"
+        );
+
+        let det = CavitationDetector::new(5.0);
+        let report = det.detect(&signal, &spectrum, 20.0, 0.0);
+        assert!(
+            report.is_some(),
+            "cutoff bin must be placed with freq_resolution = nyquist/(n-1)"
+        );
+        assert_eq!(report.unwrap().fault_type, FaultType::Cavitation);
     }
 
     #[test]

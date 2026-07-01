@@ -1248,8 +1248,10 @@ pub mod cyclic {
         let spectrum = fft_real(&padded);
         let n_f64 = fft_size as f64;
 
-        // Find dominant frequency (excluding DC)
-        let nyquist = spectrum.len() / 2;
+        // Find dominant frequency (excluding DC). `fft_real` returns the
+        // positive-frequency bins 0..=fft_size/2, so the highest usable bin
+        // (the Nyquist frequency) is the last element of `spectrum`.
+        let nyquist = spectrum.len() - 1;
         let mut max_power = 0.0;
         let mut max_bin = 0usize;
         #[allow(clippy::needless_range_loop)]
@@ -1325,7 +1327,7 @@ pub mod cyclic {
     /// Returns a matrix of complex spectra: `result[window_idx][freq_bin]`.
     /// Each window is multiplied by a Hanning window before FFT.
     pub fn windowed_fft(data: &[f64], window_size: usize, hop_size: usize) -> Vec<Vec<Complex>> {
-        if data.len() < window_size || window_size == 0
+        if data.len() < window_size || window_size == 0 || hop_size == 0
         {
             return Vec::new();
         }
@@ -1557,6 +1559,38 @@ pub mod cyclic {
                 phase,
                 phase_fft
             );
+        }
+
+        #[test]
+        fn fourier_finds_short_period_cycle() {
+            // Regression: the bin scan must cover the full positive-frequency
+            // spectrum up to Nyquist, not just the lower quarter. A short-period
+            // (high-frequency) cycle lands in the upper half of the bins; with
+            // the old `nyquist = spectrum.len() / 2` bound it was never scanned,
+            // so cycle_length/amplitude collapsed to the degenerate fallback.
+            let n = 128;
+            let period = 3; // bin ≈ 43, above the old (≈32) cutoff
+            let data = sine_wave(n, period);
+            let pattern = fourier_analysis(&data);
+            assert!(
+                (pattern.cycle_length - period as f64).abs() < 1.0,
+                "expected short cycle_length ~{}, got {}",
+                period,
+                pattern.cycle_length
+            );
+            assert!(
+                pattern.amplitude > 0.5,
+                "amplitude should be ~1.0 for the short-period sine, got {}",
+                pattern.amplitude
+            );
+        }
+
+        #[test]
+        fn windowed_fft_zero_hop_is_empty() {
+            // Regression: hop_size == 0 must not divide-by-zero panic.
+            let data = sine_wave(256, 16);
+            let result = windowed_fft(&data, 64, 0);
+            assert!(result.is_empty(), "zero hop_size should yield no windows");
         }
 
         #[test]
@@ -1952,6 +1986,18 @@ pub mod trend {
 
     use super::*;
 
+    /// Variance of the Mann-Kendall S statistic (without ties correction):
+    /// `n·(n-1)·(2n+5) / 18`.
+    ///
+    /// Computed in `f64` so the intermediate product cannot overflow `usize`
+    /// for very large series (`n·(n-1)·(2n+5)` exceeds `usize::MAX` well within
+    /// realistic sample sizes).
+    #[inline]
+    fn mann_kendall_var_s(n: usize) -> f64 {
+        let nf = n as f64;
+        nf * (nf - 1.0) * (2.0 * nf + 5.0) / 18.0
+    }
+
     /// Perform the Mann-Kendall trend test.
     ///
     /// Returns the S statistic, Z statistic, and p-value.
@@ -1980,8 +2026,8 @@ pub mod trend {
             }
         }
 
-        // Variance of S (without ties correction for simplicity)
-        let var_s = (n * (n - 1) * (2 * n + 5)) as f64 / 18.0;
+        // Variance of S (without ties correction for simplicity).
+        let var_s = mann_kendall_var_s(n);
 
         // Z statistic
         let z = if s > 0.0
@@ -2232,6 +2278,30 @@ pub mod trend {
                 (slope - 1.916_666_666_666_666_5).abs() < 1e-9,
                 "Sen's slope={}",
                 slope
+            );
+        }
+
+        #[test]
+        fn mann_kendall_var_s_no_overflow_large_n() {
+            // Regression: computing n·(n-1)·(2n+5) in usize overflows for large
+            // n (this product exceeds usize::MAX around n ≈ 2.4e6 on 64-bit and
+            // panics in debug builds). The f64 formula must stay finite and match
+            // the exact value for a large sample size.
+            let n = 3_000_000usize;
+            let var_s = mann_kendall_var_s(n);
+            assert!(var_s.is_finite(), "var_s must be finite, got {}", var_s);
+            let nf = n as f64;
+            let expected = nf * (nf - 1.0) * (2.0 * nf + 5.0) / 18.0;
+            assert!(
+                (var_s - expected).abs() <= expected * 1e-12,
+                "var_s={} expected~{}",
+                var_s,
+                expected
+            );
+            // The exact small-sample value must be unchanged by the refactor.
+            assert!(
+                (mann_kendall_var_s(5) - (5.0 * 4.0 * 15.0 / 18.0)).abs() < 1e-12,
+                "small-n var_s regressed"
             );
         }
 

@@ -5,6 +5,7 @@
 //
 // Référence : https://www.pcg-random.org/
 
+#[derive(Debug, Clone)]
 pub struct PcgEngine {
     state: u64,
     inc: u64,

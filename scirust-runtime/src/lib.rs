@@ -250,41 +250,76 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
             s.parse::<f32>()
                 .map_err(|_| format!("ligne {ln}: flottant invalide '{s}'"))
         };
+        let need = |n: usize| {
+            if t.len() < n
+            {
+                Err(format!(
+                    "ligne {ln}: couche '{}' attend {} champs, {} fournis",
+                    t[0],
+                    n - 1,
+                    t.len() - 1
+                ))
+            }
+            else
+            {
+                Ok(())
+            }
+        };
         let spec = match t[0]
         {
-            "linear" => LayerSpec::Linear {
-                in_f: num(t[1])?,
-                out_f: num(t[2])?,
+            "linear" =>
+            {
+                need(3)?;
+                LayerSpec::Linear {
+                    in_f: num(t[1])?,
+                    out_f: num(t[2])?,
+                }
             },
             "relu" => LayerSpec::Relu,
             "sigmoid" => LayerSpec::Sigmoid,
-            "layernorm" => LayerSpec::LayerNorm {
-                d_model: num(t[1])?,
-                eps: numf(t[2])?,
+            "layernorm" =>
+            {
+                need(3)?;
+                LayerSpec::LayerNorm {
+                    d_model: num(t[1])?,
+                    eps: numf(t[2])?,
+                }
             },
-            "batchnorm2d" => LayerSpec::BatchNorm2d {
-                channels: num(t[1])?,
+            "batchnorm2d" =>
+            {
+                need(2)?;
+                LayerSpec::BatchNorm2d {
+                    channels: num(t[1])?,
+                }
             },
-            "conv2d" => LayerSpec::Conv2d {
-                in_c: num(t[1])?,
-                out_c: num(t[2])?,
-                kernel: num(t[3])?,
-                stride: num(t[4])?,
-                same: match t[5]
-                {
-                    "same" => true,
-                    "valid" => false,
-                    x => return Err(format!("ligne {ln}: padding '{x}'")),
-                },
-                in_h: num(t[6])?,
-                in_w: num(t[7])?,
+            "conv2d" =>
+            {
+                need(8)?;
+                LayerSpec::Conv2d {
+                    in_c: num(t[1])?,
+                    out_c: num(t[2])?,
+                    kernel: num(t[3])?,
+                    stride: num(t[4])?,
+                    same: match t[5]
+                    {
+                        "same" => true,
+                        "valid" => false,
+                        x => return Err(format!("ligne {ln}: padding '{x}'")),
+                    },
+                    in_h: num(t[6])?,
+                    in_w: num(t[7])?,
+                }
             },
-            "maxpool2d" => LayerSpec::MaxPool2d {
-                kernel: num(t[1])?,
-                stride: num(t[2])?,
-                c: num(t[3])?,
-                h: num(t[4])?,
-                w: num(t[5])?,
+            "maxpool2d" =>
+            {
+                need(6)?;
+                LayerSpec::MaxPool2d {
+                    kernel: num(t[1])?,
+                    stride: num(t[2])?,
+                    c: num(t[3])?,
+                    h: num(t[4])?,
+                    w: num(t[5])?,
+                }
             },
             other => return Err(format!("ligne {ln}: couche inconnue '{other}'")),
         };
@@ -299,3 +334,49 @@ pub mod proof;
 pub mod proofcli;
 pub mod quant;
 pub mod vinfer;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression : une ligne de couche tronquee doit renvoyer Err et non paniquer
+    // (index out of bounds sur t[1..]).
+    #[test]
+    fn parse_manifest_truncated_lines_return_err_not_panic() {
+        // Chaque couche a champs manque au moins un argument requis.
+        for truncated in [
+            "linear",
+            "linear 10",
+            "layernorm 8",
+            "batchnorm2d",
+            "conv2d 1 2 3 4 same 5",
+            "maxpool2d 2 2 3 4",
+        ]
+        {
+            let r = parse_manifest(truncated);
+            assert!(
+                r.is_err(),
+                "ligne tronquee '{truncated}' aurait du renvoyer Err, obtenu {r:?}"
+            );
+        }
+    }
+
+    // Les manifestes valides restent acceptes apres le garde-fou.
+    #[test]
+    fn parse_manifest_valid_still_ok() {
+        let text = "\
+# commentaire
+linear 4 8
+relu
+layernorm 8 0.001
+batchnorm2d 8
+conv2d 1 2 3 1 same 5 5
+maxpool2d 2 2 2 4 4
+sigmoid
+";
+        let specs = parse_manifest(text).expect("manifeste valide");
+        assert_eq!(specs.len(), 7);
+        assert!(matches!(specs[0], LayerSpec::Linear { in_f: 4, out_f: 8 }));
+        assert!(matches!(specs[5], LayerSpec::MaxPool2d { .. }));
+    }
+}

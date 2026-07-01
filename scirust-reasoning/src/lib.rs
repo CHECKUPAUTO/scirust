@@ -113,12 +113,30 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
         }
     }
 
-    for i in 0..20
+    // Sample on a larger deterministic grid than before. A denser, more varied
+    // set of points makes accidental agreement (false positives) far less likely
+    // than the original 20-point grid, while remaining fully deterministic.
+    //
+    // A sample point where *either* side fails to evaluate (division by zero,
+    // ln/sqrt of a non-positive value, …) is outside the common domain, so it is
+    // not evidence of inequality — such points are skipped rather than treated as
+    // a disproof. To avoid vacuously "proving" equality when the two expressions
+    // never share a defined point, we require a minimum number of agreeing
+    // evaluations before returning `true`.
+    const SAMPLES: usize = 200;
+    const MIN_AGREEING: usize = 8;
+    let mut agreeing = 0usize;
+
+    for i in 0..SAMPLES
     {
         let mut bindings = HashMap::new();
         for (j, v) in vars.iter().enumerate()
         {
-            let val = ((i * 7919 + j * 6271 + 127) as f64 / 1000.0) % 20.0 - 10.0;
+            // Spread the samples across a wide range that includes the positive
+            // half-line (so domain-restricted expressions like ln/sqrt still get
+            // evaluated) as well as negative and near-zero values.
+            let raw = (i * 7919 + j * 6271 + 127) as f64;
+            let val = (raw / 733.0) % 40.0 - 15.0;
             bindings.insert((*v).clone(), val);
         }
 
@@ -133,12 +151,16 @@ pub fn prove_equal(a: &str, b: &str) -> bool {
                 {
                     return false;
                 }
+                agreeing += 1;
             },
-            _ => return false,
+            // At least one side is undefined here — outside the common domain, so
+            // skip this point instead of concluding inequality.
+            _ =>
+            {},
         }
     }
 
-    true
+    agreeing >= MIN_AGREEING
 }
 
 /// Recursively collect all variable names from an expression tree.
@@ -219,8 +241,15 @@ pub fn apply_trig_identity(expr: &str) -> String {
                 }
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        // No identity matched at `i`. Copy the whole UTF-8 character that starts
+        // here (not a single raw byte reinterpreted as a `char`, which would
+        // corrupt multi-byte characters) and advance past it. `sin(`/`cos(`,
+        // `^2` and the parentheses are all ASCII, so the matched branches above
+        // only ever start on a character boundary; `i` is therefore always on a
+        // boundary here too.
+        let ch = expr[i..].chars().next().expect("i is on a char boundary");
+        result.push(ch);
+        i += ch.len_utf8();
     }
 
     result
@@ -311,6 +340,37 @@ mod tests {
         assert!(!prove_equal("sin((", "x"));
     }
 
+    #[test]
+    fn test_prove_equal_domain_restricted_still_proves() {
+        // Regression: these are genuinely equal on their common domain, but the
+        // old fixed grid sampled negative/zero points where `sqrt`/`ln` are
+        // undefined and treated the resulting eval error as a *disproof*,
+        // returning false. Out-of-domain points must be skipped, not counted
+        // against equality.
+        //
+        // sqrt(x)^2 == x  (both require x >= 0)
+        assert!(prove_equal("sqrt(x)^2", "x"));
+        // ln(exp(x)) == x  (ln's argument exp(x) is always positive)
+        assert!(prove_equal("ln(exp(x))", "x"));
+        // A restricted expression compared with itself must still hold.
+        assert!(prove_equal("ln(x)", "ln(x)"));
+    }
+
+    #[test]
+    fn test_prove_equal_domain_restricted_rejects_unequal() {
+        // Guard against the fix vacuously returning true: distinct expressions
+        // that share a domain must still be rejected.
+        assert!(!prove_equal("sqrt(x)", "sqrt(x) + 1"));
+    }
+
+    #[test]
+    fn test_prove_equal_no_common_domain_is_not_true() {
+        // If the two sides never share a defined sample point, we must not
+        // vacuously "prove" them equal. `ln(x)` needs x > 0 while `ln(-x)`
+        // needs x < 0, so they never both evaluate at the same sample.
+        assert!(!prove_equal("ln(x)", "ln(-x)"));
+    }
+
     // ── apply_trig_identity ──
 
     #[test]
@@ -335,6 +395,32 @@ mod tests {
     fn test_trig_with_coeff() {
         let result = apply_trig_identity("2*sin(y)^2");
         assert_eq!(result, "2*(1-cos(2*y))/2");
+    }
+
+    #[test]
+    fn test_trig_preserves_non_ascii_passthrough() {
+        // Regression: the copy-through path used `bytes[i] as char`, which
+        // reinterprets each raw UTF-8 byte as a `char` and mangles multi-byte
+        // characters. Text with no matching identity must be returned verbatim.
+        let input = "α + β·sin(θ) + 漢字";
+        assert_eq!(apply_trig_identity(input), input);
+    }
+
+    #[test]
+    fn test_trig_rewrites_with_non_ascii_argument() {
+        // A genuine sin(...)^2 whose argument contains multi-byte characters:
+        // the identity must fire and the non-ASCII argument survive intact.
+        let result = apply_trig_identity("sin(θ)^2");
+        assert_eq!(result, "(1-cos(2*θ))/2");
+    }
+
+    #[test]
+    fn test_trig_no_panic_on_multibyte_before_match() {
+        // A multi-byte character sits before a real match so the byte cursor
+        // advances through it; the old byte-at-a-time slicing risked landing on
+        // a non-char boundary. This must neither panic nor corrupt output.
+        let result = apply_trig_identity("漢cos(x)^2");
+        assert_eq!(result, "漢(1+cos(2*x))/2");
     }
 
     // ── solve_linear / solve_quadratic (kept from original) ──
