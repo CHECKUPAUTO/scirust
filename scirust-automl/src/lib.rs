@@ -3574,17 +3574,12 @@ mod tests {
         // log-odds space, not least-squares on raw 0/1 labels. With log-odds
         // boosting the initial score is logit(mean) and predictions are proper
         // probabilities that separate the two classes.
-        let x = vec![
-            vec![0.0],
-            vec![0.2],
-            vec![0.4],
-            vec![0.6],
-            vec![0.8],
-            vec![1.0],
-        ];
-        let y = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        // 20 points, cleanly separable at 0.5 (enough samples for the trees to
+        // split under the default min-samples), balanced so mean = 0.5.
+        let x: Vec<Vec<f64>> = (0..20).map(|i| vec![i as f64 * 0.05]).collect();
+        let y: Vec<f64> = (0..20).map(|i| if i < 10 { 0.0 } else { 1.0 }).collect();
         let mut rng = XorShift64::new(42);
-        let gb = GradientBoosting::fit(&x, &y, 30, 0.3, 3, true, &mut rng);
+        let gb = GradientBoosting::fit(&x, &y, 50, 0.3, 3, true, &mut rng);
 
         // initial_pred is logit(mean=0.5) == 0, not the raw mean 0.5.
         assert!(
@@ -3604,13 +3599,13 @@ mod tests {
             );
         }
         assert!(
-            preds[0] < 0.5 && preds[5] > 0.5,
+            preds[0] < 0.5 && preds[19] > 0.5,
             "classes not separated: {:?}",
             preds
         );
 
         // All-positive labels must stay finite (no logit(1.0) blow-up).
-        let y_pos = vec![1.0; 6];
+        let y_pos = vec![1.0; 20];
         let mut rng2 = XorShift64::new(7);
         let gb_pos = GradientBoosting::fit(&x, &y_pos, 10, 0.3, 2, true, &mut rng2);
         assert!(gb_pos.initial_pred.is_finite());
