@@ -38,7 +38,6 @@ impl<'a, T: Copy> MatrixView<'a, T> {
 
 #[derive(Debug)]
 pub struct MatrixViewMut<'a, T> {
-    #[allow(dead_code)]
     data: &'a mut [T],
     rows: usize,
     cols: usize,
@@ -54,5 +53,25 @@ impl<'a, T: Copy> MatrixViewMut<'a, T> {
     }
     pub fn cols(&self) -> usize {
         self.cols
+    }
+
+    /// Row-major read access to row `i` (contiguous `cols` elements).
+    pub fn row_slice(&self, i: usize) -> Option<&[T]> {
+        if i >= self.rows
+        {
+            return None;
+        }
+        let start = i * self.cols;
+        Some(&self.data[start..start + self.cols])
+    }
+
+    /// Row-major mutable access to row `i` (contiguous `cols` elements).
+    pub fn row_slice_mut(&mut self, i: usize) -> Option<&mut [T]> {
+        if i >= self.rows
+        {
+            return None;
+        }
+        let start = i * self.cols;
+        Some(&mut self.data[start..start + self.cols])
     }
 }
