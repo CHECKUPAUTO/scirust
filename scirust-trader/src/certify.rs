@@ -65,33 +65,32 @@ impl CertifiedBounds {
 
 /// Propagate interval bounds through the network's weights.
 ///
-/// The weights are expected as a list of flat vectors, alternating:
-/// `weights[0]` = layer-0 weight matrix (row-major, `in * out`),
-/// `weights[1]` = layer-0 bias (`out`),
-/// `weights[2]` = layer-1 weight matrix, etc.
-///
-/// `input` is the feature vector; `eps` is the perturbation radius.
+/// The layout matches [`PricePredictor::export_weights`](crate::model::PricePredictor::export_weights):
+/// each entry in `weights.layers` is **one** `Linear` layer, stored as its bias
+/// (`out` values) immediately followed by its weight matrix (`in*out`, row-major
+/// `(in, out)`). ReLU is applied after every layer except the last, mirroring the
+/// `Sequential` network. `input` is the feature vector; `eps` is the L∞ radius.
 pub fn certify(weights: &ModelWeights, input: &[f32], eps: f32) -> CertifiedBounds {
     let mut bounds: Vec<Interval> = input
         .iter()
         .map(|&x| Interval::new(x - eps, x + eps))
         .collect();
 
-    let mut i = 0;
-    while i < weights.layers.len()
+    let n_layers = weights.layers.len();
+    for (li, entry) in weights.layers.iter().enumerate()
     {
-        let w_flat = &weights.layers[i];
-        if i + 1 >= weights.layers.len()
-        {
-            break;
-        }
-        let b_flat = &weights.layers[i + 1];
         let in_dim = bounds.len();
-        let out_dim = b_flat.len();
-        if w_flat.len() < in_dim * out_dim
+        // entry = bias(out) ++ weight(in*out)  =>  len = out*(in+1)  =>  out = len/(in+1)
+        if in_dim == 0 || entry.len() % (in_dim + 1) != 0
         {
             break;
         }
+        let out_dim = entry.len() / (in_dim + 1);
+        if out_dim == 0
+        {
+            break;
+        }
+        let (b_flat, w_flat) = entry.split_at(out_dim);
         let mut out_bounds = Vec::with_capacity(out_dim);
         for j in 0..out_dim
         {
@@ -115,10 +114,9 @@ pub fn certify(weights: &ModelWeights, input: &[f32], eps: f32) -> CertifiedBoun
             out_bounds.push(Interval::new(lo, hi));
         }
         bounds = out_bounds;
-        i += 2;
-        if i < weights.layers.len()
+        // ReLU after every layer except the last.
+        if li + 1 < n_layers
         {
-            // ReLU activation: [max(0, lo), max(0, hi)]
             for b in &mut bounds
             {
                 b.lo = b.lo.max(0.0);
@@ -195,6 +193,33 @@ mod tests {
         assert!(bounds.output.lo <= bounds.output.hi);
         assert_eq!(bounds.eps, 0.01);
         assert_eq!(bounds.weights_fingerprint, weights.fingerprint);
+    }
+
+    #[test]
+    fn certified_interval_contains_model_output() {
+        // Regression for the weight-layout mismatch: the certified interval must
+        // actually BOUND the network output. The strongest check is eps=0, where
+        // sound IBP collapses onto the exact forward pass.
+        let mut model = PricePredictor::new(13, &[16, 8], 42);
+        let features: Vec<f32> = (0..13).map(|i| 0.01 * i as f32 - 0.05).collect();
+        let y = model.predict(&features);
+        let weights = model.export_weights();
+
+        let b = certify(&weights, &features, 0.01);
+        assert!(
+            b.output.lo <= y && y <= b.output.hi,
+            "certified [{}, {}] must contain model output {y}",
+            b.output.lo,
+            b.output.hi
+        );
+
+        let b0 = certify(&weights, &features, 0.0);
+        assert!(
+            (b0.output.lo - y).abs() < 1e-4 && (b0.output.hi - y).abs() < 1e-4,
+            "eps=0 must reproduce the exact output: got [{}, {}] vs {y}",
+            b0.output.lo,
+            b0.output.hi
+        );
     }
 
     #[test]

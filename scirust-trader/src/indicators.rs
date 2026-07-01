@@ -41,7 +41,7 @@ impl IndicatorSet {
             macd: macd_line(closes, macd_fast, macd_slow),
             macd_signal: macd_signal_line(closes, macd_fast, macd_slow, macd_signal),
             macd_hist: Vec::new(),
-            atr: atr(highs, lows, atr_period),
+            atr: atr(highs, lows, closes, atr_period),
             bb_mid: sma(closes, bb_period),
             bb_upper: bollinger_band(closes, bb_period, bb_std, true),
             bb_lower: bollinger_band(closes, bb_period, bb_std, false),
@@ -211,22 +211,17 @@ pub fn macd_signal_line(closes: &[f32], fast: usize, slow: usize, signal: usize)
 }
 
 /// Average True Range (Wilder) — forward reduction.
-pub fn atr(highs: &[f32], lows: &[f32], period: usize) -> Vec<f32> {
+///
+/// True range needs the *previous close*, so `closes` must be provided (parallel
+/// to `highs`/`lows`). Delegates to [`true_range`] for the per-bar TR.
+pub fn atr(highs: &[f32], lows: &[f32], closes: &[f32], period: usize) -> Vec<f32> {
     let n = highs.len();
     let mut out = vec![f32::NAN; n];
-    if n <= period
+    if n <= period || lows.len() != n || closes.len() != n
     {
         return out;
     }
-    let mut trs = Vec::with_capacity(n);
-    trs.push(highs[0] - lows[0]);
-    for i in 1..n
-    {
-        let tr = (highs[i] - lows[i])
-            .max((highs[i] - closes_safe(lows, i, i - 1)).abs())
-            .max((lows[i] - closes_safe(lows, i, i - 1)).abs());
-        trs.push(tr);
-    }
+    let trs = true_range(highs, lows, closes);
     let sum: f32 = trs[..period].iter().sum();
     let mut prev_atr = sum / period as f32;
     out[period - 1] = prev_atr;
@@ -236,11 +231,6 @@ pub fn atr(highs: &[f32], lows: &[f32], period: usize) -> Vec<f32> {
         out[i] = prev_atr;
     }
     out
-}
-
-#[inline]
-fn closes_safe(_lows: &[f32], _a: usize, _b: usize) -> f32 {
-    0.0
 }
 
 /// Bollinger Band (mid = SMA, upper/lower = mid ± k·stddev).
@@ -358,13 +348,27 @@ mod tests {
     fn atr_positive_and_stable() {
         let highs: Vec<f32> = (0..20).map(|i| 100.0 + (i as f32).sin()).collect();
         let lows: Vec<f32> = (0..20).map(|i| 99.0 + (i as f32).sin()).collect();
-        let _closes: Vec<f32> = (0..20).map(|i| 99.5 + (i as f32).sin()).collect();
-        let a = atr(&highs, &lows, 14);
+        let closes: Vec<f32> = (0..20).map(|i| 99.5 + (i as f32).sin()).collect();
+        let a = atr(&highs, &lows, &closes, 14);
         for v in &a[13..]
         {
             assert!(!v.is_nan());
             assert!(*v >= 0.0);
         }
+    }
+
+    #[test]
+    fn atr_measures_true_range_not_price_level() {
+        // Bars around 50000 with ~60-wide ranges. ATR must be on the order of the
+        // range (tens), NOT the price level — the pre-fix stub used close=0.0, so
+        // TR collapsed to ~high (~50000). Verified separation via a loose bound.
+        let highs: Vec<f32> = (0..40).map(|i| 50000.0 + (i as f32 * 0.3).sin() * 5.0 + 30.0).collect();
+        let lows: Vec<f32> = highs.iter().map(|h| h - 60.0).collect();
+        let closes: Vec<f32> = highs.iter().map(|h| h - 30.0).collect();
+        let a = atr(&highs, &lows, &closes, 14);
+        let last = *a.last().unwrap();
+        assert!(last.is_finite() && last > 0.0);
+        assert!(last < 500.0, "ATR should track the ~60-wide range, got {last}");
     }
 
     #[test]
