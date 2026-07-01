@@ -689,7 +689,8 @@ mod tests {
         assert_eq!(r.exit, 0, "keygen failed: {}", r.stdout);
         // Clamp ceiling is 20 → 2^20 == 1048576 one-time licenses.
         assert!(
-            r.stdout.contains("capacity: 1048576 one-time licenses (height 20)"),
+            r.stdout
+                .contains("capacity: 1048576 one-time licenses (height 20)"),
             "expected effective height 20 next to its capacity, got: {}",
             r.stdout
         );

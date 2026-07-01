@@ -610,16 +610,13 @@ pub fn solve_linear(expr: &Expr, var: &str) -> Option<f64> {
 fn collect_vars(expr: &Expr, out: &mut std::collections::BTreeSet<String>) {
     match expr
     {
-        Expr::Const(_) => {},
+        Expr::Const(_) =>
+        {},
         Expr::Var(v) =>
         {
             out.insert(v.clone());
         },
-        Expr::Add(a, b)
-        | Expr::Sub(a, b)
-        | Expr::Mul(a, b)
-        | Expr::Div(a, b)
-        | Expr::Pow(a, b) =>
+        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Pow(a, b) =>
         {
             collect_vars(a, out);
             collect_vars(b, out);
@@ -1309,10 +1306,7 @@ mod tests {
             &parse("t + t").unwrap(),
             &parse("2*t").unwrap()
         ));
-        assert!(prove_equal(
-            &parse("k*k").unwrap(),
-            &parse("k^2").unwrap()
-        ));
+        assert!(prove_equal(&parse("k*k").unwrap(), &parse("k^2").unwrap()));
         // Genuinely different expressions in such variables still compare unequal.
         assert!(!prove_equal(&parse("t").unwrap(), &parse("t + 1").unwrap()));
     }

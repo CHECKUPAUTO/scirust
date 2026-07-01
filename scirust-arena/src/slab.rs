@@ -156,7 +156,7 @@ impl<T: Copy, const N: usize> Slab<T, N> {
         // `T` dont l'alignement divise 128. On l'affirme en debug.
         let ptr = unsafe { base.add(handle.index as usize * self.slot_size_bytes) } as *mut T;
         debug_assert!(
-            ptr as usize % std::mem::align_of::<T>() == 0,
+            (ptr as usize).is_multiple_of(std::mem::align_of::<T>()),
             "Slab::data_slice produced a misaligned pointer"
         );
         Some(unsafe { std::slice::from_raw_parts_mut(ptr, N) })
@@ -204,12 +204,14 @@ mod tests {
         // exercer aussi le padding par slot.
         let mut slab: Slab<f32, 33> = Slab::new(16);
         let mut handles = Vec::new();
-        while let Some(h) = slab.alloc() {
+        while let Some(h) = slab.alloc()
+        {
             handles.push(h);
         }
         assert_eq!(handles.len(), 16);
 
-        for h in &handles {
+        for h in &handles
+        {
             let slice = slab.data_slice(*h).expect("valid handle");
             let addr = slice.as_ptr() as usize;
             assert_eq!(
@@ -241,14 +243,17 @@ mod tests {
         let mut slab: Slab<u32, 40> = Slab::new(8);
         let handles: Vec<_> = (0..8).map(|_| slab.alloc().unwrap()).collect();
 
-        for (i, h) in handles.iter().enumerate() {
+        for (i, h) in handles.iter().enumerate()
+        {
             let slice = slab.data_slice(*h).unwrap();
-            for elem in slice.iter_mut() {
+            for elem in slice.iter_mut()
+            {
                 *elem = i as u32;
             }
         }
 
-        for (i, h) in handles.iter().enumerate() {
+        for (i, h) in handles.iter().enumerate()
+        {
             let slice = slab.data_slice(*h).unwrap();
             assert!(slice.iter().all(|&v| v == i as u32), "slot {i} corrupted");
         }

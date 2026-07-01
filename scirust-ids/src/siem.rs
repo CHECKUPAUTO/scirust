@@ -506,7 +506,11 @@ mod tests {
         let s = format_epoch(1_700_000_000.0);
         assert_eq!(s, "2023-11-14T22:13:20.000Z");
         // Must carry a date, not just a time (old bug produced "T00:53:20.000Z").
-        assert!(s.starts_with("2023-11-14T"), "missing date component: {}", s);
+        assert!(
+            s.starts_with("2023-11-14T"),
+            "missing date component: {}",
+            s
+        );
         assert!(!s.starts_with('T'), "time-only string regressed: {}", s);
         // Epoch itself.
         assert_eq!(format_epoch(0.0), "1970-01-01T00:00:00.000Z");

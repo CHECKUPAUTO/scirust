@@ -1743,14 +1743,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
         cur[0] = i;
         for j in 1..=n
         {
-            let cost = if ac[i - 1] == bc[j - 1]
-            {
-                0
-            }
-            else
-            {
-                1
-            };
+            let cost = if ac[i - 1] == bc[j - 1] { 0 } else { 1 };
             cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut cur);
@@ -2286,7 +2279,17 @@ mod tests {
     // correct across the full i64 domain.
     #[test]
     fn test_radix_sort_wide_range() {
-        let mut v = vec![i64::MAX, i64::MIN, 0, -1, 1, i64::MAX - 3, i64::MIN + 7, 42, -42];
+        let mut v = vec![
+            i64::MAX,
+            i64::MIN,
+            0,
+            -1,
+            1,
+            i64::MAX - 3,
+            i64::MIN + 7,
+            42,
+            -42,
+        ];
         let mut expected = v.clone();
         expected.sort_unstable();
         sort(&mut v, SortStrategy::Radix);

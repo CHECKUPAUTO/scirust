@@ -13,9 +13,7 @@ impl TensorND {
     /// does not match the product of `shape`.
     pub fn try_new(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
         let expected = shape_product(&shape).ok_or_else(|| {
-            format!(
-                "TensorND::try_new: product of shape {shape:?} overflows usize"
-            )
+            format!("TensorND::try_new: product of shape {shape:?} overflows usize")
         })?;
         if data.len() != expected
         {
@@ -41,8 +39,9 @@ impl TensorND {
 
     /// Zero-filled tensor of the given shape.
     pub fn zeros(shape: Vec<usize>) -> Self {
-        let n = shape_product(&shape)
-            .unwrap_or_else(|| panic!("TensorND::zeros: product of shape {shape:?} overflows usize"));
+        let n = shape_product(&shape).unwrap_or_else(|| {
+            panic!("TensorND::zeros: product of shape {shape:?} overflows usize")
+        });
         Self::new(vec![0.0; n], shape)
     }
 
@@ -77,9 +76,8 @@ impl TensorND {
 
     /// Reshape without copying data; errors if the element count changes.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<TensorND, String> {
-        let n = shape_product(&new_shape).ok_or_else(|| {
-            format!("reshape: product of shape {new_shape:?} overflows usize")
-        })?;
+        let n = shape_product(&new_shape)
+            .ok_or_else(|| format!("reshape: product of shape {new_shape:?} overflows usize"))?;
         if n != self.data.len()
         {
             return Err(format!(
@@ -97,7 +95,9 @@ impl TensorND {
 /// Returns `Some(1)` for an empty (scalar) shape and `None` if the product
 /// overflows `usize` instead of silently wrapping (release) or panicking (debug).
 fn shape_product(shape: &[usize]) -> Option<usize> {
-    shape.iter().try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+    shape
+        .iter()
+        .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
 
 /// Row-major strides for `shape`. Handles 0- and 1-D shapes without underflow.

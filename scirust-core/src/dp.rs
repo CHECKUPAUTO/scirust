@@ -291,7 +291,11 @@ mod tests {
             .map(|&alpha| (steps as f64 * alpha * per_step - delta.ln()) / alpha)
             .fold(f64::INFINITY, f64::min);
 
-        assert!((acc.epsilon - expected).abs() < 1e-9, "eps = {}", acc.epsilon);
+        assert!(
+            (acc.epsilon - expected).abs() < 1e-9,
+            "eps = {}",
+            acc.epsilon
+        );
         // The buggy formula (α_M − ln δ/α) yields ≈ 1.5012 here; the correct one
         // ≈ 1.0880. Guard against a regression back to the larger value.
         assert!((acc.epsilon - 1.087_951_901_774_153).abs() < 1e-9);

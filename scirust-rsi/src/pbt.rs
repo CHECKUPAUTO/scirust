@@ -350,6 +350,9 @@ mod tests {
             .pop_size(8)
             .steps_per_gen(1)
             .run(&NanTask, &Guard::new().max_iters(10));
-        assert!(report.iterations >= 1, "run should complete without panicking");
+        assert!(
+            report.iterations >= 1,
+            "run should complete without panicking"
+        );
     }
 }

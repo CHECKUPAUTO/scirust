@@ -252,7 +252,10 @@ mod tests {
         // Empty graph: any ID is out of range.
         assert_eq!(eg.find(0), 0, "unknown id is its own root");
         assert_eq!(eg.find(42), 42);
-        assert!(!eg.equivalent(1, 2), "distinct unknown ids are not equivalent");
+        assert!(
+            !eg.equivalent(1, 2),
+            "distinct unknown ids are not equivalent"
+        );
         assert!(eg.equivalent(7, 7), "an id is equivalent to itself");
         // union involving an out-of-range id is a safe no-op.
         eg.union(3, 4);

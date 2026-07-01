@@ -207,13 +207,8 @@ mod tests {
         // Zeros weights + a large constant... but only Zeros bias is available, so
         // use a deterministic SmallNormal weight to get non-degenerate logits and
         // assert the *property* (bounded probability), independent of the argmax.
-        let model = Sequential::new().add(Linear::new(
-            3,
-            5,
-            &SmallNormal::new(3.0),
-            &Zeros,
-            &mut rng,
-        ));
+        let model =
+            Sequential::new().add(Linear::new(3, 5, &SmallNormal::new(3.0), &Zeros, &mut rng));
         let mut classifier = EventClassifier::new(
             model,
             vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()],

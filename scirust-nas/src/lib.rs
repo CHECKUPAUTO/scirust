@@ -282,7 +282,10 @@ impl NasSearch {
         for i in 0..pop_size
         {
             let mut arch = self.random_architecture(
-                self.config.seed.wrapping_add(i as u64).wrapping_mul(0x9E3779B9),
+                self.config
+                    .seed
+                    .wrapping_add(i as u64)
+                    .wrapping_mul(0x9E3779B9),
             );
             arch.fitness = self.evaluate(&arch);
             self.population.push(arch);

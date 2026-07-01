@@ -219,8 +219,12 @@ mod tests {
         for d in 0..dims
         {
             let mean: f64 = pf.particles.iter().map(|p| p[d]).sum::<f64>() / n;
-            let var: f64 =
-                pf.particles.iter().map(|p| (p[d] - mean).powi(2)).sum::<f64>() / n;
+            let var: f64 = pf
+                .particles
+                .iter()
+                .map(|p| (p[d] - mean).powi(2))
+                .sum::<f64>()
+                / n;
             assert!(
                 var > 0.1,
                 "dim {d} received no process noise (var = {var}); trailing dims silently skipped"

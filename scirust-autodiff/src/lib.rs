@@ -49,11 +49,7 @@ impl Dual {
 /// partial derivatives are taken one variable at a time.
 #[inline]
 fn chain(factor: f64, deriv: f64) -> f64 {
-    if deriv == 0.0 {
-        0.0
-    } else {
-        factor * deriv
-    }
+    if deriv == 0.0 { 0.0 } else { factor * deriv }
 }
 
 // ---------------------------------------------------------------------------
@@ -210,9 +206,12 @@ impl Dual {
         let pow_val = self.value.powi(n);
         // x^0 is the constant 1, so its derivative is 0 everywhere (including
         // x = 0, where n·x^(n-1) would otherwise evaluate to 0·∞ = NaN).
-        let pow_deriv = if n == 0 {
+        let pow_deriv = if n == 0
+        {
             0.0
-        } else {
+        }
+        else
+        {
             chain(n as f64 * self.value.powi(n - 1), self.deriv)
         };
         Dual {
@@ -567,7 +566,11 @@ mod tests {
         // A held-constant operand (primal) must not poison the seed.
         let d = Dual::primal(0.0).sqrt();
         assert_eq!(d.val(), 0.0);
-        assert!(d.grad().is_finite(), "sqrt(0) constant deriv was {}", d.grad());
+        assert!(
+            d.grad().is_finite(),
+            "sqrt(0) constant deriv was {}",
+            d.grad()
+        );
         assert_eq!(d.grad(), 0.0);
     }
 

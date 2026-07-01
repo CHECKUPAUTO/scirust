@@ -459,7 +459,10 @@ mod tests {
             .iter()
             .filter(|r| matches!(r.correlation_type, CorrelationType::MultiAttack))
             .count();
-        assert_eq!(multi_count, 1, "batch must emit a single MultiAttack result");
+        assert_eq!(
+            multi_count, 1,
+            "batch must emit a single MultiAttack result"
+        );
         assert_eq!(
             corr.incident_count() as usize,
             out.len(),
