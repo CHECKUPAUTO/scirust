@@ -362,13 +362,18 @@ mod tests {
         // Bars around 50000 with ~60-wide ranges. ATR must be on the order of the
         // range (tens), NOT the price level — the pre-fix stub used close=0.0, so
         // TR collapsed to ~high (~50000). Verified separation via a loose bound.
-        let highs: Vec<f32> = (0..40).map(|i| 50000.0 + (i as f32 * 0.3).sin() * 5.0 + 30.0).collect();
+        let highs: Vec<f32> = (0..40)
+            .map(|i| 50000.0 + (i as f32 * 0.3).sin() * 5.0 + 30.0)
+            .collect();
         let lows: Vec<f32> = highs.iter().map(|h| h - 60.0).collect();
         let closes: Vec<f32> = highs.iter().map(|h| h - 30.0).collect();
         let a = atr(&highs, &lows, &closes, 14);
         let last = *a.last().unwrap();
         assert!(last.is_finite() && last > 0.0);
-        assert!(last < 500.0, "ATR should track the ~60-wide range, got {last}");
+        assert!(
+            last < 500.0,
+            "ATR should track the ~60-wide range, got {last}"
+        );
     }
 
     #[test]

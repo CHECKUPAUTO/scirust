@@ -293,7 +293,10 @@ mod tests {
             vec![0.0, 0.0],
         );
         let d = m.decide(&[0.5, 0.5], 0.0); // y = [0.5, 50.0]
-        assert!(!d.is_trusted(), "dim 1 (50) is outside [-2,2]; must fall back");
+        assert!(
+            !d.is_trusted(),
+            "dim 1 (50) is outside [-2,2]; must fall back"
+        );
         assert_eq!(d.output(), &[0.0, 0.0]);
     }
 }

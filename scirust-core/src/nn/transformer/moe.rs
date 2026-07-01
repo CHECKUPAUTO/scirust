@@ -1,4 +1,4 @@
-use crate::autodiff::reverse::{concat_rows, Tape, Tensor, Var};
+use crate::autodiff::reverse::{Tape, Tensor, Var, concat_rows};
 use crate::nn::init::Initializer;
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;
@@ -75,8 +75,7 @@ impl<E: Module> Module for MoELayer<E> {
             // Every row contributes its own mixed-expert output. (Previously only
             // row 0 was kept, silently dropping all other batch rows and returning
             // a (1, out) tensor instead of (rows, out).)
-            row_outputs
-                .push(row_output.unwrap_or_else(|| tape.input(Tensor::zeros(1, out_cols))));
+            row_outputs.push(row_output.unwrap_or_else(|| tape.input(Tensor::zeros(1, out_cols))));
         }
 
         if row_outputs.is_empty()

@@ -140,14 +140,21 @@ mod tests {
         let mut vit = ViT::new(4, 2, 1, 3, 8, 2, 1, 16, &KaimingNormal, &Zeros, &mut rng);
 
         let tape = Tape::new();
-        let img_a = tape.input(Tensor::from_vec((0..16).map(|i| i as f32 * 0.1).collect(), 1, 16));
+        let img_a = tape.input(Tensor::from_vec(
+            (0..16).map(|i| i as f32 * 0.1).collect(),
+            1,
+            16,
+        ));
         let out_a = vit.forward(&tape, img_a);
         assert_eq!(tape.value(out_a.idx()).shape(), (1, 3));
         let logits_a = tape.value(out_a.idx()).data.clone();
 
         let tape2 = Tape::new();
-        let img_b =
-            tape2.input(Tensor::from_vec((0..16).map(|i| (16 - i) as f32 * 0.1).collect(), 1, 16));
+        let img_b = tape2.input(Tensor::from_vec(
+            (0..16).map(|i| (16 - i) as f32 * 0.1).collect(),
+            1,
+            16,
+        ));
         let out_b = vit.forward(&tape2, img_b);
         let logits_b = tape2.value(out_b.idx()).data.clone();
 
