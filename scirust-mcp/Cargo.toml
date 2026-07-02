@@ -1,0 +1,21 @@
+[package]
+name = "scirust-mcp"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust MCP server — exposes SciRust's solvers and tools as Model Context Protocol tools so any agent (the in-house SLM or an external LLM/script) can drive them deterministically, with a SHA-256 hash-chained audit log of every call"
+
+[[bin]]
+name = "scirust-mcp"
+path = "src/bin/scirust-mcp.rs"
+doc = false
+
+[dependencies]
+scirust-discovery = { path = "../scirust-discovery" }
+scirust-sciagent = { path = "../scirust-sciagent" }
+scirust-solvers = { path = "../scirust-solvers" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+approx = "0.5"

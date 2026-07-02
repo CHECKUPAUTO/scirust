@@ -5,6 +5,52 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — connecteur d'agent (MCP) et découverte OT/IT sûre
+- **`scirust-mcp`** (nouvelle crate) : serveur [Model Context Protocol](https://modelcontextprotocol.io)
+  (JSON-RPC 2.0, transport stdio) exposant les capacités de SciRust — solveurs numériques, outils de
+  développement du SLM `scirust-sciagent`, découverte OT/IT — comme des **outils MCP standard**,
+  appelables par n'importe quel agent (le SLM embarqué, Claude, ChatGPT, un script) sans glue code
+  spécifique par intégration. Réutilise l'implémentation existante des outils de développement
+  (`scirust_sciagent::agentic::tools::Tool::builtins()`) plutôt que de la dupliquer. Chaque
+  `tools/call` — succès ou échec — est journalisé dans une chaîne hash SHA-256 (`AuditLog`), sur le
+  modèle de `scirust-func-safety::audit` mais avec un vrai SHA-256 plutôt qu'un hash maison. Outils
+  fournis par défaut : `dev_*` (hérités du SLM), `linalg_eigen_symmetric`, `linalg_svd`,
+  `linalg_gmres`, `discovery_scan`, et l'échappatoire générique `scirust_cli`.
+- **`scirust-discovery`** (nouvelle crate) : découverte d'actifs OT/IT **sûre, consentie et
+  auditée** — jamais un scanner de ports générique (dangereux sur des automates industriels : voir
+  l'incident SQL Slammer/Davis-Besse 2003 et l'étude Coffey et al. 2018 citées dans son `README.md`).
+  Sondes natives au protocole uniquement : handshake OPC-UA UACP `Hello`/`Acknowledge`, Modbus TCP
+  `Read Device Identification` (0x2B/0x0E), énumération de services mDNS/DNS-SD. Aucun paquet n'est
+  envoyé sans une `ScopeAuthorization` **signée HMAC-SHA256** validant la cible contre une liste
+  blanche de plages CIDR, une liste blanche de protocoles, une fenêtre de validité temporelle, et un
+  niveau de sécurité de zone IEC 62443 (zones SL3+ refusées par défaut). Chaque tentative — dans la
+  portée ou refusée — est journalisée dans une chaîne hash SHA-256. Exposé comme outil MCP
+  (`discovery_scan`) dont la clé d'autorisation vit côté serveur (`SCIRUST_DISCOVERY_KEY`), jamais
+  dans les arguments d'appel — un agent ne peut pas s'auto-autoriser.
+- **`docs/DOMAIN_ROADMAP.md`** (nouveau) : recherche de marché sur les secteurs régulés (sûreté
+  procédés IEC 61511, protection réseau électrique IEC 61850, dispositifs médicaux IEC 62304,
+  aéronautique DO-178C, maritime autonome DNV/IMO MASS, semi-conducteurs SEMI, agriculture de
+  précision ISO 25119, nucléaire IEC 61513) où le déterminisme et l'auditabilité de SciRust
+  apportent une valeur documentée et non déjà couverte par les crates existantes.
+
+### Ajouté — algèbre linéaire (`scirust-solvers`)
+- **Décomposition en valeurs propres symétrique** (`linalg::eigen_symmetric`) : tridiagonalisation
+  de Householder + algorithme QL implicite à décalage de Wilkinson (portage du couple `tred2`/`tql2`
+  d'EISPACK, domaine public). Primitive **publique et réutilisable**, contrairement à
+  l'implémentation Jacobi cyclique privée et dupliquée dans `scirust-multivariate` pour la seule PCA.
+- **SVD dense générale** (`linalg::svd`) : Jacobi à un côté (Hestenes 1958), pour n'importe quelle
+  matrice `(m, n)` — pseudo-inverse, moindres carrés de rang déficient — complémentaire de la SVD
+  tronquée basée `nalgebra` de `scirust-core::tn::ops` (pensée pour les réseaux de tenseurs).
+- **GMRES(m) redémarré et BiCGSTAB** (`linalg::gmres`, `linalg::bicgstab`) : solveurs itératifs
+  matrix-free pour systèmes `A·x=b` **non symétriques** (Saad & Schultz 1986 ; van der Vorst 1992),
+  jusqu'ici couverts uniquement par le gradient conjugué (SPD seulement). Orthogonalisation de
+  Arnoldi séquentielle (Gram-Schmidt modifié), déterministe.
+- **Préconditionneur de Jacobi** (`linalg::precond::JacobiPreconditioner`), utilisable avec
+  `gmres_preconditioned`/`bicgstab_preconditioned`.
+- **Gradient projeté spectral** (`optimize::spg`) : optimisation sous contraintes de boîte
+  (Birgin, Martínez & Raydan 2000), pas de Barzilai-Borwein + recherche linéaire d'Armijo non
+  monotone — jusqu'ici seul un QP de boîte ad hoc existait dans `scirust-control`.
+
 ### Ajouté — simulation quantique par réseaux de tenseurs
 - **Simulateur de circuits quantiques MPS / Tensor-Train** (`quantum::Mps`/`MpsNode`) : représente
   un état à `n` qubits par une **chaîne de tenseurs de rang 3** au lieu des `2ⁿ` amplitudes d'un

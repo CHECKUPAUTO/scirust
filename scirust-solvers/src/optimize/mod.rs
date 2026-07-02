@@ -7,7 +7,9 @@
 pub mod bfgs;
 pub mod gradient;
 pub mod nelder_mead;
+pub mod spg;
 
 pub use bfgs::bfgs;
 pub use gradient::gradient_descent;
 pub use nelder_mead::nelder_mead;
+pub use spg::spg;

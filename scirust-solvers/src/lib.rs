@@ -3,14 +3,19 @@
 //! Construit au-dessus de `scirust-autodiff` (gradients exacts) et
 //! `scirust-symbolic` (chemin symbolique quand possible). Couvre :
 //!
-//! - **Algèbre linéaire** : `Matrix`, LU, QR, Cholesky, déterminant, inverse,
-//!   gradient conjugué.
+//! - **Algèbre linéaire dense** : `Matrix`, LU, QR, Cholesky, déterminant,
+//!   inverse, décomposition en valeurs propres symétrique (Householder +
+//!   QL implicite à décalage de Wilkinson), SVD générale (Jacobi à un côté).
+//! - **Algèbre linéaire creuse / matrix-free** : gradient conjugué (SPD),
+//!   GMRES(m) redémarré et BiCGSTAB (non symétriques), préconditionneur de
+//!   Jacobi.
 //! - **Racines 1D** : bissection, sécante, Newton (autodiff), Brent.
 //! - **Systèmes non-linéaires** : Newton-Raphson multivarié (jacobienne via
 //!   autodiff), Broyden quasi-Newton.
 //! - **EDO** : Runge-Kutta 4 fixe, Dormand-Prince 5(4) adaptatif.
 //! - **Optimisation** : BFGS, descente de gradient avec recherche linéaire,
-//!   Nelder-Mead sans dérivée.
+//!   Nelder-Mead sans dérivée, gradient projeté spectral (SPG) sous
+//!   contraintes de boîte.
 //! - **Quadrature** : Simpson adaptatif, Gauss-Legendre.
 //! - **Polynômes** : évaluation Horner, racines via matrice compagnon.
 //! - **API unifiée** : `solve(expr, var)` dispatch symbolique → numérique.

@@ -8,15 +8,25 @@
 use crate::{SolverError, SolverResult};
 use std::fmt;
 
+pub mod bicgstab;
 pub mod cholesky;
+pub mod eigen;
+pub mod gmres;
 pub mod iterative;
 pub mod lu;
+pub mod precond;
 pub mod qr;
+pub mod svd;
 
+pub use bicgstab::{bicgstab, bicgstab_preconditioned};
 pub use cholesky::{cholesky_decompose, solve_cholesky};
+pub use eigen::{EigenSymmetric, eigen_symmetric};
+pub use gmres::{gmres, gmres_preconditioned};
 pub use iterative::conjugate_gradient;
 pub use lu::{Lu, lu_decompose, solve, solve_lu};
+pub use precond::{JacobiPreconditioner, identity_precond};
 pub use qr::{Qr, qr_decompose, solve_qr_least_squares};
+pub use svd::{Svd, svd};
 
 // ─── Matrix dense row-major ─────────────────────────────────────────────────
 

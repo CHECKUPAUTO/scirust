@@ -2680,6 +2680,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-discovery"
+version = "0.1.0"
+dependencies = [
+ "scirust-sciagent",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-edge"
 version = "0.1.0"
 dependencies = [
@@ -2887,6 +2896,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "scirust-mcp"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "scirust-discovery",
+ "scirust-sciagent",
+ "scirust-solvers",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

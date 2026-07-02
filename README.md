@@ -51,6 +51,8 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 - **State estimation, navigation, water & OT security** (`scirust-estimation`, `scirust-nav`, `scirust-water`, `scirust-ids`, `scirust-func-safety`) — Kalman / IMM / **UD square-root** filters (covariance positive-semidefinite by construction), **GNSS/INS fusion** and **TDOA** multilateration, acoustic **leak correlation** and water-hammer physics (Joukowsky/Korteweg), OT **firmware attestation** and **PLC ladder integrity** (Stuxnet write-set detection) on a tamper-evident hash chain, and a **GMP golden-batch** comparator (DTW alignment + hash-chained 21 CFR Part 11 audit). All reachable from the `scirust-industrial` CLI: `nav-tdoa`, `nav-fusion`, `track-imm`, `track-ud`, `water-leak`, `water-surge`, `ot-firmware`, `ot-plc`, `golden-batch`. Validated on x86 and natively on a **Jetson AGX Thor** via [`docs/TEST_PROTOCOL.md`](docs/TEST_PROTOCOL.md).
 - **Pattern detection** (`scirust-vision`, `scirust-audio`, `scirust-graph`, `scirust-sequential`, `scirust-multivariate`, `scirust-unsupervised`, `scirust-seasonal`, `scirust-nlp-advanced`) — computer vision (CNN, HOG, LBP, Canny, Otsu, NMS), audio (MFCC, chroma, pitch YIN, onset detection), graph patterns (subgraph isomorphism, motif discovery, community detection, betweenness), sequential (HMM, CRF, DTW, KMP/Boyer-Moore), multivariate (PCA, ICA, K-Means++, MDS, CCA), unsupervised (autoencoder, isolation forest, DBSCAN, LOF, GMM), seasonal (STL, ACF/PACF, Mann-Kendall, CUSUM), NLP (NER, LDA, TextRank, MinHash, NaiveBayes).
 - **Algorithm creation** (`scirust-automl`, `scirust-synthesis`, `scirust-algogen`, `scirust-codetrans`, `scirust-rl-algo`, `scirust-scaffold`) — AutoML (Bayesian optimization, GP surrogate, model selection, ensembles), program synthesis (30+ ops, sketch-based, bottom-up/top-down/GP/beam search), algorithm generation (sort/search/graph/DP/DaC, complexity analysis), code transformation (AST, pattern matching, 20 optimization rules, refactoring, Rust→Python/C transpilation), RL-based discovery (REINFORCE, Actor-Critic, Q-Learning, MCTS, meta-learning), scaffolding (DSL, code gen, 16 templates, docs).
+- **General-purpose linear algebra & optimization** (`scirust-solvers`) — beyond LU/QR/Cholesky/conjugate-gradient: a general dense **symmetric eigendecomposition** (Householder + implicit QL, Wilkinson shift), a general dense **SVD** (one-sided Jacobi), restarted **GMRES** and **BiCGSTAB** for nonsymmetric matrix-free systems with a Jacobi preconditioner, and a bound-constrained **spectral projected gradient** optimizer — all deterministic (fixed iteration budgets, sequential orthogonalization), all from scratch.
+- **Agent connectivity & safe OT/IT discovery** (`scirust-mcp`, `scirust-discovery`) — a [Model Context Protocol](https://modelcontextprotocol.io) server exposing SciRust's solvers, dev tools, and discovery as standard MCP tools callable by any agent (the in-house `scirust-sciagent` SLM, Claude, ChatGPT, a script) with a SHA-256 hash-chained audit log per call; and consent-scoped, protocol-native OT/IT asset discovery (OPC-UA UACP handshake, Modbus Read Device Identification, mDNS/DNS-SD — never a generic port scan, following the IEC 62443 zone/conduit model and NIST SP 800-82 doctrine) so an agent can find what industrial hardware is actually reachable before driving it. See [`docs/DOMAIN_ROADMAP.md`](docs/DOMAIN_ROADMAP.md) for the researched regulated-industry verticals this connector layer is meant to unlock.
 
 ## What's in it?
 
@@ -107,6 +109,9 @@ scirust-industrial water-surge              # Joukowsky surge + Korteweg wave sp
 scirust-industrial ot-firmware              # firmware attestation: clean vs tampered image
 scirust-industrial ot-plc                   # PLC integrity + Stuxnet critical-write detection
 scirust-industrial golden-batch             # GMP golden-batch comparator (DTW + audit chain)
+
+# MCP server — connect any agent (the in-house SLM, Claude, ChatGPT, a script) to SciRust
+cargo run -p scirust-mcp --bin scirust-mcp  # JSON-RPC 2.0 over stdio, see scirust-mcp/README.md
 ```
 
 `scirust quickstart` prints a decreasing loss and reaches 4/4 on a
@@ -177,6 +182,8 @@ scirust-mlops/         Industrial MLOps: drift detection, shadow deployment, sig
 scirust-func-safety/   Functional safety: ASIL A-D, fault injection, degraded mode, audit log
 scirust-integration/   Integration kit: Backend, Pipeline, config, code templates
 scirust-som/           Ownership Model: real-Rust analyzer + Transformer pipeline
+scirust-mcp/           Model Context Protocol server: exposes solvers/tools/discovery to any agent
+scirust-discovery/     Safe OT/IT asset discovery: OPC-UA/Modbus/mDNS, signed scope, audit log
 examples/              Quickstart, MNIST training, industrial_monitor, benchmarks
 ```
 
@@ -193,6 +200,9 @@ examples/              Quickstart, MNIST training, industrial_monitor, benchmark
 - [`docs/RELEASING.md`](docs/RELEASING.md) — Release process & branch-protection runbook
 - [`SECURITY.md`](SECURITY.md) — Supply-chain posture, SBOM, accepted advisories
 - [`scirust-som/README.md`](scirust-som/README.md) — Ownership Model (real-Rust analyzer)
+- [`scirust-mcp/README.md`](scirust-mcp/README.md) — MCP server: exposed tools, audit log, how to connect an agent
+- [`scirust-discovery/README.md`](scirust-discovery/README.md) — Safe OT/IT discovery: protocol doctrine, scope authorization, sources
+- [`docs/DOMAIN_ROADMAP.md`](docs/DOMAIN_ROADMAP.md) — Researched regulated-industry verticals where determinism/auditability is a documented differentiator
 
 ## Status
 
