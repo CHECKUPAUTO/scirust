@@ -51,17 +51,25 @@ sont où ce créneau a la demande la plus documentée.
 
 ## Domaines classés par force de la preuve trouvée
 
-### D1 · Sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS)
+### D1 · Sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS) — ✅ fait
 - **Client** : pétrochimie, chimie fine, raffinage — systèmes instrumentés de
   sécurité (SIS).
 - **Pourquoi maintenant** : l'attaque Triton/Trisis (2017) a reflashé la
   logique de sécurité d'un Triconex Schneider sans être détectée avant un
   déclenchement accidentel — le cas d'école pour une logique de sécurité
   *non auditable*.
-- **Algorithmes** : calcul PFDavg/SIL par architecture de vote (1oo2, 2oo3),
-  intervalles de test de preuve, matrices cause-à-effet, journal
-  hash-chaîné de la logique de vote (extension directe du modèle
-  `scirust-func-safety::audit`).
+- **Algorithmes** : calcul PFDavg/SIL par architecture de vote (1oo1, 1oo2,
+  2oo2, 2oo3, 1oo3), intervalles de test de preuve (inversion numérique via
+  `scirust-solvers::roots::bisection`), matrices cause-à-effet, journal
+  hash-chaîné de la logique de vote (SHA-256, sur le modèle de
+  `scirust-mcp::audit`/`scirust-discovery::audit`).
+- **Livré** : `scirust-reliability` (déjà présent, complété par les
+  architectures 2oo2/1oo3 manquantes) pour le calcul quantitatif, et le
+  nouveau `scirust-sis` pour la couche systèmes (boucle SIF complète,
+  simulation de vote à injection de pannes, matrices cause-à-effet,
+  dimensionnement d'intervalle de test, journal d'audit) — exposé comme
+  outils MCP (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). Voir
+  `scirust-sis/README.md`.
 - **Taille** : petite à moyenne — le chemin le plus rapide vers un produit
   différenciant « audit-grade ».
 

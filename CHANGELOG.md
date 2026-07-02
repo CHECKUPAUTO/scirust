@@ -5,6 +5,31 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS)
+- **`scirust-reliability`** (existant, complété) : ajout des architectures de
+  vote manquantes `pfd_2oo2` (`λDU·T1`, pas de terme β — un 2oo2 n'a aucune
+  redondance à vaincre pour une défaillance dangereuse) et `pfd_1oo3`
+  (`(1−β)³(λT1)³/4 + β·λT1/2`), complétant la famille MooN
+  1oo1/1oo2/2oo2/2oo3/1oo3. `Sil` dérive maintenant `Ord` (bande la plus
+  haute = garantie la plus forte). Nouveau test de validation contre un
+  exemple publié externe (Lundteigen & Rausand, NTNU, ch. 8, diapo 27/43 :
+  2oo3, λDU=1e-6/h, τ=8760h, β=10% → PFDavg≈5.00e-4), en plus des dérivations
+  à la main déjà présentes.
+- **`scirust-sis`** (nouvelle crate) : la couche systèmes/logique par-dessus
+  ces primitives — architectures de vote `M`-parmi-`N` (évaluation de votes
+  en décision de déclenchement), boucle SIF complète (capteurs → automate
+  logique → éléments finaux, PFDavg total = somme des sous-systèmes, pratique
+  ISA-TR84.00.02 standard), injection de pannes (démontre empiriquement
+  qu'un 2oo3 tolère un canal en panne mais qu'un 2oo2 non), matrices
+  cause-à-effet évaluées déterministiquement, dimensionnement d'intervalle
+  de test de preuve par inversion numérique de PFDavg (réutilise
+  `scirust-solvers::roots::bisection`), et un journal d'audit hash-chaîné
+  SHA-256 des décisions de déclenchement et des changements de matrice
+  cause-à-effet — motivé directement par l'attaque Triton/Trisis (2017)
+  contre des automates de sécurité Triconex Schneider. Exposé comme outils
+  MCP (`sis_verify_sif_loop`, `sis_size_proof_test_interval`). Marque le
+  domaine D1 de `docs/DOMAIN_ROADMAP.md` comme fait.
+
 ### Ajouté — connecteur d'agent (MCP) et découverte OT/IT sûre
 - **`scirust-mcp`** (nouvelle crate) : serveur [Model Context Protocol](https://modelcontextprotocol.io)
   (JSON-RPC 2.0, transport stdio) exposant les capacités de SciRust — solveurs numériques, outils de

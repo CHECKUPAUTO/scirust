@@ -42,6 +42,8 @@ une réécriture.
 | `linalg_svd` | Algèbre linéaire | SVD générale (Jacobi à un côté) |
 | `linalg_gmres` | Algèbre linéaire | GMRES(m) pour systèmes non symétriques |
 | `discovery_scan` | Découverte OT/IT | Sonde des cibles réseau (OPC-UA, Modbus, mDNS) via `scirust-discovery`, sous portée signée — voir `scirust-discovery/README.md` |
+| `sis_verify_sif_loop` | Sûreté procédés (IEC 61511) | PFDavg total + SIL atteint d'une boucle SIF multi-sous-systèmes via `scirust-sis` |
+| `sis_size_proof_test_interval` | Sûreté procédés (IEC 61511) | Intervalle de test de preuve maximal pour un PFDavg cible, par inversion numérique |
 | `scirust_cli` | Passe-plat | Exécute n'importe quelle sous-commande du CLI `scirust` (`linsolve`, `solve`, `diff`, `integrate`, `ode`, `certify`, `conformal`, `evo`, `analyze`, ...) |
 
 `discovery_scan` ne peut jamais s'auto-autoriser depuis la conversation : la
