@@ -9,6 +9,7 @@ pub mod inference;
 pub mod model;
 pub mod norm;
 pub mod quantize;
+pub mod sha256;
 pub mod swiglu;
 pub mod tokenizer;
 pub mod train;

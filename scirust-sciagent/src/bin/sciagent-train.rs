@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use scirust_core::autodiff::reverse::Tape;
 use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::model::SciAgentModel;
@@ -122,7 +121,11 @@ fn main() {
         warmup_steps: args.warmup_steps,
         total_steps: args.total_steps,
         batch_size: args.effective_batch_size,
-        seq_len: args.max_seq_len,
+        // Follow the resolved model config, not the raw CLI flag: for named
+        // configs (small=256, debug=128) args.max_seq_len keeps its 8192
+        // default, and the dataset is built with config.max_seq_len — a
+        // mismatch here silently glues sequences together in the forward.
+        seq_len: config.max_seq_len,
         micro_batch_size: args.micro_batch_size,
         grad_accum_steps: args.grad_accum_steps,
         max_grad_norm: args.max_grad_norm,
@@ -232,37 +235,23 @@ fn main() {
 
     for step in start_step..trainer_cfg.total_steps
     {
-        let tape = Tape::new();
-
-        let mut step_loss = 0.0f32;
-        for _ in 0..trainer_cfg.grad_accum_steps
-        {
-            let (inputs, targets) = dataset
-                .next_batch(trainer_cfg.micro_batch_size)
-                .unwrap_or_else(|| {
-                    dataset.shuffle(args.seed);
-                    dataset
-                        .next_batch(trainer_cfg.micro_batch_size)
-                        .expect("Dataset too small for a single batch")
-                });
-
-            let logits = model.forward(&tape, &inputs, trainer_cfg.seq_len);
-            let loss = scirust_sciagent::train::cross_entropy_loss(&tape, logits, &targets);
-            loss.backward();
-            step_loss += tape.value(loss.idx()).data[0];
-        }
-        step_loss /= trainer_cfg.grad_accum_steps as f32;
-
         let lr = scheduler.lr_at(step);
         opt.set_lr(lr);
-        if trainer_cfg.max_grad_norm > 0.0
-        {
-            opt.clip_grad_norm(&tape, trainer_cfg.max_grad_norm);
-        }
 
-        let params = model.parameter_indices();
-        opt.step(&params, &tape);
-        model.sync(&tape);
+        // Single concatenated forward over the whole effective batch: the old
+        // shared-tape accumulation loop only ever applied the LAST
+        // micro-batch's gradients (each forward re-registers the parameters
+        // and parameter_indices() reports the latest registration only).
+        let step_loss = scirust_sciagent::train::accumulated_train_step(
+            &mut model,
+            &mut opt,
+            &mut dataset,
+            trainer_cfg.micro_batch_size,
+            trainer_cfg.grad_accum_steps,
+            trainer_cfg.seq_len,
+            trainer_cfg.max_grad_norm,
+            args.seed,
+        );
 
         total_loss += step_loss as f64;
 

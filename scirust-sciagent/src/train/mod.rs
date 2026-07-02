@@ -68,8 +68,13 @@ pub fn cross_entropy_loss<'t>(tape: &'t Tape, logits: Var<'t>, targets: &[usize]
     loss
 }
 
+/// One full optimization step: forward, backward, optimizer update, sync.
+/// Returns the pre-update loss. (An earlier version omitted the optimizer
+/// call, which made it a silent no-op: `sync` copies tape values back, and
+/// `backward` never changes values — only the optimizer does.)
 pub fn train_step(
     model: &mut SciAgentModel,
+    opt: &mut TrainOptimizer,
     inputs: &[usize],
     targets: &[usize],
     seq_len: usize,
@@ -79,6 +84,58 @@ pub fn train_step(
     let loss = cross_entropy_loss(&tape, logits, targets);
     tape.backward(loss.idx());
     let loss_val = tape.value(loss.idx()).data[0];
+    opt.step(&model.parameter_indices(), &tape);
+    model.sync(&tape);
+    loss_val
+}
+
+/// One optimizer step over `grad_accum_steps × micro_batch_size` sequences.
+///
+/// The micro-batches are concatenated into a SINGLE forward. scirust-core
+/// modules re-register their weights on every `forward` call and
+/// `parameter_indices()` reports only the latest registration, so the classic
+/// "N backwards on one shared tape" accumulation silently drops every
+/// micro-batch's gradients except the last one (the effective batch was just
+/// the final micro-batch). One forward over the full effective batch has the
+/// same peak memory — a shared tape keeps all activations alive anyway — and
+/// yields the exact mean gradient (attention is block-causal per `seq_len`,
+/// so sequences in the concatenation stay independent).
+#[allow(clippy::too_many_arguments)]
+pub fn accumulated_train_step(
+    model: &mut SciAgentModel,
+    opt: &mut TrainOptimizer,
+    dataset: &mut PretrainDataset,
+    micro_batch_size: usize,
+    grad_accum_steps: usize,
+    seq_len: usize,
+    max_grad_norm: f32,
+    reshuffle_seed: u64,
+) -> f32 {
+    let cap = grad_accum_steps * micro_batch_size * seq_len;
+    let mut inputs = Vec::with_capacity(cap);
+    let mut targets = Vec::with_capacity(cap);
+    for _ in 0..grad_accum_steps
+    {
+        let (mi, mt) = dataset.next_batch(micro_batch_size).unwrap_or_else(|| {
+            dataset.shuffle(reshuffle_seed);
+            dataset
+                .next_batch(micro_batch_size)
+                .expect("dataset too small for a single micro-batch")
+        });
+        inputs.extend_from_slice(&mi);
+        targets.extend_from_slice(&mt);
+    }
+
+    let tape = Tape::new();
+    let logits = model.forward(&tape, &inputs, seq_len);
+    let loss = cross_entropy_loss(&tape, logits, &targets);
+    tape.backward(loss.idx());
+    let loss_val = tape.value(loss.idx()).data[0];
+    if max_grad_norm > 0.0
+    {
+        opt.clip_grad_norm(&tape, max_grad_norm);
+    }
+    opt.step(&model.parameter_indices(), &tape);
     model.sync(&tape);
     loss_val
 }
@@ -283,6 +340,90 @@ mod tests {
     }
 
     #[test]
+    fn concatenated_batch_gradient_is_mean_of_micro_batch_gradients() {
+        // The correctness property behind `accumulated_train_step`: because
+        // attention is block-causal per seq_len and cross-entropy averages
+        // over rows, grad(concat(A, B)) == (grad(A) + grad(B)) / 2. This is
+        // what "gradient accumulation" must compute — the old shared-tape
+        // loop applied grad(B) alone, because every forward re-registers the
+        // weights and parameter_indices() only reports the last registration.
+        let cfg = SciAgentConfig::debug();
+        let mut model = SciAgentModel::new(&cfg);
+        let seq = 4usize;
+        let batch_a: Vec<usize> = vec![4, 5, 6, 7];
+        let tgt_a: Vec<usize> = vec![5, 6, 7, 8];
+        let batch_b: Vec<usize> = vec![9, 10, 11, 12];
+        let tgt_b: Vec<usize> = vec![10, 11, 12, 13];
+
+        let grad_of = |model: &mut SciAgentModel, ins: &[usize], tgts: &[usize]| {
+            let tape = Tape::new();
+            let logits = model.forward(&tape, ins, seq);
+            let loss = cross_entropy_loss(&tape, logits, tgts);
+            tape.backward(loss.idx());
+            model
+                .parameter_indices()
+                .iter()
+                .map(|&p| tape.grad(p).data)
+                .collect::<Vec<_>>()
+        };
+
+        let ga = grad_of(&mut model, &batch_a, &tgt_a);
+        let gb = grad_of(&mut model, &batch_b, &tgt_b);
+        let concat_in: Vec<usize> = [batch_a.as_slice(), batch_b.as_slice()].concat();
+        let concat_tg: Vec<usize> = [tgt_a.as_slice(), tgt_b.as_slice()].concat();
+        let gc = grad_of(&mut model, &concat_in, &concat_tg);
+
+        assert_eq!(ga.len(), gc.len());
+        let mut checked = 0usize;
+        for ((a, b), c) in ga.iter().zip(&gb).zip(&gc)
+        {
+            for ((&x, &y), &z) in a.iter().zip(b.iter()).zip(c.iter())
+            {
+                let expect = 0.5 * (x + y);
+                assert!(
+                    (z - expect).abs() <= 1e-4 + 1e-3 * expect.abs(),
+                    "concat grad {z} != mean of micro grads {expect}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn accumulated_train_step_descends() {
+        let cfg = SciAgentConfig {
+            vocab_size: 32,
+            d_model: 16,
+            n_layers: 1,
+            n_heads: 4,
+            n_kv_heads: 2,
+            d_ff: 32,
+            max_seq_len: 8,
+            rope_theta: 10000.0,
+            tie_embeddings: true,
+            use_bias: false,
+            eps: 1e-5,
+        };
+        let mut model = SciAgentModel::new(&cfg);
+        let mut opt = TrainOptimizer::new_muon(0.05);
+        // Cyclic data: memorisable next-token structure.
+        let data: Vec<u32> = (0..256u32).map(|i| 4 + (i % 8)).collect();
+        let mut ds = PretrainDataset::from_slice(&data, 4, cfg.vocab_size);
+
+        let first = accumulated_train_step(&mut model, &mut opt, &mut ds, 2, 2, 4, 1.0, 7);
+        let mut last = first;
+        for _ in 0..15
+        {
+            last = accumulated_train_step(&mut model, &mut opt, &mut ds, 2, 2, 4, 1.0, 7);
+        }
+        assert!(
+            last < first * 0.8,
+            "accumulated step must descend: {first} -> {last}"
+        );
+    }
+
+    #[test]
     fn test_train_step_decreases_loss() {
         let cfg = SciAgentConfig {
             vocab_size: 32,
@@ -298,16 +439,21 @@ mod tests {
             eps: 1e-5,
         };
         let mut model = SciAgentModel::new(&cfg);
+        let mut opt = TrainOptimizer::new_muon(0.02);
         let inputs: Vec<usize> = (4..12).collect();
         let targets: Vec<usize> = (5..13)
             .map(|x| if x >= cfg.vocab_size { 0 } else { x })
             .collect();
 
-        let loss1 = train_step(&mut model, &inputs, &targets, 8);
-        let loss2 = train_step(&mut model, &inputs, &targets, 8);
+        let loss1 = train_step(&mut model, &mut opt, &inputs, &targets, 8);
+        let mut last = loss1;
+        for _ in 0..10
+        {
+            last = train_step(&mut model, &mut opt, &inputs, &targets, 8);
+        }
         assert!(
-            loss2 <= loss1 * 1.1,
-            "Loss should not increase significantly after one step: {loss1} -> {loss2}"
+            last < loss1,
+            "train_step must actually descend on a memorisable batch: {loss1} -> {last}"
         );
     }
 }
