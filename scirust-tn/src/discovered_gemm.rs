@@ -1,32 +1,40 @@
 //! Algorithme decouvert automatiquement par forge (FunSearch/AlphaEvolve-style).
-//! Injecte le 2026-06-05T09:57:09Z.
+//! Injecte le 2026-06-05T18:17:10Z.
 //!
 //! model = hf.co/bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF:Q8_0
-//! latency_ns = 90517
-//! baseline_ns = 178662
-//! speedup = 1.97x
-//! bytes = 480
+//! domain = simd_gemm
+//! latency_ns = 83006
+//! baseline_ns = 178995
+//! speedup = 2.15x
+//! bytes = 391
 //! verified_holdout = true
+//! gate = C=A*B durci (c pre-rempli 1e30)
 //!
 //! NE PAS editer a la main : regenere par le binaire `inject_elite`.
 
 #[inline(never)]
 pub fn compute_kernel(c: &mut [f64], a: &[f64], b: &[f64], n: usize) {
-    // Pré-zéroer la matrice C pour éviter les accumulations inutiles
-    for x in c.iter_mut()
+    // Pre-zeroage de C : produit C = A*B (ecrasement, pas accumulation)
+    for elem in c.iter_mut()
     {
-        *x = 0.0;
+        *elem = 0.0;
     }
-
-    // Utilisation de l'algorithme de multiplication matricielle optimisé (i-k-j)
-    for i in 0..n
-    {
-        for k in 0..n
+    // i-k-j : boucle interne sur j contigue en memoire -> vectorisable
+    unsafe {
+        let a_ptr = a.as_ptr();
+        let b_ptr = b.as_ptr();
+        let c_ptr = c.as_mut_ptr();
+        for i in 0..n
         {
-            let aik = a[i * n + k];
-            for j in 0..n
+            for k in 0..n
             {
-                c[i * n + j] += aik * b[k * n + j];
+                let a_ik = *a_ptr.add(i * n + k);
+                for j in 0..n
+                {
+                    let b_kj = *b_ptr.add(k * n + j);
+                    let c_ij = *c_ptr.add(i * n + j) + a_ik * b_kj;
+                    *c_ptr.add(i * n + j) = c_ij;
+                }
             }
         }
     }
@@ -35,29 +43,55 @@ pub fn compute_kernel(c: &mut [f64], a: &[f64], b: &[f64], n: usize) {
 #[cfg(test)]
 mod forge_tests {
     use super::*;
-    #[test]
-    fn gemm_matches_reference() {
-        let n = 5usize;
-        let a: Vec<f64> = (0..n * n).map(|i| (i as f64 * 0.3).sin()).collect();
-        let b: Vec<f64> = (0..n * n).map(|i| (i as f64 * 0.7).cos()).collect();
-        let mut got = vec![0.0f64; n * n];
-        compute_kernel(&mut got, &a, &b, n);
-        let mut want = vec![0.0f64; n * n];
+
+    fn naive_ref(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
+        let mut c = vec![0.0f64; n * n];
         for i in 0..n
         {
             for j in 0..n
             {
-                let mut s = 0.0f64;
+                let mut acc = 0.0;
                 for k in 0..n
                 {
-                    s += a[i * n + k] * b[k * n + j];
+                    acc += a[i * n + k] * b[k * n + j];
                 }
-                want[i * n + j] = s;
+                c[i * n + j] = acc;
             }
         }
+        c
+    }
+
+    #[test]
+    fn gemm_matches_reference_and_overwrites() {
+        let n = 17; // non multiple de 4 : aucune hypothese de taille
+        let mut a = vec![0.0f64; n * n];
+        let mut b = vec![0.0f64; n * n];
+        let mut s: u64 = 0x1234_5678_9abc_def0;
+        let mut rng = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for x in a.iter_mut()
+        {
+            *x = rng();
+        }
+        for x in b.iter_mut()
+        {
+            *x = rng();
+        }
+        let expected = naive_ref(&a, &b, n);
+        let mut c = vec![999.0f64; n * n]; // bruit : le kernel DOIT ecraser
+        compute_kernel(&mut c, &a, &b, n);
         for i in 0..n * n
         {
-            assert!((got[i] - want[i]).abs() < 1e-9, "mismatch at {i}");
+            assert!(
+                (c[i] - expected[i]).abs() < 1e-9,
+                "mismatch @{i}: {} vs {}",
+                c[i],
+                expected[i]
+            );
         }
     }
 
