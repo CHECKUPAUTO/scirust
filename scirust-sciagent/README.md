@@ -2,6 +2,11 @@
 
 Deterministic small language model for Rust code generation, trained from scratch on real Rust source code.
 
+> **Using the pretrained model?** A ready‑to‑run checkpoint ships at
+> [`checkpoints/small-20M/final`](checkpoints/small-20M/final). Agents (human or
+> AI) should read [`AGENTS.md`](AGENTS.md) for exact load/generate/evaluate
+> commands, sampling presets, and safe‑use rules.
+
 ## Architecture
 
 - **GQA** (Grouped Query Attention) with RoPE positional encoding
@@ -27,15 +32,19 @@ Deterministic small language model for Rust code generation, trained from scratc
 3. **Train tokenizer**: `train-tokenizer --input corpus.txt --vocab-size 8192`
 4. **Tokenize and shard**: `collect-data --input dir/ --tokenizer bpe.json --output shards/`
 5. **Train**: `sciagent-train --model small --data-dir shards/ --total-steps 2000`
+6. **Evaluate**: `sciagent-eval --checkpoint ckpt/final --data-dir heldout-shards/`
 
 ### Reference run (small model)
 
 An early 2000-step run plateaued at 9.03 → 8.90, right at the ln(8192) = 9.01
 uniform baseline: three gradient bugs (tied-embedding head detach, off-tape
 RoPE, detaching value concat) froze most of the model at init. With those
-fixed, the same config descends immediately — a 400-step rerun on ~630K
-tokens of workspace Rust code reaches loss ≈ 5.4 by step 220 (batch 16×256,
-Muon, lr 1.5e-2 cosine). Retrain any old checkpoints; they predate the fixes.
+fixed, the same config descends immediately. The shipped
+[`checkpoints/small-20M`](checkpoints/small-20M/final) checkpoint trained 2000
+steps on ~20M tokens (SciRust + CCOS + SLHAv2 + crates.io, no data repetition)
+and reaches a held‑out perplexity ≈ 108 with only a ~6% seen/held‑out gap — it
+generalizes rather than memorizes (see [`AGENTS.md`](AGENTS.md) §9). Retrain any
+pre‑fix checkpoints; they predate the gradient fixes.
 
 ### Usage
 
