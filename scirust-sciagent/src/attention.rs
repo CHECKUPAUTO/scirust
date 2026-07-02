@@ -1,4 +1,4 @@
-use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
+use scirust_core::autodiff::reverse::{Tape, Tensor, Var, concat_rows};
 use scirust_core::nn::init::{Initializer, Zeros};
 use scirust_core::nn::linear::Linear;
 use scirust_core::nn::module::Module;
@@ -52,6 +52,60 @@ impl GQAAttention {
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = name.into();
         self
+    }
+
+    /// RoPE as **on-tape** operations, so gradients flow back through the
+    /// rotation into `w_q`/`w_k`. The previous implementation extracted the
+    /// projected values (`tape.value`), rotated them outside the tape, and
+    /// re-registered the result as a fresh `tape.input` — a detach: the
+    /// attention-path gradient stopped there and `w_q`/`w_k` stayed frozen at
+    /// their random init for the whole training run.
+    ///
+    /// Rotation identity used: with per-pair constants `C`/`S` (cos/sin
+    /// broadcast to both lanes of each pair) and a constant pair-swap matrix
+    /// `W` such that `(x·W)[2j] = −x[2j+1]`, `(x·W)[2j+1] = x[2j]`:
+    /// `rope(x) = x⊙C + (x·W)⊙S` — exactly the interleaved rotation of
+    /// [`rope_apply`], expressed with differentiable ops only.
+    ///
+    /// Positions restart at `offset` every `seq_len` rows (`pos = r % seq_len`),
+    /// which also fixes batched training: the old path rotated the flattened
+    /// batch with absolute row indices, so every sequence after the first got
+    /// shifted positions.
+    fn rope_on_tape<'t>(
+        tape: &'t Tape,
+        x: Var<'t>,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> Var<'t> {
+        let (rows, dim) = x.shape();
+        let half = dim / 2;
+        let mut c = vec![0.0f32; rows * dim];
+        let mut s = vec![0.0f32; rows * dim];
+        for r in 0..rows
+        {
+            let pos = ((r % seq_len) + offset) as f32;
+            for j in 0..half
+            {
+                let freq = theta.powf(-2.0 * j as f32 / dim as f32);
+                let a = pos * freq;
+                c[r * dim + 2 * j] = a.cos();
+                c[r * dim + 2 * j + 1] = a.cos();
+                s[r * dim + 2 * j] = a.sin();
+                s[r * dim + 2 * j + 1] = a.sin();
+            }
+        }
+        // Pair-swap-and-negate: column 2j reads −x[2j+1], column 2j+1 reads x[2j].
+        let mut w = vec![0.0f32; dim * dim];
+        for j in 0..half
+        {
+            w[(2 * j + 1) * dim + 2 * j] = -1.0;
+            w[(2 * j) * dim + (2 * j + 1)] = 1.0;
+        }
+        let c_v = tape.input(Tensor::from_vec(c, rows, dim));
+        let s_v = tape.input(Tensor::from_vec(s, rows, dim));
+        let w_v = tape.input(Tensor::from_vec(w, dim, dim));
+        x.hadamard(c_v).add(x.matmul(w_v).hadamard(s_v))
     }
 
     fn rope_apply(t: &Tensor, offset: usize, theta: f32) -> Tensor {
@@ -119,11 +173,10 @@ impl GQAAttention {
         let k = self.w_k.forward(tape, x);
         let v = self.w_v.forward(tape, x);
 
-        let qv = tape.value(q.idx());
-        let kv = tape.value(k.idx());
-
-        let qr = tape.input(Self::rope_apply(&qv, 0, self.rope_theta));
-        let kr = tape.input(Self::rope_apply(&kv, 0, self.rope_theta));
+        // On-tape RoPE (per-block positions): gradients flow through the
+        // rotation back into w_q / w_k — see `rope_on_tape`.
+        let qr = Self::rope_on_tape(tape, q, seq_len, 0, self.rope_theta);
+        let kr = Self::rope_on_tape(tape, k, seq_len, 0, self.rope_theta);
 
         let mut head_out = Vec::with_capacity(h);
         for head in 0..h
@@ -146,7 +199,10 @@ impl GQAAttention {
                     .matmul(vb);
                 pb.push(o);
             }
-            let cat = concat_var_rows(tape, &pb);
+            // Differentiable concat (Op::Concat), NOT a value copy: the old
+            // hand-rolled concat re-registered the per-batch outputs as fresh
+            // inputs, detaching the whole attention product from w_q/w_k/w_v.
+            let cat = concat_rows(tape, &pb);
             head_out.push(cat.matmul(build_pad(tape, head, dh, self.d_model)));
         }
 
@@ -284,15 +340,79 @@ fn build_pad<'t>(tape: &'t Tape, h: usize, dh: usize, dm: usize) -> Var<'t> {
     tape.input(Tensor::from_vec(data, dh, dm))
 }
 
-fn concat_var_rows<'t>(tape: &'t Tape, vars: &[Var<'t>]) -> Var<'t> {
-    let mut all = Vec::new();
-    let mut rows = 0;
-    let cols = vars[0].shape().1;
-    for v in vars
-    {
-        let t = tape.value(v.idx());
-        all.extend(&t.data);
-        rows += t.rows;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scirust_core::nn::init::KaimingNormal;
+
+    fn tiny_attn() -> GQAAttention {
+        let init = KaimingNormal;
+        let mut rng = PcgEngine::new(7);
+        GQAAttention::new(16, 4, 2, 10000.0, &init, &mut rng)
     }
-    tape.input(Tensor::from_vec(all, rows, cols))
+
+    #[test]
+    fn rope_on_tape_matches_the_reference_rotation() {
+        // The differentiable formulation x⊙C + (x·W)⊙S must equal the scalar
+        // reference `rope_apply` exactly (same interleaved pairs, same freqs).
+        let tape = Tape::new();
+        let rows = 6usize;
+        let dim = 8usize;
+        let data: Vec<f32> = (0..rows * dim).map(|i| (i as f32 * 0.37).sin()).collect();
+        let x = tape.input(Tensor::from_vec(data.clone(), rows, dim));
+        let on_tape = GQAAttention::rope_on_tape(&tape, x, rows, 3, 10000.0);
+        let got = tape.value(on_tape.idx());
+        let want = GQAAttention::rope_apply(&Tensor::from_vec(data, rows, dim), 3, 10000.0);
+        for (g, w) in got.data.iter().zip(&want.data)
+        {
+            assert!((g - w).abs() < 1e-5, "rope mismatch: {g} vs {w}");
+        }
+    }
+
+    #[test]
+    fn attention_gradients_reach_q_k_v() {
+        // Regression for the detach bugs: RoPE-as-tape.input and the value-copy
+        // concat cut the gradient path, so w_q/w_k/w_v trained to nothing (the
+        // attention stayed at its random init for the whole 197M-token run).
+        let mut attn = tiny_attn();
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(
+            (0..4 * 16).map(|i| (i as f32 * 0.13).cos()).collect(),
+            4,
+            16,
+        ));
+        let out = attn.forward(&tape, x, 4);
+        let loss = out.hadamard(out).sum();
+        tape.backward(loss.idx());
+        for (name, lin) in [("w_q", &attn.w_q), ("w_k", &attn.w_k), ("w_v", &attn.w_v)]
+        {
+            let idx = lin.parameter_indices()[0];
+            let g = tape.grad(idx);
+            let norm: f32 = g.data.iter().map(|v| v.abs()).sum();
+            assert!(norm > 1e-9, "{name} must receive gradient, got norm {norm}");
+        }
+    }
+
+    #[test]
+    fn batched_rows_get_per_sequence_positions() {
+        // The same sequence duplicated as two batch rows must produce identical
+        // outputs for both blocks: positions restart per sequence. The old code
+        // gave block 1 positions seq_len..2*seq_len, so the blocks differed.
+        let mut attn = tiny_attn();
+        let tape = Tape::new();
+        let one: Vec<f32> = (0..4 * 16).map(|i| (i as f32 * 0.11).sin()).collect();
+        let mut two = one.clone();
+        two.extend(one.iter().copied());
+        let x = tape.input(Tensor::from_vec(two, 8, 16));
+        let out = attn.forward(&tape, x, 4);
+        let t = tape.value(out.idx());
+        let (a, b) = t.data.split_at(4 * 16);
+        for (va, vb) in a.iter().zip(b)
+        {
+            assert!(
+                (va - vb).abs() < 1e-5,
+                "duplicated batch rows must match: {va} vs {vb}"
+            );
+        }
+    }
 }

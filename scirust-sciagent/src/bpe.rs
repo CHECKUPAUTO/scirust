@@ -269,14 +269,33 @@ impl BpeTokenizer {
             if id < self.rev.len()
             {
                 let s = &self.rev[id];
-                // skip special tokens
-                if !s.starts_with('<')
+                // Skip only the true non-text tokens: the named specials and the
+                // `<NNN>` placeholders for non-UTF-8 bytes. A blanket
+                // `starts_with('<')` also swallowed every learned merge that
+                // BEGINS with a literal '<' ("<T", "< ", "<<") — which a Rust
+                // corpus is full of (generics, comparisons, shifts) — silently
+                // deleting '<' from decoded code.
+                if !Self::is_non_text_token(s)
                 {
                     out.push_str(s);
                 }
             }
         }
         out
+    }
+
+    /// True for tokens that carry no decodable text: the named special tokens
+    /// and the `<NNN>` placeholders minted for non-UTF-8 bytes.
+    fn is_non_text_token(s: &str) -> bool {
+        if SPECIAL_TOKENS.iter().any(|(tok, _)| *tok == s)
+        {
+            return true;
+        }
+        // "<200>"-style byte placeholders: '<' + digits + '>'.
+        s.len() >= 3
+            && s.starts_with('<')
+            && s.ends_with('>')
+            && s[1..s.len() - 1].bytes().all(|b| b.is_ascii_digit())
     }
 
     #[allow(dead_code)]
@@ -443,6 +462,21 @@ mod tests {
         let original = "save and load";
         assert_eq!(tok.encode(original), loaded.encode(original));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_bpe_decode_preserves_angle_brackets() {
+        // Regression: decode skipped every token starting with '<', deleting the
+        // '<' of generics/comparisons from decoded Rust ("fn f<T>" -> "fn f>").
+        let tok = BpeTokenizer::from_embedded().unwrap();
+        for src in ["Vec<T>", "fn f<T>(x: T) -> T { x }", "a < b && b << 2"]
+        {
+            let ids = tok.encode(src);
+            assert_eq!(tok.decode(&ids), src, "roundtrip must preserve '<'");
+        }
+        // The named specials are still elided.
+        let with_special = tok.encode_with_special("x", true, true);
+        assert_eq!(tok.decode(&with_special), "x");
     }
 
     #[test]

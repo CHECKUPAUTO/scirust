@@ -211,6 +211,78 @@ mod tests {
     }
 
     #[test]
+    fn tied_embeddings_receive_the_head_gradient_and_learn() {
+        // Regression for the tied-embeddings bug: the LM head used a fresh
+        // `tape.input(weight.clone())`, so the head-side gradient — the main
+        // next-token learning signal — never reached the shared parameter and
+        // a tied model could not descend below the ln(vocab) floor (the
+        // trained `small` run sat at 9.01→8.90 while the untied `debug`
+        // config learned normally).
+        let cfg = SciAgentConfig {
+            vocab_size: 32,
+            d_model: 16,
+            n_layers: 1,
+            n_heads: 4,
+            n_kv_heads: 2,
+            d_ff: 32,
+            max_seq_len: 8,
+            rope_theta: 10000.0,
+            tie_embeddings: true,
+            use_bias: false,
+            eps: 1e-5,
+        };
+        let mut model = SciAgentModel::new(&cfg);
+        let inputs = vec![4usize, 5, 6, 7];
+        let targets = vec![5usize, 6, 7, 8];
+
+        // 1) The head gradient reaches the shared table: rows of tokens that
+        //    never appear in the INPUT (e.g. target 8) must still get gradient
+        //    through the output projection. With the old clone path this was
+        //    exactly zero.
+        let tape = Tape::new();
+        let logits = model.forward(&tape, &inputs, 4);
+        let loss = cross_entropy_loss(&tape, logits, &targets);
+        tape.backward(loss.idx());
+        let params = model.parameter_indices();
+        let widx = params[0]; // the tied table is reported first
+        let g = tape.grad(widx);
+        let row = 8 * cfg.d_model..9 * cfg.d_model;
+        let head_grad_norm: f32 = g.data[row].iter().map(|x| x.abs()).sum();
+        assert!(
+            head_grad_norm > 1e-12,
+            "head-side gradient must reach the tied table (got {head_grad_norm})"
+        );
+
+        // 2) With an optimizer in the loop, a tied model now actually learns.
+        let mut opt = TrainOptimizer::new_muon(0.05);
+        let first = {
+            let tape = Tape::new();
+            let logits = model.forward(&tape, &inputs, 4);
+            let loss = cross_entropy_loss(&tape, logits, &targets);
+            tape.backward(loss.idx());
+            let v = tape.value(loss.idx()).data[0];
+            opt.step(&model.parameter_indices(), &tape);
+            model.sync(&tape);
+            v
+        };
+        let mut last = first;
+        for _ in 0..20
+        {
+            let tape = Tape::new();
+            let logits = model.forward(&tape, &inputs, 4);
+            let loss = cross_entropy_loss(&tape, logits, &targets);
+            tape.backward(loss.idx());
+            last = tape.value(loss.idx()).data[0];
+            opt.step(&model.parameter_indices(), &tape);
+            model.sync(&tape);
+        }
+        assert!(
+            last < first * 0.8,
+            "a tied model must descend on a memorisable batch: {first} -> {last}"
+        );
+    }
+
+    #[test]
     fn test_train_step_decreases_loss() {
         let cfg = SciAgentConfig {
             vocab_size: 32,

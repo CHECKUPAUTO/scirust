@@ -18,6 +18,11 @@ pub struct SciAgentModel {
     pub rms_final: RMSNorm,
     pub lm_head: Option<Linear>,
     tokenizer: Option<SciAgentTokenizer>,
+    /// Tape index of the shared embedding/output matrix for the current tape,
+    /// when `tie_embeddings` is on. One registration serves both the input
+    /// lookup and the tied LM head, so the head-side gradient accumulates into
+    /// the same parameter (see [`SciAgentModel::forward`]).
+    tied_w_idx: Option<usize>,
 }
 
 impl SciAgentModel {
@@ -73,6 +78,7 @@ impl SciAgentModel {
             rms_final,
             lm_head,
             tokenizer: None,
+            tied_w_idx: None,
         }
     }
 
@@ -84,26 +90,43 @@ impl SciAgentModel {
         let total_tokens = input_ids.len();
         assert_eq!(total_tokens % seq_len, 0);
 
-        let data: Vec<f32> = input_ids.iter().map(|&id| id as f32).collect();
-        let n = data.len();
-        let idx_t = tape.input(Tensor::from_vec(data, n, 1));
-        let h = self.embed.forward(tape, idx_t);
+        // With tied embeddings the SAME tape registration must serve both the
+        // input lookup and the output projection: registering a second clone
+        // for the head (the previous code) sent the head-side gradient — the
+        // dominant next-token learning signal — into a tensor that was never in
+        // `parameter_indices()`, so it was silently discarded every step. (The
+        // untied `debug` config learned; the tied `small` config stayed at the
+        // ln(vocab) floor — this was why.)
+        let mut h;
+        let tied_table = if self.lm_head.is_none()
+        {
+            let indices: Vec<u32> = input_ids.iter().map(|&id| id as u32).collect();
+            let table = tape.input(self.embed.weight.clone());
+            self.tied_w_idx = Some(table.idx());
+            h = table.embedding(indices);
+            Some(table)
+        }
+        else
+        {
+            self.tied_w_idx = None;
+            let data: Vec<f32> = input_ids.iter().map(|&id| id as f32).collect();
+            let n = data.len();
+            let idx_t = tape.input(Tensor::from_vec(data, n, 1));
+            h = self.embed.forward(tape, idx_t);
+            None
+        };
 
-        let mut h = h;
         for layer in &mut self.layers
         {
             h = layer.forward(tape, h, seq_len);
         }
         h = self.rms_final.forward(tape, h);
 
-        match self.lm_head.as_mut()
+        match (self.lm_head.as_mut(), tied_table)
         {
-            Some(head) => head.forward(tape, h),
-            None =>
-            {
-                let w = tape.input(self.embed.weight.clone());
-                h.try_matmul(w.transpose_2d()).unwrap()
-            },
+            (Some(head), _) => head.forward(tape, h),
+            (None, Some(table)) => h.try_matmul(table.transpose_2d()).unwrap(),
+            (None, None) => unreachable!("tied path always sets tied_table"),
         }
     }
 
@@ -125,7 +148,14 @@ impl SciAgentModel {
 
     pub fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        v.extend(self.embed.parameter_indices());
+        // Tied path: the shared table was registered by `forward` directly (the
+        // Embedding module's own bookkeeping was bypassed), so report that
+        // registration — it carries BOTH the lookup and head gradients.
+        match self.tied_w_idx
+        {
+            Some(idx) => v.push(idx),
+            None => v.extend(self.embed.parameter_indices()),
+        }
         for layer in &self.layers
         {
             v.extend(layer.parameter_indices());
@@ -139,7 +169,11 @@ impl SciAgentModel {
     }
 
     pub fn sync(&mut self, tape: &Tape) {
-        self.embed.sync(tape);
+        match self.tied_w_idx
+        {
+            Some(idx) => self.embed.weight = tape.value(idx),
+            None => self.embed.sync(tape),
+        }
         for layer in &mut self.layers
         {
             layer.sync(tape);
