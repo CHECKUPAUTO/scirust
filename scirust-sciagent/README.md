@@ -28,10 +28,14 @@ Deterministic small language model for Rust code generation, trained from scratc
 4. **Tokenize and shard**: `collect-data --input dir/ --tokenizer bpe.json --output shards/`
 5. **Train**: `sciagent-train --model small --data-dir shards/ --total-steps 2000`
 
-### Pretrained checkpoint (2000 steps, small model)
+### Reference run (small model)
 
-Location: `/tmp/scirust_small_2k/final/`
-Loss: 9.03 → 8.90 (ln 8192 = 9.01 baseline)
+An early 2000-step run plateaued at 9.03 → 8.90, right at the ln(8192) = 9.01
+uniform baseline: three gradient bugs (tied-embedding head detach, off-tape
+RoPE, detaching value concat) froze most of the model at init. With those
+fixed, the same config descends immediately — a 400-step rerun on ~630K
+tokens of workspace Rust code reaches loss ≈ 5.4 by step 220 (batch 16×256,
+Muon, lr 1.5e-2 cosine). Retrain any old checkpoints; they predate the fixes.
 
 ### Usage
 

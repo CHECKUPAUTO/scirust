@@ -15,12 +15,21 @@ pub struct ConformalGuard {
     alpha: f32,
 }
 
+/// Default width of the abstention band above q̂.
+pub const DEFAULT_ABSTAIN_EPSILON: f32 = 0.05;
+
 impl ConformalGuard {
     pub fn calibrate(nonconformity_scores: &[f32], alpha: f32) -> Self {
+        Self::calibrate_with_epsilon(nonconformity_scores, alpha, DEFAULT_ABSTAIN_EPSILON)
+    }
+
+    /// Calibrate with an explicit abstention-band width ε: scores in
+    /// `(q̂, q̂ + ε]` abstain instead of rejecting. `ε = 0` disables the band.
+    pub fn calibrate_with_epsilon(nonconformity_scores: &[f32], alpha: f32, epsilon: f32) -> Self {
         let q = conformal_quantile(nonconformity_scores, alpha);
         Self {
             score_threshold: q,
-            abstain_margin: q + 0.05,
+            abstain_margin: q + epsilon.max(0.0),
             alpha,
         }
     }
@@ -72,6 +81,20 @@ mod tests {
         );
         let verdict = guard.decide(0.98);
         assert!(matches!(verdict, GuardVerdict::Accept(_)));
+    }
+
+    #[test]
+    fn epsilon_zero_disables_the_abstention_band() {
+        let scores: Vec<f32> = (0..50).map(|i| 0.01 + i as f32 * 0.02).collect();
+        let strict = ConformalGuard::calibrate_with_epsilon(&scores, 0.1, 0.0);
+        let q = strict.threshold();
+        // Just above the threshold: with ε=0 this must be a hard Reject.
+        let verdict = strict.decide(1.0 - (q + 0.01));
+        assert_eq!(verdict, GuardVerdict::Reject);
+        // Same score with the default band abstains instead.
+        let lenient = ConformalGuard::calibrate(&scores, 0.1);
+        let verdict = lenient.decide(1.0 - (q + 0.01));
+        assert_eq!(verdict, GuardVerdict::Abstain);
     }
 
     #[test]
