@@ -1,0 +1,31 @@
+[package]
+name = "scirust-sciagent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.85"
+description = "SCIAGENT — SLM deterministe entraine from scratch, specialise Rust + agentique, infere via scirust/CCOS/SLHAv2"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-autodiff = { path = "../scirust-autodiff" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+clap = { version = "4", features = ["derive"] }
+ureq = { version = "2", features = ["json"], optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+# HTTP fetching for the data-collection binary only. Off by default so the
+# workspace stays pure-Rust: `ureq` pulls `ring`, whose build script needs a C
+# cross-compiler — which breaks the linker-less aarch64 `cargo check` CI job.
+fetch = ["dep:ureq"]
+
+[[bin]]
+name = "fetch-crates"
+path = "src/bin/fetch-crates.rs"
+required-features = ["fetch"]

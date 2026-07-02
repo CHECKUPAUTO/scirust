@@ -11,6 +11,7 @@ pub mod nlp;
 pub mod numeric;
 pub mod quickstart;
 pub mod reasoning;
+pub mod sciagent;
 pub mod symbolic;
 pub mod synergy;
 pub mod trader;
@@ -271,6 +272,14 @@ const GROUPS: &[(&str, &[Command])] = &[
         }],
     ),
     (
+        "SCIAGENT SLM",
+        &[Command {
+            name: "sciagent",
+            args: "ask|chat|explain|generate|info|attest|quantize [args]",
+            about: "Deterministic SLM for Rust + agentic — GQA + SwiGLU + RoPE + RMSNorm.",
+        }],
+    ),
+    (
         "INFERENCE INTEGRITY",
         &[
             Command {
@@ -495,7 +504,8 @@ fn print_info() {
     println!(
         "  • Algorithm creation: 6 crates for AutoML, program synthesis, algorithm generation,"
     );
-    println!("    code transformation, RL discovery, and scaffolding (`scirust-automl`, …).\n");
+    println!("    code transformation, RL discovery, and scaffolding (`scirust-automl`, …).");
+    println!("  • SCIAGENT deterministic SLM specialised for Rust + agentic (`sciagent`).\n");
     println!("Docs: README.md · docs/REFERENCE.md · `cargo doc --workspace --no-deps --open`");
 }
 
@@ -570,6 +580,7 @@ pub fn run(args: &[String]) -> u8 {
         Some("gla") => nlp::run_gla(rest),
         Some("hgrn") => nlp::run_hgrn(rest),
         Some("rwkv") => nlp::run_rwkv(rest),
+        Some("sciagent") => sciagent::run(rest),
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some("trader") => trader::run(rest),
