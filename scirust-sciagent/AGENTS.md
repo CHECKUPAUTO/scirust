@@ -152,7 +152,17 @@ println!("{}", tok.decode(&ids));
 ```
 
 Larger configs (`350m`, `7b`) exist in `config.rs` but the CPU tape‑autodiff
-forward is not practical for them without a GPU backend.
+forward is not practical for them without a GPU backend. To size such a run
+against a memory budget (e.g. a 128 GB Jetson Thor) before building anything,
+use the planner:
+
+```bash
+cargo run --release -p scirust-sciagent --bin sciagent-plan -- \
+  --model 350m --seq-len 8192 --precision bf16 --ceiling-gb 128
+```
+
+See [`JETSON_THOR.md`](JETSON_THOR.md) for the full feasibility analysis and
+the GPU‑backend roadmap toward training 350M on the Thor.
 
 ## 8. Checkpoint provenance
 

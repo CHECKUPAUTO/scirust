@@ -8,6 +8,7 @@ pub mod generate;
 pub mod inference;
 pub mod model;
 pub mod norm;
+pub mod planning;
 pub mod quantize;
 pub mod sha256;
 pub mod swiglu;
