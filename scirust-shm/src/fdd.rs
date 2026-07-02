@@ -41,7 +41,14 @@ pub fn jacobi_eigen(input: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
                 {
                     continue;
                 }
-                let theta = 0.5 * (2.0 * a[p][q]).atan2(a[p][p] - a[q][q]);
+                // With J = [[c, s], [-s, c]] applied as JᵀAJ below, the (p,q)
+                // entry becomes (a_pp − a_qq)·sc + a_pq·(c² − s²); zeroing it
+                // needs tan(2θ) = 2·a_pq / (a_qq − a_pp). The previous sign
+                // (a_pp − a_qq) rotated AWAY from the annihilation angle, so
+                // the off-diagonal mass oscillated instead of vanishing and
+                // the 100-sweep loop exited unconverged with wrong
+                // eigenvectors (MAC ≈ 0.75 on a rank-1 CPSD).
+                let theta = 0.5 * (2.0 * a[p][q]).atan2(a[q][q] - a[p][p]);
                 let (s, c) = theta.sin_cos();
                 // A·J  (rotate columns p,q)
                 for row in a.iter_mut()
