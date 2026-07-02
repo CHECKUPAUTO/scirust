@@ -2905,6 +2905,7 @@ dependencies = [
  "approx",
  "scirust-discovery",
  "scirust-sciagent",
+ "scirust-sis",
  "scirust-solvers",
  "serde",
  "serde_json",
@@ -3155,6 +3156,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "scirust-sis"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "scirust-reliability",
+ "scirust-sciagent",
+ "scirust-solvers",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -1,0 +1,17 @@
+[package]
+name = "scirust-sis"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Safety Instrumented Systems — IEC 61511 SIF loop modeling, voting/trip simulation, cause-and-effect matrices, proof-test-interval sizing, hash-chained audit log"
+
+[dependencies]
+scirust-reliability = { path = "../scirust-reliability" }
+scirust-sciagent = { path = "../scirust-sciagent" }
+scirust-solvers = { path = "../scirust-solvers" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+approx = "0.5"

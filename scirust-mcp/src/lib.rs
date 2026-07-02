@@ -2,8 +2,9 @@
 //!
 //! Expose les capacités de SciRust (solveurs numériques, outils de
 //! développement du SLM `scirust-sciagent`, découverte d'actifs OT/IT de
-//! `scirust-discovery`) comme des outils MCP standard : n'importe quel
-//! agent — le SLM embarqué, Claude, ChatGPT, un script — peut les découvrir
+//! `scirust-discovery`, vérification SIL/IEC 61511 de `scirust-sis`) comme
+//! des outils MCP standard : n'importe quel agent — le SLM embarqué, Claude,
+//! ChatGPT, un script — peut les découvrir
 //! (`tools/list`) et les appeler (`tools/call`) sans glue code spécifique,
 //! avec un schéma JSON explicite par outil et un journal d'audit
 //! hash-chaîné (SHA-256) de chaque appel.
@@ -38,6 +39,10 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::sis::sis_tools()
+    {
+        registry.register(tool);
+    }
     registry.register(tools::cli_passthrough::cli_tool());
     registry
 }
@@ -56,5 +61,6 @@ mod tests {
         assert!(registry.names().contains(&"dev_search"));
         assert!(registry.names().contains(&"scirust_cli"));
         assert!(registry.names().contains(&"discovery_scan"));
+        assert!(registry.names().contains(&"sis_verify_sif_loop"));
     }
 }

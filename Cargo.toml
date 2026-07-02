@@ -127,6 +127,7 @@ members = [
     "scirust-retrieval",
     "scirust-mcp",
     "scirust-discovery",
+    "scirust-sis",
 ]
 exclude = [
     "scirust-rustc-driver",

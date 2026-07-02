@@ -6,3 +6,4 @@ pub mod cli_passthrough;
 pub mod dev;
 pub mod discovery;
 pub mod linalg;
+pub mod sis;

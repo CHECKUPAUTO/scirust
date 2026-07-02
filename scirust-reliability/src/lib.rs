@@ -2,14 +2,21 @@
 //!
 //! The quantitative side of SIL: average Probability of Failure on Demand
 //! (`PFDavg`, low-demand mode) and Probability of dangerous Failure per Hour
-//! (`PFH`, high-demand mode) for common MooN architectures with a common-cause
-//! `β` factor, the SIL band a figure maps to, and a two-state Markov
-//! availability. Pure deterministic `f64` — auditable safety arithmetic.
+//! (`PFH`, high-demand mode) for the full 1oo1/1oo2/2oo2/2oo3/1oo3 MooN
+//! family with a common-cause `β` factor, the SIL band a figure maps to, and
+//! a two-state Markov availability. Pure deterministic `f64` — auditable
+//! safety arithmetic. `scirust-sis` builds process-safety (IEC 61511) SIS
+//! loop modeling, voting simulation, and cause-and-effect matrices on top of
+//! these primitives.
 
 use serde::{Deserialize, Serialize};
 
 /// Safety Integrity Level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Declared worst-to-best so the derived [`Ord`] matches integrity order
+/// (`Sil::None < Sil::Sil1 < ... < Sil::Sil4`) — a higher band is always a
+/// stronger safety claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Sil {
     /// Below SIL 1 (PFDavg ≥ 0.1).
     None,
@@ -67,6 +74,27 @@ pub fn pfd_2oo3(lambda_du: f64, t1: f64, beta: f64) -> f64 {
     (1.0 - beta).powi(2) * lt * lt + beta * lt / 2.0
 }
 
+/// `PFDavg` of a 2oo2 architecture: `λ_DU · T₁` (i.e. `2 × pfd_1oo1`).
+///
+/// Unlike 1oo2/2oo3, a 2oo2 vote requires **both** channels to agree before
+/// tripping, so a single channel's dangerous failure already defeats the
+/// safety function — there is no redundancy left for a common-cause fault to
+/// additionally defeat. No separate `β` term applies (2oo2 architectures are
+/// chosen to cut spurious trips, at the cost of the worst PFDavg of the
+/// MooN family — the reverse trade-off from 1oo2).
+pub fn pfd_2oo2(lambda_du: f64, t1: f64) -> f64 {
+    lambda_du * t1
+}
+
+/// `PFDavg` of a 1oo3 architecture with common-cause fraction `beta`:
+/// `(1−β)³(λT₁)³/4 + β·λT₁/2`. The best (lowest) PFDavg of the MooN family —
+/// all three channels must fail dangerous-undetected simultaneously before
+/// the group does.
+pub fn pfd_1oo3(lambda_du: f64, t1: f64, beta: f64) -> f64 {
+    let lt = lambda_du * t1;
+    (1.0 - beta).powi(3) * lt * lt * lt / 4.0 + beta * lt / 2.0
+}
+
 /// `PFH` (per hour) of a 1oo1 channel in high-demand mode: simply `λ_DU`.
 pub fn pfh_1oo1(lambda_du: f64) -> f64 {
     lambda_du
@@ -122,6 +150,21 @@ mod tests {
     }
 
     #[test]
+    fn pfd_2oo3_matches_published_worked_example() {
+        // Lundteigen & Rausand, *Reliability of Safety-Critical Systems*
+        // (NTNU course notes, ch. 8, slide 27/43): 2oo3, λDU=1e-6/h,
+        // τ=8760h, β=10% -> PFDavg ≈ 5.00e-4 (independent ≈6.22e-5, common
+        // cause ≈4.38e-4, i.e. CCF is ~87.6% of the total, matching the
+        // slide's stated ~87%/~13% split).
+        let pfd = pfd_2oo3(1e-6, 8760.0, 0.1);
+        assert!(
+            (pfd - 5.00e-4).abs() < 5e-6,
+            "pfd_2oo3 {pfd}, want ~5.00e-4"
+        );
+        assert_eq!(sil_from_pfd(pfd), Sil::Sil3);
+    }
+
+    #[test]
     fn pfd_2oo3_matches_hand_derivation() {
         // Same λT1 = 1.0, β=0.1.
         //   independent = (1−β)²·(λT1)² = 0.81·1 = 0.81   (no /3 factor for 2oo3)
@@ -129,6 +172,47 @@ mod tests {
         //   total = 0.86  (IEC 61508-6 Annex B, simplified 2oo3 PFDavg).
         let pfd = pfd_2oo3(1e-3, 1000.0, 0.1);
         assert!((pfd - 0.86).abs() < 1e-12, "pfd_2oo3 {pfd}, want 0.86");
+    }
+
+    #[test]
+    fn pfd_2oo2_matches_hand_derivation() {
+        // λ_DU=1e-6 /h, T1=8760 h -> PFD = λT1 = 8.76e-3 = exactly 2× pfd_1oo1.
+        let pfd = pfd_2oo2(1e-6, 8760.0);
+        assert!(
+            (pfd - 8.76e-3).abs() < 1e-12,
+            "pfd_2oo2 {pfd}, want 8.76e-3"
+        );
+        assert!((pfd - 2.0 * pfd_1oo1(1e-6, 8760.0)).abs() < 1e-15);
+    }
+
+    #[test]
+    fn pfd_1oo3_matches_hand_derivation() {
+        // Same λT1 = 1.0, β=0.1 as the 1oo2/2oo3 hand derivations above.
+        //   independent = (1−β)³·(λT1)³/4 = 0.729/4 = 0.18225
+        //   common-cause = β·(λT1)/2      = 0.05
+        //   total = 0.23225 (IEC 61508-6 Annex B, simplified 1oo3 PFDavg).
+        let pfd = pfd_1oo3(1e-3, 1000.0, 0.1);
+        assert!(
+            (pfd - 0.23225).abs() < 1e-12,
+            "pfd_1oo3 {pfd}, want 0.23225"
+        );
+    }
+
+    #[test]
+    fn moon_family_pfd_ordering_matches_redundancy() {
+        // For identical (λ, T1, β): more channels needed to *simultaneously*
+        // fail dangerous before the group does ⇒ lower PFDavg. 2oo2 has zero
+        // redundancy against dangerous failure (either channel failing is
+        // already fatal to the vote) and is therefore the worst; 1oo3 needs
+        // all three channels to fail together and is the best.
+        let (lam, t1, beta) = (1e-3, 1000.0, 0.1);
+        let p_1oo3 = pfd_1oo3(lam, t1, beta);
+        let p_1oo2 = pfd_1oo2(lam, t1, beta);
+        let p_2oo3 = pfd_2oo3(lam, t1, beta);
+        let p_2oo2 = pfd_2oo2(lam, t1);
+        assert!(p_1oo3 < p_1oo2, "{p_1oo3} should beat {p_1oo2}");
+        assert!(p_1oo2 < p_2oo3, "{p_1oo2} should beat {p_2oo3}");
+        assert!(p_2oo3 < p_2oo2, "{p_2oo3} should beat {p_2oo2}");
     }
 
     #[test]
