@@ -1,0 +1,18 @@
+{
+  "config": {
+    "d_ff": 256,
+    "d_model": 128,
+    "eps": 9.999999747378752e-6,
+    "max_seq_len": 256,
+    "n_heads": 4,
+    "n_kv_heads": 2,
+    "n_layers": 4,
+    "rope_theta": 10000.0,
+    "tie_embeddings": true,
+    "use_bias": false,
+    "vocab_size": 8192
+  },
+  "loss": 5.107260227203369,
+  "lr": 0.001500000013038516,
+  "step": 2000
+}
