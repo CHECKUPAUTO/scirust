@@ -1,5 +1,10 @@
 use std::path::Path;
 
+/// `<unk>` id in the BPE special-token table (see `bpe::SPECIAL_TOKENS`).
+/// Out-of-vocab ids map here — NOT to `vocab_size - 1`, which is an ordinary
+/// learned merge that would receive spurious probability mass.
+const UNK_ID: usize = 3;
+
 pub struct PretrainDataset {
     data: Vec<u32>,
     position: usize,
@@ -50,15 +55,24 @@ impl PretrainDataset {
         let mut inputs = Vec::with_capacity(batch_size * self.seq_len);
         let mut targets = Vec::with_capacity(batch_size * self.seq_len);
 
+        let vocab = self.vocab_size;
+        let sanitize = move |tok: usize| {
+            if tok < vocab
+            {
+                tok
+            }
+            else
+            {
+                UNK_ID.min(vocab - 1)
+            }
+        };
         for _ in 0..batch_size
         {
             let start = self.position;
             for j in 0..self.seq_len
             {
-                let tok = self.data[start + j] as usize;
-                inputs.push(tok.min(self.vocab_size - 1));
-                let tgt = self.data[start + j + 1] as usize;
-                targets.push(tgt.min(self.vocab_size - 1));
+                inputs.push(sanitize(self.data[start + j] as usize));
+                targets.push(sanitize(self.data[start + j + 1] as usize));
             }
             self.position += self.seq_len;
         }
@@ -202,11 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn test_clamp_vocab() {
+    fn test_oov_maps_to_unk() {
         let data = vec![0u32, 1, 2, 200, 4];
         let mut ds = PretrainDataset::from_slice(&data, 4, 10);
         let (inputs, targets) = ds.next_batch(1).unwrap();
-        assert_eq!(inputs[3], 9, "Token 200 should be clamped to vocab_size-1");
+        assert_eq!(inputs[3], 3, "OOV token 200 should map to <unk>=3");
+        assert_eq!(targets[2], 3, "OOV target 200 should map to <unk>=3");
         assert_eq!(targets[3], 4, "Target 4 should be unchanged");
     }
 }
