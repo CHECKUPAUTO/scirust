@@ -2,9 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use scirust_core::autodiff::reverse::Tensor;
-use scirust_core::nn::elastic_kv_cache::{
-    dequantize_int4_grouped, quantize_int4_grouped,
-};
+use scirust_core::nn::elastic_kv_cache::{dequantize_int4_grouped, quantize_int4_grouped};
 
 use crate::model::SciAgentModel;
 
@@ -75,41 +73,31 @@ impl QuantizedSciAgent {
             .map(|i| {
                 let prefix = format!("sciagent.layer{i}");
                 QuantizedBlock {
-                    attn_q: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.attn.wq.weight")], g,
-                    ),
-                    attn_k: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.attn.wk.weight")], g,
-                    ),
-                    attn_v: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.attn.wv.weight")], g,
-                    ),
-                    attn_o: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.attn.wo.weight")], g,
-                    ),
+                    attn_q: QuantizedWeight::quantize(&sd[&format!("{prefix}.attn.wq.weight")], g),
+                    attn_k: QuantizedWeight::quantize(&sd[&format!("{prefix}.attn.wk.weight")], g),
+                    attn_v: QuantizedWeight::quantize(&sd[&format!("{prefix}.attn.wv.weight")], g),
+                    attn_o: QuantizedWeight::quantize(&sd[&format!("{prefix}.attn.wo.weight")], g),
                     ffn_gate: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.ffn.gate.weight")], g,
+                        &sd[&format!("{prefix}.ffn.gate.weight")],
+                        g,
                     ),
-                    ffn_up: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.ffn.up.weight")], g,
-                    ),
+                    ffn_up: QuantizedWeight::quantize(&sd[&format!("{prefix}.ffn.up.weight")], g),
                     ffn_down: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.ffn.down.weight")], g,
+                        &sd[&format!("{prefix}.ffn.down.weight")],
+                        g,
                     ),
                     rms_attn: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.rms_attn/weight")], g,
+                        &sd[&format!("{prefix}.rms_attn/weight")],
+                        g,
                     ),
-                    rms_ffn: QuantizedWeight::quantize(
-                        &sd[&format!("{prefix}.rms_ffn/weight")], g,
-                    ),
+                    rms_ffn: QuantizedWeight::quantize(&sd[&format!("{prefix}.rms_ffn/weight")], g),
                 }
             })
             .collect();
 
         let embed_weight = QuantizedWeight::quantize(&sd["sciagent.embed.weight"], g);
         let final_norm_weight = QuantizedWeight::quantize(&sd["sciagent.rms_final/weight"], g);
-        let lm_head_weight = sd.get("weight")
-            .map(|w| QuantizedWeight::quantize(w, g));
+        let lm_head_weight = sd.get("weight").map(|w| QuantizedWeight::quantize(w, g));
 
         Self {
             embed_weight,
@@ -128,19 +116,22 @@ impl QuantizedSciAgent {
     fn serialize(&self, buf: &mut Vec<u8>) {
         self.embed_weight.serialize(buf);
         buf.extend(&(self.layers.len() as u32).to_le_bytes());
-        for layer in &self.layers {
+        for layer in &self.layers
+        {
             layer.serialize(buf);
         }
         self.final_norm_weight.serialize(buf);
         buf.push(self.lm_head_weight.is_some() as u8);
-        if let Some(ref w) = self.lm_head_weight {
+        if let Some(ref w) = self.lm_head_weight
+        {
             w.serialize(buf);
         }
     }
 
     pub fn total_compressed_bytes(&self) -> usize {
         let mut total = self.embed_weight.compressed_bytes();
-        for layer in &self.layers {
+        for layer in &self.layers
+        {
             total += layer.attn_q.compressed_bytes();
             total += layer.attn_k.compressed_bytes();
             total += layer.attn_v.compressed_bytes();
@@ -152,7 +143,8 @@ impl QuantizedSciAgent {
             total += layer.rms_ffn.compressed_bytes();
         }
         total += self.final_norm_weight.compressed_bytes();
-        if let Some(ref w) = self.lm_head_weight {
+        if let Some(ref w) = self.lm_head_weight
+        {
             total += w.compressed_bytes();
         }
         total
@@ -166,19 +158,26 @@ impl QuantizedSciAgent {
     pub fn estimate_original_bytes(&self) -> usize {
         let param_count = self.embed_weight.shape.0 * self.embed_weight.shape.1
             + self.final_norm_weight.shape.0 * self.final_norm_weight.shape.1;
-        let per_layer = self.layers.iter().map(|l| {
-            l.attn_q.shape.0 * l.attn_q.shape.1
-                + l.attn_k.shape.0 * l.attn_k.shape.1
-                + l.attn_v.shape.0 * l.attn_v.shape.1
-                + l.attn_o.shape.0 * l.attn_o.shape.1
-                + l.ffn_gate.shape.0 * l.ffn_gate.shape.1
-                + l.ffn_up.shape.0 * l.ffn_up.shape.1
-                + l.ffn_down.shape.0 * l.ffn_down.shape.1
-                + l.rms_attn.shape.0 * l.rms_attn.shape.1
-                + l.rms_ffn.shape.0 * l.rms_ffn.shape.1
-        }).sum::<usize>();
-        let lm_head = self.lm_head_weight.as_ref()
-            .map(|w| w.shape.0 * w.shape.1).unwrap_or(0);
+        let per_layer = self
+            .layers
+            .iter()
+            .map(|l| {
+                l.attn_q.shape.0 * l.attn_q.shape.1
+                    + l.attn_k.shape.0 * l.attn_k.shape.1
+                    + l.attn_v.shape.0 * l.attn_v.shape.1
+                    + l.attn_o.shape.0 * l.attn_o.shape.1
+                    + l.ffn_gate.shape.0 * l.ffn_gate.shape.1
+                    + l.ffn_up.shape.0 * l.ffn_up.shape.1
+                    + l.ffn_down.shape.0 * l.ffn_down.shape.1
+                    + l.rms_attn.shape.0 * l.rms_attn.shape.1
+                    + l.rms_ffn.shape.0 * l.rms_ffn.shape.1
+            })
+            .sum::<usize>();
+        let lm_head = self
+            .lm_head_weight
+            .as_ref()
+            .map(|w| w.shape.0 * w.shape.1)
+            .unwrap_or(0);
         (param_count + per_layer + lm_head) * 4
     }
 }
@@ -189,11 +188,13 @@ impl QuantizedWeight {
         buf.extend(&(self.shape.1 as u32).to_le_bytes());
         buf.extend(&(self.group_size as u32).to_le_bytes());
         buf.extend(&(self.codes.len() as u32).to_le_bytes());
-        for &c in &self.codes {
+        for &c in &self.codes
+        {
             buf.push(c as u8);
         }
         buf.extend(&(self.scales.len() as u32).to_le_bytes());
-        for &s in &self.scales {
+        for &s in &self.scales
+        {
             buf.extend(&s.to_le_bytes());
         }
     }
@@ -225,19 +226,21 @@ mod tests {
         let model = SciAgentModel::new(&cfg);
         let quantized = QuantizedSciAgent::from_model(&model, 32);
 
-        assert!(quantized.compression_ratio() > 2.0,
-            "INT4 should compress at least 2x, got {:.1}x", quantized.compression_ratio());
+        assert!(
+            quantized.compression_ratio() > 2.0,
+            "INT4 should compress at least 2x, got {:.1}x",
+            quantized.compression_ratio()
+        );
     }
 
     #[test]
     fn test_quantize_weight_roundtrip() {
-        let data = Tensor::from_vec(
-            (0..64).map(|i| ((i % 14) - 7) as f32).collect(), 8, 8,
-        );
+        let data = Tensor::from_vec((0..64).map(|i| ((i % 14) - 7) as f32).collect(), 8, 8);
         let qw = QuantizedWeight::quantize(&data, 4);
         let reconstructed = qw.dequantize();
 
-        for i in 0..data.data.len() {
+        for i in 0..data.data.len()
+        {
             let diff = (data.data[i] - reconstructed.data[i]).abs();
             assert!(diff < 2.0, "INT4 roundtrip error too large at {i}: {diff}");
         }

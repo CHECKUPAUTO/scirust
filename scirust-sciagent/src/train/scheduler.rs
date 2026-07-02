@@ -20,12 +20,16 @@ impl WarmupCosineSchedule {
 
 impl LrSchedule for WarmupCosineSchedule {
     fn lr_at(&self, step: usize) -> f32 {
-        if step < self.warmup_steps {
+        if step < self.warmup_steps
+        {
             self.base * (step as f32 / self.warmup_steps as f32)
-        } else {
+        }
+        else
+        {
             let post = step - self.warmup_steps;
             let period = self.total_steps - self.warmup_steps;
-            if post >= period {
+            if post >= period
+            {
                 return self.min_lr;
             }
             let progress = post as f32 / period as f32;

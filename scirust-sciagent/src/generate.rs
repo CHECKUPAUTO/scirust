@@ -26,21 +26,27 @@ impl Generator {
         let mut ids = prompt.to_vec();
         let max_seq_len = self.config.max_seq_len;
 
-        for _ in 0..max_tokens {
+        for _ in 0..max_tokens
+        {
             let tape = Tape::new();
             let seq_len = ids.len();
 
-            let input_slice = if seq_len > max_seq_len {
+            let input_slice = if seq_len > max_seq_len
+            {
                 &ids[seq_len - max_seq_len..]
-            } else {
+            }
+            else
+            {
                 &ids
             };
 
             let local_seq = input_slice.len();
             let logits = model.forward(&tape, input_slice, local_seq);
-            let next = sample_or_argmax(&tape, logits.idx(), self.config.vocab_size, &mut _rng_seed);
+            let next =
+                sample_or_argmax(&tape, logits.idx(), self.config.vocab_size, &mut _rng_seed);
             ids.push(next);
-            if next == 0 {
+            if next == 0
+            {
                 break;
             }
         }
@@ -61,17 +67,20 @@ impl Generator {
         let idx_t = tape.input(Tensor::from_vec(data, n, 1));
         let mut h = model.embed.forward(&tape, idx_t);
 
-        for layer in &mut model.layers {
+        for layer in &mut model.layers
+        {
             h = layer.forward(&tape, h, n);
         }
         h = model.rms_final.forward(&tape, h);
 
-        let last_logits = match model.lm_head.as_mut() {
+        let last_logits = match model.lm_head.as_mut()
+        {
             Some(head) => head.forward(&tape, h),
-            None => {
+            None =>
+            {
                 let w = tape.input(model.embed.weight.clone());
                 h.try_matmul(w.transpose_2d()).unwrap()
-            }
+            },
         };
 
         let last_idx = {
@@ -80,9 +89,11 @@ impl Generator {
             let start = t.data.len() - vocab;
             let mut best = 0usize;
             let mut bv = t.data[start];
-            for j in 1..vocab {
+            for j in 1..vocab
+            {
                 let v = t.data[start + j];
-                if v > bv {
+                if v > bv
+                {
                     bv = v;
                     best = j;
                 }
@@ -95,29 +106,35 @@ impl Generator {
 
         reset_kv_caches(model);
 
-        for _ in 1..max_tokens {
+        for _ in 1..max_tokens
+        {
             let tape = Tape::new();
             let token_data = vec![output.last().copied().unwrap_or(0) as f32];
             let token_v = tape.input(Tensor::from_vec(token_data, 1, 1));
             let h = model.embed.forward(&tape, token_v);
             let mut h = h;
 
-            for layer in &mut model.layers {
+            for layer in &mut model.layers
+            {
                 h = layer.infer_step(&tape, h, output.len() - 1);
             }
             h = model.rms_final.forward(&tape, h);
 
-            let logits = match model.lm_head.as_mut() {
+            let logits = match model.lm_head.as_mut()
+            {
                 Some(head) => head.forward(&tape, h),
-                None => {
+                None =>
+                {
                     let w = tape.input(model.embed.weight.clone());
                     h.try_matmul(w.transpose_2d()).unwrap()
-                }
+                },
             };
 
-            let next = sample_or_argmax(&tape, logits.idx(), self.config.vocab_size, &mut _rng_seed);
+            let next =
+                sample_or_argmax(&tape, logits.idx(), self.config.vocab_size, &mut _rng_seed);
             output.push(next);
-            if next == 0 {
+            if next == 0
+            {
                 break;
             }
         }
@@ -130,9 +147,11 @@ fn sample_or_argmax(tape: &Tape, logits_idx: usize, vocab: usize, _rng: &mut u64
     let row_start = t.data.len() - vocab;
     let mut best = 0usize;
     let mut best_val = t.data[row_start];
-    for j in 1..vocab {
+    for j in 1..vocab
+    {
         let v = t.data[row_start + j];
-        if v > best_val {
+        if v > best_val
+        {
             best_val = v;
             best = j;
         }
@@ -141,7 +160,8 @@ fn sample_or_argmax(tape: &Tape, logits_idx: usize, vocab: usize, _rng: &mut u64
 }
 
 fn reset_kv_caches(model: &mut SciAgentModel) {
-    for layer in &mut model.layers {
+    for layer in &mut model.layers
+    {
         layer.attn.kv_cache = std::cell::RefCell::new(None);
     }
 }
@@ -172,7 +192,10 @@ mod tests {
         let gen = Generator::new(&cfg);
         let prompt = vec![4usize, 5, 6];
         let out = gen.generate_with_cache(&mut model, &prompt, 10, 42);
-        assert!(out.len() > prompt.len(), "Should produce more tokens than prompt");
+        assert!(
+            out.len() > prompt.len(),
+            "Should produce more tokens than prompt"
+        );
     }
 
     #[test]
@@ -189,33 +212,41 @@ mod tests {
         let tape2 = Tape::new();
         let idx_t = tape2.input(Tensor::from_vec(data, 4, 1));
         let mut h = model.embed.forward(&tape2, idx_t);
-        for layer in &mut model.layers {
+        for layer in &mut model.layers
+        {
             h = layer.forward(&tape2, h, 4);
         }
         h = model.rms_final.forward(&tape2, h);
-        let logits_partial = match model.lm_head.as_mut() {
+        let logits_partial = match model.lm_head.as_mut()
+        {
             Some(head) => head.forward(&tape2, h),
-            None => {
+            None =>
+            {
                 let w = tape2.input(model.embed.weight.clone());
                 h.try_matmul(w.transpose_2d()).unwrap()
-            }
+            },
         };
         let v_partial = tape2.value(logits_partial.idx()).data.clone();
-        assert_eq!(v_full, v_partial, "Manual forward should match model.forward");
+        assert_eq!(
+            v_full, v_partial,
+            "Manual forward should match model.forward"
+        );
     }
 
     #[test]
     fn test_reset_kv_cache() {
         let cfg = SciAgentConfig::debug();
         let mut model = SciAgentModel::new(&cfg);
-        for layer in &mut model.layers {
+        for layer in &mut model.layers
+        {
             *layer.attn.kv_cache.borrow_mut() = Some((
                 Tensor::from_vec(vec![1.0], 1, 1),
                 Tensor::from_vec(vec![1.0], 1, 1),
             ));
         }
         reset_kv_caches(&mut model);
-        for layer in &model.layers {
+        for layer in &model.layers
+        {
             assert!(layer.attn.kv_cache.borrow().is_none());
         }
     }

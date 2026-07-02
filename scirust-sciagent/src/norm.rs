@@ -64,7 +64,8 @@ impl Module for RMSNorm {
     }
 
     fn sync(&mut self, tape: &Tape) {
-        if let Some(i) = self.last_w_idx {
+        if let Some(i) = self.last_w_idx
+        {
             self.weight = tape.value(i);
         }
     }

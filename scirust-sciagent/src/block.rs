@@ -17,6 +17,7 @@ pub struct SciAgentBlock {
 }
 
 impl SciAgentBlock {
+    #[allow(clippy::too_many_arguments)] // constructor mirrors the config fields
     pub fn new<I: Initializer>(
         d_model: usize,
         n_heads: usize,
@@ -83,7 +84,10 @@ impl SciAgentBlock {
         map
     }
 
-    pub fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> scirust_core::error::Result<()> {
+    pub fn load_state_dict(
+        &mut self,
+        sd: &HashMap<String, Tensor>,
+    ) -> scirust_core::error::Result<()> {
         self.rms_attn.load_state_dict(sd)?;
         self.attn.load_state_dict(sd)?;
         self.rms_ffn.load_state_dict(sd)?;

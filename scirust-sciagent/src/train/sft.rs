@@ -32,20 +32,17 @@ impl SftDataset {
         let reader = std::io::BufReader::new(file);
         let mut examples = Vec::new();
 
-        for line in std::io::BufRead::lines(reader) {
+        for line in std::io::BufRead::lines(reader)
+        {
             let line = line?;
-            if line.trim().is_empty() {
+            if line.trim().is_empty()
+            {
                 continue;
             }
-            let json: serde_json::Value =
-                serde_json::from_str(&line).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-                })?;
+            let json: serde_json::Value = serde_json::from_str(&line)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let instruction = json["instruction"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let instruction = json["instruction"].as_str().unwrap_or("").to_string();
             let output = json["output"].as_str().unwrap_or("").to_string();
             let tool_calls = json["tool_calls"].as_array().map(|arr| {
                 arr.iter()
@@ -54,9 +51,7 @@ impl SftDataset {
                         let params = tc["params"]
                             .as_object()?
                             .iter()
-                            .map(|(k, v)| {
-                                (k.clone(), v.as_str().unwrap_or("").to_string())
-                            })
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
                             .collect();
                         Some(ToolCallExample {
                             name: name.to_string(),
@@ -105,6 +100,7 @@ pub fn format_sft_prompt(example: &SftExample, tokenizer: &BpeTokenizer) -> Vec<
     tokens
 }
 
+#[allow(clippy::too_many_arguments)] // training entry point mirrors the CLI knobs
 pub fn sft_train(
     model: &mut SciAgentModel,
     dataset: &SftDataset,
@@ -117,21 +113,24 @@ pub fn sft_train(
 ) {
     let total_steps = dataset.len() * epochs / batch_size;
     let mut opt = TrainOptimizer::new_muon(lr);
-    let scheduler =
-        WarmupCosineSchedule::new(lr, lr * 0.1, total_steps / 20, total_steps);
+    let scheduler = WarmupCosineSchedule::new(lr, lr * 0.1, total_steps / 20, total_steps);
 
     let mut step = 0usize;
-    for epoch in 0..epochs {
+    for epoch in 0..epochs
+    {
         let mut epoch_loss = 0.0f64;
 
-        for chunk in dataset.examples.chunks(batch_size) {
+        for chunk in dataset.examples.chunks(batch_size)
+        {
             let tape = Tape::new();
             let mut all_inputs = Vec::new();
             let mut all_targets = Vec::new();
 
-            for ex in chunk {
+            for ex in chunk
+            {
                 let tokens = format_sft_prompt(ex, tokenizer);
-                if tokens.len() < 2 {
+                if tokens.len() < 2
+                {
                     continue;
                 }
                 let seq = &tokens[..tokens.len().min(max_seq_len)];
@@ -141,7 +140,8 @@ pub fn sft_train(
                 all_targets.extend(targets);
             }
 
-            if all_inputs.is_empty() {
+            if all_inputs.is_empty()
+            {
                 continue;
             }
 
@@ -161,10 +161,9 @@ pub fn sft_train(
 
             step += 1;
 
-            if step % 10 == 0 {
-                println!(
-                    "[SFT Epoch {epoch} Step {step}] loss: {loss_val:.4} | lr: {lr:.8}"
-                );
+            if step % 10 == 0
+            {
+                println!("[SFT Epoch {epoch} Step {step}] loss: {loss_val:.4} | lr: {lr:.8}");
             }
         }
 

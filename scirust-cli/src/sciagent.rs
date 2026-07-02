@@ -1,8 +1,8 @@
 //! SCIAGENT SLM: deterministic small language model specialised for Rust + agentic.
 //! Subcommands: `ask`, `chat`, `explain`, `generate`, `info`, `attest`, `quantize`.
 
-use std::path::PathBuf;
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
 use scirust_sciagent::bpe::BpeTokenizer;
 use scirust_sciagent::config::SciAgentConfig;
@@ -29,29 +29,37 @@ fn model_name(args: &[String]) -> String {
 }
 
 fn get_config(name: &str) -> SciAgentConfig {
-    match name {
+    match name
+    {
         "debug" => SciAgentConfig::debug(),
         "350m" | "350M" => SciAgentConfig::sciagent_350m(),
         "7b" | "7B" => SciAgentConfig::sciagent_7b(),
-        _ => {
+        _ =>
+        {
             eprintln!("Unknown model '{name}', using debug");
             SciAgentConfig::debug()
-        }
+        },
     }
 }
 
 fn tokenize(text: &str) -> Vec<usize> {
-    if let Ok(tok) = BpeTokenizer::from_embedded() {
+    if let Ok(tok) = BpeTokenizer::from_embedded()
+    {
         tok.encode_with_special(text, true, false)
-    } else {
+    }
+    else
+    {
         text.chars().map(|c| (c as usize) % 32768).collect()
     }
 }
 
 fn detokenize(ids: &[usize]) -> String {
-    if let Ok(tok) = BpeTokenizer::from_embedded() {
+    if let Ok(tok) = BpeTokenizer::from_embedded()
+    {
         tok.decode(ids)
-    } else {
+    }
+    else
+    {
         ids.iter()
             .map(|&id| char::from_u32((id % 32768) as u32).unwrap_or('?'))
             .collect()
@@ -59,11 +67,16 @@ fn detokenize(ids: &[usize]) -> String {
 }
 
 fn fmt_params(n: usize) -> String {
-    if n >= 1_000_000_000 {
+    if n >= 1_000_000_000
+    {
         format!("{:.1}B", n as f64 / 1e9)
-    } else if n >= 1_000_000 {
+    }
+    else if n >= 1_000_000
+    {
         format!("{:.1}M", n as f64 / 1e6)
-    } else {
+    }
+    else
+    {
         format!("{n}")
     }
 }
@@ -80,7 +93,8 @@ fn run_ask(args: &[String]) -> u8 {
     let prompt = flag_str(args, "--prompt")
         .or_else(|| args.first().cloned())
         .unwrap_or_default();
-    if prompt.is_empty() {
+    if prompt.is_empty()
+    {
         eprintln!("usage: scirust sciagent ask <prompt> [--model debug|350m|7b]");
         return 2;
     }
@@ -98,24 +112,31 @@ fn run_chat(_args: &[String]) -> u8 {
     println!("SCIAGENT chat (Ctrl+D to exit)");
     let mut history: Vec<usize> = Vec::new();
     let stdin = io::stdin();
-    loop {
+    loop
+    {
         print!("> ");
         let _ = std::io::stdout().flush();
         let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
+        match stdin.lock().read_line(&mut line)
+        {
             Ok(0) | Err(_) => break,
-            Ok(_) => {}
+            Ok(_) =>
+            {},
         }
         let line = line.trim().to_string();
-        if line.is_empty() {
+        if line.is_empty()
+        {
             continue;
         }
         let tokens = tokenize(&line);
         history.extend(&tokens);
         let max_seq = model.config.max_seq_len;
-        let ctx = if history.len() > max_seq {
+        let ctx = if history.len() > max_seq
+        {
             &history[history.len() - max_seq..]
-        } else {
+        }
+        else
+        {
             &history
         };
         let result = gen.generate(&mut model, ctx, 256, 42);
@@ -130,32 +151,41 @@ fn run_explain(args: &[String]) -> u8 {
     let path = flag_str(args, "--path")
         .or_else(|| args.first().cloned())
         .map(PathBuf::from);
-    let path = match path {
+    let path = match path
+    {
         Some(p) => p,
-        None => {
+        None =>
+        {
             eprintln!("usage: scirust sciagent explain <path> [--lines N-M]");
             return 2;
-        }
+        },
     };
-    let content = match std::fs::read_to_string(&path) {
+    let content = match std::fs::read_to_string(&path)
+    {
         Ok(c) => c,
-        Err(e) => {
+        Err(e) =>
+        {
             eprintln!("Cannot read {:?}: {e}", path);
             return 1;
-        }
+        },
     };
-    let excerpt = match flag_str(args, "--lines") {
-        Some(range) => {
+    let excerpt = match flag_str(args, "--lines")
+    {
+        Some(range) =>
+        {
             let parts: Vec<&str> = range.splitn(2, '-').collect();
             let start: usize = parts[0].parse().unwrap_or(1);
-            let end: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(start + 30);
+            let end: usize = parts
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(start + 30);
             content
                 .lines()
                 .skip(start.saturating_sub(1))
                 .take(end - start + 1)
                 .collect::<Vec<_>>()
                 .join("\n")
-        }
+        },
         None => content.chars().take(2000).collect::<String>(),
     };
     let prompt = format!("Explain this code:\n```rust\n{excerpt}\n```");
@@ -169,7 +199,8 @@ fn run_generate(args: &[String]) -> u8 {
     let desc = flag_str(args, "--desc")
         .or_else(|| args.first().cloned())
         .unwrap_or_default();
-    if desc.is_empty() {
+    if desc.is_empty()
+    {
         eprintln!("usage: scirust sciagent generate <description>");
         return 2;
     }
@@ -219,15 +250,27 @@ fn run_quantize(args: &[String]) -> u8 {
     let quantized = QuantizedSciAgent::from_model(&model, group_size);
 
     println!("INT4 Quantization — SCIAGENT");
-    println!("  model: {:?} (params: {})", (cfg.d_model, cfg.n_layers), fmt_params(cfg.total_parameters()));
+    println!(
+        "  model: {:?} (params: {})",
+        (cfg.d_model, cfg.n_layers),
+        fmt_params(cfg.total_parameters())
+    );
     println!("  group size: {group_size}");
-    println!("  original: {} MB", quantized.estimate_original_bytes() as f64 / 1_048_576.0);
-    println!("  compressed: {} MB", quantized.total_compressed_bytes() as f64 / 1_048_576.0);
+    println!(
+        "  original: {} MB",
+        quantized.estimate_original_bytes() as f64 / 1_048_576.0
+    );
+    println!(
+        "  compressed: {} MB",
+        quantized.total_compressed_bytes() as f64 / 1_048_576.0
+    );
     println!("  ratio: {:.2}×", quantized.compression_ratio());
 
-    if let Some(out) = flag_str(args, "--output") {
+    if let Some(out) = flag_str(args, "--output")
+    {
         let path = PathBuf::from(&out);
-        match quantized.save_bin(&path) {
+        match quantized.save_bin(&path)
+        {
             Ok(_) => println!("  saved to: {out}"),
             Err(e) => eprintln!("  error: {e}"),
         }
@@ -239,7 +282,8 @@ fn run_quantize(args: &[String]) -> u8 {
 pub fn run(args: &[String]) -> u8 {
     let sub = args.first().map(String::as_str).unwrap_or("info");
     let rest = if args.len() > 1 { &args[1..] } else { &[] };
-    match sub {
+    match sub
+    {
         "ask" => run_ask(rest),
         "chat" => run_chat(rest),
         "explain" => run_explain(rest),
@@ -247,10 +291,13 @@ pub fn run(args: &[String]) -> u8 {
         "info" => run_info(rest),
         "attest" => run_attest(rest),
         "quantize" => run_quantize(rest),
-        _ => {
+        _ =>
+        {
             eprintln!("unknown sciagent subcommand: `{sub}`");
-            eprintln!("usage: scirust sciagent <ask|chat|explain|generate|info|attest|quantize> [args]");
+            eprintln!(
+                "usage: scirust sciagent <ask|chat|explain|generate|info|attest|quantize> [args]"
+            );
             2
-        }
+        },
     }
 }

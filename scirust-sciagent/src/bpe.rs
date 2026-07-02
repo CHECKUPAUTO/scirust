@@ -1,12 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 
-const SPECIAL_TOKENS: &[(&str, usize)] = &[
-    ("<pad>", 0),
-    ("<bos>", 1),
-    ("<eos>", 2),
-    ("<unk>", 3),
-];
+const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
 
 fn byte_to_str(b: u8) -> String {
     let single = vec![b];
@@ -37,23 +32,28 @@ impl BpeTrainer {
         // Étape 1 : construire le vocabulaire de base (bytes)
         let mut vocab: BTreeMap<String, usize> = BTreeMap::new();
         let mut rev: Vec<String> = Vec::new();
-        for (tok, idx) in SPECIAL_TOKENS {
+        for (tok, idx) in SPECIAL_TOKENS
+        {
             vocab.insert(tok.to_string(), *idx);
             rev.push(tok.to_string());
         }
 
         // Ajouter tous les bytes uniques du corpus (byte-level BPE)
         let mut byte_set = HashSet::new();
-        for t in texts {
-            for b in t.bytes() {
+        for t in texts
+        {
+            for b in t.bytes()
+            {
                 byte_set.insert(b);
             }
         }
         let mut byte_ids: Vec<u8> = byte_set.into_iter().collect();
         byte_ids.sort();
-        for b in &byte_ids {
+        for b in &byte_ids
+        {
             let s = byte_to_str(*b);
-            if !vocab.contains_key(&s) {
+            if !vocab.contains_key(&s)
+            {
                 vocab.insert(s.clone(), id);
                 rev.push(s);
                 id += 1;
@@ -62,7 +62,8 @@ impl BpeTrainer {
 
         // Étape 2 : tokeniser chaque texte en séquence de bytes
         let mut corpus: Vec<Vec<usize>> = Vec::with_capacity(texts.len());
-        for t in texts {
+        for t in texts
+        {
             let ids: Vec<usize> = t.bytes().map(|b| vocab[&byte_to_str(b)]).collect();
             corpus.push(ids);
         }
@@ -72,11 +73,15 @@ impl BpeTrainer {
         let mut merges: Vec<(usize, usize, usize)> = Vec::new();
         let merge_batch_size = std::cmp::min(2000, (self.vocab_size.saturating_sub(id)) / 4 + 1);
 
-        while id < self.vocab_size {
+        while id < self.vocab_size
+        {
             let mut pair_counts: HashMap<(usize, usize), u64> = HashMap::new();
-            for tokens in &corpus {
-                for w in tokens.windows(2) {
-                    if w[0] != 0 && w[1] != 0 {
+            for tokens in &corpus
+            {
+                for w in tokens.windows(2)
+                {
+                    if w[0] != 0 && w[1] != 0
+                    {
                         *pair_counts.entry((w[0], w[1])).or_insert(0) += 1;
                     }
                 }
@@ -87,19 +92,22 @@ impl BpeTrainer {
                 .into_iter()
                 .filter(|&(_, count)| count >= self.min_frequency as u64)
                 .collect();
-            ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            ranked.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
             let batch: Vec<(usize, usize)> = ranked
                 .into_iter()
                 .take(merge_batch_size)
                 .map(|((a, b), _)| (a, b))
                 .collect();
 
-            if batch.is_empty() {
+            if batch.is_empty()
+            {
                 break;
             }
 
-            for &(pa, pb) in &batch {
-                if id >= self.vocab_size {
+            for &(pa, pb) in &batch
+            {
+                if id >= self.vocab_size
+                {
                     break;
                 }
                 merges.push((pa, pb, id));
@@ -119,13 +127,17 @@ impl BpeTrainer {
                 .map(|(i, &(a, b))| ((a, b), base_id + i))
                 .collect();
 
-            for tokens in &mut corpus {
+            for tokens in &mut corpus
+            {
                 let mut out = Vec::with_capacity(tokens.len());
                 let mut i = 0;
-                while i < tokens.len() {
-                    if i + 1 < tokens.len() {
+                while i < tokens.len()
+                {
+                    if i + 1 < tokens.len()
+                    {
                         let key = (tokens[i], tokens[i + 1]);
-                        if let Some(&new_id) = merge_map.get(&key) {
+                        if let Some(&new_id) = merge_map.get(&key)
+                        {
                             out.push(new_id);
                             i += 2;
                             continue;
@@ -137,7 +149,8 @@ impl BpeTrainer {
                 *tokens = out;
             }
 
-            if id % 1000 == 0 {
+            if id % 1000 == 0
+            {
                 eprintln!("BPE: {}/{} tokens", id, self.vocab_size);
             }
         }
@@ -148,11 +161,7 @@ impl BpeTrainer {
             merges.len()
         );
 
-        BpeTokenizer {
-            vocab,
-            rev,
-            merges,
-        }
+        BpeTokenizer { vocab, rev, merges }
     }
 }
 
@@ -164,7 +173,11 @@ pub struct BpeTokenizer {
 }
 
 impl BpeTokenizer {
-    pub fn new(vocab: BTreeMap<String, usize>, rev: Vec<String>, merges: Vec<(usize, usize, usize)>) -> Self {
+    pub fn new(
+        vocab: BTreeMap<String, usize>,
+        rev: Vec<String>,
+        merges: Vec<(usize, usize, usize)>,
+    ) -> Self {
         Self { vocab, rev, merges }
     }
 
@@ -182,7 +195,8 @@ impl BpeTokenizer {
             .map(|b| *self.vocab.get(&byte_to_str(b)).unwrap_or(&3))
             .collect();
 
-        if ids.is_empty() {
+        if ids.is_empty()
+        {
             return ids;
         }
 
@@ -193,18 +207,23 @@ impl BpeTokenizer {
             .map(|&(a, b, new_id)| ((a, b), new_id))
             .collect();
 
-        if merge_lookup.is_empty() {
+        if merge_lookup.is_empty()
+        {
             return ids;
         }
 
         // Single-pass BPE merge using output buffer (avoids O(n²) remove())
-        loop {
+        loop
+        {
             let mut out = Vec::with_capacity(ids.len());
             let mut any_merged = false;
             let mut i = 0;
-            while i < ids.len() {
-                if i + 1 < ids.len() && ids[i] != 0 && ids[i + 1] != 0 {
-                    if let Some(&new_id) = merge_lookup.get(&(ids[i], ids[i + 1])) {
+            while i < ids.len()
+            {
+                if i + 1 < ids.len() && ids[i] != 0 && ids[i + 1] != 0
+                {
+                    if let Some(&new_id) = merge_lookup.get(&(ids[i], ids[i + 1]))
+                    {
                         out.push(new_id);
                         i += 2;
                         any_merged = true;
@@ -214,7 +233,8 @@ impl BpeTokenizer {
                 out.push(ids[i]);
                 i += 1;
             }
-            if !any_merged {
+            if !any_merged
+            {
                 break;
             }
             ids = out;
@@ -223,13 +243,20 @@ impl BpeTokenizer {
         ids
     }
 
-    pub fn encode_with_special(&self, text: &str, prepend_bos: bool, append_eos: bool) -> Vec<usize> {
+    pub fn encode_with_special(
+        &self,
+        text: &str,
+        prepend_bos: bool,
+        append_eos: bool,
+    ) -> Vec<usize> {
         let mut ids = Vec::new();
-        if prepend_bos {
+        if prepend_bos
+        {
             ids.push(self.special_id("<bos>"));
         }
         ids.extend(self.encode(text));
-        if append_eos {
+        if append_eos
+        {
             ids.push(self.special_id("<eos>"));
         }
         ids
@@ -237,11 +264,14 @@ impl BpeTokenizer {
 
     pub fn decode(&self, ids: &[usize]) -> String {
         let mut out = String::new();
-        for &id in ids {
-            if id < self.rev.len() {
+        for &id in ids
+        {
+            if id < self.rev.len()
+            {
                 let s = &self.rev[id];
                 // skip special tokens
-                if !s.starts_with('<') {
+                if !s.starts_with('<')
+                {
                     out.push_str(s);
                 }
             }
@@ -251,8 +281,10 @@ impl BpeTokenizer {
 
     #[allow(dead_code)]
     fn find_merge(&self, left: usize, right: usize) -> Option<usize> {
-        for &(l, r, new_id) in &self.merges {
-            if l == left && r == right {
+        for &(l, r, new_id) in &self.merges
+        {
+            if l == left && r == right
+            {
                 return Some(new_id);
             }
         }
@@ -271,12 +303,13 @@ impl BpeTokenizer {
     pub fn load_json(path: &str) -> std::io::Result<Self> {
         let s = fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&s)?;
-        let vocab: BTreeMap<String, usize> =
-            serde_json::from_value(json["vocab"].clone())?;
+        let vocab: BTreeMap<String, usize> = serde_json::from_value(json["vocab"].clone())?;
         let rev: Vec<String> = {
             let mut v = vec![String::new(); vocab.len()];
-            for (s, &id) in &vocab {
-                if id < v.len() {
+            for (s, &id) in &vocab
+            {
+                if id < v.len()
+                {
                     v[id] = s.clone();
                 }
             }
@@ -288,13 +321,16 @@ impl BpeTokenizer {
                 arr.iter()
                     .filter_map(|m| {
                         let parts: Vec<&str> = m.as_str()?.split_whitespace().collect();
-                        if parts.len() == 3 {
+                        if parts.len() == 3
+                        {
                             Some((
                                 parts[0].parse().ok()?,
                                 parts[1].parse().ok()?,
                                 parts[2].parse().ok()?,
                             ))
-                        } else {
+                        }
+                        else
+                        {
                             None
                         }
                     })
@@ -306,18 +342,17 @@ impl BpeTokenizer {
 
     pub fn from_embedded() -> std::io::Result<Self> {
         let bpe_json = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tokenizer/bpe.json"));
-        let s = std::str::from_utf8(bpe_json).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
-        let json: serde_json::Value = serde_json::from_str(s).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
-        let vocab: BTreeMap<String, usize> =
-            serde_json::from_value(json["vocab"].clone())?;
+        let s = std::str::from_utf8(bpe_json)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let json: serde_json::Value = serde_json::from_str(s)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let vocab: BTreeMap<String, usize> = serde_json::from_value(json["vocab"].clone())?;
         let rev: Vec<String> = {
             let mut v = vec![String::new(); vocab.len()];
-            for (s, &id) in &vocab {
-                if id < v.len() {
+            for (s, &id) in &vocab
+            {
+                if id < v.len()
+                {
                     v[id] = s.clone();
                 }
             }
@@ -329,13 +364,16 @@ impl BpeTokenizer {
                 arr.iter()
                     .filter_map(|m| {
                         let parts: Vec<&str> = m.as_str()?.split_whitespace().collect();
-                        if parts.len() == 3 {
+                        if parts.len() == 3
+                        {
                             Some((
                                 parts[0].parse().ok()?,
                                 parts[1].parse().ok()?,
                                 parts[2].parse().ok()?,
                             ))
-                        } else {
+                        }
+                        else
+                        {
                             None
                         }
                     })

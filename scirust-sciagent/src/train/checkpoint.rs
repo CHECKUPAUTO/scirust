@@ -15,11 +15,7 @@ pub struct CheckpointMeta {
     pub config: SciAgentConfig,
 }
 
-pub fn save_checkpoint(
-    model: &SciAgentModel,
-    meta: &CheckpointMeta,
-    path: &Path,
-) -> Result<()> {
+pub fn save_checkpoint(model: &SciAgentModel, meta: &CheckpointMeta, path: &Path) -> Result<()> {
     fs::create_dir_all(path).map_err(|e| format!("Cannot create checkpoint dir: {e}"))?;
 
     let meta_path = path.join("meta.json");
@@ -56,8 +52,7 @@ pub fn save_checkpoint(
 
 pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<CheckpointMeta> {
     let meta_path = path.join("meta.json");
-    let meta_str =
-        fs::read_to_string(&meta_path).map_err(|e| format!("Cannot read meta: {e}"))?;
+    let meta_str = fs::read_to_string(&meta_path).map_err(|e| format!("Cannot read meta: {e}"))?;
     let meta_json: serde_json::Value =
         serde_json::from_str(&meta_str).map_err(|e| format!("Cannot parse meta: {e}"))?;
 
@@ -95,14 +90,17 @@ pub fn latest_checkpoint(dir: &Path) -> Option<std::path::PathBuf> {
     let entries = fs::read_dir(dir).ok()?;
     let mut dirs: Vec<_> = entries
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().ok().map_or(false, |t| t.is_dir()))
+        .filter(|e| e.file_type().ok().is_some_and(|t| t.is_dir()))
         .collect();
     dirs.sort_by_key(|d| d.file_name());
 
     let last = dirs.last()?;
-    if last.path().join("meta.json").exists() {
+    if last.path().join("meta.json").exists()
+    {
         Some(last.path())
-    } else {
+    }
+    else
+    {
         None
     }
 }
@@ -144,7 +142,10 @@ mod tests {
         let logits_loaded = loaded.forward(&tape3, &input_ids, 4);
         let v_orig = tape2.value(logits_orig.idx());
         let v_loaded = tape3.value(logits_loaded.idx());
-        assert_eq!(v_orig.data, v_loaded.data, "Weights should match after load");
+        assert_eq!(
+            v_orig.data, v_loaded.data,
+            "Weights should match after load"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

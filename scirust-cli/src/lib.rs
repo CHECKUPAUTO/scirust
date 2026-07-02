@@ -266,13 +266,11 @@ const GROUPS: &[(&str, &[Command])] = &[
     ),
     (
         "SCIAGENT SLM",
-        &[
-            Command {
-                name: "sciagent",
-                args: "ask|chat|explain|generate|info|attest|quantize [args]",
-                about: "Deterministic SLM for Rust + agentic — GQA + SwiGLU + RoPE + RMSNorm.",
-            },
-        ],
+        &[Command {
+            name: "sciagent",
+            args: "ask|chat|explain|generate|info|attest|quantize [args]",
+            about: "Deterministic SLM for Rust + agentic — GQA + SwiGLU + RoPE + RMSNorm.",
+        }],
     ),
     (
         "INFERENCE INTEGRITY",

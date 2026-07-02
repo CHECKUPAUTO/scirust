@@ -45,7 +45,8 @@ impl MuonOptimizer {
 
 impl Optimizer for MuonOptimizer {
     fn step(&mut self, params: &[usize], tape: &Tape) {
-        for &idx in params {
+        for &idx in params
+        {
             let mut value = tape.value(idx);
             let grad = tape.grad(idx);
             assert_eq!(
@@ -65,23 +66,27 @@ impl Optimizer for MuonOptimizer {
                 .or_insert_with(|| Tensor::zeros(rows, cols));
 
             // momentum: m = β·m + (1−β)·g
-            for i in 0..value.data.len() {
-                mk.data[i] =
-                    self.momentum * mk.data[i] + (1.0 - self.momentum) * grad.data[i];
+            for i in 0..value.data.len()
+            {
+                mk.data[i] = self.momentum * mk.data[i] + (1.0 - self.momentum) * grad.data[i];
             }
 
-            if is_matrix {
+            if is_matrix
+            {
                 // orthogonalise the momentum, then apply
-                let ortho =
-                    newton_schulz_orthogonalize(&mk.data, rows, cols, self.ns_steps);
+                let ortho = newton_schulz_orthogonalize(&mk.data, rows, cols, self.ns_steps);
                 let scale = (rows as f32 / cols as f32).max(1.0).sqrt();
-                for i in 0..value.data.len() {
-                    let decay = self.weight_decay * value.data[i];
-                    value.data[i] -= self.lr * (scale * ortho[i] + decay);
+                for (v, &o) in value.data.iter_mut().zip(&ortho)
+                {
+                    let decay = self.weight_decay * *v;
+                    *v -= self.lr * (scale * o + decay);
                 }
-            } else {
+            }
+            else
+            {
                 // 1-D params: plain momentum SGD
-                for i in 0..value.data.len() {
+                for i in 0..value.data.len()
+                {
                     let decay = self.weight_decay * value.data[i];
                     value.data[i] -= self.lr * (mk.data[i] + decay);
                 }
@@ -116,7 +121,8 @@ impl TrainOptimizer {
     }
 
     pub fn with_weight_decay(mut self, wd: f32) -> Self {
-        match &mut self {
+        match &mut self
+        {
             Self::Adam(a) => a.weight_decay = wd,
             Self::Muon(m) => m.weight_decay = wd,
         }
@@ -124,21 +130,24 @@ impl TrainOptimizer {
     }
 
     pub fn step(&mut self, params: &[usize], tape: &Tape) {
-        match self {
+        match self
+        {
             Self::Adam(a) => a.step(params, tape),
             Self::Muon(m) => m.step(params, tape),
         }
     }
 
     pub fn set_lr(&mut self, lr: f32) {
-        match self {
+        match self
+        {
             Self::Adam(a) => a.set_lr(lr),
             Self::Muon(m) => m.set_lr(lr),
         }
     }
 
     pub fn lr(&self) -> f32 {
-        match self {
+        match self
+        {
             Self::Adam(a) => a.lr(),
             Self::Muon(m) => m.lr(),
         }

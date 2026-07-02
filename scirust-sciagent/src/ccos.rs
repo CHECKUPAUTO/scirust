@@ -35,7 +35,14 @@ impl CcosEntry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        Self::new_with_timestamp(sequence, model_version, input_tokens, output_tokens, prev_hash, ts)
+        Self::new_with_timestamp(
+            sequence,
+            model_version,
+            input_tokens,
+            output_tokens,
+            prev_hash,
+            ts,
+        )
     }
 
     pub fn new_with_timestamp(
@@ -77,6 +84,12 @@ impl CcosEntry {
     }
 }
 
+impl Default for CcosLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CcosLog {
     pub fn new() -> Self {
         Self {
@@ -96,7 +109,13 @@ impl CcosLog {
             .last()
             .map(|e| e.chain_hash.clone())
             .unwrap_or_else(|| String::from("0000000000000000"));
-        let entry = CcosEntry::new(sequence, model_version, input_tokens, output_tokens, &prev_hash);
+        let entry = CcosEntry::new(
+            sequence,
+            model_version,
+            input_tokens,
+            output_tokens,
+            &prev_hash,
+        );
         self.entries.push(entry);
         self.entries.last().unwrap()
     }
@@ -115,15 +134,19 @@ impl CcosLog {
 
     /// Verify the entire chain from genesis to the last entry.
     pub fn verify(&self) -> bool {
-        if self.entries.is_empty() {
+        if self.entries.is_empty()
+        {
             return true;
         }
         let mut expected_prev = String::from("0000000000000000");
-        for entry in &self.entries {
-            if entry.prev_hash != expected_prev {
+        for entry in &self.entries
+        {
+            if entry.prev_hash != expected_prev
+            {
                 return false;
             }
-            if !entry.verify_chain_hash() {
+            if !entry.verify_chain_hash()
+            {
                 return false;
             }
             expected_prev = entry.chain_hash.clone();
@@ -134,7 +157,8 @@ impl CcosLog {
     /// Export as JSON lines.
     pub fn to_json_lines(&self) -> String {
         let mut out = String::new();
-        for entry in &self.entries {
+        for entry in &self.entries
+        {
             let _ = writeln!(
                 out,
                 r#"{{"seq":{},"model":"{}","input":"{}","output":"{}","ts":{},"prev":"{}","hash":"{}"}}"#,
@@ -203,7 +227,8 @@ mod tests {
 
         assert!(log.verify());
 
-        if let Some(entry) = log.entries.last_mut() {
+        if let Some(entry) = log.entries.last_mut()
+        {
             entry.input_hash = String::from("tampered");
         }
         assert!(!log.verify());
@@ -211,8 +236,10 @@ mod tests {
 
     #[test]
     fn test_ccos_deterministic_hash() {
-        let entry1 = CcosEntry::new_with_timestamp(0, "v1", &[1, 2], &[3, 4], "0000000000000000", 0);
-        let entry2 = CcosEntry::new_with_timestamp(0, "v1", &[1, 2], &[3, 4], "0000000000000000", 0);
+        let entry1 =
+            CcosEntry::new_with_timestamp(0, "v1", &[1, 2], &[3, 4], "0000000000000000", 0);
+        let entry2 =
+            CcosEntry::new_with_timestamp(0, "v1", &[1, 2], &[3, 4], "0000000000000000", 0);
         assert_eq!(entry1.chain_hash, entry2.chain_hash);
     }
 }

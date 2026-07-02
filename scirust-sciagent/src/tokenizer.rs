@@ -8,8 +8,10 @@ pub struct SciAgentTokenizer {
 impl SciAgentTokenizer {
     pub fn new_char_level(texts: &[&str]) -> Self {
         let mut chars = BTreeMap::new();
-        for t in texts {
-            for c in t.chars() {
+        for t in texts
+        {
+            for c in t.chars()
+            {
                 *chars.entry(c).or_insert(0) += 1;
             }
         }
@@ -23,7 +25,8 @@ impl SciAgentTokenizer {
         rev.push("<eos>".to_string());
         vocab.insert("<unk>".to_string(), 3);
         rev.push("<unk>".to_string());
-        for (i, c) in chars.keys().enumerate() {
+        for (i, c) in chars.keys().enumerate()
+        {
             let s = c.to_string();
             vocab.insert(s.clone(), i + 4);
             rev.push(s);
@@ -33,7 +36,8 @@ impl SciAgentTokenizer {
 
     pub fn encode(&self, text: &str) -> Vec<usize> {
         let mut ids = Vec::new();
-        for c in text.chars() {
+        for c in text.chars()
+        {
             let s = c.to_string();
             ids.push(*self.vocab.get(&s).unwrap_or(&3));
         }
@@ -42,8 +46,10 @@ impl SciAgentTokenizer {
 
     pub fn decode(&self, ids: &[usize]) -> String {
         let mut out = String::new();
-        for &id in ids {
-            if id < self.rev.len() {
+        for &id in ids
+        {
+            if id < self.rev.len()
+            {
                 out.push_str(&self.rev[id]);
             }
         }

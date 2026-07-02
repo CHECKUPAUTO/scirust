@@ -6,6 +6,7 @@ use scirust_core::nn::conformal::conformal_quantile;
 /// The conformal quantile q̂ at level α gives a threshold.
 /// - Accept if score ≤ q̂ (prob ≥ 1 − q̂)
 /// - Reject otherwise
+///
 /// With an optional abstention band:
 /// - Abstain if q̂ < score ≤ q̂ + ε (close call)
 pub struct ConformalGuard {
@@ -26,11 +27,16 @@ impl ConformalGuard {
 
     pub fn decide(&self, probability: f32) -> GuardVerdict {
         let score = 1.0 - probability;
-        if score <= self.score_threshold {
+        if score <= self.score_threshold
+        {
             GuardVerdict::Accept(probability as f64)
-        } else if score <= self.abstain_margin {
+        }
+        else if score <= self.abstain_margin
+        {
             GuardVerdict::Abstain
-        } else {
+        }
+        else
+        {
             GuardVerdict::Reject
         }
     }
@@ -59,7 +65,11 @@ mod tests {
     fn test_guard_accepts_high_confidence() {
         let scores: Vec<f32> = (0..50).map(|i| 0.01 + i as f32 * 0.02).collect();
         let guard = ConformalGuard::calibrate(&scores, 0.1);
-        assert!(guard.threshold().is_finite(), "threshold={:?}", guard.threshold());
+        assert!(
+            guard.threshold().is_finite(),
+            "threshold={:?}",
+            guard.threshold()
+        );
         let verdict = guard.decide(0.98);
         assert!(matches!(verdict, GuardVerdict::Accept(_)));
     }
@@ -70,6 +80,9 @@ mod tests {
         let guard = ConformalGuard::calibrate(&scores, 0.1);
         // Very low probability → should not be accepted
         let verdict = guard.decide(0.001);
-        assert!(matches!(verdict, GuardVerdict::Reject | GuardVerdict::Abstain));
+        assert!(matches!(
+            verdict,
+            GuardVerdict::Reject | GuardVerdict::Abstain
+        ));
     }
 }

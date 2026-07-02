@@ -8,7 +8,7 @@ use scirust_core::autodiff::reverse::{Tape, Tensor, Var};
 
 use crate::config::SciAgentConfig;
 use crate::model::SciAgentModel;
-use crate::train::checkpoint::{save_checkpoint, CheckpointMeta};
+use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::dataset::PretrainDataset;
 use crate::train::optimizer::TrainOptimizer;
 use crate::train::scheduler::WarmupCosineSchedule;
@@ -55,8 +55,12 @@ pub fn cross_entropy_loss<'t>(tape: &'t Tape, logits: Var<'t>, targets: &[usize]
     let lprobs = logits.log_softmax(1);
 
     let mut onehot = vec![0.0f32; n * vocab];
-    for (r, &t) in targets.iter().enumerate() {
-        assert!(t < vocab, "cross_entropy: target {t} out of range ({vocab})");
+    for (r, &t) in targets.iter().enumerate()
+    {
+        assert!(
+            t < vocab,
+            "cross_entropy: target {t} out of range ({vocab})"
+        );
         onehot[r * vocab + t] = 1.0;
     }
     let onehot_v = tape.input(Tensor::from_vec(onehot, n, vocab));
@@ -97,7 +101,8 @@ pub fn train_epoch(
     let batch_size = trainer_cfg.batch_size;
     let seq_len = trainer_cfg.seq_len;
 
-    while let Some((inputs, targets)) = dataset.next_batch(batch_size) {
+    while let Some((inputs, targets)) = dataset.next_batch(batch_size)
+    {
         let tape = Tape::new();
         let logits = model.forward(&tape, &inputs, seq_len);
         let params = model.parameter_indices();
@@ -108,21 +113,24 @@ pub fn train_epoch(
         steps += 1;
 
         opt.apply_schedule(&scheduler, steps);
-        if trainer_cfg.max_grad_norm > 0.0 {
+        if trainer_cfg.max_grad_norm > 0.0
+        {
             opt.clip_grad_norm(&tape, trainer_cfg.max_grad_norm);
         }
         opt.step(&params, &tape);
         model.sync(&tape);
 
-        if steps % trainer_cfg.log_interval == 0 {
+        if steps % trainer_cfg.log_interval == 0
+        {
             let avg = total_loss / steps as f64;
             let lr = opt.lr();
             println!("[Step {steps}] loss: {avg:.6} | lr: {lr:.8}");
         }
 
-        if steps % trainer_cfg.save_interval == 0 {
-            let ckpt_dir = std::path::Path::new(&trainer_cfg.checkpoint_dir)
-                .join(format!("step_{steps}"));
+        if steps % trainer_cfg.save_interval == 0
+        {
+            let ckpt_dir =
+                std::path::Path::new(&trainer_cfg.checkpoint_dir).join(format!("step_{steps}"));
             let meta = CheckpointMeta {
                 step: steps,
                 loss: loss_val as f32,
@@ -132,14 +140,18 @@ pub fn train_epoch(
             let _ = save_checkpoint(model, &meta, &ckpt_dir);
         }
 
-        if steps >= trainer_cfg.total_steps {
+        if steps >= trainer_cfg.total_steps
+        {
             break;
         }
     }
 
-    if steps > 0 {
+    if steps > 0
+    {
         total_loss / steps as f64
-    } else {
+    }
+    else
+    {
         0.0
     }
 }
@@ -215,7 +227,9 @@ mod tests {
         };
         let mut model = SciAgentModel::new(&cfg);
         let inputs: Vec<usize> = (4..12).collect();
-        let targets: Vec<usize> = (5..13).map(|x| if x >= cfg.vocab_size { 0 } else { x }).collect();
+        let targets: Vec<usize> = (5..13)
+            .map(|x| if x >= cfg.vocab_size { 0 } else { x })
+            .collect();
 
         let loss1 = train_step(&mut model, &inputs, &targets, 8);
         let loss2 = train_step(&mut model, &inputs, &targets, 8);

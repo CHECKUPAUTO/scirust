@@ -91,9 +91,12 @@ impl SciAgentConfig {
             + self.d_ff * self.d_model;
         let layers = self.n_layers * per_layer;
         let final_norm = self.d_model;
-        let head = if self.tie_embeddings {
+        let head = if self.tie_embeddings
+        {
             0
-        } else {
+        }
+        else
+        {
             self.d_model * self.vocab_size
         };
         embed + layers + final_norm + head

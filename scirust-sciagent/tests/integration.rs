@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-use scirust_core::autodiff::reverse::Tape;
+    use scirust_core::autodiff::reverse::Tape;
 
-use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::model::SciAgentModel;
-use scirust_sciagent::tokenizer::SciAgentTokenizer;
+    use scirust_sciagent::config::SciAgentConfig;
+    use scirust_sciagent::model::SciAgentModel;
+    use scirust_sciagent::tokenizer::SciAgentTokenizer;
 
     #[test]
     fn test_model_creation() {
@@ -89,6 +89,9 @@ use scirust_sciagent::tokenizer::SciAgentTokenizer;
             let g = tape.grad(p);
             g.data.iter().map(|x| x.abs()).fold(0.0, f32::max) > 1e-10
         });
-        assert!(has_some, "At least some parameters should receive non-zero gradient");
+        assert!(
+            has_some,
+            "At least some parameters should receive non-zero gradient"
+        );
     }
 }

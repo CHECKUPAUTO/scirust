@@ -1,5 +1,5 @@
-use scirust_core::autodiff::reverse::{Tape, Var};
 use scirust_core::autodiff::reverse::Tensor;
+use scirust_core::autodiff::reverse::{Tape, Var};
 use scirust_core::nn::init::Initializer;
 use scirust_core::nn::linear::Linear;
 use scirust_core::nn::module::Module;
@@ -61,11 +61,23 @@ impl SwiGLUFFN {
         map
     }
 
-    pub fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> scirust_core::error::Result<()> {
+    pub fn load_state_dict(
+        &mut self,
+        sd: &HashMap<String, Tensor>,
+    ) -> scirust_core::error::Result<()> {
         let p = &self.name;
-        self.gate.weight = sd.get(&format!("{p}.gate.weight")).ok_or_else(|| format!("missing {p}.gate.weight"))?.clone();
-        self.up.weight = sd.get(&format!("{p}.up.weight")).ok_or_else(|| format!("missing {p}.up.weight"))?.clone();
-        self.down.weight = sd.get(&format!("{p}.down.weight")).ok_or_else(|| format!("missing {p}.down.weight"))?.clone();
+        self.gate.weight = sd
+            .get(&format!("{p}.gate.weight"))
+            .ok_or_else(|| format!("missing {p}.gate.weight"))?
+            .clone();
+        self.up.weight = sd
+            .get(&format!("{p}.up.weight"))
+            .ok_or_else(|| format!("missing {p}.up.weight"))?
+            .clone();
+        self.down.weight = sd
+            .get(&format!("{p}.down.weight"))
+            .ok_or_else(|| format!("missing {p}.down.weight"))?
+            .clone();
         Ok(())
     }
 }

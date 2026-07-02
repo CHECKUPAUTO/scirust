@@ -60,9 +60,11 @@ impl GQAAttention {
         let half = dim / 2;
         let mut cos = vec![0.0f32; rows * half];
         let mut sin = vec![0.0f32; rows * half];
-        for p in 0..rows {
+        for p in 0..rows
+        {
             let pos = (p + offset) as f32;
-            for j in 0..half {
+            for j in 0..half
+            {
                 let freq = theta.powf(-2.0 * j as f32 / dim as f32);
                 let a = pos * freq;
                 cos[p * half + j] = a.cos();
@@ -70,8 +72,10 @@ impl GQAAttention {
             }
         }
         let mut out = vec![0.0f32; rows * dim];
-        for r in 0..rows {
-            for j in 0..half {
+        for r in 0..rows
+        {
+            for j in 0..half
+            {
                 let e = t.data[r * dim + 2 * j];
                 let o = t.data[r * dim + 2 * j + 1];
                 let c = cos[r * half + j];
@@ -122,17 +126,24 @@ impl GQAAttention {
         let kr = tape.input(Self::rope_apply(&kv, 0, self.rope_theta));
 
         let mut head_out = Vec::with_capacity(h);
-        for head in 0..h {
+        for head in 0..h
+        {
             let kv_idx = head / repeat;
             let qs = qr.slice_cols(head * dh, dh);
             let ks = kr.slice_cols(kv_idx * dh, dh);
             let vs = v.slice_cols(kv_idx * dh, dh);
             let mut pb = Vec::with_capacity(batch);
-            for b in 0..batch {
+            for b in 0..batch
+            {
                 let qb = qs.slice_rows(b * seq_len, seq_len);
                 let kb = ks.slice_rows(b * seq_len, seq_len);
                 let vb = vs.slice_rows(b * seq_len, seq_len);
-                let o = qb.matmul(kb.transpose_2d()).scale(scale).causal_mask(seq_len).softmax(1).matmul(vb);
+                let o = qb
+                    .matmul(kb.transpose_2d())
+                    .scale(scale)
+                    .causal_mask(seq_len)
+                    .softmax(1)
+                    .matmul(vb);
                 pb.push(o);
             }
             let cat = concat_var_rows(tape, &pb);
@@ -140,8 +151,9 @@ impl GQAAttention {
         }
 
         let mut acc = head_out[0];
-        for hx in 1..h {
-            acc = acc.add(head_out[hx]);
+        for &ho in head_out.iter().skip(1)
+        {
+            acc = acc.add(ho);
         }
         self.w_o.forward(tape, acc)
     }
@@ -159,8 +171,10 @@ impl GQAAttention {
 
         let (k_cached, v_cached) = {
             let mut cache = self.kv_cache.borrow_mut();
-            match cache.as_mut() {
-                Some((ck, cv)) => {
+            match cache.as_mut()
+            {
+                Some((ck, cv)) =>
+                {
                     let kd = tape.value(k.idx());
                     let vd = tape.value(v.idx());
                     let mut nk = ck.data.clone();
@@ -170,13 +184,14 @@ impl GQAAttention {
                     *ck = Tensor::from_vec(nk, ck.rows + 1, ck.cols);
                     *cv = Tensor::from_vec(nv, cv.rows + 1, cv.cols);
                     (tape.input(ck.clone()), tape.input(cv.clone()))
-                }
-                None => {
+                },
+                None =>
+                {
                     let kd = tape.value(k.idx());
                     let vd = tape.value(v.idx());
                     *cache = Some((kd, vd));
                     (k, v)
-                }
+                },
             }
         };
 
@@ -187,18 +202,24 @@ impl GQAAttention {
         let kr = tape.input(Self::rope_apply(&kv, 0, self.rope_theta));
 
         let mut head_out = Vec::with_capacity(h);
-        for head in 0..h {
+        for head in 0..h
+        {
             let kv_idx = head / repeat;
             let qh = qr.slice_cols(head * dh, dh);
             let kh = kr.slice_cols(kv_idx * dh, dh);
             let vh = v_cached.slice_cols(kv_idx * dh, dh);
-            let o = qh.matmul(kh.transpose_2d()).scale(scale).softmax(1).matmul(vh);
+            let o = qh
+                .matmul(kh.transpose_2d())
+                .scale(scale)
+                .softmax(1)
+                .matmul(vh);
             head_out.push(o.matmul(build_pad(tape, head, dh, self.d_model)));
         }
 
         let mut acc = head_out[0];
-        for hx in 1..h {
-            acc = acc.add(head_out[hx]);
+        for &ho in head_out.iter().skip(1)
+        {
+            acc = acc.add(ho);
         }
         self.w_o.forward(tape, acc)
     }
@@ -229,19 +250,35 @@ impl GQAAttention {
         map
     }
 
-    pub fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> scirust_core::error::Result<()> {
+    pub fn load_state_dict(
+        &mut self,
+        sd: &HashMap<String, Tensor>,
+    ) -> scirust_core::error::Result<()> {
         let p = &self.name;
-        self.w_q.weight = sd.get(&format!("{p}.wq.weight")).ok_or_else(|| format!("missing {p}.wq.weight"))?.clone();
-        self.w_k.weight = sd.get(&format!("{p}.wk.weight")).ok_or_else(|| format!("missing {p}.wk.weight"))?.clone();
-        self.w_v.weight = sd.get(&format!("{p}.wv.weight")).ok_or_else(|| format!("missing {p}.wv.weight"))?.clone();
-        self.w_o.weight = sd.get(&format!("{p}.wo.weight")).ok_or_else(|| format!("missing {p}.wo.weight"))?.clone();
+        self.w_q.weight = sd
+            .get(&format!("{p}.wq.weight"))
+            .ok_or_else(|| format!("missing {p}.wq.weight"))?
+            .clone();
+        self.w_k.weight = sd
+            .get(&format!("{p}.wk.weight"))
+            .ok_or_else(|| format!("missing {p}.wk.weight"))?
+            .clone();
+        self.w_v.weight = sd
+            .get(&format!("{p}.wv.weight"))
+            .ok_or_else(|| format!("missing {p}.wv.weight"))?
+            .clone();
+        self.w_o.weight = sd
+            .get(&format!("{p}.wo.weight"))
+            .ok_or_else(|| format!("missing {p}.wo.weight"))?
+            .clone();
         Ok(())
     }
 }
 
 fn build_pad<'t>(tape: &'t Tape, h: usize, dh: usize, dm: usize) -> Var<'t> {
     let mut data = vec![0.0f32; dh * dm];
-    for i in 0..dh {
+    for i in 0..dh
+    {
         data[i * dm + h * dh + i] = 1.0;
     }
     tape.input(Tensor::from_vec(data, dh, dm))
@@ -251,7 +288,8 @@ fn concat_var_rows<'t>(tape: &'t Tape, vars: &[Var<'t>]) -> Var<'t> {
     let mut all = Vec::new();
     let mut rows = 0;
     let cols = vars[0].shape().1;
-    for v in vars {
+    for v in vars
+    {
         let t = tape.value(v.idx());
         all.extend(&t.data);
         rows += t.rows;

@@ -52,7 +52,8 @@ impl SciAgentInference {
 
     pub fn set_budget(&mut self, budget: usize) {
         self.budget = budget;
-        for cache in &mut self.kv_caches {
+        for cache in &mut self.kv_caches
+        {
             *cache = ElasticKvCache::new_grouped(
                 self.config.n_kv_heads * (self.config.d_model / self.config.n_heads),
                 budget,
@@ -76,7 +77,8 @@ impl SciAgentInference {
         let out = tape.value(logits.idx()).clone();
 
         // Also populate the compressed caches if enabled
-        if self.use_compressed {
+        if self.use_compressed
+        {
             self.populate_compressed_caches(&tape);
         }
 
@@ -92,9 +94,11 @@ impl SciAgentInference {
 
         // If we're using compressed cache, bypass the per-step KV storage
         // and reconstruct from the compressed cache instead.
-        if self.use_compressed {
+        if self.use_compressed
+        {
             let n_layers = self.model.layers.len();
-            for layer_idx in 0..n_layers {
+            for layer_idx in 0..n_layers
+            {
                 let layer = &mut self.model.layers[layer_idx];
                 let x = h;
                 let a = layer.rms_attn.forward(&tape, x);
@@ -128,21 +132,26 @@ impl SciAgentInference {
                 let b = layer.ffn.forward(&tape, b);
                 h = h.add(b);
             }
-        } else {
+        }
+        else
+        {
             // Standard tape-based inference with uncompressed KV cache
-            for layer in &mut self.model.layers {
+            for layer in &mut self.model.layers
+            {
                 h = layer.infer_step(&tape, h, pos);
             }
         }
 
         h = self.model.rms_final.forward(&tape, h);
 
-        let logits = match self.model.lm_head.as_mut() {
+        let logits = match self.model.lm_head.as_mut()
+        {
             Some(head) => head.forward(&tape, h),
-            None => {
+            None =>
+            {
                 let w = tape.input(self.model.embed.weight.clone());
                 h.try_matmul(w.transpose_2d()).unwrap()
-            }
+            },
         };
 
         let t = tape.value(logits.idx());
@@ -150,9 +159,11 @@ impl SciAgentInference {
         let start = t.data.len() - vocab;
         let mut best = 0usize;
         let mut bv = t.data[start];
-        for j in 1..vocab {
+        for j in 1..vocab
+        {
             let v = t.data[start + j];
-            if v > bv {
+            if v > bv
+            {
                 bv = v;
                 best = j;
             }
@@ -173,9 +184,11 @@ impl SciAgentInference {
         let start = last_logits.data.len() - vocab;
         let mut best = 0usize;
         let mut bv = last_logits.data[start];
-        for j in 1..vocab {
+        for j in 1..vocab
+        {
             let v = last_logits.data[start + j];
-            if v > bv {
+            if v > bv
+            {
                 bv = v;
                 best = j;
             }
@@ -183,10 +196,12 @@ impl SciAgentInference {
         output.push(best);
 
         // Token-by-token generation
-        for _ in 1..max_tokens {
+        for _ in 1..max_tokens
+        {
             let next = self.generate_token(best, output.len() - 1);
             output.push(next);
-            if next == 0 || next == 2 {
+            if next == 0 || next == 2
+            {
                 // <pad> or <eos>
                 break;
             }
@@ -202,26 +217,33 @@ impl SciAgentInference {
     }
 
     pub fn generate_str(&mut self, prompt: &str, max_tokens: usize) -> String {
-        let tokens = match &self.tokenizer {
+        let tokens = match &self.tokenizer
+        {
             Some(tok) => tok.encode_with_special(prompt, true, false),
             None => prompt.bytes().map(|b| b as usize).collect(),
         };
         let out = self.generate(&tokens, max_tokens);
-        match &self.tokenizer {
+        match &self.tokenizer
+        {
             Some(tok) => tok.decode(&out),
-            None => out.iter().map(|&id| char::from_u32(id as u32).unwrap_or('?')).collect(),
+            None => out
+                .iter()
+                .map(|&id| char::from_u32(id as u32).unwrap_or('?'))
+                .collect(),
         }
     }
 
     pub fn reset_caches(&mut self) {
-        for cache in &mut self.kv_caches {
+        for cache in &mut self.kv_caches
+        {
             *cache = ElasticKvCache::new_grouped(
                 self.config.n_kv_heads * (self.config.d_model / self.config.n_heads),
                 self.budget,
                 self.config.d_model / self.config.n_heads,
             );
         }
-        for layer in &mut self.model.layers {
+        for layer in &mut self.model.layers
+        {
             layer.attn.kv_cache = std::cell::RefCell::new(None);
         }
     }
@@ -245,7 +267,8 @@ impl SciAgentInference {
 
         let mut outputs = Vec::with_capacity(self.config.d_model);
 
-        for head in 0..n_heads {
+        for head in 0..n_heads
+        {
             let _kv_idx = head / repeat;
             let q_start = head * dh;
             let q_head = &q.data[q_start..q_start + dh];

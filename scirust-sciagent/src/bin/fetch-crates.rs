@@ -45,7 +45,10 @@ struct CrateVersion {
 // ── CLI ────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "fetch-crates", about = "Download top Rust crates from crates.io for SCIAGENT training")]
+#[command(
+    name = "fetch-crates",
+    about = "Download top Rust crates from crates.io for SCIAGENT training"
+)]
 struct Args {
     #[arg(short, long, default_value_t = 50)]
     count: usize,
@@ -75,7 +78,8 @@ fn main() {
     fs::create_dir_all(&args.output).expect("Cannot create output dir");
     let out = &args.output;
 
-    let crates: Vec<CrateSummary> = if let Some(list_path) = &args.crate_list {
+    let crates: Vec<CrateSummary> = if let Some(list_path) = &args.crate_list
+    {
         let content = fs::read_to_string(list_path).expect("Cannot read crate list");
         content
             .lines()
@@ -86,7 +90,9 @@ fn main() {
             })
             .filter(|c| !c.id.is_empty())
             .collect()
-    } else {
+    }
+    else
+    {
         fetch_top_crates(args.count)
     };
 
@@ -95,20 +101,26 @@ fn main() {
     let mut fetched = 0usize;
     let mut skipped = 0usize;
 
-    for c in &crates {
-        if out.join(format!("{}-done", c.id)).exists() && args.resume {
+    for c in &crates
+    {
+        if out.join(format!("{}-done", c.id)).exists() && args.resume
+        {
             skipped += 1;
             continue;
         }
 
-        if let Err(e) = fetch_and_extract(c, out, args.skip_extract) {
+        if let Err(e) = fetch_and_extract(c, out, args.skip_extract)
+        {
             eprintln!("  SKIP {}: {e}", c.id);
-        } else {
+        }
+        else
+        {
             let _ = fs::File::create(out.join(format!("{}-done", c.id)));
             fetched += 1;
         }
 
-        if args.delay_ms > 0 {
+        if args.delay_ms > 0
+        {
             std::thread::sleep(Duration::from_millis(args.delay_ms));
         }
     }
@@ -117,7 +129,10 @@ fn main() {
         "Done. Fetched {fetched} crates (skipped {skipped}) into {:?}",
         out.canonicalize().unwrap_or_else(|_| out.clone())
     );
-    eprintln!("Next: cargo run --bin collect-data -- --input {:?} -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive", out);
+    eprintln!(
+        "Next: cargo run --bin collect-data -- --input {:?} -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive",
+        out
+    );
 }
 
 fn fetch_top_crates(count: usize) -> Vec<CrateSummary> {
@@ -137,18 +152,20 @@ fn fetch_top_crates(count: usize) -> Vec<CrateSummary> {
         std::process::exit(1);
     });
     // If we need more than 100, fetch additional pages
-    if count > 100 {
+    if count > 100
+    {
         let mut all = api.crates;
-        let pages = (count + 99) / 100;
-        for page in 2..=pages {
-            let url = format!(
-                "https://crates.io/api/v1/crates?page={page}&per_page=100&sort=downloads"
-            );
+        let pages = count.div_ceil(100);
+        for page in 2..=pages
+        {
+            let url =
+                format!("https://crates.io/api/v1/crates?page={page}&per_page=100&sort=downloads");
             if let Ok(resp) = ureq::get(&url)
                 .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
                 .call()
             {
-                if let Ok(api) = resp.into_json::<ApiResponse>() {
+                if let Ok(api) = resp.into_json::<ApiResponse>()
+                {
                     all.extend(api.crates);
                 }
             }
@@ -156,7 +173,9 @@ fn fetch_top_crates(count: usize) -> Vec<CrateSummary> {
         }
         all.truncate(count);
         all
-    } else {
+    }
+    else
+    {
         api.crates
     }
 }
@@ -167,7 +186,8 @@ fn fetch_and_extract(
     skip_extract: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Get latest version
-    let version = if krate.max_version.is_empty() {
+    let version = if krate.max_version.is_empty()
+    {
         let detail_url = format!("https://crates.io/api/v1/crates/{}", krate.id);
         let resp = ureq::get(&detail_url)
             .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
@@ -178,7 +198,9 @@ fn fetch_and_extract(
             .first()
             .map(|v| v.num.clone())
             .ok_or("no versions")?
-    } else {
+    }
+    else
+    {
         krate.max_version.clone()
     };
 
@@ -190,8 +212,12 @@ fn fetch_and_extract(
     let tarball_name = format!("{}-{}.tar.gz", krate.id, version);
     let tarball_path = out.join(&tarball_name);
 
-    if !tarball_path.exists() {
-        eprintln!("  DL {} v{} ({} downloads)", krate.id, version, krate.downloads);
+    if !tarball_path.exists()
+    {
+        eprintln!(
+            "  DL {} v{} ({} downloads)",
+            krate.id, version, krate.downloads
+        );
         let resp = ureq::get(&dl_url)
             .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
             .timeout(Duration::from_secs(120))
@@ -201,14 +227,18 @@ fn fetch_and_extract(
         resp.into_reader().read_to_end(&mut body)?;
         let mut f = fs::File::create(&tarball_path)?;
         f.write_all(&body)?;
-    } else {
+    }
+    else
+    {
         eprintln!("  CACHED {} v{} (tarball exists)", krate.id, version);
     }
 
     // 3. Extract .rs files
-    if !skip_extract {
+    if !skip_extract
+    {
         let extract_dir = out.join(&krate.id);
-        if !extract_dir.exists() {
+        if !extract_dir.exists()
+        {
             fs::create_dir_all(&extract_dir)?;
             let status = Command::new("tar")
                 .args([
@@ -219,7 +249,8 @@ fn fetch_and_extract(
                     "--strip-components=1",
                 ])
                 .status()?;
-            if !status.success() {
+            if !status.success()
+            {
                 eprintln!("  tar extraction failed for {}", krate.id);
             }
         }
@@ -233,13 +264,19 @@ fn fetch_and_extract(
     Ok(())
 }
 
-fn collect_rs_files(dir: &Path, out: &Path, prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if !dir.is_dir() {
+fn collect_rs_files(
+    dir: &Path,
+    out: &Path,
+    prefix: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !dir.is_dir()
+    {
         return Ok(());
     }
     let mut file_count = 0u32;
     collect_rs_recursive(dir, out, prefix, &mut file_count)?;
-    if file_count > 0 {
+    if file_count > 0
+    {
         eprintln!("    -> {file_count} .rs files");
     }
     Ok(())
@@ -251,17 +288,22 @@ fn collect_rs_recursive(
     prefix: &str,
     count: &mut u32,
 ) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
+    for entry in fs::read_dir(dir)?
+    {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir()
+        {
             collect_rs_recursive(&path, out, prefix, count)?;
-        } else if path.extension().map_or(false, |e| e == "rs") {
+        }
+        else if path.extension().is_some_and(|e| e == "rs")
+        {
             *count += 1;
             let name = format!("{prefix}_{count}.rs");
             // Symlink to avoid duplicating disk space
             let link = out.join(&name);
-            if !link.exists() {
+            if !link.exists()
+            {
                 let _ = std::os::unix::fs::symlink(&path, &link);
             }
         }
