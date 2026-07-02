@@ -27,6 +27,15 @@ struct Cli {
     #[arg(global = true, long, default_value_t = 0.0)]
     temperature: f32,
 
+    #[arg(global = true, long, default_value_t = 0)]
+    top_k: usize,
+
+    #[arg(global = true, long, default_value_t = 1.0)]
+    top_p: f32,
+
+    #[arg(global = true, long, default_value_t = 1.0)]
+    repetition_penalty: f32,
+
     #[arg(global = true, long)]
     json: bool,
 
@@ -135,8 +144,11 @@ fn cmd_ask(model: &mut SciAgentModel, prompt: &str, cli: &Cli) {
     let tape = Tape::new();
     let _ = model.forward(&tape, &tokens, tokens.len());
 
-    let gen =
-        scirust_sciagent::generate::Generator::new(&model.config).with_temperature(cli.temperature);
+    let gen = scirust_sciagent::generate::Generator::new(&model.config)
+        .with_temperature(cli.temperature)
+        .with_top_k(cli.top_k)
+        .with_top_p(cli.top_p)
+        .with_repetition_penalty(cli.repetition_penalty);
     let result = gen.generate(model, &tokens, cli.max_tokens, cli.seed);
     let text = detokenize_with_vocab(&result, vocab);
 
@@ -161,8 +173,11 @@ fn cmd_chat(model: &mut SciAgentModel, cli: &Cli) {
     let max_seq = model.config.max_seq_len;
     println!("SCIAGENT chat (Ctrl+D to exit)");
     let mut history: Vec<usize> = Vec::new();
-    let gen =
-        scirust_sciagent::generate::Generator::new(&model.config).with_temperature(cli.temperature);
+    let gen = scirust_sciagent::generate::Generator::new(&model.config)
+        .with_temperature(cli.temperature)
+        .with_top_k(cli.top_k)
+        .with_top_p(cli.top_p)
+        .with_repetition_penalty(cli.repetition_penalty);
 
     loop
     {

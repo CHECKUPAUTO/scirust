@@ -4,25 +4,68 @@ use scirust_core::nn::Module;
 use crate::config::SciAgentConfig;
 use crate::model::SciAgentModel;
 
+/// Decoding knobs, applied in the order: repetition penalty → temperature
+/// (or greedy) → top-k → top-p → renormalise → sample. Everything is
+/// deterministic given (prompt, seed, settings).
+#[derive(Clone, Debug)]
+pub struct SamplingParams {
+    /// `<= 0.0` means greedy argmax (after the repetition penalty).
+    pub temperature: f32,
+    /// Keep only the `k` highest-probability tokens. `0` disables.
+    pub top_k: usize,
+    /// Nucleus sampling: keep the smallest set of tokens whose cumulative
+    /// probability reaches `p`. `>= 1.0` disables.
+    pub top_p: f32,
+    /// CTRL-style penalty: logits of tokens present in the recent window are
+    /// divided by this when positive, multiplied when negative. `1.0`
+    /// disables. Also applies to greedy decoding, where it breaks loops.
+    pub repetition_penalty: f32,
+    /// How many trailing context tokens the repetition penalty looks at.
+    pub repetition_window: usize,
+}
+
+impl Default for SamplingParams {
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            top_k: 0,
+            top_p: 1.0,
+            repetition_penalty: 1.0,
+            repetition_window: 64,
+        }
+    }
+}
+
 pub struct Generator {
     config: SciAgentConfig,
-    /// Softmax temperature. `<= 0.0` means greedy argmax; anything positive
-    /// samples from `softmax(logits / temperature)` with a deterministic
-    /// xorshift stream seeded by the caller, so a given (prompt, seed,
-    /// temperature) triple always reproduces the same output.
-    temperature: f32,
+    sampling: SamplingParams,
 }
 
 impl Generator {
     pub fn new(config: &SciAgentConfig) -> Self {
         Self {
             config: config.clone(),
-            temperature: 0.0,
+            sampling: SamplingParams::default(),
         }
     }
 
     pub fn with_temperature(mut self, temperature: f32) -> Self {
-        self.temperature = temperature;
+        self.sampling.temperature = temperature;
+        self
+    }
+
+    pub fn with_top_k(mut self, top_k: usize) -> Self {
+        self.sampling.top_k = top_k;
+        self
+    }
+
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.sampling.top_p = top_p;
+        self
+    }
+
+    pub fn with_repetition_penalty(mut self, penalty: f32) -> Self {
+        self.sampling.repetition_penalty = penalty;
         self
     }
 
@@ -53,11 +96,12 @@ impl Generator {
 
             let local_seq = input_slice.len();
             let logits = model.forward(&tape, input_slice, local_seq);
-            let next = sample_or_argmax(
+            let next = sample_next(
                 &tape,
                 logits.idx(),
                 self.config.vocab_size,
-                self.temperature,
+                &self.sampling,
+                &ids,
                 &mut rng_state,
             );
             ids.push(next);
@@ -99,11 +143,12 @@ impl Generator {
             },
         };
 
-        let last_idx = sample_or_argmax(
+        let last_idx = sample_next(
             &tape,
             last_logits.idx(),
             self.config.vocab_size,
-            self.temperature,
+            &self.sampling,
+            prompt,
             &mut rng_state,
         );
 
@@ -136,11 +181,12 @@ impl Generator {
                 },
             };
 
-            let next = sample_or_argmax(
+            let next = sample_next(
                 &tape,
                 logits.idx(),
                 self.config.vocab_size,
-                self.temperature,
+                &self.sampling,
+                &output,
                 &mut rng_state,
             );
             output.push(next);
@@ -173,18 +219,42 @@ fn next_uniform(state: &mut u64) -> f32 {
     ((s >> 11) as f64 / (1u64 << 53) as f64) as f32
 }
 
-fn sample_or_argmax(
+fn sample_next(
     tape: &Tape,
     logits_idx: usize,
     vocab: usize,
-    temperature: f32,
+    params: &SamplingParams,
+    recent: &[usize],
     rng: &mut u64,
 ) -> usize {
     let t = tape.value(logits_idx);
     let row_start = t.data.len() - vocab;
-    let row = &t.data[row_start..row_start + vocab];
+    let mut row: Vec<f32> = t.data[row_start..row_start + vocab].to_vec();
 
-    if temperature <= 0.0
+    // Repetition penalty (CTRL, Keskar et al. 2019): demote tokens already
+    // present in the trailing window. Dividing a positive logit and
+    // multiplying a negative one both shrink its probability.
+    if params.repetition_penalty > 1.0
+    {
+        let start = recent.len().saturating_sub(params.repetition_window);
+        for &tok in &recent[start..]
+        {
+            if tok < vocab
+            {
+                let l = row[tok];
+                row[tok] = if l > 0.0
+                {
+                    l / params.repetition_penalty
+                }
+                else
+                {
+                    l * params.repetition_penalty
+                };
+            }
+        }
+    }
+
+    if params.temperature <= 0.0
     {
         let mut best = 0usize;
         let mut best_val = row[0];
@@ -199,12 +269,11 @@ fn sample_or_argmax(
         return best;
     }
 
-    // softmax(logits / T), max-subtracted for numerical stability, then a
-    // single uniform draw walked through the CDF.
+    // softmax(logits / T), max-subtracted for numerical stability.
     let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut probs: Vec<f32> = row
         .iter()
-        .map(|&v| ((v - max) / temperature).exp())
+        .map(|&v| ((v - max) / params.temperature).exp())
         .collect();
     let z: f32 = probs.iter().sum();
     for p in probs.iter_mut()
@@ -212,17 +281,41 @@ fn sample_or_argmax(
         *p /= z;
     }
 
-    let u = next_uniform(rng);
-    let mut acc = 0.0f32;
-    for (j, &p) in probs.iter().enumerate()
+    // top-k, then top-p, both on the descending-probability order.
+    let mut order: Vec<usize> = (0..vocab).collect();
+    order.sort_unstable_by(|&a, &b| probs[b].total_cmp(&probs[a]));
+    let mut cut = vocab;
+    if params.top_k > 0
     {
-        acc += p;
-        if u < acc
+        cut = cut.min(params.top_k);
+    }
+    if params.top_p < 1.0
+    {
+        let mut cum = 0.0f32;
+        for (rank, &tok) in order.iter().enumerate().take(cut)
         {
-            return j;
+            cum += probs[tok];
+            if cum >= params.top_p
+            {
+                cut = rank + 1;
+                break;
+            }
         }
     }
-    vocab - 1 // float round-off: the CDF summed to slightly under 1.0
+    let kept = &order[..cut.max(1)];
+    let z: f32 = kept.iter().map(|&tok| probs[tok]).sum();
+
+    let u = next_uniform(rng) * z;
+    let mut acc = 0.0f32;
+    for &tok in kept
+    {
+        acc += probs[tok];
+        if u < acc
+        {
+            return tok;
+        }
+    }
+    kept[kept.len() - 1] // float round-off fallback
 }
 
 fn reset_kv_caches(model: &mut SciAgentModel) {
@@ -333,6 +426,63 @@ mod tests {
         let mut m2 = SciAgentModel::new(&cfg);
         let out_b = gen.generate(&mut m2, &prompt, 12, 2);
         assert_ne!(out_a, out_b, "different seeds should sample differently");
+    }
+
+    fn logits_tape(vals: &[f32]) -> (Tape, usize) {
+        let tape = Tape::new();
+        let n = vals.len();
+        let v = tape.input(Tensor::from_vec(vals.to_vec(), 1, n));
+        let idx = v.idx();
+        (tape, idx)
+    }
+
+    #[test]
+    fn repetition_penalty_demotes_recent_tokens_even_in_greedy() {
+        let (tape, idx) = logits_tape(&[2.0, 1.9, 0.5, 0.1]);
+        let mut rng = 1u64;
+        let mut p = SamplingParams::default();
+        // No penalty: argmax is token 0.
+        assert_eq!(sample_next(&tape, idx, 4, &p, &[0], &mut rng), 0);
+        // Penalised (0 is in the window): 2.0/1.5 = 1.33 < 1.9 → token 1.
+        p.repetition_penalty = 1.5;
+        assert_eq!(sample_next(&tape, idx, 4, &p, &[0], &mut rng), 1);
+        // Token 0 outside the window: unaffected.
+        p.repetition_window = 2;
+        let recent = vec![0, 2, 3];
+        assert_eq!(sample_next(&tape, idx, 4, &p, &recent, &mut rng), 0);
+    }
+
+    #[test]
+    fn top_k_one_is_argmax_at_any_temperature() {
+        let (tape, idx) = logits_tape(&[0.5, 3.0, 0.4, 0.2]);
+        let mut p = SamplingParams {
+            temperature: 5.0,
+            top_k: 1,
+            ..SamplingParams::default()
+        };
+        p.top_p = 1.0;
+        for seed in 1..20u64
+        {
+            let mut rng = seed_to_state(seed);
+            assert_eq!(sample_next(&tape, idx, 4, &p, &[], &mut rng), 1);
+        }
+    }
+
+    #[test]
+    fn top_p_keeps_only_the_nucleus() {
+        // softmax([5,0,0,0]) puts ~0.98 on token 0: with top_p=0.5 the
+        // nucleus is exactly {0}, so every draw returns 0.
+        let (tape, idx) = logits_tape(&[5.0, 0.0, 0.0, 0.0]);
+        let p = SamplingParams {
+            temperature: 1.0,
+            top_p: 0.5,
+            ..SamplingParams::default()
+        };
+        for seed in 1..20u64
+        {
+            let mut rng = seed_to_state(seed);
+            assert_eq!(sample_next(&tape, idx, 4, &p, &[], &mut rng), 0);
+        }
     }
 
     #[test]
