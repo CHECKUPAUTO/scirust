@@ -2621,6 +2621,7 @@ dependencies = [
  "scirust-learning",
  "scirust-neuro-symbolic",
  "scirust-runtime",
+ "scirust-sciagent",
  "scirust-solvers",
  "scirust-som-cli",
  "scirust-som-dataset",
@@ -3069,6 +3070,20 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "scirust-sciagent"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "clap",
+ "rand 0.8.6",
+ "scirust-autodiff",
+ "scirust-core",
+ "serde",
+ "serde_json",
+ "ureq 2.12.1",
 ]
 
 [[package]]

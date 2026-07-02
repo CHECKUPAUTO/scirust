@@ -259,6 +259,27 @@ of the framework.
 
 
 
+## scirust-sciagent — Deterministic SLM for Rust
+
+The `scirust-sciagent` crate provides a from-scratch transformer trained on Rust source code (672MB from crates.io + The Stack v2).
+
+**Architecture**: GQA + SwiGLU + RoPE + RMSNorm, from 106K to 7B params.
+
+**Configs**:
+| Config | Params | Vocab | Layers | Seq Len |
+|--------|--------|-------|--------|---------|
+| debug  | 106K   | 256   | 2      | 128     |
+| small  | 1.6M   | 8192  | 4      | 256     |
+| 350M   | 350M   | 32768 | 24     | 8192    |
+| 7B     | 7B     | 32768 | 40     | 8192    |
+
+**Pretrained**: `small` checkpoint (2000 steps, loss 9.01→8.90) at `/tmp/scirust_small_2k/final/`. See `scirust-sciagent/README.md`.
+
+```bash
+cargo run --release -p scirust-sciagent --bin sciagent -- --model small \\
+  --checkpoint /tmp/scirust_small_2k/final ask "fn main()" --max-tokens 100
+```
+
 ## License
 
 Dual-licensed: [PolyForm Noncommercial 1.0.0](LICENSE.md) for noncommercial and personal use; commercial license required for any commercial use. See [LICENSING.md](LICENSING.md).

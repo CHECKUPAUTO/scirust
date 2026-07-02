@@ -30,3 +30,4 @@ scirust-som-dataset = { path = "../scirust-som/crates/dataset" }
 scirust-som-model = { path = "../scirust-som/crates/model" }
 scirust-som-trainer = { path = "../scirust-som/crates/trainer" }
 scirust-som-inference = { path = "../scirust-som/crates/inference" }
+scirust-sciagent = { path = "../scirust-sciagent" }

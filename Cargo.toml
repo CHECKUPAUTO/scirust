@@ -121,6 +121,7 @@ members = [
     "scirust-synthesis",
     "scirust-codetrans",
     "scirust-scaffold",
+    "scirust-sciagent",
     "scirust-rsi",
     "scirust-license",
     "scirust-retrieval",
