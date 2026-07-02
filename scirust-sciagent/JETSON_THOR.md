@@ -87,12 +87,15 @@ then B to make it fast.**
 ## Phased plan
 
 1. **Foundations (backend-agnostic, CPU-testable — start here).**
-   - `sciagent-plan` memory planner. ✅ (this PR)
-   - Activation-checkpointing in the training loop (recompute per-layer during
-     backward). Implementable and unit-testable against the current CPU tape.
-   - A flash-attention-shaped attention path (block-streaming softmax) that is
-     numerically identical to the current dense attention — validate on CPU
-     first, then port the kernel.
+   - `sciagent-plan` memory planner. ✅
+   - Flash-attention **reference + numerical oracle** (`flash_attention`):
+     block-streaming online-softmax, proven numerically identical to the dense
+     path *and* to the model's own tape ops (`flash == dense == model`). ✅
+     This is the correctness contract a GPU kernel must satisfy.
+   - Gradient/activation **checkpointing technique** (`checkpointing`):
+     segment recompute with an upstream-gradient surrogate, proven to yield
+     gradients identical to a full end-to-end tape on `scirust-core`. ✅
+     Remaining: wire it into the training loop's multi-segment param mapping.
 2. **Route A GPU backend (on the Thor).**
    - `gpu` feature routing `SciAgentModel` ops through `scirust-gpu`.
    - Parity tests: GPU logits vs CPU logits within tolerance on the `debug`
@@ -103,6 +106,22 @@ then B to make it fast.**
      Thor. Use `sciagent-plan` to pick seq/batch for the memory budget.
    - Checkpoint to the 128 GB host memory / NVMe; evaluate with `sciagent-eval`.
 4. **Route B CUDA (optional, for throughput).**
+
+## Related: speculative decoding (DeepSpec)
+
+[deepseek-ai/DeepSpec](https://github.com/deepseek-ai/DeepSpec) is a
+Python/PyTorch/CUDA framework (MIT) for training *draft models* for speculative
+decoding (Eagle3/DFlash/DSpark). Its **code is not reusable** here — it would
+violate SCIAGENT's pure-Rust, no-ML-runtime, deterministic invariants — but the
+**pattern is a strong fit**: a small fast model (SCIAGENT `small`) drafts tokens
+that a larger target (the `350m`, once trained) verifies, for exact
+(verification-preserving) 2–4× inference speedups. Determinism is preserved
+because verification makes the output identical to the target's. **Prerequisite
+to flag now:** speculative decoding needs the draft and target to share a
+tokenizer, but the configs currently mismatch (`small` vocab 8192 vs `350m`
+vocab 32768). If drafting is a goal, align the `350m` tokenizer with `small`'s
+(or plan a vocab bridge) before training it. Not a near-term task — it depends
+on the 350M existing first.
 
 ## Risks / honesty
 
