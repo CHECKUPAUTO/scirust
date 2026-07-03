@@ -5,6 +5,39 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur scientifique entrant, Phase 0 MVP (`scirust-transpiler`)
+Nouveau crate : un transpileur **entrant** (Python/NumPy → Rust déterministe,
+sûr), c'est-à-dire le sens que le travail scientifique réclame (prototype
+Python → production Rust), à l'opposé de `scirust-codetrans` (Rust → Python/C).
+Aligné sur la conception de `docs/TRANSPILER_DESIGN.md`.
+
+- **Pipeline complet** : front-end Python/NumPy (lexer indentation-aware +
+  parser à descente récursive, écrits à la main, zéro dépendance) → **SIR**
+  typée (scalaire `f64` / tableau 1-D / index) avec inférence de types et de
+  formes → **émetteur Rust déterministe** (réductions `sum`/`dot` à ordre
+  ascendant pinné → bit-reproductibles ; std uniquement, ni FFI ni `unsafe`).
+- **Sous-ensemble** : `def`s de premier niveau ; arithmétique `+ - * / **` ;
+  opérations élémentaires et broadcasting scalaire↔tableau ; intrinsèques
+  `np.sum/dot/zeros/ones/sqrt/exp/sin/cos/abs/tanh`, `len` ; `for i in
+  range(...)`, indexation et affectation indexée, `return`. Tout ce qui sort du
+  contrat est **refusé avec un diagnostic**, jamais deviné.
+- **Oracle différentiel contre NumPy réel** (`examples/oracle.rs`) : entrées
+  aléatoires germées formatées en décimales round-trip (Python et Rust
+  reçoivent des entrées bit-identiques), compilation `rustc`, exécution des
+  deux côtés, comparaison sous tolérance `|Δ| ≤ 1e-7 + 1e-9·|numpy|`.
+  **7/7 cas, 200 essais chacun, conformes** (rk4, dot, norm, weighted-mean,
+  cumsum, saxpy, tanh). Gate non-vacuous : un opérateur faux injecté dans
+  l'émetteur fait passer 4/7 cas au ROUGE.
+- **Tests unitaires** (10, gate CI, sans Python/numpy) sur signatures,
+  inférence de types, intrinsèques, refus hors-périmètre.
+
+### Ajouté — conception du transpileur scientifique source→Rust (`docs/TRANSPILER_DESIGN.md`)
+État des lieux honnête (l'existant `codetrans` va Rust→Python/C, l'inverse de
+la vision) + architecture cible en 5 étages (front-ends → SIR typée → analyses
+→ lowering routé vers les primitives vérifiées → oracle de transpilation),
+matrice de couverture des 15 secteurs, feuille de route par phases et 6 critères
+d'acceptation. Statut mis à jour : **Phase 0 livrée et prouvée**.
+
 ### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
 Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
 Systèmes Assemblés, une approche par le Tolérancement Inertiel et Modal*,

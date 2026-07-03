@@ -1,0 +1,14 @@
+[package]
+name = "scirust-transpiler"
+version = "0.1.0"
+edition = "2021"
+description = "SciRust inbound scientific transpiler — Python/NumPy subset → deterministic, safe Rust, gated by a differential oracle (Phase 0 MVP)"
+license = "PolyForm-Noncommercial-1.0.0"
+
+# Pure Rust, zero external dependencies: every line is readable and auditable,
+# matching the SciRust doctrine. The Python front-end is a hand-written
+# lexer/parser; the Rust emitter produces std-only code so the differential
+# oracle can compile it with `rustc` alone (no cargo, no crates).
+[dependencies]
+
+[dev-dependencies]

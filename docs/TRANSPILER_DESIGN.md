@@ -1,10 +1,20 @@
 # SciRust — Conception du transpileur scientifique (source → Rust)
 
-> Statut : **conception**. Ce document décrit l'architecture d'un transpileur
-> *entrant* (Python / MATLAB / Julia / Fortran / C++ → Rust) déterministe, sûr et
-> **vérifié par oracle**, aligné sur la doctrine du dépôt (« aucune affirmation
-> sans test »). Il distingue rigoureusement ce qui **existe déjà** de ce qui
-> **reste à construire**, et ne revendique aucune capacité non livrée.
+> Statut : **conception + Phase 0 livrée**. Ce document décrit l'architecture
+> d'un transpileur *entrant* (Python / MATLAB / Julia / Fortran / C++ → Rust)
+> déterministe, sûr et **vérifié par oracle**, aligné sur la doctrine du dépôt
+> (« aucune affirmation sans test »). Il distingue rigoureusement ce qui
+> **existe déjà** de ce qui **reste à construire**, et ne revendique aucune
+> capacité non livrée.
+>
+> **Mise à jour — Phase 0 (MVP) implémentée et prouvée.** Le crate
+> [`scirust-transpiler`](../scirust-transpiler) réalise le pipeline entrant
+> complet (front-end Python/NumPy → SIR typée → émission Rust déterministe),
+> gated par un **oracle différentiel contre NumPy réel** :
+> `cargo run -p scirust-transpiler --example oracle` → **7/7 cas, 200 essais
+> chacun, conformes** (rk4, dot, norm, weighted-mean, cumsum, saxpy, tanh).
+> L'oracle est non-vacuous (l'injection d'un opérateur faux fait passer 4/7 cas
+> au ROUGE). Voir la §9-bis « État d'implémentation ».
 
 ---
 
@@ -290,14 +300,20 @@ C'est la brique qui transforme « transpileur » en « transpileur *de confiance
 
 ## 9. Feuille de route par phases
 
-- **Phase 0 — MVP (tranche verticale la plus fine).** Sous-ensemble
-  Python/NumPy → Rust routé vers `scirust-core`/`scirust-solvers`/`scirust-signal`,
-  **gated par oracle différentiel contre NumPy**. Corpus initial : un
-  intégrateur RK4, une résolution linéaire `np.linalg.solve`, une FFT
-  `np.fft`. Objectif unique : **prouver le pipeline de bout en bout**
-  (front-end → SIR → lowering → oracle vert), pas la largeur.
-- **Phase 1 — Élargir Python.** Contrôle de flux, fonctions, structures,
-  mapping SciPy étendu ; secteurs débloqués : robotique, finance, imagerie.
+- **Phase 0 — MVP (tranche verticale la plus fine). ✅ LIVRÉE.** Sous-ensemble
+  Python/NumPy → Rust déterministe std-only, **gated par oracle différentiel
+  contre NumPy réel**. Objectif atteint : **le pipeline est prouvé de bout en
+  bout** (front-end → SIR → lowering → oracle vert). Corpus livré (7 cas,
+  200 essais chacun) : intégrateur **RK4** (scalaire), **dot**, **norme**
+  euclidienne, **moyenne pondérée**, **cumsum** (boucle + tableau en sortie),
+  **saxpy** (broadcast), **tanh** élémentaire. *Écart honnête vs le plan
+  initial :* `np.linalg.solve` et `np.fft` ne sont **pas** encore livrés — ils
+  exigent le routage vers `scirust-solvers`/`scirust-signal`, prévu en Phase 1.
+- **Phase 1 — Élargir Python + router vers les noyaux vérifiés.** Contrôle de
+  flux (`if`/`while`), fonctions multiples, tableaux 2-D, et surtout le
+  **routage `np.linalg.solve` → `scirust-solvers`, `np.fft` → `scirust-signal`**
+  (au lieu du prélude std-only) ; secteurs débloqués : robotique, finance,
+  imagerie.
 - **Phase 2 — MATLAB.** Sous-ensemble matriciel + broadcasting ; secteurs :
   aéro, automobile, contrôle.
 - **Phase 3 — Fortran.** Routines numériques héritées ; secteurs : météo,
@@ -306,6 +322,41 @@ C'est la brique qui transforme « transpileur » en « transpileur *de confiance
 
 Chaque phase livre : contrat de sous-ensemble + corpus d'oracle + matrice des
 secteurs réellement débloqués.
+
+---
+
+## 9-bis. État d'implémentation (mesuré, pas revendiqué)
+
+| Brique du pipeline (§2)                     | Statut | Emplacement |
+|---------------------------------------------|--------|-------------|
+| Front-end Python/NumPy (lexer + parser)     | ✅ livré | `scirust-transpiler/src/front_python/` |
+| Scientific IR typée (scalaire/tableau/int)  | ✅ livré | `scirust-transpiler/src/sir.rs` |
+| Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
+| Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
+| Oracle différentiel contre NumPy réel       | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
+| Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (10 tests) |
+| Routage vers les noyaux `scirust-*` vérifiés | ⏳ Phase 1 | — |
+| Contrôle de flux `if`/`while`, tableaux 2-D | ⏳ Phase 1 | — |
+| Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
+
+**Résultat de l'oracle (reproductible).**
+
+```
+$ cargo run -p scirust-transpiler --example oracle
+tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
+  ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
+  ORACLE GREEN — 7/7 cases match NumPy within tolerance
+```
+
+Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur
+(`*` → `+`) fait passer **4/7 cas au ROUGE** — le gate mord réellement.
+
+> **Note de réutilisation `codetrans`.** Le §10 vise `codetrans::Expr` comme
+> backend d'émission. En pratique son nœud `Function` porte des paramètres
+> **non typés** (`Vec<String>`), ce qui ne permet pas d'émettre des signatures
+> Rust typées (`&[f64]` vs `f64`) qui *compilent*. Le MVP utilise donc un
+> émetteur dédié typé ; unifier avec `codetrans` (en étendant son `Function`
+> avec des types de paramètres) reste un travail ultérieur.
 
 ---
 
