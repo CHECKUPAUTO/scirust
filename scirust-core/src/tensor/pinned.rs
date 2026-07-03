@@ -160,17 +160,35 @@ impl PinnedBuffer {
     }
 
     /// Retourne un slice immutable de type T.
+    ///
+    /// The buffer is aligned to `align_of::<construction T>().max(128)`.
+    /// Reinterpreting as a `T` whose alignment the pointer does not satisfy
+    /// would yield a misaligned slice (UB); this asserts alignment instead so
+    /// the safe signature is honest (panics rather than producing UB).
     #[inline]
     pub fn as_slice<T>(&self) -> &[T] {
         let ptr = self.ptr as *const T;
+        assert_eq!(
+            ptr as usize % std::mem::align_of::<T>(),
+            0,
+            "PinnedBuffer::as_slice::<T>(): pointer not aligned for T (align {})",
+            std::mem::align_of::<T>()
+        );
         let len = self.len_bytes / std::mem::size_of::<T>();
         unsafe { std::slice::from_raw_parts(ptr, len) }
     }
 
-    /// Retourne un slice mutable de type T.
+    /// Retourne un slice mutable de type T. Voir [`Self::as_slice`] pour la
+    /// garantie d'alignement.
     #[inline]
     pub fn as_mut_slice<T>(&mut self) -> &mut [T] {
         let ptr = self.ptr as *mut T;
+        assert_eq!(
+            ptr as usize % std::mem::align_of::<T>(),
+            0,
+            "PinnedBuffer::as_mut_slice::<T>(): pointer not aligned for T (align {})",
+            std::mem::align_of::<T>()
+        );
         let len = self.len_bytes / std::mem::size_of::<T>();
         unsafe { std::slice::from_raw_parts_mut(ptr, len) }
     }
