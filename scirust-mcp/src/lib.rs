@@ -80,6 +80,10 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::tolerance::tolerance_tools()
+    {
+        registry.register(tool);
+    }
     registry.register(tools::cli_passthrough::cli_tool());
     registry
 }
@@ -113,5 +117,8 @@ mod tests {
         assert!(registry.names().contains(&"wallet_validate_address"));
         assert!(registry.names().contains(&"wallet_build_evm_transaction"));
         assert!(registry.names().contains(&"wallet_authorization_status"));
+        assert!(registry.names().contains(&"tolerance_inertial_capability"));
+        assert!(registry.names().contains(&"tolerance_chain_allocate"));
+        assert!(registry.names().contains(&"tolerance_acceptance_plan"));
     }
 }

@@ -50,6 +50,19 @@ pub struct BlockWeights<'a> {
     pub wd: &'a GpuMatrix,
 }
 
+/// Forward activations of one transformer block that the backward pass needs to
+/// read — produced by [`GpuChain::transformer_block_forward_cached`] and
+/// consumed by [`GpuChain::transformer_block_backward`]. All resident.
+pub struct BlockCache {
+    q: GpuMatrix,       // xn·Wq   (t×d)
+    k: GpuMatrix,       // xn·Wk   (t×d)
+    v: GpuMatrix,       // xn·Wv   (t×d)
+    weights: GpuMatrix, // softmax scores (t×t)
+    h: GpuMatrix,       // x + attn·Wo  (residual 1, t×d)
+    gate: GpuMatrix,    // hn·Wg   (t×h)
+    up: GpuMatrix,      // hn·Wu   (t×h)
+}
+
 /// The resident weights of a full **tied-embedding decoder**: a shared
 /// `vocab × d` embedding table (which is also the LM head), the `N`
 /// transformer [`BlockWeights`], and a final `d`-length RMSNorm gain. Consumed
@@ -218,6 +231,100 @@ impl GpuChain {
         self.add(&h, &mlp) // residual 2
     }
 
+    /// [`Self::transformer_block`] that also returns a [`BlockCache`] of the
+    /// forward activations the backward pass reads. Same math as the plain
+    /// forward; use this when you intend to call
+    /// [`Self::transformer_block_backward`].
+    pub fn transformer_block_forward_cached(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, BlockCache)> {
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?;
+        let k = self.matmul(&xn, w.wk)?;
+        let v = self.matmul(&xn, w.wv)?;
+        let scale = 1.0 / (q.cols() as f32).sqrt();
+        let scaled = self.scale_causal_mask(&self.matmul_t(&q, &k, false, true)?, scale, causal)?;
+        let weights = self.softmax(&scaled)?;
+        let a = self.matmul(&weights, &v)?;
+        let h = self.add(x, &self.matmul(&a, w.wo)?)?; // residual 1
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let gate = self.matmul(&hn, w.wg)?;
+        let up = self.matmul(&hn, w.wu)?;
+        let act = self.swiglu(&gate, &up)?;
+        let out = self.add(&h, &self.matmul(&act, w.wd)?)?; // residual 2
+        Ok((
+            out,
+            BlockCache {
+                q,
+                k,
+                v,
+                weights,
+                h,
+                gate,
+                up,
+            },
+        ))
+    }
+
+    /// Backward of the transformer block — the **input gradient** `dx` given the
+    /// upstream grad `dout`, the block weights, and the forward [`BlockCache`].
+    /// Chains every adjoint (residual → MLP GEMMs → SwiGLU → norm2 → residual →
+    /// Wo → attention: value/softmax/scale-mask/scores → QKV → norm1) in reverse.
+    /// Gradients that reach `x` by two paths (the two residual skips) are summed.
+    pub fn transformer_block_backward(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        cache: &BlockCache,
+        dout: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        // out = h + mlp  ⇒  dmlp = dout, and dh gets a residual contribution below.
+        // mlp = act·Wd  ⇒  dact = dout·Wdᵀ
+        let dact = self.matmul_t(dout, w.wd, false, true)?;
+        // act = silu(gate)⊙up  ⇒  dgate, dup
+        let (dgate, dup) = self.swiglu_backward(&cache.gate, &cache.up, &dact)?;
+        // gate = hn·Wg, up = hn·Wu  ⇒  dhn = dgate·Wgᵀ + dup·Wuᵀ
+        let dhn = self.add(
+            &self.matmul_t(&dgate, w.wg, false, true)?,
+            &self.matmul_t(&dup, w.wu, false, true)?,
+        )?;
+        // hn = rms_norm(h, norm2)  ⇒  dh (from MLP path)
+        let dh_mlp = self.rms_norm_backward(&cache.h, w.norm2, &dhn, eps)?;
+        // h feeds both the MLP norm and the residual add of out ⇒ dh = dout + dh_mlp
+        let dh = self.add(dout, &dh_mlp)?;
+        // h = x + a·Wo  ⇒  dao = dh ; da = dh·Woᵀ
+        let da = self.matmul_t(&dh, w.wo, false, true)?;
+        // a = weights·v  ⇒  dweights = da·vᵀ ; dv = weightsᵀ·da
+        let dweights = self.matmul_t(&da, &cache.v, false, true)?;
+        let dv = self.matmul_t(&cache.weights, &da, true, false)?;
+        // weights = softmax(scaled)  ⇒  dscaled
+        let dscaled = self.softmax_backward(&cache.weights, &dweights)?;
+        // scaled = scale_mask(q·kᵀ)  ⇒  dscores
+        let scale = 1.0 / (cache.q.cols() as f32).sqrt();
+        let dscores = self.scale_causal_mask_backward(&dscaled, scale, causal)?;
+        // scores = q·kᵀ  ⇒  dq = dscores·k ; dk = dscoresᵀ·q
+        let dq = self.matmul(&dscores, &cache.k)?;
+        let dk = self.matmul_t(&dscores, &cache.q, true, false)?;
+        // q,k,v = xn·{Wq,Wk,Wv}  ⇒  dxn = dq·Wqᵀ + dk·Wkᵀ + dv·Wvᵀ
+        let dxn = self.add(
+            &self.add(
+                &self.matmul_t(&dq, w.wq, false, true)?,
+                &self.matmul_t(&dk, w.wk, false, true)?,
+            )?,
+            &self.matmul_t(&dv, w.wv, false, true)?,
+        )?;
+        // xn = rms_norm(x, norm1)  ⇒  dx (from attention path)
+        let dx_attn = self.rms_norm_backward(x, w.norm1, &dxn, eps)?;
+        // x feeds both norm1 and the residual add of h ⇒ dx = dh + dx_attn
+        self.add(&dh, &dx_attn)
+    }
+
     /// Apply a **stack of transformer blocks** in sequence, fully resident:
     /// block `i`'s output feeds block `i+1` without ever leaving VRAM. `x` is
     /// `t×d`; every `BlockWeights` must be `d`-consistent. Returns the `t×d`
@@ -292,6 +399,104 @@ impl GpuChain {
         let grad_a = self.matmul_t(grad_c, b, false, true)?; // grad_c · Bᵀ  (m×k)
         let grad_b = self.matmul_t(a, grad_c, true, false)?; // Aᵀ · grad_c  (k×n)
         Ok((grad_a, grad_b))
+    }
+
+    /// Backward of row-wise softmax: `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)`, given the
+    /// forward output `y` and upstream grad `dy`. Result resident.
+    pub fn softmax_backward(&self, y: &GpuMatrix, dy: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.softmax_backward_resident(y, dy)
+    }
+
+    /// Backward of the SwiGLU gate `c = silu(a) ⊙ b`: returns `(da, db)`
+    /// resident, `da = dc·silu'(a)·b`, `db = dc·silu(a)`.
+    pub fn swiglu_backward(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        dc: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix)> {
+        self.ctx.swiglu_backward_resident(a, b, dc)
+    }
+
+    /// Backward of RMSNorm (input gradient `dx`), given the input `x`, the gain
+    /// `weight`, upstream grad `dy` and `eps`. Result resident.
+    pub fn rms_norm_backward(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        dy: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.rms_norm_backward_resident(x, weight, dy, eps)
+    }
+
+    /// Backward of scale + causal mask: `din = scale·dout` at kept positions,
+    /// `0` above the diagonal. Result resident.
+    pub fn scale_causal_mask_backward(
+        &self,
+        dout: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx
+            .scale_causal_mask_backward_resident(dout, scale, causal)
+    }
+
+    /// Backward of the embedding gather: accumulate `dout` (`t×d`) into a
+    /// resident `vocab × d` table gradient (row `v` = sum of `dout` rows whose
+    /// token is `v`). Deterministic, no atomics. Result resident.
+    pub fn embed_backward(
+        &self,
+        tokens: &[u32],
+        dout: &GpuMatrix,
+        vocab: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.embed_backward_resident(tokens, dout, vocab)
+    }
+
+    /// Cross-entropy loss gradient w.r.t. the `logits` (`t × vocab`) for the
+    /// per-row `targets`: `dlogits = (softmax(logits) − onehot(target)) / t`,
+    /// resident. The seed of the training backward — feed it as the upstream
+    /// grad of the LM head.
+    pub fn cross_entropy_grad(
+        &self,
+        logits: &GpuMatrix,
+        targets: &[u32],
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.cross_entropy_grad_resident(logits, targets)
+    }
+
+    /// One SGD parameter update `param − lr·grad`, resident. Feed the result
+    /// back as the next iteration's parameter — the optimizer step that closes
+    /// the on-device training loop.
+    pub fn sgd_step(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        lr: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.sgd_step_resident(param, grad, lr)
+    }
+
+    /// One AdamW step at optimizer step `step` (1-based), updating `param`, `m`
+    /// and `v` **in place**. Start `m`/`v` at zero and reuse them across steps.
+    /// Decoupled weight decay; bias-corrected. Nothing to return — the resident
+    /// `param` buffer is updated on the device.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        m: &GpuMatrix,
+        v: &GpuMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+    ) -> BackendResult<()> {
+        self.ctx
+            .adamw_step_resident(param, grad, m, v, lr, betas, eps, weight_decay, step)
     }
 
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
@@ -1040,6 +1245,564 @@ mod tests {
                 grad_b[idx]
             );
         }
+    }
+
+    /// Softmax backward must match numerical gradients. For `L = Σ softmax(X)⊙G`
+    /// the input gradient is `dx = softmax_backward(Y, G)`; checked against
+    /// central finite differences of `L` over `X` on the CPU. Skips if no adapter.
+    #[test]
+    fn softmax_backward_matches_finite_differences() {
+        use crate::ops::{cpu_softmax, cpu_softmax_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (3usize, 5usize);
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let g: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.5 + 0.2).cos())
+            .collect(); // dL/dY
+
+        let y = cpu_softmax(&x, rows, cols);
+        let gy = chain.upload(&y, rows, cols);
+        let gg = chain.upload(&g, rows, cols);
+        let dx_gpu = chain
+            .download(&chain.softmax_backward(&gy, &gg).unwrap())
+            .unwrap();
+        // GPU must also match the CPU adjoint formula exactly (same arithmetic).
+        let dx_cpu = cpu_softmax_backward(&y, &g, rows, cols);
+        assert!(rel_err(&dx_gpu, &dx_cpu) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ softmax(X)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_softmax(xx, rows, cols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..rows * cols
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += eps;
+            xm[idx] -= eps;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * eps);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// SwiGLU-gate backward must match numerical gradients. For
+    /// `L = Σ (silu(A)⊙B) ⊙ G`, `(da, db) = swiglu_backward(A, B, G)`; each is
+    /// checked against central finite differences of `L`. Skips if no adapter.
+    #[test]
+    fn swiglu_backward_matches_finite_differences() {
+        use crate::ops::cpu_swiglu_backward;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 12usize;
+        let a: Vec<f32> = (0..n).map(|i| (i as f32 * 0.4 - 1.5).sin() * 2.0).collect();
+        let b: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 + 0.5).cos()).collect();
+        let g: Vec<f32> = (0..n).map(|i| (i as f32 * 0.6 - 0.3).sin()).collect(); // dL/dC
+
+        let (ga, gb, gg) = (
+            chain.upload(&a, 1, n),
+            chain.upload(&b, 1, n),
+            chain.upload(&g, 1, n),
+        );
+        let (da_m, db_m) = chain.swiglu_backward(&ga, &gb, &gg).unwrap();
+        let da_gpu = chain.download(&da_m).unwrap();
+        let db_gpu = chain.download(&db_m).unwrap();
+        let (da_cpu, db_cpu) = cpu_swiglu_backward(&a, &b, &g);
+        assert!(rel_err(&da_gpu, &da_cpu) < 1e-4 && rel_err(&db_gpu, &db_cpu) < 1e-4);
+
+        // Gold standard: finite differences of L = Σ (silu(A)⊙B) ⊙ G.
+        let silu = |x: f32| x / (1.0 + (-x).exp());
+        let loss =
+            |aa: &[f32], bb: &[f32]| -> f32 { (0..n).map(|i| silu(aa[i]) * bb[i] * g[i]).sum() };
+        let eps = 1e-3f32;
+        for idx in 0..n
+        {
+            let (mut ap, mut am) = (a.clone(), a.clone());
+            ap[idx] += eps;
+            am[idx] -= eps;
+            let fd = (loss(&ap, &b) - loss(&am, &b)) / (2.0 * eps);
+            assert!(
+                (fd - da_gpu[idx]).abs() < 1e-2,
+                "da[{idx}]: fd={fd} gpu={}",
+                da_gpu[idx]
+            );
+            let (mut bp, mut bm) = (b.clone(), b.clone());
+            bp[idx] += eps;
+            bm[idx] -= eps;
+            let fd = (loss(&a, &bp) - loss(&a, &bm)) / (2.0 * eps);
+            assert!(
+                (fd - db_gpu[idx]).abs() < 1e-2,
+                "db[{idx}]: fd={fd} gpu={}",
+                db_gpu[idx]
+            );
+        }
+    }
+
+    /// RMSNorm backward must match numerical gradients. For `L = Σ rmsnorm(X,w)⊙G`
+    /// the input gradient `dx = rms_norm_backward(X, w, G)` is checked against
+    /// central finite differences of `L` over `X` on the CPU — this exercises the
+    /// mean-coupling term of the jacobian. Skips if no adapter.
+    #[test]
+    fn rms_norm_backward_matches_finite_differences() {
+        use crate::ops::{cpu_rms_norm, cpu_rms_norm_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (3usize, 5usize);
+        let eps = 1e-5f32;
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let w: Vec<f32> = (0..cols).map(|i| 0.6 + 0.1 * i as f32).collect();
+        let g: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.5 + 0.2).cos())
+            .collect(); // dL/dY
+
+        let dx_gpu = chain
+            .download(
+                &chain
+                    .rms_norm_backward(
+                        &chain.upload(&x, rows, cols),
+                        &chain.upload(&w, 1, cols),
+                        &chain.upload(&g, rows, cols),
+                        eps,
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(rel_err(&dx_gpu, &cpu_rms_norm_backward(&x, &w, &g, eps, rows, cols)) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ rmsnorm(X,w)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_rms_norm(xx, &w, eps, rows, cols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let step = 1e-3f32;
+        for idx in 0..rows * cols
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += step;
+            xm[idx] -= step;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * step);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// Scale + causal-mask backward: `din = scale·dout` below/on the diagonal,
+    /// `0` above. Exact match to the CPU oracle (no accumulation). Skips if no
+    /// adapter.
+    #[test]
+    fn scale_causal_mask_backward_matches_cpu_oracle() {
+        use crate::ops::cpu_scale_causal_mask_backward;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 6usize;
+        let scale = 0.125f32;
+        let dout: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+        let din_gpu = chain
+            .download(
+                &chain
+                    .scale_causal_mask_backward(&chain.upload(&dout, n, n), scale, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        let din_cpu = cpu_scale_causal_mask_backward(&dout, n, n, scale, true);
+        assert!(rel_err(&din_gpu, &din_cpu) < 1e-6);
+        // Above the diagonal must be exactly zero.
+        for i in 0..n
+        {
+            for j in i + 1..n
+            {
+                assert_eq!(din_gpu[i * n + j], 0.0, "({i},{j}) not zeroed");
+            }
+        }
+    }
+
+    /// Embedding backward: the scatter-sum must match the CPU oracle exactly
+    /// (a pure accumulation of gathered rows) and match finite differences of
+    /// `L = Σ embed(tokens, E)⊙G` over the table `E`. Skips if no adapter.
+    #[test]
+    fn embed_backward_matches_cpu_and_finite_differences() {
+        use crate::ops::{cpu_embed, cpu_embed_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, d) = (7usize, 4usize);
+        let tokens: Vec<u32> = vec![0, 3, 6, 3, 1, 3]; // token 3 repeats → accumulation
+        let t = tokens.len();
+        let g: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect(); // dL/dOut
+
+        let dtable_gpu = chain
+            .download(
+                &chain
+                    .embed_backward(&tokens, &chain.upload(&g, t, d), vocab)
+                    .unwrap(),
+            )
+            .unwrap();
+        let dtable_cpu = cpu_embed_backward(&tokens, &g, d, vocab);
+        assert!(rel_err(&dtable_gpu, &dtable_cpu) < 1e-5);
+
+        // Finite differences of L = Σ embed(tokens, E)⊙G over the table E.
+        let table: Vec<f32> = (0..vocab * d).map(|i| (i as f32 * 0.11).cos()).collect();
+        let loss = |tab: &[f32]| -> f32 {
+            cpu_embed(&tokens, tab, d, vocab)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..vocab * d
+        {
+            let (mut ep, mut em) = (table.clone(), table.clone());
+            ep[idx] += eps;
+            em[idx] -= eps;
+            let fd = (loss(&ep) - loss(&em)) / (2.0 * eps);
+            assert!(
+                (fd - dtable_gpu[idx]).abs() < 1e-2,
+                "dE[{idx}]: fd={fd} gpu={}",
+                dtable_gpu[idx]
+            );
+        }
+    }
+
+    /// The **composed block backward** — `dx` through the whole transformer block
+    /// (attention + MLP + both residuals + both norms) — must match numerical
+    /// gradients. Forward-with-cache then backward on the GPU; the loss
+    /// `L = Σ block(X)⊙G` and its central finite differences over `X` are
+    /// computed on the CPU (via `cpu_block`), so this validates that every
+    /// adjoint composes correctly. The end-to-end integration test. Skips if no
+    /// adapter.
+    #[test]
+    fn transformer_block_backward_matches_finite_differences() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (4usize, 6usize, 12usize);
+        let eps = 1e-5f32;
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.037 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.02 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.3);
+        let wk = gen(d * d, 1.1, 0.3);
+        let wv = gen(d * d, 1.7, 0.3);
+        let wo = gen(d * d, 2.3, 0.3);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.01 * i as f32).collect();
+        let wg = gen(d * h, 2.9, 0.25);
+        let wu = gen(d * h, 3.5, 0.25);
+        let wd = gen(h * d, 4.1, 0.25);
+        let g = gen(t * d, 5.0, 1.0); // dL/dout
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (up(&wq, d, d), up(&wk, d, d), up(&wv, d, d), up(&wo, d, d));
+        let (gwg, gwu, gwd) = (up(&wg, d, h), up(&wu, d, h), up(&wd, h, d));
+        let weights = BlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        };
+        let gx = up(&x, t, d);
+        let (out_m, cache) = chain
+            .transformer_block_forward_cached(&gx, &weights, eps, true)
+            .unwrap();
+        // Forward parity against the CPU block oracle.
+        let out_gpu = chain.download(&out_m).unwrap();
+        let out_cpu = cpu_block(
+            &x,
+            (&n1, &n2),
+            (&wq, &wk, &wv, &wo),
+            (&wg, &wu, &wd),
+            (t, d, h),
+            eps,
+            true,
+        );
+        assert!(rel_err(&out_gpu, &out_cpu) < 1e-4, "forward mismatch");
+
+        let dx_gpu = chain
+            .download(
+                &chain
+                    .transformer_block_backward(&gx, &weights, &cache, &up(&g, t, d), eps, true)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        // Gold standard: central finite differences of L = Σ block(X)⊙G over X.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_block(
+                xx,
+                (&n1, &n2),
+                (&wq, &wk, &wv, &wo),
+                (&wg, &wu, &wd),
+                (t, d, h),
+                eps,
+                true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let step = 1e-3f32;
+        for idx in 0..t * d
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += step;
+            xm[idx] -= step;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * step);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 2e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// Cross-entropy gradient must match numerical gradients. `dlogits =
+    /// cross_entropy_grad(logits, targets)` is checked against the CPU analytic
+    /// `(softmax − onehot)/rows` and against central finite differences of the
+    /// mean cross-entropy loss over the logits. The seed of the training
+    /// backward. Skips if no adapter.
+    #[test]
+    fn cross_entropy_grad_matches_finite_differences() {
+        use crate::ops::{cpu_cross_entropy, cpu_cross_entropy_grad};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, vocab) = (4usize, 7usize);
+        let logits: Vec<f32> = (0..rows * vocab)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let targets: Vec<u32> = vec![2, 5, 0, 6];
+
+        let dl_gpu = chain
+            .download(
+                &chain
+                    .cross_entropy_grad(&chain.upload(&logits, rows, vocab), &targets)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            rel_err(
+                &dl_gpu,
+                &cpu_cross_entropy_grad(&logits, &targets, rows, vocab)
+            ) < 1e-4
+        );
+
+        // Gold standard: central finite differences of the mean loss over logits.
+        let step = 1e-3f32;
+        for idx in 0..rows * vocab
+        {
+            let (mut lp, mut lm) = (logits.clone(), logits.clone());
+            lp[idx] += step;
+            lm[idx] -= step;
+            let fd = (cpu_cross_entropy(&lp, &targets, rows, vocab)
+                - cpu_cross_entropy(&lm, &targets, rows, vocab))
+                / (2.0 * step);
+            assert!(
+                (fd - dl_gpu[idx]).abs() < 1e-2,
+                "dlogits[{idx}]: fd={fd} gpu={}",
+                dl_gpu[idx]
+            );
+        }
+    }
+
+    /// The **capstone**: a real on-device training loop actually reduces the
+    /// loss. A linear model `logits = x·W` with cross-entropy targets; each step
+    /// runs `xent_grad → matmul_backward (dW) → sgd_step(W)` entirely on the GPU.
+    /// Asserts the loss decreases monotonically and ends well below the start —
+    /// the whole loop (forward → loss → grads → update) works. Skips if no
+    /// adapter.
+    #[test]
+    fn sgd_step_reduces_cross_entropy_loss() {
+        use crate::ops::cpu_cross_entropy;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, vocab) = (6usize, 5usize, 8usize);
+        let x: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.21 - 0.7).sin()).collect();
+        let w0: Vec<f32> = (0..d * vocab)
+            .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+            .collect();
+        let targets: Vec<u32> = (0..t as u32).map(|i| (i * 5 + 1) % vocab as u32).collect();
+        let lr = 0.5f32;
+
+        let gx = chain.upload(&x, t, d);
+        let mut gw = chain.upload(&w0, d, vocab);
+        let mut losses = Vec::new();
+        for _ in 0..12
+        {
+            // Forward: logits = x·W.
+            let logits = chain.matmul(&gx, &gw).unwrap();
+            let logits_cpu = chain.download(&logits).unwrap();
+            losses.push(cpu_cross_entropy(&logits_cpu, &targets, t, vocab));
+            // Backward: dlogits = xent grad; dW = xᵀ·dlogits (matmul_backward.1).
+            let dlogits = chain.cross_entropy_grad(&logits, &targets).unwrap();
+            let (_dx, dw) = chain.matmul_backward(&gx, &gw, &dlogits).unwrap();
+            // Optimizer step: W ← W − lr·dW.
+            gw = chain.sgd_step(&gw, &dw, lr).unwrap();
+        }
+
+        // Loss decreases monotonically and ends far below the start.
+        for pair in losses.windows(2)
+        {
+            assert!(pair[1] < pair[0] + 1e-6, "loss went up: {pair:?}");
+        }
+        assert!(
+            *losses.last().unwrap() < losses[0] * 0.7,
+            "loss barely moved: {} → {}",
+            losses[0],
+            losses.last().unwrap()
+        );
+    }
+
+    /// One AdamW step matches the CPU oracle exactly (param, m, v) — the moments
+    /// update and the bias-corrected, weight-decayed parameter update. Skips if
+    /// no adapter.
+    #[test]
+    fn adamw_step_matches_cpu_oracle() {
+        use crate::ops::cpu_adamw_step;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 16usize;
+        let mut param: Vec<f32> = (0..n).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+        let grad: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 + 0.1).cos() * 0.5).collect();
+        let mut m = vec![0.0f32; n];
+        let mut v = vec![0.0f32; n];
+        let (lr, betas, eps, wd) = (0.01f32, (0.9f32, 0.999f32), 1e-8f32, 0.01f32);
+
+        let gp = chain.upload(&param, 1, n);
+        let gg = chain.upload(&grad, 1, n);
+        let gm = chain.upload(&m, 1, n);
+        let gv = chain.upload(&v, 1, n);
+        chain
+            .adamw_step(&gp, &gg, &gm, &gv, lr, betas, eps, wd, 1)
+            .unwrap();
+        cpu_adamw_step(&mut param, &grad, &mut m, &mut v, lr, betas, eps, wd, 1);
+
+        assert!(
+            rel_err(&chain.download(&gp).unwrap(), &param) < 1e-5,
+            "param mismatch"
+        );
+        assert!(
+            rel_err(&chain.download(&gm).unwrap(), &m) < 1e-5,
+            "m mismatch"
+        );
+        assert!(
+            rel_err(&chain.download(&gv).unwrap(), &v) < 1e-5,
+            "v mismatch"
+        );
+    }
+
+    /// An AdamW training loop reduces the loss on-device. Same linear + cross-
+    /// entropy model as the SGD capstone, but the update is the resident AdamW
+    /// step with persistent `m`/`v` moments. Asserts the loss ends well below the
+    /// start. Skips if no adapter.
+    #[test]
+    fn adamw_training_loop_reduces_loss() {
+        use crate::ops::cpu_cross_entropy;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, vocab) = (6usize, 5usize, 8usize);
+        let x: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.21 - 0.7).sin()).collect();
+        let w0: Vec<f32> = (0..d * vocab)
+            .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+            .collect();
+        let targets: Vec<u32> = (0..t as u32).map(|i| (i * 5 + 1) % vocab as u32).collect();
+
+        let gx = chain.upload(&x, t, d);
+        let gw = chain.upload(&w0, d, vocab);
+        let gm = chain.upload(&vec![0.0f32; d * vocab], d, vocab);
+        let gv = chain.upload(&vec![0.0f32; d * vocab], d, vocab);
+        let mut first = 0.0f32;
+        let mut last = 0.0f32;
+        for step in 1..=30u32
+        {
+            let logits = chain.matmul(&gx, &gw).unwrap();
+            let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &targets, t, vocab);
+            if step == 1
+            {
+                first = l;
+            }
+            last = l;
+            let dlogits = chain.cross_entropy_grad(&logits, &targets).unwrap();
+            let (_dx, dw) = chain.matmul_backward(&gx, &gw, &dlogits).unwrap();
+            chain
+                .adamw_step(&gw, &dw, &gm, &gv, 0.1, (0.9, 0.999), 1e-8, 0.0, step)
+                .unwrap();
+        }
+        assert!(last < first * 0.5, "AdamW barely moved: {first} → {last}");
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.

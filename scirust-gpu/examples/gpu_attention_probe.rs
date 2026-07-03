@@ -20,7 +20,9 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err,
+    MASK_NEG, cpu_cross_entropy, cpu_cross_entropy_grad, cpu_embed, cpu_embed_backward,
+    cpu_rms_norm, cpu_rms_norm_backward, cpu_scale_causal_mask, cpu_scale_causal_mask_backward,
+    cpu_softmax, cpu_softmax_backward, cpu_swiglu_backward, rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -436,6 +438,268 @@ fn main() {
         back_err,
         &mut failures,
     );
+
+    // 11. BACKWARD: softmax adjoint dx = y ⊙ (dy − Σ dy·y), on-device.
+    let (sr, sc) = (4usize, 6usize);
+    let sx: Vec<f32> = (0..sr * sc)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let sy = cpu_softmax(&sx, sr, sc);
+    let sdy: Vec<f32> = (0..sr * sc).map(|i| (i as f32 * 0.5 + 0.2).cos()).collect();
+    let sdx_gpu = chain
+        .download(
+            &chain
+                .softmax_backward(&chain.upload(&sy, sr, sc), &chain.upload(&sdy, sr, sc))
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: softmax vjp (y⊙(dy−Σdy·y))",
+        rel_err(&sdx_gpu, &cpu_softmax_backward(&sy, &sdy, sr, sc)),
+        &mut failures,
+    );
+
+    // 12. BACKWARD: SwiGLU adjoint — da = dc·silu'(a)·b, db = dc·silu(a).
+    let sn = 14usize;
+    let sa: Vec<f32> = (0..sn)
+        .map(|i| (i as f32 * 0.4 - 1.5).sin() * 2.0)
+        .collect();
+    let sb: Vec<f32> = (0..sn).map(|i| (i as f32 * 0.3 + 0.5).cos()).collect();
+    let sdc: Vec<f32> = (0..sn).map(|i| (i as f32 * 0.6 - 0.3).sin()).collect();
+    let (gda2, gdb2) = chain
+        .swiglu_backward(
+            &chain.upload(&sa, 1, sn),
+            &chain.upload(&sb, 1, sn),
+            &chain.upload(&sdc, 1, sn),
+        )
+        .unwrap();
+    let (da_cpu, db_cpu) = cpu_swiglu_backward(&sa, &sb, &sdc);
+    let sg_err = rel_err(&chain.download(&gda2).unwrap(), &da_cpu)
+        .max(rel_err(&chain.download(&gdb2).unwrap(), &db_cpu));
+    check("backward: swiglu vjp (da, db)", sg_err, &mut failures);
+
+    // 13. BACKWARD: RMSNorm input gradient (the mean-coupling jacobian).
+    let (rr, rc) = (4usize, 6usize);
+    let rx: Vec<f32> = (0..rr * rc)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let rwt: Vec<f32> = (0..rc).map(|i| 0.6 + 0.1 * i as f32).collect();
+    let rdy: Vec<f32> = (0..rr * rc).map(|i| (i as f32 * 0.5 + 0.2).cos()).collect();
+    let rdx_gpu = chain
+        .download(
+            &chain
+                .rms_norm_backward(
+                    &chain.upload(&rx, rr, rc),
+                    &chain.upload(&rwt, 1, rc),
+                    &chain.upload(&rdy, rr, rc),
+                    eps,
+                )
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: rmsnorm vjp (dx, mean-coupled)",
+        rel_err(
+            &rdx_gpu,
+            &cpu_rms_norm_backward(&rx, &rwt, &rdy, eps, rr, rc),
+        ),
+        &mut failures,
+    );
+
+    // 14. BACKWARD: scale + causal mask — scale below/on diagonal, 0 above.
+    let mn = 6usize;
+    let mdout: Vec<f32> = (0..mn * mn).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+    let mdin_gpu = chain
+        .download(
+            &chain
+                .scale_causal_mask_backward(&chain.upload(&mdout, mn, mn), 0.125, true)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: scale+mask vjp (0 above diagonal)",
+        rel_err(
+            &mdin_gpu,
+            &cpu_scale_causal_mask_backward(&mdout, mn, mn, 0.125, true),
+        ),
+        &mut failures,
+    );
+
+    // 15. BACKWARD: embedding scatter-sum — dE[v] = Σ over tokens==v of dOut.
+    let evocab = 9usize;
+    let etoks: Vec<u32> = vec![0, 4, 8, 4, 1, 4]; // token 4 repeats → accumulation
+    let et_len = etoks.len();
+    let edout: Vec<f32> = (0..et_len * d)
+        .map(|i| (i as f32 * 0.3 - 0.5).sin())
+        .collect();
+    let edt_gpu = chain
+        .download(
+            &chain
+                .embed_backward(&etoks, &chain.upload(&edout, et_len, d), evocab)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: embedding scatter-sum (dE[v])",
+        rel_err(&edt_gpu, &cpu_embed_backward(&etoks, &edout, d, evocab)),
+        &mut failures,
+    );
+
+    // 16. BACKWARD (integration): dx through the WHOLE transformer block, checked
+    //     against central finite differences of L = Σ block(x)⊙G (via the CPU
+    //     block closure). Absolute tolerance since finite differences carry ~1e-3
+    //     truncation error. This proves every adjoint composes correctly.
+    let bwd_bw = BlockWeights {
+        norm1: &gnw,
+        wq: &gbq,
+        wk: &gbk,
+        wv: &gbv,
+        wo: &gbo,
+        norm2: &gn2,
+        wg: &gwg,
+        wu: &gwu,
+        wd: &gwd,
+    };
+    let bg: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.23 - 0.4).sin()).collect(); // dL/dout
+    let (_out_c, bcache) = chain
+        .transformer_block_forward_cached(&gnx, &bwd_bw, eps, true)
+        .unwrap();
+    let bdx_gpu = chain
+        .download(
+            &chain
+                .transformer_block_backward(
+                    &gnx,
+                    &bwd_bw,
+                    &bcache,
+                    &chain.upload(&bg, t, d),
+                    eps,
+                    true,
+                )
+                .unwrap(),
+        )
+        .unwrap();
+    let bloss =
+        |xx: &[f32]| -> f32 { cpu_block_once(xx).iter().zip(&bg).map(|(a, b)| a * b).sum() };
+    let hstep = 1e-3f32;
+    let mut max_fd_err = 0.0f32;
+    for idx in 0..t * d
+    {
+        let (mut xp, mut xm) = (nx.clone(), nx.clone());
+        xp[idx] += hstep;
+        xm[idx] -= hstep;
+        let fd = (bloss(&xp) - bloss(&xm)) / (2.0 * hstep);
+        max_fd_err = max_fd_err.max((fd - bdx_gpu[idx]).abs());
+    }
+    let ok = max_fd_err < 3e-2;
+    println!(
+        "  {:<34} max|fd−gpu| = {:>10.3e}   {}",
+        "backward: full block dx (finite-diff)",
+        max_fd_err,
+        if ok { "PASS" } else { "FAIL" }
+    );
+    if !ok
+    {
+        failures += 1;
+    }
+
+    // 17. LOSS: cross-entropy gradient dlogits = (softmax − onehot)/t — the seed
+    //     of the whole training backward.
+    let (lrows, lvocab) = (5usize, 11usize);
+    let logits: Vec<f32> = (0..lrows * lvocab)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let ltargets: Vec<u32> = (0..lrows as u32)
+        .map(|i| (i * 3 + 2) % lvocab as u32)
+        .collect();
+    let dl_gpu = chain
+        .download(
+            &chain
+                .cross_entropy_grad(&chain.upload(&logits, lrows, lvocab), &ltargets)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "loss: cross-entropy grad (softmax−onehot)/t",
+        rel_err(
+            &dl_gpu,
+            &cpu_cross_entropy_grad(&logits, &ltargets, lrows, lvocab),
+        ),
+        &mut failures,
+    );
+
+    // 18. CAPSTONE — a real on-device training loop reduces the loss. Linear
+    //     model logits = x·W with cross-entropy targets; each step runs
+    //     xent_grad → matmul_backward (dW) → sgd_step(W), entirely on the GPU.
+    let (tt, td, tv) = (6usize, 5usize, 8usize);
+    let tx: Vec<f32> = (0..tt * td)
+        .map(|i| (i as f32 * 0.21 - 0.7).sin())
+        .collect();
+    let tw0: Vec<f32> = (0..td * tv)
+        .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+        .collect();
+    let ttargets: Vec<u32> = (0..tt as u32).map(|i| (i * 5 + 1) % tv as u32).collect();
+    let tgx = chain.upload(&tx, tt, td);
+    let mut tgw = chain.upload(&tw0, td, tv);
+    let (mut loss0, mut lossf) = (0.0f32, 0.0f32);
+    for step in 0..12
+    {
+        let logits = chain.matmul(&tgx, &tgw).unwrap();
+        let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &ttargets, tt, tv);
+        if step == 0
+        {
+            loss0 = l;
+        }
+        lossf = l;
+        let dl = chain.cross_entropy_grad(&logits, &ttargets).unwrap();
+        let (_dx, dw) = chain.matmul_backward(&tgx, &tgw, &dl).unwrap();
+        tgw = chain.sgd_step(&tgw, &dw, 0.5).unwrap();
+    }
+    let trained = lossf < loss0 * 0.7;
+    println!(
+        "  {:<34} loss {:.4} → {:.4}   {}",
+        "TRAIN LOOP (xent→grad→sgd on GPU)",
+        loss0,
+        lossf,
+        if trained { "PASS" } else { "FAIL" }
+    );
+    if !trained
+    {
+        failures += 1;
+    }
+
+    // 19. Same loop but with the resident AdamW optimizer (persistent m/v
+    //     moments in VRAM) — the optimizer a real 350M run uses.
+    let agw = chain.upload(&tw0, td, tv);
+    let am = chain.upload(&vec![0.0f32; td * tv], td, tv);
+    let av = chain.upload(&vec![0.0f32; td * tv], td, tv);
+    let (mut aloss0, mut alossf) = (0.0f32, 0.0f32);
+    for step in 1..=30u32
+    {
+        let logits = chain.matmul(&tgx, &agw).unwrap();
+        let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &ttargets, tt, tv);
+        if step == 1
+        {
+            aloss0 = l;
+        }
+        alossf = l;
+        let dl = chain.cross_entropy_grad(&logits, &ttargets).unwrap();
+        let (_dx, dw) = chain.matmul_backward(&tgx, &agw, &dl).unwrap();
+        chain
+            .adamw_step(&agw, &dw, &am, &av, 0.1, (0.9, 0.999), 1e-8, 0.0, step)
+            .unwrap();
+    }
+    let atrained = alossf < aloss0 * 0.5;
+    println!(
+        "  {:<34} loss {:.4} → {:.4}   {}",
+        "TRAIN LOOP (AdamW on GPU, 30 steps)",
+        aloss0,
+        alossf,
+        if atrained { "PASS" } else { "FAIL" }
+    );
+    if !atrained
+    {
+        failures += 1;
+    }
 
     println!();
     if failures == 0

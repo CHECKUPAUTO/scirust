@@ -124,6 +124,223 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Backward of row-wise softmax. Given the forward output `y = softmax(x)` and
+/// the upstream grad `dy`, one invocation per row computes the Jacobian-vector
+/// product `dx = y ⊙ (dy − Σⱼ dyⱼ·yⱼ)`. The CPU contract is
+/// [`crate::ops::cpu_softmax_backward`].
+const SOFTMAX_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, _p0: u32, _p1: u32, };
+
+@group(0) @binding(0) var<storage, read>       y:  array<f32>;
+@group(0) @binding(1) var<storage, read>       dy: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dx: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    if (row >= p.rows) { return; }
+    if (p.cols == 0u) { return; }
+    let base = row * p.cols;
+    var s = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { s = s + dy[base + j] * y[base + j]; }
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { dx[base + j] = y[base + j] * (dy[base + j] - s); }
+}
+"#;
+
+/// Backward of the SwiGLU gate `c = silu(a) ⊙ b` (`silu(x)=x·σ(x)`). One
+/// invocation per element writes both gradients into a single `2n` output:
+/// `dab[i] = da = dc · silu'(a) · b` and `dab[n+i] = db = dc · silu(a)`, where
+/// `silu'(a) = σ(a)·(1 + a·(1−σ(a)))`. Packing both into one buffer keeps this
+/// at **4 storage buffers** (a, b, dc, dab) — within the portable
+/// `downlevel_defaults` limit that a five-buffer layout would exceed on real
+/// hardware. The CPU contract is [`crate::ops::cpu_swiglu_backward`].
+const SWIGLU_BWD_WGSL: &str = r#"
+struct P { n: u32, _p0: u32, _p1: u32, _p2: u32, };
+
+@group(0) @binding(0) var<storage, read>       a:   array<f32>;
+@group(0) @binding(1) var<storage, read>       b:   array<f32>;
+@group(0) @binding(2) var<storage, read>       dc:  array<f32>;
+@group(0) @binding(3) var<storage, read_write> dab: array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    let sig = 1.0 / (1.0 + exp(-a[i]));
+    let silu = a[i] * sig;
+    let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
+    dab[i] = dc[i] * dsilu * b[i];       // da
+    dab[p.n + i] = dc[i] * silu;         // db
+}
+"#;
+
+/// Backward of row-wise RMSNorm `y = x/rms · w` (`rms = √(mean(x²)+eps)`), input
+/// gradient only. One invocation per row computes
+/// `dx_j = (dy_j·w_j)/rms − x_j · (Σₖ dyₖ·wₖ·xₖ)/(d·rms³)` — the normalisation
+/// jacobian, whose second term couples all elements through `rms`. The CPU
+/// contract is [`crate::ops::cpu_rms_norm_backward`].
+const RMSNORM_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, eps_bits: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       x:      array<f32>;
+@group(0) @binding(1) var<storage, read>       weight: array<f32>;
+@group(0) @binding(2) var<storage, read>       dy:     array<f32>;
+@group(0) @binding(3) var<storage, read_write> dx:     array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    if (row >= p.rows) { return; }
+    if (p.cols == 0u) { return; }
+    let base = row * p.cols;
+    var ss = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { let v = x[base + j]; ss = ss + v * v; }
+    let ms = ss / f32(p.cols) + bitcast<f32>(p.eps_bits);
+    let rms = sqrt(ms);
+    var dot = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { dot = dot + dy[base + j] * weight[j] * x[base + j]; }
+    let inv = 1.0 / rms;
+    let coef = dot / (f32(p.cols) * ms * rms);
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) {
+        dx[base + j] = dy[base + j] * weight[j] * inv - x[base + j] * coef;
+    }
+}
+"#;
+
+/// Backward of the scale + causal mask. `din = scale·dout` at kept positions
+/// and `0` above the diagonal (masked keys carry no gradient — the `-1e30`
+/// sentinel was a constant). Same 2D dispatch/convention as the forward mask.
+const MASK_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, causal: u32, scale_bits: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.y;
+    let j = gid.x;
+    if (i >= p.rows || j >= p.cols) { return; }
+    let idx = i * p.cols + j;
+    if (p.causal == 1u && j > i) {
+        out[idx] = 0.0;
+    } else {
+        out[idx] = inp[idx] * bitcast<f32>(p.scale_bits);
+    }
+}
+"#;
+
+/// Backward of the token embedding gather: accumulate the upstream grad `dout`
+/// (`rows × d`) into the `vocab × d` table gradient — row `v` of `dtable` is the
+/// sum of `dout` rows whose token id is `v`. Deterministic, **no atomics**: one
+/// invocation per `(v, c)` output cell scans the `rows` tokens and sums the
+/// matching contributions. The CPU contract is [`crate::ops::cpu_embed_backward`].
+const EMBED_BWD_WGSL: &str = r#"
+struct P { rows: u32, d: u32, vocab: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       tokens: array<u32>;
+@group(0) @binding(1) var<storage, read>       dout:   array<f32>;
+@group(0) @binding(2) var<storage, read_write> dtable: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= p.vocab * p.d) { return; }
+    let v = idx / p.d;
+    let c = idx % p.d;
+    var acc = 0.0;
+    for (var i: u32 = 0u; i < p.rows; i = i + 1u) {
+        if (min(tokens[i], p.vocab - 1u) == v) { acc = acc + dout[i * p.d + c]; }
+    }
+    dtable[idx] = acc;
+}
+"#;
+
+/// Gradient of the mean cross-entropy loss w.r.t. the logits. Given the softmax
+/// probabilities `prob` (`rows × cols`) and the per-row `targets`,
+/// `dlogits = (prob − onehot(target)) / rows`. One invocation per logit. The CPU
+/// contract is [`crate::ops::cpu_cross_entropy_grad`].
+const XENT_GRAD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, inv_n_bits: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       prob:    array<f32>;
+@group(0) @binding(1) var<storage, read>       targets: array<u32>;
+@group(0) @binding(2) var<storage, read_write> dlogits: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= p.rows * p.cols) { return; }
+    let i = idx / p.cols;
+    let j = idx % p.cols;
+    var v = prob[idx];
+    if (j == targets[i]) { v = v - 1.0; }
+    dlogits[idx] = v * bitcast<f32>(p.inv_n_bits);
+}
+"#;
+
+/// One SGD parameter update: `out = param − lr·grad`, elementwise. The resident
+/// optimizer step that closes the training loop. The CPU contract is
+/// [`crate::ops::cpu_sgd_step`].
+const SGD_WGSL: &str = r#"
+struct P { n: u32, lr_bits: u32, _p0: u32, _p1: u32, };
+
+@group(0) @binding(0) var<storage, read>       param: array<f32>;
+@group(0) @binding(1) var<storage, read>       grad:  array<f32>;
+@group(0) @binding(2) var<storage, read_write> out:   array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    out[i] = param[i] - bitcast<f32>(p.lr_bits) * grad[i];
+}
+"#;
+
+/// One AdamW step, updating `param`, `m`, `v` **in place** (bias-corrected Adam
+/// with decoupled weight decay). Stays at 4 storage buffers (`param`, `grad`,
+/// `m`, `v`) by updating in place. Hyper-parameters ride the uniform as f32
+/// bits; `bc1`/`bc2` are the precomputed bias corrections `1 − βᵗ`. The CPU
+/// contract is [`crate::ops::cpu_adamw_step`].
+const ADAMW_WGSL: &str = r#"
+struct P {
+    n: u32, lr: u32, b1: u32, b2: u32,
+    eps: u32, wd: u32, bc1: u32, bc2: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> param: array<f32>;
+@group(0) @binding(1) var<storage, read>       grad:  array<f32>;
+@group(0) @binding(2) var<storage, read_write> m:     array<f32>;
+@group(0) @binding(3) var<storage, read_write> v:     array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    let lr = bitcast<f32>(p.lr);
+    let b1 = bitcast<f32>(p.b1);
+    let b2 = bitcast<f32>(p.b2);
+    let eps = bitcast<f32>(p.eps);
+    let wd = bitcast<f32>(p.wd);
+    let g = grad[i];
+    let mi = b1 * m[i] + (1.0 - b1) * g;
+    let vi = b2 * v[i] + (1.0 - b2) * g * g;
+    m[i] = mi;
+    v[i] = vi;
+    let mhat = mi / bitcast<f32>(p.bc1);
+    let vhat = vi / bitcast<f32>(p.bc2);
+    param[i] = param[i] - lr * (mhat / (sqrt(vhat) + eps) + wd * param[i]);
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -187,6 +404,14 @@ pub struct WgpuContext {
     mask_pipeline: wgpu::ComputePipeline,
     rmsnorm_pipeline: wgpu::ComputePipeline,
     embed_pipeline: wgpu::ComputePipeline,
+    softmax_bwd_pipeline: wgpu::ComputePipeline,
+    swiglu_bwd_pipeline: wgpu::ComputePipeline,
+    rmsnorm_bwd_pipeline: wgpu::ComputePipeline,
+    mask_bwd_pipeline: wgpu::ComputePipeline,
+    embed_bwd_pipeline: wgpu::ComputePipeline,
+    xent_grad_pipeline: wgpu::ComputePipeline,
+    sgd_pipeline: wgpu::ComputePipeline,
+    adamw_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -310,6 +535,105 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let softmax_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("softmax_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SOFTMAX_BWD_WGSL)),
+        });
+        let softmax_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("softmax_bwd"),
+                layout: None,
+                module: &softmax_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let swiglu_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("swiglu_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SWIGLU_BWD_WGSL)),
+        });
+        let swiglu_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("swiglu_bwd"),
+                layout: None,
+                module: &swiglu_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let rmsnorm_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rmsnorm_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(RMSNORM_BWD_WGSL)),
+        });
+        let rmsnorm_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("rmsnorm_bwd"),
+                layout: None,
+                module: &rmsnorm_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let mask_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mask_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(MASK_BWD_WGSL)),
+        });
+        let mask_bwd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("mask_bwd"),
+            layout: None,
+            module: &mask_bwd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let embed_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("embed_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(EMBED_BWD_WGSL)),
+        });
+        let embed_bwd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("embed_bwd"),
+            layout: None,
+            module: &embed_bwd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let xent_grad_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("xent_grad"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(XENT_GRAD_WGSL)),
+        });
+        let xent_grad_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("xent_grad"),
+            layout: None,
+            module: &xent_grad_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let sgd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sgd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SGD_WGSL)),
+        });
+        let sgd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("sgd"),
+            layout: None,
+            module: &sgd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let adamw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("adamw"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(ADAMW_WGSL)),
+        });
+        let adamw_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("adamw"),
+            layout: None,
+            module: &adamw_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -319,6 +643,14 @@ impl WgpuContext {
             mask_pipeline,
             rmsnorm_pipeline,
             embed_pipeline,
+            softmax_bwd_pipeline,
+            swiglu_bwd_pipeline,
+            rmsnorm_bwd_pipeline,
+            mask_bwd_pipeline,
+            embed_bwd_pipeline,
+            xent_grad_pipeline,
+            sgd_pipeline,
+            adamw_pipeline,
             adapter_name,
         })
     }
@@ -729,6 +1061,710 @@ impl WgpuContext {
             buf: out_buf,
             rows,
             cols: d,
+        })
+    }
+
+    /// Backward of row-wise softmax: given the forward output `y` and upstream
+    /// grad `dy` (same `rows × cols`), returns `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)`,
+    /// resident. Matches [`crate::ops::cpu_softmax_backward`].
+    pub fn softmax_backward_resident(
+        &self,
+        y: &GpuMatrix,
+        dy: &GpuMatrix,
+    ) -> BackendResult<GpuMatrix> {
+        if y.rows != dy.rows || y.cols != dy.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "softmax_backward: {}×{} vs {}×{}",
+                y.rows, y.cols, dy.rows, dy.cols
+            )));
+        }
+        let elems = y.rows * y.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dx = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("softmax-bwd-dx"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && y.cols > 0
+        {
+            let params: [u32; 4] = [y.rows as u32, y.cols as u32, 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("softmax-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("softmax-bwd"),
+                layout: &self.softmax_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: y.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dy.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dx.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("softmax-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("softmax-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.softmax_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((y.rows as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dx,
+            rows: y.rows,
+            cols: y.cols,
+        })
+    }
+
+    /// Backward of the SwiGLU gate `c = silu(a) ⊙ b`: given `a`, `b` and the
+    /// upstream grad `dc` (same shape), returns `(da, db)` resident, where
+    /// `da = dc·silu'(a)·b` and `db = dc·silu(a)`. Matches
+    /// [`crate::ops::cpu_swiglu_backward`].
+    pub fn swiglu_backward_resident(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        dc: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix)> {
+        if a.rows != b.rows || a.cols != b.cols || a.rows != dc.rows || a.cols != dc.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "swiglu_backward: a {}×{}, b {}×{}, dc {}×{}",
+                a.rows, a.cols, b.rows, b.cols, dc.rows, dc.cols
+            )));
+        }
+        let n = a.rows * a.cols;
+        let bytes = (n.max(1) * std::mem::size_of::<f32>()) as u64;
+        let mk = |label| {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let da = mk("swiglu-bwd-da");
+        let db = mk("swiglu-bwd-db");
+        if n > 0
+        {
+            // The kernel writes da into [0, n) and db into [n, 2n) of one buffer,
+            // keeping the layout at 4 storage buffers (a, b, dc, dab) — within the
+            // portable `downlevel_defaults` limit. We then split it into the two
+            // result buffers with GPU-side copies (no CPU round-trip).
+            let dab = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("swiglu-bwd-dab"),
+                size: 2 * bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let params: [u32; 4] = [n as u32, 0, 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("swiglu-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("swiglu-bwd"),
+                layout: &self.swiglu_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dc.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: dab.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("swiglu-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("swiglu-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.swiglu_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+            }
+            // Split the packed [da | db] into the two resident result buffers.
+            encoder.copy_buffer_to_buffer(&dab, 0, &da, 0, bytes);
+            encoder.copy_buffer_to_buffer(&dab, bytes, &db, 0, bytes);
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok((
+            GpuMatrix {
+                buf: da,
+                rows: a.rows,
+                cols: a.cols,
+            },
+            GpuMatrix {
+                buf: db,
+                rows: a.rows,
+                cols: a.cols,
+            },
+        ))
+    }
+
+    /// Backward of row-wise RMSNorm (input gradient): given `x`, the `cols`
+    /// `weight`, upstream grad `dy` and `eps`, returns `dx` resident. Matches
+    /// [`crate::ops::cpu_rms_norm_backward`].
+    pub fn rms_norm_backward_resident(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        dy: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if x.rows != dy.rows || x.cols != dy.cols || weight.rows * weight.cols != x.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rms_norm_backward: x {}×{}, dy {}×{}, weight {}",
+                x.rows,
+                x.cols,
+                dy.rows,
+                dy.cols,
+                weight.rows * weight.cols
+            )));
+        }
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dx = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rmsnorm-bwd-dx"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && x.cols > 0
+        {
+            let params: [u32; 4] = [x.rows as u32, x.cols as u32, eps.to_bits(), 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rmsnorm-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("rmsnorm-bwd"),
+                layout: &self.rmsnorm_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: x.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: weight.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dy.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: dx.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rmsnorm-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("rmsnorm-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.rmsnorm_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((x.rows as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dx,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// One SGD step, resident: `out = param − lr·grad` (same shape). Matches
+    /// [`crate::ops::cpu_sgd_step`]. Returns a fresh resident matrix; feed it
+    /// back as the next iteration's parameter.
+    pub fn sgd_step_resident(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        lr: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if param.rows != grad.rows || param.cols != grad.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "sgd_step: param {}×{} vs grad {}×{}",
+                param.rows, param.cols, grad.rows, grad.cols
+            )));
+        }
+        let n = param.rows * param.cols;
+        let bytes = (n.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sgd-out"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if n > 0
+        {
+            let params: [u32; 4] = [n as u32, lr.to_bits(), 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("sgd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("sgd"),
+                layout: &self.sgd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: param.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: grad.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sgd") });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("sgd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.sgd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: out,
+            rows: param.rows,
+            cols: param.cols,
+        })
+    }
+
+    /// One AdamW step at optimizer step `step` (1-based), updating `param`, `m`
+    /// and `v` **in place** — bias-corrected Adam with decoupled weight decay.
+    /// `m`/`v` are the resident first/second-moment buffers (start them at zero
+    /// and reuse them across steps). Matches [`crate::ops::cpu_adamw_step`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step_resident(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        m: &GpuMatrix,
+        v: &GpuMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+    ) -> BackendResult<()> {
+        let n = param.rows * param.cols;
+        if grad.rows * grad.cols != n || m.rows * m.cols != n || v.rows * v.cols != n
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "adamw_step: param {n} vs grad {} m {} v {}",
+                grad.rows * grad.cols,
+                m.rows * m.cols,
+                v.rows * v.cols
+            )));
+        }
+        if n == 0
+        {
+            return Ok(());
+        }
+        let (b1, b2) = betas;
+        let bc1 = 1.0 - b1.powi(step as i32);
+        let bc2 = 1.0 - b2.powi(step as i32);
+        let params: [u32; 8] = [
+            n as u32,
+            lr.to_bits(),
+            b1.to_bits(),
+            b2.to_bits(),
+            eps.to_bits(),
+            weight_decay.to_bits(),
+            bc1.to_bits(),
+            bc2.to_bits(),
+        ];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("adamw-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("adamw"),
+            layout: &self.adamw_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: param.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grad.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: m.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: v.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("adamw"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("adamw"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.adamw_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Gradient of the mean cross-entropy loss w.r.t. the `logits` (`rows ×
+    /// vocab`) for the per-row `targets`: softmaxes each row, then
+    /// `dlogits = (softmax(logits) − onehot(target)) / rows`, resident. This is
+    /// the seed of the whole training backward. Matches
+    /// [`crate::ops::cpu_cross_entropy_grad`].
+    pub fn cross_entropy_grad_resident(
+        &self,
+        logits: &GpuMatrix,
+        targets: &[u32],
+    ) -> BackendResult<GpuMatrix> {
+        let rows = logits.rows;
+        let cols = logits.cols;
+        if targets.len() != rows
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "cross_entropy_grad: {} targets != {rows} rows",
+                targets.len()
+            )));
+        }
+        let prob = self.softmax_resident(logits)?;
+        let elems = rows * cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dlogits = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("xent-dlogits"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            let tgt_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("xent-targets"),
+                    contents: bytemuck::cast_slice(targets),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+            let inv_n = 1.0f32 / rows as f32;
+            let params: [u32; 4] = [rows as u32, cols as u32, inv_n.to_bits(), 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("xent-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("xent-grad"),
+                layout: &self.xent_grad_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: prob.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: tgt_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dlogits.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("xent-grad"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("xent-grad"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.xent_grad_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dlogits,
+            rows,
+            cols,
+        })
+    }
+
+    /// Backward of the embedding gather: accumulate the upstream grad `dout`
+    /// (`tokens.len() × d`) into a resident `vocab × d` table gradient — row `v`
+    /// is the sum of `dout` rows whose token is `v`. Deterministic, no atomics.
+    /// Matches [`crate::ops::cpu_embed_backward`].
+    pub fn embed_backward_resident(
+        &self,
+        tokens: &[u32],
+        dout: &GpuMatrix,
+        vocab: usize,
+    ) -> BackendResult<GpuMatrix> {
+        let rows = tokens.len();
+        let d = dout.cols;
+        if dout.rows != rows
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "embed_backward: dout has {} rows, expected {rows} tokens",
+                dout.rows
+            )));
+        }
+        let elems = vocab * d;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dtable = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("embed-bwd-dtable"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && rows > 0
+        {
+            let tok_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-bwd-tokens"),
+                    contents: bytemuck::cast_slice(tokens),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+            let params: [u32; 4] = [rows as u32, d as u32, vocab as u32, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("embed-bwd"),
+                layout: &self.embed_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: tok_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dout.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dtable.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("embed-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("embed-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.embed_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dtable,
+            rows: vocab,
+            cols: d,
+        })
+    }
+
+    /// Backward of scale + causal mask: `din = scale·dout` at kept positions,
+    /// `0` above the diagonal. Matches [`crate::ops::cpu_scale_causal_mask_backward`].
+    pub fn scale_causal_mask_backward_resident(
+        &self,
+        dout: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let elems = dout.rows * dout.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let din = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mask-bwd-din"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            let params: [u32; 4] = [
+                dout.rows as u32,
+                dout.cols as u32,
+                causal as u32,
+                scale.to_bits(),
+            ];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("mask-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mask-bwd"),
+                layout: &self.mask_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: dout.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: din.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mask-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("mask-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.mask_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(
+                    (dout.cols as u32).div_ceil(8),
+                    (dout.rows as u32).div_ceil(8),
+                    1,
+                );
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: din,
+            rows: dout.rows,
+            cols: dout.cols,
         })
     }
 
