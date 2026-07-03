@@ -25,14 +25,16 @@
 //! * `trader_certified_predict`   — IBP-certified ML prediction (LLM-bounded)
 //! * `trader_portfolio`           — account state: PnL, equity, exposure, liq price
 //! * `trader_rebalance`           — trades to reach target portfolio weights
+//! * `trader_dashboard`           — self-contained HTML report (scan + backtest)
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use scirust_trader::agent::{Action, StubLlm, TradingAgent};
-use scirust_trader::backtest::{BacktestConfig, Sizing, run_backtest};
+use scirust_trader::backtest::{BacktestConfig, BacktestReport, Sizing, run_backtest};
 use scirust_trader::chart::{ChartOptions, Marker, Overlay, candlestick_svg, equity_curve_svg};
+use scirust_trader::dashboard::{DashboardOptions, render_dashboard};
 use scirust_trader::execution::{
     AlmgrenChriss, almgren_chriss, iceberg, micro_burst, pov, twap, vwap,
 };
@@ -70,6 +72,7 @@ pub fn trader_tools() -> Vec<McpTool> {
         certified_predict_tool(),
         portfolio_tool(),
         rebalance_tool(),
+        dashboard_tool(),
     ]
 }
 
@@ -175,6 +178,78 @@ fn snapshot_from(symbol: &str, interval: &str, candles: Vec<Candle>) -> MarketSn
 fn ohlcv_arg(args: &Value) -> Result<Vec<Candle>, String> {
     let v = args.get("ohlcv").ok_or("missing `ohlcv`")?;
     parse_candles(v)
+}
+
+/// Parse the `series` array (one `{symbol, interval, ohlcv}` per market) into
+/// snapshots. Shared by the scan and dashboard tools.
+fn parse_series(args: &Value) -> Result<Vec<MarketSnapshot>, String> {
+    let series_json = args
+        .get("series")
+        .and_then(|x| x.as_array())
+        .ok_or("missing `series` array")?;
+    let mut snapshots = Vec::new();
+    for (i, sj) in series_json.iter().enumerate()
+    {
+        let symbol = sj
+            .get("symbol")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| format!("series[{i}]: missing symbol"))?;
+        let interval = sj.get("interval").and_then(|x| x.as_str()).unwrap_or("1h");
+        let ohlcv = sj
+            .get("ohlcv")
+            .ok_or_else(|| format!("series[{i}]: missing ohlcv"))?;
+        let candles = parse_candles(ohlcv).map_err(|e| format!("series[{i}]: {e}"))?;
+        snapshots.push(snapshot_from(symbol, interval, candles));
+    }
+    Ok(snapshots)
+}
+
+/// Parse `constraints` into an [`OpportunityConstraints`] (defaults for absent keys).
+fn parse_constraints(args: &Value) -> OpportunityConstraints {
+    let c = args.get("constraints").cloned().unwrap_or(json!({}));
+    let mut constraints = OpportunityConstraints::default();
+    if let Some(x) = c.get("min_total_return").and_then(|v| v.as_f64())
+    {
+        constraints.min_total_return = x as f32;
+    }
+    if let Some(x) = c.get("min_expectancy").and_then(|v| v.as_f64())
+    {
+        constraints.min_expectancy = x as f32;
+    }
+    if let Some(x) = c.get("max_drawdown").and_then(|v| v.as_f64())
+    {
+        constraints.max_drawdown = x as f32;
+    }
+    if let Some(x) = c.get("min_sharpe").and_then(|v| v.as_f64())
+    {
+        constraints.min_sharpe = x as f32;
+    }
+    constraints.min_win_rate = f(&c, "min_win_rate", constraints.min_win_rate);
+    constraints.min_profit_factor = f(&c, "min_profit_factor", constraints.min_profit_factor);
+    constraints.min_trades = u(&c, "min_trades", constraints.min_trades);
+    constraints.min_signal_strength = f(&c, "min_signal_strength", constraints.min_signal_strength);
+    constraints.max_results = u(&c, "max_results", constraints.max_results);
+    constraints.direction = parse_action(&c, "direction");
+    if let Some(list) = c.get("strategies").and_then(|v| v.as_array())
+    {
+        constraints.strategies = list
+            .iter()
+            .filter_map(|s| s.as_str().map(String::from))
+            .collect();
+    }
+    constraints
+}
+
+/// Parse `risk` into a [`ScanRiskConfig`].
+fn parse_scan_risk(args: &Value) -> ScanRiskConfig {
+    let r = args.get("risk").cloned().unwrap_or(json!({}));
+    ScanRiskConfig {
+        capital: f(&r, "capital", 10_000.0),
+        risk_per_trade: f(&r, "risk_per_trade", 0.01),
+        atr_period: u(&r, "atr_period", 14),
+        atr_mult: f(&r, "atr_mult", 2.0),
+        reward_risk: f(&r, "reward_risk", 2.0),
+    }
 }
 
 fn parse_action(v: &Value, key: &str) -> Option<Action> {
@@ -535,43 +610,9 @@ fn scan_tool() -> McpTool {
             "required": ["series"]
         }),
         handler: Box::new(|args| {
-            let series_json = args.get("series").and_then(|x| x.as_array()).ok_or("missing `series` array")?;
-            let mut snapshots = Vec::new();
-            for (i, sj) in series_json.iter().enumerate()
-            {
-                let symbol = sj.get("symbol").and_then(|x| x.as_str()).ok_or_else(|| format!("series[{i}]: missing symbol"))?;
-                let interval = sj.get("interval").and_then(|x| x.as_str()).unwrap_or("1h");
-                let ohlcv = sj.get("ohlcv").ok_or_else(|| format!("series[{i}]: missing ohlcv"))?;
-                let candles = parse_candles(ohlcv).map_err(|e| format!("series[{i}]: {e}"))?;
-                snapshots.push(snapshot_from(symbol, interval, candles));
-            }
-
-            let c = args.get("constraints").cloned().unwrap_or(json!({}));
-            let mut constraints = OpportunityConstraints::default();
-            if let Some(x) = c.get("min_total_return").and_then(|v| v.as_f64()) { constraints.min_total_return = x as f32; }
-            if let Some(x) = c.get("min_expectancy").and_then(|v| v.as_f64()) { constraints.min_expectancy = x as f32; }
-            if let Some(x) = c.get("max_drawdown").and_then(|v| v.as_f64()) { constraints.max_drawdown = x as f32; }
-            if let Some(x) = c.get("min_sharpe").and_then(|v| v.as_f64()) { constraints.min_sharpe = x as f32; }
-            constraints.min_win_rate = f(&c, "min_win_rate", constraints.min_win_rate);
-            constraints.min_profit_factor = f(&c, "min_profit_factor", constraints.min_profit_factor);
-            constraints.min_trades = u(&c, "min_trades", constraints.min_trades);
-            constraints.min_signal_strength = f(&c, "min_signal_strength", constraints.min_signal_strength);
-            constraints.max_results = u(&c, "max_results", constraints.max_results);
-            constraints.direction = parse_action(&c, "direction");
-            if let Some(list) = c.get("strategies").and_then(|v| v.as_array())
-            {
-                constraints.strategies = list.iter().filter_map(|s| s.as_str().map(String::from)).collect();
-            }
-
-            let r = args.get("risk").cloned().unwrap_or(json!({}));
-            let risk = ScanRiskConfig {
-                capital: f(&r, "capital", 10_000.0),
-                risk_per_trade: f(&r, "risk_per_trade", 0.01),
-                atr_period: u(&r, "atr_period", 14),
-                atr_mult: f(&r, "atr_mult", 2.0),
-                reward_risk: f(&r, "reward_risk", 2.0),
-            };
-
+            let snapshots = parse_series(&args)?;
+            let constraints = parse_constraints(&args);
+            let risk = parse_scan_risk(&args);
             let report = scan(&snapshots, &constraints, &risk);
             Ok(to_value(&report))
         }),
@@ -1250,6 +1291,79 @@ fn rebalance_tool() -> McpTool {
     }
 }
 
+fn dashboard_tool() -> McpTool {
+    McpTool {
+        name: "trader_dashboard".to_string(),
+        description: "Render a self-contained HTML dashboard from a market scan (and an optional \
+            backtest): the ranked opportunities with their sealed proofs, metric cards, an embedded \
+            equity-curve chart, and a trade log — one styled, light/dark-aware HTML page the user \
+            can open directly. This turns 'show me what you found' into a shareable visual report \
+            instead of a wall of JSON. Same `series`/`constraints`/`risk` inputs as \
+            trader_scan_opportunities; add `backtest` to embed a strategy's equity curve."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "series": {
+                    "type": "array",
+                    "description": "market series: [{symbol, interval, ohlcv:[[ts,o,h,l,c,v],...]}]"
+                },
+                "constraints": { "type": "object", "description": "same as trader_scan_opportunities" },
+                "risk": { "type": "object", "description": "capital, risk_per_trade, atr_period, atr_mult, reward_risk" },
+                "backtest": {
+                    "type": "object",
+                    "description": "optional embedded backtest: {strategy, params, capital, series_index}"
+                },
+                "title": { "type": "string" },
+                "subtitle": { "type": "string" }
+            },
+            "required": ["series"]
+        }),
+        handler: Box::new(|args| {
+            let snapshots = parse_series(&args)?;
+            let constraints = parse_constraints(&args);
+            let risk = parse_scan_risk(&args);
+            let report = scan(&snapshots, &constraints, &risk);
+
+            // Optional embedded backtest of a named strategy on one series.
+            let mut bt_holder: Option<BacktestReport> = None;
+            let mut label = String::new();
+            if let Some(b) = args.get("backtest") {
+                if let Some(name) = b.get("strategy").and_then(|x| x.as_str()) {
+                    let idx = u(b, "series_index", 0).min(snapshots.len().saturating_sub(1));
+                    if let (Some(strat), Some(snap)) =
+                        (strategy_from_spec(name, &params_map(b)), snapshots.get(idx))
+                    {
+                        let cfg = BacktestConfig {
+                            symbol: snap.symbol.clone(),
+                            interval: snap.interval.clone(),
+                            starting_cash: f(b, "capital", 10_000.0),
+                            ..Default::default()
+                        };
+                        bt_holder = Some(run_backtest(strat.as_ref(), &snap.candles, &cfg));
+                        label = strat.name();
+                    }
+                }
+            }
+            let backtests: Vec<(String, &BacktestReport)> = match &bt_holder {
+                Some(r) => vec![(label, r)],
+                None => Vec::new(),
+            };
+
+            let opts = DashboardOptions {
+                title: s(&args, "title", "SciRust Trader"),
+                subtitle: s(&args, "subtitle", "Deterministic, auditable, simulation-first"),
+            };
+            let html = render_dashboard(Some(&report), &backtests, &opts);
+            Ok(json!({
+                "html": html,
+                "format": "html",
+                "num_opportunities": report.opportunities.len(),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1279,7 +1393,24 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 16);
+        assert!(before >= 17);
+    }
+
+    #[test]
+    fn dashboard_renders_html_report() {
+        let t = tool("trader_dashboard");
+        let out = (t.handler)(json!({
+            "series": [{ "symbol": "BTC/USDT", "interval": "1h", "ohlcv": mock_ohlcv(200) }],
+            "backtest": { "strategy": "sma_cross", "params": { "fast": 10, "slow": 30 } },
+            "title": "My Book"
+        }))
+        .unwrap();
+        let html = out["html"].as_str().unwrap();
+        assert!(html.starts_with("<!doctype html>"));
+        assert!(html.contains("My Book"));
+        assert!(html.contains("Opportunities"));
+        assert!(html.contains("<svg"));
+        assert_eq!(out["format"], json!("html"));
     }
 
     #[test]
