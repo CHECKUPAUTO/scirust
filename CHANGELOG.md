@@ -74,6 +74,24 @@ empreintes de preuve), sans nouvelle dépendance.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité).
+- **Connexion aux portefeuilles (`wallet.rs` + 7 outils MCP)** — plomberie
+  conforme aux protocoles reconnus, **watch-only / dry-run par défaut** :
+  Keccak-256 et HMAC-SHA256 en Rust pur (vérifiés contre les vecteurs
+  Ethereum et RFC 4231), adresses EVM avec checksum **EIP-55** (vérifié
+  contre les 4 exemples canoniques), parsing d'URI de pairing **WalletConnect
+  v2** + namespaces `eip155`/CAIP-2, construction de transactions **EIP-1559**
+  avec hash de signature (RLP + keccak, non signé), séparateur de domaine et
+  digest **EIP-712**, signature de requêtes REST d'exchange (Binance/Coinbase,
+  HMAC), et un connecteur watch-only + lecture de solde JSON-RPC (derrière
+  `live`). **Sécurité** : toute action qui signe ou déplace des fonds est
+  verrouillée derrière une `WalletAuthorization` signée hors-bande avec une
+  clé côté serveur (`SCIRUST_WALLET_KEY`) que le LLM ne peut pas fabriquer ;
+  les secrets d'exchange proviennent d'une variable d'environnement
+  (`SCIRUST_EXCHANGE_SECRET`) et ne transitent jamais par la conversation.
+  Outils MCP : `wallet_validate_address`, `wallet_parse_walletconnect_uri`,
+  `wallet_walletconnect_namespace`, `wallet_build_evm_transaction`,
+  `wallet_eip712_hash`, `wallet_sign_exchange_request`,
+  `wallet_authorization_status`.
 
 ### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
 Chaque domaine documenté dans la feuille de route de marché reçoit maintenant

@@ -14,3 +14,4 @@ pub mod linalg;
 pub mod maritime;
 pub mod sis;
 pub mod trader;
+pub mod wallet;

@@ -47,3 +47,4 @@ pub mod chart;
 pub mod execution;
 pub mod marketmaking;
 pub mod microstructure;
+pub mod wallet;
