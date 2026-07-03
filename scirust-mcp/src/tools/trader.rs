@@ -25,28 +25,28 @@
 //! * `trader_certified_predict`   — IBP-certified ML prediction (LLM-bounded)
 
 use crate::registry::McpTool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use scirust_trader::agent::{Action, StubLlm, TradingAgent};
-use scirust_trader::backtest::{run_backtest, BacktestConfig, Sizing};
-use scirust_trader::chart::{candlestick_svg, equity_curve_svg, ChartOptions, Marker, Overlay};
+use scirust_trader::backtest::{BacktestConfig, Sizing, run_backtest};
+use scirust_trader::chart::{ChartOptions, Marker, Overlay, candlestick_svg, equity_curve_svg};
 use scirust_trader::execution::{
-    almgren_chriss, iceberg, micro_burst, pov, twap, vwap, AlmgrenChriss,
+    AlmgrenChriss, almgren_chriss, iceberg, micro_burst, pov, twap, vwap,
 };
 use scirust_trader::indicators;
-use scirust_trader::market::{Candle, MarketSnapshot, MarketFeed, MockExchange};
-use scirust_trader::marketmaking::{optimal_quotes, MmParams};
-use scirust_trader::metrics::{periods_per_year, PerformanceReport};
+use scirust_trader::market::{Candle, MarketFeed, MarketSnapshot, MockExchange};
+use scirust_trader::marketmaking::{MmParams, optimal_quotes};
+use scirust_trader::metrics::{PerformanceReport, periods_per_year};
 use scirust_trader::microstructure::{
-    kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin, L1Quote, TradePrint,
+    L1Quote, TradePrint, kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin,
 };
 use scirust_trader::model::PricePredictor;
 use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
-use scirust_trader::scanner::{scan, OpportunityConstraints, ScanRiskConfig};
-use scirust_trader::strategy::{strategy_from_spec, STRATEGY_NAMES};
+use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
+use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
 
 /// All trader tools.
 pub fn trader_tools() -> Vec<McpTool> {
@@ -73,15 +73,24 @@ pub fn trader_tools() -> Vec<McpTool> {
 // ---------------------------------------------------------------------------
 
 fn f(v: &Value, key: &str, default: f32) -> f32 {
-    v.get(key).and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default)
+    v.get(key)
+        .and_then(|x| x.as_f64())
+        .map(|x| x as f32)
+        .unwrap_or(default)
 }
 
 fn u(v: &Value, key: &str, default: usize) -> usize {
-    v.get(key).and_then(|x| x.as_u64()).map(|x| x as usize).unwrap_or(default)
+    v.get(key)
+        .and_then(|x| x.as_u64())
+        .map(|x| x as usize)
+        .unwrap_or(default)
 }
 
 fn s<'a>(v: &'a Value, key: &str, default: &'a str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or(default).to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or(default)
+        .to_string()
 }
 
 /// Parse an OHLCV array into candles. Each row may be:
@@ -372,8 +381,12 @@ fn signal_tool() -> McpTool {
         handler: Box::new(|args| {
             let candles = ohlcv_arg(&args)?;
             let name = s(&args, "strategy", "sma_cross");
-            let strat = strategy_from_spec(&name, &params_map(&args))
-                .ok_or_else(|| format!("unknown strategy `{name}`; available: {}", STRATEGY_NAMES.join(", ")))?;
+            let strat = strategy_from_spec(&name, &params_map(&args)).ok_or_else(|| {
+                format!(
+                    "unknown strategy `{name}`; available: {}",
+                    STRATEGY_NAMES.join(", ")
+                )
+            })?;
             let sig = strat.evaluate(&candles);
             Ok(json!({
                 "strategy": strat.name(),
@@ -411,7 +424,10 @@ fn build_backtest_cfg(args: &Value, symbol: &str, interval: &str) -> BacktestCon
             ref_liquidity: 1.0,
         },
         sizing,
-        allow_short: args.get("allow_short").and_then(|x| x.as_bool()).unwrap_or(true),
+        allow_short: args
+            .get("allow_short")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(true),
         min_strength: f(args, "min_strength", 0.0),
     }
 }
@@ -578,11 +594,16 @@ fn orderbook_tool() -> McpTool {
         }),
         handler: Box::new(|args| {
             let parse_side = |key: &str| -> Result<Vec<Level>, String> {
-                let arr = args.get(key).and_then(|x| x.as_array()).ok_or(format!("missing `{key}`"))?;
+                let arr = args
+                    .get(key)
+                    .and_then(|x| x.as_array())
+                    .ok_or(format!("missing `{key}`"))?;
                 let mut out = Vec::with_capacity(arr.len());
                 for row in arr
                 {
-                    let cols = row.as_array().ok_or(format!("`{key}` rows must be [price, qty]"))?;
+                    let cols = row
+                        .as_array()
+                        .ok_or(format!("`{key}` rows must be [price, qty]"))?;
                     let px = cols.first().and_then(|x| x.as_f64()).ok_or("bad price")? as f32;
                     let qty = cols.get(1).and_then(|x| x.as_f64()).ok_or("bad qty")? as f32;
                     out.push(Level::new(px, qty));
@@ -709,26 +730,54 @@ fn execution_plan_tool() -> McpTool {
             }
             let algo = s(&args, "algo", "twap");
             let n = u(&args, "slices", 10);
-            let interval = args.get("interval_ms").and_then(|x| x.as_i64()).unwrap_or(60_000);
+            let interval = args
+                .get("interval_ms")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(60_000);
             match algo.as_str()
             {
                 "twap" => Ok(to_value(&twap(side, total, n, 0, interval))),
                 "micro_burst" => Ok(to_value(&micro_burst(side, total, n, 0))),
                 "vwap" =>
                 {
-                    let profile: Vec<f32> = args.get("volume_profile").and_then(|x| x.as_array())
-                        .map(|a| a.iter().filter_map(|v| v.as_f64().map(|x| x as f32)).collect())
+                    let profile: Vec<f32> = args
+                        .get("volume_profile")
+                        .and_then(|x| x.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_f64().map(|x| x as f32))
+                                .collect()
+                        })
                         .unwrap_or_else(|| vec![1.0; n]);
                     Ok(to_value(&vwap(side, total, &profile, 0, interval)))
                 },
                 "pov" =>
                 {
-                    let vols: Vec<f32> = args.get("expected_volumes").and_then(|x| x.as_array())
-                        .map(|a| a.iter().filter_map(|v| v.as_f64().map(|x| x as f32)).collect())
+                    let vols: Vec<f32> = args
+                        .get("expected_volumes")
+                        .and_then(|x| x.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_f64().map(|x| x as f32))
+                                .collect()
+                        })
                         .unwrap_or_else(|| vec![total; n]);
-                    Ok(to_value(&pov(side, total, f(&args, "rate", 0.1), &vols, 0, interval)))
+                    Ok(to_value(&pov(
+                        side,
+                        total,
+                        f(&args, "rate", 0.1),
+                        &vols,
+                        0,
+                        interval,
+                    )))
                 },
-                "iceberg" => Ok(to_value(&iceberg(side, total, f(&args, "display", total / 10.0).max(1e-6), 0, interval))),
+                "iceberg" => Ok(to_value(&iceberg(
+                    side,
+                    total,
+                    f(&args, "display", total / 10.0).max(1e-6),
+                    0,
+                    interval,
+                ))),
                 "almgren_chriss" =>
                 {
                     let a = args.get("ac").cloned().unwrap_or(json!({}));
@@ -1024,7 +1073,10 @@ mod tests {
     }
 
     fn tool(name: &str) -> McpTool {
-        trader_tools().into_iter().find(|t| t.name == name).expect("tool exists")
+        trader_tools()
+            .into_iter()
+            .find(|t| t.name == name)
+            .expect("tool exists")
     }
 
     #[test]
@@ -1071,7 +1123,8 @@ mod tests {
     #[test]
     fn backtest_returns_performance() {
         let t = tool("trader_backtest");
-        let out = (t.handler)(json!({ "ohlcv": mock_ohlcv(150), "strategy": "sma_cross" })).unwrap();
+        let out =
+            (t.handler)(json!({ "ohlcv": mock_ohlcv(150), "strategy": "sma_cross" })).unwrap();
         assert!(out["performance"]["sharpe"].is_number());
         assert!(out["final_equity"].is_number());
     }
@@ -1081,7 +1134,8 @@ mod tests {
         let t = tool("trader_scan_opportunities");
         let out = (t.handler)(json!({
             "series": [{ "symbol": "BTC/USDT", "interval": "1h", "ohlcv": mock_ohlcv(200) }]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["manifest_hash"].is_string());
         assert!(out["opportunities"].is_array());
     }
@@ -1093,7 +1147,8 @@ mod tests {
             "bids": [[99.0, 5.0], [98.0, 10.0]],
             "asks": [[101.0, 4.0], [102.0, 8.0]],
             "size": 6.0
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["mid"].as_f64().unwrap() > 99.0);
         assert!(out["buy_fill"]["vwap"].is_number());
     }
@@ -1103,7 +1158,8 @@ mod tests {
         let t = tool("trader_size_position");
         let out = (t.handler)(json!({
             "capital": 10000.0, "risk_per_trade": 0.01, "entry": 100.0, "atr": 2.0
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["position_size"].as_f64().unwrap() > 0.0);
         assert!(out["stop_loss"].as_f64().unwrap() < 100.0);
         assert!(out["take_profit"].as_f64().unwrap() > 100.0);
@@ -1112,9 +1168,13 @@ mod tests {
     #[test]
     fn execution_plans() {
         let t = tool("trader_execution_plan");
-        let twap = (t.handler)(json!({ "side": "buy", "total_qty": 100.0, "algo": "twap", "slices": 4 })).unwrap();
+        let twap =
+            (t.handler)(json!({ "side": "buy", "total_qty": 100.0, "algo": "twap", "slices": 4 }))
+                .unwrap();
         assert_eq!(twap["children"].as_array().unwrap().len(), 4);
-        let ac = (t.handler)(json!({ "side": "sell", "total_qty": 1000.0, "algo": "almgren_chriss" })).unwrap();
+        let ac =
+            (t.handler)(json!({ "side": "sell", "total_qty": 1000.0, "algo": "almgren_chriss" }))
+                .unwrap();
         assert!(ac["schedule"]["kappa"].is_number());
     }
 
@@ -1148,7 +1208,8 @@ mod tests {
     #[test]
     fn chart_renders_svg() {
         let t = tool("trader_chart");
-        let out = (t.handler)(json!({ "type": "candles", "ohlcv": mock_ohlcv(30), "title": "T" })).unwrap();
+        let out = (t.handler)(json!({ "type": "candles", "ohlcv": mock_ohlcv(30), "title": "T" }))
+            .unwrap();
         assert!(out["svg"].as_str().unwrap().starts_with("<svg"));
     }
 
@@ -1160,6 +1221,9 @@ mod tests {
         let hi = out["certified_interval"]["hi"].as_f64().unwrap();
         assert!(lo <= hi);
         let raw = out["raw_prediction"].as_f64().unwrap();
-        assert!(raw >= lo - 1e-4 && raw <= hi + 1e-4, "raw {raw} must be within [{lo},{hi}]");
+        assert!(
+            raw >= lo - 1e-4 && raw <= hi + 1e-4,
+            "raw {raw} must be within [{lo},{hi}]"
+        );
     }
 }

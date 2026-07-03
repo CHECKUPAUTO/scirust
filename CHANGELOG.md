@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — synthèse de tolérances à coût minimal (`scirust-tolerance`)
+Le « calcul optimal » du tolérancement inertiel : nouveau module `optimize`
+qui minimise le coût total de fabrication `Σᵢ bᵢ·Iᵢ^(−rᵢ)` (modèle
+coût-tolérance en puissance inverse, Chase & Greenwood) sous **plusieurs
+exigences fonctionnelles simultanées** `√(Σᵢ αₖᵢ² Iᵢ²) ≤ I_max,ₖ`. En
+variables `vᵢ=Iᵢ²` le coût est convexe et les contraintes linéaires, donc
+programme convexe à dualité forte : le lagrangien se sépare par composant
+(`Iᵢ = ((rᵢ/2)bᵢ/sᵢ)^{1/(rᵢ+2)}`, `sᵢ=Σₖ μₖ αₖᵢ²`) et le dual est
+maximisé par une mise à jour multiplicative invariante d'échelle
+`μₖ ← μₖ·(atteintₖ²/I_max,ₖ²)^γ` dont le point fixe est exactement le point
+KKT (contrainte active ⇒ atteint=budget, contrainte lâche ⇒ μₖ→0). Pour une
+exigence unique, reproduit exactement la forme close `Allocation::CostOptimal`.
+Fournit `Component`, `Requirement`, `optimize`/`optimize_with`,
+`OptimizeResult` (inerties, coût total, multiplicateurs/prix duaux, exigences
+actives), et la **frontière de Pareto coût-qualité** `cost_quality_frontier`.
+Vérifié par : égalité à la forme close mono-exigence, satisfaction des
+conditions KKT à deux exigences, coût ≤ allocation naïve par-exigence, et
+monotonie de la frontière. Nouvel outil MCP `tolerance_optimize_cost`.
+
 ### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
 Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
 Systèmes Assemblés, une approche par le Tolérancement Inertiel et Modal*,
