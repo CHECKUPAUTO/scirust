@@ -145,4 +145,35 @@ mod tests {
         assert!(rust.contains("pub mod np"));
         assert!(rust.contains("pub fn sum(a: &[f64]) -> f64"));
     }
+
+    #[test]
+    fn if_without_else() {
+        let src = "def relu(x):\n    if x > 0.0:\n        return x\n    return 0.0\n";
+        let rust = transpile(src).unwrap();
+        // Scope the check to the emitted function (the prelude legitimately
+        // contains `} else {` in its min-length helpers).
+        let func = &rust[rust.find("pub fn relu").unwrap()..];
+        assert!(func.contains("if (x > 0.0f64) {"));
+        assert!(func.contains("return x;"));
+        assert!(func.contains("return 0.0f64;"));
+        assert!(!func.contains("else"));
+    }
+
+    #[test]
+    fn if_elif_else_desugars() {
+        let src = "def sign(x):\n    if x > 0.0:\n        return 1.0\n    elif x < 0.0:\n        return -1.0\n    else:\n        return 0.0\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("if (x > 0.0f64) {"));
+        // elif becomes a nested `if` inside the else branch.
+        assert!(rust.contains("} else {"));
+        assert!(rust.contains("if (x < 0.0f64) {"));
+    }
+
+    #[test]
+    fn comparison_outside_condition_is_rejected() {
+        // A comparison is only allowed as an `if`/`elif` condition, never as a
+        // value; the parser rejects `y = x > 0.0`.
+        let src = "def f(x):\n    y = x > 0.0\n    return y\n";
+        assert!(transpile(src).is_err());
+    }
 }

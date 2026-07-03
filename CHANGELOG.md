@@ -5,6 +5,19 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : contrôle de flux `if`/`elif`/`else` (Phase 1, incrément 1)
+Extension du sous-ensemble Python avec le **contrôle de flux scalaire**, prouvée
+par le même oracle différentiel contre NumPy réel :
+- front-end : instructions `if`/`elif`/`else` (`elif` désucré en `if` imbriqué
+  dans la branche `else`) ; opérateurs de comparaison `< <= > >= == !=` comme
+  conditions booléennes (une comparaison n'est valide qu'en condition, jamais
+  comme valeur — sinon refusée).
+- SIR : `Ty::Bool`, `SirStmt::If`, `SirExpr::Cmp` ; inférence de paramètres et
+  émetteur étendus ; les branches suivent la même règle « initialiser avant »
+  que les boucles.
+- oracle : 3 nouveaux cas (relu, clamp, sign) → **10/10 cas conformes**
+  (200 essais chacun) ; 13 tests unitaires.
+
 ### Ajouté — transpileur scientifique entrant, Phase 0 MVP (`scirust-transpiler`)
 Nouveau crate : un transpileur **entrant** (Python/NumPy → Rust déterministe,
 sûr), c'est-à-dire le sens que le travail scientifique réclame (prototype

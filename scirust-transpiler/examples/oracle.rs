@@ -130,6 +130,31 @@ fn cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // Control flow (Phase 1): if without else.
+        Case {
+            name: "relu (if, scalar)",
+            call: "relu",
+            src: "def relu(x):\n    if x > 0.0:\n        return x\n    return 0.0\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // Two sequential ifs — clamp to [lo, hi].
+        Case {
+            name: "clamp (two ifs)",
+            call: "clamp",
+            src: "def clamp(x, lo, hi):\n    if x < lo:\n        return lo\n    if x > hi:\n        return hi\n    return x\n",
+            args: vec![
+                Scalar { lo: -3.0, hi: 3.0 },
+                Scalar { lo: -1.0, hi: 0.0 },
+                Scalar { lo: 0.5, hi: 1.5 },
+            ],
+        },
+        // if / elif / else — piecewise sign.
+        Case {
+            name: "sign (if/elif/else)",
+            call: "sign",
+            src: "def sign(x):\n    if x > 0.0:\n        return 1.0\n    elif x < 0.0:\n        return -1.0\n    else:\n        return 0.0\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
     ]
 }
 

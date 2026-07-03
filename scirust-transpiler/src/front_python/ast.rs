@@ -51,6 +51,12 @@ pub enum PyStmt {
         end: PyExpr,
         body: Vec<PyStmt>,
     },
+    /// `if cond: then [else: els]`  (`elif` desugars to a nested `If` in `els`).
+    If {
+        cond: PyExpr,
+        then: Vec<PyStmt>,
+        els: Vec<PyStmt>,
+    },
     /// `return expr`
     Return(Option<PyExpr>),
 }
@@ -78,6 +84,12 @@ pub enum PyExpr {
         base: Box<PyExpr>,
         index: Box<PyExpr>,
     },
+    /// A comparison `l <op> r` (used only in conditions; yields a boolean).
+    Cmp {
+        op: CmpOp,
+        l: Box<PyExpr>,
+        r: Box<PyExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,4 +99,14 @@ pub enum BinOp {
     Mul,
     Div,
     Pow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
 }

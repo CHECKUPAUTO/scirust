@@ -188,6 +188,16 @@ fn lower_stmt(
                 body,
             })
         },
+        PyStmt::If { cond, then, els } =>
+        {
+            let cond = lower_condition(cond, env)?;
+            // Branches are nested scopes: they may reassign already-declared
+            // names or `return`, but cannot first-declare a name expected to
+            // survive the `if` (same rule as loops — hoist before the `if`).
+            let then = lower_block(then, env, declared, false, ret)?;
+            let els = lower_block(els, env, declared, false, ret)?;
+            Ok(SirStmt::If { cond, then, els })
+        },
         PyStmt::Return(Some(e)) =>
         {
             let v = lower_scalar(e, env)?;
@@ -327,6 +337,43 @@ fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String
         },
         PyExpr::Bin { op, l, r } => lower_bin(*op, l, r, env),
         PyExpr::Call { func, args } => lower_call(func, args, env),
+        PyExpr::Cmp { .. } => Err("a comparison is only valid as an `if`/`elif` condition".into()),
+    }
+}
+
+/// Lower a boolean condition: a single scalar comparison.
+fn lower_condition(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
+    match e
+    {
+        PyExpr::Cmp { op, l, r } =>
+        {
+            let lv = lower_scalar(l, env)?;
+            let rv = lower_scalar(r, env)?;
+            if lv.ty() == Ty::Array || rv.ty() == Ty::Array
+            {
+                return Err("array comparisons are not supported in conditions".into());
+            }
+            Ok(SirExpr::Cmp {
+                op: cmp_op(*op),
+                l: Box::new(lv),
+                r: Box::new(rv),
+            })
+        },
+        _ => Err("`if`/`elif` condition must be a comparison".into()),
+    }
+}
+
+fn cmp_op(op: crate::front_python::ast::CmpOp) -> crate::sir::CmpOp {
+    use crate::front_python::ast::CmpOp as A;
+    use crate::sir::CmpOp as S;
+    match op
+    {
+        A::Lt => S::Lt,
+        A::Le => S::Le,
+        A::Gt => S::Gt,
+        A::Ge => S::Ge,
+        A::Eq => S::Eq,
+        A::Ne => S::Ne,
     }
 }
 
@@ -529,6 +576,12 @@ fn array_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
                 || array_evidence_expr(name, end)
                 || array_evidence_block(name, body)
         },
+        PyStmt::If { cond, then, els } =>
+        {
+            array_evidence_expr(name, cond)
+                || array_evidence_block(name, then)
+                || array_evidence_block(name, els)
+        },
         PyStmt::Return(Some(e)) => array_evidence_expr(name, e),
         PyStmt::Return(None) => false,
     })
@@ -553,6 +606,7 @@ fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
                 || args.iter().any(|a| array_evidence_expr(name, a))
         },
         PyExpr::Bin { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
+        PyExpr::Cmp { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
         PyExpr::Neg(inner) => array_evidence_expr(name, inner),
         _ => false,
     }
