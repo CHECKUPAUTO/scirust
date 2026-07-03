@@ -333,6 +333,122 @@ pub fn cpu_rope_backward(
     dx
 }
 
+/// CPU reference for a contiguous column-block gather — the oracle for
+/// [`crate::WgpuContext::slice_cols_resident`]. `out[r, c] = x[r, col_start + c]`
+/// for `c in 0..ncols`; `x` is `rows × src_cols`, `out` is `rows × ncols`.
+pub fn cpu_slice_cols(
+    x: &[f32],
+    rows: usize,
+    src_cols: usize,
+    col_start: usize,
+    ncols: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * ncols];
+    for r in 0..rows
+    {
+        for c in 0..ncols
+        {
+            out[r * ncols + c] = x[r * src_cols + col_start + c];
+        }
+    }
+    out
+}
+
+/// CPU reference for the column scatter — the oracle for
+/// [`crate::WgpuContext::place_cols_resident`] and the adjoint of
+/// [`cpu_slice_cols`]. `out[r, col_start + c] = x[r, c]`, `0` elsewhere; `x` is
+/// `rows × ncols`, `out` is `rows × dst_cols`.
+pub fn cpu_place_cols(
+    x: &[f32],
+    rows: usize,
+    ncols: usize,
+    col_start: usize,
+    dst_cols: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * dst_cols];
+    for r in 0..rows
+    {
+        for c in 0..ncols
+        {
+            out[r * dst_cols + col_start + c] = x[r * ncols + c];
+        }
+    }
+    out
+}
+
+/// CPU reference for resident multi-head grouped-query attention, single
+/// sequence (`rows = seq_len`) — the oracle for
+/// [`crate::GpuChain::gqa_attention`]. Matches the sciagent model's attention
+/// math exactly: full-width RoPE on `q` and `k` (each using **its own width** in
+/// the frequency, as the model's `rope_on_tape` does — `d_model` for `q`,
+/// `kv_dim` for `k`), then per head `kv = head / (n_heads/n_kv_heads)`,
+/// `softmax((qs·ksᵀ)·(1/√dh) [+ causal]) · vs`, placed into the head's `d_model`
+/// slot and summed. `q` is `[rows, n_heads·dh]`; `k`/`v` are `[rows, n_kv_heads·dh]`;
+/// returns `[rows, n_heads·dh]` (the concatenated context, before `w_o`).
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_gqa_attention(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    rows: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    dh: usize,
+    seq_len: usize,
+    theta: f32,
+    causal: bool,
+) -> Vec<f32> {
+    let d_model = n_heads * dh;
+    let kv_dim = n_kv_heads * dh;
+    let qr = cpu_rope(q, rows, d_model, seq_len, 0, theta);
+    let kr = cpu_rope(k, rows, kv_dim, seq_len, 0, theta);
+    let repeat = n_heads / n_kv_heads;
+    let scale = 1.0 / (dh as f32).sqrt();
+    let mm = |a: &[f32], b: &[f32], m: usize, kk: usize, n: usize| -> Vec<f32> {
+        let mut c = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for p in 0..kk
+                {
+                    acc += a[i * kk + p] * b[p * n + j];
+                }
+                c[i * n + j] = acc;
+            }
+        }
+        c
+    };
+    let mut out = vec![0.0f32; rows * d_model];
+    for head in 0..n_heads
+    {
+        let kv = head / repeat;
+        let qs = cpu_slice_cols(&qr, rows, d_model, head * dh, dh); // [rows, dh]
+        let ks = cpu_slice_cols(&kr, rows, kv_dim, kv * dh, dh);
+        let vs = cpu_slice_cols(v, rows, kv_dim, kv * dh, dh);
+        // scores = qs · ksᵀ  → transpose ks to [dh, rows] first.
+        let mut kt = vec![0.0f32; dh * rows];
+        for r in 0..rows
+        {
+            for c in 0..dh
+            {
+                kt[c * rows + r] = ks[r * dh + c];
+            }
+        }
+        let s = mm(&qs, &kt, rows, dh, rows); // [rows, rows]
+        let s = cpu_scale_causal_mask(&s, rows, rows, scale, causal);
+        let w = cpu_softmax(&s, rows, rows);
+        let ctx = mm(&w, &vs, rows, rows, dh); // [rows, dh]
+        let placed = cpu_place_cols(&ctx, rows, dh, head * dh, d_model);
+        for i in 0..rows * d_model
+        {
+            out[i] += placed[i];
+        }
+    }
+    out
+}
+
 /// CPU reference for the scale + causal-mask backward: `din = scale·dout` at
 /// kept positions, `0` above the diagonal (masked keys carry no gradient). The
 /// GPU `scale_causal_mask_backward_resident` contract.
