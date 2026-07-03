@@ -85,6 +85,7 @@ impl ModalBasis {
         let mut modes: Vec<Vec<f64>> = Vec::new();
         for v in raw
         {
+            let orig_norm = dot(&v, &v).sqrt();
             let mut w = v;
             for q in &modes
             {
@@ -95,7 +96,10 @@ impl ModalBasis {
                 }
             }
             let norm = dot(&w, &w).sqrt();
-            if norm > 1e-12
+            // Relative rank tolerance: a vector is dependent on the earlier
+            // modes when its orthogonal residual is a negligible fraction of
+            // its own length, so the threshold scales with the input magnitude.
+            if norm > 1e-9 * orig_norm.max(f64::MIN_POSITIVE)
             {
                 for wi in &mut w
                 {

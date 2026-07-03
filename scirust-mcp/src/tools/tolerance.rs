@@ -234,8 +234,9 @@ fn form_modal_tool() -> McpTool {
             Pillet, Samper). Given a batch of surface measurements (rows = parts, columns = points \
             measured against nominal 0), returns the surface inertia I_S (RMS of every deviation \
             from nominal), the worst point, and — via an orthonormal DCT modal basis — the \
-            per-mode inertias I_k, which partition the surface inertia (sum I_k^2 = m*I_S^2). Low \
-            modes are physical: mode 0 = size/mean offset, 1 = tilt, 2 = ovality/curvature, etc."
+            per-mode inertias I_k, which for the complete basis (num_modes = all points, the default) \
+            partition the surface inertia (sum I_k^2 = m*I_S^2); with fewer modes the sum is smaller. \
+            Low modes are physical: mode 0 = size/mean offset, 1 = tilt, 2 = ovality/curvature, etc."
             .to_string(),
         input_schema: json!({
             "type": "object",
