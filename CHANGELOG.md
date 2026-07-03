@@ -61,10 +61,28 @@ plutôt qu'une formule devinée) :
   entièrement sur les primitives déjà vérifiées de `Architecture` et
   `pfd_moon`. La méthodologie de seuil ISA-67.04 reste documentée mais non
   implémentée (limite honnête, pas un oubli).
+- **`scirust-tolerance`** (nouvelle crate — tolérancement inertiel) : la
+  méthode de M. Pillet et du laboratoire SYMME (Adragna, Pillet, Formosa,
+  Samper — arXiv:1002.0270), qui tolérance l'**inertie**
+  `I = √(δ² + σ²)` (l'écart quadratique moyen à la cible, soit
+  `√(E[perte de Taguchi]/k)`) plutôt que la distance à un intervalle. Cinq
+  modules : `inertia` (type `Inertia`, estimation d'échantillon avec `Î²`
+  estimateur non biaisé de `I²`, perte de Taguchi, budget `I_max`, cône
+  d'inertie), `capability` (`Cp`/`Cpk`/`Cpm`/`Cpmk`/`Pp`/`Ppk`, l'indice
+  inertiel `Cpi = I_max/I` — égal à `Cpm` au budget `Cp=1` —, non-conformité
+  en ppm avec une queue `erfc` fiable jusqu'à 6σ), `chain` (analyse et
+  répartition de chaînes de cotes 1D : pire cas / statistique / pondérée /
+  garantie d'un `Cpk` par le coefficient `ICC = √(Cpk²+n/9)`, **vérifié
+  contre le tableau 2 de arXiv:1002.0270** : `0.033`/`0.075`/`0.060`),
+  `chart` (carte de pilotage inertiel avec limite `UPL(α) = I_max·√(χ²_{n;1−α}/n)`
+  et recommandation recentrer / réduire la dispersion), et `special`
+  (`erf`/`erfc`/CDF normale/quantile χ² validés contre valeurs de
+  référence). Pur Rust, dépendance unique `serde`.
 - **`scirust-mcp`** : un outil par domaine ci-dessus
   (`grid_state_estimate`, `biomed_cbf_safe_dose`, `maritime_collision_risk`,
   `fab_r2r_update`, `agtech_clean_yield_map`, `fatigue_rainflow_damage`,
-  `sis_reactor_trip_bypass`) — chaque domaine ajouté devient immédiatement
+  `sis_reactor_trip_bypass`, `tolerance_inertial_capability`,
+  `tolerance_chain_allocate`) — chaque domaine ajouté devient immédiatement
   pilotable par un agent, conformément à la doctrine du connecteur unique
   de `docs/DOMAIN_ROADMAP.md`.
 

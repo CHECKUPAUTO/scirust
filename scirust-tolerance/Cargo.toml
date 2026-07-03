@@ -1,0 +1,12 @@
+[package]
+name = "scirust-tolerance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust inertial tolerancing (tolérancement inertiel, Pillet) — inertia I=√(δ²+σ²), inertial capability Cpi, Cpm/Cpk/Pp/Ppk, 1D tolerance-chain analysis & allocation (worst-case / statistical / weighted / guaranteed-Cpk), and the inertial piloting chart"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"
