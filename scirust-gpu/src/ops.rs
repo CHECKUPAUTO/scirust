@@ -312,6 +312,12 @@ pub fn cpu_embed_backward(tokens: &[u32], dout: &[f32], d: usize, vocab: usize) 
     dtable
 }
 
+/// CPU reference for one SGD step: `param − lr·grad`, elementwise. The GPU
+/// `sgd_step_resident` kernel's correctness contract.
+pub fn cpu_sgd_step(param: &[f32], grad: &[f32], lr: f32) -> Vec<f32> {
+    param.iter().zip(grad).map(|(p, g)| p - lr * g).collect()
+}
+
 /// CPU reference for the mean cross-entropy loss: `−(1/rows)·Σᵢ log P[i,tgtᵢ]`
 /// where `P = softmax(logits)` row-wise (`rows × cols` logits, `rows` targets).
 pub fn cpu_cross_entropy(logits: &[f32], targets: &[u32], rows: usize, cols: usize) -> f32 {

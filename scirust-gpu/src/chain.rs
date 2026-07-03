@@ -466,6 +466,18 @@ impl GpuChain {
         self.ctx.cross_entropy_grad_resident(logits, targets)
     }
 
+    /// One SGD parameter update `param − lr·grad`, resident. Feed the result
+    /// back as the next iteration's parameter — the optimizer step that closes
+    /// the on-device training loop.
+    pub fn sgd_step(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        lr: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.sgd_step_resident(param, grad, lr)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1629,6 +1641,59 @@ mod tests {
                 dl_gpu[idx]
             );
         }
+    }
+
+    /// The **capstone**: a real on-device training loop actually reduces the
+    /// loss. A linear model `logits = x·W` with cross-entropy targets; each step
+    /// runs `xent_grad → matmul_backward (dW) → sgd_step(W)` entirely on the GPU.
+    /// Asserts the loss decreases monotonically and ends well below the start —
+    /// the whole loop (forward → loss → grads → update) works. Skips if no
+    /// adapter.
+    #[test]
+    fn sgd_step_reduces_cross_entropy_loss() {
+        use crate::ops::cpu_cross_entropy;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, vocab) = (6usize, 5usize, 8usize);
+        let x: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.21 - 0.7).sin()).collect();
+        let w0: Vec<f32> = (0..d * vocab)
+            .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+            .collect();
+        let targets: Vec<u32> = (0..t as u32).map(|i| (i * 5 + 1) % vocab as u32).collect();
+        let lr = 0.5f32;
+
+        let gx = chain.upload(&x, t, d);
+        let mut gw = chain.upload(&w0, d, vocab);
+        let mut losses = Vec::new();
+        for _ in 0..12
+        {
+            // Forward: logits = x·W.
+            let logits = chain.matmul(&gx, &gw).unwrap();
+            let logits_cpu = chain.download(&logits).unwrap();
+            losses.push(cpu_cross_entropy(&logits_cpu, &targets, t, vocab));
+            // Backward: dlogits = xent grad; dW = xᵀ·dlogits (matmul_backward.1).
+            let dlogits = chain.cross_entropy_grad(&logits, &targets).unwrap();
+            let (_dx, dw) = chain.matmul_backward(&gx, &gw, &dlogits).unwrap();
+            // Optimizer step: W ← W − lr·dW.
+            gw = chain.sgd_step(&gw, &dw, lr).unwrap();
+        }
+
+        // Loss decreases monotonically and ends far below the start.
+        for pair in losses.windows(2)
+        {
+            assert!(pair[1] < pair[0] + 1e-6, "loss went up: {pair:?}");
+        }
+        assert!(
+            *losses.last().unwrap() < losses[0] * 0.7,
+            "loss barely moved: {} → {}",
+            losses[0],
+            losses.last().unwrap()
+        );
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.

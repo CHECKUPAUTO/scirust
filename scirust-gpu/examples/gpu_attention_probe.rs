@@ -20,9 +20,9 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_cross_entropy_grad, cpu_embed, cpu_embed_backward, cpu_rms_norm,
-    cpu_rms_norm_backward, cpu_scale_causal_mask, cpu_scale_causal_mask_backward, cpu_softmax,
-    cpu_softmax_backward, cpu_swiglu_backward, rel_err,
+    MASK_NEG, cpu_cross_entropy, cpu_cross_entropy_grad, cpu_embed, cpu_embed_backward,
+    cpu_rms_norm, cpu_rms_norm_backward, cpu_scale_causal_mask, cpu_scale_causal_mask_backward,
+    cpu_softmax, cpu_softmax_backward, cpu_swiglu_backward, rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -626,6 +626,46 @@ fn main() {
         ),
         &mut failures,
     );
+
+    // 18. CAPSTONE — a real on-device training loop reduces the loss. Linear
+    //     model logits = x·W with cross-entropy targets; each step runs
+    //     xent_grad → matmul_backward (dW) → sgd_step(W), entirely on the GPU.
+    let (tt, td, tv) = (6usize, 5usize, 8usize);
+    let tx: Vec<f32> = (0..tt * td)
+        .map(|i| (i as f32 * 0.21 - 0.7).sin())
+        .collect();
+    let tw0: Vec<f32> = (0..td * tv)
+        .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+        .collect();
+    let ttargets: Vec<u32> = (0..tt as u32).map(|i| (i * 5 + 1) % tv as u32).collect();
+    let tgx = chain.upload(&tx, tt, td);
+    let mut tgw = chain.upload(&tw0, td, tv);
+    let (mut loss0, mut lossf) = (0.0f32, 0.0f32);
+    for step in 0..12
+    {
+        let logits = chain.matmul(&tgx, &tgw).unwrap();
+        let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &ttargets, tt, tv);
+        if step == 0
+        {
+            loss0 = l;
+        }
+        lossf = l;
+        let dl = chain.cross_entropy_grad(&logits, &ttargets).unwrap();
+        let (_dx, dw) = chain.matmul_backward(&tgx, &tgw, &dl).unwrap();
+        tgw = chain.sgd_step(&tgw, &dw, 0.5).unwrap();
+    }
+    let trained = lossf < loss0 * 0.7;
+    println!(
+        "  {:<34} loss {:.4} → {:.4}   {}",
+        "TRAIN LOOP (xent→grad→sgd on GPU)",
+        loss0,
+        lossf,
+        if trained { "PASS" } else { "FAIL" }
+    );
+    if !trained
+    {
+        failures += 1;
+    }
 
     println!();
     if failures == 0
