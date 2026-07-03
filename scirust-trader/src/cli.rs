@@ -11,6 +11,7 @@
 use crate::agent::{Action, OllamaClient, StubLlm, TradingAgent};
 use crate::backtest::{run_backtest as run_strategy_backtest, BacktestConfig};
 use crate::chart::{equity_curve_svg, ChartOptions};
+use crate::dashboard::{render_dashboard, DashboardOptions};
 use crate::market::{MarketFeed, MarketSnapshot, MockExchange};
 use crate::model::PricePredictor;
 use crate::proof::DecisionProof;
@@ -41,6 +42,7 @@ pub fn run(args: &[String]) -> u8 {
         },
         Some("scan") => cmd_scan(&args[1..]),
         Some("chart") => cmd_chart(&args[1..]),
+        Some("dashboard") => cmd_dashboard(&args[1..]),
         Some("info") =>
         {
             print_info();
@@ -78,6 +80,8 @@ fn print_help() {
     println!("            Scan mock markets x strategies for opportunities matching constraints.");
     println!("  chart     [--bars N] [--seed S] [--strategy NAME] --output FILE.svg");
     println!("            Backtest on a mock feed and write an equity-curve SVG chart.");
+    println!("  dashboard [--symbols A,B,...] [--bars N] [--seed S] [--strategy NAME] --output FILE.html");
+    println!("            Scan mock markets + backtest and write a self-contained HTML dashboard.");
     println!("  info      Show pipeline capabilities.");
     println!();
     println!("examples:");
@@ -870,6 +874,72 @@ fn cmd_chart(args: &[String]) -> u8 {
     }
 }
 
+fn cmd_dashboard(args: &[String]) -> u8 {
+    let mut symbols = vec!["BTC/USDT".to_string(), "ETH/USDT".to_string(), "SOL/USDT".to_string()];
+    let mut bars = 400usize;
+    let mut seed = 42u64;
+    let mut strategy = "sma_cross".to_string();
+    let mut output = "dashboard.html".to_string();
+
+    let mut i = 0;
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--symbols" => { i += 1; if i < args.len() { symbols = args[i].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(); } },
+            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(400); } },
+            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
+            "--strategy" => { i += 1; if i < args.len() { strategy = args[i].clone(); } },
+            "--output" => { i += 1; if i < args.len() { output = args[i].clone(); } },
+            _ => {},
+        }
+        i += 1;
+    }
+
+    let series: Vec<MarketSnapshot> = symbols.iter().map(|s| mock_snapshot(s, seed, bars)).collect();
+    let report = scan(&series, &OpportunityConstraints::default(), &ScanRiskConfig::default());
+
+    // Embed a backtest of the chosen strategy on the first symbol.
+    let mut backtests = Vec::new();
+    let bt = strategy_from_spec(&strategy, &BTreeMap::new()).map(|strat| {
+        let cfg = BacktestConfig {
+            symbol: series[0].symbol.clone(),
+            interval: "1m".to_string(),
+            ..Default::default()
+        };
+        (strat.name(), run_strategy_backtest(strat.as_ref(), &series[0].candles, &cfg))
+    });
+    if let Some((label, ref rep)) = bt
+    {
+        backtests.push((label, rep));
+    }
+
+    let opts = DashboardOptions {
+        title: "SciRust Trader — Dashboard".to_string(),
+        subtitle: format!("{} symbols · mock data · deterministic & simulation-first", series.len()),
+    };
+    let html = render_dashboard(Some(&report), &backtests, &opts);
+    match std::fs::write(&output, html)
+    {
+        Ok(_) =>
+        {
+            println!("dashboard written to: {output}");
+            println!(
+                "opportunities={} candidates={} proof={}",
+                report.opportunities.len(),
+                report.num_candidates,
+                if report.verify() { "valid" } else { "invalid" }
+            );
+            0
+        },
+        Err(e) =>
+        {
+            eprintln!("error writing dashboard: {e}");
+            1
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1042,6 +1112,24 @@ mod tests {
         assert_eq!(run(&args), 0);
         let content = std::fs::read_to_string(out).unwrap();
         assert!(content.starts_with("<svg"));
+    }
+
+    #[test]
+    fn dashboard_writes_html_file() {
+        let out = "/tmp/scirust_trader_dashboard_test.html";
+        let args = vec![
+            "dashboard".to_string(),
+            "--symbols".to_string(),
+            "BTC/USDT,ETH/USDT".to_string(),
+            "--bars".to_string(),
+            "150".to_string(),
+            "--output".to_string(),
+            out.to_string(),
+        ];
+        assert_eq!(run(&args), 0);
+        let content = std::fs::read_to_string(out).unwrap();
+        assert!(content.starts_with("<!doctype html>"));
+        assert!(content.contains("Opportunities"));
     }
 
     #[test]
