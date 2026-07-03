@@ -25,13 +25,26 @@ caractéristique scalaire à une surface mesurée entière :
   partition **`Σₖ Iₖ² = m·I_S²`** rend le tolérancement des modes (petit
   jeu de budgets physiques : mode 0 = taille, 1 = inclinaison, 2 = ovalité…)
   équivalent au tolérancement de toute la surface.
-- **`scirust-mcp`** : nouvel outil `tolerance_form_modal` (inertie de
-  surface + décomposition modale en un appel).
-
-La géométrie 3D complète par torseurs de petits déplacements
-(arXiv:1002.0253) reste une limite honnête documentée : seule la
-combinaison statistique vérifiable est fournie (`vector_inertia`,
-`form`, `modal`), pas la paramétrisation géométrique dépendante des figures.
+- **`spatial`** (nouveau module) : **tolérancement inertiel 3D par
+  torseurs de petits déplacements** (SDT, d'après Bourdet & Clément ;
+  Adragna/Samper/Pillet, arXiv:1002.0253). L'écart d'un point vaut
+  `d(M) = T + R × OM`, et l'écart normal `e(M) = d(M)·n = T·n + R·(OM×n)
+  = g(M)·θ` avec le vecteur d'influence `g = [n ; OM×n]`. `Torsor`,
+  `Feature` (échantillon points+normales), `fit_torsor` (association aux
+  moindres carrés `θ=(GᵀG)⁻¹Gᵀe` par élimination de Gauss avec pivot,
+  renvoie `None` si la surface est sous-contrainte — un plan seul
+  n'observe que 3 DDL), `form_residual` (défaut de forme résiduel, à
+  passer à `modal`), et l'**inertie de surface** `I_S² = θ̄ᵀHθ̄ + tr(HΣ_θ)`
+  avec `H=(1/m)Σ g gᵀ` — la combinaison statistique exacte du défaut de
+  **localisation** (T) et d'**orientation** (R), avec sa décomposition
+  location/orientation/couplage. La forme analytique est vérifiée égale à
+  l'empirique (via `FormBatch`) et l'association vérifiée par
+  aller-retour sur une pièce datum 3-2-1 pleine échelle. Ceci **remplace**
+  l'ancienne limite « non livré » : la géométrie 3D par torseurs est
+  maintenant fournie et vérifiée.
+- **`scirust-mcp`** : nouveaux outils `tolerance_form_modal` (inertie de
+  surface + décomposition modale) et `tolerance_3d_surface_inertia`
+  (inertie de surface 3D + décomposition localisation/orientation).
 
 ### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
 Chaque domaine documenté dans la feuille de route de marché reçoit maintenant

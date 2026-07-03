@@ -13,6 +13,9 @@ use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance, mix_lots};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::sampling::design_plan;
+use scirust_tolerance::spatial::{
+    Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
+};
 
 fn main() {
     // ---- 1. Tolerance-chain allocation (top-down synthesis) ---------------
@@ -157,5 +160,29 @@ fn main() {
         "  Σ I_k² = {:.5}  =  m·I_S² = {:.5}  (modal partition of the surface inertia)",
         sum_i2,
         batch.points() as f64 * i_s * i_s
+    );
+
+    // ---- 7. 3D small-displacement-torsor tolerancing ----------------------
+    // A part located by three cube faces (a 3-2-1 datum, full 6-DOF), with a
+    // batch of per-part torsors (location T + orientation R).
+    let feature = Feature::new(vec![
+        ([1.0, 0.3, -0.2], [1.0, 0.0, 0.0]), // +x face
+        ([-0.4, 1.0, 0.1], [0.0, 1.0, 0.0]), // +y face
+        ([0.2, -0.3, 1.0], [0.0, 0.0, 1.0]), // +z face
+    ]);
+    let torsors = [
+        Torsor::new([0.02, -0.01, 0.03], [0.010, 0.0, -0.005]),
+        Torsor::new([-0.01, 0.02, 0.01], [-0.005, 0.010, 0.002]),
+        Torsor::new([0.03, 0.0, -0.02], [0.002, -0.003, 0.004]),
+    ];
+    let i3d = surface_inertia_from_torsors(&feature, &torsors);
+    let dec = inertia_decomposition(&feature, &torsors);
+    println!("\n3D torsor tolerancing (3-face datum, 3 parts): surface inertia I_S = {i3d:.4}");
+    println!(
+        "  I_S² split: location {:.5} + orientation {:.5} + coupling {:+.5} = {:.5}",
+        dec.location,
+        dec.orientation,
+        dec.coupling,
+        dec.total()
     );
 }

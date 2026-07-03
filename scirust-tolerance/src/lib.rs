@@ -36,6 +36,11 @@
 //!   inertia as the quadratic mean of the per-point inertias.
 //! - [`modal`] — modal decomposition of form defects ([`modal::ModalBasis`],
 //!   DCT / eigenmode) and the modal inertias that partition the surface inertia.
+//! - [`spatial`] — 3D inertial tolerancing by small-displacement torsors
+//!   ([`spatial::Torsor`], [`spatial::Feature`]): normal deviation `e = G·θ`,
+//!   best-fit torsor + form residual, and the surface inertia as the
+//!   statistical combination of location and orientation via the geometry
+//!   matrix `H`.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -80,6 +85,7 @@ pub mod form;
 pub mod inertia;
 pub mod modal;
 pub mod sampling;
+pub mod spatial;
 pub mod special;
 
 pub use capability::{CapabilitySummary, cp, cpi, cpk, cpm, cpmk, nonconformity_ppm};
@@ -94,3 +100,4 @@ pub use inertia::{
 };
 pub use modal::{ModalBasis, modal_inertias};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
+pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};

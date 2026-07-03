@@ -106,5 +106,6 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_chain_allocate"));
         assert!(registry.names().contains(&"tolerance_acceptance_plan"));
         assert!(registry.names().contains(&"tolerance_form_modal"));
+        assert!(registry.names().contains(&"tolerance_3d_surface_inertia"));
     }
 }
