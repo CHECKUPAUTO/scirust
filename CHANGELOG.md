@@ -5,23 +5,29 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — cross-check par fuzzing de tous les modules (`scirust-tolerance`)
-Nouvel exemple `fuzz_crosscheck` : un harnais déterministe (graine xorshift)
-qui valide chaque module contre une **méthode de référence indépendante**
-(pas un re-run du même code), sur des milliers d'instances aléatoires :
-- `special` — `erf` contre une intégration de Simpson de `(2/√π)e^{−t²}`,
-  identités `erf+erfc=1` / `Φ+Φ̄=1`, réductions χ² et aller-retours de quantile ;
-- `sampling` — la probabilité d'acceptation par χ² non-centré contre une
-  simulation **Monte-Carlo** directe de `P(Î ≤ k·I_max)` ;
-- `spatial` — inertie de surface analytique `θ̄ᵀHθ̄+tr(HΣ)` contre l'empirique
-  (`FormBatch`), aller-retour d'association de torseur, orthogonalité du résidu ;
-- `modal` — orthonormalité DCT, Parseval, partition `Σ Iₖ²=m·I_S²` ;
-- `chain` — recombinaison statistique/pire-cas et KKT du coût-optimal ;
-- `capability` — non-conformité en ppm contre l'intégration de Simpson des queues.
-À 1500 instances/module : **39 200 vérifications, 0 erreur**, résidu pire-cas à
-la précision machine (à l'erreur Monte-Carlo près pour `sampling`). Complète le
-harnais `fuzz_optimize` (qui, lui, avait révélé et fait corriger deux défauts de
-robustesse). Conservé comme couverture de régression réutilisable.
+### Ajouté — transpileur : boucles `while` (Phase 1, incrément 2)
+Le sous-ensemble Python du transpileur entrant supporte désormais les **boucles
+`while`** (condition = comparaison scalaire), débloquant les algorithmes
+itératifs (Newton, point fixe, bisection). Prouvé par le même oracle
+différentiel contre NumPy réel avec deux cas de **méthode de Newton** — à
+nombre d'itérations fixe et à condition de convergence (le nombre d'itérations
+dépend des données mais reste identique côté Rust et NumPy, les opérations
+flottantes étant bit-identiques). **Oracle 12/12** (200 essais chacun) ; 14
+tests unitaires. `SirStmt::While` ajouté ; émetteur, parseur et inférence de
+paramètres étendus.
+
+### Ajouté — transpileur : contrôle de flux `if`/`elif`/`else` (Phase 1, incrément 1)
+Extension du sous-ensemble Python avec le **contrôle de flux scalaire**, prouvée
+par le même oracle différentiel contre NumPy réel :
+- front-end : instructions `if`/`elif`/`else` (`elif` désucré en `if` imbriqué
+  dans la branche `else`) ; opérateurs de comparaison `< <= > >= == !=` comme
+  conditions booléennes (une comparaison n'est valide qu'en condition, jamais
+  comme valeur — sinon refusée).
+- SIR : `Ty::Bool`, `SirStmt::If`, `SirExpr::Cmp` ; inférence de paramètres et
+  émetteur étendus ; les branches suivent la même règle « initialiser avant »
+  que les boucles.
+- oracle : 3 nouveaux cas (relu, clamp, sign) → **10/10 cas conformes**
+  (200 essais chacun) ; 13 tests unitaires.
 
 ### Ajouté — synthèse de tolérances à coût minimal (`scirust-tolerance`)
 Le « calcul optimal » du tolérancement inertiel : nouveau module `optimize`

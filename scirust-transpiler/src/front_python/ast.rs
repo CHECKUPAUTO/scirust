@@ -57,6 +57,8 @@ pub enum PyStmt {
         then: Vec<PyStmt>,
         els: Vec<PyStmt>,
     },
+    /// `while cond: body`
+    While { cond: PyExpr, body: Vec<PyStmt> },
     /// `return expr`
     Return(Option<PyExpr>),
 }

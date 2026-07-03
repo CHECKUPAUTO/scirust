@@ -62,6 +62,11 @@ pub enum SirStmt {
         then: Vec<SirStmt>,
         els: Vec<SirStmt>,
     },
+    /// `while cond { body }`.
+    While {
+        cond: SirExpr,
+        body: Vec<SirStmt>,
+    },
     Return(SirExpr),
 }
 

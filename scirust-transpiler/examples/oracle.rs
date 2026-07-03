@@ -155,6 +155,27 @@ fn cases() -> Vec<Case> {
             src: "def sign(x):\n    if x > 0.0:\n        return 1.0\n    elif x < 0.0:\n        return -1.0\n    else:\n        return 0.0\n",
             args: vec![Scalar { lo: -2.0, hi: 2.0 }],
         },
+        // while — Newton's method for sqrt, fixed iteration count.
+        Case {
+            name: "newton_sqrt (while, fixed)",
+            call: "newton_sqrt",
+            src: "def newton_sqrt(a):\n    x = a\n    i = 0\n    while i < 20:\n        x = 0.5 * (x + a / x)\n        i = i + 1\n    return x\n",
+            args: vec![Scalar { lo: 0.1, hi: 5.0 }],
+        },
+        // while — Newton's method with a convergence condition (data-dependent
+        // iteration count; bit-identical ops => same count in Rust and NumPy).
+        Case {
+            name: "newton_conv (while, converge)",
+            call: "newton_conv",
+            src: "def newton_conv(a, tol):\n    x = a\n    d = x * x - a\n    while abs(d) > tol:\n        x = x - d / (2.0 * x)\n        d = x * x - a\n    return x\n",
+            args: vec![
+                Scalar { lo: 0.1, hi: 5.0 },
+                Scalar {
+                    lo: 1e-10,
+                    hi: 1e-8,
+                },
+            ],
+        },
     ]
 }
 
