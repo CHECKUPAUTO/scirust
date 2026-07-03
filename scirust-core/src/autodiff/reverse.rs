@@ -387,6 +387,17 @@ impl Tensor {
         let sum = exp.sum_axis(axis);
         exp.div(&sum.broadcast_to(self.rows, self.cols))
     }
+    /// Numerically stable log-softmax: `x - logsumexp(x)`, max-shifted.
+    /// Computing `log(softmax(x))` instead underflows a strongly-masked entry
+    /// (e.g. a `-1e9` causal-mask fill) to `softmax = 0` and then `log(0) = -inf`;
+    /// here the same entry stays a large FINITE negative.
+    pub fn log_softmax(&self, axis: u8) -> Tensor {
+        let max = self.max_axis(axis);
+        let shifted = self.sub(&max.broadcast_to(self.rows, self.cols));
+        let sum = shifted.exp().sum_axis(axis);
+        let logsum = sum.log(); // natural log; log_softmax = shifted - logsum
+        shifted.sub(&logsum.broadcast_to(self.rows, self.cols))
+    }
     pub fn transpose(&self) -> Tensor {
         let mut out = Tensor::zeros(self.cols, self.rows);
         for r in 0..self.rows
@@ -1532,16 +1543,29 @@ impl Tape {
                     let av = &values[a].as_cpu();
                     let max_v = av.max_axis(axis);
                     let mut mask = Tensor::zeros(av.rows, av.cols);
+                    // Split the incoming gradient EQUALLY among tied maxima
+                    // (weight 1/k for k ties) instead of giving the full gradient
+                    // to each — the latter over-counts by a factor of k and
+                    // inflates the gradient on plateaus.
                     if axis == 0
                     {
                         for c in 0..av.cols
                         {
                             let m = max_v.data[c];
+                            let mut count = 0usize;
                             for r in 0..av.rows
                             {
                                 if (av.data[r * av.cols + c] - m).abs() < 1e-6
                                 {
-                                    mask.data[r * av.cols + c] = 1.0;
+                                    count += 1;
+                                }
+                            }
+                            let w = 1.0 / count as f32;
+                            for r in 0..av.rows
+                            {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6
+                                {
+                                    mask.data[r * av.cols + c] = w;
                                 }
                             }
                         }
@@ -1551,11 +1575,20 @@ impl Tape {
                         for r in 0..av.rows
                         {
                             let m = max_v.data[r];
+                            let mut count = 0usize;
                             for c in 0..av.cols
                             {
                                 if (av.data[r * av.cols + c] - m).abs() < 1e-6
                                 {
-                                    mask.data[r * av.cols + c] = 1.0;
+                                    count += 1;
+                                }
+                            }
+                            let w = 1.0 / count as f32;
+                            for c in 0..av.cols
+                            {
+                                if (av.data[r * av.cols + c] - m).abs() < 1e-6
+                                {
+                                    mask.data[r * av.cols + c] = w;
                                 }
                             }
                         }
@@ -3167,8 +3200,7 @@ impl<'t> Var<'t> {
                 "log_softmax: axis {axis} out of range [0, 1]"
             )));
         }
-        let sm = a.softmax(axis);
-        let out = sm.log();
+        let out = a.log_softmax(axis);
         let new_idx = self.tape.push_with_saved(
             Op::LogSoftmax {
                 input: self.idx,
@@ -4906,6 +4938,81 @@ mod l2_normalize_tests {
         assert_eq!(b1, b2, "second dropout not reproducible under set_seed");
         // Sanity: the two calls within a run still differ (stochastic across calls).
         assert_ne!(a1, b1, "the two calls should differ within a run");
+    }
+}
+
+#[cfg(test)]
+mod numerical_stability_tests {
+    use super::*;
+
+    #[test]
+    fn log_softmax_masked_entry_stays_finite() {
+        // A strongly-masked entry (-1e9, as used for causal masking) must not
+        // produce -inf in the forward. The old log(softmax(x)) underflowed the
+        // masked softmax to 0 and then log(0) = -inf.
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, -1e9], 1, 3));
+        let y = x.log_softmax(1);
+        let v = tape.value(y.idx());
+        assert!(
+            v.data.iter().all(|z| z.is_finite()),
+            "log_softmax produced a non-finite value: {:?}",
+            v.data
+        );
+        // exp(log_softmax) sums to 1 over the axis.
+        let s: f32 = v.data.iter().map(|z| z.exp()).sum();
+        assert!((s - 1.0).abs() < 1e-4, "sum exp(log_softmax) = {s}");
+        // the masked entry is a large finite negative log-prob.
+        assert!(v.data[2] < -1e8, "masked log-prob = {}", v.data[2]);
+    }
+
+    #[test]
+    fn log_softmax_backward_matches_finite_differences() {
+        let x0 = [0.5f32, -1.0, 2.0, 0.3];
+        let analytic = {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(x0.to_vec(), 1, 4));
+            // weight the log-probs so the upstream gradient is non-uniform.
+            let w = tape.input(Tensor::from_vec(vec![0.7, -0.4, 1.2, 0.1], 1, 4));
+            let loss = x.log_softmax(1).hadamard(w).sum();
+            tape.backward(loss.idx());
+            tape.grad(x.idx()).data
+        };
+        let loss_at = |xs: &[f32]| -> f32 {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(xs.to_vec(), 1, 4));
+            let w = tape.input(Tensor::from_vec(vec![0.7, -0.4, 1.2, 0.1], 1, 4));
+            let y = x.log_softmax(1).hadamard(w).sum();
+            tape.value(y.idx()).data.iter().sum()
+        };
+        let h = 1e-3f32;
+        for (i, &a) in analytic.iter().enumerate()
+        {
+            let mut xp = x0;
+            let mut xm = x0;
+            xp[i] += h;
+            xm[i] -= h;
+            let num = (loss_at(&xp) - loss_at(&xm)) / (2.0 * h);
+            assert!(
+                (a - num).abs() <= 1e-2,
+                "dlog_softmax/dx[{i}] analytic {a} vs finite-diff {num}"
+            );
+        }
+    }
+
+    #[test]
+    fn max_axis_splits_gradient_equally_among_ties() {
+        // Column [5, 5, 3]: max = 5 with two ties. Each tied max must receive
+        // 1/2 of the upstream gradient, not the full gradient (which the old
+        // code gave to every tie, over-counting by k).
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![5.0, 5.0, 3.0], 3, 1));
+        let loss = x.max_axis(0).sum();
+        tape.backward(loss.idx());
+        let g = tape.grad(x.idx());
+        assert!((g.data[0] - 0.5).abs() < 1e-6, "g[0] = {}", g.data[0]);
+        assert!((g.data[1] - 0.5).abs() < 1e-6, "g[1] = {}", g.data[1]);
+        assert!(g.data[2].abs() < 1e-6, "g[2] = {}", g.data[2]);
     }
 }
 
