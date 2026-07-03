@@ -99,6 +99,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Pre-softmax attention step: scale a `rows × cols` score matrix by `scale`,
+/// and — when `causal == 1` — overwrite every above-diagonal entry (key
+/// `j > i` for query `i`) with the `-1e30` mask sentinel. 2D dispatch: `gid.x`
+/// is the key column `j`, `gid.y` the query row `i`. `scale` is smuggled
+/// through the `u32` uniform as raw bits and reconstructed with `bitcast`. The
+/// CPU contract is [`crate::ops::cpu_scale_causal_mask`].
+const MASK_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, causal: u32, scale_bits: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.y;
+    let j = gid.x;
+    if (i >= p.rows || j >= p.cols) { return; }
+    let idx = i * p.cols + j;
+    if (p.causal == 1u && j > i) {
+        out[idx] = -1.0e30;
+    } else {
+        out[idx] = inp[idx] * bitcast<f32>(p.scale_bits);
+    }
+}
+"#;
+
 /// A wgpu device + compiled compute pipelines, created once and reused across
 /// calls (adapter/device acquisition and shader compilation are expensive).
 pub struct WgpuContext {
@@ -107,6 +134,7 @@ pub struct WgpuContext {
     pipeline: wgpu::ComputePipeline,
     ew_pipeline: wgpu::ComputePipeline,
     softmax_pipeline: wgpu::ComputePipeline,
+    mask_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -194,12 +222,25 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("scale_causal_mask"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(MASK_WGSL)),
+        });
+        let mask_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("scale_causal_mask"),
+            layout: None,
+            module: &mask_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
             pipeline,
             ew_pipeline,
             softmax_pipeline,
+            mask_pipeline,
             adapter_name,
         })
     }
@@ -275,6 +316,87 @@ impl WgpuContext {
         }
         self.queue.submit(Some(encoder.finish()));
         self.download_buffer(&out_buf, data.len(), bytes)
+    }
+
+    /// Pre-softmax attention step on a row-major `rows × cols` score matrix:
+    /// multiply by `scale`, and — when `causal` — replace every entry above the
+    /// diagonal (key `j > i`) with the `-1e30` mask sentinel. Matches
+    /// [`crate::ops::cpu_scale_causal_mask`]. One thread per score cell.
+    pub fn scale_causal_mask(
+        &self,
+        scores: &[f32],
+        rows: usize,
+        cols: usize,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<Vec<f32>> {
+        if scores.len() != rows * cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "scale_causal_mask: {} elems != {rows}×{cols}",
+                scores.len()
+            )));
+        }
+        if scores.is_empty()
+        {
+            return Ok(Vec::new());
+        }
+        let bytes = std::mem::size_of_val(scores) as u64;
+        let in_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mask-in"),
+                contents: bytemuck::cast_slice(scores),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mask-out"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let params: [u32; 4] = [rows as u32, cols as u32, causal as u32, scale.to_bits()];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mask-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mask"),
+            layout: &self.mask_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: in_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mask"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("mask"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.mask_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((cols as u32).div_ceil(8), (rows as u32).div_ceil(8), 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        self.download_buffer(&out_buf, scores.len(), bytes)
     }
 
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
@@ -836,6 +958,18 @@ pub fn wgpu_softmax(data: &[f32], rows: usize, cols: usize) -> BackendResult<Vec
     WgpuContext::new()?.softmax_rows(data, rows, cols)
 }
 
+/// One-shot scale + causal mask over a `rows × cols` score matrix. Acquires a
+/// fresh [`WgpuContext`]; for repeated calls prefer holding a context.
+pub fn wgpu_scale_causal_mask(
+    scores: &[f32],
+    rows: usize,
+    cols: usize,
+    scale: f32,
+    causal: bool,
+) -> BackendResult<Vec<f32>> {
+    WgpuContext::new()?.scale_causal_mask(scores, rows, cols, scale, causal)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{CpuBackend, GpuAccelerator, RawComputeBackend, WgpuBackend};
@@ -938,6 +1072,57 @@ mod tests {
             Err(crate::BackendError::Unavailable(_)) =>
             {
                 eprintln!("wgpu: no adapter available, skipping softmax parity");
+            },
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+
+    /// GPU scale + causal mask must match the CPU oracle, including the exact
+    /// `-1e30` sentinel written above the diagonal. Exercised on lavapipe in CI
+    /// and the real GPU on-device; skipped where no adapter is present.
+    #[test]
+    fn wgpu_scale_causal_mask_matches_cpu_oracle() {
+        let (rows, cols) = (5usize, 5usize);
+        let scores: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.21 - 2.0).cos() * 3.0)
+            .collect();
+        let scale = 0.125_f32; // 1/sqrt(64), a realistic 1/sqrt(head_dim).
+        match super::wgpu_scale_causal_mask(&scores, rows, cols, scale, true)
+        {
+            Ok(gpu) =>
+            {
+                let cpu = crate::ops::cpu_scale_causal_mask(&scores, rows, cols, scale, true);
+                assert_eq!(gpu.len(), cpu.len());
+                // Above-diagonal entries are the exact sentinel on both paths.
+                for i in 0..rows
+                {
+                    for j in 0..cols
+                    {
+                        let idx = i * cols + j;
+                        if j > i
+                        {
+                            assert_eq!(gpu[idx], crate::ops::MASK_NEG, "masked ({i},{j})");
+                        }
+                        else
+                        {
+                            assert!(
+                                (gpu[idx] - cpu[idx]).abs() < 1e-5,
+                                "kept ({i},{j}): gpu={} cpu={}",
+                                gpu[idx],
+                                cpu[idx]
+                            );
+                        }
+                    }
+                }
+                // Non-causal path is a pure scale.
+                let gpu_ns =
+                    super::wgpu_scale_causal_mask(&scores, rows, cols, scale, false).unwrap();
+                let cpu_ns = crate::ops::cpu_scale_causal_mask(&scores, rows, cols, scale, false);
+                assert!(rel_err(&gpu_ns, &cpu_ns) < 1e-5);
+            },
+            Err(crate::BackendError::Unavailable(_)) =>
+            {
+                eprintln!("wgpu: no adapter available, skipping mask parity");
             },
             Err(e) => panic!("unexpected error: {e:?}"),
         }
