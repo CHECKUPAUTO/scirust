@@ -215,7 +215,32 @@ impl Feature {
                 }
             }
         }
-        solve6(&ata, &atb).map(Torsor::from_array)
+        // Symmetric Jacobi (diagonal) scaling before the solve. A zero
+        // diagonal is an unobservable DOF (that column of G is null); scaling
+        // by the diagonal otherwise makes the normal matrix unit-diagonal, so
+        // the singularity test is scale-invariant no matter how far the working
+        // origin sits from the feature (the rotation block scales as ‖OM‖²).
+        let mut d = [0.0f64; 6];
+        for i in 0..6
+        {
+            if ata[i][i] <= 0.0
+            {
+                return None;
+            }
+            d[i] = ata[i][i].sqrt();
+        }
+        let mut sa = [[0.0f64; 6]; 6];
+        let mut sb = [0.0f64; 6];
+        for i in 0..6
+        {
+            sb[i] = atb[i] / d[i];
+            for j in 0..6
+            {
+                sa[i][j] = ata[i][j] / (d[i] * d[j]);
+            }
+        }
+        let y = solve6(&sa, &sb)?;
+        Some(Torsor::from_array(std::array::from_fn(|i| y[i] / d[i])))
     }
 
     /// The form residual `e − G·θ̂` after removing the best-fit rigid
@@ -497,6 +522,37 @@ mod tests {
             assert!(proj.abs() < 1e-9, "residual not orthogonal to column {k}");
         }
         assert!(resid.iter().any(|r| r.abs() > 1e-4));
+    }
+
+    #[test]
+    fn fit_torsor_handles_a_non_unit_scaled_feature() {
+        // A feature offset ~50 units from the origin, so the rotation block of
+        // the normal matrix (∝ ‖OM‖²) dwarfs the translation block. The Jacobi
+        // (diagonal) scaling keeps the singularity test scale-invariant and the
+        // solve well-behaved, so the fit still recovers the torsor accurately.
+        // Same 3-face datum as `cube_feature`, but translated by `c` so ‖OM‖≈c;
+        // in-plane variation (not along the normal) keeps all 6 DOF observable.
+        let c = 50.0;
+        let mut pts = Vec::new();
+        for &s in &[-0.5, 0.5]
+        {
+            for &t in &[-0.5, 0.5]
+            {
+                pts.push(([c + 1.0, c + s, c + t], [1.0, 0.0, 0.0]));
+                pts.push(([c + s, c + 1.0, c + t], [0.0, 1.0, 0.0]));
+                pts.push(([c + s, c + t, c + 1.0], [0.0, 0.0, 1.0]));
+            }
+        }
+        let shifted = Feature::new(pts);
+        let truth = Torsor::new([0.02, -0.01, 0.03], [1e-3, -2e-3, 3e-3]);
+        let e = shifted.deviation_field(&truth);
+        let fit = shifted
+            .fit_torsor(&e)
+            .expect("full-rank feature should fit");
+        for (a, b) in fit.to_array().iter().zip(truth.to_array())
+        {
+            assert_relative_eq!(a, &b, epsilon = 1e-7, max_relative = 1e-7);
+        }
     }
 
     #[test]
