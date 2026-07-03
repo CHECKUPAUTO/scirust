@@ -231,6 +231,10 @@ impl<'a> Parser<'a> {
         {
             return self.parse_for();
         }
+        if self.is_name("if")
+        {
+            return self.parse_if();
+        }
         // assignment: NAME ['[' idx ']'] '=' expr
         let target = self.take_name()?;
         if self.is_sym("[")
@@ -288,6 +292,80 @@ impl<'a> Parser<'a> {
             start,
             end,
             body,
+        })
+    }
+
+    /// `if cond: block (elif cond: block)* (else: block)?`
+    fn parse_if(&mut self) -> Result<PyStmt, String> {
+        self.eat_name("if")?;
+        self.parse_if_tail()
+    }
+
+    /// Parse the part after `if`/`elif`: `cond ':' block` then optional
+    /// `elif`/`else`. `elif` desugars into a nested `If` in the else branch.
+    fn parse_if_tail(&mut self) -> Result<PyStmt, String> {
+        let cond = self.parse_condition()?;
+        self.eat_sym(":")?;
+        let then = self.parse_block()?;
+        self.eat_newlines();
+        let els = if self.is_name("elif")
+        {
+            self.eat_name("elif")?;
+            vec![self.parse_if_tail()?]
+        }
+        else if self.is_name("else")
+        {
+            self.eat_name("else")?;
+            self.eat_sym(":")?;
+            self.parse_block()?
+        }
+        else
+        {
+            Vec::new()
+        };
+        Ok(PyStmt::If { cond, then, els })
+    }
+
+    /// A boolean condition: a single comparison `add <op> add`.
+    fn parse_condition(&mut self) -> Result<PyExpr, String> {
+        let l = self.parse_add()?;
+        let op = if self.is_sym("<")
+        {
+            CmpOp::Lt
+        }
+        else if self.is_sym("<=")
+        {
+            CmpOp::Le
+        }
+        else if self.is_sym(">")
+        {
+            CmpOp::Gt
+        }
+        else if self.is_sym(">=")
+        {
+            CmpOp::Ge
+        }
+        else if self.is_sym("==")
+        {
+            CmpOp::Eq
+        }
+        else if self.is_sym("!=")
+        {
+            CmpOp::Ne
+        }
+        else
+        {
+            return Err(format!(
+                "condition must be a comparison (`<`,`<=`,`>`,`>=`,`==`,`!=`), got {:?}",
+                self.peek()
+            ));
+        };
+        self.bump();
+        let r = self.parse_add()?;
+        Ok(PyExpr::Cmp {
+            op,
+            l: Box::new(l),
+            r: Box::new(r),
         })
     }
 

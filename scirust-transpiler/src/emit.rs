@@ -118,6 +118,7 @@ fn param_ty(t: Ty) -> &'static str {
         Ty::Scalar => "f64",
         Ty::Array => "&[f64]",
         Ty::Int => "usize",
+        Ty::Bool => "bool",
     }
 }
 
@@ -198,6 +199,28 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
                 emit_stmt(b, ctx, ind + 1, out);
             }
             out.push_str(&format!("{}}}\n", pad));
+        },
+        SirStmt::If { cond, then, els } =>
+        {
+            let c = emit(cond, ctx);
+            out.push_str(&format!("{}if {} {{\n", pad, c.code));
+            for b in then
+            {
+                emit_stmt(b, ctx, ind + 1, out);
+            }
+            if els.is_empty()
+            {
+                out.push_str(&format!("{}}}\n", pad));
+            }
+            else
+            {
+                out.push_str(&format!("{}}} else {{\n", pad));
+                for b in els
+                {
+                    emit_stmt(b, ctx, ind + 1, out);
+                }
+                out.push_str(&format!("{}}}\n", pad));
+            }
         },
         SirStmt::Return(e) =>
         {
@@ -441,6 +464,16 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code: format!("np::map1({}, |x| x.{}())", slice_of(&a), func.rust_method()),
                 ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cmp { op, l, r } =>
+        {
+            let l = emit(l, ctx);
+            let r = emit(r, ctx);
+            Frag {
+                code: format!("({} {} {})", scalar_of(l), op.rust_sym(), scalar_of(r)),
+                ty: Ty::Bool,
                 borrowed: false,
             }
         },

@@ -13,6 +13,8 @@ pub enum Ty {
     Array,
     /// Integer index / length (emitted as `usize`). Internal to loops/indexing.
     Int,
+    /// Boolean (emitted as `bool`). Internal to conditions only.
+    Bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +55,12 @@ pub enum SirStmt {
         start: SirExpr,
         end: SirExpr,
         body: Vec<SirStmt>,
+    },
+    /// `if cond { then } else { els }` (else omitted when empty).
+    If {
+        cond: SirExpr,
+        then: Vec<SirStmt>,
+        els: Vec<SirStmt>,
     },
     Return(SirExpr),
 }
@@ -126,6 +134,12 @@ pub enum SirExpr {
     Zeros(Box<SirExpr>),
     /// `np.ones(n)` : Int -> Array.
     Ones(Box<SirExpr>),
+    /// Scalar comparison `l <op> r` -> Bool (conditions only).
+    Cmp {
+        op: CmpOp,
+        l: Box<SirExpr>,
+        r: Box<SirExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +148,30 @@ pub enum Op {
     Sub,
     Mul,
     Div,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmpOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl CmpOp {
+    pub fn rust_sym(self) -> &'static str {
+        match self
+        {
+            CmpOp::Lt => "<",
+            CmpOp::Le => "<=",
+            CmpOp::Gt => ">",
+            CmpOp::Ge => ">=",
+            CmpOp::Eq => "==",
+            CmpOp::Ne => "!=",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +219,7 @@ impl SirExpr {
             | SirExpr::ArrayUnaryFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_) => Ty::Array,
+            SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
 }
