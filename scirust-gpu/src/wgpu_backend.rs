@@ -393,6 +393,73 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Rotary position embedding (RoPE), forward. One invocation per `(row, pair)`
+/// rotates the interleaved lane pair `(2j, 2j+1)` of row `r` by angle
+/// `θ_pos · freqⱼ`, with `pos = (r mod seq_len) + offset` and
+/// `freqⱼ = theta^(-2j/dim)`:
+/// `y[2j] = e·cos − o·sin`, `y[2j+1] = e·sin + o·cos` (`e=x[2j], o=x[2j+1]`).
+/// This is exactly the model's interleaved rotation (`GQAAttention::rope_apply`
+/// / `rope_on_tape`); the CPU contract is [`crate::ops::cpu_rope`]. `dim` must be
+/// even. 2 storage buffers (well within the portable 4-buffer limit).
+const ROPE_WGSL: &str = r#"
+struct P { rows: u32, dim: u32, seq_len: u32, offset: u32, theta_bits: u32, _p0: u32, _p1: u32, _p2: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let j = gid.x;              // pair index in 0..dim/2
+    let row = gid.y;
+    let half = p.dim / 2u;
+    if (row >= p.rows || j >= half) { return; }
+    let theta = bitcast<f32>(p.theta_bits);
+    let base = row * p.dim;
+    let pos = f32((row % p.seq_len) + p.offset);
+    let freq = pow(theta, -2.0 * f32(j) / f32(p.dim));
+    let angle = pos * freq;
+    let c = cos(angle);
+    let s = sin(angle);
+    let e = inp[base + 2u * j];
+    let o = inp[base + 2u * j + 1u];
+    out[base + 2u * j]      = e * c - o * s;
+    out[base + 2u * j + 1u] = e * s + o * c;
+}
+"#;
+
+/// Backward of [`ROPE_WGSL`]. RoPE is a rotation, so its adjoint is the
+/// transpose rotation: given the upstream grad `dy`, one invocation per
+/// `(row, pair)` computes `dx[2j] = cos·dy[2j] + sin·dy[2j+1]`,
+/// `dx[2j+1] = −sin·dy[2j] + cos·dy[2j+1]` with the same `pos`/`freq` as the
+/// forward. The CPU contract is [`crate::ops::cpu_rope_backward`].
+const ROPE_BWD_WGSL: &str = r#"
+struct P { rows: u32, dim: u32, seq_len: u32, offset: u32, theta_bits: u32, _p0: u32, _p1: u32, _p2: u32, };
+
+@group(0) @binding(0) var<storage, read>       dy:  array<f32>;
+@group(0) @binding(1) var<storage, read_write> dx:  array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let j = gid.x;
+    let row = gid.y;
+    let half = p.dim / 2u;
+    if (row >= p.rows || j >= half) { return; }
+    let theta = bitcast<f32>(p.theta_bits);
+    let base = row * p.dim;
+    let pos = f32((row % p.seq_len) + p.offset);
+    let freq = pow(theta, -2.0 * f32(j) / f32(p.dim));
+    let angle = pos * freq;
+    let c = cos(angle);
+    let s = sin(angle);
+    let ge = dy[base + 2u * j];
+    let go = dy[base + 2u * j + 1u];
+    dx[base + 2u * j]      =  c * ge + s * go;
+    dx[base + 2u * j + 1u] = -s * ge + c * go;
+}
+"#;
+
 /// A wgpu device + compiled compute pipelines, created once and reused across
 /// calls (adapter/device acquisition and shader compilation are expensive).
 pub struct WgpuContext {
@@ -412,6 +479,8 @@ pub struct WgpuContext {
     xent_grad_pipeline: wgpu::ComputePipeline,
     sgd_pipeline: wgpu::ComputePipeline,
     adamw_pipeline: wgpu::ComputePipeline,
+    rope_pipeline: wgpu::ComputePipeline,
+    rope_bwd_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -634,6 +703,30 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let rope_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rope"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(ROPE_WGSL)),
+        });
+        let rope_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("rope"),
+            layout: None,
+            module: &rope_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let rope_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rope_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(ROPE_BWD_WGSL)),
+        });
+        let rope_bwd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("rope_bwd"),
+            layout: None,
+            module: &rope_bwd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -651,6 +744,8 @@ impl WgpuContext {
             xent_grad_pipeline,
             sgd_pipeline,
             adamw_pipeline,
+            rope_pipeline,
+            rope_bwd_pipeline,
             adapter_name,
         })
     }
@@ -886,6 +981,179 @@ impl WgpuContext {
             pass.set_pipeline(&self.mask_pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups((cols as u32).div_ceil(8), (rows as u32).div_ceil(8), 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Rotary position embedding of a **resident** `rows × dim` matrix (rows are
+    /// token positions, `dim` the per-head dimension), result kept in VRAM.
+    /// Applies the interleaved-pair rotation with `pos = (row mod seq_len) +
+    /// offset` and `freqⱼ = theta^(-2j/dim)` — matching [`crate::ops::cpu_rope`]
+    /// and the sciagent model's RoPE. `dim` must be even and `seq_len ≥ 1`.
+    pub fn rope_resident(
+        &self,
+        x: &GpuMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if !x.cols.is_multiple_of(2)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rope: dim (cols) must be even, got {}",
+                x.cols
+            )));
+        }
+        if seq_len == 0
+        {
+            return Err(BackendError::ShapeMismatch(
+                "rope: seq_len must be ≥ 1".into(),
+            ));
+        }
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rope-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_rope(
+                &self.rope_pipeline,
+                &x.buf,
+                &out_buf,
+                x.rows,
+                x.cols,
+                seq_len,
+                offset,
+                theta,
+            );
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// Backward of [`Self::rope_resident`]: given the upstream grad `dy`
+    /// (`rows × dim`, resident), returns the resident `dx` via the transpose
+    /// rotation. Same `seq_len`/`offset`/`theta` as the forward. The CPU contract
+    /// is [`crate::ops::cpu_rope_backward`].
+    pub fn rope_backward_resident(
+        &self,
+        dy: &GpuMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if !dy.cols.is_multiple_of(2)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rope_backward: dim (cols) must be even, got {}",
+                dy.cols
+            )));
+        }
+        if seq_len == 0
+        {
+            return Err(BackendError::ShapeMismatch(
+                "rope_backward: seq_len must be ≥ 1".into(),
+            ));
+        }
+        let elems = dy.rows * dy.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rope-bwd-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_rope(
+                &self.rope_bwd_pipeline,
+                &dy.buf,
+                &out_buf,
+                dy.rows,
+                dy.cols,
+                seq_len,
+                offset,
+                theta,
+            );
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: dy.rows,
+            cols: dy.cols,
+        })
+    }
+
+    /// Encode + submit one RoPE (or RoPE-backward) dispatch: `in_buf`
+    /// (`rows × dim`, row-major) rotated pairwise into `out_buf`. The forward and
+    /// backward kernels share this bind-group layout (in, out, params); the
+    /// caller picks the pipeline.
+    #[allow(clippy::too_many_arguments)]
+    fn _encode_rope(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        in_buf: &wgpu::Buffer,
+        out_buf: &wgpu::Buffer,
+        rows: usize,
+        dim: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) {
+        let params: [u32; 8] = [
+            rows as u32,
+            dim as u32,
+            seq_len as u32,
+            offset as u32,
+            theta.to_bits(),
+            0,
+            0,
+            0,
+        ];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("rope-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rope"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: in_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("rope"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("rope"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(((dim / 2) as u32).div_ceil(8), (rows as u32).div_ceil(8), 1);
         }
         self.queue.submit(Some(encoder.finish()));
     }
