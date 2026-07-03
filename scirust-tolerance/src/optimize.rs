@@ -119,8 +119,10 @@ pub struct OptimizeResult {
     pub achieved: Vec<f64>,
     /// Whether each requirement is binding (active at the optimum).
     pub binding: Vec<bool>,
-    /// Max KKT residual (primal infeasibility ∪ complementary-slackness),
-    /// a convergence quality measure — near 0 when solved.
+    /// Primal-infeasibility residual `maxₖ max(achievedₖ²/I_max,ₖ² − 1, 0)` at
+    /// convergence — a quality measure, near 0 when solved (the closed-form
+    /// primal keeps stationarity and dual feasibility exact by construction, so
+    /// this is the binding KKT residual). `+∞` if the result was non-finite.
     pub kkt_residual: f64,
     /// Dual iterations performed.
     pub iterations: usize,
@@ -307,8 +309,14 @@ pub fn optimize_with(
         kkt = feas;
         // Converged once the primal has stabilised and is feasible: a binding
         // constraint sits on ratio = 1, a slack one has driven its μ to ~0 so
-        // it no longer moves the primal (complementary slackness).
-        if it > 0 && max_change <= opts.tol && feas <= opts.tol
+        // it no longer moves the primal (complementary slackness). The
+        // finiteness guard is essential: `f64::max` and `NaN.max(0.0)` silently
+        // swallow NaN, so a non-finite iterate would otherwise read
+        // `max_change = feas = 0` and falsely report convergence.
+        if it > 0
+            && max_change <= opts.tol
+            && feas <= opts.tol
+            && inertias.iter().all(|v| v.is_finite())
         {
             converged = true;
             break;
@@ -327,7 +335,7 @@ pub fn optimize_with(
         .iter()
         .map(|r| r.achieved(&inertias) / r.i_max)
         .fold(0.0_f64, f64::max);
-    if max_ratio > 1.0
+    if max_ratio.is_finite() && max_ratio > 1.0
     {
         let f = 1.0 / max_ratio;
         for v in &mut inertias
@@ -347,6 +355,17 @@ pub fn optimize_with(
         .zip(&inertias)
         .map(|(c, i)| c.cost(*i))
         .sum();
+
+    // Never claim success on a non-finite result. This can only arise on
+    // pathologically-scaled inputs (a shadow price × coefficient² overflowing
+    // f64 — e.g. an `i_max` of ~1e-70), but if it does the `converged` flag
+    // must not lie: report it as unconverged with an infinite residual so the
+    // caller can react.
+    if !total_cost.is_finite() || inertias.iter().any(|v| !v.is_finite())
+    {
+        converged = false;
+        kkt = f64::INFINITY;
+    }
 
     Ok(OptimizeResult {
         inertias,
@@ -533,6 +552,30 @@ mod tests {
             res.total_cost,
             naive_cost
         );
+    }
+
+    #[test]
+    fn never_reports_convergence_on_a_non_finite_result() {
+        // Pathologically-scaled input (a shadow price × coefficient² can
+        // overflow f64): the answer may be non-finite, but `converged` must not
+        // lie — NaN/Inf must never masquerade as a solved optimum.
+        let comps = vec![Component::new("A", 1.0, 2.0), Component::new("B", 1.0, 2.0)];
+        let reqs = vec![Requirement::new("Y", vec![1.0, 1e7], 1e-74)];
+        let res = optimize(&comps, &reqs).unwrap();
+        if !res.total_cost.is_finite() || res.inertias.iter().any(|v| !v.is_finite())
+        {
+            assert!(
+                !res.converged,
+                "non-finite result must not report converged"
+            );
+            assert!(res.kkt_residual.is_infinite());
+        }
+        // A finite result must be genuinely feasible.
+        if res.converged
+        {
+            assert!(res.inertias.iter().all(|v| v.is_finite() && *v > 0.0));
+            assert!(res.total_cost.is_finite());
+        }
     }
 
     #[test]
