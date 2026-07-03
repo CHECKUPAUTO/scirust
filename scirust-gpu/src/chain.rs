@@ -50,6 +50,19 @@ pub struct BlockWeights<'a> {
     pub wd: &'a GpuMatrix,
 }
 
+/// The resident weights of a full **tied-embedding decoder**: a shared
+/// `vocab × d` embedding table (which is also the LM head), the `N`
+/// transformer [`BlockWeights`], and a final `d`-length RMSNorm gain. Consumed
+/// by [`GpuChain::model_forward_tied`].
+pub struct ModelWeights<'a> {
+    /// Token embedding table (`vocab × d`), tied to the output LM head.
+    pub embedding: &'a GpuMatrix,
+    /// The transformer blocks, applied in order.
+    pub blocks: &'a [BlockWeights<'a>],
+    /// Final pre-logits RMSNorm gain (`d`).
+    pub final_norm: &'a GpuMatrix,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -229,6 +242,38 @@ impl GpuChain {
             // No layers: identity. Round-trip to return an owned resident copy.
             None => Ok(self.upload(&self.download(x)?, x.rows(), x.cols())),
         }
+    }
+
+    /// Token embedding gather: build a resident `tokens.len() × d` matrix whose
+    /// row `i` is row `tokens[i]` of the `vocab × d` `table`.
+    pub fn embed(&self, tokens: &[u32], table: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.embed_resident(tokens, table)
+    }
+
+    /// The **full tied-embedding decoder forward**, `tokens → logits`, fully
+    /// resident:
+    ///
+    /// ```text
+    /// emb    = embed(tokens, E)              // t×d
+    /// trunk  = transformer_stack(emb, blocks) // t×d
+    /// logits = rms_norm(trunk, final) · Eᵀ    // t×vocab   (tied LM head)
+    /// ```
+    ///
+    /// Returns the `t × vocab` logit matrix (`t = tokens.len()`). Nothing leaves
+    /// VRAM between the embedding gather and the final logit GEMM — a whole
+    /// 350M forward pass as one resident call.
+    pub fn model_forward_tied(
+        &self,
+        tokens: &[u32],
+        w: &ModelWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let emb = self.embed(tokens, w.embedding)?;
+        let trunk = self.transformer_stack(&emb, w.blocks, eps, causal)?;
+        let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
+        // Tied head: logits = normed · Eᵀ  (E is vocab×d ⇒ Eᵀ is d×vocab).
+        self.matmul_t(&normed, w.embedding, false, true)
     }
 
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
@@ -762,6 +807,155 @@ mod tests {
         }
         assert_eq!(out.len(), t * d);
         assert!(rel_err(&out, &cur) < 1e-4, "out={out:?} exp={cur:?}");
+    }
+
+    /// Resident embedding gather matches the CPU oracle (row `i` = table row
+    /// `tokens[i]`). Skips if no adapter.
+    #[test]
+    fn resident_embed_matches_cpu_oracle() {
+        use crate::ops::cpu_embed;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, d) = (11usize, 6usize);
+        let table: Vec<f32> = (0..vocab * d)
+            .map(|i| (i as f32 * 0.1 - 1.0).sin())
+            .collect();
+        let tokens: Vec<u32> = vec![0, 5, 10, 3, 3, 7];
+        let gt = chain.upload(&table, vocab, d);
+        let out = chain.download(&chain.embed(&tokens, &gt).unwrap()).unwrap();
+        let expected = cpu_embed(&tokens, &table, d, vocab);
+        assert_eq!(out, expected); // gather is an exact copy — bit-identical.
+    }
+
+    /// The **full tied-embedding decoder forward** — embed → 2 blocks → final
+    /// RMSNorm → tied LM head — run resident (`tokens → logits`), must match a
+    /// step-by-step CPU oracle. Skips if no adapter; asserts on lavapipe / a real
+    /// GPU. This is a whole 350M forward pass in miniature.
+    #[test]
+    fn resident_model_forward_matches_cpu_oracle() {
+        use crate::ops::cpu_embed;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, d, h, layers) = (13usize, 8usize, 16usize, 2usize);
+        let eps = 1e-5f32;
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.027 + phase).sin() * amp)
+                .collect()
+        };
+        let embedding = gen(vocab * d, 0.3, 1.0);
+        let final_norm: Vec<f32> = (0..d).map(|i| 0.8 + 0.01 * i as f32).collect();
+        let tokens: Vec<u32> = vec![1, 4, 9, 2, 7];
+        let t = tokens.len();
+
+        struct W {
+            n1: Vec<f32>,
+            wq: Vec<f32>,
+            wk: Vec<f32>,
+            wv: Vec<f32>,
+            wo: Vec<f32>,
+            n2: Vec<f32>,
+            wg: Vec<f32>,
+            wu: Vec<f32>,
+            wd: Vec<f32>,
+        }
+        let ws: Vec<W> = (0..layers)
+            .map(|l| {
+                let p = l as f32 * 10.0;
+                W {
+                    n1: (0..d).map(|i| 0.7 + 0.02 * i as f32).collect(),
+                    wq: gen(d * d, p + 0.5, 0.3),
+                    wk: gen(d * d, p + 1.1, 0.3),
+                    wv: gen(d * d, p + 1.7, 0.3),
+                    wo: gen(d * d, p + 2.3, 0.3),
+                    n2: (0..d).map(|i| 0.9 - 0.01 * i as f32).collect(),
+                    wg: gen(d * h, p + 2.9, 0.25),
+                    wu: gen(d * h, p + 3.5, 0.25),
+                    wd: gen(h * d, p + 4.1, 0.25),
+                }
+            })
+            .collect();
+
+        // Upload everything resident.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let g_emb = up(&embedding, vocab, d);
+        let g_fn = up(&final_norm, 1, d);
+        let g: Vec<[GpuMatrix; 9]> = ws
+            .iter()
+            .map(|w| {
+                [
+                    up(&w.n1, 1, d),
+                    up(&w.wq, d, d),
+                    up(&w.wk, d, d),
+                    up(&w.wv, d, d),
+                    up(&w.wo, d, d),
+                    up(&w.n2, 1, d),
+                    up(&w.wg, d, h),
+                    up(&w.wu, d, h),
+                    up(&w.wd, h, d),
+                ]
+            })
+            .collect();
+        let blocks: Vec<BlockWeights> = g
+            .iter()
+            .map(|m| BlockWeights {
+                norm1: &m[0],
+                wq: &m[1],
+                wk: &m[2],
+                wv: &m[3],
+                wo: &m[4],
+                norm2: &m[5],
+                wg: &m[6],
+                wu: &m[7],
+                wd: &m[8],
+            })
+            .collect();
+        let mw = ModelWeights {
+            embedding: &g_emb,
+            blocks: &blocks,
+            final_norm: &g_fn,
+        };
+        let logits = chain
+            .download(&chain.model_forward_tied(&tokens, &mw, eps, true).unwrap())
+            .unwrap();
+
+        // CPU oracle: embed → blocks → final norm → h·Eᵀ.
+        let mut cur = cpu_embed(&tokens, &embedding, d, vocab);
+        for w in &ws
+        {
+            cur = cpu_block(
+                &cur,
+                (&w.n1, &w.n2),
+                (&w.wq, &w.wk, &w.wv, &w.wo),
+                (&w.wg, &w.wu, &w.wd),
+                (t, d, h),
+                eps,
+                true,
+            );
+        }
+        let normed = crate::ops::cpu_rms_norm(&cur, &final_norm, eps, t, d);
+        // logits = normed(t×d) · Eᵀ(d×vocab); build Eᵀ then GEMM.
+        let mut et = vec![0.0f32; d * vocab];
+        for r in 0..vocab
+        {
+            for c in 0..d
+            {
+                et[c * vocab + r] = embedding[r * d + c];
+            }
+        }
+        let expected = CpuBackend.gemm_f32(&normed, &et, t, d, vocab).unwrap();
+        assert_eq!(logits.len(), t * vocab);
+        assert!(rel_err(&logits, &expected) < 1e-4, "logits mismatch");
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.

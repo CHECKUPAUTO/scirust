@@ -19,8 +19,12 @@
 //! Exit status is non-zero if any parity check fails, so it doubles as a
 //! device smoke test in a script.
 
-use scirust_gpu::ops::{MASK_NEG, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err};
-use scirust_gpu::{BlockWeights, CpuBackend, GpuChain, RawComputeBackend, WgpuContext};
+use scirust_gpu::ops::{
+    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err,
+};
+use scirust_gpu::{
+    BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
+};
 
 /// Parity tolerance: GPU accumulation order is not bit-identical to the scalar
 /// CPU oracle, so we assert a relative Frobenius bound rather than equality.
@@ -321,6 +325,68 @@ fn main() {
     check(
         "resident 2-block stack (trunk of the 350M)",
         rel_err(&stack_gpu, &stack_cpu),
+        &mut failures,
+    );
+
+    // 9. The FULL model forward, tokens → logits, fully resident: embed gather →
+    //    2 transformer blocks → final RMSNorm → tied LM head (h·Eᵀ). A whole
+    //    350M forward pass in miniature, on the GPU from token ids to logits.
+    let vocab = 20usize;
+    let etab: Vec<f32> = (0..vocab * d)
+        .map(|i| (i as f32 * 0.05 - 1.0).sin())
+        .collect();
+    let fnorm: Vec<f32> = (0..d).map(|i| 0.8 + 0.01 * i as f32).collect();
+    let toks: Vec<u32> = (0..t as u32).map(|i| (i * 7 + 3) % vocab as u32).collect();
+    let getab = chain.upload(&etab, vocab, d);
+    let gfn = chain.upload(&fnorm, 1, d);
+    let mstack = [
+        BlockWeights {
+            norm1: &gnw,
+            wq: &gbq,
+            wk: &gbk,
+            wv: &gbv,
+            wo: &gbo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        },
+        BlockWeights {
+            norm1: &gnw,
+            wq: &gbq,
+            wk: &gbk,
+            wv: &gbv,
+            wo: &gbo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        },
+    ];
+    let mw = ModelWeights {
+        embedding: &getab,
+        blocks: &mstack,
+        final_norm: &gfn,
+    };
+    let logits_gpu = chain
+        .download(&chain.model_forward_tied(&toks, &mw, eps, true).unwrap())
+        .unwrap();
+    // CPU oracle: embed → 2 blocks → final norm → logits = h·Eᵀ.
+    let emb = cpu_embed(&toks, &etab, d, vocab);
+    let trunk = cpu_block_once(&cpu_block_once(&emb));
+    let normed = cpu_rms_norm(&trunk, &fnorm, eps, t, d);
+    let mut et = vec![0.0f32; d * vocab];
+    for r in 0..vocab
+    {
+        for c in 0..d
+        {
+            et[c * vocab + r] = etab[r * d + c];
+        }
+    }
+    let logits_cpu = CpuBackend.gemm_f32(&normed, &et, t, d, vocab).unwrap();
+    check(
+        "resident model forward (tokens→logits, tied)",
+        rel_err(&logits_gpu, &logits_cpu),
         &mut failures,
     );
 

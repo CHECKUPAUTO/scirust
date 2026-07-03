@@ -200,6 +200,19 @@ pub fn cpu_scale_causal_mask(
     out
 }
 
+/// CPU reference for token embedding gather: output row `i` is row `tokens[i]`
+/// of the `vocab × d` row-major `table` (token ids clamped to `vocab-1`). The
+/// GPU `embed_resident` kernel's correctness contract.
+pub fn cpu_embed(tokens: &[u32], table: &[f32], d: usize, vocab: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; tokens.len() * d];
+    for (i, &tok) in tokens.iter().enumerate()
+    {
+        let row = (tok as usize).min(vocab.saturating_sub(1));
+        out[i * d..i * d + d].copy_from_slice(&table[row * d..row * d + d]);
+    }
+    out
+}
+
 /// Relative Frobenius error.
 pub fn rel_err(a: &[f32], b: &[f32]) -> f32 {
     let num: f32 = a
