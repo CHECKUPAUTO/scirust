@@ -44,6 +44,7 @@ pub mod strategy;
 pub mod backtest;
 pub mod scanner;
 pub mod chart;
+pub mod dashboard;
 pub mod execution;
 pub mod marketmaking;
 pub mod microstructure;

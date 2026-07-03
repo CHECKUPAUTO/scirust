@@ -513,7 +513,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 /// A wgpu device + compiled compute pipelines, created once and reused across
 /// calls (adapter/device acquisition and shader compilation are expensive).
+///
+/// A cheap-to-[`Clone`] handle: the device, queue and pipelines live behind one
+/// [`Arc`] (none of `wgpu::Device`/`Queue`/`ComputePipeline` are themselves
+/// `Clone` in this wgpu version), so a clone shares the *same* underlying device.
+/// The shared test context (see [`WgpuContext::new`]) relies on this. [`Deref`]
+/// exposes the inner fields transparently, so call sites read `self.device`,
+/// `self.pipeline`, … unchanged.
+///
+/// [`Deref`]: std::ops::Deref
+#[derive(Clone)]
 pub struct WgpuContext {
+    inner: std::sync::Arc<WgpuContextInner>,
+}
+
+impl std::ops::Deref for WgpuContext {
+    type Target = WgpuContextInner;
+    fn deref(&self) -> &WgpuContextInner {
+        &self.inner
+    }
+}
+
+/// The owned device + pipelines behind a [`WgpuContext`]'s `Arc`.
+pub struct WgpuContextInner {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
@@ -560,10 +582,36 @@ impl GpuMatrix {
 }
 
 impl WgpuContext {
-    /// Acquire an adapter/device and compile the GEMM pipeline. Returns
+    /// Acquire an adapter/device and compile the compute pipelines. Returns
     /// [`BackendError::Unavailable`] if no adapter is available (e.g. no Vulkan
     /// driver) — never a silent fake.
+    ///
+    /// In **test builds** this hands out cheap clones of a single process-wide
+    /// context, created on first use and held in a never-dropped [`OnceLock`], so
+    /// every unit test shares one device instead of creating its own. The static
+    /// keeps a permanent reference, so the Vulkan device is never torn down —
+    /// which sidesteps a teardown-time SIGSEGV seen in some drivers (e.g. the
+    /// Jetson Thor's) when dozens of devices are created and dropped in a single
+    /// process. Production builds always create a fresh context.
+    #[cfg(test)]
     pub fn new() -> BackendResult<Self> {
+        use std::sync::OnceLock;
+        static SHARED: OnceLock<Option<WgpuContext>> = OnceLock::new();
+        SHARED
+            .get_or_init(|| WgpuContext::new_uncached().ok())
+            .clone()
+            .ok_or(BackendError::Unavailable("wgpu"))
+    }
+
+    /// See [`WgpuContext::new`]; production always builds a fresh context.
+    #[cfg(not(test))]
+    pub fn new() -> BackendResult<Self> {
+        Self::new_uncached()
+    }
+
+    /// Build a fresh context: acquire an adapter/device and compile every compute
+    /// pipeline. The uncached path behind [`WgpuContext::new`].
+    fn new_uncached() -> BackendResult<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -807,27 +855,29 @@ impl WgpuContext {
             });
 
         Ok(Self {
-            device,
-            queue,
-            pipeline,
-            ew_pipeline,
-            softmax_pipeline,
-            mask_pipeline,
-            rmsnorm_pipeline,
-            embed_pipeline,
-            softmax_bwd_pipeline,
-            swiglu_bwd_pipeline,
-            rmsnorm_bwd_pipeline,
-            mask_bwd_pipeline,
-            embed_bwd_pipeline,
-            xent_grad_pipeline,
-            sgd_pipeline,
-            adamw_pipeline,
-            rope_pipeline,
-            rope_bwd_pipeline,
-            slice_cols_pipeline,
-            place_cols_pipeline,
-            adapter_name,
+            inner: std::sync::Arc::new(WgpuContextInner {
+                device,
+                queue,
+                pipeline,
+                ew_pipeline,
+                softmax_pipeline,
+                mask_pipeline,
+                rmsnorm_pipeline,
+                embed_pipeline,
+                softmax_bwd_pipeline,
+                swiglu_bwd_pipeline,
+                rmsnorm_bwd_pipeline,
+                mask_bwd_pipeline,
+                embed_bwd_pipeline,
+                xent_grad_pipeline,
+                sgd_pipeline,
+                adamw_pipeline,
+                rope_pipeline,
+                rope_bwd_pipeline,
+                slice_cols_pipeline,
+                place_cols_pipeline,
+                adapter_name,
+            }),
         })
     }
 
