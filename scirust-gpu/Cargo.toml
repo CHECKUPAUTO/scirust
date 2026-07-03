@@ -19,3 +19,11 @@ scirust-core = { path = "../scirust-core", optional = true }
 wgpu = { version = "0.20", optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
+
+# The device-parity probe uses the wgpu-gated `ops` / `GpuChain` / `WgpuContext`
+# API, so it can only build with the `wgpu` feature. Declaring required-features
+# makes `cargo build --all-targets` (without wgpu) skip it instead of failing to
+# compile the gated imports.
+[[example]]
+name = "gpu_attention_probe"
+required-features = ["wgpu"]
