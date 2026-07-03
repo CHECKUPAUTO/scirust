@@ -142,14 +142,17 @@ impl MixedPrecisionEnv {
 
 // ── Precision conversion utilities ──
 
-/// Simulate FP32 → FP16 conversion (truncate mantissa).
+/// Simulate FP32 → FP16 conversion via a real IEEE-754 half round-trip.
+///
+/// Uses `half::f16` (round-to-nearest-even) rather than a raw mantissa
+/// truncation, so (a) rounding is correct and (b) magnitudes beyond the fp16
+/// max (~65504) **saturate to ±inf**. That saturation is exactly what
+/// [`MixedPrecisionEnv::has_overflow`] must detect for AMP loss scaling to do
+/// its job — the old `bits & 0xFFFF_E000` kept fp32's 8-bit exponent, so an
+/// fp16 overflow could never be simulated and overflow detection never fired.
 #[inline]
 pub fn fp32_to_fp16(x: f32) -> f32 {
-    let bits = x.to_bits();
-    // FP16 has 10-bit mantissa vs FP32's 23-bit
-    // Truncate bottom 13 bits of mantissa
-    let truncated = bits & 0xFFFF_E000;
-    f32::from_bits(truncated)
+    half::f16::from_f32(x).to_f32()
 }
 
 /// Simulate FP16 → FP32 conversion (identity after truncation).
@@ -200,6 +203,25 @@ mod tests {
         assert!(MixedPrecisionEnv::has_overflow(&[f32::NAN, 1.0]));
         assert!(MixedPrecisionEnv::has_overflow(&[1.0, f32::INFINITY]));
         assert!(!MixedPrecisionEnv::has_overflow(&[1.0, 2.0]));
+    }
+
+    #[test]
+    fn fp32_to_fp16_saturates_beyond_fp16_max_and_triggers_overflow() {
+        // Beyond the fp16 max (~65504) the simulated cast must saturate to inf so
+        // has_overflow fires. The old truncation kept fp32's exponent and could
+        // never overflow, defeating the loss-scaling harness.
+        let big = 1.0e30f32;
+        assert!(
+            fp32_to_fp16(big).is_infinite(),
+            "fp32_to_fp16(1e30) = {}, expected inf",
+            fp32_to_fp16(big)
+        );
+        assert!(MixedPrecisionEnv::has_overflow(&[fp32_to_fp16(big)]));
+        // A representable value must round-trip finite and not overflow.
+        assert!(fp32_to_fp16(1.5).is_finite());
+        assert!(!MixedPrecisionEnv::has_overflow(&[fp32_to_fp16(1.5)]));
+        // Just past the fp16 max also saturates.
+        assert!(fp32_to_fp16(70_000.0).is_infinite());
     }
 
     #[test]

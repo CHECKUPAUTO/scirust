@@ -1462,6 +1462,22 @@ impl NdRwkv {
     }
 }
 
+/// Clamps `x` to `x <= bound` via the exact identity `min(x, bound) =
+/// x - relu(x - bound)`. Used to bound an exponential-input-gate pre-activation
+/// so `exp()` cannot overflow to `+inf` (which then poisons the `c/n` ratio with
+/// `inf/inf = NaN`). For any realistic gate activation (`|x| << bound`) this is a
+/// no-op with gradient 1, so it does not perturb normal training or the
+/// gradient checks; it only caps pathological/unbounded projections.
+fn clamp_gate_arg<'t>(tape: &'t NdTape, x: NdVar<'t>, bound: f32) -> NdVar<'t> {
+    let b = tape.input(TensorND::new(vec![bound], vec![1, 1]));
+    x.sub(x.sub(b).relu())
+}
+
+/// Safe upper bound for an `exp()` argument in f32: `exp(40) ≈ 2.4e17`, far below
+/// `f32::MAX ≈ 3.4e38`, leaving headroom for accumulation across a scan while
+/// sitting far above any realistic gate pre-activation.
+const GATE_EXP_CLAMP: f32 = 40.0;
+
 /// **sLSTM cell** — the scalar-memory xLSTM recurrence (Beck et al., *xLSTM:
 /// Extended Long Short-Term Memory*, NeurIPS 2024, arXiv:2405.04517). It extends
 /// the LSTM with an **exponential input gate** and a **normaliser state**:
@@ -1477,9 +1493,11 @@ impl NdRwkv {
 /// ```
 ///
 /// `tanh` is built from the available `sigmoid` op via the exact identity
-/// `tanh(x) = 2σ(2x) − 1`. The log-space stabiliser state `mₜ` is **omitted**: it
-/// cancels exactly in the ratio `cₜ/nₜ` (a pure numerical device) and the bounded
-/// inputs used here keep `exp` finite; the normaliser `nₜ ≥ iₜ = exp(ĩₜ) > 0` is
+/// `tanh(x) = 2σ(2x) − 1`. The full log-space stabiliser state `mₜ` is **omitted**:
+/// it cancels exactly in the ratio `cₜ/nₜ` (a pure numerical device). Instead the
+/// input-gate argument `ĩₜ` is defensively clamped (see [`clamp_gate_arg`]) so
+/// `exp` cannot overflow to `+inf` on an unbounded projection; the normaliser
+/// `nₜ ≥ iₜ = exp(ĩₜ) > 0` is
 /// provably positive so the division is always well-defined. Because `cₜ/nₜ` is a
 /// positive-weighted average of `zₜ ∈ (−1,1)`, the output is intrinsically bounded
 /// in `(−1,1)` (stable without the stabiliser). Recurrent gate connections (memory
@@ -1502,7 +1520,9 @@ pub fn slstm_scan<'t>(
     let mut outs: Vec<NdVar<'t>> = Vec::with_capacity(seq);
     for t in 0..seq
     {
-        let i_t = i_pre.gather(&[t]).exp(); // exponential input gate
+        // exponential input gate, with the argument clamped so exp cannot
+        // overflow to +inf (which would give NaN in the c/n ratio below).
+        let i_t = clamp_gate_arg(tape, i_pre.gather(&[t]), GATE_EXP_CLAMP).exp();
         let f_t = f_pre.gather(&[t]).sigmoid(); // forget gate ∈ (0,1)
         let z_t = z_pre.gather(&[t]).mul(two).sigmoid().mul(two).sub(one); // tanh
         let o_t = o_pre.gather(&[t]).sigmoid(); // output gate ∈ (0,1)
@@ -1549,7 +1569,7 @@ pub fn mlstm_scan<'t>(
         let q_t = q.gather(&[t]); // (1,d)
         let k_t = k.gather(&[t]); // (1,d)
         let v_t = v.gather(&[t]); // (1,d)
-        let i_t = i_pre.gather(&[t]).exp(); // (1,1) exp gate
+        let i_t = clamp_gate_arg(tape, i_pre.gather(&[t]), GATE_EXP_CLAMP).exp(); // (1,1) exp gate, clamped
         let f_t = f_pre.gather(&[t]).sigmoid(); // (1,1) forget gate
         let outer = v_t.reshape(&[d, 1]).matmul(k_t); // vₜᵀkₜ  (d,d)
         cmat = f_t.mul(cmat).add(i_t.mul(outer)); // Cₜ
@@ -2505,6 +2525,45 @@ mod tests {
         let (first2, last2) = run();
         assert_eq!(first.to_bits(), first2.to_bits());
         assert_eq!(last.to_bits(), last2.to_bits());
+    }
+
+    /// A large (unbounded) input-gate pre-activation must not overflow `exp` to
+    /// `+inf` and poison the `c/n` ratio with `NaN`. The clamp on the gate
+    /// argument keeps the output finite.
+    #[test]
+    fn slstm_scan_large_input_gate_stays_finite() {
+        let (seq, d) = (3usize, 2usize);
+        let t = NdTape::new();
+        let iv = t.input(TensorND::new(vec![100.0f32; seq * d], vec![seq, d])); // huge ĩ
+        let fv = t.input(TensorND::new(vec![0.5f32; seq * d], vec![seq, d]));
+        let zv = t.input(TensorND::new(vec![0.3f32; seq * d], vec![seq, d]));
+        let ov = t.input(TensorND::new(vec![0.1f32; seq * d], vec![seq, d]));
+        let y = slstm_scan(&t, iv, fv, zv, ov);
+        let yt = t.value(y);
+        assert!(
+            yt.data.iter().all(|v| v.is_finite()),
+            "sLSTM output non-finite for a large input gate: {:?}",
+            yt.data
+        );
+    }
+
+    /// Same overflow guard for the matrix-memory mLSTM cell.
+    #[test]
+    fn mlstm_scan_large_input_gate_stays_finite() {
+        let (seq, d) = (3usize, 2usize);
+        let t = NdTape::new();
+        let q = t.input(TensorND::new(vec![0.2f32; seq * d], vec![seq, d]));
+        let k = t.input(TensorND::new(vec![0.3f32; seq * d], vec![seq, d]));
+        let v = t.input(TensorND::new(vec![0.4f32; seq * d], vec![seq, d]));
+        let ip = t.input(TensorND::new(vec![100.0f32; seq], vec![seq, 1])); // huge ĩ
+        let fp = t.input(TensorND::new(vec![0.5f32; seq], vec![seq, 1]));
+        let y = mlstm_scan(&t, q, k, v, ip, fp);
+        let yt = t.value(y);
+        assert!(
+            yt.data.iter().all(|z| z.is_finite()),
+            "mLSTM output non-finite for a large input gate: {:?}",
+            yt.data
+        );
     }
 
     /// `slstm_scan` gradients (w.r.t. the four gate pre-activations) match finite
