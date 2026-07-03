@@ -166,6 +166,40 @@ pub fn cpu_softmax(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     out
 }
 
+/// Large negative sentinel written into causally-masked score entries. Big
+/// enough that `exp(MASK_NEG - rowmax)` underflows to 0 in the following
+/// softmax, but finite (not `-inf`) so parity checks stay numeric.
+pub const MASK_NEG: f32 = -1.0e30;
+
+/// CPU reference for the pre-softmax attention step: scale the `rows × cols`
+/// score matrix by `scale`, and — when `causal` — replace every entry above the
+/// diagonal (key `j > i` for query `i`) with [`MASK_NEG`]. The GPU
+/// `scale_causal_mask` kernel's correctness contract.
+pub fn cpu_scale_causal_mask(
+    scores: &[f32],
+    rows: usize,
+    cols: usize,
+    scale: f32,
+    causal: bool,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; scores.len()];
+    for i in 0..rows
+    {
+        for j in 0..cols
+        {
+            out[i * cols + j] = if causal && j > i
+            {
+                MASK_NEG
+            }
+            else
+            {
+                scores[i * cols + j] * scale
+            };
+        }
+    }
+    out
+}
+
 /// Relative Frobenius error.
 pub fn rel_err(a: &[f32], b: &[f32]) -> f32 {
     let num: f32 = a
@@ -203,6 +237,26 @@ mod tests {
         assert!(out[3..6].iter().all(|&x| (x - 1.0 / 3.0).abs() < 1e-6));
         // Monotonic row preserves order.
         assert!(out[0] < out[1] && out[1] < out[2]);
+    }
+
+    #[test]
+    fn test_cpu_scale_causal_mask() {
+        // 3×3 scores, scale 0.5, causal: upper triangle → MASK_NEG.
+        let s: Vec<f32> = (1..=9).map(|x| x as f32).collect();
+        let out = cpu_scale_causal_mask(&s, 3, 3, 0.5, true);
+        // Row 0: keep [0], mask [1],[2].
+        assert_eq!(out[0], 0.5); // 1*0.5
+        assert_eq!(out[1], MASK_NEG);
+        assert_eq!(out[2], MASK_NEG);
+        // Row 1: keep [0],[1], mask [2].
+        assert_eq!(out[3], 2.0); // 4*0.5
+        assert_eq!(out[4], 2.5); // 5*0.5
+        assert_eq!(out[5], MASK_NEG);
+        // Row 2: all kept.
+        assert!(out[6..9].iter().all(|&x| x > 0.0));
+        // Non-causal just scales.
+        let ns = cpu_scale_causal_mask(&s, 3, 3, 2.0, false);
+        assert_eq!(ns, s.iter().map(|x| x * 2.0).collect::<Vec<_>>());
     }
 
     #[test]
