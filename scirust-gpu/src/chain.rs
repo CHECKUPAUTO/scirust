@@ -71,6 +71,43 @@ impl GpuChain {
         self.ctx.ew_resident(a, a, 2)
     }
 
+    /// Row-wise softmax of a resident matrix, result resident.
+    pub fn softmax(&self, x: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.softmax_resident(x)
+    }
+
+    /// Scale a resident score matrix by `scale` and (optionally) apply the
+    /// causal mask, result resident.
+    pub fn scale_causal_mask(
+        &self,
+        x: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.scale_causal_mask_resident(x, scale, causal)
+    }
+
+    /// Single-head scaled dot-product attention, **fully resident**:
+    /// `softmax( (Q·Kᵀ)/√d  [+ causal mask] ) · V`.
+    ///
+    /// `q` and `k` are `t×d` (queries/keys, `d` = head dim), `v` is `t×dv`;
+    /// returns the `t×dv` context. The `t×t` score matrix never leaves VRAM
+    /// between the score GEMM, the scale/mask, the softmax and the value GEMM —
+    /// this is the on-device attention block the SML's forward pass will call.
+    pub fn attention(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let scale = 1.0 / (q.cols() as f32).sqrt();
+        let scores = self.matmul_t(q, k, false, true)?; // S = Q·Kᵀ   (t×t)
+        let scaled = self.scale_causal_mask(&scores, scale, causal)?; // /√d [+ mask]
+        let weights = self.softmax(&scaled)?; // row softmax (t×t)
+        self.matmul(&weights, v) // context = W·V (t×dv)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -222,6 +259,54 @@ mod tests {
         );
         // ReLU actually clamped something (so the test is meaningful).
         assert!(expected.contains(&0.0));
+    }
+
+    /// The **fully resident** single-head attention block —
+    /// `softmax((Q·Kᵀ)/√d + causal mask)·V` with the `t×t` scores never leaving
+    /// VRAM — must match a step-by-step CPU oracle. Skips if no adapter; asserts
+    /// on lavapipe (CI) and a real GPU (Thor). Also checks causality: no query
+    /// attends to a future key, so masking a future V row leaves output intact.
+    #[test]
+    fn resident_attention_matches_cpu_oracle() {
+        use crate::ops::{cpu_scale_causal_mask, cpu_softmax};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, dv) = (6usize, 8usize, 5usize);
+        let q: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.13 - 1.0).sin()).collect();
+        let k: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.09 + 0.4).cos()).collect();
+        let v: Vec<f32> = (0..t * dv).map(|i| (i as f32 * 0.17 - 0.6).sin()).collect();
+
+        // GPU: fully resident forward.
+        let gq = chain.upload(&q, t, d);
+        let gk = chain.upload(&k, t, d);
+        let gv = chain.upload(&v, t, dv);
+        let gout = chain.attention(&gq, &gk, &gv, true).unwrap();
+        assert_eq!((gout.rows(), gout.cols()), (t, dv));
+        let out = chain.download(&gout).unwrap();
+
+        // CPU oracle, step by step: S = Q·Kᵀ → /√d + mask → softmax → ·V.
+        let mut kt = vec![0.0f32; d * t];
+        for r in 0..t
+        {
+            for c in 0..d
+            {
+                kt[c * t + r] = k[r * d + c];
+            }
+        }
+        let s = CpuBackend.gemm_f32(&q, &kt, t, d, t).unwrap();
+        let s = cpu_scale_causal_mask(&s, t, t, 1.0 / (d as f32).sqrt(), true);
+        let w = cpu_softmax(&s, t, t);
+        let expected = CpuBackend.gemm_f32(&w, &v, t, t, dv).unwrap();
+
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.
