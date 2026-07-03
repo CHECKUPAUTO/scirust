@@ -13,33 +13,34 @@ use std::collections::HashMap;
 pub struct PositionalEncoding {
     pub d_model: usize,
     pub max_seq_len: usize,
-    /// Table pré-calculée (max_seq_len, d_model)
-    pub pe: Tensor,
+}
+
+/// Sinusoidal encoding value at (pos, i) for a given `d_model` (Vaswani et al.).
+/// Computed on demand — see [`PositionalEncoding`] for why the table is not
+/// materialised.
+#[inline]
+fn pe_value(d_model: usize, pos: usize, i: usize) -> f32 {
+    let div = 10000_f32.powf(2.0 * (i / 2) as f32 / d_model as f32);
+    if i % 2 == 0
+    {
+        (pos as f32 / div).sin()
+    }
+    else
+    {
+        (pos as f32 / div).cos()
+    }
 }
 
 impl PositionalEncoding {
     pub fn new(d_model: usize, max_seq_len: usize) -> Self {
-        let mut pe = Tensor::zeros(max_seq_len, d_model);
-        for pos in 0..max_seq_len
-        {
-            for i in 0..d_model
-            {
-                let div = 10000_f32.powf(2.0 * (i / 2) as f32 / d_model as f32);
-                let val = if i % 2 == 0
-                {
-                    (pos as f32 / div).sin()
-                }
-                else
-                {
-                    (pos as f32 / div).cos()
-                };
-                pe.data[pos * d_model + i] = val;
-            }
-        }
+        // The encoding is a closed-form function of (pos, i), so nothing is
+        // precomputed here: materialising a full (max_seq_len, d_model) table
+        // eagerly allocated ~128 MB for the MiniLLM default (max_seq_len=125_000)
+        // even though a forward only ever touches `seq_len` rows. Rows are now
+        // computed on the fly (bit-for-bit identical to the old table).
         Self {
             d_model,
             max_seq_len,
-            pe,
         }
     }
 
@@ -51,8 +52,9 @@ impl PositionalEncoding {
             pos < self.max_seq_len,
             "encoding_at: pos {pos} out of range"
         );
-        let d = self.d_model;
-        self.pe.data[pos * d..(pos + 1) * d].to_vec()
+        (0..self.d_model)
+            .map(|i| pe_value(self.d_model, pos, i))
+            .collect()
     }
 
     /// Ajoute le PE à `input` de shape (batch * seq_len, d_model).
@@ -72,7 +74,8 @@ impl PositionalEncoding {
         );
         let batch = total_rows / seq_len;
 
-        // Construire le PE broadcasté (batch*seq_len, d_model)
+        // Construire le PE broadcasté (batch*seq_len, d_model), calculé à la
+        // volée (aucune table pré-allouée).
         let mut broadcasted = vec![0.0f32; total_rows * d];
         for b in 0..batch
         {
@@ -80,7 +83,7 @@ impl PositionalEncoding {
             {
                 for i in 0..d
                 {
-                    broadcasted[(b * seq_len + pos) * d + i] = self.pe.data[pos * d + i];
+                    broadcasted[(b * seq_len + pos) * d + i] = pe_value(d, pos, i);
                 }
             }
         }
@@ -106,7 +109,6 @@ impl Clone for PositionalEncoding {
         Self {
             d_model: self.d_model,
             max_seq_len: self.max_seq_len,
-            pe: self.pe.clone(),
         }
     }
 }
@@ -135,18 +137,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pe_has_correct_shape() {
+    fn encoding_at_length_and_known_values() {
         let pe = PositionalEncoding::new(8, 16);
-        assert_eq!(pe.pe.shape(), (16, 8));
+        let row0 = pe.encoding_at(0);
+        assert_eq!(row0.len(), 8);
+        // pos 0: sin(0)=0 at even dims, cos(0)=1 at odd dims.
+        for (i, &v) in row0.iter().enumerate()
+        {
+            let expected = if i % 2 == 0 { 0.0 } else { 1.0 };
+            assert!(
+                (v - expected).abs() < 1e-6,
+                "row0[{i}] = {v}, expected {expected}"
+            );
+        }
     }
 
     #[test]
     fn pe_values_in_range() {
         let pe = PositionalEncoding::new(16, 32);
-        for &v in &pe.pe.data
+        for pos in 0..pe.max_seq_len
         {
-            assert!((-1.0..=1.0).contains(&v), "PE value out of [-1, 1]: {}", v);
+            for &v in &pe.encoding_at(pos)
+            {
+                assert!((-1.0..=1.0).contains(&v), "PE value out of [-1, 1]: {v}");
+            }
         }
+    }
+
+    // Constructing with a huge max_seq_len must be O(1) now — it previously
+    // eagerly allocated ~128 MB and ran a 125k*d_model build loop.
+    #[test]
+    fn new_with_huge_max_seq_len_is_cheap() {
+        let pe = PositionalEncoding::new(256, 125_000);
+        assert_eq!(pe.d_model, 256);
+        assert_eq!(pe.max_seq_len, 125_000);
+        // Only the requested row is materialised, on demand.
+        assert_eq!(pe.encoding_at(124_999).len(), 256);
     }
 
     #[test]
@@ -159,27 +185,20 @@ mod tests {
         let yt = tape.value(y.idx());
 
         assert_eq!(yt.shape(), (6, 4));
-        // Les 2 premières lignes (batch 0, pos 0 et 1) doivent matcher pe[0..2]
+        let row0 = pe.encoding_at(0);
+        let row1 = pe.encoding_at(1);
         for i in 0..4
         {
+            // batch 0, pos 0 / pos 1
+            assert!((yt.data[i] - row0[i]).abs() < 1e-6, "batch0 pos0 dim {i}");
             assert!(
-                (yt.data[i] - pe.pe.data[i]).abs() < 1e-6,
-                "batch0 pos0 mismatch at dim {i}"
+                (yt.data[4 + i] - row1[i]).abs() < 1e-6,
+                "batch0 pos1 dim {i}"
             );
-        }
-        for i in 0..4
-        {
+            // batch 1 has the same PE as batch 0
             assert!(
-                (yt.data[4 + i] - pe.pe.data[4 + i]).abs() < 1e-6,
-                "batch0 pos1 mismatch at dim {i}"
-            );
-        }
-        // batch 1 doit avoir les mêmes PE que batch 0
-        for i in 0..4
-        {
-            assert!(
-                (yt.data[12 + i] - pe.pe.data[i]).abs() < 1e-6,
-                "batch1 pos0 mismatch at dim {i}"
+                (yt.data[12 + i] - row0[i]).abs() < 1e-6,
+                "batch1 pos0 dim {i}"
             );
         }
     }
