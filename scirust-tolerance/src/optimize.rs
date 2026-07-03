@@ -106,7 +106,10 @@ impl Requirement {
 /// Result of [`optimize`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OptimizeResult {
-    /// Optimal per-component inertias `Iᵢ`.
+    /// Optimal per-component inertias `Iᵢ`. Guaranteed feasible: every
+    /// requirement's resultant inertia is within its budget (a final uniform
+    /// tightening seats the worst constraint exactly on its budget even when
+    /// the dual iteration did not fully converge).
     pub inertias: Vec<f64>,
     /// Total tightening cost `Σᵢ bᵢ Iᵢ^(−rᵢ)`.
     pub total_cost: f64,
@@ -116,8 +119,10 @@ pub struct OptimizeResult {
     pub achieved: Vec<f64>,
     /// Whether each requirement is binding (active at the optimum).
     pub binding: Vec<bool>,
-    /// Max KKT residual (primal infeasibility ∪ complementary-slackness),
-    /// a convergence quality measure — near 0 when solved.
+    /// Primal-infeasibility residual `maxₖ max(achievedₖ²/I_max,ₖ² − 1, 0)` at
+    /// convergence — a quality measure, near 0 when solved (the closed-form
+    /// primal keeps stationarity and dual feasibility exact by construction, so
+    /// this is the binding KKT residual). `+∞` if the result was non-finite.
     pub kkt_residual: f64,
     /// Dual iterations performed.
     pub iterations: usize,
@@ -193,8 +198,8 @@ pub struct OptimizeOptions {
 impl Default for OptimizeOptions {
     fn default() -> Self {
         Self {
-            max_iters: 5000,
-            tol: 1e-12,
+            max_iters: 20_000,
+            tol: 1e-10,
             damping: 0.5,
         }
     }
@@ -304,13 +309,39 @@ pub fn optimize_with(
         kkt = feas;
         // Converged once the primal has stabilised and is feasible: a binding
         // constraint sits on ratio = 1, a slack one has driven its μ to ~0 so
-        // it no longer moves the primal (complementary slackness).
-        if it > 0 && max_change <= opts.tol && feas <= opts.tol
+        // it no longer moves the primal (complementary slackness). The
+        // finiteness guard is essential: `f64::max` and `NaN.max(0.0)` silently
+        // swallow NaN, so a non-finite iterate would otherwise read
+        // `max_change = feas = 0` and falsely report convergence.
+        if it > 0
+            && max_change <= opts.tol
+            && feas <= opts.tol
+            && inertias.iter().all(|v| v.is_finite())
         {
             converged = true;
             break;
         }
         prev.copy_from_slice(&inertias);
+    }
+
+    // Feasibility safeguard. Rounding — or a run that hit `max_iters` on
+    // ill-conditioned (near-parallel) constraints — can leave a requirement
+    // marginally over budget. For tolerance allocation a feasible, slightly
+    // costlier answer is strictly preferable to an infeasible one, so uniformly
+    // tighten: scaling every Iᵢ by `f` scales every achievedₖ by `f`, and
+    // `f = 1/maxₖ(achievedₖ/I_max,ₖ)` seats the worst constraint exactly on its
+    // budget while leaving the (scale-invariant) relative allocation untouched.
+    let max_ratio = requirements
+        .iter()
+        .map(|r| r.achieved(&inertias) / r.i_max)
+        .fold(0.0_f64, f64::max);
+    if max_ratio.is_finite() && max_ratio > 1.0
+    {
+        let f = 1.0 / max_ratio;
+        for v in &mut inertias
+        {
+            *v *= f;
+        }
     }
 
     let achieved: Vec<f64> = requirements.iter().map(|r| r.achieved(&inertias)).collect();
@@ -324,6 +355,17 @@ pub fn optimize_with(
         .zip(&inertias)
         .map(|(c, i)| c.cost(*i))
         .sum();
+
+    // Never claim success on a non-finite result. This can only arise on
+    // pathologically-scaled inputs (a shadow price × coefficient² overflowing
+    // f64 — e.g. an `i_max` of ~1e-70), but if it does the `converged` flag
+    // must not lie: report it as unconverged with an infinite residual so the
+    // caller can react.
+    if !total_cost.is_finite() || inertias.iter().any(|v| !v.is_finite())
+    {
+        converged = false;
+        kkt = f64::INFINITY;
+    }
 
     Ok(OptimizeResult {
         inertias,
@@ -510,6 +552,57 @@ mod tests {
             res.total_cost,
             naive_cost
         );
+    }
+
+    #[test]
+    fn never_reports_convergence_on_a_non_finite_result() {
+        // Pathologically-scaled input (a shadow price × coefficient² can
+        // overflow f64): the answer may be non-finite, but `converged` must not
+        // lie — NaN/Inf must never masquerade as a solved optimum.
+        let comps = vec![Component::new("A", 1.0, 2.0), Component::new("B", 1.0, 2.0)];
+        let reqs = vec![Requirement::new("Y", vec![1.0, 1e7], 1e-74)];
+        let res = optimize(&comps, &reqs).unwrap();
+        if !res.total_cost.is_finite() || res.inertias.iter().any(|v| !v.is_finite())
+        {
+            assert!(
+                !res.converged,
+                "non-finite result must not report converged"
+            );
+            assert!(res.kkt_residual.is_infinite());
+        }
+        // A finite result must be genuinely feasible.
+        if res.converged
+        {
+            assert!(res.inertias.iter().all(|v| v.is_finite() && *v > 0.0));
+            assert!(res.total_cost.is_finite());
+        }
+    }
+
+    #[test]
+    fn result_is_always_feasible_even_when_ill_conditioned() {
+        // Two nearly-parallel constraints with slightly different budgets — an
+        // ill-conditioned instance where the dual can stall. The feasibility
+        // safeguard must still return an allocation inside every budget.
+        let comps = vec![
+            Component::new("A", 1.0, 2.0),
+            Component::new("B", 1.0, 2.0),
+            Component::new("C", 2.0, 3.0),
+        ];
+        let reqs = vec![
+            Requirement::new("Y1", vec![1.0, 1.000_000_1, 0.5], 0.050),
+            Requirement::new("Y2", vec![1.0, 1.0, 0.5], 0.050_01),
+        ];
+        let res = optimize(&comps, &reqs).unwrap();
+        for (a, r) in res.achieved.iter().zip(&reqs)
+        {
+            assert!(
+                *a <= r.i_max * (1.0 + 1e-9),
+                "{} infeasible: achieved {a} > budget {}",
+                r.name,
+                r.i_max
+            );
+        }
+        assert!(res.inertias.iter().all(|i| i.is_finite() && *i > 0.0));
     }
 
     #[test]

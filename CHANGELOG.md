@@ -22,7 +22,18 @@ Fournit `Component`, `Requirement`, `optimize`/`optimize_with`,
 actives), et la **frontière de Pareto coût-qualité** `cost_quality_frontier`.
 Vérifié par : égalité à la forme close mono-exigence, satisfaction des
 conditions KKT à deux exigences, coût ≤ allocation naïve par-exigence, et
-monotonie de la frontière. Nouvel outil MCP `tolerance_optimize_cost`.
+monotonie de la frontière. **Cross-check par fuzzing** (exemple
+`fuzz_optimize`) sur 1500+ instances aléatoires contre un certificat
+d'optimalité indépendant purement primal (faisabilité + « chaque composant
+épinglé » : aucune inertie ne peut croître sans violer une contrainte, ce
+qui est nécessaire à l'optimalité puisque le coût décroît strictement en I).
+Le fuzzing a révélé qu'une exécution ayant atteint `max_iters` sur des
+contraintes quasi-parallèles pouvait laisser une contrainte marginalement
+dépassée (~4 ppm) ; corrigé par un **garde-fou de faisabilité** (resserrement
+uniforme final `f = 1/maxₖ(atteintₖ/I_max,ₖ)`) qui **garantit** désormais que
+l'allocation retournée respecte toujours chaque budget — préférable, pour du
+tolérancement, à une solution légèrement infaisable. Nouvel outil MCP
+`tolerance_optimize_cost`.
 
 ### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
 Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
