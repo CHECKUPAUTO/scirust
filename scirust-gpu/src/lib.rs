@@ -70,7 +70,7 @@ pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 #[cfg(feature = "wgpu")]
 pub use tensor::GpuTensor;
 #[cfg(feature = "wgpu")]
-pub use wgpu_backend::{GpuMatrix, WgpuContext};
+pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_softmax};
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]

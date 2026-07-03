@@ -143,6 +143,29 @@ pub fn cpu_rms_norm(data: &[f32], weight: &[f32], eps: f32, rows: usize, cols: u
     out
 }
 
+/// CPU reference for row-wise softmax: `exp(x - rowmax) / sum(exp(x - rowmax))`,
+/// max-subtracted for numerical stability. The correctness contract for the GPU
+/// `softmax_rows` kernel and the missing transformer-attention primitive.
+pub fn cpu_softmax(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; data.len()];
+    for r in 0..rows
+    {
+        let start = r * cols;
+        let row = &data[start..start + cols];
+        let m = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut sum = 0.0f32;
+        for &x in row
+        {
+            sum += (x - m).exp();
+        }
+        for c in 0..cols
+        {
+            out[start + c] = (data[start + c] - m).exp() / sum;
+        }
+    }
+    out
+}
+
 /// Relative Frobenius error.
 pub fn rel_err(a: &[f32], b: &[f32]) -> f32 {
     let num: f32 = a
@@ -164,6 +187,32 @@ mod tests {
         let data = vec![-1.0, 0.0, 2.0, -0.5];
         let out = cpu_activation(&data, EwOp::Relu);
         assert_eq!(out, vec![0.0, 0.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn test_cpu_softmax_rows_sum_to_one_and_match_hand() {
+        // Two rows; each softmax row must sum to 1 and be order-preserving.
+        let data = vec![1.0, 2.0, 3.0, 0.0, 0.0, 0.0];
+        let out = cpu_softmax(&data, 2, 3);
+        for r in 0..2
+        {
+            let s: f32 = out[r * 3..r * 3 + 3].iter().sum();
+            assert!((s - 1.0).abs() < 1e-6, "row {r} sums to {s}");
+        }
+        // Uniform row → uniform distribution.
+        assert!(out[3..6].iter().all(|&x| (x - 1.0 / 3.0).abs() < 1e-6));
+        // Monotonic row preserves order.
+        assert!(out[0] < out[1] && out[1] < out[2]);
+    }
+
+    #[test]
+    fn test_cpu_softmax_is_shift_invariant() {
+        // softmax(x) == softmax(x + c): the max-subtraction guarantees it.
+        let a = vec![-2.0, 0.5, 3.0, 1.0];
+        let b: Vec<f32> = a.iter().map(|x| x + 100.0).collect();
+        let sa = cpu_softmax(&a, 1, 4);
+        let sb = cpu_softmax(&b, 1, 4);
+        assert!(rel_err(&sa, &sb) < 1e-6);
     }
 
     #[test]
