@@ -168,18 +168,7 @@ impl MultiHeadAttention {
             head_full.push(concat_rows(tape, outputs));
         }
 
-        let mut accumulator: Option<Var<'t>> = None;
-        for (h, head) in head_full.iter().enumerate()
-        {
-            let pad = build_pad_matrix(tape, h, d_h, self.d_model);
-            let padded = head.try_matmul(pad).unwrap();
-            accumulator = Some(match accumulator
-            {
-                None => padded,
-                Some(acc) => acc.try_add(padded).unwrap(),
-            });
-        }
-        accumulator.unwrap()
+        combine_heads(tape, &head_full)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -236,18 +225,7 @@ impl MultiHeadAttention {
             head_full.push(concat_rows(tape, outputs));
         }
 
-        let mut accumulator: Option<Var<'t>> = None;
-        for (h, head) in head_full.iter().enumerate()
-        {
-            let pad = build_pad_matrix(tape, h, d_h, self.d_model);
-            let padded = head.matmul(pad);
-            accumulator = Some(match accumulator
-            {
-                None => padded,
-                Some(acc) => acc.add(padded),
-            });
-        }
-        accumulator.unwrap()
+        combine_heads(tape, &head_full)
     }
 
     /// Inférence incrémentale avec KV-Cache (mode token unique).
@@ -296,17 +274,8 @@ impl MultiHeadAttention {
                     .matmul(vh),
             );
         }
-        let mut acc: Option<Var> = None;
-        for (h, hd) in heads.iter().enumerate()
-        {
-            let pd = hd.matmul(build_pad_matrix(tape, h, d_h, self.d_model));
-            acc = Some(match acc
-            {
-                None => pd,
-                Some(a) => a.add(pd),
-            });
-        }
-        self.w_o.forward(tape, acc.unwrap())
+        let combined = combine_heads(tape, &heads);
+        self.w_o.forward(tape, combined)
     }
 
     pub fn parameter_indices(&self) -> Vec<usize> {
@@ -401,15 +370,27 @@ impl MultiHeadAttention {
     }
 }
 
-/// pad[i, j] = 1 si j == h*d_h + i, sinon 0. Shape (d_h, d_model).
-fn build_pad_matrix<'t>(tape: &'t Tape, h: usize, d_h: usize, d_model: usize) -> Var<'t> {
-    let mut data = vec![0.0f32; d_h * d_model];
-    for i in 0..d_h
-    {
-        let j = h * d_h + i;
-        data[i * d_model + j] = 1.0;
-    }
-    tape.input(Tensor::from_vec(data, d_h, d_model))
+/// Recombine per-head outputs into a single `(rows, d_model)` tensor by placing
+/// head `h`'s `(rows, d_head)` block into columns `[h*d_head, (h+1)*d_head)`.
+///
+/// This is a pure column-concatenation, expressed through the existing
+/// `transpose_2d` / `concat_rows` primitives: each head is transposed to
+/// `(d_head, rows)`, the heads are row-concatenated into `(d_model, rows)`, and
+/// the result is transposed back to `(rows, d_model)`.
+///
+/// It replaces the previous per-head "pad matrix" approach, where each head was
+/// multiplied by a `(d_head, d_model)` scatter matrix and the padded results
+/// summed. That cost `O(rows · d_head · d_model)` FLOPs *per head* (an
+/// `O(rows · d_model²)` matmul chain overall) purely to move data around. The
+/// concat moves the same bytes in `O(rows · d_model)`.
+///
+/// The output is **bit-for-bit identical** to the pad-matrix version: the old
+/// accumulator wrote each head's value into its target column exactly once and
+/// added zeros everywhere else (`x + 0.0 == x` in IEEE-754), so the sum of the
+/// scattered blocks equals the concatenation of those blocks.
+fn combine_heads<'t>(tape: &'t Tape, heads: &[Var<'t>]) -> Var<'t> {
+    let transposed: Vec<Var<'t>> = heads.iter().map(|h| h.transpose_2d()).collect();
+    concat_rows(tape, &transposed).transpose_2d()
 }
 
 impl Clone for MultiHeadAttention {
@@ -505,6 +486,55 @@ mod tests {
 
         assert_eq!(mha2.w_q.weight.data, mha1.w_q.weight.data);
         assert_eq!(mha2.w_o.bias.data, mha1.w_o.bias.data);
+    }
+
+    /// `combine_heads` must place head `h`'s block into columns
+    /// `[h*d_head, (h+1)*d_head)` — the same layout the old pad-matrix
+    /// scatter-and-sum produced. We build two heads of shape (rows, d_head)
+    /// with distinct, easily-recognisable values and check every cell of the
+    /// combined (rows, d_model) tensor, then confirm gradients flow back to
+    /// both heads.
+    #[test]
+    fn combine_heads_places_columns_and_backprops() {
+        let tape = Tape::new();
+        let rows = 3;
+        let d_head = 2;
+        // Head 0: values 1,2 / 3,4 / 5,6 ; Head 1: 10,20 / 30,40 / 50,60.
+        let h0 = tape.input(Tensor::from_vec(
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            rows,
+            d_head,
+        ));
+        let h1 = tape.input(Tensor::from_vec(
+            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+            rows,
+            d_head,
+        ));
+        let combined = combine_heads(&tape, &[h0, h1]);
+        let val = tape.value(combined.idx());
+        assert_eq!(val.shape(), (rows, 4));
+        // Row-major (rows, d_model=4): [h0_col0, h0_col1, h1_col0, h1_col1].
+        let expected = [
+            1.0, 2.0, 10.0, 20.0, //
+            3.0, 4.0, 30.0, 40.0, //
+            5.0, 6.0, 50.0, 60.0,
+        ];
+        for (i, (&got, &exp)) in val.data.iter().zip(expected.iter()).enumerate()
+        {
+            assert_eq!(got, exp, "combined[{i}] = {got}, expected {exp}");
+        }
+
+        // Pure data movement ⇒ each input cell has gradient 1 under sum().
+        let loss = combined.sum();
+        loss.backward();
+        for &g in &tape.grad(h0.idx()).data
+        {
+            assert_eq!(g, 1.0, "h0 grad should be 1");
+        }
+        for &g in &tape.grad(h1.idx()).data
+        {
+            assert_eq!(g, 1.0, "h1 grad should be 1");
+        }
     }
 
     /// KV-cache correctness: feeding a sequence token-by-token through
