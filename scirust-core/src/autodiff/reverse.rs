@@ -1881,56 +1881,71 @@ impl Tape {
                     beta_idx,
                 } =>
                 {
-                    // Analytic backward for BatchNorm (same as LayerNorm but per-channel):
-                    // y = gamma * (x - mu)/sigma + beta
-                    // dL/dx = (gamma / sigma) * (dL/dy - mean(dL/dy) - x_norm * mean(dL/dy * x_norm))
-                    //
-                    // Approximation: dL/dx = gamma * (dL/dy - mean(dL/dy)) / sigma
-                    // Full fix requires caching x_norm in SavedData::BatchNormNormed.
+                    // Exact analytic backward for the (per-row normalized) affine
+                    // y = gamma * x_norm + beta,  x_norm = (x - mu)/sigma:
+                    //   dL/dx   = (1/sigma)( a - mean(a) - x_norm*mean(a*x_norm) ), a = dL/dy * gamma
+                    //   dL/dgamma = sum_r (dL/dy * x_norm)
+                    //   dL/dbeta  = sum_r  dL/dy
+                    // NOTE: this Op has no in-crate forward constructor; the arm is
+                    // kept correct for any external caller building it directly.
                     let input = &values[input_idx].as_cpu();
                     let (rows, cols) = input.shape();
-                    let mut grad_x = Tensor::zeros(rows, cols);
                     let g_v = &values[gamma_idx].as_cpu();
+                    let n = cols as f32;
+
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    let mut xnorm = Tensor::zeros(rows, cols);
 
                     for r in 0..rows
                     {
                         let mut mean = 0.0f32;
-                        let mut var = 0.0f32;
                         for c in 0..cols
                         {
                             mean += input.data[r * cols + c];
                         }
-                        mean /= cols as f32;
+                        mean /= n;
+                        let mut var = 0.0f32;
                         for c in 0..cols
                         {
                             let d = input.data[r * cols + c] - mean;
                             var += d * d;
                         }
-                        var = var / cols as f32 + 1e-5f32;
+                        var = var / n + 1e-5f32;
                         let sigma = var.sqrt();
 
-                        let mut g_mean = 0.0f32;
                         for c in 0..cols
                         {
-                            g_mean += g.data[r * cols + c];
+                            xnorm.data[r * cols + c] = (input.data[r * cols + c] - mean) / sigma;
                         }
-                        g_mean /= cols as f32;
+
+                        // a = dL/dy * gamma, with gamma weighting inside the reductions.
+                        let mut a_mean = 0.0f32;
+                        let mut ax_mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            a_mean += a;
+                            ax_mean += a * xnorm.data[r * cols + c];
+                        }
+                        a_mean /= n;
+                        ax_mean /= n;
 
                         for c in 0..cols
                         {
+                            let a = g.data[r * cols + c] * g_v.data[c];
                             grad_x.data[r * cols + c] =
-                                g_v.data[c] * (g.data[r * cols + c] - g_mean) / sigma;
+                                (a - a_mean - xnorm.data[r * cols + c] * ax_mean) / sigma;
                         }
                     }
                     grads[input_idx] = grads[input_idx].add(&grad_x);
-                    grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
+                    grads[gamma_idx] = grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
                 },
                 Op::LayerNorm {
                     input_idx,
                     gamma_idx,
                     beta_idx,
-                    eps: _eps,
+                    eps,
                 } =>
                 {
                     // Analytic backward for LayerNorm using cached normalized input:
@@ -1938,95 +1953,78 @@ impl Tape {
                     // dL/dbeta = sum(dL/dy, axis=0)
                     // dL/dgamma = sum(dL/dy * x_norm, axis=0)
                     // dL/dx = (gamma / sigma) * (dL/dy - mean(dL/dy, axis=1) - x_norm * mean(dL/dy * x_norm, axis=1))
-                    let x_norm = match &nodes[i].saved
+                    // x_norm = (x - mu)/sigma. Prefer the value cached by the
+                    // forward pass; recompute it only if it is unavailable. It is
+                    // needed for BOTH the input gradient and the gamma gradient.
+                    let cached_norm = match &nodes[i].saved
                     {
                         SavedData::LayerNormNormed(t) => Some(t),
                         _ => None,
                     };
                     let input = &values[input_idx].as_cpu();
                     let (rows, cols) = input.shape();
-                    let mut grad_x = Tensor::zeros(rows, cols);
                     let g_v = &values[gamma_idx].as_cpu();
                     let n = cols as f32;
 
-                    if let Some(norm) = x_norm
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    // Materialise x_norm per row so the gamma gradient can reuse it.
+                    let mut xnorm = Tensor::zeros(rows, cols);
+
+                    for r in 0..rows
                     {
-                        // Full analytic backward with cached x_norm
-                        for r in 0..rows
+                        // Recompute sigma with the SAME (var + eps) convention as
+                        // the forward pass, so it matches the cached x_norm exactly.
+                        let mut mean = 0.0f32;
+                        for c in 0..cols
                         {
-                            let mut g_mean = 0.0f32;
-                            let mut gxnorm_mean = 0.0f32;
-                            for c in 0..cols
-                            {
-                                g_mean += g.data[r * cols + c];
-                                gxnorm_mean += g.data[r * cols + c] * norm.data[r * cols + c];
-                            }
-                            g_mean /= n;
-                            gxnorm_mean /= n;
+                            mean += input.data[r * cols + c];
+                        }
+                        mean /= n;
+                        let mut var = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let d = input.data[r * cols + c] - mean;
+                            var += d * d;
+                        }
+                        var /= n;
+                        let sigma = (var + eps).sqrt();
 
-                            // Recompute sigma
-                            let mut mean = 0.0f32;
-                            let mut var = 0.0f32;
-                            for c in 0..cols
+                        for c in 0..cols
+                        {
+                            xnorm.data[r * cols + c] = match cached_norm
                             {
-                                mean += input.data[r * cols + c];
-                            }
-                            mean /= n;
-                            for c in 0..cols
-                            {
-                                let d = input.data[r * cols + c] - mean;
-                                var += d * d;
-                            }
-                            var /= n;
+                                Some(t) => t.data[r * cols + c],
+                                None => (input.data[r * cols + c] - mean) / sigma,
+                            };
+                        }
 
-                            // Use safe epsilon for numerical stability
-                            let eps_val = if var < 1e-12 { 1e-6 } else { 0.0 };
-                            let sigma = (var + eps_val).sqrt();
+                        // a = dL/dx_norm = g ⊙ gamma. The per-feature gamma must be
+                        // INSIDE the feature-axis reductions, not factored out — the
+                        // two are equal only when all gamma are equal.
+                        let mut a_mean = 0.0f32;
+                        let mut ax_mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            a_mean += a;
+                            ax_mean += a * xnorm.data[r * cols + c];
+                        }
+                        a_mean /= n;
+                        ax_mean /= n;
 
-                            for c in 0..cols
-                            {
-                                grad_x.data[r * cols + c] = (g_v.data[c] / sigma)
-                                    * (g.data[r * cols + c]
-                                        - g_mean
-                                        - norm.data[r * cols + c] * gxnorm_mean);
-                            }
+                        // dL/dx = (1/sigma)( a - mean(a) - x_norm * mean(a * x_norm) )
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            grad_x.data[r * cols + c] =
+                                (a - a_mean - xnorm.data[r * cols + c] * ax_mean) / sigma;
                         }
                     }
-                    else
-                    {
-                        // Fallback: approximate backward (no cached normed)
-                        for r in 0..rows
-                        {
-                            let mut mean = 0.0f32;
-                            let mut var = 0.0f32;
-                            for c in 0..cols
-                            {
-                                mean += input.data[r * cols + c];
-                            }
-                            mean /= n;
-                            for c in 0..cols
-                            {
-                                let d = input.data[r * cols + c] - mean;
-                                var += d * d;
-                            }
-                            var /= n;
-                            let eps_val = if var < 1e-12 { 1e-6 } else { 0.0 };
-                            let sigma = (var + eps_val).sqrt();
-                            let mut g_mean = 0.0f32;
-                            for c in 0..cols
-                            {
-                                g_mean += g.data[r * cols + c];
-                            }
-                            g_mean /= n;
-                            for c in 0..cols
-                            {
-                                grad_x.data[r * cols + c] =
-                                    g_v.data[c] * (g.data[r * cols + c] - g_mean) / sigma;
-                            }
-                        }
-                    }
+
                     grads[input_idx] = grads[input_idx].add(&grad_x);
-                    grads[gamma_idx] = grads[gamma_idx].add(&g.sum_axis(0));
+                    // dL/dgamma = sum_r (g * x_norm), NOT sum_r g.
+                    grads[gamma_idx] = grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
+                    // dL/dbeta = sum_r g.
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
                 },
                 Op::L2Normalize { input_idx } =>
@@ -4908,5 +4906,139 @@ mod l2_normalize_tests {
         assert_eq!(b1, b2, "second dropout not reproducible under set_seed");
         // Sanity: the two calls within a run still differ (stochastic across calls).
         assert_ne!(a1, b1, "the two calls should differ within a run");
+    }
+}
+
+#[cfg(test)]
+mod layer_norm_backward_tests {
+    use super::*;
+
+    // Fixed problem: 3 rows x 4 features, a deliberately NON-UNIFORM gamma and a
+    // non-uniform upstream weight `w`. Both are what the two historical bugs got
+    // wrong: (a) dL/dgamma used sum(g) instead of sum(g * x_norm); (b) dL/dx
+    // factored the per-feature gamma outside the feature-axis reductions, which is
+    // only correct when all gamma are equal. With uniform gamma neither bug shows,
+    // so the non-uniformity here is essential.
+    const ROWS: usize = 3;
+    const COLS: usize = 4;
+    const EPS: f32 = 1e-5;
+    const X0: [f32; 12] = [
+        2.0, -1.0, 0.5, 3.0, //
+        -2.5, 0.7, 1.3, -0.4, //
+        0.2, 2.1, -1.8, 0.9,
+    ];
+    const GAMMA0: [f32; 4] = [1.5, -0.5, 2.0, 0.7];
+    const BETA0: [f32; 4] = [0.1, -0.2, 0.3, 0.05];
+    // Non-uniform upstream so g is not all-ones (exercises every reduction term).
+    const W: [f32; 12] = [
+        0.9, 1.7, -0.3, 0.4, //
+        1.1, -0.6, 0.8, 2.0, //
+        -1.2, 0.5, 1.4, -0.7,
+    ];
+
+    fn loss_at(x: &[f32], gamma: &[f32], beta: &[f32]) -> f32 {
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(x.to_vec(), ROWS, COLS));
+        let gv = tape.input(Tensor::from_vec(gamma.to_vec(), 1, COLS));
+        let bv = tape.input(Tensor::from_vec(beta.to_vec(), 1, COLS));
+        let wv = tape.input(Tensor::from_vec(W.to_vec(), ROWS, COLS));
+        let y = xv.layer_norm(gv, bv, EPS).hadamard(wv).sum();
+        tape.value(y.idx()).data.iter().sum()
+    }
+
+    fn finite_diff(base: &[f32], which: usize, recompute: impl Fn(&[f32]) -> f32) -> f32 {
+        let h = 1e-3f32;
+        let mut xp = base.to_vec();
+        let mut xm = base.to_vec();
+        xp[which] += h;
+        xm[which] -= h;
+        (recompute(&xp) - recompute(&xm)) / (2.0 * h)
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() <= 1e-2 + 1e-2 * b.abs()
+    }
+
+    #[test]
+    fn input_gradient_matches_finite_differences() {
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(X0.to_vec(), ROWS, COLS));
+        let gv = tape.input(Tensor::from_vec(GAMMA0.to_vec(), 1, COLS));
+        let bv = tape.input(Tensor::from_vec(BETA0.to_vec(), 1, COLS));
+        let wv = tape.input(Tensor::from_vec(W.to_vec(), ROWS, COLS));
+        let loss = xv.layer_norm(gv, bv, EPS).hadamard(wv).sum();
+        tape.backward(loss.idx());
+        let analytic = tape.grad(xv.idx()).data;
+
+        for (i, &a) in analytic.iter().enumerate()
+        {
+            let num = finite_diff(&X0, i, |x| loss_at(x, &GAMMA0, &BETA0));
+            assert!(
+                close(a, num),
+                "dL/dx[{i}] analytic {a} vs finite-diff {num}"
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_gradient_matches_finite_differences() {
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(X0.to_vec(), ROWS, COLS));
+        let gv = tape.input(Tensor::from_vec(GAMMA0.to_vec(), 1, COLS));
+        let bv = tape.input(Tensor::from_vec(BETA0.to_vec(), 1, COLS));
+        let wv = tape.input(Tensor::from_vec(W.to_vec(), ROWS, COLS));
+        let loss = xv.layer_norm(gv, bv, EPS).hadamard(wv).sum();
+        tape.backward(loss.idx());
+        let analytic = tape.grad(gv.idx()).data;
+
+        for (c, &a) in analytic.iter().enumerate()
+        {
+            let num = finite_diff(&GAMMA0, c, |gamma| loss_at(&X0, gamma, &BETA0));
+            assert!(
+                close(a, num),
+                "dL/dgamma[{c}] analytic {a} vs finite-diff {num}"
+            );
+        }
+    }
+
+    #[test]
+    fn beta_gradient_matches_finite_differences() {
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(X0.to_vec(), ROWS, COLS));
+        let gv = tape.input(Tensor::from_vec(GAMMA0.to_vec(), 1, COLS));
+        let bv = tape.input(Tensor::from_vec(BETA0.to_vec(), 1, COLS));
+        let wv = tape.input(Tensor::from_vec(W.to_vec(), ROWS, COLS));
+        let loss = xv.layer_norm(gv, bv, EPS).hadamard(wv).sum();
+        tape.backward(loss.idx());
+        let analytic = tape.grad(bv.idx()).data;
+
+        for (c, &a) in analytic.iter().enumerate()
+        {
+            let num = finite_diff(&BETA0, c, |beta| loss_at(&X0, &GAMMA0, beta));
+            assert!(
+                close(a, num),
+                "dL/dbeta[{c}] analytic {a} vs finite-diff {num}"
+            );
+        }
+    }
+
+    // Direct guard for the specific gamma bug: with x_norm having per-row mean 0,
+    // sum_r(g * x_norm) differs from sum_r(g). The old code returned the latter.
+    #[test]
+    fn gamma_gradient_is_not_the_beta_gradient() {
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(X0.to_vec(), ROWS, COLS));
+        let gv = tape.input(Tensor::from_vec(GAMMA0.to_vec(), 1, COLS));
+        let bv = tape.input(Tensor::from_vec(BETA0.to_vec(), 1, COLS));
+        let wv = tape.input(Tensor::from_vec(W.to_vec(), ROWS, COLS));
+        let loss = xv.layer_norm(gv, bv, EPS).hadamard(wv).sum();
+        tape.backward(loss.idx());
+        let dgamma = tape.grad(gv.idx()).data;
+        let dbeta = tape.grad(bv.idx()).data;
+        let diff: f32 = dgamma.iter().zip(&dbeta).map(|(a, b)| (a - b).abs()).sum();
+        assert!(
+            diff > 1e-3,
+            "dL/dgamma collapsed onto dL/dbeta (the historical bug): {dgamma:?} vs {dbeta:?}"
+        );
     }
 }

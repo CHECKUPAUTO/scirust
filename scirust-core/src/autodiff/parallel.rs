@@ -747,23 +747,123 @@ impl ParallelTape {
                     beta_idx,
                 } =>
                 {
-                    let gv = &values[gamma_idx];
-                    let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
-                    t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
-                    t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
+                    // Exact per-row backward (matches reverse.rs). No in-crate
+                    // forward constructs this Op; kept correct for external callers.
+                    let input = &values[input_idx];
+                    let g_v = &values[gamma_idx];
+                    let (rows, cols) = (input.rows, input.cols);
+                    let n = cols as f32;
+
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    let mut xnorm = Tensor::zeros(rows, cols);
+                    for r in 0..rows
+                    {
+                        let mut mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            mean += input.data[r * cols + c];
+                        }
+                        mean /= n;
+                        let mut var = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let d = input.data[r * cols + c] - mean;
+                            var += d * d;
+                        }
+                        var = var / n + 1e-5f32;
+                        let sigma = var.sqrt();
+                        for c in 0..cols
+                        {
+                            xnorm.data[r * cols + c] = (input.data[r * cols + c] - mean) / sigma;
+                        }
+                        let mut a_mean = 0.0f32;
+                        let mut ax_mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            a_mean += a;
+                            ax_mean += a * xnorm.data[r * cols + c];
+                        }
+                        a_mean /= n;
+                        ax_mean /= n;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            grad_x.data[r * cols + c] =
+                                (a - a_mean - xnorm.data[r * cols + c] * ax_mean) / sigma;
+                        }
+                    }
+                    t_grads[input_idx] = t_grads[input_idx].add(&grad_x);
+                    t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
                 },
                 Op::LayerNorm {
                     input_idx,
                     gamma_idx,
                     beta_idx,
-                    ..
+                    eps,
                 } =>
                 {
-                    let gv = &values[gamma_idx];
-                    let g_b = g.broadcast_to(values[input_idx].rows, values[input_idx].cols);
-                    t_grads[input_idx] = t_grads[input_idx].add(&g_b.hadamard(gv));
-                    t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.sum_axis(0));
+                    // Exact reverse-mode backward, mirroring reverse.rs. The previous
+                    // formula (g⊙γ for dx, sum(g) for both dγ and dβ) dropped the
+                    // 1/σ factor, the whole mean-subtraction Jacobian, and the
+                    // x_norm weighting of dγ. x_norm is taken from the cached
+                    // SavedData when present, otherwise recomputed.
+                    let cached_norm = match &nodes[i].saved
+                    {
+                        SavedData::LayerNormNormed(t) => Some(t),
+                        _ => None,
+                    };
+                    let input = &values[input_idx];
+                    let g_v = &values[gamma_idx];
+                    let (rows, cols) = (input.rows, input.cols);
+                    let n = cols as f32;
+
+                    let mut grad_x = Tensor::zeros(rows, cols);
+                    let mut xnorm = Tensor::zeros(rows, cols);
+                    for r in 0..rows
+                    {
+                        let mut mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            mean += input.data[r * cols + c];
+                        }
+                        mean /= n;
+                        let mut var = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let d = input.data[r * cols + c] - mean;
+                            var += d * d;
+                        }
+                        var /= n;
+                        let sigma = (var + eps).sqrt();
+                        for c in 0..cols
+                        {
+                            xnorm.data[r * cols + c] = match cached_norm
+                            {
+                                Some(t) => t.data[r * cols + c],
+                                None => (input.data[r * cols + c] - mean) / sigma,
+                            };
+                        }
+                        let mut a_mean = 0.0f32;
+                        let mut ax_mean = 0.0f32;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            a_mean += a;
+                            ax_mean += a * xnorm.data[r * cols + c];
+                        }
+                        a_mean /= n;
+                        ax_mean /= n;
+                        for c in 0..cols
+                        {
+                            let a = g.data[r * cols + c] * g_v.data[c];
+                            grad_x.data[r * cols + c] =
+                                (a - a_mean - xnorm.data[r * cols + c] * ax_mean) / sigma;
+                        }
+                    }
+                    t_grads[input_idx] = t_grads[input_idx].add(&grad_x);
+                    t_grads[gamma_idx] = t_grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
                     t_grads[beta_idx] = t_grads[beta_idx].add(&g.sum_axis(0));
                 },
                 Op::L2Normalize { input_idx } =>
@@ -1141,6 +1241,105 @@ mod tests {
             "seq_grad={} p_grad={}",
             seq_grad,
             p_grad
+        );
+    }
+
+    // LayerNorm backward parity: the ParallelTape arm must agree with the
+    // (finite-difference-verified) reverse.rs LayerNorm backward. A NON-UNIFORM
+    // upstream gradient is essential — with a uniform (all-ones) upstream the LN
+    // input/gamma gradients sum to ~0, which would hide the historical bug. We
+    // get a non-uniform upstream by multiplying the LN output by a weight `w`
+    // before the (implicit) sum.
+    #[test]
+    fn layer_norm_backward_matches_sequential_tape() {
+        use crate::autodiff::reverse::Tape;
+        let (rows, cols) = (2usize, 3usize);
+        let eps = 1e-5f32;
+        let x0 = vec![2.0f32, -1.0, 0.5, 3.0, -2.5, 0.7];
+        let gamma0 = vec![1.5f32, -0.5, 2.0];
+        let beta0 = vec![0.1f32, -0.2, 0.3];
+        let w0 = vec![0.9f32, 1.7, -0.3, 1.1, -0.6, 0.8];
+
+        // Sequential reference: loss = sum((layer_norm(x) ⊙ w)).
+        let (sx, sg, sb) = {
+            let seq = Tape::new();
+            let x = seq.input(Tensor::from_vec(x0.clone(), rows, cols));
+            let g = seq.input(Tensor::from_vec(gamma0.clone(), 1, cols));
+            let b = seq.input(Tensor::from_vec(beta0.clone(), 1, cols));
+            let w = seq.input(Tensor::from_vec(w0.clone(), rows, cols));
+            let (xi, gi, bi) = (x.idx(), g.idx(), b.idx());
+            let loss = x.layer_norm(g, b, eps).hadamard(w).sum();
+            seq.backward(loss.idx());
+            (
+                seq.grad(xi).sum() as f64,
+                seq.grad(gi).sum() as f64,
+                seq.grad(bi).sum() as f64,
+            )
+        };
+
+        // Parallel: manual graph out = LayerNorm(x) * w, seeded with ones.
+        let p = ParallelTape::new();
+        let px = p.alloc_node(Node {
+            op: Op::Input,
+            shape: (rows, cols),
+            saved: SavedData::None,
+        });
+        let pg = p.alloc_node(Node {
+            op: Op::Input,
+            shape: (1, cols),
+            saved: SavedData::None,
+        });
+        let pb = p.alloc_node(Node {
+            op: Op::Input,
+            shape: (1, cols),
+            saved: SavedData::None,
+        });
+        let pw = p.alloc_node(Node {
+            op: Op::Input,
+            shape: (rows, cols),
+            saved: SavedData::None,
+        });
+        let pln = p.alloc_node(Node {
+            op: Op::LayerNorm {
+                input_idx: px,
+                gamma_idx: pg,
+                beta_idx: pb,
+                eps,
+            },
+            shape: (rows, cols),
+            saved: SavedData::None,
+        });
+        let pout = p.alloc_node(Node {
+            op: Op::Mul(pln, pw),
+            shape: (rows, cols),
+            saved: SavedData::None,
+        });
+        p.set_value(px, &x0);
+        p.set_value(pg, &gamma0);
+        p.set_value(pb, &beta0);
+        p.set_value(pw, &w0);
+        // pln value is not read by the LayerNorm arm; zeros suffice for shape.
+        p.set_value(pln, &vec![0.0f32; rows * cols]);
+        p.set_value(pout, &vec![0.0f32; rows * cols]);
+        p.backward(pout);
+
+        assert!(
+            (p.grad(px) - sx).abs() < 1e-4,
+            "dL/dx sum: parallel {} vs sequential {}",
+            p.grad(px),
+            sx
+        );
+        assert!(
+            (p.grad(pg) - sg).abs() < 1e-4,
+            "dL/dgamma sum: parallel {} vs sequential {}",
+            p.grad(pg),
+            sg
+        );
+        assert!(
+            (p.grad(pb) - sb).abs() < 1e-4,
+            "dL/dbeta sum: parallel {} vs sequential {}",
+            p.grad(pb),
+            sb
         );
     }
 
