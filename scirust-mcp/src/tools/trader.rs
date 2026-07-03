@@ -23,6 +23,8 @@
 //! * `trader_metrics`             — Sharpe/Sortino/VaR/… from an equity curve
 //! * `trader_chart`               — self-contained SVG price/equity charts
 //! * `trader_certified_predict`   — IBP-certified ML prediction (LLM-bounded)
+//! * `trader_portfolio`           — account state: PnL, equity, exposure, liq price
+//! * `trader_rebalance`           — trades to reach target portfolio weights
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -43,8 +45,9 @@ use scirust_trader::microstructure::{
 };
 use scirust_trader::model::PricePredictor;
 use scirust_trader::orderbook::{Level, OrderBook};
-use scirust_trader::orders::{FeeSchedule, Side, SlippageModel};
+use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
+use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_to_weights};
 use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
 use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
 
@@ -65,6 +68,8 @@ pub fn trader_tools() -> Vec<McpTool> {
         metrics_tool(),
         chart_tool(),
         certified_predict_tool(),
+        portfolio_tool(),
+        rebalance_tool(),
     ]
 }
 
@@ -1058,6 +1063,193 @@ fn certified_predict_tool() -> McpTool {
     }
 }
 
+/// Build an `Account` from a JSON `{cash, positions:[{symbol,qty,avg_entry,realized_pnl?}]}`.
+fn account_from(args: &Value) -> Account {
+    let mut acct = Account::new(f(args, "cash", 0.0));
+    if let Some(list) = args.get("positions").and_then(|x| x.as_array())
+    {
+        for p in list
+        {
+            let symbol = s(p, "symbol", "");
+            if symbol.is_empty()
+            {
+                continue;
+            }
+            acct.positions.insert(
+                symbol.clone(),
+                Position {
+                    symbol,
+                    qty: f(p, "qty", 0.0),
+                    avg_entry: f(p, "avg_entry", 0.0),
+                    realized_pnl: f(p, "realized_pnl", 0.0),
+                },
+            );
+        }
+    }
+    acct
+}
+
+/// Parse `{marks:{SYM: price}}` into a symbol→price map.
+fn marks_from(args: &Value) -> BTreeMap<String, f32> {
+    let mut m = BTreeMap::new();
+    if let Some(obj) = args.get("marks").and_then(|x| x.as_object())
+    {
+        for (k, v) in obj
+        {
+            if let Some(p) = v.as_f64()
+            {
+                m.insert(k.clone(), p as f32);
+            }
+        }
+    }
+    m
+}
+
+fn portfolio_tool() -> McpTool {
+    McpTool {
+        name: "trader_portfolio".to_string(),
+        description:
+            "Track a paper portfolio's state. Given cash, current positions (signed qty + \
+            average entry), and mark prices — plus optional fills to apply first — it returns \
+            mark-to-market equity, realized & unrealized PnL, fees, per-position PnL and market \
+            value, and gross/net exposure. If `leverage` is given it also reports each position's \
+            isolated-margin liquidation price. This is how an agent answers 'what's my PnL / \
+            exposure / distance to liquidation?' — deterministically, no real funds."
+                .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cash": { "type": "number", "description": "quote-currency cash balance" },
+                "positions": {
+                    "type": "array",
+                    "description": "[{symbol, qty (signed: +long/-short), avg_entry, realized_pnl?}]"
+                },
+                "marks": { "type": "object", "description": "{SYMBOL: mark_price}" },
+                "fills": {
+                    "type": "array",
+                    "description": "optional fills to apply first: [{symbol, side(buy|sell), price, qty, fee?}]"
+                },
+                "leverage": { "type": "number", "description": "optional, for liquidation price" },
+                "mmr": { "type": "number", "description": "maintenance-margin rate (default 0.005)" }
+            }
+        }),
+        handler: Box::new(|args| {
+            let mut acct = account_from(&args);
+            // Apply optional fills.
+            if let Some(fills) = args.get("fills").and_then(|x| x.as_array())
+            {
+                for fj in fills
+                {
+                    let symbol = s(fj, "symbol", "");
+                    if symbol.is_empty()
+                    {
+                        continue;
+                    }
+                    let side = match fj.get("side").and_then(|x| x.as_str())
+                    {
+                        Some("sell") | Some("SELL") => Side::Sell,
+                        _ => Side::Buy,
+                    };
+                    let fill = Fill {
+                        price: f(fj, "price", 0.0),
+                        qty: f(fj, "qty", 0.0),
+                        fee: f(fj, "fee", 0.0),
+                        taker: true,
+                        ts_ms: 0,
+                    };
+                    acct.apply_fill(&symbol, side, &fill);
+                }
+            }
+            let marks = marks_from(&args);
+            let leverage = args
+                .get("leverage")
+                .and_then(|x| x.as_f64())
+                .map(|x| x as f32);
+            let mmr = f(&args, "mmr", 0.005);
+            let (gross, net) = acct.exposure(&marks);
+            let positions: Vec<Value> = acct
+                .positions
+                .values()
+                .filter(|p| !p.is_flat())
+                .map(|p| {
+                    let mark = marks.get(&p.symbol).copied().unwrap_or(p.avg_entry);
+                    let mut obj = json!({
+                        "symbol": p.symbol,
+                        "qty": p.qty,
+                        "avg_entry": p.avg_entry,
+                        "mark": mark,
+                        "market_value": p.market_value(mark),
+                        "unrealized_pnl": p.unrealized_pnl(mark),
+                        "realized_pnl": p.realized_pnl,
+                        "side": if p.is_long() { "long" } else { "short" },
+                    });
+                    if let Some(lev) = leverage
+                    {
+                        let side = if p.is_long() { Side::Buy } else { Side::Sell };
+                        obj["liquidation_price"] =
+                            json!(liquidation_price(p.avg_entry, lev, mmr, side));
+                    }
+                    obj
+                })
+                .collect();
+            Ok(json!({
+                "cash": acct.cash,
+                "equity": acct.equity(&marks),
+                "realized_pnl": acct.realized_pnl,
+                "unrealized_pnl": acct.unrealized_pnl(&marks),
+                "fees_paid": acct.fees_paid,
+                "gross_exposure": gross,
+                "net_exposure": net,
+                "positions": positions,
+            }))
+        }),
+    }
+}
+
+fn rebalance_tool() -> McpTool {
+    McpTool {
+        name: "trader_rebalance".to_string(),
+        description: "Compute the trades that move a portfolio to target weights. Given cash, current \
+            positions, mark prices, and target weights (fraction of total equity per symbol; may sum \
+            to < 1 to hold cash), it returns the buy/sell trades — with a `band` to suppress trades \
+            below a drift threshold. The disciplined way to rebalance a book via chat."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cash": { "type": "number" },
+                "positions": { "type": "array", "description": "[{symbol, qty, avg_entry}]" },
+                "marks": { "type": "object", "description": "{SYMBOL: mark_price}" },
+                "target_weights": { "type": "object", "description": "{SYMBOL: weight in [0,1]}" },
+                "band": { "type": "number", "description": "min weight drift to trade (default 0)" }
+            },
+            "required": ["marks", "target_weights"]
+        }),
+        handler: Box::new(|args| {
+            let acct = account_from(&args);
+            let marks = marks_from(&args);
+            let mut targets = BTreeMap::new();
+            if let Some(obj) = args.get("target_weights").and_then(|x| x.as_object())
+            {
+                for (k, v) in obj
+                {
+                    if let Some(w) = v.as_f64()
+                    {
+                        targets.insert(k.clone(), w as f32);
+                    }
+                }
+            }
+            let band = f(&args, "band", 0.0);
+            let trades = rebalance_to_weights(&acct, &targets, &marks, band);
+            Ok(json!({
+                "equity": acct.equity(&marks),
+                "num_trades": trades.len(),
+                "trades": to_value(&trades),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1087,7 +1279,56 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 14);
+        assert!(before >= 16);
+    }
+
+    #[test]
+    fn portfolio_reports_pnl_and_exposure() {
+        let t = tool("trader_portfolio");
+        let out = (t.handler)(json!({
+            "cash": 5000.0,
+            "positions": [{ "symbol": "BTC/USDT", "qty": 1.0, "avg_entry": 50000.0 }],
+            "marks": { "BTC/USDT": 55000.0 },
+            "leverage": 10.0
+        }))
+        .unwrap();
+        // equity = 5000 cash + 1*55000 = 60000; unrealized = 5000.
+        assert!((out["equity"].as_f64().unwrap() - 60000.0).abs() < 1.0);
+        assert!((out["unrealized_pnl"].as_f64().unwrap() - 5000.0).abs() < 1.0);
+        let pos = &out["positions"][0];
+        assert_eq!(pos["side"], json!("long"));
+        // 10x long -> liquidation below entry.
+        assert!(pos["liquidation_price"].as_f64().unwrap() < 50000.0);
+    }
+
+    #[test]
+    fn portfolio_applies_fills() {
+        let t = tool("trader_portfolio");
+        let out = (t.handler)(json!({
+            "cash": 10000.0,
+            "marks": { "ETH/USDT": 3000.0 },
+            "fills": [{ "symbol": "ETH/USDT", "side": "buy", "price": 3000.0, "qty": 2.0, "fee": 6.0 }]
+        }))
+        .unwrap();
+        // cash = 10000 - 6000 - 6 fee = 3994; equity = 3994 + 2*3000 = 9994.
+        assert!((out["equity"].as_f64().unwrap() - 9994.0).abs() < 1.0);
+        assert!((out["fees_paid"].as_f64().unwrap() - 6.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rebalance_produces_trades_to_targets() {
+        let t = tool("trader_rebalance");
+        let out = (t.handler)(json!({
+            "cash": 10000.0,
+            "positions": [],
+            "marks": { "BTC/USDT": 100.0 },
+            "target_weights": { "BTC/USDT": 0.5 }
+        }))
+        .unwrap();
+        // 50% of 10000 = 5000 / 100 = 50 units to buy.
+        assert_eq!(out["num_trades"], json!(1));
+        assert!((out["trades"][0]["qty"].as_f64().unwrap() - 50.0).abs() < 1e-2);
+        assert_eq!(out["trades"][0]["side"], json!("Buy"));
     }
 
     #[test]
