@@ -16,8 +16,8 @@
 //! whole forward op-set (bias, activations, im2col) to be device-resident —
 //! tracked as future work in `docs/GPU.md` (P2.2).
 
-use crate::BackendResult;
 use crate::wgpu_backend::{GpuMatrix, WgpuContext};
+use crate::{BackendError, BackendResult};
 
 /// A handle to a wgpu device for building VRAM-resident matmul chains.
 pub struct GpuChain {
@@ -268,6 +268,91 @@ impl GpuChain {
         dst_cols: usize,
     ) -> BackendResult<GpuMatrix> {
         self.ctx.place_cols_resident(x, col_start, dst_cols)
+    }
+
+    /// **Resident multi-head grouped-query attention**, single sequence
+    /// (`rows = seq_len`), matching the sciagent model's attention:
+    ///
+    /// ```text
+    /// qr = rope(q)         kr = rope(k)                  # full width, per model
+    /// for head in 0..n_heads:                            # kv = head / (n_heads/n_kv_heads)
+    ///     ctx_head = attention( slice(qr,head), slice(kr,kv), slice(v,kv) )
+    ///     out += place(ctx_head into its d_model slot)
+    /// ```
+    ///
+    /// `q` is `t×(n_heads·dh)`, `k`/`v` are `t×(n_kv_heads·dh)`; returns the
+    /// `t×(n_heads·dh)` concatenated context (the caller applies `w_o`). RoPE is
+    /// applied to the *full-width* `q`/`k` exactly as `rope_on_tape` does — each
+    /// uses its own width in the frequency schedule — so the result matches the
+    /// CPU model. Every intermediate stays in VRAM. `v` is not rotated. This
+    /// composes brick-17 RoPE, brick-18a slice/place and the single-head
+    /// `attention`, all already gradient-checked.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gqa_attention(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        n_heads: usize,
+        n_kv_heads: usize,
+        seq_len: usize,
+        theta: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let d_model = q.cols();
+        if n_heads == 0 || n_kv_heads == 0 || !d_model.is_multiple_of(n_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention: q.cols {d_model} not divisible by n_heads {n_heads}"
+            )));
+        }
+        let dh = d_model / n_heads;
+        if !n_heads.is_multiple_of(n_kv_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention: n_heads {n_heads} not a multiple of n_kv_heads {n_kv_heads}"
+            )));
+        }
+        if k.cols() != n_kv_heads * dh || v.cols() != n_kv_heads * dh
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention: expected k/v cols = n_kv_heads·dh = {}, got k {}, v {}",
+                n_kv_heads * dh,
+                k.cols(),
+                v.cols()
+            )));
+        }
+        if q.rows() != seq_len || k.rows() != seq_len || v.rows() != seq_len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention: single sequence only — rows must equal seq_len {seq_len} \
+                 (q {}, k {}, v {})",
+                q.rows(),
+                k.rows(),
+                v.rows()
+            )));
+        }
+
+        let qr = self.rope(q, seq_len, 0, theta)?;
+        let kr = self.rope(k, seq_len, 0, theta)?;
+        let repeat = n_heads / n_kv_heads;
+        let mut out: Option<GpuMatrix> = None;
+        for head in 0..n_heads
+        {
+            let kv = head / repeat;
+            let qs = self.slice_cols(&qr, head * dh, dh)?;
+            let ks = self.slice_cols(&kr, kv * dh, dh)?;
+            let vs = self.slice_cols(v, kv * dh, dh)?;
+            let ctx = self.attention(&qs, &ks, &vs, causal)?; // scale = 1/√dh
+            let padded = self.place_cols(&ctx, head * dh, d_model)?;
+            out = Some(match out
+            {
+                None => padded,
+                Some(acc) => self.add(&acc, &padded)?,
+            });
+        }
+        // n_heads ≥ 1 is guaranteed above, so `out` is always Some.
+        out.ok_or_else(|| BackendError::ShapeMismatch("gqa_attention: n_heads must be ≥ 1".into()))
     }
 
     /// A complete **pre-norm residual transformer block**, fully resident:
@@ -1099,6 +1184,55 @@ mod tests {
                 dx_gpu[idx]
             );
         }
+    }
+
+    /// **Resident multi-head GQA attention** matches the CPU oracle (the model's
+    /// exact math): full-width RoPE on q/k, grouped-query head mapping
+    /// (`4 heads / 2 kv-heads`), causal, heads concatenated. Skips if no adapter;
+    /// asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_gqa_attention_matches_cpu_oracle() {
+        use crate::ops::cpu_gqa_attention;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (n_heads, n_kv_heads, dh, seq_len) = (4usize, 2usize, 8usize, 6usize);
+        let d_model = n_heads * dh; // 32
+        let kv_dim = n_kv_heads * dh; // 16
+        let theta = 10_000.0f32;
+        let q: Vec<f32> = (0..seq_len * d_model)
+            .map(|i| (i as f32 * 0.11 - 1.0).sin() * 0.5)
+            .collect();
+        let k: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.07 + 0.3).cos() * 0.5)
+            .collect();
+        let v: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.05 - 0.2).sin() * 0.5)
+            .collect();
+
+        let gq = chain.upload(&q, seq_len, d_model);
+        let gk = chain.upload(&k, seq_len, kv_dim);
+        let gv = chain.upload(&v, seq_len, kv_dim);
+        let out = chain
+            .download(
+                &chain
+                    .gqa_attention(&gq, &gk, &gv, n_heads, n_kv_heads, seq_len, theta, true)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let expected = cpu_gqa_attention(
+            &q, &k, &v, seq_len, n_heads, n_kv_heads, dh, seq_len, theta, true,
+        );
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "rel_err {}",
+            rel_err(&out, &expected)
+        );
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
