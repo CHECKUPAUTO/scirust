@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — cross-check par fuzzing de tous les modules (`scirust-tolerance`)
+Nouvel exemple `fuzz_crosscheck` : un harnais déterministe (graine xorshift)
+qui valide chaque module contre une **méthode de référence indépendante**
+(pas un re-run du même code), sur des milliers d'instances aléatoires :
+- `special` — `erf` contre une intégration de Simpson de `(2/√π)e^{−t²}`,
+  identités `erf+erfc=1` / `Φ+Φ̄=1`, réductions χ² et aller-retours de quantile ;
+- `sampling` — la probabilité d'acceptation par χ² non-centré contre une
+  simulation **Monte-Carlo** directe de `P(Î ≤ k·I_max)` ;
+- `spatial` — inertie de surface analytique `θ̄ᵀHθ̄+tr(HΣ)` contre l'empirique
+  (`FormBatch`), aller-retour d'association de torseur, orthogonalité du résidu ;
+- `modal` — orthonormalité DCT, Parseval, partition `Σ Iₖ²=m·I_S²` ;
+- `chain` — recombinaison statistique/pire-cas et KKT du coût-optimal ;
+- `capability` — non-conformité en ppm contre l'intégration de Simpson des queues.
+À 1500 instances/module : **39 200 vérifications, 0 erreur**, résidu pire-cas à
+la précision machine (à l'erreur Monte-Carlo près pour `sampling`). Complète le
+harnais `fuzz_optimize` (qui, lui, avait révélé et fait corriger deux défauts de
+robustesse). Conservé comme couverture de régression réutilisable.
+
 ### Ajouté — synthèse de tolérances à coût minimal (`scirust-tolerance`)
 Le « calcul optimal » du tolérancement inertiel : nouveau module `optimize`
 qui minimise le coût total de fabrication `Σᵢ bᵢ·Iᵢ^(−rᵢ)` (modèle
