@@ -460,6 +460,57 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Gather a contiguous column block: `out[r, c] = inp[r, col_start + c]` for
+/// `c in 0..ncols`. `inp` is `rows × src_cols`, `out` is `rows × ncols`. Used to
+/// extract a single head's `d_head` columns from a full-width projection. The
+/// CPU contract is [`crate::ops::cpu_slice_cols`]; its adjoint is
+/// [`PLACE_COLS_WGSL`]. 2 storage buffers.
+const SLICE_COLS_WGSL: &str = r#"
+struct P { rows: u32, ncols: u32, src_cols: u32, col_start: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let c = gid.x;
+    let r = gid.y;
+    if (r >= p.rows || c >= p.ncols) { return; }
+    out[r * p.ncols + c] = inp[r * p.src_cols + p.col_start + c];
+}
+"#;
+
+/// Scatter a narrow block into a zero-padded wide matrix:
+/// `out[r, col_start + c] = inp[r, c]` for `c in 0..ncols`, and `0` everywhere
+/// else. `inp` is `rows × ncols`, `out` is `rows × dst_cols`. Used to place a
+/// head's context back into its `d_model` column slot before summing heads (the
+/// efficient equivalent of the model's `build_pad` matmul). The CPU contract is
+/// [`crate::ops::cpu_place_cols`]; it is the adjoint of [`SLICE_COLS_WGSL`].
+/// One invocation per *output* element, so the zeros are written explicitly
+/// (no uninitialised VRAM). 2 storage buffers.
+const PLACE_COLS_WGSL: &str = r#"
+struct P { rows: u32, ncols: u32, dst_cols: u32, col_start: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let c = gid.x;
+    let r = gid.y;
+    if (r >= p.rows || c >= p.dst_cols) { return; }
+    let lo = p.col_start;
+    let hi = p.col_start + p.ncols;
+    if (c >= lo && c < hi) {
+        out[r * p.dst_cols + c] = inp[r * p.ncols + (c - lo)];
+    } else {
+        out[r * p.dst_cols + c] = 0.0;
+    }
+}
+"#;
+
 /// A wgpu device + compiled compute pipelines, created once and reused across
 /// calls (adapter/device acquisition and shader compilation are expensive).
 pub struct WgpuContext {
@@ -481,6 +532,8 @@ pub struct WgpuContext {
     adamw_pipeline: wgpu::ComputePipeline,
     rope_pipeline: wgpu::ComputePipeline,
     rope_bwd_pipeline: wgpu::ComputePipeline,
+    slice_cols_pipeline: wgpu::ComputePipeline,
+    place_cols_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -727,6 +780,32 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let slice_cols_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("slice_cols"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SLICE_COLS_WGSL)),
+        });
+        let slice_cols_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("slice_cols"),
+                layout: None,
+                module: &slice_cols_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let place_cols_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("place_cols"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(PLACE_COLS_WGSL)),
+        });
+        let place_cols_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("place_cols"),
+                layout: None,
+                module: &place_cols_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
         Ok(Self {
             device,
             queue,
@@ -746,6 +825,8 @@ impl WgpuContext {
             adamw_pipeline,
             rope_pipeline,
             rope_bwd_pipeline,
+            slice_cols_pipeline,
+            place_cols_pipeline,
             adapter_name,
         })
     }
@@ -1154,6 +1235,162 @@ impl WgpuContext {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(((dim / 2) as u32).div_ceil(8), (rows as u32).div_ceil(8), 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Gather a contiguous column block of a **resident** matrix:
+    /// `out[r, c] = x[r, col_start + c]` for `c in 0..ncols`, result resident.
+    /// Extracts one head's `d_head` columns from a full-width projection. The CPU
+    /// contract is [`crate::ops::cpu_slice_cols`].
+    pub fn slice_cols_resident(
+        &self,
+        x: &GpuMatrix,
+        col_start: usize,
+        ncols: usize,
+    ) -> BackendResult<GpuMatrix> {
+        if col_start + ncols > x.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "slice_cols: [{col_start}, {}) out of {} columns",
+                col_start + ncols,
+                x.cols
+            )));
+        }
+        let elems = x.rows * ncols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("slice-cols-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_cols(
+                &self.slice_cols_pipeline,
+                &x.buf,
+                &out_buf,
+                x.rows,
+                ncols,
+                x.cols,
+                col_start,
+                ncols,
+            );
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: ncols,
+        })
+    }
+
+    /// Scatter a **resident** narrow block into a zero-padded wide matrix:
+    /// `out[r, col_start + c] = x[r, c]`, `0` elsewhere; result resident and
+    /// `rows × dst_cols`. Places a head's context back into its `d_model` slot.
+    /// This is the adjoint of [`Self::slice_cols_resident`]; the CPU contract is
+    /// [`crate::ops::cpu_place_cols`].
+    pub fn place_cols_resident(
+        &self,
+        x: &GpuMatrix,
+        col_start: usize,
+        dst_cols: usize,
+    ) -> BackendResult<GpuMatrix> {
+        if col_start + x.cols > dst_cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "place_cols: block [{col_start}, {}) does not fit in {dst_cols} columns",
+                col_start + x.cols
+            )));
+        }
+        let elems = x.rows * dst_cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("place-cols-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_cols(
+                &self.place_cols_pipeline,
+                &x.buf,
+                &out_buf,
+                x.rows,
+                x.cols,
+                dst_cols,
+                col_start,
+                dst_cols,
+            );
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: dst_cols,
+        })
+    }
+
+    /// Encode + submit one column slice/place dispatch. `p1`/`p2` fill the
+    /// kernel's `ncols` and `src_cols`/`dst_cols` params (position 1/2);
+    /// `dispatch_cols` is the output width driving the x-dimension. Shared by
+    /// [`Self::slice_cols_resident`] and [`Self::place_cols_resident`], which
+    /// differ only by pipeline and which width is the output.
+    #[allow(clippy::too_many_arguments)]
+    fn _encode_cols(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        in_buf: &wgpu::Buffer,
+        out_buf: &wgpu::Buffer,
+        rows: usize,
+        p1: usize,
+        p2: usize,
+        col_start: usize,
+        dispatch_cols: usize,
+    ) {
+        let params: [u32; 4] = [rows as u32, p1 as u32, p2 as u32, col_start as u32];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("cols-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cols"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: in_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("cols"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cols"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(
+                (dispatch_cols as u32).div_ceil(8),
+                (rows as u32).div_ceil(8),
+                1,
+            );
         }
         self.queue.submit(Some(encoder.finish()));
     }

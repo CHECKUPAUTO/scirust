@@ -23,30 +23,33 @@
 //! * `trader_metrics`             — Sharpe/Sortino/VaR/… from an equity curve
 //! * `trader_chart`               — self-contained SVG price/equity charts
 //! * `trader_certified_predict`   — IBP-certified ML prediction (LLM-bounded)
+//! * `trader_portfolio`           — account state: PnL, equity, exposure, liq price
+//! * `trader_rebalance`           — trades to reach target portfolio weights
 
 use crate::registry::McpTool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use scirust_trader::agent::{Action, StubLlm, TradingAgent};
-use scirust_trader::backtest::{run_backtest, BacktestConfig, Sizing};
-use scirust_trader::chart::{candlestick_svg, equity_curve_svg, ChartOptions, Marker, Overlay};
+use scirust_trader::backtest::{BacktestConfig, Sizing, run_backtest};
+use scirust_trader::chart::{ChartOptions, Marker, Overlay, candlestick_svg, equity_curve_svg};
 use scirust_trader::execution::{
-    almgren_chriss, iceberg, micro_burst, pov, twap, vwap, AlmgrenChriss,
+    AlmgrenChriss, almgren_chriss, iceberg, micro_burst, pov, twap, vwap,
 };
 use scirust_trader::indicators;
-use scirust_trader::market::{Candle, MarketSnapshot, MarketFeed, MockExchange};
-use scirust_trader::marketmaking::{optimal_quotes, MmParams};
-use scirust_trader::metrics::{periods_per_year, PerformanceReport};
+use scirust_trader::market::{Candle, MarketFeed, MarketSnapshot, MockExchange};
+use scirust_trader::marketmaking::{MmParams, optimal_quotes};
+use scirust_trader::metrics::{PerformanceReport, periods_per_year};
 use scirust_trader::microstructure::{
-    kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin, L1Quote, TradePrint,
+    L1Quote, TradePrint, kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin,
 };
 use scirust_trader::model::PricePredictor;
 use scirust_trader::orderbook::{Level, OrderBook};
-use scirust_trader::orders::{FeeSchedule, Side, SlippageModel};
+use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
-use scirust_trader::scanner::{scan, OpportunityConstraints, ScanRiskConfig};
-use scirust_trader::strategy::{strategy_from_spec, STRATEGY_NAMES};
+use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_to_weights};
+use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
+use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
 
 /// All trader tools.
 pub fn trader_tools() -> Vec<McpTool> {
@@ -65,6 +68,8 @@ pub fn trader_tools() -> Vec<McpTool> {
         metrics_tool(),
         chart_tool(),
         certified_predict_tool(),
+        portfolio_tool(),
+        rebalance_tool(),
     ]
 }
 
@@ -73,15 +78,24 @@ pub fn trader_tools() -> Vec<McpTool> {
 // ---------------------------------------------------------------------------
 
 fn f(v: &Value, key: &str, default: f32) -> f32 {
-    v.get(key).and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default)
+    v.get(key)
+        .and_then(|x| x.as_f64())
+        .map(|x| x as f32)
+        .unwrap_or(default)
 }
 
 fn u(v: &Value, key: &str, default: usize) -> usize {
-    v.get(key).and_then(|x| x.as_u64()).map(|x| x as usize).unwrap_or(default)
+    v.get(key)
+        .and_then(|x| x.as_u64())
+        .map(|x| x as usize)
+        .unwrap_or(default)
 }
 
 fn s<'a>(v: &'a Value, key: &str, default: &'a str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or(default).to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or(default)
+        .to_string()
 }
 
 /// Parse an OHLCV array into candles. Each row may be:
@@ -372,8 +386,12 @@ fn signal_tool() -> McpTool {
         handler: Box::new(|args| {
             let candles = ohlcv_arg(&args)?;
             let name = s(&args, "strategy", "sma_cross");
-            let strat = strategy_from_spec(&name, &params_map(&args))
-                .ok_or_else(|| format!("unknown strategy `{name}`; available: {}", STRATEGY_NAMES.join(", ")))?;
+            let strat = strategy_from_spec(&name, &params_map(&args)).ok_or_else(|| {
+                format!(
+                    "unknown strategy `{name}`; available: {}",
+                    STRATEGY_NAMES.join(", ")
+                )
+            })?;
             let sig = strat.evaluate(&candles);
             Ok(json!({
                 "strategy": strat.name(),
@@ -411,7 +429,10 @@ fn build_backtest_cfg(args: &Value, symbol: &str, interval: &str) -> BacktestCon
             ref_liquidity: 1.0,
         },
         sizing,
-        allow_short: args.get("allow_short").and_then(|x| x.as_bool()).unwrap_or(true),
+        allow_short: args
+            .get("allow_short")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(true),
         min_strength: f(args, "min_strength", 0.0),
     }
 }
@@ -578,11 +599,16 @@ fn orderbook_tool() -> McpTool {
         }),
         handler: Box::new(|args| {
             let parse_side = |key: &str| -> Result<Vec<Level>, String> {
-                let arr = args.get(key).and_then(|x| x.as_array()).ok_or(format!("missing `{key}`"))?;
+                let arr = args
+                    .get(key)
+                    .and_then(|x| x.as_array())
+                    .ok_or(format!("missing `{key}`"))?;
                 let mut out = Vec::with_capacity(arr.len());
                 for row in arr
                 {
-                    let cols = row.as_array().ok_or(format!("`{key}` rows must be [price, qty]"))?;
+                    let cols = row
+                        .as_array()
+                        .ok_or(format!("`{key}` rows must be [price, qty]"))?;
                     let px = cols.first().and_then(|x| x.as_f64()).ok_or("bad price")? as f32;
                     let qty = cols.get(1).and_then(|x| x.as_f64()).ok_or("bad qty")? as f32;
                     out.push(Level::new(px, qty));
@@ -709,26 +735,54 @@ fn execution_plan_tool() -> McpTool {
             }
             let algo = s(&args, "algo", "twap");
             let n = u(&args, "slices", 10);
-            let interval = args.get("interval_ms").and_then(|x| x.as_i64()).unwrap_or(60_000);
+            let interval = args
+                .get("interval_ms")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(60_000);
             match algo.as_str()
             {
                 "twap" => Ok(to_value(&twap(side, total, n, 0, interval))),
                 "micro_burst" => Ok(to_value(&micro_burst(side, total, n, 0))),
                 "vwap" =>
                 {
-                    let profile: Vec<f32> = args.get("volume_profile").and_then(|x| x.as_array())
-                        .map(|a| a.iter().filter_map(|v| v.as_f64().map(|x| x as f32)).collect())
+                    let profile: Vec<f32> = args
+                        .get("volume_profile")
+                        .and_then(|x| x.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_f64().map(|x| x as f32))
+                                .collect()
+                        })
                         .unwrap_or_else(|| vec![1.0; n]);
                     Ok(to_value(&vwap(side, total, &profile, 0, interval)))
                 },
                 "pov" =>
                 {
-                    let vols: Vec<f32> = args.get("expected_volumes").and_then(|x| x.as_array())
-                        .map(|a| a.iter().filter_map(|v| v.as_f64().map(|x| x as f32)).collect())
+                    let vols: Vec<f32> = args
+                        .get("expected_volumes")
+                        .and_then(|x| x.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_f64().map(|x| x as f32))
+                                .collect()
+                        })
                         .unwrap_or_else(|| vec![total; n]);
-                    Ok(to_value(&pov(side, total, f(&args, "rate", 0.1), &vols, 0, interval)))
+                    Ok(to_value(&pov(
+                        side,
+                        total,
+                        f(&args, "rate", 0.1),
+                        &vols,
+                        0,
+                        interval,
+                    )))
                 },
-                "iceberg" => Ok(to_value(&iceberg(side, total, f(&args, "display", total / 10.0).max(1e-6), 0, interval))),
+                "iceberg" => Ok(to_value(&iceberg(
+                    side,
+                    total,
+                    f(&args, "display", total / 10.0).max(1e-6),
+                    0,
+                    interval,
+                ))),
                 "almgren_chriss" =>
                 {
                     let a = args.get("ac").cloned().unwrap_or(json!({}));
@@ -1009,6 +1063,193 @@ fn certified_predict_tool() -> McpTool {
     }
 }
 
+/// Build an `Account` from a JSON `{cash, positions:[{symbol,qty,avg_entry,realized_pnl?}]}`.
+fn account_from(args: &Value) -> Account {
+    let mut acct = Account::new(f(args, "cash", 0.0));
+    if let Some(list) = args.get("positions").and_then(|x| x.as_array())
+    {
+        for p in list
+        {
+            let symbol = s(p, "symbol", "");
+            if symbol.is_empty()
+            {
+                continue;
+            }
+            acct.positions.insert(
+                symbol.clone(),
+                Position {
+                    symbol,
+                    qty: f(p, "qty", 0.0),
+                    avg_entry: f(p, "avg_entry", 0.0),
+                    realized_pnl: f(p, "realized_pnl", 0.0),
+                },
+            );
+        }
+    }
+    acct
+}
+
+/// Parse `{marks:{SYM: price}}` into a symbol→price map.
+fn marks_from(args: &Value) -> BTreeMap<String, f32> {
+    let mut m = BTreeMap::new();
+    if let Some(obj) = args.get("marks").and_then(|x| x.as_object())
+    {
+        for (k, v) in obj
+        {
+            if let Some(p) = v.as_f64()
+            {
+                m.insert(k.clone(), p as f32);
+            }
+        }
+    }
+    m
+}
+
+fn portfolio_tool() -> McpTool {
+    McpTool {
+        name: "trader_portfolio".to_string(),
+        description:
+            "Track a paper portfolio's state. Given cash, current positions (signed qty + \
+            average entry), and mark prices — plus optional fills to apply first — it returns \
+            mark-to-market equity, realized & unrealized PnL, fees, per-position PnL and market \
+            value, and gross/net exposure. If `leverage` is given it also reports each position's \
+            isolated-margin liquidation price. This is how an agent answers 'what's my PnL / \
+            exposure / distance to liquidation?' — deterministically, no real funds."
+                .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cash": { "type": "number", "description": "quote-currency cash balance" },
+                "positions": {
+                    "type": "array",
+                    "description": "[{symbol, qty (signed: +long/-short), avg_entry, realized_pnl?}]"
+                },
+                "marks": { "type": "object", "description": "{SYMBOL: mark_price}" },
+                "fills": {
+                    "type": "array",
+                    "description": "optional fills to apply first: [{symbol, side(buy|sell), price, qty, fee?}]"
+                },
+                "leverage": { "type": "number", "description": "optional, for liquidation price" },
+                "mmr": { "type": "number", "description": "maintenance-margin rate (default 0.005)" }
+            }
+        }),
+        handler: Box::new(|args| {
+            let mut acct = account_from(&args);
+            // Apply optional fills.
+            if let Some(fills) = args.get("fills").and_then(|x| x.as_array())
+            {
+                for fj in fills
+                {
+                    let symbol = s(fj, "symbol", "");
+                    if symbol.is_empty()
+                    {
+                        continue;
+                    }
+                    let side = match fj.get("side").and_then(|x| x.as_str())
+                    {
+                        Some("sell") | Some("SELL") => Side::Sell,
+                        _ => Side::Buy,
+                    };
+                    let fill = Fill {
+                        price: f(fj, "price", 0.0),
+                        qty: f(fj, "qty", 0.0),
+                        fee: f(fj, "fee", 0.0),
+                        taker: true,
+                        ts_ms: 0,
+                    };
+                    acct.apply_fill(&symbol, side, &fill);
+                }
+            }
+            let marks = marks_from(&args);
+            let leverage = args
+                .get("leverage")
+                .and_then(|x| x.as_f64())
+                .map(|x| x as f32);
+            let mmr = f(&args, "mmr", 0.005);
+            let (gross, net) = acct.exposure(&marks);
+            let positions: Vec<Value> = acct
+                .positions
+                .values()
+                .filter(|p| !p.is_flat())
+                .map(|p| {
+                    let mark = marks.get(&p.symbol).copied().unwrap_or(p.avg_entry);
+                    let mut obj = json!({
+                        "symbol": p.symbol,
+                        "qty": p.qty,
+                        "avg_entry": p.avg_entry,
+                        "mark": mark,
+                        "market_value": p.market_value(mark),
+                        "unrealized_pnl": p.unrealized_pnl(mark),
+                        "realized_pnl": p.realized_pnl,
+                        "side": if p.is_long() { "long" } else { "short" },
+                    });
+                    if let Some(lev) = leverage
+                    {
+                        let side = if p.is_long() { Side::Buy } else { Side::Sell };
+                        obj["liquidation_price"] =
+                            json!(liquidation_price(p.avg_entry, lev, mmr, side));
+                    }
+                    obj
+                })
+                .collect();
+            Ok(json!({
+                "cash": acct.cash,
+                "equity": acct.equity(&marks),
+                "realized_pnl": acct.realized_pnl,
+                "unrealized_pnl": acct.unrealized_pnl(&marks),
+                "fees_paid": acct.fees_paid,
+                "gross_exposure": gross,
+                "net_exposure": net,
+                "positions": positions,
+            }))
+        }),
+    }
+}
+
+fn rebalance_tool() -> McpTool {
+    McpTool {
+        name: "trader_rebalance".to_string(),
+        description: "Compute the trades that move a portfolio to target weights. Given cash, current \
+            positions, mark prices, and target weights (fraction of total equity per symbol; may sum \
+            to < 1 to hold cash), it returns the buy/sell trades — with a `band` to suppress trades \
+            below a drift threshold. The disciplined way to rebalance a book via chat."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cash": { "type": "number" },
+                "positions": { "type": "array", "description": "[{symbol, qty, avg_entry}]" },
+                "marks": { "type": "object", "description": "{SYMBOL: mark_price}" },
+                "target_weights": { "type": "object", "description": "{SYMBOL: weight in [0,1]}" },
+                "band": { "type": "number", "description": "min weight drift to trade (default 0)" }
+            },
+            "required": ["marks", "target_weights"]
+        }),
+        handler: Box::new(|args| {
+            let acct = account_from(&args);
+            let marks = marks_from(&args);
+            let mut targets = BTreeMap::new();
+            if let Some(obj) = args.get("target_weights").and_then(|x| x.as_object())
+            {
+                for (k, v) in obj
+                {
+                    if let Some(w) = v.as_f64()
+                    {
+                        targets.insert(k.clone(), w as f32);
+                    }
+                }
+            }
+            let band = f(&args, "band", 0.0);
+            let trades = rebalance_to_weights(&acct, &targets, &marks, band);
+            Ok(json!({
+                "equity": acct.equity(&marks),
+                "num_trades": trades.len(),
+                "trades": to_value(&trades),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,7 +1265,10 @@ mod tests {
     }
 
     fn tool(name: &str) -> McpTool {
-        trader_tools().into_iter().find(|t| t.name == name).expect("tool exists")
+        trader_tools()
+            .into_iter()
+            .find(|t| t.name == name)
+            .expect("tool exists")
     }
 
     #[test]
@@ -1035,7 +1279,56 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 14);
+        assert!(before >= 16);
+    }
+
+    #[test]
+    fn portfolio_reports_pnl_and_exposure() {
+        let t = tool("trader_portfolio");
+        let out = (t.handler)(json!({
+            "cash": 5000.0,
+            "positions": [{ "symbol": "BTC/USDT", "qty": 1.0, "avg_entry": 50000.0 }],
+            "marks": { "BTC/USDT": 55000.0 },
+            "leverage": 10.0
+        }))
+        .unwrap();
+        // equity = 5000 cash + 1*55000 = 60000; unrealized = 5000.
+        assert!((out["equity"].as_f64().unwrap() - 60000.0).abs() < 1.0);
+        assert!((out["unrealized_pnl"].as_f64().unwrap() - 5000.0).abs() < 1.0);
+        let pos = &out["positions"][0];
+        assert_eq!(pos["side"], json!("long"));
+        // 10x long -> liquidation below entry.
+        assert!(pos["liquidation_price"].as_f64().unwrap() < 50000.0);
+    }
+
+    #[test]
+    fn portfolio_applies_fills() {
+        let t = tool("trader_portfolio");
+        let out = (t.handler)(json!({
+            "cash": 10000.0,
+            "marks": { "ETH/USDT": 3000.0 },
+            "fills": [{ "symbol": "ETH/USDT", "side": "buy", "price": 3000.0, "qty": 2.0, "fee": 6.0 }]
+        }))
+        .unwrap();
+        // cash = 10000 - 6000 - 6 fee = 3994; equity = 3994 + 2*3000 = 9994.
+        assert!((out["equity"].as_f64().unwrap() - 9994.0).abs() < 1.0);
+        assert!((out["fees_paid"].as_f64().unwrap() - 6.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rebalance_produces_trades_to_targets() {
+        let t = tool("trader_rebalance");
+        let out = (t.handler)(json!({
+            "cash": 10000.0,
+            "positions": [],
+            "marks": { "BTC/USDT": 100.0 },
+            "target_weights": { "BTC/USDT": 0.5 }
+        }))
+        .unwrap();
+        // 50% of 10000 = 5000 / 100 = 50 units to buy.
+        assert_eq!(out["num_trades"], json!(1));
+        assert!((out["trades"][0]["qty"].as_f64().unwrap() - 50.0).abs() < 1e-2);
+        assert_eq!(out["trades"][0]["side"], json!("Buy"));
     }
 
     #[test]
@@ -1071,7 +1364,8 @@ mod tests {
     #[test]
     fn backtest_returns_performance() {
         let t = tool("trader_backtest");
-        let out = (t.handler)(json!({ "ohlcv": mock_ohlcv(150), "strategy": "sma_cross" })).unwrap();
+        let out =
+            (t.handler)(json!({ "ohlcv": mock_ohlcv(150), "strategy": "sma_cross" })).unwrap();
         assert!(out["performance"]["sharpe"].is_number());
         assert!(out["final_equity"].is_number());
     }
@@ -1081,7 +1375,8 @@ mod tests {
         let t = tool("trader_scan_opportunities");
         let out = (t.handler)(json!({
             "series": [{ "symbol": "BTC/USDT", "interval": "1h", "ohlcv": mock_ohlcv(200) }]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["manifest_hash"].is_string());
         assert!(out["opportunities"].is_array());
     }
@@ -1093,7 +1388,8 @@ mod tests {
             "bids": [[99.0, 5.0], [98.0, 10.0]],
             "asks": [[101.0, 4.0], [102.0, 8.0]],
             "size": 6.0
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["mid"].as_f64().unwrap() > 99.0);
         assert!(out["buy_fill"]["vwap"].is_number());
     }
@@ -1103,7 +1399,8 @@ mod tests {
         let t = tool("trader_size_position");
         let out = (t.handler)(json!({
             "capital": 10000.0, "risk_per_trade": 0.01, "entry": 100.0, "atr": 2.0
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(out["position_size"].as_f64().unwrap() > 0.0);
         assert!(out["stop_loss"].as_f64().unwrap() < 100.0);
         assert!(out["take_profit"].as_f64().unwrap() > 100.0);
@@ -1112,9 +1409,13 @@ mod tests {
     #[test]
     fn execution_plans() {
         let t = tool("trader_execution_plan");
-        let twap = (t.handler)(json!({ "side": "buy", "total_qty": 100.0, "algo": "twap", "slices": 4 })).unwrap();
+        let twap =
+            (t.handler)(json!({ "side": "buy", "total_qty": 100.0, "algo": "twap", "slices": 4 }))
+                .unwrap();
         assert_eq!(twap["children"].as_array().unwrap().len(), 4);
-        let ac = (t.handler)(json!({ "side": "sell", "total_qty": 1000.0, "algo": "almgren_chriss" })).unwrap();
+        let ac =
+            (t.handler)(json!({ "side": "sell", "total_qty": 1000.0, "algo": "almgren_chriss" }))
+                .unwrap();
         assert!(ac["schedule"]["kappa"].is_number());
     }
 
@@ -1148,7 +1449,8 @@ mod tests {
     #[test]
     fn chart_renders_svg() {
         let t = tool("trader_chart");
-        let out = (t.handler)(json!({ "type": "candles", "ohlcv": mock_ohlcv(30), "title": "T" })).unwrap();
+        let out = (t.handler)(json!({ "type": "candles", "ohlcv": mock_ohlcv(30), "title": "T" }))
+            .unwrap();
         assert!(out["svg"].as_str().unwrap().starts_with("<svg"));
     }
 
@@ -1160,6 +1462,9 @@ mod tests {
         let hi = out["certified_interval"]["hi"].as_f64().unwrap();
         assert!(lo <= hi);
         let raw = out["raw_prediction"].as_f64().unwrap();
-        assert!(raw >= lo - 1e-4 && raw <= hi + 1e-4, "raw {raw} must be within [{lo},{hi}]");
+        assert!(
+            raw >= lo - 1e-4 && raw <= hi + 1e-4,
+            "raw {raw} must be within [{lo},{hi}]"
+        );
     }
 }

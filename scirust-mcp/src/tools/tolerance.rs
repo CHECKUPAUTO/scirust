@@ -12,6 +12,7 @@ use scirust_tolerance::chain::{
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::optimize::{Component, Requirement, optimize};
 use scirust_tolerance::sampling::design_plan;
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
@@ -25,6 +26,7 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         acceptance_plan_tool(),
         form_modal_tool(),
         torsor_3d_tool(),
+        optimize_cost_tool(),
     ]
 }
 
@@ -377,6 +379,110 @@ fn torsor_3d_tool() -> McpTool {
     }
 }
 
+fn optimize_cost_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_optimize_cost".to_string(),
+        description: "Minimum-cost inertial tolerance synthesis under several functional \
+            requirements at once (the 'calcul optimal' of inertial tolerancing). Minimises total \
+            manufacturing cost Σ bᵢ·Iᵢ^(-rᵢ) (reciprocal-power cost-tolerance model) subject to each \
+            requirement's statistical inertia √(Σ αₖᵢ² Iᵢ²) ≤ i_max_k, by convex Lagrangian dual \
+            ascent. Returns the optimal per-component inertias, the total cost, and for each \
+            requirement the achieved inertia, whether it is binding, and its shadow price."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "cost": { "type": "number", "description": "cost coefficient bᵢ > 0" },
+                            "exponent": { "type": "number", "description": "cost exponent rᵢ > 0" },
+                        },
+                        "required": ["cost", "exponent"],
+                    },
+                },
+                "requirements": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "coeffs": { "type": "array", "items": { "type": "number" }, "description": "influence coefficients αₖᵢ, one per component" },
+                            "i_max": { "type": "number", "description": "max resultant inertia" },
+                        },
+                        "required": ["coeffs", "i_max"],
+                    },
+                },
+            },
+            "required": ["components", "requirements"],
+        }),
+        handler: Box::new(|args| {
+            let comps_json = args
+                .get("components")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `components`")?;
+            let components: Vec<Component> = comps_json
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let cost = c.get("cost").and_then(|v| v.as_f64()).ok_or("component `cost` missing")?;
+                    let exp = c
+                        .get("exponent")
+                        .and_then(|v| v.as_f64())
+                        .ok_or("component `exponent` missing")?;
+                    let name = c
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("X{i}"));
+                    Ok(Component::new(name, cost, exp))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let reqs_json = args
+                .get("requirements")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `requirements`")?;
+            let requirements: Vec<Requirement> = reqs_json
+                .iter()
+                .enumerate()
+                .map(|(k, r)| {
+                    let coeffs: Vec<f64> = r
+                        .get("coeffs")
+                        .and_then(|v| v.as_array())
+                        .ok_or("requirement `coeffs` missing")?
+                        .iter()
+                        .map(|x| x.as_f64().ok_or("non-numeric coeff".to_string()))
+                        .collect::<Result<_, _>>()?;
+                    let i_max = r.get("i_max").and_then(|v| v.as_f64()).ok_or("requirement `i_max` missing")?;
+                    let name = r
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("Y{k}"));
+                    Ok(Requirement::new(name, coeffs, i_max))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let res = optimize(&components, &requirements).map_err(|e| e.to_string())?;
+            Ok(json!({
+                "inertias": res.inertias,
+                "total_cost": res.total_cost,
+                "converged": res.converged,
+                "requirements": requirements.iter().enumerate().map(|(k, r)| json!({
+                    "name": r.name,
+                    "achieved": res.achieved[k],
+                    "binding": res.binding[k],
+                    "shadow_price": res.multipliers[k],
+                })).collect::<Vec<_>>(),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +606,43 @@ mod tests {
                 "normals": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
                 "translations": [[0.0, 0.0, 0.0]],
                 "rotations": [[0.0, 0.0, 0.0]],
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn optimize_cost_tool_solves_two_requirements() {
+        let tool = optimize_cost_tool();
+        let out = (tool.handler)(json!({
+            "components": [
+                { "name": "A", "cost": 1.0, "exponent": 2.0 },
+                { "name": "B", "cost": 3.0, "exponent": 2.0 },
+                { "name": "C", "cost": 2.0, "exponent": 3.0 },
+            ],
+            "requirements": [
+                { "name": "Y1", "coeffs": [1.0, -1.0, 1.0], "i_max": 0.06 },
+                { "name": "Y2", "coeffs": [1.0, 1.0, 0.0], "i_max": 0.05 },
+            ],
+        }))
+        .unwrap();
+        assert_eq!(out["converged"], json!(true));
+        assert_eq!(out["inertias"].as_array().unwrap().len(), 3);
+        assert!(out["total_cost"].as_f64().unwrap() > 0.0);
+        // Every requirement is feasible.
+        for r in out["requirements"].as_array().unwrap()
+        {
+            assert!(r["achieved"].as_f64().unwrap() <= 0.06 * (1.0 + 1e-6));
+        }
+    }
+
+    #[test]
+    fn optimize_cost_tool_rejects_unconstrained_component() {
+        let tool = optimize_cost_tool();
+        assert!(
+            (tool.handler)(json!({
+                "components": [{ "cost": 1.0, "exponent": 2.0 }],
+                "requirements": [{ "coeffs": [0.0], "i_max": 0.1 }],
             }))
             .is_err()
         );

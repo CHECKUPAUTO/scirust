@@ -12,6 +12,7 @@ use scirust_tolerance::chart::PilotingChart;
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance, mix_lots};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::optimize::{Component, Requirement, cost_quality_frontier, optimize};
 use scirust_tolerance::sampling::design_plan;
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
@@ -185,4 +186,45 @@ fn main() {
         dec.coupling,
         dec.total()
     );
+
+    // ---- 8. Minimum-cost synthesis under several requirements -------------
+    // Three components shared by two functional requirements; component B is
+    // the priciest to tighten. Minimise total cost meeting both budgets.
+    let components = vec![
+        Component::new("A", 1.0, 2.0),
+        Component::new("B", 4.0, 2.0),
+        Component::new("C", 2.0, 2.0),
+    ];
+    let requirements = vec![
+        Requirement::new("Y1", vec![1.0, -1.0, 1.0], 0.06),
+        Requirement::new("Y2", vec![1.0, 1.0, 0.0], 0.05),
+    ];
+    let opt = optimize(&components, &requirements).unwrap();
+    println!("\nMinimum-cost allocation (2 requirements, 3 shared components):");
+    for (c, i) in components.iter().zip(&opt.inertias)
+    {
+        println!("  I[{}] = {i:.4}", c.name);
+    }
+    println!(
+        "  total cost = {:.3}  (converged: {})",
+        opt.total_cost, opt.converged
+    );
+    for (r, (a, b)) in requirements
+        .iter()
+        .zip(opt.achieved.iter().zip(&opt.binding))
+    {
+        println!(
+            "  {}: achieved {a:.4} / budget {:.4}  {}",
+            r.name,
+            r.i_max,
+            if *b { "← binding" } else { "slack" }
+        );
+    }
+    let front = cost_quality_frontier(&components, &requirements, &[0.5, 0.75, 1.0, 1.5]);
+    print!("  cost-quality frontier (scale→cost):");
+    for p in &front
+    {
+        print!(" {:.2}→{:.2}", p.scale, p.total_cost);
+    }
+    println!();
 }

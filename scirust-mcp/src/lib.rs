@@ -114,6 +114,8 @@ mod tests {
         assert!(registry.names().contains(&"trader_backtest"));
         assert!(registry.names().contains(&"trader_execution_plan"));
         assert!(registry.names().contains(&"trader_market_making_quotes"));
+        assert!(registry.names().contains(&"trader_portfolio"));
+        assert!(registry.names().contains(&"trader_rebalance"));
         assert!(registry.names().contains(&"wallet_validate_address"));
         assert!(registry.names().contains(&"wallet_build_evm_transaction"));
         assert!(registry.names().contains(&"wallet_authorization_status"));
@@ -122,5 +124,6 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_acceptance_plan"));
         assert!(registry.names().contains(&"tolerance_form_modal"));
         assert!(registry.names().contains(&"tolerance_3d_surface_inertia"));
+        assert!(registry.names().contains(&"tolerance_optimize_cost"));
     }
 }

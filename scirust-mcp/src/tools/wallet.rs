@@ -19,11 +19,11 @@
 //! * `wallet_authorization_status`      — report whether signing is armed
 
 use crate::registry::McpTool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use scirust_trader::wallet::{
-    eip155_namespace, parse_walletconnect_uri, sign_binance_query, sign_coinbase_request, to_hex,
-    Chain, Eip1559Tx, Eip712Domain, EvmAddress, WalletAuthorization,
+    Chain, Eip712Domain, Eip1559Tx, EvmAddress, WalletAuthorization, eip155_namespace,
+    parse_walletconnect_uri, sign_binance_query, sign_coinbase_request, to_hex,
 };
 
 /// All wallet tools.
@@ -72,7 +72,10 @@ fn validate_address_tool() -> McpTool {
             "required": ["address"]
         }),
         handler: Box::new(|args| {
-            let a = args.get("address").and_then(|x| x.as_str()).ok_or("missing `address`")?;
+            let a = args
+                .get("address")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `address`")?;
             let addr = EvmAddress::from_hex(a).ok_or("not a 20-byte hex address")?;
             let checksum = addr.to_checksum();
             Ok(json!({
@@ -342,7 +345,10 @@ mod tests {
     use super::*;
 
     fn tool(name: &str) -> McpTool {
-        wallet_tools().into_iter().find(|t| t.name == name).expect("tool exists")
+        wallet_tools()
+            .into_iter()
+            .find(|t| t.name == name)
+            .expect("tool exists")
     }
 
     #[test]
@@ -359,8 +365,12 @@ mod tests {
     #[test]
     fn validate_address_checksums() {
         let t = tool("wallet_validate_address");
-        let out = (t.handler)(json!({ "address": "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed" })).unwrap();
-        assert_eq!(out["checksum"], json!("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"));
+        let out = (t.handler)(json!({ "address": "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed" }))
+            .unwrap();
+        assert_eq!(
+            out["checksum"],
+            json!("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
+        );
         assert_eq!(out["already_checksummed"], json!(false));
         assert_eq!(out["checksum_valid"], json!(true));
     }
@@ -382,7 +392,8 @@ mod tests {
             "chain_id": 1, "nonce": 9, "gas_limit": 21000,
             "to": "0x3535353535353535353535353535353535353535",
             "value_wei": "1000000000000000000"
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(out["signed"], json!(false));
         assert!(out["signing_hash"].as_str().unwrap().starts_with("0x"));
         assert_eq!(out["signing_hash"].as_str().unwrap().len(), 66); // 0x + 64
