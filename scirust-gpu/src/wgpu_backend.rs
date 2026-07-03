@@ -124,6 +124,56 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Backward of row-wise softmax. Given the forward output `y = softmax(x)` and
+/// the upstream grad `dy`, one invocation per row computes the Jacobian-vector
+/// product `dx = y ⊙ (dy − Σⱼ dyⱼ·yⱼ)`. The CPU contract is
+/// [`crate::ops::cpu_softmax_backward`].
+const SOFTMAX_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, _p0: u32, _p1: u32, };
+
+@group(0) @binding(0) var<storage, read>       y:  array<f32>;
+@group(0) @binding(1) var<storage, read>       dy: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dx: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    if (row >= p.rows) { return; }
+    if (p.cols == 0u) { return; }
+    let base = row * p.cols;
+    var s = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { s = s + dy[base + j] * y[base + j]; }
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { dx[base + j] = y[base + j] * (dy[base + j] - s); }
+}
+"#;
+
+/// Backward of the SwiGLU gate `c = silu(a) ⊙ b` (`silu(x)=x·σ(x)`). One
+/// invocation per element writes both `da = dc · silu'(a) · b` and
+/// `db = dc · silu(a)`, where `silu'(a) = σ(a)·(1 + a·(1−σ(a)))`. The CPU
+/// contract is [`crate::ops::cpu_swiglu_backward`].
+const SWIGLU_BWD_WGSL: &str = r#"
+struct P { n: u32, _p0: u32, _p1: u32, _p2: u32, };
+
+@group(0) @binding(0) var<storage, read>       a:  array<f32>;
+@group(0) @binding(1) var<storage, read>       b:  array<f32>;
+@group(0) @binding(2) var<storage, read>       dc: array<f32>;
+@group(0) @binding(3) var<storage, read_write> da: array<f32>;
+@group(0) @binding(4) var<storage, read_write> db: array<f32>;
+@group(0) @binding(5) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    let sig = 1.0 / (1.0 + exp(-a[i]));
+    let silu = a[i] * sig;
+    let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
+    da[i] = dc[i] * dsilu * b[i];
+    db[i] = dc[i] * silu;
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -187,6 +237,8 @@ pub struct WgpuContext {
     mask_pipeline: wgpu::ComputePipeline,
     rmsnorm_pipeline: wgpu::ComputePipeline,
     embed_pipeline: wgpu::ComputePipeline,
+    softmax_bwd_pipeline: wgpu::ComputePipeline,
+    swiglu_bwd_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -310,6 +362,32 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let softmax_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("softmax_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SOFTMAX_BWD_WGSL)),
+        });
+        let softmax_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("softmax_bwd"),
+                layout: None,
+                module: &softmax_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let swiglu_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("swiglu_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SWIGLU_BWD_WGSL)),
+        });
+        let swiglu_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("swiglu_bwd"),
+                layout: None,
+                module: &swiglu_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
         Ok(Self {
             device,
             queue,
@@ -319,6 +397,8 @@ impl WgpuContext {
             mask_pipeline,
             rmsnorm_pipeline,
             embed_pipeline,
+            softmax_bwd_pipeline,
+            swiglu_bwd_pipeline,
             adapter_name,
         })
     }
@@ -730,6 +810,183 @@ impl WgpuContext {
             rows,
             cols: d,
         })
+    }
+
+    /// Backward of row-wise softmax: given the forward output `y` and upstream
+    /// grad `dy` (same `rows × cols`), returns `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)`,
+    /// resident. Matches [`crate::ops::cpu_softmax_backward`].
+    pub fn softmax_backward_resident(
+        &self,
+        y: &GpuMatrix,
+        dy: &GpuMatrix,
+    ) -> BackendResult<GpuMatrix> {
+        if y.rows != dy.rows || y.cols != dy.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "softmax_backward: {}×{} vs {}×{}",
+                y.rows, y.cols, dy.rows, dy.cols
+            )));
+        }
+        let elems = y.rows * y.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dx = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("softmax-bwd-dx"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && y.cols > 0
+        {
+            let params: [u32; 4] = [y.rows as u32, y.cols as u32, 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("softmax-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("softmax-bwd"),
+                layout: &self.softmax_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: y.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dy.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dx.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("softmax-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("softmax-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.softmax_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((y.rows as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dx,
+            rows: y.rows,
+            cols: y.cols,
+        })
+    }
+
+    /// Backward of the SwiGLU gate `c = silu(a) ⊙ b`: given `a`, `b` and the
+    /// upstream grad `dc` (same shape), returns `(da, db)` resident, where
+    /// `da = dc·silu'(a)·b` and `db = dc·silu(a)`. Matches
+    /// [`crate::ops::cpu_swiglu_backward`].
+    pub fn swiglu_backward_resident(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        dc: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix)> {
+        if a.rows != b.rows || a.cols != b.cols || a.rows != dc.rows || a.cols != dc.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "swiglu_backward: a {}×{}, b {}×{}, dc {}×{}",
+                a.rows, a.cols, b.rows, b.cols, dc.rows, dc.cols
+            )));
+        }
+        let n = a.rows * a.cols;
+        let bytes = (n.max(1) * std::mem::size_of::<f32>()) as u64;
+        let mk = |label| {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            })
+        };
+        let da = mk("swiglu-bwd-da");
+        let db = mk("swiglu-bwd-db");
+        if n > 0
+        {
+            let params: [u32; 4] = [n as u32, 0, 0, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("swiglu-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("swiglu-bwd"),
+                layout: &self.swiglu_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: a.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: b.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dc.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: da.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: db.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("swiglu-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("swiglu-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.swiglu_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok((
+            GpuMatrix {
+                buf: da,
+                rows: a.rows,
+                cols: a.cols,
+            },
+            GpuMatrix {
+                buf: db,
+                rows: a.rows,
+                cols: a.cols,
+            },
+        ))
     }
 
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`

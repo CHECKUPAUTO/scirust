@@ -200,6 +200,41 @@ pub fn cpu_scale_causal_mask(
     out
 }
 
+/// CPU reference for the softmax backward: given the forward output `y` and
+/// upstream grad `dy`, `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)` per row. The GPU
+/// `softmax_backward_resident` kernel's correctness contract.
+pub fn cpu_softmax_backward(y: &[f32], dy: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut dx = vec![0.0f32; y.len()];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let s: f32 = (0..cols).map(|j| dy[base + j] * y[base + j]).sum();
+        for j in 0..cols
+        {
+            dx[base + j] = y[base + j] * (dy[base + j] - s);
+        }
+    }
+    dx
+}
+
+/// CPU reference for the SwiGLU-gate backward of `c = silu(a) ⊙ b`: returns
+/// `(da, db)` with `da = dc·silu'(a)·b`, `db = dc·silu(a)`, where
+/// `silu'(x) = σ(x)·(1 + x·(1−σ(x)))`. The GPU `swiglu_backward_resident`
+/// kernel's correctness contract.
+pub fn cpu_swiglu_backward(a: &[f32], b: &[f32], dc: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let mut da = vec![0.0f32; a.len()];
+    let mut db = vec![0.0f32; a.len()];
+    for i in 0..a.len()
+    {
+        let sig = 1.0 / (1.0 + (-a[i]).exp());
+        let silu = a[i] * sig;
+        let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
+        da[i] = dc[i] * dsilu * b[i];
+        db[i] = dc[i] * silu;
+    }
+    (da, db)
+}
+
 /// CPU reference for token embedding gather: output row `i` is row `tokens[i]`
 /// of the `vocab × d` row-major `table` (token ids clamped to `vocab-1`). The
 /// GPU `embed_resident` kernel's correctness contract.

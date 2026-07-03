@@ -294,6 +294,23 @@ impl GpuChain {
         Ok((grad_a, grad_b))
     }
 
+    /// Backward of row-wise softmax: `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)`, given the
+    /// forward output `y` and upstream grad `dy`. Result resident.
+    pub fn softmax_backward(&self, y: &GpuMatrix, dy: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.softmax_backward_resident(y, dy)
+    }
+
+    /// Backward of the SwiGLU gate `c = silu(a) ⊙ b`: returns `(da, db)`
+    /// resident, `da = dc·silu'(a)·b`, `db = dc·silu(a)`.
+    pub fn swiglu_backward(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        dc: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix)> {
+        self.ctx.swiglu_backward_resident(a, b, dc)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1038,6 +1055,117 @@ mod tests {
                 (fd - grad_b[idx]).abs() < 1e-2,
                 "grad_b[{idx}]: fd={fd} gpu={}",
                 grad_b[idx]
+            );
+        }
+    }
+
+    /// Softmax backward must match numerical gradients. For `L = Σ softmax(X)⊙G`
+    /// the input gradient is `dx = softmax_backward(Y, G)`; checked against
+    /// central finite differences of `L` over `X` on the CPU. Skips if no adapter.
+    #[test]
+    fn softmax_backward_matches_finite_differences() {
+        use crate::ops::{cpu_softmax, cpu_softmax_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (3usize, 5usize);
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let g: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.5 + 0.2).cos())
+            .collect(); // dL/dY
+
+        let y = cpu_softmax(&x, rows, cols);
+        let gy = chain.upload(&y, rows, cols);
+        let gg = chain.upload(&g, rows, cols);
+        let dx_gpu = chain
+            .download(&chain.softmax_backward(&gy, &gg).unwrap())
+            .unwrap();
+        // GPU must also match the CPU adjoint formula exactly (same arithmetic).
+        let dx_cpu = cpu_softmax_backward(&y, &g, rows, cols);
+        assert!(rel_err(&dx_gpu, &dx_cpu) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ softmax(X)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_softmax(xx, rows, cols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..rows * cols
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += eps;
+            xm[idx] -= eps;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * eps);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// SwiGLU-gate backward must match numerical gradients. For
+    /// `L = Σ (silu(A)⊙B) ⊙ G`, `(da, db) = swiglu_backward(A, B, G)`; each is
+    /// checked against central finite differences of `L`. Skips if no adapter.
+    #[test]
+    fn swiglu_backward_matches_finite_differences() {
+        use crate::ops::cpu_swiglu_backward;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 12usize;
+        let a: Vec<f32> = (0..n).map(|i| (i as f32 * 0.4 - 1.5).sin() * 2.0).collect();
+        let b: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 + 0.5).cos()).collect();
+        let g: Vec<f32> = (0..n).map(|i| (i as f32 * 0.6 - 0.3).sin()).collect(); // dL/dC
+
+        let (ga, gb, gg) = (
+            chain.upload(&a, 1, n),
+            chain.upload(&b, 1, n),
+            chain.upload(&g, 1, n),
+        );
+        let (da_m, db_m) = chain.swiglu_backward(&ga, &gb, &gg).unwrap();
+        let da_gpu = chain.download(&da_m).unwrap();
+        let db_gpu = chain.download(&db_m).unwrap();
+        let (da_cpu, db_cpu) = cpu_swiglu_backward(&a, &b, &g);
+        assert!(rel_err(&da_gpu, &da_cpu) < 1e-4 && rel_err(&db_gpu, &db_cpu) < 1e-4);
+
+        // Gold standard: finite differences of L = Σ (silu(A)⊙B) ⊙ G.
+        let silu = |x: f32| x / (1.0 + (-x).exp());
+        let loss =
+            |aa: &[f32], bb: &[f32]| -> f32 { (0..n).map(|i| silu(aa[i]) * bb[i] * g[i]).sum() };
+        let eps = 1e-3f32;
+        for idx in 0..n
+        {
+            let (mut ap, mut am) = (a.clone(), a.clone());
+            ap[idx] += eps;
+            am[idx] -= eps;
+            let fd = (loss(&ap, &b) - loss(&am, &b)) / (2.0 * eps);
+            assert!(
+                (fd - da_gpu[idx]).abs() < 1e-2,
+                "da[{idx}]: fd={fd} gpu={}",
+                da_gpu[idx]
+            );
+            let (mut bp, mut bm) = (b.clone(), b.clone());
+            bp[idx] += eps;
+            bm[idx] -= eps;
+            let fd = (loss(&a, &bp) - loss(&a, &bm)) / (2.0 * eps);
+            assert!(
+                (fd - db_gpu[idx]).abs() < 1e-2,
+                "db[{idx}]: fd={fd} gpu={}",
+                db_gpu[idx]
             );
         }
     }

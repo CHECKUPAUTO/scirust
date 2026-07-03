@@ -20,7 +20,8 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err,
+    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, cpu_softmax_backward,
+    cpu_swiglu_backward, rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -436,6 +437,45 @@ fn main() {
         back_err,
         &mut failures,
     );
+
+    // 11. BACKWARD: softmax adjoint dx = y ⊙ (dy − Σ dy·y), on-device.
+    let (sr, sc) = (4usize, 6usize);
+    let sx: Vec<f32> = (0..sr * sc)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let sy = cpu_softmax(&sx, sr, sc);
+    let sdy: Vec<f32> = (0..sr * sc).map(|i| (i as f32 * 0.5 + 0.2).cos()).collect();
+    let sdx_gpu = chain
+        .download(
+            &chain
+                .softmax_backward(&chain.upload(&sy, sr, sc), &chain.upload(&sdy, sr, sc))
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: softmax vjp (y⊙(dy−Σdy·y))",
+        rel_err(&sdx_gpu, &cpu_softmax_backward(&sy, &sdy, sr, sc)),
+        &mut failures,
+    );
+
+    // 12. BACKWARD: SwiGLU adjoint — da = dc·silu'(a)·b, db = dc·silu(a).
+    let sn = 14usize;
+    let sa: Vec<f32> = (0..sn)
+        .map(|i| (i as f32 * 0.4 - 1.5).sin() * 2.0)
+        .collect();
+    let sb: Vec<f32> = (0..sn).map(|i| (i as f32 * 0.3 + 0.5).cos()).collect();
+    let sdc: Vec<f32> = (0..sn).map(|i| (i as f32 * 0.6 - 0.3).sin()).collect();
+    let (gda2, gdb2) = chain
+        .swiglu_backward(
+            &chain.upload(&sa, 1, sn),
+            &chain.upload(&sb, 1, sn),
+            &chain.upload(&sdc, 1, sn),
+        )
+        .unwrap();
+    let (da_cpu, db_cpu) = cpu_swiglu_backward(&sa, &sb, &sdc);
+    let sg_err = rel_err(&chain.download(&gda2).unwrap(), &da_cpu)
+        .max(rel_err(&chain.download(&gdb2).unwrap(), &db_cpu));
+    check("backward: swiglu vjp (da, db)", sg_err, &mut failures);
 
     println!();
     if failures == 0
