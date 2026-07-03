@@ -76,6 +76,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Token embedding gather: row `i` of the output is row `tokens[i]` of the
+/// `vocab × d` `table`. One invocation per output element. Out-of-range tokens
+/// are clamped to the last row (defensive; callers pass valid ids). The CPU
+/// contract is [`crate::ops::cpu_embed`].
+const EMBED_WGSL: &str = r#"
+struct P { rows: u32, d: u32, vocab: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       tokens: array<u32>;
+@group(0) @binding(1) var<storage, read>       table: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.rows * p.d) { return; }
+    let row = i / p.d;
+    let col = i % p.d;
+    let tok = min(tokens[row], p.vocab - 1u);
+    out[i] = table[tok * p.d + col];
+}
+"#;
+
 /// Row-wise RMSNorm: `x / sqrt(mean(x²) + eps) · weight`, one invocation per
 /// row over the row's `cols` elements; `weight` is a `cols`-length gain vector.
 /// `eps` rides through the `u32` uniform as raw bits. The CPU contract is
@@ -163,6 +186,7 @@ pub struct WgpuContext {
     softmax_pipeline: wgpu::ComputePipeline,
     mask_pipeline: wgpu::ComputePipeline,
     rmsnorm_pipeline: wgpu::ComputePipeline,
+    embed_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -274,6 +298,18 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let embed_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("embed"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(EMBED_WGSL)),
+        });
+        let embed_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("embed"),
+            layout: None,
+            module: &embed_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -282,6 +318,7 @@ impl WgpuContext {
             softmax_pipeline,
             mask_pipeline,
             rmsnorm_pipeline,
+            embed_pipeline,
             adapter_name,
         })
     }
@@ -615,6 +652,84 @@ impl WgpuContext {
             pass.dispatch_workgroups((rows as u32).div_ceil(64), 1, 1);
         }
         self.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Token embedding gather: build a resident `tokens.len() × d` matrix whose
+    /// row `i` is row `tokens[i]` of the resident `vocab × d` `table`. Matches
+    /// [`crate::ops::cpu_embed`]. The token ids are uploaded as a `u32` buffer;
+    /// the gathered rows stay in VRAM to feed the transformer stack.
+    pub fn embed_resident(&self, tokens: &[u32], table: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        let rows = tokens.len();
+        let d = table.cols;
+        let vocab = table.rows;
+        let elems = rows * d;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("embed-out"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            let tok_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-tokens"),
+                    contents: bytemuck::cast_slice(tokens),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+            let params: [u32; 4] = [rows as u32, d as u32, vocab as u32, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("embed"),
+                layout: &self.embed_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: tok_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: table.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("embed"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("embed"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.embed_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows,
+            cols: d,
+        })
     }
 
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
