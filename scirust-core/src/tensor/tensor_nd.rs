@@ -500,9 +500,12 @@ impl TensorND {
 fn compute_strides(shape: &[usize]) -> Vec<usize> {
     let ndim = shape.len();
     let mut strides = vec![1usize; ndim];
-    for i in (0..ndim - 1).rev()
+    // Iterate high axis -> low. `1..ndim` is empty for ndim 0 and 1, so this
+    // avoids the `ndim - 1` usize underflow that panicked (debug) / produced
+    // `0..usize::MAX` (release) on a rank-0 (scalar) shape `&[]`.
+    for i in (1..ndim).rev()
     {
-        strides[i] = strides[i + 1] * shape[i + 1];
+        strides[i - 1] = strides[i] * shape[i];
     }
     strides
 }
@@ -521,6 +524,22 @@ mod tests {
 
         let o = TensorND::ones(&[2, 3, 4]);
         assert!(o.data.iter().all(|&x| x == 1.0));
+    }
+
+    // A rank-0 (scalar) shape `&[]` is legal (numel == 1) and must not panic in
+    // compute_strides (the `ndim - 1` usize underflow regression).
+    #[test]
+    fn scalar_rank0_tensor_construction() {
+        let z = TensorND::zeros(&[]);
+        assert_eq!(z.ndim(), 0);
+        assert_eq!(z.shape(), &[] as &[usize]);
+        assert_eq!(z.numel(), 1);
+        assert_eq!(z.data[0], 0.0);
+
+        let s = TensorND::new(vec![3.5], vec![]);
+        assert_eq!(s.ndim(), 0);
+        assert_eq!(s.numel(), 1);
+        assert_eq!(s.data[0], 3.5);
     }
 
     #[test]
