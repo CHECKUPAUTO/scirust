@@ -3,9 +3,14 @@ name = "scirust-grid"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "SciRust power-grid analytics — frequency/RoCoF, synchrophasors, THD, islanding detection"
+description = "SciRust power-grid analytics — frequency/RoCoF, synchrophasors, THD, islanding detection, WLS state estimation with bad-data detection, and distance-relay zone logic"
 
 [dependencies]
 scirust-signal = { path = "../scirust-signal" }
 scirust-license = { path = "../scirust-license" }
+scirust-solvers = { path = "../scirust-solvers" }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+approx = "0.5"

@@ -74,15 +74,19 @@ stated ~87%/~13% independent/common-cause split).
 
 ## Honest limitations
 
-- Only the five MooN architectures `scirust-reliability` implements
-  (1oo1/1oo2/2oo2/2oo3/1oo3) have a `PFDavg` formula; asking for e.g. 2oo4
-  returns a clear `UnsupportedArchitecture` error rather than a wrong
-  number.
-- `fault_injection::simulate_demand` models channels that are stuck
-  dangerous-undetected (never vote trip); it does not yet model a channel
-  that spuriously votes trip on its own (a different, safe-side failure
-  mode) — a natural follow-up, not implemented here.
-- The IEC 61508-6 Annex B equations used are first-order approximations
-  valid for `λ·T1 < 0.1` (Brissaud et al., arXiv:1501.06487); this crate
-  does not warn when that bound is exceeded — documented here rather than
-  silently assumed away.
+- `Architecture::pfd_avg` dispatches any valid `M`-out-of-`N` shape: the
+  five IEC 61508-6 Annex B closed forms
+  (1oo1/1oo2/2oo2/2oo3/1oo3) are used directly, and any other valid shape
+  (2oo4, 3oo4, ...) falls back to `scirust_reliability::pfd_moon`'s
+  cross-validated general formula — see that crate's module docs for the
+  derivation and why it's kept distinct from the five named cases. Only a
+  structurally invalid shape (`m == 0` or `m > n`) is refused.
+- `fault_injection` models two independent channel fault modes —
+  dangerous-undetected (never votes trip) and spurious (always votes trip)
+  — via `simulate_demand_with_spurious`; a channel that is *intermittently*
+  faulty (neither permanently stuck nor permanently healthy) is not
+  modeled.
+- The underlying IEC 61508-6 Annex B equations (and their `pfd_moon`
+  generalization) are first-order approximations valid for `λ·T1 < 0.1`
+  (Brissaud et al., arXiv:1501.06487); this crate does not warn when that
+  bound is exceeded — documented here rather than silently assumed away.

@@ -27,12 +27,72 @@ fn architecture_schema() -> Value {
             "n": { "type": "integer", "minimum": 1, "description": "total channels" },
         },
         "required": ["m", "n"],
-        "description": "MooN voting architecture; only 1oo1, 1oo2, 2oo2, 2oo3, 1oo3 have a known PFDavg formula",
+        "description": "MooN voting architecture (1 <= m <= n); 1oo1/1oo2/2oo2/2oo3/1oo3 use the exact IEC 61508-6 Annex B formula, any other valid shape (e.g. 2oo4) uses a cross-validated general formula",
     })
 }
 
 pub fn sis_tools() -> Vec<McpTool> {
-    vec![sif_loop_tool(), proof_test_interval_tool()]
+    vec![
+        sif_loop_tool(),
+        proof_test_interval_tool(),
+        reactor_trip_bypass_tool(),
+    ]
+}
+
+fn reactor_trip_bypass_tool() -> McpTool {
+    McpTool {
+        name: "sis_reactor_trip_bypass".to_string(),
+        description: "Reconfigure a MooN reactor-trip architecture for one or more channels in \
+            maintenance bypass (IEC 61513 §6.2.3.5): reduces N without changing M (a 2oo4 with \
+            one channel bypassed becomes 2oo3, not 1oo3), and reports the resulting PFDavg. Does \
+            NOT implement ISA-67.04 setpoint methodology — see scirust-sis::reactor_trip's module \
+            doc."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "nominal_architecture": architecture_schema(),
+                "bypassed_channels": { "type": "integer", "minimum": 1 },
+                "lambda_du": { "type": "number" },
+                "beta": { "type": "number" },
+                "t1": { "type": "number" },
+            },
+            "required": ["nominal_architecture", "bypassed_channels", "lambda_du", "beta", "t1"],
+        }),
+        handler: Box::new(|args| {
+            let nominal = parse_architecture(
+                args.get("nominal_architecture")
+                    .ok_or("missing `nominal_architecture`")?,
+            )?;
+            let bypassed_channels = args
+                .get("bypassed_channels")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing `bypassed_channels`")? as u8;
+            let lambda_du = args
+                .get("lambda_du")
+                .and_then(|v| v.as_f64())
+                .ok_or("missing `lambda_du`")?;
+            let beta = args
+                .get("beta")
+                .and_then(|v| v.as_f64())
+                .ok_or("missing `beta`")?;
+            let t1 = args
+                .get("t1")
+                .and_then(|v| v.as_f64())
+                .ok_or("missing `t1`")?;
+
+            let reduced = scirust_sis::architecture_with_bypass(nominal, bypassed_channels)
+                .map_err(|e| e.to_string())?;
+            let pfd_avg = reduced
+                .pfd_avg(lambda_du, t1, beta)
+                .map_err(|e| e.to_string())?;
+
+            Ok(json!({
+                "reduced_architecture": { "m": reduced.m, "n": reduced.n },
+                "pfd_avg": pfd_avg,
+            }))
+        }),
+    }
 }
 
 fn sif_loop_tool() -> McpTool {
@@ -210,13 +270,54 @@ mod tests {
     }
 
     #[test]
-    fn proof_test_interval_tool_rejects_unsupported_architecture() {
+    fn proof_test_interval_tool_supports_2oo4_via_general_formula() {
         let tool = proof_test_interval_tool();
         let result = (tool.handler)(json!({
             "architecture": {"m": 2, "n": 4},
+            "lambda_du": 1e-6,
+            "beta": 0.05,
+            "target_pfd_avg": 1e-3,
+        }))
+        .unwrap();
+        assert!(result["max_proof_test_interval_hours"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn proof_test_interval_tool_rejects_invalid_architecture() {
+        let tool = proof_test_interval_tool();
+        let result = (tool.handler)(json!({
+            "architecture": {"m": 5, "n": 2},
             "lambda_du": 1e-3,
             "beta": 0.1,
             "target_pfd_avg": 1e-3,
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reactor_trip_bypass_tool_reduces_n_not_m() {
+        let tool = reactor_trip_bypass_tool();
+        let result = (tool.handler)(json!({
+            "nominal_architecture": {"m": 2, "n": 4},
+            "bypassed_channels": 1,
+            "lambda_du": 1e-6,
+            "beta": 0.05,
+            "t1": 8760.0,
+        }))
+        .unwrap();
+        assert_eq!(result["reduced_architecture"], json!({"m": 2, "n": 3}));
+        assert!(result["pfd_avg"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn reactor_trip_bypass_tool_rejects_unsatisfiable_bypass() {
+        let tool = reactor_trip_bypass_tool();
+        let result = (tool.handler)(json!({
+            "nominal_architecture": {"m": 2, "n": 4},
+            "bypassed_channels": 3,
+            "lambda_du": 1e-6,
+            "beta": 0.05,
+            "t1": 8760.0,
         }));
         assert!(result.is_err());
     }

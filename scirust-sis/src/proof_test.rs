@@ -114,9 +114,26 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_architecture_clearly() {
-        let unsupported = Architecture::new(2, 4).unwrap();
-        let err = max_proof_test_interval(unsupported, 1e-6, 0.0, 1e-3).unwrap_err();
+    fn supports_2oo4_via_the_general_moon_formula() {
+        // 2oo4 isn't one of the five IEC-tabulated architectures, but
+        // `Architecture::pfd_avg` falls back to `pfd_moon` for it — see
+        // scirust-reliability's module docs for that formula's provenance.
+        let architecture = Architecture::new(2, 4).unwrap();
+        let (lambda_du, beta, target) = (1e-6, 0.05, 1e-3);
+        let t1 = max_proof_test_interval(architecture, lambda_du, beta, target).unwrap();
+        let pfd = architecture.pfd_avg(lambda_du, t1, beta).unwrap();
+        assert_relative_eq!(pfd, target, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn rejects_a_directly_constructed_invalid_architecture_clearly() {
+        // `Architecture`'s fields are public (needed for (de)serialization),
+        // so `Architecture::new`'s m<=n validation can be bypassed by a
+        // struct literal; `pfd_avg` (and therefore this function, through
+        // it) must still refuse such a shape instead of silently computing
+        // a wrong number.
+        let invalid = Architecture { m: 5, n: 2 };
+        let err = max_proof_test_interval(invalid, 1e-6, 0.0, 1e-3).unwrap_err();
         assert!(matches!(err, SisError::UnsupportedArchitecture { .. }));
     }
 }

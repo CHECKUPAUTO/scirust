@@ -1,0 +1,14 @@
+[package]
+name = "scirust-fab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust semiconductor-fab process control — EWMA run-to-run recipe control and PCA-based multivariate fault detection (T²/SPE)"
+
+[dependencies]
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-spc = { path = "../scirust-spc" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"

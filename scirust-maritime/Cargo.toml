@@ -1,0 +1,13 @@
+[package]
+name = "scirust-maritime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust maritime autonomy — COLREG encounter classification, CPA/TCPA collision-risk assessment, dynamic-positioning thrust allocation"
+
+[dependencies]
+scirust-solvers = { path = "../scirust-solvers" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"

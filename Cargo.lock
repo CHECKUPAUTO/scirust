@@ -2545,6 +2545,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-agtech"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "serde",
+]
+
+[[package]]
 name = "scirust-algogen"
 version = "0.1.0"
 dependencies = [
@@ -2590,6 +2598,7 @@ dependencies = [
 name = "scirust-biomed"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "scirust-core",
  "serde",
 ]
@@ -2754,6 +2763,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-fab"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "scirust-solvers",
+ "scirust-spc",
+ "serde",
+]
+
+[[package]]
+name = "scirust-fatigue"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
 name = "scirust-func-safety"
 version = "0.1.0"
 dependencies = [
@@ -2807,9 +2833,12 @@ dependencies = [
 name = "scirust-grid"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "scirust-license",
  "scirust-signal",
+ "scirust-solvers",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2899,11 +2928,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-maritime"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "scirust-solvers",
+ "serde",
+]
+
+[[package]]
 name = "scirust-mcp"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "scirust-agtech",
+ "scirust-biomed",
  "scirust-discovery",
+ "scirust-fab",
+ "scirust-fatigue",
+ "scirust-grid",
+ "scirust-maritime",
  "scirust-sciagent",
  "scirust-sis",
  "scirust-solvers",
@@ -3031,6 +3075,7 @@ dependencies = [
 name = "scirust-reliability"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "serde",
 ]
 

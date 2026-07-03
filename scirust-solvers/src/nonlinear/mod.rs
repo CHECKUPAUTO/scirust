@@ -5,8 +5,10 @@
 //! - `broyden`       : quasi-Newton qui met à jour la jacobienne sans la
 //!   recalculer — utile quand l'évaluation de F est coûteuse
 
+pub mod anderson;
 pub mod broyden;
 pub mod newton;
 
+pub use anderson::anderson_accelerate;
 pub use broyden::broyden;
 pub use newton::{newton_system, newton_system_jac};

@@ -56,12 +56,14 @@ hash-chaîné SHA-256 (`src/audit.rs`), sur le même principe que
 | **OPC-UA** | Handshake UACP `Hello`/`Acknowledge` — la première chose qu'échange tout client OPC-UA, avant même l'ouverture d'un canal sécurisé | OPC UA Part 6 §7.1 |
 | **Modbus TCP** | `Read Device Identification` (code fonction 0x2B, MEI 0x0E) — lecture seule, prévue par le protocole pour l'auto-description d'un appareil | Modbus Application Protocol V1.1b3 §6.21 |
 | **mDNS/DNS-SD** | Requête DNS standard d'énumération de services (`_services._dns-sd._udp.local`) | RFC 1035, RFC 6762/6763 |
+| **BACnet/IP** | Diffusion `Who-Is` globale + décodage `I-Am` (identifiant d'appareil uniquement) | ANSI/ASHRAE 135, Annexe J (BVLL), clauses 16.9/16.10 |
+| **SNMP v1** | `GET sysDescr.0` (`1.3.6.1.2.1.1.1.0`) — encodage/décodage BER minimal | RFC 1157, RFC 1213 (MIB-II) |
+| **EtherNet/IP (CIP)** | `ListIdentity` — en-tête d'encapsulation à confiance haute, disposition interne de l'objet Identity à valider face à un appareil réel (voir la note de confiance dans `src/protocols/ethernet_ip.rs`) | ODVA, *CIP Networks Library Vol. 2* |
 
-D'autres protocoles natifs à faible risque identifiés par la recherche
-(BACnet `Who-Is`/`I-Am`, EtherNet/IP `List Identity`, SNMP `sysDescr`) sont
-documentés comme prochaine extension naturelle — même schéma :
-construction/analyse pures et testées, sonde active isolée, autorisation
-vérifiée en amont.
+La découverte purement **passive** (écoute de trafic déjà présent, sans
+rien émettre) reste une extension naturelle non encore faite — elle
+nécessiterait une source de trames (capture réseau) que ce crate ne fournit
+pas.
 
 ## Utilisation
 
@@ -98,9 +100,13 @@ assert!(engine.audit_log().verify_chain());
   (pas de rotation ni de révocation de clé) — suffisant pour un usage à un
   seul opérateur/une seule équipe, à durcir avant un déploiement
   multi-tenant.
-- Les sondes actives fournies (OPC-UA, Modbus) sont volontairement les deux
-  probes les plus légers identifiés par la recherche (voir
-  `docs/DOMAIN_ROADMAP.md`) ; la découverte purement **passive** (écoute de
-  trafic déjà présent, sans rien émettre) reste à implémenter — elle
-  nécessite une source de trames (capture réseau) que ce crate ne fournit
-  pas encore.
+- La découverte purement **passive** (écoute de trafic déjà présent, sans
+  rien émettre) reste à implémenter — elle nécessite une source de trames
+  (capture réseau) que ce crate ne fournit pas encore.
+- La disposition interne de l'objet Identity EtherNet/IP (`ethernet_ip.rs`)
+  suit la structure généralement documentée mais n'a pas été vérifiée face
+  à un appareil réel dans cet environnement — voir la note de confiance en
+  tête de ce module avant un usage en production.
+- Le décodage BACnet `I-Am` (`bacnet.rs`) s'arrête au premier paramètre
+  (l'identifiant d'appareil) ; les paramètres suivants (longueur APDU max,
+  segmentation, vendor ID) ne sont pas décodés.

@@ -16,6 +16,8 @@ pub mod iterative;
 pub mod lu;
 pub mod precond;
 pub mod qr;
+pub mod randomized_svd;
+pub mod rng;
 pub mod svd;
 
 pub use bicgstab::{bicgstab, bicgstab_preconditioned};
@@ -26,6 +28,8 @@ pub use iterative::conjugate_gradient;
 pub use lu::{Lu, lu_decompose, solve, solve_lu};
 pub use precond::{JacobiPreconditioner, identity_precond};
 pub use qr::{Qr, qr_decompose, solve_qr_least_squares};
+pub use randomized_svd::randomized_svd;
+pub use rng::SplitMix64;
 pub use svd::{Svd, svd};
 
 // ─── Matrix dense row-major ─────────────────────────────────────────────────

@@ -1,0 +1,11 @@
+[package]
+name = "scirust-fatigue"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust structural fatigue analysis — ASTM E1049 rainflow cycle counting and Palmgren-Miner cumulative damage"
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"

@@ -5,6 +5,9 @@
 //! l'I/O socket (`probe`, testée sur boucle locale — voir les tests de
 //! chaque module).
 
+pub mod bacnet;
+pub mod ethernet_ip;
 pub mod mdns;
 pub mod modbus;
 pub mod opcua;
+pub mod snmp;
