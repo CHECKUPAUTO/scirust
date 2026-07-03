@@ -24,6 +24,32 @@ pub struct GpuChain {
     ctx: WgpuContext,
 }
 
+/// The resident weights of one pre-norm, single-head transformer block, as
+/// [`GpuMatrix`] handles already uploaded to VRAM. Shapes for a `d`-wide model
+/// with MLP hidden size `h`: the two RMSNorm gains are `d`-length, the Q/K/V/O
+/// projections are `d×d`, and the MLP `w_gate`/`w_up` are `d×h` with `w_down`
+/// `h×d`. Consumed by [`GpuChain::transformer_block`].
+pub struct BlockWeights<'a> {
+    /// Pre-attention RMSNorm gain (`d`).
+    pub norm1: &'a GpuMatrix,
+    /// Query projection (`d×d`).
+    pub wq: &'a GpuMatrix,
+    /// Key projection (`d×d`).
+    pub wk: &'a GpuMatrix,
+    /// Value projection (`d×d`).
+    pub wv: &'a GpuMatrix,
+    /// Attention output projection (`d×d`).
+    pub wo: &'a GpuMatrix,
+    /// Pre-MLP RMSNorm gain (`d`).
+    pub norm2: &'a GpuMatrix,
+    /// SwiGLU gate projection (`d×h`).
+    pub wg: &'a GpuMatrix,
+    /// SwiGLU up projection (`d×h`).
+    pub wu: &'a GpuMatrix,
+    /// SwiGLU down projection (`h×d`).
+    pub wd: &'a GpuMatrix,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -143,6 +169,40 @@ impl GpuChain {
         let scaled = self.scale_causal_mask(&scores, scale, causal)?; // /√d [+ mask]
         let weights = self.softmax(&scaled)?; // row softmax (t×t)
         self.matmul(&weights, v) // context = W·V (t×dv)
+    }
+
+    /// A complete **pre-norm residual transformer block**, fully resident:
+    ///
+    /// ```text
+    /// h   = x + attention( rms_norm(x)·Wq, ·Wk, ·Wv ) · Wo
+    /// out = h + swiglu_mlp( rms_norm(h) )
+    /// ```
+    ///
+    /// `x` is `t×d`; the block preserves that shape. Single head (`d` = head
+    /// dim). Everything — the two norms, the four attention projections, the
+    /// score matrix, the two residual adds and the MLP — stays in VRAM from the
+    /// input upload to the output download. This is **one full layer of the
+    /// 350M forward** as a single resident call.
+    pub fn transformer_block(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        // Attention sub-block (pre-norm + residual).
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?;
+        let k = self.matmul(&xn, w.wk)?;
+        let v = self.matmul(&xn, w.wv)?;
+        let attn = self.attention(&q, &k, &v, causal)?;
+        let attn_out = self.matmul(&attn, w.wo)?;
+        let h = self.add(x, &attn_out)?; // residual 1
+
+        // MLP sub-block (pre-norm + residual).
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let mlp = self.swiglu_mlp(&hn, w.wg, w.wu, w.wd)?;
+        self.add(&h, &mlp) // residual 2
     }
 
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
@@ -418,6 +478,101 @@ mod tests {
             .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
             .collect();
         let expected = CpuBackend.gemm_f32(&act, &wd, t, h, d).unwrap();
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
+    }
+
+    /// The **complete residual transformer block** — pre-norm attention with
+    /// Q/K/V/O projections + residual, then pre-norm SwiGLU MLP + residual, all
+    /// resident — matches a full step-by-step CPU oracle. Skips if no adapter;
+    /// asserts on lavapipe / a real GPU. This is one whole 350M layer forward.
+    #[test]
+    fn resident_transformer_block_matches_cpu_oracle() {
+        use crate::ops::{cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (6usize, 8usize, 16usize);
+        let eps = 1e-5f32;
+        // Deterministic pseudo-random weights (distinct phase per matrix).
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.031 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1 = (0..d).map(|i| 0.7 + 0.03 * i as f32).collect::<Vec<_>>();
+        let wq = gen(d * d, 0.5, 0.3);
+        let wk = gen(d * d, 1.1, 0.3);
+        let wv = gen(d * d, 1.7, 0.3);
+        let wo = gen(d * d, 2.3, 0.3);
+        let n2 = (0..d).map(|i| 0.9 - 0.02 * i as f32).collect::<Vec<_>>();
+        let wg = gen(d * h, 2.9, 0.25);
+        let wu = gen(d * h, 3.5, 0.25);
+        let wd = gen(h * d, 4.1, 0.25);
+
+        // GPU: one resident call.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (up(&wq, d, d), up(&wk, d, d), up(&wv, d, d), up(&wo, d, d));
+        let (gwg, gwu, gwd) = (up(&wg, d, h), up(&wu, d, h), up(&wd, h, d));
+        let weights = BlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        };
+        let out = chain
+            .download(&chain.transformer_block(&gx, &weights, eps, true).unwrap())
+            .unwrap();
+
+        // CPU oracle, step by step.
+        let gemm = |a: &[f32], b: &[f32], m, k, n| CpuBackend.gemm_f32(a, b, m, k, n).unwrap();
+        let transpose = |a: &[f32], r: usize, c: usize| {
+            let mut o = vec![0.0f32; r * c];
+            for i in 0..r
+            {
+                for j in 0..c
+                {
+                    o[j * r + i] = a[i * c + j];
+                }
+            }
+            o
+        };
+        let xn = cpu_rms_norm(&x, &n1, eps, t, d);
+        let q = gemm(&xn, &wq, t, d, d);
+        let k = gemm(&xn, &wk, t, d, d);
+        let v = gemm(&xn, &wv, t, d, d);
+        let s = gemm(&q, &transpose(&k, t, d), t, d, t); // Q·Kᵀ
+        let s = cpu_scale_causal_mask(&s, t, t, 1.0 / (d as f32).sqrt(), true);
+        let aw = cpu_softmax(&s, t, t);
+        let a = gemm(&aw, &v, t, t, d);
+        let ao = gemm(&a, &wo, t, d, d);
+        let hh: Vec<f32> = x.iter().zip(&ao).map(|(a, b)| a + b).collect(); // residual 1
+        let hn = cpu_rms_norm(&hh, &n2, eps, t, d);
+        let gate = gemm(&hn, &wg, t, d, h);
+        let upm = gemm(&hn, &wu, t, d, h);
+        let act: Vec<f32> = gate
+            .iter()
+            .zip(&upm)
+            .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+            .collect();
+        let m = gemm(&act, &wd, t, h, d);
+        let expected: Vec<f32> = hh.iter().zip(&m).map(|(a, b)| a + b).collect(); // residual 2
+
+        assert_eq!(out.len(), t * d);
         assert!(
             rel_err(&out, &expected) < 1e-4,
             "out={out:?} exp={expected:?}"
