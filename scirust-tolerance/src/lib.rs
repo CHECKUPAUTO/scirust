@@ -27,6 +27,9 @@
 //!   [`chain::assembly_inertia_worst_case`] analysis and [`chain::allocate`]
 //!   synthesis (worst-case / statistical / weighted / guaranteed-`Cpk` /
 //!   cost-optimal), plus traditional interval allocation for comparison.
+//! - [`optimize`] — minimum-cost tolerance synthesis under **several**
+//!   functional requirements at once ([`optimize::optimize`]), by convex
+//!   Lagrangian dual ascent, plus the cost–quality Pareto frontier.
 //! - [`chart`] — the [`chart::PilotingChart`] (*carte de pilotage inertiel*),
 //!   monitoring the inertia against an upper piloting limit.
 //! - [`sampling`] — acceptance sampling by inertia: the [`sampling::SamplingPlan`]
@@ -84,6 +87,7 @@ pub mod chart;
 pub mod form;
 pub mod inertia;
 pub mod modal;
+pub mod optimize;
 pub mod sampling;
 pub mod spatial;
 pub mod special;
@@ -99,5 +103,6 @@ pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
 pub use modal::{ModalBasis, modal_inertias};
+pub use optimize::{Component, OptimizeResult, Requirement, cost_quality_frontier, optimize};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
