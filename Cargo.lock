@@ -2952,6 +2952,7 @@ dependencies = [
  "scirust-sis",
  "scirust-solvers",
  "scirust-tolerance",
+ "scirust-trader",
  "serde",
  "serde_json",
 ]
