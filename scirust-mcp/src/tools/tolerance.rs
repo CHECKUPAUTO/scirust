@@ -186,7 +186,7 @@ fn acceptance_plan_tool() -> McpTool {
             let alpha = f64_field(&args, "alpha")?;
             let beta = f64_field(&args, "beta")?;
             let ratio_bad = f64_field(&args, "ratio_bad")?;
-            if !(0.0..1.0).contains(&alpha) || !(0.0..1.0).contains(&beta)
+            if !(alpha > 0.0 && alpha < 1.0) || !(beta > 0.0 && beta < 1.0)
             {
                 return Err("`alpha` and `beta` must lie in (0, 1)".to_string());
             }

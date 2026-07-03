@@ -296,7 +296,23 @@ fn gammp(a: f64, x: f64) -> f64 {
 
 /// Cumulative distribution of the chi-square law with `dof` degrees of freedom,
 /// `P(X ≤ x) = P(dof/2, x/2)`.
+///
+/// For very large `dof` the incomplete-gamma series would need `O(√dof)` terms,
+/// so above `dof = 20000` it switches to the Wilson–Hilferty normal
+/// approximation `Φ( ((x/k)^{1/3} − (1 − 2/(9k))) / √(2/(9k)) )`, accurate to a
+/// few parts in ten-thousand there and `O(1)` in cost.
 pub fn chi2_cdf(dof: f64, x: f64) -> f64 {
+    if x <= 0.0
+    {
+        return 0.0;
+    }
+    if dof > 20_000.0
+    {
+        let t = (x / dof).cbrt();
+        let m = 1.0 - 2.0 / (9.0 * dof);
+        let s = (2.0 / (9.0 * dof)).sqrt();
+        return normal_cdf((t - m) / s).clamp(0.0, 1.0);
+    }
     gammp(dof / 2.0, x / 2.0)
 }
 
@@ -311,6 +327,13 @@ pub fn chi2_cdf(dof: f64, x: f64) -> f64 {
 /// Reduces to [`chi2_cdf`] at `lambda = 0`. This is the sampling law of the
 /// scaled inertia estimator `n·Î²/σ²` (non-centrality `λ = n·δ²/σ²`), so it
 /// underpins the acceptance-sampling operating-characteristic curves.
+///
+/// The Poisson weights are concentrated within roughly `±40√(λ/2)` of the mode
+/// `λ/2`; the sum runs over exactly that window. When the window would be
+/// impractically wide (very large `λ`, i.e. a nearly-degenerate `σ`), it falls
+/// back to **Patnaik's** central-χ² approximation
+/// `χ'²(k, λ) ≈ ρ·χ²(ν)` with `ν = (k+λ)²/(k+2λ)`, `ρ = (k+2λ)/(k+λ)`, which is
+/// increasingly accurate exactly where the exact sum becomes unwieldy.
 pub fn ncchi2_cdf(dof: f64, lambda: f64, x: f64) -> f64 {
     if x <= 0.0
     {
@@ -321,43 +344,31 @@ pub fn ncchi2_cdf(dof: f64, lambda: f64, x: f64) -> f64 {
         return chi2_cdf(dof, x);
     }
     let half = lambda / 2.0;
-    // Start summation at the Poisson mode to avoid underflow of e^{−λ/2} for
-    // large λ, walking outward in both directions.
-    let mode = half.floor().max(0.0) as usize;
-    // ln of the Poisson weight at index j: −λ/2 + j·ln(λ/2) − ln(j!).
-    let ln_w = |j: usize| -> f64 { -half + (j as f64) * half.ln() - ln_gamma(j as f64 + 1.0) };
-    let mut sum = 0.0;
-    // Upward from the mode.
-    let mut j = mode;
-    loop
+    // Significant Poisson mass lies within ~±40·√(λ/2) of the mode λ/2.
+    let spread = 40.0 * half.sqrt() + 40.0;
+    let j_lo = (half - spread).floor().max(0.0);
+    let j_hi = (half + spread).ceil();
+    // Fall back to Patnaik's approximation when the exact window is too wide.
+    if j_hi - j_lo > 60_000.0
     {
-        let w = ln_w(j).exp();
-        let term = w * chi2_cdf(dof + 2.0 * j as f64, x);
-        sum += term;
-        if w < 1e-18 && j > mode
+        let nu = (dof + lambda) * (dof + lambda) / (dof + 2.0 * lambda);
+        let rho = (dof + 2.0 * lambda) / (dof + lambda);
+        return chi2_cdf(nu, x / rho).clamp(0.0, 1.0);
+    }
+    // Exact Poisson-weighted sum over the significant window (log-space weights).
+    let ln_half = half.ln();
+    let mut sum = 0.0;
+    let mut j = j_lo as u64;
+    let hi = j_hi as u64;
+    while j <= hi
+    {
+        let jf = j as f64;
+        let w = (-half + jf * ln_half - ln_gamma(jf + 1.0)).exp();
+        if w > 0.0
         {
-            break;
+            sum += w * chi2_cdf(dof + 2.0 * jf, x);
         }
         j += 1;
-        if j > mode + 10_000
-        {
-            break;
-        }
-    }
-    // Downward from just below the mode.
-    if mode > 0
-    {
-        let mut j = mode - 1;
-        loop
-        {
-            let w = ln_w(j).exp();
-            sum += w * chi2_cdf(dof + 2.0 * j as f64, x);
-            if w < 1e-18 || j == 0
-            {
-                break;
-            }
-            j -= 1;
-        }
     }
     sum.clamp(0.0, 1.0)
 }
@@ -516,5 +527,37 @@ mod tests {
         close(ncchi2_cdf(5.0, 3.0, 11.0), 0.7736, 8e-3);
         // Shifting mass right: at fixed x, larger λ ⇒ smaller CDF.
         assert!(ncchi2_cdf(4.0, 5.0, 8.0) < ncchi2_cdf(4.0, 1.0, 8.0));
+    }
+
+    #[test]
+    fn ncchi2_cdf_terminates_and_is_correct_for_huge_lambda() {
+        // Regression: a near-degenerate σ pushes λ ~ 7e14. The naive
+        // walk-outward Poisson sum would run ~1e8 iterations (a de-facto hang);
+        // the bounded-window + Patnaik path must return quickly and correctly.
+        // At x = mean = k+λ the CDF is ≈ 0.5; below/above it → 1 / 0.
+        let lambda = 7.2e14;
+        let k = 5.0;
+        close(ncchi2_cdf(k, lambda, k + lambda), 0.5, 0.02);
+        assert!(ncchi2_cdf(k, lambda, 0.5 * (k + lambda)) < 1e-6);
+        assert!(ncchi2_cdf(k, lambda, 2.0 * (k + lambda)) > 1.0 - 1e-6);
+        // Continuity across the exact-sum → Patnaik threshold (λ ≈ 1.1e6).
+        close(
+            ncchi2_cdf(6.0, 1.10e6, 1.12e6),
+            ncchi2_cdf(6.0, 1.14e6, 1.16e6),
+            2e-2,
+        );
+    }
+
+    #[test]
+    fn chi2_cdf_large_dof_uses_accurate_normal_branch() {
+        // Wilson–Hilferty branch (dof > 20000) must agree with the exact CDF
+        // just below the switch, and stay in [0,1] far above it.
+        close(
+            chi2_cdf(19_999.0, 20_000.0),
+            chi2_cdf(20_001.0, 20_002.0),
+            2e-3,
+        );
+        let p = chi2_cdf(1e9, 1e9); // at the mean ⇒ ≈ 0.5
+        close(p, 0.5, 1e-3);
     }
 }
