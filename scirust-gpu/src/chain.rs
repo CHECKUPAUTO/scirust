@@ -355,6 +355,128 @@ impl GpuChain {
         out.ok_or_else(|| BackendError::ShapeMismatch("gqa_attention: n_heads must be ≥ 1".into()))
     }
 
+    /// Backward of [`Self::gqa_attention`]. Given the upstream grad `dout`
+    /// (`t×(n_heads·dh)`, grad of the concatenated context), returns
+    /// `(dq, dk, dv)` — grads of the pre-RoPE projections `q` (`t×(n_heads·dh)`)
+    /// and `k`/`v` (`t×(n_kv_heads·dh)`), all resident.
+    ///
+    /// The per-head forward intermediates (`weights`) are recomputed here, then
+    /// each head's single-head attention adjoint is taken (the same reverse chain
+    /// as [`Self::transformer_block_backward`]). Because a grouped-query key/value
+    /// head is shared by `repeat = n_heads/n_kv_heads` query heads, `dk`/`dv`
+    /// **accumulate** over those heads (place + add), while `dq` slots are
+    /// disjoint. Finally RoPE's adjoint maps `dqr→dq` and `dkr→dk` (each at its
+    /// own width); `v` is not rotated so `dv` passes straight through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gqa_attention_backward(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        dout: &GpuMatrix,
+        n_heads: usize,
+        n_kv_heads: usize,
+        seq_len: usize,
+        theta: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix, GpuMatrix)> {
+        let d_model = q.cols();
+        if n_heads == 0 || n_kv_heads == 0 || !d_model.is_multiple_of(n_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: q.cols {d_model} not divisible by n_heads {n_heads}"
+            )));
+        }
+        let dh = d_model / n_heads;
+        if !n_heads.is_multiple_of(n_kv_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: n_heads {n_heads} not a multiple of n_kv_heads {n_kv_heads}"
+            )));
+        }
+        let kv_dim = n_kv_heads * dh;
+        if k.cols() != kv_dim || v.cols() != kv_dim
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: expected k/v cols = {kv_dim}, got k {}, v {}",
+                k.cols(),
+                v.cols()
+            )));
+        }
+        if q.rows() != seq_len
+            || k.rows() != seq_len
+            || v.rows() != seq_len
+            || dout.rows() != seq_len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: single sequence only — rows must equal seq_len {seq_len}"
+            )));
+        }
+
+        let qr = self.rope(q, seq_len, 0, theta)?;
+        let kr = self.rope(k, seq_len, 0, theta)?;
+        let repeat = n_heads / n_kv_heads;
+        let scale = 1.0 / (dh as f32).sqrt();
+
+        // Grad accumulators for the (post-RoPE) qr/kr and the (un-rotated) v.
+        let mut dqr: Option<GpuMatrix> = None; // disjoint per head
+        let mut dkr: Option<GpuMatrix> = None; // shared kv heads accumulate
+        let mut dvv: Option<GpuMatrix> = None;
+
+        for head in 0..n_heads
+        {
+            let kv = head / repeat;
+            let qs = self.slice_cols(&qr, head * dh, dh)?;
+            let ks = self.slice_cols(&kr, kv * dh, dh)?;
+            let vs = self.slice_cols(v, kv * dh, dh)?;
+
+            // Recompute this head's forward softmax weights.
+            let scores = self.matmul_t(&qs, &ks, false, true)?;
+            let scaled = self.scale_causal_mask(&scores, scale, causal)?;
+            let weights = self.softmax(&scaled)?;
+
+            // Grad of this head's context = adjoint of place_cols = slice of dout.
+            let d_ctx = self.slice_cols(dout, head * dh, dh)?;
+
+            // Single-head attention adjoint (see transformer_block_backward).
+            let dweights = self.matmul_t(&d_ctx, &vs, false, true)?; // d_ctx·vsᵀ
+            let dvs = self.matmul_t(&weights, &d_ctx, true, false)?; // weightsᵀ·d_ctx
+            let dscaled = self.softmax_backward(&weights, &dweights)?;
+            let dscores = self.scale_causal_mask_backward(&dscaled, scale, causal)?;
+            let dqs = self.matmul(&dscores, &ks)?; // dscores·ks
+            let dks = self.matmul_t(&dscores, &qs, true, false)?; // dscoresᵀ·qs
+
+            // Scatter each head's grads back to full width and accumulate.
+            let dqs_full = self.place_cols(&dqs, head * dh, d_model)?;
+            let dks_full = self.place_cols(&dks, kv * dh, kv_dim)?;
+            let dvs_full = self.place_cols(&dvs, kv * dh, kv_dim)?;
+            dqr = Some(match dqr
+            {
+                None => dqs_full,
+                Some(acc) => self.add(&acc, &dqs_full)?,
+            });
+            dkr = Some(match dkr
+            {
+                None => dks_full,
+                Some(acc) => self.add(&acc, &dks_full)?,
+            });
+            dvv = Some(match dvv
+            {
+                None => dvs_full,
+                Some(acc) => self.add(&acc, &dvs_full)?,
+            });
+        }
+
+        let dqr = dqr.expect("n_heads ≥ 1");
+        let dkr = dkr.expect("n_heads ≥ 1");
+        let dv = dvv.expect("n_heads ≥ 1");
+
+        // RoPE adjoint: qr = rope(q), kr = rope(k); v was not rotated.
+        let dq = self.rope_backward(&dqr, seq_len, 0, theta)?;
+        let dk = self.rope_backward(&dkr, seq_len, 0, theta)?;
+        Ok((dq, dk, dv))
+    }
+
     /// A complete **pre-norm residual transformer block**, fully resident:
     ///
     /// ```text
@@ -1233,6 +1355,101 @@ mod tests {
             "rel_err {}",
             rel_err(&out, &expected)
         );
+    }
+
+    /// **Multi-head GQA attention backward** gradient-checked end-to-end. For
+    /// `L = Σ gqa_attention(Q,K,V) ⊙ G`, `(dQ,dK,dV) = gqa_attention_backward(…,G)`;
+    /// each is checked against central finite differences of `L` over that input,
+    /// via the CPU oracle. Uses `2 heads / 1 kv-head` so the two query heads share
+    /// the single key/value head — this specifically exercises the `dK`/`dV`
+    /// accumulation across grouped-query heads. Causal, RoPE on. Skips if no
+    /// adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn gqa_attention_backward_matches_finite_differences() {
+        use crate::ops::cpu_gqa_attention;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (n_heads, n_kv_heads, dh, seq_len) = (2usize, 1usize, 4usize, 4usize);
+        let d_model = n_heads * dh; // 8
+        let kv_dim = n_kv_heads * dh; // 4
+        let theta = 10_000.0f32;
+        let q: Vec<f32> = (0..seq_len * d_model)
+            .map(|i| (i as f32 * 0.13 - 0.8).sin() * 0.5)
+            .collect();
+        let k: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.09 + 0.4).cos() * 0.5)
+            .collect();
+        let v: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.06 - 0.1).sin() * 0.5)
+            .collect();
+        let g: Vec<f32> = (0..seq_len * d_model)
+            .map(|i| (i as f32 * 0.21 + 0.2).cos())
+            .collect(); // dL/dOut
+
+        let gq = chain.upload(&q, seq_len, d_model);
+        let gk = chain.upload(&k, seq_len, kv_dim);
+        let gv = chain.upload(&v, seq_len, kv_dim);
+        let gg = chain.upload(&g, seq_len, d_model);
+        let (dq_g, dk_g, dv_g) = chain
+            .gqa_attention_backward(
+                &gq, &gk, &gv, &gg, n_heads, n_kv_heads, seq_len, theta, true,
+            )
+            .unwrap();
+        let dq = chain.download(&dq_g).unwrap();
+        let dk = chain.download(&dk_g).unwrap();
+        let dv = chain.download(&dv_g).unwrap();
+
+        let loss = |qq: &[f32], kk: &[f32], vv: &[f32]| -> f32 {
+            cpu_gqa_attention(
+                qq, kk, vv, seq_len, n_heads, n_kv_heads, dh, seq_len, theta, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..q.len()
+        {
+            let (mut p, mut m) = (q.clone(), q.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&p, &k, &v) - loss(&m, &k, &v)) / (2.0 * eps);
+            assert!(
+                (fd - dq[idx]).abs() < 2e-2,
+                "dq[{idx}]: fd={fd} gpu={}",
+                dq[idx]
+            );
+        }
+        for idx in 0..k.len()
+        {
+            let (mut p, mut m) = (k.clone(), k.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&q, &p, &v) - loss(&q, &m, &v)) / (2.0 * eps);
+            assert!(
+                (fd - dk[idx]).abs() < 2e-2,
+                "dk[{idx}]: fd={fd} gpu={}",
+                dk[idx]
+            );
+        }
+        for idx in 0..v.len()
+        {
+            let (mut p, mut m) = (v.clone(), v.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&q, &k, &p) - loss(&q, &k, &m)) / (2.0 * eps);
+            assert!(
+                (fd - dv[idx]).abs() < 2e-2,
+                "dv[{idx}]: fd={fd} gpu={}",
+                dv[idx]
+            );
+        }
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
