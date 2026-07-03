@@ -390,6 +390,53 @@ fn main() {
         &mut failures,
     );
 
+    // 10. BACKWARD: the GEMM vjp on-device — for C = A·B, grad_a = grad_c·Bᵀ and
+    //     grad_b = Aᵀ·grad_c. The adjoint the whole backward pass builds on.
+    let (bm, bk, bn) = (3usize, 5usize, 4usize);
+    let ba: Vec<f32> = (0..bm * bk)
+        .map(|i| (i as f32 * 0.21 - 0.5).sin())
+        .collect();
+    let bb: Vec<f32> = (0..bk * bn)
+        .map(|i| (i as f32 * 0.17 + 0.3).cos())
+        .collect();
+    let bgc: Vec<f32> = (0..bm * bn)
+        .map(|i| (i as f32 * 0.31 - 1.0).sin())
+        .collect(); // dL/dC
+    let (gda, gdb) = chain
+        .matmul_backward(
+            &chain.upload(&ba, bm, bk),
+            &chain.upload(&bb, bk, bn),
+            &chain.upload(&bgc, bm, bn),
+        )
+        .unwrap();
+    let grad_a_gpu = chain.download(&gda).unwrap();
+    let grad_b_gpu = chain.download(&gdb).unwrap();
+    // CPU analytic: grad_a = grad_c · Bᵀ, grad_b = Aᵀ · grad_c.
+    let mut bbt = vec![0.0f32; bn * bk]; // Bᵀ (n×k)
+    for r in 0..bk
+    {
+        for c in 0..bn
+        {
+            bbt[c * bk + r] = bb[r * bn + c];
+        }
+    }
+    let grad_a_cpu = CpuBackend.gemm_f32(&bgc, &bbt, bm, bn, bk).unwrap();
+    let mut bat = vec![0.0f32; bk * bm]; // Aᵀ (k×m)
+    for r in 0..bm
+    {
+        for c in 0..bk
+        {
+            bat[c * bm + r] = ba[r * bk + c];
+        }
+    }
+    let grad_b_cpu = CpuBackend.gemm_f32(&bat, &bgc, bk, bm, bn).unwrap();
+    let back_err = rel_err(&grad_a_gpu, &grad_a_cpu).max(rel_err(&grad_b_gpu, &grad_b_cpu));
+    check(
+        "backward: matmul vjp (grad_a=G·Bᵀ, grad_b=Aᵀ·G)",
+        back_err,
+        &mut failures,
+    );
+
     println!();
     if failures == 0
     {

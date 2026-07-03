@@ -276,6 +276,24 @@ impl GpuChain {
         self.matmul_t(&normed, w.embedding, false, true)
     }
 
+    // ---- Backward (vjp) primitives ----------------------------------------
+
+    /// Backward of `C = A·B`: given `grad_c = ∂L/∂C`, return
+    /// `(grad_a, grad_b)` with `grad_a = grad_c·Bᵀ` (`m×k`) and
+    /// `grad_b = Aᵀ·grad_c` (`k×n`), both resident. `a` is `m×k`, `b` is `k×n`,
+    /// `grad_c` is `m×n`. Every matmul in the backward pass reduces to these two
+    /// transposed GEMMs — the foundation the rest of the backward builds on.
+    pub fn matmul_backward(
+        &self,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        grad_c: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix)> {
+        let grad_a = self.matmul_t(grad_c, b, false, true)?; // grad_c · Bᵀ  (m×k)
+        let grad_b = self.matmul_t(a, grad_c, true, false)?; // Aᵀ · grad_c  (k×n)
+        Ok((grad_a, grad_b))
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -956,6 +974,72 @@ mod tests {
         let expected = CpuBackend.gemm_f32(&normed, &et, t, d, vocab).unwrap();
         assert_eq!(logits.len(), t * vocab);
         assert!(rel_err(&logits, &expected) < 1e-4, "logits mismatch");
+    }
+
+    /// The GEMM backward (vjp) must match numerical gradients. For the scalar
+    /// loss `L = Σ (A·B) ⊙ G`, the analytic gradients are `grad_a = G·Bᵀ` and
+    /// `grad_b = Aᵀ·G`; this checks the GPU's gradients against central finite
+    /// differences of `L` computed on the CPU — the gold-standard correctness
+    /// test for an adjoint. Skips if no adapter.
+    #[test]
+    fn matmul_backward_matches_finite_differences() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (m, k, n) = (3usize, 4usize, 2usize);
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.4 + 0.2).cos()).collect();
+        let g: Vec<f32> = (0..m * n).map(|i| (i as f32 * 0.7 - 1.0).sin()).collect(); // dL/dC
+
+        let (ga, gb, gg) = (
+            chain.upload(&a, m, k),
+            chain.upload(&b, k, n),
+            chain.upload(&g, m, n),
+        );
+        let (da_m, db_m) = chain.matmul_backward(&ga, &gb, &gg).unwrap();
+        assert_eq!((da_m.rows(), da_m.cols()), (m, k));
+        assert_eq!((db_m.rows(), db_m.cols()), (k, n));
+        let grad_a = chain.download(&da_m).unwrap();
+        let grad_b = chain.download(&db_m).unwrap();
+
+        // Scalar loss L(A,B) = Σ (A·B) ⊙ G, evaluated on the CPU.
+        let loss = |aa: &[f32], bb: &[f32]| -> f32 {
+            CpuBackend
+                .gemm_f32(aa, bb, m, k, n)
+                .unwrap()
+                .iter()
+                .zip(&g)
+                .map(|(c, gg)| c * gg)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..m * k
+        {
+            let (mut ap, mut am) = (a.clone(), a.clone());
+            ap[idx] += eps;
+            am[idx] -= eps;
+            let fd = (loss(&ap, &b) - loss(&am, &b)) / (2.0 * eps);
+            assert!(
+                (fd - grad_a[idx]).abs() < 1e-2,
+                "grad_a[{idx}]: fd={fd} gpu={}",
+                grad_a[idx]
+            );
+        }
+        for idx in 0..k * n
+        {
+            let (mut bp, mut bm) = (b.clone(), b.clone());
+            bp[idx] += eps;
+            bm[idx] -= eps;
+            let fd = (loss(&a, &bp) - loss(&a, &bm)) / (2.0 * eps);
+            assert!(
+                (fd - grad_b[idx]).abs() < 1e-2,
+                "grad_b[{idx}]: fd={fd} gpu={}",
+                grad_b[idx]
+            );
+        }
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.
