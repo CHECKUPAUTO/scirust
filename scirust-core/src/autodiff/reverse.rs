@@ -788,6 +788,11 @@ pub struct Tape {
     pub(crate) grads: RefCell<Vec<Tensor>>,
     grad_enabled: RefCell<bool>,
     pub(crate) gpu_engine: RefCell<Option<Box<dyn GpuEngine>>>,
+    /// When set (and an engine is attached), every plain `matmul`/`try_matmul`
+    /// on this tape is recorded as a GPU node so its forward and backward GEMMs
+    /// run on the device — the whole-model opt-in used by `scirust-sciagent`'s
+    /// GPU path. Defaults off, so CPU-only tapes are byte-for-byte unchanged.
+    prefer_gpu_matmul: core::cell::Cell<bool>,
     /// PRNG driving stochastic ops (e.g. [`Var::dropout`]). Seeded
     /// deterministically at construction so a fresh tape replays the same
     /// stream, yet advances across calls so successive dropout masks differ.
@@ -805,6 +810,7 @@ impl Tape {
             grads: RefCell::new(Vec::new()),
             grad_enabled: RefCell::new(true),
             gpu_engine: RefCell::new(None),
+            prefer_gpu_matmul: core::cell::Cell::new(false),
             rng: RefCell::new(PcgEngine::new(DEFAULT_DROPOUT_SEED)),
         }
     }
@@ -836,6 +842,22 @@ impl Tape {
     /// Remove the GPU engine, falling back to CPU-only.
     pub fn clear_gpu_engine(&self) {
         *self.gpu_engine.borrow_mut() = None;
+    }
+
+    /// Route every subsequent plain `matmul`/`try_matmul` on this tape through
+    /// the attached [`GpuEngine`] (forward *and* backward), exactly as if each
+    /// call site had used `matmul_gpu`. This is the whole-model GPU switch: flip
+    /// it on a tape that already has an engine and the model's projections,
+    /// attention scores and LM head all run their GEMMs on the device with no
+    /// per-call-site changes. Has no effect unless an engine is attached, and
+    /// defaults off so CPU-only tapes are byte-for-byte unchanged.
+    pub fn set_prefer_gpu_matmul(&self, prefer: bool) {
+        self.prefer_gpu_matmul.set(prefer);
+    }
+
+    /// Whether plain matmuls on this tape are currently routed to the GPU.
+    pub fn prefers_gpu_matmul(&self) -> bool {
+        self.prefer_gpu_matmul.get()
     }
 
     /// `C = op(A)·op(B)` where `ta`/`tb` request a transpose of the
@@ -2741,6 +2763,13 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_matmul(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        // Whole-model GPU switch: when the tape prefers GPU matmuls and an engine
+        // is attached, record this as a MatMulGpu node so forward and backward run
+        // on the device. Off by default, so the CPU path below is unchanged.
+        if self.tape.prefer_gpu_matmul.get() && self.tape.gpu_engine.borrow().is_some()
+        {
+            return self.try_matmul_gpu(other);
+        }
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_inner_dim("matmul", a.cols, b.rows)?;

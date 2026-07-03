@@ -7,6 +7,8 @@ pub mod checkpointing;
 pub mod config;
 pub mod flash_attention;
 pub mod generate;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod inference;
 pub mod model;
 pub mod norm;

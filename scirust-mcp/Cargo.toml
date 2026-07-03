@@ -22,6 +22,7 @@ scirust-sciagent = { path = "../scirust-sciagent" }
 scirust-sis = { path = "../scirust-sis" }
 scirust-solvers = { path = "../scirust-solvers" }
 scirust-tolerance = { path = "../scirust-tolerance" }
+scirust-trader = { path = "../scirust-trader" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

@@ -2952,6 +2952,7 @@ dependencies = [
  "scirust-sis",
  "scirust-solvers",
  "scirust-tolerance",
+ "scirust-trader",
  "serde",
  "serde_json",
 ]
@@ -3149,6 +3150,7 @@ dependencies = [
  "rand 0.8.6",
  "scirust-autodiff",
  "scirust-core",
+ "scirust-gpu",
  "serde",
  "serde_json",
  "ureq 2.12.1",

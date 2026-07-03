@@ -72,6 +72,14 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::trader::trader_tools()
+    {
+        registry.register(tool);
+    }
+    for tool in tools::wallet::wallet_tools()
+    {
+        registry.register(tool);
+    }
     for tool in tools::tolerance::tolerance_tools()
     {
         registry.register(tool);
@@ -102,6 +110,13 @@ mod tests {
         assert!(registry.names().contains(&"fab_r2r_update"));
         assert!(registry.names().contains(&"agtech_clean_yield_map"));
         assert!(registry.names().contains(&"fatigue_rainflow_damage"));
+        assert!(registry.names().contains(&"trader_scan_opportunities"));
+        assert!(registry.names().contains(&"trader_backtest"));
+        assert!(registry.names().contains(&"trader_execution_plan"));
+        assert!(registry.names().contains(&"trader_market_making_quotes"));
+        assert!(registry.names().contains(&"wallet_validate_address"));
+        assert!(registry.names().contains(&"wallet_build_evm_transaction"));
+        assert!(registry.names().contains(&"wallet_authorization_status"));
         assert!(registry.names().contains(&"tolerance_inertial_capability"));
         assert!(registry.names().contains(&"tolerance_chain_allocate"));
         assert!(registry.names().contains(&"tolerance_acceptance_plan"));
