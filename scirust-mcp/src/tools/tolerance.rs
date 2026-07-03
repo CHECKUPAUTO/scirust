@@ -9,7 +9,9 @@ use scirust_tolerance::capability::CapabilitySummary;
 use scirust_tolerance::chain::{
     Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
 };
+use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::sampling::design_plan;
 use serde_json::json;
 
@@ -18,6 +20,7 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         inertial_capability_tool(),
         chain_allocate_tool(),
         acceptance_plan_tool(),
+        form_modal_tool(),
     ]
 }
 
@@ -224,6 +227,71 @@ fn acceptance_plan_tool() -> McpTool {
     }
 }
 
+fn form_modal_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_form_modal".to_string(),
+        description: "Surface / form inertial tolerancing with modal decomposition (Adragna, \
+            Pillet, Samper). Given a batch of surface measurements (rows = parts, columns = points \
+            measured against nominal 0), returns the surface inertia I_S (RMS of every deviation \
+            from nominal), the worst point, and — via an orthonormal DCT modal basis — the \
+            per-mode inertias I_k, which partition the surface inertia (sum I_k^2 = m*I_S^2). Low \
+            modes are physical: mode 0 = size/mean offset, 1 = tilt, 2 = ovality/curvature, etc."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "measurements": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "number" } },
+                    "description": "rows = parts, columns = point deviations from nominal",
+                },
+                "num_modes": { "type": "integer", "description": "modes to report (default = all points)" },
+            },
+            "required": ["measurements"],
+        }),
+        handler: Box::new(|args| {
+            let rows = args
+                .get("measurements")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `measurements`")?;
+            let parts: Vec<Vec<f64>> = rows
+                .iter()
+                .map(|r| {
+                    r.as_array()
+                        .ok_or("`measurements` must be an array of arrays".to_string())?
+                        .iter()
+                        .map(|x| x.as_f64().ok_or("non-numeric measurement".to_string()))
+                        .collect::<Result<Vec<f64>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let batch = FormBatch::new(parts).ok_or("empty or ragged `measurements`")?;
+            let m = batch.points();
+            let k = args
+                .get("num_modes")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(m);
+            let basis = ModalBasis::dct(m, k);
+            let modal = modal_inertias(&basis, batch.deviations());
+            let i_s = batch.surface_inertia();
+            let (worst_idx, worst) = batch.worst_point().ok_or("no points")?;
+
+            Ok(json!({
+                "surface_inertia": i_s,
+                "worst_point": { "index": worst_idx, "inertia": worst.value() },
+                "modal_inertias": modal.iter().enumerate().map(|(mode, i)| json!({
+                    "mode": mode,
+                    "inertia": i.value(),
+                    "off_centering": i.off_centering,
+                })).collect::<Vec<_>>(),
+                // Partition check (exact only for a complete basis k = m).
+                "modal_energy_sum": modal.iter().map(|i| i.mean_squared_deviation()).sum::<f64>(),
+                "surface_energy": m as f64 * i_s * i_s,
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +360,30 @@ mod tests {
     fn acceptance_plan_tool_rejects_bad_ratio() {
         let tool = acceptance_plan_tool();
         assert!((tool.handler)(json!({ "alpha": 0.05, "beta": 0.1, "ratio_bad": 0.9 })).is_err());
+    }
+
+    #[test]
+    fn form_modal_tool_partitions_surface_inertia() {
+        let tool = form_modal_tool();
+        let out = (tool.handler)(json!({
+            "measurements": [
+                [0.10, -0.05, 0.20, 0.00],
+                [-0.10, 0.05, 0.10, 0.10],
+                [0.00, 0.15, -0.10, 0.05],
+            ],
+        }))
+        .unwrap();
+        // Complete DCT basis ⇒ modal energy sum equals m·I_S².
+        let esum = out["modal_energy_sum"].as_f64().unwrap();
+        let etot = out["surface_energy"].as_f64().unwrap();
+        assert!((esum - etot).abs() < 1e-9);
+        assert_eq!(out["modal_inertias"].as_array().unwrap().len(), 4);
+        assert!(out["surface_inertia"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn form_modal_tool_rejects_ragged_input() {
+        let tool = form_modal_tool();
+        assert!((tool.handler)(json!({ "measurements": [[0.1, 0.2], [0.1]] })).is_err());
     }
 }

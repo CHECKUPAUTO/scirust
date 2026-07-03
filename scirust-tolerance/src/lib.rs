@@ -32,6 +32,10 @@
 //! - [`sampling`] — acceptance sampling by inertia: the [`sampling::SamplingPlan`]
 //!   operating-characteristic curve and [`sampling::design_plan`] for a
 //!   producer/consumer double specification.
+//! - [`form`] — surface / form inertia ([`form::FormBatch`]): the whole-surface
+//!   inertia as the quadratic mean of the per-point inertias.
+//! - [`modal`] — modal decomposition of form defects ([`modal::ModalBasis`],
+//!   DCT / eigenmode) and the modal inertias that partition the surface inertia.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -72,7 +76,9 @@
 pub mod capability;
 pub mod chain;
 pub mod chart;
+pub mod form;
 pub mod inertia;
+pub mod modal;
 pub mod sampling;
 pub mod special;
 
@@ -82,7 +88,9 @@ pub use chain::{
     assembly_inertia_worst_case, assembly_state,
 };
 pub use chart::{PilotingAction, PilotingChart, PilotingSignal};
+pub use form::FormBatch;
 pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
+pub use modal::{ModalBasis, modal_inertias};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};

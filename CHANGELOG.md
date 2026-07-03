@@ -5,6 +5,34 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
+Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
+Systèmes Assemblés, une approche par le Tolérancement Inertiel et Modal*,
+tel-00403876 ; arXiv:1002.0251) qui étend le tolérancement inertiel d'une
+caractéristique scalaire à une surface mesurée entière :
+
+- **`form`** (nouveau module) : `FormBatch` sur une matrice de mesures
+  (parts × points, écart au nominal). L'**inertie de surface**
+  `I_S = √((1/m) Σⱼ Iⱼ²)` est la moyenne quadratique des inerties de points,
+  égale à la RMS de tous les écarts au nominal — vérifié par l'identité
+  `I_S² = (1/(m·n)) Σᵢⱼ xᵢⱼ²`. Fournit aussi les inerties par point, le point
+  le pire, et la signature de forme moyenne.
+- **`modal`** (nouveau module) : décomposition modale des défauts de forme
+  « à la manière des séries de Fourier ». `ModalBasis` (base DCT-II
+  exactement orthonormée, base utilisateur, ou orthonormalisation de
+  Gram-Schmidt d'une base FEM), `decompose`/`reconstruct`/`residual_norm`
+  (Parseval `Σ λₖ² = ‖d‖²`), et `modal_inertias` dont l'identité de
+  partition **`Σₖ Iₖ² = m·I_S²`** rend le tolérancement des modes (petit
+  jeu de budgets physiques : mode 0 = taille, 1 = inclinaison, 2 = ovalité…)
+  équivalent au tolérancement de toute la surface.
+- **`scirust-mcp`** : nouvel outil `tolerance_form_modal` (inertie de
+  surface + décomposition modale en un appel).
+
+La géométrie 3D complète par torseurs de petits déplacements
+(arXiv:1002.0253) reste une limite honnête documentée : seule la
+combinaison statistique vérifiable est fournie (`vector_inertia`,
+`form`, `modal`), pas la paramétrisation géométrique dépendante des figures.
+
 ### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
 Chaque domaine documenté dans la feuille de route de marché reçoit maintenant
 une implémentation (ou, quand une pièce ne peut pas être vérifiée avec une

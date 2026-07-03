@@ -9,7 +9,9 @@ use scirust_tolerance::chain::{
     Allocation, TraditionalMethod, allocate, allocate_traditional, max_dispersion,
 };
 use scirust_tolerance::chart::PilotingChart;
+use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance, mix_lots};
+use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::sampling::design_plan;
 
 fn main() {
@@ -130,4 +132,30 @@ fn main() {
             beta
         );
     }
+
+    // ---- 6. Surface / modal form tolerancing ------------------------------
+    // A round bore measured at 8 angular points on 3 parts: a systematic
+    // 2-lobe ovality (mode 2) plus noise.
+    let batch = FormBatch::new(vec![
+        vec![0.02, -0.02, 0.02, -0.02, 0.02, -0.02, 0.02, -0.02],
+        vec![0.03, -0.01, 0.02, -0.03, 0.03, -0.01, 0.02, -0.03],
+        vec![0.01, -0.02, 0.03, -0.02, 0.01, -0.02, 0.03, -0.02],
+    ])
+    .unwrap();
+    let i_s = batch.surface_inertia();
+    let basis = ModalBasis::dct(batch.points(), batch.points());
+    let modal = modal_inertias(&basis, batch.deviations());
+    println!("\nSurface (bore, 8 points × 3 parts): surface inertia I_S = {i_s:.4}");
+    print!("  modal inertias I_k:");
+    for (k, i) in modal.iter().enumerate()
+    {
+        print!(" [{k}]={:.4}", i.value());
+    }
+    println!();
+    let sum_i2: f64 = modal.iter().map(|i| i.value().powi(2)).sum();
+    println!(
+        "  Σ I_k² = {:.5}  =  m·I_S² = {:.5}  (modal partition of the surface inertia)",
+        sum_i2,
+        batch.points() as f64 * i_s * i_s
+    );
 }
