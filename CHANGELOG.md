@@ -124,13 +124,16 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 14 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 16 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
   `trader_execution_plan`, `trader_market_making_quotes`,
   `trader_microstructure`, `trader_metrics`, `trader_chart`,
-  `trader_certified_predict` (prédiction ML bornée par IBP).
+  `trader_certified_predict` (prédiction ML bornée par IBP), `trader_portfolio`
+  (état du portefeuille : PnL réalisé/latent, équité mark-to-market, exposition
+  brute/nette, prix de liquidation avec levier) et `trader_rebalance`
+  (ordres pour atteindre des poids cibles) — le portefeuille se pilote au chat.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité).
