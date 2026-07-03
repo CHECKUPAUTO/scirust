@@ -86,7 +86,7 @@ fn emit_func(f: &SirFunc) -> String {
     let params: HashSet<String> = f
         .params
         .iter()
-        .filter(|(_, t)| *t == Ty::Array)
+        .filter(|(_, t)| *t == Ty::Array || *t == Ty::Matrix)
         .map(|(n, _)| n.clone())
         .collect();
     let ctx = Ctx { params };
@@ -117,6 +117,7 @@ fn param_ty(t: Ty) -> &'static str {
     {
         Ty::Scalar => "f64",
         Ty::Array => "&[f64]",
+        Ty::Matrix => "&[f64]",
         Ty::Int => "usize",
         Ty::Bool => "bool",
     }
@@ -306,7 +307,7 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
         SirExpr::Var { name, ty } => Frag {
             code: name.clone(),
             ty: *ty,
-            borrowed: *ty == Ty::Array && ctx.params.contains(name),
+            borrowed: (*ty == Ty::Array || *ty == Ty::Matrix) && ctx.params.contains(name),
         },
         SirExpr::ScalarBin { op, l, r } =>
         {
@@ -484,6 +485,25 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code: format!("({} {} {})", scalar_of(l), op.rust_sym(), scalar_of(r)),
                 ty: Ty::Bool,
+                borrowed: false,
+            }
+        },
+        SirExpr::LinSolve { a, b } =>
+        {
+            // Route to the verified LU solver; A is flat row-major, n = b.len().
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            let code = format!(
+                "{{ let __b: &[f64] = {bs}; let __n = __b.len(); \
+                 scirust_solvers::linalg::solve(\
+                 scirust_solvers::Matrix::from_row_major(__n, __n, ({amat}).to_vec()), __b)\
+                 .expect(\"scirust-transpiler: linear solve failed (singular matrix?)\") }}",
+                bs = slice_of(&b),
+                amat = a.code,
+            );
+            Frag {
+                code,
+                ty: Ty::Array,
                 borrowed: false,
             }
         },

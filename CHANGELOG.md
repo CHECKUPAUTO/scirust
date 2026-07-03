@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : routage vers les noyaux vérifiés (Phase 1, incrément 3)
+Premier **routage vers un noyau `scirust-*` vérifié** : `np.linalg.solve(A, b)`
+est transpilé vers `scirust_solvers::linalg::solve` (résolution LU prouvée) au
+lieu d'être re-dérivé en Rust std. C'est le différenciateur central de la
+conception — on ne ré-implémente pas la numérique, on route vers des noyaux
+oracle-validés.
+- SIR : `Ty::Matrix` (matrice 2-D plate row-major), `SirExpr::LinSolve`,
+  fonction `required_crates(&SirModule)` qui déclare les crates `scirust-*`
+  nécessaires ; inférence des paramètres matrice (arg 0 de `np.linalg.solve`).
+- **Oracle bi-mode** : les cas std-only compilent toujours avec `rustc` seul ;
+  les cas routés compilent en projet cargo autonome dépendant (par chemin) de
+  `scirust-solvers`, avec un target partagé (l'arbre de deps se compile une
+  fois). Nouveau cas : `np.linalg.solve` sur des systèmes 5×5 à diagonale
+  dominante, comparé à `numpy.linalg.solve`. **Oracle 13/13** (200 essais
+  chacun). 16 tests unitaires.
+
 ### Ajouté — transpileur : boucles `while` (Phase 1, incrément 2)
 Le sous-ensemble Python du transpileur entrant supporte désormais les **boucles
 `while`** (condition = comparaison scalaire), débloquant les algorithmes

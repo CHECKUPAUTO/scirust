@@ -465,6 +465,26 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             expect_array(&b, "np.dot")?;
             Ok(SirExpr::Dot(Box::new(a), Box::new(b)))
         },
+        "linalg.solve" =>
+        {
+            // np.linalg.solve(A, b): A an n×n matrix, b an n vector.
+            // Routed to the verified LU solver in `scirust-solvers`.
+            need_args(func, args, 2)?;
+            let a = lower_scalar(&args[0], env)?;
+            let b = lower_scalar(&args[1], env)?;
+            if a.ty() != Ty::Matrix
+            {
+                return Err("np.linalg.solve expects a 2-D matrix as its first \
+                            argument (hint it as `A: np.ndarray` and use it only \
+                            as solve's matrix)"
+                    .into());
+            }
+            expect_array(&b, "np.linalg.solve")?;
+            Ok(SirExpr::LinSolve {
+                a: Box::new(a),
+                b: Box::new(b),
+            })
+        },
         "zeros" =>
         {
             need_args(func, args, 1)?;
@@ -555,7 +575,11 @@ fn expect_array(e: &SirExpr, ctx: &str) -> Result<(), String> {
 // ---- param type inference (no hint) ---------------------------------------
 
 fn infer_param_ty(name: &str, body: &[PyStmt]) -> Ty {
-    if array_evidence_block(name, body)
+    if matrix_evidence_block(name, body)
+    {
+        Ty::Matrix
+    }
+    else if array_evidence_block(name, body)
     {
         Ty::Array
     }
@@ -563,6 +587,43 @@ fn infer_param_ty(name: &str, body: &[PyStmt]) -> Ty {
     {
         Ty::Scalar
     }
+}
+
+/// A param is a matrix if it is the first argument of `np.linalg.solve`.
+fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
+    fn expr(name: &str, e: &PyExpr) -> bool {
+        match e
+        {
+            PyExpr::Call { func, args } =>
+            {
+                (strip_np(func) == "linalg.solve"
+                    && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
+                    || args.iter().any(|a| expr(name, a))
+            },
+            PyExpr::Bin { l, r, .. } | PyExpr::Cmp { l, r, .. } => expr(name, l) || expr(name, r),
+            PyExpr::Neg(inner) => expr(name, inner),
+            PyExpr::Index { base, index } => expr(name, base) || expr(name, index),
+            _ => false,
+        }
+    }
+    fn block(name: &str, stmts: &[PyStmt]) -> bool {
+        stmts.iter().any(|s| match s
+        {
+            PyStmt::Assign { value, .. } => expr(name, value),
+            PyStmt::AssignIndex { index, value, .. } => expr(name, index) || expr(name, value),
+            PyStmt::For {
+                start, end, body, ..
+            } => expr(name, start) || expr(name, end) || block(name, body),
+            PyStmt::If { cond, then, els } =>
+            {
+                expr(name, cond) || block(name, then) || block(name, els)
+            },
+            PyStmt::While { cond, body } => expr(name, cond) || block(name, body),
+            PyStmt::Return(Some(e)) => expr(name, e),
+            PyStmt::Return(None) => false,
+        })
+    }
+    block(name, stmts)
 }
 
 fn array_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
@@ -609,10 +670,14 @@ fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
         PyExpr::Call { func, args } =>
         {
             let is_array_consumer = matches!(strip_np(func), "sum" | "dot" | "len");
+            // `np.linalg.solve(A, b)` — the *second* argument `b` is a vector.
+            let solve_rhs = strip_np(func) == "linalg.solve"
+                && matches!(args.get(1), Some(PyExpr::Name(n)) if n == name);
             (is_array_consumer
                 && args
                     .iter()
                     .any(|a| matches!(a, PyExpr::Name(n) if n == name)))
+                || solve_rhs
                 || args.iter().any(|a| array_evidence_expr(name, a))
         },
         PyExpr::Bin { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
