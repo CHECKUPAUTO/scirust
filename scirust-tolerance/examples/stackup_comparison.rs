@@ -9,7 +9,8 @@ use scirust_tolerance::chain::{
     Allocation, TraditionalMethod, allocate, allocate_traditional, max_dispersion,
 };
 use scirust_tolerance::chart::PilotingChart;
-use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance, mix_lots};
+use scirust_tolerance::sampling::design_plan;
 
 fn main() {
     // ---- 1. Tolerance-chain allocation (top-down synthesis) ---------------
@@ -92,6 +93,41 @@ fn main() {
             if s.in_control { "in-control" } else { "OUT" },
             s.action,
             s.recommended_shift
+        );
+    }
+
+    // ---- 4. Lot mixing (a headline advantage of inertial tolerancing) -----
+    // Two sub-lots, each centred-ish but off-target in opposite directions.
+    let lot_a = Inertia::new(0.08, 0.03); // I ≈ 0.0854
+    let lot_b = Inertia::new(-0.08, 0.03);
+    let mixed = mix_lots(&[(1.0, lot_a), (1.0, lot_b)]);
+    println!(
+        "\nLot mixing: I_A = {:.4}, I_B = {:.4}  ⇒  pooled I = {:.4} (δ = {:.3})",
+        lot_a.value(),
+        lot_b.value(),
+        mixed.value(),
+        mixed.off_centering
+    );
+    println!("  (I_c² = mean of the sub-lot I²; the mixed lot is on-target but wider)");
+
+    // ---- 5. Acceptance sampling by inertia --------------------------------
+    let (alpha, beta, ratio_bad) = (0.05, 0.10, 2.0);
+    if let Some(plan) = design_plan(alpha, beta, ratio_bad, 500)
+    {
+        println!(
+            "\nAcceptance plan (α={alpha}, β={beta}, bad at {ratio_bad}·I_max): \
+             sample n = {}, accept if Î ≤ {:.3}·I_max",
+            plan.n, plan.factor
+        );
+        println!(
+            "  P(accept good @ I_max)   = {:.3}  (≥ {:.2})",
+            plan.probability_of_acceptance_at(1.0, 1.0, 0.0),
+            1.0 - alpha
+        );
+        println!(
+            "  P(accept bad  @ {ratio_bad}·I_max) = {:.3}  (≤ {:.2})",
+            plan.probability_of_acceptance_at(1.0, ratio_bad, 0.0),
+            beta
         );
     }
 }

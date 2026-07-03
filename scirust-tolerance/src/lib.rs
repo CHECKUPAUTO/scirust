@@ -25,11 +25,19 @@
 //!   [`capability::sigma_level`]).
 //! - [`chain`] — 1D tolerance chains: [`chain::assembly_inertia_statistical`]/
 //!   [`chain::assembly_inertia_worst_case`] analysis and [`chain::allocate`]
-//!   synthesis (worst-case / statistical / weighted / guaranteed-`Cpk`),
-//!   plus traditional interval allocation for comparison.
+//!   synthesis (worst-case / statistical / weighted / guaranteed-`Cpk` /
+//!   cost-optimal), plus traditional interval allocation for comparison.
 //! - [`chart`] — the [`chart::PilotingChart`] (*carte de pilotage inertiel*),
 //!   monitoring the inertia against an upper piloting limit.
-//! - [`special`] — the error function / normal CDF / χ² quantile used above.
+//! - [`sampling`] — acceptance sampling by inertia: the [`sampling::SamplingPlan`]
+//!   operating-characteristic curve and [`sampling::design_plan`] for a
+//!   producer/consumer double specification.
+//! - [`special`] — error function / normal CDF / central & non-central χ².
+//!
+//! Beyond the single-characteristic core, [`inertia`] also covers **lot
+//! mixing** ([`inertia::mix_lots`], `I_c² = Σ pᵢ Iᵢ²`), multi-DOF / 3D
+//! combination ([`inertia::vector_inertia`]), and correcting an observed
+//! inertia for measurement dispersion ([`inertia::correct_for_measurement`]).
 //!
 //! Pairs naturally with `scirust-spc` (Shewhart / EWMA / Hotelling charts) and
 //! `scirust-metrology` (GUM measurement uncertainty) for a complete
@@ -65,6 +73,7 @@ pub mod capability;
 pub mod chain;
 pub mod chart;
 pub mod inertia;
+pub mod sampling;
 pub mod special;
 
 pub use capability::{CapabilitySummary, cp, cpi, cpk, cpm, cpmk, nonconformity_ppm};
@@ -73,4 +82,7 @@ pub use chain::{
     assembly_inertia_worst_case, assembly_state,
 };
 pub use chart::{PilotingAction, PilotingChart, PilotingSignal};
-pub use inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+pub use inertia::{
+    Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
+};
+pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};

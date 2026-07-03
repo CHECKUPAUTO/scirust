@@ -104,6 +104,98 @@ impl Inertia {
             self.off_centering * self.off_centering / i2
         }
     }
+
+    /// Variance of the squared-inertia estimator `Î² = (1/n) Σ(xᵢ − T)²` for a
+    /// sample of size `n` drawn from this (normal) characteristic:
+    ///
+    /// ```text
+    /// Var(Î²) = 2σ²(2δ² + σ²) / n .
+    /// ```
+    ///
+    /// Its square root is a standard error for `Î²`, useful for putting an
+    /// uncertainty band on an estimated inertia. Returns 0 for `n = 0`.
+    pub fn variance_of_squared_estimate(&self, n: usize) -> f64 {
+        if n == 0
+        {
+            return 0.0;
+        }
+        let (d2, s2) = (
+            self.off_centering * self.off_centering,
+            self.sigma * self.sigma,
+        );
+        2.0 * s2 * (2.0 * d2 + s2) / n as f64
+    }
+}
+
+/// Inertia of a mixture of lots (sub-batches), the property that makes
+/// inertial tolerancing robust to **lot mixing**: the squared inertia of the
+/// pooled lot is the proportion-weighted mean of the sub-lot squared inertias,
+///
+/// ```text
+/// I_c² = Σ pᵢ Iᵢ² ,   δ_c = Σ pᵢ δᵢ ,   σ_c² = I_c² − δ_c² ,
+/// ```
+///
+/// because `E[(X − T)²]` over the mixture is the mixture of the per-lot
+/// `E[(X − T)²] = Iᵢ²`. `lots` are `(proportion, inertia)` pairs; the
+/// proportions are normalised to sum to 1. Returns a null inertia for an empty
+/// or zero-weight input.
+pub fn mix_lots(lots: &[(f64, Inertia)]) -> Inertia {
+    let total: f64 = lots.iter().map(|(p, _)| p.abs()).sum();
+    if total <= 0.0
+    {
+        return Inertia::new(0.0, 0.0);
+    }
+    let mut i2 = 0.0;
+    let mut delta = 0.0;
+    for (p, inertia) in lots
+    {
+        let w = p.abs() / total;
+        i2 += w * inertia.mean_squared_deviation();
+        delta += w * inertia.off_centering;
+    }
+    // σ_c² = I_c² − δ_c² is non-negative by Jensen (mixing never reduces spread
+    // below the between-lot mean shift), but guard against rounding.
+    let sigma = (i2 - delta * delta).max(0.0).sqrt();
+    Inertia::new(delta, sigma)
+}
+
+/// Resultant inertia of a multi-degree-of-freedom (e.g. 3D location +
+/// orientation) deviation whose per-DOF inertias combine statistically:
+/// `I = √(Σ Iⱼ²)`, the Euclidean norm of the component inertias.
+///
+/// This is the isotropic combination; for a functional requirement that
+/// weights the DOFs unequally, use [`crate::chain`] with the DOFs as
+/// contributors and their influence coefficients (the general 3D inertial
+/// tolerancing of arXiv:1002.0253 is the geometric reference).
+pub fn vector_inertia(components: &[Inertia]) -> f64 {
+    components
+        .iter()
+        .map(|c| c.mean_squared_deviation())
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// Correct an observed inertia for measurement dispersion. A measurement
+/// system with standard uncertainty `u` inflates the observed variance
+/// (`σ_obs² = σ_true² + u²`) but not the off-centering, so the true inertia is
+///
+/// ```text
+/// I_true = √(I_obs² − u²).
+/// ```
+///
+/// Returns `None` when `u` exceeds the observed inertia (the measurement noise
+/// alone would exceed the observed spread — the correction is undefined).
+/// Pairs with `scirust-metrology` for `u` from a GUM budget.
+pub fn correct_for_measurement(observed: &Inertia, u: f64) -> Option<Inertia> {
+    let corrected_var = observed.sigma * observed.sigma - u * u;
+    if corrected_var < 0.0
+    {
+        None
+    }
+    else
+    {
+        Some(Inertia::new(observed.off_centering, corrected_var.sqrt()))
+    }
 }
 
 /// Expected quadratic (Taguchi) loss of a characteristic with the given
@@ -248,5 +340,54 @@ mod tests {
         assert_relative_eq!(cone.max_sigma_at(0.0).unwrap(), 0.1, epsilon = 1e-12);
         assert_relative_eq!(cone.max_sigma_at(0.06).unwrap(), 0.08, epsilon = 1e-12);
         assert!(cone.max_sigma_at(0.2).is_none());
+    }
+
+    #[test]
+    fn mixing_lots_averages_squared_inertia() {
+        // Two equal lots, opposite off-centering ±0.1, σ = 0. Pooled δ = 0 but
+        // pooled I² = mean of Iᵢ² = 0.01 ⇒ pooled inertia = 0.1 (all now spread).
+        let a = Inertia::new(0.1, 0.0);
+        let b = Inertia::new(-0.1, 0.0);
+        let mixed = mix_lots(&[(1.0, a), (1.0, b)]);
+        assert_relative_eq!(mixed.off_centering, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(mixed.value(), 0.1, epsilon = 1e-12);
+        // I_c² is always the weighted mean of the component I².
+        assert_relative_eq!(
+            mixed.mean_squared_deviation(),
+            0.5 * a.mean_squared_deviation() + 0.5 * b.mean_squared_deviation(),
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn mixing_a_single_lot_is_identity() {
+        let a = Inertia::new(0.03, 0.05);
+        let mixed = mix_lots(&[(3.0, a)]);
+        assert_relative_eq!(mixed.value(), a.value(), epsilon = 1e-12);
+    }
+
+    #[test]
+    fn vector_inertia_is_euclidean_norm() {
+        let v = vector_inertia(&[Inertia::new(0.03, 0.04), Inertia::new(0.0, 0.12)]);
+        // √(0.05² + 0.12²) = 0.13.
+        assert_relative_eq!(v, 0.13, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn measurement_correction_removes_gauge_variance() {
+        // Observed σ = 0.05 includes u = 0.03 ⇒ true σ = 0.04.
+        let obs = Inertia::new(0.02, 0.05);
+        let corr = correct_for_measurement(&obs, 0.03).unwrap();
+        assert_relative_eq!(corr.sigma, 0.04, epsilon = 1e-12);
+        assert_relative_eq!(corr.off_centering, 0.02, epsilon = 1e-12);
+        // Gauge noise larger than observed spread ⇒ undefined.
+        assert!(correct_for_measurement(&obs, 0.1).is_none());
+    }
+
+    #[test]
+    fn squared_estimate_variance_matches_closed_form() {
+        let i = Inertia::new(0.3, 0.4);
+        // 2·σ²·(2δ² + σ²)/n = 2·0.16·(0.18 + 0.16)/8 = 2·0.16·0.34/8 = 0.0136.
+        assert_relative_eq!(i.variance_of_squared_estimate(8), 0.0136, epsilon = 1e-12);
     }
 }

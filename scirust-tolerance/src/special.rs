@@ -13,6 +13,8 @@
 //!   `1 - Φ`, both routed through [`erfc`] so each tail is computed directly.
 //! - [`chi2_cdf`] / [`chi2_quantile`] — χ² CDF (regularised incomplete gamma)
 //!   and its Newton-refined inverse, used by the piloting chart's upper limit.
+//! - [`ncchi2_cdf`] — non-central χ² CDF (Poisson mixture of central χ²), the
+//!   sampling law behind the acceptance-sampling operating-characteristic curve.
 
 use core::f64::consts::{FRAC_2_SQRT_PI, PI};
 
@@ -298,6 +300,68 @@ pub fn chi2_cdf(dof: f64, x: f64) -> f64 {
     gammp(dof / 2.0, x / 2.0)
 }
 
+/// Cumulative distribution of the **non-central** chi-square law with `dof`
+/// degrees of freedom and non-centrality `lambda ≥ 0`, evaluated as the
+/// Poisson-weighted mixture of central chi-square CDFs
+///
+/// ```text
+/// F(x; k, λ) = Σ_{j≥0} e^{−λ/2} (λ/2)ʲ / j! · F_central(x; k + 2j).
+/// ```
+///
+/// Reduces to [`chi2_cdf`] at `lambda = 0`. This is the sampling law of the
+/// scaled inertia estimator `n·Î²/σ²` (non-centrality `λ = n·δ²/σ²`), so it
+/// underpins the acceptance-sampling operating-characteristic curves.
+pub fn ncchi2_cdf(dof: f64, lambda: f64, x: f64) -> f64 {
+    if x <= 0.0
+    {
+        return 0.0;
+    }
+    if lambda <= 0.0
+    {
+        return chi2_cdf(dof, x);
+    }
+    let half = lambda / 2.0;
+    // Start summation at the Poisson mode to avoid underflow of e^{−λ/2} for
+    // large λ, walking outward in both directions.
+    let mode = half.floor().max(0.0) as usize;
+    // ln of the Poisson weight at index j: −λ/2 + j·ln(λ/2) − ln(j!).
+    let ln_w = |j: usize| -> f64 { -half + (j as f64) * half.ln() - ln_gamma(j as f64 + 1.0) };
+    let mut sum = 0.0;
+    // Upward from the mode.
+    let mut j = mode;
+    loop
+    {
+        let w = ln_w(j).exp();
+        let term = w * chi2_cdf(dof + 2.0 * j as f64, x);
+        sum += term;
+        if w < 1e-18 && j > mode
+        {
+            break;
+        }
+        j += 1;
+        if j > mode + 10_000
+        {
+            break;
+        }
+    }
+    // Downward from just below the mode.
+    if mode > 0
+    {
+        let mut j = mode - 1;
+        loop
+        {
+            let w = ln_w(j).exp();
+            sum += w * chi2_cdf(dof + 2.0 * j as f64, x);
+            if w < 1e-18 || j == 0
+            {
+                break;
+            }
+            j -= 1;
+        }
+    }
+    sum.clamp(0.0, 1.0)
+}
+
 /// Quantile (inverse CDF) of the chi-square distribution with `dof` degrees of
 /// freedom at probability `p`.
 ///
@@ -436,5 +500,21 @@ mod tests {
         }
         // Known point: χ²₂ CDF is 1 − e^{−x/2}; at x=2 that's 1−e⁻¹≈0.6321.
         close(chi2_cdf(2.0, 2.0), 1.0 - (-1.0f64).exp(), 1e-10);
+    }
+
+    #[test]
+    fn ncchi2_cdf_reduces_to_central_and_matches_monte_carlo() {
+        // λ = 0 must reproduce the central CDF exactly.
+        for &(dof, x) in &[(1.0, 1.0), (4.0, 9.488), (8.0, 20.0)]
+        {
+            close(ncchi2_cdf(dof, 0.0, x), chi2_cdf(dof, x), 1e-12);
+        }
+        // Independent Monte-Carlo anchors (500k samples, seed fixed).
+        close(ncchi2_cdf(4.0, 0.0, 9.488), 0.9497, 8e-3);
+        close(ncchi2_cdf(2.0, 2.0, 3.0), 0.4883, 8e-3);
+        close(ncchi2_cdf(4.0, 2.0, 8.0), 0.7458, 8e-3);
+        close(ncchi2_cdf(5.0, 3.0, 11.0), 0.7736, 8e-3);
+        // Shifting mass right: at fixed x, larger λ ⇒ smaller CDF.
+        assert!(ncchi2_cdf(4.0, 5.0, 8.0) < ncchi2_cdf(4.0, 1.0, 8.0));
     }
 }

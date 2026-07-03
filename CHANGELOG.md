@@ -75,16 +75,28 @@ plutôt qu'une formule devinée) :
   garantie d'un `Cpk` par le coefficient `ICC = √(Cpk²+n/9)`, **vérifié
   contre le tableau 2 de arXiv:1002.0270** : `0.033`/`0.075`/`0.060`),
   `chart` (carte de pilotage inertiel avec limite `UPL(α) = I_max·√(χ²_{n;1−α}/n)`
-  et recommandation recentrer / réduire la dispersion), et `special`
-  (`erf`/`erfc`/CDF normale/quantile χ² validés contre valeurs de
-  référence). Pur Rust, dépendance unique `serde`.
+  et recommandation recentrer / réduire la dispersion), `sampling`
+  (échantillonnage d'acceptation par inertie, Pillet & Maire — loi du χ²
+  **non-centré** `n·Î²/σ² ~ χ'²(n, λ=n·δ²/σ²)`, courbe d'efficacité et
+  synthèse d'un plan `(n, k)` satisfaisant risques fournisseur α et
+  client β), et `special` (`erf`/`erfc`/CDF normale/quantile χ² et **CDF
+  du χ² non-centré**, validés contre valeurs de référence — dont des
+  ancres Monte-Carlo indépendantes pour le χ² non-centré). Le module
+  `inertia` couvre aussi le **mélange de lots** (`I_c² = Σ pᵢ Iᵢ²`, un
+  avantage clé du tolérancement inertiel), la combinaison multi-DOF/3D
+  (`vector_inertia`), la correction de l'inertie observée pour l'incertitude
+  de mesure, et une répartition **à coût minimal** (`CostOptimal`, minimum
+  lagrangien en forme close, vérifié par les conditions KKT). Pur Rust,
+  dépendance unique `serde`. Découvert et corrigé par une passe de
+  vérification adverse : saturation de `erf` à `|x|≥6` (débordement→NaN
+  pour grand `x`).
 - **`scirust-mcp`** : un outil par domaine ci-dessus
   (`grid_state_estimate`, `biomed_cbf_safe_dose`, `maritime_collision_risk`,
   `fab_r2r_update`, `agtech_clean_yield_map`, `fatigue_rainflow_damage`,
   `sis_reactor_trip_bypass`, `tolerance_inertial_capability`,
-  `tolerance_chain_allocate`) — chaque domaine ajouté devient immédiatement
-  pilotable par un agent, conformément à la doctrine du connecteur unique
-  de `docs/DOMAIN_ROADMAP.md`.
+  `tolerance_chain_allocate`, `tolerance_acceptance_plan`) — chaque domaine
+  ajouté devient immédiatement pilotable par un agent, conformément à la
+  doctrine du connecteur unique de `docs/DOMAIN_ROADMAP.md`.
 
 ### Ajouté — algèbre linéaire et solveurs
 - **`scirust-solvers`** : **SVD aléatoire** (Halko, Martinsson & Tropp 2011 —

@@ -157,6 +157,23 @@ pub enum Allocation {
     /// allocation tightened so the assembly resultant is guaranteed a
     /// capability index of at least `cpk`.
     GuaranteedCpk(f64),
+    /// Minimum-cost allocation. For a per-component tightening cost
+    /// `Cᵢ(Iᵢ) = kᵢ · Iᵢ^(−r)` (harder-to-hold ⇒ larger `kᵢ`; steeper cost ⇒
+    /// larger exponent `r`), the Lagrangian minimum of `Σ Cᵢ` subject to the
+    /// statistical assembly constraint `√(Σ αᵢ² Iᵢ²) = I_Y` is closed-form:
+    ///
+    /// ```text
+    /// wᵢ = (kᵢ / αᵢ²)^(1/(r+2)) ,   Iᵢ = wᵢ · I_Y / √(Σ αⱼ² wⱼ²) .
+    /// ```
+    ///
+    /// Spends the inertia budget where it is cheapest to widen. `costs` must
+    /// match the coefficient count; `exponent` is `r > 0`.
+    CostOptimal {
+        /// Per-component cost coefficients `kᵢ`.
+        costs: Vec<f64>,
+        /// Cost exponent `r > 0`.
+        exponent: f64,
+    },
 }
 
 /// Distribute an assembly inertia budget `i_max_assembly` (typically
@@ -210,11 +227,39 @@ pub fn allocate(
                 .sqrt();
             Ok(betas.iter().map(|b| b * i_max_assembly / denom).collect())
         },
+        Allocation::CostOptimal { costs, exponent } =>
+        {
+            if costs.len() != n
+            {
+                return Err(AllocationError::CostCountMismatch {
+                    coeffs: n,
+                    costs: costs.len(),
+                });
+            }
+            if *exponent <= 0.0
+            {
+                return Err(AllocationError::NonPositiveExponent(*exponent));
+            }
+            let p = 1.0 / (exponent + 2.0);
+            // wᵢ = (kᵢ / αᵢ²)^p, guarding a zero coefficient (a free DOF).
+            let weights: Vec<f64> = coeffs
+                .iter()
+                .zip(costs)
+                .map(|(a, k)| (k.max(0.0) / (a * a).max(1e-300)).powf(p))
+                .collect();
+            let denom = coeffs
+                .iter()
+                .zip(&weights)
+                .map(|(a, w)| (a * w) * (a * w))
+                .sum::<f64>()
+                .sqrt();
+            Ok(weights.iter().map(|w| w * i_max_assembly / denom).collect())
+        },
     }
 }
 
 /// Error returned by [`allocate`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AllocationError {
     /// A [`Allocation::Weighted`] weight slice length differed from the number
     /// of coefficients.
@@ -224,6 +269,16 @@ pub enum AllocationError {
         /// Number of weights supplied.
         weights: usize,
     },
+    /// A [`Allocation::CostOptimal`] cost slice length differed from the number
+    /// of coefficients.
+    CostCountMismatch {
+        /// Number of coefficients supplied.
+        coeffs: usize,
+        /// Number of cost coefficients supplied.
+        costs: usize,
+    },
+    /// A [`Allocation::CostOptimal`] exponent was not strictly positive.
+    NonPositiveExponent(f64),
 }
 
 impl core::fmt::Display for AllocationError {
@@ -234,6 +289,14 @@ impl core::fmt::Display for AllocationError {
                 f,
                 "weighted allocation needs one weight per coefficient (got {weights} weights for {coeffs} coefficients)"
             ),
+            AllocationError::CostCountMismatch { coeffs, costs } => write!(
+                f,
+                "cost-optimal allocation needs one cost per coefficient (got {costs} costs for {coeffs} coefficients)"
+            ),
+            AllocationError::NonPositiveExponent(r) =>
+            {
+                write!(f, "cost-optimal exponent must be > 0 (got {r})")
+            },
         }
     }
 }
@@ -403,6 +466,76 @@ mod tests {
                 coeffs: 3,
                 weights: 2
             }
+        );
+    }
+
+    #[test]
+    fn cost_optimal_recombines_and_satisfies_kkt() {
+        let coeffs = vec![1.0, -1.0, 1.0];
+        let costs = vec![1.0, 4.0, 2.0]; // component 2 is the priciest to tighten
+        let r = 2.0;
+        let i_y = 0.3;
+        let alloc = allocate(
+            i_y,
+            &coeffs,
+            &Allocation::CostOptimal {
+                costs: costs.clone(),
+                exponent: r,
+            },
+        )
+        .unwrap();
+
+        // Constraint: statistical recombination equals the budget.
+        let cs: Vec<Contributor> = coeffs
+            .iter()
+            .zip(&alloc)
+            .map(|(a, i)| Contributor::new("x", *a, *i))
+            .collect();
+        assert_relative_eq!(assembly_inertia_statistical(&cs), i_y, epsilon = 1e-12);
+
+        // The priciest-to-tighten component gets the largest inertia (loosest).
+        assert!(alloc[1] > alloc[0] && alloc[1] > alloc[2]);
+
+        // KKT stationarity: r·kᵢ·Iᵢ^(−r−1) / (αᵢ² Iᵢ) = 2μ equal for every i.
+        let mu: Vec<f64> = coeffs
+            .iter()
+            .zip(&alloc)
+            .zip(&costs)
+            .map(|((a, i), k)| r * k * i.powf(-r - 1.0) / (a * a * i))
+            .collect();
+        assert_relative_eq!(mu[0], mu[1], epsilon = 1e-9);
+        assert_relative_eq!(mu[1], mu[2], epsilon = 1e-9);
+    }
+
+    #[test]
+    fn cost_optimal_rejects_bad_inputs() {
+        let coeffs = vec![1.0, -1.0];
+        assert_eq!(
+            allocate(
+                0.3,
+                &coeffs,
+                &Allocation::CostOptimal {
+                    costs: vec![1.0],
+                    exponent: 2.0
+                }
+            )
+            .unwrap_err(),
+            AllocationError::CostCountMismatch {
+                coeffs: 2,
+                costs: 1
+            }
+        );
+        assert_eq!(
+            allocate(
+                0.3,
+                &coeffs,
+                &Allocation::CostOptimal {
+                    costs: vec![1.0, 1.0],
+                    exponent: 0.0
+                }
+            )
+            .unwrap_err(),
+            AllocationError::NonPositiveExponent(0.0)
         );
     }
 

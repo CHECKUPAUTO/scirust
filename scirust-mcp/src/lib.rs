@@ -104,5 +104,6 @@ mod tests {
         assert!(registry.names().contains(&"fatigue_rainflow_damage"));
         assert!(registry.names().contains(&"tolerance_inertial_capability"));
         assert!(registry.names().contains(&"tolerance_chain_allocate"));
+        assert!(registry.names().contains(&"tolerance_acceptance_plan"));
     }
 }

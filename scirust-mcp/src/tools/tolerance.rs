@@ -10,10 +10,15 @@ use scirust_tolerance::chain::{
     Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
 };
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::sampling::design_plan;
 use serde_json::json;
 
 pub fn tolerance_tools() -> Vec<McpTool> {
-    vec![inertial_capability_tool(), chain_allocate_tool()]
+    vec![
+        inertial_capability_tool(),
+        chain_allocate_tool(),
+        acceptance_plan_tool(),
+    ]
 }
 
 fn f64_field(args: &serde_json::Value, key: &str) -> Result<f64, String> {
@@ -156,6 +161,69 @@ fn chain_allocate_tool() -> McpTool {
     }
 }
 
+fn acceptance_plan_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_acceptance_plan".to_string(),
+        description: "Design an inertial acceptance-sampling plan (Pillet & Maire): find the \
+            smallest sample size n and acceptance factor k (accept the batch if the sampled inertia \
+            Î <= k*I_max) that accepts a good batch at I_max with probability >= 1-alpha (producer \
+            risk) and accepts a bad batch at ratio_bad*I_max with probability <= beta (consumer \
+            risk). Both evaluated at the fully-dispersed worst-case split via the non-central \
+            chi-square law. Returns n, k, and the operating-characteristic probabilities at the \
+            good and bad inertia."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "alpha": { "type": "number", "description": "producer risk (e.g. 0.05)" },
+                "beta": { "type": "number", "description": "consumer risk (e.g. 0.10)" },
+                "ratio_bad": { "type": "number", "description": "bad-batch inertia as a multiple of I_max, > 1" },
+                "max_n": { "type": "integer", "description": "largest sample size to try (default 500)" },
+            },
+            "required": ["alpha", "beta", "ratio_bad"],
+        }),
+        handler: Box::new(|args| {
+            let alpha = f64_field(&args, "alpha")?;
+            let beta = f64_field(&args, "beta")?;
+            let ratio_bad = f64_field(&args, "ratio_bad")?;
+            if !(0.0..1.0).contains(&alpha) || !(0.0..1.0).contains(&beta)
+            {
+                return Err("`alpha` and `beta` must lie in (0, 1)".to_string());
+            }
+            if ratio_bad <= 1.0
+            {
+                return Err("`ratio_bad` must be greater than 1".to_string());
+            }
+            let max_n = args
+                .get("max_n")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(500);
+            match design_plan(alpha, beta, ratio_bad, max_n)
+            {
+                None => Ok(json!({
+                    "feasible": false,
+                    "reason": "no plan within max_n meets both risks",
+                })),
+                Some(plan) =>
+                {
+                    // Evaluate the OC at the good (I_max) and bad (ratio_bad*I_max)
+                    // inertia; the result is scale-free, so use I_max = 1.
+                    let good = plan.probability_of_acceptance_at(1.0, 1.0, 0.0);
+                    let bad = plan.probability_of_acceptance_at(1.0, ratio_bad, 0.0);
+                    Ok(json!({
+                        "feasible": true,
+                        "n": plan.n,
+                        "factor_k": plan.factor,
+                        "p_accept_good": good,
+                        "p_accept_bad": bad,
+                    }))
+                },
+            }
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +271,26 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn acceptance_plan_tool_designs_a_feasible_plan() {
+        let tool = acceptance_plan_tool();
+        let out = (tool.handler)(json!({
+            "alpha": 0.05,
+            "beta": 0.10,
+            "ratio_bad": 2.0,
+        }))
+        .unwrap();
+        assert_eq!(out["feasible"], json!(true));
+        assert!(out["n"].as_u64().unwrap() >= 2);
+        assert!(out["p_accept_good"].as_f64().unwrap() >= 0.94);
+        assert!(out["p_accept_bad"].as_f64().unwrap() <= 0.11);
+    }
+
+    #[test]
+    fn acceptance_plan_tool_rejects_bad_ratio() {
+        let tool = acceptance_plan_tool();
+        assert!((tool.handler)(json!({ "alpha": 0.05, "beta": 0.1, "ratio_bad": 0.9 })).is_err());
     }
 }

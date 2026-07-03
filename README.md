@@ -194,7 +194,7 @@ scirust-maritime/      COLREG encounter classification, CPA/TCPA collision risk,
 scirust-fab/           Semiconductor-fab process control: EWMA run-to-run, PCA-based T²/SPE fault detection
 scirust-agtech/        Precision-agriculture yield-map cleaning pipeline + ISO 25119-2 risk-parameter model
 scirust-fatigue/       Structural fatigue: ASTM E1049 rainflow counting, Palmgren-Miner damage
-scirust-tolerance/     Inertial tolerancing (Pillet): inertia I=√(δ²+σ²), Cpi/Cpm/Cpk, tolerance-chain allocation, piloting chart
+scirust-tolerance/     Inertial tolerancing (Pillet): inertia I=√(δ²+σ²), Cpi/Cpm/Cpk, chain allocation, piloting chart, acceptance sampling, lot mixing
 examples/              Quickstart, MNIST training, industrial_monitor, benchmarks
 ```
 
