@@ -1637,29 +1637,16 @@ impl NdXlstm {
 /// y[t,c] = Σ_{τ=0}^{t} h[τ,c]·u[t−τ,c]
 /// ```
 ///
-/// expressed on the tape as `y = Σ_τ h[τ,:] ⊙ (Sτ·u)`, where each `Sτ` is the
-/// **constant** shift-down-by-`τ` matrix (1 on its `τ`-th lower sub-diagonal).
-/// Distributing the matmul over the (learnable) taps keeps the whole thing
-/// differentiable in both `u` and `h` without a scatter op. `u` and `h` are
-/// `(seq, d)`; returns `(seq, d)`. Causal, deterministic; gradient-checked.
-pub fn hyena_long_conv<'t>(tape: &'t NdTape, u: NdVar<'t>, h: NdVar<'t>) -> NdVar<'t> {
-    let us = u.shape();
-    let (seq, d) = (us[0], us[1]);
-    let mut y = tape.input(TensorND::zeros(&[seq, d]));
-    for tau in 0..seq
-    {
-        // Sτ : (seq×seq), Sτ[t, t−τ] = 1 ⇒ (Sτ·u)[t] = u[t−τ] (0 for t<τ).
-        let mut sdata = vec![0f32; seq * seq];
-        for t in tau..seq
-        {
-            sdata[t * seq + (t - tau)] = 1.0;
-        }
-        let s = tape.input(TensorND::new(sdata, vec![seq, seq]));
-        let shifted = s.matmul(u); // (seq,d): row t = u[t−τ]
-        let tap = h.gather(&[tau]); // (1,d): filter tap at lag τ
-        y = y.add(tap.mul(shifted)); // += h[τ,:] ⊙ shifted
-    }
-    y
+/// evaluated by the fused [`NdVar::causal_conv`] tape op. The previous
+/// formulation expanded this as `y = Σ_τ h[τ,:] ⊙ (Sτ·u)`, materialising a
+/// `(seq×seq)` shift matrix `Sτ` per lag and running a full matmul against it —
+/// `O(seq³·d)` work (and `O(seq²)` scratch per tap) to move data around. The
+/// fused op does the same accumulation directly in `O(seq²·d)`; because it sums
+/// the taps in the same `τ`-ascending order, the result is bit-for-bit
+/// identical. `u` and `h` are `(seq, d)`; returns `(seq, d)`. Causal,
+/// deterministic; gradient-checked and differentiable in both `u` and `h`.
+pub fn hyena_long_conv<'t>(_tape: &'t NdTape, u: NdVar<'t>, h: NdVar<'t>) -> NdVar<'t> {
+    u.causal_conv(h)
 }
 
 /// **Hyena implicit filter** — the convolution filter is not stored tap-by-tap but
