@@ -2,12 +2,55 @@
 //!
 //! The quantitative side of SIL: average Probability of Failure on Demand
 //! (`PFDavg`, low-demand mode) and Probability of dangerous Failure per Hour
-//! (`PFH`, high-demand mode) for the full 1oo1/1oo2/2oo2/2oo3/1oo3 MooN
-//! family with a common-cause `β` factor, the SIL band a figure maps to, and
-//! a two-state Markov availability. Pure deterministic `f64` — auditable
-//! safety arithmetic. `scirust-sis` builds process-safety (IEC 61511) SIS
-//! loop modeling, voting simulation, and cause-and-effect matrices on top of
-//! these primitives.
+//! (`PFH`, high-demand mode) for the MooN family with a common-cause `β`
+//! factor, the SIL band a figure maps to, and a two-state Markov
+//! availability. Pure deterministic `f64` — auditable safety arithmetic.
+//! `scirust-sis` builds process-safety (IEC 61511) SIS loop modeling,
+//! voting simulation, and cause-and-effect matrices on top of these
+//! primitives.
+//!
+//! ## Two tiers of formula, not one, and why
+//! IEC 61508-6:2010 Annex B.3.2 tabulates closed-form `PFDavg` equations for
+//! exactly five architectures — 1oo1, 1oo2, 2oo2, 2oo3, 1oo3 — and no
+//! others; it does **not** give a general M-out-of-N formula. This crate
+//! keeps [`pfd_1oo1`], [`pfd_1oo2`], [`pfd_2oo2`], [`pfd_2oo3`], and
+//! [`pfd_1oo3`] as those exact, literally-standard closed forms — the ones
+//! to cite when a reviewer asks "where does this equation come from?"
+//!
+//! [`pfd_moon`] additionally generalizes to arbitrary `M`-out-of-`N` via
+//! Lundteigen & Rausand's minimal-cutset/RBD derivation (*Reliability of
+//! Safety-Critical Systems*, Wiley 2015, ch. 8): for `M < N`, with
+//! `r = N-M+1` the number of channels that must fail dangerous-undetected
+//! *simultaneously* to fail the group,
+//! `PFDavg = C(N,r)·(1-β)^r·(λDU·T1)^r/(r+1) + β·λDU·T1/2`; for the `M = N`
+//! case (no redundancy against dangerous failure — any single channel
+//! failing is already fatal to the vote), `PFDavg = N·λDU·T1/2` with no `β`
+//! term, following the explicit `NooN` treatment in "The MooN Safety
+//! Function Failure Probability Model" (I&E Systems / The 61508
+//! Association, Rev. 3, 2023) — the same source notes that including a `β`
+//! term for `M = N` would make the estimate *less* conservative, which is
+//! why the convention omits it, not because a common-cause contribution is
+//! physically absent. **This general formula is cross-validated to
+//! reproduce all five IEC-tabulated cases exactly** (see
+//! `pfd_moon_matches_all_five_named_architectures` in the test suite below)
+//! but is itself a textbook/industry generalization, not a literal Annex B
+//! quote — an earlier, cruder generalization attempted while building this
+//! crate reproduced four of the five cases but got 2oo2 wrong by omitting
+//! this M=N special case, which is exactly the kind of near-miss this
+//! doc comment exists to prevent repeating. Architectures beyond what
+//! either tier can cite a source for (e.g. non-identical channel failure
+//! rates) remain unsupported by design; see Jin & Rausand, *Reliability
+//! Engineering & System Safety* (2014) for why a *fully* general KooN
+//! theory (arbitrary channel heterogeneity) is still active research, not
+//! a closed textbook result.
+//!
+//! ## Validity range
+//! These are first-order ("rare event") approximations to the underlying
+//! Markov model, valid for `λDU·T1 < 0.1` per ISA-TR84.00.02 Part 2 and
+//! Brissaud et al. (arXiv:1501.06487); they also assume identical channel
+//! failure rates and proof-test intervals across a voted group. This crate
+//! does not warn when `λDU·T1` exceeds that bound — documented here rather
+//! than silently assumed away.
 
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +138,54 @@ pub fn pfd_1oo3(lambda_du: f64, t1: f64, beta: f64) -> f64 {
     (1.0 - beta).powi(3) * lt * lt * lt / 4.0 + beta * lt / 2.0
 }
 
+/// Binomial coefficient `C(n, r)`, computed multiplicatively in `f64` to
+/// avoid factorial overflow — exact for the small `n` any real voting
+/// architecture uses.
+fn binomial_coefficient(n: u32, r: u32) -> f64 {
+    if r > n
+    {
+        return 0.0;
+    }
+    let r = r.min(n - r);
+    let mut result = 1.0f64;
+    for i in 0..r
+    {
+        result *= (n - i) as f64 / (i + 1) as f64;
+    }
+    result
+}
+
+/// `PFDavg` of an arbitrary `M`-out-of-`N` voting architecture. See the
+/// module documentation ("Two tiers of formula, not one, and why") for the
+/// derivation, its provenance (Lundteigen & Rausand's RBD generalization,
+/// plus the industry-documented `M = N` special case), and why it is kept
+/// separate from the five named IEC-tabulated functions above.
+///
+/// Returns `Err` if `m == 0` or `m > n` (not a valid voting architecture).
+pub fn pfd_moon(m: u32, n: u32, lambda_du: f64, t1: f64, beta: f64) -> Result<f64, String> {
+    if m == 0 || m > n
+    {
+        return Err(format!(
+            "invalid MooN architecture {m}oo{n}: need 1 <= m <= n"
+        ));
+    }
+    if m == n
+    {
+        // Zero redundancy against dangerous failure: any one channel
+        // failing already defeats the vote, so there is no coincidence
+        // left for beta to model (see module doc for the conservatism
+        // caveat on deliberately omitting it here).
+        return Ok(n as f64 * lambda_du * t1 / 2.0);
+    }
+    let r = n - m + 1;
+    let lt = lambda_du * t1;
+    let coeff = binomial_coefficient(n, r);
+    Ok(
+        coeff * (1.0 - beta).powi(r as i32) * lt.powi(r as i32) / (r as f64 + 1.0)
+            + beta * lt / 2.0,
+    )
+}
+
 /// `PFH` (per hour) of a 1oo1 channel in high-demand mode: simply `λ_DU`.
 pub fn pfh_1oo1(lambda_du: f64) -> f64 {
     lambda_du
@@ -130,6 +221,7 @@ pub fn markov_unavailability(lambda: f64, mu: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_relative_eq;
 
     #[test]
     fn pfd_1oo1_is_half_lambda_t() {
@@ -213,6 +305,91 @@ mod tests {
         assert!(p_1oo3 < p_1oo2, "{p_1oo3} should beat {p_1oo2}");
         assert!(p_1oo2 < p_2oo3, "{p_1oo2} should beat {p_2oo3}");
         assert!(p_2oo3 < p_2oo2, "{p_2oo3} should beat {p_2oo2}");
+    }
+
+    #[test]
+    fn pfd_moon_matches_all_five_named_architectures() {
+        // Cross-validates the general formula against every one of the
+        // five IEC-tabulated closed forms above, at several (λ, T1, β)
+        // combinations — not just the one hand-derivation each already has.
+        let cases: &[(f64, f64, f64)] = &[
+            (1e-3, 1000.0, 0.1),
+            (1e-6, 8760.0, 0.02),
+            (2e-5, 4380.0, 0.0),
+        ];
+        for &(lam, t1, beta) in cases
+        {
+            assert_relative_eq!(
+                pfd_moon(1, 1, lam, t1, beta).unwrap(),
+                pfd_1oo1(lam, t1),
+                epsilon = 1e-15
+            );
+            assert_relative_eq!(
+                pfd_moon(1, 2, lam, t1, beta).unwrap(),
+                pfd_1oo2(lam, t1, beta),
+                epsilon = 1e-15
+            );
+            assert_relative_eq!(
+                pfd_moon(2, 2, lam, t1, beta).unwrap(),
+                pfd_2oo2(lam, t1),
+                epsilon = 1e-15
+            );
+            assert_relative_eq!(
+                pfd_moon(2, 3, lam, t1, beta).unwrap(),
+                pfd_2oo3(lam, t1, beta),
+                epsilon = 1e-15
+            );
+            assert_relative_eq!(
+                pfd_moon(1, 3, lam, t1, beta).unwrap(),
+                pfd_1oo3(lam, t1, beta),
+                epsilon = 1e-15
+            );
+        }
+    }
+
+    #[test]
+    fn pfd_moon_2oo4_and_3oo4_match_independent_derivation() {
+        // Lundteigen & Rausand's koon recursion, applied independently to
+        // 2oo4/3oo4, gives (1-β)³(λT)³+βλT/2 and 2(1-β)²(λT)²+βλT/2
+        // respectively — reproduced here from the same general formula.
+        let (lam, t1, beta): (f64, f64, f64) = (1e-3, 1000.0, 0.1);
+        let lt = lam * t1;
+        let expected_2oo4 = (1.0 - beta).powi(3) * lt.powi(3) + beta * lt / 2.0;
+        let expected_3oo4 = 2.0 * (1.0 - beta).powi(2) * lt.powi(2) + beta * lt / 2.0;
+        assert_relative_eq!(
+            pfd_moon(2, 4, lam, t1, beta).unwrap(),
+            expected_2oo4,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            pfd_moon(3, 4, lam, t1, beta).unwrap(),
+            expected_3oo4,
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn pfd_moon_rejects_invalid_architecture() {
+        assert!(pfd_moon(0, 3, 1e-3, 1000.0, 0.1).is_err());
+        assert!(pfd_moon(4, 3, 1e-3, 1000.0, 0.1).is_err());
+    }
+
+    #[test]
+    fn pfd_moon_more_redundancy_is_never_worse_within_fixed_n() {
+        // Within a fixed channel count N=5, requiring fewer votes to trip
+        // (smaller M) means more channels must simultaneously fail to
+        // defeat the group, so PFDavg should be non-increasing as M drops.
+        let (lam, t1, beta) = (1e-4, 2000.0, 0.05);
+        let by_m: Vec<f64> = (1..=5)
+            .map(|m| pfd_moon(m, 5, lam, t1, beta).unwrap())
+            .collect();
+        for w in by_m.windows(2)
+        {
+            assert!(
+                w[0] <= w[1],
+                "PFDavg should not increase as M decreases: {by_m:?}"
+            );
+        }
     }
 
     #[test]

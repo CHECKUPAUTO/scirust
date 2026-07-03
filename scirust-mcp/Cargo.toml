@@ -11,7 +11,13 @@ path = "src/bin/scirust-mcp.rs"
 doc = false
 
 [dependencies]
+scirust-agtech = { path = "../scirust-agtech" }
+scirust-biomed = { path = "../scirust-biomed" }
 scirust-discovery = { path = "../scirust-discovery" }
+scirust-fab = { path = "../scirust-fab" }
+scirust-fatigue = { path = "../scirust-fatigue" }
+scirust-grid = { path = "../scirust-grid" }
+scirust-maritime = { path = "../scirust-maritime" }
 scirust-sciagent = { path = "../scirust-sciagent" }
 scirust-sis = { path = "../scirust-sis" }
 scirust-solvers = { path = "../scirust-solvers" }

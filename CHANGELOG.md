@@ -5,6 +5,94 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
+Chaque domaine documenté dans la feuille de route de marché reçoit maintenant
+une implémentation (ou, quand une pièce ne peut pas être vérifiée avec une
+confiance suffisante pour du code de sécurité, une limite honnête explicite
+plutôt qu'une formule devinée) :
+
+- **`scirust-grid`** (existant, complété — D2 protection réseau) : nouveaux
+  modules `state_estimation` (estimation d'état par moindres carrés pondérés
+  `x̂=(HᵀWH)⁻¹HᵀWz`, détection de mauvaises données par test du χ² global et
+  test du plus grand résidu normalisé, Abur & Expósito — vérifié contre un
+  exemple 3-nœuds calculé indépendamment) et `distance_relay` (comparateur
+  mho multi-zones, IEEE C37.113 §5.2).
+- **`scirust-biomed`** (existant, complété — D3 dispositifs médicaux) :
+  nouveau module `control` (`pid`, `iob`, `insulin_safety`, `barrier`) — PID
+  à anti-windup conditionnel, suivi d'insuline active par décroissance
+  exponentielle, supervision par seuils (suspension sur glycémie basse,
+  sortie de mode automatique), et un filtre de sécurité **Control Barrier
+  Function** (Ames et al., IEEE TAC 2017) résolu en forme close. Chaque
+  module porte un avertissement de non-usage clinique explicite : ceci
+  démontre des techniques de contrôle certifiable, pas un algorithme de
+  dosage homologable.
+- **`scirust-maritime`** (nouvelle crate — D5 maritime autonome) :
+  `colregs` (classification de rencontre COLREG par relèvement relatif),
+  `cpa_tcpa` (évaluation du risque de collision, vérifié contre un exemple
+  travaillé à deux navires : TCPA≈54.5min, CPA≈3.41nm), `thrust_allocation`
+  (allocation de poussée DP par pseudo-inverse pondérée, Fossen 2011,
+  vérifiée contre la pseudo-inverse de Moore-Penrose numpy).
+- **`scirust-fab`** (nouvelle crate — D6 semi-conducteurs) : `r2r`
+  (contrôleur EWMA run-to-run, Sachs, Hu & Ingolfsson 1995, vérifié contre
+  un exemple travaillé et une preuve de convergence géométrique) et `pca`
+  (FDC multivarié T²/SPE, Kourti & MacGregor 1995, sur la SVD générale de
+  `scirust-solvers`) — construit par-dessus `scirust-spc` (`EwmaChart`,
+  `HotellingT2`) déjà présent, sans le dupliquer.
+- **`scirust-agtech`** (nouvelle crate — D7 agriculture de précision) :
+  pipeline de nettoyage de carte de rendement déterministe et auditable
+  (`outlier_filter` : filtres global + local, Sudduth & Drummond 2007 ;
+  `idw` : interpolation par pondération inverse à la distance) répondant à
+  la divergence documentée entre QGIS/Agro-Map/Farm Works (Walczykova et
+  al. 2018). `agpl` expose le modèle des trois paramètres de risque
+  ISO 25119-2 (Sévérité/Exposition/Contrôlabilité, vérifié contre le texte
+  normatif) mais **n'implémente délibérément pas** la fonction de décision
+  `S×E×C→AgPL` : le graphe de risque complet (Figure 1, §6.3.7) n'apparaît
+  dans aucune source ouverte vérifiable trouvée.
+- **`scirust-fatigue`** (nouvelle crate — D4 fatigue structurelle) :
+  `rainflow` (comptage de cycles ASTM E1049-85 §5.4.4, port de l'algorithme
+  à pile vérifié valeur par valeur contre la bibliothèque de référence PyPI
+  `rainflow` sur deux séquences indépendantes) et `miner` (règle de
+  Palmgren-Miner de cumul de dommage, courbe S-N en loi de puissance
+  générique — aucune courbe de matériau réel n'est prétendue).
+- **`scirust-sis`** (complété — D8 nucléaire) : nouveau module
+  `reactor_trip` (`architecture_with_bypass`, `pfd_avg_during_bypass`) —
+  reconfiguration du vote MooN quand un canal est en dérivation pour
+  maintenance (IEC 61513 §6.2.3.5, réduit `N` sans changer `M`), construit
+  entièrement sur les primitives déjà vérifiées de `Architecture` et
+  `pfd_moon`. La méthodologie de seuil ISA-67.04 reste documentée mais non
+  implémentée (limite honnête, pas un oubli).
+- **`scirust-mcp`** : un outil par domaine ci-dessus
+  (`grid_state_estimate`, `biomed_cbf_safe_dose`, `maritime_collision_risk`,
+  `fab_r2r_update`, `agtech_clean_yield_map`, `fatigue_rainflow_damage`,
+  `sis_reactor_trip_bypass`) — chaque domaine ajouté devient immédiatement
+  pilotable par un agent, conformément à la doctrine du connecteur unique
+  de `docs/DOMAIN_ROADMAP.md`.
+
+### Ajouté — algèbre linéaire et solveurs
+- **`scirust-solvers`** : **SVD aléatoire** (Halko, Martinsson & Tropp 2011 —
+  projection sur sous-espace aléatoire germé par un `SplitMix64` déterministe
+  maison, avec itérations de puissance optionnelles et ré-orthonormalisation
+  QR) pour approximer la SVD tronquée d'une matrice sans la décomposer en
+  entier ; **accélération d'Anderson** (Walker & Ni 2011) pour les
+  itérations à point fixe, réduite à des moindres carrés sans contrainte
+  résolus par la QR déjà présente. Même graine ⇒ sortie bit-identique.
+- **`scirust-reliability`** : nouvelle formule générale `pfd_moon(m, n, ...)`
+  généralisant PFDavg à toute architecture `M`-parmi-`N` au-delà des cinq
+  tabulées par IEC 61508-6 Annexe B (validée contre les cinq cas nommés et
+  contre 2oo4/3oo4 par dérivation indépendante — voir la doc du module pour
+  le near-miss de généralisation naïve qui a motivé cette vérification
+  poussée). `scirust-sis::voting::Architecture::pfd_avg` s'y replie
+  désormais au lieu de refuser les architectures non tabulées (2oo4, etc.).
+- **`scirust-sis`** : nouveau mode de panne « déclenchement intempestif »
+  (`fault_injection::simulate_demand_with_spurious`) — modélise un canal
+  bloqué en position déclenchée, indépendamment des pannes dangereuses non
+  détectées déjà modélisées.
+- **`scirust-discovery`** : trois nouveaux protocoles de découverte —
+  BACnet/IP (Who-Is/I-Am), SNMPv1 (GET sysDescr.0, encodeur/décodeur BER
+  minimal maison), EtherNet/IP (CIP ListIdentity — en-tête d'encapsulation à
+  confiance élevée, disposition interne de l'item Identity documentée comme
+  moins vérifiée faute de matériel réel pour confirmer).
+
 ### Ajouté — sûreté fonctionnelle des procédés (IEC 61511/61508 — SIS)
 - **`scirust-reliability`** (existant, complété) : ajout des architectures de
   vote manquantes `pfd_2oo2` (`λDU·T1`, pas de terme β — un 2oo2 n'a aucune

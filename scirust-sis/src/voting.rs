@@ -4,7 +4,7 @@
 //! `scirust-reliability`.
 
 use crate::error::{SisError, SisResult};
-use scirust_reliability::{pfd_1oo1, pfd_1oo2, pfd_1oo3, pfd_2oo2, pfd_2oo3};
+use scirust_reliability::{pfd_1oo1, pfd_1oo2, pfd_1oo3, pfd_2oo2, pfd_2oo3, pfd_moon};
 use serde::{Deserialize, Serialize};
 
 /// An `M`-out-of-`N` voting architecture: at least `m` of `n` channels must
@@ -34,9 +34,14 @@ impl Architecture {
         format!("{}oo{}", self.m, self.n)
     }
 
-    /// `PFDavg` (low-demand mode) of this architecture, dispatching to the
-    /// matching `scirust-reliability` formula. `beta` (common-cause
-    /// fraction) is ignored by architectures that don't use it (1oo1, 2oo2).
+    /// `PFDavg` (low-demand mode) of this architecture. The five
+    /// architectures IEC 61508-6 Annex B tabulates directly (1oo1, 1oo2,
+    /// 2oo2, 2oo3, 1oo3) dispatch to those exact, literally-standard
+    /// closed forms; any other valid `M`-out-of-`N` falls back to
+    /// [`scirust_reliability::pfd_moon`]'s cross-validated generalization
+    /// (see that function's documentation for its provenance). `beta`
+    /// (common-cause fraction) is ignored by architectures that don't use
+    /// it (1oo1, 2oo2, and generally any `M = N`).
     pub fn pfd_avg(&self, lambda_du: f64, t1: f64, beta: f64) -> SisResult<f64> {
         match (self.m, self.n)
         {
@@ -45,7 +50,8 @@ impl Architecture {
             (2, 2) => Ok(pfd_2oo2(lambda_du, t1)),
             (2, 3) => Ok(pfd_2oo3(lambda_du, t1, beta)),
             (1, 3) => Ok(pfd_1oo3(lambda_du, t1, beta)),
-            (m, n) => Err(SisError::UnsupportedArchitecture { m, n }),
+            (m, n) => pfd_moon(m as u32, n as u32, lambda_du, t1, beta)
+                .map_err(|reason| SisError::UnsupportedArchitecture { m, n, reason }),
         }
     }
 
@@ -90,9 +96,22 @@ mod tests {
     }
 
     #[test]
-    fn pfd_avg_rejects_unsupported_architecture() {
+    fn pfd_avg_falls_back_to_general_moon_formula_beyond_the_five_named_cases() {
+        // 2oo4 isn't one of the five IEC-tabulated architectures but is a
+        // valid MooN shape, so `pfd_avg` computes it via `pfd_moon` instead
+        // of refusing it outright.
         let a = Architecture::new(2, 4).unwrap();
-        assert!(a.pfd_avg(1e-3, 1000.0, 0.1).is_err());
+        let pfd = a.pfd_avg(1e-3, 1000.0, 0.1).unwrap();
+        assert_relative_eq!(
+            pfd,
+            scirust_reliability::pfd_moon(2, 4, 1e-3, 1000.0, 0.1).unwrap()
+        );
+    }
+
+    #[test]
+    fn pfd_avg_rejects_a_directly_constructed_invalid_shape() {
+        let invalid = Architecture { m: 5, n: 2 };
+        assert!(invalid.pfd_avg(1e-3, 1000.0, 0.1).is_err());
     }
 
     #[test]

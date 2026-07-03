@@ -73,77 +73,170 @@ sont où ce créneau a la demande la plus documentée.
 - **Taille** : petite à moyenne — le chemin le plus rapide vers un produit
   différenciant « audit-grade ».
 
-### D2 · Protection réseau électrique & estimation d'état (IEC 61850, NERC CIP, IEEE C37.118)
+### D2 · Protection réseau électrique & estimation d'état (IEC 61850, NERC CIP, IEEE C37.118) — ✅ fait
 - **Pourquoi maintenant** : le rapport post-mortem du blackout nord-américain
   de 2003 pointe un estimateur d'état dont la défaillance n'a pas pu être
   reconstituée ; les protocoles GOOSE/Sampled Values de l'IEC 61850 sont
   démontrés usurpables (littérature académique citée).
-  `scirust-grid` existe déjà mais reste à approfondir sur cet axe précis.
-  `scirust-estimation` (Kalman/UD) est directement réutilisable ici.
-- **Algorithmes** : estimation d'état par moindres carrés pondérés (WLS),
-  détection de mauvaises données (largest normalized residual), logique de
-  relais de distance/différentielle, traitement de synchrophaseurs (PMU).
+  `scirust-grid` existait déjà (fréquence/RoCoF/synchrophaseurs/THD) mais
+  sans la couche estimation d'état / protection.
+- **Algorithmes** : estimation d'état par moindres carrés pondérés (WLS,
+  solution fermée `x̂=(HᵀWH)⁻¹HᵀWz` via `scirust-solvers`), détection de
+  mauvaises données (test du χ² global + plus grand résidu normalisé,
+  Abur & Expósito §5.3-5.4), logique de relais de distance à
+  caractéristique mho multi-zones (IEEE C37.113 §5.2).
+- **Livré** : `scirust-grid::state_estimation` (`wls_state_estimate`,
+  `chi_squared_test`, `largest_normalized_residual_test`, vérifié contre un
+  exemple 3-nœuds calculé indépendamment) et
+  `scirust-grid::distance_relay` (`DistanceRelay`, comparateur mho
+  `mho_operates`, zones à portée/retard configurables). Reste hors périmètre
+  volontairement : estimation d'état AC non-linéaire itérative (Newton-Raphson
+  sur `h(x)` non-linéaire — le solveur `scirust-solvers::nonlinear` le
+  permettrait mais n'est pas câblé ici), et les seuils du test du χ² restent
+  à la charge de l'appelant (pas de réimplémentation de l'inverse de la
+  fonction gamma incomplète, comme `scirust-multivariate`).
 - **Taille** : moyenne — s'appuie sur l'estimation déjà présente.
 
-### D3 · Dispositifs médicaux à boucle fermée (IEC 62304 Ed.2, FDA SaMD/GMLP/PCCP)
+### D3 · Dispositifs médicaux à boucle fermée (IEC 62304 Ed.2, FDA SaMD/GMLP/PCCP) — ✅ fait (techniques ; pas un dispositif)
 - **Pourquoi maintenant** : la future édition d'IEC 62304 ajoute un cycle de
   vie dédié à l'IA/ML précisément parce qu'un modèle adaptatif ne rentre pas
   dans le modèle déterministe historique de la norme.
-  `scirust-biomed` existe (traitement de signal) ; l'ouverture ici est le
-  **contrôle** (dosage, ventilation) avec certificat de preuve d'inférence
-  (`scirust-runtime`), pas seulement l'analyse de signal.
-- **Algorithmes** : PID/MPC certifié à bornes IBP/CROWN, contrôleur de repli
-  Simplex (déjà en I5 de `INDUSTRIAL_VERTICALS.md`), traçabilité PCCP.
-- **Taille** : moyenne à grande (exigences réglementaires lourdes).
+  `scirust-biomed` existait déjà (traitement de signal) ; l'ouverture ici
+  était le **contrôle** (dosage), pas seulement l'analyse de signal.
+- **Algorithmes** : PID à anti-windup conditionnel (classe de contrôleur des
+  systèmes hybrides de 1ère génération type Medtronic 670G/770G), suivi
+  d'insuline active (IOB, décroissance exponentielle), supervision par
+  seuils (suspension sur glycémie basse + variante prédictive, sortie de
+  mode automatique — le principe documenté publiquement de "Suspend on
+  Low"/SmartGuard), et un filtre de sécurité **Control Barrier Function**
+  (Ames et al., IEEE TAC 2017) résolu en forme close (CBF-QP à 1 variable
+  de décision) — l'alternative certifiable au réglage ad hoc de garde-fous
+  citée dans la doctrine du domaine.
+- **Livré** : `scirust-biomed::control` (`pid`, `iob`, `insulin_safety`,
+  `barrier`). **Explicitement pas livré, par doctrine anti-survente** :
+  aucune courbe IOB clinique (Walsh/OpenAPS/LoopKit — le module utilise une
+  décroissance mono-exponentielle générique), aucun modèle physiologique
+  validé (Bergman/UVA-Padova — le CBF utilise un modèle affine à 1
+  compartiment), aucun MPC (les systèmes récents — Tandem Control-IQ,
+  Omnipod 5, CamAPS FX — en utilisent, hors périmètre), aucune traçabilité
+  PCCP ni bornes IBP/CROWN. Ce qui est livré est la *technique* de contrôle
+  certifiable (PID + CBF-QP + supervision), pas un algorithme de dosage
+  homologable — chaque module de code porte cet avertissement en tête.
+- **Taille** : moyenne à grande (exigences réglementaires lourdes) — un
+  dispositif réel resterait un travail de partenariat clinique/réglementaire,
+  pas un sprint solo.
 
-### D4 · Aéronautique — lois de commande de vol & fatigue structurelle (DO-178C/DO-333)
+### D4 · Aéronautique — lois de commande de vol & fatigue structurelle (DO-178C/DO-333) — ✅ fait (comptage de fatigue ; lois de commande = partenariat)
 - **Pourquoi maintenant** : la traçabilité DO-178C suppose un comportement
   déterministe entrée→sortie ; c'est documenté comme rompu par la
   non-associativité flottante et par tout composant ML embarqué.
-- **Algorithmes** : comptage rainflow pour la durée de vie en fatigue,
-  numérique de lois de commande à virgule fixe déterministe (réutilise le
-  pipeline int8 déjà validé de SciRust), bornes certifiées pour tout
-  composant appris.
-- **Taille** : grande — expertise de certification aéronautique nécessaire ;
-  à traiter comme un partenariat plutôt qu'un sprint solo.
+- **Algorithmes** : comptage rainflow (ASTM E1049-85 §5.4.4) pour la durée
+  de vie en fatigue, règle de Palmgren-Miner pour le cumul de dommage.
+- **Livré** : `scirust-fatigue` (`rainflow`, `miner`) — port de l'algorithme
+  à pile de la norme, vérifié contre la bibliothèque de référence PyPI
+  `rainflow` (implémentation ASTM E1049-85 dédiée) sur deux séquences
+  indépendantes, valeur par valeur (plage/moyenne/compte/indices).
+  **Explicitement pas livré** : la numérique de lois de commande de vol à
+  virgule fixe déterministe et les bornes certifiées pour un composant
+  appris — cette partie reste, comme documenté ci-dessous, un travail de
+  certification aéronautique nécessitant un partenariat, pas un sprint
+  solo.
+- **Taille** : grande — expertise de certification aéronautique nécessaire
+  pour la partie lois de commande ; à traiter comme un partenariat plutôt
+  qu'un sprint solo.
 
-### D5 · Maritime autonome & classification DNV (IMO MASS Code 2026, DNV AROS, IACS UR E26/E27)
+### D5 · Maritime autonome & classification DNV (IMO MASS Code 2026, DNV AROS, IACS UR E26/E27) — ✅ fait (primitives)
 - **Pourquoi maintenant** : le nouveau code MASS (obligatoire, 2026) exige que
   les décisions autonomes restent « explicables et auditables » sans méthode
   de vérification encore consensuelle dans l'industrie — une fenêtre
   d'opportunité pour poser un standard de référence.
-- **Algorithmes** : boucles de positionnement dynamique (DP), géométrie
-  d'évitement de collision COLREGs, stabilité/tenue à la mer.
+- **Algorithmes** : classification géométrique de rencontre COLREG
+  (rencontre de face/croisement/rattrapage à partir du relèvement relatif,
+  Règles 13-15), évaluation du risque de collision par CPA/TCPA
+  (trajectoires rectilignes), allocation de poussée par pseudo-inverse
+  pondérée pour le positionnement dynamique (DP).
+- **Livré** : `scirust-maritime` (`colregs`, `cpa_tcpa`,
+  `thrust_allocation`), vérifié contre un exemple travaillé CPA/TCPA
+  indépendant (deux navires, TCPA≈54.5 min, CPA≈3.41 nm) et une
+  configuration DP à 4 propulseurs sur-actionnée (comparée à la
+  pseudo-inverse de Moore-Penrose numpy). **Explicitement pas livré** : la
+  logique de statut réglementaire complète des Règles 11-18 (voile vs
+  propulsion mécanique, capacité de manœuvre restreinte), la boucle de
+  commande DP complète (observateur, modèle de référence, PID/MPC 3-DDL —
+  ce crate prend la force généralisée désirée en entrée), et la
+  stabilité/tenue à la mer (hors périmètre, pas abordée).
 - **Taille** : moyenne.
 
-### D6 · Contrôle « run-to-run » en fabrication de semi-conducteurs (SEMI E10/E58/E116)
+### D6 · Contrôle « run-to-run » en fabrication de semi-conducteurs (SEMI E10/E58/E116) — ✅ fait
 - **Pourquoi maintenant** : le contrôleur R2R réinjecte directement la sortie
   du contrôle statistique de procédé (FDC/métrologie virtuelle) dans la
   recette du run suivant — une dérive numérique silencieuse coûte des
   plaquettes ; les normes d'audit y sont proches du 21 CFR Part 11 déjà géré
   par `scirust-func-safety::golden_batch`.
-- **Algorithmes** : contrôle EWMA run-to-run, SPC/FDC multivarié, T² de
-  Hotelling / PCA (réutilise le futur SVD général — voir plus bas).
-- **Taille** : grande (surface statistique large).
+- **Algorithmes** : contrôle EWMA run-to-run (Sachs, Hu & Ingolfsson 1995),
+  FDC multivarié T²/SPE par PCA (Kourti & MacGregor 1995) — réutilise la SVD
+  générale de `scirust-solvers` plutôt que de la redupliquer.
+- **Livré** : `scirust-fab` (`r2r::EwmaR2rController` vérifié contre un
+  exemple travaillé et une preuve de convergence géométrique ;
+  `pca::Pca` avec `t2`/`spe` complémentaires, vérifiés contre trois cas
+  numpy — point en régime, rupture de corrélation captée par SPE, excursion
+  le long de la corrélation connue captée par T²). `scirust_spc` (déjà
+  existant : `EwmaChart`, `HotellingT2`, règles de Western Electric)
+  couvrait déjà le SPC univarié/multivarié de base — ce crate ajoute la
+  couche *contrôle* (R2R) et *PCA* par-dessus, sans dupliquer l'existant.
+- **Taille** : grande (surface statistique large) — la brique de base est
+  livrée ; sélection automatique de `k`/seuils UCL restent à la charge de
+  l'appelant (voir la limite honnête dans `scirust-fab::pca`).
 
-### D7 · Agriculture de précision — conformité & traçabilité (ISO 25119, ISO 18497, ISOBUS/ISO 11783)
+### D7 · Agriculture de précision — conformité & traçabilité (ISO 25119, ISO 18497, ISOBUS/ISO 11783) — ✅ fait (partiellement, par doctrine anti-survente)
 - **Pourquoi maintenant** : un cas documenté montre que les mêmes données de
   rendement, passées dans QGIS / Agro-Map / Farm Works, produisent des cartes
   de rendement *différentes* — une rupture de reproductibilité concrète et
   publiée. Les registres phytosanitaires et le MRV carbone exigent de plus en
   plus une trace horodatée inviolable.
-- **Algorithmes** : recalcul déterministe de cartes de rendement, journal
-  hash-chaîné de traitement phytosanitaire, sûreté fonctionnelle ISO 25119
-  pour l'guidage/automatisation.
+- **Algorithmes** : filtres d'aberrants global + local (Sudduth & Drummond
+  2007, l'outil de référence USDA-ARS "Yield Editor"), interpolation IDW
+  explicite, modèle des paramètres de risque ISO 25119-2 (Sévérité/
+  Exposition/Contrôlabilité).
+- **Livré** : `scirust-agtech` (`outlier_filter`, `idw`) — pipeline de
+  nettoyage de carte de rendement déterministe et auditable, vérifié par un
+  cas construit où un filtre global ne peut *structurellement* pas
+  distinguer un point légitime d'une anomalie de même valeur alors que le
+  filtre local le peut. `agpl` expose le modèle de données des trois
+  paramètres de risque ISO 25119-2 (vérifié contre le texte normatif
+  — aperçus iTeh Standards des éditions 2010/2019, tableaux 1-3).
+  **Explicitement pas livré, par doctrine anti-survente** : la fonction de
+  décision `S×E×C → AgPL` elle-même (le graphe de risque de la Figure
+  1, §6.3.7) n'apparaît dans aucune source ouverte vérifiable trouvée — la
+  seule reproduction secondaire disponible (Mitka 2018) contredit le texte
+  normatif vérifié (invente un niveau "S4", réduit la sortie à 3
+  catégories) et a été jugée non fiable. Coder une topologie de graphe de
+  sécurité fonctionnelle *devinée* serait pire que ne rien coder — voir
+  `scirust-agtech::agpl` pour le détail. De même non livrés : catégories
+  d'architecture SRP/CS (Annexe A) et niveau SRL, dont les tables de
+  correspondance n'ont pas pu être vérifiées ; journal hash-chaîné de
+  traitement phytosanitaire (hors périmètre de cette passe).
 - **Taille** : moyenne.
 
-### D8 · Nucléaire — protection de réacteur (IEC 61513/60880/62138)
+### D8 · Nucléaire — protection de réacteur (IEC 61513/60880/62138) — ✅ fait (primitive de vote ; licensing = partenariat)
 - **Pourquoi maintenant** : l'AIEA et la littérature académique citent la
   défaillance de cause commune logicielle entre canaux redondants comme un
   point de licensing non résolu ; aucune plateforme ouverte de ce niveau
   n'existe aujourd'hui.
-- **Algorithmes** : logique de vote 2-sur-4, calcul de seuils de flux,
-  diversité fonctionnelle démontrable.
+- **Algorithmes** : logique de vote 2-sur-4 avec dérivation de canal
+  (IEC 61513 §6.2.3.5) — un canal en maintenance/surveillance réduit `N`
+  sans changer `M`.
+- **Livré** : `scirust-sis::reactor_trip` (`architecture_with_bypass`,
+  `pfd_avg_during_bypass`), construit entièrement sur les primitives déjà
+  vérifiées de `scirust-sis::voting::Architecture` et
+  `scirust_reliability::pfd_moon` (2oo4 y compris) — pas de nouvelle
+  formule non vérifiée. **Explicitement pas livré, par doctrine
+  anti-survente** : la méthodologie de calcul de seuil ISA-67.04
+  (Analytical Limit → Trip Set Point via SRSS → Nominal Trip Set Point →
+  Limiting Trip Setpoint) et les exigences de repli sur défaillance en
+  mode commun de NUREG-0800 BTP 7-19 — recherchées et documentées, mais
+  non portées en code faute d'une vérification jugée suffisante pour du
+  code de sécurité nucléaire dans cette passe.
 - **Taille** : LOC modeste, mais expertise de licensing très élevée — à
   n'aborder qu'en partenariat avec un exploitant/intégrateur qualifié.
 

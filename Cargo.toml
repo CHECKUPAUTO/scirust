@@ -128,6 +128,10 @@ members = [
     "scirust-mcp",
     "scirust-discovery",
     "scirust-sis",
+    "scirust-maritime",
+    "scirust-fab",
+    "scirust-agtech",
+    "scirust-fatigue",
 ]
 exclude = [
     "scirust-rustc-driver",

@@ -2,10 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
 pub enum SisError {
-    #[error(
-        "architecture {m}oo{n} has no known PFDavg formula (supported: 1oo1, 1oo2, 2oo2, 2oo3, 1oo3)"
-    )]
-    UnsupportedArchitecture { m: u8, n: u8 },
+    #[error("architecture {m}oo{n} has no known PFDavg formula: {reason}")]
+    UnsupportedArchitecture { m: u8, n: u8, reason: String },
 
     #[error("architecture {m}oo{n} is invalid: need 1 <= m <= n")]
     InvalidArchitecture { m: u8, n: u8 },

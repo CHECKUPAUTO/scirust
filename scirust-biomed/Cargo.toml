@@ -3,8 +3,11 @@ name = "scirust-biomed"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "SciRust biomedical signals — ECG R-peak detection, rhythm classification, conformal beat prediction sets"
+description = "SciRust biomedical signals — ECG R-peak detection, rhythm classification, conformal beat prediction sets — plus closed-loop dosing control primitives (PID, IOB, CBF-QP safety filter)"
 
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"

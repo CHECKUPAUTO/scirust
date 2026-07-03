@@ -7,3 +7,6 @@ description = "SciRust reliability — IEC 61508 PFD/PFH for MooN architectures,
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"

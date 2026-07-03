@@ -23,6 +23,11 @@
 //!   cause-and-effect matrix changes, motivated directly by Triton/Trisis
 //!   (2017): SIS logic that can be reprogrammed without a tamper-evident
 //!   trail is a demonstrated attack target, not a hypothetical one.
+//! - [`reactor_trip`] — channel-bypass reconfiguration for nuclear
+//!   reactor-trip voting (IEC 61513 §6.2.3.5): reduces `N` without
+//!   changing `M` when a channel goes into maintenance bypass. Does
+//!   **not** implement ISA-67.04 setpoint methodology — see that
+//!   module's doc for the honest boundary.
 //!
 //! See `README.md` for the IEC 61511/61508 citations and the Triton/Trisis
 //! background in full.
@@ -32,6 +37,7 @@ pub mod cause_effect;
 pub mod error;
 pub mod fault_injection;
 pub mod proof_test;
+pub mod reactor_trip;
 pub mod sif_loop;
 pub mod voting;
 
@@ -39,5 +45,6 @@ pub use cause_effect::CauseEffectMatrix;
 pub use error::{SisError, SisResult};
 pub use fault_injection::{TripOutcome, TripSimulationResult, simulate_demand};
 pub use proof_test::max_proof_test_interval;
+pub use reactor_trip::{architecture_with_bypass, pfd_avg_during_bypass};
 pub use sif_loop::{SifLoop, Subsystem};
 pub use voting::Architecture;

@@ -1,0 +1,12 @@
+[package]
+name = "scirust-agtech"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust precision-agriculture compliance — reproducible yield-map filtering/interpolation and ISO 25119 AgPL safety categorization"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5"

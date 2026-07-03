@@ -6,7 +6,7 @@
 //! réseau sans passer par la vérification de portée.
 
 use crate::audit::AuditLog;
-use crate::protocols::{mdns, modbus, opcua};
+use crate::protocols::{bacnet, ethernet_ip, mdns, modbus, opcua, snmp};
 use crate::scope::ScopeAuthorization;
 use serde::Serialize;
 use std::net::{IpAddr, SocketAddr};
@@ -17,6 +17,9 @@ pub enum Protocol {
     OpcUa,
     ModbusTcp,
     Mdns,
+    BacnetIp,
+    Snmp,
+    EtherNetIp,
 }
 
 impl Protocol {
@@ -26,6 +29,9 @@ impl Protocol {
             Protocol::OpcUa => "opcua",
             Protocol::ModbusTcp => "modbus",
             Protocol::Mdns => "mdns",
+            Protocol::BacnetIp => "bacnet",
+            Protocol::Snmp => "snmp",
+            Protocol::EtherNetIp => "ethernet_ip",
         }
     }
 
@@ -35,6 +41,9 @@ impl Protocol {
             Protocol::OpcUa => opcua::DEFAULT_PORT,
             Protocol::ModbusTcp => modbus::DEFAULT_PORT,
             Protocol::Mdns => 5353,
+            Protocol::BacnetIp => bacnet::DEFAULT_PORT,
+            Protocol::Snmp => snmp::DEFAULT_PORT,
+            Protocol::EtherNetIp => ethernet_ip::DEFAULT_PORT,
         }
     }
 
@@ -44,8 +53,11 @@ impl Protocol {
             "opcua" => Ok(Protocol::OpcUa),
             "modbus" => Ok(Protocol::ModbusTcp),
             "mdns" => Ok(Protocol::Mdns),
+            "bacnet" => Ok(Protocol::BacnetIp),
+            "snmp" => Ok(Protocol::Snmp),
+            "ethernet_ip" => Ok(Protocol::EtherNetIp),
             other => Err(format!(
-                "unknown protocol '{other}' (expected opcua, modbus, or mdns)"
+                "unknown protocol '{other}' (expected opcua, modbus, mdns, bacnet, snmp, or ethernet_ip)"
             )),
         }
     }
@@ -148,6 +160,33 @@ impl DiscoveryEngine {
                 },
                 Ok(_) => DiscoveryOutcome::NotFound {
                     reason: "no services advertised".to_string(),
+                },
+                Err(reason) => DiscoveryOutcome::NotFound { reason },
+            },
+            Protocol::BacnetIp => match bacnet::probe(addr, self.timeout)
+            {
+                Ok(i_am) => DiscoveryOutcome::Found {
+                    summary: format!(
+                        "BACnet/IP device instance {} (object type {})",
+                        i_am.instance, i_am.object_type
+                    ),
+                },
+                Err(reason) => DiscoveryOutcome::NotFound { reason },
+            },
+            Protocol::Snmp => match snmp::probe(addr, "public", self.timeout)
+            {
+                Ok(description) => DiscoveryOutcome::Found {
+                    summary: format!("SNMP sysDescr: {description}"),
+                },
+                Err(reason) => DiscoveryOutcome::NotFound { reason },
+            },
+            Protocol::EtherNetIp => match ethernet_ip::probe(addr, self.timeout)
+            {
+                Ok(id) => DiscoveryOutcome::Found {
+                    summary: format!(
+                        "EtherNet/IP device: {} (vendor=0x{:04x}, product_code={})",
+                        id.product_name, id.vendor_id, id.product_code
+                    ),
                 },
                 Err(reason) => DiscoveryOutcome::NotFound { reason },
             },
