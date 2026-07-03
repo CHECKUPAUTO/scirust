@@ -205,6 +205,32 @@ impl GpuChain {
         self.add(&h, &mlp) // residual 2
     }
 
+    /// Apply a **stack of transformer blocks** in sequence, fully resident:
+    /// block `i`'s output feeds block `i+1` without ever leaving VRAM. `x` is
+    /// `t×d`; every `BlockWeights` must be `d`-consistent. Returns the `t×d`
+    /// output of the last block — the resident trunk of the 350M forward
+    /// (`N` layers). With no blocks it returns a copy of `x`.
+    pub fn transformer_stack(
+        &self,
+        x: &GpuMatrix,
+        blocks: &[BlockWeights],
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let mut cur: Option<GpuMatrix> = None;
+        for b in blocks
+        {
+            let input = cur.as_ref().unwrap_or(x);
+            cur = Some(self.transformer_block(input, b, eps, causal)?);
+        }
+        match cur
+        {
+            Some(m) => Ok(m),
+            // No layers: identity. Round-trip to return an owned resident copy.
+            None => Ok(self.upload(&self.download(x)?, x.rows(), x.cols())),
+        }
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -225,6 +251,59 @@ mod tests {
             .sqrt();
         let den: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-30);
         num / den
+    }
+
+    /// CPU reference for one pre-norm residual transformer block, used as the
+    /// oracle for both the single-block and the stack tests. Weights match
+    /// [`BlockWeights`]: `n1`/`n2` are `d`, `wq..wo` are `d×d`, `wg`/`wu` are
+    /// `d×h`, `wd` is `h×d`.
+    #[allow(clippy::too_many_arguments)]
+    fn cpu_block(
+        x: &[f32],
+        (n1, n2): (&[f32], &[f32]),
+        (wq, wk, wv, wo): (&[f32], &[f32], &[f32], &[f32]),
+        (wg, wu, wd): (&[f32], &[f32], &[f32]),
+        (t, d, h): (usize, usize, usize),
+        eps: f32,
+        causal: bool,
+    ) -> Vec<f32> {
+        use crate::ops::{cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax};
+        let gemm = |a: &[f32], b: &[f32], m, k, n| CpuBackend.gemm_f32(a, b, m, k, n).unwrap();
+        let transpose = |a: &[f32], r: usize, c: usize| {
+            let mut o = vec![0.0f32; r * c];
+            for i in 0..r
+            {
+                for j in 0..c
+                {
+                    o[j * r + i] = a[i * c + j];
+                }
+            }
+            o
+        };
+        let xn = cpu_rms_norm(x, n1, eps, t, d);
+        let q = gemm(&xn, wq, t, d, d);
+        let k = gemm(&xn, wk, t, d, d);
+        let v = gemm(&xn, wv, t, d, d);
+        let s = cpu_scale_causal_mask(
+            &gemm(&q, &transpose(&k, t, d), t, d, t),
+            t,
+            t,
+            1.0 / (d as f32).sqrt(),
+            causal,
+        );
+        let a = gemm(&cpu_softmax(&s, t, t), &v, t, t, d);
+        let ao = gemm(&a, wo, t, d, d);
+        let hh: Vec<f32> = x.iter().zip(&ao).map(|(a, b)| a + b).collect();
+        let hn = cpu_rms_norm(&hh, n2, eps, t, d);
+        let gate = gemm(&hn, wg, t, d, h);
+        let up = gemm(&hn, wu, t, d, h);
+        let act: Vec<f32> = gate
+            .iter()
+            .zip(&up)
+            .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+            .collect();
+        let m = gemm(&act, wd, t, h, d);
+        hh.iter().zip(&m).map(|(a, b)| a + b).collect()
     }
 
     /// A two-GEMM chain `(A·B)·C` keeps the intermediate `T = A·B` in VRAM and
@@ -577,6 +656,112 @@ mod tests {
             rel_err(&out, &expected) < 1e-4,
             "out={out:?} exp={expected:?}"
         );
+    }
+
+    /// A **stack of transformer blocks** run resident (each block's output
+    /// feeds the next in VRAM) must match the CPU oracle applied layer by layer.
+    /// This is the resident trunk of the 350M forward. Skips if no adapter.
+    #[test]
+    fn resident_transformer_stack_matches_cpu_oracle() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h, layers) = (5usize, 8usize, 16usize, 3usize);
+        let eps = 1e-5f32;
+        // Distinct deterministic weights per layer (phase offset by layer index).
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.029 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+
+        // Per-layer CPU weight sets, kept alive to back the GPU uploads.
+        struct W {
+            n1: Vec<f32>,
+            wq: Vec<f32>,
+            wk: Vec<f32>,
+            wv: Vec<f32>,
+            wo: Vec<f32>,
+            n2: Vec<f32>,
+            wg: Vec<f32>,
+            wu: Vec<f32>,
+            wd: Vec<f32>,
+        }
+        let ws: Vec<W> = (0..layers)
+            .map(|l| {
+                let p = l as f32 * 10.0;
+                W {
+                    n1: (0..d).map(|i| 0.7 + 0.02 * i as f32).collect(),
+                    wq: gen(d * d, p + 0.5, 0.3),
+                    wk: gen(d * d, p + 1.1, 0.3),
+                    wv: gen(d * d, p + 1.7, 0.3),
+                    wo: gen(d * d, p + 2.3, 0.3),
+                    n2: (0..d).map(|i| 0.9 - 0.01 * i as f32).collect(),
+                    wg: gen(d * h, p + 2.9, 0.25),
+                    wu: gen(d * h, p + 3.5, 0.25),
+                    wd: gen(h * d, p + 4.1, 0.25),
+                }
+            })
+            .collect();
+
+        // Upload every layer's weights; keep the GpuMatrix handles alive.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let g: Vec<[GpuMatrix; 9]> = ws
+            .iter()
+            .map(|w| {
+                [
+                    up(&w.n1, 1, d),
+                    up(&w.wq, d, d),
+                    up(&w.wk, d, d),
+                    up(&w.wv, d, d),
+                    up(&w.wo, d, d),
+                    up(&w.n2, 1, d),
+                    up(&w.wg, d, h),
+                    up(&w.wu, d, h),
+                    up(&w.wd, h, d),
+                ]
+            })
+            .collect();
+        let blocks: Vec<BlockWeights> = g
+            .iter()
+            .map(|m| BlockWeights {
+                norm1: &m[0],
+                wq: &m[1],
+                wk: &m[2],
+                wv: &m[3],
+                wo: &m[4],
+                norm2: &m[5],
+                wg: &m[6],
+                wu: &m[7],
+                wd: &m[8],
+            })
+            .collect();
+
+        let gx = up(&x, t, d);
+        let out = chain
+            .download(&chain.transformer_stack(&gx, &blocks, eps, true).unwrap())
+            .unwrap();
+
+        // CPU oracle: fold x through each layer's block.
+        let mut cur = x.clone();
+        for w in &ws
+        {
+            cur = cpu_block(
+                &cur,
+                (&w.n1, &w.n2),
+                (&w.wq, &w.wk, &w.wv, &w.wo),
+                (&w.wg, &w.wu, &w.wd),
+                (t, d, h),
+                eps,
+                true,
+            );
+        }
+        assert_eq!(out.len(), t * d);
+        assert!(rel_err(&out, &cur) < 1e-4, "out={out:?} exp={cur:?}");
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.

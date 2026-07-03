@@ -254,33 +254,73 @@ fn main() {
         }
         o
     };
-    let xn = cpu_rms_norm(&nx, &nw, eps, t, d);
-    let q = gemm(&xn, &bq, t, d, d);
-    let kk = gemm(&xn, &bk, t, d, d);
-    let vv2 = gemm(&xn, &bv, t, d, d);
-    let s = cpu_scale_causal_mask(
-        &gemm(&q, &transpose(&kk, t, d), t, d, t),
-        t,
-        t,
-        1.0 / (d as f32).sqrt(),
-        true,
-    );
-    let a = gemm(&cpu_softmax(&s, t, t), &vv2, t, t, d);
-    let ao = gemm(&a, &bo, t, d, d);
-    let hblk: Vec<f32> = nx.iter().zip(&ao).map(|(a, b)| a + b).collect();
-    let hn = cpu_rms_norm(&hblk, &n2, eps, t, d);
-    let g2 = gemm(&hn, &wg, t, d, hh);
-    let u2 = gemm(&hn, &wu, t, d, hh);
-    let act2: Vec<f32> = g2
-        .iter()
-        .zip(&u2)
-        .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
-        .collect();
-    let m2 = gemm(&act2, &wd, t, hh, d);
-    let blk_cpu: Vec<f32> = hblk.iter().zip(&m2).map(|(a, b)| a + b).collect();
+    // One CPU transformer block (reused for the stack check below).
+    let cpu_block_once = |input: &[f32]| -> Vec<f32> {
+        let xn = cpu_rms_norm(input, &nw, eps, t, d);
+        let q = gemm(&xn, &bq, t, d, d);
+        let kk = gemm(&xn, &bk, t, d, d);
+        let vv2 = gemm(&xn, &bv, t, d, d);
+        let s = cpu_scale_causal_mask(
+            &gemm(&q, &transpose(&kk, t, d), t, d, t),
+            t,
+            t,
+            1.0 / (d as f32).sqrt(),
+            true,
+        );
+        let a = gemm(&cpu_softmax(&s, t, t), &vv2, t, t, d);
+        let ao = gemm(&a, &bo, t, d, d);
+        let hblk: Vec<f32> = input.iter().zip(&ao).map(|(a, b)| a + b).collect();
+        let hn = cpu_rms_norm(&hblk, &n2, eps, t, d);
+        let g2 = gemm(&hn, &wg, t, d, hh);
+        let u2 = gemm(&hn, &wu, t, d, hh);
+        let act2: Vec<f32> = g2
+            .iter()
+            .zip(&u2)
+            .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+            .collect();
+        let m2 = gemm(&act2, &wd, t, hh, d);
+        hblk.iter().zip(&m2).map(|(a, b)| a + b).collect()
+    };
+    let blk_cpu = cpu_block_once(&nx);
     check(
         "resident transformer block (attn+MLP+residuals)",
         rel_err(&blk_gpu, &blk_cpu),
+        &mut failures,
+    );
+
+    // 8. A 2-block STACK run resident — block 1's output feeds block 2 in VRAM
+    //    (same weights both layers). The resident trunk of the 350M forward.
+    let stack = [
+        BlockWeights {
+            norm1: &gnw,
+            wq: &gbq,
+            wk: &gbk,
+            wv: &gbv,
+            wo: &gbo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        },
+        BlockWeights {
+            norm1: &gnw,
+            wq: &gbq,
+            wk: &gbk,
+            wv: &gbv,
+            wo: &gbo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        },
+    ];
+    let stack_gpu = chain
+        .download(&chain.transformer_stack(&gnx, &stack, eps, true).unwrap())
+        .unwrap();
+    let stack_cpu = cpu_block_once(&cpu_block_once(&nx));
+    check(
+        "resident 2-block stack (trunk of the 350M)",
+        rel_err(&stack_gpu, &stack_cpu),
         &mut failures,
     );
 
