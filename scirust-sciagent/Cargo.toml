@@ -9,6 +9,7 @@ description = "SCIAGENT — SLM deterministe entraine from scratch, specialise R
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 scirust-autodiff = { path = "../scirust-autodiff" }
+scirust-gpu = { path = "../scirust-gpu", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
@@ -24,8 +25,18 @@ default = []
 # workspace stays pure-Rust: `ureq` pulls `ring`, whose build script needs a C
 # cross-compiler — which breaks the linker-less aarch64 `cargo check` CI job.
 fetch = ["dep:ureq"]
+# GPU-accelerated matmuls (Vulkan/Metal/DX12/GL via wgpu). Attaches scirust-gpu's
+# validated `WgpuEngine` to the model's tape and flips it into GPU-matmul mode, so
+# every projection / attention-score / SwiGLU / tied-LM-head GEMM runs its forward
+# and backward on the device. Off by default: it pulls `wgpu` (and a device at
+# runtime), which the pure-Rust default build and the aarch64 check must not need.
+gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
 
 [[bin]]
 name = "fetch-crates"
 path = "src/bin/fetch-crates.rs"
 required-features = ["fetch"]
+
+[[example]]
+name = "gpu_forward_parity"
+required-features = ["gpu"]

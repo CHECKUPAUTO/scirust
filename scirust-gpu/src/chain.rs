@@ -63,6 +63,28 @@ pub struct BlockCache {
     up: GpuMatrix,      // hn·Wu   (t×h)
 }
 
+/// The projection weight gradients of one transformer block, produced by
+/// [`GpuChain::transformer_block_backward_full`] — one resident matrix per
+/// projection, same shapes as the corresponding [`BlockWeights`] fields. (The
+/// two RMSNorm gain gradients are not included here; freeze the norms or handle
+/// their small `d`-vectors separately.)
+pub struct BlockGrads {
+    /// `∂L/∂Wq` (`d×d`).
+    pub dwq: GpuMatrix,
+    /// `∂L/∂Wk` (`d×d`).
+    pub dwk: GpuMatrix,
+    /// `∂L/∂Wv` (`d×d`).
+    pub dwv: GpuMatrix,
+    /// `∂L/∂Wo` (`d×d`).
+    pub dwo: GpuMatrix,
+    /// `∂L/∂Wg` (`d×h`).
+    pub dwg: GpuMatrix,
+    /// `∂L/∂Wu` (`d×h`).
+    pub dwu: GpuMatrix,
+    /// `∂L/∂Wd` (`h×d`).
+    pub dwd: GpuMatrix,
+}
+
 /// The resident weights of a full **tied-embedding decoder**: a shared
 /// `vocab × d` embedding table (which is also the LM head), the `N`
 /// transformer [`BlockWeights`], and a final `d`-length RMSNorm gain. Consumed
@@ -323,6 +345,76 @@ impl GpuChain {
         let dx_attn = self.rms_norm_backward(x, w.norm1, &dxn, eps)?;
         // x feeds both norm1 and the residual add of h ⇒ dx = dh + dx_attn
         self.add(&dh, &dx_attn)
+    }
+
+    /// Like [`Self::transformer_block_backward`] but also returns the **projection
+    /// weight gradients** ([`BlockGrads`]) alongside `dx`. The forward
+    /// activations that the weight grads need but the cache doesn't hold (`xn`,
+    /// `a`, `hn`, `act`) are recomputed here — cheap forward ops. Enables an
+    /// AdamW update of every projection: a transformer block that trains on the
+    /// GPU. (RMSNorm gain gradients are not produced; freeze the norms.)
+    pub fn transformer_block_backward_full(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        cache: &BlockCache,
+        dout: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, BlockGrads)> {
+        // Recompute the forward activations the weight gradients contract with.
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let a = self.matmul(&cache.weights, &cache.v)?; // attention output (t×d)
+        let h = &cache.h;
+        let hn = self.rms_norm(h, w.norm2, eps)?;
+        let act = self.swiglu(&cache.gate, &cache.up)?;
+
+        // --- MLP path ---
+        let dact = self.matmul_t(dout, w.wd, false, true)?;
+        let dwd = self.matmul_t(&act, dout, true, false)?; // actᵀ·dout   (h×d)
+        let (dgate, dup) = self.swiglu_backward(&cache.gate, &cache.up, &dact)?;
+        let dwg = self.matmul_t(&hn, &dgate, true, false)?; // hnᵀ·dgate  (d×h)
+        let dwu = self.matmul_t(&hn, &dup, true, false)?; // hnᵀ·dup    (d×h)
+        let dhn = self.add(
+            &self.matmul_t(&dgate, w.wg, false, true)?,
+            &self.matmul_t(&dup, w.wu, false, true)?,
+        )?;
+        let dh = self.add(dout, &self.rms_norm_backward(h, w.norm2, &dhn, eps)?)?;
+
+        // --- attention path ---
+        let dwo = self.matmul_t(&a, &dh, true, false)?; // aᵀ·dh      (d×d)
+        let da = self.matmul_t(&dh, w.wo, false, true)?;
+        let dweights = self.matmul_t(&da, &cache.v, false, true)?;
+        let dv = self.matmul_t(&cache.weights, &da, true, false)?;
+        let dscaled = self.softmax_backward(&cache.weights, &dweights)?;
+        let scale = 1.0 / (cache.q.cols() as f32).sqrt();
+        let dscores = self.scale_causal_mask_backward(&dscaled, scale, causal)?;
+        let dq = self.matmul(&dscores, &cache.k)?;
+        let dk = self.matmul_t(&dscores, &cache.q, true, false)?;
+        let dwq = self.matmul_t(&xn, &dq, true, false)?; // xnᵀ·dq     (d×d)
+        let dwk = self.matmul_t(&xn, &dk, true, false)?; // xnᵀ·dk     (d×d)
+        let dwv = self.matmul_t(&xn, &dv, true, false)?; // xnᵀ·dv     (d×d)
+        let dxn = self.add(
+            &self.add(
+                &self.matmul_t(&dq, w.wq, false, true)?,
+                &self.matmul_t(&dk, w.wk, false, true)?,
+            )?,
+            &self.matmul_t(&dv, w.wv, false, true)?,
+        )?;
+        let dx = self.add(&dh, &self.rms_norm_backward(x, w.norm1, &dxn, eps)?)?;
+
+        Ok((
+            dx,
+            BlockGrads {
+                dwq,
+                dwk,
+                dwv,
+                dwo,
+                dwg,
+                dwu,
+                dwd,
+            },
+        ))
     }
 
     /// Apply a **stack of transformer blocks** in sequence, fully resident:
@@ -1803,6 +1895,188 @@ mod tests {
                 .unwrap();
         }
         assert!(last < first * 0.5, "AdamW barely moved: {first} → {last}");
+    }
+
+    /// The block weight gradient `dWq` must match numerical gradients: for
+    /// `L = Σ block(x; W)⊙G`, `transformer_block_backward_full` gives `dWq`,
+    /// checked against central finite differences of `L` over `Wq` (via the CPU
+    /// block oracle). Validates the weight-grad plumbing. Skips if no adapter.
+    #[test]
+    fn block_weight_grad_dwq_matches_finite_differences() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (4usize, 6usize, 10usize);
+        let eps = 1e-5f32;
+        let gen = |n: usize, p: f32, a: f32| -> Vec<f32> {
+            (0..n).map(|i| (i as f32 * 0.037 + p).sin() * a).collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.02 * i as f32).collect();
+        let (wq, wk, wv, wo) = (
+            gen(d * d, 0.5, 0.3),
+            gen(d * d, 1.1, 0.3),
+            gen(d * d, 1.7, 0.3),
+            gen(d * d, 2.3, 0.3),
+        );
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.01 * i as f32).collect();
+        let (wg, wu, wd) = (
+            gen(d * h, 2.9, 0.25),
+            gen(d * h, 3.5, 0.25),
+            gen(h * d, 4.1, 0.25),
+        );
+        let g = gen(t * d, 5.0, 1.0);
+
+        let up = |data: &[f32], r, c| chain.upload(data, r, c);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (up(&wq, d, d), up(&wk, d, d), up(&wv, d, d), up(&wo, d, d));
+        let (gwg, gwu, gwd) = (up(&wg, d, h), up(&wu, d, h), up(&wd, h, d));
+        let weights = BlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        };
+        let gx = up(&x, t, d);
+        let (_out, cache) = chain
+            .transformer_block_forward_cached(&gx, &weights, eps, true)
+            .unwrap();
+        let (_dx, grads) = chain
+            .transformer_block_backward_full(&gx, &weights, &cache, &up(&g, t, d), eps, true)
+            .unwrap();
+        let dwq_gpu = chain.download(&grads.dwq).unwrap();
+
+        // Finite differences of L = Σ block(x; Wq)⊙G over Wq.
+        let loss = |wqp: &[f32]| -> f32 {
+            cpu_block(
+                &x,
+                (&n1, &n2),
+                (wqp, &wk, &wv, &wo),
+                (&wg, &wu, &wd),
+                (t, d, h),
+                eps,
+                true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let step = 1e-3f32;
+        for idx in 0..d * d
+        {
+            let (mut wp, mut wm) = (wq.clone(), wq.clone());
+            wp[idx] += step;
+            wm[idx] -= step;
+            let fd = (loss(&wp) - loss(&wm)) / (2.0 * step);
+            assert!(
+                (fd - dwq_gpu[idx]).abs() < 2e-2,
+                "dWq[{idx}]: fd={fd} gpu={}",
+                dwq_gpu[idx]
+            );
+        }
+    }
+
+    /// **A transformer block trains on the GPU.** Fit a fixed target with an MSE
+    /// loss `L = ½‖block(x) − Y‖²` (so `dout = block(x) − Y`); each step runs the
+    /// forward, the full backward (all 7 projection grads), and an AdamW update
+    /// of every projection — entirely on the device. Asserts the loss falls well
+    /// below the start. Skips if no adapter.
+    #[test]
+    fn transformer_block_trains_with_adamw() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (4usize, 6usize, 10usize);
+        let eps = 1e-5f32;
+        let gen = |n: usize, p: f32, a: f32| -> Vec<f32> {
+            (0..n).map(|i| (i as f32 * 0.041 + p).sin() * a).collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let y = gen(t * d, 7.0, 0.5); // target
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.02 * i as f32).collect();
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.01 * i as f32).collect();
+        let up = |data: &[f32], r, c| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let gy = up(&y, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        // Trainable projections + their AdamW moments (start at zero).
+        let mk = |data: Vec<f32>, r, c| {
+            (
+                up(&data, r, c),
+                up(&vec![0.0; r * c], r, c),
+                up(&vec![0.0; r * c], r, c),
+            )
+        };
+        let (gwq, mq, vq) = mk(gen(d * d, 0.5, 0.3), d, d);
+        let (gwk, mk_, vk) = mk(gen(d * d, 1.1, 0.3), d, d);
+        let (gwv, mv, vv) = mk(gen(d * d, 1.7, 0.3), d, d);
+        let (gwo, mo, vo) = mk(gen(d * d, 2.3, 0.3), d, d);
+        let (gwg, mg, vg) = mk(gen(d * h, 2.9, 0.25), d, h);
+        let (gwu, mu, vu) = mk(gen(d * h, 3.5, 0.25), d, h);
+        let (gwd, md, vd) = mk(gen(h * d, 4.1, 0.25), h, d);
+        let betas = (0.9f32, 0.999f32);
+
+        let mut first = 0.0f32;
+        let mut last = 0.0f32;
+        for step in 1..=40u32
+        {
+            let weights = BlockWeights {
+                norm1: &gn1,
+                wq: &gwq,
+                wk: &gwk,
+                wv: &gwv,
+                wo: &gwo,
+                norm2: &gn2,
+                wg: &gwg,
+                wu: &gwu,
+                wd: &gwd,
+            };
+            let (out, cache) = chain
+                .transformer_block_forward_cached(&gx, &weights, eps, true)
+                .unwrap();
+            let out_cpu = chain.download(&out).unwrap();
+            let l: f32 = out_cpu
+                .iter()
+                .zip(&y)
+                .map(|(o, t)| 0.5 * (o - t) * (o - t))
+                .sum();
+            if step == 1
+            {
+                first = l;
+            }
+            last = l;
+            // dL/dout = out − Y  (computed as a resident subtract via add of −Y).
+            let neg_y = chain.sgd_step(&gy, &gy, 2.0).unwrap(); // gy − 2·gy = −gy
+            let dout = chain.add(&out, &neg_y).unwrap();
+            let (_dx, grads) = chain
+                .transformer_block_backward_full(&gx, &weights, &cache, &dout, eps, true)
+                .unwrap();
+            let opt = |p: &GpuMatrix, gr: &GpuMatrix, m: &GpuMatrix, v: &GpuMatrix| {
+                chain
+                    .adamw_step(p, gr, m, v, 0.02, betas, 1e-8, 0.0, step)
+                    .unwrap();
+            };
+            opt(&gwq, &grads.dwq, &mq, &vq);
+            opt(&gwk, &grads.dwk, &mk_, &vk);
+            opt(&gwv, &grads.dwv, &mv, &vv);
+            opt(&gwo, &grads.dwo, &mo, &vo);
+            opt(&gwg, &grads.dwg, &mg, &vg);
+            opt(&gwu, &grads.dwu, &mu, &vu);
+            opt(&gwd, &grads.dwd, &md, &vd);
+        }
+        assert!(last < first * 0.5, "block did not train: {first} → {last}");
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.
