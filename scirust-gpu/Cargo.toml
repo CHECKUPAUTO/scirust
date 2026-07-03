@@ -27,3 +27,9 @@ bytemuck = { version = "1", optional = true }
 [[example]]
 name = "gpu_attention_probe"
 required-features = ["wgpu"]
+
+# The GPU-vs-CPU bench uses the same wgpu-gated `ops` / `GpuChain` API, so it
+# likewise only builds with the `wgpu` feature.
+[[example]]
+name = "gpu_bench"
+required-features = ["wgpu"]
