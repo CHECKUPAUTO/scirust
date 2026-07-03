@@ -335,6 +335,18 @@ impl GpuChain {
             .scale_causal_mask_backward_resident(dout, scale, causal)
     }
 
+    /// Backward of the embedding gather: accumulate `dout` (`t×d`) into a
+    /// resident `vocab × d` table gradient (row `v` = sum of `dout` rows whose
+    /// token is `v`). Deterministic, no atomics. Result resident.
+    pub fn embed_backward(
+        &self,
+        tokens: &[u32],
+        dout: &GpuMatrix,
+        vocab: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.embed_backward_resident(tokens, dout, vocab)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1287,6 +1299,58 @@ mod tests {
             {
                 assert_eq!(din_gpu[i * n + j], 0.0, "({i},{j}) not zeroed");
             }
+        }
+    }
+
+    /// Embedding backward: the scatter-sum must match the CPU oracle exactly
+    /// (a pure accumulation of gathered rows) and match finite differences of
+    /// `L = Σ embed(tokens, E)⊙G` over the table `E`. Skips if no adapter.
+    #[test]
+    fn embed_backward_matches_cpu_and_finite_differences() {
+        use crate::ops::{cpu_embed, cpu_embed_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, d) = (7usize, 4usize);
+        let tokens: Vec<u32> = vec![0, 3, 6, 3, 1, 3]; // token 3 repeats → accumulation
+        let t = tokens.len();
+        let g: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect(); // dL/dOut
+
+        let dtable_gpu = chain
+            .download(
+                &chain
+                    .embed_backward(&tokens, &chain.upload(&g, t, d), vocab)
+                    .unwrap(),
+            )
+            .unwrap();
+        let dtable_cpu = cpu_embed_backward(&tokens, &g, d, vocab);
+        assert!(rel_err(&dtable_gpu, &dtable_cpu) < 1e-5);
+
+        // Finite differences of L = Σ embed(tokens, E)⊙G over the table E.
+        let table: Vec<f32> = (0..vocab * d).map(|i| (i as f32 * 0.11).cos()).collect();
+        let loss = |tab: &[f32]| -> f32 {
+            cpu_embed(&tokens, tab, d, vocab)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..vocab * d
+        {
+            let (mut ep, mut em) = (table.clone(), table.clone());
+            ep[idx] += eps;
+            em[idx] -= eps;
+            let fd = (loss(&ep) - loss(&em)) / (2.0 * eps);
+            assert!(
+                (fd - dtable_gpu[idx]).abs() < 1e-2,
+                "dE[{idx}]: fd={fd} gpu={}",
+                dtable_gpu[idx]
+            );
         }
     }
 

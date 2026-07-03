@@ -20,9 +20,9 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_rms_norm_backward, cpu_scale_causal_mask,
-    cpu_scale_causal_mask_backward, cpu_softmax, cpu_softmax_backward, cpu_swiglu_backward,
-    rel_err,
+    MASK_NEG, cpu_embed, cpu_embed_backward, cpu_rms_norm, cpu_rms_norm_backward,
+    cpu_scale_causal_mask, cpu_scale_causal_mask_backward, cpu_softmax, cpu_softmax_backward,
+    cpu_swiglu_backward, rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -522,6 +522,26 @@ fn main() {
             &mdin_gpu,
             &cpu_scale_causal_mask_backward(&mdout, mn, mn, 0.125, true),
         ),
+        &mut failures,
+    );
+
+    // 15. BACKWARD: embedding scatter-sum — dE[v] = Σ over tokens==v of dOut.
+    let evocab = 9usize;
+    let etoks: Vec<u32> = vec![0, 4, 8, 4, 1, 4]; // token 4 repeats → accumulation
+    let et_len = etoks.len();
+    let edout: Vec<f32> = (0..et_len * d)
+        .map(|i| (i as f32 * 0.3 - 0.5).sin())
+        .collect();
+    let edt_gpu = chain
+        .download(
+            &chain
+                .embed_backward(&etoks, &chain.upload(&edout, et_len, d), evocab)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: embedding scatter-sum (dE[v])",
+        rel_err(&edt_gpu, &cpu_embed_backward(&etoks, &edout, d, evocab)),
         &mut failures,
     );
 

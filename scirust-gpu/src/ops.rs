@@ -295,6 +295,23 @@ pub fn cpu_scale_causal_mask_backward(
     din
 }
 
+/// CPU reference for the embedding-gather backward: accumulate upstream grad
+/// `dout` (`tokens.len() × d`) into a `vocab × d` table gradient — row `v` sums
+/// the `dout` rows whose token id is `v`. The GPU `embed_backward_resident`
+/// kernel's correctness contract.
+pub fn cpu_embed_backward(tokens: &[u32], dout: &[f32], d: usize, vocab: usize) -> Vec<f32> {
+    let mut dtable = vec![0.0f32; vocab * d];
+    for (i, &tok) in tokens.iter().enumerate()
+    {
+        let v = (tok as usize).min(vocab.saturating_sub(1));
+        for c in 0..d
+        {
+            dtable[v * d + c] += dout[i * d + c];
+        }
+    }
+    dtable
+}
+
 /// CPU reference for token embedding gather: output row `i` is row `tokens[i]`
 /// of the `vocab × d` row-major `table` (token ids clamped to `vocab-1`). The
 /// GPU `embed_resident` kernel's correctness contract.

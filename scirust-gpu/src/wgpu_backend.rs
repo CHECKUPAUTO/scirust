@@ -232,6 +232,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Backward of the token embedding gather: accumulate the upstream grad `dout`
+/// (`rows × d`) into the `vocab × d` table gradient — row `v` of `dtable` is the
+/// sum of `dout` rows whose token id is `v`. Deterministic, **no atomics**: one
+/// invocation per `(v, c)` output cell scans the `rows` tokens and sums the
+/// matching contributions. The CPU contract is [`crate::ops::cpu_embed_backward`].
+const EMBED_BWD_WGSL: &str = r#"
+struct P { rows: u32, d: u32, vocab: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       tokens: array<u32>;
+@group(0) @binding(1) var<storage, read>       dout:   array<f32>;
+@group(0) @binding(2) var<storage, read_write> dtable: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= p.vocab * p.d) { return; }
+    let v = idx / p.d;
+    let c = idx % p.d;
+    var acc = 0.0;
+    for (var i: u32 = 0u; i < p.rows; i = i + 1u) {
+        if (min(tokens[i], p.vocab - 1u) == v) { acc = acc + dout[i * p.d + c]; }
+    }
+    dtable[idx] = acc;
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -299,6 +326,7 @@ pub struct WgpuContext {
     swiglu_bwd_pipeline: wgpu::ComputePipeline,
     rmsnorm_bwd_pipeline: wgpu::ComputePipeline,
     mask_bwd_pipeline: wgpu::ComputePipeline,
+    embed_bwd_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -473,6 +501,18 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let embed_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("embed_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(EMBED_BWD_WGSL)),
+        });
+        let embed_bwd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("embed_bwd"),
+            layout: None,
+            module: &embed_bwd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -486,6 +526,7 @@ impl WgpuContext {
             swiglu_bwd_pipeline,
             rmsnorm_bwd_pipeline,
             mask_bwd_pipeline,
+            embed_bwd_pipeline,
             adapter_name,
         })
     }
@@ -1161,6 +1202,95 @@ impl WgpuContext {
             buf: dx,
             rows: x.rows,
             cols: x.cols,
+        })
+    }
+
+    /// Backward of the embedding gather: accumulate the upstream grad `dout`
+    /// (`tokens.len() × d`) into a resident `vocab × d` table gradient — row `v`
+    /// is the sum of `dout` rows whose token is `v`. Deterministic, no atomics.
+    /// Matches [`crate::ops::cpu_embed_backward`].
+    pub fn embed_backward_resident(
+        &self,
+        tokens: &[u32],
+        dout: &GpuMatrix,
+        vocab: usize,
+    ) -> BackendResult<GpuMatrix> {
+        let rows = tokens.len();
+        let d = dout.cols;
+        if dout.rows != rows
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "embed_backward: dout has {} rows, expected {rows} tokens",
+                dout.rows
+            )));
+        }
+        let elems = vocab * d;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dtable = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("embed-bwd-dtable"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && rows > 0
+        {
+            let tok_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-bwd-tokens"),
+                    contents: bytemuck::cast_slice(tokens),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+            let params: [u32; 4] = [rows as u32, d as u32, vocab as u32, 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("embed-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("embed-bwd"),
+                layout: &self.embed_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: tok_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dout.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dtable.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("embed-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("embed-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.embed_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dtable,
+            rows: vocab,
+            cols: d,
         })
     }
 
