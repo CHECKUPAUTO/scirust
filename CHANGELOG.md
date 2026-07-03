@@ -5,6 +5,47 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — tolérancement de forme et modal (`scirust-tolerance`)
+Complément « surface + modal » de la thèse d'Adragna (*Tolérancement des
+Systèmes Assemblés, une approche par le Tolérancement Inertiel et Modal*,
+tel-00403876 ; arXiv:1002.0251) qui étend le tolérancement inertiel d'une
+caractéristique scalaire à une surface mesurée entière :
+
+- **`form`** (nouveau module) : `FormBatch` sur une matrice de mesures
+  (parts × points, écart au nominal). L'**inertie de surface**
+  `I_S = √((1/m) Σⱼ Iⱼ²)` est la moyenne quadratique des inerties de points,
+  égale à la RMS de tous les écarts au nominal — vérifié par l'identité
+  `I_S² = (1/(m·n)) Σᵢⱼ xᵢⱼ²`. Fournit aussi les inerties par point, le point
+  le pire, et la signature de forme moyenne.
+- **`modal`** (nouveau module) : décomposition modale des défauts de forme
+  « à la manière des séries de Fourier ». `ModalBasis` (base DCT-II
+  exactement orthonormée, base utilisateur, ou orthonormalisation de
+  Gram-Schmidt d'une base FEM), `decompose`/`reconstruct`/`residual_norm`
+  (Parseval `Σ λₖ² = ‖d‖²`), et `modal_inertias` dont l'identité de
+  partition **`Σₖ Iₖ² = m·I_S²`** rend le tolérancement des modes (petit
+  jeu de budgets physiques : mode 0 = taille, 1 = inclinaison, 2 = ovalité…)
+  équivalent au tolérancement de toute la surface.
+- **`spatial`** (nouveau module) : **tolérancement inertiel 3D par
+  torseurs de petits déplacements** (SDT, d'après Bourdet & Clément ;
+  Adragna/Samper/Pillet, arXiv:1002.0253). L'écart d'un point vaut
+  `d(M) = T + R × OM`, et l'écart normal `e(M) = d(M)·n = T·n + R·(OM×n)
+  = g(M)·θ` avec le vecteur d'influence `g = [n ; OM×n]`. `Torsor`,
+  `Feature` (échantillon points+normales), `fit_torsor` (association aux
+  moindres carrés `θ=(GᵀG)⁻¹Gᵀe` par élimination de Gauss avec pivot,
+  renvoie `None` si la surface est sous-contrainte — un plan seul
+  n'observe que 3 DDL), `form_residual` (défaut de forme résiduel, à
+  passer à `modal`), et l'**inertie de surface** `I_S² = θ̄ᵀHθ̄ + tr(HΣ_θ)`
+  avec `H=(1/m)Σ g gᵀ` — la combinaison statistique exacte du défaut de
+  **localisation** (T) et d'**orientation** (R), avec sa décomposition
+  location/orientation/couplage. La forme analytique est vérifiée égale à
+  l'empirique (via `FormBatch`) et l'association vérifiée par
+  aller-retour sur une pièce datum 3-2-1 pleine échelle. Ceci **remplace**
+  l'ancienne limite « non livré » : la géométrie 3D par torseurs est
+  maintenant fournie et vérifiée.
+- **`scirust-mcp`** : nouveaux outils `tolerance_form_modal` (inertie de
+  surface + décomposition modale) et `tolerance_3d_surface_inertia`
+  (inertie de surface 3D + décomposition localisation/orientation).
+
 ### Ajouté — plateforme de trading crypto agentique (`scirust-trader` + `scirust-mcp`)
 Extension majeure du MVP `scirust-trader` (marché→indicateurs→modèle→
 certification→risque→LLM→preuve) en une boîte à outils de trading niveau

@@ -9,8 +9,13 @@ use scirust_tolerance::capability::CapabilitySummary;
 use scirust_tolerance::chain::{
     Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
 };
+use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::sampling::design_plan;
+use scirust_tolerance::spatial::{
+    Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
+};
 use serde_json::json;
 
 pub fn tolerance_tools() -> Vec<McpTool> {
@@ -18,7 +23,32 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         inertial_capability_tool(),
         chain_allocate_tool(),
         acceptance_plan_tool(),
+        form_modal_tool(),
+        torsor_3d_tool(),
     ]
+}
+
+/// Parse a JSON array of 3-element numeric arrays into `Vec<[f64; 3]>`.
+fn vec3_array(args: &serde_json::Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("missing `{key}`"))?
+        .iter()
+        .map(|row| {
+            let a = row
+                .as_array()
+                .ok_or(format!("`{key}` must be an array of [x,y,z]"))?;
+            if a.len() != 3
+            {
+                return Err(format!("`{key}` rows must have 3 numbers"));
+            }
+            Ok([
+                a[0].as_f64().ok_or("non-numeric")?,
+                a[1].as_f64().ok_or("non-numeric")?,
+                a[2].as_f64().ok_or("non-numeric")?,
+            ])
+        })
+        .collect()
 }
 
 fn f64_field(args: &serde_json::Value, key: &str) -> Result<f64, String> {
@@ -224,6 +254,129 @@ fn acceptance_plan_tool() -> McpTool {
     }
 }
 
+fn form_modal_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_form_modal".to_string(),
+        description: "Surface / form inertial tolerancing with modal decomposition (Adragna, \
+            Pillet, Samper). Given a batch of surface measurements (rows = parts, columns = points \
+            measured against nominal 0), returns the surface inertia I_S (RMS of every deviation \
+            from nominal), the worst point, and — via an orthonormal DCT modal basis — the \
+            per-mode inertias I_k, which for the complete basis (num_modes = all points, the default) \
+            partition the surface inertia (sum I_k^2 = m*I_S^2); with fewer modes the sum is smaller. \
+            Low modes are physical: mode 0 = size/mean offset, 1 = tilt, 2 = ovality/curvature, etc."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "measurements": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "number" } },
+                    "description": "rows = parts, columns = point deviations from nominal",
+                },
+                "num_modes": { "type": "integer", "description": "modes to report (default = all points)" },
+            },
+            "required": ["measurements"],
+        }),
+        handler: Box::new(|args| {
+            let rows = args
+                .get("measurements")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `measurements`")?;
+            let parts: Vec<Vec<f64>> = rows
+                .iter()
+                .map(|r| {
+                    r.as_array()
+                        .ok_or("`measurements` must be an array of arrays".to_string())?
+                        .iter()
+                        .map(|x| x.as_f64().ok_or("non-numeric measurement".to_string()))
+                        .collect::<Result<Vec<f64>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let batch = FormBatch::new(parts).ok_or("empty or ragged `measurements`")?;
+            let m = batch.points();
+            let k = args
+                .get("num_modes")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(m);
+            let basis = ModalBasis::dct(m, k);
+            let modal = modal_inertias(&basis, batch.deviations());
+            let i_s = batch.surface_inertia();
+            let (worst_idx, worst) = batch.worst_point().ok_or("no points")?;
+
+            Ok(json!({
+                "surface_inertia": i_s,
+                "worst_point": { "index": worst_idx, "inertia": worst.value() },
+                "modal_inertias": modal.iter().enumerate().map(|(mode, i)| json!({
+                    "mode": mode,
+                    "inertia": i.value(),
+                    "off_centering": i.off_centering,
+                })).collect::<Vec<_>>(),
+                // Partition check (exact only for a complete basis k = m).
+                "modal_energy_sum": modal.iter().map(|i| i.mean_squared_deviation()).sum::<f64>(),
+                "surface_energy": m as f64 * i_s * i_s,
+            }))
+        }),
+    }
+}
+
+fn torsor_3d_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_3d_surface_inertia".to_string(),
+        description: "3D inertial tolerancing by small-displacement torsors (Adragna, Samper, \
+            Pillet). Given a nominal feature sampled as points (positions OM relative to the working \
+            origin) with outward unit normals, and a batch of per-part torsors (translation T + \
+            small rotation R), returns the surface inertia I_S — the RMS normal deviation e=T·n+R·(OM×n) \
+            over all points and parts — and its split into location (translation), orientation \
+            (rotation), and coupling contributions to I_S² (the statistical combination of location \
+            and orientation)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "points":      { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "OM positions [x,y,z] per sample point" },
+                "normals":     { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "outward unit normals [x,y,z] per sample point" },
+                "translations":{ "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "per-part translation T [x,y,z]" },
+                "rotations":   { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "per-part small rotation R [x,y,z]" },
+            },
+            "required": ["points", "normals", "translations", "rotations"],
+        }),
+        handler: Box::new(|args| {
+            let points = vec3_array(&args, "points")?;
+            let normals = vec3_array(&args, "normals")?;
+            let translations = vec3_array(&args, "translations")?;
+            let rotations = vec3_array(&args, "rotations")?;
+            if points.len() != normals.len() || points.is_empty()
+            {
+                return Err("`points` and `normals` must be non-empty and equal length".to_string());
+            }
+            if translations.len() != rotations.len() || translations.is_empty()
+            {
+                return Err(
+                    "`translations` and `rotations` must be non-empty and equal length".to_string(),
+                );
+            }
+            let feature = Feature::new(points.into_iter().zip(normals).collect());
+            let torsors: Vec<Torsor> = translations
+                .into_iter()
+                .zip(rotations)
+                .map(|(t, r)| Torsor::new(t, r))
+                .collect();
+            let i_s = surface_inertia_from_torsors(&feature, &torsors);
+            let d = inertia_decomposition(&feature, &torsors);
+            Ok(json!({
+                "surface_inertia": i_s,
+                "decomposition_of_i_s_squared": {
+                    "location": d.location,
+                    "orientation": d.orientation,
+                    "coupling": d.coupling,
+                    "total": d.total(),
+                },
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +445,63 @@ mod tests {
     fn acceptance_plan_tool_rejects_bad_ratio() {
         let tool = acceptance_plan_tool();
         assert!((tool.handler)(json!({ "alpha": 0.05, "beta": 0.1, "ratio_bad": 0.9 })).is_err());
+    }
+
+    #[test]
+    fn form_modal_tool_partitions_surface_inertia() {
+        let tool = form_modal_tool();
+        let out = (tool.handler)(json!({
+            "measurements": [
+                [0.10, -0.05, 0.20, 0.00],
+                [-0.10, 0.05, 0.10, 0.10],
+                [0.00, 0.15, -0.10, 0.05],
+            ],
+        }))
+        .unwrap();
+        // Complete DCT basis ⇒ modal energy sum equals m·I_S².
+        let esum = out["modal_energy_sum"].as_f64().unwrap();
+        let etot = out["surface_energy"].as_f64().unwrap();
+        assert!((esum - etot).abs() < 1e-9);
+        assert_eq!(out["modal_inertias"].as_array().unwrap().len(), 4);
+        assert!(out["surface_inertia"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn form_modal_tool_rejects_ragged_input() {
+        let tool = form_modal_tool();
+        assert!((tool.handler)(json!({ "measurements": [[0.1, 0.2], [0.1]] })).is_err());
+    }
+
+    #[test]
+    fn torsor_3d_tool_reports_inertia_and_decomposition() {
+        let tool = torsor_3d_tool();
+        let out = (tool.handler)(json!({
+            "points":  [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            "normals": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            "translations": [[0.02, -0.01, 0.03], [-0.01, 0.0, 0.01]],
+            "rotations":    [[0.01, 0.0, -0.005], [0.0, 0.005, 0.0]],
+        }))
+        .unwrap();
+        assert!(out["surface_inertia"].as_f64().unwrap() > 0.0);
+        let d = &out["decomposition_of_i_s_squared"];
+        let total = d["total"].as_f64().unwrap();
+        let sum = d["location"].as_f64().unwrap()
+            + d["orientation"].as_f64().unwrap()
+            + d["coupling"].as_f64().unwrap();
+        assert!((total - sum).abs() < 1e-12);
+    }
+
+    #[test]
+    fn torsor_3d_tool_rejects_length_mismatch() {
+        let tool = torsor_3d_tool();
+        assert!(
+            (tool.handler)(json!({
+                "points": [[1.0, 0.0, 0.0]],
+                "normals": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                "translations": [[0.0, 0.0, 0.0]],
+                "rotations": [[0.0, 0.0, 0.0]],
+            }))
+            .is_err()
+        );
     }
 }
