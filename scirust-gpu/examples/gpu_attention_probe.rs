@@ -20,7 +20,7 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{MASK_NEG, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err};
-use scirust_gpu::{CpuBackend, GpuChain, RawComputeBackend, WgpuContext};
+use scirust_gpu::{BlockWeights, CpuBackend, GpuChain, RawComputeBackend, WgpuContext};
 
 /// Parity tolerance: GPU accumulation order is not bit-identical to the scalar
 /// CPU oracle, so we assert a relative Frobenius bound rather than equality.
@@ -207,6 +207,80 @@ fn main() {
     check(
         "resident SwiGLU MLP (silu(x·Wg)⊙(x·Wu)·Wd)",
         rel_err(&mlp_gpu, &mlp_cpu),
+        &mut failures,
+    );
+
+    // 7. A COMPLETE residual transformer block in ONE resident call — the whole
+    //    350M layer forward: h = x + attn(rms_norm(x)·Wq,·Wk,·Wv)·Wo ; then
+    //    out = h + swiglu_mlp(rms_norm(h)). Reuses the MLP weights from check 6.
+    let mk = |phase: f32| -> Vec<f32> {
+        (0..d * d)
+            .map(|i| (i as f32 * 0.03 + phase).sin() * 0.3)
+            .collect()
+    };
+    let (bq, bk, bv, bo) = (mk(0.5), mk(1.1), mk(1.7), mk(2.3));
+    let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.01 * i as f32).collect();
+    let (gbq, gbk, gbv, gbo) = (
+        chain.upload(&bq, d, d),
+        chain.upload(&bk, d, d),
+        chain.upload(&bv, d, d),
+        chain.upload(&bo, d, d),
+    );
+    let gn2 = chain.upload(&n2, 1, d);
+    let bw = BlockWeights {
+        norm1: &gnw,
+        wq: &gbq,
+        wk: &gbk,
+        wv: &gbv,
+        wo: &gbo,
+        norm2: &gn2,
+        wg: &gwg,
+        wu: &gwu,
+        wd: &gwd,
+    };
+    let blk_gpu = chain
+        .download(&chain.transformer_block(&gnx, &bw, eps, true).unwrap())
+        .unwrap();
+    // CPU oracle for the full block.
+    let gemm = |a: &[f32], b: &[f32], m, k, n| CpuBackend.gemm_f32(a, b, m, k, n).unwrap();
+    let transpose = |a: &[f32], r: usize, c: usize| {
+        let mut o = vec![0.0f32; r * c];
+        for i in 0..r
+        {
+            for j in 0..c
+            {
+                o[j * r + i] = a[i * c + j];
+            }
+        }
+        o
+    };
+    let xn = cpu_rms_norm(&nx, &nw, eps, t, d);
+    let q = gemm(&xn, &bq, t, d, d);
+    let kk = gemm(&xn, &bk, t, d, d);
+    let vv2 = gemm(&xn, &bv, t, d, d);
+    let s = cpu_scale_causal_mask(
+        &gemm(&q, &transpose(&kk, t, d), t, d, t),
+        t,
+        t,
+        1.0 / (d as f32).sqrt(),
+        true,
+    );
+    let a = gemm(&cpu_softmax(&s, t, t), &vv2, t, t, d);
+    let ao = gemm(&a, &bo, t, d, d);
+    let hblk: Vec<f32> = nx.iter().zip(&ao).map(|(a, b)| a + b).collect();
+    let hn = cpu_rms_norm(&hblk, &n2, eps, t, d);
+    let g2 = gemm(&hn, &wg, t, d, hh);
+    let u2 = gemm(&hn, &wu, t, d, hh);
+    let act2: Vec<f32> = g2
+        .iter()
+        .zip(&u2)
+        .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+        .collect();
+    let m2 = gemm(&act2, &wd, t, hh, d);
+    let blk_cpu: Vec<f32> = hblk.iter().zip(&m2).map(|(a, b)| a + b).collect();
+    check(
+        "resident transformer block (attn+MLP+residuals)",
+        rel_err(&blk_gpu, &blk_cpu),
         &mut failures,
     );
 
