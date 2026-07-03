@@ -272,8 +272,16 @@ impl LazyTensor {
         }
     }
     pub fn matmul(self, other: Self) -> Self {
-        let (m, _) = self.shape();
-        let (_, n) = other.shape();
+        let (m, k) = self.shape();
+        let (k2, n) = other.shape();
+        // Validate inner dimensions at graph-build time, matching the eager
+        // `naive_matmul` assert. Without this the COMPILED MatMul (which indexes
+        // `b.data[p*n+j]` for `p in 0..k`) reads out of bounds or produces silent
+        // garbage on a dimension mismatch, unlike the eager path which panics.
+        assert_eq!(
+            k, k2,
+            "LazyTensor::matmul: inner dimensions mismatch — ({m}x{k}) · ({k2}x{n})"
+        );
         let id = self.graph.push(LazyOp::MatMul(self.id, other.id), (m, n));
         Self {
             graph: self.graph,
@@ -315,5 +323,32 @@ mod tests {
         let l = LazyTensor::from_var(g.clone(), &tape, v);
         let v2 = l.scale(10.0).materialize_into(&tape);
         assert_eq!(tape.value(v2.idx()).data, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "inner dimensions mismatch")]
+    fn matmul_rejects_dimension_mismatch() {
+        let g = LazyGraph::new();
+        let a = LazyTensor::from_tensor(g.clone(), Tensor::from_vec(vec![1.0; 6], 2, 3)); // 2x3
+        let b = LazyTensor::from_tensor(g.clone(), Tensor::from_vec(vec![1.0; 8], 4, 2)); // 4x2 (3 != 4)
+        let _ = a.matmul(b);
+    }
+
+    #[test]
+    fn matmul_valid_compiles_and_matches_eager() {
+        let g = LazyGraph::new();
+        let a = LazyTensor::from_tensor(
+            g.clone(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3),
+        );
+        let b = LazyTensor::from_tensor(
+            g.clone(),
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3, 2),
+        );
+        let y = a.matmul(b);
+        let eager = y.value().data;
+        let compiled = y.compile().execute().data;
+        assert_eq!(compiled, eager);
+        assert_eq!(compiled, vec![22.0, 28.0, 49.0, 64.0]);
     }
 }

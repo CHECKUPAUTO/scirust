@@ -429,7 +429,22 @@ impl<'g> Compiler<'g> {
             Some([single]) =>
             {
                 let consumer_op = self.graph.nodes_borrow()[*single].op.clone();
-                is_pointwise(&consumer_op)
+                if !is_pointwise(&consumer_op)
+                {
+                    return false;
+                }
+                // A binary pointwise consumer folds only its FIRST operand into
+                // the linear accumulator; the second operand must be emitted
+                // separately and referenced via LoadInput. Fusing both would form
+                // a "diamond" (two fused branches meeting at one binary op) that a
+                // single-accumulator chain cannot represent. Keeping this in sync
+                // with collect_recursive is what makes the diamond panics in
+                // append_to_chain unreachable.
+                match op_parents(&consumer_op).as_slice()
+                {
+                    [first, _second] => *first == id,
+                    _ => true,
+                }
             },
             _ => false,
         }
@@ -581,10 +596,16 @@ impl<'g> Compiler<'g> {
 
         if in_chain && is_pw
         {
-            // On descend d'abord chez les parents pointwise mono-consommateur
-            for parent in op_parents(&op)
+            // Descend into the first operand only. For a binary op the second
+            // operand is left out of the chain (it becomes a LoadInput), which
+            // prevents a diamond; for a unary op there is only one parent.
+            // Must stay in sync with will_be_fused.
+            match op_parents(&op).as_slice()
             {
-                self.collect_recursive(parent, consumers, out, false);
+                [first, _second] => self.collect_recursive(*first, consumers, out, false),
+                [only] => self.collect_recursive(*only, consumers, out, false),
+                _ =>
+                {},
             }
             out.push(id);
         }
@@ -865,5 +886,64 @@ mod tests {
         {
             let _ = plan.execute_with(&[("x", Tensor::from_vec(vec![1.0; 4], 1, 4))]);
         }
+    }
+
+    // Diamonds: a binary op whose BOTH operands are single-consumer pointwise
+    // nodes (e.g. a residual `relu(a) + relu(b)`). The old fusion panicked
+    // ("diamant détecté"); compilation must now succeed and match eager eval.
+    fn diamond_a(g: &std::rc::Rc<LazyGraph>) -> LazyTensor {
+        LazyTensor::from_tensor(
+            g.clone(),
+            Tensor::from_vec(vec![-1.0, 2.0, -3.0, 4.0], 1, 4),
+        )
+    }
+    fn diamond_b(g: &std::rc::Rc<LazyGraph>) -> LazyTensor {
+        LazyTensor::from_tensor(g.clone(), Tensor::from_vec(vec![5.0, 6.0, -7.0, 8.0], 1, 4))
+    }
+
+    #[test]
+    fn fusion_add_diamond_matches_eager() {
+        let g = LazyGraph::new();
+        // relu(a) = [0,2,0,4], relu(b) = [5,6,0,8], sum = [5,8,0,12].
+        let y = diamond_a(&g).relu().add(diamond_b(&g).relu());
+        let eager = y.value().data;
+        let compiled = Compiler::new(&g).compile(y.id).execute().data;
+        assert_eq!(compiled, eager, "compiled != eager");
+        assert_eq!(compiled, vec![5.0, 8.0, 0.0, 12.0]);
+    }
+
+    #[test]
+    fn fusion_sub_diamond_matches_eager() {
+        let g = LazyGraph::new();
+        // relu(a) - relu(b) = [0,2,0,4] - [5,6,0,8] = [-5,-4,0,-4].
+        let y = diamond_a(&g).relu().sub(diamond_b(&g).relu());
+        let eager = y.value().data;
+        let compiled = Compiler::new(&g).compile(y.id).execute().data;
+        assert_eq!(compiled, eager);
+        assert_eq!(compiled, vec![-5.0, -4.0, 0.0, -4.0]);
+    }
+
+    #[test]
+    fn fusion_mul_diamond_matches_eager() {
+        let g = LazyGraph::new();
+        // relu(a) * relu(b) = [0,2,0,4] * [5,6,0,8] = [0,12,0,32].
+        let y = diamond_a(&g).relu().mul(diamond_b(&g).relu());
+        let eager = y.value().data;
+        let compiled = Compiler::new(&g).compile(y.id).execute().data;
+        assert_eq!(compiled, eager);
+        assert_eq!(compiled, vec![0.0, 12.0, 0.0, 32.0]);
+    }
+
+    #[test]
+    fn fusion_nested_diamond_both_branches_fused() {
+        // Both operands are multi-op fused chains meeting at a binary op:
+        //   left  = relu(scale(a, 2))    right = exp(relu(b))
+        let g = LazyGraph::new();
+        let left = diamond_a(&g).scale(2.0).relu();
+        let right = diamond_b(&g).relu().exp();
+        let y = left.mul(right);
+        let eager = y.value().data;
+        let compiled = Compiler::new(&g).compile(y.id).execute().data;
+        assert_eq!(compiled, eager, "nested diamond: compiled != eager");
     }
 }

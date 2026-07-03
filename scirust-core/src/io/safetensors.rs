@@ -251,8 +251,21 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
             ));
         }
 
+        // Reject negative dims/offsets from an untrusted header BEFORE casting to
+        // usize: `-1i64 as usize` becomes usize::MAX and then overflows
+        // `rows * cols` (a panic / DoS on a crafted file).
+        if shape.iter().chain(offsets.iter()).any(|&v| v < 0)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "valeur négative dans shape / data_offsets",
+            ));
+        }
         let (rows, cols) = (shape[0] as usize, shape[1] as usize);
         let (start, end) = (offsets[0] as usize, offsets[1] as usize);
+        let numel = rows.checked_mul(cols).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "débordement de rows * cols")
+        })?;
         if end > data.len() || start > end
         {
             return Err(io::Error::new(
@@ -260,12 +273,19 @@ fn parse_header(header: &str, data: &[u8]) -> io::Result<HashMap<String, Tensor>
                 "offsets hors bornes",
             ));
         }
-        let n = (end - start) / 4;
-        if n != rows * cols
+        if (end - start) % 4 != 0
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("taille data inattendue : {n} vs {}", rows * cols),
+                "span data_offsets non multiple de 4 octets (f32)",
+            ));
+        }
+        let n = (end - start) / 4;
+        if n != numel
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("taille data inattendue : {n} vs {numel}"),
             ));
         }
 
@@ -913,5 +933,30 @@ mod tests {
         }
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // A crafted header with a negative dimension must be rejected with an error,
+    // not cast to usize::MAX and panic on the rows*cols multiply (a DoS on an
+    // untrusted safetensors file).
+    #[test]
+    fn deserialize_rejects_negative_shape_without_panicking() {
+        let header = r#"{"t":{"dtype":"F32","shape":[-1,4],"data_offsets":[0,16]}}"#;
+        let hdr = header.as_bytes();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(hdr.len() as u64).to_le_bytes());
+        buf.extend_from_slice(hdr);
+        buf.extend_from_slice(&[0u8; 16]); // 4 f32 of payload
+        let r = deserialize(&buf);
+        assert!(r.is_err(), "negative shape must be an error");
+    }
+
+    // A valid round trip still works after the added validation.
+    #[test]
+    fn deserialize_valid_after_validation() {
+        let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let bytes = serialize(&[("w".to_string(), t.clone())]);
+        let map = deserialize(&bytes).expect("valid buffer must deserialize");
+        assert_eq!(map["w"].data, t.data);
+        assert_eq!(map["w"].shape(), (2, 2));
     }
 }
