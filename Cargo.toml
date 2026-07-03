@@ -81,6 +81,7 @@ members = [
     "scirust-som/crates/cli",
     "scirust-cli",
     "scirust-codetrans",
+    "scirust-transpiler",
     "scirust-som/crates/visualizer",
     "examples/industrial_monitor",
     "scirust-signal",
