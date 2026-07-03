@@ -149,18 +149,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 /// Backward of the SwiGLU gate `c = silu(a) ⊙ b` (`silu(x)=x·σ(x)`). One
-/// invocation per element writes both `da = dc · silu'(a) · b` and
-/// `db = dc · silu(a)`, where `silu'(a) = σ(a)·(1 + a·(1−σ(a)))`. The CPU
-/// contract is [`crate::ops::cpu_swiglu_backward`].
+/// invocation per element writes both gradients into a single `2n` output:
+/// `dab[i] = da = dc · silu'(a) · b` and `dab[n+i] = db = dc · silu(a)`, where
+/// `silu'(a) = σ(a)·(1 + a·(1−σ(a)))`. Packing both into one buffer keeps this
+/// at **4 storage buffers** (a, b, dc, dab) — within the portable
+/// `downlevel_defaults` limit that a five-buffer layout would exceed on real
+/// hardware. The CPU contract is [`crate::ops::cpu_swiglu_backward`].
 const SWIGLU_BWD_WGSL: &str = r#"
 struct P { n: u32, _p0: u32, _p1: u32, _p2: u32, };
 
-@group(0) @binding(0) var<storage, read>       a:  array<f32>;
-@group(0) @binding(1) var<storage, read>       b:  array<f32>;
-@group(0) @binding(2) var<storage, read>       dc: array<f32>;
-@group(0) @binding(3) var<storage, read_write> da: array<f32>;
-@group(0) @binding(4) var<storage, read_write> db: array<f32>;
-@group(0) @binding(5) var<uniform>             p: P;
+@group(0) @binding(0) var<storage, read>       a:   array<f32>;
+@group(0) @binding(1) var<storage, read>       b:   array<f32>;
+@group(0) @binding(2) var<storage, read>       dc:  array<f32>;
+@group(0) @binding(3) var<storage, read_write> dab: array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -169,8 +171,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let sig = 1.0 / (1.0 + exp(-a[i]));
     let silu = a[i] * sig;
     let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
-    da[i] = dc[i] * dsilu * b[i];
-    db[i] = dc[i] * silu;
+    dab[i] = dc[i] * dsilu * b[i];       // da
+    dab[p.n + i] = dc[i] * silu;         // db
 }
 "#;
 
@@ -1112,7 +1114,9 @@ impl WgpuContext {
             self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: bytes,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
         };
@@ -1120,6 +1124,16 @@ impl WgpuContext {
         let db = mk("swiglu-bwd-db");
         if n > 0
         {
+            // The kernel writes da into [0, n) and db into [n, 2n) of one buffer,
+            // keeping the layout at 4 storage buffers (a, b, dc, dab) — within the
+            // portable `downlevel_defaults` limit. We then split it into the two
+            // result buffers with GPU-side copies (no CPU round-trip).
+            let dab = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("swiglu-bwd-dab"),
+                size: 2 * bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
             let params: [u32; 4] = [n as u32, 0, 0, 0];
             let p_buf = self
                 .device
@@ -1146,14 +1160,10 @@ impl WgpuContext {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: da.as_entire_binding(),
+                        resource: dab.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: db.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
                         resource: p_buf.as_entire_binding(),
                     },
                 ],
@@ -1172,6 +1182,9 @@ impl WgpuContext {
                 pass.set_bind_group(0, &bind_group, &[]);
                 pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
             }
+            // Split the packed [da | db] into the two resident result buffers.
+            encoder.copy_buffer_to_buffer(&dab, 0, &da, 0, bytes);
+            encoder.copy_buffer_to_buffer(&dab, bytes, &db, 0, bytes);
             self.queue.submit(Some(encoder.finish()));
         }
         Ok((
