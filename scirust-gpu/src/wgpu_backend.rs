@@ -174,6 +174,64 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Backward of row-wise RMSNorm `y = x/rms · w` (`rms = √(mean(x²)+eps)`), input
+/// gradient only. One invocation per row computes
+/// `dx_j = (dy_j·w_j)/rms − x_j · (Σₖ dyₖ·wₖ·xₖ)/(d·rms³)` — the normalisation
+/// jacobian, whose second term couples all elements through `rms`. The CPU
+/// contract is [`crate::ops::cpu_rms_norm_backward`].
+const RMSNORM_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, eps_bits: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       x:      array<f32>;
+@group(0) @binding(1) var<storage, read>       weight: array<f32>;
+@group(0) @binding(2) var<storage, read>       dy:     array<f32>;
+@group(0) @binding(3) var<storage, read_write> dx:     array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    if (row >= p.rows) { return; }
+    if (p.cols == 0u) { return; }
+    let base = row * p.cols;
+    var ss = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { let v = x[base + j]; ss = ss + v * v; }
+    let ms = ss / f32(p.cols) + bitcast<f32>(p.eps_bits);
+    let rms = sqrt(ms);
+    var dot = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { dot = dot + dy[base + j] * weight[j] * x[base + j]; }
+    let inv = 1.0 / rms;
+    let coef = dot / (f32(p.cols) * ms * rms);
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) {
+        dx[base + j] = dy[base + j] * weight[j] * inv - x[base + j] * coef;
+    }
+}
+"#;
+
+/// Backward of the scale + causal mask. `din = scale·dout` at kept positions
+/// and `0` above the diagonal (masked keys carry no gradient — the `-1e30`
+/// sentinel was a constant). Same 2D dispatch/convention as the forward mask.
+const MASK_BWD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, causal: u32, scale_bits: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@group(0) @binding(2) var<uniform>             p: P;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.y;
+    let j = gid.x;
+    if (i >= p.rows || j >= p.cols) { return; }
+    let idx = i * p.cols + j;
+    if (p.causal == 1u && j > i) {
+        out[idx] = 0.0;
+    } else {
+        out[idx] = inp[idx] * bitcast<f32>(p.scale_bits);
+    }
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -239,6 +297,8 @@ pub struct WgpuContext {
     embed_pipeline: wgpu::ComputePipeline,
     softmax_bwd_pipeline: wgpu::ComputePipeline,
     swiglu_bwd_pipeline: wgpu::ComputePipeline,
+    rmsnorm_bwd_pipeline: wgpu::ComputePipeline,
+    mask_bwd_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -388,6 +448,31 @@ impl WgpuContext {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             });
 
+        let rmsnorm_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rmsnorm_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(RMSNORM_BWD_WGSL)),
+        });
+        let rmsnorm_bwd_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("rmsnorm_bwd"),
+                layout: None,
+                module: &rmsnorm_bwd_shader,
+                entry_point: "main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+
+        let mask_bwd_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mask_bwd"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(MASK_BWD_WGSL)),
+        });
+        let mask_bwd_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("mask_bwd"),
+            layout: None,
+            module: &mask_bwd_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -399,6 +484,8 @@ impl WgpuContext {
             embed_pipeline,
             softmax_bwd_pipeline,
             swiglu_bwd_pipeline,
+            rmsnorm_bwd_pipeline,
+            mask_bwd_pipeline,
             adapter_name,
         })
     }
@@ -987,6 +1074,170 @@ impl WgpuContext {
                 cols: a.cols,
             },
         ))
+    }
+
+    /// Backward of row-wise RMSNorm (input gradient): given `x`, the `cols`
+    /// `weight`, upstream grad `dy` and `eps`, returns `dx` resident. Matches
+    /// [`crate::ops::cpu_rms_norm_backward`].
+    pub fn rms_norm_backward_resident(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        dy: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if x.rows != dy.rows || x.cols != dy.cols || weight.rows * weight.cols != x.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rms_norm_backward: x {}×{}, dy {}×{}, weight {}",
+                x.rows,
+                x.cols,
+                dy.rows,
+                dy.cols,
+                weight.rows * weight.cols
+            )));
+        }
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dx = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rmsnorm-bwd-dx"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && x.cols > 0
+        {
+            let params: [u32; 4] = [x.rows as u32, x.cols as u32, eps.to_bits(), 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("rmsnorm-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("rmsnorm-bwd"),
+                layout: &self.rmsnorm_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: x.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: weight.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dy.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: dx.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rmsnorm-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("rmsnorm-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.rmsnorm_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((x.rows as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dx,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// Backward of scale + causal mask: `din = scale·dout` at kept positions,
+    /// `0` above the diagonal. Matches [`crate::ops::cpu_scale_causal_mask_backward`].
+    pub fn scale_causal_mask_backward_resident(
+        &self,
+        dout: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let elems = dout.rows * dout.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let din = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mask-bwd-din"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            let params: [u32; 4] = [
+                dout.rows as u32,
+                dout.cols as u32,
+                causal as u32,
+                scale.to_bits(),
+            ];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("mask-bwd-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mask-bwd"),
+                layout: &self.mask_bwd_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: dout.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: din.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mask-bwd"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("mask-bwd"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.mask_bwd_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(
+                    (dout.cols as u32).div_ceil(8),
+                    (dout.rows as u32).div_ceil(8),
+                    1,
+                );
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: din,
+            rows: dout.rows,
+            cols: dout.cols,
+        })
     }
 
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`

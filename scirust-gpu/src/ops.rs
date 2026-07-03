@@ -235,6 +235,66 @@ pub fn cpu_swiglu_backward(a: &[f32], b: &[f32], dc: &[f32]) -> (Vec<f32>, Vec<f
     (da, db)
 }
 
+/// CPU reference for the RMSNorm input-gradient backward. Given `x`, the `cols`
+/// gain `weight`, upstream grad `dy` and `eps`,
+/// `dx_j = (dy_j·w_j)/rms − x_j·(Σₖ dyₖwₖxₖ)/(d·rms³)` per row, where
+/// `rms = √(mean(x²)+eps)`. The GPU `rms_norm_backward_resident` contract.
+#[allow(clippy::needless_range_loop)]
+pub fn cpu_rms_norm_backward(
+    x: &[f32],
+    weight: &[f32],
+    dy: &[f32],
+    eps: f32,
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let mut dx = vec![0.0f32; x.len()];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let ms = x[base..base + cols].iter().map(|v| v * v).sum::<f32>() / cols as f32 + eps;
+        let rms = ms.sqrt();
+        let dot: f32 = (0..cols)
+            .map(|j| dy[base + j] * weight[j] * x[base + j])
+            .sum();
+        let coef = dot / (cols as f32 * ms * rms);
+        for j in 0..cols
+        {
+            dx[base + j] = dy[base + j] * weight[j] / rms - x[base + j] * coef;
+        }
+    }
+    dx
+}
+
+/// CPU reference for the scale + causal-mask backward: `din = scale·dout` at
+/// kept positions, `0` above the diagonal (masked keys carry no gradient). The
+/// GPU `scale_causal_mask_backward_resident` contract.
+#[allow(clippy::needless_range_loop)]
+pub fn cpu_scale_causal_mask_backward(
+    dout: &[f32],
+    rows: usize,
+    cols: usize,
+    scale: f32,
+    causal: bool,
+) -> Vec<f32> {
+    let mut din = vec![0.0f32; dout.len()];
+    for i in 0..rows
+    {
+        for j in 0..cols
+        {
+            din[i * cols + j] = if causal && j > i
+            {
+                0.0
+            }
+            else
+            {
+                dout[i * cols + j] * scale
+            };
+        }
+    }
+    din
+}
+
 /// CPU reference for token embedding gather: output row `i` is row `tokens[i]`
 /// of the `vocab × d` row-major `table` (token ids clamped to `vocab-1`). The
 /// GPU `embed_resident` kernel's correctness contract.

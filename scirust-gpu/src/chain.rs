@@ -311,6 +311,30 @@ impl GpuChain {
         self.ctx.swiglu_backward_resident(a, b, dc)
     }
 
+    /// Backward of RMSNorm (input gradient `dx`), given the input `x`, the gain
+    /// `weight`, upstream grad `dy` and `eps`. Result resident.
+    pub fn rms_norm_backward(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        dy: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.rms_norm_backward_resident(x, weight, dy, eps)
+    }
+
+    /// Backward of scale + causal mask: `din = scale·dout` at kept positions,
+    /// `0` above the diagonal. Result resident.
+    pub fn scale_causal_mask_backward(
+        &self,
+        dout: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx
+            .scale_causal_mask_backward_resident(dout, scale, causal)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1167,6 +1191,102 @@ mod tests {
                 "db[{idx}]: fd={fd} gpu={}",
                 db_gpu[idx]
             );
+        }
+    }
+
+    /// RMSNorm backward must match numerical gradients. For `L = Σ rmsnorm(X,w)⊙G`
+    /// the input gradient `dx = rms_norm_backward(X, w, G)` is checked against
+    /// central finite differences of `L` over `X` on the CPU — this exercises the
+    /// mean-coupling term of the jacobian. Skips if no adapter.
+    #[test]
+    fn rms_norm_backward_matches_finite_differences() {
+        use crate::ops::{cpu_rms_norm, cpu_rms_norm_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (3usize, 5usize);
+        let eps = 1e-5f32;
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let w: Vec<f32> = (0..cols).map(|i| 0.6 + 0.1 * i as f32).collect();
+        let g: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.5 + 0.2).cos())
+            .collect(); // dL/dY
+
+        let dx_gpu = chain
+            .download(
+                &chain
+                    .rms_norm_backward(
+                        &chain.upload(&x, rows, cols),
+                        &chain.upload(&w, 1, cols),
+                        &chain.upload(&g, rows, cols),
+                        eps,
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(rel_err(&dx_gpu, &cpu_rms_norm_backward(&x, &w, &g, eps, rows, cols)) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ rmsnorm(X,w)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_rms_norm(xx, &w, eps, rows, cols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let step = 1e-3f32;
+        for idx in 0..rows * cols
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += step;
+            xm[idx] -= step;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * step);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// Scale + causal-mask backward: `din = scale·dout` below/on the diagonal,
+    /// `0` above. Exact match to the CPU oracle (no accumulation). Skips if no
+    /// adapter.
+    #[test]
+    fn scale_causal_mask_backward_matches_cpu_oracle() {
+        use crate::ops::cpu_scale_causal_mask_backward;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 6usize;
+        let scale = 0.125f32;
+        let dout: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+        let din_gpu = chain
+            .download(
+                &chain
+                    .scale_causal_mask_backward(&chain.upload(&dout, n, n), scale, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        let din_cpu = cpu_scale_causal_mask_backward(&dout, n, n, scale, true);
+        assert!(rel_err(&din_gpu, &din_cpu) < 1e-6);
+        // Above the diagonal must be exactly zero.
+        for i in 0..n
+        {
+            for j in i + 1..n
+            {
+                assert_eq!(din_gpu[i * n + j], 0.0, "({i},{j}) not zeroed");
+            }
         }
     }
 

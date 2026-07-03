@@ -20,8 +20,9 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, cpu_softmax_backward,
-    cpu_swiglu_backward, rel_err,
+    MASK_NEG, cpu_embed, cpu_rms_norm, cpu_rms_norm_backward, cpu_scale_causal_mask,
+    cpu_scale_causal_mask_backward, cpu_softmax, cpu_softmax_backward, cpu_swiglu_backward,
+    rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -476,6 +477,53 @@ fn main() {
     let sg_err = rel_err(&chain.download(&gda2).unwrap(), &da_cpu)
         .max(rel_err(&chain.download(&gdb2).unwrap(), &db_cpu));
     check("backward: swiglu vjp (da, db)", sg_err, &mut failures);
+
+    // 13. BACKWARD: RMSNorm input gradient (the mean-coupling jacobian).
+    let (rr, rc) = (4usize, 6usize);
+    let rx: Vec<f32> = (0..rr * rc)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let rwt: Vec<f32> = (0..rc).map(|i| 0.6 + 0.1 * i as f32).collect();
+    let rdy: Vec<f32> = (0..rr * rc).map(|i| (i as f32 * 0.5 + 0.2).cos()).collect();
+    let rdx_gpu = chain
+        .download(
+            &chain
+                .rms_norm_backward(
+                    &chain.upload(&rx, rr, rc),
+                    &chain.upload(&rwt, 1, rc),
+                    &chain.upload(&rdy, rr, rc),
+                    eps,
+                )
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: rmsnorm vjp (dx, mean-coupled)",
+        rel_err(
+            &rdx_gpu,
+            &cpu_rms_norm_backward(&rx, &rwt, &rdy, eps, rr, rc),
+        ),
+        &mut failures,
+    );
+
+    // 14. BACKWARD: scale + causal mask — scale below/on diagonal, 0 above.
+    let mn = 6usize;
+    let mdout: Vec<f32> = (0..mn * mn).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+    let mdin_gpu = chain
+        .download(
+            &chain
+                .scale_causal_mask_backward(&chain.upload(&mdout, mn, mn), 0.125, true)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "backward: scale+mask vjp (0 above diagonal)",
+        rel_err(
+            &mdin_gpu,
+            &cpu_scale_causal_mask_backward(&mdout, mn, mn, 0.125, true),
+        ),
+        &mut failures,
+    );
 
     println!();
     if failures == 0
