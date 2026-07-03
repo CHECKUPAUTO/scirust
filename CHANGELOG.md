@@ -5,6 +5,76 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — plateforme de trading crypto agentique (`scirust-trader` + `scirust-mcp`)
+Extension majeure du MVP `scirust-trader` (marché→indicateurs→modèle→
+certification→risque→LLM→preuve) en une boîte à outils de trading niveau
+plateforme pro, **entièrement pilotable par un LLM agentic via MCP** et
+**simulation/paper-trading d'abord** (aucune exécution d'ordre réel exposée ;
+les données de marché live Binance restent en lecture derrière `--features
+live`). Tout est en Rust pur, déterministe (même entrée ⇒ même sortie et mêmes
+empreintes de preuve), sans nouvelle dépendance.
+
+- **Indicateurs (`indicators.rs`)** — +12 indicateurs pro au-delà de
+  RSI/MACD/ATR/Bollinger/SMA/EMA : Stochastic (%K/%D), ADX/DMI (+DI/−DI,
+  lissage de Wilder correct, amorce ADX à `2·période−1`), OBV, VWAP glissant,
+  Williams %R, CCI (déviation absolue moyenne), MFI, ROC, momentum, Z-score,
+  Chaikin Money Flow, Supertrend (bandes ATR + logique de report/retournement),
+  canaux Donchian et Keltner, extrema glissants.
+- **Figures chartistes (`patterns.rs`)** — détection déterministe de doji,
+  marteau/pendu, marteau inversé/étoile filante, marubozu, engulfing, piercing
+  line/dark cloud, étoiles du matin/soir, trois soldats/corbeaux.
+- **Carnet d'ordres (`orderbook.rs`)** — microstructure : mid, micro-price
+  pondéré par la taille, spread (bps), profondeur, imbalance, **VWAP
+  d'exécution en marchant le carnet**, slippage et liquidité dans X bps.
+- **Ordres & moteur d'appariement (`orders.rs`)** — types Market/Limit/
+  Stop/StopLimit/TakeProfit, TIF (GTC/IOC/FOK), post-only/reduce-only, frais
+  maker/taker, modèle de slippage, arrondi tick/lot, et une logique de fill
+  *paper* déterministe sur chandelier (sémantique de backtest standard).
+- **Portefeuille (`portfolio.rs`)** — comptes multi-actifs, positions nettées
+  long/short (coût moyen, PnL réalisé/latent, retournement à travers zéro),
+  équité mark-to-market, exposition brute/nette, rééquilibrage vers des poids
+  cibles, prix de liquidation isolé (levier).
+- **Métriques (`metrics.rs`)** — Sharpe, Sortino, Calmar, CAGR, volatilité
+  annualisée, max drawdown, Ulcer Index, VaR/CVaR historiques, Kelly
+  (discret & continu), win-rate, profit factor, expectancy, corrélation, bêta.
+- **Stratégies (`strategy.rs`)** — trait `Strategy` + archétypes : croisement
+  SMA/EMA, RSI mean-reversion, MACD, breakout Bollinger/Donchian, Supertrend,
+  momentum ; fabrique par nom + paramètres (pilotable en langage naturel).
+- **Backtest événementiel (`backtest.rs`)** — décision à la clôture,
+  exécution à l'ouverture suivante (**pas de look-ahead**), frais/slippage
+  réels, journal de trades round-trip, rapport de performance complet,
+  comparaison buy-and-hold.
+- **Découverte d'opportunités (`scanner.rs`)** — le cœur du « trouve-moi des
+  trades qui respectent ces conditions, avec un objectif de profit de X » :
+  backteste chaque stratégie × symbole, lit le signal courant, filtre sur les
+  contraintes (retour, drawdown, Sharpe, win-rate, profit factor, direction),
+  dimensionne un plan entrée/stop/take-profit/taille basé ATR, classe, et
+  **scelle chaque opportunité + le rapport avec une preuve SHA-256** vérifiable.
+- **Exécution de micro-ordres (`execution.rs`)** — découpe d'un ordre parent
+  en ordres enfants rapides : TWAP, VWAP (profil de volume), POV, Iceberg,
+  micro-burst, et trajectoire optimale **Almgren-Chriss**
+  (`x_j=X·sinh(κ(T−t_j))/sinh(κT)`, `η̃=η−½γτ`), plus simulation de qualité
+  d'exécution (VWAP réalisé, slippage vs prix d'arrivée).
+- **Market making (`marketmaking.rs`)** — quotes optimales **Avellaneda-
+  Stoikov** : prix de réservation `r=s−q·γ·σ²·(T−t)`, spread optimal
+  `γ·σ²·(T−t)+(2/γ)·ln(1+γ/κ)`, skew d'inventaire, approximation GLFT.
+- **Signaux microstructure (`microstructure.rs`)** — Order-Flow Imbalance
+  (Cont-Kukanov-Stoikov), imbalance de flux de trades, VPIN (toxicité de flux,
+  classification bulk-volume), lambda de Kyle (impact prix).
+- **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
+  marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
+  affiche directement (« fournir des graphes »).
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 14 outils exposant tout
+  le pipeline à n'importe quel agent MCP : `trader_market_data`,
+  `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
+  `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
+  `trader_execution_plan`, `trader_market_making_quotes`,
+  `trader_microstructure`, `trader_metrics`, `trader_chart`,
+  `trader_certified_predict` (prédiction ML bornée par IBP).
+- **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
+  `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
+  (écrit un SVG de courbe d'équité).
+
 ### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
 Chaque domaine documenté dans la feuille de route de marché reçoit maintenant
 une implémentation (ou, quand une pièce ne peut pas être vérifiée avec une

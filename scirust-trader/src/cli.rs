@@ -8,11 +8,16 @@
 //!   - `trader backtest`  — run a full backtest with risk management
 //!   - `trader info`      — show pipeline capabilities
 
-use crate::agent::{OllamaClient, StubLlm, TradingAgent};
-use crate::market::{MarketFeed, MockExchange};
+use crate::agent::{Action, OllamaClient, StubLlm, TradingAgent};
+use crate::backtest::{run_backtest as run_strategy_backtest, BacktestConfig};
+use crate::chart::{equity_curve_svg, ChartOptions};
+use crate::market::{MarketFeed, MarketSnapshot, MockExchange};
 use crate::model::PricePredictor;
 use crate::proof::DecisionProof;
 use crate::risk::{RiskConfig, run_backtest as run_risk_backtest};
+use crate::scanner::{scan, OpportunityConstraints, ScanRiskConfig};
+use crate::strategy::{strategy_from_spec, STRATEGY_NAMES};
+use std::collections::BTreeMap;
 
 /// Entry point — dispatches subcommands.
 /// Returns an exit code (0 = success, 2 = usage error).
@@ -29,6 +34,13 @@ pub fn run(args: &[String]) -> u8 {
         Some("audit") => cmd_audit(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some("backtest") => cmd_backtest(&args[1..]),
+        Some("strategies") =>
+        {
+            cmd_strategies();
+            0
+        },
+        Some("scan") => cmd_scan(&args[1..]),
+        Some("chart") => cmd_chart(&args[1..]),
         Some("info") =>
         {
             print_info();
@@ -59,6 +71,13 @@ fn print_help() {
     println!(
         "            Full backtest with risk management (position sizing, stop-loss, circuit breaker)."
     );
+    println!("  strategies");
+    println!("            List the built-in trading strategies the scanner and agent can run.");
+    println!("  scan      [--symbols A,B,...] [--bars N] [--seed S] [--strategy NAME]");
+    println!("            [--min-return F] [--min-sharpe F] [--max-dd F] [--direction long|short]");
+    println!("            Scan mock markets x strategies for opportunities matching constraints.");
+    println!("  chart     [--bars N] [--seed S] [--strategy NAME] --output FILE.svg");
+    println!("            Backtest on a mock feed and write an equity-curve SVG chart.");
     println!("  info      Show pipeline capabilities.");
     println!();
     println!("examples:");
@@ -685,6 +704,172 @@ fn cmd_backtest(args: &[String]) -> u8 {
     0
 }
 
+/// Generate a deterministic mock market snapshot for a symbol.
+fn mock_snapshot(symbol: &str, seed: u64, bars: usize) -> MarketSnapshot {
+    // Vary the seed per symbol so a multi-symbol scan sees distinct series.
+    let sym_seed = seed ^ (symbol.bytes().fold(0u64, |a, b| a.wrapping_mul(131).wrapping_add(b as u64)));
+    let start = 100.0 + (sym_seed % 5000) as f32;
+    let mut feed = MockExchange::new(sym_seed.max(1), start);
+    let mut snap = feed.next_snapshot(bars).unwrap_or_else(|| MarketSnapshot {
+        exchange: "mock".to_string(),
+        symbol: symbol.to_string(),
+        interval: "1m".to_string(),
+        candles: Vec::new(),
+    });
+    snap.symbol = symbol.to_string();
+    snap
+}
+
+fn cmd_strategies() {
+    println!("scirust-trader — built-in strategies\n");
+    for name in STRATEGY_NAMES
+    {
+        // Instantiate with defaults to print the canonical parameterised name.
+        if let Some(s) = strategy_from_spec(name, &BTreeMap::new())
+        {
+            println!("  {:20} (e.g. {})", name, s.name());
+        }
+    }
+    println!("\nUse with: scirust trader scan --strategy <name>   or the MCP tool trader_signal.");
+}
+
+fn cmd_scan(args: &[String]) -> u8 {
+    let mut symbols = vec!["BTC/USDT".to_string(), "ETH/USDT".to_string(), "SOL/USDT".to_string()];
+    let mut bars = 300usize;
+    let mut seed = 42u64;
+    let mut strategy: Option<String> = None;
+    let mut c = OpportunityConstraints::default();
+
+    let mut i = 0;
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--symbols" => { i += 1; if i < args.len() { symbols = args[i].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(); } },
+            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(300); } },
+            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
+            "--strategy" => { i += 1; if i < args.len() { strategy = Some(args[i].clone()); } },
+            "--min-return" => { i += 1; if i < args.len() { c.min_total_return = args[i].parse().unwrap_or(f32::NEG_INFINITY); } },
+            "--min-sharpe" => { i += 1; if i < args.len() { c.min_sharpe = args[i].parse().unwrap_or(f32::NEG_INFINITY); } },
+            "--max-dd" => { i += 1; if i < args.len() { c.max_drawdown = args[i].parse().unwrap_or(f32::INFINITY); } },
+            "--direction" => { i += 1; if i < args.len() { c.direction = match args[i].as_str() { "long" => Some(Action::Long), "short" => Some(Action::Short), _ => None }; } },
+            "--max-results" => { i += 1; if i < args.len() { c.max_results = args[i].parse().unwrap_or(10); } },
+            _ => {},
+        }
+        i += 1;
+    }
+    if let Some(name) = strategy
+    {
+        c.strategies = vec![name];
+    }
+
+    let series: Vec<MarketSnapshot> = symbols.iter().map(|s| mock_snapshot(s, seed, bars)).collect();
+    let report = scan(&series, &c, &ScanRiskConfig::default());
+
+    println!("=== SciRust Trader — Opportunity Scan (mock data) ===");
+    println!(
+        "symbols={} strategies={} candidates={} matched={}",
+        series.len(),
+        if c.strategies.is_empty() { STRATEGY_NAMES.len() } else { c.strategies.len() },
+        report.num_candidates,
+        report.num_matched
+    );
+    println!("manifest_hash: {}", report.manifest_hash);
+    println!("proof_verify:  {}", if report.verify() { "✅ VALID" } else { "❌ INVALID" });
+    println!();
+    if report.opportunities.is_empty()
+    {
+        println!("No opportunities matched the constraints.");
+        return 0;
+    }
+    println!(
+        "{:>2}  {:10} {:22} {:5} {:>8} {:>8} {:>7} {:>7} {:>6}",
+        "#", "symbol", "strategy", "side", "entry", "stop", "ret%", "sharpe", "score"
+    );
+    for (idx, o) in report.opportunities.iter().enumerate()
+    {
+        println!(
+            "{:>2}  {:10} {:22} {:5} {:>8.2} {:>8.2} {:>+7.2} {:>7.2} {:>6.3}",
+            idx + 1,
+            o.symbol,
+            o.strategy,
+            o.action.label(),
+            o.entry,
+            o.stop_loss,
+            o.backtest_total_return * 100.0,
+            o.backtest_sharpe,
+            o.score
+        );
+    }
+    0
+}
+
+fn cmd_chart(args: &[String]) -> u8 {
+    let mut bars = 300usize;
+    let mut seed = 42u64;
+    let mut strategy = "sma_cross".to_string();
+    let mut output = "equity.svg".to_string();
+
+    let mut i = 0;
+    while i < args.len()
+    {
+        match args[i].as_str()
+        {
+            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(300); } },
+            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
+            "--strategy" => { i += 1; if i < args.len() { strategy = args[i].clone(); } },
+            "--output" => { i += 1; if i < args.len() { output = args[i].clone(); } },
+            _ => {},
+        }
+        i += 1;
+    }
+
+    let snap = mock_snapshot("BTC/USDT", seed, bars);
+    let strat = match strategy_from_spec(&strategy, &BTreeMap::new())
+    {
+        Some(s) => s,
+        None =>
+        {
+            eprintln!("unknown strategy `{strategy}`; run `scirust trader strategies`");
+            return 2;
+        },
+    };
+    let cfg = BacktestConfig {
+        symbol: "BTC/USDT".to_string(),
+        interval: "1m".to_string(),
+        ..Default::default()
+    };
+    let report = run_strategy_backtest(strat.as_ref(), &snap.candles, &cfg);
+    let title = format!(
+        "{} — {}  ({:+.2}% vs {:+.2}% B&H)",
+        report.symbol,
+        report.strategy,
+        report.total_return * 100.0,
+        report.buy_hold_return * 100.0
+    );
+    let svg = equity_curve_svg(&report.equity_curve, &ChartOptions { title, ..Default::default() });
+    match std::fs::write(&output, svg)
+    {
+        Ok(_) =>
+        {
+            println!("equity chart written to: {output}");
+            println!(
+                "strategy={} return={:+.2}% sharpe={:.2} trades={}",
+                report.strategy,
+                report.total_return * 100.0,
+                report.performance.sharpe,
+                report.num_trades
+            );
+            0
+        },
+        Err(e) =>
+        {
+            eprintln!("error writing chart: {e}");
+            1
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,5 +996,61 @@ mod tests {
             "/tmp/scirust_trader_backtest_test.json".to_string(),
         ];
         assert_eq!(run(&args), 0);
+    }
+
+    #[test]
+    fn strategies_lists_and_returns_zero() {
+        assert_eq!(run(&["strategies".to_string()]), 0);
+    }
+
+    #[test]
+    fn scan_runs_on_mock_markets() {
+        let args = vec![
+            "scan".to_string(),
+            "--symbols".to_string(),
+            "BTC/USDT,ETH/USDT".to_string(),
+            "--bars".to_string(),
+            "120".to_string(),
+        ];
+        assert_eq!(run(&args), 0);
+    }
+
+    #[test]
+    fn scan_with_impossible_constraint_still_returns_zero() {
+        let args = vec![
+            "scan".to_string(),
+            "--bars".to_string(),
+            "120".to_string(),
+            "--min-sharpe".to_string(),
+            "1000".to_string(),
+        ];
+        assert_eq!(run(&args), 0);
+    }
+
+    #[test]
+    fn chart_writes_svg_file() {
+        let out = "/tmp/scirust_trader_chart_test.svg";
+        let args = vec![
+            "chart".to_string(),
+            "--bars".to_string(),
+            "150".to_string(),
+            "--strategy".to_string(),
+            "sma_cross".to_string(),
+            "--output".to_string(),
+            out.to_string(),
+        ];
+        assert_eq!(run(&args), 0);
+        let content = std::fs::read_to_string(out).unwrap();
+        assert!(content.starts_with("<svg"));
+    }
+
+    #[test]
+    fn chart_unknown_strategy_returns_two() {
+        let args = vec![
+            "chart".to_string(),
+            "--strategy".to_string(),
+            "nope".to_string(),
+        ];
+        assert_eq!(run(&args), 2);
     }
 }

@@ -2951,6 +2951,7 @@ dependencies = [
  "scirust-sciagent",
  "scirust-sis",
  "scirust-solvers",
+ "scirust-trader",
  "serde",
  "serde_json",
 ]

@@ -13,3 +13,4 @@ pub mod grid;
 pub mod linalg;
 pub mod maritime;
 pub mod sis;
+pub mod trader;
