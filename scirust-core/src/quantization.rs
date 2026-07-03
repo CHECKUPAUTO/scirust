@@ -133,6 +133,37 @@ pub fn quantized_linear_forward(
     bias: &[f32],
     out_features: usize,
 ) -> Vec<f32> {
+    // Validate lengths up front (matching the sibling quantized kernels) so a
+    // caller mismatch is a clear error rather than an opaque out-of-bounds panic
+    // deep inside matmul_int8 / the scale loop.
+    assert_eq!(
+        input.len(),
+        batch * in_features,
+        "quantized_linear_forward: input.len() {} != batch*in_features {}",
+        input.len(),
+        batch * in_features
+    );
+    assert_eq!(
+        w_q.len(),
+        in_features * out_features,
+        "quantized_linear_forward: w_q.len() {} != in_features*out_features {}",
+        w_q.len(),
+        in_features * out_features
+    );
+    assert_eq!(
+        w_scales.len(),
+        out_features,
+        "quantized_linear_forward: w_scales.len() {} != out_features {}",
+        w_scales.len(),
+        out_features
+    );
+    assert_eq!(
+        bias.len(),
+        out_features,
+        "quantized_linear_forward: bias.len() {} != out_features {}",
+        bias.len(),
+        out_features
+    );
     let scale_in = compute_scale(input);
     let x_q = quantize_tensor(input, scale_in);
     let acc = matmul_int8(&x_q, w_q, batch, in_features, out_features);
@@ -161,6 +192,17 @@ mod tests_quant_linear {
         assert!((scales[0] - 4.0 / 127.0).abs() < 1e-9);
         assert!((scales[1] - 2.0 / 127.0).abs() < 1e-9);
         assert!((scales[2] - 0.5 / 127.0).abs() < 1e-9);
+    }
+
+    #[test]
+    #[should_panic(expected = "input.len()")]
+    fn quantized_linear_forward_rejects_length_mismatch() {
+        // input should be batch*in_features = 2*4 = 8, but we pass 6.
+        let input = vec![0.0f32; 6];
+        let w_q = vec![0i8; 12]; // 4*3
+        let w_scales = vec![1.0f32; 3];
+        let bias = vec![0.0f32; 3];
+        let _ = quantized_linear_forward(&input, 2, 4, &w_q, &w_scales, &bias, 3);
     }
 
     #[test]

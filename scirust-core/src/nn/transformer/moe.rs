@@ -54,7 +54,10 @@ impl<E: Module> Module for MoELayer<E> {
             let row_probs = &probs.data[i * cols..(i + 1) * cols];
             let mut indexed_probs: Vec<(usize, f32)> =
                 row_probs.iter().cloned().enumerate().collect();
-            indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            // total_cmp is a total order over f32, so a NaN gate probability
+            // (e.g. from a NaN activation upstream) sorts deterministically
+            // instead of panicking the way partial_cmp().unwrap() did.
+            indexed_probs.sort_by(|a, b| b.1.total_cmp(&a.1));
 
             let top_k = &indexed_probs[0..self.k.min(indexed_probs.len())];
             let mut row_output: Option<Var> = None;
@@ -154,5 +157,26 @@ mod tests {
         let loss = out.sum();
         tape.backward(loss.idx());
         assert!(tape.value(out.idx()).data.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn moe_forward_does_not_panic_on_nan_gate() {
+        // A NaN activation propagates to the gate probabilities. The top-k sort
+        // must not panic — total_cmp handles NaN, whereas the old
+        // partial_cmp().unwrap() panicked on it.
+        let mut rng = PcgEngine::new(7);
+        let mut moe = MoELayer::new(
+            4,
+            2,
+            1,
+            || Linear::new(4, 4, &KaimingNormal, &Zeros, &mut PcgEngine::new(99)),
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        );
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![f32::NAN; 8], 2, 4));
+        let out = moe.forward(&tape, x);
+        assert_eq!(tape.value(out.idx()).shape(), (2, 4));
     }
 }

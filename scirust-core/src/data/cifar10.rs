@@ -47,7 +47,18 @@ pub fn load_cifar10_batch<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, Vec<
     for i in 0..n
     {
         let off = i * record_size;
-        labels[i] = raw[off];
+        let label = raw[off];
+        // CIFAR-10 has 10 classes; a byte >= 10 is a corrupt/foreign file and
+        // would later index a one-hot vector out of bounds (into a neighbour's
+        // slot or past the end). Reject it here rather than silently corrupting.
+        if label >= 10
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("étiquette CIFAR-10 hors plage : {label} (attendu 0..=9), échantillon {i}"),
+            ));
+        }
+        labels[i] = label;
         // Normalisation : uint8 [0,255] → f32 [0,1]
         for j in 0..CIFAR10_IMAGE_SIZE
         {
@@ -183,6 +194,23 @@ mod tests {
         assert_eq!(imgs.len(), 3 * 3072);
         // Pixel normalisé : valeur / 255
         assert!(imgs[0].abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rejects_out_of_range_label() {
+        // A label byte >= 10 is out of CIFAR-10's 0..=9 range and would corrupt
+        // a one-hot vector; the loader must reject it instead of silently loading.
+        let dir =
+            std::env::temp_dir().join(format!("scirust_cifar10_badlabel_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bad.bin");
+        {
+            let mut f = File::create(&path).unwrap();
+            f.write_all(&make_synthetic_batch(2, &[200])).unwrap();
+        }
+        let r = load_cifar10_batch(&path);
+        assert!(r.is_err(), "out-of-range CIFAR-10 label must be rejected");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

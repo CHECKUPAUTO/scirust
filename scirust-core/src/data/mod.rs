@@ -10,7 +10,24 @@ pub struct InMemoryDataset {
 
 impl InMemoryDataset {
     pub fn new(x: Vec<f32>, y: Vec<f32>, x_dim: usize, y_dim: usize) -> Self {
+        assert!(x_dim > 0, "InMemoryDataset::new: x_dim must be > 0");
+        assert_eq!(
+            x.len() % x_dim,
+            0,
+            "InMemoryDataset::new: x.len() {} not divisible by x_dim {}",
+            x.len(),
+            x_dim
+        );
         let n = x.len() / x_dim;
+        // Guard the x/y sample-count consistency here rather than letting a
+        // mismatched y silently truncate or panic later inside sample().
+        assert_eq!(
+            y.len(),
+            n * y_dim,
+            "InMemoryDataset::new: y.len() {} != n*y_dim {} (n={n}, y_dim={y_dim})",
+            y.len(),
+            n * y_dim
+        );
         Self {
             x,
             y,
@@ -130,3 +147,29 @@ pub mod mnist;
 pub use cifar10::Cifar10Dataset;
 pub use loader::DataLoader;
 pub use mnist::MnistDataset;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_accepts_consistent_dims() {
+        let ds = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0], vec![1.0, 0.0], 2, 1);
+        assert_eq!(ds.n, 2);
+        assert_eq!(ds.sample(1).0, &[3.0, 4.0]);
+        assert_eq!(ds.sample(1).1, &[0.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "y.len()")]
+    fn new_rejects_mismatched_y() {
+        // x is 2 samples (x_dim=2) but y has only 1 element for y_dim=1.
+        let _ = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0], vec![1.0], 2, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "not divisible")]
+    fn new_rejects_indivisible_x() {
+        let _ = InMemoryDataset::new(vec![1.0, 2.0, 3.0], vec![1.0], 2, 1);
+    }
+}
