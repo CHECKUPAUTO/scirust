@@ -200,6 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn tiny_sigma_is_continuous_with_the_hard_threshold_and_fast() {
+        // Regression: σ = 1e-8 drives λ = n·δ²/σ² ≈ 7e14 into ncchi2_cdf; the
+        // call must terminate quickly and match the σ→0 limit by continuity.
+        let plan = SamplingPlan::new(5, 1.2); // limit = 0.12·? no: k·I_max
+        let i_max = 0.1; // limit = 1.2·0.1 = 0.12
+        // δ exactly on the limit ⇒ ≈ 0.5; below ⇒ ≈ 1; above ⇒ ≈ 0.
+        assert!((plan.probability_of_acceptance(i_max, 0.12, 1e-8) - 0.5).abs() < 0.02);
+        assert!(plan.probability_of_acceptance(i_max, 0.11, 1e-8) > 0.999);
+        assert!(plan.probability_of_acceptance(i_max, 0.13, 1e-8) < 0.001);
+        // A fully-off-centre split (ratio→1) is the same near-degenerate regime.
+        assert!(plan.probability_of_acceptance_at(i_max, 0.2, 1.0) < 0.001);
+    }
+
+    #[test]
     fn design_plan_meets_both_risks() {
         let alpha = 0.05;
         let beta = 0.10;

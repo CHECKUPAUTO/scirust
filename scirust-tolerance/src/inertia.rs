@@ -183,9 +183,10 @@ pub fn vector_inertia(components: &[Inertia]) -> f64 {
 /// I_true = √(I_obs² − u²).
 /// ```
 ///
-/// Returns `None` when `u` exceeds the observed inertia (the measurement noise
-/// alone would exceed the observed spread — the correction is undefined).
-/// Pairs with `scirust-metrology` for `u` from a GUM budget.
+/// Returns `None` when `u` exceeds the observed dispersion `σ_obs` (so
+/// `σ_true² = σ_obs² − u²` would be negative — the measurement noise alone
+/// exceeds the observed spread and the correction is undefined). Pairs with
+/// `scirust-metrology` for `u` from a GUM budget.
 pub fn correct_for_measurement(observed: &Inertia, u: f64) -> Option<Inertia> {
     let corrected_var = observed.sigma * observed.sigma - u * u;
     if corrected_var < 0.0

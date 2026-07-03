@@ -240,12 +240,18 @@ pub fn allocate(
             {
                 return Err(AllocationError::NonPositiveExponent(*exponent));
             }
+            if costs.iter().any(|k| *k <= 0.0)
+            {
+                // A non-positive cost has no meaning (and would zero its weight,
+                // driving the denominator to 0 and the result to NaN).
+                return Err(AllocationError::NonPositiveCost);
+            }
             let p = 1.0 / (exponent + 2.0);
             // wᵢ = (kᵢ / αᵢ²)^p, guarding a zero coefficient (a free DOF).
             let weights: Vec<f64> = coeffs
                 .iter()
                 .zip(costs)
-                .map(|(a, k)| (k.max(0.0) / (a * a).max(1e-300)).powf(p))
+                .map(|(a, k)| (k / (a * a).max(1e-300)).powf(p))
                 .collect();
             let denom = coeffs
                 .iter()
@@ -279,6 +285,8 @@ pub enum AllocationError {
     },
     /// A [`Allocation::CostOptimal`] exponent was not strictly positive.
     NonPositiveExponent(f64),
+    /// A [`Allocation::CostOptimal`] cost coefficient was not strictly positive.
+    NonPositiveCost,
 }
 
 impl core::fmt::Display for AllocationError {
@@ -296,6 +304,10 @@ impl core::fmt::Display for AllocationError {
             AllocationError::NonPositiveExponent(r) =>
             {
                 write!(f, "cost-optimal exponent must be > 0 (got {r})")
+            },
+            AllocationError::NonPositiveCost =>
+            {
+                write!(f, "cost-optimal cost coefficients must all be > 0")
             },
         }
     }
@@ -536,6 +548,32 @@ mod tests {
             )
             .unwrap_err(),
             AllocationError::NonPositiveExponent(0.0)
+        );
+        // A non-positive cost is rejected rather than silently producing NaN
+        // (all-zero costs would zero the denominator → 0/0).
+        assert_eq!(
+            allocate(
+                0.3,
+                &coeffs,
+                &Allocation::CostOptimal {
+                    costs: vec![0.0, 0.0],
+                    exponent: 2.0
+                }
+            )
+            .unwrap_err(),
+            AllocationError::NonPositiveCost
+        );
+        assert_eq!(
+            allocate(
+                0.3,
+                &coeffs,
+                &Allocation::CostOptimal {
+                    costs: vec![-1.0, 1.0],
+                    exponent: 2.0
+                }
+            )
+            .unwrap_err(),
+            AllocationError::NonPositiveCost
         );
     }
 
