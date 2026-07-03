@@ -478,6 +478,27 @@ impl GpuChain {
         self.ctx.sgd_step_resident(param, grad, lr)
     }
 
+    /// One AdamW step at optimizer step `step` (1-based), updating `param`, `m`
+    /// and `v` **in place**. Start `m`/`v` at zero and reuse them across steps.
+    /// Decoupled weight decay; bias-corrected. Nothing to return — the resident
+    /// `param` buffer is updated on the device.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        m: &GpuMatrix,
+        v: &GpuMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+    ) -> BackendResult<()> {
+        self.ctx
+            .adamw_step_resident(param, grad, m, v, lr, betas, eps, weight_decay, step)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1694,6 +1715,94 @@ mod tests {
             losses[0],
             losses.last().unwrap()
         );
+    }
+
+    /// One AdamW step matches the CPU oracle exactly (param, m, v) — the moments
+    /// update and the bias-corrected, weight-decayed parameter update. Skips if
+    /// no adapter.
+    #[test]
+    fn adamw_step_matches_cpu_oracle() {
+        use crate::ops::cpu_adamw_step;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 16usize;
+        let mut param: Vec<f32> = (0..n).map(|i| (i as f32 * 0.2 - 1.0).sin()).collect();
+        let grad: Vec<f32> = (0..n).map(|i| (i as f32 * 0.3 + 0.1).cos() * 0.5).collect();
+        let mut m = vec![0.0f32; n];
+        let mut v = vec![0.0f32; n];
+        let (lr, betas, eps, wd) = (0.01f32, (0.9f32, 0.999f32), 1e-8f32, 0.01f32);
+
+        let gp = chain.upload(&param, 1, n);
+        let gg = chain.upload(&grad, 1, n);
+        let gm = chain.upload(&m, 1, n);
+        let gv = chain.upload(&v, 1, n);
+        chain
+            .adamw_step(&gp, &gg, &gm, &gv, lr, betas, eps, wd, 1)
+            .unwrap();
+        cpu_adamw_step(&mut param, &grad, &mut m, &mut v, lr, betas, eps, wd, 1);
+
+        assert!(
+            rel_err(&chain.download(&gp).unwrap(), &param) < 1e-5,
+            "param mismatch"
+        );
+        assert!(
+            rel_err(&chain.download(&gm).unwrap(), &m) < 1e-5,
+            "m mismatch"
+        );
+        assert!(
+            rel_err(&chain.download(&gv).unwrap(), &v) < 1e-5,
+            "v mismatch"
+        );
+    }
+
+    /// An AdamW training loop reduces the loss on-device. Same linear + cross-
+    /// entropy model as the SGD capstone, but the update is the resident AdamW
+    /// step with persistent `m`/`v` moments. Asserts the loss ends well below the
+    /// start. Skips if no adapter.
+    #[test]
+    fn adamw_training_loop_reduces_loss() {
+        use crate::ops::cpu_cross_entropy;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, vocab) = (6usize, 5usize, 8usize);
+        let x: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.21 - 0.7).sin()).collect();
+        let w0: Vec<f32> = (0..d * vocab)
+            .map(|i| (i as f32 * 0.13 + 0.2).cos() * 0.3)
+            .collect();
+        let targets: Vec<u32> = (0..t as u32).map(|i| (i * 5 + 1) % vocab as u32).collect();
+
+        let gx = chain.upload(&x, t, d);
+        let gw = chain.upload(&w0, d, vocab);
+        let gm = chain.upload(&vec![0.0f32; d * vocab], d, vocab);
+        let gv = chain.upload(&vec![0.0f32; d * vocab], d, vocab);
+        let mut first = 0.0f32;
+        let mut last = 0.0f32;
+        for step in 1..=30u32
+        {
+            let logits = chain.matmul(&gx, &gw).unwrap();
+            let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &targets, t, vocab);
+            if step == 1
+            {
+                first = l;
+            }
+            last = l;
+            let dlogits = chain.cross_entropy_grad(&logits, &targets).unwrap();
+            let (_dx, dw) = chain.matmul_backward(&gx, &gw, &dlogits).unwrap();
+            chain
+                .adamw_step(&gw, &dw, &gm, &gv, 0.1, (0.9, 0.999), 1e-8, 0.0, step)
+                .unwrap();
+        }
+        assert!(last < first * 0.5, "AdamW barely moved: {first} → {last}");
     }
 
     /// Resident elementwise mul matches the CPU product; shape mismatch errors.

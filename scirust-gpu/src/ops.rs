@@ -318,6 +318,35 @@ pub fn cpu_sgd_step(param: &[f32], grad: &[f32], lr: f32) -> Vec<f32> {
     param.iter().zip(grad).map(|(p, g)| p - lr * g).collect()
 }
 
+/// CPU reference for one in-place AdamW step at `step` (1-based): bias-corrected
+/// Adam with decoupled weight decay. Updates `param`, `m`, `v` in place. The GPU
+/// `adamw_step_resident` kernel's correctness contract.
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_adamw_step(
+    param: &mut [f32],
+    grad: &[f32],
+    m: &mut [f32],
+    v: &mut [f32],
+    lr: f32,
+    betas: (f32, f32),
+    eps: f32,
+    weight_decay: f32,
+    step: u32,
+) {
+    let (b1, b2) = betas;
+    let bc1 = 1.0 - b1.powi(step as i32);
+    let bc2 = 1.0 - b2.powi(step as i32);
+    for i in 0..param.len()
+    {
+        let g = grad[i];
+        m[i] = b1 * m[i] + (1.0 - b1) * g;
+        v[i] = b2 * v[i] + (1.0 - b2) * g * g;
+        let mhat = m[i] / bc1;
+        let vhat = v[i] / bc2;
+        param[i] -= lr * (mhat / (vhat.sqrt() + eps) + weight_decay * param[i]);
+    }
+}
+
 /// CPU reference for the mean cross-entropy loss: `−(1/rows)·Σᵢ log P[i,tgtᵢ]`
 /// where `P = softmax(logits)` row-wise (`rows × cols` logits, `rows` targets).
 pub fn cpu_cross_entropy(logits: &[f32], targets: &[u32], rows: usize, cols: usize) -> f32 {
