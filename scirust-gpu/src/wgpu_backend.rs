@@ -54,8 +54,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-/// Elementwise kernel: `op` selects `0=add`, `1=mul` (binary, `a` and `b`), or
-/// `2=relu` (unary, `b` ignored). One invocation per element.
+/// Elementwise kernel: `op` selects `0=add`, `1=mul` (binary, `a` and `b`),
+/// `2=relu` (unary, `b` ignored), or `3=swiglu` (binary: `silu(a)·b`, the
+/// SwiGLU gate — `silu(x) = x·σ(x)`). One invocation per element.
 const EW_WGSL: &str = r#"
 struct P { n: u32, op: u32, _p0: u32, _p1: u32, };
 
@@ -70,7 +71,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (i >= p.n) { return; }
     if (p.op == 0u) { c[i] = a[i] + b[i]; }
     else if (p.op == 1u) { c[i] = a[i] * b[i]; }
-    else { c[i] = max(a[i], 0.0); }
+    else if (p.op == 2u) { c[i] = max(a[i], 0.0); }
+    else { c[i] = (a[i] / (1.0 + exp(-a[i]))) * b[i]; }
+}
+"#;
+
+/// Row-wise RMSNorm: `x / sqrt(mean(x²) + eps) · weight`, one invocation per
+/// row over the row's `cols` elements; `weight` is a `cols`-length gain vector.
+/// `eps` rides through the `u32` uniform as raw bits. The CPU contract is
+/// [`crate::ops::cpu_rms_norm`].
+const RMSNORM_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, eps_bits: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       inp: array<f32>;
+@group(0) @binding(1) var<storage, read>       weight: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let row = gid.x;
+    if (row >= p.rows) { return; }
+    if (p.cols == 0u) { return; }
+    let base = row * p.cols;
+    var ss = 0.0;
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { let x = inp[base + j]; ss = ss + x * x; }
+    let rms = sqrt(ss / f32(p.cols) + bitcast<f32>(p.eps_bits));
+    for (var j: u32 = 0u; j < p.cols; j = j + 1u) { out[base + j] = inp[base + j] / rms * weight[j]; }
 }
 "#;
 
@@ -135,6 +162,7 @@ pub struct WgpuContext {
     ew_pipeline: wgpu::ComputePipeline,
     softmax_pipeline: wgpu::ComputePipeline,
     mask_pipeline: wgpu::ComputePipeline,
+    rmsnorm_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -234,6 +262,18 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let rmsnorm_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rmsnorm"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(RMSNORM_WGSL)),
+        });
+        let rmsnorm_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("rmsnorm"),
+            layout: None,
+            module: &rmsnorm_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -241,6 +281,7 @@ impl WgpuContext {
             ew_pipeline,
             softmax_pipeline,
             mask_pipeline,
+            rmsnorm_pipeline,
             adapter_name,
         })
     }
@@ -480,11 +521,108 @@ impl WgpuContext {
         self.queue.submit(Some(encoder.finish()));
     }
 
+    /// Row-wise RMSNorm of a **resident** `rows × cols` matrix, result kept in
+    /// VRAM — `x / sqrt(mean(x²) + eps) · weight`, matching
+    /// [`crate::ops::cpu_rms_norm`]. `weight` is a resident `cols`-length gain
+    /// vector (any shape whose element count is `x.cols`).
+    pub fn rms_norm_resident(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        let weight_len = weight.rows * weight.cols;
+        if weight_len != x.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rms_norm: weight has {weight_len} elems, expected cols = {}",
+                x.cols
+            )));
+        }
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rmsnorm-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_rms_norm(&x.buf, &weight.buf, &out_buf, x.rows, x.cols, eps);
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// Encode + submit one RMSNorm dispatch: `in_buf` (`rows × cols`) normalised
+    /// row-wise and scaled by the `cols`-length `weight_buf`, written to
+    /// `out_buf`. `eps` is passed as raw bits and reconstructed with `bitcast`.
+    fn _encode_rms_norm(
+        &self,
+        in_buf: &wgpu::Buffer,
+        weight_buf: &wgpu::Buffer,
+        out_buf: &wgpu::Buffer,
+        rows: usize,
+        cols: usize,
+        eps: f32,
+    ) {
+        let params: [u32; 4] = [rows as u32, cols as u32, eps.to_bits(), 0];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("rmsnorm-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rmsnorm"),
+            layout: &self.rmsnorm_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: in_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: weight_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("rmsnorm"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("rmsnorm"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.rmsnorm_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((rows as u32).div_ceil(64), 1, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+    }
+
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
-    /// (unary). For binary ops `a` and `b` must share a shape; the result stays
-    /// in VRAM. For relu, pass `b = a` (it is ignored).
+    /// (unary), `3=swiglu` (binary: `silu(a)·b`). For binary ops `a` and `b`
+    /// must share a shape; the result stays in VRAM. For relu, pass `b = a`
+    /// (it is ignored).
     pub fn ew_resident(&self, a: &GpuMatrix, b: &GpuMatrix, op: u32) -> BackendResult<GpuMatrix> {
-        if op < 2 && (a.rows != b.rows || a.cols != b.cols)
+        if op != 2 && (a.rows != b.rows || a.cols != b.cols)
         {
             return Err(BackendError::ShapeMismatch(format!(
                 "elementwise: {}×{} vs {}×{}",
@@ -634,7 +772,7 @@ impl WgpuContext {
         b: &crate::tensor::GpuTensor,
         op: u32,
     ) -> BackendResult<crate::tensor::GpuTensor> {
-        if op < 2 && (a.rows != b.rows || a.cols != b.cols)
+        if op != 2 && (a.rows != b.rows || a.cols != b.cols)
         {
             return Err(BackendError::ShapeMismatch(format!(
                 "elementwise shape mismatch: {}×{} vs {}×{}",

@@ -71,6 +71,43 @@ impl GpuChain {
         self.ctx.ew_resident(a, a, 2)
     }
 
+    /// SwiGLU gate `silu(gate) ⊙ up` (same shape), result resident — the
+    /// nonlinearity of the SwiGLU MLP.
+    pub fn swiglu(&self, gate: &GpuMatrix, up: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.ew_resident(gate, up, 3)
+    }
+
+    /// Row-wise RMSNorm `x / sqrt(mean(x²) + eps) · weight`, result resident.
+    /// `weight` is a resident `cols`-length gain vector.
+    pub fn rms_norm(
+        &self,
+        x: &GpuMatrix,
+        weight: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.rms_norm_resident(x, weight, eps)
+    }
+
+    /// The SwiGLU MLP forward, **fully resident**:
+    /// `(silu(x·W_gate) ⊙ (x·W_up)) · W_down`.
+    ///
+    /// `x` is `t×d`, `w_gate`/`w_up` are `d×h`, `w_down` is `h×d`; returns the
+    /// `t×d` output. Every intermediate (`t×h` gate/up/activation) stays in
+    /// VRAM — the on-device MLP the SML's transformer block will call. (Apply
+    /// [`Self::rms_norm`] to `x` first for the pre-norm block.)
+    pub fn swiglu_mlp(
+        &self,
+        x: &GpuMatrix,
+        w_gate: &GpuMatrix,
+        w_up: &GpuMatrix,
+        w_down: &GpuMatrix,
+    ) -> BackendResult<GpuMatrix> {
+        let gate = self.matmul(x, w_gate)?; // x·W_gate  (t×h)
+        let up = self.matmul(x, w_up)?; // x·W_up    (t×h)
+        let act = self.swiglu(&gate, &up)?; // silu(gate)⊙up (t×h)
+        self.matmul(&act, w_down) // ·W_down    (t×d)
+    }
+
     /// Row-wise softmax of a resident matrix, result resident.
     pub fn softmax(&self, x: &GpuMatrix) -> BackendResult<GpuMatrix> {
         self.ctx.softmax_resident(x)
@@ -303,6 +340,84 @@ mod tests {
         let w = cpu_softmax(&s, t, t);
         let expected = CpuBackend.gemm_f32(&w, &v, t, t, dv).unwrap();
 
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
+    }
+
+    /// Resident row-wise RMSNorm matches the CPU oracle. Skips if no adapter.
+    #[test]
+    fn resident_rms_norm_matches_cpu_oracle() {
+        use crate::ops::cpu_rms_norm;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (4usize, 6usize);
+        let eps = 1e-5f32;
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.23 - 1.5).sin() * 2.0)
+            .collect();
+        let w: Vec<f32> = (0..cols).map(|i| 0.5 + 0.1 * i as f32).collect();
+
+        let gx = chain.upload(&x, rows, cols);
+        let gw = chain.upload(&w, 1, cols);
+        let out = chain
+            .download(&chain.rms_norm(&gx, &gw, eps).unwrap())
+            .unwrap();
+
+        let expected = cpu_rms_norm(&x, &w, eps, rows, cols);
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
+    }
+
+    /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
+    /// with every `t×h` intermediate kept in VRAM — matches a step-by-step CPU
+    /// oracle. Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_swiglu_mlp_matches_cpu_oracle() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (5usize, 4usize, 8usize);
+        let x: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.15 - 0.9).sin()).collect();
+        let wg: Vec<f32> = (0..d * h)
+            .map(|i| (i as f32 * 0.07 + 0.2).cos() * 0.5)
+            .collect();
+        let wu: Vec<f32> = (0..d * h)
+            .map(|i| (i as f32 * 0.05 - 0.4).sin() * 0.5)
+            .collect();
+        let wd: Vec<f32> = (0..h * d)
+            .map(|i| (i as f32 * 0.09 + 0.1).cos() * 0.5)
+            .collect();
+
+        let gx = chain.upload(&x, t, d);
+        let gwg = chain.upload(&wg, d, h);
+        let gwu = chain.upload(&wu, d, h);
+        let gwd = chain.upload(&wd, h, d);
+        let out = chain
+            .download(&chain.swiglu_mlp(&gx, &gwg, &gwu, &gwd).unwrap())
+            .unwrap();
+        assert_eq!(out.len(), t * d);
+
+        // CPU oracle: gate = x·Wg, up = x·Wu, act = silu(gate)⊙up, out = act·Wd.
+        let gate = CpuBackend.gemm_f32(&x, &wg, t, d, h).unwrap();
+        let up = CpuBackend.gemm_f32(&x, &wu, t, d, h).unwrap();
+        let act: Vec<f32> = gate
+            .iter()
+            .zip(&up)
+            .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+            .collect();
+        let expected = CpuBackend.gemm_f32(&act, &wd, t, h, d).unwrap();
         assert!(
             rel_err(&out, &expected) < 1e-4,
             "out={out:?} exp={expected:?}"

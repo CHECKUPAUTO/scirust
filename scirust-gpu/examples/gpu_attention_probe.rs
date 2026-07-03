@@ -19,7 +19,7 @@
 //! Exit status is non-zero if any parity check fails, so it doubles as a
 //! device smoke test in a script.
 
-use scirust_gpu::ops::{MASK_NEG, cpu_scale_causal_mask, cpu_softmax, rel_err};
+use scirust_gpu::ops::{MASK_NEG, cpu_rms_norm, cpu_scale_causal_mask, cpu_softmax, rel_err};
 use scirust_gpu::{CpuBackend, GpuChain, RawComputeBackend, WgpuContext};
 
 /// Parity tolerance: GPU accumulation order is not bit-identical to the scalar
@@ -157,6 +157,56 @@ fn main() {
     check(
         "resident attention block (·V, scores stay in VRAM)",
         rel_err(&ctx_gpu, &ctx_cpu),
+        &mut failures,
+    );
+
+    // 5. Resident RMSNorm (the pre-norm of a transformer block).
+    let eps = 1e-5f32;
+    let nx: Vec<f32> = (0..t * d)
+        .map(|i| (i as f32 * 0.13 - 0.8).cos() * 2.0)
+        .collect();
+    let nw: Vec<f32> = (0..d).map(|i| 0.6 + 0.05 * i as f32).collect();
+    let gnx = chain.upload(&nx, t, d);
+    let gnw = chain.upload(&nw, 1, d);
+    let rms_gpu = chain
+        .download(&chain.rms_norm(&gnx, &gnw, eps).unwrap())
+        .unwrap();
+    check(
+        "resident RMSNorm",
+        rel_err(&rms_gpu, &cpu_rms_norm(&nx, &nw, eps, t, d)),
+        &mut failures,
+    );
+
+    // 6. The SwiGLU MLP block, fully resident: (silu(x·Wg) ⊙ (x·Wu))·Wd, every
+    //    t×h intermediate kept in VRAM — the MLP half of a transformer layer.
+    let hh = 12usize;
+    let wg: Vec<f32> = (0..d * hh)
+        .map(|i| (i as f32 * 0.07 + 0.2).cos() * 0.5)
+        .collect();
+    let wu: Vec<f32> = (0..d * hh)
+        .map(|i| (i as f32 * 0.05 - 0.4).sin() * 0.5)
+        .collect();
+    let wd: Vec<f32> = (0..hh * d)
+        .map(|i| (i as f32 * 0.09 + 0.1).cos() * 0.5)
+        .collect();
+    let gwg = chain.upload(&wg, d, hh);
+    let gwu = chain.upload(&wu, d, hh);
+    let gwd = chain.upload(&wd, hh, d);
+    let mlp_gpu = chain
+        .download(&chain.swiglu_mlp(&gnx, &gwg, &gwu, &gwd).unwrap())
+        .unwrap();
+    // CPU oracle: gate = x·Wg, up = x·Wu, act = silu(gate)⊙up, out = act·Wd.
+    let gate = CpuBackend.gemm_f32(&nx, &wg, t, d, hh).unwrap();
+    let up = CpuBackend.gemm_f32(&nx, &wu, t, d, hh).unwrap();
+    let act: Vec<f32> = gate
+        .iter()
+        .zip(&up)
+        .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+        .collect();
+    let mlp_cpu = CpuBackend.gemm_f32(&act, &wd, t, hh, d).unwrap();
+    check(
+        "resident SwiGLU MLP (silu(x·Wg)⊙(x·Wu)·Wd)",
+        rel_err(&mlp_gpu, &mlp_cpu),
         &mut failures,
     );
 
