@@ -57,6 +57,24 @@ pub trait SimdBackend: Send + Sync {
 #[cfg(feature = "blas")]
 pub struct BlasBackend;
 
+/// Exact element count spanned by a `col_stride == 1` view whose logical shape
+/// is (rows, cols) with the given row stride: the last element sits at
+/// `(rows-1)*row_stride + (cols-1)`. Using `rows*row_stride` overshoots the
+/// backing allocation for a sub-view where `row_stride > cols` — `from_raw_parts`
+/// spanning outside the allocation is UB even if BLAS never reads the tail.
+#[cfg(feature = "blas")]
+#[inline]
+fn contiguous_span(rows: usize, cols: usize, row_stride: usize) -> usize {
+    if rows == 0
+    {
+        0
+    }
+    else
+    {
+        (rows - 1) * row_stride + cols
+    }
+}
+
 #[cfg(feature = "blas")]
 impl SimdBackend for BlasBackend {
     fn name(&self) -> &'static str {
@@ -101,7 +119,7 @@ impl SimdBackend for BlasBackend {
                     k as i32,
                     m as i32,
                     alpha,
-                    std::slice::from_raw_parts(a.as_ptr(), m * a.row_stride()),
+                    std::slice::from_raw_parts(a.as_ptr(), contiguous_span(m, k, a.row_stride())),
                     a.row_stride() as i32,
                     x,
                     1,
@@ -141,12 +159,21 @@ impl SimdBackend for BlasBackend {
                     m as i32,
                     k as i32,
                     alpha,
-                    std::slice::from_raw_parts(b.as_ptr(), b.rows() * b.row_stride()),
+                    std::slice::from_raw_parts(
+                        b.as_ptr(),
+                        contiguous_span(b.rows(), n, b.row_stride()),
+                    ),
                     b.row_stride() as i32,
-                    std::slice::from_raw_parts(a.as_ptr(), a.rows() * a.row_stride()),
+                    std::slice::from_raw_parts(
+                        a.as_ptr(),
+                        contiguous_span(a.rows(), k, a.row_stride()),
+                    ),
                     a.row_stride() as i32,
                     beta,
-                    std::slice::from_raw_parts_mut(c.as_mut_ptr(), c.rows() * c.row_stride()),
+                    std::slice::from_raw_parts_mut(
+                        c.as_mut_ptr(),
+                        contiguous_span(c.rows(), n, c.row_stride()),
+                    ),
                     c.row_stride() as i32,
                 );
             }
@@ -354,47 +381,71 @@ impl SimdBackend for PortableSimdBackend {
 
     #[inline]
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
-        // y += alpha * x, vectorisé
+        // y += alpha * x, vectorised.
+        //
+        // Split ONLY y on its SIMD alignment; load x UNALIGNED at the matching
+        // logical offset. Calling as_simd on x AND y independently splits each
+        // at its own alignment boundary, so whenever the two buffers' start
+        // alignments differ (common for offset sub-slices) the pre/mid/suf
+        // chunks pair mismatched logical indices and corrupt y.
         use std::simd::{StdFloat, f32x8};
+        if x.len() != y.len()
+        {
+            for (yi, xi) in y.iter_mut().zip(x.iter())
+            {
+                *yi += alpha * xi;
+            }
+            return;
+        }
         let splat = f32x8::splat(alpha);
-        let (pre_x, mid_x, suf_x) = x.as_simd::<8>();
         let (pre_y, mid_y, suf_y) = y.as_simd_mut::<8>();
-
-        for (yi, xi) in pre_y.iter_mut().zip(pre_x.iter())
+        let pre = pre_y.len();
+        for (i, yi) in pre_y.iter_mut().enumerate()
         {
-            *yi += alpha * xi;
+            *yi += alpha * x[i];
         }
-        for (vy, vx) in mid_y.iter_mut().zip(mid_x.iter())
+        for (k, vy) in mid_y.iter_mut().enumerate()
         {
-            *vy = splat.mul_add(*vx, *vy);
+            let base = pre + k * 8;
+            let vx = f32x8::from_slice(&x[base..base + 8]);
+            *vy = splat.mul_add(vx, *vy);
         }
-        let offset = pre_x.len() + mid_x.len() * 8;
-        for (yi, xi) in suf_y.iter_mut().zip(suf_x.iter())
+        let off = pre + mid_y.len() * 8;
+        for (i, yi) in suf_y.iter_mut().enumerate()
         {
-            *yi += alpha * xi;
+            *yi += alpha * x[off + i];
         }
-        let _ = offset; // silence unused
     }
 
     #[inline]
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
+        // See saxpy_f32: split only y, load x unaligned at the matching offset.
         use std::simd::{StdFloat, f64x4};
+        if x.len() != y.len()
+        {
+            for (yi, xi) in y.iter_mut().zip(x.iter())
+            {
+                *yi += alpha * xi;
+            }
+            return;
+        }
         let splat = f64x4::splat(alpha);
-        let (pre_x, mid_x, _) = x.as_simd::<4>();
         let (pre_y, mid_y, suf_y) = y.as_simd_mut::<4>();
-
-        for (yi, xi) in pre_y.iter_mut().zip(pre_x.iter())
+        let pre = pre_y.len();
+        for (i, yi) in pre_y.iter_mut().enumerate()
         {
-            *yi += alpha * xi;
+            *yi += alpha * x[i];
         }
-        for (vy, vx) in mid_y.iter_mut().zip(mid_x.iter())
+        for (k, vy) in mid_y.iter_mut().enumerate()
         {
-            *vy = splat.mul_add(*vx, *vy);
+            let base = pre + k * 4;
+            let vx = f64x4::from_slice(&x[base..base + 4]);
+            *vy = splat.mul_add(vx, *vy);
         }
-        let offset = pre_x.len() + mid_x.len() * 4;
-        for (yi, xi) in suf_y.iter_mut().zip(x[offset..].iter())
+        let off = pre + mid_y.len() * 4;
+        for (i, yi) in suf_y.iter_mut().enumerate()
         {
-            *yi += alpha * xi;
+            *yi += alpha * x[off + i];
         }
     }
 
@@ -434,15 +485,16 @@ impl SimdBackend for PortableSimdBackend {
         let (_k, n) = b.shape();
         assert_eq!(k, _k);
 
-        // Pré-scale C par beta
+        // Pré-scale C par beta. Element indexing (not row_slice_mut) so a
+        // column-strided C is still scaled: row_slice_mut returns None when
+        // col_stride != 1, which previously skipped the beta scaling while the
+        // accumulation below still ran — yielding C + alpha*AB, not
+        // beta*C + alpha*AB.
         for i in 0..m
         {
-            if let Some(row) = c.row_slice_mut(i)
+            for j in 0..n
             {
-                for x in row.iter_mut()
-                {
-                    *x *= beta;
-                }
+                c[(i, j)] *= beta;
             }
         }
 
@@ -583,5 +635,118 @@ mod tests {
         assert_eq!(a[0], vec![2.0, 0.0, 0.0]);
         assert_eq!(a[1], vec![6.0, 1.0, 0.0]);
         assert_eq!(a[2], vec![-8.0, 5.0, 3.0]);
+    }
+
+    // The PortableSimd AXPY must match the scalar reference for EVERY pair of
+    // start offsets. Sweeping offsets 0..9 on two independent buffers exercises
+    // cases where x and y have different SIMD alignment (pre_x.len() !=
+    // pre_y.len()) — exactly where the old independent-split code corrupted y.
+    #[cfg(feature = "portable-simd")]
+    #[test]
+    fn portable_simd_saxpy_matches_scalar_across_offsets() {
+        let base_x: Vec<f32> = (0..80).map(|i| i as f32 * 0.5 + 1.0).collect();
+        let base_y: Vec<f32> = (0..80).map(|i| i as f32 * -0.25 + 2.0).collect();
+        let alpha = 1.75f32;
+        let len = 47; // not a multiple of 8, so prefix/suffix are non-empty
+        for ox in 0..9
+        {
+            for oy in 0..9
+            {
+                let mut y_simd = base_y.clone();
+                let mut y_ref = base_y.clone();
+                PortableSimdBackend.saxpy_f32(
+                    alpha,
+                    &base_x[ox..ox + len],
+                    &mut y_simd[oy..oy + len],
+                );
+                ScalarBackend.saxpy_f32(alpha, &base_x[ox..ox + len], &mut y_ref[oy..oy + len]);
+                for i in 0..len
+                {
+                    let a = y_simd[oy + i];
+                    let b = y_ref[oy + i];
+                    assert!(
+                        (a - b).abs() <= 1e-4 * (1.0 + b.abs()),
+                        "saxpy mismatch at offsets x={ox} y={oy} elem {i}: {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "portable-simd")]
+    #[test]
+    fn portable_simd_daxpy_matches_scalar_across_offsets() {
+        let base_x: Vec<f64> = (0..80).map(|i| i as f64 * 0.5 + 1.0).collect();
+        let base_y: Vec<f64> = (0..80).map(|i| i as f64 * -0.25 + 2.0).collect();
+        let alpha = 1.75f64;
+        let len = 23;
+        for ox in 0..5
+        {
+            for oy in 0..5
+            {
+                let mut y_simd = base_y.clone();
+                let mut y_ref = base_y.clone();
+                PortableSimdBackend.daxpy_f64(
+                    alpha,
+                    &base_x[ox..ox + len],
+                    &mut y_simd[oy..oy + len],
+                );
+                ScalarBackend.daxpy_f64(alpha, &base_x[ox..ox + len], &mut y_ref[oy..oy + len]);
+                for i in 0..len
+                {
+                    let a = y_simd[oy + i];
+                    let b = y_ref[oy + i];
+                    assert!(
+                        (a - b).abs() <= 1e-9 * (1.0 + b.abs()),
+                        "daxpy mismatch at offsets x={ox} y={oy} elem {i}: {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    // GEMM must apply beta even when C is column-strided. The old pre-scale used
+    // row_slice_mut, which returns None for col_stride != 1, so it skipped the
+    // beta scaling while still accumulating -> C + alpha*AB instead of
+    // beta*C + alpha*AB.
+    #[cfg(feature = "portable-simd")]
+    #[test]
+    fn portable_simd_gemm_applies_beta_on_column_strided_c() {
+        let (m, k, n) = (2usize, 2usize, 2usize);
+        let a = vec![1.0f32, 2.0, 3.0, 4.0]; // [[1,2],[3,4]]
+        let b = vec![5.0f32, 6.0, 7.0, 8.0]; // [[5,6],[7,8]]
+        let av = MatrixView::from_slice(&a, m, k);
+        let bv = MatrixView::from_slice(&b, k, n);
+
+        // Column-strided C: col_stride = 2, row_stride = n*2, into a padded buf.
+        let col_stride = 2usize;
+        let row_stride = n * col_stride;
+        let mut buf = vec![-999.0f32; m * row_stride];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                buf[i * row_stride + j * col_stride] = 1.0; // initial C = ones
+            }
+        }
+        // A@B = [[19,22],[43,50]]; beta*1 + A@B = [[21,24],[45,52]].
+        let expected = [[21.0f32, 24.0], [45.0, 52.0]];
+        unsafe {
+            let c = MatrixViewMut::from_raw_parts(buf.as_mut_ptr(), m, n, row_stride, col_stride);
+            PortableSimdBackend.sgemm_f32(1.0, av, bv, 2.0, c);
+        }
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let got = buf[i * row_stride + j * col_stride];
+                assert!(
+                    (got - expected[i][j]).abs() < 1e-4,
+                    "C[{i}][{j}] = {got}, expected {}",
+                    expected[i][j]
+                );
+            }
+        }
+        assert_eq!(buf[1], -999.0, "padding gap must be untouched");
     }
 }
