@@ -266,6 +266,73 @@ pub fn cpu_rms_norm_backward(
     dx
 }
 
+/// CPU reference for rotary position embedding — the bit-exact oracle for
+/// [`crate::WgpuContext::rope_resident`]. Rotates the interleaved lane pair
+/// `(2j, 2j+1)` of each row by `pos·freqⱼ`, with `pos = (row mod seq_len) +
+/// offset` and `freqⱼ = theta^(-2j/dim)`:
+/// `y[2j] = e·cos − o·sin`, `y[2j+1] = e·sin + o·cos` (`e=x[2j], o=x[2j+1]`).
+/// This is exactly the sciagent model's RoPE (`GQAAttention::rope_apply`).
+/// `dim` must be even.
+pub fn cpu_rope(
+    x: &[f32],
+    rows: usize,
+    dim: usize,
+    seq_len: usize,
+    offset: usize,
+    theta: f32,
+) -> Vec<f32> {
+    let half = dim / 2;
+    let mut out = vec![0.0f32; rows * dim];
+    for r in 0..rows
+    {
+        let base = r * dim;
+        let pos = ((r % seq_len.max(1)) + offset) as f32;
+        for j in 0..half
+        {
+            let freq = theta.powf(-2.0 * j as f32 / dim as f32);
+            let angle = pos * freq;
+            let (s, c) = angle.sin_cos();
+            let e = x[base + 2 * j];
+            let o = x[base + 2 * j + 1];
+            out[base + 2 * j] = e * c - o * s;
+            out[base + 2 * j + 1] = e * s + o * c;
+        }
+    }
+    out
+}
+
+/// CPU reference for the RoPE backward — the adjoint of the rotation is the
+/// transpose rotation: `dx[2j] = cos·dy[2j] + sin·dy[2j+1]`,
+/// `dx[2j+1] = −sin·dy[2j] + cos·dy[2j+1]`, same `pos`/`freq` as [`cpu_rope`].
+/// The GPU `rope_backward_resident` contract.
+pub fn cpu_rope_backward(
+    dy: &[f32],
+    rows: usize,
+    dim: usize,
+    seq_len: usize,
+    offset: usize,
+    theta: f32,
+) -> Vec<f32> {
+    let half = dim / 2;
+    let mut dx = vec![0.0f32; rows * dim];
+    for r in 0..rows
+    {
+        let base = r * dim;
+        let pos = ((r % seq_len.max(1)) + offset) as f32;
+        for j in 0..half
+        {
+            let freq = theta.powf(-2.0 * j as f32 / dim as f32);
+            let angle = pos * freq;
+            let (s, c) = angle.sin_cos();
+            let ge = dy[base + 2 * j];
+            let go = dy[base + 2 * j + 1];
+            dx[base + 2 * j] = c * ge + s * go;
+            dx[base + 2 * j + 1] = -s * ge + c * go;
+        }
+    }
+    dx
+}
+
 /// CPU reference for the scale + causal-mask backward: `din = scale·dout` at
 /// kept positions, `0` above the diagonal (masked keys carry no gradient). The
 /// GPU `scale_causal_mask_backward_resident` contract.

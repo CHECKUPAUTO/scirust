@@ -219,6 +219,33 @@ impl GpuChain {
         self.matmul(&weights, v) // context = W·V (t×dv)
     }
 
+    /// Rotary position embedding of a resident `rows × dim` matrix (rows =
+    /// positions, `dim` = head dim), result resident. Interleaved-pair rotation
+    /// with `pos = (row mod seq_len) + offset` and `freqⱼ = theta^(-2j/dim)` —
+    /// matching the sciagent model's RoPE. Apply to Q and K before the score
+    /// GEMM. `dim` must be even.
+    pub fn rope(
+        &self,
+        x: &GpuMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.rope_resident(x, seq_len, offset, theta)
+    }
+
+    /// Backward of [`Self::rope`]: the transpose rotation of the upstream grad
+    /// `dy` (`rows × dim`, resident), result resident.
+    pub fn rope_backward(
+        &self,
+        dy: &GpuMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.rope_backward_resident(dy, seq_len, offset, theta)
+    }
+
     /// A complete **pre-norm residual transformer block**, fully resident:
     ///
     /// ```text
@@ -874,6 +901,91 @@ mod tests {
             rel_err(&out, &expected) < 1e-4,
             "out={out:?} exp={expected:?}"
         );
+    }
+
+    /// The resident RoPE forward matches the CPU oracle (the model's exact
+    /// interleaved rotation). Rows are token positions; here 6 rows span two
+    /// sequences of `seq_len = 3`, so the `pos = row mod seq_len` restart is
+    /// exercised. Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_rope_matches_cpu_oracle() {
+        use crate::ops::cpu_rope;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, dim, seq_len, offset, theta) = (6usize, 8usize, 3usize, 0usize, 10_000.0f32);
+        let x: Vec<f32> = (0..rows * dim)
+            .map(|i| (i as f32 * 0.19 - 1.1).sin() * 1.7)
+            .collect();
+
+        let gx = chain.upload(&x, rows, dim);
+        let out = chain
+            .download(&chain.rope(&gx, seq_len, offset, theta).unwrap())
+            .unwrap();
+
+        let expected = cpu_rope(&x, rows, dim, seq_len, offset, theta);
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "out={out:?} exp={expected:?}"
+        );
+    }
+
+    /// RoPE backward must match numerical gradients. RoPE is linear, so for
+    /// `L = Σ rope(X)⊙G` the input gradient is `dx = rope_backward(G)` (the
+    /// transpose rotation applied to `G`); checked against the CPU adjoint and
+    /// against central finite differences of `L` over `X`. `offset = 1` and a
+    /// mid-range `seq_len` exercise the position arithmetic. Skips if no adapter.
+    #[test]
+    fn rope_backward_matches_finite_differences() {
+        use crate::ops::{cpu_rope, cpu_rope_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, dim, seq_len, offset, theta) = (4usize, 6usize, 4usize, 1usize, 10_000.0f32);
+        let x: Vec<f32> = (0..rows * dim)
+            .map(|i| (i as f32 * 0.27 - 0.9).sin() * 1.3)
+            .collect();
+        let g: Vec<f32> = (0..rows * dim)
+            .map(|i| (i as f32 * 0.4 + 0.15).cos())
+            .collect(); // dL/dY
+
+        let gg = chain.upload(&g, rows, dim);
+        let dx_gpu = chain
+            .download(&chain.rope_backward(&gg, seq_len, offset, theta).unwrap())
+            .unwrap();
+        // GPU must match the CPU adjoint formula (same arithmetic).
+        let dx_cpu = cpu_rope_backward(&g, rows, dim, seq_len, offset, theta);
+        assert!(rel_err(&dx_gpu, &dx_cpu) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ rope(X)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_rope(xx, rows, dim, seq_len, offset, theta)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..rows * dim
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += eps;
+            xm[idx] -= eps;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * eps);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
