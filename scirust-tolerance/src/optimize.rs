@@ -106,7 +106,10 @@ impl Requirement {
 /// Result of [`optimize`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OptimizeResult {
-    /// Optimal per-component inertias `Iᵢ`.
+    /// Optimal per-component inertias `Iᵢ`. Guaranteed feasible: every
+    /// requirement's resultant inertia is within its budget (a final uniform
+    /// tightening seats the worst constraint exactly on its budget even when
+    /// the dual iteration did not fully converge).
     pub inertias: Vec<f64>,
     /// Total tightening cost `Σᵢ bᵢ Iᵢ^(−rᵢ)`.
     pub total_cost: f64,
@@ -193,8 +196,8 @@ pub struct OptimizeOptions {
 impl Default for OptimizeOptions {
     fn default() -> Self {
         Self {
-            max_iters: 5000,
-            tol: 1e-12,
+            max_iters: 20_000,
+            tol: 1e-10,
             damping: 0.5,
         }
     }
@@ -311,6 +314,26 @@ pub fn optimize_with(
             break;
         }
         prev.copy_from_slice(&inertias);
+    }
+
+    // Feasibility safeguard. Rounding — or a run that hit `max_iters` on
+    // ill-conditioned (near-parallel) constraints — can leave a requirement
+    // marginally over budget. For tolerance allocation a feasible, slightly
+    // costlier answer is strictly preferable to an infeasible one, so uniformly
+    // tighten: scaling every Iᵢ by `f` scales every achievedₖ by `f`, and
+    // `f = 1/maxₖ(achievedₖ/I_max,ₖ)` seats the worst constraint exactly on its
+    // budget while leaving the (scale-invariant) relative allocation untouched.
+    let max_ratio = requirements
+        .iter()
+        .map(|r| r.achieved(&inertias) / r.i_max)
+        .fold(0.0_f64, f64::max);
+    if max_ratio > 1.0
+    {
+        let f = 1.0 / max_ratio;
+        for v in &mut inertias
+        {
+            *v *= f;
+        }
     }
 
     let achieved: Vec<f64> = requirements.iter().map(|r| r.achieved(&inertias)).collect();
@@ -510,6 +533,33 @@ mod tests {
             res.total_cost,
             naive_cost
         );
+    }
+
+    #[test]
+    fn result_is_always_feasible_even_when_ill_conditioned() {
+        // Two nearly-parallel constraints with slightly different budgets — an
+        // ill-conditioned instance where the dual can stall. The feasibility
+        // safeguard must still return an allocation inside every budget.
+        let comps = vec![
+            Component::new("A", 1.0, 2.0),
+            Component::new("B", 1.0, 2.0),
+            Component::new("C", 2.0, 3.0),
+        ];
+        let reqs = vec![
+            Requirement::new("Y1", vec![1.0, 1.000_000_1, 0.5], 0.050),
+            Requirement::new("Y2", vec![1.0, 1.0, 0.5], 0.050_01),
+        ];
+        let res = optimize(&comps, &reqs).unwrap();
+        for (a, r) in res.achieved.iter().zip(&reqs)
+        {
+            assert!(
+                *a <= r.i_max * (1.0 + 1e-9),
+                "{} infeasible: achieved {a} > budget {}",
+                r.name,
+                r.i_max
+            );
+        }
+        assert!(res.inertias.iter().all(|i| i.is_finite() && *i > 0.0));
     }
 
     #[test]
