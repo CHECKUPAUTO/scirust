@@ -62,6 +62,16 @@ autodiff must run on GPU tensors. Two routes:
 - Pro: portable, buildable incrementally, testable against the CPU path for
   numerical parity. Con: wgpu does not expose Blackwell Tensor cores, so it
   leaves throughput on the table.
+- **✅ Wired (v1 — GEMM routing).** `scirust-sciagent`'s `gpu` feature attaches
+  `scirust-gpu`'s validated `WgpuEngine` (the tape's GEMM hook) and flips the
+  tape into GPU-matmul mode (`Tape::set_prefer_gpu_matmul`), so every projection,
+  RoPE rotation, per-head `Q·Kᵀ`/`·V`, SwiGLU and the tied LM head run their
+  **forward and backward** GEMMs on the device — no per-call-site changes, the
+  autodiff graph unchanged, non-GEMM ops (softmax/RMSNorm/mask) on CPU. Parity
+  vs the CPU reference (logits + every parameter gradient) is checked in
+  `tests/gpu_parity.rs` and on-device by `examples/gpu_forward_parity.rs`. GEMMs
+  are the dominant transformer FLOPs; the fully-resident all-op path
+  (`GpuChain`, where the 8–60× `gpu_bench` speedups live) is the next lift.
 
 ### Route B — native CUDA for Blackwell (sm_110) — later, for throughput
 - CUDA 13, `cudarc` 0.19+, compute capability sm_110; Tensor cores with
@@ -97,10 +107,12 @@ then B to make it fast.**
      gradients identical to a full end-to-end tape on `scirust-core`. ✅
      Remaining: wire it into the training loop's multi-segment param mapping.
 2. **Route A GPU backend (on the Thor).**
-   - `gpu` feature routing `SciAgentModel` ops through `scirust-gpu`.
-   - Parity tests: GPU logits vs CPU logits within tolerance on the `debug`
-     config.
-   - Mixed precision (bf16 compute, fp32 optimizer master).
+   - `gpu` feature routing `SciAgentModel` ops through `scirust-gpu`. ✅ (GEMM
+     forward+backward via the tape engine; see Route A above.)
+   - Parity tests: GPU logits + all parameter grads vs CPU within tolerance. ✅
+     (`tests/gpu_parity.rs`, `examples/gpu_forward_parity.rs`.)
+   - Remaining: fully-resident all-op path (`GpuChain`) to cut per-op host
+     round-trips; mixed precision (bf16 compute, fp32 optimizer master).
 3. **Scale-up run.**
    - `sciagent_350m` with flash + checkpointing, seq 2048→4096, bf16, on the
      Thor. Use `sciagent-plan` to pick seq/batch for the memory budget.
