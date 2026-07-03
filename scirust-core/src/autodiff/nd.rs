@@ -61,6 +61,14 @@ enum Op {
     /// with one integer target per row. Output is the scalar mean loss; the
     /// indices are constants (not differentiated).
     CrossEntropy(usize, Vec<usize>),
+    /// Fused **per-channel causal convolution** `CausalConv(u, h)` of a signal
+    /// `u` with a lag-indexed filter `h`, both `(seq, d)`:
+    /// `y[t,c] = Σ_{τ=0}^{t} h[τ,c]·u[t−τ,c]`. Backward differentiates both
+    /// operands. Replaces the `Σ_τ hτ ⊙ (Sτ·u)` shift-matrix decomposition
+    /// (which was O(seq³·d)) with an O(seq²·d) direct evaluation — the forward
+    /// is bit-identical because the accumulation order (`τ` ascending) and the
+    /// per-term products are unchanged.
+    CausalConv(usize, usize),
 }
 
 struct Node {
@@ -317,6 +325,41 @@ impl NdTape {
                     }
                     accumulate(&mut grads[a], &TensorND::new(dl, logits.shape.clone()));
                 },
+                Op::CausalConv(u, h) =>
+                {
+                    // y[t,c] = Σ_{τ=0}^{t} h[τ,c]·u[t−τ,c]. Differentiate both:
+                    //   ∂L/∂u[j,c] = Σ_{τ=0}^{seq-1-j} g[j+τ,c]·h[τ,c]
+                    //   ∂L/∂h[τ,c] = Σ_{t=τ}^{seq-1}   g[t,c]·u[t−τ,c]
+                    let uv = &nodes[u].value;
+                    let hv = &nodes[h].value;
+                    let (seq, d) = (uv.shape[0], uv.shape[1]);
+                    let (ud, hd) = (&uv.data, &hv.data);
+                    let mut gu = vec![0f32; seq * d];
+                    let mut gh = vec![0f32; seq * d];
+                    for c in 0..d
+                    {
+                        for j in 0..seq
+                        {
+                            let mut acc = 0f32;
+                            for tau in 0..seq - j
+                            {
+                                acc += g.data[(j + tau) * d + c] * hd[tau * d + c];
+                            }
+                            gu[j * d + c] = acc;
+                        }
+                        for tau in 0..seq
+                        {
+                            let mut acc = 0f32;
+                            for t in tau..seq
+                            {
+                                acc += g.data[t * d + c] * ud[(t - tau) * d + c];
+                            }
+                            gh[tau * d + c] = acc;
+                        }
+                    }
+                    accumulate(&mut grads[u], &TensorND::new(gu, uv.shape.clone()));
+                    accumulate(&mut grads[h], &TensorND::new(gh, hv.shape.clone()));
+                },
             }
         }
         grads
@@ -499,6 +542,38 @@ impl<'t> NdVar<'t> {
         }
         let out = TensorND::new(data, vec![indices.len(), dim]);
         self.tape.push(Op::Gather(self.idx, indices.to_vec()), out)
+    }
+
+    /// **Per-channel causal convolution** of the signal `self` with a
+    /// lag-indexed filter `h`, both `(seq, d)`:
+    /// `y[t,c] = Σ_{τ=0}^{t} h[τ,c]·u[t−τ,c]` — the core primitive of a Hyena
+    /// long convolution. Evaluated directly in `O(seq²·d)` (versus the
+    /// `O(seq³·d)` shift-matrix expansion `Σ_τ hτ ⊙ (Sτ·u)`), while summing the
+    /// taps in the same `τ`-ascending order so the forward is bit-identical.
+    /// Differentiable in both operands.
+    pub fn causal_conv(self, h: NdVar<'t>) -> NdVar<'t> {
+        let (u, hh) = self.pair(h);
+        assert_eq!(u.ndim(), 2, "causal_conv: signal must be 2-D (seq, d)");
+        assert_eq!(
+            u.shape, hh.shape,
+            "causal_conv: signal and filter must share shape (seq, d)"
+        );
+        let (seq, d) = (u.shape[0], u.shape[1]);
+        let mut y = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for c in 0..d
+            {
+                let mut acc = 0f32;
+                for tau in 0..=t
+                {
+                    acc += hh.data[tau * d + c] * u.data[(t - tau) * d + c];
+                }
+                y[t * d + c] = acc;
+            }
+        }
+        let out = TensorND::new(y, vec![seq, d]);
+        self.tape.push(Op::CausalConv(self.idx, h.idx), out)
     }
 
     /// Concatenate `self` with `rest` along axis 0 — all parts must share their
@@ -1620,6 +1695,79 @@ mod tests {
         // Rows never gathered (1 and 3) receive zero gradient.
         assert_eq!(&gw.data[dim..2 * dim], &[0.0, 0.0, 0.0]);
         assert_eq!(&gw.data[3 * dim..4 * dim], &[0.0, 0.0, 0.0]);
+    }
+
+    /// Fused per-channel causal convolution: forward is **bit-for-bit** equal to
+    /// the naive `τ`-ascending reference, and gradients w.r.t. both the signal
+    /// and the filter match finite differences.
+    #[test]
+    fn nd_causal_conv_forward_bitexact_and_gradient_check() {
+        let (seq, d) = (6usize, 3usize);
+        let u: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.3 - 0.5).sin()).collect();
+        let h: Vec<f32> = (0..seq * d).map(|i| (i as f32 * 0.2 + 0.4).cos()).collect();
+
+        // Naive reference, identical accumulation order to the op.
+        let mut want = vec![0f32; seq * d];
+        for t in 0..seq
+        {
+            for c in 0..d
+            {
+                let mut acc = 0f32;
+                for tau in 0..=t
+                {
+                    acc += h[tau * d + c] * u[(t - tau) * d + c];
+                }
+                want[t * d + c] = acc;
+            }
+        }
+
+        let t0 = NdTape::new();
+        let uv = t0.input(TensorND::new(u.clone(), vec![seq, d]));
+        let hv = t0.input(TensorND::new(h.clone(), vec![seq, d]));
+        let got = t0.value(uv.causal_conv(hv));
+        assert_eq!(got.shape, vec![seq, d]);
+        for (g, w) in got.data.iter().zip(&want)
+        {
+            assert_eq!(
+                g.to_bits(),
+                w.to_bits(),
+                "causal_conv forward not bit-exact"
+            );
+        }
+
+        let loss_of = |uu: &[f32], hh: &[f32]| -> f32 {
+            let t = NdTape::new();
+            let uv = t.input(TensorND::new(uu.to_vec(), vec![seq, d]));
+            let hv = t.input(TensorND::new(hh.to_vec(), vec![seq, d]));
+            t.value(uv.causal_conv(hv).sum()).data[0]
+        };
+
+        let t = NdTape::new();
+        let uv = t.input(TensorND::new(u.clone(), vec![seq, d]));
+        let hv = t.input(TensorND::new(h.clone(), vec![seq, d]));
+        let grads = t.backward(uv.causal_conv(hv).sum());
+        let (gu, gh) = (grads[uv.idx()].clone(), grads[hv.idx()].clone());
+        assert_eq!(gu.shape, vec![seq, d]);
+        assert_eq!(gh.shape, vec![seq, d]);
+
+        let eps = 1e-3f32;
+        let check = |analytic: &TensorND, base: &[f32], rebuild: &dyn Fn(&[f32]) -> f32| {
+            for i in 0..base.len()
+            {
+                let mut up = base.to_vec();
+                let mut dn = base.to_vec();
+                up[i] += eps;
+                dn[i] -= eps;
+                let num = (rebuild(&up) - rebuild(&dn)) / (2.0 * eps);
+                assert!(
+                    (num - analytic.data[i]).abs() < 2e-2,
+                    "causal_conv grad {i}: numeric {num}, analytic {}",
+                    analytic.data[i]
+                );
+            }
+        };
+        check(&gu, &u, &|p| loss_of(p, &h));
+        check(&gh, &h, &|p| loss_of(&u, p));
     }
 
     /// Fused softmax cross-entropy: gradient w.r.t. the logits matches finite
