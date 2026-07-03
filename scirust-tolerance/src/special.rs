@@ -24,9 +24,12 @@ use core::f64::consts::{FRAC_2_SQRT_PI, PI};
 /// erf(x) = (2/√π) · e^{-x²} · Σ_{n≥0}  2ⁿ x^{2n+1} / (1·3·5···(2n+1))
 /// ```
 ///
-/// whose terms are all positive, so there is no subtractive cancellation
-/// for any real `x`. Accurate to full `f64` precision; the term count grows
-/// like `x²`, which is irrelevant for the ranges capability work touches.
+/// whose terms are all positive, so there is no subtractive cancellation.
+/// Accurate to full `f64` precision; the term count grows like `x²`, which is
+/// irrelevant for the ranges capability work touches. For `|x| ≥ 6` the result
+/// saturates at `±1` — exact in `f64` there, since `erfc(6) ≈ 2.15e-17` is
+/// below the ULP of `1.0` — which also avoids the `e^{x²}` intermediate
+/// overflow the series would otherwise hit near `|x| ≈ 27`.
 pub fn erf(x: f64) -> f64 {
     if x == 0.0
     {
@@ -34,6 +37,10 @@ pub fn erf(x: f64) -> f64 {
     }
     // Series is written for x > 0 and reflected via erf(-x) = -erf(x).
     let ax = x.abs();
+    if ax >= 6.0
+    {
+        return if x < 0.0 { -1.0 } else { 1.0 };
+    }
     // term_0 = ax; term_{n} = term_{n-1} · 2·ax² / (2n+1)
     let two_x2 = 2.0 * ax * ax;
     let mut term = ax;
@@ -358,6 +365,19 @@ mod tests {
         close(erf(2.0), 0.995_322_265_018_952_7, 1e-12);
         close(erf(-1.0), -0.842_700_792_949_714_9, 1e-12);
         close(erf(3.0), 0.999_977_909_503_001_4, 1e-12);
+    }
+
+    #[test]
+    fn erf_saturates_for_large_x_without_nan() {
+        // Regression: the all-positive series overflows e^{x²} near |x|≈27; the
+        // saturation branch must return exactly ±1 and never NaN/inf or >1.
+        for &x in &[6.0, 15.0, 27.0, 28.0, 30.0, 100.0, 1e9]
+        {
+            assert_eq!(erf(x), 1.0, "erf({x}) should saturate to 1.0");
+            assert_eq!(erf(-x), -1.0, "erf({}) should saturate to -1.0", -x);
+        }
+        // Continuity: just below the cutoff the series already yields 1.0 in f64.
+        close(erf(5.9), 1.0, 1e-15);
     }
 
     #[test]
