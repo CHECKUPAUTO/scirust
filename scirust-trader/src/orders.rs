@@ -323,12 +323,6 @@ impl Order {
     }
 }
 
-/// Whether a taker fill would be assumed given the order type. A limit/TP order
-/// that rests earns the maker rate; a market/stop-triggered order pays taker.
-fn is_taker(order_type: &OrderType) -> bool {
-    matches!(order_type, OrderType::Market | OrderType::StopMarket { .. })
-}
-
 /// Attempt to fill an order against a single execution candle.
 ///
 /// Returns `Some(Fill)` for the executable quantity (`order.remaining()`), or
@@ -384,7 +378,11 @@ pub fn simulate_fill(
                 Side::Buy => o.min(price),
                 Side::Sell => o.max(price),
             };
-            (px, false)
+            // A limit that is already marketable on arrival (its open is on the
+            // crossing side) removes liquidity — it is a taker and pays slippage
+            // + the taker fee. A resting limit that only gets hit later is a
+            // maker. `post_only` crossing was already rejected above.
+            (px, crosses_on_open)
         },
         OrderType::StopMarket { stop } =>
         {
@@ -427,16 +425,16 @@ pub fn simulate_fill(
             {
                 return None;
             }
-            // The stop triggers intrabar (after the open), so the open price is
-            // no longer a valid reference — fill at the resting limit exactly.
-            // This is the conservative, deterministic backtest convention.
-            (limit, false)
+            // The stop triggers intrabar (after the open), so the order becomes
+            // aggressive (a taker) as price crosses through the stop. It fills at
+            // the resting limit; the limit clamp below guarantees slippage never
+            // pushes the price through that limit.
+            (limit, true)
         },
     };
-    let _ = is_taker(&order.order_type); // kept for callers reasoning about maker/taker
 
     // Taker fills pay slippage; resting (maker) fills do not.
-    let price = if taker
+    let mut price = if taker
     {
         slippage.adjust(raw_price, side, qty)
     }
@@ -444,6 +442,16 @@ pub fn simulate_fill(
     {
         raw_price
     };
+    // A limit/stop-limit price is a hard cap: slippage must never fill through
+    // it (a buy never above its limit, a sell never below).
+    if let Some(limit) = order.order_type.limit_price()
+    {
+        price = match side
+        {
+            Side::Buy => price.min(limit),
+            Side::Sell => price.max(limit),
+        };
+    }
     let notional = price * qty;
     let fee = fees.fee(notional, taker);
     Some(Fill {
@@ -525,13 +533,27 @@ mod tests {
     }
 
     #[test]
-    fn limit_buy_gap_gets_price_improvement() {
-        // Open already below limit -> fill at the better open price.
+    fn limit_buy_gap_is_marketable_taker_at_open() {
+        // Open already below the limit -> the limit is marketable on arrival, so
+        // it fills at the open as a TAKER (removes liquidity). With no slippage
+        // the fill is exactly the open; the limit clamp keeps it at/under 99.5.
+        let no_slip = SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 };
         let o = Order::limit(1, "BTC", Side::Buy, 1.0, 99.5);
-        let f = simulate_fill(&o, &candle(99.0, 99.8, 98.0, 99.2), &Default::default(), &Default::default())
-            .unwrap();
+        let f = simulate_fill(&o, &candle(99.0, 99.8, 98.0, 99.2), &Default::default(), &no_slip).unwrap();
         assert!((f.price - 99.0).abs() < 1e-4, "gap fill at open, got {}", f.price);
-        assert!(!f.taker, "resting limit is maker");
+        assert!(f.taker, "a limit that crosses on arrival is a taker");
+        assert!(f.price <= 99.5 + 1e-6, "fill must never exceed the limit");
+    }
+
+    #[test]
+    fn resting_limit_is_maker() {
+        // Open above the limit -> the buy limit rests and is only hit intrabar,
+        // so it is a maker with no slippage.
+        let o = Order::limit(1, "BTC", Side::Buy, 1.0, 99.5);
+        let f = simulate_fill(&o, &candle(100.0, 100.5, 99.0, 100.0), &Default::default(), &Default::default())
+            .unwrap();
+        assert!(!f.taker, "a resting limit is a maker");
+        assert!((f.price - 99.5).abs() < 1e-4);
     }
 
     #[test]

@@ -217,7 +217,10 @@ pub fn macd_signal_line(closes: &[f32], fast: usize, slow: usize, signal: usize)
 pub fn atr(highs: &[f32], lows: &[f32], closes: &[f32], period: usize) -> Vec<f32> {
     let n = highs.len();
     let mut out = vec![f32::NAN; n];
-    if n <= period || lows.len() != n || closes.len() != n
+    // ATR does not reduce dimensionality (unlike RSI), so a series of exactly
+    // `period` bars already yields the seed ATR at index `period-1`. Guard
+    // `period == 0` to avoid the `out[period - 1]` underflow.
+    if period == 0 || n < period || lows.len() != n || closes.len() != n
     {
         return out;
     }
@@ -1116,6 +1119,19 @@ mod tests {
             last < 500.0,
             "ATR should track the ~60-wide range, got {last}"
         );
+    }
+
+    #[test]
+    fn atr_handles_exactly_period_bars_and_zero_period() {
+        // Exactly `period` bars must still yield the seed ATR at index period-1.
+        let highs: Vec<f32> = (0..14).map(|i| 100.0 + i as f32).collect();
+        let lows: Vec<f32> = highs.iter().map(|h| h - 2.0).collect();
+        let closes: Vec<f32> = highs.iter().map(|h| h - 1.0).collect();
+        let a = atr(&highs, &lows, &closes, 14);
+        assert!(a[13].is_finite() && a[13] > 0.0, "seed ATR at index 13 must be finite, got {}", a[13]);
+        // period == 0 must return all-NaN, not panic.
+        let z = atr(&highs, &lows, &closes, 0);
+        assert!(z.iter().all(|v| v.is_nan()));
     }
 
     #[test]

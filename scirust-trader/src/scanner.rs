@@ -169,7 +169,12 @@ pub struct ScanReport {
 }
 
 impl ScanReport {
-    fn seal(opportunities: Vec<Opportunity>, num_symbols: usize, num_candidates: usize) -> Self {
+    fn seal(
+        opportunities: Vec<Opportunity>,
+        num_symbols: usize,
+        num_candidates: usize,
+        num_matched: usize,
+    ) -> Self {
         let mut hasher = Sha256::new();
         for o in &opportunities
         {
@@ -179,7 +184,7 @@ impl ScanReport {
         ScanReport {
             scirust_version: env!("CARGO_PKG_VERSION").to_string(),
             num_symbols,
-            num_matched: opportunities.len(),
+            num_matched,
             num_candidates,
             opportunities,
             manifest_hash: format!("{:x}", hasher.finalize()),
@@ -343,9 +348,12 @@ pub fn scan(
             .then_with(|| a.symbol.cmp(&b.symbol))
             .then_with(|| a.strategy.cmp(&b.strategy))
     });
+    // How many candidates actually passed the constraint gate — captured before
+    // the display cap truncates the ranked list.
+    let num_matched = matches.len();
     matches.truncate(constraints.max_results.max(1));
 
-    ScanReport::seal(matches, series.len(), candidates)
+    ScanReport::seal(matches, series.len(), candidates, num_matched)
 }
 
 /// Bounded ranking score in `[0, 1]` blending Sharpe, return, win rate, profit
@@ -479,6 +487,23 @@ mod tests {
             }
             assert!(o.position_size > 0.0);
         }
+    }
+
+    #[test]
+    fn num_matched_counts_all_survivors_not_the_display_cap() {
+        let series = vec![uptrend("BTC/USDT", 200), uptrend("ETH/USDT", 200)];
+        // Cap the returned list to 1 but keep loose constraints so several pass.
+        let c = OpportunityConstraints {
+            max_results: 1,
+            ..Default::default()
+        };
+        let report = scan(&series, &c, &ScanRiskConfig::default());
+        assert_eq!(report.opportunities.len(), 1, "display capped to 1");
+        assert!(
+            report.num_matched >= report.opportunities.len(),
+            "num_matched ({}) must count all survivors, not the cap",
+            report.num_matched
+        );
     }
 
     #[test]

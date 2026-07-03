@@ -333,12 +333,12 @@ fn apply_and_track(
         },
         Some(mut t) =>
         {
-            t.fees += fill.fee;
             t.realized += realized_delta;
             let same_dir = (qty_before > 0.0) == (side == Side::Buy);
             if same_dir
             {
                 // Added to the position.
+                t.fees += fill.fee;
                 let denom = t.qty + fill.qty;
                 if denom > 1e-12
                 {
@@ -349,13 +349,26 @@ fn apply_and_track(
             }
             else if qty_after.abs() < 1e-9
             {
-                // Closed flat.
+                // Closed flat — the whole fill fee belongs to this trade.
+                t.fees += fill.fee;
                 trades.push(book_trade(&t, symbol, fill, bar_index));
             }
             else if (qty_before > 0.0) != (qty_after > 0.0)
             {
-                // Flipped through zero: book the old trade, open a new one for
-                // the overshoot at the fill price.
+                // Flipped through zero: the fill fee is split by quantity between
+                // the closing leg (booked with the old trade) and the opening leg
+                // (carried by the new overshoot trade), so neither trade's net
+                // PnL absorbs the other's entry/exit fee.
+                let close_qty = qty_before.abs();
+                let close_fee = if fill.qty > 1e-12
+                {
+                    fill.fee * close_qty / fill.qty
+                }
+                else
+                {
+                    fill.fee
+                };
+                t.fees += close_fee;
                 trades.push(book_trade(&t, symbol, fill, bar_index));
                 *open = Some(OpenTrade {
                     action: if side == Side::Buy { Action::Long } else { Action::Short },
@@ -363,13 +376,14 @@ fn apply_and_track(
                     entry_index: bar_index,
                     entry_price: fill.price,
                     qty: qty_after.abs(),
-                    fees: 0.0,
+                    fees: fill.fee - close_fee,
                     realized: 0.0,
                 });
             }
             else
             {
                 // Partial reduction, still open.
+                t.fees += fill.fee;
                 t.qty = qty_after.abs();
                 *open = Some(t);
             }

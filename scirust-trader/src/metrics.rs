@@ -413,7 +413,10 @@ pub fn trade_stats(pnls: &[f32]) -> TradeStats {
     {
         0.0
     };
-    let loss_rate = 1.0 - win_rate;
+    // Loss rate is the fraction of *losing* trades, not `1 − win_rate`: a
+    // break-even (exactly 0) trade is neither a win nor a loss and must not be
+    // counted against expectancy.
+    let loss_rate = if num_trades > 0 { num_losses as f32 / num_trades as f32 } else { 0.0 };
     let expectancy = win_rate * avg_win - loss_rate * avg_loss.abs();
     let payoff_ratio = if avg_loss.abs() > 1e-12 { avg_win / avg_loss.abs() } else { 0.0 };
     TradeStats {
@@ -593,6 +596,17 @@ mod tests {
         assert!(approx(s.avg_loss, -50.0, 1e-3));
         // expectancy = 0.5*150 - 0.5*50 = 50
         assert!(approx(s.expectancy, 50.0, 1e-3));
+    }
+
+    #[test]
+    fn expectancy_excludes_breakeven_trades() {
+        // 1 win (+100), 1 loss (−50), 2 break-even (0.0). loss_rate must be
+        // 1/4 = 0.25 (not 1 − win_rate = 0.75).
+        let s = trade_stats(&[100.0, -50.0, 0.0, 0.0]);
+        assert_eq!(s.num_wins, 1);
+        assert_eq!(s.num_losses, 1);
+        // expectancy = 0.25*100 − 0.25*50 = 12.5
+        assert!(approx(s.expectancy, 12.5, 1e-3), "expectancy {}", s.expectancy);
     }
 
     #[test]
