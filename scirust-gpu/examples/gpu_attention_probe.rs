@@ -667,6 +667,40 @@ fn main() {
         failures += 1;
     }
 
+    // 19. Same loop but with the resident AdamW optimizer (persistent m/v
+    //     moments in VRAM) — the optimizer a real 350M run uses.
+    let agw = chain.upload(&tw0, td, tv);
+    let am = chain.upload(&vec![0.0f32; td * tv], td, tv);
+    let av = chain.upload(&vec![0.0f32; td * tv], td, tv);
+    let (mut aloss0, mut alossf) = (0.0f32, 0.0f32);
+    for step in 1..=30u32
+    {
+        let logits = chain.matmul(&tgx, &agw).unwrap();
+        let l = cpu_cross_entropy(&chain.download(&logits).unwrap(), &ttargets, tt, tv);
+        if step == 1
+        {
+            aloss0 = l;
+        }
+        alossf = l;
+        let dl = chain.cross_entropy_grad(&logits, &ttargets).unwrap();
+        let (_dx, dw) = chain.matmul_backward(&tgx, &agw, &dl).unwrap();
+        chain
+            .adamw_step(&agw, &dw, &am, &av, 0.1, (0.9, 0.999), 1e-8, 0.0, step)
+            .unwrap();
+    }
+    let atrained = alossf < aloss0 * 0.5;
+    println!(
+        "  {:<34} loss {:.4} → {:.4}   {}",
+        "TRAIN LOOP (AdamW on GPU, 30 steps)",
+        aloss0,
+        alossf,
+        if atrained { "PASS" } else { "FAIL" }
+    );
+    if !atrained
+    {
+        failures += 1;
+    }
+
     println!();
     if failures == 0
     {

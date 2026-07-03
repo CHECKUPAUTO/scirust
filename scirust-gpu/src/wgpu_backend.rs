@@ -304,6 +304,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// One AdamW step, updating `param`, `m`, `v` **in place** (bias-corrected Adam
+/// with decoupled weight decay). Stays at 4 storage buffers (`param`, `grad`,
+/// `m`, `v`) by updating in place. Hyper-parameters ride the uniform as f32
+/// bits; `bc1`/`bc2` are the precomputed bias corrections `1 − βᵗ`. The CPU
+/// contract is [`crate::ops::cpu_adamw_step`].
+const ADAMW_WGSL: &str = r#"
+struct P {
+    n: u32, lr: u32, b1: u32, b2: u32,
+    eps: u32, wd: u32, bc1: u32, bc2: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> param: array<f32>;
+@group(0) @binding(1) var<storage, read>       grad:  array<f32>;
+@group(0) @binding(2) var<storage, read_write> m:     array<f32>;
+@group(0) @binding(3) var<storage, read_write> v:     array<f32>;
+@group(0) @binding(4) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= p.n) { return; }
+    let lr = bitcast<f32>(p.lr);
+    let b1 = bitcast<f32>(p.b1);
+    let b2 = bitcast<f32>(p.b2);
+    let eps = bitcast<f32>(p.eps);
+    let wd = bitcast<f32>(p.wd);
+    let g = grad[i];
+    let mi = b1 * m[i] + (1.0 - b1) * g;
+    let vi = b2 * v[i] + (1.0 - b2) * g * g;
+    m[i] = mi;
+    v[i] = vi;
+    let mhat = mi / bitcast<f32>(p.bc1);
+    let vhat = vi / bitcast<f32>(p.bc2);
+    param[i] = param[i] - lr * (mhat / (sqrt(vhat) + eps) + wd * param[i]);
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -374,6 +411,7 @@ pub struct WgpuContext {
     embed_bwd_pipeline: wgpu::ComputePipeline,
     xent_grad_pipeline: wgpu::ComputePipeline,
     sgd_pipeline: wgpu::ComputePipeline,
+    adamw_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -584,6 +622,18 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let adamw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("adamw"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(ADAMW_WGSL)),
+        });
+        let adamw_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("adamw"),
+            layout: None,
+            module: &adamw_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -600,6 +650,7 @@ impl WgpuContext {
             embed_bwd_pipeline,
             xent_grad_pipeline,
             sgd_pipeline,
+            adamw_pipeline,
             adapter_name,
         })
     }
@@ -1364,6 +1415,101 @@ impl WgpuContext {
             rows: param.rows,
             cols: param.cols,
         })
+    }
+
+    /// One AdamW step at optimizer step `step` (1-based), updating `param`, `m`
+    /// and `v` **in place** — bias-corrected Adam with decoupled weight decay.
+    /// `m`/`v` are the resident first/second-moment buffers (start them at zero
+    /// and reuse them across steps). Matches [`crate::ops::cpu_adamw_step`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step_resident(
+        &self,
+        param: &GpuMatrix,
+        grad: &GpuMatrix,
+        m: &GpuMatrix,
+        v: &GpuMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+    ) -> BackendResult<()> {
+        let n = param.rows * param.cols;
+        if grad.rows * grad.cols != n || m.rows * m.cols != n || v.rows * v.cols != n
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "adamw_step: param {n} vs grad {} m {} v {}",
+                grad.rows * grad.cols,
+                m.rows * m.cols,
+                v.rows * v.cols
+            )));
+        }
+        if n == 0
+        {
+            return Ok(());
+        }
+        let (b1, b2) = betas;
+        let bc1 = 1.0 - b1.powi(step as i32);
+        let bc2 = 1.0 - b2.powi(step as i32);
+        let params: [u32; 8] = [
+            n as u32,
+            lr.to_bits(),
+            b1.to_bits(),
+            b2.to_bits(),
+            eps.to_bits(),
+            weight_decay.to_bits(),
+            bc1.to_bits(),
+            bc2.to_bits(),
+        ];
+        let p_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("adamw-params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("adamw"),
+            layout: &self.adamw_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: param.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grad.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: m.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: v.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: p_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("adamw"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("adamw"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.adamw_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
     }
 
     /// Gradient of the mean cross-entropy loss w.r.t. the `logits` (`rows ×
