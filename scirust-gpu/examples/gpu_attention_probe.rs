@@ -20,7 +20,7 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{MASK_NEG, cpu_scale_causal_mask, cpu_softmax, rel_err};
-use scirust_gpu::{CpuBackend, RawComputeBackend, WgpuContext};
+use scirust_gpu::{CpuBackend, GpuChain, RawComputeBackend, WgpuContext};
 
 /// Parity tolerance: GPU accumulation order is not bit-identical to the scalar
 /// CPU oracle, so we assert a relative Frobenius bound rather than equality.
@@ -138,6 +138,27 @@ fn main() {
         })
         .fold(0.0f32, f32::max);
     println!("    (max attention weight leaked to a future key = {leak:.3e})");
+
+    // 4. The SAME attention, but as a FULLY RESIDENT block: with GpuChain the
+    //    t×t scores never leave VRAM between the score GEMM, scale/mask, softmax
+    //    and value GEMM — only the final t×dv context is downloaded. This is the
+    //    on-device attention block the SML forward will call.
+    let dv = 5usize;
+    let vv: Vec<f32> = (0..t * dv).map(|i| (i as f32 * 0.17 - 0.6).sin()).collect();
+    let chain = GpuChain::new().expect("adapter was available a moment ago");
+    let gq = chain.upload(&q, t, d);
+    let gk = chain.upload(&k, t, d);
+    let gv = chain.upload(&vv, t, dv);
+    let ctx_gpu = chain
+        .download(&chain.attention(&gq, &gk, &gv, true).unwrap())
+        .unwrap();
+    // CPU oracle for the context: (attention weights) · V.
+    let ctx_cpu = CpuBackend.gemm_f32(&att_cpu, &vv, t, t, dv).unwrap();
+    check(
+        "resident attention block (·V, scores stay in VRAM)",
+        rel_err(&ctx_gpu, &ctx_cpu),
+        &mut failures,
+    );
 
     println!();
     if failures == 0

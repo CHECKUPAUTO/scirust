@@ -274,6 +274,44 @@ impl WgpuContext {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        self._encode_softmax(&in_buf, &out_buf, rows, cols);
+        self.download_buffer(&out_buf, data.len(), bytes)
+    }
+
+    /// Row-wise softmax of a **resident** `rows × cols` matrix, result kept in
+    /// VRAM (no download) — the resident counterpart of [`Self::softmax_rows`]
+    /// used to keep attention weights on-device across the score → weight →
+    /// context chain.
+    pub fn softmax_resident(&self, x: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("softmax-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0 && x.cols > 0
+        {
+            self._encode_softmax(&x.buf, &out_buf, x.rows, x.cols);
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// Encode + submit one row-wise-softmax dispatch reading `in_buf`
+    /// (`rows × cols`, row-major) and writing `out_buf`. Shared by the
+    /// upload/download and resident entry points.
+    fn _encode_softmax(
+        &self,
+        in_buf: &wgpu::Buffer,
+        out_buf: &wgpu::Buffer,
+        rows: usize,
+        cols: usize,
+    ) {
         let params: [u32; 4] = [rows as u32, cols as u32, 0, 0];
         let p_buf = self
             .device
@@ -315,7 +353,6 @@ impl WgpuContext {
             pass.dispatch_workgroups((rows as u32).div_ceil(64), 1, 1);
         }
         self.queue.submit(Some(encoder.finish()));
-        self.download_buffer(&out_buf, data.len(), bytes)
     }
 
     /// Pre-softmax attention step on a row-major `rows × cols` score matrix:
@@ -355,6 +392,51 @@ impl WgpuContext {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        self._encode_scale_causal_mask(&in_buf, &out_buf, rows, cols, scale, causal);
+        self.download_buffer(&out_buf, scores.len(), bytes)
+    }
+
+    /// Scale + causal mask of a **resident** `rows × cols` score matrix, result
+    /// kept in VRAM (no download) — the resident counterpart of
+    /// [`Self::scale_causal_mask`]. `rows`/`cols` are `x.rows`/`x.cols`; the
+    /// masking convention (query = row, key = column) is the same.
+    pub fn scale_causal_mask_resident(
+        &self,
+        x: &GpuMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let elems = x.rows * x.cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mask-res"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            self._encode_scale_causal_mask(&x.buf, &out_buf, x.rows, x.cols, scale, causal);
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: x.rows,
+            cols: x.cols,
+        })
+    }
+
+    /// Encode + submit one scale + causal-mask dispatch reading `in_buf`
+    /// (`rows × cols`, row-major) and writing `out_buf`. Shared by the
+    /// upload/download and resident entry points.
+    fn _encode_scale_causal_mask(
+        &self,
+        in_buf: &wgpu::Buffer,
+        out_buf: &wgpu::Buffer,
+        rows: usize,
+        cols: usize,
+        scale: f32,
+        causal: bool,
+    ) {
         let params: [u32; 4] = [rows as u32, cols as u32, causal as u32, scale.to_bits()];
         let p_buf = self
             .device
@@ -396,7 +478,6 @@ impl WgpuContext {
             pass.dispatch_workgroups((cols as u32).div_ceil(8), (rows as u32).div_ceil(8), 1);
         }
         self.queue.submit(Some(encoder.finish()));
-        self.download_buffer(&out_buf, scores.len(), bytes)
     }
 
     /// Resident elementwise op: `op` is `0=add`, `1=mul` (binary), `2=relu`
