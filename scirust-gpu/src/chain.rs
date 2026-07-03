@@ -246,6 +246,30 @@ impl GpuChain {
         self.ctx.rope_backward_resident(dy, seq_len, offset, theta)
     }
 
+    /// Gather columns `[col_start, col_start+ncols)` of a resident matrix into a
+    /// resident `rows × ncols` matrix — e.g. one head's `d_head` slice of a
+    /// full-width projection. Backward is [`Self::place_cols`].
+    pub fn slice_cols(
+        &self,
+        x: &GpuMatrix,
+        col_start: usize,
+        ncols: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.slice_cols_resident(x, col_start, ncols)
+    }
+
+    /// Scatter a resident narrow block into a zero-padded `rows × dst_cols`
+    /// matrix at `col_start` — e.g. place a head's context back into its
+    /// `d_model` slot before summing heads. Adjoint of [`Self::slice_cols`].
+    pub fn place_cols(
+        &self,
+        x: &GpuMatrix,
+        col_start: usize,
+        dst_cols: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.place_cols_resident(x, col_start, dst_cols)
+    }
+
     /// A complete **pre-norm residual transformer block**, fully resident:
     ///
     /// ```text
@@ -975,6 +999,95 @@ mod tests {
         };
         let eps = 1e-3f32;
         for idx in 0..rows * dim
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += eps;
+            xm[idx] -= eps;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * eps);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 1e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
+            );
+        }
+    }
+
+    /// Column slice/place are pure copies, so the GPU must be **bit-exact** to
+    /// the CPU oracle (no arithmetic → no accumulation-order slack). Slices a
+    /// column block out, then scatters it back into a wider zero-padded matrix.
+    /// Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_slice_place_cols_match_cpu_oracle() {
+        use crate::ops::{cpu_place_cols, cpu_slice_cols};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, src_cols) = (5usize, 12usize);
+        let (col_start, ncols) = (4usize, 3usize); // a "head" at columns [4, 7)
+        let x: Vec<f32> = (0..rows * src_cols)
+            .map(|i| (i as f32 * 0.17 - 1.0).sin())
+            .collect();
+
+        let gx = chain.upload(&x, rows, src_cols);
+        let sliced = chain
+            .download(&chain.slice_cols(&gx, col_start, ncols).unwrap())
+            .unwrap();
+        assert_eq!(sliced, cpu_slice_cols(&x, rows, src_cols, col_start, ncols));
+
+        let gs = chain.upload(&sliced, rows, ncols);
+        let placed = chain
+            .download(&chain.place_cols(&gs, col_start, src_cols).unwrap())
+            .unwrap();
+        assert_eq!(
+            placed,
+            cpu_place_cols(&sliced, rows, ncols, col_start, src_cols)
+        );
+    }
+
+    /// `slice_cols` backward: RoPE-style gradient check. For `L = Σ slice(X)⊙G`
+    /// the input gradient is `dx = place_cols(G)` — the adjoint scatter — checked
+    /// bit-exactly against the CPU adjoint AND against central finite differences
+    /// of `L` over `X`. Confirms `place_cols` really is `slice_cols`'s adjoint.
+    #[test]
+    fn slice_cols_backward_matches_finite_differences() {
+        use crate::ops::{cpu_place_cols, cpu_slice_cols};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, src_cols) = (4usize, 10usize);
+        let (col_start, ncols) = (3usize, 4usize);
+        let x: Vec<f32> = (0..rows * src_cols)
+            .map(|i| (i as f32 * 0.3 - 0.7).sin())
+            .collect();
+        let g: Vec<f32> = (0..rows * ncols)
+            .map(|i| (i as f32 * 0.45 + 0.2).cos())
+            .collect(); // dL/dY
+
+        // Analytic adjoint on the GPU: dx = place_cols(G).
+        let gg = chain.upload(&g, rows, ncols);
+        let dx_gpu = chain
+            .download(&chain.place_cols(&gg, col_start, src_cols).unwrap())
+            .unwrap();
+        assert_eq!(dx_gpu, cpu_place_cols(&g, rows, ncols, col_start, src_cols));
+
+        // Gold standard: central finite differences of L = Σ slice(X)⊙G.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_slice_cols(xx, rows, src_cols, col_start, ncols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..rows * src_cols
         {
             let (mut xp, mut xm) = (x.clone(), x.clone());
             xp[idx] += eps;

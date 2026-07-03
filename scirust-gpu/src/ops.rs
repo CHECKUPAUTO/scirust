@@ -333,6 +333,49 @@ pub fn cpu_rope_backward(
     dx
 }
 
+/// CPU reference for a contiguous column-block gather — the oracle for
+/// [`crate::WgpuContext::slice_cols_resident`]. `out[r, c] = x[r, col_start + c]`
+/// for `c in 0..ncols`; `x` is `rows × src_cols`, `out` is `rows × ncols`.
+pub fn cpu_slice_cols(
+    x: &[f32],
+    rows: usize,
+    src_cols: usize,
+    col_start: usize,
+    ncols: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * ncols];
+    for r in 0..rows
+    {
+        for c in 0..ncols
+        {
+            out[r * ncols + c] = x[r * src_cols + col_start + c];
+        }
+    }
+    out
+}
+
+/// CPU reference for the column scatter — the oracle for
+/// [`crate::WgpuContext::place_cols_resident`] and the adjoint of
+/// [`cpu_slice_cols`]. `out[r, col_start + c] = x[r, c]`, `0` elsewhere; `x` is
+/// `rows × ncols`, `out` is `rows × dst_cols`.
+pub fn cpu_place_cols(
+    x: &[f32],
+    rows: usize,
+    ncols: usize,
+    col_start: usize,
+    dst_cols: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; rows * dst_cols];
+    for r in 0..rows
+    {
+        for c in 0..ncols
+        {
+            out[r * dst_cols + col_start + c] = x[r * ncols + c];
+        }
+    }
+    out
+}
+
 /// CPU reference for the scale + causal-mask backward: `din = scale·dout` at
 /// kept positions, `0` above the diagonal (masked keys carry no gradient). The
 /// GPU `scale_causal_mask_backward_resident` contract.
