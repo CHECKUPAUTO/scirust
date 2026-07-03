@@ -259,6 +259,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// Gradient of the mean cross-entropy loss w.r.t. the logits. Given the softmax
+/// probabilities `prob` (`rows × cols`) and the per-row `targets`,
+/// `dlogits = (prob − onehot(target)) / rows`. One invocation per logit. The CPU
+/// contract is [`crate::ops::cpu_cross_entropy_grad`].
+const XENT_GRAD_WGSL: &str = r#"
+struct P { rows: u32, cols: u32, inv_n_bits: u32, _p0: u32, };
+
+@group(0) @binding(0) var<storage, read>       prob:    array<f32>;
+@group(0) @binding(1) var<storage, read>       targets: array<u32>;
+@group(0) @binding(2) var<storage, read_write> dlogits: array<f32>;
+@group(0) @binding(3) var<uniform>             p: P;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if (idx >= p.rows * p.cols) { return; }
+    let i = idx / p.cols;
+    let j = idx % p.cols;
+    var v = prob[idx];
+    if (j == targets[i]) { v = v - 1.0; }
+    dlogits[idx] = v * bitcast<f32>(p.inv_n_bits);
+}
+"#;
+
 /// Row-wise softmax: one invocation per row computes
 /// `exp(x - rowmax) / sum(exp(x - rowmax))` over the row's `cols` elements
 /// (max-subtracted for stability). The missing transformer-attention primitive;
@@ -327,6 +351,7 @@ pub struct WgpuContext {
     rmsnorm_bwd_pipeline: wgpu::ComputePipeline,
     mask_bwd_pipeline: wgpu::ComputePipeline,
     embed_bwd_pipeline: wgpu::ComputePipeline,
+    xent_grad_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
 }
 
@@ -513,6 +538,18 @@ impl WgpuContext {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
+        let xent_grad_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("xent_grad"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(XENT_GRAD_WGSL)),
+        });
+        let xent_grad_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("xent_grad"),
+            layout: None,
+            module: &xent_grad_shader,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
         Ok(Self {
             device,
             queue,
@@ -527,6 +564,7 @@ impl WgpuContext {
             rmsnorm_bwd_pipeline,
             mask_bwd_pipeline,
             embed_bwd_pipeline,
+            xent_grad_pipeline,
             adapter_name,
         })
     }
@@ -1202,6 +1240,97 @@ impl WgpuContext {
             buf: dx,
             rows: x.rows,
             cols: x.cols,
+        })
+    }
+
+    /// Gradient of the mean cross-entropy loss w.r.t. the `logits` (`rows ×
+    /// vocab`) for the per-row `targets`: softmaxes each row, then
+    /// `dlogits = (softmax(logits) − onehot(target)) / rows`, resident. This is
+    /// the seed of the whole training backward. Matches
+    /// [`crate::ops::cpu_cross_entropy_grad`].
+    pub fn cross_entropy_grad_resident(
+        &self,
+        logits: &GpuMatrix,
+        targets: &[u32],
+    ) -> BackendResult<GpuMatrix> {
+        let rows = logits.rows;
+        let cols = logits.cols;
+        if targets.len() != rows
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "cross_entropy_grad: {} targets != {rows} rows",
+                targets.len()
+            )));
+        }
+        let prob = self.softmax_resident(logits)?;
+        let elems = rows * cols;
+        let bytes = (elems.max(1) * std::mem::size_of::<f32>()) as u64;
+        let dlogits = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("xent-dlogits"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if elems > 0
+        {
+            let tgt_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("xent-targets"),
+                    contents: bytemuck::cast_slice(targets),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+            let inv_n = 1.0f32 / rows as f32;
+            let params: [u32; 4] = [rows as u32, cols as u32, inv_n.to_bits(), 0];
+            let p_buf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("xent-params"),
+                    contents: bytemuck::cast_slice(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("xent-grad"),
+                layout: &self.xent_grad_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: prob.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: tgt_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: dlogits.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("xent-grad"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("xent-grad"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.xent_grad_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: dlogits,
+            rows,
+            cols,
         })
     }
 

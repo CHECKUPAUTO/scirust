@@ -454,6 +454,18 @@ impl GpuChain {
         self.ctx.embed_backward_resident(tokens, dout, vocab)
     }
 
+    /// Cross-entropy loss gradient w.r.t. the `logits` (`t × vocab`) for the
+    /// per-row `targets`: `dlogits = (softmax(logits) − onehot(target)) / t`,
+    /// resident. The seed of the training backward — feed it as the upstream
+    /// grad of the LM head.
+    pub fn cross_entropy_grad(
+        &self,
+        logits: &GpuMatrix,
+        targets: &[u32],
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.cross_entropy_grad_resident(logits, targets)
+    }
+
     /// Download a resident matrix back to a CPU `Vec<f32>` (row-major).
     pub fn download(&self, mat: &GpuMatrix) -> BackendResult<Vec<f32>> {
         self.ctx.download(mat)
@@ -1562,6 +1574,59 @@ mod tests {
                 (fd - dx_gpu[idx]).abs() < 2e-2,
                 "dx[{idx}]: fd={fd} gpu={}",
                 dx_gpu[idx]
+            );
+        }
+    }
+
+    /// Cross-entropy gradient must match numerical gradients. `dlogits =
+    /// cross_entropy_grad(logits, targets)` is checked against the CPU analytic
+    /// `(softmax − onehot)/rows` and against central finite differences of the
+    /// mean cross-entropy loss over the logits. The seed of the training
+    /// backward. Skips if no adapter.
+    #[test]
+    fn cross_entropy_grad_matches_finite_differences() {
+        use crate::ops::{cpu_cross_entropy, cpu_cross_entropy_grad};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, vocab) = (4usize, 7usize);
+        let logits: Vec<f32> = (0..rows * vocab)
+            .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+            .collect();
+        let targets: Vec<u32> = vec![2, 5, 0, 6];
+
+        let dl_gpu = chain
+            .download(
+                &chain
+                    .cross_entropy_grad(&chain.upload(&logits, rows, vocab), &targets)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            rel_err(
+                &dl_gpu,
+                &cpu_cross_entropy_grad(&logits, &targets, rows, vocab)
+            ) < 1e-4
+        );
+
+        // Gold standard: central finite differences of the mean loss over logits.
+        let step = 1e-3f32;
+        for idx in 0..rows * vocab
+        {
+            let (mut lp, mut lm) = (logits.clone(), logits.clone());
+            lp[idx] += step;
+            lm[idx] -= step;
+            let fd = (cpu_cross_entropy(&lp, &targets, rows, vocab)
+                - cpu_cross_entropy(&lm, &targets, rows, vocab))
+                / (2.0 * step);
+            assert!(
+                (fd - dl_gpu[idx]).abs() < 1e-2,
+                "dlogits[{idx}]: fd={fd} gpu={}",
+                dl_gpu[idx]
             );
         }
     }

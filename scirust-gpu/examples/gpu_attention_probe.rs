@@ -20,9 +20,9 @@
 //! device smoke test in a script.
 
 use scirust_gpu::ops::{
-    MASK_NEG, cpu_embed, cpu_embed_backward, cpu_rms_norm, cpu_rms_norm_backward,
-    cpu_scale_causal_mask, cpu_scale_causal_mask_backward, cpu_softmax, cpu_softmax_backward,
-    cpu_swiglu_backward, rel_err,
+    MASK_NEG, cpu_cross_entropy_grad, cpu_embed, cpu_embed_backward, cpu_rms_norm,
+    cpu_rms_norm_backward, cpu_scale_causal_mask, cpu_scale_causal_mask_backward, cpu_softmax,
+    cpu_softmax_backward, cpu_swiglu_backward, rel_err,
 };
 use scirust_gpu::{
     BlockWeights, CpuBackend, GpuChain, ModelWeights, RawComputeBackend, WgpuContext,
@@ -601,6 +601,31 @@ fn main() {
     {
         failures += 1;
     }
+
+    // 17. LOSS: cross-entropy gradient dlogits = (softmax − onehot)/t — the seed
+    //     of the whole training backward.
+    let (lrows, lvocab) = (5usize, 11usize);
+    let logits: Vec<f32> = (0..lrows * lvocab)
+        .map(|i| (i as f32 * 0.3 - 1.0).sin() * 2.0)
+        .collect();
+    let ltargets: Vec<u32> = (0..lrows as u32)
+        .map(|i| (i * 3 + 2) % lvocab as u32)
+        .collect();
+    let dl_gpu = chain
+        .download(
+            &chain
+                .cross_entropy_grad(&chain.upload(&logits, lrows, lvocab), &ltargets)
+                .unwrap(),
+        )
+        .unwrap();
+    check(
+        "loss: cross-entropy grad (softmax−onehot)/t",
+        rel_err(
+            &dl_gpu,
+            &cpu_cross_entropy_grad(&logits, &ltargets, lrows, lvocab),
+        ),
+        &mut failures,
+    );
 
     println!();
     if failures == 0

@@ -312,6 +312,40 @@ pub fn cpu_embed_backward(tokens: &[u32], dout: &[f32], d: usize, vocab: usize) 
     dtable
 }
 
+/// CPU reference for the mean cross-entropy loss: `−(1/rows)·Σᵢ log P[i,tgtᵢ]`
+/// where `P = softmax(logits)` row-wise (`rows × cols` logits, `rows` targets).
+pub fn cpu_cross_entropy(logits: &[f32], targets: &[u32], rows: usize, cols: usize) -> f32 {
+    let p = cpu_softmax(logits, rows, cols);
+    let mut loss = 0.0f32;
+    for (i, &t) in targets.iter().enumerate()
+    {
+        loss -= p[i * cols + (t as usize).min(cols - 1)].max(1e-30).ln();
+    }
+    loss / rows as f32
+}
+
+/// CPU reference for the cross-entropy gradient w.r.t. the logits:
+/// `dlogits = (softmax(logits) − onehot(target)) / rows`. The GPU
+/// `cross_entropy_grad_resident` kernel's correctness contract.
+pub fn cpu_cross_entropy_grad(
+    logits: &[f32],
+    targets: &[u32],
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let mut d = cpu_softmax(logits, rows, cols);
+    let inv = 1.0f32 / rows as f32;
+    for (i, &t) in targets.iter().enumerate()
+    {
+        d[i * cols + (t as usize).min(cols - 1)] -= 1.0;
+    }
+    for v in d.iter_mut()
+    {
+        *v *= inv;
+    }
+    d
+}
+
 /// CPU reference for token embedding gather: output row `i` is row `tokens[i]`
 /// of the `vocab × d` row-major `table` (token ids clamped to `vocab-1`). The
 /// GPU `embed_resident` kernel's correctness contract.
