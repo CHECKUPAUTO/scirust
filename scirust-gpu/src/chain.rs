@@ -50,6 +50,37 @@ pub struct BlockWeights<'a> {
     pub wd: &'a GpuMatrix,
 }
 
+/// Weights of one **GQA transformer block** — multi-head grouped-query attention
+/// with RoPE, then SwiGLU MLP — matching the sciagent `SciAgentBlock`. Unlike
+/// [`BlockWeights`] (single head, square q/k/v), the key/value projections are
+/// `d×(n_kv_heads·dh)` where `dh = d/n_heads`.
+pub struct GqaBlockWeights<'a> {
+    /// Pre-attention RMSNorm gain (`d`).
+    pub norm1: &'a GpuMatrix,
+    /// Query projection (`d×d`, `d = n_heads·dh`).
+    pub wq: &'a GpuMatrix,
+    /// Key projection (`d×kv_dim`, `kv_dim = n_kv_heads·dh`).
+    pub wk: &'a GpuMatrix,
+    /// Value projection (`d×kv_dim`).
+    pub wv: &'a GpuMatrix,
+    /// Attention output projection (`d×d`).
+    pub wo: &'a GpuMatrix,
+    /// Pre-MLP RMSNorm gain (`d`).
+    pub norm2: &'a GpuMatrix,
+    /// SwiGLU gate projection (`d×h`).
+    pub wg: &'a GpuMatrix,
+    /// SwiGLU up projection (`d×h`).
+    pub wu: &'a GpuMatrix,
+    /// SwiGLU down projection (`h×d`).
+    pub wd: &'a GpuMatrix,
+    /// Number of query heads.
+    pub n_heads: usize,
+    /// Number of key/value heads (`n_heads % n_kv_heads == 0`).
+    pub n_kv_heads: usize,
+    /// RoPE base frequency.
+    pub theta: f32,
+}
+
 /// Forward activations of one transformer block that the backward pass needs to
 /// read — produced by [`GpuChain::transformer_block_forward_cached`] and
 /// consumed by [`GpuChain::transformer_block_backward`]. All resident.
@@ -475,6 +506,49 @@ impl GpuChain {
         let dq = self.rope_backward(&dqr, seq_len, 0, theta)?;
         let dk = self.rope_backward(&dkr, seq_len, 0, theta)?;
         Ok((dq, dk, dv))
+    }
+
+    /// A complete **pre-norm residual GQA transformer block**, fully resident —
+    /// the real `scirust-sciagent` `SciAgentBlock`, on the GPU:
+    ///
+    /// ```text
+    /// h   = x + gqa_attention( rms_norm(x)·Wq, ·Wk, ·Wv ) · Wo
+    /// out = h + swiglu_mlp( rms_norm(h) )
+    /// ```
+    ///
+    /// `x` is `t×d` (single sequence, `t = seq_len`); the block preserves that
+    /// shape. Multi-head grouped-query attention with RoPE (via
+    /// [`Self::gqa_attention`]) — `w.wq`/`w.wo` are `d×d`, `w.wk`/`w.wv` are
+    /// `d×kv_dim`. Everything stays in VRAM. One whole layer of the 350M forward.
+    pub fn gqa_transformer_block(
+        &self,
+        x: &GpuMatrix,
+        w: &GqaBlockWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let seq_len = x.rows();
+        // Attention sub-block (pre-norm + residual).
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?; // t×d
+        let k = self.matmul(&xn, w.wk)?; // t×kv_dim
+        let v = self.matmul(&xn, w.wv)?; // t×kv_dim
+        let ctx = self.gqa_attention(
+            &q,
+            &k,
+            &v,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let attn_out = self.matmul(&ctx, w.wo)?; // t×d
+        let h = self.add(x, &attn_out)?;
+        // MLP sub-block (pre-norm + residual).
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let mlp = self.swiglu_mlp(&hn, w.wg, w.wu, w.wd)?;
+        self.add(&h, &mlp)
     }
 
     /// A complete **pre-norm residual transformer block**, fully resident:
@@ -1450,6 +1524,84 @@ mod tests {
                 dv[idx]
             );
         }
+    }
+
+    /// The **resident GQA transformer block** — the real `SciAgentBlock`
+    /// (pre-norm multi-head grouped-query attention with RoPE + residual, then
+    /// pre-norm SwiGLU MLP + residual) — matches a step-by-step CPU oracle.
+    /// `4 heads / 2 kv-heads`, causal. Skips if no adapter; asserts on lavapipe /
+    /// a real GPU. This is one whole 350M layer forward on the resident path.
+    #[test]
+    fn resident_gqa_transformer_block_matches_cpu_oracle() {
+        use crate::ops::cpu_gqa_transformer_block;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, n_heads, n_kv_heads, dh, ff) = (6usize, 4usize, 2usize, 4usize, 16usize);
+        let d = n_heads * dh; // 16
+        let kv_dim = n_kv_heads * dh; // 8
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.031 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.03 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.3);
+        let wk = gen(d * kv_dim, 1.1, 0.3);
+        let wv = gen(d * kv_dim, 1.7, 0.3);
+        let wo = gen(d * d, 2.3, 0.3);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.02 * i as f32).collect();
+        let wg = gen(d * ff, 2.9, 0.25);
+        let wu = gen(d * ff, 3.5, 0.25);
+        let wd = gen(ff * d, 4.1, 0.25);
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (
+            up(&wq, d, d),
+            up(&wk, d, kv_dim),
+            up(&wv, d, kv_dim),
+            up(&wo, d, d),
+        );
+        let (gwg, gwu, gwd) = (up(&wg, d, ff), up(&wu, d, ff), up(&wd, ff, d));
+        let weights = GqaBlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+            n_heads,
+            n_kv_heads,
+            theta,
+        };
+        let out = chain
+            .download(
+                &chain
+                    .gqa_transformer_block(&gx, &weights, eps, true)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let expected = cpu_gqa_transformer_block(
+            &x, &n1, &wq, &wk, &wv, &wo, &n2, &wg, &wu, &wd, t, d, kv_dim, ff, n_heads, n_kv_heads,
+            dh, theta, eps, true,
+        );
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "rel_err {}",
+            rel_err(&out, &expected)
+        );
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
