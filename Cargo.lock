@@ -2951,6 +2951,7 @@ dependencies = [
  "scirust-sciagent",
  "scirust-sis",
  "scirust-solvers",
+ "scirust-tolerance",
  "serde",
  "serde_json",
 ]
@@ -3408,6 +3409,14 @@ dependencies = [
  "approx",
  "nalgebra",
  "scirust-core",
+]
+
+[[package]]
+name = "scirust-tolerance"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "serde",
 ]
 
 [[package]]

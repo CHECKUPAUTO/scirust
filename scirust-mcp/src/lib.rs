@@ -72,6 +72,10 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::tolerance::tolerance_tools()
+    {
+        registry.register(tool);
+    }
     registry.register(tools::cli_passthrough::cli_tool());
     registry
 }
@@ -98,5 +102,8 @@ mod tests {
         assert!(registry.names().contains(&"fab_r2r_update"));
         assert!(registry.names().contains(&"agtech_clean_yield_map"));
         assert!(registry.names().contains(&"fatigue_rainflow_damage"));
+        assert!(registry.names().contains(&"tolerance_inertial_capability"));
+        assert!(registry.names().contains(&"tolerance_chain_allocate"));
+        assert!(registry.names().contains(&"tolerance_acceptance_plan"));
     }
 }
