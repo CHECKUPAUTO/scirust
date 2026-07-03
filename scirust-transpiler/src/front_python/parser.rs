@@ -235,6 +235,10 @@ impl<'a> Parser<'a> {
         {
             return self.parse_if();
         }
+        if self.is_name("while")
+        {
+            return self.parse_while();
+        }
         // assignment: NAME ['[' idx ']'] '=' expr
         let target = self.take_name()?;
         if self.is_sym("[")
@@ -299,6 +303,15 @@ impl<'a> Parser<'a> {
     fn parse_if(&mut self) -> Result<PyStmt, String> {
         self.eat_name("if")?;
         self.parse_if_tail()
+    }
+
+    /// `while cond: block`
+    fn parse_while(&mut self) -> Result<PyStmt, String> {
+        self.eat_name("while")?;
+        let cond = self.parse_condition()?;
+        self.eat_sym(":")?;
+        let body = self.parse_block()?;
+        Ok(PyStmt::While { cond, body })
     }
 
     /// Parse the part after `if`/`elif`: `cond ':' block` then optional

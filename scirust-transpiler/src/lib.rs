@@ -176,4 +176,14 @@ mod tests {
         let src = "def f(x):\n    y = x > 0.0\n    return y\n";
         assert!(transpile(src).is_err());
     }
+
+    #[test]
+    fn while_loop_emits() {
+        let src = "def newton(a):\n    x = a\n    i = 0\n    while i < 20:\n        x = 0.5 * (x + a / x)\n        i = i + 1\n    return x\n";
+        let rust = transpile(src).unwrap();
+        let func = &rust[rust.find("pub fn newton").unwrap()..];
+        assert!(func.contains("while (i < 20"));
+        assert!(func.contains("x = (0.5f64 * (x + (a / x)));"));
+        assert!(func.contains("i = (i + 1"));
+    }
 }

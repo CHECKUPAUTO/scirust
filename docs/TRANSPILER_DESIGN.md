@@ -336,8 +336,9 @@ secteurs réellement débloqués.
 | Oracle différentiel contre NumPy réel       | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
 | Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (13 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
+| Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage vers les noyaux `scirust-*` vérifiés | ⏳ Phase 1 | — |
-| Contrôle de flux `while`, tableaux 2-D      | ⏳ Phase 1 | — |
+| Tableaux 2-D                                | ⏳ Phase 1 | — |
 | Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
 
 **Résultat de l'oracle (reproductible).**
@@ -346,8 +347,9 @@ secteurs réellement débloqués.
 $ cargo run -p scirust-transpiler --example oracle
 tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
-  ✓ relu / clamp / sign    (contrôle de flux — Phase 1)
-  ORACLE GREEN — 10/10 cases match NumPy within tolerance
+  ✓ relu / clamp / sign            (if/elif/else — Phase 1)
+  ✓ newton_sqrt / newton_conv      (while — Phase 1)
+  ORACLE GREEN — 12/12 cases match NumPy within tolerance
 ```
 
 Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur

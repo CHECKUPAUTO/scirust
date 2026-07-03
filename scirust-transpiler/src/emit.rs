@@ -222,6 +222,16 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
                 out.push_str(&format!("{}}}\n", pad));
             }
         },
+        SirStmt::While { cond, body } =>
+        {
+            let c = emit(cond, ctx);
+            out.push_str(&format!("{}while {} {{\n", pad, c.code));
+            for b in body
+            {
+                emit_stmt(b, ctx, ind + 1, out);
+            }
+            out.push_str(&format!("{}}}\n", pad));
+        },
         SirStmt::Return(e) =>
         {
             let v = emit(e, ctx);

@@ -5,6 +5,17 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : boucles `while` (Phase 1, incrément 2)
+Le sous-ensemble Python du transpileur entrant supporte désormais les **boucles
+`while`** (condition = comparaison scalaire), débloquant les algorithmes
+itératifs (Newton, point fixe, bisection). Prouvé par le même oracle
+différentiel contre NumPy réel avec deux cas de **méthode de Newton** — à
+nombre d'itérations fixe et à condition de convergence (le nombre d'itérations
+dépend des données mais reste identique côté Rust et NumPy, les opérations
+flottantes étant bit-identiques). **Oracle 12/12** (200 essais chacun) ; 14
+tests unitaires. `SirStmt::While` ajouté ; émetteur, parseur et inférence de
+paramètres étendus.
+
 ### Ajouté — transpileur : contrôle de flux `if`/`elif`/`else` (Phase 1, incrément 1)
 Extension du sous-ensemble Python avec le **contrôle de flux scalaire**, prouvée
 par le même oracle différentiel contre NumPy réel :

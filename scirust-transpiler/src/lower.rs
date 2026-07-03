@@ -198,6 +198,12 @@ fn lower_stmt(
             let els = lower_block(els, env, declared, false, ret)?;
             Ok(SirStmt::If { cond, then, els })
         },
+        PyStmt::While { cond, body } =>
+        {
+            let cond = lower_condition(cond, env)?;
+            let body = lower_block(body, env, declared, false, ret)?;
+            Ok(SirStmt::While { cond, body })
+        },
         PyStmt::Return(Some(e)) =>
         {
             let v = lower_scalar(e, env)?;
@@ -581,6 +587,10 @@ fn array_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
             array_evidence_expr(name, cond)
                 || array_evidence_block(name, then)
                 || array_evidence_block(name, els)
+        },
+        PyStmt::While { cond, body } =>
+        {
+            array_evidence_expr(name, cond) || array_evidence_block(name, body)
         },
         PyStmt::Return(Some(e)) => array_evidence_expr(name, e),
         PyStmt::Return(None) => false,
