@@ -50,6 +50,19 @@ pub struct BlockWeights<'a> {
     pub wd: &'a GpuMatrix,
 }
 
+/// Forward activations of one transformer block that the backward pass needs to
+/// read — produced by [`GpuChain::transformer_block_forward_cached`] and
+/// consumed by [`GpuChain::transformer_block_backward`]. All resident.
+pub struct BlockCache {
+    q: GpuMatrix,       // xn·Wq   (t×d)
+    k: GpuMatrix,       // xn·Wk   (t×d)
+    v: GpuMatrix,       // xn·Wv   (t×d)
+    weights: GpuMatrix, // softmax scores (t×t)
+    h: GpuMatrix,       // x + attn·Wo  (residual 1, t×d)
+    gate: GpuMatrix,    // hn·Wg   (t×h)
+    up: GpuMatrix,      // hn·Wu   (t×h)
+}
+
 /// The resident weights of a full **tied-embedding decoder**: a shared
 /// `vocab × d` embedding table (which is also the LM head), the `N`
 /// transformer [`BlockWeights`], and a final `d`-length RMSNorm gain. Consumed
@@ -216,6 +229,100 @@ impl GpuChain {
         let hn = self.rms_norm(&h, w.norm2, eps)?;
         let mlp = self.swiglu_mlp(&hn, w.wg, w.wu, w.wd)?;
         self.add(&h, &mlp) // residual 2
+    }
+
+    /// [`Self::transformer_block`] that also returns a [`BlockCache`] of the
+    /// forward activations the backward pass reads. Same math as the plain
+    /// forward; use this when you intend to call
+    /// [`Self::transformer_block_backward`].
+    pub fn transformer_block_forward_cached(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, BlockCache)> {
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?;
+        let k = self.matmul(&xn, w.wk)?;
+        let v = self.matmul(&xn, w.wv)?;
+        let scale = 1.0 / (q.cols() as f32).sqrt();
+        let scaled = self.scale_causal_mask(&self.matmul_t(&q, &k, false, true)?, scale, causal)?;
+        let weights = self.softmax(&scaled)?;
+        let a = self.matmul(&weights, &v)?;
+        let h = self.add(x, &self.matmul(&a, w.wo)?)?; // residual 1
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let gate = self.matmul(&hn, w.wg)?;
+        let up = self.matmul(&hn, w.wu)?;
+        let act = self.swiglu(&gate, &up)?;
+        let out = self.add(&h, &self.matmul(&act, w.wd)?)?; // residual 2
+        Ok((
+            out,
+            BlockCache {
+                q,
+                k,
+                v,
+                weights,
+                h,
+                gate,
+                up,
+            },
+        ))
+    }
+
+    /// Backward of the transformer block — the **input gradient** `dx` given the
+    /// upstream grad `dout`, the block weights, and the forward [`BlockCache`].
+    /// Chains every adjoint (residual → MLP GEMMs → SwiGLU → norm2 → residual →
+    /// Wo → attention: value/softmax/scale-mask/scores → QKV → norm1) in reverse.
+    /// Gradients that reach `x` by two paths (the two residual skips) are summed.
+    pub fn transformer_block_backward(
+        &self,
+        x: &GpuMatrix,
+        w: &BlockWeights,
+        cache: &BlockCache,
+        dout: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        // out = h + mlp  ⇒  dmlp = dout, and dh gets a residual contribution below.
+        // mlp = act·Wd  ⇒  dact = dout·Wdᵀ
+        let dact = self.matmul_t(dout, w.wd, false, true)?;
+        // act = silu(gate)⊙up  ⇒  dgate, dup
+        let (dgate, dup) = self.swiglu_backward(&cache.gate, &cache.up, &dact)?;
+        // gate = hn·Wg, up = hn·Wu  ⇒  dhn = dgate·Wgᵀ + dup·Wuᵀ
+        let dhn = self.add(
+            &self.matmul_t(&dgate, w.wg, false, true)?,
+            &self.matmul_t(&dup, w.wu, false, true)?,
+        )?;
+        // hn = rms_norm(h, norm2)  ⇒  dh (from MLP path)
+        let dh_mlp = self.rms_norm_backward(&cache.h, w.norm2, &dhn, eps)?;
+        // h feeds both the MLP norm and the residual add of out ⇒ dh = dout + dh_mlp
+        let dh = self.add(dout, &dh_mlp)?;
+        // h = x + a·Wo  ⇒  dao = dh ; da = dh·Woᵀ
+        let da = self.matmul_t(&dh, w.wo, false, true)?;
+        // a = weights·v  ⇒  dweights = da·vᵀ ; dv = weightsᵀ·da
+        let dweights = self.matmul_t(&da, &cache.v, false, true)?;
+        let dv = self.matmul_t(&cache.weights, &da, true, false)?;
+        // weights = softmax(scaled)  ⇒  dscaled
+        let dscaled = self.softmax_backward(&cache.weights, &dweights)?;
+        // scaled = scale_mask(q·kᵀ)  ⇒  dscores
+        let scale = 1.0 / (cache.q.cols() as f32).sqrt();
+        let dscores = self.scale_causal_mask_backward(&dscaled, scale, causal)?;
+        // scores = q·kᵀ  ⇒  dq = dscores·k ; dk = dscoresᵀ·q
+        let dq = self.matmul(&dscores, &cache.k)?;
+        let dk = self.matmul_t(&dscores, &cache.q, true, false)?;
+        // q,k,v = xn·{Wq,Wk,Wv}  ⇒  dxn = dq·Wqᵀ + dk·Wkᵀ + dv·Wvᵀ
+        let dxn = self.add(
+            &self.add(
+                &self.matmul_t(&dq, w.wq, false, true)?,
+                &self.matmul_t(&dk, w.wk, false, true)?,
+            )?,
+            &self.matmul_t(&dv, w.wv, false, true)?,
+        )?;
+        // xn = rms_norm(x, norm1)  ⇒  dx (from attention path)
+        let dx_attn = self.rms_norm_backward(x, w.norm1, &dxn, eps)?;
+        // x feeds both norm1 and the residual add of h ⇒ dx = dh + dx_attn
+        self.add(&dh, &dx_attn)
     }
 
     /// Apply a **stack of transformer blocks** in sequence, fully resident:
@@ -1350,6 +1457,111 @@ mod tests {
                 (fd - dtable_gpu[idx]).abs() < 1e-2,
                 "dE[{idx}]: fd={fd} gpu={}",
                 dtable_gpu[idx]
+            );
+        }
+    }
+
+    /// The **composed block backward** — `dx` through the whole transformer block
+    /// (attention + MLP + both residuals + both norms) — must match numerical
+    /// gradients. Forward-with-cache then backward on the GPU; the loss
+    /// `L = Σ block(X)⊙G` and its central finite differences over `X` are
+    /// computed on the CPU (via `cpu_block`), so this validates that every
+    /// adjoint composes correctly. The end-to-end integration test. Skips if no
+    /// adapter.
+    #[test]
+    fn transformer_block_backward_matches_finite_differences() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, d, h) = (4usize, 6usize, 12usize);
+        let eps = 1e-5f32;
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.037 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.02 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.3);
+        let wk = gen(d * d, 1.1, 0.3);
+        let wv = gen(d * d, 1.7, 0.3);
+        let wo = gen(d * d, 2.3, 0.3);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.01 * i as f32).collect();
+        let wg = gen(d * h, 2.9, 0.25);
+        let wu = gen(d * h, 3.5, 0.25);
+        let wd = gen(h * d, 4.1, 0.25);
+        let g = gen(t * d, 5.0, 1.0); // dL/dout
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (up(&wq, d, d), up(&wk, d, d), up(&wv, d, d), up(&wo, d, d));
+        let (gwg, gwu, gwd) = (up(&wg, d, h), up(&wu, d, h), up(&wd, h, d));
+        let weights = BlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+        };
+        let gx = up(&x, t, d);
+        let (out_m, cache) = chain
+            .transformer_block_forward_cached(&gx, &weights, eps, true)
+            .unwrap();
+        // Forward parity against the CPU block oracle.
+        let out_gpu = chain.download(&out_m).unwrap();
+        let out_cpu = cpu_block(
+            &x,
+            (&n1, &n2),
+            (&wq, &wk, &wv, &wo),
+            (&wg, &wu, &wd),
+            (t, d, h),
+            eps,
+            true,
+        );
+        assert!(rel_err(&out_gpu, &out_cpu) < 1e-4, "forward mismatch");
+
+        let dx_gpu = chain
+            .download(
+                &chain
+                    .transformer_block_backward(&gx, &weights, &cache, &up(&g, t, d), eps, true)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        // Gold standard: central finite differences of L = Σ block(X)⊙G over X.
+        let loss = |xx: &[f32]| -> f32 {
+            cpu_block(
+                xx,
+                (&n1, &n2),
+                (&wq, &wk, &wv, &wo),
+                (&wg, &wu, &wd),
+                (t, d, h),
+                eps,
+                true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let step = 1e-3f32;
+        for idx in 0..t * d
+        {
+            let (mut xp, mut xm) = (x.clone(), x.clone());
+            xp[idx] += step;
+            xm[idx] -= step;
+            let fd = (loss(&xp) - loss(&xm)) / (2.0 * step);
+            assert!(
+                (fd - dx_gpu[idx]).abs() < 2e-2,
+                "dx[{idx}]: fd={fd} gpu={}",
+                dx_gpu[idx]
             );
         }
     }

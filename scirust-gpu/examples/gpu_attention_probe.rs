@@ -545,6 +545,63 @@ fn main() {
         &mut failures,
     );
 
+    // 16. BACKWARD (integration): dx through the WHOLE transformer block, checked
+    //     against central finite differences of L = Σ block(x)⊙G (via the CPU
+    //     block closure). Absolute tolerance since finite differences carry ~1e-3
+    //     truncation error. This proves every adjoint composes correctly.
+    let bwd_bw = BlockWeights {
+        norm1: &gnw,
+        wq: &gbq,
+        wk: &gbk,
+        wv: &gbv,
+        wo: &gbo,
+        norm2: &gn2,
+        wg: &gwg,
+        wu: &gwu,
+        wd: &gwd,
+    };
+    let bg: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.23 - 0.4).sin()).collect(); // dL/dout
+    let (_out_c, bcache) = chain
+        .transformer_block_forward_cached(&gnx, &bwd_bw, eps, true)
+        .unwrap();
+    let bdx_gpu = chain
+        .download(
+            &chain
+                .transformer_block_backward(
+                    &gnx,
+                    &bwd_bw,
+                    &bcache,
+                    &chain.upload(&bg, t, d),
+                    eps,
+                    true,
+                )
+                .unwrap(),
+        )
+        .unwrap();
+    let bloss =
+        |xx: &[f32]| -> f32 { cpu_block_once(xx).iter().zip(&bg).map(|(a, b)| a * b).sum() };
+    let hstep = 1e-3f32;
+    let mut max_fd_err = 0.0f32;
+    for idx in 0..t * d
+    {
+        let (mut xp, mut xm) = (nx.clone(), nx.clone());
+        xp[idx] += hstep;
+        xm[idx] -= hstep;
+        let fd = (bloss(&xp) - bloss(&xm)) / (2.0 * hstep);
+        max_fd_err = max_fd_err.max((fd - bdx_gpu[idx]).abs());
+    }
+    let ok = max_fd_err < 3e-2;
+    println!(
+        "  {:<34} max|fd−gpu| = {:>10.3e}   {}",
+        "backward: full block dx (finite-diff)",
+        max_fd_err,
+        if ok { "PASS" } else { "FAIL" }
+    );
+    if !ok
+    {
+        failures += 1;
+    }
+
     println!();
     if failures == 0
     {
