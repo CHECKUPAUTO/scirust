@@ -29,7 +29,7 @@ auditable, matching the SciRust doctrine.
 | Types         | scalar `f64`, 1-D array `Vec<f64>` / `&[f64]` |
 | Arithmetic    | `+ - * / **`, unary minus; elementwise array ops; scalar↔array broadcasting |
 | Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
-| Routed kernels | `np.linalg.solve(A, b)` → `scirust-solvers` (verified LU) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
+| Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)` → `scirust-solvers` (verified LU) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
 | Control/flow  | `for i in range(...)`, `while cond:`, `if`/`elif`/`else` + comparisons `< <= > >= == !=`, indexing `a[i]`, index-assignment `a[i] = …`, `return` |
 
 Anything outside the subset is **refused with a diagnostic** — never guessed.
@@ -61,8 +61,8 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ tanh_activation              200/200 trials match
   ✓ relu / clamp / sign          200/200 trials match   (if/elif/else, Phase 1)
   ✓ newton_sqrt / newton_conv    200/200 trials match   (while, Phase 1)
-  ✓ linalg.solve                 200/200 trials match   (routed to scirust-solvers)
-  ORACLE GREEN — 13/13 cases match NumPy within tolerance
+  ✓ linalg.solve / linalg.det    200/200 trials match   (routed to scirust-solvers)
+  ORACLE GREEN — 14/14 cases match NumPy within tolerance
 ```
 
 The oracle is **dual-mode**: std-only cases compile with bare `rustc`; **routed**

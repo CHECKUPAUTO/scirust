@@ -485,6 +485,18 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
                 b: Box::new(b),
             })
         },
+        "linalg.det" =>
+        {
+            // np.linalg.det(A): determinant of an n×n matrix, routed to
+            // `scirust-solvers` (LU-based).
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if a.ty() != Ty::Matrix
+            {
+                return Err("np.linalg.det expects a 2-D matrix argument".into());
+            }
+            Ok(SirExpr::Det(Box::new(a)))
+        },
         "zeros" =>
         {
             need_args(func, args, 1)?;
@@ -596,7 +608,8 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
         {
             PyExpr::Call { func, args } =>
             {
-                (strip_np(func) == "linalg.solve"
+                // First argument of a matrix-taking linalg routine is a matrix.
+                (matches!(strip_np(func), "linalg.solve" | "linalg.det")
                     && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },

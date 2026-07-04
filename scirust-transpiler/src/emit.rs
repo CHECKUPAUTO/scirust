@@ -507,6 +507,24 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Det(a) =>
+        {
+            // Route to the verified LU-based determinant; A is flat row-major,
+            // n = isqrt(A.len()).
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let __a: &[f64] = {amat}; let __n = (__a.len() as f64).sqrt() as usize; \
+                 scirust_solvers::Matrix::from_row_major(__n, __n, __a.to_vec())\
+                 .determinant()\
+                 .expect(\"scirust-transpiler: determinant failed\") }}",
+                amat = slice_of(&a),
+            );
+            Frag {
+                code,
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
     }
 }
 
