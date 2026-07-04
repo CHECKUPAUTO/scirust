@@ -525,6 +525,26 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Eigvalsh(a) =>
+        {
+            // Route to the verified symmetric eigensolver; eigenvalues come back
+            // sorted ascending (matching numpy.linalg.eigvalsh). A is flat
+            // row-major, n = isqrt(A.len()).
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let __a: &[f64] = {amat}; let __n = (__a.len() as f64).sqrt() as usize; \
+                 scirust_solvers::linalg::eigen_symmetric(\
+                 &scirust_solvers::Matrix::from_row_major(__n, __n, __a.to_vec()))\
+                 .expect(\"scirust-transpiler: symmetric eigendecomposition failed\")\
+                 .eigenvalues }}",
+                amat = slice_of(&a),
+            );
+            Frag {
+                code,
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
     }
 }
 
