@@ -50,6 +50,58 @@ pub struct BlockWeights<'a> {
     pub wd: &'a GpuMatrix,
 }
 
+/// Weights of one **GQA transformer block** — multi-head grouped-query attention
+/// with RoPE, then SwiGLU MLP — matching the sciagent `SciAgentBlock`. Unlike
+/// [`BlockWeights`] (single head, square q/k/v), the key/value projections are
+/// `d×(n_kv_heads·dh)` where `dh = d/n_heads`.
+pub struct GqaBlockWeights<'a> {
+    /// Pre-attention RMSNorm gain (`d`).
+    pub norm1: &'a GpuMatrix,
+    /// Query projection (`d×d`, `d = n_heads·dh`).
+    pub wq: &'a GpuMatrix,
+    /// Key projection (`d×kv_dim`, `kv_dim = n_kv_heads·dh`).
+    pub wk: &'a GpuMatrix,
+    /// Value projection (`d×kv_dim`).
+    pub wv: &'a GpuMatrix,
+    /// Attention output projection (`d×d`).
+    pub wo: &'a GpuMatrix,
+    /// Pre-MLP RMSNorm gain (`d`).
+    pub norm2: &'a GpuMatrix,
+    /// SwiGLU gate projection (`d×h`).
+    pub wg: &'a GpuMatrix,
+    /// SwiGLU up projection (`d×h`).
+    pub wu: &'a GpuMatrix,
+    /// SwiGLU down projection (`h×d`).
+    pub wd: &'a GpuMatrix,
+    /// Number of query heads.
+    pub n_heads: usize,
+    /// Number of key/value heads (`n_heads % n_kv_heads == 0`).
+    pub n_kv_heads: usize,
+    /// RoPE base frequency.
+    pub theta: f32,
+}
+
+/// The projection weight gradients of one **GQA transformer block**, produced by
+/// [`GpuChain::gqa_transformer_block_backward_full`] — same shapes as the
+/// corresponding [`GqaBlockWeights`] fields (`dwk`/`dwv` are `d×kv_dim`). The two
+/// RMSNorm gains are frozen (no gain gradients), as elsewhere.
+pub struct GqaBlockGrads {
+    /// `∂L/∂Wq` (`d×d`).
+    pub dwq: GpuMatrix,
+    /// `∂L/∂Wk` (`d×kv_dim`).
+    pub dwk: GpuMatrix,
+    /// `∂L/∂Wv` (`d×kv_dim`).
+    pub dwv: GpuMatrix,
+    /// `∂L/∂Wo` (`d×d`).
+    pub dwo: GpuMatrix,
+    /// `∂L/∂Wg` (`d×h`).
+    pub dwg: GpuMatrix,
+    /// `∂L/∂Wu` (`d×h`).
+    pub dwu: GpuMatrix,
+    /// `∂L/∂Wd` (`h×d`).
+    pub dwd: GpuMatrix,
+}
+
 /// Forward activations of one transformer block that the backward pass needs to
 /// read — produced by [`GpuChain::transformer_block_forward_cached`] and
 /// consumed by [`GpuChain::transformer_block_backward`]. All resident.
@@ -94,6 +146,20 @@ pub struct ModelWeights<'a> {
     pub embedding: &'a GpuMatrix,
     /// The transformer blocks, applied in order.
     pub blocks: &'a [BlockWeights<'a>],
+    /// Final pre-logits RMSNorm gain (`d`).
+    pub final_norm: &'a GpuMatrix,
+}
+
+/// The resident weights of the full **GQA tied-embedding decoder** — the real
+/// `scirust-sciagent` model: a shared `vocab × d` embedding (also the LM head),
+/// `N` [`GqaBlockWeights`] (multi-head grouped-query attention + RoPE + SwiGLU),
+/// and a final RMSNorm gain. Consumed by [`GpuChain::gqa_model_forward`] /
+/// [`GpuChain::gqa_model_backward`].
+pub struct GqaModelWeights<'a> {
+    /// Token embedding table (`vocab × d`), tied to the output LM head.
+    pub embedding: &'a GpuMatrix,
+    /// The GQA transformer blocks, applied in order.
+    pub blocks: &'a [GqaBlockWeights<'a>],
     /// Final pre-logits RMSNorm gain (`d`).
     pub final_norm: &'a GpuMatrix,
 }
@@ -355,6 +421,260 @@ impl GpuChain {
         out.ok_or_else(|| BackendError::ShapeMismatch("gqa_attention: n_heads must be ≥ 1".into()))
     }
 
+    /// Backward of [`Self::gqa_attention`]. Given the upstream grad `dout`
+    /// (`t×(n_heads·dh)`, grad of the concatenated context), returns
+    /// `(dq, dk, dv)` — grads of the pre-RoPE projections `q` (`t×(n_heads·dh)`)
+    /// and `k`/`v` (`t×(n_kv_heads·dh)`), all resident.
+    ///
+    /// The per-head forward intermediates (`weights`) are recomputed here, then
+    /// each head's single-head attention adjoint is taken (the same reverse chain
+    /// as [`Self::transformer_block_backward`]). Because a grouped-query key/value
+    /// head is shared by `repeat = n_heads/n_kv_heads` query heads, `dk`/`dv`
+    /// **accumulate** over those heads (place + add), while `dq` slots are
+    /// disjoint. Finally RoPE's adjoint maps `dqr→dq` and `dkr→dk` (each at its
+    /// own width); `v` is not rotated so `dv` passes straight through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gqa_attention_backward(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        dout: &GpuMatrix,
+        n_heads: usize,
+        n_kv_heads: usize,
+        seq_len: usize,
+        theta: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix, GpuMatrix)> {
+        let d_model = q.cols();
+        if n_heads == 0 || n_kv_heads == 0 || !d_model.is_multiple_of(n_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: q.cols {d_model} not divisible by n_heads {n_heads}"
+            )));
+        }
+        let dh = d_model / n_heads;
+        if !n_heads.is_multiple_of(n_kv_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: n_heads {n_heads} not a multiple of n_kv_heads {n_kv_heads}"
+            )));
+        }
+        let kv_dim = n_kv_heads * dh;
+        if k.cols() != kv_dim || v.cols() != kv_dim
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: expected k/v cols = {kv_dim}, got k {}, v {}",
+                k.cols(),
+                v.cols()
+            )));
+        }
+        if q.rows() != seq_len
+            || k.rows() != seq_len
+            || v.rows() != seq_len
+            || dout.rows() != seq_len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "gqa_attention_backward: single sequence only — rows must equal seq_len {seq_len}"
+            )));
+        }
+
+        let qr = self.rope(q, seq_len, 0, theta)?;
+        let kr = self.rope(k, seq_len, 0, theta)?;
+        let repeat = n_heads / n_kv_heads;
+        let scale = 1.0 / (dh as f32).sqrt();
+
+        // Grad accumulators for the (post-RoPE) qr/kr and the (un-rotated) v.
+        let mut dqr: Option<GpuMatrix> = None; // disjoint per head
+        let mut dkr: Option<GpuMatrix> = None; // shared kv heads accumulate
+        let mut dvv: Option<GpuMatrix> = None;
+
+        for head in 0..n_heads
+        {
+            let kv = head / repeat;
+            let qs = self.slice_cols(&qr, head * dh, dh)?;
+            let ks = self.slice_cols(&kr, kv * dh, dh)?;
+            let vs = self.slice_cols(v, kv * dh, dh)?;
+
+            // Recompute this head's forward softmax weights.
+            let scores = self.matmul_t(&qs, &ks, false, true)?;
+            let scaled = self.scale_causal_mask(&scores, scale, causal)?;
+            let weights = self.softmax(&scaled)?;
+
+            // Grad of this head's context = adjoint of place_cols = slice of dout.
+            let d_ctx = self.slice_cols(dout, head * dh, dh)?;
+
+            // Single-head attention adjoint (see transformer_block_backward).
+            let dweights = self.matmul_t(&d_ctx, &vs, false, true)?; // d_ctx·vsᵀ
+            let dvs = self.matmul_t(&weights, &d_ctx, true, false)?; // weightsᵀ·d_ctx
+            let dscaled = self.softmax_backward(&weights, &dweights)?;
+            let dscores = self.scale_causal_mask_backward(&dscaled, scale, causal)?;
+            let dqs = self.matmul(&dscores, &ks)?; // dscores·ks
+            let dks = self.matmul_t(&dscores, &qs, true, false)?; // dscoresᵀ·qs
+
+            // Scatter each head's grads back to full width and accumulate.
+            let dqs_full = self.place_cols(&dqs, head * dh, d_model)?;
+            let dks_full = self.place_cols(&dks, kv * dh, kv_dim)?;
+            let dvs_full = self.place_cols(&dvs, kv * dh, kv_dim)?;
+            dqr = Some(match dqr
+            {
+                None => dqs_full,
+                Some(acc) => self.add(&acc, &dqs_full)?,
+            });
+            dkr = Some(match dkr
+            {
+                None => dks_full,
+                Some(acc) => self.add(&acc, &dks_full)?,
+            });
+            dvv = Some(match dvv
+            {
+                None => dvs_full,
+                Some(acc) => self.add(&acc, &dvs_full)?,
+            });
+        }
+
+        let dqr = dqr.expect("n_heads ≥ 1");
+        let dkr = dkr.expect("n_heads ≥ 1");
+        let dv = dvv.expect("n_heads ≥ 1");
+
+        // RoPE adjoint: qr = rope(q), kr = rope(k); v was not rotated.
+        let dq = self.rope_backward(&dqr, seq_len, 0, theta)?;
+        let dk = self.rope_backward(&dkr, seq_len, 0, theta)?;
+        Ok((dq, dk, dv))
+    }
+
+    /// A complete **pre-norm residual GQA transformer block**, fully resident —
+    /// the real `scirust-sciagent` `SciAgentBlock`, on the GPU:
+    ///
+    /// ```text
+    /// h   = x + gqa_attention( rms_norm(x)·Wq, ·Wk, ·Wv ) · Wo
+    /// out = h + swiglu_mlp( rms_norm(h) )
+    /// ```
+    ///
+    /// `x` is `t×d` (single sequence, `t = seq_len`); the block preserves that
+    /// shape. Multi-head grouped-query attention with RoPE (via
+    /// [`Self::gqa_attention`]) — `w.wq`/`w.wo` are `d×d`, `w.wk`/`w.wv` are
+    /// `d×kv_dim`. Everything stays in VRAM. One whole layer of the 350M forward.
+    pub fn gqa_transformer_block(
+        &self,
+        x: &GpuMatrix,
+        w: &GqaBlockWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let seq_len = x.rows();
+        // Attention sub-block (pre-norm + residual).
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?; // t×d
+        let k = self.matmul(&xn, w.wk)?; // t×kv_dim
+        let v = self.matmul(&xn, w.wv)?; // t×kv_dim
+        let ctx = self.gqa_attention(
+            &q,
+            &k,
+            &v,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let attn_out = self.matmul(&ctx, w.wo)?; // t×d
+        let h = self.add(x, &attn_out)?;
+        // MLP sub-block (pre-norm + residual).
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let mlp = self.swiglu_mlp(&hn, w.wg, w.wu, w.wd)?;
+        self.add(&h, &mlp)
+    }
+
+    /// Backward of [`Self::gqa_transformer_block`], returning `dx` **and** the
+    /// seven projection weight gradients ([`GqaBlockGrads`]) — the GQA analogue
+    /// of [`Self::transformer_block_backward_full`], so a GQA block can be trained
+    /// on the device with an AdamW step. The forward activations are recomputed
+    /// here (cheap resident ops); the attention adjoint goes through
+    /// [`Self::gqa_attention_backward`] (multi-head, grouped-query, RoPE). RMSNorm
+    /// gain gradients are not produced — freeze the norms.
+    pub fn gqa_transformer_block_backward_full(
+        &self,
+        x: &GpuMatrix,
+        w: &GqaBlockWeights,
+        dout: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, GqaBlockGrads)> {
+        let seq_len = x.rows();
+        // --- recompute the forward activations the backward contracts with ---
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?;
+        let k = self.matmul(&xn, w.wk)?;
+        let v = self.matmul(&xn, w.wv)?;
+        let ctx = self.gqa_attention(
+            &q,
+            &k,
+            &v,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let h = self.add(x, &self.matmul(&ctx, w.wo)?)?;
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let gate = self.matmul(&hn, w.wg)?;
+        let up = self.matmul(&hn, w.wu)?;
+        let act = self.swiglu(&gate, &up)?;
+
+        // --- MLP path ---
+        let dact = self.matmul_t(dout, w.wd, false, true)?;
+        let dwd = self.matmul_t(&act, dout, true, false)?; // actᵀ·dout   (h×d)
+        let (dgate, dup) = self.swiglu_backward(&gate, &up, &dact)?;
+        let dwg = self.matmul_t(&hn, &dgate, true, false)?; // hnᵀ·dgate  (d×h)
+        let dwu = self.matmul_t(&hn, &dup, true, false)?; // hnᵀ·dup    (d×h)
+        let dhn = self.add(
+            &self.matmul_t(&dgate, w.wg, false, true)?,
+            &self.matmul_t(&dup, w.wu, false, true)?,
+        )?;
+        let dh = self.add(dout, &self.rms_norm_backward(&h, w.norm2, &dhn, eps)?)?;
+
+        // --- attention path ---
+        let dwo = self.matmul_t(&ctx, &dh, true, false)?; // ctxᵀ·dh     (d×d)
+        let d_ctx = self.matmul_t(&dh, w.wo, false, true)?; // dh·Woᵀ     (t×d)
+        let (dq, dk, dv) = self.gqa_attention_backward(
+            &q,
+            &k,
+            &v,
+            &d_ctx,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let dwq = self.matmul_t(&xn, &dq, true, false)?; // xnᵀ·dq  (d×d)
+        let dwk = self.matmul_t(&xn, &dk, true, false)?; // xnᵀ·dk  (d×kv_dim)
+        let dwv = self.matmul_t(&xn, &dv, true, false)?; // xnᵀ·dv  (d×kv_dim)
+        let dxn = self.add(
+            &self.add(
+                &self.matmul_t(&dq, w.wq, false, true)?,
+                &self.matmul_t(&dk, w.wk, false, true)?,
+            )?,
+            &self.matmul_t(&dv, w.wv, false, true)?,
+        )?;
+        let dx = self.add(&dh, &self.rms_norm_backward(x, w.norm1, &dxn, eps)?)?;
+
+        Ok((
+            dx,
+            GqaBlockGrads {
+                dwq,
+                dwk,
+                dwv,
+                dwo,
+                dwg,
+                dwu,
+                dwd,
+            },
+        ))
+    }
+
     /// A complete **pre-norm residual transformer block**, fully resident:
     ///
     /// ```text
@@ -608,6 +928,54 @@ impl GpuChain {
         let trunk = self.transformer_stack(&emb, w.blocks, eps, causal)?;
         let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
         // Tied head: logits = normed · Eᵀ  (E is vocab×d ⇒ Eᵀ is d×vocab).
+        self.matmul_t(&normed, w.embedding, false, true)
+    }
+
+    /// Apply a **stack of GQA transformer blocks** in sequence, fully resident —
+    /// the multi-head grouped-query analogue of [`Self::transformer_stack`].
+    /// Returns the `t×d` output of the last block. With no blocks, a resident
+    /// copy of `x`.
+    pub fn gqa_transformer_stack(
+        &self,
+        x: &GpuMatrix,
+        blocks: &[GqaBlockWeights],
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let mut cur: Option<GpuMatrix> = None;
+        for b in blocks
+        {
+            let input = cur.as_ref().unwrap_or(x);
+            cur = Some(self.gqa_transformer_block(input, b, eps, causal)?);
+        }
+        match cur
+        {
+            Some(m) => Ok(m),
+            None => Ok(self.upload(&self.download(x)?, x.rows(), x.cols())),
+        }
+    }
+
+    /// The **full GQA tied-embedding decoder forward**, `tokens → logits`, fully
+    /// resident — the real `scirust-sciagent` model on the GPU:
+    ///
+    /// ```text
+    /// emb    = embed(tokens, E)                    // t×d
+    /// trunk  = gqa_transformer_stack(emb, blocks)  // t×d  (N GQA layers)
+    /// logits = rms_norm(trunk, final) · Eᵀ         // t×vocab  (tied LM head)
+    /// ```
+    ///
+    /// Returns the `t × vocab` logits (`t = tokens.len()`). Nothing leaves VRAM
+    /// between the embedding gather and the final logit GEMM.
+    pub fn gqa_model_forward(
+        &self,
+        tokens: &[u32],
+        w: &GqaModelWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let emb = self.embed(tokens, w.embedding)?;
+        let trunk = self.gqa_transformer_stack(&emb, w.blocks, eps, causal)?;
+        let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
         self.matmul_t(&normed, w.embedding, false, true)
     }
 
@@ -1232,6 +1600,454 @@ mod tests {
             rel_err(&out, &expected) < 1e-4,
             "rel_err {}",
             rel_err(&out, &expected)
+        );
+    }
+
+    /// **Multi-head GQA attention backward** gradient-checked end-to-end. For
+    /// `L = Σ gqa_attention(Q,K,V) ⊙ G`, `(dQ,dK,dV) = gqa_attention_backward(…,G)`;
+    /// each is checked against central finite differences of `L` over that input,
+    /// via the CPU oracle. Uses `2 heads / 1 kv-head` so the two query heads share
+    /// the single key/value head — this specifically exercises the `dK`/`dV`
+    /// accumulation across grouped-query heads. Causal, RoPE on. Skips if no
+    /// adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn gqa_attention_backward_matches_finite_differences() {
+        use crate::ops::cpu_gqa_attention;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (n_heads, n_kv_heads, dh, seq_len) = (2usize, 1usize, 4usize, 4usize);
+        let d_model = n_heads * dh; // 8
+        let kv_dim = n_kv_heads * dh; // 4
+        let theta = 10_000.0f32;
+        let q: Vec<f32> = (0..seq_len * d_model)
+            .map(|i| (i as f32 * 0.13 - 0.8).sin() * 0.5)
+            .collect();
+        let k: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.09 + 0.4).cos() * 0.5)
+            .collect();
+        let v: Vec<f32> = (0..seq_len * kv_dim)
+            .map(|i| (i as f32 * 0.06 - 0.1).sin() * 0.5)
+            .collect();
+        let g: Vec<f32> = (0..seq_len * d_model)
+            .map(|i| (i as f32 * 0.21 + 0.2).cos())
+            .collect(); // dL/dOut
+
+        let gq = chain.upload(&q, seq_len, d_model);
+        let gk = chain.upload(&k, seq_len, kv_dim);
+        let gv = chain.upload(&v, seq_len, kv_dim);
+        let gg = chain.upload(&g, seq_len, d_model);
+        let (dq_g, dk_g, dv_g) = chain
+            .gqa_attention_backward(
+                &gq, &gk, &gv, &gg, n_heads, n_kv_heads, seq_len, theta, true,
+            )
+            .unwrap();
+        let dq = chain.download(&dq_g).unwrap();
+        let dk = chain.download(&dk_g).unwrap();
+        let dv = chain.download(&dv_g).unwrap();
+
+        let loss = |qq: &[f32], kk: &[f32], vv: &[f32]| -> f32 {
+            cpu_gqa_attention(
+                qq, kk, vv, seq_len, n_heads, n_kv_heads, dh, seq_len, theta, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let eps = 1e-3f32;
+        for idx in 0..q.len()
+        {
+            let (mut p, mut m) = (q.clone(), q.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&p, &k, &v) - loss(&m, &k, &v)) / (2.0 * eps);
+            assert!(
+                (fd - dq[idx]).abs() < 2e-2,
+                "dq[{idx}]: fd={fd} gpu={}",
+                dq[idx]
+            );
+        }
+        for idx in 0..k.len()
+        {
+            let (mut p, mut m) = (k.clone(), k.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&q, &p, &v) - loss(&q, &m, &v)) / (2.0 * eps);
+            assert!(
+                (fd - dk[idx]).abs() < 2e-2,
+                "dk[{idx}]: fd={fd} gpu={}",
+                dk[idx]
+            );
+        }
+        for idx in 0..v.len()
+        {
+            let (mut p, mut m) = (v.clone(), v.clone());
+            p[idx] += eps;
+            m[idx] -= eps;
+            let fd = (loss(&q, &k, &p) - loss(&q, &k, &m)) / (2.0 * eps);
+            assert!(
+                (fd - dv[idx]).abs() < 2e-2,
+                "dv[{idx}]: fd={fd} gpu={}",
+                dv[idx]
+            );
+        }
+    }
+
+    /// The **resident GQA transformer block** — the real `SciAgentBlock`
+    /// (pre-norm multi-head grouped-query attention with RoPE + residual, then
+    /// pre-norm SwiGLU MLP + residual) — matches a step-by-step CPU oracle.
+    /// `4 heads / 2 kv-heads`, causal. Skips if no adapter; asserts on lavapipe /
+    /// a real GPU. This is one whole 350M layer forward on the resident path.
+    #[test]
+    fn resident_gqa_transformer_block_matches_cpu_oracle() {
+        use crate::ops::cpu_gqa_transformer_block;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, n_heads, n_kv_heads, dh, ff) = (6usize, 4usize, 2usize, 4usize, 16usize);
+        let d = n_heads * dh; // 16
+        let kv_dim = n_kv_heads * dh; // 8
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.031 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 1.0);
+        let n1: Vec<f32> = (0..d).map(|i| 0.7 + 0.03 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.3);
+        let wk = gen(d * kv_dim, 1.1, 0.3);
+        let wv = gen(d * kv_dim, 1.7, 0.3);
+        let wo = gen(d * d, 2.3, 0.3);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.02 * i as f32).collect();
+        let wg = gen(d * ff, 2.9, 0.25);
+        let wu = gen(d * ff, 3.5, 0.25);
+        let wd = gen(ff * d, 4.1, 0.25);
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (
+            up(&wq, d, d),
+            up(&wk, d, kv_dim),
+            up(&wv, d, kv_dim),
+            up(&wo, d, d),
+        );
+        let (gwg, gwu, gwd) = (up(&wg, d, ff), up(&wu, d, ff), up(&wd, ff, d));
+        let weights = GqaBlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+            n_heads,
+            n_kv_heads,
+            theta,
+        };
+        let out = chain
+            .download(
+                &chain
+                    .gqa_transformer_block(&gx, &weights, eps, true)
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let expected = cpu_gqa_transformer_block(
+            &x, &n1, &wq, &wk, &wv, &wo, &n2, &wg, &wu, &wd, t, d, kv_dim, ff, n_heads, n_kv_heads,
+            dh, theta, eps, true,
+        );
+        assert!(
+            rel_err(&out, &expected) < 1e-4,
+            "rel_err {}",
+            rel_err(&out, &expected)
+        );
+    }
+
+    /// The **GQA transformer block backward** gradient-checked end-to-end: `dx`
+    /// and all seven projection weight gradients checked against central finite
+    /// differences of `L = Σ gqa_transformer_block(x; W) ⊙ G` via the CPU oracle.
+    /// `2 heads / 1 kv-head` so the query heads share the single kv head — the
+    /// weight grads `dWk`/`dWv` then flow through the grouped-query accumulation.
+    /// Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn gqa_transformer_block_backward_matches_finite_differences() {
+        use crate::ops::cpu_gqa_transformer_block;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, n_heads, n_kv_heads, dh, ff) = (4usize, 2usize, 1usize, 2usize, 6usize);
+        let d = n_heads * dh; // 4
+        let kv_dim = n_kv_heads * dh; // 2
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.037 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 0.7);
+        let n1: Vec<f32> = (0..d).map(|i| 0.8 + 0.05 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.4);
+        let wk = gen(d * kv_dim, 1.1, 0.4);
+        let wv = gen(d * kv_dim, 1.7, 0.4);
+        let wo = gen(d * d, 2.3, 0.4);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.03 * i as f32).collect();
+        let wg = gen(d * ff, 2.9, 0.3);
+        let wu = gen(d * ff, 3.5, 0.3);
+        let wd = gen(ff * d, 4.1, 0.3);
+        let g = gen(t * d, 5.0, 1.0); // dL/dOut
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (
+            up(&wq, d, d),
+            up(&wk, d, kv_dim),
+            up(&wv, d, kv_dim),
+            up(&wo, d, d),
+        );
+        let (gwg, gwu, gwd) = (up(&wg, d, ff), up(&wu, d, ff), up(&wd, ff, d));
+        let gg = up(&g, t, d);
+        let weights = GqaBlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+            n_heads,
+            n_kv_heads,
+            theta,
+        };
+        let (dx_g, grads) = chain
+            .gqa_transformer_block_backward_full(&gx, &weights, &gg, eps, true)
+            .unwrap();
+        let dl = |m: &GpuMatrix| chain.download(m).unwrap();
+        let (dx, dwq, dwk, dwv, dwo, dwg, dwu, dwd) = (
+            dl(&dx_g),
+            dl(&grads.dwq),
+            dl(&grads.dwk),
+            dl(&grads.dwv),
+            dl(&grads.dwo),
+            dl(&grads.dwg),
+            dl(&grads.dwu),
+            dl(&grads.dwd),
+        );
+
+        // L = Σ block(x; W) ⊙ G, on the CPU oracle.
+        #[allow(clippy::too_many_arguments)]
+        let loss = |x_: &[f32],
+                    wq_: &[f32],
+                    wk_: &[f32],
+                    wv_: &[f32],
+                    wo_: &[f32],
+                    wg_: &[f32],
+                    wu_: &[f32],
+                    wd_: &[f32]|
+         -> f32 {
+            cpu_gqa_transformer_block(
+                x_, &n1, wq_, wk_, wv_, wo_, &n2, wg_, wu_, wd_, t, d, kv_dim, ff, n_heads,
+                n_kv_heads, dh, theta, eps, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let hh = 1e-3f32;
+        let check = |name: &str, analytic: &[f32], base: &[f32], f: &dyn Fn(&[f32]) -> f32| {
+            for idx in 0..base.len()
+            {
+                let (mut p, mut m) = (base.to_vec(), base.to_vec());
+                p[idx] += hh;
+                m[idx] -= hh;
+                let fd = (f(&p) - f(&m)) / (2.0 * hh);
+                assert!(
+                    (fd - analytic[idx]).abs() < 2e-2,
+                    "{name}[{idx}]: fd={fd} gpu={}",
+                    analytic[idx]
+                );
+            }
+        };
+        check("dx", &dx, &x, &|z| {
+            loss(z, &wq, &wk, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwq", &dwq, &wq, &|z| {
+            loss(&x, z, &wk, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwk", &dwk, &wk, &|z| {
+            loss(&x, &wq, z, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwv", &dwv, &wv, &|z| {
+            loss(&x, &wq, &wk, z, &wo, &wg, &wu, &wd)
+        });
+        check("dwo", &dwo, &wo, &|z| {
+            loss(&x, &wq, &wk, &wv, z, &wg, &wu, &wd)
+        });
+        check("dwg", &dwg, &wg, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, z, &wu, &wd)
+        });
+        check("dwu", &dwu, &wu, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, &wg, z, &wd)
+        });
+        check("dwd", &dwd, &wd, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, &wg, &wu, z)
+        });
+    }
+
+    /// The **full resident GQA model forward** — the real `scirust-sciagent`
+    /// decoder (`tokens → embed → N × GQA block → final RMSNorm → tied LM head`) —
+    /// matches a step-by-step CPU reference over a 2-layer tied-embedding config.
+    /// Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_gqa_model_forward_matches_cpu_oracle() {
+        use crate::ops::{cpu_gqa_transformer_block, cpu_rms_norm};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, n_layers, n_heads, n_kv_heads, dh, ff) =
+            (6usize, 2usize, 2usize, 1usize, 4usize, 12usize);
+        let d = n_heads * dh; // 8
+        let kv_dim = n_kv_heads * dh; // 4
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let tokens: Vec<u32> = vec![1, 3, 0, 5];
+        let t = tokens.len();
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.029 + phase).sin() * amp)
+                .collect()
+        };
+        let embedding = gen(vocab * d, 0.2, 0.6);
+        let final_norm: Vec<f32> = (0..d).map(|i| 0.85 + 0.02 * i as f32).collect();
+
+        // Per-block raw weights.
+        struct Bw {
+            n1: Vec<f32>,
+            wq: Vec<f32>,
+            wk: Vec<f32>,
+            wv: Vec<f32>,
+            wo: Vec<f32>,
+            n2: Vec<f32>,
+            wg: Vec<f32>,
+            wu: Vec<f32>,
+            wd: Vec<f32>,
+        }
+        let blocks_raw: Vec<Bw> = (0..n_layers)
+            .map(|l| {
+                let s = l as f32 * 10.0;
+                Bw {
+                    n1: (0..d).map(|i| 0.8 + 0.03 * i as f32).collect(),
+                    wq: gen(d * d, s + 0.5, 0.3),
+                    wk: gen(d * kv_dim, s + 1.1, 0.3),
+                    wv: gen(d * kv_dim, s + 1.7, 0.3),
+                    wo: gen(d * d, s + 2.3, 0.3),
+                    n2: (0..d).map(|i| 0.9 - 0.02 * i as f32).collect(),
+                    wg: gen(d * ff, s + 2.9, 0.25),
+                    wu: gen(d * ff, s + 3.5, 0.25),
+                    wd: gen(ff * d, s + 4.1, 0.25),
+                }
+            })
+            .collect();
+
+        // Upload everything; the per-block matrices must outlive the weight refs.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gemb = up(&embedding, vocab, d);
+        let gfn = up(&final_norm, 1, d);
+        let gblocks: Vec<[GpuMatrix; 9]> = blocks_raw
+            .iter()
+            .map(|b| {
+                [
+                    up(&b.n1, 1, d),
+                    up(&b.wq, d, d),
+                    up(&b.wk, d, kv_dim),
+                    up(&b.wv, d, kv_dim),
+                    up(&b.wo, d, d),
+                    up(&b.n2, 1, d),
+                    up(&b.wg, d, ff),
+                    up(&b.wu, d, ff),
+                    up(&b.wd, ff, d),
+                ]
+            })
+            .collect();
+        let weights_blocks: Vec<GqaBlockWeights> = gblocks
+            .iter()
+            .map(|g| GqaBlockWeights {
+                norm1: &g[0],
+                wq: &g[1],
+                wk: &g[2],
+                wv: &g[3],
+                wo: &g[4],
+                norm2: &g[5],
+                wg: &g[6],
+                wu: &g[7],
+                wd: &g[8],
+                n_heads,
+                n_kv_heads,
+                theta,
+            })
+            .collect();
+        let mw = GqaModelWeights {
+            embedding: &gemb,
+            blocks: &weights_blocks,
+            final_norm: &gfn,
+        };
+        let logits_gpu = chain
+            .download(&chain.gqa_model_forward(&tokens, &mw, eps, true).unwrap())
+            .unwrap();
+
+        // CPU reference: embed → blocks → final norm → tied head.
+        let mut x: Vec<f32> = tokens
+            .iter()
+            .flat_map(|&tk| embedding[(tk as usize) * d..(tk as usize) * d + d].to_vec())
+            .collect();
+        for b in &blocks_raw
+        {
+            x = cpu_gqa_transformer_block(
+                &x, &b.n1, &b.wq, &b.wk, &b.wv, &b.wo, &b.n2, &b.wg, &b.wu, &b.wd, t, d, kv_dim,
+                ff, n_heads, n_kv_heads, dh, theta, eps, true,
+            );
+        }
+        let normed = cpu_rms_norm(&x, &final_norm, eps, t, d);
+        let mut logits_cpu = vec![0.0f32; t * vocab];
+        for i in 0..t
+        {
+            for vv in 0..vocab
+            {
+                let mut acc = 0.0f32;
+                for dd in 0..d
+                {
+                    acc += normed[i * d + dd] * embedding[vv * d + dd];
+                }
+                logits_cpu[i * vocab + vv] = acc;
+            }
+        }
+        assert!(
+            rel_err(&logits_gpu, &logits_cpu) < 1e-4,
+            "rel_err {}",
+            rel_err(&logits_gpu, &logits_cpu)
         );
     }
 

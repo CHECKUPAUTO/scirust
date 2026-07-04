@@ -449,6 +449,72 @@ pub fn cpu_gqa_attention(
     out
 }
 
+/// CPU reference for one **GQA transformer block** — the oracle for
+/// [`crate::GpuChain::gqa_transformer_block`], matching the sciagent
+/// `SciAgentBlock`: pre-norm multi-head grouped-query attention (with RoPE) +
+/// residual, then pre-norm SwiGLU MLP + residual. `x` is `[t, d]`
+/// (`d = n_heads·dh`); `wk`/`wv` are `[d, kv_dim]` (`kv_dim = n_kv_heads·dh`);
+/// `wg`/`wu` are `[d, ff]`, `wd` is `[ff, d]`.
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_gqa_transformer_block(
+    x: &[f32],
+    norm1: &[f32],
+    wq: &[f32],
+    wk: &[f32],
+    wv: &[f32],
+    wo: &[f32],
+    norm2: &[f32],
+    wg: &[f32],
+    wu: &[f32],
+    wd: &[f32],
+    t: usize,
+    d: usize,
+    kv_dim: usize,
+    ff: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    dh: usize,
+    theta: f32,
+    eps: f32,
+    causal: bool,
+) -> Vec<f32> {
+    let mm = |a: &[f32], b: &[f32], m: usize, kk: usize, n: usize| -> Vec<f32> {
+        let mut c = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for p in 0..kk
+                {
+                    acc += a[i * kk + p] * b[p * n + j];
+                }
+                c[i * n + j] = acc;
+            }
+        }
+        c
+    };
+    // Attention sub-block.
+    let xn = cpu_rms_norm(x, norm1, eps, t, d);
+    let q = mm(&xn, wq, t, d, d);
+    let k = mm(&xn, wk, t, d, kv_dim);
+    let v = mm(&xn, wv, t, d, kv_dim);
+    let ctx = cpu_gqa_attention(&q, &k, &v, t, n_heads, n_kv_heads, dh, t, theta, causal);
+    let attn_out = mm(&ctx, wo, t, d, d);
+    let h: Vec<f32> = x.iter().zip(&attn_out).map(|(a, b)| a + b).collect();
+    // MLP sub-block.
+    let hn = cpu_rms_norm(&h, norm2, eps, t, d);
+    let gate = mm(&hn, wg, t, d, ff);
+    let up = mm(&hn, wu, t, d, ff);
+    let act: Vec<f32> = gate
+        .iter()
+        .zip(&up)
+        .map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u)
+        .collect();
+    let mlp = mm(&act, wd, t, ff, d);
+    h.iter().zip(&mlp).map(|(a, b)| a + b).collect()
+}
+
 /// CPU reference for the scale + causal-mask backward: `din = scale·dout` at
 /// kept positions, `0` above the diagonal (masked keys carry no gradient). The
 /// GPU `scale_causal_mask_backward_resident` contract.
