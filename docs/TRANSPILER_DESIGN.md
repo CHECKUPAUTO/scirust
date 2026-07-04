@@ -352,7 +352,15 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
   ✓ linalg.solve / linalg.det      (routed to scirust-solvers, cargo-compiled — Phase 1)
-  ORACLE GREEN — 14/14 cases match NumPy within tolerance
+  ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
+  ORACLE GREEN — 19/19 cases match NumPy within tolerance
+```
+
+Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
+un rapport et un code de sortie non nul à la moindre divergence :
+
+```
+$ ./scripts/test_transpiler.sh
 ```
 
 Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur

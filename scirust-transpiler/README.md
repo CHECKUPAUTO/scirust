@@ -62,8 +62,12 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ relu / clamp / sign          200/200 trials match   (if/elif/else, Phase 1)
   ✓ newton_sqrt / newton_conv    200/200 trials match   (while, Phase 1)
   ✓ linalg.solve / linalg.det    200/200 trials match   (routed to scirust-solvers)
-  ORACLE GREEN — 14/14 cases match NumPy within tolerance
+  ✓ sin/cos/abs / exp / ** / ones 200/200 trials match  (full intrinsic coverage)
+  ORACLE GREEN — 19/19 cases match NumPy within tolerance
 ```
+
+Run the whole suite (unit tests + oracle) from one entry point:
+`./scripts/test_transpiler.sh`.
 
 The oracle is **dual-mode**: std-only cases compile with bare `rustc`; **routed**
 cases (which call verified `scirust-*` kernels, e.g. `np.linalg.solve`) compile

@@ -5,6 +5,16 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : couverture de test exhaustive + script global
+Objectif « tester **toutes** les fonctions codées » : l'oracle différentiel
+couvre désormais **chaque** intrinsèque et opérateur supporté. Nouveaux cas —
+`np.sin`/`np.cos`/`np.abs` (scalaire), `np.exp` (scalaire **et** élémentaire
+sur tableau), l'opérateur `**`, et `np.ones` + `len` (tableau en sortie) —
+portant l'oracle à **19/19** (200 essais chacun vs NumPy réel). Ajout du script
+`scripts/test_transpiler.sh` qui lance en un point la suite complète (17 tests
+unitaires + oracle) avec rapport clair et code de sortie non nul si une seule
+fonction transpilée diverge de NumPy.
+
 ### Ajouté — transpileur : routage `np.linalg.det` (Phase 1, incrément 4)
 Deuxième noyau routé vers `scirust-solvers` : `np.linalg.det(A)` transpile vers
 `scirust_solvers::Matrix::from_row_major(...).determinant()` (déterminant par LU
