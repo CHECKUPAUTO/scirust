@@ -5,6 +5,18 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : FFT + type complexe (Phase 1, incrément 6)
+Premier routage vers `scirust-signal` et première **valeur complexe** dans la
+SIR. `np.fft.fft(x)` (signal réel → spectre complet) transpile vers la FFT
+complexe vérifiée `scirust_signal::fft::fft` (buffer complexe in-place),
+renvoyant `Vec<scirust_signal::complex::Complex>` ; `np.abs(np.fft.fft(x))`
+donne le spectre de **magnitude** réel via `.mag()`. Nouveautés :
+`Ty::ComplexArray`, `SirExpr::Fft`/`ComplexAbs`, `required_crates` multi-crates
+(solvers **et** signal). L'oracle gère les retours complexes (parties ré/im
+entrelacées des deux côtés) et compile les cas `scirust-signal` via cargo.
+Comparé à `numpy.fft.fft` sur des signaux de longueur 8. **Oracle 22/22** (200
+essais chacun) ; 20 tests unitaires.
+
 ### Ajouté — tolérancement non-normal + position GD&T (`scirust-tolerance`)
 Deux modules qui étendent le tolérancement inertiel au-delà de l'hypothèse
 normale et à la cotation de position :

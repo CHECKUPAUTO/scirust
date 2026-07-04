@@ -120,6 +120,7 @@ fn param_ty(t: Ty) -> &'static str {
         Ty::Matrix => "&[f64]",
         Ty::Int => "usize",
         Ty::Bool => "bool",
+        Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
     }
 }
 
@@ -127,6 +128,7 @@ fn ret_ty(t: Ty) -> &'static str {
     match t
     {
         Ty::Array => "Vec<f64>",
+        Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
         _ => "f64",
     }
 }
@@ -150,6 +152,10 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
                     name,
                     owned_array(v)
                 )),
+                Ty::ComplexArray => out.push_str(&format!(
+                    "{}let mut {}: Vec<scirust_signal::complex::Complex> = {};\n",
+                    pad, name, v.code
+                )),
                 _ => out.push_str(&format!(
                     "{}let mut {}: f64 = {};\n",
                     pad,
@@ -161,13 +167,11 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
         SirStmt::Reassign { name, value } =>
         {
             let v = emit(value, ctx);
-            if v.ty == Ty::Array
+            match v.ty
             {
-                out.push_str(&format!("{}{} = {};\n", pad, name, owned_array(v)));
-            }
-            else
-            {
-                out.push_str(&format!("{}{} = {};\n", pad, name, scalar_of(v)));
+                Ty::Array => out.push_str(&format!("{}{} = {};\n", pad, name, owned_array(v))),
+                Ty::ComplexArray => out.push_str(&format!("{}{} = {};\n", pad, name, v.code)),
+                _ => out.push_str(&format!("{}{} = {};\n", pad, name, scalar_of(v))),
             }
         },
         SirStmt::SetIndex { name, index, value } =>
@@ -236,13 +240,11 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
         SirStmt::Return(e) =>
         {
             let v = emit(e, ctx);
-            if v.ty == Ty::Array
+            match v.ty
             {
-                out.push_str(&format!("{}return {};\n", pad, owned_array(v)));
-            }
-            else
-            {
-                out.push_str(&format!("{}return {};\n", pad, scalar_of(v)));
+                Ty::Array => out.push_str(&format!("{}return {};\n", pad, owned_array(v))),
+                Ty::ComplexArray => out.push_str(&format!("{}return {};\n", pad, v.code)),
+                _ => out.push_str(&format!("{}return {};\n", pad, scalar_of(v))),
             }
         },
     }
@@ -541,6 +543,33 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             );
             Frag {
                 code,
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Fft(a) =>
+        {
+            // Full complex DFT of a real signal (all N bins, matching
+            // numpy.fft.fft): lift to complex, run the verified in-place FFT.
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let mut __b: Vec<scirust_signal::complex::Complex> = {}.iter()\
+                 .map(|&__v| scirust_signal::complex::Complex::new(__v, 0.0)).collect(); \
+                 scirust_signal::fft::fft(&mut __b); __b }}",
+                a.code,
+            );
+            Frag {
+                code,
+                ty: Ty::ComplexArray,
+                borrowed: false,
+            }
+        },
+        SirExpr::ComplexAbs(a) =>
+        {
+            // |z| over a complex array -> real magnitude array.
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("{}.iter().map(|c| c.mag()).collect::<Vec<f64>>()", a.code),
                 ty: Ty::Array,
                 borrowed: false,
             }

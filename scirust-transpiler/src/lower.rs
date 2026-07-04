@@ -509,6 +509,15 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             }
             Ok(SirExpr::Eigvalsh(Box::new(a)))
         },
+        "fft.fft" =>
+        {
+            // np.fft.fft(x): DFT of a real signal, routed to
+            // `scirust-signal::fft::fft_real` -> complex spectrum.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            expect_array(&a, "np.fft.fft")?;
+            Ok(SirExpr::Fft(Box::new(a)))
+        },
         "zeros" =>
         {
             need_args(func, args, 1)?;
@@ -540,7 +549,12 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
                 "tanh" => MathFn::Tanh,
                 _ => unreachable!(),
             };
-            if a.ty() == Ty::Array
+            if mf == MathFn::Abs && a.ty() == Ty::ComplexArray
+            {
+                // |z| over a complex array -> real magnitude array.
+                Ok(SirExpr::ComplexAbs(Box::new(a)))
+            }
+            else if a.ty() == Ty::Array
             {
                 Ok(SirExpr::ArrayUnaryFn {
                     func: mf,
