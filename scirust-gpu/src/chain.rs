@@ -81,6 +81,27 @@ pub struct GqaBlockWeights<'a> {
     pub theta: f32,
 }
 
+/// The projection weight gradients of one **GQA transformer block**, produced by
+/// [`GpuChain::gqa_transformer_block_backward_full`] — same shapes as the
+/// corresponding [`GqaBlockWeights`] fields (`dwk`/`dwv` are `d×kv_dim`). The two
+/// RMSNorm gains are frozen (no gain gradients), as elsewhere.
+pub struct GqaBlockGrads {
+    /// `∂L/∂Wq` (`d×d`).
+    pub dwq: GpuMatrix,
+    /// `∂L/∂Wk` (`d×kv_dim`).
+    pub dwk: GpuMatrix,
+    /// `∂L/∂Wv` (`d×kv_dim`).
+    pub dwv: GpuMatrix,
+    /// `∂L/∂Wo` (`d×d`).
+    pub dwo: GpuMatrix,
+    /// `∂L/∂Wg` (`d×h`).
+    pub dwg: GpuMatrix,
+    /// `∂L/∂Wu` (`d×h`).
+    pub dwu: GpuMatrix,
+    /// `∂L/∂Wd` (`h×d`).
+    pub dwd: GpuMatrix,
+}
+
 /// Forward activations of one transformer block that the backward pass needs to
 /// read — produced by [`GpuChain::transformer_block_forward_cached`] and
 /// consumed by [`GpuChain::transformer_block_backward`]. All resident.
@@ -549,6 +570,95 @@ impl GpuChain {
         let hn = self.rms_norm(&h, w.norm2, eps)?;
         let mlp = self.swiglu_mlp(&hn, w.wg, w.wu, w.wd)?;
         self.add(&h, &mlp)
+    }
+
+    /// Backward of [`Self::gqa_transformer_block`], returning `dx` **and** the
+    /// seven projection weight gradients ([`GqaBlockGrads`]) — the GQA analogue
+    /// of [`Self::transformer_block_backward_full`], so a GQA block can be trained
+    /// on the device with an AdamW step. The forward activations are recomputed
+    /// here (cheap resident ops); the attention adjoint goes through
+    /// [`Self::gqa_attention_backward`] (multi-head, grouped-query, RoPE). RMSNorm
+    /// gain gradients are not produced — freeze the norms.
+    pub fn gqa_transformer_block_backward_full(
+        &self,
+        x: &GpuMatrix,
+        w: &GqaBlockWeights,
+        dout: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<(GpuMatrix, GqaBlockGrads)> {
+        let seq_len = x.rows();
+        // --- recompute the forward activations the backward contracts with ---
+        let xn = self.rms_norm(x, w.norm1, eps)?;
+        let q = self.matmul(&xn, w.wq)?;
+        let k = self.matmul(&xn, w.wk)?;
+        let v = self.matmul(&xn, w.wv)?;
+        let ctx = self.gqa_attention(
+            &q,
+            &k,
+            &v,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let h = self.add(x, &self.matmul(&ctx, w.wo)?)?;
+        let hn = self.rms_norm(&h, w.norm2, eps)?;
+        let gate = self.matmul(&hn, w.wg)?;
+        let up = self.matmul(&hn, w.wu)?;
+        let act = self.swiglu(&gate, &up)?;
+
+        // --- MLP path ---
+        let dact = self.matmul_t(dout, w.wd, false, true)?;
+        let dwd = self.matmul_t(&act, dout, true, false)?; // actᵀ·dout   (h×d)
+        let (dgate, dup) = self.swiglu_backward(&gate, &up, &dact)?;
+        let dwg = self.matmul_t(&hn, &dgate, true, false)?; // hnᵀ·dgate  (d×h)
+        let dwu = self.matmul_t(&hn, &dup, true, false)?; // hnᵀ·dup    (d×h)
+        let dhn = self.add(
+            &self.matmul_t(&dgate, w.wg, false, true)?,
+            &self.matmul_t(&dup, w.wu, false, true)?,
+        )?;
+        let dh = self.add(dout, &self.rms_norm_backward(&h, w.norm2, &dhn, eps)?)?;
+
+        // --- attention path ---
+        let dwo = self.matmul_t(&ctx, &dh, true, false)?; // ctxᵀ·dh     (d×d)
+        let d_ctx = self.matmul_t(&dh, w.wo, false, true)?; // dh·Woᵀ     (t×d)
+        let (dq, dk, dv) = self.gqa_attention_backward(
+            &q,
+            &k,
+            &v,
+            &d_ctx,
+            w.n_heads,
+            w.n_kv_heads,
+            seq_len,
+            w.theta,
+            causal,
+        )?;
+        let dwq = self.matmul_t(&xn, &dq, true, false)?; // xnᵀ·dq  (d×d)
+        let dwk = self.matmul_t(&xn, &dk, true, false)?; // xnᵀ·dk  (d×kv_dim)
+        let dwv = self.matmul_t(&xn, &dv, true, false)?; // xnᵀ·dv  (d×kv_dim)
+        let dxn = self.add(
+            &self.add(
+                &self.matmul_t(&dq, w.wq, false, true)?,
+                &self.matmul_t(&dk, w.wk, false, true)?,
+            )?,
+            &self.matmul_t(&dv, w.wv, false, true)?,
+        )?;
+        let dx = self.add(&dh, &self.rms_norm_backward(x, w.norm1, &dxn, eps)?)?;
+
+        Ok((
+            dx,
+            GqaBlockGrads {
+                dwq,
+                dwk,
+                dwv,
+                dwo,
+                dwg,
+                dwu,
+                dwd,
+            },
+        ))
     }
 
     /// A complete **pre-norm residual transformer block**, fully resident:
@@ -1602,6 +1712,144 @@ mod tests {
             "rel_err {}",
             rel_err(&out, &expected)
         );
+    }
+
+    /// The **GQA transformer block backward** gradient-checked end-to-end: `dx`
+    /// and all seven projection weight gradients checked against central finite
+    /// differences of `L = Σ gqa_transformer_block(x; W) ⊙ G` via the CPU oracle.
+    /// `2 heads / 1 kv-head` so the query heads share the single kv head — the
+    /// weight grads `dWk`/`dWv` then flow through the grouped-query accumulation.
+    /// Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn gqa_transformer_block_backward_matches_finite_differences() {
+        use crate::ops::cpu_gqa_transformer_block;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (t, n_heads, n_kv_heads, dh, ff) = (4usize, 2usize, 1usize, 2usize, 6usize);
+        let d = n_heads * dh; // 4
+        let kv_dim = n_kv_heads * dh; // 2
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.037 + phase).sin() * amp)
+                .collect()
+        };
+        let x = gen(t * d, 0.0, 0.7);
+        let n1: Vec<f32> = (0..d).map(|i| 0.8 + 0.05 * i as f32).collect();
+        let wq = gen(d * d, 0.5, 0.4);
+        let wk = gen(d * kv_dim, 1.1, 0.4);
+        let wv = gen(d * kv_dim, 1.7, 0.4);
+        let wo = gen(d * d, 2.3, 0.4);
+        let n2: Vec<f32> = (0..d).map(|i| 0.9 - 0.03 * i as f32).collect();
+        let wg = gen(d * ff, 2.9, 0.3);
+        let wu = gen(d * ff, 3.5, 0.3);
+        let wd = gen(ff * d, 4.1, 0.3);
+        let g = gen(t * d, 5.0, 1.0); // dL/dOut
+
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gx = up(&x, t, d);
+        let (gn1, gn2) = (up(&n1, 1, d), up(&n2, 1, d));
+        let (gwq, gwk, gwv, gwo) = (
+            up(&wq, d, d),
+            up(&wk, d, kv_dim),
+            up(&wv, d, kv_dim),
+            up(&wo, d, d),
+        );
+        let (gwg, gwu, gwd) = (up(&wg, d, ff), up(&wu, d, ff), up(&wd, ff, d));
+        let gg = up(&g, t, d);
+        let weights = GqaBlockWeights {
+            norm1: &gn1,
+            wq: &gwq,
+            wk: &gwk,
+            wv: &gwv,
+            wo: &gwo,
+            norm2: &gn2,
+            wg: &gwg,
+            wu: &gwu,
+            wd: &gwd,
+            n_heads,
+            n_kv_heads,
+            theta,
+        };
+        let (dx_g, grads) = chain
+            .gqa_transformer_block_backward_full(&gx, &weights, &gg, eps, true)
+            .unwrap();
+        let dl = |m: &GpuMatrix| chain.download(m).unwrap();
+        let (dx, dwq, dwk, dwv, dwo, dwg, dwu, dwd) = (
+            dl(&dx_g),
+            dl(&grads.dwq),
+            dl(&grads.dwk),
+            dl(&grads.dwv),
+            dl(&grads.dwo),
+            dl(&grads.dwg),
+            dl(&grads.dwu),
+            dl(&grads.dwd),
+        );
+
+        // L = Σ block(x; W) ⊙ G, on the CPU oracle.
+        #[allow(clippy::too_many_arguments)]
+        let loss = |x_: &[f32],
+                    wq_: &[f32],
+                    wk_: &[f32],
+                    wv_: &[f32],
+                    wo_: &[f32],
+                    wg_: &[f32],
+                    wu_: &[f32],
+                    wd_: &[f32]|
+         -> f32 {
+            cpu_gqa_transformer_block(
+                x_, &n1, wq_, wk_, wv_, wo_, &n2, wg_, wu_, wd_, t, d, kv_dim, ff, n_heads,
+                n_kv_heads, dh, theta, eps, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let hh = 1e-3f32;
+        let check = |name: &str, analytic: &[f32], base: &[f32], f: &dyn Fn(&[f32]) -> f32| {
+            for idx in 0..base.len()
+            {
+                let (mut p, mut m) = (base.to_vec(), base.to_vec());
+                p[idx] += hh;
+                m[idx] -= hh;
+                let fd = (f(&p) - f(&m)) / (2.0 * hh);
+                assert!(
+                    (fd - analytic[idx]).abs() < 2e-2,
+                    "{name}[{idx}]: fd={fd} gpu={}",
+                    analytic[idx]
+                );
+            }
+        };
+        check("dx", &dx, &x, &|z| {
+            loss(z, &wq, &wk, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwq", &dwq, &wq, &|z| {
+            loss(&x, z, &wk, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwk", &dwk, &wk, &|z| {
+            loss(&x, &wq, z, &wv, &wo, &wg, &wu, &wd)
+        });
+        check("dwv", &dwv, &wv, &|z| {
+            loss(&x, &wq, &wk, z, &wo, &wg, &wu, &wd)
+        });
+        check("dwo", &dwo, &wo, &|z| {
+            loss(&x, &wq, &wk, &wv, z, &wg, &wu, &wd)
+        });
+        check("dwg", &dwg, &wg, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, z, &wu, &wd)
+        });
+        check("dwu", &dwu, &wu, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, &wg, z, &wd)
+        });
+        check("dwd", &dwd, &wd, &|z| {
+            loss(&x, &wq, &wk, &wv, &wo, &wg, &wu, z)
+        });
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
