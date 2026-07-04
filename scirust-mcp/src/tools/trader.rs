@@ -31,6 +31,8 @@
 //! * `trader_portfolio_construct` — target weights (risk-parity / min-variance)
 //! * `trader_regime`              — volatility/trend regime + Hurst + transitions
 //! * `trader_optimize`            — walk-forward-guarded parameter tuning
+//! * `trader_pair_analyze`        — cointegration + spread z-score for a pair
+//! * `trader_pair_scan`           — rank tradeable stat-arb pairs among N assets
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -54,6 +56,7 @@ use scirust_trader::model::PricePredictor;
 use scirust_trader::optimize::{Objective, OptimizeConfig, ParamAxis, default_axes, optimize};
 use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
+use scirust_trader::pairs::{PairConfig, analyze_pair, scan_pairs};
 use scirust_trader::patterns::detect_patterns;
 use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_to_weights};
 use scirust_trader::portfolio_opt::{
@@ -89,6 +92,8 @@ pub fn trader_tools() -> Vec<McpTool> {
         portfolio_construct_tool(),
         regime_tool(),
         optimize_tool(),
+        pair_analyze_tool(),
+        pair_scan_tool(),
     ]
 }
 
@@ -1744,6 +1749,150 @@ fn optimize_tool() -> McpTool {
     }
 }
 
+fn pair_config(args: &Value) -> PairConfig {
+    PairConfig {
+        entry_z: f(args, "entry_z", 2.0),
+        exit_z: f(args, "exit_z", 0.5),
+        adf_threshold: f(args, "adf_threshold", -2.5),
+        max_half_life: f(args, "max_half_life", 100.0),
+    }
+}
+
+/// A closing-price series from either a numeric `key` array or a `key_ohlcv`
+/// candle array.
+fn closes_arg(args: &Value, key: &str, key_ohlcv: &str) -> Result<Vec<f32>, String> {
+    if let Some(arr) = args.get(key).and_then(|x| x.as_array())
+    {
+        let v: Vec<f32> = arr
+            .iter()
+            .filter_map(|x| x.as_f64().map(|y| y as f32))
+            .collect();
+        if !v.is_empty()
+        {
+            return Ok(v);
+        }
+    }
+    if let Some(v) = args.get(key_ohlcv)
+    {
+        let candles = parse_candles(v)?;
+        return Ok(candles.iter().map(|c| c.close).collect());
+    }
+    Err(format!(
+        "provide `{key}` (price array) or `{key_ohlcv}` (candles)"
+    ))
+}
+
+fn pair_analyze_tool() -> McpTool {
+    McpTool {
+        name: "trader_pair_analyze".to_string(),
+        description: "Statistical-arbitrage analysis of a pair. Fits the hedge ratio (OLS β so \
+            A−βB is stationary), runs the Engle-Granger cointegration test (Dickey-Fuller-style \
+            ADF t-stat on the residual spread), estimates the mean-reversion HALF-LIFE (bars) and \
+            the spread's Hurst exponent, and standardizes the current spread into a z-score. Returns \
+            whether the pair is cointegrated and TRADEABLE, the dollar-neutral hedge, the z-score \
+            entry signal (short the spread when rich, long when cheap), and a plain-language \
+            verdict. This is market-neutral relative value — profit from the spread reverting, not \
+            from either leg's direction. Give each leg as a price array (`a`,`b`) or candles \
+            (`a_ohlcv`,`b_ohlcv`)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "a": { "type": "array", "description": "leg A closing prices" },
+                "b": { "type": "array", "description": "leg B closing prices" },
+                "a_ohlcv": { "type": "array", "description": "leg A candles (alternative to `a`)" },
+                "b_ohlcv": { "type": "array", "description": "leg B candles (alternative to `b`)" },
+                "symbol_a": { "type": "string" },
+                "symbol_b": { "type": "string" },
+                "entry_z": { "type": "number", "description": "|z| to open (default 2.0)" },
+                "exit_z": { "type": "number", "description": "|z| to close (default 0.5)" },
+                "adf_threshold": { "type": "number", "description": "ADF t-stat for stationarity (default -2.5)" },
+                "max_half_life": { "type": "number", "description": "max tradeable half-life in bars (default 100)" }
+            }
+        }),
+        handler: Box::new(|args| {
+            let a = closes_arg(&args, "a", "a_ohlcv")?;
+            let b = closes_arg(&args, "b", "b_ohlcv")?;
+            let sym_a = s(&args, "symbol_a", "A");
+            let sym_b = s(&args, "symbol_b", "B");
+            let cfg = pair_config(&args);
+            match analyze_pair(&a, &b, &cfg)
+            {
+                Some(rep) => {
+                    let mut out = to_value(&rep);
+                    if let Some(obj) = out.as_object_mut()
+                    {
+                        obj.insert("symbol_a".to_string(), json!(sym_a));
+                        obj.insert("symbol_b".to_string(), json!(sym_b));
+                        obj.insert(
+                            "hedge".to_string(),
+                            json!(format!("long 1 {sym_a} vs short {:.4} {sym_b}", rep.beta)),
+                        );
+                    }
+                    Ok(out)
+                }
+                None => Err("need >= 30 aligned observations per leg".to_string()),
+            }
+        }),
+    }
+}
+
+fn pair_scan_tool() -> McpTool {
+    McpTool {
+        name: "trader_pair_scan".to_string(),
+        description: "Scan a basket of assets for tradeable statistical-arbitrage pairs. Tests every \
+            pair for cointegration (Engle-Granger ADF), estimates each spread's mean-reversion \
+            half-life and Hurst, and ranks them best-first (most stationary spread first). Returns \
+            each pair's hedge ratio, half-life, ADF t-stat, Hurst, current z-score, tradeable flag, \
+            and the z-signal. This is how an agent answers 'find me a market-neutral pair to trade' \
+            across a watchlist. Pass `series` as [{symbol, ohlcv}]."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "series": {
+                    "type": "array",
+                    "description": "assets: [{symbol, interval, ohlcv:[[ts,o,h,l,c,v],...]}]"
+                },
+                "entry_z": { "type": "number", "description": "|z| to open (default 2.0)" },
+                "exit_z": { "type": "number", "description": "|z| to close (default 0.5)" },
+                "adf_threshold": { "type": "number", "description": "ADF t-stat for stationarity (default -2.5)" },
+                "max_half_life": { "type": "number", "description": "max tradeable half-life in bars (default 100)" },
+                "tradeable_only": { "type": "boolean", "description": "return only tradeable pairs (default false)" },
+                "top_n": { "type": "integer", "description": "cap on pairs returned (default 20)" }
+            },
+            "required": ["series"]
+        }),
+        handler: Box::new(|args| {
+            let snapshots = parse_series(&args)?;
+            if snapshots.len() < 2
+            {
+                return Err("need >= 2 markets in `series`".to_string());
+            }
+            let symbols: Vec<String> = snapshots.iter().map(|s| s.symbol.clone()).collect();
+            let closes: Vec<Vec<f32>> = snapshots.iter().map(|s| s.closes()).collect();
+            let cfg = pair_config(&args);
+            let ranked = scan_pairs(&symbols, &closes, &cfg);
+            let total = ranked.len();
+            let total_tradeable = ranked.iter().filter(|c| c.tradeable).count();
+            let tradeable_only =
+                args.get("tradeable_only").and_then(|x| x.as_bool()).unwrap_or(false);
+            let top_n = u(&args, "top_n", 20);
+            let pairs: Vec<_> = ranked
+                .into_iter()
+                .filter(|c| !tradeable_only || c.tradeable)
+                .take(top_n)
+                .collect();
+            Ok(json!({
+                "num_pairs_tested": total,
+                "num_tradeable": total_tradeable,
+                "returned": pairs.len(),
+                "pairs": to_value(&pairs),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1773,7 +1922,7 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 22);
+        assert!(before >= 24);
     }
 
     #[test]
@@ -1879,6 +2028,110 @@ mod tests {
         let t = tool("trader_optimize");
         let r = (t.handler)(json!({ "ohlcv": mock_ohlcv(200), "strategy": "does_not_exist" }));
         assert!(r.is_err());
+    }
+
+    /// Deterministic cointegrated pair: b is a random walk, a = b + a fast
+    /// mean-reverting spread.
+    fn cointegrated_ab(n: usize) -> (Vec<f64>, Vec<f64>) {
+        let mut x: u64 = 20_240_704;
+        let mut nextf = || {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((x >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0
+        };
+        let (mut b, mut s) = (100.0f64, 0.0f64);
+        let (mut av, mut bv) = (Vec::new(), Vec::new());
+        for _ in 0..n
+        {
+            b += nextf();
+            s = 0.5 * s + nextf();
+            bv.push(b);
+            av.push(b + s);
+        }
+        (av, bv)
+    }
+
+    fn ohlcv_from_closes(closes: &[f64]) -> Value {
+        let rows: Vec<Value> = closes
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| json!([i, c, c * 1.001, c * 0.999, c, 100.0]))
+            .collect();
+        json!(rows)
+    }
+
+    #[test]
+    fn pair_analyze_reports_cointegration() {
+        let t = tool("trader_pair_analyze");
+        let (a, b) = cointegrated_ab(300);
+        let out = (t.handler)(json!({
+            "a": a, "b": b, "symbol_a": "ETH", "symbol_b": "BTC"
+        }))
+        .unwrap();
+        assert!(out["beta"].is_number());
+        assert!(out["adf_t"].is_number());
+        assert!(out["spread_z"].is_number());
+        assert!(out["verdict"].as_str().unwrap().len() > 8);
+        assert_eq!(out["symbol_a"], json!("ETH"));
+        assert!(out["hedge"].as_str().unwrap().contains("ETH"));
+        // Cointegrated construction with beta_true ~ 1.
+        assert!((out["beta"].as_f64().unwrap() - 1.0).abs() < 0.3);
+        assert_eq!(out["is_cointegrated"], json!(true));
+    }
+
+    #[test]
+    fn pair_analyze_rejects_short_series() {
+        let t = tool("trader_pair_analyze");
+        let r = (t.handler)(json!({ "a": [1, 2, 3, 4], "b": [2, 3, 4, 5] }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn pair_scan_ranks_pairs() {
+        let t = tool("trader_pair_scan");
+        let (a, b) = cointegrated_ab(300);
+        // A third, independent walk.
+        let mut y: u64 = 777;
+        let mut nf = || {
+            y = y
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((y >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0
+        };
+        let mut p = 100.0f64;
+        let z: Vec<f64> = (0..300)
+            .map(|_| {
+                p += nf();
+                p
+            })
+            .collect();
+        let out = (t.handler)(json!({
+            "series": [
+                { "symbol": "ETH", "ohlcv": ohlcv_from_closes(&a) },
+                { "symbol": "BTC", "ohlcv": ohlcv_from_closes(&b) },
+                { "symbol": "DOGE", "ohlcv": ohlcv_from_closes(&z) }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(out["num_pairs_tested"], json!(3));
+        let pairs = out["pairs"].as_array().unwrap();
+        assert!(!pairs.is_empty());
+        assert!(
+            pairs
+                .iter()
+                .all(|p| p["symbol_a"].is_string() && p["symbol_b"].is_string())
+        );
+        // The cointegrated ETH/BTC pair should be the most stationary → ranked first.
+        let top = &pairs[0];
+        let names = [
+            top["symbol_a"].as_str().unwrap(),
+            top["symbol_b"].as_str().unwrap(),
+        ];
+        assert!(
+            names.contains(&"ETH") && names.contains(&"BTC"),
+            "top {names:?}"
+        );
     }
 
     #[test]

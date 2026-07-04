@@ -43,6 +43,7 @@ pub mod model;
 pub mod optimize;
 pub mod orderbook;
 pub mod orders;
+pub mod pairs;
 pub mod patterns;
 pub mod portfolio;
 pub mod portfolio_opt;
