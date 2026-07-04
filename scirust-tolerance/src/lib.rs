@@ -27,7 +27,7 @@
 //!   [`chain::assembly_inertia_worst_case`] analysis and [`chain::allocate`]
 //!   synthesis (worst-case / statistical / weighted / guaranteed-`Cpk` /
 //!   cost-optimal), plus traditional interval allocation for comparison.
-//! - [`optimize`] — minimum-cost tolerance synthesis under **several**
+//! - [`optimize`](mod@optimize) — minimum-cost tolerance synthesis under **several**
 //!   functional requirements at once ([`optimize::optimize`]), by convex
 //!   Lagrangian dual ascent, plus the cost–quality Pareto frontier.
 //! - [`chart`] — the [`chart::PilotingChart`] (*carte de pilotage inertiel*),
@@ -49,6 +49,19 @@
 //!   first four moments (the inertia itself is distribution-free).
 //! - [`position`] — GD&T / ISO positional tolerancing: true position, MMC
 //!   bonus, `±`↔`Ø` conversion, and the positional inertia `√(Iₓ²+I_y²)`.
+//! - [`geometry`] — the rest of the ISO 1101 characteristics: straightness /
+//!   flatness / roundness / cylindricity (form), parallelism / perpendicularity
+//!   / angularity (orientation), profile and runout, each with its inertial RMS.
+//! - [`montecarlo`] — Monte-Carlo tolerance simulation: arbitrary component
+//!   distributions through a non-linear transfer function → inertia, yield,
+//!   ppm, percentiles (deterministic, seeded).
+//! - [`correlated`] — correlated / non-linear chains: covariance-form inertia
+//!   `√((α∘I)ᵀR(α∘I))`, finite-difference linearisation, second-order mean.
+//! - [`sensitivity`] — per-component variance-contribution ranking of a chain.
+//! - [`process`] — discrete-process (menu) cost allocation by exact
+//!   multiple-choice knapsack.
+//! - [`drift`] — short-vs-long-term capability: uniform mean-drift variance and
+//!   the Motorola 1.5σ shift (`Cpk`↔`Ppk`).
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -89,13 +102,19 @@
 pub mod capability;
 pub mod chain;
 pub mod chart;
+pub mod correlated;
+pub mod drift;
 pub mod form;
+pub mod geometry;
 pub mod inertia;
 pub mod modal;
+pub mod montecarlo;
 pub mod nonnormal;
 pub mod optimize;
 pub mod position;
+pub mod process;
 pub mod sampling;
+pub mod sensitivity;
 pub mod spatial;
 pub mod special;
 
@@ -105,15 +124,24 @@ pub use chain::{
     assembly_inertia_worst_case, assembly_state,
 };
 pub use chart::{PilotingAction, PilotingChart, PilotingSignal};
+pub use correlated::{correlated_inertia, correlated_variance, gradient, second_order_mean};
+pub use drift::{cpk_to_ppk, long_term_inertia, long_term_ppm, long_term_sigma};
 pub use form::FormBatch;
+pub use geometry::{
+    angularity, cylindricity, flatness, parallelism, perpendicularity, profile, roundness,
+    straightness, total_runout,
+};
 pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
 pub use modal::{ModalBasis, modal_inertias};
+pub use montecarlo::{Distribution, SimResult, simulate};
 pub use nonnormal::{
     ClementsCapability, clements_capability, cornish_fisher_quantile, nonnormal_ppm,
 };
 pub use optimize::{Component, OptimizeResult, Requirement, cost_quality_frontier, optimize};
 pub use position::{FeatureType, positional_inertia, total_position_tolerance, true_position};
+pub use process::{Combination, ProcessOption, allocate_discrete};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
+pub use sensitivity::{Contribution, contributions};
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
