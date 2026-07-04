@@ -216,6 +216,18 @@ mod tests {
     }
 
     #[test]
+    fn linalg_eigvalsh_routes_to_solvers() {
+        let src = "def eig(A):\n    return np.linalg.eigvalsh(A)\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn eig(A: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains("scirust_solvers::linalg::eigen_symmetric"));
+        assert!(rust.contains(".eigenvalues"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

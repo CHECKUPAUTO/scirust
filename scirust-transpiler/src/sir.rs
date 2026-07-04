@@ -157,6 +157,9 @@ pub enum SirExpr {
     /// `np.linalg.det(A)` : Matrix -> Scalar, routed to `scirust-solvers`
     /// (LU-based determinant).
     Det(Box<SirExpr>),
+    /// `np.linalg.eigvalsh(A)` : symmetric Matrix -> Array (eigenvalues, sorted
+    /// ascending), routed to `scirust-solvers::eigen_symmetric`.
+    Eigvalsh(Box<SirExpr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,7 +240,8 @@ impl SirExpr {
             | SirExpr::ArrayUnaryFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
-            | SirExpr::LinSolve { .. } => Ty::Array,
+            | SirExpr::LinSolve { .. }
+            | SirExpr::Eigvalsh(_) => Ty::Array,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -249,7 +253,7 @@ pub fn required_crates(m: &SirModule) -> Vec<&'static str> {
     fn expr_uses_solvers(e: &SirExpr) -> bool {
         match e
         {
-            SirExpr::LinSolve { .. } | SirExpr::Det(_) => true,
+            SirExpr::LinSolve { .. } | SirExpr::Det(_) | SirExpr::Eigvalsh(_) => true,
             SirExpr::ScalarBin { l, r, .. }
             | SirExpr::IntBin { l, r, .. }
             | SirExpr::EwBin { l, r, .. }

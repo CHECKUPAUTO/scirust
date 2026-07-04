@@ -5,6 +5,15 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : routage `np.linalg.eigvalsh` (Phase 1, incrément 5)
+Troisième noyau routé vers `scirust-solvers` : `np.linalg.eigvalsh(A)` (valeurs
+propres d'une matrice symétrique) transpile vers
+`scirust_solvers::linalg::eigen_symmetric(...).eigenvalues` — valeurs propres
+triées croissantes, comme `numpy.linalg.eigvalsh`. `SirExpr::Eigvalsh` ajouté ;
+inférence de paramètre matrice étendue. Nouveau générateur d'oracle `SymMatrix`
+(matrice symétrique à valeurs propres bien séparées). **Oracle 20/20** (200
+essais chacun) ; 18 tests unitaires.
+
 ### Ajouté — transpileur : couverture de test exhaustive + script global
 Objectif « tester **toutes** les fonctions codées » : l'oracle différentiel
 couvre désormais **chaque** intrinsèque et opérateur supporté. Nouveaux cas —
