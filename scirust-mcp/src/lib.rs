@@ -120,6 +120,7 @@ mod tests {
         assert!(registry.names().contains(&"trader_walkforward"));
         assert!(registry.names().contains(&"trader_monte_carlo"));
         assert!(registry.names().contains(&"trader_portfolio_construct"));
+        assert!(registry.names().contains(&"trader_regime"));
         assert!(registry.names().contains(&"wallet_validate_address"));
         assert!(registry.names().contains(&"wallet_build_evm_transaction"));
         assert!(registry.names().contains(&"wallet_authorization_status"));

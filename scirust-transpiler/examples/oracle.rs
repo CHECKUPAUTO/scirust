@@ -209,6 +209,20 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        // Routing (Phase 1): A @ b matrix-vector product -> scirust-solvers.
+        Case {
+            name: "matvec (A @ b) -> scirust-solvers",
+            call: "mv",
+            src: "def mv(A, b):\n    return A @ b\n",
+            args: vec![
+                Matrix { n: 5 },
+                Array {
+                    n: 5,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+            ],
+        },
         // Routing (Phase 1): np.linalg.det -> scirust-solvers (LU determinant).
         // A is a 4×4 diagonally-dominant matrix; compare the scalar determinant.
         Case {
@@ -225,6 +239,51 @@ fn cases() -> Vec<Case> {
             call: "eigvals",
             src: "def eigvals(A):\n    return np.linalg.eigvalsh(A)\n",
             args: vec![SymMatrix { n: 5 }],
+        },
+        // Routing (Phase 1): np.fft.fft -> scirust-signal. Real input, COMPLEX
+        // output (compared re/im interleaved vs numpy.fft.fft). n = 8 (radix-2).
+        Case {
+            name: "fft.fft -> scirust-signal (complex out)",
+            call: "spec",
+            src: "def spec(x: np.ndarray):\n    return np.fft.fft(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // np.abs(np.fft.fft(x)) -> real magnitude spectrum.
+        Case {
+            name: "abs(fft) magnitude spectrum",
+            call: "mag",
+            src: "def mag(x: np.ndarray):\n    return np.abs(np.fft.fft(x))\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // np.fft.rfft -> half spectrum (N/2+1 complex bins) vs numpy.fft.rfft.
+        Case {
+            name: "fft.rfft -> scirust-signal (half spectrum)",
+            call: "rf",
+            src: "def rf(x: np.ndarray):\n    return np.fft.rfft(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // np.fft.ifft(np.fft.fft(x)) -> round-trip, should recover x (complex).
+        Case {
+            name: "ifft(fft) round-trip",
+            call: "rt",
+            src: "def rt(x: np.ndarray):\n    return np.fft.ifft(np.fft.fft(x))\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
         },
         // ---- intrinsic coverage: every supported math intrinsic & operator ----
         // sin, cos, abs (scalar).
@@ -463,6 +522,12 @@ fn run_rust_batch(
     let emit = match ret
     {
         Ty::Array => "for v in r.iter() { print!(\"{:.17e} \", v); } println!();",
+        // Complex arrays are serialised as interleaved (re, im) — the Python
+        // side does the same, so the vectors line up for comparison.
+        Ty::ComplexArray =>
+        {
+            "for c in r.iter() { print!(\"{:.17e} {:.17e} \", c.re, c.im); } println!();"
+        },
         _ => "println!(\"{:.17e}\", r);",
     };
     let program = format!(
@@ -558,8 +623,10 @@ fn run_python_batch(
     tmp: &std::path::Path,
 ) -> Result<Vec<Vec<f64>>, String> {
     let tuples: Vec<String> = trials.iter().map(|t| py_tuple(t)).collect();
+    // `_ser` serialises a result to a flat float vector — complex arrays become
+    // interleaved (re, im), matching the Rust driver.
     let script = format!(
-        "import numpy as np\n{src}\ninputs = [\n{rows}\n]\nout = []\nfor args in inputs:\n    r = {call}(*args)\n    arr = np.atleast_1d(np.asarray(r, dtype=float)).ravel()\n    out.append(' '.join('%.17e' % v for v in arr))\nimport sys\nsys.stdout.write('\\n'.join(out))\n",
+        "import numpy as np\n{src}\ndef _ser(r):\n    a = np.atleast_1d(np.asarray(r)).ravel()\n    if np.iscomplexobj(a):\n        o = np.empty(a.size * 2)\n        o[0::2] = a.real\n        o[1::2] = a.imag\n        return o\n    return a.astype(float)\ninputs = [\n{rows}\n]\nout = []\nfor args in inputs:\n    r = {call}(*args)\n    arr = _ser(r)\n    out.append(' '.join('%.17e' % v for v in arr))\nimport sys\nsys.stdout.write('\\n'.join(out))\n",
         src = case.src,
         rows = tuples
             .iter()

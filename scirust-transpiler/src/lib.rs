@@ -228,6 +228,49 @@ mod tests {
     }
 
     #[test]
+    fn fft_routes_to_signal_with_complex_return() {
+        let src = "def spec(x: np.ndarray):\n    return np.fft.fft(x)\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn spec(x: &[f64]) -> Vec<scirust_signal::complex::Complex>"));
+        // Full complex DFT (all N bins) via the verified in-place FFT.
+        assert!(rust.contains("scirust_signal::fft::fft(&mut __b)"));
+        assert!(rust.contains("scirust_signal::complex::Complex::new(__v, 0.0)"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-signal"]);
+    }
+
+    #[test]
+    fn abs_of_fft_is_a_real_magnitude_array() {
+        let src = "def mag(x: np.ndarray):\n    return np.abs(np.fft.fft(x))\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn mag(x: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains(".iter().map(|c| c.mag())"));
+    }
+
+    #[test]
+    fn rfft_and_ifft_route_to_signal() {
+        let rf = transpile("def rf(x: np.ndarray):\n    return np.fft.rfft(x)\n").unwrap();
+        assert!(rf.contains("scirust_signal::fft::fft_real(x)"));
+
+        let rt =
+            transpile("def rt(x: np.ndarray):\n    return np.fft.ifft(np.fft.fft(x))\n").unwrap();
+        assert!(rt.contains("scirust_signal::fft::ifft(&mut __ib)"));
+        assert!(rt.contains("scirust_signal::fft::fft(&mut __b)"));
+    }
+
+    #[test]
+    fn matmul_operator_routes_to_matvec() {
+        let src = "def mv(A, b):\n    return A @ b\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn mv(A: &[f64], b: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains(".matvec(__b)"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

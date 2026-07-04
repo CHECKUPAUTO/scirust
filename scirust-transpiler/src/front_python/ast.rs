@@ -101,6 +101,8 @@ pub enum BinOp {
     Mul,
     Div,
     Pow,
+    /// `@` matrix-multiplication operator.
+    MatMul,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

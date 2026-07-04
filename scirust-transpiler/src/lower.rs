@@ -298,7 +298,10 @@ fn int_op(op: BinOp) -> Result<Op, String> {
         BinOp::Sub => Ok(Op::Sub),
         BinOp::Mul => Ok(Op::Mul),
         BinOp::Div => Ok(Op::Div),
-        BinOp::Pow => Err("`**` is not supported in integer index context".into()),
+        BinOp::Pow | BinOp::MatMul =>
+        {
+            Err("`**`/`@` are not supported in an integer index context".into())
+        },
     }
 }
 
@@ -402,6 +405,21 @@ fn lower_bin(
             exp: Box::new(exp),
         });
     }
+    if op == BinOp::MatMul
+    {
+        // `A @ b` : matrix-vector product (Matrix @ Array -> Array).
+        let a = lower_scalar(l, env)?;
+        let b = lower_scalar(r, env)?;
+        if a.ty() != Ty::Matrix
+        {
+            return Err("`@` expects a 2-D matrix on the left".into());
+        }
+        expect_array(&b, "`@`")?;
+        return Ok(SirExpr::Matvec {
+            a: Box::new(a),
+            b: Box::new(b),
+        });
+    }
     let sop = num_op(op);
     let lv = lower_scalar(l, env)?;
     let rv = lower_scalar(r, env)?;
@@ -441,7 +459,7 @@ fn num_op(op: BinOp) -> Op {
         BinOp::Sub => Op::Sub,
         BinOp::Mul => Op::Mul,
         BinOp::Div => Op::Div,
-        BinOp::Pow => unreachable!(),
+        BinOp::Pow | BinOp::MatMul => unreachable!(),
     }
 }
 
@@ -509,6 +527,35 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             }
             Ok(SirExpr::Eigvalsh(Box::new(a)))
         },
+        "fft.fft" =>
+        {
+            // np.fft.fft(x): full complex DFT of a real signal.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            expect_array(&a, "np.fft.fft")?;
+            Ok(SirExpr::Fft(Box::new(a)))
+        },
+        "fft.rfft" =>
+        {
+            // np.fft.rfft(x): real FFT (positive-frequency half spectrum).
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            expect_array(&a, "np.fft.rfft")?;
+            Ok(SirExpr::Rfft(Box::new(a)))
+        },
+        "fft.ifft" =>
+        {
+            // np.fft.ifft(c): inverse DFT of a complex spectrum.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if a.ty() != Ty::ComplexArray
+            {
+                return Err("np.fft.ifft expects a complex array (e.g. the result \
+                            of np.fft.fft)"
+                    .into());
+            }
+            Ok(SirExpr::Ifft(Box::new(a)))
+        },
         "zeros" =>
         {
             need_args(func, args, 1)?;
@@ -540,7 +587,12 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
                 "tanh" => MathFn::Tanh,
                 _ => unreachable!(),
             };
-            if a.ty() == Ty::Array
+            if mf == MathFn::Abs && a.ty() == Ty::ComplexArray
+            {
+                // |z| over a complex array -> real magnitude array.
+                Ok(SirExpr::ComplexAbs(Box::new(a)))
+            }
+            else if a.ty() == Ty::Array
             {
                 Ok(SirExpr::ArrayUnaryFn {
                     func: mf,
@@ -627,6 +679,15 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
                 ) && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },
+            // Left operand of `@` (matrix-multiplication) is a matrix.
+            PyExpr::Bin {
+                op: BinOp::MatMul,
+                l,
+                r,
+            } =>
+            {
+                matches!(l.as_ref(), PyExpr::Name(n) if n == name) || expr(name, l) || expr(name, r)
+            },
             PyExpr::Bin { l, r, .. } | PyExpr::Cmp { l, r, .. } => expr(name, l) || expr(name, r),
             PyExpr::Neg(inner) => expr(name, inner),
             PyExpr::Index { base, index } => expr(name, base) || expr(name, index),
@@ -706,6 +767,17 @@ fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
                     .any(|a| matches!(a, PyExpr::Name(n) if n == name)))
                 || solve_rhs
                 || args.iter().any(|a| array_evidence_expr(name, a))
+        },
+        // Right operand of `@` (matrix @ vector) is a vector.
+        PyExpr::Bin {
+            op: BinOp::MatMul,
+            l,
+            r,
+        } =>
+        {
+            matches!(r.as_ref(), PyExpr::Name(n) if n == name)
+                || array_evidence_expr(name, l)
+                || array_evidence_expr(name, r)
         },
         PyExpr::Bin { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
         PyExpr::Cmp { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),

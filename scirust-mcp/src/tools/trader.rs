@@ -29,6 +29,7 @@
 //! * `trader_walkforward`         — out-of-sample consistency across time windows
 //! * `trader_monte_carlo`         — bootstrap equity bands + probability of ruin
 //! * `trader_portfolio_construct` — target weights (risk-parity / min-variance)
+//! * `trader_regime`              — volatility/trend regime + Hurst + transitions
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -56,6 +57,7 @@ use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_
 use scirust_trader::portfolio_opt::{
     AllocationMethod, construct, correlation_matrix, covariance_matrix,
 };
+use scirust_trader::regime::{RegimeConfig, detect as detect_regime};
 use scirust_trader::robustness::{monte_carlo, walk_forward};
 use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
 use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
@@ -83,6 +85,7 @@ pub fn trader_tools() -> Vec<McpTool> {
         walkforward_tool(),
         monte_carlo_tool(),
         portfolio_construct_tool(),
+        regime_tool(),
     ]
 }
 
@@ -1588,6 +1591,55 @@ fn portfolio_construct_tool() -> McpTool {
     }
 }
 
+fn regime_tool() -> McpTool {
+    McpTool {
+        name: "trader_regime".to_string(),
+        description: "Detect the market regime from an OHLCV history — read the state of the tape \
+            before choosing how to trade it. Classifies the latest bar into one of six regimes \
+            (bull/bear × calm/volatile, plus range and crisis) from rolling realized volatility \
+            (ranked against its own history) and a volatility-normalized trend slope, and reports \
+            the Hurst exponent (>0.5 trending/momentum, <0.5 mean-reverting) via rescaled-range \
+            analysis. Also returns the empirical regime transition matrix, expected regime \
+            durations, and the long-run occupancy — plus a recommended trading posture for the \
+            current regime. Use it to pick a strategy family and scale leverage to conditions."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "ohlcv": { "type": "array", "description": "rows [ts,o,h,l,c,v] (ts & v optional)" },
+                "interval": { "type": "string", "description": "bar interval for annualising vol (default 1h)" },
+                "vol_window": { "type": "integer", "description": "rolling volatility window (default 20)" },
+                "trend_window": { "type": "integer", "description": "trend regression window (default 30)" },
+                "elevated_pct": { "type": "number", "description": "vol percentile for 'volatile' 0..1 (default 0.66)" },
+                "crisis_pct": { "type": "number", "description": "vol percentile for 'crisis' 0..1 (default 0.90)" },
+                "range_threshold": { "type": "number", "description": "|normalized trend| below this = range (default 1.0)" }
+            },
+            "required": ["ohlcv"]
+        }),
+        handler: Box::new(|args| {
+            let candles = ohlcv_arg(&args)?;
+            let interval = s(&args, "interval", "1h");
+            let cfg = RegimeConfig {
+                vol_window: u(&args, "vol_window", 20),
+                trend_window: u(&args, "trend_window", 30),
+                elevated_pct: f(&args, "elevated_pct", 0.66),
+                crisis_pct: f(&args, "crisis_pct", 0.90),
+                range_t: f(&args, "range_threshold", 1.0),
+                periods_per_year: periods_per_year(&interval),
+            };
+            match detect_regime(&candles, &cfg)
+            {
+                Some(report) => Ok(to_value(&report)),
+                None => Err(
+                    "not enough candles to detect a regime (need > vol_window and \
+                    trend_window bars)"
+                        .to_string(),
+                ),
+            }
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1617,7 +1669,7 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 20);
+        assert!(before >= 21);
     }
 
     #[test]
@@ -1646,6 +1698,37 @@ mod tests {
     fn portfolio_construct_rejects_single_asset() {
         let t = tool("trader_portfolio_construct");
         let r = (t.handler)(json!({ "assets": [{ "symbol": "X", "returns": [0.1, 0.2] }] }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn regime_reads_an_uptrend_as_bullish() {
+        let t = tool("trader_regime");
+        // A steady low-vol uptrend.
+        let rows: Vec<Value> = (0..200)
+            .map(|i| {
+                let c = 100.0 * 1.003f32.powi(i);
+                json!([i, c, c * 1.001, c * 0.999, c, 100.0])
+            })
+            .collect();
+        let out = (t.handler)(json!({
+            "ohlcv": rows, "interval": "1h", "vol_window": 15, "trend_window": 20
+        }))
+        .unwrap();
+        assert!(out["trend_strength"].as_f64().unwrap() > 0.0);
+        let label = out["current_label"].as_str().unwrap();
+        assert!(label.starts_with("bull"), "label {label}");
+        assert!(out["realized_vol"].is_number());
+        assert!(out["hurst"].is_number());
+        assert!(out["posture"].as_str().unwrap().len() > 8);
+        // Transition matrix is 6x6.
+        assert_eq!(out["transition_matrix"].as_array().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn regime_rejects_too_few_candles() {
+        let t = tool("trader_regime");
+        let r = (t.handler)(json!({ "ohlcv": mock_ohlcv(5) }));
         assert!(r.is_err());
     }
 
