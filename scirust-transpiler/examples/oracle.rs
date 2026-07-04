@@ -38,6 +38,12 @@ enum ArgSpec {
     Matrix {
         n: usize,
     },
+    /// A symmetric n×n matrix with well-separated eigenvalues (a stable input
+    /// for a symmetric eigensolver — distinct eigenvalues make the two
+    /// implementations agree to high precision).
+    SymMatrix {
+        n: usize,
+    },
 }
 
 struct Case {
@@ -211,6 +217,15 @@ fn cases() -> Vec<Case> {
             src: "def det(A):\n    return np.linalg.det(A)\n",
             args: vec![Matrix { n: 4 }],
         },
+        // Routing (Phase 1): np.linalg.eigvalsh -> scirust-solvers symmetric
+        // eigensolver. A is a 5×5 symmetric matrix; compare the (ascending)
+        // eigenvalue vector.
+        Case {
+            name: "linalg.eigvalsh -> scirust-solvers",
+            call: "eigvals",
+            src: "def eigvals(A):\n    return np.linalg.eigvalsh(A)\n",
+            args: vec![SymMatrix { n: 5 }],
+        },
         // ---- intrinsic coverage: every supported math intrinsic & operator ----
         // sin, cos, abs (scalar).
         Case {
@@ -316,6 +331,26 @@ fn gen_args(specs: &[ArgSpec], rng: &mut Rng) -> Vec<Val> {
                 }
                 Val::Matrix(rows)
             },
+            ArgSpec::SymMatrix { n } =>
+            {
+                let n = *n;
+                // Start from a random matrix, symmetrise (A = (B+Bᵀ)/2), then
+                // add a distinct diagonal shift so eigenvalues are well
+                // separated (both eigensolvers then agree to high precision).
+                let b: Vec<Vec<f64>> = (0..n)
+                    .map(|_| (0..n).map(|_| rng.uniform(-1.0, 1.0)).collect())
+                    .collect();
+                let mut a = vec![vec![0.0f64; n]; n];
+                for i in 0..n
+                {
+                    for j in 0..n
+                    {
+                        a[i][j] = 0.5 * (b[i][j] + b[j][i]);
+                    }
+                    a[i][i] += 3.0 * (i as f64);
+                }
+                Val::Matrix(a)
+            },
         })
         .collect()
 }
@@ -399,7 +434,7 @@ fn rust_bindings(specs: &[ArgSpec]) -> (String, String) {
                     "        let a{i} = &nums[off..off + {n}]; off += {n};\n"
                 ));
             },
-            ArgSpec::Matrix { n } =>
+            ArgSpec::Matrix { n } | ArgSpec::SymMatrix { n } =>
             {
                 let nn = n * n;
                 binds.push_str(&format!(

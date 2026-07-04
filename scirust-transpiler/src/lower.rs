@@ -497,6 +497,18 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             }
             Ok(SirExpr::Det(Box::new(a)))
         },
+        "linalg.eigvalsh" =>
+        {
+            // np.linalg.eigvalsh(A): eigenvalues of a symmetric matrix (sorted
+            // ascending), routed to `scirust-solvers::eigen_symmetric`.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if a.ty() != Ty::Matrix
+            {
+                return Err("np.linalg.eigvalsh expects a 2-D matrix argument".into());
+            }
+            Ok(SirExpr::Eigvalsh(Box::new(a)))
+        },
         "zeros" =>
         {
             need_args(func, args, 1)?;
@@ -609,8 +621,10 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
             PyExpr::Call { func, args } =>
             {
                 // First argument of a matrix-taking linalg routine is a matrix.
-                (matches!(strip_np(func), "linalg.solve" | "linalg.det")
-                    && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
+                (matches!(
+                    strip_np(func),
+                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh"
+                ) && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },
             PyExpr::Bin { l, r, .. } | PyExpr::Cmp { l, r, .. } => expr(name, l) || expr(name, r),

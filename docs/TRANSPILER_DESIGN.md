@@ -338,7 +338,7 @@ secteurs réellement débloqués.
 | Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (13 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Routage `np.linalg.solve` (LU) + `np.linalg.det` → `scirust-solvers` | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `required_crates`) + `emit.rs` |
+| Routage `np.linalg.solve`/`det`/`eigvalsh` → `scirust-solvers` | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `required_crates`) + `emit.rs` |
 | Routage `np.fft` → `scirust-signal`         | ⏳ Phase 1 | — |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
@@ -351,9 +351,9 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
-  ✓ linalg.solve / linalg.det      (routed to scirust-solvers, cargo-compiled — Phase 1)
+  ✓ linalg.solve / det / eigvalsh  (routed to scirust-solvers, cargo-compiled — Phase 1)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
-  ORACLE GREEN — 19/19 cases match NumPy within tolerance
+  ORACLE GREEN — 20/20 cases match NumPy within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
