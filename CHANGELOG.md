@@ -236,7 +236,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 19 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 20 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -261,6 +261,18 @@ empreintes de preuve), sans nouvelle dépendance.
   trades → bandes de percentiles d'équité, distribution du max drawdown,
   probabilité de perte et de **ruine**). Outils MCP `trader_walkforward` et
   `trader_monte_carlo`.
+- **Construction de portefeuille (`portfolio_opt.rs` + 1 outil MCP)** — passer
+  d'un signal par actif à une **allocation multi-actifs** : matrice de
+  covariance et de corrélation des rendements, volatilités annualisées, et
+  quatre méthodes de pondération — poids égaux, **inverse-vol**,
+  **inverse-variance** et **variance minimale** (inversion Gauss-Jordan
+  régularisée par crête, repli sur inverse-variance si singulière),
+  long-only en option. Diagnostics de risque : contributions au risque par
+  actif, **ratio de diversification** et variance de portefeuille. L'outil
+  MCP `trader_portfolio_construct` prend des rendements (ou des séries OHLCV
+  alignées), renvoie des poids cibles + la matrice de corrélation, et se
+  branche sur `trader_rebalance` pour émettre les ordres — « construis-moi un
+  portefeuille » se pilote au chat.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
