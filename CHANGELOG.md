@@ -5,6 +5,14 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : routage `np.linalg.det` (Phase 1, incrément 4)
+Deuxième noyau routé vers `scirust-solvers` : `np.linalg.det(A)` transpile vers
+`scirust_solvers::Matrix::from_row_major(...).determinant()` (déterminant par LU
+prouvé). Réutilise l'infrastructure `Ty::Matrix` + oracle bi-mode (compilation
+cargo). `SirExpr::Det` ajouté ; inférence de paramètre matrice étendue à l'arg 0
+de `np.linalg.det`. Nouveau cas d'oracle sur des matrices 4×4 comparé à
+`numpy.linalg.det`. **Oracle 14/14** (200 essais chacun) ; 17 tests unitaires.
+
 ### Ajouté — transpileur : routage vers les noyaux vérifiés (Phase 1, incrément 3)
 Premier **routage vers un noyau `scirust-*` vérifié** : `np.linalg.solve(A, b)`
 est transpilé vers `scirust_solvers::linalg::solve` (résolution LU prouvée) au

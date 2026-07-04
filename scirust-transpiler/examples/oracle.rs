@@ -203,6 +203,14 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        // Routing (Phase 1): np.linalg.det -> scirust-solvers (LU determinant).
+        // A is a 4×4 diagonally-dominant matrix; compare the scalar determinant.
+        Case {
+            name: "linalg.det -> scirust-solvers",
+            call: "det",
+            src: "def det(A):\n    return np.linalg.det(A)\n",
+            args: vec![Matrix { n: 4 }],
+        },
     ]
 }
 

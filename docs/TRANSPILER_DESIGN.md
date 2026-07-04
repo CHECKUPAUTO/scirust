@@ -338,7 +338,7 @@ secteurs réellement débloqués.
 | Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (13 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Routage `np.linalg.solve` → `scirust-solvers` (LU) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `required_crates`) + `emit.rs` |
+| Routage `np.linalg.solve` (LU) + `np.linalg.det` → `scirust-solvers` | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `required_crates`) + `emit.rs` |
 | Routage `np.fft` → `scirust-signal`         | ⏳ Phase 1 | — |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
@@ -351,8 +351,8 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
-  ✓ linalg.solve                   (routed to scirust-solvers, cargo-compiled — Phase 1)
-  ORACLE GREEN — 13/13 cases match NumPy within tolerance
+  ✓ linalg.solve / linalg.det      (routed to scirust-solvers, cargo-compiled — Phase 1)
+  ORACLE GREEN — 14/14 cases match NumPy within tolerance
 ```
 
 Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur
