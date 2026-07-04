@@ -226,6 +226,29 @@ fn cases() -> Vec<Case> {
             src: "def eigvals(A):\n    return np.linalg.eigvalsh(A)\n",
             args: vec![SymMatrix { n: 5 }],
         },
+        // Routing (Phase 1): np.fft.fft -> scirust-signal. Real input, COMPLEX
+        // output (compared re/im interleaved vs numpy.fft.fft). n = 8 (radix-2).
+        Case {
+            name: "fft.fft -> scirust-signal (complex out)",
+            call: "spec",
+            src: "def spec(x: np.ndarray):\n    return np.fft.fft(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // np.abs(np.fft.fft(x)) -> real magnitude spectrum.
+        Case {
+            name: "abs(fft) magnitude spectrum",
+            call: "mag",
+            src: "def mag(x: np.ndarray):\n    return np.abs(np.fft.fft(x))\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
         // ---- intrinsic coverage: every supported math intrinsic & operator ----
         // sin, cos, abs (scalar).
         Case {
@@ -463,6 +486,12 @@ fn run_rust_batch(
     let emit = match ret
     {
         Ty::Array => "for v in r.iter() { print!(\"{:.17e} \", v); } println!();",
+        // Complex arrays are serialised as interleaved (re, im) — the Python
+        // side does the same, so the vectors line up for comparison.
+        Ty::ComplexArray =>
+        {
+            "for c in r.iter() { print!(\"{:.17e} {:.17e} \", c.re, c.im); } println!();"
+        },
         _ => "println!(\"{:.17e}\", r);",
     };
     let program = format!(
@@ -558,8 +587,10 @@ fn run_python_batch(
     tmp: &std::path::Path,
 ) -> Result<Vec<Vec<f64>>, String> {
     let tuples: Vec<String> = trials.iter().map(|t| py_tuple(t)).collect();
+    // `_ser` serialises a result to a flat float vector — complex arrays become
+    // interleaved (re, im), matching the Rust driver.
     let script = format!(
-        "import numpy as np\n{src}\ninputs = [\n{rows}\n]\nout = []\nfor args in inputs:\n    r = {call}(*args)\n    arr = np.atleast_1d(np.asarray(r, dtype=float)).ravel()\n    out.append(' '.join('%.17e' % v for v in arr))\nimport sys\nsys.stdout.write('\\n'.join(out))\n",
+        "import numpy as np\n{src}\ndef _ser(r):\n    a = np.atleast_1d(np.asarray(r)).ravel()\n    if np.iscomplexobj(a):\n        o = np.empty(a.size * 2)\n        o[0::2] = a.real\n        o[1::2] = a.imag\n        return o\n    return a.astype(float)\ninputs = [\n{rows}\n]\nout = []\nfor args in inputs:\n    r = {call}(*args)\n    arr = _ser(r)\n    out.append(' '.join('%.17e' % v for v in arr))\nimport sys\nsys.stdout.write('\\n'.join(out))\n",
         src = case.src,
         rows = tuples
             .iter()

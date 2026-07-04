@@ -228,6 +228,27 @@ mod tests {
     }
 
     #[test]
+    fn fft_routes_to_signal_with_complex_return() {
+        let src = "def spec(x: np.ndarray):\n    return np.fft.fft(x)\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn spec(x: &[f64]) -> Vec<scirust_signal::complex::Complex>"));
+        // Full complex DFT (all N bins) via the verified in-place FFT.
+        assert!(rust.contains("scirust_signal::fft::fft(&mut __b)"));
+        assert!(rust.contains("scirust_signal::complex::Complex::new(__v, 0.0)"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-signal"]);
+    }
+
+    #[test]
+    fn abs_of_fft_is_a_real_magnitude_array() {
+        let src = "def mag(x: np.ndarray):\n    return np.abs(np.fft.fft(x))\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn mag(x: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains(".iter().map(|c| c.mag())"));
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

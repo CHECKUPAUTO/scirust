@@ -18,6 +18,9 @@ pub enum Ty {
     /// A 2-D matrix, stored flat row-major (param emitted as `&[f64]`).
     /// Used to route `np.linalg.solve` to `scirust-solvers`.
     Matrix,
+    /// A 1-D complex array (`Vec<scirust_signal::complex::Complex>`), produced
+    /// by `np.fft.fft`. Consumed by `np.abs` (→ magnitude, real) or returned.
+    ComplexArray,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +163,11 @@ pub enum SirExpr {
     /// `np.linalg.eigvalsh(A)` : symmetric Matrix -> Array (eigenvalues, sorted
     /// ascending), routed to `scirust-solvers::eigen_symmetric`.
     Eigvalsh(Box<SirExpr>),
+    /// `np.fft.fft(x)` : real Array -> ComplexArray, routed to
+    /// `scirust-signal::fft::fft_real`.
+    Fft(Box<SirExpr>),
+    /// `np.abs(c)` where `c` is a ComplexArray -> real Array of magnitudes.
+    ComplexAbs(Box<SirExpr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +249,9 @@ impl SirExpr {
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
             | SirExpr::LinSolve { .. }
-            | SirExpr::Eigvalsh(_) => Ty::Array,
+            | SirExpr::Eigvalsh(_)
+            | SirExpr::ComplexAbs(_) => Ty::Array,
+            SirExpr::Fft(_) => Ty::ComplexArray,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -250,68 +260,112 @@ impl SirExpr {
 /// Which external `scirust-*` crates the emitted code for `m` depends on
 /// (empty for std-only modules). Drives the oracle's compile mode.
 pub fn required_crates(m: &SirModule) -> Vec<&'static str> {
-    fn expr_uses_solvers(e: &SirExpr) -> bool {
-        match e
+    let mut solvers = false;
+    let mut signal = false;
+    for f in &m.funcs
+    {
+        for s in &f.body
         {
-            SirExpr::LinSolve { .. } | SirExpr::Det(_) | SirExpr::Eigvalsh(_) => true,
-            SirExpr::ScalarBin { l, r, .. }
-            | SirExpr::IntBin { l, r, .. }
-            | SirExpr::EwBin { l, r, .. }
-            | SirExpr::Cmp { l, r, .. } => expr_uses_solvers(l) || expr_uses_solvers(r),
-            SirExpr::Dot(l, r) => expr_uses_solvers(l) || expr_uses_solvers(r),
-            SirExpr::ScalarNeg(x)
-            | SirExpr::ScalarUnaryFn { arg: x, .. }
-            | SirExpr::ArrayUnaryFn { arg: x, .. }
-            | SirExpr::Sum(x)
-            | SirExpr::Len(x)
-            | SirExpr::Zeros(x)
-            | SirExpr::Ones(x) => expr_uses_solvers(x),
-            SirExpr::ScalarPow { base, exp } => expr_uses_solvers(base) || expr_uses_solvers(exp),
-            SirExpr::Index { base, idx } => expr_uses_solvers(base) || expr_uses_solvers(idx),
-            SirExpr::ScalarBroadcast { scalar, arr, .. } =>
-            {
-                expr_uses_solvers(scalar) || expr_uses_solvers(arr)
-            },
-            SirExpr::ScalarLit(_) | SirExpr::IntLit(_) | SirExpr::Var { .. } => false,
+            scan_stmt(s, &mut solvers, &mut signal);
         }
     }
-    fn stmt_uses_solvers(s: &SirStmt) -> bool {
-        match s
+    let mut out = Vec::new();
+    if signal
+    {
+        out.push("scirust-signal");
+    }
+    if solvers
+    {
+        out.push("scirust-solvers");
+    }
+    out
+}
+
+fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
+    match s
+    {
+        SirStmt::Let { value, .. } | SirStmt::Reassign { value, .. } | SirStmt::Return(value) =>
         {
-            SirStmt::Let { value, .. }
-            | SirStmt::Reassign { value, .. }
-            | SirStmt::Return(value) => expr_uses_solvers(value),
-            SirStmt::SetIndex { index, value, .. } =>
-            {
-                expr_uses_solvers(index) || expr_uses_solvers(value)
-            },
-            SirStmt::For {
-                start, end, body, ..
-            } =>
-            {
-                expr_uses_solvers(start)
-                    || expr_uses_solvers(end)
-                    || body.iter().any(stmt_uses_solvers)
-            },
-            SirStmt::If { cond, then, els } =>
-            {
-                expr_uses_solvers(cond)
-                    || then.iter().any(stmt_uses_solvers)
-                    || els.iter().any(stmt_uses_solvers)
-            },
-            SirStmt::While { cond, body } =>
-            {
-                expr_uses_solvers(cond) || body.iter().any(stmt_uses_solvers)
-            },
-        }
+            scan_expr(value, solvers, signal)
+        },
+        SirStmt::SetIndex { index, value, .. } =>
+        {
+            scan_expr(index, solvers, signal);
+            scan_expr(value, solvers, signal);
+        },
+        SirStmt::For {
+            start, end, body, ..
+        } =>
+        {
+            scan_expr(start, solvers, signal);
+            scan_expr(end, solvers, signal);
+            body.iter().for_each(|s| scan_stmt(s, solvers, signal));
+        },
+        SirStmt::If { cond, then, els } =>
+        {
+            scan_expr(cond, solvers, signal);
+            then.iter().for_each(|s| scan_stmt(s, solvers, signal));
+            els.iter().for_each(|s| scan_stmt(s, solvers, signal));
+        },
+        SirStmt::While { cond, body } =>
+        {
+            scan_expr(cond, solvers, signal);
+            body.iter().for_each(|s| scan_stmt(s, solvers, signal));
+        },
     }
-    let uses = m.funcs.iter().any(|f| f.body.iter().any(stmt_uses_solvers));
-    if uses
+}
+
+fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
+    match e
     {
-        vec!["scirust-solvers"]
-    }
-    else
-    {
-        vec![]
+        SirExpr::LinSolve { a, b } =>
+        {
+            *solvers = true;
+            scan_expr(a, solvers, signal);
+            scan_expr(b, solvers, signal);
+        },
+        SirExpr::Det(x) | SirExpr::Eigvalsh(x) =>
+        {
+            *solvers = true;
+            scan_expr(x, solvers, signal);
+        },
+        SirExpr::Fft(x) | SirExpr::ComplexAbs(x) =>
+        {
+            *signal = true;
+            scan_expr(x, solvers, signal);
+        },
+        SirExpr::ScalarBin { l, r, .. }
+        | SirExpr::IntBin { l, r, .. }
+        | SirExpr::EwBin { l, r, .. }
+        | SirExpr::Cmp { l, r, .. }
+        | SirExpr::Dot(l, r) =>
+        {
+            scan_expr(l, solvers, signal);
+            scan_expr(r, solvers, signal);
+        },
+        SirExpr::ScalarNeg(x)
+        | SirExpr::ScalarUnaryFn { arg: x, .. }
+        | SirExpr::ArrayUnaryFn { arg: x, .. }
+        | SirExpr::Sum(x)
+        | SirExpr::Len(x)
+        | SirExpr::Zeros(x)
+        | SirExpr::Ones(x) => scan_expr(x, solvers, signal),
+        SirExpr::ScalarPow { base, exp } =>
+        {
+            scan_expr(base, solvers, signal);
+            scan_expr(exp, solvers, signal);
+        },
+        SirExpr::Index { base, idx } =>
+        {
+            scan_expr(base, solvers, signal);
+            scan_expr(idx, solvers, signal);
+        },
+        SirExpr::ScalarBroadcast { scalar, arr, .. } =>
+        {
+            scan_expr(scalar, solvers, signal);
+            scan_expr(arr, solvers, signal);
+        },
+        SirExpr::ScalarLit(_) | SirExpr::IntLit(_) | SirExpr::Var { .. } =>
+        {},
     }
 }
