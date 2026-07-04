@@ -236,7 +236,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 20 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 21 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -273,6 +273,19 @@ empreintes de preuve), sans nouvelle dépendance.
   alignées), renvoie des poids cibles + la matrice de corrélation, et se
   branche sur `trader_rebalance` pour émettre les ordres — « construis-moi un
   portefeuille » se pilote au chat.
+- **Détection de régime de marché (`regime.rs` + 1 outil MCP)** — lire *l'état
+  du marché* avant de choisir comment y trader. Trois lectures orthogonales
+  fusionnées en une taxonomie de six régimes (haussier/baissier × calme/volatil,
+  plus range et crise) : **volatilité réalisée glissante** classée par
+  percentile (calme / élevé / crise, la volatilité étant auto-corrélée —
+  Mandelbrot 1963), **force de tendance** = pente OLS du log-prix normalisée par
+  la volatilité (un t-stat signal/bruit), et **exposant de Hurst** par analyse
+  R/S (Hurst 1951, Mandelbrot & Wallis 1969 ; `H>0.5` tendanciel/momentum,
+  `H<0.5` retour à la moyenne). Les labels par barre alimentent une **matrice de
+  transition de Markov** empirique → durées de régime attendues et occupation
+  stationnaire (long terme). L'outil MCP `trader_regime` renvoie le régime
+  courant, une **posture recommandée** (famille de stratégie + levier à adapter
+  aux conditions), et toute la dynamique de transition — déterministe.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
