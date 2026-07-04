@@ -312,6 +312,23 @@ fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String
     {
         PyExpr::Float(v) => Ok(SirExpr::ScalarLit(*v)),
         PyExpr::Int(v) => Ok(SirExpr::ScalarLit(*v as f64)),
+        // `A.T` — matrix transpose (parsed as the dotted name `A.T`).
+        PyExpr::Name(n) if n.ends_with(".T") =>
+        {
+            let base = &n[..n.len() - 2];
+            match env.get(base)
+            {
+                Some(&ty) if is_matrixish(ty) => Ok(SirExpr::Transpose(Box::new(SirExpr::Var {
+                    name: base.to_string(),
+                    ty,
+                }))),
+                Some(other) => Err(format!(
+                    "`.T` (transpose) expects a matrix, got {:?}",
+                    other
+                )),
+                None => Err(format!("undefined name `{}` in `.T`", base)),
+            }
+        },
         PyExpr::Name(n) => match env.get(n)
         {
             Some(ty) => Ok(SirExpr::Var {
@@ -407,12 +424,19 @@ fn lower_bin(
     }
     if op == BinOp::MatMul
     {
-        // `A @ b` : matrix-vector product (Matrix @ Array -> Array).
+        // `A @ B` (matrix × matrix) or `A @ b` (matrix × vector).
         let a = lower_scalar(l, env)?;
         let b = lower_scalar(r, env)?;
-        if a.ty() != Ty::Matrix
+        if !is_matrixish(a.ty())
         {
             return Err("`@` expects a 2-D matrix on the left".into());
+        }
+        if is_matrixish(b.ty())
+        {
+            return Ok(SirExpr::Matmul {
+                a: Box::new(a),
+                b: Box::new(b),
+            });
         }
         expect_array(&b, "`@`")?;
         return Ok(SirExpr::Matvec {
@@ -490,7 +514,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             need_args(func, args, 2)?;
             let a = lower_scalar(&args[0], env)?;
             let b = lower_scalar(&args[1], env)?;
-            if a.ty() != Ty::Matrix
+            if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.solve expects a 2-D matrix as its first \
                             argument (hint it as `A: np.ndarray` and use it only \
@@ -509,7 +533,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // `scirust-solvers` (LU-based).
             need_args(func, args, 1)?;
             let a = lower_scalar(&args[0], env)?;
-            if a.ty() != Ty::Matrix
+            if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.det expects a 2-D matrix argument".into());
             }
@@ -521,7 +545,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // ascending), routed to `scirust-solvers::eigen_symmetric`.
             need_args(func, args, 1)?;
             let a = lower_scalar(&args[0], env)?;
-            if a.ty() != Ty::Matrix
+            if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.eigvalsh expects a 2-D matrix argument".into());
             }
@@ -533,7 +557,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // `scirust-solvers::Matrix::inverse`.
             need_args(func, args, 1)?;
             let a = lower_scalar(&args[0], env)?;
-            if a.ty() != Ty::Matrix
+            if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.inv expects a 2-D matrix argument".into());
             }
@@ -660,6 +684,11 @@ fn expect_array(e: &SirExpr, ctx: &str) -> Result<(), String> {
     }
 }
 
+/// A matrix operand: either a flat `&[f64]` parameter or a produced `Matrix`.
+fn is_matrixish(t: Ty) -> bool {
+    matches!(t, Ty::Matrix | Ty::MatrixVal)
+}
+
 // ---- param type inference (no hint) ---------------------------------------
 
 fn infer_param_ty(name: &str, body: &[PyStmt]) -> Ty {
@@ -700,6 +729,8 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
             {
                 matches!(l.as_ref(), PyExpr::Name(n) if n == name) || expr(name, l) || expr(name, r)
             },
+            // `A.T` (transpose, parsed as the dotted name `A.T`) — `A` is a matrix.
+            PyExpr::Name(n) => n == &format!("{}.T", name),
             PyExpr::Bin { l, r, .. } | PyExpr::Cmp { l, r, .. } => expr(name, l) || expr(name, r),
             PyExpr::Neg(inner) => expr(name, inner),
             PyExpr::Index { base, index } => expr(name, base) || expr(name, index),

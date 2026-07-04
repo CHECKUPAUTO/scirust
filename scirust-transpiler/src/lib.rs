@@ -282,6 +282,22 @@ mod tests {
     }
 
     #[test]
+    fn transpose_and_matmul_route_to_solvers() {
+        let tp = transpile("def tp(A):\n    return A.T\n").unwrap();
+        assert!(tp.contains("pub fn tp(A: &[f64]) -> scirust_solvers::Matrix"));
+        assert!(tp.contains(".transpose()"));
+
+        // A @ A.T chains transpose (MatrixVal) into matmul.
+        let g = transpile("def gram(A):\n    return A @ A.T\n").unwrap();
+        assert!(g.contains(".matmul(&"));
+        assert!(g.contains(".transpose()"));
+        assert_eq!(
+            required_crates(&transpile_to_sir("def gram(A):\n    return A @ A.T\n").unwrap()),
+            vec!["scirust-solvers"]
+        );
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

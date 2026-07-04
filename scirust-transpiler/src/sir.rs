@@ -176,6 +176,14 @@ pub enum SirExpr {
     /// `np.linalg.inv(A)` : Matrix -> MatrixVal, routed to
     /// `scirust-solvers::Matrix::inverse`.
     Inv(Box<SirExpr>),
+    /// `A @ B` : (matrix, matrix) -> MatrixVal, routed to
+    /// `scirust-solvers::Matrix::matmul`.
+    Matmul {
+        a: Box<SirExpr>,
+        b: Box<SirExpr>,
+    },
+    /// `A.T` : matrix -> MatrixVal (transpose).
+    Transpose(Box<SirExpr>),
     /// `np.fft.fft(x)` : real Array -> ComplexArray (full spectrum), routed to
     /// the verified in-place FFT in `scirust-signal`.
     Fft(Box<SirExpr>),
@@ -272,7 +280,7 @@ impl SirExpr {
             | SirExpr::Matvec { .. }
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
-            SirExpr::Inv(_) => Ty::MatrixVal,
+            SirExpr::Inv(_) | SirExpr::Matmul { .. } | SirExpr::Transpose(_) => Ty::MatrixVal,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -339,13 +347,13 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
 fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
     match e
     {
-        SirExpr::LinSolve { a, b } | SirExpr::Matvec { a, b } =>
+        SirExpr::LinSolve { a, b } | SirExpr::Matvec { a, b } | SirExpr::Matmul { a, b } =>
         {
             *solvers = true;
             scan_expr(a, solvers, signal);
             scan_expr(b, solvers, signal);
         },
-        SirExpr::Det(x) | SirExpr::Eigvalsh(x) | SirExpr::Inv(x) =>
+        SirExpr::Det(x) | SirExpr::Eigvalsh(x) | SirExpr::Inv(x) | SirExpr::Transpose(x) =>
         {
             *solvers = true;
             scan_expr(x, solvers, signal);
