@@ -351,10 +351,10 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
-  ✓ solve / det / eigvalsh / inv / A@b (routed to scirust-solvers, cargo-compiled — Phase 1)
+  ✓ solve/det/eigvalsh/inv/A@b/A@B/A.T (routed to scirust-solvers, cargo-compiled — Phase 1)
   ✓ fft.fft / rfft / ifft / abs(fft) (routed to scirust-signal, complex type — Phase 1)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
-  ORACLE GREEN — 26/26 cases match NumPy within tolerance
+  ORACLE GREEN — 28/28 cases match NumPy within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

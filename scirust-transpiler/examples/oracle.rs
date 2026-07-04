@@ -231,6 +231,20 @@ fn cases() -> Vec<Case> {
             src: "def inv(A):\n    return np.linalg.inv(A)\n",
             args: vec![Matrix { n: 4 }],
         },
+        // Transpose A.T -> matrix out.
+        Case {
+            name: "transpose (A.T) -> matrix out",
+            call: "tp",
+            src: "def tp(A):\n    return A.T\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // Matrix-matrix product with chaining: A @ A.T (Gram matrix).
+        Case {
+            name: "matmul A @ A.T -> scirust-solvers",
+            call: "gram",
+            src: "def gram(A):\n    return A @ A.T\n",
+            args: vec![Matrix { n: 4 }],
+        },
         // Routing (Phase 1): np.linalg.det -> scirust-solvers (LU determinant).
         // A is a 4×4 diagonally-dominant matrix; compare the scalar determinant.
         Case {

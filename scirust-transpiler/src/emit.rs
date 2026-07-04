@@ -576,6 +576,32 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Matmul { a, b } =>
+        {
+            // Matrix-matrix product routed to the verified kernel; accepts flat
+            // matrix params and produced `Matrix` values alike.
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            let code = format!(
+                "{}.matmul(&{}).expect(\"scirust-transpiler: matmul dimension mismatch\")",
+                as_matrix(&a),
+                as_matrix(&b),
+            );
+            Frag {
+                code,
+                ty: Ty::MatrixVal,
+                borrowed: false,
+            }
+        },
+        SirExpr::Transpose(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("{}.transpose()", as_matrix(&a)),
+                ty: Ty::MatrixVal,
+                borrowed: false,
+            }
+        },
         SirExpr::Matvec { a, b } =>
         {
             // Matrix-vector product routed to the verified kernel. A is flat
@@ -647,6 +673,32 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+    }
+}
+
+/// Produce a `scirust_solvers::Matrix` value from a matrix-typed fragment —
+/// either a flat `&[f64]` parameter (assumed square) or an already-built
+/// `Matrix` value (which carries its own shape).
+fn as_matrix(f: &Frag) -> String {
+    match f.ty
+    {
+        Ty::MatrixVal => f.code.clone(),
+        Ty::Matrix =>
+        {
+            let slice = if f.borrowed
+            {
+                f.code.clone()
+            }
+            else
+            {
+                format!("&({})", f.code)
+            };
+            format!(
+                "{{ let __m: &[f64] = {slice}; let __n = (__m.len() as f64).sqrt() as usize; \
+                 scirust_solvers::Matrix::from_row_major(__n, __n, __m.to_vec()) }}"
+            )
+        },
+        _ => f.code.clone(),
     }
 }
 

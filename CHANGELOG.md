@@ -5,6 +5,15 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : matrice-matrice `A @ B` + transpose `A.T` (Phase 1, incrément 10)
+Complète l'algèbre linéaire dense. `A.T` (transpose) et `A @ B` (produit
+matrice-matrice) → `scirust_solvers::Matrix::transpose`/`matmul`. Nouveautés :
+`SirExpr::Matmul`/`Transpose` ; helper d'émission `as_matrix` qui accepte
+indifféremment une matrice-paramètre plate ou une valeur `Matrix` produite,
+d'où le **chaînage** (`A @ A.T`, et les opérations matricielles acceptant un
+`MatrixVal`). Cas d'oracle : `A.T` et `A @ A.T` (matrice de Gram) vs numpy.
+**Oracle 28/28** (200 essais chacun) ; 24 tests unitaires.
+
 ### Ajouté — transpileur : `np.linalg.inv` (retour matrice 2-D) (Phase 1, incrément 9)
 Premier **retour de matrice 2-D** : `np.linalg.inv(A)` transpile vers
 `scirust_solvers::Matrix::inverse` et renvoie une valeur `scirust_solvers::Matrix`
