@@ -48,4 +48,5 @@ pub mod dashboard;
 pub mod execution;
 pub mod marketmaking;
 pub mod microstructure;
+pub mod robustness;
 pub mod wallet;

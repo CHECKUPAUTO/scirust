@@ -159,7 +159,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 17 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 19 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -175,6 +175,15 @@ empreintes de preuve), sans nouvelle dépendance.
   (CSS inline, SVG embarqué, thème clair/sombre) réunissant le scan
   d'opportunités et un backtest ; « montre-moi » devient un rapport visuel
   partageable plutôt qu'un mur de JSON.
+- **Robustesse anti-surapprentissage (`robustness.rs` + 2 outils MCP)** — un
+  scanner qui garde la meilleure de nombreuses stratégies trouve forcément des
+  flukes ; deux garde-fous : `walk_forward` (backtest sur segments séquentiels
+  indépendants → **consistance out-of-sample** = fraction de fenêtres
+  gagnantes, pour distinguer un edge durable d'un ajustement de courbe) et
+  `monte_carlo` (ré-échantillonnage bootstrap **déterministe** du journal de
+  trades → bandes de percentiles d'équité, distribution du max drawdown,
+  probabilité de perte et de **ruine**). Outils MCP `trader_walkforward` et
+  `trader_monte_carlo`.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
