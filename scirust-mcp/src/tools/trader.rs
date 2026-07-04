@@ -30,6 +30,7 @@
 //! * `trader_monte_carlo`         — bootstrap equity bands + probability of ruin
 //! * `trader_portfolio_construct` — target weights (risk-parity / min-variance)
 //! * `trader_regime`              — volatility/trend regime + Hurst + transitions
+//! * `trader_optimize`            — walk-forward-guarded parameter tuning
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -50,6 +51,7 @@ use scirust_trader::microstructure::{
     L1Quote, TradePrint, kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin,
 };
 use scirust_trader::model::PricePredictor;
+use scirust_trader::optimize::{Objective, OptimizeConfig, ParamAxis, default_axes, optimize};
 use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
@@ -86,6 +88,7 @@ pub fn trader_tools() -> Vec<McpTool> {
         monte_carlo_tool(),
         portfolio_construct_tool(),
         regime_tool(),
+        optimize_tool(),
     ]
 }
 
@@ -1640,6 +1643,107 @@ fn regime_tool() -> McpTool {
     }
 }
 
+fn optimize_tool() -> McpTool {
+    McpTool {
+        name: "trader_optimize".to_string(),
+        description: "Tune a strategy's parameters WITHOUT overfitting. Splits the history into an \
+            in-sample train portion and an untouched holdout; searches the parameter grid on train \
+            only, ranking candidates by their WALK-FORWARD out-of-sample consistency (not their \
+            single best-fit backtest); then confirms the finalists on the holdout the search never \
+            saw. Reports the best parameters, a leaderboard, the train→holdout Sharpe degradation \
+            (`overfit_gap`), and a plain-language VERDICT (robust / partial / overfit). Supply a \
+            `grid` of {param: [values]} or omit it to use sensible per-strategy defaults. This is \
+            the honest way to answer 'what parameters should I use?' — a naive sweep just curve-fits \
+            the past."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "ohlcv": { "type": "array", "description": "rows [ts,o,h,l,c,v]" },
+                "strategy": { "type": "string", "description": "strategy name (see trader_signal)" },
+                "grid": {
+                    "type": "object",
+                    "description": "{param: [values,...]} search axes; omit for per-strategy defaults"
+                },
+                "params": { "type": "object", "description": "fixed params merged into every combo" },
+                "objective": {
+                    "type": "string",
+                    "enum": ["return_consistency", "consistency", "mean_return", "worst_window", "sharpe"],
+                    "description": "in-sample ranking objective (default return_consistency)"
+                },
+                "train_frac": { "type": "number", "description": "in-sample fraction 0.3..0.9 (default 0.7)" },
+                "wf_windows": { "type": "integer", "description": "walk-forward windows in train (default 4)" },
+                "top_k": { "type": "integer", "description": "leaderboard size (default 10)" },
+                "max_combos": { "type": "integer", "description": "cap on combinations evaluated (default 256)" },
+                "interval": { "type": "string" },
+                "capital": { "type": "number" },
+                "fraction": { "type": "number" },
+                "maker_bps": { "type": "number" },
+                "taker_bps": { "type": "number" },
+                "slippage_bps": { "type": "number" }
+            },
+            "required": ["ohlcv", "strategy"]
+        }),
+        handler: Box::new(|args| {
+            let candles = ohlcv_arg(&args)?;
+            let name = s(&args, "strategy", "sma_cross");
+            let symbol = s(&args, "symbol", "BTC/USDT");
+            let interval = s(&args, "interval", "1h");
+            // Reject unknown strategies up front (else the grid silently builds nothing).
+            if strategy_from_spec(&name, &params_map(&args)).is_none()
+            {
+                return Err(format!("unknown strategy `{name}`"));
+            }
+            let cfg = build_backtest_cfg(&args, &symbol, &interval);
+
+            // Grid: explicit {param:[...]} object, else per-strategy defaults.
+            let axes: Vec<ParamAxis> = match args.get("grid").and_then(|x| x.as_object())
+            {
+                Some(obj) => obj
+                    .iter()
+                    .map(|(k, v)| {
+                        let vals: Vec<f32> = v
+                            .as_array()
+                            .map(|a| {
+                                a.iter().filter_map(|x| x.as_f64().map(|y| y as f32)).collect()
+                            })
+                            .unwrap_or_default();
+                        ParamAxis::new(k.clone(), vals)
+                    })
+                    .collect(),
+                None => default_axes(&name),
+            };
+            if axes.iter().all(|a| a.values.is_empty())
+            {
+                return Err(format!(
+                    "no parameter grid for `{name}` — pass an explicit `grid` of \
+                     {{param:[values]}}"
+                ));
+            }
+
+            let opt = OptimizeConfig {
+                train_frac: f(&args, "train_frac", 0.7),
+                wf_windows: u(&args, "wf_windows", 4),
+                objective: args
+                    .get("objective")
+                    .and_then(|x| x.as_str())
+                    .and_then(Objective::parse)
+                    .unwrap_or(Objective::ReturnConsistency),
+                top_k: u(&args, "top_k", 10),
+                max_combos: u(&args, "max_combos", 256),
+            };
+            let base = params_map(&args);
+            match optimize(&name, &axes, &base, &candles, &cfg, &opt)
+            {
+                Some(report) => Ok(to_value(&report)),
+                None => Err("not enough candles to split into train and holdout \
+                    (need >= 40 bars)"
+                    .to_string()),
+            }
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1669,7 +1773,7 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 21);
+        assert!(before >= 22);
     }
 
     #[test]
@@ -1729,6 +1833,51 @@ mod tests {
     fn regime_rejects_too_few_candles() {
         let t = tool("trader_regime");
         let r = (t.handler)(json!({ "ohlcv": mock_ohlcv(5) }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn optimize_tunes_and_reports_holdout() {
+        let t = tool("trader_optimize");
+        // A clean uptrend: a trend-follower should optimize to a positive holdout.
+        let out = (t.handler)(json!({
+            "ohlcv": mock_ohlcv(400),
+            "strategy": "sma_cross",
+            "maker_bps": 0.0, "taker_bps": 0.0, "slippage_bps": 0.0
+        }))
+        .unwrap();
+        assert!(out["best"]["params"]["fast"].is_number());
+        assert!(out["best"]["params"]["slow"].is_number());
+        assert!(out["train_bars"].as_u64().unwrap() > 0);
+        assert!(out["holdout_bars"].as_u64().unwrap() > 0);
+        assert!(out["verdict"].as_str().unwrap().len() > 8);
+        assert!(
+            out["leaderboard"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["overfit_gap"].is_number())
+        );
+    }
+
+    #[test]
+    fn optimize_accepts_explicit_grid() {
+        let t = tool("trader_optimize");
+        let out = (t.handler)(json!({
+            "ohlcv": mock_ohlcv(300),
+            "strategy": "momentum",
+            "grid": { "lookback": [10, 20, 30, 40] },
+            "objective": "consistency"
+        }))
+        .unwrap();
+        assert_eq!(out["objective"], json!("walk-forward consistency"));
+        assert!(out["grid_size"].as_u64().unwrap() >= 4);
+    }
+
+    #[test]
+    fn optimize_rejects_unknown_strategy() {
+        let t = tool("trader_optimize");
+        let r = (t.handler)(json!({ "ohlcv": mock_ohlcv(200), "strategy": "does_not_exist" }));
         assert!(r.is_err());
     }
 
