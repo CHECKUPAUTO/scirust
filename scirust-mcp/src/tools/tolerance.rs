@@ -12,7 +12,11 @@ use scirust_tolerance::chain::{
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::nonnormal::{clements_capability, nonnormal_ppm};
 use scirust_tolerance::optimize::{Component, Requirement, optimize};
+use scirust_tolerance::position::{
+    FeatureType, positional_inertia, total_position_tolerance, true_position,
+};
 use scirust_tolerance::sampling::design_plan;
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
@@ -27,6 +31,8 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         form_modal_tool(),
         torsor_3d_tool(),
         optimize_cost_tool(),
+        nonnormal_tool(),
+        position_tool(),
     ]
 }
 
@@ -483,6 +489,114 @@ fn optimize_cost_tool() -> McpTool {
     }
 }
 
+fn nonnormal_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_nonnormal_capability".to_string(),
+        description: "Non-normal statistical tolerancing from the first four moments (mean, sd, \
+            skewness, excess kurtosis). Returns the predicted non-conformity in ppm (Cornish-Fisher \
+            tail inversion) and the Clements (1989) percentile capability Cp/Cpk for skewed data. \
+            Both reduce to the classical normal results when skew=0, kurtosis=0. Valid for moderate \
+            non-normality and spec limits within the distribution bulk (a few sigma)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "mean": { "type": "number" },
+                "sd": { "type": "number", "description": "standard deviation > 0" },
+                "skewness": { "type": "number" },
+                "excess_kurtosis": { "type": "number", "description": "kurtosis − 3" },
+                "lsl": { "type": "number" },
+                "usl": { "type": "number" },
+            },
+            "required": ["mean", "sd", "skewness", "excess_kurtosis", "lsl", "usl"],
+        }),
+        handler: Box::new(|args| {
+            let mean = f64_field(&args, "mean")?;
+            let sd = f64_field(&args, "sd")?;
+            let skew = f64_field(&args, "skewness")?;
+            let exk = f64_field(&args, "excess_kurtosis")?;
+            let lsl = f64_field(&args, "lsl")?;
+            let usl = f64_field(&args, "usl")?;
+            if sd <= 0.0 || usl <= lsl
+            {
+                return Err("need sd > 0 and usl > lsl".to_string());
+            }
+            let c = clements_capability(mean, sd, skew, exk, lsl, usl);
+            Ok(json!({
+                "ppm": nonnormal_ppm(mean, sd, skew, exk, lsl, usl),
+                "clements_cp": c.cp,
+                "clements_cpk": c.cpk,
+                "clements_cpu": c.cpu,
+                "clements_cpl": c.cpl,
+                "median": c.median,
+            }))
+        }),
+    }
+}
+
+fn position_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_position".to_string(),
+        description: "GD&T / ISO positional tolerancing. Given an axis offset (dx, dy) from true \
+            position, a stated diametral position tolerance, and optional MMC size data, returns the \
+            true position deviation 2*sqrt(dx^2+dy^2), the total tolerance including MMC bonus, \
+            whether the feature conforms, and the positional inertia sqrt(Ix^2+Iy^2). Set \
+            `feature` to \"internal\" (hole) or \"external\" (pin) with `actual_size`/`mmc_size` for \
+            the bonus."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "dx": { "type": "number", "description": "X offset from true position" },
+                "dy": { "type": "number", "description": "Y offset from true position" },
+                "stated_tol": { "type": "number", "description": "stated diametral Ø position tolerance" },
+                "feature": { "type": "string", "enum": ["internal", "external"], "description": "for MMC bonus" },
+                "actual_size": { "type": "number" },
+                "mmc_size": { "type": "number" },
+                "ix": { "type": "number", "description": "optional per-axis inertia X for positional inertia" },
+                "iy": { "type": "number", "description": "optional per-axis inertia Y" },
+            },
+            "required": ["dx", "dy", "stated_tol"],
+        }),
+        handler: Box::new(|args| {
+            let dx = f64_field(&args, "dx")?;
+            let dy = f64_field(&args, "dy")?;
+            let stated = f64_field(&args, "stated_tol")?;
+            let tp = true_position(dx, dy);
+            // Total tolerance with optional MMC bonus.
+            let total = match (
+                args.get("feature").and_then(|v| v.as_str()),
+                args.get("actual_size").and_then(|v| v.as_f64()),
+                args.get("mmc_size").and_then(|v| v.as_f64()),
+            )
+            {
+                (Some(f), Some(actual), Some(mmc)) =>
+                {
+                    let ft = match f
+                    {
+                        "internal" => FeatureType::Internal,
+                        "external" => FeatureType::External,
+                        other => return Err(format!("unknown feature `{other}`")),
+                    };
+                    total_position_tolerance(stated, actual, mmc, ft)
+                },
+                _ => stated,
+            };
+            let mut out = json!({
+                "true_position": tp,
+                "total_tolerance": total,
+                "conforms": tp <= total,
+            });
+            if let (Some(ix), Some(iy)) =
+                (args.get("ix").and_then(|v| v.as_f64()), args.get("iy").and_then(|v| v.as_f64()))
+            {
+                out["positional_inertia"] = json!(positional_inertia(ix, iy));
+            }
+            Ok(out)
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,6 +757,97 @@ mod tests {
             (tool.handler)(json!({
                 "components": [{ "cost": 1.0, "exponent": 2.0 }],
                 "requirements": [{ "coeffs": [0.0], "i_max": 0.1 }],
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn nonnormal_tool_reduces_to_normal_when_symmetric() {
+        let tool = nonnormal_tool();
+        let out = (tool.handler)(json!({
+            "mean": 10.5,
+            "sd": 1.0,
+            "skewness": 0.0,
+            "excess_kurtosis": 0.0,
+            "lsl": 7.0,
+            "usl": 13.0,
+        }))
+        .unwrap();
+        // Symmetric ⇒ Clements Cp = (USL−LSL)/6σ = 1.0, median = mean.
+        assert!((out["clements_cp"].as_f64().unwrap() - 1.0).abs() < 1e-3);
+        assert!((out["median"].as_f64().unwrap() - 10.5).abs() < 1e-6);
+        assert!(out["ppm"].as_f64().unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn nonnormal_tool_skew_fattens_the_tail() {
+        let tool = nonnormal_tool();
+        let base = json!({ "mean": 0.0, "sd": 1.0, "lsl": -3.0, "usl": 3.0 });
+        let mut sym = base.clone();
+        sym["skewness"] = json!(0.0);
+        sym["excess_kurtosis"] = json!(0.0);
+        let mut skewed = base;
+        skewed["skewness"] = json!(1.0);
+        skewed["excess_kurtosis"] = json!(2.0);
+        let p_sym = (tool.handler)(sym).unwrap()["ppm"].as_f64().unwrap();
+        let p_skew = (tool.handler)(skewed).unwrap()["ppm"].as_f64().unwrap();
+        assert!(p_skew > p_sym);
+    }
+
+    #[test]
+    fn nonnormal_tool_rejects_bad_spec() {
+        let tool = nonnormal_tool();
+        assert!(
+            (tool.handler)(json!({
+                "mean": 0.0, "sd": 0.0, "skewness": 0.0,
+                "excess_kurtosis": 0.0, "lsl": -1.0, "usl": 1.0,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn position_tool_reports_true_position_and_bonus() {
+        let tool = position_tool();
+        let out = (tool.handler)(json!({
+            "dx": 0.03,
+            "dy": 0.04,
+            "stated_tol": 0.1,
+            "feature": "internal",
+            "actual_size": 10.2,
+            "mmc_size": 10.0,
+            "ix": 0.03,
+            "iy": 0.04,
+        }))
+        .unwrap();
+        // (0.03, 0.04) ⇒ radius 0.05 ⇒ true position Ø 0.10.
+        assert!((out["true_position"].as_f64().unwrap() - 0.10).abs() < 1e-12);
+        // Bonus 0.2 ⇒ total 0.30; 0.10 ≤ 0.30 conforms.
+        assert!((out["total_tolerance"].as_f64().unwrap() - 0.30).abs() < 1e-12);
+        assert_eq!(out["conforms"], json!(true));
+        // I_pos = √(0.03²+0.04²) = 0.05.
+        assert!((out["positional_inertia"].as_f64().unwrap() - 0.05).abs() < 1e-12);
+    }
+
+    #[test]
+    fn position_tool_without_mmc_uses_stated_tol() {
+        let tool = position_tool();
+        let out = (tool.handler)(json!({ "dx": 0.1, "dy": 0.0, "stated_tol": 0.15 })).unwrap();
+        // Ø 0.20 > 0.15 ⇒ does not conform; no positional_inertia key.
+        assert!((out["true_position"].as_f64().unwrap() - 0.20).abs() < 1e-12);
+        assert_eq!(out["total_tolerance"], json!(0.15));
+        assert_eq!(out["conforms"], json!(false));
+        assert!(out.get("positional_inertia").is_none());
+    }
+
+    #[test]
+    fn position_tool_rejects_unknown_feature() {
+        let tool = position_tool();
+        assert!(
+            (tool.handler)(json!({
+                "dx": 0.0, "dy": 0.0, "stated_tol": 0.1,
+                "feature": "bogus", "actual_size": 10.1, "mmc_size": 10.0,
             }))
             .is_err()
         );

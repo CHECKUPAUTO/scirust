@@ -24,6 +24,10 @@ use scirust_tolerance::chain::{
 };
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::nonnormal::{cornish_fisher_quantile, nonnormal_ppm};
+use scirust_tolerance::position::{
+    coord_to_position, position_to_coord, positional_inertia, true_position,
+};
 use scirust_tolerance::sampling::SamplingPlan;
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_analytical,
@@ -428,6 +432,76 @@ fn check_capability(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_nonnormal(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let (mean, sd) = (rng.uniform(-2.0, 2.0), rng.uniform(0.3, 2.0));
+        // (1) s=k=0 must reduce to the exact normal ppm.
+        let lsl = mean - rng.uniform(2.0, 4.0) * sd;
+        let usl = mean + rng.uniform(2.0, 4.0) * sd;
+        let nn = nonnormal_ppm(mean, sd, 0.0, 0.0, lsl, usl);
+        let normal = nonconformity_ppm(mean, sd, lsl, usl);
+        r.check((nn - normal).abs(), (normal * 1e-6).max(1e-4), || {
+            format!("nonnormal reduce μ={mean:.2}: {nn:.4} vs {normal:.4}")
+        });
+        // (2) Cornish–Fisher forward/inverse consistency within the valid
+        // (moderate, monotone) domain: with both limits at the p_lo and p_hi
+        // quantiles, nonnormal_ppm must recover (p_lo + 1 − p_hi)·1e6. The
+        // skew/kurtosis are kept small enough that the CF cubic stays monotone
+        // over the tested range (strong non-normality breaks CF invertibility —
+        // a documented limitation, not a code defect).
+        let (s, k) = (rng.uniform(-0.4, 0.4), rng.uniform(-0.2, 0.8));
+        let p_lo = rng.uniform(0.005, 0.05);
+        let p_hi = rng.uniform(0.95, 0.995);
+        let lo = cornish_fisher_quantile(mean, sd, s, k, p_lo);
+        let hi = cornish_fisher_quantile(mean, sd, s, k, p_hi);
+        let want = (p_lo + 1.0 - p_hi) * 1e6;
+        let tail = nonnormal_ppm(mean, sd, s, k, lo.min(hi), lo.max(hi));
+        r.check((tail - want).abs(), (want * 1e-6).max(1e-2), || {
+            format!("CF fwd/inv p_lo={p_lo:.3} p_hi={p_hi:.3}: {tail:.2} vs {want:.2}")
+        });
+        // (3) Monotonicity (qualitative): more right-skew ⇒ no meaningfully-less
+        // upper-tail nonconformity, at a moderate (in-domain) ~2σ limit. A small
+        // relative slack absorbs CF's approximation noise at the edges (this is a
+        // sanity check; checks 1–2 are the rigorous ones).
+        let ul = mean + 2.0 * sd;
+        let low = nonnormal_ppm(mean, sd, 0.0, k, mean - 6.0 * sd, ul);
+        let high = nonnormal_ppm(mean, sd, 0.4, k, mean - 6.0 * sd, ul);
+        r.check((low - high).max(0.0) / low.max(1.0), 0.05, || {
+            format!("nonnormal skew monotonic: high {high:.2} vs low {low:.2}")
+        });
+    }
+    r
+}
+
+fn check_position(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let (dx, dy) = (rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
+        // True position vs independent radial computation.
+        let ref_tp = 2.0 * (dx * dx + dy * dy).sqrt();
+        r.check((true_position(dx, dy) - ref_tp).abs(), 1e-12, || {
+            "position true".into()
+        });
+        // ±coord ↔ Ø round-trip on a symmetric zone.
+        let t = rng.uniform(0.01, 0.5);
+        let phi = coord_to_position(t, t);
+        r.check((position_to_coord(phi) - t).abs() / t, 1e-12, || {
+            "position coord round-trip".into()
+        });
+        // Positional inertia = Euclidean norm of the two axis inertias.
+        let (ix, iy) = (rng.uniform(0.0, 0.5), rng.uniform(0.0, 0.5));
+        r.check(
+            (positional_inertia(ix, iy) - (ix * ix + iy * iy).sqrt()).abs(),
+            1e-12,
+            || "position inertia".into(),
+        );
+    }
+    r
+}
+
 fn main() {
     let n: usize = std::env::args()
         .nth(1)
@@ -442,6 +516,8 @@ fn main() {
         ("modal", check_modal(&mut rng, n)),
         ("chain", check_chain(&mut rng, n)),
         ("capability", check_capability(&mut rng, n)),
+        ("nonnormal", check_nonnormal(&mut rng, n)),
+        ("position", check_position(&mut rng, n)),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");

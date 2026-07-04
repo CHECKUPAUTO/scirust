@@ -126,5 +126,7 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_form_modal"));
         assert!(registry.names().contains(&"tolerance_3d_surface_inertia"));
         assert!(registry.names().contains(&"tolerance_optimize_cost"));
+        assert!(registry.names().contains(&"tolerance_nonnormal_capability"));
+        assert!(registry.names().contains(&"tolerance_position"));
     }
 }
