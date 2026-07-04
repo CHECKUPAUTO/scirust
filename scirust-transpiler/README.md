@@ -27,9 +27,9 @@ auditable, matching the SciRust doctrine.
 |---------------|-----------|
 | Definitions   | top-level `def`s; params `float` / `int` / `np.ndarray` (hints optional, array-ness inferred from indexing / `np.sum` / `np.dot` / `len`) |
 | Types         | scalar `f64`, 1-D array `Vec<f64>` / `&[f64]` |
-| Arithmetic    | `+ - * / **`, unary minus; elementwise array ops; scalar↔array broadcasting |
+| Arithmetic    | `+ - * / **`, unary minus, `@` matrix-vector product; elementwise array ops; scalar↔array broadcasting |
 | Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
-| Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)`, `np.linalg.eigvalsh(A)` → `scirust-solvers` (verified LU / symmetric eigensolver); `np.fft.fft(x)` / `np.fft.rfft(x)` / `np.fft.ifft(...)` / `np.abs(np.fft.fft(x))` → `scirust-signal` (verified FFT, real→complex) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
+| Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)`, `np.linalg.eigvalsh(A)`, `A @ b` → `scirust-solvers` (verified LU / symmetric eigensolver); `np.fft.fft(x)` / `np.fft.rfft(x)` / `np.fft.ifft(...)` / `np.abs(np.fft.fft(x))` → `scirust-signal` (verified FFT, real→complex) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
 | Control/flow  | `for i in range(...)`, `while cond:`, `if`/`elif`/`else` + comparisons `< <= > >= == !=`, indexing `a[i]`, index-assignment `a[i] = …`, `return` |
 
 Anything outside the subset is **refused with a diagnostic** — never guessed.
@@ -61,10 +61,10 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ tanh_activation              200/200 trials match
   ✓ relu / clamp / sign          200/200 trials match   (if/elif/else, Phase 1)
   ✓ newton_sqrt / newton_conv    200/200 trials match   (while, Phase 1)
-  ✓ solve / det / eigvalsh       200/200 trials match   (routed to scirust-solvers)
+  ✓ solve / det / eigvalsh / A@b 200/200 trials match   (routed to scirust-solvers)
   ✓ fft.fft / rfft / ifft        200/200 trials match   (routed to scirust-signal, complex)
   ✓ sin/cos/abs / exp / ** / ones 200/200 trials match  (full intrinsic coverage)
-  ORACLE GREEN — 24/24 cases match NumPy within tolerance
+  ORACLE GREEN — 25/25 cases match NumPy within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

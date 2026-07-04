@@ -547,6 +547,25 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Matvec { a, b } =>
+        {
+            // Matrix-vector product routed to the verified kernel. A is flat
+            // row-major with cols = b.len(), rows = A.len() / cols.
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            let code = format!(
+                "{{ let __b: &[f64] = {bs}; let __c = __b.len(); let __r = {amat}.len() / __c; \
+                 scirust_solvers::Matrix::from_row_major(__r, __c, ({amat}).to_vec())\
+                 .matvec(__b).expect(\"scirust-transpiler: matvec dimension mismatch\") }}",
+                bs = slice_of(&b),
+                amat = a.code,
+            );
+            Frag {
+                code,
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
         SirExpr::Fft(a) =>
         {
             // Full complex DFT of a real signal (all N bins, matching
