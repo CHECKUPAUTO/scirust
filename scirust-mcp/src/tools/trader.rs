@@ -28,6 +28,7 @@
 //! * `trader_dashboard`           — self-contained HTML report (scan + backtest)
 //! * `trader_walkforward`         — out-of-sample consistency across time windows
 //! * `trader_monte_carlo`         — bootstrap equity bands + probability of ruin
+//! * `trader_portfolio_construct` — target weights (risk-parity / min-variance)
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -43,7 +44,7 @@ use scirust_trader::execution::{
 use scirust_trader::indicators;
 use scirust_trader::market::{Candle, MarketFeed, MarketSnapshot, MockExchange};
 use scirust_trader::marketmaking::{MmParams, optimal_quotes};
-use scirust_trader::metrics::{PerformanceReport, periods_per_year};
+use scirust_trader::metrics::{PerformanceReport, periods_per_year, returns_from_equity};
 use scirust_trader::microstructure::{
     L1Quote, TradePrint, kyle_lambda, order_flow_imbalance, trade_flow_imbalance, vpin,
 };
@@ -52,6 +53,9 @@ use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
 use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_to_weights};
+use scirust_trader::portfolio_opt::{
+    AllocationMethod, construct, correlation_matrix, covariance_matrix,
+};
 use scirust_trader::robustness::{monte_carlo, walk_forward};
 use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
 use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
@@ -78,6 +82,7 @@ pub fn trader_tools() -> Vec<McpTool> {
         dashboard_tool(),
         walkforward_tool(),
         monte_carlo_tool(),
+        portfolio_construct_tool(),
     ]
 }
 
@@ -1465,6 +1470,124 @@ fn monte_carlo_tool() -> McpTool {
     }
 }
 
+fn portfolio_construct_tool() -> McpTool {
+    McpTool {
+        name: "trader_portfolio_construct".to_string(),
+        description: "Compute target portfolio weights across a set of assets. Give per-asset return \
+            series (`assets`) or price series (`series` — returns are derived from closes), and a \
+            `method`: equal, inverse_vol (naive risk parity), inverse_variance, or min_variance \
+            (long-only closed form). Returns the weights per symbol (ready to feed straight into \
+            trader_rebalance), each asset's volatility and risk contribution, the portfolio \
+            volatility, the diversification ratio, and the correlation matrix. This is how an agent \
+            builds a risk-balanced book rather than eyeballing allocations."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "assets": {
+                    "type": "array",
+                    "description": "[{symbol, returns:[...]}] — per-asset return series (equal length)"
+                },
+                "series": {
+                    "type": "array",
+                    "description": "[{symbol, ohlcv:[[ts,o,h,l,c,v],...]}] — returns derived from closes"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["equal", "inverse_vol", "inverse_variance", "min_variance"],
+                    "description": "allocation scheme (default inverse_vol)"
+                },
+                "interval": { "type": "string", "description": "bar interval for annualising vols (default 1d)" }
+            }
+        }),
+        handler: Box::new(|args| {
+            // Collect (symbol, returns) from `assets` or `series`.
+            let mut symbols: Vec<String> = Vec::new();
+            let mut returns: Vec<Vec<f32>> = Vec::new();
+            if let Some(arr) = args.get("assets").and_then(|x| x.as_array())
+            {
+                for (i, a) in arr.iter().enumerate()
+                {
+                    let sym = s(a, "symbol", &format!("asset{i}"));
+                    let r: Vec<f32> = a
+                        .get("returns")
+                        .and_then(|x| x.as_array())
+                        .map(|v| v.iter().filter_map(|x| x.as_f64().map(|y| y as f32)).collect())
+                        .unwrap_or_default();
+                    symbols.push(sym);
+                    returns.push(r);
+                }
+            }
+            else if let Some(arr) = args.get("series").and_then(|x| x.as_array())
+            {
+                for (i, sj) in arr.iter().enumerate()
+                {
+                    let sym = s(sj, "symbol", &format!("asset{i}"));
+                    let ohlcv = sj.get("ohlcv").ok_or_else(|| format!("series[{i}]: missing ohlcv"))?;
+                    let candles = parse_candles(ohlcv).map_err(|e| format!("series[{i}]: {e}"))?;
+                    let closes: Vec<f32> = candles.iter().map(|c| c.close).collect();
+                    symbols.push(sym);
+                    returns.push(returns_from_equity(&closes));
+                }
+            }
+            else
+            {
+                return Err("provide `assets` (with returns) or `series` (with ohlcv)".to_string());
+            }
+            if symbols.len() < 2
+            {
+                return Err("need at least 2 assets".to_string());
+            }
+            // Align all series to the shortest length (most recent observations).
+            let min_len = returns.iter().map(|r| r.len()).min().unwrap_or(0);
+            if min_len < 2
+            {
+                return Err("each asset needs at least 2 returns".to_string());
+            }
+            for r in returns.iter_mut()
+            {
+                let start = r.len() - min_len;
+                *r = r[start..].to_vec();
+            }
+
+            let method = args
+                .get("method")
+                .and_then(|x| x.as_str())
+                .and_then(AllocationMethod::parse)
+                .unwrap_or(AllocationMethod::InverseVol);
+            let ppy = periods_per_year(&s(&args, "interval", "1d"));
+            let rep = construct(&returns, method, ppy);
+
+            // Symbol -> weight map (feeds trader_rebalance's target_weights).
+            let mut target_weights = serde_json::Map::new();
+            let mut per_asset = Vec::new();
+            for (i, sym) in symbols.iter().enumerate()
+            {
+                target_weights.insert(sym.clone(), json!(rep.weights[i]));
+                per_asset.push(json!({
+                    "symbol": sym,
+                    "weight": rep.weights[i],
+                    "volatility": rep.volatilities[i],
+                    "risk_contribution": rep.risk_contributions[i],
+                }));
+            }
+            let cov = covariance_matrix(&returns);
+            let corr = correlation_matrix(&cov);
+            Ok(json!({
+                "method": rep.method,
+                "num_assets": rep.num_assets,
+                "target_weights": Value::Object(target_weights),
+                "assets": per_asset,
+                "portfolio_volatility": rep.portfolio_volatility,
+                "diversification_ratio": rep.diversification_ratio,
+                "avg_correlation": rep.avg_correlation,
+                "correlation_matrix": to_value(&corr),
+                "symbols": symbols,
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1494,7 +1617,36 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 19);
+        assert!(before >= 20);
+    }
+
+    #[test]
+    fn portfolio_construct_returns_weights() {
+        let t = tool("trader_portfolio_construct");
+        // Two assets with different volatilities via explicit return series.
+        let a: Vec<f32> = (0..50).map(|i| ((i as f32) * 0.3).sin() * 0.01).collect();
+        let b: Vec<f32> = (0..50).map(|i| ((i as f32) * 0.7).cos() * 0.05).collect();
+        let out = (t.handler)(json!({
+            "assets": [
+                { "symbol": "AAA", "returns": a },
+                { "symbol": "BBB", "returns": b }
+            ],
+            "method": "inverse_vol"
+        }))
+        .unwrap();
+        let w = out["target_weights"].as_object().unwrap();
+        let sum = w.values().map(|v| v.as_f64().unwrap()).sum::<f64>();
+        assert!((sum - 1.0).abs() < 1e-3, "weights sum {sum}");
+        // The quieter asset (AAA) should get more weight than the noisy BBB.
+        assert!(w["AAA"].as_f64().unwrap() > w["BBB"].as_f64().unwrap());
+        assert!(out["portfolio_volatility"].is_number());
+    }
+
+    #[test]
+    fn portfolio_construct_rejects_single_asset() {
+        let t = tool("trader_portfolio_construct");
+        let r = (t.handler)(json!({ "assets": [{ "symbol": "X", "returns": [0.1, 0.2] }] }));
+        assert!(r.is_err());
     }
 
     #[test]

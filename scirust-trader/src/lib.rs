@@ -44,6 +44,7 @@ pub mod orderbook;
 pub mod orders;
 pub mod patterns;
 pub mod portfolio;
+pub mod portfolio_opt;
 pub mod proof;
 pub mod risk;
 pub mod robustness;
