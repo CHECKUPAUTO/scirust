@@ -279,7 +279,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 21 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 22 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -329,6 +329,21 @@ empreintes de preuve), sans nouvelle dépendance.
   stationnaire (long terme). L'outil MCP `trader_regime` renvoie le régime
   courant, une **posture recommandée** (famille de stratégie + levier à adapter
   aux conditions), et toute la dynamique de transition — déterministe.
+- **Optimisation de paramètres anti-surapprentissage (`optimize.rs` + 1 outil
+  MCP)** — répondre honnêtement à « quels paramètres utiliser ? ». Un balayage
+  naïf qui garde le meilleur backtest ne fait que sur-ajuster le passé ; ce
+  module reproduit la validation d'un desk systématique : (1) **découpe**
+  l'historique en une portion *train* et un *holdout* jamais vu par la
+  recherche ; (2) **explore** la grille sur le train uniquement, en classant les
+  candidats non par leur meilleur ajustement plein-échantillon mais par leur
+  **consistance walk-forward hors-échantillon** (via `robustness`) — un jeu de
+  paramètres qui ne marche que sur une fenêtre chanceuse est mal classé même
+  in-sample ; (3) **confirme** les finalistes sur le holdout, la dégradation de
+  Sharpe train→holdout (`overfit_gap`) trahissant le surapprentissage ; (4) rend
+  un **verdict** en clair (robuste / partiel / surappris). L'outil MCP
+  `trader_optimize` accepte une grille explicite `{param:[valeurs]}` ou des
+  grilles par défaut par stratégie, cinq objectifs de classement, et borne le
+  balayage (`max_combos`, échantillonnage régulier) — déterministe.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).

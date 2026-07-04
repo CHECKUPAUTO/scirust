@@ -40,6 +40,7 @@ pub mod marketmaking;
 pub mod metrics;
 pub mod microstructure;
 pub mod model;
+pub mod optimize;
 pub mod orderbook;
 pub mod orders;
 pub mod patterns;
