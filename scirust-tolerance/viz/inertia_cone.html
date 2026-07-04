@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cône d'inertie — tolérancement inertiel</title>
+<style>
+  /* ---- Design tokens : instrument de métrologie, neutres biaisés teal ---- */
+  :root {
+    --bg: #e9edf2; --panel: #ffffff; --well: #f2f5f9; --raised: #ffffff;
+    --ink: #14212d; --dim: #56646f; --faint: #8493a0;
+    --line: #d5dde5; --grid: #e4eaf0; --hair: #c7d1da;
+    --teal: #0e9b90; --teal-line: #0e9b90; --teal-fill: rgba(14,155,144,.13);
+    --amber: #9f6a26; --amber-fill: rgba(159,106,38,.10);
+    --good: #2f9d6a; --bad: #d24a34; --warn: #c98a1e;
+    --shadow: 0 1px 2px rgba(20,40,60,.06), 0 8px 24px rgba(20,40,60,.07);
+    --focus: #0e9b90;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b121a; --panel: #131d27; --well: #0a121a; --raised: #172330;
+      --ink: #e3e9f0; --dim: #8c9caa; --faint: #61717f;
+      --line: #22303d; --grid: #172431; --hair: #2b3a48;
+      --teal: #2fd3c5; --teal-line: #2fd3c5; --teal-fill: rgba(47,211,197,.14);
+      --amber: #e6a94a; --amber-fill: rgba(230,169,74,.12);
+      --good: #54c78c; --bad: #ec6a54; --warn: #e6b24a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+      --focus: #2fd3c5;
+    }
+  }
+  /* Viewer toggle overrides the media query in both directions */
+  :root[data-theme="light"] {
+    --bg: #e9edf2; --panel: #ffffff; --well: #f2f5f9; --raised: #ffffff;
+    --ink: #14212d; --dim: #56646f; --faint: #8493a0;
+    --line: #d5dde5; --grid: #e4eaf0; --hair: #c7d1da;
+    --teal: #0e9b90; --teal-line: #0e9b90; --teal-fill: rgba(14,155,144,.13);
+    --amber: #9f6a26; --amber-fill: rgba(159,106,38,.10);
+    --good: #2f9d6a; --bad: #d24a34; --warn: #c98a1e;
+    --shadow: 0 1px 2px rgba(20,40,60,.06), 0 8px 24px rgba(20,40,60,.07);
+    --focus: #0e9b90;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b121a; --panel: #131d27; --well: #0a121a; --raised: #172330;
+    --ink: #e3e9f0; --dim: #8c9caa; --faint: #61717f;
+    --line: #22303d; --grid: #172431; --hair: #2b3a48;
+    --teal: #2fd3c5; --teal-line: #2fd3c5; --teal-fill: rgba(47,211,197,.14);
+    --amber: #e6a94a; --amber-fill: rgba(230,169,74,.12);
+    --good: #54c78c; --bad: #ec6a54; --warn: #e6b24a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    --focus: #2fd3c5;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :root {
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: clamp(16px, 3vw, 34px); }
+
+  /* ---- Header ---- */
+  header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+  .brand { display: flex; flex-direction: column; gap: 6px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--teal); font-weight: 600;
+  }
+  h1 {
+    margin: 0; font-size: clamp(26px, 4.4vw, 40px); font-weight: 700; letter-spacing: -.02em;
+    text-wrap: balance; line-height: 1.04;
+  }
+  .lede { margin: 2px 0 0; color: var(--dim); max-width: 56ch; font-size: 14.5px; }
+  .eqn {
+    font-family: var(--mono); font-size: 14px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 15px; box-shadow: var(--shadow); white-space: nowrap;
+  }
+  .eqn b { color: var(--teal); font-weight: 600; }
+  .eqn .mut { color: var(--faint); }
+  .themebtn {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 11px; cursor: pointer; margin-top: 8px; align-self: flex-start;
+  }
+  .themebtn:hover { color: var(--ink); border-color: var(--hair); }
+  .themebtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* ---- Layout ---- */
+  .app { display: grid; grid-template-columns: minmax(0,1fr) 350px; gap: 18px; align-items: start; }
+  @media (max-width: 940px) { .app { grid-template-columns: 1fr; } }
+
+  .stage { display: grid; gap: 18px; min-width: 0; }
+  .plots { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 620px) { .plots { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .card-h {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 12px 15px 0;
+  }
+  .card-t { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); font-weight: 600; }
+  .card-s { font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
+  .well { background: var(--well); border-top: 1px solid var(--line); margin-top: 11px; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+  #map { cursor: crosshair; }
+  #cone { cursor: grab; }
+  #cone.drag { cursor: grabbing; }
+
+  /* ---- Sidebar ---- */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; display: grid; gap: 16px; }
+
+  .verdict { display: grid; gap: 3px; }
+  .verdict .cpi { display: flex; align-items: baseline; gap: 9px; }
+  .verdict .cpi .num { font-family: var(--mono); font-size: 40px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .verdict .cpi .lab { font-family: var(--mono); font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; align-self: start;
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    padding: 5px 11px; border-radius: 999px; text-transform: uppercase;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .pill.ok  { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
+  .pill.no  { color: var(--bad);  background: color-mix(in srgb, var(--bad) 15%, transparent); }
+  .pill.ok .dot { background: var(--good); } .pill.no .dot { background: var(--bad); }
+
+  .readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .ro { background: var(--panel); padding: 9px 11px; display: grid; gap: 1px; }
+  .ro .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; color: var(--faint); text-transform: uppercase; }
+  .ro .v { font-family: var(--mono); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .ro .v small { font-size: 11px; color: var(--faint); font-weight: 500; }
+  .ro.accent .v { color: var(--teal); }
+
+  .controls { display: grid; gap: 13px; }
+  .ctrl { display: grid; gap: 6px; }
+  .ctrl .row { display: flex; align-items: baseline; justify-content: space-between; }
+  .ctrl label { font-family: var(--mono); font-size: 11.5px; color: var(--dim); letter-spacing: .02em; }
+  .ctrl .val { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; background: var(--hair); outline: none; margin: 4px 0; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--teal); border: 2px solid var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.3); cursor: pointer; }
+  input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--teal); border: 2px solid var(--panel); cursor: pointer; }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 7px; }
+  .presets button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .02em; color: var(--dim);
+    background: var(--well); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; cursor: pointer;
+  }
+  .presets button:hover { color: var(--ink); border-color: var(--hair); background: var(--raised); }
+  .presets button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .legend { display: grid; gap: 6px; font-size: 12px; color: var(--dim); }
+  .legend .li { display: flex; align-items: center; gap: 9px; }
+  .legend .sw { width: 22px; height: 10px; border-radius: 3px; flex: none; }
+  .sw.teal { background: var(--teal-fill); border: 1.5px solid var(--teal-line); }
+  .sw.amber { background: var(--amber-fill); border: 1.5px dashed var(--amber); }
+  .sw.mk { background: var(--teal); border-radius: 50%; width: 12px; height: 12px; }
+
+  .foot { margin-top: 22px; font-size: 12px; color: var(--faint); font-family: var(--mono); line-height: 1.7; }
+  .foot b { color: var(--dim); font-weight: 600; }
+  .foot code { color: var(--teal); }
+  a { color: var(--teal); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="eyebrow">Tolérancement inertiel · M. Pillet / SYMME</span>
+      <h1>Le cône d'inertie</h1>
+      <p class="lede">Un lot est jugé par sa <em>distance à la cible</em> dans le plan (δ, σ) — pas par sa marge à l'intervalle. Faites glisser le point de lot ou les curseurs&nbsp;: l'inertie, le cône d'acceptation et les indices se recalculent en direct.</p>
+      <button class="themebtn" id="theme" type="button" aria-label="Basculer le thème">◐ Thème</button>
+    </div>
+    <div class="eqn">
+      <b>I</b> = √(<b>δ</b>² + <b>σ</b>²) <span class="mut">&nbsp;·&nbsp; δ = μ − Cible &nbsp;·&nbsp; I_max = IT / (6·Cp)</span>
+    </div>
+  </header>
+
+  <div class="app">
+    <div class="stage">
+      <div class="plots">
+        <div class="card">
+          <div class="card-h"><span class="card-t">Plan (δ, σ)</span><span class="card-s">vue de dessus du cône</span></div>
+          <div class="well"><canvas id="map" width="520" height="440" role="img" aria-label="Carte d'acceptation dans le plan décentrage-écart-type"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="card-t">Cône I = √(δ²+σ²)</span><span class="card-s">glisser pour pivoter</span></div>
+          <div class="well"><canvas id="cone" width="520" height="440" role="img" aria-label="Cône d'inertie en 3D avec plan de coupe I_max"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span class="card-t">Distribution du lot</span><span class="card-s">N(μ, σ) vs [LSL, USL]</span></div>
+        <div class="well"><canvas id="dist" width="1040" height="200" role="img" aria-label="Densité du lot par rapport aux limites de spécification"></canvas></div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <div class="verdict">
+        <div class="cpi"><span class="num" id="cpiNum">1.38</span><span class="lab">Cpi = I_max / I</span></div>
+        <span class="pill ok" id="pill"><span class="dot"></span><span id="pillTxt">Conforme · dans le cône</span></span>
+      </div>
+
+      <div class="readouts">
+        <div class="ro accent"><span class="k">Inertie I</span><span class="v" id="roI">0.120</span></div>
+        <div class="ro accent"><span class="k">Budget I_max</span><span class="v" id="roImax">0.167</span></div>
+        <div class="ro"><span class="k">Décentrage δ</span><span class="v" id="roDelta">0.080</span></div>
+        <div class="ro"><span class="k">Écart-type σ</span><span class="v" id="roSigma">0.090</span></div>
+        <div class="ro"><span class="k">Cpm</span><span class="v" id="roCpm">1.38</span></div>
+        <div class="ro"><span class="k">Cp</span><span class="v" id="roCp">1.85</span></div>
+        <div class="ro"><span class="k">Cpk</span><span class="v" id="roCpk">1.56</span></div>
+        <div class="ro"><span class="k">Non-conf.</span><span class="v" id="roPpm">0<small> ppm</small></span></div>
+      </div>
+
+      <div class="controls">
+        <div class="ctrl">
+          <div class="row"><label for="sIT">Intervalle de tolérance IT</label><span class="val" id="vIT">1.000</span></div>
+          <input type="range" id="sIT" min="0.4" max="2" step="0.02" value="1">
+        </div>
+        <div class="ctrl">
+          <div class="row"><label for="sCp">Capabilité visée Cp</label><span class="val" id="vCp">1.00</span></div>
+          <input type="range" id="sCp" min="0.5" max="2" step="0.05" value="1">
+        </div>
+        <div class="ctrl">
+          <div class="row"><label for="sMu">Moyenne μ (cible = 0)</label><span class="val" id="vMu">+0.080</span></div>
+          <input type="range" id="sMu" min="-0.5" max="0.5" step="0.005" value="0.08">
+        </div>
+        <div class="ctrl">
+          <div class="row"><label for="sSig">Écart-type σ</label><span class="val" id="vSig">0.090</span></div>
+          <input type="range" id="sSig" min="0" max="0.45" step="0.005" value="0.09">
+        </div>
+      </div>
+
+      <div class="presets" role="group" aria-label="Configurations types">
+        <button type="button" data-p="centre">Centré précis</button>
+        <button type="button" data-p="decentre">Décentré serré</button>
+        <button type="button" data-p="disperse">Dispersé centré</button>
+        <button type="button" data-p="hors">Hors cône</button>
+      </div>
+
+      <div class="legend">
+        <div class="li"><span class="sw teal"></span>Cône d'inertie · I ≤ I_max (Cpi ≥ 1)</div>
+        <div class="li"><span class="sw amber"></span>Zone Cpk ≥ 1 (méthode classique)</div>
+        <div class="li"><span class="sw mk"></span>Lot mesuré (δ, σ)</div>
+      </div>
+    </aside>
+  </div>
+
+  <p class="foot">
+    <b>Pourquoi un cône&nbsp;?</b> L'inertie <code>I = √(δ²+σ²)</code> est la distance du lot à la cible dans le plan (δ, σ) ; le graphe <code>z = I(δ,σ)</code> est un cône de révolution. Accepter <code>I ≤ I_max</code> revient à couper ce cône par un plan horizontal — d'où le disque (demi-disque, σ ≥ 0) d'acceptation, la <b>vue de dessus</b> à gauche.<br>
+    <b>La différence clé.</b> La zone Cpk (triangle ambré) tolère un fort décentrage tant que σ est petit ; le cône d'inertie plafonne l'écart <em>total</em> à la cible — un lot très précis mais décentré peut sortir du cône, un lot centré mais dispersé aussi. Les deux se rejoignent en δ = 0, σ = IT/6 quand Cp = 1.<br>
+    <b>scirust-tolerance</b> · <code>InertiaCone</code>, <code>Inertia</code>, <code>capability::cpi</code> — calcul déterministe, vérifié par fuzzing (48 200 checks, 0 erreur).
+  </p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const root = document.documentElement;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- State ----
+  const S = { IT: 1.0, cp: 1.0, mu: 0.08, sigma: 0.09 };
+
+  // ---- Math ----
+  const erf = (x) => {
+    const s = x < 0 ? -1 : 1; x = Math.abs(x);
+    const t = 1 / (1 + 0.3275911 * x);
+    const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+    return s * y;
+  };
+  const Phi = (z) => 0.5 * (1 + erf(z / Math.SQRT2));
+
+  function derive() {
+    const IT = S.IT, T = 0, lsl = -IT / 2, usl = IT / 2;
+    const delta = S.mu - T, sigma = S.sigma;
+    const I = Math.hypot(delta, sigma);
+    const Imax = IT / (6 * S.cp);
+    const cpi = I > 0 ? Imax / I : Infinity;
+    const cpm = I > 0 ? IT / (6 * I) : Infinity;
+    const cp = sigma > 0 ? IT / (6 * sigma) : Infinity;
+    const cpk = sigma > 0 ? Math.min(usl - S.mu, S.mu - lsl) / (3 * sigma) : Infinity;
+    let ppm = 0;
+    if (sigma > 1e-9) ppm = 1e6 * (Phi((lsl - S.mu) / sigma) + (1 - Phi((usl - S.mu) / sigma)));
+    else ppm = (S.mu >= lsl && S.mu <= usl) ? 0 : 1e6;
+    return { IT, T, lsl, usl, delta, sigma, I, Imax, cpi, cpm, cp, cpk, ppm };
+  }
+
+  const css = (n) => getComputedStyle(root).getPropertyValue(n).trim();
+  function theme() {
+    return {
+      ink: css("--ink"), dim: css("--dim"), faint: css("--faint"),
+      grid: css("--grid"), line: css("--line"), hair: css("--hair"),
+      teal: css("--teal"), tealFill: css("--teal-fill"),
+      amber: css("--amber"), amberFill: css("--amber-fill"),
+      good: css("--good"), bad: css("--bad"), well: css("--well"), panel: css("--panel"),
+      mono: '12px ' + css("--mono").split(",")[0]
+    };
+  }
+
+  // ---- Canvas helpers (dpr-aware) ----
+  function fit(cv) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = cv.clientWidth, h = Math.round(w * (cv.dataset.ar ? +cv.dataset.ar : 0.846));
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      cv.style.height = h + "px";
+    }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  const mapCv = $("map"), coneCv = $("cone"), distCv = $("dist");
+  mapCv.dataset.ar = 0.846; coneCv.dataset.ar = 0.846; distCv.dataset.ar = 0.24;
+
+  // Mapping for the (δ,σ) plane — equal aspect so circles stay circular.
+  let MAP = null;
+  function mapGeom(w, h, d) {
+    const padL = 46, padR = 16, padT = 16, padB = 34;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    // minimum data ranges: |δ| up to 0.55·IT (triangle base), σ up to 0.30·IT
+    const upp = Math.max((2 * 0.55 * d.IT) / pw, (0.32 * d.IT) / ph);
+    const dMax = (pw * upp) / 2, sMax = ph * upp;
+    const ox = padL + pw / 2, oy = padT + ph; // origin (δ=0, σ=0) bottom-center
+    const sx = (v) => ox + v / upp;
+    const sy = (v) => oy - v / upp;
+    return { padL, padT, pw, ph, dMax, sMax, upp, ox, oy, sx, sy, w, h };
+  }
+
+  // ---- Draw: (δ, σ) acceptance map ----
+  function drawMap(d) {
+    const { ctx, w, h } = fit(mapCv);
+    const t = theme();
+    const g = mapGeom(w, h, d); MAP = g;
+    ctx.clearRect(0, 0, w, h);
+
+    // grid
+    ctx.strokeStyle = t.grid; ctx.lineWidth = 1;
+    const gd = niceStep(g.dMax);
+    ctx.beginPath();
+    for (let v = 0; v <= g.dMax + 1e-9; v += gd) {
+      ctx.moveTo(g.sx(v) + .5, g.padT); ctx.lineTo(g.sx(v) + .5, g.oy);
+      ctx.moveTo(g.sx(-v) + .5, g.padT); ctx.lineTo(g.sx(-v) + .5, g.oy);
+    }
+    for (let v = 0; v <= g.sMax + 1e-9; v += gd) { ctx.moveTo(g.padL, g.sy(v) + .5); ctx.lineTo(w - 16, g.sy(v) + .5); }
+    ctx.stroke();
+
+    // iso-inertia guide circles (I = k·Imax) — the cone seen from above
+    ctx.save();
+    ctx.strokeStyle = t.hair; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+    for (const k of [0.5, 1.5, 2]) {
+      const r = k * d.Imax / g.upp;
+      ctx.beginPath(); ctx.arc(g.ox, g.oy, r, Math.PI, 2 * Math.PI); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Cpk triangle: |δ| + 3σ ≤ IT/2  → vertices (±IT/2,0),(0,IT/6)
+    const apex = d.IT / 6;
+    ctx.beginPath();
+    ctx.moveTo(g.sx(-d.IT / 2), g.sy(0));
+    ctx.lineTo(g.sx(0), g.sy(apex));
+    ctx.lineTo(g.sx(d.IT / 2), g.sy(0));
+    ctx.closePath();
+    ctx.fillStyle = t.amberFill; ctx.fill();
+    ctx.strokeStyle = t.amber; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+
+    // Inertia semicircle (the cone): δ²+σ² ≤ Imax²
+    const R = d.Imax / g.upp;
+    ctx.beginPath(); ctx.arc(g.ox, g.oy, R, Math.PI, 2 * Math.PI); ctx.closePath();
+    ctx.fillStyle = t.tealFill; ctx.fill();
+    ctx.strokeStyle = t.teal; ctx.lineWidth = 2; ctx.stroke();
+
+    // axes
+    ctx.strokeStyle = t.line; ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(g.padL, g.oy + .5); ctx.lineTo(w - 16, g.oy + .5);   // σ=0 axis
+    ctx.moveTo(g.ox + .5, g.padT); ctx.lineTo(g.ox + .5, g.oy);      // δ=0 axis
+    ctx.stroke();
+
+    // axis labels
+    ctx.fillStyle = t.faint; ctx.font = t.mono; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText("δ →", w - 30, g.oy - 16);
+    ctx.save(); ctx.translate(g.padL - 32, g.padT + 8); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "right"; ctx.fillText("σ ↑", 0, 0); ctx.restore();
+    ctx.textAlign = "center"; ctx.fillText("0", g.ox, g.oy + 5);
+
+    // radial line from origin to marker = the inertia I
+    const mx = g.sx(d.delta), my = g.sy(d.sigma);
+    const inside = d.cpi >= 1;
+    ctx.strokeStyle = inside ? t.good : t.bad; ctx.lineWidth = 1.5; ctx.globalAlpha = .5;
+    ctx.beginPath(); ctx.moveTo(g.ox, g.oy); ctx.lineTo(mx, my); ctx.stroke(); ctx.globalAlpha = 1;
+
+    // marker
+    const col = inside ? t.good : t.bad;
+    ctx.beginPath(); ctx.arc(mx, my, 9, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.globalAlpha = .18; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(mx, my, 5.5, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = t.panel; ctx.stroke();
+
+    // "I" label on the radial midpoint
+    ctx.fillStyle = col; ctx.font = "600 " + t.mono; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText("I=" + d.I.toFixed(3), (g.ox + mx) / 2 + 6, (g.oy + my) / 2);
+  }
+
+  function niceStep(range) {
+    const raw = range / 4, p = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / p;
+    return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p;
+  }
+
+  // ---- Draw: 3D cone ----
+  let az = -0.7, el = 0.42;
+  function drawCone(d) {
+    const { ctx, w, h } = fit(coneCv);
+    const t = theme();
+    ctx.clearRect(0, 0, w, h);
+    const R = Math.max(d.Imax * 2.0, d.I * 1.15, d.Imax * 1.05);
+    const cx = w / 2, cyBase = h * 0.80, scale = (Math.min(w, h) * 0.40) / R;
+    const ce = Math.cos(el), se = Math.sin(el), ca = Math.cos(az), sa = Math.sin(az);
+    const proj = (x, y, z) => {
+      const xr = x * ca - y * sa, yr = x * sa + y * ca;
+      return [cx + xr * scale, cyBase + (yr * se - z * ce) * scale, yr];
+    };
+    const rings = 5, seg = 48;
+
+    // cone surface generatrices (apex at origin up to z=R)
+    ctx.strokeStyle = t.hair; ctx.lineWidth = 1; ctx.globalAlpha = .8;
+    for (let i = 0; i < seg; i += 2) {
+      const a = (i / seg) * 2 * Math.PI;
+      const p0 = proj(0, 0, 0), p1 = proj(R * Math.cos(a), R * Math.sin(a), R);
+      ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // horizontal rings at z=z_k (radius = z_k since r=z on the cone)
+    for (let r = 1; r <= rings; r++) {
+      const z = (r / rings) * R;
+      ringPath(ctx, proj, z, z, seg);
+      ctx.strokeStyle = t.line; ctx.lineWidth = 1; ctx.stroke();
+    }
+
+    // I_max cutting plane: a filled disc + emphasized circle
+    const zc = d.Imax;
+    ctx.save();
+    ringPath(ctx, proj, zc, zc, seg);
+    ctx.fillStyle = t.tealFill; ctx.fill();
+    ctx.strokeStyle = t.teal; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.restore();
+
+    // label the cut
+    const lp = proj(zc, 0, zc);
+    ctx.fillStyle = t.teal; ctx.font = "600 " + t.mono; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("I_max", lp[0] + 8, lp[1]);
+
+    // batch point on the cone surface at (δ, σ, I)
+    const inside = d.cpi >= 1;
+    const bp = proj(d.delta, d.sigma, d.I);
+    // stem from base plane to the surface point
+    const base = proj(d.delta, d.sigma, 0);
+    ctx.strokeStyle = inside ? t.good : t.bad; ctx.setLineDash([3, 3]); ctx.globalAlpha = .6;
+    ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(bp[0], bp[1]); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    const col = inside ? t.good : t.bad;
+    ctx.beginPath(); ctx.arc(bp[0], bp[1], 8, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.globalAlpha = .18; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(bp[0], bp[1], 5, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = t.panel; ctx.stroke();
+
+    // axis hint
+    ctx.fillStyle = t.faint; ctx.font = t.mono; ctx.textAlign = "center";
+    ctx.fillText("z = I", cx, h - 12);
+  }
+  function ringPath(ctx, proj, z, radius, seg) {
+    ctx.beginPath();
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * 2 * Math.PI;
+      const p = proj(radius * Math.cos(a), radius * Math.sin(a), z);
+      if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+    }
+    ctx.closePath();
+  }
+
+  // ---- Draw: distribution ----
+  function drawDist(d) {
+    const { ctx, w, h } = fit(distCv);
+    const t = theme();
+    ctx.clearRect(0, 0, w, h);
+    const padX = 20, padB = 24, padT = 12;
+    const half = 0.62 * d.IT + 3 * Math.max(d.sigma, 0.02);
+    const xlo = -half, xhi = half;
+    const X = (x) => padX + ((x - xlo) / (xhi - xlo)) * (w - 2 * padX);
+    const sig = Math.max(d.sigma, 1e-4);
+    const pdf = (x) => Math.exp(-0.5 * ((x - S.mu) / sig) ** 2) / (sig * Math.sqrt(2 * Math.PI));
+    const peak = pdf(S.mu) || 1;
+    const Y = (p) => (h - padB) - (p / peak) * (h - padB - padT);
+
+    // spec band
+    ctx.fillStyle = t.tealFill;
+    ctx.fillRect(X(d.lsl), padT, X(d.usl) - X(d.lsl), h - padB - padT);
+
+    // out-of-spec tails (shaded under the curve beyond limits)
+    const N = 240;
+    const inside = d.cpi >= 1;
+    const tailFill = css("--bad");
+    for (const seg of [[xlo, d.lsl], [d.usl, xhi]]) {
+      ctx.beginPath(); ctx.moveTo(X(seg[0]), h - padB);
+      for (let i = 0; i <= N; i++) { const x = seg[0] + (seg[1] - seg[0]) * i / N; ctx.lineTo(X(x), Y(pdf(x))); }
+      ctx.lineTo(X(seg[1]), h - padB); ctx.closePath();
+      ctx.globalAlpha = .28; ctx.fillStyle = tailFill; ctx.fill(); ctx.globalAlpha = 1;
+    }
+
+    // curve
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = xlo + (xhi - xlo) * i / N; const yy = Y(pdf(x)); if (i === 0) ctx.moveTo(X(x), yy); else ctx.lineTo(X(x), yy); }
+    ctx.strokeStyle = inside ? t.good : t.bad; ctx.lineWidth = 2; ctx.stroke();
+
+    // baseline
+    ctx.strokeStyle = t.line; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padX, h - padB + .5); ctx.lineTo(w - padX, h - padB + .5); ctx.stroke();
+
+    // limit + target + mean markers
+    const vline = (x, color, label, dash) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash(dash || []);
+      ctx.beginPath(); ctx.moveTo(X(x), padT - 2); ctx.lineTo(X(x), h - padB); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = color; ctx.font = t.mono; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText(label, X(x), h - padB + 5);
+    };
+    vline(d.lsl, t.dim, "LSL");
+    vline(d.usl, t.dim, "USL");
+    vline(0, t.faint, "Cible", [4, 3]);
+    vline(S.mu, inside ? t.good : t.bad, "μ");
+  }
+
+  // ---- Readouts ----
+  const fx = (v, n = 3) => (isFinite(v) ? v.toFixed(n) : "∞");
+  function render(d) {
+    $("cpiNum").textContent = isFinite(d.cpi) ? d.cpi.toFixed(2) : "∞";
+    const ok = d.cpi >= 1;
+    const pill = $("pill");
+    pill.className = "pill " + (ok ? "ok" : "no");
+    $("pillTxt").textContent = ok ? "Conforme · dans le cône" : "Non conforme · hors du cône";
+    $("roI").textContent = fx(d.I);
+    $("roImax").textContent = fx(d.Imax);
+    $("roDelta").textContent = (d.delta >= 0 ? "+" : "") + d.delta.toFixed(3);
+    $("roSigma").textContent = fx(d.sigma);
+    $("roCpm").textContent = fx(d.cpm, 2);
+    $("roCp").textContent = fx(d.cp, 2);
+    $("roCpk").textContent = fx(d.cpk, 2);
+    const ppm = d.ppm;
+    $("roPpm").innerHTML = (ppm >= 1000 ? Math.round(ppm).toLocaleString("fr-FR") : ppm >= 1 ? ppm.toFixed(0) : ppm.toFixed(2)) + "<small> ppm</small>";
+    $("vIT").textContent = S.IT.toFixed(3);
+    $("vCp").textContent = S.cp.toFixed(2);
+    $("vMu").textContent = (S.mu >= 0 ? "+" : "") + S.mu.toFixed(3);
+    $("vSig").textContent = S.sigma.toFixed(3);
+  }
+
+  function draw() {
+    const d = derive();
+    render(d);
+    drawMap(d); drawCone(d); drawDist(d);
+  }
+
+  // ---- Controls ----
+  function syncSliders() {
+    $("sIT").value = S.IT; $("sCp").value = S.cp;
+    $("sMu").value = S.mu; $("sSig").value = S.sigma;
+    // μ range tracks IT
+    $("sMu").min = (-S.IT / 2).toFixed(3); $("sMu").max = (S.IT / 2).toFixed(3);
+    $("sSig").max = (S.IT * 0.45).toFixed(3);
+  }
+  $("sIT").addEventListener("input", (e) => { S.IT = +e.target.value; S.mu = Math.max(-S.IT / 2, Math.min(S.IT / 2, S.mu)); S.sigma = Math.min(S.sigma, S.IT * 0.45); syncSliders(); draw(); });
+  $("sCp").addEventListener("input", (e) => { S.cp = +e.target.value; draw(); });
+  $("sMu").addEventListener("input", (e) => { S.mu = +e.target.value; draw(); });
+  $("sSig").addEventListener("input", (e) => { S.sigma = +e.target.value; draw(); });
+
+  const PRESETS = {
+    centre:   { mu: 0.0,  sigma: 0.05 },
+    decentre: { mu: 0.14, sigma: 0.03 },
+    disperse: { mu: 0.0,  sigma: 0.16 },
+    hors:     { mu: 0.13, sigma: 0.13 },
+  };
+  document.querySelectorAll(".presets button").forEach((b) => b.addEventListener("click", () => {
+    const p = PRESETS[b.dataset.p]; S.IT = 1.0; S.cp = 1.0; S.mu = p.mu; S.sigma = p.sigma; syncSliders(); draw();
+  }));
+
+  // ---- Drag the marker in the (δ,σ) plane ----
+  function mapPoint(ev) {
+    const r = mapCv.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    if (!MAP) return;
+    const delta = (px - MAP.ox) * MAP.upp;
+    const sigma = (MAP.oy - py) * MAP.upp;
+    S.mu = Math.max(-S.IT / 2, Math.min(S.IT / 2, delta));
+    S.sigma = Math.max(0, Math.min(S.IT * 0.45, sigma));
+    syncSliders(); draw();
+  }
+  let mapping = false;
+  mapCv.addEventListener("pointerdown", (e) => { mapping = true; mapCv.setPointerCapture(e.pointerId); mapPoint(e); });
+  mapCv.addEventListener("pointermove", (e) => { if (mapping) mapPoint(e); });
+  mapCv.addEventListener("pointerup", () => { mapping = false; });
+  mapCv.addEventListener("pointercancel", () => { mapping = false; });
+
+  // ---- Drag to rotate the cone ----
+  let rot = false, lastX = 0, lastY = 0;
+  coneCv.addEventListener("pointerdown", (e) => { rot = true; coneCv.classList.add("drag"); coneCv.setPointerCapture(e.pointerId); lastX = e.clientX; lastY = e.clientY; });
+  coneCv.addEventListener("pointermove", (e) => {
+    if (!rot) return;
+    az += (e.clientX - lastX) * 0.01; el += (e.clientY - lastY) * 0.006;
+    el = Math.max(0.12, Math.min(1.2, el)); lastX = e.clientX; lastY = e.clientY; draw();
+  });
+  const stopRot = () => { rot = false; coneCv.classList.remove("drag"); };
+  coneCv.addEventListener("pointerup", stopRot);
+  coneCv.addEventListener("pointercancel", stopRot);
+
+  // ---- Idle auto-rotation (respects reduced-motion / interaction) ----
+  let raf = 0;
+  function loop() {
+    if (!reduce && !rot && !mapping) { az += 0.0032; draw(); }
+    raf = requestAnimationFrame(loop);
+  }
+
+  // ---- Theme: local toggle + react to viewer/system changes ----
+  $("theme").addEventListener("click", () => {
+    const cur = root.getAttribute("data-theme");
+    const sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = cur ? (cur === "dark" ? "light" : "dark") : (sysDark ? "light" : "dark");
+    root.setAttribute("data-theme", next); draw();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  new MutationObserver(draw).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  window.addEventListener("resize", draw);
+
+  syncSliders(); draw();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -44,6 +44,11 @@
 //!   best-fit torsor + form residual, and the surface inertia as the
 //!   statistical combination of location and orientation via the geometry
 //!   matrix `H`.
+//! - [`nonnormal`] — non-normal statistical tolerancing: Cornish–Fisher
+//!   quantiles, non-normal ppm, and Clements percentile capability from the
+//!   first four moments (the inertia itself is distribution-free).
+//! - [`position`] — GD&T / ISO positional tolerancing: true position, MMC
+//!   bonus, `±`↔`Ø` conversion, and the positional inertia `√(Iₓ²+I_y²)`.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -87,7 +92,9 @@ pub mod chart;
 pub mod form;
 pub mod inertia;
 pub mod modal;
+pub mod nonnormal;
 pub mod optimize;
+pub mod position;
 pub mod sampling;
 pub mod spatial;
 pub mod special;
@@ -103,6 +110,10 @@ pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
 pub use modal::{ModalBasis, modal_inertias};
+pub use nonnormal::{
+    ClementsCapability, clements_capability, cornish_fisher_quantile, nonnormal_ppm,
+};
 pub use optimize::{Component, OptimizeResult, Requirement, cost_quality_frontier, optimize};
+pub use position::{FeatureType, positional_inertia, total_position_tolerance, true_position};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};

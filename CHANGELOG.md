@@ -5,14 +5,48 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — transpileur : routage `np.linalg.eigvalsh` (Phase 1, incrément 5)
-Troisième noyau routé vers `scirust-solvers` : `np.linalg.eigvalsh(A)` (valeurs
-propres d'une matrice symétrique) transpile vers
-`scirust_solvers::linalg::eigen_symmetric(...).eigenvalues` — valeurs propres
-triées croissantes, comme `numpy.linalg.eigvalsh`. `SirExpr::Eigvalsh` ajouté ;
-inférence de paramètre matrice étendue. Nouveau générateur d'oracle `SymMatrix`
-(matrice symétrique à valeurs propres bien séparées). **Oracle 20/20** (200
-essais chacun) ; 18 tests unitaires.
+### Ajouté — tolérancement non-normal + position GD&T (`scirust-tolerance`)
+Deux modules qui étendent le tolérancement inertiel au-delà de l'hypothèse
+normale et à la cotation de position :
+
+- **`nonnormal`** (nouveau module) : tolérancement statistique **non-normal**
+  à partir des quatre premiers moments (moyenne, écart-type, asymétrie `S`,
+  aplatissement d'excès `K`). L'inertie `I = √(δ²+σ²)` étant *sans hypothèse
+  de distribution* (c'est la RMS d'écart à la cible), c'est la **conformité**
+  qui dépend de la forme. `cornish_fisher_quantile` donne le `p`-quantile par
+  l'expansion de Cornish–Fisher `x_p = μ + σ·w(Φ⁻¹(p))` ; `nonnormal_ppm`
+  inverse l'expansion à chaque limite pour la non-conformité en ppm ;
+  `clements_capability` fournit le `Cp`/`Cpk` percentile de Clements (1989)
+  sur données asymétriques. Les trois **se réduisent exactement** aux résultats
+  normaux classiques quand `S = K = 0`. L'inversion `w(z)=t` d'un cubique n'est
+  bien posée que sur la **branche monotone** autour de `z=0` : le solveur
+  localise cette branche (marche + bornage), rabat une cible extérieure sur son
+  extrémité (une limite loin en queue ⇒ contribution ≈ 0, pas de racine
+  parasite) et bissecte à l'intérieur — valide pour une non-normalité modérée
+  et des limites dans le corps de la distribution (régime usuel de capabilité).
+- **`position`** (nouveau module) : cotation de **position GD&T / ISO GPS** et
+  sa forme inertielle. `true_position = 2·√(Δx²+Δy²)` (écart diamétral),
+  `mmc_bonus`/`total_position_tolerance` (bonus au maximum de matière selon
+  `FeatureType::Internal`/`External`), `coord_to_position`/`position_to_coord`
+  (conversion zone `±` ↔ zone diamétrale `Ø`), et l'**inertie de position**
+  `√(Iₓ²+I_y²)` — puisque `E[Δx²+Δy²] = Iₓ²+I_y²`, exactement la
+  `vector_inertia` des deux axes, ce qui rattache la position au cadre inertiel.
+- **`scirust-mcp`** : nouveaux outils `tolerance_nonnormal_capability`
+  (ppm non-normal + capabilité de Clements) et `tolerance_position`
+  (position vraie + bonus MMC + inertie de position).
+- **Cross-check par fuzzing** (`fuzz_crosscheck`) étendu à ces deux modules :
+  réduction exacte au normal, cohérence aller-retour de l'inversion
+  Cornish–Fisher sur son domaine valide, monotonie de la queue vs asymétrie,
+  et identités radiales de la position — **0 erreur** sur 10 000 instances. Le
+  fuzzing a révélé et corrigé une racine parasite de l'inversion pour une cible
+  sous le minimum de la branche monotone (queue basse gonflée) ; d'où le
+  solveur robuste marche-bornage-bissection.
+- **Visualisation** (`scirust-tolerance/viz/inertia_cone.html`) : page HTML
+  autonome et interactive du **cône d'inertie** — la carte d'acceptation
+  `(δ, σ)` (demi-disque inertiel vs triangle Cpk), le cône 3D `z = √(δ²+σ²)`
+  coupé par le plan `I_max`, la distribution du lot, et la lecture en direct de
+  `I`/`Cpi`/`Cpm`/`Cp`/`Cpk`/ppm en glissant le point de lot ou les curseurs.
+  Sans dépendance réseau, thème clair/sombre.
 
 ### Ajouté — transpileur : couverture de test exhaustive + script global
 Objectif « tester **toutes** les fonctions codées » : l'oracle différentiel
