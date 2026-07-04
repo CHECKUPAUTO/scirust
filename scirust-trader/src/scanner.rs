@@ -19,10 +19,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::agent::Action;
-use crate::backtest::{run_backtest, BacktestConfig};
+use crate::backtest::{BacktestConfig, run_backtest};
 use crate::indicators;
 use crate::market::MarketSnapshot;
-use crate::strategy::{strategy_from_spec, STRATEGY_NAMES};
+use crate::strategy::{STRATEGY_NAMES, strategy_from_spec};
 use std::collections::BTreeMap;
 
 /// Filters the agent expresses in natural language, lowered to numbers.
@@ -303,9 +303,23 @@ pub fn scan(
                 Action::Flat => (last_close, last_close),
             };
             let risk_amount = risk.capital * risk.risk_per_trade.clamp(0.0, 1.0);
-            let position_size = if stop_distance > 1e-9 { risk_amount / stop_distance } else { 0.0 };
+            let position_size = if stop_distance > 1e-9
+            {
+                risk_amount / stop_distance
+            }
+            else
+            {
+                0.0
+            };
             let position_notional = (position_size * last_close).min(risk.capital);
-            let position_size = if last_close > 1e-9 { position_notional / last_close } else { 0.0 };
+            let position_size = if last_close > 1e-9
+            {
+                position_notional / last_close
+            }
+            else
+            {
+                0.0
+            };
 
             let score = score_opportunity(&report, sig.strength);
 
@@ -412,17 +426,29 @@ mod tests {
     }
 
     fn uptrend(symbol: &str, n: usize) -> MarketSnapshot {
-        snapshot(symbol, &(0..n).map(|i| 100.0 + i as f32).collect::<Vec<_>>())
+        snapshot(
+            symbol,
+            &(0..n).map(|i| 100.0 + i as f32).collect::<Vec<_>>(),
+        )
     }
 
     #[test]
     fn scan_finds_opportunities_in_trend() {
         let series = vec![uptrend("BTC/USDT", 200)];
-        let report = scan(&series, &OpportunityConstraints::default(), &ScanRiskConfig::default());
+        let report = scan(
+            &series,
+            &OpportunityConstraints::default(),
+            &ScanRiskConfig::default(),
+        );
         assert!(report.num_candidates > 0);
         assert!(report.verify(), "report proof must verify");
         // In a clean uptrend at least one long trend-follower should surface.
-        assert!(report.opportunities.iter().any(|o| o.action == Action::Long));
+        assert!(
+            report
+                .opportunities
+                .iter()
+                .any(|o| o.action == Action::Long)
+        );
     }
 
     #[test]
@@ -446,7 +472,12 @@ mod tests {
             ..Default::default()
         };
         let report = scan(&series, &c, &ScanRiskConfig::default());
-        assert!(report.opportunities.iter().all(|o| o.action == Action::Short));
+        assert!(
+            report
+                .opportunities
+                .iter()
+                .all(|o| o.action == Action::Short)
+        );
     }
 
     #[test]
@@ -468,7 +499,11 @@ mod tests {
     #[test]
     fn trade_plan_has_stop_and_target_on_correct_sides() {
         let series = vec![uptrend("BTC/USDT", 200)];
-        let report = scan(&series, &OpportunityConstraints::default(), &ScanRiskConfig::default());
+        let report = scan(
+            &series,
+            &OpportunityConstraints::default(),
+            &ScanRiskConfig::default(),
+        );
         for o in &report.opportunities
         {
             match o.action
@@ -509,7 +544,11 @@ mod tests {
     #[test]
     fn tampering_breaks_the_proof() {
         let series = vec![uptrend("BTC/USDT", 200)];
-        let mut report = scan(&series, &OpportunityConstraints::default(), &ScanRiskConfig::default());
+        let mut report = scan(
+            &series,
+            &OpportunityConstraints::default(),
+            &ScanRiskConfig::default(),
+        );
         if let Some(o) = report.opportunities.first_mut()
         {
             o.take_profit *= 2.0; // tamper

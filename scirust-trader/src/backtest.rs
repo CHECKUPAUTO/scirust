@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::agent::Action;
 use crate::indicators;
 use crate::market::Candle;
-use crate::metrics::{periods_per_year, PerformanceReport};
-use crate::orders::{simulate_fill, FeeSchedule, Fill, Order, Side, SlippageModel};
+use crate::metrics::{PerformanceReport, periods_per_year};
+use crate::orders::{FeeSchedule, Fill, Order, Side, SlippageModel, simulate_fill};
 use crate::portfolio::Account;
 use crate::strategy::Strategy;
 use std::collections::BTreeMap;
@@ -124,7 +124,11 @@ struct OpenTrade {
 
 /// Run `strategy` over `candles` under `cfg`. Candles must be chronological and
 /// share `cfg.symbol`.
-pub fn run_backtest(strategy: &dyn Strategy, candles: &[Candle], cfg: &BacktestConfig) -> BacktestReport {
+pub fn run_backtest(
+    strategy: &dyn Strategy,
+    candles: &[Candle],
+    cfg: &BacktestConfig,
+) -> BacktestReport {
     let n = candles.len();
     let mut account = Account::new(cfg.starting_cash);
     // Overwrite the initial curve sample so it stays length-aligned with bars.
@@ -196,7 +200,15 @@ pub fn run_backtest(strategy: &dyn Strategy, candles: &[Candle], cfg: &BacktestC
         let order = Order::market(order_id, &cfg.symbol, side, current.abs());
         if let Some(fill) = simulate_fill(&order, &closing_candle, &cfg.fees, &cfg.slippage)
         {
-            apply_and_track(&mut account, &mut open, &mut trades, &cfg.symbol, side, &fill, n - 1);
+            apply_and_track(
+                &mut account,
+                &mut open,
+                &mut trades,
+                &cfg.symbol,
+                side,
+                &fill,
+                n - 1,
+            );
         }
     }
 
@@ -219,12 +231,8 @@ pub fn run_backtest(strategy: &dyn Strategy, candles: &[Candle], cfg: &BacktestC
         0.0
     };
     let pnls: Vec<f32> = trades.iter().map(|t| t.net_pnl).collect();
-    let performance = PerformanceReport::from_curve(
-        &equity_curve,
-        &pnls,
-        periods_per_year(&cfg.interval),
-        0.0,
-    );
+    let performance =
+        PerformanceReport::from_curve(&equity_curve, &pnls, periods_per_year(&cfg.interval), 0.0);
 
     BacktestReport {
         strategy: strategy.name(),
@@ -260,7 +268,14 @@ fn target_qty_for(
         Action::Long => 1.0,
         Action::Short =>
         {
-            if cfg.allow_short { -1.0 } else { return 0.0 }
+            if cfg.allow_short
+            {
+                -1.0
+            }
+            else
+            {
+                return 0.0;
+            }
         },
         Action::Flat => return 0.0,
     };
@@ -322,7 +337,14 @@ fn apply_and_track(
         {
             // Opening a fresh trade.
             *open = Some(OpenTrade {
-                action: if side == Side::Buy { Action::Long } else { Action::Short },
+                action: if side == Side::Buy
+                {
+                    Action::Long
+                }
+                else
+                {
+                    Action::Short
+                },
                 entry_ts: fill.ts_ms,
                 entry_index: bar_index,
                 entry_price: fill.price,
@@ -371,7 +393,14 @@ fn apply_and_track(
                 t.fees += close_fee;
                 trades.push(book_trade(&t, symbol, fill, bar_index));
                 *open = Some(OpenTrade {
-                    action: if side == Side::Buy { Action::Long } else { Action::Short },
+                    action: if side == Side::Buy
+                    {
+                        Action::Long
+                    }
+                    else
+                    {
+                        Action::Short
+                    },
                     entry_ts: fill.ts_ms,
                     entry_index: bar_index,
                     entry_price: fill.price,
@@ -428,7 +457,9 @@ mod tests {
     }
 
     fn uptrend(n: usize) -> Vec<Candle> {
-        (0..n).map(|i| candle(i as i64 * 60_000, 100.0 + i as f32)).collect()
+        (0..n)
+            .map(|i| candle(i as i64 * 60_000, 100.0 + i as f32))
+            .collect()
     }
 
     #[test]
@@ -448,12 +479,23 @@ mod tests {
         let candles = uptrend(200);
         let strat = MaCross::sma(5, 20);
         let cfg = BacktestConfig {
-            fees: FeeSchedule { maker_bps: 0.0, taker_bps: 0.0 },
-            slippage: SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 },
+            fees: FeeSchedule {
+                maker_bps: 0.0,
+                taker_bps: 0.0,
+            },
+            slippage: SlippageModel {
+                base_bps: 0.0,
+                impact_bps: 0.0,
+                ref_liquidity: 1.0,
+            },
             ..Default::default()
         };
         let report = run_backtest(&strat, &candles, &cfg);
-        assert!(report.total_return > 0.0, "should profit: {}", report.total_return);
+        assert!(
+            report.total_return > 0.0,
+            "should profit: {}",
+            report.total_return
+        );
     }
 
     #[test]
@@ -466,16 +508,29 @@ mod tests {
     #[test]
     fn no_short_config_stays_flat_on_short_signal() {
         // Downtrend + no-short -> never opens a short; equity stays ~flat.
-        let candles: Vec<Candle> = (0..120).map(|i| candle(i as i64, 200.0 - i as f32)).collect();
+        let candles: Vec<Candle> = (0..120)
+            .map(|i| candle(i as i64, 200.0 - i as f32))
+            .collect();
         let cfg = BacktestConfig {
             allow_short: false,
-            fees: FeeSchedule { maker_bps: 0.0, taker_bps: 0.0 },
-            slippage: SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 },
+            fees: FeeSchedule {
+                maker_bps: 0.0,
+                taker_bps: 0.0,
+            },
+            slippage: SlippageModel {
+                base_bps: 0.0,
+                impact_bps: 0.0,
+                ref_liquidity: 1.0,
+            },
             ..Default::default()
         };
         let report = run_backtest(&MaCross::sma(5, 20), &candles, &cfg);
         // With no shorting on a pure downtrend, we should not lose (stay in cash).
-        assert!(report.total_return >= -0.02, "return {}", report.total_return);
+        assert!(
+            report.total_return >= -0.02,
+            "return {}",
+            report.total_return
+        );
     }
 
     #[test]
@@ -483,12 +538,22 @@ mod tests {
         let candles = uptrend(150);
         let strat = MaCross::sma(5, 15);
         let no_fee = BacktestConfig {
-            fees: FeeSchedule { maker_bps: 0.0, taker_bps: 0.0 },
-            slippage: SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 },
+            fees: FeeSchedule {
+                maker_bps: 0.0,
+                taker_bps: 0.0,
+            },
+            slippage: SlippageModel {
+                base_bps: 0.0,
+                impact_bps: 0.0,
+                ref_liquidity: 1.0,
+            },
             ..Default::default()
         };
         let with_fee = BacktestConfig {
-            fees: FeeSchedule { maker_bps: 10.0, taker_bps: 20.0 },
+            fees: FeeSchedule {
+                maker_bps: 10.0,
+                taker_bps: 20.0,
+            },
             ..Default::default()
         };
         let r0 = run_backtest(&strat, &candles, &no_fee);

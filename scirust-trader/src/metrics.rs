@@ -234,7 +234,14 @@ pub fn ulcer_index(equity: &[f32]) -> f32 {
         {
             peak = e;
         }
-        let dd_pct = if peak > 1e-12 { (e - peak) / peak * 100.0 } else { 0.0 };
+        let dd_pct = if peak > 1e-12
+        {
+            (e - peak) / peak * 100.0
+        }
+        else
+        {
+            0.0
+        };
         acc += dd_pct * dd_pct;
     }
     (acc / equity.len() as f32).sqrt()
@@ -266,7 +273,9 @@ pub fn conditional_value_at_risk(returns: &[f32], alpha: f32) -> f32 {
     let mut sorted = returns.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let a = alpha.clamp(0.0, 1.0);
-    let count = ((a * sorted.len() as f32).ceil() as usize).max(1).min(sorted.len());
+    let count = ((a * sorted.len() as f32).ceil() as usize)
+        .max(1)
+        .min(sorted.len());
     let mut sum = 0.0f32;
     for &r in &sorted[..count]
     {
@@ -399,8 +408,22 @@ pub fn trade_stats(pnls: &[f32]) -> TradeStats {
     {
         0.0
     };
-    let avg_win = if num_wins > 0 { gross_profit / num_wins as f32 } else { 0.0 };
-    let avg_loss = if num_losses > 0 { gross_loss / num_losses as f32 } else { 0.0 };
+    let avg_win = if num_wins > 0
+    {
+        gross_profit / num_wins as f32
+    }
+    else
+    {
+        0.0
+    };
+    let avg_loss = if num_losses > 0
+    {
+        gross_loss / num_losses as f32
+    }
+    else
+    {
+        0.0
+    };
     let profit_factor = if gross_loss.abs() > 1e-12
     {
         gross_profit / gross_loss.abs()
@@ -416,9 +439,23 @@ pub fn trade_stats(pnls: &[f32]) -> TradeStats {
     // Loss rate is the fraction of *losing* trades, not `1 − win_rate`: a
     // break-even (exactly 0) trade is neither a win nor a loss and must not be
     // counted against expectancy.
-    let loss_rate = if num_trades > 0 { num_losses as f32 / num_trades as f32 } else { 0.0 };
+    let loss_rate = if num_trades > 0
+    {
+        num_losses as f32 / num_trades as f32
+    }
+    else
+    {
+        0.0
+    };
     let expectancy = win_rate * avg_win - loss_rate * avg_loss.abs();
-    let payoff_ratio = if avg_loss.abs() > 1e-12 { avg_win / avg_loss.abs() } else { 0.0 };
+    let payoff_ratio = if avg_loss.abs() > 1e-12
+    {
+        avg_win / avg_loss.abs()
+    }
+    else
+    {
+        0.0
+    };
     TradeStats {
         num_trades,
         num_wins,
@@ -606,7 +643,11 @@ mod tests {
         assert_eq!(s.num_wins, 1);
         assert_eq!(s.num_losses, 1);
         // expectancy = 0.25*100 − 0.25*50 = 12.5
-        assert!(approx(s.expectancy, 12.5, 1e-3), "expectancy {}", s.expectancy);
+        assert!(
+            approx(s.expectancy, 12.5, 1e-3),
+            "expectancy {}",
+            s.expectancy
+        );
     }
 
     #[test]

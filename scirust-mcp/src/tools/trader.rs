@@ -26,6 +26,8 @@
 //! * `trader_portfolio`           — account state: PnL, equity, exposure, liq price
 //! * `trader_rebalance`           — trades to reach target portfolio weights
 //! * `trader_dashboard`           — self-contained HTML report (scan + backtest)
+//! * `trader_walkforward`         — out-of-sample consistency across time windows
+//! * `trader_monte_carlo`         — bootstrap equity bands + probability of ruin
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -50,6 +52,7 @@ use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::patterns::detect_patterns;
 use scirust_trader::portfolio::{Account, Position, liquidation_price, rebalance_to_weights};
+use scirust_trader::robustness::{monte_carlo, walk_forward};
 use scirust_trader::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
 use scirust_trader::strategy::{STRATEGY_NAMES, strategy_from_spec};
 
@@ -73,6 +76,8 @@ pub fn trader_tools() -> Vec<McpTool> {
         portfolio_tool(),
         rebalance_tool(),
         dashboard_tool(),
+        walkforward_tool(),
+        monte_carlo_tool(),
     ]
 }
 
@@ -1364,6 +1369,102 @@ fn dashboard_tool() -> McpTool {
     }
 }
 
+fn walkforward_tool() -> McpTool {
+    McpTool {
+        name: "trader_walkforward".to_string(),
+        description: "Walk-forward robustness check: split an OHLCV history into N sequential \
+            windows and backtest the strategy on each independently. A real edge persists across \
+            windows; an overfit one shows up as one lucky window among losers. Returns per-window \
+            return/Sharpe/drawdown plus the CONSISTENCY (fraction of profitable windows) — use it \
+            to distinguish a durable strategy from a curve-fit fluke before trusting a scan result."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "ohlcv": { "type": "array" },
+                "strategy": { "type": "string" },
+                "params": { "type": "object" },
+                "windows": { "type": "integer", "description": "number of sequential segments (default 5)" },
+                "symbol": { "type": "string" },
+                "interval": { "type": "string" },
+                "capital": { "type": "number" },
+                "fraction": { "type": "number" },
+                "allow_short": { "type": "boolean" }
+            },
+            "required": ["ohlcv", "strategy"]
+        }),
+        handler: Box::new(|args| {
+            let candles = ohlcv_arg(&args)?;
+            let name = s(&args, "strategy", "sma_cross");
+            let symbol = s(&args, "symbol", "BTC/USDT");
+            let interval = s(&args, "interval", "1h");
+            let strat = strategy_from_spec(&name, &params_map(&args))
+                .ok_or_else(|| format!("unknown strategy `{name}`"))?;
+            let cfg = build_backtest_cfg(&args, &symbol, &interval);
+            let windows = u(&args, "windows", 5);
+            let report = walk_forward(strat.as_ref(), &candles, windows, &cfg);
+            Ok(to_value(&report))
+        }),
+    }
+}
+
+fn monte_carlo_tool() -> McpTool {
+    McpTool {
+        name: "trader_monte_carlo".to_string(),
+        description: "Monte-Carlo risk of a strategy or a trade log. Bootstrap-resamples the closed \
+            trades (with replacement) into many equity paths and reports percentile bands on the \
+            final equity, the max-drawdown distribution, the probability of loss, and the \
+            probability of RUIN (equity touching a floor). Pass `trade_pnls` directly, or `ohlcv` + \
+            `strategy` to backtest first. Deterministic in `seed`."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "trade_pnls": { "type": "array", "description": "closed-trade net PnLs (else backtest ohlcv+strategy)" },
+                "ohlcv": { "type": "array" },
+                "strategy": { "type": "string" },
+                "params": { "type": "object" },
+                "interval": { "type": "string" },
+                "starting_equity": { "type": "number", "description": "default = backtest capital or 10000" },
+                "num_paths": { "type": "integer", "description": "default 2000" },
+                "ruin_threshold": { "type": "number", "description": "equity floor counted as ruin (default 0)" },
+                "seed": { "type": "integer", "description": "RNG seed (default 42)" }
+            }
+        }),
+        handler: Box::new(|args| {
+            // Trade PnLs: provided directly, or from a backtest of ohlcv+strategy.
+            let mut starting_equity = f(&args, "starting_equity", 10_000.0);
+            let pnls: Vec<f32> = if let Some(arr) = args.get("trade_pnls").and_then(|x| x.as_array())
+            {
+                arr.iter().filter_map(|v| v.as_f64().map(|y| y as f32)).collect()
+            }
+            else
+            {
+                let candles = ohlcv_arg(&args)?;
+                let name = s(&args, "strategy", "sma_cross");
+                let interval = s(&args, "interval", "1h");
+                let strat = strategy_from_spec(&name, &params_map(&args))
+                    .ok_or_else(|| format!("unknown strategy `{name}`"))?;
+                let cfg = build_backtest_cfg(&args, "BTC/USDT", &interval);
+                if args.get("starting_equity").is_none()
+                {
+                    starting_equity = cfg.starting_cash;
+                }
+                let report = run_backtest(strat.as_ref(), &candles, &cfg);
+                report.trades.iter().map(|t| t.net_pnl).collect()
+            };
+            let paths = u(&args, "num_paths", 2000);
+            let ruin = f(&args, "ruin_threshold", 0.0);
+            let seed = args.get("seed").and_then(|x| x.as_u64()).unwrap_or(42);
+            match monte_carlo(&pnls, starting_equity, paths, ruin, seed)
+            {
+                Some(report) => Ok(to_value(&report)),
+                None => Err("no trades to simulate (empty trade log)".to_string()),
+            }
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1393,7 +1494,46 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 17);
+        assert!(before >= 19);
+    }
+
+    #[test]
+    fn walkforward_reports_windows() {
+        let t = tool("trader_walkforward");
+        let out = (t.handler)(json!({
+            "ohlcv": mock_ohlcv(400), "strategy": "sma_cross", "windows": 4
+        }))
+        .unwrap();
+        assert_eq!(out["num_windows"], json!(4));
+        assert!(out["consistency"].is_number());
+        assert!(out["windows"].as_array().unwrap().len() == 4);
+    }
+
+    #[test]
+    fn monte_carlo_from_trade_pnls() {
+        let t = tool("trader_monte_carlo");
+        let out = (t.handler)(json!({
+            "trade_pnls": [100.0, -50.0, 200.0, -30.0, 80.0],
+            "starting_equity": 10000.0,
+            "num_paths": 1000,
+            "seed": 7
+        }))
+        .unwrap();
+        assert!(out["median_final"].is_number());
+        assert!(out["prob_ruin"].as_f64().unwrap() >= 0.0);
+        // p5 <= median <= p95
+        assert!(out["p5_final"].as_f64().unwrap() <= out["median_final"].as_f64().unwrap());
+        assert!(out["median_final"].as_f64().unwrap() <= out["p95_final"].as_f64().unwrap());
+    }
+
+    #[test]
+    fn monte_carlo_from_backtest() {
+        let t = tool("trader_monte_carlo");
+        let out = (t.handler)(json!({
+            "ohlcv": mock_ohlcv(200), "strategy": "sma_cross", "num_paths": 500
+        }));
+        // Either a report (if trades occurred) or a clean "no trades" error.
+        assert!(out.is_ok() || out.unwrap_err().contains("no trades"));
     }
 
     #[test]

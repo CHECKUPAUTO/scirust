@@ -132,7 +132,7 @@ pub fn liquidation_price(entry: f32, leverage: f32, mmr: f32, side: Side) -> f32
     let imr = if leverage > 0.0 { 1.0 / leverage } else { 1.0 };
     match side
     {
-        Side::Buy => entry * (1.0 - imr + mmr), // long
+        Side::Buy => entry * (1.0 - imr + mmr),  // long
         Side::Sell => entry * (1.0 + imr - mmr), // short
     }
 }

@@ -123,7 +123,14 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
         else if g.body >= 0.9 * g.range
         {
             out.push(Pattern {
-                kind: if g.bull { PatternKind::BullishMarubozu } else { PatternKind::BearishMarubozu },
+                kind: if g.bull
+                {
+                    PatternKind::BullishMarubozu
+                }
+                else
+                {
+                    PatternKind::BearishMarubozu
+                },
                 index: i,
                 bullish: g.bull,
                 strength: (g.body / g.range).clamp(0.0, 1.0),
@@ -189,11 +196,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
         {
             let p = geom(&candles[i - 1]);
             // Bullish engulfing: prev bearish, curr bullish, curr body covers prev.
-            if !p.bull
-                && g.bull
-                && g.close >= p.open
-                && g.open <= p.close
-                && g.body > p.body
+            if !p.bull && g.bull && g.close >= p.open && g.open <= p.close && g.body > p.body
             {
                 out.push(Pattern {
                     kind: PatternKind::BullishEngulfing,
@@ -203,11 +206,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
                 });
             }
             // Bearish engulfing: prev bullish, curr bearish, curr body covers prev.
-            if p.bull
-                && !g.bull
-                && g.open >= p.close
-                && g.close <= p.open
-                && g.body > p.body
+            if p.bull && !g.bull && g.open >= p.close && g.close <= p.open && g.body > p.body
             {
                 out.push(Pattern {
                     kind: PatternKind::BearishEngulfing,
@@ -219,11 +218,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
             // Piercing line: prev bearish, curr bullish opening below prev low,
             // closing above the midpoint of the prev body.
             let prev_mid = (p.open + p.close) / 2.0;
-            if !p.bull
-                && g.bull
-                && g.open < p.close
-                && g.close > prev_mid
-                && g.close < p.open
+            if !p.bull && g.bull && g.open < p.close && g.close > prev_mid && g.close < p.open
             {
                 out.push(Pattern {
                     kind: PatternKind::PiercingLine,
@@ -233,11 +228,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
                 });
             }
             // Dark cloud cover: mirror of piercing line.
-            if p.bull
-                && !g.bull
-                && g.open > p.close
-                && g.close < prev_mid
-                && g.close > p.open
+            if p.bull && !g.bull && g.open > p.close && g.close < prev_mid && g.close > p.open
             {
                 out.push(Pattern {
                     kind: PatternKind::DarkCloudCover,
@@ -256,11 +247,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
             let mid_a = (a.open + a.close) / 2.0;
             // Morning star: big bearish, small-bodied star, big bullish closing
             // back above the midpoint of the first candle.
-            if !a.bull
-                && b.body <= 0.5 * a.body
-                && g.bull
-                && g.close > mid_a
-                && a.body > 1e-9
+            if !a.bull && b.body <= 0.5 * a.body && g.bull && g.close > mid_a && a.body > 1e-9
             {
                 out.push(Pattern {
                     kind: PatternKind::MorningStar,
@@ -270,11 +257,7 @@ pub fn detect_patterns_with(candles: &[Candle], trend_lookback: usize) -> Vec<Pa
                 });
             }
             // Evening star: mirror.
-            if a.bull
-                && b.body <= 0.5 * a.body
-                && !g.bull
-                && g.close < mid_a
-                && a.body > 1e-9
+            if a.bull && b.body <= 0.5 * a.body && !g.bull && g.close < mid_a && a.body > 1e-9
             {
                 out.push(Pattern {
                     kind: PatternKind::EveningStar,
@@ -396,11 +379,23 @@ mod tests {
     #[test]
     fn hammer_after_downtrend() {
         // Preceding downtrend, then a hammer (small body top, long lower shadow).
-        let mut candles: Vec<Candle> = (0..5).map(|i| c(110.0 - i as f32 * 2.0, 111.0 - i as f32 * 2.0, 108.0 - i as f32 * 2.0, 109.0 - i as f32 * 2.0)).collect();
+        let mut candles: Vec<Candle> = (0..5)
+            .map(|i| {
+                c(
+                    110.0 - i as f32 * 2.0,
+                    111.0 - i as f32 * 2.0,
+                    108.0 - i as f32 * 2.0,
+                    109.0 - i as f32 * 2.0,
+                )
+            })
+            .collect();
         // Hammer: open 100, close 100.5, low 95 (long lower), high 100.8 (small upper).
         candles.push(c(100.0, 100.8, 95.0, 100.5));
         let pats = detect_patterns(&candles);
-        assert!(pats.iter().any(|p| p.kind == PatternKind::Hammer && p.bullish));
+        assert!(
+            pats.iter()
+                .any(|p| p.kind == PatternKind::Hammer && p.bullish)
+        );
     }
 
     #[test]
@@ -410,7 +405,10 @@ mod tests {
             c(98.0, 102.0, 97.5, 101.5), // bullish, engulfs
         ];
         let pats = detect_patterns(&candles);
-        assert!(pats.iter().any(|p| p.kind == PatternKind::BullishEngulfing && p.bullish));
+        assert!(
+            pats.iter()
+                .any(|p| p.kind == PatternKind::BullishEngulfing && p.bullish)
+        );
     }
 
     #[test]
@@ -420,7 +418,10 @@ mod tests {
             c(102.0, 102.5, 99.0, 99.5),  // bearish engulfs
         ];
         let pats = detect_patterns(&candles);
-        assert!(pats.iter().any(|p| p.kind == PatternKind::BearishEngulfing && !p.bullish));
+        assert!(
+            pats.iter()
+                .any(|p| p.kind == PatternKind::BearishEngulfing && !p.bullish)
+        );
     }
 
     #[test]
@@ -431,7 +432,10 @@ mod tests {
             c(104.5, 109.0, 104.2, 108.5), // big bullish above midpoint of first (107.25)
         ];
         let pats = detect_patterns(&candles);
-        assert!(pats.iter().any(|p| p.kind == PatternKind::MorningStar && p.bullish));
+        assert!(
+            pats.iter()
+                .any(|p| p.kind == PatternKind::MorningStar && p.bullish)
+        );
     }
 
     #[test]
@@ -442,15 +446,15 @@ mod tests {
             c(104.0, 107.0, 103.5, 106.5),
         ];
         let pats = detect_patterns(&candles);
-        assert!(pats.iter().any(|p| p.kind == PatternKind::ThreeWhiteSoldiers));
+        assert!(
+            pats.iter()
+                .any(|p| p.kind == PatternKind::ThreeWhiteSoldiers)
+        );
     }
 
     #[test]
     fn latest_only_returns_last_index() {
-        let candles = vec![
-            c(100.0, 100.5, 98.0, 98.5),
-            c(98.0, 102.0, 97.5, 101.5),
-        ];
+        let candles = vec![c(100.0, 100.5, 98.0, 98.5), c(98.0, 102.0, 97.5, 101.5)];
         let latest = latest_patterns(&candles);
         assert!(latest.iter().all(|p| p.index == 1));
     }

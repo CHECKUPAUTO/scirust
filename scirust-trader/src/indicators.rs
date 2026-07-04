@@ -534,7 +534,13 @@ pub fn obv(closes: &[f32], volumes: &[f32]) -> Vec<f32> {
 // `i` indexes the output *and* bounds the trailing money-flow window, so the
 // range loop is not needless here.
 #[allow(clippy::needless_range_loop)]
-pub fn mfi(highs: &[f32], lows: &[f32], closes: &[f32], volumes: &[f32], period: usize) -> Vec<f32> {
+pub fn mfi(
+    highs: &[f32],
+    lows: &[f32],
+    closes: &[f32],
+    volumes: &[f32],
+    period: usize,
+) -> Vec<f32> {
     let n = closes.len();
     let tp = typical_price(highs, lows, closes);
     let mut out = vec![f32::NAN; n];
@@ -576,7 +582,13 @@ pub fn mfi(highs: &[f32], lows: &[f32], closes: &[f32], volumes: &[f32], period:
 }
 
 /// Rolling VWAP over `period`: `Σ(TP·vol) / Σ(vol)` in the window.
-pub fn vwap(highs: &[f32], lows: &[f32], closes: &[f32], volumes: &[f32], period: usize) -> Vec<f32> {
+pub fn vwap(
+    highs: &[f32],
+    lows: &[f32],
+    closes: &[f32],
+    volumes: &[f32],
+    period: usize,
+) -> Vec<f32> {
     let n = closes.len();
     let tp = typical_price(highs, lows, closes);
     let mut out = vec![f32::NAN; n];
@@ -630,7 +642,14 @@ pub fn chaikin_money_flow(
     {
         let mfv_sum: f32 = mfv[i + 1 - period..=i].iter().sum();
         let vol_sum: f32 = volumes[i + 1 - period..=i].iter().sum();
-        out[i] = if vol_sum > 1e-12 { mfv_sum / vol_sum } else { 0.0 };
+        out[i] = if vol_sum > 1e-12
+        {
+            mfv_sum / vol_sum
+        }
+        else
+        {
+            0.0
+        };
     }
     out
 }
@@ -701,7 +720,14 @@ pub fn dmi(highs: &[f32], lows: &[f32], closes: &[f32], period: usize) -> DmiSet
         plus_di[i] = pdi;
         minus_di[i] = mdi;
         let sum = pdi + mdi;
-        dx[i] = if sum > 1e-12 { 100.0 * (pdi - mdi).abs() / sum } else { 0.0 };
+        dx[i] = if sum > 1e-12
+        {
+            100.0 * (pdi - mdi).abs() / sum
+        }
+        else
+        {
+            0.0
+        };
     }
     // ADX = Wilder-smoothed DX. First ADX at index 2*period-1 = mean of the
     // first `period` DX values (indices period..2*period-1).
@@ -852,7 +878,14 @@ pub fn supertrend(
         {
             -1
         };
-        line[i] = if direction[i] == 1 { final_lower[i] } else { final_upper[i] };
+        line[i] = if direction[i] == 1
+        {
+            final_lower[i]
+        }
+        else
+        {
+            final_upper[i]
+        };
     }
     Supertrend { line, direction }
 }
@@ -888,7 +921,9 @@ mod tests_ext {
 
     #[test]
     fn stochastic_bounds() {
-        let highs: Vec<f32> = (0..30).map(|i| 100.0 + (i as f32 * 0.5).sin() * 5.0 + 5.0).collect();
+        let highs: Vec<f32> = (0..30)
+            .map(|i| 100.0 + (i as f32 * 0.5).sin() * 5.0 + 5.0)
+            .collect();
         let lows: Vec<f32> = highs.iter().map(|h| h - 10.0).collect();
         let closes: Vec<f32> = highs.iter().map(|h| h - 5.0).collect();
         let (k, d) = stochastic(&highs, &lows, &closes, 14, 3);
@@ -924,7 +959,9 @@ mod tests_ext {
 
     #[test]
     fn mfi_in_range() {
-        let highs: Vec<f32> = (0..30).map(|i| 100.0 + (i as f32 * 0.3).sin() * 4.0).collect();
+        let highs: Vec<f32> = (0..30)
+            .map(|i| 100.0 + (i as f32 * 0.3).sin() * 4.0)
+            .collect();
         let lows: Vec<f32> = highs.iter().map(|h| h - 5.0).collect();
         let closes: Vec<f32> = highs.iter().map(|h| h - 2.0).collect();
         let vols: Vec<f32> = (0..30).map(|i| 1000.0 + i as f32 * 10.0).collect();
@@ -965,14 +1002,19 @@ mod tests_ext {
         let closes: Vec<f32> = highs.iter().map(|h| h - 0.5).collect();
         let set = dmi(&highs, &lows, &closes, 14);
         let last = 59;
-        assert!(set.plus_di[last] > set.minus_di[last], "uptrend: +DI should lead");
+        assert!(
+            set.plus_di[last] > set.minus_di[last],
+            "uptrend: +DI should lead"
+        );
         assert!(set.adx[last].is_finite());
         assert!((0.0..=100.0).contains(&set.adx[last]), "ADX out of range");
     }
 
     #[test]
     fn donchian_brackets_price() {
-        let highs: Vec<f32> = (0..30).map(|i| 100.0 + (i as f32 * 0.4).sin() * 6.0).collect();
+        let highs: Vec<f32> = (0..30)
+            .map(|i| 100.0 + (i as f32 * 0.4).sin() * 6.0)
+            .collect();
         let lows: Vec<f32> = highs.iter().map(|h| h - 4.0).collect();
         let ch = donchian(&highs, &lows, 20);
         for i in 19..30
@@ -984,7 +1026,9 @@ mod tests_ext {
 
     #[test]
     fn keltner_bands_surround_mid() {
-        let highs: Vec<f32> = (0..40).map(|i| 100.0 + (i as f32 * 0.2).sin() * 3.0 + 2.0).collect();
+        let highs: Vec<f32> = (0..40)
+            .map(|i| 100.0 + (i as f32 * 0.2).sin() * 3.0 + 2.0)
+            .collect();
         let lows: Vec<f32> = highs.iter().map(|h| h - 4.0).collect();
         let closes: Vec<f32> = highs.iter().map(|h| h - 2.0).collect();
         let ch = keltner(&highs, &lows, &closes, 20, 2.0);
@@ -1128,7 +1172,11 @@ mod tests {
         let lows: Vec<f32> = highs.iter().map(|h| h - 2.0).collect();
         let closes: Vec<f32> = highs.iter().map(|h| h - 1.0).collect();
         let a = atr(&highs, &lows, &closes, 14);
-        assert!(a[13].is_finite() && a[13] > 0.0, "seed ATR at index 13 must be finite, got {}", a[13]);
+        assert!(
+            a[13].is_finite() && a[13] > 0.0,
+            "seed ATR at index 13 must be finite, got {}",
+            a[13]
+        );
         // period == 0 must return all-NaN, not panic.
         let z = atr(&highs, &lows, &closes, 0);
         assert!(z.iter().all(|v| v.is_nan()));

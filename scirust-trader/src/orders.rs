@@ -123,7 +123,14 @@ impl Default for FeeSchedule {
 impl FeeSchedule {
     /// Fee charged on a fill of `notional` (= price·qty), in quote currency.
     pub fn fee(&self, notional: f32, taker: bool) -> f32 {
-        let bps = if taker { self.taker_bps } else { self.maker_bps };
+        let bps = if taker
+        {
+            self.taker_bps
+        }
+        else
+        {
+            self.maker_bps
+        };
         notional.abs() * bps / 10_000.0
     }
 }
@@ -513,8 +520,13 @@ mod tests {
     #[test]
     fn market_fills_at_open_with_slippage() {
         let o = Order::market(1, "BTC", Side::Buy, 1.0);
-        let f = simulate_fill(&o, &candle(100.0, 101.0, 99.0, 100.5), &Default::default(), &Default::default())
-            .unwrap();
+        let f = simulate_fill(
+            &o,
+            &candle(100.0, 101.0, 99.0, 100.5),
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(f.taker);
         assert!(f.price >= 100.0); // open + slippage
         assert_eq!(f.qty, 1.0);
@@ -524,11 +536,21 @@ mod tests {
     fn limit_buy_fills_only_if_low_touches() {
         let o = Order::limit(1, "BTC", Side::Buy, 1.0, 99.5);
         // Bar dips to 99 -> fills at min(open, limit)=99.5
-        let f = simulate_fill(&o, &candle(100.0, 100.5, 99.0, 100.0), &Default::default(), &Default::default());
+        let f = simulate_fill(
+            &o,
+            &candle(100.0, 100.5, 99.0, 100.0),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(f.is_some());
         assert!((f.unwrap().price - 99.5).abs() < 1e-4);
         // Bar never dips to 99.5 -> no fill.
-        let none = simulate_fill(&o, &candle(100.0, 101.0, 99.6, 100.5), &Default::default(), &Default::default());
+        let none = simulate_fill(
+            &o,
+            &candle(100.0, 101.0, 99.6, 100.5),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(none.is_none());
     }
 
@@ -537,10 +559,24 @@ mod tests {
         // Open already below the limit -> the limit is marketable on arrival, so
         // it fills at the open as a TAKER (removes liquidity). With no slippage
         // the fill is exactly the open; the limit clamp keeps it at/under 99.5.
-        let no_slip = SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 };
+        let no_slip = SlippageModel {
+            base_bps: 0.0,
+            impact_bps: 0.0,
+            ref_liquidity: 1.0,
+        };
         let o = Order::limit(1, "BTC", Side::Buy, 1.0, 99.5);
-        let f = simulate_fill(&o, &candle(99.0, 99.8, 98.0, 99.2), &Default::default(), &no_slip).unwrap();
-        assert!((f.price - 99.0).abs() < 1e-4, "gap fill at open, got {}", f.price);
+        let f = simulate_fill(
+            &o,
+            &candle(99.0, 99.8, 98.0, 99.2),
+            &Default::default(),
+            &no_slip,
+        )
+        .unwrap();
+        assert!(
+            (f.price - 99.0).abs() < 1e-4,
+            "gap fill at open, got {}",
+            f.price
+        );
         assert!(f.taker, "a limit that crosses on arrival is a taker");
         assert!(f.price <= 99.5 + 1e-6, "fill must never exceed the limit");
     }
@@ -550,8 +586,13 @@ mod tests {
         // Open above the limit -> the buy limit rests and is only hit intrabar,
         // so it is a maker with no slippage.
         let o = Order::limit(1, "BTC", Side::Buy, 1.0, 99.5);
-        let f = simulate_fill(&o, &candle(100.0, 100.5, 99.0, 100.0), &Default::default(), &Default::default())
-            .unwrap();
+        let f = simulate_fill(
+            &o,
+            &candle(100.0, 100.5, 99.0, 100.0),
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(!f.taker, "a resting limit is a maker");
         assert!((f.price - 99.5).abs() < 1e-4);
     }
@@ -559,7 +600,12 @@ mod tests {
     #[test]
     fn limit_sell_fills_if_high_reaches() {
         let o = Order::limit(1, "BTC", Side::Sell, 1.0, 101.0);
-        let f = simulate_fill(&o, &candle(100.0, 101.5, 99.5, 100.5), &Default::default(), &Default::default());
+        let f = simulate_fill(
+            &o,
+            &candle(100.0, 101.5, 99.5, 100.5),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(f.is_some());
         assert!((f.unwrap().price - 101.0).abs() < 1e-4);
     }
@@ -568,21 +614,42 @@ mod tests {
     fn post_only_rejected_when_crossing() {
         // Buy limit at 101 with open 100 -> would cross immediately -> reject.
         let o = Order::limit(1, "BTC", Side::Buy, 1.0, 101.0).post_only();
-        let none = simulate_fill(&o, &candle(100.0, 102.0, 99.0, 100.0), &Default::default(), &Default::default());
+        let none = simulate_fill(
+            &o,
+            &candle(100.0, 102.0, 99.0, 100.0),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(none.is_none());
     }
 
     #[test]
     fn stop_buy_triggers_on_high() {
-        let o = Order::new(1, "BTC", Side::Buy, OrderType::StopMarket { stop: 105.0 }, 1.0);
+        let o = Order::new(
+            1,
+            "BTC",
+            Side::Buy,
+            OrderType::StopMarket { stop: 105.0 },
+            1.0,
+        );
         // High reaches 106 -> triggers, fills at max(open, stop)=105 + slippage.
-        let f = simulate_fill(&o, &candle(102.0, 106.0, 101.0, 105.5), &Default::default(), &Default::default());
+        let f = simulate_fill(
+            &o,
+            &candle(102.0, 106.0, 101.0, 105.5),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(f.is_some());
         let fill = f.unwrap();
         assert!(fill.taker);
         assert!(fill.price >= 105.0);
         // High never reaches stop -> no trigger.
-        let none = simulate_fill(&o, &candle(102.0, 104.0, 101.0, 103.0), &Default::default(), &Default::default());
+        let none = simulate_fill(
+            &o,
+            &candle(102.0, 104.0, 101.0, 103.0),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(none.is_none());
     }
 
@@ -592,11 +659,19 @@ mod tests {
             1,
             "BTC",
             Side::Sell,
-            OrderType::StopLimit { stop: 95.0, limit: 94.0 },
+            OrderType::StopLimit {
+                stop: 95.0,
+                limit: 94.0,
+            },
             1.0,
         );
         // Low hits 93 (<=95 trigger) and <=94 limit -> fills at max(open, limit).
-        let f = simulate_fill(&o, &candle(96.0, 96.5, 93.0, 94.5), &Default::default(), &Default::default());
+        let f = simulate_fill(
+            &o,
+            &candle(96.0, 96.5, 93.0, 94.5),
+            &Default::default(),
+            &Default::default(),
+        );
         assert!(f.is_some());
         assert!((f.unwrap().price - 94.0).abs() < 1e-4);
     }
@@ -617,16 +692,34 @@ mod tests {
     #[test]
     fn apply_fill_updates_average_and_status() {
         let mut o = Order::market(1, "BTC", Side::Buy, 2.0);
-        o.apply_fill(&Fill { price: 100.0, qty: 1.0, fee: 0.1, taker: true, ts_ms: 1 });
+        o.apply_fill(&Fill {
+            price: 100.0,
+            qty: 1.0,
+            fee: 0.1,
+            taker: true,
+            ts_ms: 1,
+        });
         assert_eq!(o.status, OrderStatus::PartiallyFilled);
-        o.apply_fill(&Fill { price: 102.0, qty: 1.0, fee: 0.1, taker: true, ts_ms: 2 });
+        o.apply_fill(&Fill {
+            price: 102.0,
+            qty: 1.0,
+            fee: 0.1,
+            taker: true,
+            ts_ms: 2,
+        });
         assert_eq!(o.status, OrderStatus::Filled);
         assert!((o.avg_fill_price - 101.0).abs() < 1e-4);
     }
 
     #[test]
     fn fill_cash_flow_signs() {
-        let f = Fill { price: 100.0, qty: 1.0, fee: 0.5, taker: true, ts_ms: 1 };
+        let f = Fill {
+            price: 100.0,
+            qty: 1.0,
+            fee: 0.5,
+            taker: true,
+            ts_ms: 1,
+        };
         // Buying: spend 100 + 0.5 fee = -100.5
         assert!((f.cash_flow(Side::Buy) - (-100.5)).abs() < 1e-4);
         // Selling: receive 100 - 0.5 fee = +99.5
