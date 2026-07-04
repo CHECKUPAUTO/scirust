@@ -121,6 +121,7 @@ fn param_ty(t: Ty) -> &'static str {
         Ty::Int => "usize",
         Ty::Bool => "bool",
         Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
+        Ty::MatrixVal => "scirust_solvers::Matrix",
     }
 }
 
@@ -129,6 +130,7 @@ fn ret_ty(t: Ty) -> &'static str {
     {
         Ty::Array => "Vec<f64>",
         Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
+        Ty::MatrixVal => "scirust_solvers::Matrix",
         _ => "f64",
     }
 }
@@ -156,6 +158,10 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
                     "{}let mut {}: Vec<scirust_signal::complex::Complex> = {};\n",
                     pad, name, v.code
                 )),
+                Ty::MatrixVal => out.push_str(&format!(
+                    "{}let mut {}: scirust_solvers::Matrix = {};\n",
+                    pad, name, v.code
+                )),
                 _ => out.push_str(&format!(
                     "{}let mut {}: f64 = {};\n",
                     pad,
@@ -170,7 +176,10 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
             match v.ty
             {
                 Ty::Array => out.push_str(&format!("{}{} = {};\n", pad, name, owned_array(v))),
-                Ty::ComplexArray => out.push_str(&format!("{}{} = {};\n", pad, name, v.code)),
+                Ty::ComplexArray | Ty::MatrixVal =>
+                {
+                    out.push_str(&format!("{}{} = {};\n", pad, name, v.code))
+                },
                 _ => out.push_str(&format!("{}{} = {};\n", pad, name, scalar_of(v))),
             }
         },
@@ -243,7 +252,10 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
             match v.ty
             {
                 Ty::Array => out.push_str(&format!("{}return {};\n", pad, owned_array(v))),
-                Ty::ComplexArray => out.push_str(&format!("{}return {};\n", pad, v.code)),
+                Ty::ComplexArray | Ty::MatrixVal =>
+                {
+                    out.push_str(&format!("{}return {};\n", pad, v.code))
+                },
                 _ => out.push_str(&format!("{}return {};\n", pad, scalar_of(v))),
             }
         },
@@ -544,6 +556,23 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code,
                 ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Inv(a) =>
+        {
+            // Matrix inverse routed to the verified kernel; A is flat row-major,
+            // n = isqrt(A.len()). Returns a `Matrix` value (carries its shape).
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let __a: &[f64] = {amat}; let __n = (__a.len() as f64).sqrt() as usize; \
+                 scirust_solvers::Matrix::from_row_major(__n, __n, __a.to_vec())\
+                 .inverse().expect(\"scirust-transpiler: matrix inverse failed (singular?)\") }}",
+                amat = slice_of(&a),
+            );
+            Frag {
+                code,
+                ty: Ty::MatrixVal,
                 borrowed: false,
             }
         },

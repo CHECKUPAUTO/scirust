@@ -271,6 +271,17 @@ mod tests {
     }
 
     #[test]
+    fn linalg_inv_returns_a_matrix_value() {
+        let src = "def inv(A):\n    return np.linalg.inv(A)\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn inv(A: &[f64]) -> scirust_solvers::Matrix"));
+        assert!(rust.contains(".inverse()"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

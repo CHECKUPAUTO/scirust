@@ -223,6 +223,14 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        // Routing (Phase 1): np.linalg.inv -> scirust-solvers. Returns a MATRIX
+        // (flattened row-major vs numpy.linalg.inv).
+        Case {
+            name: "linalg.inv -> scirust-solvers (matrix out)",
+            call: "inv",
+            src: "def inv(A):\n    return np.linalg.inv(A)\n",
+            args: vec![Matrix { n: 4 }],
+        },
         // Routing (Phase 1): np.linalg.det -> scirust-solvers (LU determinant).
         // A is a 4×4 diagonally-dominant matrix; compare the scalar determinant.
         Case {
@@ -527,6 +535,11 @@ fn run_rust_batch(
         Ty::ComplexArray =>
         {
             "for c in r.iter() { print!(\"{:.17e} {:.17e} \", c.re, c.im); } println!();"
+        },
+        // A produced matrix: flatten row-major (Python side ravels the same way).
+        Ty::MatrixVal =>
+        {
+            "for __i in 0..r.rows() { for __v in r.row(__i).iter() { print!(\"{:.17e} \", __v); } } println!();"
         },
         _ => "println!(\"{:.17e}\", r);",
     };
