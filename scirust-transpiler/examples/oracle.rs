@@ -211,6 +211,50 @@ fn cases() -> Vec<Case> {
             src: "def det(A):\n    return np.linalg.det(A)\n",
             args: vec![Matrix { n: 4 }],
         },
+        // ---- intrinsic coverage: every supported math intrinsic & operator ----
+        // sin, cos, abs (scalar).
+        Case {
+            name: "sin/cos/abs (scalar)",
+            call: "trig",
+            src: "def trig(x):\n    return np.sin(x) + np.cos(x) + np.abs(x)\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // exp (scalar).
+        Case {
+            name: "exp (scalar)",
+            call: "es",
+            src: "def es(x):\n    return np.exp(x)\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
+        // ** power operator (integer and via powf path).
+        Case {
+            name: "power ** (poly)",
+            call: "poly",
+            src: "def poly(x):\n    return x ** 3 - 2.0 * x ** 2 + 1.0\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
+        // np.ones + len, array return.
+        Case {
+            name: "ones + len (array out)",
+            call: "ov",
+            src: "def ov(x: np.ndarray):\n    return np.ones(len(x))\n",
+            args: vec![Array {
+                n: 5,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // elementwise exp over an array (ArrayUnaryFn path).
+        Case {
+            name: "exp (elementwise array)",
+            call: "ea",
+            src: "def ea(x: np.ndarray):\n    return np.exp(x)\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
     ]
 }
 
