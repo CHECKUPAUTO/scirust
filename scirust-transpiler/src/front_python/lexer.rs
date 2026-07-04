@@ -148,7 +148,7 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
                     i += 1;
                 }
             },
-            '+' | '-' | '/' | ',' | ':' | '.' =>
+            '+' | '-' | '/' | ',' | ':' | '.' | '@' =>
             {
                 toks.push(Tok::Sym(c.to_string()));
                 i += 1;

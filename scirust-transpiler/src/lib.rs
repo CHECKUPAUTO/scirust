@@ -260,6 +260,17 @@ mod tests {
     }
 
     #[test]
+    fn matmul_operator_routes_to_matvec() {
+        let src = "def mv(A, b):\n    return A @ b\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn mv(A: &[f64], b: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains(".matvec(__b)"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

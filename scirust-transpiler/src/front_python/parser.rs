@@ -427,6 +427,10 @@ impl<'a> Parser<'a> {
             {
                 BinOp::Div
             }
+            else if self.is_sym("@")
+            {
+                BinOp::MatMul
+            }
             else
             {
                 break;

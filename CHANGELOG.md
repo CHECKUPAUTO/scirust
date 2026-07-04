@@ -5,6 +5,14 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : opérateur `@` (produit matrice-vecteur) (Phase 1, incrément 8)
+Ajoute l'opérateur `@` (matmul) au front-end. `A @ b` (matrice × vecteur)
+transpile vers `scirust_solvers::Matrix::matvec` (produit matrice-vecteur
+vérifié). `SirExpr::Matvec` ajouté ; lexer/parser étendus (`BinOp::MatMul` au
+niveau de `*`) ; inférence : l'opérande gauche de `@` est une matrice, l'opérande
+droit un vecteur. Nouveau cas d'oracle `A @ b` vs `numpy`. **Oracle 25/25** (200
+essais chacun) ; 22 tests unitaires.
+
 ### Ajouté — transpileur : famille FFT `rfft`/`ifft` (Phase 1, incrément 7)
 Complète la famille FFT en réutilisant le type complexe. `np.fft.rfft(x)` (FFT
 réelle, demi-spectre `N/2+1`) → `scirust_signal::fft::fft_real` ; `np.fft.ifft(c)`

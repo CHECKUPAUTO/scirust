@@ -209,6 +209,20 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        // Routing (Phase 1): A @ b matrix-vector product -> scirust-solvers.
+        Case {
+            name: "matvec (A @ b) -> scirust-solvers",
+            call: "mv",
+            src: "def mv(A, b):\n    return A @ b\n",
+            args: vec![
+                Matrix { n: 5 },
+                Array {
+                    n: 5,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+            ],
+        },
         // Routing (Phase 1): np.linalg.det -> scirust-solvers (LU determinant).
         // A is a 4×4 diagonally-dominant matrix; compare the scalar determinant.
         Case {
