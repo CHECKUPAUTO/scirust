@@ -287,7 +287,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 22 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 24 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -352,6 +352,18 @@ empreintes de preuve), sans nouvelle dépendance.
   `trader_optimize` accepte une grille explicite `{param:[valeurs]}` ou des
   grilles par défaut par stratégie, cinq objectifs de classement, et borne le
   balayage (`max_combos`, échantillonnage régulier) — déterministe.
+- **Arbitrage statistique / pairs trading (`pairs.rs` + 2 outils MCP)** — trader
+  la *relation* entre deux actifs plutôt que la direction de l'un : marché-neutre
+  (long une jambe, short l'autre), rentable même dans un marché plat ou baissier.
+  Boîte à outils quant standard : **ratio de couverture** par MCO (β tel que
+  `A−βB` soit stationnaire), test de **cointégration** d'Engle-Granger (t-stat de
+  Dickey-Fuller sur le coefficient AR(1) de retour à la moyenne du spread),
+  **demi-vie** de retour à la moyenne (Ornstein-Uhlenbeck), exposant de Hurst du
+  spread (confirmation indépendante `H<0.5`), et **z-score** du spread pour le
+  signal (short le spread quand il est riche, long quand il est bon marché).
+  `trader_pair_analyze` analyse une paire (cointégration + couverture + signal +
+  verdict) ; `trader_pair_scan` teste toutes les paires d'un panier et classe les
+  plus tradables (spread le plus stationnaire en tête) — déterministe.
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
