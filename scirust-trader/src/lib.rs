@@ -46,6 +46,7 @@ pub mod patterns;
 pub mod portfolio;
 pub mod portfolio_opt;
 pub mod proof;
+pub mod regime;
 pub mod risk;
 pub mod robustness;
 pub mod scanner;
