@@ -59,7 +59,7 @@ mod wgpu_backend;
 
 #[cfg(feature = "wgpu")]
 pub use chain::{
-    BlockCache, BlockGrads, BlockWeights, GpuChain, GqaBlockGrads, GqaBlockWeights,
+    BlockCache, BlockGrads, BlockWeights, GpuChain, GqaBlockGrads, GqaBlockWeights, GqaModelGrads,
     GqaModelWeights, ModelWeights,
 };
 #[cfg(feature = "wgpu")]
