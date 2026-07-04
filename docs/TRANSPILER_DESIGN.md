@@ -309,11 +309,12 @@ C'est la brique qui transforme « transpileur » en « transpileur *de confiance
   **saxpy** (broadcast), **tanh** élémentaire. *Écart honnête vs le plan
   initial :* `np.linalg.solve` et `np.fft` ne sont **pas** encore livrés — ils
   exigent le routage vers `scirust-solvers`/`scirust-signal`, prévu en Phase 1.
-- **Phase 1 — Élargir Python + router vers les noyaux vérifiés.** Contrôle de
-  flux (`if`/`while`), fonctions multiples, tableaux 2-D, et surtout le
-  **routage `np.linalg.solve` → `scirust-solvers`, `np.fft` → `scirust-signal`**
-  (au lieu du prélude std-only) ; secteurs débloqués : robotique, finance,
-  imagerie.
+- **Phase 1 — Élargir Python + router vers les noyaux vérifiés.** ✅ **en cours,
+  déjà livré :** contrôle de flux `if`/`elif`/`else` + `while`, et le premier
+  **routage `np.linalg.solve` → `scirust-solvers`** (résolution LU vérifiée,
+  cas d'oracle compilé via cargo). ⏳ **reste :** `np.fft` → `scirust-signal`,
+  tableaux 2-D généraux, fonctions multiples. Secteurs débloqués par le
+  routage : robotique, finance, imagerie.
 - **Phase 2 — MATLAB.** Sous-ensemble matriciel + broadcasting ; secteurs :
   aéro, automobile, contrôle.
 - **Phase 3 — Fortran.** Routines numériques héritées ; secteurs : météo,
@@ -337,8 +338,9 @@ secteurs réellement débloqués.
 | Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (13 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Routage vers les noyaux `scirust-*` vérifiés | ⏳ Phase 1 | — |
-| Tableaux 2-D                                | ⏳ Phase 1 | — |
+| Routage `np.linalg.solve` → `scirust-solvers` (LU) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `required_crates`) + `emit.rs` |
+| Routage `np.fft` → `scirust-signal`         | ⏳ Phase 1 | — |
+| Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
 
 **Résultat de l'oracle (reproductible).**
@@ -349,7 +351,8 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
-  ORACLE GREEN — 12/12 cases match NumPy within tolerance
+  ✓ linalg.solve                   (routed to scirust-solvers, cargo-compiled — Phase 1)
+  ORACLE GREEN — 13/13 cases match NumPy within tolerance
 ```
 
 Vérification de non-vacuité : l'injection d'un opérateur faux dans l'émetteur

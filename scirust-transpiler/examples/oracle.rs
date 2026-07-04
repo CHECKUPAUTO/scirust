@@ -24,8 +24,20 @@ const TRIALS: usize = 200;
 
 #[derive(Clone)]
 enum ArgSpec {
-    Scalar { lo: f64, hi: f64 },
-    Array { n: usize, lo: f64, hi: f64 },
+    Scalar {
+        lo: f64,
+        hi: f64,
+    },
+    Array {
+        n: usize,
+        lo: f64,
+        hi: f64,
+    },
+    /// A square n×n matrix, generated strictly diagonally dominant so it is
+    /// well-conditioned and non-singular (a fair, stable input for a solver).
+    Matrix {
+        n: usize,
+    },
 }
 
 struct Case {
@@ -176,6 +188,21 @@ fn cases() -> Vec<Case> {
                 },
             ],
         },
+        // Routing (Phase 1): np.linalg.solve -> scirust-solvers LU solver.
+        // A is a 5×5 diagonally-dominant matrix; compare the solution vector.
+        Case {
+            name: "linalg.solve -> scirust-solvers",
+            call: "solve",
+            src: "def solve(A, b):\n    return np.linalg.solve(A, b)\n",
+            args: vec![
+                Matrix { n: 5 },
+                Array {
+                    n: 5,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+            ],
+        },
     ]
 }
 
@@ -204,6 +231,8 @@ fn lit(v: f64) -> String {
 enum Val {
     Scalar(f64),
     Array(Vec<f64>),
+    /// Row-major square matrix.
+    Matrix(Vec<Vec<f64>>),
 }
 
 fn gen_args(specs: &[ArgSpec], rng: &mut Rng) -> Vec<Val> {
@@ -216,11 +245,31 @@ fn gen_args(specs: &[ArgSpec], rng: &mut Rng) -> Vec<Val> {
             {
                 Val::Array((0..*n).map(|_| rng.uniform(*lo, *hi)).collect())
             },
+            ArgSpec::Matrix { n } =>
+            {
+                let n = *n;
+                let mut rows = Vec::with_capacity(n);
+                for i in 0..n
+                {
+                    let mut row: Vec<f64> = (0..n).map(|_| rng.uniform(-1.0, 1.0)).collect();
+                    // Strict diagonal dominance -> non-singular, well-conditioned.
+                    let off: f64 = row
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != i)
+                        .map(|(_, v)| v.abs())
+                        .sum();
+                    row[i] = off + rng.uniform(1.0, 2.0);
+                    rows.push(row);
+                }
+                Val::Matrix(rows)
+            },
         })
         .collect()
 }
 
 /// Flatten one trial's args to a single whitespace line (Rust reads this).
+/// Matrices are flattened row-major.
 fn flat_line(args: &[Val]) -> String {
     let mut parts = Vec::new();
     for a in args
@@ -229,6 +278,7 @@ fn flat_line(args: &[Val]) -> String {
         {
             Val::Scalar(x) => parts.push(lit(*x)),
             Val::Array(xs) => parts.extend(xs.iter().map(|x| lit(*x))),
+            Val::Matrix(rows) => parts.extend(rows.iter().flat_map(|r| r.iter().map(|x| lit(*x)))),
         }
     }
     parts.join(" ")
@@ -245,6 +295,19 @@ fn py_tuple(args: &[Val]) -> String {
                 "np.array([{}])",
                 xs.iter().map(|x| lit(*x)).collect::<Vec<_>>().join(", ")
             ),
+            Val::Matrix(rows) =>
+            {
+                let rs: Vec<String> = rows
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "[{}]",
+                            r.iter().map(|x| lit(*x)).collect::<Vec<_>>().join(", ")
+                        )
+                    })
+                    .collect();
+                format!("np.array([{}])", rs.join(", "))
+            },
         })
         .collect();
     format!("({},)", items.join(", "))
@@ -284,6 +347,13 @@ fn rust_bindings(specs: &[ArgSpec]) -> (String, String) {
                     "        let a{i} = &nums[off..off + {n}]; off += {n};\n"
                 ));
             },
+            ArgSpec::Matrix { n } =>
+            {
+                let nn = n * n;
+                binds.push_str(&format!(
+                    "        let a{i} = &nums[off..off + {nn}]; off += {nn};\n"
+                ));
+            },
         }
         call.push(format!("a{i}"));
     }
@@ -291,12 +361,16 @@ fn rust_bindings(specs: &[ArgSpec]) -> (String, String) {
     (binds, call.join(", "))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_rust_batch(
     case: &Case,
     rust_fn: &str,
+    deps: &[&str],
     trials: &[Vec<Val>],
     ret: Ty,
     tmp: &std::path::Path,
+    workspace_root: &std::path::Path,
+    shared_target: &std::path::Path,
 ) -> Result<Vec<Vec<f64>>, String> {
     let (binds, call) = rust_bindings(&case.args);
     let emit = match ret
@@ -312,22 +386,35 @@ fn run_rust_batch(
         call = call,
         emit = emit,
     );
-    let src_path = tmp.join(format!("case_{}.rs", case.call));
-    let bin_path = tmp.join(format!("case_{}.bin", case.call));
-    std::fs::write(&src_path, program).map_err(|e| e.to_string())?;
-    let out = Command::new("rustc")
-        .args(["-O", "--edition", "2021", "-A", "warnings", "-o"])
-        .arg(&bin_path)
-        .arg(&src_path)
-        .output()
-        .map_err(|e| format!("rustc spawn failed: {}", e))?;
-    if !out.status.success()
+
+    // Std-only cases compile with bare `rustc` (fast); routed cases (which use
+    // `scirust-*` kernels) compile as a tiny standalone cargo project with the
+    // needed path deps, sharing one target dir so the dep tree builds once.
+    let bin_path = if deps.is_empty()
     {
-        return Err(format!(
-            "rustc failed:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
+        let src_path = tmp.join(format!("case_{}.rs", case.call));
+        let bin_path = tmp.join(format!("case_{}.bin", case.call));
+        std::fs::write(&src_path, &program).map_err(|e| e.to_string())?;
+        let out = Command::new("rustc")
+            .args(["-O", "--edition", "2021", "-A", "warnings", "-o"])
+            .arg(&bin_path)
+            .arg(&src_path)
+            .output()
+            .map_err(|e| format!("rustc spawn failed: {}", e))?;
+        if !out.status.success()
+        {
+            return Err(format!(
+                "rustc failed:\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        bin_path
     }
+    else
+    {
+        compile_cargo(case, &program, deps, tmp, workspace_root, shared_target)?
+    };
+
     let stdin_data: String = trials
         .iter()
         .map(|t| flat_line(t))
@@ -335,6 +422,47 @@ fn run_rust_batch(
         .join("\n");
     let output = pipe_stdin(&bin_path.to_string_lossy(), &[], &stdin_data)?;
     Ok(output.lines().map(parse_line).collect())
+}
+
+/// Compile a routed case as a standalone cargo project depending on the given
+/// `scirust-*` crates (by path), returning the built binary's path.
+fn compile_cargo(
+    case: &Case,
+    program: &str,
+    deps: &[&str],
+    tmp: &std::path::Path,
+    workspace_root: &std::path::Path,
+    shared_target: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let pkg = format!("oc_{}", case.call);
+    let proj = tmp.join(format!("proj_{}", case.call));
+    std::fs::create_dir_all(proj.join("src")).map_err(|e| e.to_string())?;
+    let mut toml = format!(
+        "[package]\nname = \"{pkg}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+    );
+    for d in deps
+    {
+        toml.push_str(&format!(
+            "{d} = {{ path = \"{}/{d}\" }}\n",
+            workspace_root.display()
+        ));
+    }
+    std::fs::write(proj.join("Cargo.toml"), toml).map_err(|e| e.to_string())?;
+    std::fs::write(proj.join("src/main.rs"), program).map_err(|e| e.to_string())?;
+    let out = Command::new("cargo")
+        .args(["build", "--release", "--quiet", "--manifest-path"])
+        .arg(proj.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", shared_target)
+        .output()
+        .map_err(|e| format!("cargo spawn failed: {}", e))?;
+    if !out.status.success()
+    {
+        return Err(format!(
+            "cargo build failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(shared_target.join("release").join(&pkg))
 }
 
 fn run_python_batch(
@@ -446,6 +574,13 @@ fn main() {
 
     let tmp = std::env::temp_dir().join(format!("scirust_oracle_{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
+    // Workspace root = parent of this crate's dir; shared cargo target dir so
+    // routed cases build the `scirust-*` dep tree only once.
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let shared_target = tmp.join("cargo-target");
 
     let mut total = 0usize;
     let mut failures = 0usize;
@@ -468,13 +603,24 @@ fn main() {
                 continue;
             },
         };
+        let sir = scirust_transpiler::transpile_to_sir(case.src).expect("transpile to sir");
         let ret = ret_ty(&case);
+        let deps = scirust_transpiler::required_crates(&sir);
         let mut rng = Rng(0xC0FFEE ^ hash_name(case.call));
         let trials: Vec<Vec<Val>> = (0..TRIALS)
             .map(|_| gen_args(&case.args, &mut rng))
             .collect();
 
-        let rust_out = run_rust_batch(&case, &rust_fn, &trials, ret, &tmp);
+        let rust_out = run_rust_batch(
+            &case,
+            &rust_fn,
+            &deps,
+            &trials,
+            ret,
+            &tmp,
+            &workspace_root,
+            &shared_target,
+        );
         let py_out = run_python_batch(&case, &trials, &tmp);
         match (rust_out, py_out)
         {

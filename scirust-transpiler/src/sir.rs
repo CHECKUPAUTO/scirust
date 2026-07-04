@@ -15,6 +15,9 @@ pub enum Ty {
     Int,
     /// Boolean (emitted as `bool`). Internal to conditions only.
     Bool,
+    /// A 2-D matrix, stored flat row-major (param emitted as `&[f64]`).
+    /// Used to route `np.linalg.solve` to `scirust-solvers`.
+    Matrix,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,6 +148,12 @@ pub enum SirExpr {
         l: Box<SirExpr>,
         r: Box<SirExpr>,
     },
+    /// `np.linalg.solve(A, b)` : (Matrix, Array) -> Array, routed to the
+    /// verified LU solver in `scirust-solvers` (not re-derived in std Rust).
+    LinSolve {
+        a: Box<SirExpr>,
+        b: Box<SirExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,8 +232,78 @@ impl SirExpr {
             | SirExpr::ScalarBroadcast { .. }
             | SirExpr::ArrayUnaryFn { .. }
             | SirExpr::Zeros(_)
-            | SirExpr::Ones(_) => Ty::Array,
+            | SirExpr::Ones(_)
+            | SirExpr::LinSolve { .. } => Ty::Array,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
+    }
+}
+
+/// Which external `scirust-*` crates the emitted code for `m` depends on
+/// (empty for std-only modules). Drives the oracle's compile mode.
+pub fn required_crates(m: &SirModule) -> Vec<&'static str> {
+    fn expr_uses_solvers(e: &SirExpr) -> bool {
+        match e
+        {
+            SirExpr::LinSolve { .. } => true,
+            SirExpr::ScalarBin { l, r, .. }
+            | SirExpr::IntBin { l, r, .. }
+            | SirExpr::EwBin { l, r, .. }
+            | SirExpr::Cmp { l, r, .. } => expr_uses_solvers(l) || expr_uses_solvers(r),
+            SirExpr::Dot(l, r) => expr_uses_solvers(l) || expr_uses_solvers(r),
+            SirExpr::ScalarNeg(x)
+            | SirExpr::ScalarUnaryFn { arg: x, .. }
+            | SirExpr::ArrayUnaryFn { arg: x, .. }
+            | SirExpr::Sum(x)
+            | SirExpr::Len(x)
+            | SirExpr::Zeros(x)
+            | SirExpr::Ones(x) => expr_uses_solvers(x),
+            SirExpr::ScalarPow { base, exp } => expr_uses_solvers(base) || expr_uses_solvers(exp),
+            SirExpr::Index { base, idx } => expr_uses_solvers(base) || expr_uses_solvers(idx),
+            SirExpr::ScalarBroadcast { scalar, arr, .. } =>
+            {
+                expr_uses_solvers(scalar) || expr_uses_solvers(arr)
+            },
+            SirExpr::ScalarLit(_) | SirExpr::IntLit(_) | SirExpr::Var { .. } => false,
+        }
+    }
+    fn stmt_uses_solvers(s: &SirStmt) -> bool {
+        match s
+        {
+            SirStmt::Let { value, .. }
+            | SirStmt::Reassign { value, .. }
+            | SirStmt::Return(value) => expr_uses_solvers(value),
+            SirStmt::SetIndex { index, value, .. } =>
+            {
+                expr_uses_solvers(index) || expr_uses_solvers(value)
+            },
+            SirStmt::For {
+                start, end, body, ..
+            } =>
+            {
+                expr_uses_solvers(start)
+                    || expr_uses_solvers(end)
+                    || body.iter().any(stmt_uses_solvers)
+            },
+            SirStmt::If { cond, then, els } =>
+            {
+                expr_uses_solvers(cond)
+                    || then.iter().any(stmt_uses_solvers)
+                    || els.iter().any(stmt_uses_solvers)
+            },
+            SirStmt::While { cond, body } =>
+            {
+                expr_uses_solvers(cond) || body.iter().any(stmt_uses_solvers)
+            },
+        }
+    }
+    let uses = m.funcs.iter().any(|f| f.body.iter().any(stmt_uses_solvers));
+    if uses
+    {
+        vec!["scirust-solvers"]
+    }
+    else
+    {
+        vec![]
     }
 }

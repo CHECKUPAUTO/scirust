@@ -32,7 +32,7 @@ pub mod front_python;
 pub mod lower;
 pub mod sir;
 
-pub use sir::{SirFunc, SirModule, Ty};
+pub use sir::{SirFunc, SirModule, Ty, required_crates};
 
 /// Transpile a Python/NumPy subset source string into a Rust module string.
 ///
@@ -185,5 +185,26 @@ mod tests {
         assert!(func.contains("while (i < 20"));
         assert!(func.contains("x = (0.5f64 * (x + (a / x)));"));
         assert!(func.contains("i = (i + 1"));
+    }
+
+    #[test]
+    fn linalg_solve_routes_to_solvers() {
+        let src = "def solve(A, b):\n    return np.linalg.solve(A, b)\n";
+        let rust = transpile(src).unwrap();
+        // A inferred as a matrix (flat &[f64]); b as a vector.
+        assert!(rust.contains("pub fn solve(A: &[f64], b: &[f64]) -> Vec<f64>"));
+        // Routed to the verified LU solver, not re-derived in std Rust.
+        assert!(rust.contains("scirust_solvers::linalg::solve"));
+        assert!(rust.contains("Matrix::from_row_major"));
+
+        // And the module is flagged as needing the scirust-solvers crate.
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
+    fn std_only_module_needs_no_external_crates() {
+        let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
+        assert!(required_crates(&sir).is_empty());
     }
 }

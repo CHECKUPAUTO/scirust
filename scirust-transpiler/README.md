@@ -29,6 +29,7 @@ auditable, matching the SciRust doctrine.
 | Types         | scalar `f64`, 1-D array `Vec<f64>` / `&[f64]` |
 | Arithmetic    | `+ - * / **`, unary minus; elementwise array ops; scalar↔array broadcasting |
 | Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
+| Routed kernels | `np.linalg.solve(A, b)` → `scirust-solvers` (verified LU) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
 | Control/flow  | `for i in range(...)`, `while cond:`, `if`/`elif`/`else` + comparisons `< <= > >= == !=`, indexing `a[i]`, index-assignment `a[i] = …`, `return` |
 
 Anything outside the subset is **refused with a diagnostic** — never guessed.
@@ -60,13 +61,20 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ tanh_activation              200/200 trials match
   ✓ relu / clamp / sign          200/200 trials match   (if/elif/else, Phase 1)
   ✓ newton_sqrt / newton_conv    200/200 trials match   (while, Phase 1)
-  ORACLE GREEN — 12/12 cases match NumPy within tolerance
+  ✓ linalg.solve                 200/200 trials match   (routed to scirust-solvers)
+  ORACLE GREEN — 13/13 cases match NumPy within tolerance
 ```
 
+The oracle is **dual-mode**: std-only cases compile with bare `rustc`; **routed**
+cases (which call verified `scirust-*` kernels, e.g. `np.linalg.solve`) compile
+as a tiny standalone cargo project depending on that crate by path — so the
+emitted code is exercised against the *real* kernel, not a stand-in.
+
 The gate is non-vacuous: injecting a single wrong operator into the emitter
-turns 4/7 cases RED. The oracle requires `python3`, `numpy` and `rustc`; it is
-opt-in (not part of `cargo test`). The library's own unit tests
-(`cargo test -p scirust-transpiler`) gate CI and need none of them.
+turns 4/7 cases RED. The oracle requires `python3`, `numpy`, `rustc` (and
+`cargo` for routed cases); it is opt-in (not part of `cargo test`). The
+library's own unit tests (`cargo test -p scirust-transpiler`) gate CI and need
+none of them.
 
 ## Honest boundary (not delivered)
 
@@ -75,10 +83,10 @@ opt-in (not part of `cargo test`). The library's own unit tests
 * **No bit-exact equality with CPython.** NumPy's reduction/BLAS order isn't
   specified; we guarantee a *declared tolerance* to NumPy and *internal*
   Rust bit-reproducibility, not bit-identity with CPython.
-* **2-D arrays** and routing to the verified `scirust-*` kernels
-  (`scirust-solvers`, `scirust-signal`) are the next increments — see the
-  roadmap in `docs/TRANSPILER_DESIGN.md`.
-  (`if`/`elif`/`else`, scalar comparisons and `while` loops landed in Phase 1.)
+* **General 2-D arrays** and more routed kernels (`np.fft` → `scirust-signal`,
+  `np.linalg.svd`/`eig` → `scirust-solvers`) are the next increments — see the
+  roadmap in `docs/TRANSPILER_DESIGN.md`. (`if`/`elif`/`else`, scalar
+  comparisons, `while` loops and `np.linalg.solve` routing landed in Phase 1.)
 * **Unifying with `codetrans::Expr`** as the shared emission backend is future
   work: its `Function` node has untyped (`Vec<String>`) params, so this MVP
   uses a purpose-built typed emitter to produce compiling Rust.
