@@ -46,7 +46,7 @@ gate and a handful of opt-in extras.
 
 | Gate | Command | What it proves | Required |
 |---|---|---|:--:|
-| `fmt` | `cargo fmt --all -- --check` | Source is in canonical form. | ✓ |
+| `fmt` | `cargo +nightly-2026-07-02 fmt --all -- --check` | Source is in canonical form. Uses the nightly pinned in CI (`rustfmt.toml` has unstable options; rustfmt output is version-sensitive, so the version is fixed to keep local and CI identical). | ✓ |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | No lint warnings anywhere — lib, bins, tests, examples. | ✓ |
 | `build` | `cargo build --workspace --all-targets` | The whole workspace compiles, every target. | ✓ |
 | `test` | `cargo test --workspace --no-fail-fast` | **Every crate's oracle tests** pass — this is the functionality gate. | ✓ |
