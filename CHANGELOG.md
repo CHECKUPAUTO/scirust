@@ -5,6 +5,49 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — six extensions du tolérancement inertiel (`scirust-tolerance`)
+Six nouveaux modules qui étendent la crate au-delà de la chaîne linéaire
+indépendante et de la seule cotation de position, chacun vérifié par
+cross-check de fuzzing contre une **référence indépendante** :
+
+- **`montecarlo`** : simulation Monte-Carlo de tolérances. Lois composant
+  (normale, uniforme, triangulaire, moments exacts), RNG déterministe graine
+  (xorshift64\* + Box–Muller), et `simulate` qui pousse `n` tirages à travers
+  une fonction de transfert quelconque `Y = f(X₁…Xₙ)` → moyenne, dispersion,
+  **inertie à la cible**, ppm, rendement, percentiles `0,135/50/99,865 %`.
+  *Cross-check* : une combinaison linéaire de normales reproduit `Σαμ`, `Σα²σ²`.
+- **`correlated`** : chaînes **corrélées** et **non-linéaires**. Forme
+  quadratique `I_Y² = (α∘I)ᵀ R (α∘I)` (se réduit au `√(Σα²I²)` de `chain` pour
+  `R=𝕀`), linéarisation par différences finies (`gradient`), variance
+  `gᵀΣg` (`correlated_variance`), et correction du second ordre de la moyenne
+  `f(μ)+½ Σ Hᵢᵢσᵢ²`. *Cross-check* : gradient vs dérivée analytique ; moyenne
+  du second ordre vs le moment exact d'une quadratique ; vs Monte-Carlo.
+- **`geometry`** : le reste des caractéristiques **ISO 1101** — rectitude,
+  planéité, circularité, cylindricité (forme, par moindres carrés), parallélisme
+  / perpendicularité / angularité (orientation, zone `L·sin Δθ`), profil et
+  battement — chacune avec sa lecture **inertielle** (RMS des écarts).
+  *Cross-check* : orthogonalité des résidus du plan des moindres carrés ; forme
+  parfaite → 0 ; orientation vs produits vectoriel/scalaire.
+- **`sensitivity`** : analyse de contribution — part de chaque composant dans
+  l'inertie d'assemblage `cᵢ = αᵢ²Iᵢ²/I_Y²` (et version corrélée), triée. Pointe
+  les cotes à resserrer. *Cross-check* : les parts somment à 1 et égalent le
+  recalcul direct.
+- **`process`** : allocation à **procédés discrets** — sac-à-dos à choix
+  multiple résolu **exactement** par frontière de Pareto des états
+  `(poids, coût)` non dominés : choisir un procédé `{inertie, coût}` par
+  composant minimisant le coût sous budget d'inertie (statistique ou pire cas).
+  *Cross-check* : vs énumération exhaustive.
+- **`drift`** : capabilité court terme vs long terme — variance de dérive
+  uniforme `σ_lt = √(σ_st² + d²/3)`, décalage Motorola `1,5σ`
+  (`Cpk↔Ppk`), et ppm long terme. *Cross-check* : `σ_lt` vs un Monte-Carlo d'une
+  moyenne qui dérive plus le bruit intra-lot.
+- **`scirust-mcp`** : six nouveaux outils — `tolerance_monte_carlo`,
+  `tolerance_geometry`, `tolerance_sensitivity`, `tolerance_discrete_allocate`,
+  `tolerance_drift`, `tolerance_correlated`.
+
+Le harnais `fuzz_crosscheck` couvre désormais **14 modules** — **76 534
+vérifications, 0 erreur** à 1500 instances.
+
 ### Ajouté — tolérancement non-normal + position GD&T (`scirust-tolerance`)
 Deux modules qui étendent le tolérancement inertiel au-delà de l'hypothèse
 normale et à la cotation de position :

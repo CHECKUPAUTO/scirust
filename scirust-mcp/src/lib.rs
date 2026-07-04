@@ -131,5 +131,11 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_optimize_cost"));
         assert!(registry.names().contains(&"tolerance_nonnormal_capability"));
         assert!(registry.names().contains(&"tolerance_position"));
+        assert!(registry.names().contains(&"tolerance_monte_carlo"));
+        assert!(registry.names().contains(&"tolerance_geometry"));
+        assert!(registry.names().contains(&"tolerance_sensitivity"));
+        assert!(registry.names().contains(&"tolerance_discrete_allocate"));
+        assert!(registry.names().contains(&"tolerance_drift"));
+        assert!(registry.names().contains(&"tolerance_correlated"));
     }
 }
