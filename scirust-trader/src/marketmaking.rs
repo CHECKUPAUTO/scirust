@@ -154,8 +154,14 @@ mod tests {
 
     #[test]
     fn higher_risk_aversion_controls_inventory_harder() {
-        let cautious = MmParams { gamma: 0.5, ..Default::default() };
-        let bold = MmParams { gamma: 0.05, ..Default::default() };
+        let cautious = MmParams {
+            gamma: 0.5,
+            ..Default::default()
+        };
+        let bold = MmParams {
+            gamma: 0.05,
+            ..Default::default()
+        };
         let q_cautious = optimal_quotes(100.0, 5.0, 1.0, &cautious);
         let q_bold = optimal_quotes(100.0, 5.0, 1.0, &bold);
         // More risk-averse -> larger inventory skew (reservation further from mid).

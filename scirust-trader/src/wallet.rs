@@ -317,7 +317,14 @@ impl EvmAddress {
         for (i, ch) in lower.chars().enumerate()
         {
             // The i-th nibble of the hash decides the case.
-            let nibble = if i & 1 == 0 { hash[i / 2] >> 4 } else { hash[i / 2] & 0x0f };
+            let nibble = if i & 1 == 0
+            {
+                hash[i / 2] >> 4
+            }
+            else
+            {
+                hash[i / 2] & 0x0f
+            };
             if ch.is_ascii_alphabetic() && nibble >= 8
             {
                 out.push(ch.to_ascii_uppercase());
@@ -515,7 +522,9 @@ pub struct WalletConnectUri {
 
 /// Parse a WalletConnect pairing URI. Supports v2 (the current standard).
 pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
-    let body = uri.strip_prefix("wc:").ok_or("not a WalletConnect URI (missing `wc:`)")?;
+    let body = uri
+        .strip_prefix("wc:")
+        .ok_or("not a WalletConnect URI (missing `wc:`)")?;
     let (topic_version, query) = body.split_once('?').ok_or("missing query parameters")?;
     let (topic, version_str) = topic_version
         .split_once('@')
@@ -524,7 +533,9 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
     {
         return Err("empty topic".to_string());
     }
-    let version: u8 = version_str.parse().map_err(|_| "invalid version".to_string())?;
+    let version: u8 = version_str
+        .parse()
+        .map_err(|_| "invalid version".to_string())?;
     let mut relay_protocol = String::new();
     let mut sym_key = String::new();
     let mut expiry_timestamp = None;
@@ -536,7 +547,8 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
             "relay-protocol" => relay_protocol = v.to_string(),
             "symKey" => sym_key = v.to_string(),
             "expiryTimestamp" => expiry_timestamp = v.parse().ok(),
-            _ => {},
+            _ =>
+            {},
         }
     }
     if version == 2 && sym_key.is_empty()
@@ -565,7 +577,11 @@ pub struct WcNamespace {
 /// `requiredNamespaces` an agent proposes when initiating a session.
 pub fn eip155_namespace(chains: &[Chain]) -> WcNamespace {
     WcNamespace {
-        chains: chains.iter().filter(|c| c.is_evm()).map(|c| c.caip2()).collect(),
+        chains: chains
+            .iter()
+            .filter(|c| c.is_evm())
+            .map(|c| c.caip2())
+            .collect(),
         methods: vec![
             "eth_sendTransaction".to_string(),
             "eth_signTransaction".to_string(),
@@ -590,7 +606,13 @@ pub fn sign_binance_query(secret: &[u8], query: &str) -> String {
 
 /// Sign a Coinbase-style prehash `timestamp+method+path+body` and return the
 /// hex HMAC (Coinbase Advanced uses hex for its `CB-ACCESS-SIGN` header).
-pub fn sign_coinbase_request(secret: &[u8], timestamp: &str, method: &str, path: &str, body: &str) -> String {
+pub fn sign_coinbase_request(
+    secret: &[u8],
+    timestamp: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> String {
     let prehash = format!("{timestamp}{method}{path}{body}");
     to_hex(&hmac_sha256(secret, prehash.as_bytes()))
 }
@@ -656,7 +678,14 @@ impl WalletAuthorization {
 
     /// Does this authorization permit `method` on `chain_id` for `value` wei at
     /// time `now_unix`? Requires a valid signature under `key`.
-    pub fn authorizes(&self, key: &[u8], chain_id: u64, method: &str, value: u128, now_unix: u64) -> bool {
+    pub fn authorizes(
+        &self,
+        key: &[u8],
+        chain_id: u64,
+        method: &str,
+        value: u128,
+        now_unix: u64,
+    ) -> bool {
         self.verify_signature(key)
             && now_unix >= self.valid_from_unix
             && now_unix <= self.valid_until_unix
@@ -728,7 +757,10 @@ impl WalletConnector for WatchOnlyWallet {
 /// explanatory error instead of making a request.
 #[cfg(not(feature = "live"))]
 pub fn evm_native_balance(_rpc_url: &str, _address: &str) -> Result<u128, String> {
-    Err("live feature disabled: build scirust-trader with --features live for JSON-RPC reads".to_string())
+    Err(
+        "live feature disabled: build scirust-trader with --features live for JSON-RPC reads"
+            .to_string(),
+    )
 }
 
 /// Fetch the native-token balance (wei) of an EVM address via `eth_getBalance`.
@@ -821,9 +853,13 @@ mod tests {
     #[test]
     fn eip55_rejects_bad_checksum() {
         // Flip the case of one letter -> invalid checksum.
-        assert!(!EvmAddress::is_valid_checksum("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD"));
+        assert!(!EvmAddress::is_valid_checksum(
+            "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD"
+        ));
         // All-lowercase is accepted (no checksum claimed).
-        assert!(EvmAddress::is_valid_checksum("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"));
+        assert!(EvmAddress::is_valid_checksum(
+            "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"
+        ));
         // Wrong length.
         assert!(!EvmAddress::is_valid_checksum("0x1234"));
     }
@@ -872,7 +908,8 @@ mod tests {
             name: "Uniswap V2".to_string(),
             version: "1".to_string(),
             chain_id: 1,
-            verifying_contract: EvmAddress::from_hex("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed").map(|a| a.0),
+            verifying_contract: EvmAddress::from_hex("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
+                .map(|a| a.0),
         };
         let sep = d.separator();
         assert_eq!(sep.len(), 32);
@@ -888,7 +925,10 @@ mod tests {
 
     #[test]
     fn binance_query_signing_matches_hmac() {
-        let sig = sign_binance_query(b"NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j", "symbol=LTCBTC&side=BUY&type=LIMIT");
+        let sig = sign_binance_query(
+            b"NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j",
+            "symbol=LTCBTC&side=BUY&type=LIMIT",
+        );
         assert_eq!(sig.len(), 64); // hex of 32-byte HMAC
     }
 
@@ -907,13 +947,25 @@ mod tests {
         .sign(key);
 
         // Valid within all bounds.
-        assert!(auth.authorizes(key, 1, "eth_sendTransaction", 500_000_000_000_000_000, 1_000_000));
+        assert!(auth.authorizes(
+            key,
+            1,
+            "eth_sendTransaction",
+            500_000_000_000_000_000,
+            1_000_000
+        ));
         // Wrong chain.
         assert!(!auth.authorizes(key, 137, "eth_sendTransaction", 1, 1_000_000));
         // Method not allowed.
         assert!(!auth.authorizes(key, 1, "personal_sign", 1, 1_000_000));
         // Over the value cap.
-        assert!(!auth.authorizes(key, 1, "eth_sendTransaction", 2_000_000_000_000_000_000, 1_000_000));
+        assert!(!auth.authorizes(
+            key,
+            1,
+            "eth_sendTransaction",
+            2_000_000_000_000_000_000,
+            1_000_000
+        ));
         // Expired.
         assert!(!auth.authorizes(key, 1, "eth_sendTransaction", 1, 5_000_000_000));
         // Wrong key -> signature fails -> refused.
@@ -940,7 +992,10 @@ mod tests {
 
     #[test]
     fn watch_only_cannot_sign() {
-        let w = WatchOnlyWallet::new(Chain::Ethereum, "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed");
+        let w = WatchOnlyWallet::new(
+            Chain::Ethereum,
+            "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+        );
         assert!(!w.can_sign());
         assert_eq!(w.mode(), ConnectionMode::WatchOnly);
         assert_eq!(w.chain().chain_id(), 1);

@@ -39,8 +39,16 @@ impl OrderBook {
     pub fn new(symbol: &str, ts_ms: i64, bids: Vec<Level>, asks: Vec<Level>) -> Self {
         let mut b = bids;
         let mut a = asks;
-        b.sort_by(|x, y| y.price.partial_cmp(&x.price).unwrap_or(std::cmp::Ordering::Equal));
-        a.sort_by(|x, y| x.price.partial_cmp(&y.price).unwrap_or(std::cmp::Ordering::Equal));
+        b.sort_by(|x, y| {
+            y.price
+                .partial_cmp(&x.price)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        a.sort_by(|x, y| {
+            x.price
+                .partial_cmp(&y.price)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Self {
             symbol: symbol.to_string(),
             ts_ms,
@@ -183,12 +191,20 @@ impl OrderBook {
             Side::Buy =>
             {
                 let limit = mid + band;
-                self.asks.iter().take_while(|l| l.price <= limit).map(|l| l.qty).sum()
+                self.asks
+                    .iter()
+                    .take_while(|l| l.price <= limit)
+                    .map(|l| l.qty)
+                    .sum()
             },
             Side::Sell =>
             {
                 let limit = mid - band;
-                self.bids.iter().take_while(|l| l.price >= limit).map(|l| l.qty).sum()
+                self.bids
+                    .iter()
+                    .take_while(|l| l.price >= limit)
+                    .map(|l| l.qty)
+                    .sum()
             },
         }
     }
@@ -245,8 +261,16 @@ mod tests {
         OrderBook::new(
             "BTC/USDT",
             1000,
-            vec![Level::new(99.0, 5.0), Level::new(98.0, 10.0), Level::new(97.0, 20.0)],
-            vec![Level::new(101.0, 4.0), Level::new(102.0, 8.0), Level::new(103.0, 16.0)],
+            vec![
+                Level::new(99.0, 5.0),
+                Level::new(98.0, 10.0),
+                Level::new(97.0, 20.0),
+            ],
+            vec![
+                Level::new(101.0, 4.0),
+                Level::new(102.0, 8.0),
+                Level::new(103.0, 16.0),
+            ],
         )
     }
 
@@ -322,8 +346,16 @@ mod tests {
         let b = OrderBook::new(
             "X",
             1,
-            vec![Level::new(97.0, 1.0), Level::new(99.0, 1.0), Level::new(98.0, 1.0)],
-            vec![Level::new(103.0, 1.0), Level::new(101.0, 1.0), Level::new(102.0, 1.0)],
+            vec![
+                Level::new(97.0, 1.0),
+                Level::new(99.0, 1.0),
+                Level::new(98.0, 1.0),
+            ],
+            vec![
+                Level::new(103.0, 1.0),
+                Level::new(101.0, 1.0),
+                Level::new(102.0, 1.0),
+            ],
         );
         assert_eq!(b.best_bid().unwrap().price, 99.0);
         assert_eq!(b.best_ask().unwrap().price, 101.0);

@@ -116,7 +116,12 @@ pub fn trade_flow_imbalance(trades: &[TradePrint]) -> f32 {
 /// Prado–O'Hara), and `VPIN = mean_j |V_buy_j − V_sell_j| / V_bucket`.
 ///
 /// Returns `None` if there is not enough volume to fill a single bucket.
-pub fn vpin(prices: &[f32], volumes: &[f32], bucket_volume: f32, num_buckets: usize) -> Option<f32> {
+pub fn vpin(
+    prices: &[f32],
+    volumes: &[f32],
+    bucket_volume: f32,
+    num_buckets: usize,
+) -> Option<f32> {
     let n = prices.len();
     if n < 2 || bucket_volume <= 0.0 || volumes.len() != n
     {
@@ -223,26 +228,61 @@ mod tests {
 
     #[test]
     fn ofi_positive_on_bid_lift() {
-        let prev = L1Quote { bid_px: 100.0, bid_qty: 5.0, ask_px: 101.0, ask_qty: 5.0 };
+        let prev = L1Quote {
+            bid_px: 100.0,
+            bid_qty: 5.0,
+            ask_px: 101.0,
+            ask_qty: 5.0,
+        };
         // Bid price ticks up (aggressive buying interest) -> positive OFI.
-        let cur = L1Quote { bid_px: 100.5, bid_qty: 6.0, ask_px: 101.0, ask_qty: 5.0 };
+        let cur = L1Quote {
+            bid_px: 100.5,
+            bid_qty: 6.0,
+            ask_px: 101.0,
+            ask_qty: 5.0,
+        };
         assert!(ofi_increment(&prev, &cur) > 0.0);
     }
 
     #[test]
     fn ofi_negative_on_ask_drop() {
-        let prev = L1Quote { bid_px: 100.0, bid_qty: 5.0, ask_px: 101.0, ask_qty: 5.0 };
+        let prev = L1Quote {
+            bid_px: 100.0,
+            bid_qty: 5.0,
+            ask_px: 101.0,
+            ask_qty: 5.0,
+        };
         // Ask price ticks down (aggressive selling) -> negative OFI.
-        let cur = L1Quote { bid_px: 100.0, bid_qty: 5.0, ask_px: 100.5, ask_qty: 6.0 };
+        let cur = L1Quote {
+            bid_px: 100.0,
+            bid_qty: 5.0,
+            ask_px: 100.5,
+            ask_qty: 6.0,
+        };
         assert!(ofi_increment(&prev, &cur) < 0.0);
     }
 
     #[test]
     fn cumulative_ofi_sums() {
         let quotes = vec![
-            L1Quote { bid_px: 100.0, bid_qty: 5.0, ask_px: 101.0, ask_qty: 5.0 },
-            L1Quote { bid_px: 100.5, bid_qty: 6.0, ask_px: 101.0, ask_qty: 5.0 },
-            L1Quote { bid_px: 100.5, bid_qty: 8.0, ask_px: 101.0, ask_qty: 5.0 },
+            L1Quote {
+                bid_px: 100.0,
+                bid_qty: 5.0,
+                ask_px: 101.0,
+                ask_qty: 5.0,
+            },
+            L1Quote {
+                bid_px: 100.5,
+                bid_qty: 6.0,
+                ask_px: 101.0,
+                ask_qty: 5.0,
+            },
+            L1Quote {
+                bid_px: 100.5,
+                bid_qty: 8.0,
+                ask_px: 101.0,
+                ask_qty: 5.0,
+            },
         ];
         assert!(order_flow_imbalance(&quotes) > 0.0);
     }
@@ -250,8 +290,16 @@ mod tests {
     #[test]
     fn trade_flow_imbalance_bounds() {
         let trades = vec![
-            TradePrint { price: 100.0, qty: 3.0, buyer_is_taker: true },
-            TradePrint { price: 100.0, qty: 1.0, buyer_is_taker: false },
+            TradePrint {
+                price: 100.0,
+                qty: 3.0,
+                buyer_is_taker: true,
+            },
+            TradePrint {
+                price: 100.0,
+                qty: 1.0,
+                buyer_is_taker: false,
+            },
         ];
         let imb = trade_flow_imbalance(&trades);
         assert!((imb - 0.5).abs() < 1e-4); // (3-1)/4

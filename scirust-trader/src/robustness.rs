@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::backtest::{run_backtest, BacktestConfig};
+use crate::backtest::{BacktestConfig, run_backtest};
 use crate::market::Candle;
 use crate::strategy::Strategy;
 
@@ -28,9 +28,7 @@ struct Rng {
 
 impl Rng {
     fn new(seed: u64) -> Self {
-        Self {
-            state: seed.max(1),
-        }
+        Self { state: seed.max(1) }
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -314,11 +312,19 @@ mod tests {
     fn walk_forward_reports_consistency() {
         // Clean uptrend -> a long trend-follower should be profitable across
         // most windows -> high consistency.
-        let candles: Vec<Candle> =
-            (0..400).map(|i| candle(i as i64 * 60_000, 100.0 + i as f32)).collect();
+        let candles: Vec<Candle> = (0..400)
+            .map(|i| candle(i as i64 * 60_000, 100.0 + i as f32))
+            .collect();
         let cfg = BacktestConfig {
-            fees: crate::orders::FeeSchedule { maker_bps: 0.0, taker_bps: 0.0 },
-            slippage: crate::orders::SlippageModel { base_bps: 0.0, impact_bps: 0.0, ref_liquidity: 1.0 },
+            fees: crate::orders::FeeSchedule {
+                maker_bps: 0.0,
+                taker_bps: 0.0,
+            },
+            slippage: crate::orders::SlippageModel {
+                base_bps: 0.0,
+                impact_bps: 0.0,
+                ref_liquidity: 1.0,
+            },
             ..Default::default()
         };
         let wf = walk_forward(&MaCross::sma(5, 20), &candles, 4, &cfg);

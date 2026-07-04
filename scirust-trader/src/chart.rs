@@ -70,7 +70,9 @@ fn fmt(x: f32) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Map a value in `[vmin, vmax]` to a y pixel (inverted: high value = low y).
@@ -240,7 +242,14 @@ pub fn candlestick_svg(
         }
         let x = x_center(m.index);
         let y = y_of(m.price, vmin, vmax, plot_t, plot_b);
-        let (color, dy) = if m.bullish { (UP_COLOR, 10.0) } else { (DOWN_COLOR, -10.0) };
+        let (color, dy) = if m.bullish
+        {
+            (UP_COLOR, 10.0)
+        }
+        else
+        {
+            (DOWN_COLOR, -10.0)
+        };
         let (a, b, c) = if m.bullish
         {
             ((x, y + dy - 8.0), (x - 5.0, y + dy), (x + 5.0, y + dy))
@@ -264,7 +273,9 @@ pub fn candlestick_svg(
         {
             s.push_str(&format!(
                 "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"10\" height=\"10\" fill=\"{}\"/>",
-                lx, ly - 9.0, ov.color
+                lx,
+                ly - 9.0,
+                ov.color
             ));
             s.push_str(&format!(
                 "<text x=\"{:.1}\" y=\"{:.1}\" font-size=\"11\" fill=\"{}\">{}</text>",
@@ -359,7 +370,14 @@ pub fn equity_curve_svg(equity: &[f32], opts: &ChartOptions) -> String {
     }
     // The curve.
     let start = equity[0];
-    let color = if equity[n - 1] >= start { UP_COLOR } else { DOWN_COLOR };
+    let color = if equity[n - 1] >= start
+    {
+        UP_COLOR
+    }
+    else
+    {
+        DOWN_COLOR
+    };
     let mut pts = String::new();
     for (i, &v) in equity.iter().enumerate()
     {
@@ -433,9 +451,26 @@ mod tests {
     #[test]
     fn candlestick_svg_is_wellformed() {
         let c = candles();
-        let ov = Overlay::new("SMA10", "#f6c343", crate::indicators::sma(&c.iter().map(|k| k.close).collect::<Vec<_>>(), 10));
-        let markers = vec![Marker { index: 5, price: c[5].close, bullish: true, label: "entry".into() }];
-        let svg = candlestick_svg(&c, &[ov], &markers, &ChartOptions { title: "BTC/USDT".into(), ..Default::default() });
+        let ov = Overlay::new(
+            "SMA10",
+            "#f6c343",
+            crate::indicators::sma(&c.iter().map(|k| k.close).collect::<Vec<_>>(), 10),
+        );
+        let markers = vec![Marker {
+            index: 5,
+            price: c[5].close,
+            bullish: true,
+            label: "entry".into(),
+        }];
+        let svg = candlestick_svg(
+            &c,
+            &[ov],
+            &markers,
+            &ChartOptions {
+                title: "BTC/USDT".into(),
+                ..Default::default()
+            },
+        );
         assert!(svg.starts_with("<svg"));
         assert!(svg.ends_with("</svg>"));
         assert!(svg.contains("<rect")); // candle bodies
@@ -447,7 +482,13 @@ mod tests {
     #[test]
     fn equity_curve_svg_is_wellformed() {
         let eq: Vec<f32> = (0..50).map(|i| 10_000.0 + i as f32 * 20.0).collect();
-        let svg = equity_curve_svg(&eq, &ChartOptions { title: "Equity".into(), ..Default::default() });
+        let svg = equity_curve_svg(
+            &eq,
+            &ChartOptions {
+                title: "Equity".into(),
+                ..Default::default()
+            },
+        );
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains("<path"));
         assert!(svg.contains("Equity"));
@@ -464,7 +505,15 @@ mod tests {
     #[test]
     fn text_is_escaped() {
         let c = candles();
-        let svg = candlestick_svg(&c, &[], &[], &ChartOptions { title: "A<b>&c".into(), ..Default::default() });
+        let svg = candlestick_svg(
+            &c,
+            &[],
+            &[],
+            &ChartOptions {
+                title: "A<b>&c".into(),
+                ..Default::default()
+            },
+        );
         assert!(svg.contains("A&lt;b&gt;&amp;c"));
         assert!(!svg.contains("A<b>&c"));
     }

@@ -9,15 +9,15 @@
 //!   - `trader info`      — show pipeline capabilities
 
 use crate::agent::{Action, OllamaClient, StubLlm, TradingAgent};
-use crate::backtest::{run_backtest as run_strategy_backtest, BacktestConfig};
-use crate::chart::{equity_curve_svg, ChartOptions};
-use crate::dashboard::{render_dashboard, DashboardOptions};
+use crate::backtest::{BacktestConfig, run_backtest as run_strategy_backtest};
+use crate::chart::{ChartOptions, equity_curve_svg};
+use crate::dashboard::{DashboardOptions, render_dashboard};
 use crate::market::{MarketFeed, MarketSnapshot, MockExchange};
 use crate::model::PricePredictor;
 use crate::proof::DecisionProof;
 use crate::risk::{RiskConfig, run_backtest as run_risk_backtest};
-use crate::scanner::{scan, OpportunityConstraints, ScanRiskConfig};
-use crate::strategy::{strategy_from_spec, STRATEGY_NAMES};
+use crate::scanner::{OpportunityConstraints, ScanRiskConfig, scan};
+use crate::strategy::{STRATEGY_NAMES, strategy_from_spec};
 use std::collections::BTreeMap;
 
 /// Entry point — dispatches subcommands.
@@ -80,7 +80,9 @@ fn print_help() {
     println!("            Scan mock markets x strategies for opportunities matching constraints.");
     println!("  chart     [--bars N] [--seed S] [--strategy NAME] --output FILE.svg");
     println!("            Backtest on a mock feed and write an equity-curve SVG chart.");
-    println!("  dashboard [--symbols A,B,...] [--bars N] [--seed S] [--strategy NAME] --output FILE.html");
+    println!(
+        "  dashboard [--symbols A,B,...] [--bars N] [--seed S] [--strategy NAME] --output FILE.html"
+    );
     println!("            Scan mock markets + backtest and write a self-contained HTML dashboard.");
     println!("  info      Show pipeline capabilities.");
     println!();
@@ -711,7 +713,10 @@ fn cmd_backtest(args: &[String]) -> u8 {
 /// Generate a deterministic mock market snapshot for a symbol.
 fn mock_snapshot(symbol: &str, seed: u64, bars: usize) -> MarketSnapshot {
     // Vary the seed per symbol so a multi-symbol scan sees distinct series.
-    let sym_seed = seed ^ (symbol.bytes().fold(0u64, |a, b| a.wrapping_mul(131).wrapping_add(b as u64)));
+    let sym_seed = seed
+        ^ (symbol
+            .bytes()
+            .fold(0u64, |a, b| a.wrapping_mul(131).wrapping_add(b as u64)));
     let start = 100.0 + (sym_seed % 5000) as f32;
     let mut feed = MockExchange::new(sym_seed.max(1), start);
     let mut snap = feed.next_snapshot(bars).unwrap_or_else(|| MarketSnapshot {
@@ -738,7 +743,11 @@ fn cmd_strategies() {
 }
 
 fn cmd_scan(args: &[String]) -> u8 {
-    let mut symbols = vec!["BTC/USDT".to_string(), "ETH/USDT".to_string(), "SOL/USDT".to_string()];
+    let mut symbols = vec![
+        "BTC/USDT".to_string(),
+        "ETH/USDT".to_string(),
+        "SOL/USDT".to_string(),
+    ];
     let mut bars = 300usize;
     let mut seed = 42u64;
     let mut strategy: Option<String> = None;
@@ -749,16 +758,89 @@ fn cmd_scan(args: &[String]) -> u8 {
     {
         match args[i].as_str()
         {
-            "--symbols" => { i += 1; if i < args.len() { symbols = args[i].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(); } },
-            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(300); } },
-            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
-            "--strategy" => { i += 1; if i < args.len() { strategy = Some(args[i].clone()); } },
-            "--min-return" => { i += 1; if i < args.len() { c.min_total_return = args[i].parse().unwrap_or(f32::NEG_INFINITY); } },
-            "--min-sharpe" => { i += 1; if i < args.len() { c.min_sharpe = args[i].parse().unwrap_or(f32::NEG_INFINITY); } },
-            "--max-dd" => { i += 1; if i < args.len() { c.max_drawdown = args[i].parse().unwrap_or(f32::INFINITY); } },
-            "--direction" => { i += 1; if i < args.len() { c.direction = match args[i].as_str() { "long" => Some(Action::Long), "short" => Some(Action::Short), _ => None }; } },
-            "--max-results" => { i += 1; if i < args.len() { c.max_results = args[i].parse().unwrap_or(10); } },
-            _ => {},
+            "--symbols" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    symbols = args[i]
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+            },
+            "--bars" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    bars = args[i].parse().unwrap_or(300);
+                }
+            },
+            "--seed" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    seed = args[i].parse().unwrap_or(42);
+                }
+            },
+            "--strategy" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    strategy = Some(args[i].clone());
+                }
+            },
+            "--min-return" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    c.min_total_return = args[i].parse().unwrap_or(f32::NEG_INFINITY);
+                }
+            },
+            "--min-sharpe" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    c.min_sharpe = args[i].parse().unwrap_or(f32::NEG_INFINITY);
+                }
+            },
+            "--max-dd" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    c.max_drawdown = args[i].parse().unwrap_or(f32::INFINITY);
+                }
+            },
+            "--direction" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    c.direction = match args[i].as_str()
+                    {
+                        "long" => Some(Action::Long),
+                        "short" => Some(Action::Short),
+                        _ => None,
+                    };
+                }
+            },
+            "--max-results" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    c.max_results = args[i].parse().unwrap_or(10);
+                }
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
@@ -767,19 +849,39 @@ fn cmd_scan(args: &[String]) -> u8 {
         c.strategies = vec![name];
     }
 
-    let series: Vec<MarketSnapshot> = symbols.iter().map(|s| mock_snapshot(s, seed, bars)).collect();
+    let series: Vec<MarketSnapshot> = symbols
+        .iter()
+        .map(|s| mock_snapshot(s, seed, bars))
+        .collect();
     let report = scan(&series, &c, &ScanRiskConfig::default());
 
     println!("=== SciRust Trader — Opportunity Scan (mock data) ===");
     println!(
         "symbols={} strategies={} candidates={} matched={}",
         series.len(),
-        if c.strategies.is_empty() { STRATEGY_NAMES.len() } else { c.strategies.len() },
+        if c.strategies.is_empty()
+        {
+            STRATEGY_NAMES.len()
+        }
+        else
+        {
+            c.strategies.len()
+        },
         report.num_candidates,
         report.num_matched
     );
     println!("manifest_hash: {}", report.manifest_hash);
-    println!("proof_verify:  {}", if report.verify() { "✅ VALID" } else { "❌ INVALID" });
+    println!(
+        "proof_verify:  {}",
+        if report.verify()
+        {
+            "✅ VALID"
+        }
+        else
+        {
+            "❌ INVALID"
+        }
+    );
     println!();
     if report.opportunities.is_empty()
     {
@@ -819,11 +921,40 @@ fn cmd_chart(args: &[String]) -> u8 {
     {
         match args[i].as_str()
         {
-            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(300); } },
-            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
-            "--strategy" => { i += 1; if i < args.len() { strategy = args[i].clone(); } },
-            "--output" => { i += 1; if i < args.len() { output = args[i].clone(); } },
-            _ => {},
+            "--bars" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    bars = args[i].parse().unwrap_or(300);
+                }
+            },
+            "--seed" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    seed = args[i].parse().unwrap_or(42);
+                }
+            },
+            "--strategy" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    strategy = args[i].clone();
+                }
+            },
+            "--output" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    output = args[i].clone();
+                }
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
@@ -851,7 +982,13 @@ fn cmd_chart(args: &[String]) -> u8 {
         report.total_return * 100.0,
         report.buy_hold_return * 100.0
     );
-    let svg = equity_curve_svg(&report.equity_curve, &ChartOptions { title, ..Default::default() });
+    let svg = equity_curve_svg(
+        &report.equity_curve,
+        &ChartOptions {
+            title,
+            ..Default::default()
+        },
+    );
     match std::fs::write(&output, svg)
     {
         Ok(_) =>
@@ -875,7 +1012,11 @@ fn cmd_chart(args: &[String]) -> u8 {
 }
 
 fn cmd_dashboard(args: &[String]) -> u8 {
-    let mut symbols = vec!["BTC/USDT".to_string(), "ETH/USDT".to_string(), "SOL/USDT".to_string()];
+    let mut symbols = vec![
+        "BTC/USDT".to_string(),
+        "ETH/USDT".to_string(),
+        "SOL/USDT".to_string(),
+    ];
     let mut bars = 400usize;
     let mut seed = 42u64;
     let mut strategy = "sma_cross".to_string();
@@ -886,18 +1027,65 @@ fn cmd_dashboard(args: &[String]) -> u8 {
     {
         match args[i].as_str()
         {
-            "--symbols" => { i += 1; if i < args.len() { symbols = args[i].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(); } },
-            "--bars" => { i += 1; if i < args.len() { bars = args[i].parse().unwrap_or(400); } },
-            "--seed" => { i += 1; if i < args.len() { seed = args[i].parse().unwrap_or(42); } },
-            "--strategy" => { i += 1; if i < args.len() { strategy = args[i].clone(); } },
-            "--output" => { i += 1; if i < args.len() { output = args[i].clone(); } },
-            _ => {},
+            "--symbols" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    symbols = args[i]
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+            },
+            "--bars" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    bars = args[i].parse().unwrap_or(400);
+                }
+            },
+            "--seed" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    seed = args[i].parse().unwrap_or(42);
+                }
+            },
+            "--strategy" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    strategy = args[i].clone();
+                }
+            },
+            "--output" =>
+            {
+                i += 1;
+                if i < args.len()
+                {
+                    output = args[i].clone();
+                }
+            },
+            _ =>
+            {},
         }
         i += 1;
     }
 
-    let series: Vec<MarketSnapshot> = symbols.iter().map(|s| mock_snapshot(s, seed, bars)).collect();
-    let report = scan(&series, &OpportunityConstraints::default(), &ScanRiskConfig::default());
+    let series: Vec<MarketSnapshot> = symbols
+        .iter()
+        .map(|s| mock_snapshot(s, seed, bars))
+        .collect();
+    let report = scan(
+        &series,
+        &OpportunityConstraints::default(),
+        &ScanRiskConfig::default(),
+    );
 
     // Embed a backtest of the chosen strategy on the first symbol.
     let mut backtests = Vec::new();
@@ -907,7 +1095,10 @@ fn cmd_dashboard(args: &[String]) -> u8 {
             interval: "1m".to_string(),
             ..Default::default()
         };
-        (strat.name(), run_strategy_backtest(strat.as_ref(), &series[0].candles, &cfg))
+        (
+            strat.name(),
+            run_strategy_backtest(strat.as_ref(), &series[0].candles, &cfg),
+        )
     });
     if let Some((label, ref rep)) = bt
     {
@@ -916,7 +1107,10 @@ fn cmd_dashboard(args: &[String]) -> u8 {
 
     let opts = DashboardOptions {
         title: "SciRust Trader — Dashboard".to_string(),
-        subtitle: format!("{} symbols · mock data · deterministic & simulation-first", series.len()),
+        subtitle: format!(
+            "{} symbols · mock data · deterministic & simulation-first",
+            series.len()
+        ),
     };
     let html = render_dashboard(Some(&report), &backtests, &opts);
     match std::fs::write(&output, html)

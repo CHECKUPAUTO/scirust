@@ -74,10 +74,18 @@ pub struct MaCross {
 
 impl MaCross {
     pub fn sma(fast: usize, slow: usize) -> Self {
-        Self { fast, slow, exponential: false }
+        Self {
+            fast,
+            slow,
+            exponential: false,
+        }
     }
     pub fn ema(fast: usize, slow: usize) -> Self {
-        Self { fast, slow, exponential: true }
+        Self {
+            fast,
+            slow,
+            exponential: true,
+        }
     }
 }
 
@@ -100,7 +108,16 @@ impl Strategy for MaCross {
         {
             return Signal::flat("insufficient history");
         }
-        let ma = |p: usize| if self.exponential { indicators::ema(&c, p) } else { indicators::sma(&c, p) };
+        let ma = |p: usize| {
+            if self.exponential
+            {
+                indicators::ema(&c, p)
+            }
+            else
+            {
+                indicators::sma(&c, p)
+            }
+        };
         let fast = ma(self.fast);
         let slow = ma(self.slow);
         let i = n - 1;
@@ -117,7 +134,11 @@ impl Strategy for MaCross {
         }
         else
         {
-            Signal::new(Action::Short, strength, format!("fast {f:.2} < slow {s:.2}"))
+            Signal::new(
+                Action::Short,
+                strength,
+                format!("fast {f:.2} < slow {s:.2}"),
+            )
         }
     }
 }
@@ -136,13 +157,20 @@ pub struct RsiReversion {
 
 impl Default for RsiReversion {
     fn default() -> Self {
-        Self { period: 14, oversold: 30.0, overbought: 70.0 }
+        Self {
+            period: 14,
+            oversold: 30.0,
+            overbought: 70.0,
+        }
     }
 }
 
 impl Strategy for RsiReversion {
     fn name(&self) -> String {
-        format!("rsi_reversion({},{:.0},{:.0})", self.period, self.oversold, self.overbought)
+        format!(
+            "rsi_reversion({},{:.0},{:.0})",
+            self.period, self.oversold, self.overbought
+        )
     }
     fn warmup(&self) -> usize {
         self.period + 2
@@ -159,12 +187,20 @@ impl Strategy for RsiReversion {
         if v < self.oversold
         {
             let strength = ((self.oversold - v) / self.oversold).clamp(0.0, 1.0);
-            Signal::new(Action::Long, strength, format!("RSI {v:.1} < oversold {:.0}", self.oversold))
+            Signal::new(
+                Action::Long,
+                strength,
+                format!("RSI {v:.1} < oversold {:.0}", self.oversold),
+            )
         }
         else if v > self.overbought
         {
             let strength = ((v - self.overbought) / (100.0 - self.overbought)).clamp(0.0, 1.0);
-            Signal::new(Action::Short, strength, format!("RSI {v:.1} > overbought {:.0}", self.overbought))
+            Signal::new(
+                Action::Short,
+                strength,
+                format!("RSI {v:.1} > overbought {:.0}", self.overbought),
+            )
         }
         else
         {
@@ -187,7 +223,11 @@ pub struct MacdCross {
 
 impl Default for MacdCross {
     fn default() -> Self {
-        Self { fast: 12, slow: 26, signal: 9 }
+        Self {
+            fast: 12,
+            slow: 26,
+            signal: 9,
+        }
     }
 }
 
@@ -203,7 +243,10 @@ impl Strategy for MacdCross {
         let macd = indicators::macd_line(&c, self.fast, self.slow);
         let sig = indicators::macd_signal_line(&c, self.fast, self.slow, self.signal);
         let i = c.len().saturating_sub(1);
-        let (m, s) = (macd.get(i).copied().unwrap_or(f32::NAN), sig.get(i).copied().unwrap_or(f32::NAN));
+        let (m, s) = (
+            macd.get(i).copied().unwrap_or(f32::NAN),
+            sig.get(i).copied().unwrap_or(f32::NAN),
+        );
         if m.is_nan() || s.is_nan()
         {
             return Signal::flat("warming up");
@@ -212,11 +255,19 @@ impl Strategy for MacdCross {
         let strength = (hist.abs() / c[i].abs().max(1e-9) * 200.0).clamp(0.0, 1.0);
         if m > s
         {
-            Signal::new(Action::Long, strength, format!("MACD {m:.4} > signal {s:.4}"))
+            Signal::new(
+                Action::Long,
+                strength,
+                format!("MACD {m:.4} > signal {s:.4}"),
+            )
         }
         else
         {
-            Signal::new(Action::Short, strength, format!("MACD {m:.4} < signal {s:.4}"))
+            Signal::new(
+                Action::Short,
+                strength,
+                format!("MACD {m:.4} < signal {s:.4}"),
+            )
         }
     }
 }
@@ -263,11 +314,19 @@ impl Strategy for BollingerBreakout {
         let width = (u - l).max(1e-9);
         if px > u
         {
-            Signal::new(Action::Long, ((px - u) / width).clamp(0.0, 1.0), format!("close {px:.2} > upper {u:.2}"))
+            Signal::new(
+                Action::Long,
+                ((px - u) / width).clamp(0.0, 1.0),
+                format!("close {px:.2} > upper {u:.2}"),
+            )
         }
         else if px < l
         {
-            Signal::new(Action::Short, ((l - px) / width).clamp(0.0, 1.0), format!("close {px:.2} < lower {l:.2}"))
+            Signal::new(
+                Action::Short,
+                ((l - px) / width).clamp(0.0, 1.0),
+                format!("close {px:.2} < lower {l:.2}"),
+            )
         }
         else
         {
@@ -319,11 +378,19 @@ impl Strategy for DonchianBreakout {
         let px = candles[i].close;
         if px >= u
         {
-            Signal::new(Action::Long, 0.7, format!("close {px:.2} broke {}-bar high {u:.2}", self.period))
+            Signal::new(
+                Action::Long,
+                0.7,
+                format!("close {px:.2} broke {}-bar high {u:.2}", self.period),
+            )
         }
         else if px <= l
         {
-            Signal::new(Action::Short, 0.7, format!("close {px:.2} broke {}-bar low {l:.2}", self.period))
+            Signal::new(
+                Action::Short,
+                0.7,
+                format!("close {px:.2} broke {}-bar low {l:.2}", self.period),
+            )
         }
         else
         {
@@ -345,7 +412,10 @@ pub struct SupertrendFollow {
 
 impl Default for SupertrendFollow {
     fn default() -> Self {
-        Self { period: 10, mult: 3.0 }
+        Self {
+            period: 10,
+            mult: 3.0,
+        }
     }
 }
 
@@ -364,8 +434,16 @@ impl Strategy for SupertrendFollow {
         let i = c.len().saturating_sub(1);
         match st.direction.get(i).copied()
         {
-            Some(1) => Signal::new(Action::Long, 0.7, format!("supertrend up, line {:.2}", st.line[i])),
-            Some(-1) => Signal::new(Action::Short, 0.7, format!("supertrend down, line {:.2}", st.line[i])),
+            Some(1) => Signal::new(
+                Action::Long,
+                0.7,
+                format!("supertrend up, line {:.2}", st.line[i]),
+            ),
+            Some(-1) => Signal::new(
+                Action::Short,
+                0.7,
+                format!("supertrend down, line {:.2}", st.line[i]),
+            ),
             _ => Signal::flat("warming up"),
         }
     }
@@ -385,7 +463,10 @@ pub struct Momentum {
 
 impl Default for Momentum {
     fn default() -> Self {
-        Self { lookback: 20, threshold: 0.0 }
+        Self {
+            lookback: 20,
+            threshold: 0.0,
+        }
     }
 }
 
@@ -412,15 +493,27 @@ impl Strategy for Momentum {
         let strength = (ret.abs() * 10.0).clamp(0.0, 1.0);
         if ret > self.threshold
         {
-            Signal::new(Action::Long, strength, format!("{}-bar return {:+.2}%", self.lookback, ret * 100.0))
+            Signal::new(
+                Action::Long,
+                strength,
+                format!("{}-bar return {:+.2}%", self.lookback, ret * 100.0),
+            )
         }
         else if ret < -self.threshold
         {
-            Signal::new(Action::Short, strength, format!("{}-bar return {:+.2}%", self.lookback, ret * 100.0))
+            Signal::new(
+                Action::Short,
+                strength,
+                format!("{}-bar return {:+.2}%", self.lookback, ret * 100.0),
+            )
         }
         else
         {
-            Signal::flat(format!("{}-bar return {:+.2}% flat", self.lookback, ret * 100.0))
+            Signal::flat(format!(
+                "{}-bar return {:+.2}% flat",
+                self.lookback,
+                ret * 100.0
+            ))
         }
     }
 }
@@ -537,7 +630,10 @@ mod tests {
     #[test]
     fn supertrend_follows_trend() {
         let up = series(&(0..40).map(|i| 100.0 + i as f32 * 2.0).collect::<Vec<_>>());
-        assert_eq!(SupertrendFollow::default().evaluate(&up).action, Action::Long);
+        assert_eq!(
+            SupertrendFollow::default().evaluate(&up).action,
+            Action::Long
+        );
     }
 
     #[test]

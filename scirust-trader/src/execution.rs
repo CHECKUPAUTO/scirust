@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::market::Candle;
-use crate::orders::{simulate_fill, FeeSchedule, Fill, Order, Side, SlippageModel};
+use crate::orders::{FeeSchedule, Fill, Order, Side, SlippageModel, simulate_fill};
 
 /// One child (micro) order in an execution schedule.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -261,7 +261,11 @@ pub struct AcSchedule {
 /// solves `cosh(κτ) = 1 + ½κ̃²τ²` where `κ̃² = λσ²/η̃`, giving
 /// `x_j = X·sinh(κ(T−t_j)) / sinh(κT)`. At `λ→0`, `κ→0` and the schedule is
 /// linear (TWAP).
-pub fn almgren_chriss(side: Side, total_qty: f32, p: &AlmgrenChriss) -> (ExecutionPlan, AcSchedule) {
+pub fn almgren_chriss(
+    side: Side,
+    total_qty: f32,
+    p: &AlmgrenChriss,
+) -> (ExecutionPlan, AcSchedule) {
     let n = p.n.max(1);
     let x = total_qty;
     let t = p.horizon_secs.max(1e-6);
@@ -318,7 +322,8 @@ pub fn almgren_chriss(side: Side, total_qty: f32, p: &AlmgrenChriss) -> (Executi
     let temp_cost: f32 = trades.iter().map(|nj| nj * nj).sum::<f32>() * (eta_tilde.max(0.0) / tau);
     let expected_cost = 0.5 * p.gamma * x * x + temp_cost;
     // Variance = σ²·τ·Σ x_j² over the *held* intervals (j = 1..N).
-    let variance: f32 = holdings[1..].iter().map(|xj| xj * xj).sum::<f32>() * (p.sigma * p.sigma * tau);
+    let variance: f32 =
+        holdings[1..].iter().map(|xj| xj * xj).sum::<f32>() * (p.sigma * p.sigma * tau);
 
     let children = trades
         .iter()
@@ -332,7 +337,14 @@ pub fn almgren_chriss(side: Side, total_qty: f32, p: &AlmgrenChriss) -> (Executi
 
     // Rough impact estimate in bps: temporary cost per share over an assumed
     // unit reference price (caller can rescale). Reported as informational.
-    let expected_impact_bps = if x.abs() > 1e-9 { 10_000.0 * temp_cost / x } else { 0.0 };
+    let expected_impact_bps = if x.abs() > 1e-9
+    {
+        10_000.0 * temp_cost / x
+    }
+    else
+    {
+        0.0
+    };
 
     let plan = ExecutionPlan {
         algo: format!("almgren_chriss(n={},lambda={:.1e})", n, p.risk_aversion),
@@ -411,7 +423,14 @@ pub fn simulate_execution(
             fills.push(f);
         }
     }
-    let avg_price = if filled > 1e-12 { notional / filled } else { arrival_price };
+    let avg_price = if filled > 1e-12
+    {
+        notional / filled
+    }
+    else
+    {
+        arrival_price
+    };
     let slippage_bps = if arrival_price.abs() > 1e-12
     {
         10_000.0 * (avg_price - arrival_price) / arrival_price * plan.side.sign()
@@ -519,7 +538,11 @@ mod tests {
         };
         let (_, sched) = almgren_chriss(Side::Sell, 1000.0, &p);
         // Risk-averse -> trade more early than late (front-loaded liquidation).
-        assert!(sched.kappa > 0.0, "kappa should be positive: {}", sched.kappa);
+        assert!(
+            sched.kappa > 0.0,
+            "kappa should be positive: {}",
+            sched.kappa
+        );
         assert!(
             sched.trades[0] > *sched.trades.last().unwrap(),
             "front-load: first {} vs last {}",
@@ -532,7 +555,11 @@ mod tests {
     fn simulate_execution_measures_slippage() {
         let plan = twap(Side::Buy, 100.0, 5, 0, 1000);
         let candles = flat_candles(100.0, 5);
-        let slip = SlippageModel { base_bps: 5.0, impact_bps: 0.0, ref_liquidity: 1.0 };
+        let slip = SlippageModel {
+            base_bps: 5.0,
+            impact_bps: 0.0,
+            ref_liquidity: 1.0,
+        };
         let res = simulate_execution(&plan, &candles, 100.0, &FeeSchedule::default(), &slip);
         assert!((res.filled_qty - 100.0).abs() < 1e-2);
         // Buying with 5 bps slippage -> avg price above arrival, positive slippage.
