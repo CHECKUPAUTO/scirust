@@ -164,6 +164,18 @@ pub struct GqaModelWeights<'a> {
     pub final_norm: &'a GpuMatrix,
 }
 
+/// The gradients of a full [`GqaModelWeights`], produced by
+/// [`GpuChain::gqa_model_backward`]: one `vocab × d` **tied** embedding gradient
+/// (accumulating both the input-embedding and the output-head paths) and one
+/// [`GqaBlockGrads`] per block, in block order. (The final RMSNorm gain is frozen,
+/// as elsewhere.)
+pub struct GqaModelGrads {
+    /// `∂L/∂E` for the tied embedding/LM-head table (`vocab × d`).
+    pub d_embedding: GpuMatrix,
+    /// Per-block projection weight gradients, in block order.
+    pub blocks: Vec<GqaBlockGrads>,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -977,6 +989,70 @@ impl GpuChain {
         let trunk = self.gqa_transformer_stack(&emb, w.blocks, eps, causal)?;
         let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
         self.matmul_t(&normed, w.embedding, false, true)
+    }
+
+    /// The **full GQA model backward**, given `dlogits = ∂L/∂logits` (`t×vocab`,
+    /// e.g. from [`Self::cross_entropy_grad`]): returns the **tied** embedding
+    /// gradient and every block's weight gradients ([`GqaModelGrads`]), all
+    /// resident. The forward activations are recomputed here (the block-boundary
+    /// inputs the backward contracts with).
+    ///
+    /// The embedding `E` is used twice — the input lookup **and** the output head
+    /// `logits = normed·Eᵀ` — so `dE` accumulates both paths:
+    /// `dE = dlogitsᵀ·normed  (head)  +  embed_backward(tokens, d_emb)  (lookup)`.
+    /// The head also feeds `d_normed = dlogits·E`, which flows back through the
+    /// final RMSNorm and the `N` blocks (reverse order), each via
+    /// [`Self::gqa_transformer_block_backward_full`]. (The final RMSNorm gain is
+    /// frozen — no gain gradient.)
+    pub fn gqa_model_backward(
+        &self,
+        tokens: &[u32],
+        w: &GqaModelWeights,
+        dlogits: &GpuMatrix,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GqaModelGrads> {
+        // Recompute the block-boundary activations: xs[i] is the input to block i.
+        let emb = self.embed(tokens, w.embedding)?;
+        let mut xs = Vec::with_capacity(w.blocks.len() + 1);
+        xs.push(emb);
+        for b in w.blocks
+        {
+            let out = self.gqa_transformer_block(xs.last().unwrap(), b, eps, causal)?;
+            xs.push(out);
+        }
+        let trunk = xs.last().unwrap();
+        let normed = self.rms_norm(trunk, w.final_norm, eps)?;
+
+        // Tied head: logits = normed · Eᵀ.
+        let d_normed = self.matmul(dlogits, w.embedding)?; // dlogits · E     (t×d)
+        let de_head = self.matmul_t(dlogits, &normed, true, false)?; // dlogitsᵀ·normed (vocab×d)
+
+        // Final RMSNorm, then the N blocks in reverse.
+        let mut d_cur = self.rms_norm_backward(trunk, w.final_norm, &d_normed, eps)?;
+        let mut block_grads: Vec<GqaBlockGrads> = Vec::with_capacity(w.blocks.len());
+        for i in (0..w.blocks.len()).rev()
+        {
+            let (dx, grads) = self.gqa_transformer_block_backward_full(
+                &xs[i],
+                &w.blocks[i],
+                &d_cur,
+                eps,
+                causal,
+            )?;
+            d_cur = dx;
+            block_grads.push(grads);
+        }
+        block_grads.reverse();
+
+        // d_cur is now d(emb); add the embedding-lookup path into the tied grad.
+        let vocab = w.embedding.rows();
+        let de_embed = self.embed_backward(tokens, &d_cur, vocab)?;
+        let d_embedding = self.add(&de_head, &de_embed)?;
+        Ok(GqaModelGrads {
+            d_embedding,
+            blocks: block_grads,
+        })
     }
 
     // ---- Backward (vjp) primitives ----------------------------------------
@@ -2049,6 +2125,192 @@ mod tests {
             "rel_err {}",
             rel_err(&logits_gpu, &logits_cpu)
         );
+    }
+
+    /// The **full resident GQA model backward** gradient-checked end-to-end. For
+    /// `L = Σ gqa_model_forward(tokens; E, blocks) ⊙ G` (so `dlogits = G`),
+    /// `gqa_model_backward(...,G)` yields the tied embedding grad and every
+    /// block's weight grads. The **tied `dE`** (both the input-lookup and the
+    /// output-head paths through the shared `E`) is checked against central finite
+    /// differences of `L` over `E`, and each block's `dWq` over its `Wq` — a
+    /// 2-layer / 2-heads / 1-kv config, so the block chain and the grouped-query
+    /// accumulation are both exercised. Skips if no adapter.
+    #[test]
+    fn gqa_model_backward_matches_finite_differences() {
+        use crate::ops::{cpu_gqa_transformer_block, cpu_rms_norm};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, n_layers, n_heads, n_kv_heads, dh, ff) =
+            (5usize, 2usize, 2usize, 1usize, 2usize, 8usize);
+        let d = n_heads * dh; // 4
+        let kv_dim = n_kv_heads * dh; // 2
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let tokens: Vec<u32> = vec![1, 4, 2];
+        let t = tokens.len();
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.041 + phase).sin() * amp)
+                .collect()
+        };
+        let embedding = gen(vocab * d, 0.2, 0.5);
+        let final_norm: Vec<f32> = (0..d).map(|i| 0.85 + 0.02 * i as f32).collect();
+
+        struct Bw {
+            n1: Vec<f32>,
+            wq: Vec<f32>,
+            wk: Vec<f32>,
+            wv: Vec<f32>,
+            wo: Vec<f32>,
+            n2: Vec<f32>,
+            wg: Vec<f32>,
+            wu: Vec<f32>,
+            wd: Vec<f32>,
+        }
+        let mut blocks_raw: Vec<Bw> = (0..n_layers)
+            .map(|l| {
+                let s = l as f32 * 7.0;
+                Bw {
+                    n1: (0..d).map(|i| 0.8 + 0.03 * i as f32).collect(),
+                    wq: gen(d * d, s + 0.5, 0.25),
+                    wk: gen(d * kv_dim, s + 1.1, 0.25),
+                    wv: gen(d * kv_dim, s + 1.7, 0.25),
+                    wo: gen(d * d, s + 2.3, 0.25),
+                    n2: (0..d).map(|i| 0.9 - 0.02 * i as f32).collect(),
+                    wg: gen(d * ff, s + 2.9, 0.2),
+                    wu: gen(d * ff, s + 3.5, 0.2),
+                    wd: gen(ff * d, s + 4.1, 0.2),
+                }
+            })
+            .collect();
+        let g = gen(t * vocab, 5.0, 1.0); // dL/dlogits
+
+        // Upload weights → GqaModelWeights, and run the resident backward.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gemb = up(&embedding, vocab, d);
+        let gfn = up(&final_norm, 1, d);
+        let gblocks: Vec<[GpuMatrix; 9]> = blocks_raw
+            .iter()
+            .map(|b| {
+                [
+                    up(&b.n1, 1, d),
+                    up(&b.wq, d, d),
+                    up(&b.wk, d, kv_dim),
+                    up(&b.wv, d, kv_dim),
+                    up(&b.wo, d, d),
+                    up(&b.n2, 1, d),
+                    up(&b.wg, d, ff),
+                    up(&b.wu, d, ff),
+                    up(&b.wd, ff, d),
+                ]
+            })
+            .collect();
+        let weights_blocks: Vec<GqaBlockWeights> = gblocks
+            .iter()
+            .map(|gb| GqaBlockWeights {
+                norm1: &gb[0],
+                wq: &gb[1],
+                wk: &gb[2],
+                wv: &gb[3],
+                wo: &gb[4],
+                norm2: &gb[5],
+                wg: &gb[6],
+                wu: &gb[7],
+                wd: &gb[8],
+                n_heads,
+                n_kv_heads,
+                theta,
+            })
+            .collect();
+        let mw = GqaModelWeights {
+            embedding: &gemb,
+            blocks: &weights_blocks,
+            final_norm: &gfn,
+        };
+        let gg = up(&g, t, vocab);
+        let grads = chain
+            .gqa_model_backward(&tokens, &mw, &gg, eps, true)
+            .unwrap();
+        let de = chain.download(&grads.d_embedding).unwrap();
+        let dwq_l: Vec<Vec<f32>> = grads
+            .blocks
+            .iter()
+            .map(|bg| chain.download(&bg.dwq).unwrap())
+            .collect();
+
+        // CPU reference loss L = Σ logits ⊙ G over (E, blocks).
+        let loss = |emb_: &[f32], blocks_: &[Bw]| -> f32 {
+            let mut x: Vec<f32> = tokens
+                .iter()
+                .flat_map(|&tk| emb_[(tk as usize) * d..(tk as usize) * d + d].to_vec())
+                .collect();
+            for b in blocks_
+            {
+                x = cpu_gqa_transformer_block(
+                    &x, &b.n1, &b.wq, &b.wk, &b.wv, &b.wo, &b.n2, &b.wg, &b.wu, &b.wd, t, d,
+                    kv_dim, ff, n_heads, n_kv_heads, dh, theta, eps, true,
+                );
+            }
+            let normed = cpu_rms_norm(&x, &final_norm, eps, t, d);
+            let mut acc = 0.0f32;
+            for i in 0..t
+            {
+                for vv in 0..vocab
+                {
+                    let mut lg = 0.0f32;
+                    for dd in 0..d
+                    {
+                        lg += normed[i * d + dd] * emb_[vv * d + dd];
+                    }
+                    acc += lg * g[i * vocab + vv];
+                }
+            }
+            acc
+        };
+        let hh = 1e-3f32;
+
+        // Tied embedding gradient: perturbing E moves both the lookup and the head.
+        let mut emb = embedding.clone();
+        for idx in 0..emb.len()
+        {
+            let orig = emb[idx];
+            emb[idx] = orig + hh;
+            let lp = loss(&emb, &blocks_raw);
+            emb[idx] = orig - hh;
+            let lm = loss(&emb, &blocks_raw);
+            emb[idx] = orig;
+            let fd = (lp - lm) / (2.0 * hh);
+            assert!(
+                (fd - de[idx]).abs() < 2e-2,
+                "dE[{idx}]: fd={fd} gpu={}",
+                de[idx]
+            );
+        }
+
+        // Each block's dWq, in place (validates the multi-block backprop chain).
+        #[allow(clippy::needless_range_loop)]
+        for l in 0..n_layers
+        {
+            for idx in 0..blocks_raw[l].wq.len()
+            {
+                let orig = blocks_raw[l].wq[idx];
+                blocks_raw[l].wq[idx] = orig + hh;
+                let lp = loss(&embedding, &blocks_raw);
+                blocks_raw[l].wq[idx] = orig - hh;
+                let lm = loss(&embedding, &blocks_raw);
+                blocks_raw[l].wq[idx] = orig;
+                let fd = (lp - lm) / (2.0 * hh);
+                assert!(
+                    (fd - dwq_l[l][idx]).abs() < 2e-2,
+                    "block{l}.dWq[{idx}]: fd={fd} gpu={}",
+                    dwq_l[l][idx]
+                );
+            }
+        }
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
