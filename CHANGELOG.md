@@ -41,6 +41,12 @@ normale et à la cotation de position :
   fuzzing a révélé et corrigé une racine parasite de l'inversion pour une cible
   sous le minimum de la branche monotone (queue basse gonflée) ; d'où le
   solveur robuste marche-bornage-bissection.
+- **Visualisation** (`scirust-tolerance/viz/inertia_cone.html`) : page HTML
+  autonome et interactive du **cône d'inertie** — la carte d'acceptation
+  `(δ, σ)` (demi-disque inertiel vs triangle Cpk), le cône 3D `z = √(δ²+σ²)`
+  coupé par le plan `I_max`, la distribution du lot, et la lecture en direct de
+  `I`/`Cpi`/`Cpm`/`Cp`/`Cpk`/ppm en glissant le point de lot ou les curseurs.
+  Sans dépendance réseau, thème clair/sombre.
 
 ### Ajouté — transpileur : couverture de test exhaustive + script global
 Objectif « tester **toutes** les fonctions codées » : l'oracle différentiel
