@@ -338,7 +338,7 @@ secteurs réellement débloqués.
 | Tests unitaires (gate CI, sans Python)      | ✅ livré | `scirust-transpiler/src/lib.rs` (13 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
-| Routage `np.linalg.solve`/`det`/`eigvalsh` + `A @ b` (matvec) → `scirust-solvers` | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `required_crates`) + `emit.rs` |
+| Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
 | Routage `np.fft.fft`/`rfft`/`ifft` → `scirust-signal` (+ type complexe) | ✅ livré (Phase 1) | `sir.rs` (`Ty::ComplexArray`, `Fft`, `Rfft`, `Ifft`, `ComplexAbs`) + `emit.rs` |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | Front-ends MATLAB / Fortran / C++           | ⏳ Phases 2-4 | — |
@@ -351,10 +351,10 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|numpy|, 200 trials/case
   ✓ rk4_step / dot / norm / weighted_mean / cumsum / saxpy / tanh_activation
   ✓ relu / clamp / sign            (if/elif/else — Phase 1)
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
-  ✓ solve / det / eigvalsh / A@b   (routed to scirust-solvers, cargo-compiled — Phase 1)
+  ✓ solve / det / eigvalsh / inv / A@b (routed to scirust-solvers, cargo-compiled — Phase 1)
   ✓ fft.fft / rfft / ifft / abs(fft) (routed to scirust-signal, complex type — Phase 1)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
-  ORACLE GREEN — 25/25 cases match NumPy within tolerance
+  ORACLE GREEN — 26/26 cases match NumPy within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

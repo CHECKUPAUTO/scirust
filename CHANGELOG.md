@@ -5,6 +5,14 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : `np.linalg.inv` (retour matrice 2-D) (Phase 1, incrément 9)
+Premier **retour de matrice 2-D** : `np.linalg.inv(A)` transpile vers
+`scirust_solvers::Matrix::inverse` et renvoie une valeur `scirust_solvers::Matrix`
+(qui porte sa forme). Nouveau `Ty::MatrixVal`, `SirExpr::Inv` ; l'oracle
+sérialise un retour matriciel en aplatissant row-major (via `rows()`/`row()`),
+comparé à `numpy.linalg.inv`. **Oracle 26/26** (200 essais chacun) ; 23 tests
+unitaires.
+
 ### Ajouté — six extensions du tolérancement inertiel (`scirust-tolerance`)
 Six nouveaux modules qui étendent la crate au-delà de la chaîne linéaire
 indépendante et de la seule cotation de position, chacun vérifié par

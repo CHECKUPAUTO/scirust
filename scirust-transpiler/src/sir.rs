@@ -21,6 +21,10 @@ pub enum Ty {
     /// A 1-D complex array (`Vec<scirust_signal::complex::Complex>`), produced
     /// by `np.fft.fft`. Consumed by `np.abs` (→ magnitude, real) or returned.
     ComplexArray,
+    /// A produced 2-D matrix value (`scirust_solvers::Matrix`, carrying its own
+    /// shape), e.g. the result of `np.linalg.inv`. Distinct from `Matrix`,
+    /// which is a flat `&[f64]` *parameter*.
+    MatrixVal,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +173,9 @@ pub enum SirExpr {
         a: Box<SirExpr>,
         b: Box<SirExpr>,
     },
+    /// `np.linalg.inv(A)` : Matrix -> MatrixVal, routed to
+    /// `scirust-solvers::Matrix::inverse`.
+    Inv(Box<SirExpr>),
     /// `np.fft.fft(x)` : real Array -> ComplexArray (full spectrum), routed to
     /// the verified in-place FFT in `scirust-signal`.
     Fft(Box<SirExpr>),
@@ -265,6 +272,7 @@ impl SirExpr {
             | SirExpr::Matvec { .. }
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
+            SirExpr::Inv(_) => Ty::MatrixVal,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -337,7 +345,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
             scan_expr(a, solvers, signal);
             scan_expr(b, solvers, signal);
         },
-        SirExpr::Det(x) | SirExpr::Eigvalsh(x) =>
+        SirExpr::Det(x) | SirExpr::Eigvalsh(x) | SirExpr::Inv(x) =>
         {
             *solvers = true;
             scan_expr(x, solvers, signal);

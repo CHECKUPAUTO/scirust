@@ -527,6 +527,18 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             }
             Ok(SirExpr::Eigvalsh(Box::new(a)))
         },
+        "linalg.inv" =>
+        {
+            // np.linalg.inv(A): matrix inverse, routed to
+            // `scirust-solvers::Matrix::inverse`.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if a.ty() != Ty::Matrix
+            {
+                return Err("np.linalg.inv expects a 2-D matrix argument".into());
+            }
+            Ok(SirExpr::Inv(Box::new(a)))
+        },
         "fft.fft" =>
         {
             // np.fft.fft(x): full complex DFT of a real signal.
@@ -675,7 +687,7 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
                 // First argument of a matrix-taking linalg routine is a matrix.
                 (matches!(
                     strip_np(func),
-                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh"
+                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh" | "linalg.inv"
                 ) && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },
