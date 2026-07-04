@@ -26,9 +26,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # rustfmt output is version-sensitive and this repo's rustfmt.toml uses
+      # unstable options, so the toolchain must be nightly. Pin it to a fixed
+      # nightly (rather than the floating `@nightly`) so a new nightly rustfmt
+      # release cannot silently reformat already-merged code and turn every
+      # open PR's Format Check red. Bump this date deliberately, re-running
+      # `cargo +nightly-<date> fmt --all` in the same commit.
       - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-07-02
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
