@@ -249,6 +249,28 @@ fn cases() -> Vec<Case> {
                 hi: 1.0,
             }],
         },
+        // np.fft.rfft -> half spectrum (N/2+1 complex bins) vs numpy.fft.rfft.
+        Case {
+            name: "fft.rfft -> scirust-signal (half spectrum)",
+            call: "rf",
+            src: "def rf(x: np.ndarray):\n    return np.fft.rfft(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // np.fft.ifft(np.fft.fft(x)) -> round-trip, should recover x (complex).
+        Case {
+            name: "ifft(fft) round-trip",
+            call: "rt",
+            src: "def rt(x: np.ndarray):\n    return np.fft.ifft(np.fft.fft(x))\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
         // ---- intrinsic coverage: every supported math intrinsic & operator ----
         // sin, cos, abs (scalar).
         Case {

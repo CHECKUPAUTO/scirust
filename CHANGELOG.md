@@ -5,6 +5,14 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : famille FFT `rfft`/`ifft` (Phase 1, incrément 7)
+Complète la famille FFT en réutilisant le type complexe. `np.fft.rfft(x)` (FFT
+réelle, demi-spectre `N/2+1`) → `scirust_signal::fft::fft_real` ; `np.fft.ifft(c)`
+(DFT inverse, normalisée `1/N`) → `scirust_signal::fft::ifft` in-place.
+`SirExpr::Rfft`/`Ifft` ajoutés. Nouveaux cas d'oracle : `rfft` vs
+`numpy.fft.rfft`, et le **round-trip** `ifft(fft(x))` (récupère `x`). **Oracle
+24/24** (200 essais chacun) ; 21 tests unitaires.
+
 ### Ajouté — transpileur : FFT + type complexe (Phase 1, incrément 6)
 Premier routage vers `scirust-signal` et première **valeur complexe** dans la
 SIR. `np.fft.fft(x)` (signal réel → spectre complet) transpile vers la FFT

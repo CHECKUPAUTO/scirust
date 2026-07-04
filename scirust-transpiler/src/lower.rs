@@ -511,12 +511,32 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         },
         "fft.fft" =>
         {
-            // np.fft.fft(x): DFT of a real signal, routed to
-            // `scirust-signal::fft::fft_real` -> complex spectrum.
+            // np.fft.fft(x): full complex DFT of a real signal.
             need_args(func, args, 1)?;
             let a = lower_scalar(&args[0], env)?;
             expect_array(&a, "np.fft.fft")?;
             Ok(SirExpr::Fft(Box::new(a)))
+        },
+        "fft.rfft" =>
+        {
+            // np.fft.rfft(x): real FFT (positive-frequency half spectrum).
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            expect_array(&a, "np.fft.rfft")?;
+            Ok(SirExpr::Rfft(Box::new(a)))
+        },
+        "fft.ifft" =>
+        {
+            // np.fft.ifft(c): inverse DFT of a complex spectrum.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if a.ty() != Ty::ComplexArray
+            {
+                return Err("np.fft.ifft expects a complex array (e.g. the result \
+                            of np.fft.fft)"
+                    .into());
+            }
+            Ok(SirExpr::Ifft(Box::new(a)))
         },
         "zeros" =>
         {
