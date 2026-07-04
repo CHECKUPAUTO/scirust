@@ -15,6 +15,15 @@
 //! - `modal` — DCT orthonormality, Parseval, and the `Σ Iₖ²=m·I_S²` partition.
 //! - `chain` — statistical/worst-case recombination and cost-optimal KKT.
 //! - `capability` — non-conformity ppm vs Simpson integration of the tails.
+//! - `montecarlo` — simulated mean/σ of a linear-normal assembly vs the exact
+//!   `Σαμ`, `Σα²σ²`.
+//! - `correlated` — finite-difference gradient vs analytic; identity-correlation
+//!   inertia vs `√(Σα²I²)`; second-order mean vs the exact quadratic moment.
+//! - `geometry` — LS-plane residual orthogonality; perfect plane/circle → 0;
+//!   parallelism/perpendicularity vs cross-/dot-product.
+//! - `sensitivity` — contribution shares sum to 1 and match `αᵢ²Iᵢ²/I_Y²`.
+//! - `process` — discrete allocation vs exhaustive brute force.
+//! - `drift` — long-term `σ` vs a Monte-Carlo of drifting mean + within noise.
 //!
 //! Run: `cargo run -p scirust-tolerance --example fuzz_crosscheck [N]`
 
@@ -22,13 +31,23 @@ use scirust_tolerance::capability::nonconformity_ppm;
 use scirust_tolerance::chain::{
     Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
 };
+use scirust_tolerance::correlated::{
+    correlated_inertia, gradient, second_order_mean, uniform_correlation,
+};
+use scirust_tolerance::drift::{cpk_to_ppk, long_term_sigma, ppk_to_cpk};
 use scirust_tolerance::form::FormBatch;
+use scirust_tolerance::geometry::{
+    flatness, least_squares_plane, parallelism, perpendicularity, roundness,
+};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::montecarlo::{Distribution, linear as mc_linear, simulate};
 use scirust_tolerance::nonnormal::{cornish_fisher_quantile, nonnormal_ppm};
 use scirust_tolerance::position::{
     coord_to_position, position_to_coord, positional_inertia, true_position,
 };
+use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::SamplingPlan;
+use scirust_tolerance::sensitivity::{contributions, correlated_contributions};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_analytical,
     surface_inertia_from_torsors,
@@ -502,6 +521,343 @@ fn check_position(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_montecarlo(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 40_000;
+    for _ in 0..n
+    {
+        let nc = rng.int(2, 4);
+        let means: Vec<f64> = (0..nc).map(|_| rng.uniform(-5.0, 5.0)).collect();
+        let sds: Vec<f64> = (0..nc).map(|_| rng.uniform(0.05, 0.5)).collect();
+        let coeffs: Vec<f64> = (0..nc)
+            .map(|_| {
+                let v = rng.uniform(-2.0, 2.0);
+                if v.abs() < 0.2 { 1.0 } else { v }
+            })
+            .collect();
+        let comps: Vec<Distribution> = means
+            .iter()
+            .zip(&sds)
+            .map(|(&mean, &sd)| Distribution::Normal { mean, sd })
+            .collect();
+        // Independent reference: a linear combination of normals is normal with
+        // mean Σαμ and variance Σα²σ².
+        let want_mean: f64 = coeffs.iter().zip(&means).map(|(a, m)| a * m).sum();
+        let want_var: f64 = coeffs.iter().zip(&sds).map(|(a, s)| a * a * s * s).sum();
+        let seed = rng.u64();
+        let res = simulate(
+            &comps,
+            |xs| mc_linear(&coeffs, xs),
+            want_mean,
+            want_mean - 1e12,
+            want_mean + 1e12,
+            trials,
+            seed,
+        );
+        let se_mean = (want_var / trials as f64).sqrt();
+        r.check(
+            (res.mean - want_mean).abs(),
+            (6.0 * se_mean).max(1e-9),
+            || format!("MC mean {} vs {}", res.mean, want_mean),
+        );
+        let want_sd = want_var.sqrt();
+        let se_sd = want_sd / (2.0 * trials as f64).sqrt();
+        r.check((res.sigma - want_sd).abs(), (6.0 * se_sd).max(1e-9), || {
+            format!("MC sigma {} vs {}", res.sigma, want_sd)
+        });
+    }
+    r
+}
+
+fn check_correlated(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let nc = rng.int(2, 5);
+        // Gradient of f = Σ aᵢ sin(xᵢ) vs the analytic aᵢ cos(xᵢ).
+        let a: Vec<f64> = (0..nc).map(|_| rng.uniform(-2.0, 2.0)).collect();
+        let x0: Vec<f64> = (0..nc).map(|_| rng.uniform(-1.0, 1.0)).collect();
+        let f = |x: &[f64]| a.iter().zip(x).map(|(ai, xi)| ai * xi.sin()).sum::<f64>();
+        let g = gradient(f, &x0, 1e-5);
+        for i in 0..nc
+        {
+            r.check((g[i] - a[i] * x0[i].cos()).abs(), 1e-6, || {
+                format!("correlated gradient[{i}]")
+            });
+        }
+        // correlated_inertia with identity correlation == √(Σ α²I²).
+        let coeffs: Vec<f64> = (0..nc).map(|_| rng.uniform(-2.0, 2.0)).collect();
+        let inert: Vec<f64> = (0..nc).map(|_| rng.uniform(0.01, 0.3)).collect();
+        let corr_i = uniform_correlation(nc, 0.0);
+        let want = coeffs
+            .iter()
+            .zip(&inert)
+            .map(|(a, i)| a * a * i * i)
+            .sum::<f64>()
+            .sqrt();
+        r.check(
+            (correlated_inertia(&coeffs, &inert, &corr_i) - want).abs(),
+            1e-12,
+            || "correlated identity == statistical".into(),
+        );
+        // second_order_mean of f = Σ xᵢ² equals the exact Σ(μᵢ² + σᵢ²).
+        let mu: Vec<f64> = (0..nc).map(|_| rng.uniform(-2.0, 2.0)).collect();
+        let varv: Vec<f64> = (0..nc).map(|_| rng.uniform(0.01, 0.5)).collect();
+        let fq = |x: &[f64]| x.iter().map(|v| v * v).sum::<f64>();
+        let so = second_order_mean(fq, &mu, 1e-3, &varv);
+        let exact = mu.iter().zip(&varv).map(|(m, v)| m * m + v).sum::<f64>();
+        r.check((so - exact).abs(), 1e-5, || {
+            "correlated 2nd-order mean".into()
+        });
+    }
+    r
+}
+
+fn check_geometry(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        // Points exactly on a random plane ⇒ zero flatness.
+        let (pa, pb, pc) = (
+            rng.uniform(-2.0, 2.0),
+            rng.uniform(-2.0, 2.0),
+            rng.uniform(-2.0, 2.0),
+        );
+        let m = rng.int(4, 12);
+        let on_plane: Vec<[f64; 3]> = (0..m)
+            .map(|_| {
+                let (x, y) = (rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
+                [x, y, pa + pb * x + pc * y]
+            })
+            .collect();
+        r.check(flatness(&on_plane), 1e-7, || {
+            "geometry perfect plane".into()
+        });
+        // LS-plane residual orthogonality on noisy points (normal equations).
+        let noisy: Vec<[f64; 3]> = (0..m)
+            .map(|_| {
+                let (x, y) = (rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
+                [x, y, pa + pb * x + pc * y + 0.05 * rng.normal()]
+            })
+            .collect();
+        if let Some((qa, qb, qc)) = least_squares_plane(&noisy)
+        {
+            let res: Vec<f64> = noisy
+                .iter()
+                .map(|p| p[2] - (qa + qb * p[0] + qc * p[1]))
+                .collect();
+            let scale = res.iter().map(|v| v.abs()).sum::<f64>().max(1e-9);
+            let sr: f64 = res.iter().sum();
+            let srx: f64 = res.iter().zip(&noisy).map(|(v, p)| v * p[0]).sum();
+            let sry: f64 = res.iter().zip(&noisy).map(|(v, p)| v * p[1]).sum();
+            r.check(sr.abs() / scale, 1e-7, || "geometry plane Σr".into());
+            r.check(srx.abs() / scale, 1e-6, || "geometry plane Σr·x".into());
+            r.check(sry.abs() / scale, 1e-6, || "geometry plane Σr·y".into());
+        }
+        // Points exactly on a random circle ⇒ zero roundness.
+        let (cx, cy, rad) = (
+            rng.uniform(-2.0, 2.0),
+            rng.uniform(-2.0, 2.0),
+            rng.uniform(0.5, 3.0),
+        );
+        let circ: Vec<[f64; 2]> = (0..12)
+            .map(|k| {
+                let t = k as f64 / 12.0 * std::f64::consts::TAU;
+                [cx + rad * t.cos(), cy + rad * t.sin()]
+            })
+            .collect();
+        r.check(roundness(&circ), 1e-7, || "geometry perfect circle".into());
+        // Orientation zones vs cross-/dot-product identities.
+        let u = [
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+        ];
+        let v = [
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+        ];
+        let nu = (u.iter().map(|x| x * x).sum::<f64>()).sqrt();
+        let nv = (v.iter().map(|x| x * x).sum::<f64>()).sqrt();
+        let l = rng.uniform(1.0, 20.0);
+        if nu > 1e-6 && nv > 1e-6
+        {
+            let cross = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let cn = (cross.iter().map(|x| x * x).sum::<f64>()).sqrt();
+            let ref_par = l * cn / (nu * nv);
+            r.check((parallelism(u, v, l) - ref_par).abs(), 1e-9, || {
+                "geometry parallelism vs cross".into()
+            });
+            let dot = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).abs();
+            let ref_perp = l * dot / (nu * nv);
+            r.check((perpendicularity(u, v, l) - ref_perp).abs(), 1e-9, || {
+                "geometry perpendicularity vs dot".into()
+            });
+        }
+    }
+    r
+}
+
+fn check_sensitivity(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let nc = rng.int(2, 6);
+        let coeffs: Vec<f64> = (0..nc).map(|_| rng.uniform(-2.0, 2.0)).collect();
+        let inert: Vec<f64> = (0..nc).map(|_| rng.uniform(0.01, 0.3)).collect();
+        let cs: Vec<Contributor> = coeffs
+            .iter()
+            .zip(&inert)
+            .map(|(a, i)| Contributor::new("x", *a, *i))
+            .collect();
+        let cons = contributions(&cs);
+        let sum: f64 = cons.iter().map(|c| c.fraction).sum();
+        r.check((sum - 1.0).abs(), 1e-12, || "sensitivity Σfrac == 1".into());
+        // correlated_contributions (identity) matches direct αᵢ²Iᵢ²/total per index.
+        let total: f64 = coeffs.iter().zip(&inert).map(|(a, i)| a * a * i * i).sum();
+        let corr_i = uniform_correlation(nc, 0.0);
+        let frac = correlated_contributions(&coeffs, &inert, &corr_i);
+        for i in 0..nc
+        {
+            let want = coeffs[i] * coeffs[i] * inert[i] * inert[i] / total;
+            r.check((frac[i] - want).abs(), 1e-12, || {
+                format!("sensitivity frac[{i}]")
+            });
+        }
+    }
+    r
+}
+
+fn check_process(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let nc = rng.int(2, 4);
+        let coeffs: Vec<f64> = (0..nc)
+            .map(|_| {
+                let v = rng.uniform(-2.0, 2.0);
+                if v.abs() < 0.2 { 1.0 } else { v }
+            })
+            .collect();
+        let opts: Vec<Vec<ProcessOption>> = (0..nc)
+            .map(|_| {
+                let k = rng.int(2, 4);
+                (0..k)
+                    .map(|_| ProcessOption::new(rng.uniform(0.02, 0.2), rng.uniform(0.5, 5.0)))
+                    .collect()
+            })
+            .collect();
+        let method = if rng.u64() & 1 == 0
+        {
+            Combination::Statistical
+        }
+        else
+        {
+            Combination::WorstCase
+        };
+        let budget = rng.uniform(0.05, 0.4);
+        let got = allocate_discrete(&coeffs, &opts, budget, method);
+        // Independent reference: brute-force every combination (nc ≤ 4, k ≤ 4).
+        let mut idx = vec![0usize; nc];
+        let mut best: Option<f64> = None;
+        loop
+        {
+            let (mut wsum, mut cost) = (0.0, 0.0);
+            for i in 0..nc
+            {
+                let opt = &opts[i][idx[i]];
+                cost += opt.cost;
+                wsum += match method
+                {
+                    Combination::Statistical => coeffs[i] * coeffs[i] * opt.inertia * opt.inertia,
+                    Combination::WorstCase => coeffs[i].abs() * opt.inertia,
+                };
+            }
+            let iy = match method
+            {
+                Combination::Statistical => wsum.sqrt(),
+                Combination::WorstCase => wsum,
+            };
+            if iy <= budget && best.map(|b| cost < b).unwrap_or(true)
+            {
+                best = Some(cost);
+            }
+            // Mixed-radix increment.
+            let mut carry = 0;
+            idx[carry] += 1;
+            while carry < nc && idx[carry] == opts[carry].len()
+            {
+                idx[carry] = 0;
+                carry += 1;
+                if carry < nc
+                {
+                    idx[carry] += 1;
+                }
+            }
+            if carry >= nc
+            {
+                break;
+            }
+        }
+        match (got, best)
+        {
+            (Some(a), Some(bc)) => r.check((a.total_cost - bc).abs(), 1e-9, || {
+                format!("process cost {} vs brute {}", a.total_cost, bc)
+            }),
+            (None, None) => r.check(0.0, 1.0, || "process both infeasible".into()),
+            (g, b) => r.check(1.0, 0.5, || {
+                format!(
+                    "process feasibility mismatch: got={} brute={}",
+                    g.is_some(),
+                    b.is_some()
+                )
+            }),
+        }
+    }
+    r
+}
+
+fn check_drift(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 60_000;
+    for _ in 0..n
+    {
+        let sd = rng.uniform(0.1, 1.0);
+        let d = rng.uniform(0.0, 1.5);
+        // Independent reference: Monte-Carlo of a drifting mean U(−d,d) plus
+        // within-noise N(0,sd) ⇒ Var = sd² + d²/3.
+        let (mut s1, mut s2) = (0.0, 0.0);
+        for _ in 0..trials
+        {
+            let mean = rng.uniform(-d, d);
+            let x = mean + sd * rng.normal();
+            s1 += x;
+            s2 += x * x;
+        }
+        let mc_var = s2 / trials as f64 - (s1 / trials as f64).powi(2);
+        let want_sd = long_term_sigma(sd, d);
+        let se = want_sd / (2.0 * trials as f64).sqrt();
+        r.check(
+            (mc_var.sqrt() - want_sd).abs(),
+            (6.0 * se).max(1e-4),
+            || format!("drift σ_lt MC {} vs {}", mc_var.sqrt(), want_sd),
+        );
+        // Cpk↔Ppk shift round-trip.
+        let cpk = rng.uniform(0.5, 2.0);
+        r.check(
+            (ppk_to_cpk(cpk_to_ppk(cpk, 1.5), 1.5) - cpk).abs(),
+            1e-12,
+            || "drift Cpk↔Ppk round-trip".into(),
+        );
+    }
+    r
+}
+
 fn main() {
     let n: usize = std::env::args()
         .nth(1)
@@ -518,6 +874,12 @@ fn main() {
         ("capability", check_capability(&mut rng, n)),
         ("nonnormal", check_nonnormal(&mut rng, n)),
         ("position", check_position(&mut rng, n)),
+        ("montecarlo", check_montecarlo(&mut rng, n.min(120))),
+        ("correlated", check_correlated(&mut rng, n)),
+        ("geometry", check_geometry(&mut rng, n)),
+        ("sensitivity", check_sensitivity(&mut rng, n)),
+        ("process", check_process(&mut rng, n)),
+        ("drift", check_drift(&mut rng, n.min(150))),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");
