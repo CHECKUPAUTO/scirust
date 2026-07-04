@@ -121,8 +121,8 @@ fn cf_inverse_z(t: f64, s: f64, k: f64) -> f64 {
 /// Cornish–Fisher is a moment-based approximation valid for **moderate**
 /// skewness/kurtosis and spec limits within the distribution's bulk (a few σ,
 /// the usual capability regime). For a limit far in the tail the expansion
-/// leaves its valid monotone branch and [`cf_inverse_z`] falls back to the
-/// normal deviate there (a negligible-tail limit contributes ≈ 0), so the
+/// leaves its valid monotone branch and the internal `cf_inverse_z` falls back
+/// to the normal deviate there (a negligible-tail limit contributes ≈ 0), so the
 /// result stays sane rather than diverging.
 pub fn nonnormal_ppm(mean: f64, sd: f64, skew: f64, ex_kurtosis: f64, lsl: f64, usl: f64) -> f64 {
     if sd <= 0.0

@@ -9,15 +9,24 @@ use scirust_tolerance::capability::CapabilitySummary;
 use scirust_tolerance::chain::{
     Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
 };
+use scirust_tolerance::correlated::{correlated_inertia, uniform_correlation};
+use scirust_tolerance::drift::{cpk_to_ppk, long_term_ppm, long_term_sigma};
 use scirust_tolerance::form::FormBatch;
+use scirust_tolerance::geometry::{
+    cylindricity, cylindricity_inertia, flatness, flatness_inertia, roundness, roundness_inertia,
+    straightness, straightness_inertia,
+};
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
+use scirust_tolerance::montecarlo::{Distribution, linear, simulate};
 use scirust_tolerance::nonnormal::{clements_capability, nonnormal_ppm};
 use scirust_tolerance::optimize::{Component, Requirement, optimize};
 use scirust_tolerance::position::{
     FeatureType, positional_inertia, total_position_tolerance, true_position,
 };
+use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::design_plan;
+use scirust_tolerance::sensitivity::contributions;
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
 };
@@ -33,6 +42,12 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         optimize_cost_tool(),
         nonnormal_tool(),
         position_tool(),
+        monte_carlo_tool(),
+        geometry_tool(),
+        sensitivity_tool(),
+        discrete_allocate_tool(),
+        drift_tool(),
+        correlated_tool(),
     ]
 }
 
@@ -597,6 +612,379 @@ fn position_tool() -> McpTool {
     }
 }
 
+fn parse_distribution(v: &serde_json::Value) -> Result<Distribution, String> {
+    let kind = v
+        .get("type")
+        .and_then(|x| x.as_str())
+        .ok_or("component `type` missing")?;
+    let f = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_f64())
+            .ok_or_else(|| format!("distribution field `{k}` missing"))
+    };
+    match kind
+    {
+        "normal" => Ok(Distribution::Normal {
+            mean: f("mean")?,
+            sd: f("sd")?,
+        }),
+        "uniform" => Ok(Distribution::Uniform {
+            lo: f("lo")?,
+            hi: f("hi")?,
+        }),
+        "triangular" => Ok(Distribution::Triangular {
+            lo: f("lo")?,
+            mode: f("mode")?,
+            hi: f("hi")?,
+        }),
+        other => Err(format!("unknown distribution `{other}`")),
+    }
+}
+
+/// Parse `points` (array of numeric arrays) with a required per-row dimension.
+fn parse_points(args: &serde_json::Value, dim: usize) -> Result<Vec<Vec<f64>>, String> {
+    args.get("points")
+        .and_then(|v| v.as_array())
+        .ok_or("missing `points`")?
+        .iter()
+        .map(|row| {
+            let a = row
+                .as_array()
+                .ok_or("`points` must be an array of arrays")?;
+            if a.len() != dim
+            {
+                return Err(format!("each point must have {dim} coordinates"));
+            }
+            a.iter()
+                .map(|x| {
+                    x.as_f64()
+                        .ok_or_else(|| "non-numeric coordinate".to_string())
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn monte_carlo_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_monte_carlo".to_string(),
+        description: "Monte-Carlo tolerance simulation of a linear assembly Y = Σ coeff_i·X_i. Each \
+            component X_i is drawn from its distribution (normal {mean,sd}, uniform {lo,hi}, or \
+            triangular {lo,mode,hi}); returns the response mean, sigma, inertia about target, \
+            non-conformity ppm, yield, and the 0.135/50/99.865% percentiles. Deterministic in `seed`."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": { "type": "object" },
+                    "description": "per-component laws, e.g. {\"type\":\"normal\",\"mean\":10,\"sd\":0.1}",
+                },
+                "coeffs": { "type": "array", "items": { "type": "number" }, "description": "influence coefficients α_i" },
+                "target": { "type": "number" },
+                "lsl": { "type": "number" },
+                "usl": { "type": "number" },
+                "trials": { "type": "integer", "description": "number of trials (default 100000)" },
+                "seed": { "type": "integer", "description": "RNG seed (default 1)" },
+            },
+            "required": ["components", "coeffs", "target", "lsl", "usl"],
+        }),
+        handler: Box::new(|args| {
+            let comps_json = args
+                .get("components")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `components`")?;
+            let comps: Vec<Distribution> =
+                comps_json.iter().map(parse_distribution).collect::<Result<_, _>>()?;
+            let coeffs = f64_array(&args, "coeffs")?;
+            if coeffs.len() != comps.len() || comps.is_empty()
+            {
+                return Err("`coeffs` must be non-empty and match `components` length".to_string());
+            }
+            let target = f64_field(&args, "target")?;
+            let lsl = f64_field(&args, "lsl")?;
+            let usl = f64_field(&args, "usl")?;
+            if usl <= lsl
+            {
+                return Err("`usl` must exceed `lsl`".to_string());
+            }
+            let n = args
+                .get("trials")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(100_000);
+            let seed = args.get("seed").and_then(|v| v.as_u64()).unwrap_or(1);
+            let res = simulate(&comps, |xs| linear(&coeffs, xs), target, lsl, usl, n, seed);
+            Ok(json!({
+                "mean": res.mean,
+                "sigma": res.sigma,
+                "inertia": res.inertia,
+                "ppm": res.ppm,
+                "yield": res.yield_fraction,
+                "min": res.min,
+                "max": res.max,
+                "p_low": res.p_low,
+                "median": res.median,
+                "p_high": res.p_high,
+                "trials": res.n,
+            }))
+        }),
+    }
+}
+
+fn geometry_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_geometry".to_string(),
+        description: "ISO 1101 form characteristics from measured points: `straightness` / \
+            `roundness` (2D points [x,y]) or `flatness` / `cylindricity` (3D points [x,y,z]). \
+            Returns the peak-to-valley zone value (least-squares reference feature) and the inertial \
+            RMS deviation. For orientation zones use the crate's parallelism/perpendicularity."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "characteristic": { "type": "string", "enum": ["straightness", "roundness", "flatness", "cylindricity"] },
+                "points": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "number" } },
+                    "description": "[x,y] rows for straightness/roundness; [x,y,z] for flatness/cylindricity",
+                },
+            },
+            "required": ["characteristic", "points"],
+        }),
+        handler: Box::new(|args| {
+            let characteristic = args
+                .get("characteristic")
+                .and_then(|v| v.as_str())
+                .ok_or("missing `characteristic`")?;
+            let (value, inertia) = match characteristic
+            {
+                "straightness" =>
+                {
+                    let p: Vec<[f64; 2]> =
+                        parse_points(&args, 2)?.iter().map(|r| [r[0], r[1]]).collect();
+                    (straightness(&p), straightness_inertia(&p))
+                },
+                "roundness" =>
+                {
+                    let p: Vec<[f64; 2]> =
+                        parse_points(&args, 2)?.iter().map(|r| [r[0], r[1]]).collect();
+                    (roundness(&p), roundness_inertia(&p))
+                },
+                "flatness" =>
+                {
+                    let p: Vec<[f64; 3]> =
+                        parse_points(&args, 3)?.iter().map(|r| [r[0], r[1], r[2]]).collect();
+                    (flatness(&p), flatness_inertia(&p))
+                },
+                "cylindricity" =>
+                {
+                    let p: Vec<[f64; 3]> =
+                        parse_points(&args, 3)?.iter().map(|r| [r[0], r[1], r[2]]).collect();
+                    (cylindricity(&p), cylindricity_inertia(&p))
+                },
+                other => return Err(format!("unknown characteristic `{other}`")),
+            };
+            Ok(json!({ "characteristic": characteristic, "zone_value": value, "inertia": inertia }))
+        }),
+    }
+}
+
+fn sensitivity_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_sensitivity".to_string(),
+        description: "Rank a tolerance chain's components by their share of the assembly inertia: \
+            c_i = α_i²·I_i² / Σ α_j²·I_j² (sums to 1). Points at the few characteristics worth \
+            tightening and the many already negligible. Returns contributions sorted largest-first."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "coefficients": { "type": "array", "items": { "type": "number" }, "description": "influence coefficients α_i" },
+                "inertias": { "type": "array", "items": { "type": "number" }, "description": "component inertia budgets I_i" },
+            },
+            "required": ["coefficients", "inertias"],
+        }),
+        handler: Box::new(|args| {
+            let coeffs = f64_array(&args, "coefficients")?;
+            let inertias = f64_array(&args, "inertias")?;
+            if coeffs.len() != inertias.len() || coeffs.is_empty()
+            {
+                return Err(
+                    "`coefficients` and `inertias` must be non-empty and equal length".to_string(),
+                );
+            }
+            let cs: Vec<Contributor> = coeffs
+                .iter()
+                .zip(&inertias)
+                .enumerate()
+                .map(|(i, (a, inertia))| Contributor::new(format!("X{}", i + 1), *a, *inertia))
+                .collect();
+            let cons = contributions(&cs);
+            Ok(json!({
+                "contributions": cons.iter().map(|c| json!({
+                    "name": c.name,
+                    "fraction": c.fraction,
+                    "inertia_contribution": c.inertia_contribution,
+                })).collect::<Vec<_>>(),
+            }))
+        }),
+    }
+}
+
+fn discrete_allocate_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_discrete_allocate".to_string(),
+        description: "Minimum-cost discrete-process tolerance allocation (multiple-choice knapsack): \
+            pick one process {inertia,cost} per component so the assembly inertia (statistical \
+            √(Σα²I²) or worst_case Σ|α|I) stays within `budget` at least cost. Returns the chosen \
+            option index per component, the total cost, and the achieved inertia — or feasible=false."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "coefficients": { "type": "array", "items": { "type": "number" } },
+                "options": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "description": "per-component menu of {inertia, cost}",
+                },
+                "budget": { "type": "number", "description": "assembly inertia budget" },
+                "method": { "type": "string", "enum": ["statistical", "worst_case"] },
+            },
+            "required": ["coefficients", "options", "budget"],
+        }),
+        handler: Box::new(|args| {
+            let coeffs = f64_array(&args, "coefficients")?;
+            let opts_json = args
+                .get("options")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `options`")?;
+            let options: Vec<Vec<ProcessOption>> = opts_json
+                .iter()
+                .map(|comp| {
+                    comp.as_array()
+                        .ok_or("`options` rows must be arrays".to_string())?
+                        .iter()
+                        .map(|o| {
+                            let inertia = o
+                                .get("inertia")
+                                .and_then(|v| v.as_f64())
+                                .ok_or("option `inertia` missing".to_string())?;
+                            let cost = o
+                                .get("cost")
+                                .and_then(|v| v.as_f64())
+                                .ok_or("option `cost` missing".to_string())?;
+                            Ok(ProcessOption::new(inertia, cost))
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let budget = f64_field(&args, "budget")?;
+            let method = match args.get("method").and_then(|v| v.as_str()).unwrap_or("statistical")
+            {
+                "statistical" => Combination::Statistical,
+                "worst_case" => Combination::WorstCase,
+                other => return Err(format!("unknown method `{other}`")),
+            };
+            match allocate_discrete(&coeffs, &options, budget, method)
+            {
+                Some(a) => Ok(json!({
+                    "feasible": true,
+                    "selection": a.selection,
+                    "total_cost": a.total_cost,
+                    "assembly_inertia": a.assembly_inertia,
+                })),
+                None => Ok(json!({
+                    "feasible": false,
+                    "reason": "no process selection meets the budget",
+                })),
+            }
+        }),
+    }
+}
+
+fn drift_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_drift".to_string(),
+        description: "Short-vs-long-term capability under process drift. From the within (short-term) \
+            sigma and a uniform mean-drift half-width d, returns the long-term sigma √(σ²+d²/3) and \
+            the long-term non-conformity ppm vs [lsl,usl]. If `cpk` is given, also the 1.5σ-shifted \
+            long-term Ppk = Cpk − 0.5."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "mean": { "type": "number" },
+                "sigma_st": { "type": "number", "description": "short-term (within) standard deviation" },
+                "drift": { "type": "number", "description": "uniform mean-drift half-width d" },
+                "lsl": { "type": "number" },
+                "usl": { "type": "number" },
+                "cpk": { "type": "number", "description": "optional short-term Cpk for the 1.5σ-shift Ppk" },
+            },
+            "required": ["mean", "sigma_st", "drift", "lsl", "usl"],
+        }),
+        handler: Box::new(|args| {
+            let mean = f64_field(&args, "mean")?;
+            let sigma_st = f64_field(&args, "sigma_st")?;
+            let drift = f64_field(&args, "drift")?;
+            let lsl = f64_field(&args, "lsl")?;
+            let usl = f64_field(&args, "usl")?;
+            let mut out = json!({
+                "long_term_sigma": long_term_sigma(sigma_st, drift),
+                "long_term_ppm": long_term_ppm(mean, sigma_st, drift, lsl, usl),
+            });
+            if let Some(cpk) = args.get("cpk").and_then(|v| v.as_f64())
+            {
+                out["long_term_ppk"] = json!(cpk_to_ppk(cpk, 1.5));
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn correlated_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_correlated".to_string(),
+        description: "Correlated statistical assembly inertia I_Y = √(Σ_ij α_i α_j ρ_ij I_i I_j) — \
+            the chain combination when components share a fixture/tool. Give a single common \
+            correlation `rho` (applied to every pair). Reduces to the independent √(Σα²I²) at rho=0; \
+            returns both for comparison."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "coefficients": { "type": "array", "items": { "type": "number" } },
+                "inertias": { "type": "array", "items": { "type": "number" } },
+                "rho": { "type": "number", "description": "common pairwise correlation in [-1,1] (default 0)" },
+            },
+            "required": ["coefficients", "inertias"],
+        }),
+        handler: Box::new(|args| {
+            let coeffs = f64_array(&args, "coefficients")?;
+            let inertias = f64_array(&args, "inertias")?;
+            if coeffs.len() != inertias.len() || coeffs.is_empty()
+            {
+                return Err("`coefficients` and `inertias` must be non-empty and equal length"
+                    .to_string());
+            }
+            let rho = args.get("rho").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let corr = uniform_correlation(coeffs.len(), rho);
+            let independent: Vec<Contributor> = coeffs
+                .iter()
+                .zip(&inertias)
+                .map(|(a, i)| Contributor::new("x", *a, *i))
+                .collect();
+            Ok(json!({
+                "correlated_inertia": correlated_inertia(&coeffs, &inertias, &corr),
+                "independent_inertia": assembly_inertia_statistical(&independent),
+                "rho": rho,
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,5 +1239,113 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn monte_carlo_tool_matches_linear_normal() {
+        let tool = monte_carlo_tool();
+        let out = (tool.handler)(json!({
+            "components": [
+                { "type": "normal", "mean": 10.0, "sd": 0.10 },
+                { "type": "normal", "mean": 4.0, "sd": 0.08 },
+            ],
+            "coeffs": [1.0, -1.0],
+            "target": 6.0,
+            "lsl": 5.0,
+            "usl": 7.0,
+            "trials": 200000,
+            "seed": 7,
+        }))
+        .unwrap();
+        // Y = X1 − X2 ⇒ mean 6, σ = √(0.01+0.0064) ≈ 0.128.
+        assert!((out["mean"].as_f64().unwrap() - 6.0).abs() < 0.01);
+        assert!((out["sigma"].as_f64().unwrap() - (0.0164f64).sqrt()).abs() < 0.01);
+        assert!(out["yield"].as_f64().unwrap() > 0.99);
+    }
+
+    #[test]
+    fn geometry_tool_reports_zero_for_perfect_circle() {
+        let tool = geometry_tool();
+        let pts: Vec<[f64; 2]> = (0..16)
+            .map(|k| {
+                let t = k as f64 / 16.0 * std::f64::consts::TAU;
+                [2.0 + t.cos(), -1.0 + t.sin()]
+            })
+            .collect();
+        let out = (tool.handler)(json!({ "characteristic": "roundness", "points": pts })).unwrap();
+        assert!(out["zone_value"].as_f64().unwrap() < 1e-6);
+        // Wrong dimensionality is rejected.
+        assert!(
+            (tool.handler)(json!({ "characteristic": "flatness", "points": [[0.0, 0.0]] }))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sensitivity_tool_ranks_and_sums_to_one() {
+        let tool = sensitivity_tool();
+        let out = (tool.handler)(json!({
+            "coefficients": [1.0, 2.0, 1.0],
+            "inertias": [0.10, 0.05, 0.02],
+        }))
+        .unwrap();
+        let cons = out["contributions"].as_array().unwrap();
+        let sum: f64 = cons.iter().map(|c| c["fraction"].as_f64().unwrap()).sum();
+        assert!((sum - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn discrete_allocate_tool_selects_within_budget() {
+        let tool = discrete_allocate_tool();
+        let out = (tool.handler)(json!({
+            "coefficients": [1.0, -1.0],
+            "options": [
+                [{ "inertia": 0.10, "cost": 1.0 }, { "inertia": 0.05, "cost": 3.0 }],
+                [{ "inertia": 0.10, "cost": 1.0 }, { "inertia": 0.05, "cost": 3.0 }],
+            ],
+            "budget": 0.20,
+            "method": "worst_case",
+        }))
+        .unwrap();
+        assert_eq!(out["feasible"], json!(true));
+        assert!((out["total_cost"].as_f64().unwrap() - 2.0).abs() < 1e-12);
+        // Impossible budget ⇒ infeasible.
+        let bad = (tool.handler)(json!({
+            "coefficients": [1.0, -1.0],
+            "options": [
+                [{ "inertia": 0.10, "cost": 1.0 }],
+                [{ "inertia": 0.10, "cost": 1.0 }],
+            ],
+            "budget": 0.05,
+            "method": "worst_case",
+        }))
+        .unwrap();
+        assert_eq!(bad["feasible"], json!(false));
+    }
+
+    #[test]
+    fn drift_tool_inflates_sigma_and_ppm() {
+        let tool = drift_tool();
+        let out = (tool.handler)(json!({
+            "mean": 0.0, "sigma_st": 0.3, "drift": 0.6, "lsl": -1.0, "usl": 1.0, "cpk": 1.5,
+        }))
+        .unwrap();
+        // σ_lt = √(0.09 + 0.12) = √0.21.
+        assert!((out["long_term_sigma"].as_f64().unwrap() - 0.21f64.sqrt()).abs() < 1e-9);
+        assert!((out["long_term_ppk"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn correlated_tool_reduces_to_independent_at_zero() {
+        let tool = correlated_tool();
+        let out = (tool.handler)(json!({
+            "coefficients": [1.0, -1.0, 0.5],
+            "inertias": [0.10, 0.08, 0.20],
+            "rho": 0.0,
+        }))
+        .unwrap();
+        let a = out["correlated_inertia"].as_f64().unwrap();
+        let b = out["independent_inertia"].as_f64().unwrap();
+        assert!((a - b).abs() < 1e-12);
     }
 }

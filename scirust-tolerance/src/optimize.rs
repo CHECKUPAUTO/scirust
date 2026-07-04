@@ -206,7 +206,7 @@ impl Default for OptimizeOptions {
 }
 
 /// Solve the minimum-cost multi-requirement inertia allocation with default
-/// options. See the [module docs](crate::optimize).
+/// options. See the [module docs](mod@crate::optimize).
 pub fn optimize(
     components: &[Component],
     requirements: &[Requirement],
