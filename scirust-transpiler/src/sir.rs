@@ -163,9 +163,15 @@ pub enum SirExpr {
     /// `np.linalg.eigvalsh(A)` : symmetric Matrix -> Array (eigenvalues, sorted
     /// ascending), routed to `scirust-solvers::eigen_symmetric`.
     Eigvalsh(Box<SirExpr>),
-    /// `np.fft.fft(x)` : real Array -> ComplexArray, routed to
-    /// `scirust-signal::fft::fft_real`.
+    /// `np.fft.fft(x)` : real Array -> ComplexArray (full spectrum), routed to
+    /// the verified in-place FFT in `scirust-signal`.
     Fft(Box<SirExpr>),
+    /// `np.fft.rfft(x)` : real Array -> ComplexArray (positive-frequency half
+    /// spectrum, `N/2+1` bins), routed to `scirust-signal::fft::fft_real`.
+    Rfft(Box<SirExpr>),
+    /// `np.fft.ifft(c)` : ComplexArray -> ComplexArray (inverse DFT, `1/N`
+    /// normalised), routed to `scirust-signal::fft::ifft`.
+    Ifft(Box<SirExpr>),
     /// `np.abs(c)` where `c` is a ComplexArray -> real Array of magnitudes.
     ComplexAbs(Box<SirExpr>),
 }
@@ -251,7 +257,7 @@ impl SirExpr {
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
             | SirExpr::ComplexAbs(_) => Ty::Array,
-            SirExpr::Fft(_) => Ty::ComplexArray,
+            SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -329,7 +335,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
             *solvers = true;
             scan_expr(x, solvers, signal);
         },
-        SirExpr::Fft(x) | SirExpr::ComplexAbs(x) =>
+        SirExpr::Fft(x) | SirExpr::Rfft(x) | SirExpr::Ifft(x) | SirExpr::ComplexAbs(x) =>
         {
             *signal = true;
             scan_expr(x, solvers, signal);

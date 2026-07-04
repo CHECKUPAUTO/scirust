@@ -249,6 +249,17 @@ mod tests {
     }
 
     #[test]
+    fn rfft_and_ifft_route_to_signal() {
+        let rf = transpile("def rf(x: np.ndarray):\n    return np.fft.rfft(x)\n").unwrap();
+        assert!(rf.contains("scirust_signal::fft::fft_real(x)"));
+
+        let rt =
+            transpile("def rt(x: np.ndarray):\n    return np.fft.ifft(np.fft.fft(x))\n").unwrap();
+        assert!(rt.contains("scirust_signal::fft::ifft(&mut __ib)"));
+        assert!(rt.contains("scirust_signal::fft::fft(&mut __b)"));
+    }
+
+    #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
         assert!(required_crates(&sir).is_empty());

@@ -564,6 +564,31 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Rfft(a) =>
+        {
+            // Real FFT (positive-frequency half spectrum).
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("scirust_signal::fft::fft_real({})", slice_of(&a)),
+                ty: Ty::ComplexArray,
+                borrowed: false,
+            }
+        },
+        SirExpr::Ifft(a) =>
+        {
+            // Inverse DFT (1/N normalised) of a complex spectrum, in place.
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let mut __ib: Vec<scirust_signal::complex::Complex> = {}; \
+                 scirust_signal::fft::ifft(&mut __ib); __ib }}",
+                a.code,
+            );
+            Frag {
+                code,
+                ty: Ty::ComplexArray,
+                borrowed: false,
+            }
+        },
         SirExpr::ComplexAbs(a) =>
         {
             // |z| over a complex array -> real magnitude array.
