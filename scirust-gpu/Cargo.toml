@@ -33,3 +33,8 @@ required-features = ["wgpu"]
 [[example]]
 name = "gpu_bench"
 required-features = ["wgpu"]
+
+# The full-model resident fwd+bwd bench (vs the C1 tape path) — same gating.
+[[example]]
+name = "gpu_model_bench"
+required-features = ["wgpu"]
