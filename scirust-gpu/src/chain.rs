@@ -150,6 +150,20 @@ pub struct ModelWeights<'a> {
     pub final_norm: &'a GpuMatrix,
 }
 
+/// The resident weights of the full **GQA tied-embedding decoder** — the real
+/// `scirust-sciagent` model: a shared `vocab × d` embedding (also the LM head),
+/// `N` [`GqaBlockWeights`] (multi-head grouped-query attention + RoPE + SwiGLU),
+/// and a final RMSNorm gain. Consumed by [`GpuChain::gqa_model_forward`] /
+/// [`GpuChain::gqa_model_backward`].
+pub struct GqaModelWeights<'a> {
+    /// Token embedding table (`vocab × d`), tied to the output LM head.
+    pub embedding: &'a GpuMatrix,
+    /// The GQA transformer blocks, applied in order.
+    pub blocks: &'a [GqaBlockWeights<'a>],
+    /// Final pre-logits RMSNorm gain (`d`).
+    pub final_norm: &'a GpuMatrix,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -914,6 +928,54 @@ impl GpuChain {
         let trunk = self.transformer_stack(&emb, w.blocks, eps, causal)?;
         let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
         // Tied head: logits = normed · Eᵀ  (E is vocab×d ⇒ Eᵀ is d×vocab).
+        self.matmul_t(&normed, w.embedding, false, true)
+    }
+
+    /// Apply a **stack of GQA transformer blocks** in sequence, fully resident —
+    /// the multi-head grouped-query analogue of [`Self::transformer_stack`].
+    /// Returns the `t×d` output of the last block. With no blocks, a resident
+    /// copy of `x`.
+    pub fn gqa_transformer_stack(
+        &self,
+        x: &GpuMatrix,
+        blocks: &[GqaBlockWeights],
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let mut cur: Option<GpuMatrix> = None;
+        for b in blocks
+        {
+            let input = cur.as_ref().unwrap_or(x);
+            cur = Some(self.gqa_transformer_block(input, b, eps, causal)?);
+        }
+        match cur
+        {
+            Some(m) => Ok(m),
+            None => Ok(self.upload(&self.download(x)?, x.rows(), x.cols())),
+        }
+    }
+
+    /// The **full GQA tied-embedding decoder forward**, `tokens → logits`, fully
+    /// resident — the real `scirust-sciagent` model on the GPU:
+    ///
+    /// ```text
+    /// emb    = embed(tokens, E)                    // t×d
+    /// trunk  = gqa_transformer_stack(emb, blocks)  // t×d  (N GQA layers)
+    /// logits = rms_norm(trunk, final) · Eᵀ         // t×vocab  (tied LM head)
+    /// ```
+    ///
+    /// Returns the `t × vocab` logits (`t = tokens.len()`). Nothing leaves VRAM
+    /// between the embedding gather and the final logit GEMM.
+    pub fn gqa_model_forward(
+        &self,
+        tokens: &[u32],
+        w: &GqaModelWeights,
+        eps: f32,
+        causal: bool,
+    ) -> BackendResult<GpuMatrix> {
+        let emb = self.embed(tokens, w.embedding)?;
+        let trunk = self.gqa_transformer_stack(&emb, w.blocks, eps, causal)?;
+        let normed = self.rms_norm(&trunk, w.final_norm, eps)?;
         self.matmul_t(&normed, w.embedding, false, true)
     }
 
@@ -1850,6 +1912,143 @@ mod tests {
         check("dwd", &dwd, &wd, &|z| {
             loss(&x, &wq, &wk, &wv, &wo, &wg, &wu, z)
         });
+    }
+
+    /// The **full resident GQA model forward** — the real `scirust-sciagent`
+    /// decoder (`tokens → embed → N × GQA block → final RMSNorm → tied LM head`) —
+    /// matches a step-by-step CPU reference over a 2-layer tied-embedding config.
+    /// Skips if no adapter; asserts on lavapipe / a real GPU.
+    #[test]
+    fn resident_gqa_model_forward_matches_cpu_oracle() {
+        use crate::ops::{cpu_gqa_transformer_block, cpu_rms_norm};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (vocab, n_layers, n_heads, n_kv_heads, dh, ff) =
+            (6usize, 2usize, 2usize, 1usize, 4usize, 12usize);
+        let d = n_heads * dh; // 8
+        let kv_dim = n_kv_heads * dh; // 4
+        let (theta, eps) = (10_000.0f32, 1e-5f32);
+        let tokens: Vec<u32> = vec![1, 3, 0, 5];
+        let t = tokens.len();
+        let gen = |n: usize, phase: f32, amp: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (i as f32 * 0.029 + phase).sin() * amp)
+                .collect()
+        };
+        let embedding = gen(vocab * d, 0.2, 0.6);
+        let final_norm: Vec<f32> = (0..d).map(|i| 0.85 + 0.02 * i as f32).collect();
+
+        // Per-block raw weights.
+        struct Bw {
+            n1: Vec<f32>,
+            wq: Vec<f32>,
+            wk: Vec<f32>,
+            wv: Vec<f32>,
+            wo: Vec<f32>,
+            n2: Vec<f32>,
+            wg: Vec<f32>,
+            wu: Vec<f32>,
+            wd: Vec<f32>,
+        }
+        let blocks_raw: Vec<Bw> = (0..n_layers)
+            .map(|l| {
+                let s = l as f32 * 10.0;
+                Bw {
+                    n1: (0..d).map(|i| 0.8 + 0.03 * i as f32).collect(),
+                    wq: gen(d * d, s + 0.5, 0.3),
+                    wk: gen(d * kv_dim, s + 1.1, 0.3),
+                    wv: gen(d * kv_dim, s + 1.7, 0.3),
+                    wo: gen(d * d, s + 2.3, 0.3),
+                    n2: (0..d).map(|i| 0.9 - 0.02 * i as f32).collect(),
+                    wg: gen(d * ff, s + 2.9, 0.25),
+                    wu: gen(d * ff, s + 3.5, 0.25),
+                    wd: gen(ff * d, s + 4.1, 0.25),
+                }
+            })
+            .collect();
+
+        // Upload everything; the per-block matrices must outlive the weight refs.
+        let up = |data: &[f32], r: usize, c: usize| chain.upload(data, r, c);
+        let gemb = up(&embedding, vocab, d);
+        let gfn = up(&final_norm, 1, d);
+        let gblocks: Vec<[GpuMatrix; 9]> = blocks_raw
+            .iter()
+            .map(|b| {
+                [
+                    up(&b.n1, 1, d),
+                    up(&b.wq, d, d),
+                    up(&b.wk, d, kv_dim),
+                    up(&b.wv, d, kv_dim),
+                    up(&b.wo, d, d),
+                    up(&b.n2, 1, d),
+                    up(&b.wg, d, ff),
+                    up(&b.wu, d, ff),
+                    up(&b.wd, ff, d),
+                ]
+            })
+            .collect();
+        let weights_blocks: Vec<GqaBlockWeights> = gblocks
+            .iter()
+            .map(|g| GqaBlockWeights {
+                norm1: &g[0],
+                wq: &g[1],
+                wk: &g[2],
+                wv: &g[3],
+                wo: &g[4],
+                norm2: &g[5],
+                wg: &g[6],
+                wu: &g[7],
+                wd: &g[8],
+                n_heads,
+                n_kv_heads,
+                theta,
+            })
+            .collect();
+        let mw = GqaModelWeights {
+            embedding: &gemb,
+            blocks: &weights_blocks,
+            final_norm: &gfn,
+        };
+        let logits_gpu = chain
+            .download(&chain.gqa_model_forward(&tokens, &mw, eps, true).unwrap())
+            .unwrap();
+
+        // CPU reference: embed → blocks → final norm → tied head.
+        let mut x: Vec<f32> = tokens
+            .iter()
+            .flat_map(|&tk| embedding[(tk as usize) * d..(tk as usize) * d + d].to_vec())
+            .collect();
+        for b in &blocks_raw
+        {
+            x = cpu_gqa_transformer_block(
+                &x, &b.n1, &b.wq, &b.wk, &b.wv, &b.wo, &b.n2, &b.wg, &b.wu, &b.wd, t, d, kv_dim,
+                ff, n_heads, n_kv_heads, dh, theta, eps, true,
+            );
+        }
+        let normed = cpu_rms_norm(&x, &final_norm, eps, t, d);
+        let mut logits_cpu = vec![0.0f32; t * vocab];
+        for i in 0..t
+        {
+            for vv in 0..vocab
+            {
+                let mut acc = 0.0f32;
+                for dd in 0..d
+                {
+                    acc += normed[i * d + dd] * embedding[vv * d + dd];
+                }
+                logits_cpu[i * vocab + vv] = acc;
+            }
+        }
+        assert!(
+            rel_err(&logits_gpu, &logits_cpu) < 1e-4,
+            "rel_err {}",
+            rel_err(&logits_gpu, &logits_cpu)
+        );
     }
 
     /// The **fully resident** SwiGLU MLP — `(silu(x·W_gate) ⊙ (x·W_up))·W_down`
