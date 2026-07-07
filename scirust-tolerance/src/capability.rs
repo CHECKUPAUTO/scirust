@@ -27,7 +27,7 @@
 //! index *is* the Taguchi index, read against an explicit inertia limit.
 
 use crate::inertia::Inertia;
-use crate::special::{normal_cdf, normal_sf};
+use crate::special::{chi2_quantile, inv_normal_cdf, normal_cdf, normal_sf};
 use serde::{Deserialize, Serialize};
 
 /// `Cp = (USL − LSL) / (6σ)` — potential capability (spread only, ignores
@@ -178,6 +178,47 @@ impl CapabilitySummary {
     }
 }
 
+/// Two-sided confidence interval for `Cp` from an estimate `cp_hat` on a sample
+/// of size `n`, at confidence `conf`. `Cp ∝ 1/σ` and `(n−1)ŝ²/σ² ~ χ²_{n−1}`, so
+///
+/// ```text
+/// [ Ĉp·√(χ²_{α/2,ν}/ν) ,  Ĉp·√(χ²_{1−α/2,ν}/ν) ] ,   ν = n−1, α = 1−conf,
+/// ```
+///
+/// an **exact** interval under normality. Returns `None` for `n < 2` or `conf`
+/// outside `(0, 1)`.
+pub fn cp_confidence_interval(cp_hat: f64, n: usize, conf: f64) -> Option<(f64, f64)> {
+    if n < 2 || conf <= 0.0 || conf >= 1.0
+    {
+        return None;
+    }
+    let nu = (n - 1) as f64;
+    let alpha = 1.0 - conf;
+    let lo = cp_hat * (chi2_quantile(nu, alpha / 2.0) / nu).sqrt();
+    let hi = cp_hat * (chi2_quantile(nu, 1.0 - alpha / 2.0) / nu).sqrt();
+    Some((lo, hi))
+}
+
+/// Two-sided confidence interval for `Cpk` from an estimate `cpk_hat` on a
+/// sample of size `n`, at confidence `conf`, by the Bissell large-sample normal
+/// approximation
+///
+/// ```text
+/// Ĉpk ± z_{1−α/2}·√( 1/(9n) + Ĉpk²/(2(n−1)) ) .
+/// ```
+///
+/// Approximate (there is no exact closed form for `Cpk`), and accurate for
+/// `n ≳ 30`. Returns `None` for `n < 2` or `conf` outside `(0, 1)`.
+pub fn cpk_confidence_interval(cpk_hat: f64, n: usize, conf: f64) -> Option<(f64, f64)> {
+    if n < 2 || conf <= 0.0 || conf >= 1.0
+    {
+        return None;
+    }
+    let z = inv_normal_cdf(1.0 - 0.5 * (1.0 - conf));
+    let se = (1.0 / (9.0 * n as f64) + cpk_hat * cpk_hat / (2.0 * (n - 1) as f64)).sqrt();
+    Some((cpk_hat - z * se, cpk_hat + z * se))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +296,25 @@ mod tests {
         assert!(s.cpi > 1.0); // tight batch, generous 0.2 budget
         assert!(s.ppm >= 0.0);
         assert_relative_eq!(s.inertia, s.inertia, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn cp_confidence_interval_brackets_estimate_and_tightens() {
+        let (lo, hi) = cp_confidence_interval(1.33, 30, 0.95).unwrap();
+        assert!(lo < 1.33 && 1.33 < hi);
+        // Larger n ⇒ narrower interval.
+        let (lo2, hi2) = cp_confidence_interval(1.33, 200, 0.95).unwrap();
+        assert!((hi2 - lo2) < (hi - lo));
+        assert!(cp_confidence_interval(1.0, 1, 0.95).is_none());
+    }
+
+    #[test]
+    fn cpk_confidence_interval_is_symmetric_and_shrinks() {
+        let (lo, hi) = cpk_confidence_interval(1.33, 50, 0.95).unwrap();
+        assert!(lo < 1.33 && 1.33 < hi);
+        // Symmetric about the estimate (normal approximation).
+        assert_relative_eq!(1.33 - lo, hi - 1.33, epsilon = 1e-12);
+        let (lo2, hi2) = cpk_confidence_interval(1.33, 500, 0.95).unwrap();
+        assert!((hi2 - lo2) < (hi - lo));
     }
 }

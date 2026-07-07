@@ -123,6 +123,82 @@ pub fn i_max_position(diametral_tol: f64, target_cp: f64) -> f64 {
     diametral_tol / (6.0 * target_cp)
 }
 
+/// Virtual condition: the constant worst-case boundary a feature-of-size can
+/// never violate, from its maximum-material size and geometric tolerance — the
+/// size a functional gauge pin/hole is built to. For an
+/// [`FeatureType::Internal`] feature (hole) `VC = mmc_size − geo_tol`; for
+/// [`FeatureType::External`] (pin) `VC = mmc_size + geo_tol`.
+pub fn virtual_condition(mmc_size: f64, geo_tol: f64, feature: FeatureType) -> f64 {
+    match feature
+    {
+        FeatureType::Internal => mmc_size - geo_tol,
+        FeatureType::External => mmc_size + geo_tol,
+    }
+}
+
+/// Resultant condition: the single worst-case boundary opposite the
+/// [`virtual_condition`], from the collective effect of the least-material size,
+/// the geometric tolerance, and the bonus earned at LMC. For an internal feature
+/// `RC = lmc_size + geo_tol + (lmc − mmc)`; for external
+/// `RC = lmc_size − geo_tol − (mmc − lmc)`.
+pub fn resultant_condition(
+    mmc_size: f64,
+    lmc_size: f64,
+    geo_tol: f64,
+    feature: FeatureType,
+) -> f64 {
+    match feature
+    {
+        FeatureType::Internal => lmc_size + geo_tol + (lmc_size - mmc_size),
+        FeatureType::External => lmc_size - geo_tol - (mmc_size - lmc_size),
+    }
+}
+
+/// Datum shift: the translational freedom a part gains when a datum feature of
+/// size is referenced at its maximum-material boundary (MMB) and departs from
+/// it — the amount the part may best-fit shift in the gauge. It is the datum
+/// feature's departure from MMB, clamped at 0.
+///
+/// Unlike [`mmc_bonus`] this does **not** enlarge a feature's tolerance zone; it
+/// lets the whole pattern shift relative to the datums (ASME Y14.5 MMB), which
+/// is why it is booked separately from bonus in a stack-up.
+pub fn datum_shift(actual_datum_size: f64, mmb_size: f64, feature: FeatureType) -> f64 {
+    let departure = match feature
+    {
+        FeatureType::Internal => actual_datum_size - mmb_size,
+        FeatureType::External => mmb_size - actual_datum_size,
+    };
+    departure.max(0.0)
+}
+
+/// A composite position tolerance: the two-tier feature-control-frame of
+/// ASME Y14.5. The upper **PLTZF** (pattern-locating zone) locates the pattern
+/// to the datums with the larger diametral tolerance; the lower **FRTZF**
+/// (feature-relating zone) refines each feature *within* the pattern with the
+/// smaller tolerance (`frtzf ≤ pltzf`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompositePosition {
+    /// Upper-tier pattern-locating diametral tolerance (to the datums).
+    pub pltzf: f64,
+    /// Lower-tier feature-relating diametral tolerance (within the pattern).
+    pub frtzf: f64,
+}
+
+impl CompositePosition {
+    /// A composite tolerance with the given upper (`pltzf`) and lower (`frtzf`)
+    /// zones.
+    pub fn new(pltzf: f64, frtzf: f64) -> Self {
+        Self { pltzf, frtzf }
+    }
+
+    /// Whether a feature conforms to **both** tiers: its deviation to the datums
+    /// `(loc_dx, loc_dy)` within the PLTZF, and its deviation within the pattern
+    /// `(pat_dx, pat_dy)` within the FRTZF (both as diametral true positions).
+    pub fn conforms(&self, loc_dx: f64, loc_dy: f64, pat_dx: f64, pat_dy: f64) -> bool {
+        true_position(loc_dx, loc_dy) <= self.pltzf && true_position(pat_dx, pat_dy) <= self.frtzf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +280,64 @@ mod tests {
     fn i_max_position_conventions() {
         assert_relative_eq!(i_max_position(0.6, 1.0), 0.1, epsilon = 1e-12);
         assert_relative_eq!(i_max_position(0.6, 2.0), 0.05, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn virtual_and_resultant_conditions() {
+        // Hole MMC 10.0, LMC 10.5, position tol 0.2.
+        assert_relative_eq!(
+            virtual_condition(10.0, 0.2, FeatureType::Internal),
+            9.8,
+            epsilon = 1e-12
+        );
+        // RC = 10.5 + 0.2 + (10.5 − 10.0) = 11.2.
+        assert_relative_eq!(
+            resultant_condition(10.0, 10.5, 0.2, FeatureType::Internal),
+            11.2,
+            epsilon = 1e-12
+        );
+        // Pin MMC 5.0, LMC 4.6: VC = 5.0 + 0.1 = 5.1; RC = 4.6 − 0.1 − 0.4 = 4.1.
+        assert_relative_eq!(
+            virtual_condition(5.0, 0.1, FeatureType::External),
+            5.1,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            resultant_condition(5.0, 4.6, 0.1, FeatureType::External),
+            4.1,
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn datum_shift_is_departure_from_mmb() {
+        // Internal datum at MMB 10.0, actual 10.15 ⇒ shift 0.15.
+        assert_relative_eq!(
+            datum_shift(10.15, 10.0, FeatureType::Internal),
+            0.15,
+            epsilon = 1e-12
+        );
+        // At MMB exactly ⇒ no shift; beyond MMB (smaller hole) ⇒ clamped 0.
+        assert_relative_eq!(
+            datum_shift(10.0, 10.0, FeatureType::Internal),
+            0.0,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            datum_shift(9.9, 10.0, FeatureType::Internal),
+            0.0,
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn composite_position_needs_both_tiers() {
+        let c = CompositePosition::new(0.4, 0.1);
+        // Located within 0.4 to datums and within 0.1 in the pattern ⇒ conforms.
+        assert!(c.conforms(0.15, 0.0, 0.04, 0.0)); // Ø 0.30 ≤ 0.4 and Ø 0.08 ≤ 0.1
+        // Within the datums but the pattern refinement fails.
+        assert!(!c.conforms(0.15, 0.0, 0.08, 0.0)); // Ø 0.16 > 0.1
+        // Pattern ok but located too far from datums.
+        assert!(!c.conforms(0.25, 0.0, 0.02, 0.0)); // Ø 0.50 > 0.4
     }
 }

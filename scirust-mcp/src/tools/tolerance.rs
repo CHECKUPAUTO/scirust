@@ -5,11 +5,15 @@
 //! réimplémenter les formules côté agent.
 
 use crate::registry::McpTool;
-use scirust_tolerance::capability::CapabilitySummary;
+use scirust_tolerance::capability::{
+    CapabilitySummary, cp_confidence_interval, cpk_confidence_interval,
+};
 use scirust_tolerance::chain::{
-    Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
+    Allocation, Contributor, ContributorState, allocate, assembly_inertia_statistical,
+    assembly_inertia_worst_case,
 };
 use scirust_tolerance::correlated::{correlated_inertia, uniform_correlation};
+use scirust_tolerance::distfit::{best_fit, percentile_capability};
 use scirust_tolerance::drift::{cpk_to_ppk, long_term_ppm, long_term_sigma};
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::geometry::{
@@ -17,16 +21,19 @@ use scirust_tolerance::geometry::{
     straightness, straightness_inertia,
 };
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::interval::tolerance_interval;
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::montecarlo::{Distribution, linear, simulate};
+use scirust_tolerance::msa::gage_rr;
 use scirust_tolerance::nonnormal::{clements_capability, nonnormal_ppm};
 use scirust_tolerance::optimize::{Component, Requirement, optimize};
 use scirust_tolerance::position::{
-    FeatureType, positional_inertia, total_position_tolerance, true_position,
+    CompositePosition, FeatureType, datum_shift, positional_inertia, resultant_condition,
+    total_position_tolerance, true_position, virtual_condition,
 };
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::design_plan;
-use scirust_tolerance::sensitivity::contributions;
+use scirust_tolerance::sensitivity::{contributions, dual_contributions};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
 };
@@ -48,6 +55,12 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         discrete_allocate_tool(),
         drift_tool(),
         correlated_tool(),
+        gage_rr_tool(),
+        tolerance_interval_tool(),
+        dual_sensitivity_tool(),
+        distribution_fit_tool(),
+        gdt_tool(),
+        capability_ci_tool(),
     ]
 }
 
@@ -985,6 +998,315 @@ fn correlated_tool() -> McpTool {
     }
 }
 
+fn gage_rr_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_gage_rr".to_string(),
+        description: "Crossed Gage R&R (ANOVA method, AIAG MSA): from a balanced study \
+            measurements[part][operator][replicate], separates the variance into repeatability \
+            (equipment), reproducibility (appraiser) and part-to-part, and returns %R&R (study \
+            variation), %contribution, %tolerance (if a tolerance is given), the number of distinct \
+            categories (ndc) and the AIAG verdict (acceptable/marginal/unacceptable)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "measurements": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+                    "description": "measurements[part][operator][replicate], balanced (p≥2, o≥2, r≥2)",
+                },
+                "tolerance": { "type": "number", "description": "spec width USL−LSL for %tolerance (optional)" },
+            },
+            "required": ["measurements"],
+        }),
+        handler: Box::new(|args| {
+            let rows = args
+                .get("measurements")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `measurements`")?;
+            let data: Vec<Vec<Vec<f64>>> = rows
+                .iter()
+                .map(|part| {
+                    part.as_array()
+                        .ok_or("`measurements` must be 3-deep".to_string())?
+                        .iter()
+                        .map(|cell| {
+                            cell.as_array()
+                                .ok_or("`measurements` must be 3-deep".to_string())?
+                                .iter()
+                                .map(|x| x.as_f64().ok_or("non-numeric reading".to_string()))
+                                .collect::<Result<Vec<f64>, String>>()
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let tol = args.get("tolerance").and_then(|v| v.as_f64());
+            match gage_rr(&data, tol)
+            {
+                None => Err("unbalanced or too-small study (need p≥2, o≥2, r≥2)".to_string()),
+                Some(g) => Ok(json!({
+                    "repeatability_var": g.repeatability_var,
+                    "reproducibility_var": g.reproducibility_var,
+                    "grr_var": g.grr_var,
+                    "part_var": g.part_var,
+                    "total_var": g.total_var,
+                    "pct_study_rr": g.pct_study_rr,
+                    "pct_contribution": g.pct_contribution,
+                    "pct_tolerance": g.pct_tolerance,
+                    "ndc": g.ndc,
+                    "verdict": format!("{:?}", g.verdict),
+                })),
+            }
+        }),
+    }
+}
+
+fn tolerance_interval_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_statistical_interval".to_string(),
+        description: "Two-sided statistical tolerance interval (normal theory, ISO 16269-6): from a \
+            sample mean, sd and size n, returns limits x̄±k·s that contain at least proportion \
+            `coverage` of the population with confidence `confidence`, plus whether they fit inside \
+            an optional [lsl, usl] spec. Unlike x̄±3s this accounts for the finite sample."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "mean": { "type": "number" },
+                "sd": { "type": "number", "description": "sample standard deviation (n−1)" },
+                "n": { "type": "integer", "description": "sample size (≥2)" },
+                "coverage": { "type": "number", "description": "population proportion p (e.g. 0.99)" },
+                "confidence": { "type": "number", "description": "confidence 1−α (e.g. 0.95)" },
+                "lsl": { "type": "number", "description": "optional lower spec for conformance" },
+                "usl": { "type": "number", "description": "optional upper spec for conformance" },
+            },
+            "required": ["mean", "sd", "n", "coverage", "confidence"],
+        }),
+        handler: Box::new(|args| {
+            let mean = f64_field(&args, "mean")?;
+            let sd = f64_field(&args, "sd")?;
+            let n = args.get("n").and_then(|v| v.as_u64()).ok_or("missing `n`")? as usize;
+            let p = f64_field(&args, "coverage")?;
+            let conf = f64_field(&args, "confidence")?;
+            let ti = tolerance_interval(mean, sd, n, p, conf)
+                .ok_or("invalid inputs (need n≥2 and coverage/confidence in (0,1))")?;
+            let mut out = json!({ "lower": ti.lower, "upper": ti.upper, "k": ti.k });
+            if let (Some(lsl), Some(usl)) = (
+                args.get("lsl").and_then(|v| v.as_f64()),
+                args.get("usl").and_then(|v| v.as_f64()),
+            )
+            {
+                out["covers_spec"] = json!(ti.covers_spec(lsl, usl));
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn dual_sensitivity_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_dual_sensitivity".to_string(),
+        description:
+            "Dual sensitivity (GeoFactor + mean-vs-variance split, à la 3DCS/CETOL): from \
+            component states (coeff α, off-centering δ, sigma σ), returns per component its \
+            geometric magnification |α|, its contribution to the assembly MEAN shift (α·δ, summing \
+            to δ_Y) and its share of the assembly VARIANCE (α²σ²/σ_Y², summing to 1) — so a part \
+            that needs re-centring is told apart from one that needs its spread reduced."
+                .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "coefficients": { "type": "array", "items": { "type": "number" } },
+                "off_centerings": { "type": "array", "items": { "type": "number" }, "description": "δ_i per component" },
+                "sigmas": { "type": "array", "items": { "type": "number" }, "description": "σ_i per component" },
+            },
+            "required": ["coefficients", "off_centerings", "sigmas"],
+        }),
+        handler: Box::new(|args| {
+            let coeffs = f64_array(&args, "coefficients")?;
+            let deltas = f64_array(&args, "off_centerings")?;
+            let sigmas = f64_array(&args, "sigmas")?;
+            if coeffs.len() != deltas.len() || coeffs.len() != sigmas.len() || coeffs.is_empty()
+            {
+                return Err(
+                    "`coefficients`, `off_centerings`, `sigmas` must be equal, non-empty"
+                        .to_string(),
+                );
+            }
+            let states: Vec<ContributorState> = (0..coeffs.len())
+                .map(|i| {
+                    ContributorState::new(format!("X{}", i + 1), coeffs[i], deltas[i], sigmas[i])
+                })
+                .collect();
+            let dual = dual_contributions(&states);
+            Ok(json!({
+                "components": dual.iter().map(|d| json!({
+                    "name": d.name,
+                    "geo_factor": d.geo_factor,
+                    "mean_contribution": d.mean_contribution,
+                    "variance_fraction": d.variance_fraction,
+                })).collect::<Vec<_>>(),
+            }))
+        }),
+    }
+}
+
+fn distribution_fit_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_distribution_fit".to_string(),
+        description: "Fit the best distribution (normal/lognormal/Rayleigh/Weibull by \
+            log-likelihood, Q-DAS/ISO 22514 style) to a data sample and report percentile capability \
+            Cp=(USL−LSL)/(X99.865−X0.135), Cpk with the fitted median — the correct capability for \
+            skewed processes where the normal Cp/Cpk lie."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "sample": { "type": "array", "items": { "type": "number" } },
+                "lsl": { "type": "number" },
+                "usl": { "type": "number" },
+            },
+            "required": ["sample", "lsl", "usl"],
+        }),
+        handler: Box::new(|args| {
+            let sample = f64_array(&args, "sample")?;
+            let lsl = f64_field(&args, "lsl")?;
+            let usl = f64_field(&args, "usl")?;
+            if usl <= lsl
+            {
+                return Err("`usl` must exceed `lsl`".to_string());
+            }
+            let dist = best_fit(&sample).ok_or("could not fit any distribution")?;
+            let c = percentile_capability(&dist, lsl, usl);
+            Ok(json!({
+                "distribution": format!("{dist:?}"),
+                "cp": c.cp,
+                "cpk": c.cpk,
+                "cpu": c.cpu,
+                "cpl": c.cpl,
+                "median": c.median,
+            }))
+        }),
+    }
+}
+
+fn gdt_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_gdt".to_string(),
+        description: "Advanced GD&T (ASME Y14.5) boundaries: virtual condition (MMC ∓ geo_tol) and \
+            resultant condition of a feature-of-size, datum shift (departure of a datum feature from \
+            its MMB), and composite-position conformance (two-tier PLTZF/FRTZF). Set `feature` to \
+            \"internal\" (hole) or \"external\" (pin)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "operation": { "type": "string", "enum": ["virtual_condition", "resultant_condition", "datum_shift", "composite"] },
+                "feature": { "type": "string", "enum": ["internal", "external"] },
+                "mmc_size": { "type": "number" },
+                "lmc_size": { "type": "number", "description": "for resultant_condition" },
+                "geo_tol": { "type": "number" },
+                "actual_datum_size": { "type": "number", "description": "for datum_shift" },
+                "mmb_size": { "type": "number", "description": "for datum_shift" },
+                "pltzf": { "type": "number", "description": "composite upper zone" },
+                "frtzf": { "type": "number", "description": "composite lower zone" },
+                "loc_dx": { "type": "number" }, "loc_dy": { "type": "number" },
+                "pat_dx": { "type": "number" }, "pat_dy": { "type": "number" },
+            },
+            "required": ["operation"],
+        }),
+        handler: Box::new(|args| {
+            let op = args
+                .get("operation")
+                .and_then(|v| v.as_str())
+                .ok_or("missing `operation`")?;
+            let feat = || -> Result<FeatureType, String> {
+                match args.get("feature").and_then(|v| v.as_str())
+                {
+                    Some("internal") => Ok(FeatureType::Internal),
+                    Some("external") => Ok(FeatureType::External),
+                    _ => Err("need `feature` = \"internal\" or \"external\"".to_string()),
+                }
+            };
+            match op
+            {
+                "virtual_condition" => Ok(json!({
+                    "virtual_condition": virtual_condition(f64_field(&args, "mmc_size")?, f64_field(&args, "geo_tol")?, feat()?),
+                })),
+                "resultant_condition" => Ok(json!({
+                    "resultant_condition": resultant_condition(
+                        f64_field(&args, "mmc_size")?,
+                        f64_field(&args, "lmc_size")?,
+                        f64_field(&args, "geo_tol")?,
+                        feat()?,
+                    ),
+                })),
+                "datum_shift" => Ok(json!({
+                    "datum_shift": datum_shift(f64_field(&args, "actual_datum_size")?, f64_field(&args, "mmb_size")?, feat()?),
+                })),
+                "composite" =>
+                {
+                    let comp = CompositePosition::new(f64_field(&args, "pltzf")?, f64_field(&args, "frtzf")?);
+                    let (ldx, ldy) = (f64_field(&args, "loc_dx")?, f64_field(&args, "loc_dy")?);
+                    let (pdx, pdy) = (f64_field(&args, "pat_dx")?, f64_field(&args, "pat_dy")?);
+                    Ok(json!({
+                        "pattern_true_position": true_position(ldx, ldy),
+                        "refinement_true_position": true_position(pdx, pdy),
+                        "conforms": comp.conforms(ldx, ldy, pdx, pdy),
+                    }))
+                },
+                other => Err(format!("unknown operation `{other}`")),
+            }
+        }),
+    }
+}
+
+fn capability_ci_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_capability_ci".to_string(),
+        description:
+            "Confidence intervals on capability indices: the exact χ² interval for Cp and \
+            the Bissell large-sample interval for Cpk, from a point estimate and the sample size n \
+            at a given confidence. Reports the uncertainty a single Cp/Cpk number hides."
+                .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cp": { "type": "number", "description": "Cp point estimate (optional)" },
+                "cpk": { "type": "number", "description": "Cpk point estimate (optional)" },
+                "n": { "type": "integer", "description": "sample size (≥2)" },
+                "confidence": { "type": "number", "description": "confidence 1−α (e.g. 0.95)" },
+            },
+            "required": ["n", "confidence"],
+        }),
+        handler: Box::new(|args| {
+            let n = args
+                .get("n")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing `n`")? as usize;
+            let conf = f64_field(&args, "confidence")?;
+            let mut out = json!({});
+            if let Some(cp) = args.get("cp").and_then(|v| v.as_f64())
+            {
+                let (lo, hi) =
+                    cp_confidence_interval(cp, n, conf).ok_or("invalid inputs for Cp CI")?;
+                out["cp_ci"] = json!([lo, hi]);
+            }
+            if let Some(cpk) = args.get("cpk").and_then(|v| v.as_f64())
+            {
+                let (lo, hi) =
+                    cpk_confidence_interval(cpk, n, conf).ok_or("invalid inputs for Cpk CI")?;
+                out["cpk_ci"] = json!([lo, hi]);
+            }
+            if out.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            {
+                return Err("provide at least one of `cp` or `cpk`".to_string());
+            }
+            Ok(out)
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1347,5 +1669,97 @@ mod tests {
         let a = out["correlated_inertia"].as_f64().unwrap();
         let b = out["independent_inertia"].as_f64().unwrap();
         assert!((a - b).abs() < 1e-12);
+    }
+
+    #[test]
+    fn gage_rr_tool_reports_components_and_verdict() {
+        let tool = gage_rr_tool();
+        let out = (tool.handler)(json!({
+            "measurements": [
+                [[10.0, 10.0], [10.1, 10.1]],
+                [[12.0, 12.0], [12.1, 12.1]],
+                [[8.0, 8.0], [8.1, 8.1]],
+            ],
+            "tolerance": 6.0,
+        }))
+        .unwrap();
+        assert!(out["repeatability_var"].as_f64().unwrap() < 1e-9);
+        assert!(out["part_var"].as_f64().unwrap() > 0.0);
+        assert!(out["verdict"].is_string());
+        // Unbalanced ⇒ error.
+        assert!((tool.handler)(json!({ "measurements": [[[1.0]]] })).is_err());
+    }
+
+    #[test]
+    fn tolerance_interval_tool_spec_coverage() {
+        let tool = tolerance_interval_tool();
+        let out = (tool.handler)(json!({
+            "mean": 10.0, "sd": 0.5, "n": 30, "coverage": 0.99, "confidence": 0.95,
+            "lsl": 5.0, "usl": 15.0,
+        }))
+        .unwrap();
+        assert!(out["k"].as_f64().unwrap() > 1.959);
+        assert_eq!(out["covers_spec"], json!(true));
+    }
+
+    #[test]
+    fn dual_sensitivity_tool_splits_mean_and_variance() {
+        let tool = dual_sensitivity_tool();
+        let out = (tool.handler)(json!({
+            "coefficients": [1.0, 1.0],
+            "off_centerings": [0.2, 0.0],
+            "sigmas": [0.01, 0.10],
+        }))
+        .unwrap();
+        let comps = out["components"].as_array().unwrap();
+        let vsum: f64 = comps
+            .iter()
+            .map(|c| c["variance_fraction"].as_f64().unwrap())
+            .sum();
+        assert!((vsum - 1.0).abs() < 1e-12);
+        // Second component dominates variance; first dominates the mean.
+        assert!(comps[1]["variance_fraction"].as_f64().unwrap() > 0.98);
+        assert!(comps[0]["mean_contribution"].as_f64().unwrap().abs() > 0.1);
+    }
+
+    #[test]
+    fn distribution_fit_tool_reduces_to_normal() {
+        let tool = distribution_fit_tool();
+        // Roughly symmetric data ⇒ fit + finite capability.
+        let out = (tool.handler)(json!({
+            "sample": [9.8, 10.1, 10.0, 9.9, 10.2, 9.95, 10.05, 9.85, 10.15, 10.0],
+            "lsl": 9.0, "usl": 11.0,
+        }))
+        .unwrap();
+        assert!(out["cp"].as_f64().unwrap() > 0.0);
+        assert!(out["distribution"].is_string());
+    }
+
+    #[test]
+    fn gdt_tool_virtual_condition_and_composite() {
+        let tool = gdt_tool();
+        let vc = (tool.handler)(json!({
+            "operation": "virtual_condition", "feature": "internal", "mmc_size": 10.0, "geo_tol": 0.2,
+        }))
+        .unwrap();
+        assert!((vc["virtual_condition"].as_f64().unwrap() - 9.8).abs() < 1e-12);
+        let comp = (tool.handler)(json!({
+            "operation": "composite", "pltzf": 0.4, "frtzf": 0.1,
+            "loc_dx": 0.15, "loc_dy": 0.0, "pat_dx": 0.04, "pat_dy": 0.0,
+        }))
+        .unwrap();
+        assert_eq!(comp["conforms"], json!(true));
+        assert!((tool.handler)(json!({ "operation": "bogus" })).is_err());
+    }
+
+    #[test]
+    fn capability_ci_tool_brackets_estimates() {
+        let tool = capability_ci_tool();
+        let out =
+            (tool.handler)(json!({ "cp": 1.33, "cpk": 1.2, "n": 50, "confidence": 0.95 })).unwrap();
+        let cp_ci = out["cp_ci"].as_array().unwrap();
+        assert!(cp_ci[0].as_f64().unwrap() < 1.33 && 1.33 < cp_ci[1].as_f64().unwrap());
+        // No index provided ⇒ error.
+        assert!((tool.handler)(json!({ "n": 50, "confidence": 0.95 })).is_err());
     }
 }

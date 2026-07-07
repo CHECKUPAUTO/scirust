@@ -5,22 +5,44 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — transpileur : **front-end MATLAB/Octave** prouvé contre Octave réel (Phase 2, incrément 11)
-Deuxième langue source, sur la **même** SIR + émetteur que Python — donc même
-déterminisme et mêmes noyaux `scirust-*` vérifiés. Nouveau front-end dédié
-(`src/front_matlab/{lexer,parser,ast}.rs`) + lowering `src/lower_matlab.rs`, et
-API publique `transpile_matlab` / `transpile_matlab_to_sir`. Sémantique MATLAB
-gérée : indexation **1-based** (`a(i)` → `a[i-1]`), plages `for` **inclusives**
-(`1:n` → `1..n+1`), opérateurs **élémentaires** `.*`/`./`/`.^` (opérandes
-inférés tableaux) vs scalaires `* / ^`, comparaisons dont `~=`, `if`/`elseif`/
-`else` + `while`, et **retour par variable de sortie**. Nouveau
-`SirStmt::Declare` (déclaration hoistée sans initialiseur, validée par
-l'analyse d'assignation-définie de Rust) pour les locales/sorties d'abord
-assignées en branche (`relu`, `sign`). L'oracle différentiel exécute désormais
-les cas MATLAB contre **Octave réel** (9 cas × 200 essais) en plus des 28 cas
-Python contre NumPy. **Oracle 37/37** ; **31 tests unitaires** (7 nouveaux pour
-MATLAB). Non-vacuité re-vérifiée côté MATLAB : casser l'indexation 1-based
-(`i-1` → `i-2`) fait planter `mysum` et passe l'oracle au ROUGE.
+### Ajouté — la couche mesure & analyse du tolérancement inertiel (`scirust-tolerance`)
+Six modules qui portent la crate au niveau des produits concurrents (Minitab,
+Q-DAS, 3DCS, CETOL) sur ce qu'ils font *autour* de la cotation : qualifier le
+moyen de mesure, borner statistiquement, séparer les leviers, ajuster une loi,
+approfondir la GD&T et chiffrer l'incertitude d'un indice. Chaque module est
+vérifié par cross-check de fuzzing contre une **référence indépendante** :
+
+- **`msa`** : **Gage R&R croisé par ANOVA** (MSA AIAG). Décomposition du modèle
+  `yᵢⱼₖ = μ + Partᵢ + Opⱼ + (Part·Op)ᵢⱼ + εᵢⱼₖ` en composantes de variance
+  répétabilité `EV` / reproductibilité `AV` / pièce `PV`, avec `%R&R` (variation
+  d'étude), `%contribution`, `%tolérance = 6σ_GRR/(USL−LSL)`, `ndc = ⌊1,41·σ_PV/σ_GRR⌋`
+  et verdict AIAG (bandes 10 %/30 %). *Cross-check* : identité de décomposition
+  des sommes de carrés ; constructions à répétabilité/reproductibilité nulles.
+- **`interval`** : **intervalles statistiques de tolérance** (ISO 16269-6).
+  Facteur bilatéral de Howe `k = z_{(1+p)/2}·√(ν(1+1/n)/χ²_{ν,α})` et unilatéral
+  de Natrella (forme fermée) ; tendent tous deux (lentement, en `1−1,645√(2/ν)`)
+  vers le quantile normal. *Cross-check* : couverture Monte-Carlo du vrai contenu.
+- **`sensitivity::dual_contributions`** : **GeoFactor / sensibilité duale** — pour
+  chaque contributeur, magnification géométrique `|αᵢ|`, part sur la **moyenne**
+  d'assemblage `αᵢδᵢ` (somment à `δ_Y`) *et* part sur la **variance** `αᵢ²σᵢ²/σ_Y²`
+  (somment à 1), à la manière de 3DCS/CETOL : distingue une cote à **recentrer**
+  d'une cote à **resserrer**, ce que la seule part de variance masque.
+- **`distfit`** : **ajustement de loi** (ISO 22514-2). Familles Normale /
+  Lognormale / Rayleigh / Weibull (régression des rangs médians), meilleur ajuste-
+  ment par vraisemblance maximale, et **capabilité par percentiles**
+  `Cp = (USL−LSL)/(X₀.₉₉₈₆₅−X₀.₀₀₁₃₅)`. *Cross-check* : aller-retour `cdf∘quantile` ;
+  la Normale retrouve le `Cp` classique ; récupération des paramètres.
+- **`position` (GD&T avancée)** : **condition virtuelle / résultante** (`VC`
+  interne `MMC−t`, externe `MMC+t`), **décalage de référence** (glissement depuis
+  le MMB) et **position composée** à deux étages (PLTZF/FRTZF). *Cross-check* :
+  monotonie et bornes des enveloppes vs la taille réelle du détail.
+- **`capability` (IC de capabilité)** : intervalle de confiance **exact** (χ²) sur
+  `Cp` et **grand-échantillon** (Bissell) sur `Cpk`. *Cross-check* : couverture
+  Monte-Carlo de l'IC de `Cp`.
+
+Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interval`,
+`tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
+`tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
 ### Ajouté — transpileur : matrice-matrice `A @ B` + transpose `A.T` (Phase 1, incrément 10)
 Complète l'algèbre linéaire dense. `A.T` (transpose) et `A @ B` (produit
