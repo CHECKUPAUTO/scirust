@@ -33,6 +33,8 @@
 //! * `trader_optimize`            — walk-forward-guarded parameter tuning
 //! * `trader_pair_analyze`        — cointegration + spread z-score for a pair
 //! * `trader_pair_scan`           — rank tradeable stat-arb pairs among N assets
+//! * `trader_option_price`        — Black-Scholes price + Greeks + implied vol
+//! * `trader_option_book`         — net Greeks + delta hedge for an options book
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
@@ -54,6 +56,9 @@ use scirust_trader::microstructure::{
 };
 use scirust_trader::model::PricePredictor;
 use scirust_trader::optimize::{Objective, OptimizeConfig, ParamAxis, default_axes, optimize};
+use scirust_trader::options::{
+    BsInputs, OptionLeg, OptionType, analyze as analyze_option, book_greeks, implied_vol,
+};
 use scirust_trader::orderbook::{Level, OrderBook};
 use scirust_trader::orders::{FeeSchedule, Fill, Side, SlippageModel};
 use scirust_trader::pairs::{PairConfig, analyze_pair, scan_pairs};
@@ -94,6 +99,8 @@ pub fn trader_tools() -> Vec<McpTool> {
         optimize_tool(),
         pair_analyze_tool(),
         pair_scan_tool(),
+        option_price_tool(),
+        option_book_tool(),
     ]
 }
 
@@ -1893,6 +1900,173 @@ fn pair_scan_tool() -> McpTool {
     }
 }
 
+/// Build [`BsInputs`] from an args object, reading a shared `spot`/`rate`/`div`
+/// context plus per-option `strike`/`expiry`/`vol`.
+fn bs_inputs(args: &Value, o: &Value) -> BsInputs {
+    BsInputs {
+        spot: f(o, "spot", f(args, "spot", 0.0)),
+        strike: f(o, "strike", 0.0),
+        time_to_expiry: f(o, "expiry", f(args, "expiry", 0.0)),
+        rate: f(o, "rate", f(args, "rate", 0.0)),
+        vol: f(o, "vol", f(args, "vol", 0.0)),
+        dividend: f(o, "dividend", f(args, "dividend", 0.0)),
+    }
+}
+
+fn option_price_tool() -> McpTool {
+    McpTool {
+        name: "trader_option_price".to_string(),
+        description: "Price a European option with Black-Scholes-Merton and report the full Greeks \
+            and analysis. Give spot, strike, expiry (in YEARS), rate, vol (annualized, e.g. 0.6), \
+            an optional carry/dividend yield, and type (call/put). Returns the price, delta, gamma, \
+            vega (per 1 vol-point), theta (per day), rho (per 1 rate-point), moneyness, \
+            intrinsic/time value, break-even, and the risk-neutral probability of finishing in the \
+            money. If you pass `market_price` instead of (or with) `vol`, it also solves the \
+            IMPLIED VOLATILITY. This is the options desk's core calculator."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "spot": { "type": "number", "description": "underlying spot price" },
+                "strike": { "type": "number" },
+                "expiry": { "type": "number", "description": "time to expiry in YEARS (e.g. 0.25 = 3mo)" },
+                "rate": { "type": "number", "description": "risk-free rate (default 0)" },
+                "vol": { "type": "number", "description": "annualized volatility, e.g. 0.6 (omit if solving IV)" },
+                "dividend": { "type": "number", "description": "carry/dividend yield (default 0)" },
+                "type": { "type": "string", "enum": ["call", "put"], "description": "default call" },
+                "market_price": { "type": "number", "description": "if given, solve implied vol" }
+            },
+            "required": ["spot", "strike", "expiry"]
+        }),
+        handler: Box::new(|args| {
+            let ot = args
+                .get("type")
+                .and_then(|x| x.as_str())
+                .and_then(OptionType::parse)
+                .unwrap_or(OptionType::Call);
+            let spot = f(&args, "spot", 0.0);
+            let strike = f(&args, "strike", 0.0);
+            let expiry = f(&args, "expiry", 0.0);
+            let rate = f(&args, "rate", 0.0);
+            let dividend = f(&args, "dividend", 0.0);
+
+            // Implied vol from a market price, if provided; else use `vol`.
+            let implied = args.get("market_price").and_then(|x| x.as_f64()).and_then(|mp| {
+                implied_vol(mp as f32, spot, strike, expiry, rate, dividend, ot)
+            });
+            let vol = implied.unwrap_or_else(|| f(&args, "vol", 0.0));
+            if vol <= 0.0
+            {
+                return Err("provide `vol` > 0, or a `market_price` within the no-arbitrage \
+                    bounds to solve implied vol"
+                    .to_string());
+            }
+            let inp = BsInputs { spot, strike, time_to_expiry: expiry, rate, vol, dividend };
+            let analysis = analyze_option(&inp, ot);
+            let mut out = to_value(&analysis);
+            if let Some(obj) = out.as_object_mut()
+            {
+                obj.insert("volatility_used".to_string(), json!(vol));
+                if let Some(iv) = implied
+                {
+                    obj.insert("implied_volatility".to_string(), json!(iv));
+                }
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn option_book_tool() -> McpTool {
+    McpTool {
+        name: "trader_option_book".to_string(),
+        description:
+            "Aggregate a portfolio of option positions into net Greeks and the spot trade \
+            that DELTA-HEDGES it. Pass shared `spot`/`rate`/`dividend` and a list of `legs`, each \
+            {quantity (signed: +long/-short), strike, expiry, vol, type}. Returns each leg's price \
+            and Greeks, the net book value, net delta/gamma/vega/theta/rho, and `delta_hedge_spot` \
+            — the units of spot to trade to neutralize directional risk (negative = sell). This is \
+            how a desk reads and hedges an options book (e.g. a delta-neutral long-vol straddle)."
+                .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "spot": { "type": "number", "description": "shared underlying spot (per-leg override allowed)" },
+                "rate": { "type": "number", "description": "shared rate (default 0)" },
+                "dividend": { "type": "number", "description": "shared carry/dividend yield (default 0)" },
+                "legs": {
+                    "type": "array",
+                    "description": "[{quantity, strike, expiry, vol, type, spot?, rate?, dividend?}]",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "quantity": { "type": "number", "description": "signed contracts (+long/-short)" },
+                            "strike": { "type": "number" },
+                            "expiry": { "type": "number", "description": "years" },
+                            "vol": { "type": "number" },
+                            "type": { "type": "string", "enum": ["call", "put"] }
+                        },
+                        "required": ["quantity", "strike", "expiry", "vol"]
+                    }
+                }
+            },
+            "required": ["legs"]
+        }),
+        handler: Box::new(|args| {
+            let legs_json = args
+                .get("legs")
+                .and_then(|x| x.as_array())
+                .ok_or("missing `legs` array")?;
+            if legs_json.is_empty()
+            {
+                return Err("`legs` is empty".to_string());
+            }
+            let mut legs = Vec::with_capacity(legs_json.len());
+            let mut per_leg = Vec::with_capacity(legs_json.len());
+            for (i, lj) in legs_json.iter().enumerate()
+            {
+                let ot = lj
+                    .get("type")
+                    .and_then(|x| x.as_str())
+                    .and_then(OptionType::parse)
+                    .unwrap_or(OptionType::Call);
+                let qty = f(lj, "quantity", 0.0);
+                let inputs = bs_inputs(&args, lj);
+                if inputs.spot <= 0.0 || inputs.strike <= 0.0 || inputs.time_to_expiry <= 0.0
+                {
+                    return Err(format!(
+                        "legs[{i}]: need spot>0, strike>0, expiry>0 (spot may be shared at top level)"
+                    ));
+                }
+                let analysis = analyze_option(&inputs, ot);
+                per_leg.push(json!({
+                    "quantity": qty,
+                    "type": ot.label(),
+                    "strike": inputs.strike,
+                    "expiry": inputs.time_to_expiry,
+                    "price": analysis.price,
+                    "delta": analysis.greeks.delta,
+                    "gamma": analysis.greeks.gamma,
+                    "vega_per_pct": analysis.greeks.vega_per_pct,
+                    "theta_per_day": analysis.greeks.theta_per_day,
+                }));
+                legs.push(OptionLeg {
+                    quantity: qty,
+                    inputs,
+                    option_type: ot,
+                });
+            }
+            let book = book_greeks(&legs);
+            let mut out = to_value(&book);
+            if let Some(obj) = out.as_object_mut()
+            {
+                obj.insert("legs".to_string(), Value::Array(per_leg));
+            }
+            Ok(out)
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1922,7 +2096,7 @@ mod tests {
         let before = names.len();
         names.dedup();
         assert_eq!(before, names.len(), "duplicate trader tool name");
-        assert!(before >= 24);
+        assert!(before >= 26);
     }
 
     #[test]
@@ -2085,6 +2259,67 @@ mod tests {
         let t = tool("trader_pair_analyze");
         let r = (t.handler)(json!({ "a": [1, 2, 3, 4], "b": [2, 3, 4, 5] }));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn option_price_prices_and_greeks() {
+        let t = tool("trader_option_price");
+        let out = (t.handler)(json!({
+            "spot": 100.0, "strike": 100.0, "expiry": 1.0, "rate": 0.05, "vol": 0.2, "type": "call"
+        }))
+        .unwrap();
+        // Textbook ATM call ≈ 10.45.
+        assert!((out["price"].as_f64().unwrap() - 10.45).abs() < 0.1);
+        let g = &out["greeks"];
+        assert!(g["delta"].as_f64().unwrap() > 0.0 && g["delta"].as_f64().unwrap() < 1.0);
+        assert!(g["gamma"].as_f64().unwrap() > 0.0);
+        assert!(out["prob_itm"].is_number());
+        assert!(out["break_even"].is_number());
+    }
+
+    #[test]
+    fn option_price_solves_implied_vol() {
+        let t = tool("trader_option_price");
+        // Price a call at vol 0.4, feed that price back as market_price → recover ~0.4.
+        let priced = (t.handler)(json!({
+            "spot": 100.0, "strike": 105.0, "expiry": 0.5, "rate": 0.03, "vol": 0.4, "type": "call"
+        }))
+        .unwrap();
+        let mkt = priced["price"].as_f64().unwrap();
+        let out = (t.handler)(json!({
+            "spot": 100.0, "strike": 105.0, "expiry": 0.5, "rate": 0.03,
+            "market_price": mkt, "type": "call"
+        }))
+        .unwrap();
+        assert!((out["implied_volatility"].as_f64().unwrap() - 0.4).abs() < 1e-2);
+    }
+
+    #[test]
+    fn option_price_rejects_no_vol() {
+        let t = tool("trader_option_price");
+        let r = (t.handler)(json!({ "spot": 100.0, "strike": 100.0, "expiry": 1.0 }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn option_book_nets_greeks_and_hedge() {
+        let t = tool("trader_option_book");
+        // Delta-neutral-ish long straddle at zero rate.
+        let out = (t.handler)(json!({
+            "spot": 100.0, "rate": 0.0,
+            "legs": [
+                { "quantity": 1.0, "strike": 100.0, "expiry": 1.0, "vol": 0.2, "type": "call" },
+                { "quantity": 1.0, "strike": 100.0, "expiry": 1.0, "vol": 0.2, "type": "put" }
+            ]
+        }))
+        .unwrap();
+        assert!(out["net_value"].as_f64().unwrap() > 0.0);
+        assert!(out["net_vega_per_pct"].as_f64().unwrap() > 0.0);
+        assert!(out["net_delta"].as_f64().unwrap().abs() < 0.15);
+        // delta_hedge_spot = -net_delta
+        let nd = out["net_delta"].as_f64().unwrap();
+        assert!((out["delta_hedge_spot"].as_f64().unwrap() + nd).abs() < 1e-4);
+        assert_eq!(out["legs"].as_array().unwrap().len(), 2);
     }
 
     #[test]

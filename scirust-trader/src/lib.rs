@@ -41,6 +41,7 @@ pub mod metrics;
 pub mod microstructure;
 pub mod model;
 pub mod optimize;
+pub mod options;
 pub mod orderbook;
 pub mod orders;
 pub mod pairs;
