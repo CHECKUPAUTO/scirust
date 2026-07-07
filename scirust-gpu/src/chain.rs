@@ -81,10 +81,10 @@ pub struct GqaBlockWeights<'a> {
     pub theta: f32,
 }
 
-/// The projection weight gradients of one **GQA transformer block**, produced by
+/// The weight gradients of one **GQA transformer block**, produced by
 /// [`GpuChain::gqa_transformer_block_backward_full`] — same shapes as the
-/// corresponding [`GqaBlockWeights`] fields (`dwk`/`dwv` are `d×kv_dim`). The two
-/// RMSNorm gains are frozen (no gain gradients), as elsewhere.
+/// corresponding [`GqaBlockWeights`] fields (`dwk`/`dwv` are `d×kv_dim`,
+/// `dnorm1`/`dnorm2` are `1×d`).
 pub struct GqaBlockGrads {
     /// `∂L/∂Wq` (`d×d`).
     pub dwq: GpuMatrix,
@@ -100,6 +100,10 @@ pub struct GqaBlockGrads {
     pub dwu: GpuMatrix,
     /// `∂L/∂Wd` (`h×d`).
     pub dwd: GpuMatrix,
+    /// `∂L/∂norm1` — the pre-attention RMSNorm gain gradient (`1×d`).
+    pub dnorm1: GpuMatrix,
+    /// `∂L/∂norm2` — the pre-MLP RMSNorm gain gradient (`1×d`).
+    pub dnorm2: GpuMatrix,
 }
 
 /// Forward activations of one transformer block that the backward pass needs to
@@ -166,14 +170,16 @@ pub struct GqaModelWeights<'a> {
 
 /// The gradients of a full [`GqaModelWeights`], produced by
 /// [`GpuChain::gqa_model_backward`]: one `vocab × d` **tied** embedding gradient
-/// (accumulating both the input-embedding and the output-head paths) and one
-/// [`GqaBlockGrads`] per block, in block order. (The final RMSNorm gain is frozen,
-/// as elsewhere.)
+/// (accumulating both the input-embedding and the output-head paths), one
+/// [`GqaBlockGrads`] per block (in block order), and the final pre-logits RMSNorm
+/// gain gradient.
 pub struct GqaModelGrads {
     /// `∂L/∂E` for the tied embedding/LM-head table (`vocab × d`).
     pub d_embedding: GpuMatrix,
-    /// Per-block projection weight gradients, in block order.
+    /// Per-block weight gradients, in block order.
     pub blocks: Vec<GqaBlockGrads>,
+    /// `∂L/∂final_norm` — the final pre-logits RMSNorm gain gradient (`1×d`).
+    pub d_final_norm: GpuMatrix,
 }
 
 impl GpuChain {
@@ -598,13 +604,14 @@ impl GpuChain {
         self.add(&h, &mlp)
     }
 
-    /// Backward of [`Self::gqa_transformer_block`], returning `dx` **and** the
-    /// seven projection weight gradients ([`GqaBlockGrads`]) — the GQA analogue
-    /// of [`Self::transformer_block_backward_full`], so a GQA block can be trained
+    /// Backward of [`Self::gqa_transformer_block`], returning `dx` **and** all nine
+    /// weight gradients ([`GqaBlockGrads`]: the seven projections plus the two
+    /// RMSNorm gains `dnorm1`/`dnorm2`) — the GQA analogue of
+    /// [`Self::transformer_block_backward_full`], so a GQA block can be trained
     /// on the device with an AdamW step. The forward activations are recomputed
     /// here (cheap resident ops); the attention adjoint goes through
-    /// [`Self::gqa_attention_backward`] (multi-head, grouped-query, RoPE). RMSNorm
-    /// gain gradients are not produced — freeze the norms.
+    /// [`Self::gqa_attention_backward`] (multi-head, grouped-query, RoPE). The two
+    /// RMSNorm gain gradients are emitted via [`Self::rms_norm_gain_backward`].
     pub fn gqa_transformer_block_backward_full(
         &self,
         x: &GpuMatrix,
@@ -645,6 +652,8 @@ impl GpuChain {
             &self.matmul_t(&dgate, w.wg, false, true)?,
             &self.matmul_t(&dup, w.wu, false, true)?,
         )?;
+        // hn = rms_norm(h, norm2) ⇒ the norm2 gain grad accumulates dhn ⊙ (h/rms).
+        let dnorm2 = self.rms_norm_gain_backward(&h, &dhn, eps)?;
         let dh = self.add(dout, &self.rms_norm_backward(&h, w.norm2, &dhn, eps)?)?;
 
         // --- attention path ---
@@ -671,6 +680,8 @@ impl GpuChain {
             )?,
             &self.matmul_t(&dv, w.wv, false, true)?,
         )?;
+        // xn = rms_norm(x, norm1) ⇒ the norm1 gain grad accumulates dxn ⊙ (x/rms).
+        let dnorm1 = self.rms_norm_gain_backward(x, &dxn, eps)?;
         let dx = self.add(&dh, &self.rms_norm_backward(x, w.norm1, &dxn, eps)?)?;
 
         Ok((
@@ -683,6 +694,8 @@ impl GpuChain {
                 dwg,
                 dwu,
                 dwd,
+                dnorm1,
+                dnorm2,
             },
         ))
     }
@@ -1002,8 +1015,8 @@ impl GpuChain {
     /// `dE = dlogitsᵀ·normed  (head)  +  embed_backward(tokens, d_emb)  (lookup)`.
     /// The head also feeds `d_normed = dlogits·E`, which flows back through the
     /// final RMSNorm and the `N` blocks (reverse order), each via
-    /// [`Self::gqa_transformer_block_backward_full`]. (The final RMSNorm gain is
-    /// frozen — no gain gradient.)
+    /// [`Self::gqa_transformer_block_backward_full`]. The final RMSNorm gain
+    /// gradient is emitted via [`Self::rms_norm_gain_backward`].
     pub fn gqa_model_backward(
         &self,
         tokens: &[u32],
@@ -1028,7 +1041,8 @@ impl GpuChain {
         let d_normed = self.matmul(dlogits, w.embedding)?; // dlogits · E     (t×d)
         let de_head = self.matmul_t(dlogits, &normed, true, false)?; // dlogitsᵀ·normed (vocab×d)
 
-        // Final RMSNorm, then the N blocks in reverse.
+        // Final RMSNorm — its gain grad, then the input grad flowing to the trunk.
+        let d_final_norm = self.rms_norm_gain_backward(trunk, &d_normed, eps)?;
         let mut d_cur = self.rms_norm_backward(trunk, w.final_norm, &d_normed, eps)?;
         let mut block_grads: Vec<GqaBlockGrads> = Vec::with_capacity(w.blocks.len());
         for i in (0..w.blocks.len()).rev()
@@ -1052,6 +1066,7 @@ impl GpuChain {
         Ok(GqaModelGrads {
             d_embedding,
             blocks: block_grads,
+            d_final_norm,
         })
     }
 
@@ -1875,8 +1890,9 @@ mod tests {
     }
 
     /// The **GQA transformer block backward** gradient-checked end-to-end: `dx`
-    /// and all seven projection weight gradients checked against central finite
-    /// differences of `L = Σ gqa_transformer_block(x; W) ⊙ G` via the CPU oracle.
+    /// and all nine weight gradients (seven projections + the two RMSNorm gains
+    /// `dnorm1`/`dnorm2`) checked against central finite differences of
+    /// `L = Σ gqa_transformer_block(x; W) ⊙ G` via the CPU oracle.
     /// `2 heads / 1 kv-head` so the query heads share the single kv head — the
     /// weight grads `dWk`/`dWv` then flow through the grouped-query accumulation.
     /// Skips if no adapter; asserts on lavapipe / a real GPU.
@@ -2010,6 +2026,31 @@ mod tests {
         check("dwd", &dwd, &wd, &|z| {
             loss(&x, &wq, &wk, &wv, &wo, &wg, &wu, z)
         });
+
+        // RMSNorm gain grads: perturb n1 / n2 (which the `loss` above holds fixed).
+        let (dnorm1, dnorm2) = (dl(&grads.dnorm1), dl(&grads.dnorm2));
+        let loss_n1 = |nn: &[f32]| -> f32 {
+            cpu_gqa_transformer_block(
+                &x, nn, &wq, &wk, &wv, &wo, &n2, &wg, &wu, &wd, t, d, kv_dim, ff, n_heads,
+                n_kv_heads, dh, theta, eps, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        let loss_n2 = |nn: &[f32]| -> f32 {
+            cpu_gqa_transformer_block(
+                &x, &n1, &wq, &wk, &wv, &wo, nn, &wg, &wu, &wd, t, d, kv_dim, ff, n_heads,
+                n_kv_heads, dh, theta, eps, true,
+            )
+            .iter()
+            .zip(&g)
+            .map(|(a, b)| a * b)
+            .sum()
+        };
+        check("dnorm1", &dnorm1, &n1, &loss_n1);
+        check("dnorm2", &dnorm2, &n2, &loss_n2);
     }
 
     /// The **full resident GQA model forward** — the real `scirust-sciagent`
@@ -2151,12 +2192,13 @@ mod tests {
 
     /// The **full resident GQA model backward** gradient-checked end-to-end. For
     /// `L = Σ gqa_model_forward(tokens; E, blocks) ⊙ G` (so `dlogits = G`),
-    /// `gqa_model_backward(...,G)` yields the tied embedding grad and every
-    /// block's weight grads. The **tied `dE`** (both the input-lookup and the
-    /// output-head paths through the shared `E`) is checked against central finite
-    /// differences of `L` over `E`, and each block's `dWq` over its `Wq` — a
-    /// 2-layer / 2-heads / 1-kv config, so the block chain and the grouped-query
-    /// accumulation are both exercised. Skips if no adapter.
+    /// `gqa_model_backward(...,G)` yields the tied embedding grad, every block's
+    /// weight grads, and the final RMSNorm gain grad. The **tied `dE`** (both the
+    /// input-lookup and the output-head paths through the shared `E`) is checked
+    /// against central finite differences of `L` over `E`, each block's `dWq` over
+    /// its `Wq`, and `d_final_norm` over `final_norm` — a 2-layer / 2-heads / 1-kv
+    /// config, so the block chain and the grouped-query accumulation are both
+    /// exercised. Skips if no adapter.
     #[test]
     fn gqa_model_backward_matches_finite_differences() {
         use crate::ops::{cpu_gqa_transformer_block, cpu_rms_norm};
@@ -2332,6 +2374,55 @@ mod tests {
                     dwq_l[l][idx]
                 );
             }
+        }
+
+        // Final pre-logits RMSNorm gain: perturbing `final_norm` moves only the
+        // head's `normed = rms_norm(trunk, final_norm)` (the block trunk is
+        // independent of it). Validates `grads.d_final_norm`.
+        let dfn = chain.download(&grads.d_final_norm).unwrap();
+        let loss_fn = |fnorm: &[f32]| -> f32 {
+            let mut x: Vec<f32> = tokens
+                .iter()
+                .flat_map(|&tk| embedding[(tk as usize) * d..(tk as usize) * d + d].to_vec())
+                .collect();
+            for b in &blocks_raw
+            {
+                x = cpu_gqa_transformer_block(
+                    &x, &b.n1, &b.wq, &b.wk, &b.wv, &b.wo, &b.n2, &b.wg, &b.wu, &b.wd, t, d,
+                    kv_dim, ff, n_heads, n_kv_heads, dh, theta, eps, true,
+                );
+            }
+            let normed = cpu_rms_norm(&x, fnorm, eps, t, d);
+            let mut acc = 0.0f32;
+            for i in 0..t
+            {
+                for vv in 0..vocab
+                {
+                    let mut lg = 0.0f32;
+                    for dd in 0..d
+                    {
+                        lg += normed[i * d + dd] * embedding[vv * d + dd];
+                    }
+                    acc += lg * g[i * vocab + vv];
+                }
+            }
+            acc
+        };
+        let mut fnv = final_norm.clone();
+        for idx in 0..fnv.len()
+        {
+            let orig = fnv[idx];
+            fnv[idx] = orig + hh;
+            let lp = loss_fn(&fnv);
+            fnv[idx] = orig - hh;
+            let lm = loss_fn(&fnv);
+            fnv[idx] = orig;
+            let fd = (lp - lm) / (2.0 * hh);
+            assert!(
+                (fd - dfn[idx]).abs() < 2e-2,
+                "d_final_norm[{idx}]: fd={fd} gpu={}",
+                dfn[idx]
+            );
         }
     }
 
