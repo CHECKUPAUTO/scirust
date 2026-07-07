@@ -20,9 +20,10 @@
 
 use crate::registry::McpTool;
 use serde_json::{Value, json};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use scirust_trader::wallet::{
-    Chain, Eip712Domain, Eip1559Tx, EvmAddress, WalletAuthorization, eip155_namespace,
+    Chain, Eip712Domain, Eip1559Tx, EvmAddress, TxContext, WalletAuthorization, eip155_namespace,
     parse_walletconnect_uri, sign_binance_query, sign_coinbase_request, to_hex,
 };
 
@@ -237,20 +238,64 @@ fn eip712_tool() -> McpTool {
     }
 }
 
+/// Defense-in-depth scope check for exchange request signing. A hard denylist of
+/// fund-exfiltration / key-management endpoint patterns is *always* refused
+/// (even if the exchange API key is misconfigured to allow them); an optional
+/// operator allowlist (`SCIRUST_EXCHANGE_ALLOWED_PATHS`, comma-separated
+/// substrings) further restricts what may be signed.
+fn exchange_scope_check(target: &str, allowlist: Option<&str>) -> Result<(), String> {
+    const DENY: &[&str] = &[
+        "withdraw",
+        "transfer",
+        "apirestrictions",
+        "apikey",
+        "api-key",
+        "apitradingstatus",
+    ];
+    let lc = target.to_ascii_lowercase();
+    if let Some(bad) = DENY.iter().find(|d| lc.contains(**d))
+    {
+        return Err(format!(
+            "refused: request matches the blocked pattern `{bad}` — withdrawals, transfers and \
+             key management are never signed by the agent"
+        ));
+    }
+    if let Some(allow) = allowlist
+    {
+        let matched = allow
+            .split(',')
+            .map(|p| p.trim().to_ascii_lowercase())
+            .filter(|p| !p.is_empty())
+            .any(|p| lc.contains(&p));
+        if !matched
+        {
+            return Err(
+                "refused: request does not match the SCIRUST_EXCHANGE_ALLOWED_PATHS allowlist"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn sign_exchange_tool() -> McpTool {
     McpTool {
         name: "wallet_sign_exchange_request".to_string(),
         description: "HMAC-sign an exchange REST request (Binance or Coinbase style) using a secret \
             the OPERATOR supplies out-of-band via the SCIRUST_EXCHANGE_SECRET environment variable — \
             the secret is never taken from the conversation and never returned. The agent builds the \
-            query/prehash; this tool returns only the signature to attach to the request. If the \
-            secret env var is unset, signing is refused (the operator has not armed it)."
+            query/prehash; this tool returns only the signature to attach to the request. Signing is \
+            refused if the secret is unset, and it is ALWAYS refused for withdrawal/transfer/API-key \
+            endpoints (and, if SCIRUST_EXCHANGE_ALLOWED_PATHS is set, for anything outside that \
+            allowlist). Binance signs only the query string, so you must also pass the `endpoint` \
+            path — it is used for the safety scope check."
             .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "style": { "type": "string", "enum": ["binance", "coinbase"] },
                 "query": { "type": "string", "description": "binance: the query string to sign" },
+                "endpoint": { "type": "string", "description": "binance: request path, e.g. /api/v3/order (for scope check)" },
                 "timestamp": { "type": "string", "description": "coinbase: request timestamp" },
                 "method": { "type": "string", "description": "coinbase: HTTP method" },
                 "path": { "type": "string", "description": "coinbase: request path" },
@@ -263,6 +308,7 @@ fn sign_exchange_tool() -> McpTool {
                 "exchange signing is not armed: the operator has not set SCIRUST_EXCHANGE_SECRET"
                     .to_string()
             })?;
+            let allowlist = std::env::var("SCIRUST_EXCHANGE_ALLOWED_PATHS").ok();
             let style = args.get("style").and_then(|x| x.as_str()).unwrap_or("binance");
             let sig = match style
             {
@@ -272,11 +318,21 @@ fn sign_exchange_tool() -> McpTool {
                     let method = args.get("method").and_then(|x| x.as_str()).ok_or("missing `method`")?;
                     let path = args.get("path").and_then(|x| x.as_str()).ok_or("missing `path`")?;
                     let body = args.get("body").and_then(|x| x.as_str()).unwrap_or("");
+                    // Scope on method+path+body so a withdrawal/transfer endpoint is refused.
+                    exchange_scope_check(&format!("{method} {path} {body}"), allowlist.as_deref())?;
                     sign_coinbase_request(secret.as_bytes(), ts, method, path, body)
                 },
                 _ =>
                 {
                     let query = args.get("query").and_then(|x| x.as_str()).ok_or("missing `query`")?;
+                    // Binance signs only the query, so the endpoint path (where a
+                    // withdrawal is identified) is not in the signed content — require
+                    // it explicitly so the scope check is not blind to it.
+                    let endpoint = args.get("endpoint").and_then(|x| x.as_str()).ok_or(
+                        "missing `endpoint` (the request path, e.g. /api/v3/order) — required so \
+                         the withdrawal/transfer scope check can see the endpoint",
+                    )?;
+                    exchange_scope_check(&format!("{endpoint} {query}"), allowlist.as_deref())?;
                     sign_binance_query(secret.as_bytes(), query)
                 },
             };
@@ -288,11 +344,13 @@ fn sign_exchange_tool() -> McpTool {
 fn authorization_status_tool() -> McpTool {
     McpTool {
         name: "wallet_authorization_status".to_string(),
-        description: "Report whether fund-moving actions are armed for this server, and validate an \
-            optional WalletAuthorization against the operator key (SCIRUST_WALLET_KEY, held \
-            server-side). NEVER signs or sends anything — it only tells the agent whether a given \
-            authorization would permit a method/chain/value, so the agent knows to ask the operator \
-            rather than attempt an action that will be refused."
+        description: "Report whether fund-moving actions are armed for this server, and preview \
+            whether an optional WalletAuthorization would permit a concrete transaction context \
+            (chain, method, recipient `to`, calldata `selector`, value, or a bound `tx_hash`), \
+            validated against the operator key (SCIRUST_WALLET_KEY, held server-side). NEVER signs \
+            or sends — it only tells the agent whether an action would be permitted (and why not), \
+            so it can ask the operator rather than attempt something that will be refused. The \
+            validity window is checked against the SERVER clock, not any client-supplied time."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -300,8 +358,10 @@ fn authorization_status_tool() -> McpTool {
                 "authorization": { "type": "object", "description": "a WalletAuthorization to validate (optional)" },
                 "chain_id": { "type": "integer" },
                 "method": { "type": "string" },
+                "to": { "type": "string", "description": "recipient address (policy-mode allowlist check)" },
+                "selector": { "type": "string", "description": "4-byte calldata selector hex (empty = native transfer)" },
                 "value_wei": { "type": ["string", "integer"] },
-                "now_unix": { "type": "integer" }
+                "tx_hash": { "type": "string", "description": "signing hash (for a bound authorization)" }
             }
         }),
         handler: Box::new(|args| {
@@ -319,17 +379,43 @@ fn authorization_status_tool() -> McpTool {
                 {
                     Ok(auth) =>
                     {
-                        let sig_ok = auth.verify_signature(k.as_bytes());
-                        out["authorization_signature_valid"] = json!(sig_ok);
+                        out["authorization_signature_valid"] =
+                            json!(auth.verify_signature(k.as_bytes()));
                         if let (Some(cid), Some(method)) = (
                             args.get("chain_id").and_then(|x| x.as_u64()),
                             args.get("method").and_then(|x| x.as_str()),
                         )
                         {
-                            let value = su128(&args, "value_wei", 0);
-                            let now = su64(&args, "now_unix", 0);
-                            out["would_authorize"] =
-                                json!(auth.authorizes(k.as_bytes(), cid, method, value, now));
+                            let ctx = TxContext {
+                                chain_id: cid,
+                                method: method.to_string(),
+                                to: args.get("to").and_then(|x| x.as_str()).map(str::to_string),
+                                selector: args
+                                    .get("selector")
+                                    .and_then(|x| x.as_str())
+                                    .map(str::to_string),
+                                value_wei: su128(&args, "value_wei", 0),
+                                tx_hash: args
+                                    .get("tx_hash")
+                                    .and_then(|x| x.as_str())
+                                    .map(str::to_string),
+                            };
+                            // Trusted server clock — never a model-supplied time.
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            // Stateless preview (already_spent = 0); the real spend/replay
+                            // accounting lives in the host's SpendLedger.
+                            match auth.evaluate(k.as_bytes(), &ctx, now, 0)
+                            {
+                                Ok(()) => out["would_authorize"] = json!(true),
+                                Err(reason) =>
+                                {
+                                    out["would_authorize"] = json!(false);
+                                    out["deny_reason"] = json!(reason);
+                                },
+                            }
                         }
                     },
                     Err(e) => out["authorization_parse_error"] = json!(e.to_string()),
@@ -421,5 +507,39 @@ mod tests {
         let t = tool("wallet_authorization_status");
         let out = (t.handler)(json!({})).unwrap();
         assert_eq!(out["signing_armed"], json!(false));
+    }
+
+    #[test]
+    fn exchange_scope_blocks_dangerous_endpoints() {
+        // Withdrawals / transfers / key management are always refused.
+        assert!(exchange_scope_check("/sapi/v1/capital/withdraw/apply", None).is_err());
+        assert!(exchange_scope_check("/sapi/v1/asset/transfer", None).is_err());
+        assert!(exchange_scope_check("POST /v2/withdrawals/crypto ", None).is_err());
+        assert!(exchange_scope_check("symbol=BTCUSDT&type=apiKey", None).is_err());
+        // A normal trading request is allowed.
+        assert!(
+            exchange_scope_check("symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1", None).is_ok()
+        );
+    }
+
+    #[test]
+    fn exchange_scope_respects_operator_allowlist() {
+        // Scope targets are "endpoint query" (binance) or "method path body"
+        // (coinbase). With an allowlist set, only matching endpoints are signable.
+        assert!(
+            exchange_scope_check(
+                "/api/v3/order symbol=BTCUSDT&side=BUY",
+                Some("/api/v3/order")
+            )
+            .is_ok()
+        );
+        assert!(
+            exchange_scope_check("/api/v3/account symbol=BTCUSDT", Some("/api/v3/order")).is_err()
+        );
+        // The denylist still wins even if the allowlist would match.
+        assert!(
+            exchange_scope_check("/sapi/v1/capital/withdraw/apply coin=BTC", Some("withdraw"))
+                .is_err()
+        );
     }
 }
