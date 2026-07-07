@@ -25,9 +25,13 @@
 //! Thor's Blackwell).
 
 use scirust_core::autodiff::reverse::{Tape, Tensor};
+use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights};
 
+use crate::config::SciAgentConfig;
 use crate::model::SciAgentModel;
+use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
+use crate::train::scheduler::WarmupCosineSchedule;
 
 pub use scirust_gpu::WgpuEngine;
 
@@ -369,6 +373,107 @@ impl ResidentModel {
         }
         losses
     }
+
+    /// Reset the internal AdamW step counter. Used when resuming a run from a
+    /// checkpoint: `from_model` re-uploads the saved weights but zero-inits the
+    /// moment buffers (`m`/`v` are not persisted), so the optimizer must restart
+    /// at step 0 for its bias correction (`1/(1-βᵗ)`) to be consistent with the
+    /// freshly-zeroed moments. The **LR schedule** position is tracked separately
+    /// (see [`ResidentPretrainConfig::start_step`]), so the learning rate still
+    /// continues from where the run left off.
+    pub fn reset_step(&mut self) {
+        self.step = 0;
+    }
+
+    /// **Production-scale resident pretraining** over a flat `u32` token stream
+    /// (load real shards with [`crate::train::dataset::ShardLoader`]), with a
+    /// warmup + cosine LR schedule and periodic checkpointing — all on the
+    /// fully-resident GPU path.
+    ///
+    /// Runs `cfg.total_steps − cfg.start_step` optimizer steps, cycling the token
+    /// stream as many times as needed (deterministic, in-order — no shuffle, so a
+    /// run is bit-reproducible). Each step:
+    /// 1. takes the next non-overlapping `cfg.seq_len` window `(inputs, targets)`;
+    /// 2. computes `lr = WarmupCosineSchedule::lr_at(step)`;
+    /// 3. runs the resident [`Self::train_step`] (fwd → cross-entropy grad → bwd →
+    ///    AdamW at that `lr`), entirely in VRAM.
+    ///
+    /// Every `cfg.save_interval` steps it [`Self::sync_to_model`]s the resident
+    /// weights back into `model` and writes a safetensors checkpoint (via
+    /// [`save_checkpoint`]) under `cfg.checkpoint_dir/step_N/`, so a long run is
+    /// resumable (reload with [`crate::train::checkpoint::load_checkpoint`], build
+    /// a fresh `ResidentModel`, and call `pretrain` again with
+    /// `start_step = meta.step`). The resident AdamW moments are **not** persisted;
+    /// a resumed run restarts them from zero, which the warmup schedule re-absorbs.
+    ///
+    /// Returns the per-step pre-update loss.
+    pub fn pretrain(
+        &mut self,
+        tokens: &[u32],
+        model: &mut SciAgentModel,
+        config: &SciAgentConfig,
+        cfg: &ResidentPretrainConfig,
+    ) -> Vec<f32> {
+        let s = cfg.seq_len;
+        let mut losses = Vec::new();
+        if tokens.len() <= s
+        {
+            eprintln!(
+                "resident pretrain: token stream ({}) shorter than a single window ({}); nothing to do",
+                tokens.len(),
+                s + 1
+            );
+            return losses;
+        }
+        let schedule =
+            WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
+        let mut step = cfg.start_step;
+        let mut cursor = 0usize;
+        while step < cfg.total_steps
+        {
+            // Wrap the corpus (a window needs `s` inputs + 1 shifted target).
+            if cursor + s + 1 > tokens.len()
+            {
+                cursor = 0;
+            }
+            let inputs = &tokens[cursor..cursor + s];
+            let targets = &tokens[cursor + 1..cursor + s + 1];
+            let lr = schedule.lr_at(step);
+            let loss = self.train_step(
+                inputs,
+                targets,
+                lr,
+                cfg.betas,
+                cfg.adam_eps,
+                cfg.weight_decay,
+            );
+            losses.push(loss);
+            cursor += s;
+            step += 1;
+
+            if cfg.log_interval > 0 && step % cfg.log_interval == 0
+            {
+                println!("[resident step {step:>6}] loss {loss:>9.4} | lr {lr:.3e}");
+            }
+            if cfg.save_interval > 0 && step % cfg.save_interval == 0
+            {
+                self.sync_to_model(model);
+                let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
+                let meta = CheckpointMeta {
+                    step,
+                    loss,
+                    lr,
+                    config: config.clone(),
+                };
+                match save_checkpoint(model, &meta, &dir)
+                {
+                    Ok(()) => println!("  checkpoint → {}", dir.display()),
+                    Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
+                }
+            }
+        }
+        losses
+    }
 }
 
 /// Hyper-parameters for [`ResidentModel::train_tokens`].
@@ -394,6 +499,56 @@ impl Default for ResidentTrainConfig {
             adam_eps: 1e-8,
             weight_decay: 0.1,
             seq_len: 128,
+        }
+    }
+}
+
+/// Hyper-parameters for [`ResidentModel::pretrain`] — a full production run with
+/// a warmup + cosine LR schedule and periodic checkpointing.
+#[derive(Debug, Clone)]
+pub struct ResidentPretrainConfig {
+    /// Peak (post-warmup) AdamW learning rate.
+    pub base_lr: f32,
+    /// Floor learning rate the cosine decays to.
+    pub min_lr: f32,
+    /// Linear warmup length, in optimizer steps.
+    pub warmup_steps: usize,
+    /// Total optimizer steps for the run (also the cosine period end).
+    pub total_steps: usize,
+    /// Step to start the LR schedule from (for resuming; the AdamW moments still
+    /// restart at zero — see [`ResidentModel::reset_step`]).
+    pub start_step: usize,
+    /// AdamW `(β₁, β₂)`.
+    pub betas: (f32, f32),
+    /// AdamW epsilon.
+    pub adam_eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+    /// Sequence length of each training window.
+    pub seq_len: usize,
+    /// Print a loss/lr line every this many steps (0 = never).
+    pub log_interval: usize,
+    /// Write a checkpoint every this many steps (0 = never).
+    pub save_interval: usize,
+    /// Directory the `step_N/` checkpoints are written under.
+    pub checkpoint_dir: String,
+}
+
+impl Default for ResidentPretrainConfig {
+    fn default() -> Self {
+        Self {
+            base_lr: 3e-4,
+            min_lr: 3e-5,
+            warmup_steps: 2000,
+            total_steps: 50_000,
+            start_step: 0,
+            betas: (0.9, 0.95),
+            adam_eps: 1e-8,
+            weight_decay: 0.1,
+            seq_len: 128,
+            log_interval: 100,
+            save_interval: 500,
+            checkpoint_dir: "checkpoints".to_string(),
         }
     }
 }
