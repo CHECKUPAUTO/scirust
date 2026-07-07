@@ -32,9 +32,16 @@
 //! - `dual` — mean contributions sum to `δ_Y`, variance fractions to 1.
 //! - `gdt` — virtual-condition / datum-shift / composite-position identities.
 //! - `capability_ci` — the exact χ² `Cp` interval vs its Monte-Carlo coverage.
+//! - `variables` — the closed-form OC `Φ(√n(z_p−k))` vs a direct Monte-Carlo of
+//!   the accept rule, and the MSD identity.
+//! - `sixsigma` — yield↔sigma↔DPMO round-trips vs the independent normal tail;
+//!   RTY vs an explicit product; Poisson `−ln Y = DPU`.
+//! - `attribution` — the `Σcⱼ = R²` decomposition identity, coefficient recovery
+//!   against known generators, and single-regressor `c = corr²`.
 //!
 //! Run: `cargo run -p scirust-tolerance --example fuzz_crosscheck [N]`
 
+use scirust_tolerance::attribution::attribute;
 use scirust_tolerance::capability::{cp as cap_cp, cp_confidence_interval, nonconformity_ppm};
 use scirust_tolerance::chain::{
     Allocation, Contributor, ContributorState, allocate, assembly_inertia_statistical,
@@ -63,6 +70,10 @@ use scirust_tolerance::position::{
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::SamplingPlan;
 use scirust_tolerance::sensitivity::{contributions, correlated_contributions, dual_contributions};
+use scirust_tolerance::sixsigma::{
+    dpmo_from_sigma, normalized_yield, process_report, rolled_throughput_yield, sigma_from_dpmo,
+    sigma_from_yield, throughput_yield, yield_from_sigma,
+};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_analytical,
     surface_inertia_from_torsors,
@@ -70,6 +81,7 @@ use scirust_tolerance::spatial::{
 use scirust_tolerance::special::{
     chi2_cdf, chi2_quantile, erf, erfc, ncchi2_cdf, normal_cdf, normal_sf,
 };
+use scirust_tolerance::variables::{VariablesPlan, design_variables_plan};
 
 /// Deterministic xorshift64* RNG with a Box–Muller normal.
 struct Rng(u64);
@@ -1158,6 +1170,184 @@ fn check_capability_ci(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_variables(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 3000;
+    for _ in 0..n
+    {
+        let nn = rng.int(5, 30);
+        let k = rng.uniform(1.0, 2.5);
+        let plan = VariablesPlan::new(nn, k, true);
+        // Independent Monte-Carlo of the OC. Put the upper limit at U = 0, σ = 1;
+        // a process with fraction p beyond U has mean μ = −z_p (z_p = −Φ⁻¹(p)).
+        // Accept when Q_U = (U − x̄)/σ = −x̄ ≥ k.
+        let p = rng.uniform(0.005, 0.15);
+        let z_p = -normal_cdf_inv(p);
+        let mu = -z_p;
+        let mut acc = 0u64;
+        for _ in 0..trials
+        {
+            let xbar = (0..nn).map(|_| mu + rng.normal()).sum::<f64>() / nn as f64;
+            if -xbar >= k
+            {
+                acc += 1;
+            }
+        }
+        let emp = acc as f64 / trials as f64;
+        r.check(
+            (plan.probability_of_acceptance(p) - emp).abs(),
+            0.05,
+            || {
+                format!(
+                    "variables OC Pa {:.3} vs MC {emp:.3} (n={nn}, k={k:.2}, p={p:.3})",
+                    plan.probability_of_acceptance(p)
+                )
+            },
+        );
+        // MSD identity: a centred lot at σ = MSD lands exactly on k.
+        let (lsl, usl) = (-rng.uniform(1.0, 5.0), rng.uniform(1.0, 5.0));
+        let msd = plan.max_process_sigma(lsl, usl);
+        let mid = 0.5 * (lsl + usl);
+        r.check(((usl - mid) / msd - k).abs(), 1e-9, || {
+            "variables MSD==k".into()
+        });
+        // A designed plan is at least as protective as its two nominal points.
+        let (aql, rql) = (rng.uniform(0.005, 0.03), rng.uniform(0.06, 0.15));
+        let (alpha, beta) = (rng.uniform(0.02, 0.10), rng.uniform(0.05, 0.15));
+        if let Some(d) = design_variables_plan(aql, rql, alpha, beta, true)
+        {
+            r.check(
+                (d.probability_of_acceptance(aql) - (1.0 - alpha)).max(0.0) - 0.03,
+                0.0,
+                || "variables design Pa(AQL)>=1-alpha".into(),
+            );
+            r.check(
+                (d.probability_of_acceptance(rql) - beta).max(0.0) - 0.03,
+                0.0,
+                || "variables design Pa(RQL)<=beta".into(),
+            );
+        }
+    }
+    r
+}
+
+fn check_sixsigma(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let shift = if rng.u64() & 1 == 0 { 0.0 } else { 1.5 };
+        // yield ↔ sigma round trip.
+        let y = rng.uniform(0.5, 0.9999);
+        let s = sigma_from_yield(y, shift);
+        r.check((yield_from_sigma(s, shift) - y).abs(), 1e-9, || {
+            "sixsigma y<->sigma".into()
+        });
+        // dpmo ↔ sigma round trip and independent normal-tail reference.
+        let sigma = rng.uniform(1.0, 6.0);
+        let d = dpmo_from_sigma(sigma, shift);
+        r.check((1e6 * normal_sf(sigma - shift) - d).abs(), 1e-6, || {
+            "sixsigma dpmo vs normal_sf".into()
+        });
+        // Round-trip through the deep tail loses a few ulps to 1−(1−Φ)
+        // cancellation at large σ — still far tighter than any real use needs.
+        r.check((sigma_from_dpmo(d, shift) - sigma).abs(), 1e-6, || {
+            "sixsigma sigma<->dpmo".into()
+        });
+        // Poisson yield: −ln(Y) recovers the DPU.
+        let dpu = rng.uniform(0.0, 2.0);
+        r.check((-throughput_yield(dpu).ln() - dpu).abs(), 1e-12, || {
+            "sixsigma -lnY==dpu".into()
+        });
+        // Rolled throughput yield vs an independent product; normalisation.
+        let steps = rng.int(2, 8);
+        let ys: Vec<f64> = (0..steps).map(|_| rng.uniform(0.90, 0.999)).collect();
+        let mut prod = 1.0;
+        for &yi in &ys
+        {
+            prod *= yi;
+        }
+        let rty = rolled_throughput_yield(&ys);
+        r.check((rty - prod).abs(), 1e-12, || "sixsigma RTY==prod".into());
+        let ymin = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        r.check((rty - ymin).max(0.0), 1e-12, || "sixsigma RTY<=min".into());
+        // Normalised yield^steps == RTY.
+        let ynorm = normalized_yield(rty, steps);
+        r.check((ynorm.powi(steps as i32) - rty).abs(), 1e-9, || {
+            "sixsigma ynorm^k==RTY".into()
+        });
+        // Report self-consistency.
+        let rep = process_report(&ys, shift).unwrap();
+        r.check(
+            ((-rep.total_dpu).exp() - rep.rolled_throughput_yield).abs(),
+            1e-9,
+            || "sixsigma report total_dpu".into(),
+        );
+    }
+    r
+}
+
+fn check_attribution(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let k = rng.int(1, 4);
+        let nn = rng.int(60, 200);
+        // Independent normal regressor columns and known coefficients.
+        let alpha: Vec<f64> = (0..k).map(|_| rng.uniform(-3.0, 3.0)).collect();
+        let cols: Vec<Vec<f64>> = (0..k)
+            .map(|_| (0..nn).map(|_| rng.normal()).collect())
+            .collect();
+        let sigma_n = rng.uniform(0.05, 0.5);
+        let y: Vec<f64> = (0..nn)
+            .map(|i| (0..k).map(|j| alpha[j] * cols[j][i]).sum::<f64>() + sigma_n * rng.normal())
+            .collect();
+        let names: Vec<&str> = ["x1", "x2", "x3", "x4"][..k].to_vec();
+        let Some(rep) = attribute(&names, &cols, &y)
+        else
+        {
+            continue;
+        };
+        // (1) Exact identity: contributions sum to R² (Cov-based vs residual R²).
+        let sum: f64 = rep.components.iter().map(|c| c.contribution).sum();
+        r.check((sum - rep.r_squared).abs(), 1e-7, || {
+            format!("attribution Σc={sum:.6} vs R²={:.6}", rep.r_squared)
+        });
+        // (2) Fitted sensitivities recover the known generating coefficients.
+        for (j, a) in alpha.iter().enumerate()
+        {
+            r.check((rep.components[j].sensitivity - a).abs(), 0.2, || {
+                format!(
+                    "attribution β{j}={:.3} vs α={a:.3}",
+                    rep.components[j].sensitivity
+                )
+            });
+        }
+        // (3) Explained + unexplained partition to 1.
+        r.check((rep.r_squared + rep.unexplained - 1.0).abs(), 1e-12, || {
+            "attribution R²+unexpl==1".into()
+        });
+        // (4) Single regressor: contribution equals corr(x,y)² (independent).
+        if k == 1
+        {
+            let xm = cols[0].iter().sum::<f64>() / nn as f64;
+            let ym = y.iter().sum::<f64>() / nn as f64;
+            let sxy: f64 = (0..nn).map(|i| (cols[0][i] - xm) * (y[i] - ym)).sum();
+            let sxx: f64 = cols[0].iter().map(|x| (x - xm).powi(2)).sum();
+            let syy: f64 = y.iter().map(|v| (v - ym).powi(2)).sum();
+            let corr2 = sxy * sxy / (sxx * syy);
+            r.check((rep.components[0].contribution - corr2).abs(), 1e-7, || {
+                "attribution c==corr²".into()
+            });
+        }
+    }
+    r
+}
+
+/// Standard-normal quantile via the crate's `special`, wrapped for local use.
+fn normal_cdf_inv(p: f64) -> f64 {
+    scirust_tolerance::special::inv_normal_cdf(p)
+}
+
 fn main() {
     let n: usize = std::env::args()
         .nth(1)
@@ -1186,6 +1376,9 @@ fn main() {
         ("dual", check_dual(&mut rng, n)),
         ("gdt", check_gdt(&mut rng, n)),
         ("capability_ci", check_capability_ci(&mut rng, n.min(80))),
+        ("variables", check_variables(&mut rng, n.min(120))),
+        ("sixsigma", check_sixsigma(&mut rng, n)),
+        ("attribution", check_attribution(&mut rng, n.min(120))),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");

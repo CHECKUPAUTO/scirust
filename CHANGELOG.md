@@ -5,6 +5,42 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — qualité de procédé : échantillonnage aux mesures, Six-Sigma, attribution des causes (`scirust-tolerance`)
+Trois modules qui prolongent la couche mesure & analyse vers le **pilotage
+qualité** que les suites concurrentes (Minitab, Q-DAS) offrent autour de la
+cotation : accepter un lot sur mesures, chiffrer le rendement d'un procédé
+multi-étapes, et remonter des données à la cause. Chaque module est vérifié par
+cross-check de fuzzing contre une **référence indépendante** :
+
+- **`variables`** : **échantillonnage aux mesures** (ISO 3951 / MIL-STD-414,
+  forme `k`). Accepte le lot quand la distance normalisée `Q = (limite−x̄)/σ ≥ k` ;
+  courbe d'efficacité en forme close `Pa(p) = Φ(√n_eff·(z_p−k))` avec `z_p = −Φ⁻¹(p)`,
+  et **conception à deux points** `√n = (z_{1−α}+z_{1−β})/(z_aql−z_rql)`,
+  `k = (z_aql·z_{1−β}+z_rql·z_{1−α})/(z_{1−α}+z_{1−β})` depuis (AQL, RQL, α, β).
+  Méthodes `σ` connu et `s` inconnu (échantillon gonflé de `1+k²/2`) ; écart-type
+  maximal admissible pour un lot centré `MSD = (USL−LSL)/(2k)`, pendant aux mesures
+  du budget inertiel `I_max`. *Cross-check* : Monte-Carlo direct de la règle
+  d'acceptation vs la CE close ; identité `MSD`.
+- **`sixsigma`** : **comptabilité de rendement Six-Sigma**. DPU, DPMO, rendement
+  de passage `Y = e^(−DPU)`, **rendement roulé** `RTY = ∏ Yᵢ` (la probabilité
+  qu'une pièce franchisse *toutes* les étapes sans reprise, invisible sur une
+  seule capabilité), rendement normalisé `RTY^(1/étapes)`, et les conversions
+  rendement↔niveau sigma↔DPMO `Z = Φ⁻¹(Y)+décalage` avec le décalage `1,5σ`
+  Motorola (d'où « 6σ ⇒ 3,4 DPMO »). *Cross-check* : aller-retours vs la queue
+  normale indépendante ; `RTY` vs produit explicite ; `−ln Y = DPU` de Poisson.
+- **`attribution`** : **attribution des causes pilotée par les données**. Ajuste
+  l'assemblage mesuré aux composants co-mesurés par moindres carrés `y ≈ β₀ + Σ βⱼxⱼ`
+  et décompose la variance expliquée par l'identité exacte (MCO avec constante)
+  `Σⱼ βⱼ·Cov(xⱼ,y) = Var(ŷ) = R²·Var(y)` : sensibilités **empiriques** `βⱼ` (à
+  confronter aux `αⱼ` de conception), parts signées `cⱼ = βⱼ·Cov(xⱼ,y)/Var(y)`
+  (somment à `R²`, mesure de Pratt) et **reste inexpliqué** `1−R²` qui trahit une
+  cause hors du jeu mesuré. *Cross-check* : identité `Σcⱼ = R²` ; récupération des
+  coefficients générateurs ; `c = corr²` à un seul régresseur.
+
+Câblés dans `scirust-mcp` (`tolerance_variables_plan`, `tolerance_six_sigma`,
+`tolerance_attribution`). Fuzz global : **111 926 checks / 0 erreur** sur 23
+modules.
+
 ### Ajouté — la couche mesure & analyse du tolérancement inertiel (`scirust-tolerance`)
 Six modules qui portent la crate au niveau des produits concurrents (Minitab,
 Q-DAS, 3DCS, CETOL) sur ce qu'ils font *autour* de la cotation : qualifier le

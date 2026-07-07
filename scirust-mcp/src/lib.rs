@@ -149,5 +149,8 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_distribution_fit"));
         assert!(registry.names().contains(&"tolerance_gdt"));
         assert!(registry.names().contains(&"tolerance_capability_ci"));
+        assert!(registry.names().contains(&"tolerance_variables_plan"));
+        assert!(registry.names().contains(&"tolerance_six_sigma"));
+        assert!(registry.names().contains(&"tolerance_attribution"));
     }
 }
