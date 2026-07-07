@@ -50,7 +50,11 @@ pub fn save_checkpoint(model: &SciAgentModel, meta: &CheckpointMeta, path: &Path
     Ok(())
 }
 
-pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<CheckpointMeta> {
+/// Read just the `meta.json` of a checkpoint (step, loss, lr, and the model
+/// [`SciAgentConfig`]) without loading any weights. Lets a caller learn the
+/// config a checkpoint was trained with — e.g. to construct a matching model
+/// before [`load_checkpoint`], or to resume with the right vocab/dims.
+pub fn read_meta(path: &Path) -> Result<CheckpointMeta> {
     let meta_path = path.join("meta.json");
     let meta_str = fs::read_to_string(&meta_path).map_err(|e| format!("Cannot read meta: {e}"))?;
     let meta_json: serde_json::Value =
@@ -71,12 +75,16 @@ pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<Checkpo
         eps: cfg["eps"].as_f64().unwrap_or(1e-5) as f32,
     };
 
-    let meta = CheckpointMeta {
+    Ok(CheckpointMeta {
         step: meta_json["step"].as_u64().unwrap_or(0) as usize,
         loss: meta_json["loss"].as_f64().unwrap_or(0.0) as f32,
         lr: meta_json["lr"].as_f64().unwrap_or(0.0) as f32,
         config,
-    };
+    })
+}
+
+pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<CheckpointMeta> {
+    let meta = read_meta(path)?;
 
     let safetensors_path = path.join("model.safetensors");
     let state = scirust_core::io::safetensors::load_safetensors(&safetensors_path)

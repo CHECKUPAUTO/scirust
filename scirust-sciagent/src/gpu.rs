@@ -429,6 +429,7 @@ impl ResidentModel {
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
         let mut cursor = 0usize;
+        let t0 = std::time::Instant::now();
         while step < cfg.total_steps
         {
             // Wrap the corpus (a window needs `s` inputs + 1 shifted target).
@@ -453,7 +454,12 @@ impl ResidentModel {
 
             if cfg.log_interval > 0 && step % cfg.log_interval == 0
             {
-                println!("[resident step {step:>6}] loss {loss:>9.4} | lr {lr:.3e}");
+                let done = (step - cfg.start_step) * s;
+                let secs = t0.elapsed().as_secs_f64().max(1e-9);
+                let tps = done as f64 / secs;
+                println!(
+                    "[resident step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | {tps:>8.0} tok/s"
+                );
             }
             if cfg.save_interval > 0 && step % cfg.save_interval == 0
             {
