@@ -289,6 +289,15 @@ fn cases() -> Vec<Case> {
             src: "def recon(A):\n    U, S, Vh = np.linalg.svd(A)\n    return U @ np.diag(S) @ Vh\n",
             args: vec![Matrix { n: 4 }],
         },
+        // Routing (Phase 2): np.linalg.qr -> scirust-solvers (Householder QR)
+        // via tuple unpacking. Q/R signs are gauge-dependent, so we prove the
+        // gauge-invariant reconstruction Q @ R ≈ A (square A => reduced == full).
+        Case {
+            name: "qr reconstruction Q@R (tuple unpack)",
+            call: "qr_rec",
+            src: "def qr_rec(A):\n    Q, R = np.linalg.qr(A)\n    return Q @ R\n",
+            args: vec![Matrix { n: 4 }],
+        },
         // Routing (Phase 1): np.fft.fft -> scirust-signal. Real input, COMPLEX
         // output (compared re/im interleaved vs numpy.fft.fft). n = 8 (radix-2).
         Case {

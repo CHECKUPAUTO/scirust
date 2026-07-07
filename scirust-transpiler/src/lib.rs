@@ -440,6 +440,26 @@ mod tests {
     }
 
     #[test]
+    fn qr_unpacks_and_routes_to_solvers() {
+        let src = "def qr_rec(A):\n    Q, R = np.linalg.qr(A)\n    return Q @ R\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn qr_rec(A: &[f64]) -> scirust_solvers::Matrix"));
+        assert!(rust.contains("let (Q, R): (scirust_solvers::Matrix, scirust_solvers::Matrix) ="));
+        assert!(rust.contains("scirust_solvers::linalg::qr_decompose"));
+        assert!(rust.contains("__qr.q()") && rust.contains("__qr.r()"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
+    fn qr_as_scalar_value_is_rejected() {
+        let src = "def f(A):\n    x = np.linalg.qr(A)\n    return x\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("returns a tuple"));
+    }
+
+    #[test]
     fn tuple_unpack_arity_mismatch_is_rejected() {
         let src = "def f(A):\n    U, S = np.linalg.svd(A)\n    return S\n";
         let err = transpile(src).unwrap_err();

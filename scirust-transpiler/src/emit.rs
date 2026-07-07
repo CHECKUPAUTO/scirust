@@ -780,6 +780,18 @@ fn emit_tuple(t: &TupleExpr, ctx: &Ctx) -> String {
                 m = as_matrix(&a),
             )
         },
+        TupleExpr::Qr(a) =>
+        {
+            // Householder QR: Q (orthogonal) and R (upper-triangular). On a
+            // square matrix, `q()` (m×m) equals numpy's reduced Q. Takes the
+            // matrix by value.
+            let a = emit(a, ctx);
+            format!(
+                "{{ let __qr = scirust_solvers::linalg::qr_decompose({m})\
+                 .expect(\"scirust-transpiler: QR failed\"); (__qr.q(), __qr.r()) }}",
+                m = as_matrix(&a),
+            )
+        },
     }
 }
 

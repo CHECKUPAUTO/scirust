@@ -51,6 +51,10 @@ pub enum TupleExpr {
     /// `Vh = Vᵀ` to match `numpy.linalg.svd`'s third return value. Routed to
     /// the verified `scirust_solvers::linalg::svd`.
     Svd(Box<SirExpr>),
+    /// `np.linalg.qr(A)` → `(Q, R)` with `Q: MatrixVal` (orthogonal) and
+    /// `R: MatrixVal` (upper-triangular). Routed to the verified Householder
+    /// `scirust_solvers::linalg::qr_decompose`.
+    Qr(Box<SirExpr>),
 }
 
 impl TupleExpr {
@@ -59,6 +63,7 @@ impl TupleExpr {
         match self
         {
             TupleExpr::Svd(_) => vec![Ty::MatrixVal, Ty::Array, Ty::MatrixVal],
+            TupleExpr::Qr(_) => vec![Ty::MatrixVal, Ty::MatrixVal],
         }
     }
 }
@@ -404,7 +409,7 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
 fn scan_tuple(t: &TupleExpr, solvers: &mut bool, signal: &mut bool) {
     match t
     {
-        TupleExpr::Svd(a) =>
+        TupleExpr::Svd(a) | TupleExpr::Qr(a) =>
         {
             *solvers = true;
             scan_expr(a, solvers, signal);

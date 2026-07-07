@@ -471,9 +471,19 @@ fn lower_tuple_call(
             }
             Ok(TupleExpr::Svd(Box::new(a)))
         },
+        PyExpr::Call { func, args } if strip_np(func) == "linalg.qr" =>
+        {
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            if !is_matrixish(a.ty())
+            {
+                return Err("np.linalg.qr expects a 2-D matrix argument".into());
+            }
+            Ok(TupleExpr::Qr(Box::new(a)))
+        },
         _ => Err(
             "the right-hand side of a tuple unpack must be a supported multi-output \
-                  kernel (np.linalg.svd)"
+                  kernel (np.linalg.svd, np.linalg.qr)"
                 .into(),
         ),
     }
@@ -694,6 +704,9 @@ fn lower_call(
                  `U, S, Vh = np.linalg.svd(A)`"
                 .into())
         },
+        "linalg.qr" => Err("np.linalg.qr returns a tuple (Q, R); unpack it: \
+                 `Q, R = np.linalg.qr(A)`"
+            .into()),
         "diag" =>
         {
             // np.diag(v): 1-D array -> square diagonal matrix.
@@ -913,7 +926,12 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
                 // First argument of a matrix-taking linalg routine is a matrix.
                 (matches!(
                     strip_np(func),
-                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh" | "linalg.inv" | "linalg.svd"
+                    "linalg.solve"
+                        | "linalg.det"
+                        | "linalg.eigvalsh"
+                        | "linalg.inv"
+                        | "linalg.svd"
+                        | "linalg.qr"
                 ) && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },

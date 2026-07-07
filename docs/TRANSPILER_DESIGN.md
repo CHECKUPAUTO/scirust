@@ -354,13 +354,13 @@ secteurs réellement débloqués.
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
 | Routage `np.fft.fft`/`rfft`/`ifft` → `scirust-signal` (+ type complexe) | ✅ livré (Phase 1) | `sir.rs` (`Ty::ComplexArray`, `Fft`, `Rfft`, `Ifft`, `ComplexAbs`) + `emit.rs` |
-| **Tuples multi-sorties + `np.linalg.svd`** (déstructuration `U, S, Vh = …`, `np.diag`) → `scirust-solvers` | ✅ livré (Phase 2) | `sir.rs` (`TupleExpr`, `SirStmt::LetTuple`, `SirExpr::Diag`) + `emit.rs` |
+| **Tuples multi-sorties + `np.linalg.svd`/`qr`** (déstructuration `U, S, Vh = …` / `Q, R = …`, `np.diag`) → `scirust-solvers` | ✅ livré (Phase 2) | `sir.rs` (`TupleExpr`, `SirStmt::LetTuple`, `SirExpr::Diag`) + `emit.rs` |
 | **Appels de fonctions utilisateur** (composition, inférence de type inter-fonctions) + **listes littérales** | ✅ livré (Phase 2) | `lower.rs` (`FuncSig`/`Sigs`) + `sir.rs` (`SirExpr::UserCall`, `ArrayLit`) |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 43 cas au total : 34 Python prouvés
+**Résultat de l'oracle (reproductible).** 44 cas au total : 35 Python prouvés
 contre **NumPy réel**, 9 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
@@ -373,11 +373,12 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ solve/det/eigvalsh/inv/A@b/A@B/A.T (routed to scirust-solvers, cargo-compiled — Phase 1)
   ✓ fft.fft / rfft / ifft / abs(fft) (routed to scirust-signal, complex type — Phase 1)
   ✓ svd singular values + reconstruction U@diag(S)@Vh (tuple unpack → scirust-solvers — Phase 2)
+  ✓ qr reconstruction Q@R (tuple unpack → scirust-solvers — Phase 2)
   ✓ user calls: sumsq / sumdbl / chain (function composition, hint-free inference — Phase 2)
   ✓ list literal: weighted average (Python list → Vec — Phase 2)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
   ✓ M: norm2 / dot / relu / sign / clamp / poly / mysum / newton / ew_scale (MATLAB → Octave — Phase 2)
-  ORACLE GREEN — 43/43 cases match their reference runtime within tolerance
+  ORACLE GREEN — 44/44 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

@@ -44,6 +44,17 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **`np.linalg.qr`** (déstructuration `Q, R = …`) prouvé contre NumPy réel (Phase 2, incrément 14)
+Deuxième noyau multi-sorties, sur le même point d'extension `TupleExpr` que la
+SVD. `Q, R = np.linalg.qr(A)` transpile vers la QR de Householder vérifiée
+`scirust_solvers::linalg::qr_decompose` (`Q` orthogonale via `.q()`, `R`
+triangulaire sup via `.r()`). Sur une matrice **carrée**, `q()` (m×m) coïncide
+avec la Q réduite de numpy, donc les formes collent. Comme les signes de Q/R
+dépendent de la jauge, la preuve porte sur la **reconstruction invariante**
+`Q @ R ≈ A`. **Oracle 44/44** (200 essais chacun) ; **45 tests unitaires**.
+Non-vacuité re-vérifiée : intervertir `q()`/`r()` (émettre `(R, Q)`) fait
+diverger la reconstruction (|Δ|≈0,48) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **Python élargi** (appels de fonctions utilisateur + listes) prouvés contre NumPy réel (Phase 2, incrément 13)
 Le transpileur compose désormais **plusieurs fonctions** : une `def` transpilée
 peut en appeler une autre définie **plus tôt** dans le module (define-before-use),
