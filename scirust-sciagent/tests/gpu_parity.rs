@@ -95,3 +95,119 @@ fn full_model_forward_and_backward_match_cpu_on_gpu() {
     }
     eprintln!("forward rel_err {fwd:.2e}, worst grad rel_err {worst:.2e} — PASS");
 }
+
+/// The **fully-resident** path (`ResidentModel`, `scirust-gpu`'s `GpuChain`)
+/// reproduces the real model's forward. Uploads every `SciAgentModel` weight to
+/// VRAM, runs `gqa_model_forward` on the device, and checks the logits against
+/// the model's own CPU forward. This is the bridge that lets the whole decoder
+/// run on the resident path (the one that beats the per-op tape ~4× on the Thor),
+/// not just its GEMMs. Skips cleanly with no adapter.
+#[test]
+fn resident_model_forward_matches_cpu_model() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let seq_len = 8usize;
+    let ids: Vec<usize> = (0..seq_len)
+        .map(|i| (i * 7 + 3) % config.vocab_size)
+        .collect();
+
+    // The model's own CPU forward logits.
+    let tape = Tape::new();
+    let logits_v = model.forward(&tape, &ids, seq_len);
+    let cpu_logits = tape.value(logits_v.idx()).data;
+
+    // The resident path, from the same weights.
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident-model parity");
+        return;
+    };
+    eprintln!("resident model on: {}", rm.adapter_name());
+    let tokens: Vec<u32> = ids.iter().map(|&i| i as u32).collect();
+    let gpu_logits = rm.forward(&tokens);
+
+    assert_eq!(gpu_logits.len(), cpu_logits.len(), "logit shape mismatch");
+    let e = rel_err(&gpu_logits, &cpu_logits);
+    assert!(e < 3e-3, "resident vs CPU model logits: rel_err {e}");
+    eprintln!("resident-model forward rel_err {e:.2e} — PASS");
+}
+
+/// A **resident AdamW training step** on the real model reduces the loss: forward
+/// → cross-entropy grad → full backward → AdamW on every trainable weight, all in
+/// VRAM, iterated on a fixed `(tokens, targets)` pair. Proves the whole resident
+/// training loop works end-to-end on the actual `SciAgentModel`. Skips with no
+/// adapter.
+#[test]
+fn resident_train_step_reduces_loss() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let Some(mut rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident training");
+        return;
+    };
+    let seq_len = 8usize;
+    let tokens: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 7 + 3) % config.vocab_size) as u32)
+        .collect();
+    let targets: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+    let betas = (0.9, 0.999);
+
+    let first = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    let mut last = first;
+    for _ in 0..25
+    {
+        last = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    }
+    eprintln!("resident training: loss {first:.4} -> {last:.4}");
+    assert!(
+        last < first * 0.7,
+        "resident training did not reduce the loss: {first} -> {last}"
+    );
+}
+
+/// `sync_to_model` round-trips: after a few resident training steps, writing the
+/// resident weights back into the `SciAgentModel` makes its own CPU forward match
+/// the resident forward (they now hold the same weights). Skips with no adapter.
+#[test]
+fn resident_sync_roundtrips_into_model() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let Some(mut rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident sync");
+        return;
+    };
+    let seq_len = 8usize;
+    let tokens: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 7 + 3) % config.vocab_size) as u32)
+        .collect();
+    let targets: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+    for _ in 0..5
+    {
+        rm.train_step(&tokens, &targets, 0.05, (0.9, 0.999), 1e-8, 0.0);
+    }
+    // Write the trained weights back, then compare the model's own CPU forward.
+    rm.sync_to_model(&mut model);
+    let ids: Vec<usize> = tokens.iter().map(|&t| t as usize).collect();
+    let tape = Tape::new();
+    let lv = model.forward(&tape, &ids, seq_len);
+    let cpu_logits = tape.value(lv.idx()).data;
+    let gpu_logits = rm.forward(&tokens);
+    let e = rel_err(&gpu_logits, &cpu_logits);
+    assert!(e < 3e-3, "post-sync model vs resident logits: rel_err {e}");
+    eprintln!("post-sync round-trip rel_err {e:.2e} — PASS");
+}
