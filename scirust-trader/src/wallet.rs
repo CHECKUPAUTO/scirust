@@ -619,54 +619,135 @@ pub fn sign_coinbase_request(
 
 // ===========================================================================
 // Authorization gate — the LLM cannot self-authorize signing/sending.
+//
+// Hardened model: an authorization is bound to the *transaction context* — the
+// recipient, the calldata selector, and the value — not merely a native-value
+// cap, and is enforced against a stateful [`SpendLedger`] for one-time use and a
+// cumulative budget. This closes the ways a native-value-only cap could be
+// side-stepped (an ERC-20 `transfer` moves tokens with `value == 0`) and the
+// ways a standing authorization could be replayed.
 // ===========================================================================
+
+/// The concrete action being authorized — what would actually be signed/sent.
+/// Supplied by the host from the real transaction, never trusted from the model.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TxContext {
+    pub chain_id: u64,
+    pub method: String,
+    /// Recipient address (hex, with or without `0x`); `None` for methods that
+    /// carry no recipient (e.g. `personal_sign`).
+    pub to: Option<String>,
+    /// The 4-byte calldata selector (hex), or `None` when the calldata is empty
+    /// (a pure native-value transfer).
+    pub selector: Option<String>,
+    /// Native value moved (wei).
+    pub value_wei: u128,
+    /// The exact signing hash of the transaction (hex), when known.
+    pub tx_hash: Option<String>,
+}
+
+/// Normalize a hex string for comparison: strip `0x`, lowercase.
+fn norm_hex(s: &str) -> String {
+    s.strip_prefix("0x").unwrap_or(s).to_ascii_lowercase()
+}
+
+/// Length-prefixed field append — an unambiguous canonical encoding. Unlike a
+/// delimiter-joined string, no field value can be crafted to make two distinct
+/// authorizations hash to the same signed bytes.
+fn push_bytes(buf: &mut Vec<u8>, b: &[u8]) {
+    buf.extend_from_slice(&(b.len() as u64).to_be_bytes());
+    buf.extend_from_slice(b);
+}
+fn push_str_list(buf: &mut Vec<u8>, items: &[String]) {
+    buf.extend_from_slice(&(items.len() as u64).to_be_bytes());
+    for it in items
+    {
+        push_bytes(buf, it.as_bytes());
+    }
+}
+fn push_u64_list(buf: &mut Vec<u8>, items: &[u64]) {
+    buf.extend_from_slice(&(items.len() as u64).to_be_bytes());
+    for it in items
+    {
+        buf.extend_from_slice(&it.to_be_bytes());
+    }
+}
 
 /// An out-of-band authorization that permits a *bounded* set of signing/sending
 /// actions. Minted by the operator with a server-side key (never in the
 /// conversation) and verified here. Without a valid authorization every
 /// state-changing wallet action is refused.
+///
+/// Two modes:
+/// * **Bound** (`bound_tx_hash = Some(..)`) — authorizes exactly one transaction
+///   whose signing hash matches; one-time-use via the [`SpendLedger`]. The
+///   strongest, per-transaction form of approval.
+/// * **Policy** (`bound_tx_hash = None`) — a scoped standing authorization,
+///   constrained by a recipient allowlist, a calldata-selector allowlist, a
+///   per-transaction native cap and a cumulative budget.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletAuthorization {
     pub operator: String,
+    /// Unique id (jti) — the key under which the ledger tracks use and spend.
+    pub nonce: String,
     /// EIP-155 chain ids the authorization covers (empty = none).
     pub allowed_chain_ids: Vec<u64>,
     /// RPC/signing methods permitted (e.g. `eth_sendTransaction`, `personal_sign`).
     pub allowed_methods: Vec<String>,
-    /// Maximum value (wei) any single authorized transaction may move.
+    /// Recipient allowlist (hex). In policy mode a transaction whose `to` is not
+    /// listed is refused; an empty list refuses every recipient-bearing tx.
+    pub allowed_to: Vec<String>,
+    /// Calldata 4-byte selector allowlist (hex). A transaction carrying calldata
+    /// whose selector is not listed is refused; an **empty** list means calldata
+    /// must be empty (native transfers only) — this is what stops an ERC-20
+    /// `transfer`/`approve` from side-stepping the native-value cap.
+    pub allowed_selectors: Vec<String>,
+    /// Per-transaction native-value cap (wei).
     pub max_value_wei: u128,
+    /// Cumulative native-value budget (wei) across every use of this nonce.
+    pub cumulative_budget_wei: u128,
+    /// If set, the authorization is bound to exactly one transaction whose
+    /// signing hash matches — one-time-use.
+    pub bound_tx_hash: Option<String>,
     pub valid_from_unix: u64,
     pub valid_until_unix: u64,
-    /// Hex HMAC signature over the canonical fields (excluding this field).
+    /// Hex HMAC over the canonical (length-prefixed) encoding of every field
+    /// above.
     pub signature_hex: String,
 }
 
 impl WalletAuthorization {
-    /// Canonical byte string signed by the operator (all fields except the sig).
-    fn canonical(&self) -> String {
-        format!(
-            "{}|{}|{}|{}|{}|{}",
-            self.operator,
-            self.allowed_chain_ids
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-            self.allowed_methods.join(","),
-            self.max_value_wei,
-            self.valid_from_unix,
-            self.valid_until_unix,
-        )
+    /// Canonical bytes signed by the operator (all fields except the signature),
+    /// length-prefixed so the encoding is injective.
+    fn canonical(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        push_bytes(&mut b, b"SCIRUST-WALLET-AUTH-v2");
+        push_bytes(&mut b, self.operator.as_bytes());
+        push_bytes(&mut b, self.nonce.as_bytes());
+        push_u64_list(&mut b, &self.allowed_chain_ids);
+        push_str_list(&mut b, &self.allowed_methods);
+        push_str_list(&mut b, &self.allowed_to);
+        push_str_list(&mut b, &self.allowed_selectors);
+        push_bytes(&mut b, &self.max_value_wei.to_be_bytes());
+        push_bytes(&mut b, &self.cumulative_budget_wei.to_be_bytes());
+        push_bytes(
+            &mut b,
+            self.bound_tx_hash.as_deref().unwrap_or("").as_bytes(),
+        );
+        push_bytes(&mut b, &self.valid_from_unix.to_be_bytes());
+        push_bytes(&mut b, &self.valid_until_unix.to_be_bytes());
+        b
     }
 
     /// Sign this authorization with the operator's key (HMAC-SHA256).
     pub fn sign(mut self, key: &[u8]) -> Self {
-        self.signature_hex = to_hex(&hmac_sha256(key, self.canonical().as_bytes()));
+        self.signature_hex = to_hex(&hmac_sha256(key, &self.canonical()));
         self
     }
 
-    /// Verify the signature against the operator key (constant-comparison).
+    /// Verify the signature against the operator key (constant-time comparison).
     pub fn verify_signature(&self, key: &[u8]) -> bool {
-        let expected = to_hex(&hmac_sha256(key, self.canonical().as_bytes()));
+        let expected = to_hex(&hmac_sha256(key, &self.canonical()));
         // Length-checked byte comparison; both are 64-char hex.
         expected.len() == self.signature_hex.len()
             && expected
@@ -676,22 +757,126 @@ impl WalletAuthorization {
                 == 0
     }
 
-    /// Does this authorization permit `method` on `chain_id` for `value` wei at
-    /// time `now_unix`? Requires a valid signature under `key`.
-    pub fn authorizes(
+    /// Stateless policy decision for `ctx` at `now_unix`, given how much native
+    /// value has *already* been spent under this authorization's nonce.
+    /// `Ok(())` ⇒ permitted; `Err(reason)` ⇒ refused. Stateful one-time and
+    /// cumulative enforcement lives in [`SpendLedger`]; call that in production
+    /// so the `already_spent_wei` and replay accounting cannot be skipped.
+    pub fn evaluate(
         &self,
         key: &[u8],
-        chain_id: u64,
-        method: &str,
-        value: u128,
+        ctx: &TxContext,
         now_unix: u64,
-    ) -> bool {
-        self.verify_signature(key)
-            && now_unix >= self.valid_from_unix
-            && now_unix <= self.valid_until_unix
-            && self.allowed_chain_ids.contains(&chain_id)
-            && self.allowed_methods.iter().any(|m| m == method)
-            && value <= self.max_value_wei
+        already_spent_wei: u128,
+    ) -> Result<(), String> {
+        if !self.verify_signature(key)
+        {
+            return Err("authorization signature invalid".to_string());
+        }
+        if now_unix < self.valid_from_unix || now_unix > self.valid_until_unix
+        {
+            return Err("outside the authorization validity window".to_string());
+        }
+        if !self.allowed_chain_ids.contains(&ctx.chain_id)
+        {
+            return Err(format!("chain {} not authorized", ctx.chain_id));
+        }
+        if !self.allowed_methods.iter().any(|m| m == &ctx.method)
+        {
+            return Err(format!("method `{}` not authorized", ctx.method));
+        }
+        match &self.bound_tx_hash
+        {
+            Some(h) =>
+            {
+                // Bound mode: the hash commits to the exact transaction, so the
+                // recipient/calldata/value are all fixed by it.
+                let want = norm_hex(h);
+                let got = ctx.tx_hash.as_deref().map(norm_hex).unwrap_or_default();
+                if want != got
+                {
+                    return Err(
+                        "transaction hash does not match the bound authorization".to_string()
+                    );
+                }
+            },
+            None =>
+            {
+                // Policy mode: constrain recipient and calldata explicitly.
+                if let Some(to) = &ctx.to
+                {
+                    let to = norm_hex(to);
+                    if !self.allowed_to.iter().any(|a| norm_hex(a) == to)
+                    {
+                        return Err("recipient not in the authorization allowlist".to_string());
+                    }
+                }
+                if let Some(sel) = &ctx.selector
+                {
+                    let sel = norm_hex(sel);
+                    if !self.allowed_selectors.iter().any(|s| norm_hex(s) == sel)
+                    {
+                        return Err(
+                            "calldata selector not in the authorization allowlist".to_string()
+                        );
+                    }
+                }
+            },
+        }
+        if ctx.value_wei > self.max_value_wei
+        {
+            return Err("exceeds the per-transaction value cap".to_string());
+        }
+        if already_spent_wei.saturating_add(ctx.value_wei) > self.cumulative_budget_wei
+        {
+            return Err("exceeds the cumulative authorization budget".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Stateful ledger enforcing one-time use of bound authorizations and the
+/// cumulative spend budget across repeated uses. The host owns one and consults
+/// it for every state-changing action; without recording spend, a standing
+/// authorization could be replayed up to its per-transaction cap indefinitely.
+#[derive(Debug, Default)]
+pub struct SpendLedger {
+    consumed_nonces: std::collections::BTreeSet<String>,
+    spent: std::collections::BTreeMap<String, u128>,
+}
+
+impl SpendLedger {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Native value already recorded against `nonce`.
+    pub fn spent_for(&self, nonce: &str) -> u128 {
+        *self.spent.get(nonce).unwrap_or(&0)
+    }
+
+    /// Authorize `ctx` under `auth`; on success record the spend (and consume
+    /// the nonce if the authorization is one-time/bound). On `Err` the ledger is
+    /// left unchanged.
+    pub fn try_consume(
+        &mut self,
+        auth: &WalletAuthorization,
+        key: &[u8],
+        ctx: &TxContext,
+        now_unix: u64,
+    ) -> Result<(), String> {
+        if auth.bound_tx_hash.is_some() && self.consumed_nonces.contains(&auth.nonce)
+        {
+            return Err("authorization already used (one-time)".to_string());
+        }
+        let already = self.spent_for(&auth.nonce);
+        auth.evaluate(key, ctx, now_unix, already)?;
+        *self.spent.entry(auth.nonce.clone()).or_insert(0) += ctx.value_wei;
+        if auth.bound_tx_hash.is_some()
+        {
+            self.consumed_nonces.insert(auth.nonce.clone());
+        }
+        Ok(())
     }
 }
 
@@ -932,62 +1117,195 @@ mod tests {
         assert_eq!(sig.len(), 64); // hex of 32-byte HMAC
     }
 
-    #[test]
-    fn authorization_gate_enforced() {
-        let key = b"operator-server-side-key";
-        let auth = WalletAuthorization {
+    const ADDR_A: &str = "0x3535353535353535353535353535353535353535";
+    const ADDR_B: &str = "0x4646464646464646464646464646464646464646";
+    const ONE_ETH: u128 = 1_000_000_000_000_000_000;
+
+    fn policy_auth(key: &[u8]) -> WalletAuthorization {
+        WalletAuthorization {
             operator: "alice".to_string(),
+            nonce: "auth-1".to_string(),
             allowed_chain_ids: vec![1],
             allowed_methods: vec!["eth_sendTransaction".to_string()],
-            max_value_wei: 1_000_000_000_000_000_000, // 1 ETH cap
+            allowed_to: vec![ADDR_A.to_string()],
+            allowed_selectors: vec![], // native transfers only
+            max_value_wei: ONE_ETH,
+            cumulative_budget_wei: ONE_ETH + ONE_ETH / 2, // 1.5 ETH
+            bound_tx_hash: None,
+            valid_from_unix: 0,
+            valid_until_unix: 4_000_000_000,
+            signature_hex: String::new(),
+        }
+        .sign(key)
+    }
+
+    fn native_ctx(to: &str, value: u128) -> TxContext {
+        TxContext {
+            chain_id: 1,
+            method: "eth_sendTransaction".to_string(),
+            to: Some(to.to_string()),
+            selector: None,
+            value_wei: value,
+            tx_hash: None,
+        }
+    }
+
+    #[test]
+    fn policy_authorization_enforces_all_bounds() {
+        let key = b"operator-server-side-key";
+        let auth = policy_auth(key);
+        // Allowed: native transfer to allowlisted recipient under the cap.
+        assert!(
+            auth.evaluate(key, &native_ctx(ADDR_A, ONE_ETH / 2), 1_000_000, 0)
+                .is_ok()
+        );
+        // Recipient not in allowlist.
+        assert!(
+            auth.evaluate(key, &native_ctx(ADDR_B, 1), 1_000_000, 0)
+                .is_err()
+        );
+        // Wrong chain.
+        let mut c = native_ctx(ADDR_A, 1);
+        c.chain_id = 137;
+        assert!(auth.evaluate(key, &c, 1_000_000, 0).is_err());
+        // Method not allowed.
+        let mut c = native_ctx(ADDR_A, 1);
+        c.method = "personal_sign".to_string();
+        assert!(auth.evaluate(key, &c, 1_000_000, 0).is_err());
+        // Over the per-tx cap.
+        assert!(
+            auth.evaluate(key, &native_ctx(ADDR_A, 2 * ONE_ETH), 1_000_000, 0)
+                .is_err()
+        );
+        // Expired.
+        assert!(
+            auth.evaluate(key, &native_ctx(ADDR_A, 1), 5_000_000_000, 0)
+                .is_err()
+        );
+        // Wrong key.
+        assert!(
+            auth.evaluate(b"attacker-guess", &native_ctx(ADDR_A, 1), 1_000_000, 0)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn erc20_transfer_cannot_bypass_native_cap() {
+        // F1 regression: a value=0 tx carrying an ERC-20 transfer selector must
+        // be refused when calldata is not on the allowlist (empty ⇒ native only).
+        let key = b"k";
+        let auth = policy_auth(key);
+        let ctx = TxContext {
+            chain_id: 1,
+            method: "eth_sendTransaction".to_string(),
+            to: Some(ADDR_A.to_string()), // token contract, on the allowlist even
+            selector: Some("a9059cbb".to_string()), // transfer(address,uint256)
+            value_wei: 0,                 // sneaks under a native-value cap
+            tx_hash: None,
+        };
+        let err = auth.evaluate(key, &ctx, 1_000_000, 0).unwrap_err();
+        assert!(err.contains("selector"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn selector_allowlist_permits_listed_call() {
+        let key = b"k";
+        let mut auth = policy_auth(key);
+        auth.allowed_selectors = vec!["a9059cbb".to_string()];
+        let auth = auth.sign(key);
+        let ctx = TxContext {
+            chain_id: 1,
+            method: "eth_sendTransaction".to_string(),
+            to: Some(ADDR_A.to_string()),
+            selector: Some("0xA9059CBB".to_string()), // case/0x-insensitive
+            value_wei: 0,
+            tx_hash: None,
+        };
+        assert!(auth.evaluate(key, &ctx, 1_000_000, 0).is_ok());
+    }
+
+    #[test]
+    fn cumulative_budget_enforced_by_ledger() {
+        // F3: per-tx cap 1 ETH, cumulative budget 1.5 ETH ⇒ second full-cap
+        // transfer is refused even though each is individually under the cap.
+        let key = b"k";
+        let auth = policy_auth(key);
+        let mut ledger = SpendLedger::new();
+        assert!(
+            ledger
+                .try_consume(&auth, key, &native_ctx(ADDR_A, ONE_ETH), 1_000)
+                .is_ok()
+        );
+        let err = ledger
+            .try_consume(&auth, key, &native_ctx(ADDR_A, ONE_ETH), 1_000)
+            .unwrap_err();
+        assert!(err.contains("cumulative"), "unexpected: {err}");
+        assert_eq!(ledger.spent_for("auth-1"), ONE_ETH);
+    }
+
+    #[test]
+    fn bound_authorization_is_one_time() {
+        // F2: an authorization bound to a specific signing hash authorizes only
+        // that transaction, and only once.
+        let key = b"k";
+        let auth = WalletAuthorization {
+            operator: "alice".to_string(),
+            nonce: "bound-1".to_string(),
+            allowed_chain_ids: vec![1],
+            allowed_methods: vec!["eth_sendTransaction".to_string()],
+            allowed_to: vec![],
+            allowed_selectors: vec![],
+            max_value_wei: ONE_ETH,
+            cumulative_budget_wei: ONE_ETH,
+            bound_tx_hash: Some("0xdeadbeef".to_string()),
             valid_from_unix: 0,
             valid_until_unix: 4_000_000_000,
             signature_hex: String::new(),
         }
         .sign(key);
-
-        // Valid within all bounds.
-        assert!(auth.authorizes(
-            key,
-            1,
-            "eth_sendTransaction",
-            500_000_000_000_000_000,
-            1_000_000
-        ));
-        // Wrong chain.
-        assert!(!auth.authorizes(key, 137, "eth_sendTransaction", 1, 1_000_000));
-        // Method not allowed.
-        assert!(!auth.authorizes(key, 1, "personal_sign", 1, 1_000_000));
-        // Over the value cap.
-        assert!(!auth.authorizes(
-            key,
-            1,
-            "eth_sendTransaction",
-            2_000_000_000_000_000_000,
-            1_000_000
-        ));
-        // Expired.
-        assert!(!auth.authorizes(key, 1, "eth_sendTransaction", 1, 5_000_000_000));
-        // Wrong key -> signature fails -> refused.
-        assert!(!auth.authorizes(b"attacker-guess", 1, "eth_sendTransaction", 1, 1_000_000));
+        let mut ledger = SpendLedger::new();
+        let mut ctx = native_ctx(ADDR_B, ONE_ETH / 2);
+        ctx.tx_hash = Some("0xDEADBEEF".to_string()); // matches (case-insensitive)
+        // A different hash is refused.
+        let mut wrong = ctx.clone();
+        wrong.tx_hash = Some("0xfeed".to_string());
+        assert!(ledger.try_consume(&auth, key, &wrong, 1_000).is_err());
+        // The bound tx is authorized once...
+        assert!(ledger.try_consume(&auth, key, &ctx, 1_000).is_ok());
+        // ...and refused on replay.
+        let err = ledger.try_consume(&auth, key, &ctx, 1_000).unwrap_err();
+        assert!(err.contains("one-time"), "unexpected: {err}");
     }
 
     #[test]
     fn tampering_authorization_breaks_signature() {
         let key = b"k";
-        let mut auth = WalletAuthorization {
-            operator: "alice".to_string(),
-            allowed_chain_ids: vec![1],
-            allowed_methods: vec!["personal_sign".to_string()],
-            max_value_wei: 0,
-            valid_from_unix: 0,
-            valid_until_unix: 1,
-            signature_hex: String::new(),
-        }
-        .sign(key);
+        let mut auth = policy_auth(key);
         assert!(auth.verify_signature(key));
         auth.max_value_wei = 999; // tamper after signing
         assert!(!auth.verify_signature(key));
+    }
+
+    #[test]
+    fn canonical_encoding_is_unambiguous() {
+        // F6: length-prefixed fields ⇒ shifting a character across a field
+        // boundary changes the signature (a `|`-joined string would collide).
+        let key = b"k";
+        let a = WalletAuthorization {
+            operator: "ab".to_string(),
+            nonce: "c".to_string(),
+            ..policy_auth(key)
+        }
+        .sign(key);
+        let b = WalletAuthorization {
+            operator: "a".to_string(),
+            nonce: "bc".to_string(),
+            ..policy_auth(key)
+        }
+        .sign(key);
+        assert_ne!(a.signature_hex, b.signature_hex);
+        // And each still verifies against itself.
+        assert!(a.verify_signature(key) && b.verify_signature(key));
     }
 
     #[test]

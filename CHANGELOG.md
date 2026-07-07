@@ -447,6 +447,24 @@ empreintes de preuve), sans nouvelle dépendance.
   `wallet_walletconnect_namespace`, `wallet_build_evm_transaction`,
   `wallet_eip712_hash`, `wallet_sign_exchange_request`,
   `wallet_authorization_status`.
+- **Durcissement de l'autorisation portefeuille (revue de sécurité, avant toute
+  exécution réelle)** — le modèle d'autorisation est renforcé pour éliminer les
+  contournements d'un simple plafond en valeur native, **sans activer la moindre
+  signature réelle** (aucune signature ECDSA n'existe ; l'autorisation reste un
+  jeton de capacité pur). `WalletAuthorization` est désormais lié au *contexte de
+  la transaction* — allowlist de destinataires (`allowed_to`) et de **sélecteurs
+  de calldata** (`allowed_selectors`, vide ⇒ transferts natifs uniquement, ce qui
+  bloque un `transfer` ERC-20 à `value=0` qui esquivait le plafond natif),
+  plafond par transaction **et budget cumulé** (`cumulative_budget_wei`), et un
+  mode **lié** (`bound_tx_hash`) à usage unique qui n'autorise qu'une transaction
+  au hash exact. Un `SpendLedger` applique l'usage unique et le budget cumulé
+  (anti-rejeu). L'encodage canonique signé est **préfixé en longueur** (plus
+  d'ambiguïté de délimiteur). Le contrôle de fenêtre de validité utilise
+  l'horloge **serveur**, jamais un temps fourni par le client. Côté exchange, la
+  signature REST refuse **toujours** les endpoints de retrait / transfert /
+  gestion de clés et respecte une allowlist opérateur optionnelle
+  (`SCIRUST_EXCHANGE_ALLOWED_PATHS`). Tout reste en simulation ; l'exécution
+  réelle derrière `live` reste non implémentée et exige une revue dédiée.
 
 ### Ajouté — verticaux industriels D2-D8 de `docs/DOMAIN_ROADMAP.md`
 Chaque domaine documenté dans la feuille de route de marché reçoit maintenant
