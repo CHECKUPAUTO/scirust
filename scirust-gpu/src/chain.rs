@@ -1102,6 +1102,28 @@ impl GpuChain {
         self.ctx.rms_norm_backward_resident(x, weight, dy, eps)
     }
 
+    /// **Gain gradient** of RMSNorm: given the input `x` (`rows × d`) and the
+    /// upstream grad `dy` (`rows × d`), returns `dweight` (`1 × d`) — the gradient
+    /// of the per-channel gain. Since `y[r,j] = (x[r,j]/rms[r])·weight[j]`, the
+    /// gain grad is `dweight[j] = Σ_r dy[r,j]·(x[r,j]/rms[r])`. Composed from
+    /// existing resident ops (no new kernel): `normalized = rms_norm(x, ones)`
+    /// gives `x/rms`, then a `ones[1×rows]·(dy ⊙ normalized)` GEMM sums over rows.
+    /// The CPU contract is [`crate::ops::cpu_rms_norm_gain_backward`]. This is what
+    /// lets the RMSNorm gains train on the resident path.
+    pub fn rms_norm_gain_backward(
+        &self,
+        x: &GpuMatrix,
+        dy: &GpuMatrix,
+        eps: f32,
+    ) -> BackendResult<GpuMatrix> {
+        let (rows, d) = (x.rows(), x.cols());
+        let ones_d = self.upload(&vec![1.0f32; d], 1, d);
+        let normalized = self.rms_norm(x, &ones_d, eps)?; // x / rms  (rows×d)
+        let prod = self.mul(dy, &normalized)?; // dy ⊙ (x/rms)
+        let ones_row = self.upload(&vec![1.0f32; rows], 1, rows);
+        self.matmul(&ones_row, &prod) // [1×rows]·[rows×d] = column sums (1×d)
+    }
+
     /// Backward of scale + causal mask: `din = scale·dout` at kept positions,
     /// `0` above the diagonal. Result resident.
     pub fn scale_causal_mask_backward(
@@ -2944,6 +2966,61 @@ mod tests {
                 (fd - dx_gpu[idx]).abs() < 1e-2,
                 "dx[{idx}]: fd={fd} gpu={}",
                 dx_gpu[idx]
+            );
+        }
+    }
+
+    /// RMSNorm **gain** gradient, gradient-checked. For `L = Σ rms_norm(X,w)⊙G`,
+    /// `dw = rms_norm_gain_backward(X, G)` — checked against the CPU adjoint AND
+    /// central finite differences of `L` over `w`. Skips if no adapter.
+    #[test]
+    fn rms_norm_gain_backward_matches_finite_differences() {
+        use crate::ops::{cpu_rms_norm, cpu_rms_norm_gain_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (4usize, 6usize);
+        let eps = 1e-5f32;
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.23 - 1.1).sin() * 1.5)
+            .collect();
+        let w: Vec<f32> = (0..cols).map(|i| 0.6 + 0.1 * i as f32).collect();
+        let g: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.37 + 0.2).cos())
+            .collect(); // dL/dY
+
+        let gx = chain.upload(&x, rows, cols);
+        let gg = chain.upload(&g, rows, cols);
+        let dw_gpu = chain
+            .download(&chain.rms_norm_gain_backward(&gx, &gg, eps).unwrap())
+            .unwrap();
+        // GPU matches the CPU adjoint.
+        let dw_cpu = cpu_rms_norm_gain_backward(&x, &g, eps, rows, cols);
+        assert!(rel_err(&dw_gpu, &dw_cpu) < 1e-4);
+
+        // Gold standard: central finite differences of L = Σ rms_norm(X,w)⊙G over w.
+        let loss = |ww: &[f32]| -> f32 {
+            cpu_rms_norm(&x, ww, eps, rows, cols)
+                .iter()
+                .zip(&g)
+                .map(|(a, b)| a * b)
+                .sum()
+        };
+        let step = 1e-3f32;
+        for j in 0..cols
+        {
+            let (mut wp, mut wm) = (w.clone(), w.clone());
+            wp[j] += step;
+            wm[j] -= step;
+            let fd = (loss(&wp) - loss(&wm)) / (2.0 * step);
+            assert!(
+                (fd - dw_gpu[j]).abs() < 1e-2,
+                "dw[{j}]: fd={fd} gpu={}",
+                dw_gpu[j]
             );
         }
     }

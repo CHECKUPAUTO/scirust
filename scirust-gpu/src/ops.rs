@@ -266,6 +266,30 @@ pub fn cpu_rms_norm_backward(
     dx
 }
 
+/// CPU reference for the RMSNorm **gain** gradient — the oracle for
+/// [`crate::GpuChain::rms_norm_gain_backward`]. `dweight[j] = Σ_r dy[r,j] ·
+/// x[r,j] / rms[r]` (`rms[r] = sqrt(mean_j x[r,j]² + eps)`); result length `cols`.
+pub fn cpu_rms_norm_gain_backward(
+    x: &[f32],
+    dy: &[f32],
+    eps: f32,
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let mut dweight = vec![0.0f32; cols];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let ms = x[base..base + cols].iter().map(|v| v * v).sum::<f32>() / cols as f32 + eps;
+        let rms = ms.sqrt();
+        for j in 0..cols
+        {
+            dweight[j] += dy[base + j] * x[base + j] / rms;
+        }
+    }
+    dweight
+}
+
 /// CPU reference for rotary position embedding — the bit-exact oracle for
 /// [`crate::WgpuContext::rope_resident`]. Rotates the interleaved lane pair
 /// `(2j, 2j+1)` of each row by `pos·freqⱼ`, with `pos = (row mod seq_len) +

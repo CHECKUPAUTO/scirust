@@ -43,3 +43,7 @@ required-features = ["fetch"]
 [[example]]
 name = "gpu_forward_parity"
 required-features = ["gpu"]
+
+[[example]]
+name = "resident_train"
+required-features = ["gpu"]

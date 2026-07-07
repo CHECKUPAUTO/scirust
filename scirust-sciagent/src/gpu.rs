@@ -320,4 +320,62 @@ impl ResidentModel {
             l.ffn.down.weight = dl(&b.wd);
         }
     }
+
+    /// **Resident next-token pretraining** over a flat `u32` token stream. Slides
+    /// a `cfg.seq_len` window (non-overlapping); each step trains on
+    /// `inputs = tokens[i..i+seq_len]`, `targets = tokens[i+1..i+seq_len+1]` via
+    /// the resident [`Self::train_step`] (forward → cross-entropy grad → backward
+    /// → AdamW, entirely in VRAM — the ~4× path). Returns the loss at each step.
+    ///
+    /// Dataset-agnostic: load any corpus into a `Vec<u32>` (e.g. via the
+    /// `train::ShardLoader`) and pass it here. Call [`Self::sync_to_model`]
+    /// afterwards to write the trained weights back for checkpointing / inference.
+    pub fn train_tokens(&mut self, tokens: &[u32], cfg: &ResidentTrainConfig) -> Vec<f32> {
+        let s = cfg.seq_len;
+        let mut losses = Vec::new();
+        let mut start = 0usize;
+        while start + s < tokens.len()
+        {
+            let inputs = &tokens[start..start + s];
+            let targets = &tokens[start + 1..start + s + 1];
+            let loss = self.train_step(
+                inputs,
+                targets,
+                cfg.lr,
+                cfg.betas,
+                cfg.adam_eps,
+                cfg.weight_decay,
+            );
+            losses.push(loss);
+            start += s;
+        }
+        losses
+    }
+}
+
+/// Hyper-parameters for [`ResidentModel::train_tokens`].
+#[derive(Debug, Clone, Copy)]
+pub struct ResidentTrainConfig {
+    /// AdamW learning rate.
+    pub lr: f32,
+    /// AdamW `(β₁, β₂)`.
+    pub betas: (f32, f32),
+    /// AdamW epsilon.
+    pub adam_eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+    /// Sequence length of each training window.
+    pub seq_len: usize,
+}
+
+impl Default for ResidentTrainConfig {
+    fn default() -> Self {
+        Self {
+            lr: 3e-4,
+            betas: (0.9, 0.95),
+            adam_eps: 1e-8,
+            weight_decay: 0.1,
+            seq_len: 128,
+        }
+    }
 }
