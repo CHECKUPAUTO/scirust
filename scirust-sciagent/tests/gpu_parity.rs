@@ -95,3 +95,42 @@ fn full_model_forward_and_backward_match_cpu_on_gpu() {
     }
     eprintln!("forward rel_err {fwd:.2e}, worst grad rel_err {worst:.2e} — PASS");
 }
+
+/// The **fully-resident** path (`ResidentModel`, `scirust-gpu`'s `GpuChain`)
+/// reproduces the real model's forward. Uploads every `SciAgentModel` weight to
+/// VRAM, runs `gqa_model_forward` on the device, and checks the logits against
+/// the model's own CPU forward. This is the bridge that lets the whole decoder
+/// run on the resident path (the one that beats the per-op tape ~4× on the Thor),
+/// not just its GEMMs. Skips cleanly with no adapter.
+#[test]
+fn resident_model_forward_matches_cpu_model() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let seq_len = 8usize;
+    let ids: Vec<usize> = (0..seq_len)
+        .map(|i| (i * 7 + 3) % config.vocab_size)
+        .collect();
+
+    // The model's own CPU forward logits.
+    let tape = Tape::new();
+    let logits_v = model.forward(&tape, &ids, seq_len);
+    let cpu_logits = tape.value(logits_v.idx()).data;
+
+    // The resident path, from the same weights.
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident-model parity");
+        return;
+    };
+    eprintln!("resident model on: {}", rm.adapter_name());
+    let tokens: Vec<u32> = ids.iter().map(|&i| i as u32).collect();
+    let gpu_logits = rm.forward(&tokens);
+
+    assert_eq!(gpu_logits.len(), cpu_logits.len(), "logit shape mismatch");
+    let e = rel_err(&gpu_logits, &cpu_logits);
+    assert!(e < 3e-3, "resident vs CPU model logits: rel_err {e}");
+    eprintln!("resident-model forward rel_err {e:.2e} — PASS");
+}
