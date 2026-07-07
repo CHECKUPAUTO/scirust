@@ -541,6 +541,26 @@ impl<'a> Parser<'a> {
                 self.eat_sym(")")?;
                 Ok(e)
             },
+            Tok::Sym(s) if s == "[" =>
+            {
+                // List literal `[a, b, c]`.
+                self.bump();
+                let mut elems = Vec::new();
+                while !self.is_sym("]")
+                {
+                    elems.push(self.parse_expr()?);
+                    if self.is_sym(",")
+                    {
+                        self.eat_sym(",")?;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                self.eat_sym("]")?;
+                Ok(PyExpr::List(elems))
+            },
             Tok::Name(_) =>
             {
                 // dotted name

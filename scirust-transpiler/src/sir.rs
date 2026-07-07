@@ -51,6 +51,10 @@ pub enum TupleExpr {
     /// `Vh = Vᵀ` to match `numpy.linalg.svd`'s third return value. Routed to
     /// the verified `scirust_solvers::linalg::svd`.
     Svd(Box<SirExpr>),
+    /// `np.linalg.qr(A)` → `(Q, R)` with `Q: MatrixVal` (orthogonal) and
+    /// `R: MatrixVal` (upper-triangular). Routed to the verified Householder
+    /// `scirust_solvers::linalg::qr_decompose`.
+    Qr(Box<SirExpr>),
 }
 
 impl TupleExpr {
@@ -59,6 +63,7 @@ impl TupleExpr {
         match self
         {
             TupleExpr::Svd(_) => vec![Ty::MatrixVal, Ty::Array, Ty::MatrixVal],
+            TupleExpr::Qr(_) => vec![Ty::MatrixVal, Ty::MatrixVal],
         }
     }
 }
@@ -224,6 +229,15 @@ pub enum SirExpr {
     /// `np.diag(v)` : 1-D Array -> MatrixVal (square diagonal matrix with `v` on
     /// the diagonal). Used to reconstruct a matrix from an SVD (`U·diag(S)·Vᵀ`).
     Diag(Box<SirExpr>),
+    /// A list literal `[a, b, c]` of scalars -> Array (`vec![…]`).
+    ArrayLit(Vec<SirExpr>),
+    /// A call to *another user-defined function* in the same module. `ret` is
+    /// the callee's (already-lowered) return type.
+    UserCall {
+        func: String,
+        args: Vec<SirExpr>,
+        ret: Ty,
+    },
     /// `np.fft.fft(x)` : real Array -> ComplexArray (full spectrum), routed to
     /// the verified in-place FFT in `scirust-signal`.
     Fft(Box<SirExpr>),
@@ -315,10 +329,12 @@ impl SirExpr {
             | SirExpr::ArrayUnaryFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
+            | SirExpr::ArrayLit(_)
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
             | SirExpr::Matvec { .. }
             | SirExpr::ComplexAbs(_) => Ty::Array,
+            SirExpr::UserCall { ret, .. } => *ret,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
             SirExpr::Inv(_) | SirExpr::Matmul { .. } | SirExpr::Transpose(_) | SirExpr::Diag(_) =>
             {
@@ -393,7 +409,7 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
 fn scan_tuple(t: &TupleExpr, solvers: &mut bool, signal: &mut bool) {
     match t
     {
-        TupleExpr::Svd(a) =>
+        TupleExpr::Svd(a) | TupleExpr::Qr(a) =>
         {
             *solvers = true;
             scan_expr(a, solvers, signal);
@@ -454,6 +470,14 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         {
             scan_expr(scalar, solvers, signal);
             scan_expr(arr, solvers, signal);
+        },
+        SirExpr::ArrayLit(elems) =>
+        {
+            elems.iter().for_each(|e| scan_expr(e, solvers, signal));
+        },
+        SirExpr::UserCall { args, .. } =>
+        {
+            args.iter().for_each(|a| scan_expr(a, solvers, signal));
         },
         SirExpr::ScalarLit(_) | SirExpr::IntLit(_) | SirExpr::Var { .. } =>
         {},

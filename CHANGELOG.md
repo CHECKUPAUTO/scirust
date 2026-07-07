@@ -80,6 +80,36 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **`np.linalg.qr`** (déstructuration `Q, R = …`) prouvé contre NumPy réel (Phase 2, incrément 14)
+Deuxième noyau multi-sorties, sur le même point d'extension `TupleExpr` que la
+SVD. `Q, R = np.linalg.qr(A)` transpile vers la QR de Householder vérifiée
+`scirust_solvers::linalg::qr_decompose` (`Q` orthogonale via `.q()`, `R`
+triangulaire sup via `.r()`). Sur une matrice **carrée**, `q()` (m×m) coïncide
+avec la Q réduite de numpy, donc les formes collent. Comme les signes de Q/R
+dépendent de la jauge, la preuve porte sur la **reconstruction invariante**
+`Q @ R ≈ A`. **Oracle 44/44** (200 essais chacun) ; **45 tests unitaires**.
+Non-vacuité re-vérifiée : intervertir `q()`/`r()` (émettre `(R, Q)`) fait
+diverger la reconstruction (|Δ|≈0,48) et passe l'oracle au ROUGE.
+
+### Ajouté — transpileur : **Python élargi** (appels de fonctions utilisateur + listes) prouvés contre NumPy réel (Phase 2, incrément 13)
+Le transpileur compose désormais **plusieurs fonctions** : une `def` transpilée
+peut en appeler une autre définie **plus tôt** dans le module (define-before-use),
+et les **listes littérales** `[a, b, c]` deviennent des `Vec<f64>`. Nouveautés :
+carte de signatures `FuncSig`/`Sigs` tissée à travers le lowering (chaque
+fonction voit les signatures des précédentes), `SirExpr::UserCall`
+(appel direct type-checké) et `SirExpr::ArrayLit`, plus le parsing Python des
+listes. **Inférence de type sans annotation à travers les appels** : un paramètre
+passé à une fonction utilisateur hérite du type du paramètre correspondant du
+callee — d'où `sumdbl(x)` où `x` est inféré `&[f64]` uniquement parce que `dbl`
+attend un tableau. Les paramètres des fonctions appelées sont restreints à
+scalaire/tableau (coercition d'argument non ambiguë à l'émission). Quatre cas
+d'oracle : composition scalaire (`sumsq`→`sq`), composition tableau sans
+annotation (`sumdbl`→`dbl`), chaîne à 3 niveaux (`chain`→`twice`→`inc`), et liste
+littérale comme vecteur de poids (`wavg` via `np.dot`). **Oracle 43/43**
+(200 essais chacun) ; **43 tests unitaires** (7 nouveaux). Non-vacuité
+re-vérifiée : injecter un décalage `+ 1.0` dans l'émission d'appel fait diverger
+les trois cas de composition (ROUGE) tandis que la liste littérale reste verte.
+
 ### Ajouté — transpileur : **tuples + `np.linalg.svd`** prouvés contre NumPy réel (Phase 2, incrément 12)
 Premier **noyau multi-sorties** et première **déstructuration de tuple**.
 `U, S, Vh = np.linalg.svd(A)` transpile vers la SVD fine vérifiée

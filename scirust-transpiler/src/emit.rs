@@ -642,6 +642,38 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::ArrayLit(elems) =>
+        {
+            // Python list literal of scalars -> `vec![…]`.
+            let parts: Vec<String> = elems.iter().map(|e| scalar_of(emit(e, ctx))).collect();
+            Frag {
+                code: format!("vec![{}]", parts.join(", ")),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::UserCall { func, args, ret } =>
+        {
+            // Call to another user function. Callee params are Scalar or Array
+            // (enforced in lowering), so array args pass a slice and scalar args
+            // pass an `f64` (integer args coerced) — unambiguously.
+            let arg_code: Vec<String> = args
+                .iter()
+                .map(|a| {
+                    let f = emit(a, ctx);
+                    match f.ty
+                    {
+                        Ty::Array | Ty::Matrix => slice_of(&f),
+                        _ => scalar_of(f),
+                    }
+                })
+                .collect();
+            Frag {
+                code: format!("{}({})", func, arg_code.join(", ")),
+                ty: *ret,
+                borrowed: false,
+            }
+        },
         SirExpr::Diag(a) =>
         {
             // 1-D array -> square diagonal matrix (for SVD reconstruction).
@@ -745,6 +777,18 @@ fn emit_tuple(t: &TupleExpr, ctx: &Ctx) -> String {
                 "{{ let __svd = scirust_solvers::linalg::svd(&{m})\
                  .expect(\"scirust-transpiler: SVD failed\"); \
                  (__svd.u, __svd.s, __svd.v.transpose()) }}",
+                m = as_matrix(&a),
+            )
+        },
+        TupleExpr::Qr(a) =>
+        {
+            // Householder QR: Q (orthogonal) and R (upper-triangular). On a
+            // square matrix, `q()` (m×m) equals numpy's reduced Q. Takes the
+            // matrix by value.
+            let a = emit(a, ctx);
+            format!(
+                "{{ let __qr = scirust_solvers::linalg::qr_decompose({m})\
+                 .expect(\"scirust-transpiler: QR failed\"); (__qr.q(), __qr.r()) }}",
                 m = as_matrix(&a),
             )
         },
