@@ -68,6 +68,15 @@
 //!   coverage × confidence) and spec conformance.
 //! - [`distfit`] — distribution fitting (normal / lognormal / Rayleigh /
 //!   Weibull) and ISO 22514 percentile capability off the best-fit law.
+//! - [`variables`] — acceptance sampling **by variables** (ISO 3951 /
+//!   MIL-STD-414 Form-`k`): the OC curve `Φ(√n(z_p−k))` and two-point
+//!   `(n, k)` design for known- and unknown-`σ` methods.
+//! - [`sixsigma`] — Six-Sigma yield accounting: DPMO / DPU, throughput and
+//!   rolled-throughput yield, and yield↔sigma-level↔DPMO conversions.
+//! - [`attribution`] — data-driven root-cause attribution: least-squares
+//!   variance-transmission decomposition of measured assembly variation onto
+//!   co-measured components, with fitted sensitivities, `R²` and the
+//!   unexplained remainder.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -105,6 +114,7 @@
 //! assert!((i_per[0] - 0.0597).abs() < 1e-3);
 //! ```
 
+pub mod attribution;
 pub mod capability;
 pub mod chain;
 pub mod chart;
@@ -124,9 +134,12 @@ pub mod position;
 pub mod process;
 pub mod sampling;
 pub mod sensitivity;
+pub mod sixsigma;
 pub mod spatial;
 pub mod special;
+pub mod variables;
 
+pub use attribution::{Attribution, AttributionReport, attribute};
 pub use capability::{
     CapabilitySummary, cp, cp_confidence_interval, cpi, cpk, cpk_confidence_interval, cpm, cpmk,
     nonconformity_ppm,
@@ -162,4 +175,9 @@ pub use position::{
 pub use process::{Combination, ProcessOption, allocate_discrete};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
 pub use sensitivity::{Contribution, DualContribution, contributions, dual_contributions};
+pub use sixsigma::{
+    ProcessReport, dpmo, dpmo_from_sigma, dpu, normalized_yield, process_report,
+    rolled_throughput_yield, sigma_from_dpmo, sigma_from_yield, throughput_yield, yield_from_sigma,
+};
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
+pub use variables::{VariablesPlan, design_variables_plan};
