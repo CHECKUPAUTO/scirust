@@ -16,6 +16,9 @@ scirust-rustc-driver/test
 scirust-rustc-driver/target/
 *.exe
 *.out
+# Stray test binaries once committed at the repo root — never re-add them.
+/cliptest
+/cliptest2
 
 # IDE
 .idea/

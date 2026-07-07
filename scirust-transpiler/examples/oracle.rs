@@ -46,6 +46,16 @@ enum ArgSpec {
     },
 }
 
+/// Which source language a case is written in (drives the transpiler entry
+/// point and which reference runtime the output is proven against).
+#[derive(Clone, Copy, PartialEq)]
+enum Lang {
+    /// Proven against real CPython + NumPy.
+    Python,
+    /// Proven against real Octave.
+    Matlab,
+}
+
 struct Case {
     name: &'static str,
     call: &'static str,
@@ -354,6 +364,114 @@ fn cases() -> Vec<Case> {
     ]
 }
 
+/// MATLAB/Octave cases — the *same* SIR → Rust pipeline, entered through the
+/// MATLAB front-end and proven against real Octave (not NumPy). These exercise
+/// the MATLAB-specific semantics: 1-based indexing, inclusive `for` ranges,
+/// element-wise `.*`/`./`, output-variable return, and branch-assigned
+/// (hoisted) locals.
+fn matlab_cases() -> Vec<Case> {
+    use ArgSpec::*;
+    vec![
+        // Array -> scalar via `.*`, `sum`, `sqrt` (euclidean norm).
+        Case {
+            name: "M: norm2 (.* + sum + sqrt)",
+            call: "norm2",
+            src: "function y = norm2(x)\n  y = sqrt(sum(x .* x));\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // Two arrays -> scalar: sum(a .* b) (dot product).
+        Case {
+            name: "M: dot (sum(a .* b))",
+            call: "dot_m",
+            src: "function s = dot_m(a, b)\n  s = sum(a .* b);\nend\n",
+            args: vec![
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+        // Scalar if/else with a branch-assigned (hoisted) output var.
+        Case {
+            name: "M: relu (if/else, hoisted)",
+            call: "relu",
+            src: "function y = relu(x)\n  if x > 0.0\n    y = x;\n  else\n    y = 0.0;\n  end\nend\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // if/elseif/else (piecewise sign), all branches assign the output.
+        Case {
+            name: "M: sign (if/elseif/else)",
+            call: "sign_m",
+            src: "function y = sign_m(x)\n  if x > 0.0\n    y = 1.0;\n  elseif x < 0.0\n    y = -1.0;\n  else\n    y = 0.0;\n  end\nend\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
+        // Sequential ifs mutating the output var (clamp to [lo, hi]).
+        Case {
+            name: "M: clamp (sequential ifs)",
+            call: "clamp_m",
+            src: "function y = clamp_m(x, lo, hi)\n  y = x;\n  if y < lo\n    y = lo;\n  end\n  if y > hi\n    y = hi;\n  end\nend\n",
+            args: vec![
+                Scalar { lo: -3.0, hi: 3.0 },
+                Scalar { lo: -1.0, hi: 0.0 },
+                Scalar { lo: 0.5, hi: 1.5 },
+            ],
+        },
+        // Scalar power `^` (polynomial).
+        Case {
+            name: "M: poly (^ power)",
+            call: "poly_m",
+            src: "function y = poly_m(x)\n  y = x^3 - 2.0 * x^2 + 1.0;\nend\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
+        // for-loop, 1-based indexing, `length`, scalar accumulator.
+        Case {
+            name: "M: mysum (for, 1-based idx)",
+            call: "mysum",
+            src: "function s = mysum(x)\n  s = 0.0;\n  for i = 1:length(x)\n    s = s + x(i);\n  end\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // while-loop with a fixed iteration count (Newton's method for sqrt).
+        Case {
+            name: "M: newton_sqrt (while)",
+            call: "newton_m",
+            src: "function x = newton_m(a)\n  x = a;\n  i = 0;\n  while i < 20\n    x = 0.5 * (x + a / x);\n    i = i + 1;\n  end\nend\n",
+            args: vec![Scalar { lo: 0.1, hi: 5.0 }],
+        },
+        // Element-wise array output: x .* w + x.
+        Case {
+            name: "M: ew_scale (array out)",
+            call: "ew_scale",
+            src: "function y = ew_scale(x, w)\n  y = x .* w + x;\nend\n",
+            args: vec![
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+    ]
+}
+
 // ---- deterministic PRNG (SplitMix64) --------------------------------------
 
 struct Rng(u64);
@@ -487,8 +605,26 @@ fn parse_line(s: &str) -> Vec<f64> {
         .collect()
 }
 
-fn ret_ty(case: &Case) -> Ty {
-    let sir = scirust_transpiler::transpile_to_sir(case.src).expect("transpile to sir");
+/// Transpile a case's source to Rust through the front-end for its language.
+fn transpile_case(lang: Lang, src: &str) -> Result<String, String> {
+    match lang
+    {
+        Lang::Python => scirust_transpiler::transpile(src),
+        Lang::Matlab => scirust_transpiler::transpile_matlab(src),
+    }
+}
+
+/// Lower a case's source to SIR through the front-end for its language.
+fn sir_case(lang: Lang, src: &str) -> Result<scirust_transpiler::SirModule, String> {
+    match lang
+    {
+        Lang::Python => scirust_transpiler::transpile_to_sir(src),
+        Lang::Matlab => scirust_transpiler::transpile_matlab_to_sir(src),
+    }
+}
+
+fn ret_ty(case: &Case, lang: Lang) -> Ty {
+    let sir = sir_case(lang, case.src).expect("transpile to sir");
     sir.funcs
         .iter()
         .find(|f| f.name == case.call)
@@ -681,6 +817,70 @@ fn run_python_batch(
         .collect())
 }
 
+/// One trial's args as an Octave cell literal `{ a1, a2, ... }`.
+/// Arrays become row vectors, matrices become `[r1; r2; ...]`.
+fn octave_tuple(args: &[Val]) -> String {
+    let items: Vec<String> = args
+        .iter()
+        .map(|a| match a
+        {
+            Val::Scalar(x) => lit(*x),
+            Val::Array(xs) => format!(
+                "[{}]",
+                xs.iter().map(|x| lit(*x)).collect::<Vec<_>>().join(", ")
+            ),
+            Val::Matrix(rows) =>
+            {
+                let rs: Vec<String> = rows
+                    .iter()
+                    .map(|r| r.iter().map(|x| lit(*x)).collect::<Vec<_>>().join(", "))
+                    .collect();
+                format!("[{}]", rs.join("; "))
+            },
+        })
+        .collect();
+    format!("{{ {} }}", items.join(", "))
+}
+
+/// Run the MATLAB source under **real Octave** over all trials, serialising each
+/// result to a flat float line (column-major `r(:)`, which matches row/scalar
+/// outputs and the Rust driver's ordering for 1-D results).
+fn run_octave_batch(
+    case: &Case,
+    trials: &[Vec<Val>],
+    tmp: &std::path::Path,
+) -> Result<Vec<Vec<f64>>, String> {
+    let rows: Vec<String> = trials.iter().map(|t| octave_tuple(t)).collect();
+    let script = format!(
+        "1;\n{src}\nfunction __s = __ser(r)\n  a = r(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  __r = {call}(__args{{:}});\n  printf('%s\\n', __ser(__r));\nend\n",
+        src = case.src,
+        rows = rows
+            .iter()
+            .map(|r| format!("  {},", r))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        call = case.call,
+    );
+    let path = tmp.join(format!("mcase_{}.m", case.call));
+    std::fs::write(&path, script).map_err(|e| e.to_string())?;
+    let out = Command::new("octave")
+        .args(["--norc", "--quiet", "--no-gui"])
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("octave spawn failed: {}", e))?;
+    if !out.status.success()
+    {
+        return Err(format!(
+            "octave failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(parse_line)
+        .collect())
+}
+
 fn pipe_stdin(bin: &str, args: &[&str], data: &str) -> Result<String, String> {
     use std::io::Write;
     let mut child = Command::new(bin)
@@ -711,7 +911,7 @@ fn approx_eq(a: &[f64], b: &[f64]) -> Option<String> {
     if a.len() != b.len()
     {
         return Some(format!(
-            "length mismatch: rust {} vs py {}",
+            "length mismatch: rust {} vs ref {}",
             a.len(),
             b.len()
         ));
@@ -722,7 +922,7 @@ fn approx_eq(a: &[f64], b: &[f64]) -> Option<String> {
         if (x - y).abs() > tol
         {
             return Some(format!(
-                "index {}: rust {:.17e} vs py {:.17e} (|Δ|={:.3e} > tol {:.3e})",
+                "index {}: rust {:.17e} vs ref {:.17e} (|Δ|={:.3e} > tol {:.3e})",
                 i,
                 x,
                 y,
@@ -753,6 +953,14 @@ fn main() {
         std::process::exit(2);
     }
 
+    // Octave is only required if MATLAB cases are present; if it is missing we
+    // skip those (and say so) rather than failing the whole Python suite.
+    let have_octave = Command::new("octave")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
     let tmp = std::env::temp_dir().join(format!("scirust_oracle_{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // Workspace root = parent of this crate's dir; shared cargo target dir so
@@ -765,27 +973,53 @@ fn main() {
 
     let mut total = 0usize;
     let mut failures = 0usize;
-    println!("SciRust transpiler — differential oracle vs NumPy");
+    let mut skipped = 0usize;
+    println!("SciRust transpiler — differential oracle vs real runtimes");
     println!(
-        "tolerance: |Δ| ≤ {:.0e} + {:.0e}·|numpy|, {} trials/case\n",
+        "tolerance: |Δ| ≤ {:.0e} + {:.0e}·|ref|, {} trials/case",
         ATOL, RTOL, TRIALS
     );
+    println!(
+        "  Python cases → NumPy · MATLAB cases → Octave{}\n",
+        if have_octave
+        {
+            ""
+        }
+        else
+        {
+            " (MISSING — skipped)"
+        }
+    );
 
-    for case in cases()
+    // Run every Python case first, then every MATLAB case, tagging each with the
+    // reference runtime it is proven against.
+    let all: Vec<(Case, Lang)> = cases()
+        .into_iter()
+        .map(|c| (c, Lang::Python))
+        .chain(matlab_cases().into_iter().map(|c| (c, Lang::Matlab)))
+        .collect();
+
+    for (case, lang) in all
     {
         total += 1;
-        let rust_fn = match scirust_transpiler::transpile(case.src)
+        if lang == Lang::Matlab && !have_octave
+        {
+            skipped += 1;
+            println!("  · {:<32} SKIPPED (octave not on PATH)", case.name);
+            continue;
+        }
+        let rust_fn = match transpile_case(lang, case.src)
         {
             Ok(s) => s,
             Err(e) =>
             {
-                println!("  ✗ {:<28} TRANSPILE ERROR: {}", case.name, e);
+                println!("  ✗ {:<32} TRANSPILE ERROR: {}", case.name, e);
                 failures += 1;
                 continue;
             },
         };
-        let sir = scirust_transpiler::transpile_to_sir(case.src).expect("transpile to sir");
-        let ret = ret_ty(&case);
+        let sir = sir_case(lang, case.src).expect("transpile to sir");
+        let ret = ret_ty(&case, lang);
         let deps = scirust_transpiler::required_crates(&sir);
         let mut rng = Rng(0xC0FFEE ^ hash_name(case.call));
         let trials: Vec<Vec<Val>> = (0..TRIALS)
@@ -802,16 +1036,30 @@ fn main() {
             &workspace_root,
             &shared_target,
         );
-        let py_out = run_python_batch(&case, &trials, &tmp);
-        match (rust_out, py_out)
+        let ref_out = match lang
+        {
+            Lang::Python => run_python_batch(&case, &trials, &tmp),
+            Lang::Matlab => run_octave_batch(&case, &trials, &tmp),
+        };
+        match (rust_out, ref_out)
         {
             (Ok(rv), Ok(pv)) =>
             {
+                let refname = match lang
+                {
+                    Lang::Python => "numpy",
+                    Lang::Matlab => "octave",
+                };
                 let mut fail = 0usize;
                 let mut first = String::new();
                 if rv.len() != pv.len()
                 {
-                    first = format!("trial count mismatch: rust {} vs py {}", rv.len(), pv.len());
+                    first = format!(
+                        "trial count mismatch: rust {} vs {} {}",
+                        rv.len(),
+                        refname,
+                        pv.len()
+                    );
                     fail = TRIALS;
                 }
                 else
@@ -830,13 +1078,16 @@ fn main() {
                 }
                 if fail == 0
                 {
-                    println!("  ✓ {:<28} {}/{} trials match", case.name, TRIALS, TRIALS);
+                    println!(
+                        "  ✓ {:<32} {}/{} trials match ({})",
+                        case.name, TRIALS, TRIALS, refname
+                    );
                 }
                 else
                 {
                     failures += 1;
                     println!(
-                        "  ✗ {:<28} {}/{} FAILED — first: {}",
+                        "  ✗ {:<32} {}/{} FAILED — first: {}",
                         case.name, fail, TRIALS, first
                     );
                 }
@@ -844,18 +1095,28 @@ fn main() {
             (Err(e), _) | (_, Err(e)) =>
             {
                 failures += 1;
-                println!("  ✗ {:<28} HARNESS ERROR: {}", case.name, e);
+                println!("  ✗ {:<32} HARNESS ERROR: {}", case.name, e);
             },
         }
     }
 
     let _ = std::fs::remove_dir_all(&tmp);
     println!();
+    let proven = total - failures - skipped;
     if failures == 0
     {
         println!(
-            "ORACLE GREEN — {}/{} cases match NumPy within tolerance",
-            total, total
+            "ORACLE GREEN — {}/{} cases match their reference runtime within tolerance{}",
+            proven,
+            total,
+            if skipped > 0
+            {
+                format!(" ({} skipped)", skipped)
+            }
+            else
+            {
+                String::new()
+            }
         );
     }
     else

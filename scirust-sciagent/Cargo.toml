@@ -15,6 +15,9 @@ serde_json = "1"
 rand = "0.8"
 clap = { version = "4", features = ["derive"] }
 ureq = { version = "2", features = ["json"], optional = true }
+# SHA-256 to verify downloaded crate tarballs against the crates.io checksum
+# (supply-chain integrity, audit finding S3). Only needed by the `fetch` binary.
+sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -24,7 +27,7 @@ default = []
 # HTTP fetching for the data-collection binary only. Off by default so the
 # workspace stays pure-Rust: `ureq` pulls `ring`, whose build script needs a C
 # cross-compiler — which breaks the linker-less aarch64 `cargo check` CI job.
-fetch = ["dep:ureq"]
+fetch = ["dep:ureq", "dep:sha2"]
 # GPU-accelerated matmuls (Vulkan/Metal/DX12/GL via wgpu). Attaches scirust-gpu's
 # validated `WgpuEngine` to the model's tape and flips it into GPU-matmul mode, so
 # every projection / attention-score / SwiGLU / tied-LM-head GEMM runs its forward

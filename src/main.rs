@@ -6,11 +6,30 @@
 //! bibliothèque `scirust`). Il n'est requis ni pour construire ni pour utiliser
 //! le framework.
 //!
+//! ## Hardening (audit `AUDIT_COMPLET.md`, finding S2)
+//!
+//! La persistance (`state.json`) est **intégrité-protégée** par un tag
+//! HMAC-SHA256 dérivé d'une clé passée via `OPENCLAW_U_STATE_KEY` (ou, à
+//! défaut, une clé de démonstration fixée à la compilation — clairement non
+//! sûre, pour tests locaux uniquement). Un `state.json` dont le MAC ne
+//! vérifie pas (fichier forgé, édité, ou issu d'une autre machine/clé) est
+//! **rejeté** et l'agent repart d'un état vierge (fail-safe).
+//!
+//! La **mutation autonome** (écriture de fichiers source générés + appel
+//! `cargo check`) est **désactivée par défaut** : elle n'a lieu que si la
+//! variable d'environnement `OPENCLAW_UNSAFE_MUTATE=1` est positionnée. Sans
+//! elle, l'agent s'exécute en lecture/heartbeat purs — il ne mute ni le code
+//! ni le système de build. Les fichiers générés sont écrits sous
+//! `target/openclaw-u/` (jamais dans `src/`), pour ne pas polluer l'arbre
+//! source du framework.
+//!
 //! Usage : `cargo run --bin openclaw-u`
+//!         `OPENCLAW_UNSAFE_MUTATE=1 cargo run --bin openclaw-u`  (active la mutation)
 
 use chrono::Local;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
@@ -21,8 +40,140 @@ use tokio::time::interval;
 
 const STATE_FILE: &str = "state.json";
 const EVOLUTION_LOG: &str = "evolution.log";
+/// Generated source files are written here (never into `src/`), so the demo
+/// cannot pollute the framework's source tree.
+const UPGRADE_DIR: &str = "target/openclaw-u";
+/// Env var that must be set to `1` to enable autonomous code mutation + the
+/// `cargo check` validation step. Off by default (defense-in-depth).
+const MUTATE_ENV: &str = "OPENCLAW_UNSAFE_MUTATE";
+/// Env var carrying the HMAC key for `state.json`. If unset, a fixed demo key
+/// is used (NOT secure — local experimentation only).
+const STATE_KEY_ENV: &str = "OPENCLAW_U_STATE_KEY";
 const HEARTBEAT_SECS: u64 = 15; // Accélération du cycle pour le développement
 const MAX_HISTORY: usize = 50;
+
+/// Fixed demonstration HMAC key used when `OPENCLAW_U_STATE_KEY` is not set.
+/// This is intentionally public and provides NO security — it only prevents
+/// accidental corruption / cross-machine state reuse. For any real use, set
+/// `OPENCLAW_U_STATE_KEY` to a high-entropy secret.
+const DEMO_STATE_KEY: &[u8] = b"openclaw-u-demo-state-key-not-for-production";
+
+fn state_key() -> Vec<u8> {
+    std::env::var(STATE_KEY_ENV)
+        .map(|s| s.into_bytes())
+        .unwrap_or_else(|_| DEMO_STATE_KEY.to_vec())
+}
+
+/// HMAC-SHA256 (RFC 2104) over `msg` keyed by the resolved state key.
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK
+    {
+        let h = Sha256::digest(key);
+        k[..32].copy_from_slice(&h);
+    }
+    else
+    {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; BLOCK];
+    let mut opad = [0x5cu8; BLOCK];
+    for i in 0..BLOCK
+    {
+        ipad[i] ^= k[i];
+        opad[i] ^= k[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(msg);
+    let inner_h = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner_h);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&outer.finalize());
+    out
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    use std::fmt::Write;
+    for b in bytes
+    {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Constant-time byte comparison (length-checked).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len()
+    {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+/// On-disk envelope: the state JSON plus its HMAC tag over the canonical
+/// `state` field. A tampered or foreign file fails verification.
+#[derive(Serialize, Deserialize)]
+struct StateEnvelope {
+    state: CoreState,
+    mac: String,
+}
+
+impl StateEnvelope {
+    fn seal(state: &CoreState) -> Self {
+        let json = serde_json::to_string(state).unwrap_or_default();
+        let mac = to_hex(&hmac_sha256(&state_key(), json.as_bytes()));
+        Self {
+            state: state.clone(),
+            mac,
+        }
+    }
+
+    fn verify(&self) -> bool {
+        let json = match serde_json::to_string(&self.state)
+        {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let expected = to_hex(&hmac_sha256(&state_key(), json.as_bytes()));
+        let stored = match hex_decode(&self.mac)
+        {
+            Some(b) => b,
+            None => return ct_eq(expected.as_bytes(), self.mac.as_bytes()),
+        };
+        let want = match hex_decode(&expected)
+        {
+            Some(b) => b,
+            None => return false,
+        };
+        ct_eq(&stored, &want)
+    }
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0
+    {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len()
+    {
+        let hi = (b[i] as char).to_digit(16)?;
+        let lo = (b[i + 1] as char).to_digit(16)?;
+        out.push((hi * 16 + lo) as u8);
+        i += 2;
+    }
+    Some(out)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoreState {
@@ -106,15 +257,30 @@ enum Event {
     Shutdown,
 }
 
-// Persistance asynchrone non-bloquante (Correction du goulot d'étranglement)
+// Persistance asynchrone non-bloquante (Correction du goulot d'étranglement).
+// Le `state.json` est integrity-protégé par un tag HMAC-SHA256 (envelope). Un
+// fichier forgé, édité à la main, ou produit sous une autre clé est rejeté :
+// l'agent repart d'un état vierge (fail-safe) plutôt que de charger un état
+// non authentifié qui pourrait piloter la génération de code.
 async fn load_state() -> CoreState {
     if Path::new(STATE_FILE).exists()
     {
         if let Ok(raw) = tokio::fs::read_to_string(STATE_FILE).await
         {
-            if let Ok(state) = serde_json::from_str::<CoreState>(&raw)
+            match serde_json::from_str::<StateEnvelope>(&raw)
             {
-                return state;
+                Ok(env) if env.verify() => return env.state,
+                Ok(_) =>
+                {
+                    eprintln!(
+                        "[openclaw-u] state.json rejeté : MAC invalide \
+                         (fichier forgé/édité/clé différente). Reprise vierge."
+                    );
+                },
+                Err(_) =>
+                {
+                    eprintln!("[openclaw-u] state.json illisible ou non signé. Reprise vierge.");
+                },
             }
         }
     }
@@ -122,10 +288,20 @@ async fn load_state() -> CoreState {
 }
 
 async fn save_state(state: &CoreState) {
-    if let Ok(json) = serde_json::to_string_pretty(state)
+    let env = StateEnvelope::seal(state);
+    if let Ok(json) = serde_json::to_string_pretty(&env)
     {
         let _ = tokio::fs::write(STATE_FILE, json).await;
     }
+}
+
+/// Whether autonomous code mutation (file writes + `cargo check`) is enabled.
+/// Requires `OPENCLAW_UNSAFE_MUTATE=1`. Off by default — the agent then only
+/// runs heartbeat/reading and never touches the source tree or the build.
+fn mutation_enabled() -> bool {
+    std::env::var(MUTATE_ENV)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v == "yes")
+        .unwrap_or(false)
 }
 
 async fn log_evolution(entry: &str) {
@@ -141,15 +317,32 @@ async fn log_evolution(entry: &str) {
     }
 }
 
-// Génération de code réel et structuré selon l'état d'avancement de l'agent
+// Génération de code réel et structuré selon l'état d'avancement de l'agent.
+// Hardening : ne s'exécute que si `OPENCLAW_UNSAFE_MUTATE=1` (mutation_enabled).
+// Les fichiers générés vont sous `target/openclaw-u/` (jamais dans `src/`), et
+// le `cargo check` de validation tourne dans ce même répertoire isolé.
 async fn propose_upgrade(state: &mut CoreState) {
+    if !mutation_enabled()
+    {
+        // Mutation désactivée par défaut — l'agent ne touche ni au code ni au build.
+        return;
+    }
     state.upgrade_attempts += 1;
     let stage = state.upgrade_successes % 3;
 
-    let (target_file, code) = match stage
+    // Répertoire isolé pour les artefacts générés (jamais l'arbre source).
+    if let Err(e) = tokio::fs::create_dir_all(UPGRADE_DIR).await
+    {
+        state.log(&format!(
+            "[Evolution] Impossible de créer {UPGRADE_DIR} : {e}"
+        ));
+        return;
+    }
+
+    let (file_name, code) = match stage
     {
         0 => (
-            "src/tensor.rs",
+            "tensor.rs",
             r#"//! SciRust Tensor Core - Alignement mémoire strict pour SIMD
 #[repr(align(32))]
 pub struct Tensor {
@@ -165,14 +358,14 @@ impl Tensor {
         Self {
             data: vec![0.0; size],
             shape,
-            strides: vec![1; size], 
+            strides: vec![1; size],
         }
     }
 }
 "#,
         ),
         1 => (
-            "src/simd_backend.rs",
+            "simd_backend.rs",
             r#"//! SciRust SIMD Abstraction Layer (AVX2 / NEON)
 pub trait SimdKernel {
     fn fma_vector(a: &[f32], b: &[f32], c: &mut [f32]);
@@ -191,13 +384,14 @@ impl SimdKernel {
 "#,
         ),
         _ => (
-            "src/upgrade_patch.rs",
+            "upgrade_patch.rs",
             "// Intégration globale SciRust opérationnelle.\npub fn status() -> &'static str { \"SciRust V1 Core online\" }\n",
         ),
     };
+    let target_file = format!("{UPGRADE_DIR}/{file_name}");
 
     // Écritures asynchrones pour préserver l'exécuteur Tokio
-    if let Err(e) = tokio::fs::write(target_file, code).await
+    if let Err(e) = tokio::fs::write(&target_file, code).await
     {
         state.log(&format!(
             "[Evolution] Erreur écriture {} : {}",
@@ -206,9 +400,18 @@ impl SimdKernel {
         return;
     }
 
-    // Validation par compilation non-bloquante
-    let result =
-        tokio::task::spawn_blocking(|| Command::new("cargo").args(["check"]).output()).await;
+    // Validation par compilation non-bloquante, dans le répertoire isolé. On
+    // compile les fichiers générés comme une cible autonome (rustc) plutôt que
+    // d'invoquer `cargo check` à la racine du workspace, pour ne jamais risquer
+    // de valider/charger du code dans le framework SciRust lui-même.
+    let target_file_clone = target_file.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        Command::new("rustc")
+            .args(["--edition", "2021", "--emit=metadata", "-o", "/dev/null"])
+            .arg(&target_file_clone)
+            .output()
+    })
+    .await;
 
     match result
     {
@@ -240,7 +443,7 @@ impl SimdKernel {
         },
         _ =>
         {
-            state.log("[Evolution] Panique ou erreur lors du processus cargo check");
+            state.log("[Evolution] Panique ou erreur lors du processus rustc");
         },
     }
 }
