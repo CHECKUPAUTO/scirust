@@ -124,6 +124,8 @@ mod tests {
         assert!(registry.names().contains(&"trader_optimize"));
         assert!(registry.names().contains(&"trader_pair_analyze"));
         assert!(registry.names().contains(&"trader_pair_scan"));
+        assert!(registry.names().contains(&"trader_option_price"));
+        assert!(registry.names().contains(&"trader_option_book"));
         assert!(registry.names().contains(&"wallet_validate_address"));
         assert!(registry.names().contains(&"wallet_build_evm_transaction"));
         assert!(registry.names().contains(&"wallet_authorization_status"));

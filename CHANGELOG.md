@@ -296,7 +296,7 @@ empreintes de preuve), sans nouvelle dépendance.
 - **Graphes SVG (`chart.rs`)** — chandeliers + overlays d'indicateurs +
   marqueurs d'entrée/sortie et courbes d'équité, en SVG autonome que le LLM
   affiche directement (« fournir des graphes »).
-- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 24 outils exposant tout
+- **Outils MCP (`scirust-mcp/src/tools/trader.rs`)** — 26 outils exposant tout
   le pipeline à n'importe quel agent MCP : `trader_market_data`,
   `trader_indicators`, `trader_patterns`, `trader_signal`, `trader_backtest`,
   `trader_scan_opportunities`, `trader_orderbook`, `trader_size_position`,
@@ -373,6 +373,20 @@ empreintes de preuve), sans nouvelle dépendance.
   `trader_pair_analyze` analyse une paire (cointégration + couverture + signal +
   verdict) ; `trader_pair_scan` teste toutes les paires d'un panier et classe les
   plus tradables (spread le plus stationnaire en tête) — déterministe.
+- **Options / dérivés (`options.rs` + 2 outils MCP)** — une nouvelle classe
+  d'instruments : une créance à effet de levier, convexe, sensible à la
+  **volatilité**. Boîte à outils du desk d'options : **pricing Black-Scholes-
+  Merton** de calls/puts européens (avec rendement de portage/dividende continu),
+  les **Grecs** en conventions de marché (delta, gamma, véga par point de vol,
+  thêta par jour, rhô par point de taux), la **volatilité implicite** par
+  bissection robuste bornée (bornes de non-arbitrage vérifiées), et l'analyse
+  (moneyness, valeur intrinsèque/temps, point mort, probabilité risque-neutre de
+  finir dans la monnaie). Agrégation de **livre d'options** : Grecs nets d'un
+  portefeuille de jambes + la quantité de spot qui **neutralise le delta**
+  (couverture). `trader_option_price` price une option (+ Grecs + VI) ;
+  `trader_option_book` agrège un livre et calcule la couverture delta —
+  déterministe (validé : parité call-put, aller-retour de VI, valeurs de
+  référence Black-Scholes).
 - **CLI (`scirust trader …`)** — nouvelles sous-commandes `strategies`,
   `scan` (scan d'opportunités sur données mock, preuve vérifiée), `chart`
   (écrit un SVG de courbe d'équité) et `dashboard` (écrit un rapport HTML).
