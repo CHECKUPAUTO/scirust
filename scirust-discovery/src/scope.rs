@@ -104,8 +104,27 @@ impl ScopeAuthorization {
     }
 
     pub fn signature_valid(&self, key: &[u8]) -> bool {
-        !self.signature_hex.is_empty()
-            && hmac_sha256_hex(key, self.canonical_payload().as_bytes()) == self.signature_hex
+        // Constant-time comparison: compute the expected HMAC and fold it
+        // against the stored hex with XOR+OR so the result does not leak timing
+        // information about how many leading characters matched (matches the
+        // approach used by `scirust_trader::wallet::WalletAuthorization`).
+        let expected = hmac_sha256_hex(key, self.canonical_payload().as_bytes());
+        if self.signature_hex.is_empty()
+        {
+            return false;
+        }
+        // Length mismatch is itself a channel, but a valid HMAC hex is always
+        // 64 chars; reject early only on an obviously wrong length (this does
+        // not reveal anything about a correctly-formed signature).
+        if expected.len() != self.signature_hex.len()
+        {
+            return false;
+        }
+        expected
+            .bytes()
+            .zip(self.signature_hex.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
     }
 
     /// Vérifie que `ip`/`protocol` sont couverts par cette portée, à

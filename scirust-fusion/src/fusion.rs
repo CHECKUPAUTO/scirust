@@ -79,7 +79,9 @@ impl FusionPipeline {
 
         loop
         {
-            let last = *group.last().unwrap();
+            // `group` was seeded with `root` above and is only ever grown, so
+            // it is never empty here; index directly rather than `unwrap()`.
+            let last = group[group.len() - 1];
             let next = self
                 .find_fusable_successors(graph, last)
                 .into_iter()

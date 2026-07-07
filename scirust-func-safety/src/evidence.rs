@@ -8,6 +8,23 @@
 //! chain. The hash is a deterministic integrity digest (FNV-1a), not a
 //! cryptographic signature — pair it with the runtime's finite-field
 //! verifiable-inference argument for soundness.
+//!
+//! # Security boundary (important)
+//!
+//! This pack is **tamper-evident, not tamper-resistant**. The chaining hash is
+//! FNV-1a — a public, non-cryptographic algorithm with no secret key. It
+//! detects *naive* edits (a field changed without recomputing `entry`/`prev`)
+//! because [`verify_chain`](fn@verify_chain) recomputes the chain and rejects
+//! the mismatch. It does **not** resist an attacker who can *recompute the
+//! whole chain*: such an attacker produces a self-consistent dossier that
+//! passes `verify()`. There is no secret in the construction, so the
+//! integrity guarantee rests entirely on **write access control to the
+//! dossier file** and on pairing this pack with a soundness argument (e.g.
+//! the runtime's finite-field verifiable-inference proof). Do **not** treat
+//! `from_json(...).verify()` as authenticating an untrusted dossier on its
+//! own — only as detecting accidental corruption or naive tampering. If a
+//! forgery-resistant chain is required, wrap the records in an HMAC (keyed)
+//! or a digital signature over the canonical encoding.
 
 use crate::asil::AsilLevel;
 use serde::{Deserialize, Serialize};

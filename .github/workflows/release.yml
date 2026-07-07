@@ -21,13 +21,13 @@ jobs:
     name: Release ${{ github.ref_name }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # nightly
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # Gate the release on the same checks CI enforces, so a tag can never
       # ship something that wouldn't pass on master.
@@ -37,7 +37,7 @@ jobs:
           RUSTFLAGS: "-D warnings"
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
           tool: cargo-cyclonedx
 
@@ -45,7 +45,7 @@ jobs:
         run: ./scripts/generate-sbom.sh
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: |

@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 // ── crates.io API response shapes ──────────────────────────────────────
 
@@ -37,9 +38,14 @@ struct CrateDetail {
     versions: Vec<CrateVersion>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct CrateVersion {
     num: String,
+    /// SHA-256 of the published `.crate` tarball, as reported by crates.io.
+    /// Verifying the download against this is what makes the supply-chain
+    /// fetch tamper-evident (audit `AUDIT_COMPLET.md`, finding S3).
+    #[serde(default)]
+    checksum: String,
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -185,24 +191,31 @@ fn fetch_and_extract(
     out: &Path,
     skip_extract: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Get latest version
-    let version = if krate.max_version.is_empty()
+    // 1. Resolve the version AND its published checksum from the crates.io
+    //    detail endpoint. The checksum is the SHA-256 of the .crate tarball
+    //    as published; verifying the download against it makes the fetch
+    //    tamper-evident (audit `AUDIT_COMPLET.md`, finding S3).
+    let detail_url = format!("https://crates.io/api/v1/crates/{}", krate.id);
+    let resp = ureq::get(&detail_url)
+        .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
+        .call()?;
+    let detail: CrateDetail = resp.into_json()?;
+    let chosen = if krate.max_version.is_empty()
     {
-        let detail_url = format!("https://crates.io/api/v1/crates/{}", krate.id);
-        let resp = ureq::get(&detail_url)
-            .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
-            .call()?;
-        let detail: CrateDetail = resp.into_json()?;
-        detail
-            .versions
-            .first()
-            .map(|v| v.num.clone())
-            .ok_or("no versions")?
+        detail.versions.first().cloned().ok_or("no versions")?
     }
     else
     {
-        krate.max_version.clone()
+        detail
+            .versions
+            .iter()
+            .find(|v| v.num == krate.max_version)
+            .cloned()
+            .or_else(|| detail.versions.first().cloned())
+            .ok_or("no versions")?
     };
+    let version = chosen.num.clone();
+    let expected_checksum = chosen.checksum.clone();
 
     // 2. Download tarball via crates.io API (follows redirect to static.crates.io)
     let dl_url = format!(
@@ -225,6 +238,36 @@ fn fetch_and_extract(
 
         let mut body = Vec::new();
         resp.into_reader().read_to_end(&mut body)?;
+
+        // Supply-chain integrity: verify the SHA-256 of the downloaded bytes
+        // against the checksum published by crates.io for this version. A
+        // mismatch (MITM, corrupted mirror, substituted tarball) aborts the
+        // fetch and discards the bad file rather than extracting it.
+        if !expected_checksum.is_empty()
+        {
+            let got = to_hex(&Sha256::digest(&body));
+            if !got.eq_ignore_ascii_case(&expected_checksum)
+            {
+                eprintln!(
+                    "  REJECT {} v{}: checksum mismatch (expected {}, got {})",
+                    krate.id, version, expected_checksum, got
+                );
+                let _ = fs::remove_file(&tarball_path);
+                return Err(format!(
+                    "checksum mismatch for {} v{}: expected {}, got {}",
+                    krate.id, version, expected_checksum, got
+                )
+                .into());
+            }
+        }
+        else
+        {
+            eprintln!(
+                "  WARN {} v{}: no published checksum to verify against",
+                krate.id, version
+            );
+        }
+
         let mut f = fs::File::create(&tarball_path)?;
         f.write_all(&body)?;
     }
@@ -253,6 +296,11 @@ fn fetch_and_extract(
             {
                 eprintln!("  tar extraction failed for {}", krate.id);
             }
+            // Defense-in-depth against path traversal in a malicious tarball:
+            // every extracted entry must canonicalize to a path inside
+            // `extract_dir`. Anything escaping is removed and the crate is
+            // rejected (audit finding S3).
+            ensure_contained(&extract_dir, &extract_dir)?;
         }
 
         // Collect .rs files into a flat "all" directory
@@ -262,6 +310,59 @@ fn fetch_and_extract(
     }
 
     Ok(())
+}
+
+/// Recursively verify that every path under `root` stays inside `base` (after
+/// canonicalization). Removes and rejects any entry that escapes via `..` or
+/// an absolute/symlinked path — a defense against tar path traversal.
+fn ensure_contained(base: &Path, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let base_canon = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    for entry in fs::read_dir(root)?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        // Skip the entry if it cannot be canonicalized (e.g. broken symlink);
+        // a malicious symlink targeting outside `base` is removed.
+        match path.canonicalize()
+        {
+            Ok(canon) =>
+            {
+                if !canon.starts_with(&base_canon)
+                {
+                    eprintln!("  REJECT path escaping extract dir: {:?}", path);
+                    if path.is_dir()
+                    {
+                        let _ = fs::remove_dir_all(&path);
+                    }
+                    else
+                    {
+                        let _ = fs::remove_file(&path);
+                    }
+                    return Err(format!("extracted path escapes base dir: {:?}", path).into());
+                }
+            },
+            Err(_) =>
+            {
+                // Broken/suspicious symlink — remove it.
+                let _ = fs::remove_file(&path);
+            },
+        }
+        if path.is_dir()
+        {
+            ensure_contained(base, &path)?;
+        }
+    }
+    Ok(())
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    use std::fmt::Write;
+    for b in bytes
+    {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 fn collect_rs_files(

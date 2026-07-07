@@ -2541,6 +2541,7 @@ dependencies = [
  "scirust-symbolic",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -3153,6 +3154,7 @@ dependencies = [
  "scirust-gpu",
  "serde",
  "serde_json",
+ "sha2",
  "ureq 2.12.1",
 ]
 
