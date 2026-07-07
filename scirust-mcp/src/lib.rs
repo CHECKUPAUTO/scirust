@@ -141,5 +141,11 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_discrete_allocate"));
         assert!(registry.names().contains(&"tolerance_drift"));
         assert!(registry.names().contains(&"tolerance_correlated"));
+        assert!(registry.names().contains(&"tolerance_gage_rr"));
+        assert!(registry.names().contains(&"tolerance_statistical_interval"));
+        assert!(registry.names().contains(&"tolerance_dual_sensitivity"));
+        assert!(registry.names().contains(&"tolerance_distribution_fit"));
+        assert!(registry.names().contains(&"tolerance_gdt"));
+        assert!(registry.names().contains(&"tolerance_capability_ci"));
     }
 }
