@@ -17,13 +17,14 @@
 //! * scalars (`f64`) and 1-D arrays (`Vec<f64>` / `&[f64]`);
 //! * arithmetic `+ - * / **`, unary minus, elementwise array ops and
 //!   scalar/array broadcasting;
-//! * intrinsics: `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `np.diag`, `len`,
-//!   `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise);
+//! * intrinsics: reductions `np.sum/prod/mean/max/min`, `np.dot`; builders
+//!   `np.zeros/ones/diag`, `len`; elementwise/scalar math
+//!   `np.sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/arctan`;
 //! * `for i in range(...)` loops, indexing `a[i]`, index-assignment `a[i] = …`,
 //!   `return`;
 //! * list literals `[a, b, c]` (→ `Vec<f64>`), tuple unpacking
-//!   `U, S, Vh = np.linalg.svd(A)`, and calls to **other user functions**
-//!   defined earlier in the module (define-before-use).
+//!   `U, S, Vh = np.linalg.svd(A)` / `Q, R = np.linalg.qr(A)`, and calls to
+//!   **other user functions** defined earlier in the module (define-before-use).
 //!
 //! Anything outside the subset is **refused with a diagnostic**, never guessed.
 //! Correctness of any given port is established by the differential oracle
@@ -457,6 +458,38 @@ mod tests {
         let src = "def f(A):\n    x = np.linalg.qr(A)\n    return x\n";
         let err = transpile(src).unwrap_err();
         assert!(err.contains("returns a tuple"));
+    }
+
+    // ---- expanded intrinsic vocabulary ------------------------------------
+
+    #[test]
+    fn new_unary_math_intrinsics_map_to_f64_methods() {
+        let rust = transpile("def f(x):\n    return np.log(x) + np.arctan(x)\n").unwrap();
+        assert!(rust.contains("(x).ln()"));
+        assert!(rust.contains("(x).atan()"));
+        // Elementwise over an array uses map1 with the same method.
+        let ra = transpile("def f(x: np.ndarray):\n    return np.floor(x)\n").unwrap();
+        assert!(ra.contains("np::map1(x, |x| x.floor())"));
+    }
+
+    #[test]
+    fn reductions_prod_max_min_and_mean() {
+        let rust = transpile(
+            "def f(x: np.ndarray):\n    return np.prod(x) + np.max(x) - np.min(x) + np.mean(x)\n",
+        )
+        .unwrap();
+        assert!(rust.contains("np::prod(x)"));
+        assert!(rust.contains("np::max(x)"));
+        assert!(rust.contains("np::min(x)"));
+        // mean desugars to sum(x) / len(x).
+        assert!(rust.contains("np::sum(x)") && rust.contains("x.len()"));
+    }
+
+    #[test]
+    fn reduction_infers_array_param() {
+        // `x` is used only via np.max -> inferred as an array.
+        let rust = transpile("def f(x):\n    return np.max(x)\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(x: &[f64]) -> f64 {");
     }
 
     #[test]

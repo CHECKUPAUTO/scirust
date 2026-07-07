@@ -632,6 +632,39 @@ fn lower_call(
             expect_array(&a, "np.sum")?;
             Ok(SirExpr::Sum(Box::new(a)))
         },
+        "prod" =>
+        {
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            expect_array(&a, "np.prod")?;
+            Ok(SirExpr::Prod(Box::new(a)))
+        },
+        "max" | "amax" =>
+        {
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            expect_array(&a, "np.max")?;
+            Ok(SirExpr::Max(Box::new(a)))
+        },
+        "min" | "amin" =>
+        {
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            expect_array(&a, "np.min")?;
+            Ok(SirExpr::Min(Box::new(a)))
+        },
+        "mean" =>
+        {
+            // np.mean(a) desugars to sum(a) / len(a) — reuses existing nodes.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            expect_array(&a, "np.mean")?;
+            Ok(SirExpr::ScalarBin {
+                op: Op::Div,
+                l: Box::new(SirExpr::Sum(Box::new(a.clone()))),
+                r: Box::new(SirExpr::Len(Box::new(a))),
+            })
+        },
         "dot" =>
         {
             need_args(func, args, 2)?;
@@ -761,7 +794,8 @@ fn lower_call(
             expect_array(&a, "len")?;
             Ok(SirExpr::Len(Box::new(a)))
         },
-        "sqrt" | "exp" | "sin" | "cos" | "abs" | "tanh" =>
+        "sqrt" | "exp" | "sin" | "cos" | "abs" | "tanh" | "log" | "log10" | "floor" | "ceil"
+        | "sinh" | "cosh" | "arctan" =>
         {
             need_args(func, args, 1)?;
             let a = lower_scalar(&args[0], env, sigs)?;
@@ -773,6 +807,13 @@ fn lower_call(
                 "cos" => MathFn::Cos,
                 "abs" => MathFn::Abs,
                 "tanh" => MathFn::Tanh,
+                "log" => MathFn::Ln,
+                "log10" => MathFn::Log10,
+                "floor" => MathFn::Floor,
+                "ceil" => MathFn::Ceil,
+                "sinh" => MathFn::Sinh,
+                "cosh" => MathFn::Cosh,
+                "arctan" => MathFn::Atan,
                 _ => unreachable!(),
             };
             if mf == MathFn::Abs && a.ty() == Ty::ComplexArray
@@ -796,7 +837,8 @@ fn lower_call(
             }
         },
         other => Err(format!(
-            "unsupported function `{}` (subset supports np.sum/dot/zeros/ones/sqrt/exp/sin/cos/abs/tanh, len)",
+            "unsupported function `{}` (subset supports np.sum/prod/mean/max/min, np.dot, \
+             np.zeros/ones/diag, np.sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/arctan, len)",
             other
         )),
     }
@@ -1022,7 +1064,10 @@ fn array_evidence_expr(name: &str, e: &PyExpr, sigs: &Sigs) -> bool {
         },
         PyExpr::Call { func, args } =>
         {
-            let is_array_consumer = matches!(strip_np(func), "sum" | "dot" | "len");
+            let is_array_consumer = matches!(
+                strip_np(func),
+                "sum" | "prod" | "mean" | "max" | "min" | "amax" | "amin" | "dot" | "len"
+            );
             // `np.linalg.solve(A, b)` — the *second* argument `b` is a vector.
             let solve_rhs = strip_np(func) == "linalg.solve"
                 && matches!(args.get(1), Some(PyExpr::Name(n)) if n == name);

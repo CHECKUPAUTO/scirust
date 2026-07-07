@@ -44,6 +44,34 @@ pub mod np {
         }
         s
     }
+    /// Fixed ascending-order product (associativity pinned -> reproducible).
+    pub fn prod(a: &[f64]) -> f64 {
+        let mut p = 1.0f64;
+        for i in 0..a.len() {
+            p *= a[i];
+        }
+        p
+    }
+    /// Maximum (panics on empty, matching numpy's error on an empty reduction).
+    pub fn max(a: &[f64]) -> f64 {
+        let mut m = a[0];
+        for i in 1..a.len() {
+            if a[i] > m {
+                m = a[i];
+            }
+        }
+        m
+    }
+    /// Minimum (panics on empty, matching numpy's error on an empty reduction).
+    pub fn min(a: &[f64]) -> f64 {
+        let mut m = a[0];
+        for i in 1..a.len() {
+            if a[i] < m {
+                m = a[i];
+            }
+        }
+        m
+    }
     pub fn zeros(n: usize) -> Vec<f64> {
         vec![0.0f64; n]
     }
@@ -452,6 +480,33 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let a = emit(a, ctx);
             Frag {
                 code: format!("np::sum({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Prod(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::prod({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Max(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::max({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Min(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::min({})", slice_of(&a)),
                 ty: Ty::Scalar,
                 borrowed: false,
             }
