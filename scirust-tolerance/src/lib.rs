@@ -62,6 +62,12 @@
 //!   multiple-choice knapsack.
 //! - [`drift`] — short-vs-long-term capability: uniform mean-drift variance and
 //!   the Motorola 1.5σ shift (`Cpk`↔`Ppk`).
+//! - [`msa`] — measurement-system analysis: crossed Gage R&R by ANOVA
+//!   (repeatability / reproducibility / part variance, %R&R, ndc).
+//! - [`interval`] — statistical tolerance intervals (normal `k`-factors,
+//!   coverage × confidence) and spec conformance.
+//! - [`distfit`] — distribution fitting (normal / lognormal / Rayleigh /
+//!   Weibull) and ISO 22514 percentile capability off the best-fit law.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -103,12 +109,15 @@ pub mod capability;
 pub mod chain;
 pub mod chart;
 pub mod correlated;
+pub mod distfit;
 pub mod drift;
 pub mod form;
 pub mod geometry;
 pub mod inertia;
+pub mod interval;
 pub mod modal;
 pub mod montecarlo;
+pub mod msa;
 pub mod nonnormal;
 pub mod optimize;
 pub mod position;
@@ -118,13 +127,17 @@ pub mod sensitivity;
 pub mod spatial;
 pub mod special;
 
-pub use capability::{CapabilitySummary, cp, cpi, cpk, cpm, cpmk, nonconformity_ppm};
+pub use capability::{
+    CapabilitySummary, cp, cp_confidence_interval, cpi, cpk, cpk_confidence_interval, cpm, cpmk,
+    nonconformity_ppm,
+};
 pub use chain::{
     Allocation, Contributor, ContributorState, allocate, assembly_inertia_statistical,
     assembly_inertia_worst_case, assembly_state,
 };
 pub use chart::{PilotingAction, PilotingChart, PilotingSignal};
 pub use correlated::{correlated_inertia, correlated_variance, gradient, second_order_mean};
+pub use distfit::{FittedDistribution, best_fit, percentile_capability};
 pub use drift::{cpk_to_ppk, long_term_inertia, long_term_ppm, long_term_sigma};
 pub use form::FormBatch;
 pub use geometry::{
@@ -134,14 +147,19 @@ pub use geometry::{
 pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
+pub use interval::{ToleranceInterval, tolerance_factor_two_sided, tolerance_interval};
 pub use modal::{ModalBasis, modal_inertias};
 pub use montecarlo::{Distribution, SimResult, simulate};
+pub use msa::{GageRnR, GageVerdict, gage_rr};
 pub use nonnormal::{
     ClementsCapability, clements_capability, cornish_fisher_quantile, nonnormal_ppm,
 };
 pub use optimize::{Component, OptimizeResult, Requirement, cost_quality_frontier, optimize};
-pub use position::{FeatureType, positional_inertia, total_position_tolerance, true_position};
+pub use position::{
+    CompositePosition, FeatureType, datum_shift, positional_inertia, resultant_condition,
+    total_position_tolerance, true_position, virtual_condition,
+};
 pub use process::{Combination, ProcessOption, allocate_discrete};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
-pub use sensitivity::{Contribution, contributions};
+pub use sensitivity::{Contribution, DualContribution, contributions, dual_contributions};
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
