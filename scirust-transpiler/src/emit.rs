@@ -163,6 +163,26 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
             // guarantees it is written before any read.
             out.push_str(&format!("{}let mut {}: {};\n", pad, name, local_ty(*ty)));
         },
+        SirStmt::LetTuple { names, value } =>
+        {
+            // Destructuring bind of a multi-output kernel:
+            // `let (n0, n1, …): (T0, T1, …) = <tuple>;`
+            let tup = emit_tuple(value, ctx);
+            let name_list = names
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ty_list = names
+                .iter()
+                .map(|(_, t)| local_ty(*t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "{}let ({}): ({}) = {};\n",
+                pad, name_list, ty_list, tup
+            ));
+        },
         SirStmt::Let { name, ty, value } =>
         {
             let v = emit(value, ctx);
@@ -622,6 +642,21 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Diag(a) =>
+        {
+            // 1-D array -> square diagonal matrix (for SVD reconstruction).
+            let a = emit(a, ctx);
+            let code = format!(
+                "{{ let __d: &[f64] = {ds}; scirust_solvers::Matrix::from_fn(__d.len(), __d.len(), \
+                 |__i, __j| if __i == __j {{ __d[__i] }} else {{ 0.0 }}) }}",
+                ds = slice_of(&a),
+            );
+            Frag {
+                code,
+                ty: Ty::MatrixVal,
+                borrowed: false,
+            }
+        },
         SirExpr::Matvec { a, b } =>
         {
             // Matrix-vector product routed to the verified kernel. A is flat
@@ -692,6 +727,26 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 ty: Ty::Array,
                 borrowed: false,
             }
+        },
+    }
+}
+
+/// Emit a Rust tuple expression for a multi-output kernel.
+fn emit_tuple(t: &TupleExpr, ctx: &Ctx) -> String {
+    match t
+    {
+        TupleExpr::Svd(a) =>
+        {
+            // Thin SVD via the verified kernel; `Vh = Vᵀ` matches numpy's third
+            // return. On a square matrix, thin == full, so the shapes line up
+            // with `numpy.linalg.svd(A)`.
+            let a = emit(a, ctx);
+            format!(
+                "{{ let __svd = scirust_solvers::linalg::svd(&{m})\
+                 .expect(\"scirust-transpiler: SVD failed\"); \
+                 (__svd.u, __svd.s, __svd.v.transpose()) }}",
+                m = as_matrix(&a),
+            )
         },
     }
 }

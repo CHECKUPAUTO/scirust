@@ -126,6 +126,45 @@ fn lower_stmt(
                 })
             }
         },
+        PyStmt::AssignTuple { targets, value } =>
+        {
+            if !top_level
+            {
+                return Err(
+                    "tuple unpacking must be at the top level of the function (not inside a \
+                     loop/branch)"
+                        .into(),
+                );
+            }
+            let tuple = lower_tuple_call(value, env)?;
+            let tys = tuple.elem_tys();
+            if targets.len() != tys.len()
+            {
+                return Err(format!(
+                    "tuple unpack expects {} names, got {}",
+                    tys.len(),
+                    targets.len()
+                ));
+            }
+            let mut names = Vec::new();
+            for (t, ty) in targets.iter().zip(tys.iter())
+            {
+                if declared.contains(t)
+                {
+                    return Err(format!(
+                        "`{}` is already defined; tuple unpacking introduces new bindings",
+                        t
+                    ));
+                }
+                env.insert(t.clone(), *ty);
+                declared.push(t.clone());
+                names.push((t.clone(), *ty));
+            }
+            Ok(SirStmt::LetTuple {
+                names,
+                value: tuple,
+            })
+        },
         PyStmt::AssignIndex {
             target,
             index,
@@ -367,6 +406,29 @@ fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String
     }
 }
 
+/// Lower the right-hand side of a tuple unpack — a supported multi-output
+/// kernel. Only `np.linalg.svd` is currently a tuple producer.
+fn lower_tuple_call(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<TupleExpr, String> {
+    match e
+    {
+        PyExpr::Call { func, args } if strip_np(func) == "linalg.svd" =>
+        {
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            if !is_matrixish(a.ty())
+            {
+                return Err("np.linalg.svd expects a 2-D matrix argument".into());
+            }
+            Ok(TupleExpr::Svd(Box::new(a)))
+        },
+        _ => Err(
+            "the right-hand side of a tuple unpack must be a supported multi-output \
+                  kernel (np.linalg.svd)"
+                .into(),
+        ),
+    }
+}
+
 /// Lower a boolean condition: a single scalar comparison.
 fn lower_condition(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
     match e
@@ -563,6 +625,21 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             }
             Ok(SirExpr::Inv(Box::new(a)))
         },
+        "linalg.svd" =>
+        {
+            // Multi-output — must be unpacked, not used as a scalar value.
+            Err("np.linalg.svd returns a tuple (U, S, Vh); unpack it: \
+                 `U, S, Vh = np.linalg.svd(A)`"
+                .into())
+        },
+        "diag" =>
+        {
+            // np.diag(v): 1-D array -> square diagonal matrix.
+            need_args(func, args, 1)?;
+            let a = lower_scalar(&args[0], env)?;
+            expect_array(&a, "np.diag")?;
+            Ok(SirExpr::Diag(Box::new(a)))
+        },
         "fft.fft" =>
         {
             // np.fft.fft(x): full complex DFT of a real signal.
@@ -716,7 +793,7 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
                 // First argument of a matrix-taking linalg routine is a matrix.
                 (matches!(
                     strip_np(func),
-                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh" | "linalg.inv"
+                    "linalg.solve" | "linalg.det" | "linalg.eigvalsh" | "linalg.inv" | "linalg.svd"
                 ) && matches!(args.first(), Some(PyExpr::Name(n)) if n == name))
                     || args.iter().any(|a| expr(name, a))
             },
@@ -741,6 +818,7 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
         stmts.iter().any(|s| match s
         {
             PyStmt::Assign { value, .. } => expr(name, value),
+            PyStmt::AssignTuple { value, .. } => expr(name, value),
             PyStmt::AssignIndex { index, value, .. } => expr(name, index) || expr(name, value),
             PyStmt::For {
                 start, end, body, ..
@@ -761,6 +839,7 @@ fn array_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
     stmts.iter().any(|s| match s
     {
         PyStmt::Assign { value, .. } => array_evidence_expr(name, value),
+        PyStmt::AssignTuple { value, .. } => array_evidence_expr(name, value),
         PyStmt::AssignIndex {
             target,
             index,

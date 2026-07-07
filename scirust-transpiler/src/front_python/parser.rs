@@ -239,8 +239,26 @@ impl<'a> Parser<'a> {
         {
             return self.parse_while();
         }
-        // assignment: NAME ['[' idx ']'] '=' expr
+        // assignment: NAME ['[' idx ']'] '=' expr, or tuple unpack
+        // `NAME (',' NAME)+ '=' expr`.
         let target = self.take_name()?;
+        if self.is_sym(",")
+        {
+            let mut targets = vec![target];
+            while self.is_sym(",")
+            {
+                self.eat_sym(",")?;
+                // Allow a trailing comma before `=` (`a, b, = …`).
+                if self.is_sym("=")
+                {
+                    break;
+                }
+                targets.push(self.take_name()?);
+            }
+            self.eat_sym("=")?;
+            let value = self.parse_expr()?;
+            return Ok(PyStmt::AssignTuple { targets, value });
+        }
         if self.is_sym("[")
         {
             self.eat_sym("[")?;

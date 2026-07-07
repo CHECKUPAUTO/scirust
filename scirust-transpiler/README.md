@@ -31,8 +31,9 @@ auditable, matching the SciRust doctrine.
 | Definitions   | top-level `def`s; params `float` / `int` / `np.ndarray` (hints optional, array-ness inferred from indexing / `np.sum` / `np.dot` / `len`) |
 | Types         | scalar `f64`, 1-D array `Vec<f64>` / `&[f64]` |
 | Arithmetic    | `+ - * / **`, unary minus, `@` matrix-vector / matrix-matrix product, `A.T` transpose; elementwise array ops; scalar↔array broadcasting |
-| Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
+| Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `np.diag`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
 | Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)`, `np.linalg.eigvalsh(A)`, `np.linalg.inv(A)`, `A @ b` → `scirust-solvers` (verified LU / symmetric eigensolver); `np.fft.fft(x)` / `np.fft.rfft(x)` / `np.fft.ifft(...)` / `np.abs(np.fft.fft(x))` → `scirust-signal` (verified FFT, real→complex) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
+| Multi-output  | `U, S, Vh = np.linalg.svd(A)` (tuple unpacking) → verified thin SVD in `scirust-solvers`, with `Vh = Vᵀ` to match numpy (square `A`, where thin = full) |
 | Control/flow  | `for i in range(...)`, `while cond:`, `if`/`elif`/`else` + comparisons `< <= > >= == !=`, indexing `a[i]`, index-assignment `a[i] = …`, `return` |
 
 Anything outside the subset is **refused with a diagnostic** — never guessed.
@@ -82,11 +83,12 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ newton_sqrt / newton_conv    200/200 trials match (numpy)  (while, Phase 1)
   ✓ solve/det/eigvalsh/inv/A@b/A@B/A.T 200/200 trials match (numpy)  (routed → scirust-solvers)
   ✓ fft.fft / rfft / ifft        200/200 trials match (numpy)  (routed → scirust-signal, complex)
+  ✓ svd singular values + reconstruction 200/200 trials match (numpy)  (tuple unpack, Phase 2)
   ✓ sin/cos/abs / exp / ** / ones 200/200 trials match (numpy) (full intrinsic coverage)
   ✓ M: norm2 / dot / relu / sign 200/200 trials match (octave) (MATLAB front-end, Phase 2)
   ✓ M: clamp / poly / mysum      200/200 trials match (octave) (1-based idx, for/while, ^)
   ✓ M: newton / ew_scale         200/200 trials match (octave) (while, element-wise array out)
-  ORACLE GREEN — 37/37 cases match their reference runtime within tolerance
+  ORACLE GREEN — 39/39 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -113,11 +115,16 @@ them.
 * **No bit-exact equality with CPython.** NumPy's reduction/BLAS order isn't
   specified; we guarantee a *declared tolerance* to NumPy and *internal*
   Rust bit-reproducibility, not bit-identity with CPython.
-* **General 2-D arrays** and more routed kernels (`np.linalg.svd`/`eig` →
-  `scirust-solvers`, multi-output/tuple returns, user-defined function calls)
-  are the next increments — see the roadmap in `docs/TRANSPILER_DESIGN.md`.
+* **General 2-D arrays** and more routed kernels (`np.linalg.qr`/`eig` →
+  `scirust-solvers`, general tuple *returns*, user-defined function calls) are
+  the next increments — see the roadmap in `docs/TRANSPILER_DESIGN.md`.
   (`if`/`elif`/`else`, scalar comparisons, `while` loops and `np.linalg.solve`
-  routing landed in Phase 1; the MATLAB/Octave front-end landed in Phase 2.)
+  routing landed in Phase 1; the MATLAB/Octave front-end and `np.linalg.svd`
+  via tuple unpacking landed in Phase 2.)
+* **SVD is proven on square inputs**, where numpy's thin and full SVD coincide
+  with `scirust-solvers`' thin SVD; individual singular *vectors* have a sign
+  gauge, so U and V are validated only through the gauge-invariant
+  reconstruction `U·diag(S)·Vᵀ`, not element-by-element.
 * **MATLAB is a scientific subset, not all of MATLAB.** No cell arrays, structs,
   anonymous functions, `end` indexing, or 2-D matrix routing yet; `zeros(n)` is
   not mapped (it is `n×n` in MATLAB, unlike NumPy's 1-D `np.zeros(n)`), and

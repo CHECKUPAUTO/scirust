@@ -38,6 +38,9 @@ pub enum TypeHint {
 pub enum PyStmt {
     /// `x = expr`
     Assign { target: String, value: PyExpr },
+    /// `a, b, c = expr` — tuple unpacking (of a multi-output call, e.g.
+    /// `U, S, Vh = np.linalg.svd(A)`).
+    AssignTuple { targets: Vec<String>, value: PyExpr },
     /// `a[i] = expr`
     AssignIndex {
         target: String,
