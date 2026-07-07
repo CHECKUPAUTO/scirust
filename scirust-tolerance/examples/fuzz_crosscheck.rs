@@ -24,30 +24,45 @@
 //! - `sensitivity` — contribution shares sum to 1 and match `αᵢ²Iᵢ²/I_Y²`.
 //! - `process` — discrete allocation vs exhaustive brute force.
 //! - `drift` — long-term `σ` vs a Monte-Carlo of drifting mean + within noise.
+//! - `msa` — Gage R&R variance-component identity; zero repeatability /
+//!   reproducibility on constructed data.
+//! - `interval` — tolerance factor vs its Monte-Carlo coverage probability.
+//! - `distfit` — CDF∘quantile round-trip; normal reduces to classic `Cp`;
+//!   parameter recovery on simulated samples.
+//! - `dual` — mean contributions sum to `δ_Y`, variance fractions to 1.
+//! - `gdt` — virtual-condition / datum-shift / composite-position identities.
+//! - `capability_ci` — the exact χ² `Cp` interval vs its Monte-Carlo coverage.
 //!
 //! Run: `cargo run -p scirust-tolerance --example fuzz_crosscheck [N]`
 
-use scirust_tolerance::capability::nonconformity_ppm;
+use scirust_tolerance::capability::{cp as cap_cp, cp_confidence_interval, nonconformity_ppm};
 use scirust_tolerance::chain::{
-    Allocation, Contributor, allocate, assembly_inertia_statistical, assembly_inertia_worst_case,
+    Allocation, Contributor, ContributorState, allocate, assembly_inertia_statistical,
+    assembly_inertia_worst_case, assembly_state,
 };
 use scirust_tolerance::correlated::{
     correlated_inertia, gradient, second_order_mean, uniform_correlation,
+};
+use scirust_tolerance::distfit::{
+    FittedDistribution, fit_lognormal, fit_rayleigh, fit_weibull, percentile_capability,
 };
 use scirust_tolerance::drift::{cpk_to_ppk, long_term_sigma, ppk_to_cpk};
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::geometry::{
     flatness, least_squares_plane, parallelism, perpendicularity, roundness,
 };
+use scirust_tolerance::interval::tolerance_factor_two_sided;
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::montecarlo::{Distribution, linear as mc_linear, simulate};
+use scirust_tolerance::msa::gage_rr;
 use scirust_tolerance::nonnormal::{cornish_fisher_quantile, nonnormal_ppm};
 use scirust_tolerance::position::{
-    coord_to_position, position_to_coord, positional_inertia, true_position,
+    CompositePosition, FeatureType, coord_to_position, datum_shift, position_to_coord,
+    positional_inertia, true_position, virtual_condition,
 };
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::SamplingPlan;
-use scirust_tolerance::sensitivity::{contributions, correlated_contributions};
+use scirust_tolerance::sensitivity::{contributions, correlated_contributions, dual_contributions};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_analytical,
     surface_inertia_from_torsors,
@@ -858,6 +873,291 @@ fn check_drift(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_msa(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let p = rng.int(3, 8);
+        let o = rng.int(2, 4);
+        let rr = rng.int(3, 6);
+        // (1) Random balanced study ⇒ the variance-component identity holds.
+        let sp = rng.uniform(0.5, 3.0);
+        let so = rng.uniform(0.05, 0.4);
+        let se = rng.uniform(0.05, 0.5);
+        let parts: Vec<f64> = (0..p).map(|_| sp * rng.normal()).collect();
+        let opers: Vec<f64> = (0..o).map(|_| so * rng.normal()).collect();
+        let data: Vec<Vec<Vec<f64>>> = (0..p)
+            .map(|i| {
+                (0..o)
+                    .map(|j| {
+                        (0..rr)
+                            .map(|_| parts[i] + opers[j] + se * rng.normal())
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        let g = gage_rr(&data, None).unwrap();
+        r.check(
+            (g.grr_var + g.part_var - g.total_var).abs() / g.total_var.max(1e-12),
+            1e-12,
+            || "msa grr+part == total".into(),
+        );
+        // (2) Identical replicates within every cell ⇒ zero repeatability.
+        let ident: Vec<Vec<Vec<f64>>> = (0..p)
+            .map(|i| (0..o).map(|j| vec![parts[i] + opers[j]; rr]).collect())
+            .collect();
+        let gi = gage_rr(&ident, None).unwrap();
+        r.check(gi.repeatability_var, 1e-9, || {
+            "msa zero repeatability".into()
+        });
+        // (3) All operators read identically ⇒ zero reproducibility.
+        let same_oper: Vec<Vec<Vec<f64>>> = (0..p)
+            .map(|i| {
+                let reads: Vec<f64> = (0..rr).map(|_| parts[i] + se * rng.normal()).collect();
+                (0..o).map(|_| reads.clone()).collect()
+            })
+            .collect();
+        let gs = gage_rr(&same_oper, None).unwrap();
+        r.check(gs.reproducibility_var, 1e-9, || {
+            "msa zero reproducibility".into()
+        });
+    }
+    r
+}
+
+fn check_interval(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 2000;
+    for _ in 0..n
+    {
+        let nn = rng.int(4, 20);
+        let p = rng.uniform(0.80, 0.98);
+        let conf = rng.uniform(0.80, 0.95);
+        let k = tolerance_factor_two_sided(nn, p, conf).unwrap();
+        // Independent reference: the Monte-Carlo coverage probability that
+        // *defines* the factor — the fraction of samples whose x̄±k·s contains
+        // at least proportion p of N(0,1) should be ≥ the nominal confidence.
+        let mut ok = 0u64;
+        for _ in 0..trials
+        {
+            let xs: Vec<f64> = (0..nn).map(|_| rng.normal()).collect();
+            let mean = xs.iter().sum::<f64>() / nn as f64;
+            let var = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (nn as f64 - 1.0);
+            let s = var.sqrt();
+            let coverage = normal_cdf(mean + k * s) - normal_cdf(mean - k * s);
+            if coverage >= p
+            {
+                ok += 1;
+            }
+        }
+        let emp = ok as f64 / trials as f64;
+        // Howe is accurate/slightly conservative ⇒ empirical confidence is not
+        // meaningfully below the nominal.
+        r.check((conf - emp).max(0.0), 0.06, || {
+            format!("interval coverage emp {emp:.3} vs conf {conf:.3} (n={nn}, p={p:.2})")
+        });
+    }
+    r
+}
+
+fn check_distfit(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        // (1) CDF∘quantile round-trip for every family with random params.
+        let dists = [
+            FittedDistribution::Normal {
+                mean: rng.uniform(-2.0, 2.0),
+                sd: rng.uniform(0.3, 2.0),
+            },
+            FittedDistribution::Lognormal {
+                mu: rng.uniform(-1.0, 1.0),
+                sigma: rng.uniform(0.2, 1.0),
+            },
+            FittedDistribution::Rayleigh {
+                sigma: rng.uniform(0.5, 3.0),
+            },
+            FittedDistribution::Weibull {
+                shape: rng.uniform(0.8, 4.0),
+                scale: rng.uniform(0.5, 4.0),
+            },
+        ];
+        for d in dists
+        {
+            let p = rng.uniform(0.02, 0.98);
+            r.check((d.cdf(d.quantile(p)) - p).abs(), 1e-9, || {
+                "distfit cdf∘quantile".into()
+            });
+        }
+        // (2) percentile capability of a normal reduces to the classical Cp.
+        let (mean, sd) = (rng.uniform(-1.0, 1.0), rng.uniform(0.3, 1.5));
+        let (lsl, usl) = (
+            mean - rng.uniform(3.0, 6.0) * sd,
+            mean + rng.uniform(3.0, 6.0) * sd,
+        );
+        let c = percentile_capability(&FittedDistribution::Normal { mean, sd }, lsl, usl);
+        r.check(
+            (c.cp - cap_cp(sd, lsl, usl)).abs() / cap_cp(sd, lsl, usl),
+            1e-3,
+            || "distfit normal reduces to classic cp".into(),
+        );
+        // (3) Parameter recovery on large simulated samples.
+        let m = 4000;
+        let sig = rng.uniform(0.5, 3.0);
+        let rl: Vec<f64> = (0..m)
+            .map(|_| sig * (-2.0 * rng.uniform(1e-12, 1.0).ln()).sqrt())
+            .collect();
+        if let Some(FittedDistribution::Rayleigh { sigma }) = fit_rayleigh(&rl)
+        {
+            r.check((sigma - sig).abs() / sig, 0.05, || {
+                "distfit rayleigh recovery".into()
+            });
+        }
+        let (mu0, sg0) = (rng.uniform(-1.0, 1.0), rng.uniform(0.2, 0.8));
+        let ln: Vec<f64> = (0..m).map(|_| (mu0 + sg0 * rng.normal()).exp()).collect();
+        if let Some(FittedDistribution::Lognormal { mu, sigma }) = fit_lognormal(&ln)
+        {
+            r.check((mu - mu0).abs(), 0.05, || "distfit lognormal mu".into());
+            r.check((sigma - sg0).abs() / sg0, 0.05, || {
+                "distfit lognormal sigma".into()
+            });
+        }
+        let (k0, lam0) = (rng.uniform(1.2, 3.5), rng.uniform(0.5, 4.0));
+        let wb: Vec<f64> = (0..m)
+            .map(|_| lam0 * (-rng.uniform(1e-12, 1.0).ln()).powf(1.0 / k0))
+            .collect();
+        if let Some(FittedDistribution::Weibull { shape, scale }) = fit_weibull(&wb)
+        {
+            r.check((shape - k0).abs() / k0, 0.08, || {
+                "distfit weibull shape".into()
+            });
+            r.check((scale - lam0).abs() / lam0, 0.08, || {
+                "distfit weibull scale".into()
+            });
+        }
+    }
+    r
+}
+
+fn check_dual(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let nc = rng.int(2, 6);
+        let states: Vec<ContributorState> = (0..nc)
+            .map(|_| {
+                ContributorState::new(
+                    "x",
+                    rng.uniform(-2.0, 2.0),
+                    rng.uniform(-0.5, 0.5),
+                    rng.uniform(0.01, 0.3),
+                )
+            })
+            .collect();
+        let dual = dual_contributions(&states);
+        // Mean contributions sum to the assembly off-centering.
+        let asm = assembly_state(&states);
+        let msum: f64 = dual.iter().map(|d| d.mean_contribution).sum();
+        r.check((msum - asm.off_centering).abs(), 1e-9, || {
+            "dual mean sum == δ_Y".into()
+        });
+        // Variance fractions sum to 1 and geo_factor == |coeff|.
+        let vsum: f64 = dual.iter().map(|d| d.variance_fraction).sum();
+        r.check((vsum - 1.0).abs(), 1e-12, || "dual variance sum".into());
+        for (d, s) in dual.iter().zip(&states)
+        {
+            r.check((d.geo_factor - s.coeff.abs()).abs(), 1e-12, || {
+                "dual geo_factor".into()
+            });
+        }
+    }
+    r
+}
+
+fn check_gdt(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let (mmc, tol) = (rng.uniform(5.0, 20.0), rng.uniform(0.01, 0.5));
+        r.check(
+            (virtual_condition(mmc, tol, FeatureType::Internal) - (mmc - tol)).abs(),
+            1e-12,
+            || "gdt VC internal".into(),
+        );
+        r.check(
+            (virtual_condition(mmc, tol, FeatureType::External) - (mmc + tol)).abs(),
+            1e-12,
+            || "gdt VC external".into(),
+        );
+        // Datum shift: 0 at MMB, equal to the departure beyond it.
+        let mmb = rng.uniform(5.0, 20.0);
+        r.check(datum_shift(mmb, mmb, FeatureType::Internal), 1e-12, || {
+            "gdt datum 0".into()
+        });
+        let dep = rng.uniform(0.0, 0.3);
+        r.check(
+            (datum_shift(mmb + dep, mmb, FeatureType::Internal) - dep).abs(),
+            1e-12,
+            || "gdt datum departure".into(),
+        );
+        // Composite conforms iff both tiers pass.
+        let pltzf = rng.uniform(0.2, 0.6);
+        let frtzf = rng.uniform(0.02, pltzf);
+        let comp = CompositePosition::new(pltzf, frtzf);
+        let (ldx, ldy) = (rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3));
+        let (pdx, pdy) = (rng.uniform(-0.12, 0.12), rng.uniform(-0.12, 0.12));
+        let expected = true_position(ldx, ldy) <= pltzf && true_position(pdx, pdy) <= frtzf;
+        r.check(
+            if comp.conforms(ldx, ldy, pdx, pdy) == expected
+            {
+                0.0
+            }
+            else
+            {
+                1.0
+            },
+            0.5,
+            || "gdt composite two-tier".into(),
+        );
+    }
+    r
+}
+
+fn check_capability_ci(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 1500;
+    for _ in 0..n
+    {
+        let nn = rng.int(10, 40);
+        let conf = rng.uniform(0.80, 0.95);
+        let sigma_true = rng.uniform(0.2, 1.0);
+        let lsl = -rng.uniform(2.0, 4.0);
+        let usl = rng.uniform(2.0, 4.0);
+        let true_cp = (usl - lsl) / (6.0 * sigma_true);
+        // Independent reference: the exact χ² Cp interval must cover the true Cp
+        // with frequency ≈ the nominal confidence.
+        let mut cover = 0u64;
+        for _ in 0..trials
+        {
+            let xs: Vec<f64> = (0..nn).map(|_| sigma_true * rng.normal()).collect();
+            let mean = xs.iter().sum::<f64>() / nn as f64;
+            let var = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (nn as f64 - 1.0);
+            let cp_hat = (usl - lsl) / (6.0 * var.sqrt());
+            let (lo, hi) = cp_confidence_interval(cp_hat, nn, conf).unwrap();
+            if lo <= true_cp && true_cp <= hi
+            {
+                cover += 1;
+            }
+        }
+        let emp = cover as f64 / trials as f64;
+        r.check((emp - conf).abs(), 0.05, || {
+            format!("cp CI coverage {emp:.3} vs conf {conf:.3}")
+        });
+    }
+    r
+}
+
 fn main() {
     let n: usize = std::env::args()
         .nth(1)
@@ -880,6 +1180,12 @@ fn main() {
         ("sensitivity", check_sensitivity(&mut rng, n)),
         ("process", check_process(&mut rng, n)),
         ("drift", check_drift(&mut rng, n.min(150))),
+        ("msa", check_msa(&mut rng, n)),
+        ("interval", check_interval(&mut rng, n.min(80))),
+        ("distfit", check_distfit(&mut rng, n.min(120))),
+        ("dual", check_dual(&mut rng, n)),
+        ("gdt", check_gdt(&mut rng, n)),
+        ("capability_ci", check_capability_ci(&mut rng, n.min(80))),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");
