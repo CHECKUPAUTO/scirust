@@ -77,6 +77,15 @@
 //!   variance-transmission decomposition of measured assembly variation onto
 //!   co-measured components, with fitted sensitivities, `R²` and the
 //!   unexplained remainder.
+//! - [`attributes`] — acceptance sampling **by attributes** (ISO 2859-1):
+//!   binomial OC `P(D≤c)` and two-point `(n, c)` design, plus average
+//!   outgoing quality.
+//! - [`interference`] — stress–strength interference and assembly-fit
+//!   reliability: `R = Φ((μ_S−μ_L)/√(σ_S²+σ_L²))`, the reliability index, and
+//!   clearance-fit probabilities for a random hole/shaft pair.
+//! - [`subgroup`] — rational-subgroup capability study (AIAG / ISO 22514-2):
+//!   within-subgroup `σ̂ = R̄/d₂ = s̄/c₄` driving `Cp`/`Cpk` vs the overall spread
+//!   driving `Pp`/`Ppk`.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -114,6 +123,7 @@
 //! assert!((i_per[0] - 0.0597).abs() < 1e-3);
 //! ```
 
+pub mod attributes;
 pub mod attribution;
 pub mod capability;
 pub mod chain;
@@ -124,6 +134,7 @@ pub mod drift;
 pub mod form;
 pub mod geometry;
 pub mod inertia;
+pub mod interference;
 pub mod interval;
 pub mod modal;
 pub mod montecarlo;
@@ -137,8 +148,10 @@ pub mod sensitivity;
 pub mod sixsigma;
 pub mod spatial;
 pub mod special;
+pub mod subgroup;
 pub mod variables;
 
+pub use attributes::{AttributesPlan, design_attributes_plan};
 pub use attribution::{Attribution, AttributionReport, attribute};
 pub use capability::{
     CapabilitySummary, cp, cp_confidence_interval, cpi, cpk, cpk_confidence_interval, cpm, cpmk,
@@ -160,6 +173,7 @@ pub use geometry::{
 pub use inertia::{
     Inertia, InertiaCone, correct_for_measurement, i_max_from_tolerance, mix_lots, vector_inertia,
 };
+pub use interference::{FitAnalysis, clearance_fit, interference_reliability, reliability_index};
 pub use interval::{ToleranceInterval, tolerance_factor_two_sided, tolerance_interval};
 pub use modal::{ModalBasis, modal_inertias};
 pub use montecarlo::{Distribution, SimResult, simulate};
@@ -180,4 +194,5 @@ pub use sixsigma::{
     rolled_throughput_yield, sigma_from_dpmo, sigma_from_yield, throughput_yield, yield_from_sigma,
 };
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
+pub use subgroup::{SubgroupCapability, sigma_within_s_method, subgroup_capability};
 pub use variables::{VariablesPlan, design_variables_plan};
