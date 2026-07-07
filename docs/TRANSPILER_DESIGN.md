@@ -315,15 +315,19 @@ C'est la brique qui transforme « transpileur » en « transpileur *de confiance
   cas d'oracle compilé via cargo). ⏳ **reste :** `np.fft` → `scirust-signal`,
   tableaux 2-D généraux, fonctions multiples. Secteurs débloqués par le
   routage : robotique, finance, imagerie.
-- **Phase 2 — MATLAB.** ✅ **front-end livré :** second front-end (lexer + parser
-  + lowering dédiés) sur la **même** SIR + émetteur que Python, prouvé contre
-  **Octave réel** (oracle différentiel, 9 cas × 200 essais). Couvre : indexation
+- **Phase 2 — MATLAB + tuples/SVD.** ✅ **livré :** (1) second front-end (lexer +
+  parser + lowering dédiés) sur la **même** SIR + émetteur que Python, prouvé
+  contre **Octave réel** (oracle différentiel, 9 cas × 200 essais) — indexation
   **1-based** (`a(i)` → `a[i-1]`), plages `for` inclusives (`1:n` → `1..n+1`),
   opérateurs élémentaires `.*`/`./`/`.^` vs scalaires `*`/`/`, retour par
-  **variable de sortie**, et hoisting des locales assignées en branche (`if`/
-  `else`) validé par l'analyse d'assignation-définie de Rust. ⏳ **reste :**
+  **variable de sortie**, hoisting des locales assignées en branche (`if`/`else`)
+  validé par l'analyse d'assignation-définie de Rust ; (2) premier **noyau
+  multi-sorties** : `U, S, Vh = np.linalg.svd(A)` (déstructuration de tuple +
+  `np.diag`) → SVD fine vérifiée de `scirust-solvers`, prouvé contre NumPy par
+  les valeurs singulières *et* la reconstruction `U·diag(S)·Vᵀ`. ⏳ **reste :**
   routage matriciel depuis MATLAB, `zeros(m,n)` 2-D, broadcasting scalaire↔tableau
-  sans `.*`. Secteurs visés : aéro, automobile, contrôle.
+  sans `.*`, autres décompositions (`qr`, `eig`). Secteurs visés : aéro,
+  automobile, contrôle, imagerie.
 - **Phase 3 — Fortran.** Routines numériques héritées ; secteurs : météo,
   géophysique, spatial, physique.
 - **Phase 4 — C/C++.** Sous-ensemble numérique via pré-passe `c2rust`.
@@ -342,16 +346,17 @@ secteurs réellement débloqués.
 | Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
 | Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
 | Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (31 tests) |
+| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (36 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
 | Routage `np.fft.fft`/`rfft`/`ifft` → `scirust-signal` (+ type complexe) | ✅ livré (Phase 1) | `sir.rs` (`Ty::ComplexArray`, `Fft`, `Rfft`, `Ifft`, `ComplexAbs`) + `emit.rs` |
+| **Tuples multi-sorties + `np.linalg.svd`** (déstructuration `U, S, Vh = …`, `np.diag`) → `scirust-solvers` | ✅ livré (Phase 2) | `sir.rs` (`TupleExpr`, `SirStmt::LetTuple`, `SirExpr::Diag`) + `emit.rs` |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 37 cas au total : 28 Python prouvés
+**Résultat de l'oracle (reproductible).** 39 cas au total : 30 Python prouvés
 contre **NumPy réel**, 9 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
@@ -363,9 +368,10 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ newton_sqrt / newton_conv      (while — Phase 1)
   ✓ solve/det/eigvalsh/inv/A@b/A@B/A.T (routed to scirust-solvers, cargo-compiled — Phase 1)
   ✓ fft.fft / rfft / ifft / abs(fft) (routed to scirust-signal, complex type — Phase 1)
+  ✓ svd singular values + reconstruction U@diag(S)@Vh (tuple unpack → scirust-solvers — Phase 2)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
   ✓ M: norm2 / dot / relu / sign / clamp / poly / mysum / newton / ew_scale (MATLAB → Octave — Phase 2)
-  ORACLE GREEN — 37/37 cases match their reference runtime within tolerance
+  ORACLE GREEN — 39/39 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

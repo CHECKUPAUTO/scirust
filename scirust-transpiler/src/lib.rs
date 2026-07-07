@@ -396,4 +396,57 @@ mod tests {
                 .unwrap();
         assert!(required_crates(&sir).is_empty());
     }
+
+    // ---- tuples / SVD -----------------------------------------------------
+
+    #[test]
+    fn svd_unpacks_and_routes_to_solvers() {
+        let src = "def singvals(A):\n    U, S, Vh = np.linalg.svd(A)\n    return S\n";
+        let rust = transpile(src).unwrap();
+        // A inferred as a matrix; S is the (array) singular-value vector.
+        assert!(rust.contains("pub fn singvals(A: &[f64]) -> Vec<f64>"));
+        // Tuple destructure with the three element types.
+        assert!(rust.contains(
+            "let (U, S, Vh): (scirust_solvers::Matrix, Vec<f64>, scirust_solvers::Matrix) ="
+        ));
+        // Routed to the verified SVD kernel; Vh = Vᵀ (matches numpy).
+        assert!(rust.contains("scirust_solvers::linalg::svd"));
+        assert!(rust.contains("__svd.v.transpose()"));
+        assert!(rust.contains("return S;"));
+
+        let sir = transpile_to_sir(src).unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+    }
+
+    #[test]
+    fn svd_reconstruction_chains_diag_and_matmul() {
+        let src =
+            "def recon(A):\n    U, S, Vh = np.linalg.svd(A)\n    return U @ np.diag(S) @ Vh\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("pub fn recon(A: &[f64]) -> scirust_solvers::Matrix"));
+        // np.diag(S) -> square diagonal matrix, chained through matmul.
+        assert!(rust.contains("scirust_solvers::Matrix::from_fn"));
+        assert!(rust.contains(".matmul(&"));
+    }
+
+    #[test]
+    fn svd_as_scalar_value_is_rejected() {
+        let src = "def f(A):\n    x = np.linalg.svd(A)\n    return x\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("returns a tuple"));
+    }
+
+    #[test]
+    fn tuple_unpack_arity_mismatch_is_rejected() {
+        let src = "def f(A):\n    U, S = np.linalg.svd(A)\n    return S\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("expects 3 names"));
+    }
+
+    #[test]
+    fn tuple_unpack_of_unsupported_rhs_is_rejected() {
+        let src = "def f(x: np.ndarray):\n    a, b = np.sum(x)\n    return a\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("multi-output kernel"));
+    }
 }

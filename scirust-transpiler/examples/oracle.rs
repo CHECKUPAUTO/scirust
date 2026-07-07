@@ -272,6 +272,23 @@ fn cases() -> Vec<Case> {
             src: "def eigvals(A):\n    return np.linalg.eigvalsh(A)\n",
             args: vec![SymMatrix { n: 5 }],
         },
+        // Routing (Phase 2): np.linalg.svd -> scirust-solvers (thin SVD) via
+        // TUPLE UNPACKING. (a) singular values S are unique and descending, so
+        // compared directly to numpy. U and Vh are computed but unused here.
+        Case {
+            name: "svd singular values (tuple unpack)",
+            call: "singvals",
+            src: "def singvals(A):\n    U, S, Vh = np.linalg.svd(A)\n    return S\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // (b) reconstruction U @ diag(S) @ Vh ≈ A — gauge-invariant, so it
+        // exercises U and V (whose individual signs are ambiguous) too.
+        Case {
+            name: "svd reconstruction U@diag(S)@Vh",
+            call: "recon",
+            src: "def recon(A):\n    U, S, Vh = np.linalg.svd(A)\n    return U @ np.diag(S) @ Vh\n",
+            args: vec![Matrix { n: 4 }],
+        },
         // Routing (Phase 1): np.fft.fft -> scirust-signal. Real input, COMPLEX
         // output (compared re/im interleaved vs numpy.fft.fft). n = 8 (radix-2).
         Case {

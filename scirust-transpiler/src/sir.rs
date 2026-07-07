@@ -40,6 +40,29 @@ pub struct SirFunc {
     pub body: Vec<SirStmt>,
 }
 
+/// A tuple-producing routed call (a *multi-output* kernel). Consumed only by
+/// [`SirStmt::LetTuple`] unpacking — tuples are never first-class *values*, so
+/// this deliberately stays out of the `Copy` [`Ty`] lattice (which would force
+/// a non-`Copy` `Ty` and ripple through the whole IR).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TupleExpr {
+    /// `np.linalg.svd(A)` (thin SVD) → `(U, S, Vh)` with `U: MatrixVal`,
+    /// `S: Array` (singular values, descending), `Vh: MatrixVal` where
+    /// `Vh = Vᵀ` to match `numpy.linalg.svd`'s third return value. Routed to
+    /// the verified `scirust_solvers::linalg::svd`.
+    Svd(Box<SirExpr>),
+}
+
+impl TupleExpr {
+    /// Static types of the tuple elements, in order.
+    pub fn elem_tys(&self) -> Vec<Ty> {
+        match self
+        {
+            TupleExpr::Svd(_) => vec![Ty::MatrixVal, Ty::Array, Ty::MatrixVal],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SirStmt {
     /// Hoisted declaration without initialiser: `let mut name: ty;` — Rust's
@@ -48,6 +71,13 @@ pub enum SirStmt {
     Declare {
         name: String,
         ty: Ty,
+    },
+    /// `let (n0, n1, …) = <tuple>;` — destructuring bind of a multi-output
+    /// kernel (e.g. `U, S, Vh = np.linalg.svd(A)`). Each name carries its
+    /// element type (from [`TupleExpr::elem_tys`]).
+    LetTuple {
+        names: Vec<(String, Ty)>,
+        value: TupleExpr,
     },
     /// First binding of a name: `let mut name: ty = value;`
     Let {
@@ -191,6 +221,9 @@ pub enum SirExpr {
     },
     /// `A.T` : matrix -> MatrixVal (transpose).
     Transpose(Box<SirExpr>),
+    /// `np.diag(v)` : 1-D Array -> MatrixVal (square diagonal matrix with `v` on
+    /// the diagonal). Used to reconstruct a matrix from an SVD (`U·diag(S)·Vᵀ`).
+    Diag(Box<SirExpr>),
     /// `np.fft.fft(x)` : real Array -> ComplexArray (full spectrum), routed to
     /// the verified in-place FFT in `scirust-signal`.
     Fft(Box<SirExpr>),
@@ -287,7 +320,10 @@ impl SirExpr {
             | SirExpr::Matvec { .. }
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
-            SirExpr::Inv(_) | SirExpr::Matmul { .. } | SirExpr::Transpose(_) => Ty::MatrixVal,
+            SirExpr::Inv(_) | SirExpr::Matmul { .. } | SirExpr::Transpose(_) | SirExpr::Diag(_) =>
+            {
+                Ty::MatrixVal
+            },
             SirExpr::Cmp { .. } => Ty::Bool,
         }
     }
@@ -322,6 +358,7 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
     {
         SirStmt::Declare { .. } =>
         {},
+        SirStmt::LetTuple { value, .. } => scan_tuple(value, solvers, signal),
         SirStmt::Let { value, .. } | SirStmt::Reassign { value, .. } | SirStmt::Return(value) =>
         {
             scan_expr(value, solvers, signal)
@@ -353,6 +390,17 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
     }
 }
 
+fn scan_tuple(t: &TupleExpr, solvers: &mut bool, signal: &mut bool) {
+    match t
+    {
+        TupleExpr::Svd(a) =>
+        {
+            *solvers = true;
+            scan_expr(a, solvers, signal);
+        },
+    }
+}
+
 fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
     match e
     {
@@ -362,7 +410,11 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
             scan_expr(a, solvers, signal);
             scan_expr(b, solvers, signal);
         },
-        SirExpr::Det(x) | SirExpr::Eigvalsh(x) | SirExpr::Inv(x) | SirExpr::Transpose(x) =>
+        SirExpr::Det(x)
+        | SirExpr::Eigvalsh(x)
+        | SirExpr::Inv(x)
+        | SirExpr::Transpose(x)
+        | SirExpr::Diag(x) =>
         {
             *solvers = true;
             scan_expr(x, solvers, signal);
