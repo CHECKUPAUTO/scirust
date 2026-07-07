@@ -5,6 +5,7 @@
 //! réimplémenter les formules côté agent.
 
 use crate::registry::McpTool;
+use scirust_tolerance::attribution::attribute;
 use scirust_tolerance::capability::{
     CapabilitySummary, cp_confidence_interval, cpk_confidence_interval,
 };
@@ -34,9 +35,11 @@ use scirust_tolerance::position::{
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::design_plan;
 use scirust_tolerance::sensitivity::{contributions, dual_contributions};
+use scirust_tolerance::sixsigma::{dpmo, dpmo_from_sigma, dpu, process_report, sigma_from_yield};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
 };
+use scirust_tolerance::variables::design_variables_plan;
 use serde_json::json;
 
 pub fn tolerance_tools() -> Vec<McpTool> {
@@ -61,6 +64,9 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         distribution_fit_tool(),
         gdt_tool(),
         capability_ci_tool(),
+        variables_plan_tool(),
+        six_sigma_tool(),
+        attribution_tool(),
     ]
 }
 
@@ -1307,6 +1313,187 @@ fn capability_ci_tool() -> McpTool {
     }
 }
 
+fn variables_plan_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_variables_plan".to_string(),
+        description: "Acceptance sampling by variables (ISO 3951 / MIL-STD-414 Form-k): designs a \
+            single-sampling plan (sample size n, acceptance constant k) whose OC passes through the \
+            producer point (aql, 1−alpha) and consumer point (rql, beta). Accept the lot when \
+            (limit−mean)/spread ≥ k. Reports the achieved acceptance probabilities and, if a spec \
+            [lsl, usl] is given, the maximum process sigma (MSD) a centred lot may carry. Set \
+            known_sigma=false for the s-method (unknown σ), which needs a larger sample."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "aql": { "type": "number", "description": "acceptable quality level (fraction nonconforming, e.g. 0.01)" },
+                "rql": { "type": "number", "description": "rejectable quality level (fraction, > aql, e.g. 0.08)" },
+                "alpha": { "type": "number", "description": "producer's risk (e.g. 0.05)" },
+                "beta": { "type": "number", "description": "consumer's risk (e.g. 0.10)" },
+                "known_sigma": { "type": "boolean", "description": "true=σ-method (default), false=s-method" },
+                "lsl": { "type": "number", "description": "lower spec limit (optional, for MSD)" },
+                "usl": { "type": "number", "description": "upper spec limit (optional, for MSD)" },
+            },
+            "required": ["aql", "rql", "alpha", "beta"],
+        }),
+        handler: Box::new(|args| {
+            let aql = f64_field(&args, "aql")?;
+            let rql = f64_field(&args, "rql")?;
+            let alpha = f64_field(&args, "alpha")?;
+            let beta = f64_field(&args, "beta")?;
+            let known = args
+                .get("known_sigma")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let plan = design_variables_plan(aql, rql, alpha, beta, known)
+                .ok_or("invalid inputs (need 0<aql<rql<1, risks in (0,1))")?;
+            let mut out = json!({
+                "sample_size": plan.sample_size,
+                "acceptance_constant": plan.acceptance_constant,
+                "known_sigma": plan.known_sigma,
+                "p_accept_aql": plan.probability_of_acceptance(aql),
+                "p_accept_rql": plan.probability_of_acceptance(rql),
+            });
+            if let (Some(lsl), Some(usl)) =
+                (args.get("lsl").and_then(|v| v.as_f64()), args.get("usl").and_then(|v| v.as_f64()))
+            {
+                out["max_process_sigma"] = json!(plan.max_process_sigma(lsl, usl));
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn six_sigma_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_six_sigma".to_string(),
+        description: "Six-Sigma yield accounting. Provide `step_yields` (per-step throughput \
+            yields) for a rolled-throughput-yield report (RTY, normalised yield, total DPU, sigma \
+            level, DPMO); and/or `defects`+`units`(+`opportunities`) for DPU/DPMO; and/or `sigma` \
+            for its DPMO; and/or `yield` for its sigma level. `shift` is the sigma-level shift \
+            (default 1.5 short-term; use 0 for long-term Z-bench)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "step_yields": { "type": "array", "items": { "type": "number" }, "description": "per-step throughput yields in [0,1]" },
+                "defects": { "type": "number", "description": "observed defect count" },
+                "units": { "type": "number", "description": "units inspected" },
+                "opportunities": { "type": "number", "description": "defect opportunities per unit" },
+                "sigma": { "type": "number", "description": "process sigma level → DPMO" },
+                "yield": { "type": "number", "description": "yield fraction → sigma level" },
+                "shift": { "type": "number", "description": "sigma shift (default 1.5)" },
+            },
+        }),
+        handler: Box::new(|args| {
+            let shift = args.get("shift").and_then(|v| v.as_f64()).unwrap_or(1.5);
+            let mut out = json!({});
+            if let Some(ys) = args.get("step_yields").and_then(|v| v.as_array())
+            {
+                let yields: Vec<f64> = ys.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect();
+                let rep = process_report(&yields, shift).ok_or("empty `step_yields`")?;
+                out["rolled_throughput_yield"] = json!(rep.rolled_throughput_yield);
+                out["normalized_yield"] = json!(rep.normalized_yield);
+                out["total_dpu"] = json!(rep.total_dpu);
+                out["sigma_level"] = json!(rep.sigma_level);
+                out["dpmo"] = json!(rep.dpmo);
+            }
+            if let (Some(d), Some(u)) = (
+                args.get("defects").and_then(|v| v.as_f64()),
+                args.get("units").and_then(|v| v.as_f64()),
+            )
+            {
+                out["dpu"] = json!(dpu(d, u));
+                if let Some(o) = args.get("opportunities").and_then(|v| v.as_f64())
+                {
+                    out["dpmo_measured"] = json!(dpmo(d, u, o));
+                }
+            }
+            if let Some(s) = args.get("sigma").and_then(|v| v.as_f64())
+            {
+                out["dpmo_from_sigma"] = json!(dpmo_from_sigma(s, shift));
+            }
+            if let Some(y) = args.get("yield").and_then(|v| v.as_f64())
+            {
+                out["sigma_from_yield"] = json!(sigma_from_yield(y, shift));
+            }
+            if out.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            {
+                return Err(
+                    "provide at least one of step_yields / defects+units / sigma / yield"
+                        .to_string(),
+                );
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn attribution_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_attribution".to_string(),
+        description: "Data-driven root-cause attribution: fits the measured assembly characteristic \
+            `assembly` to co-measured component series `columns` (columns[component][observation]) by \
+            least squares and decomposes the explained variance. Returns each component's fitted \
+            sensitivity (empirical ∂y/∂x) and signed contribution share (summing to R²), the model R² \
+            and the unexplained remainder — the tell-tale of a cause outside the measured set."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "number" } },
+                    "description": "columns[component][observation]; every column length n = assembly length",
+                },
+                "assembly": { "type": "array", "items": { "type": "number" }, "description": "measured assembly characteristic, length n" },
+                "names": { "type": "array", "items": { "type": "string" }, "description": "component names (optional; default x1..xk)" },
+            },
+            "required": ["columns", "assembly"],
+        }),
+        handler: Box::new(|args| {
+            let cols_json = args
+                .get("columns")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `columns`")?;
+            let columns: Vec<Vec<f64>> = cols_json
+                .iter()
+                .map(|c| {
+                    c.as_array()
+                        .ok_or("`columns` must be 2-deep".to_string())?
+                        .iter()
+                        .map(|x| x.as_f64().ok_or("non-numeric reading".to_string()))
+                        .collect::<Result<Vec<f64>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let assembly = f64_array(&args, "assembly")?;
+            let default_names: Vec<String> =
+                (1..=columns.len()).map(|i| format!("x{i}")).collect();
+            let names: Vec<String> = match args.get("names").and_then(|v| v.as_array())
+            {
+                Some(a) => a
+                    .iter()
+                    .map(|s| s.as_str().unwrap_or("").to_string())
+                    .collect(),
+                None => default_names,
+            };
+            let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let rep = attribute(&name_refs, &columns, &assembly)
+                .ok_or("bad shape / collinear / too few observations (need n ≥ k+2, Var(y)>0)")?;
+            Ok(json!({
+                "intercept": rep.intercept,
+                "r_squared": rep.r_squared,
+                "unexplained": rep.unexplained,
+                "components": rep.components.iter().map(|c| json!({
+                    "name": c.name,
+                    "sensitivity": c.sensitivity,
+                    "contribution": c.contribution,
+                })).collect::<Vec<_>>(),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1761,5 +1948,71 @@ mod tests {
         assert!(cp_ci[0].as_f64().unwrap() < 1.33 && 1.33 < cp_ci[1].as_f64().unwrap());
         // No index provided ⇒ error.
         assert!((tool.handler)(json!({ "n": 50, "confidence": 0.95 })).is_err());
+    }
+
+    #[test]
+    fn variables_plan_tool_designs_and_reports_msd() {
+        let tool = variables_plan_tool();
+        let out = (tool.handler)(json!({
+            "aql": 0.01, "rql": 0.08, "alpha": 0.05, "beta": 0.10,
+            "lsl": 10.0, "usl": 20.0,
+        }))
+        .unwrap();
+        assert!(out["sample_size"].as_u64().unwrap() >= 2);
+        assert!(out["acceptance_constant"].as_f64().unwrap() > 1.0);
+        assert!(out["p_accept_aql"].as_f64().unwrap() > 0.9);
+        assert!(out["p_accept_rql"].as_f64().unwrap() < 0.15);
+        // MSD = (usl−lsl)/(2k).
+        let k = out["acceptance_constant"].as_f64().unwrap();
+        assert!((out["max_process_sigma"].as_f64().unwrap() - 10.0 / (2.0 * k)).abs() < 1e-9);
+        // aql ≥ rql is rejected.
+        assert!(
+            (tool.handler)(json!({ "aql": 0.08, "rql": 0.01, "alpha": 0.05, "beta": 0.10 }))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn six_sigma_tool_rolls_yield_and_converts() {
+        let tool = six_sigma_tool();
+        let out = (tool.handler)(json!({ "step_yields": [0.99, 0.99, 0.99, 0.99, 0.99] })).unwrap();
+        // Five 99% steps roll up below any single step.
+        assert!(out["rolled_throughput_yield"].as_f64().unwrap() < 0.99);
+        assert!((out["normalized_yield"].as_f64().unwrap() - 0.99).abs() < 1e-9);
+        // 6σ short-term ⇒ ≈3.4 DPMO.
+        let d = (tool.handler)(json!({ "sigma": 6.0 })).unwrap();
+        assert!((d["dpmo_from_sigma"].as_f64().unwrap() - 3.4).abs() < 0.1);
+        // Nothing supplied ⇒ error.
+        assert!((tool.handler)(json!({})).is_err());
+    }
+
+    #[test]
+    fn attribution_tool_recovers_sensitivities() {
+        let tool = attribution_tool();
+        // y = 2·x1 − x2 exactly over 6 observations.
+        let x1 = [0.0, 1.0, 2.0, 3.0, 1.5, -1.0];
+        let x2 = [1.0, 0.0, 1.0, -1.0, 2.0, 0.5];
+        let y: Vec<f64> = (0..6).map(|i| 2.0 * x1[i] - x2[i]).collect();
+        let out = (tool.handler)(json!({
+            "columns": [x1, x2],
+            "assembly": y,
+            "names": ["a", "b"],
+        }))
+        .unwrap();
+        assert!(out["r_squared"].as_f64().unwrap() > 0.999_999);
+        let comps = out["components"].as_array().unwrap();
+        assert_eq!(comps[0]["name"], json!("a"));
+        assert!((comps[0]["sensitivity"].as_f64().unwrap() - 2.0).abs() < 1e-6);
+        assert!((comps[1]["sensitivity"].as_f64().unwrap() + 1.0).abs() < 1e-6);
+        // Contributions sum to R².
+        let sum: f64 = comps
+            .iter()
+            .map(|c| c["contribution"].as_f64().unwrap())
+            .sum();
+        assert!((sum - out["r_squared"].as_f64().unwrap()).abs() < 1e-7);
+        // Too few observations ⇒ error.
+        assert!(
+            (tool.handler)(json!({ "columns": [[1.0, 2.0]], "assembly": [1.0, 2.0] })).is_err()
+        );
     }
 }
