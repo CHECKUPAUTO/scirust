@@ -68,14 +68,16 @@ struct ResidentBlock {
     wd: GpuMatrix,
 }
 
-/// AdamW moment (`m` or `v`) buffers for the seven **trainable** projections of
-/// one block. The two RMSNorm gains are frozen (the resident backward produces no
-/// gain gradient), so they have no optimizer state.
+/// AdamW moment (`m` or `v`) buffers for one block's nine trainable weights: the
+/// two RMSNorm gains and the seven projections. The resident backward now emits a
+/// gain gradient (`rms_norm_gain_backward`), so the norms train too.
 struct OptState {
+    norm1: GpuMatrix,
     wq: GpuMatrix,
     wk: GpuMatrix,
     wv: GpuMatrix,
     wo: GpuMatrix,
+    norm2: GpuMatrix,
     wg: GpuMatrix,
     wu: GpuMatrix,
     wd: GpuMatrix,
@@ -108,6 +110,8 @@ pub struct ResidentModel {
     // AdamW state (zero-initialised), one pair per trainable weight, + step count.
     m_embedding: GpuMatrix,
     v_embedding: GpuMatrix,
+    m_final_norm: GpuMatrix,
+    v_final_norm: GpuMatrix,
     m_blocks: Vec<OptState>,
     v_blocks: Vec<OptState>,
     step: u32,
@@ -144,16 +148,20 @@ impl ResidentModel {
             .collect();
         // Zero-initialised AdamW moment buffers for each trainable weight.
         let opt_of = |b: &ResidentBlock| OptState {
+            norm1: zeros(&b.norm1),
             wq: zeros(&b.wq),
             wk: zeros(&b.wk),
             wv: zeros(&b.wv),
             wo: zeros(&b.wo),
+            norm2: zeros(&b.norm2),
             wg: zeros(&b.wg),
             wu: zeros(&b.wu),
             wd: zeros(&b.wd),
         };
         let m_embedding = zeros(&embedding);
         let v_embedding = zeros(&embedding);
+        let m_final_norm = zeros(&final_norm);
+        let v_final_norm = zeros(&final_norm);
         let m_blocks = blocks.iter().map(&opt_of).collect();
         let v_blocks = blocks.iter().map(&opt_of).collect();
         Some(Self {
@@ -169,6 +177,8 @@ impl ResidentModel {
             vocab: model.config.vocab_size,
             m_embedding,
             v_embedding,
+            m_final_norm,
+            v_final_norm,
             m_blocks,
             v_blocks,
             step: 0,
@@ -226,9 +236,9 @@ impl ResidentModel {
 
     /// One **resident AdamW training step** on `(tokens, targets)`: forward →
     /// cross-entropy grad → full backward → AdamW update of every trainable
-    /// weight (the tied embedding and each block's seven projections; the RMSNorm
-    /// gains are frozen, as the resident backward produces no gain gradient),
-    /// entirely in VRAM. Returns the **pre-update** cross-entropy loss.
+    /// weight (the tied embedding, the final RMSNorm gain, and each block's two
+    /// RMSNorm gains + seven projections), entirely in VRAM. Returns the
+    /// **pre-update** cross-entropy loss.
     #[allow(clippy::too_many_arguments)]
     pub fn train_step(
         &mut self,
@@ -280,13 +290,21 @@ impl ResidentModel {
             &self.m_embedding,
             &self.v_embedding,
         );
+        adam(
+            &self.final_norm,
+            &grads.d_final_norm,
+            &self.m_final_norm,
+            &self.v_final_norm,
+        );
         for (i, bg) in grads.blocks.iter().enumerate()
         {
             let (b, m, v) = (&self.blocks[i], &self.m_blocks[i], &self.v_blocks[i]);
+            adam(&b.norm1, &bg.dnorm1, &m.norm1, &v.norm1);
             adam(&b.wq, &bg.dwq, &m.wq, &v.wq);
             adam(&b.wk, &bg.dwk, &m.wk, &v.wk);
             adam(&b.wv, &bg.dwv, &m.wv, &v.wv);
             adam(&b.wo, &bg.dwo, &m.wo, &v.wo);
+            adam(&b.norm2, &bg.dnorm2, &m.norm2, &v.norm2);
             adam(&b.wg, &bg.dwg, &m.wg, &v.wg);
             adam(&b.wu, &bg.dwu, &m.wu, &v.wu);
             adam(&b.wd, &bg.dwd, &m.wd, &v.wd);
