@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 # Comprehensive, rigorous test of `scirust-transpiler` — the inbound
-# Python/NumPy → deterministic-Rust transpiler.
+# Python/NumPy **and** MATLAB/Octave → deterministic-Rust transpiler.
 #
 # Runs, in order:
 #   1. the library unit tests  (lexer, parser, type/shape inference, emission,
-#      kernel-routing) — no Python needed, this is the CI gate;
-#   2. the differential ORACLE against real NumPy — for EVERY supported
-#      intrinsic, operator and control-flow construct, it transpiles the
-#      Python source, compiles the emitted Rust (with `rustc` for std-only
-#      cases, or `cargo` against the real `scirust-*` kernel for routed cases),
-#      runs both sides on seeded random inputs and checks they match within a
-#      declared tolerance.
+#      kernel-routing, both front-ends) — no Python/Octave needed, the CI gate;
+#   2. the differential ORACLE against real reference runtimes — for EVERY
+#      supported intrinsic, operator and control-flow construct, it transpiles
+#      the source, compiles the emitted Rust (with `rustc` for std-only cases,
+#      or `cargo` against the real `scirust-*` kernel for routed cases), runs
+#      both sides on seeded random inputs and checks they match within a
+#      declared tolerance. Python cases are proven against CPython+NumPy;
+#      MATLAB cases against Octave.
 #
 # Exit code 0 iff every coded function passes. Requires `rustc`/`cargo`, and
 # for the oracle `python3` + `numpy` (the oracle self-skips with code 2 if the
 # latter are missing — this script treats that as a soft skip, not a failure).
+# `octave` is optional: if absent, the MATLAB cases self-skip with a notice
+# and the Python suite still runs.
 # ---------------------------------------------------------------------------
 set -uo pipefail
 

@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — transpileur : **front-end MATLAB/Octave** prouvé contre Octave réel (Phase 2, incrément 11)
+Deuxième langue source, sur la **même** SIR + émetteur que Python — donc même
+déterminisme et mêmes noyaux `scirust-*` vérifiés. Nouveau front-end dédié
+(`src/front_matlab/{lexer,parser,ast}.rs`) + lowering `src/lower_matlab.rs`, et
+API publique `transpile_matlab` / `transpile_matlab_to_sir`. Sémantique MATLAB
+gérée : indexation **1-based** (`a(i)` → `a[i-1]`), plages `for` **inclusives**
+(`1:n` → `1..n+1`), opérateurs **élémentaires** `.*`/`./`/`.^` (opérandes
+inférés tableaux) vs scalaires `* / ^`, comparaisons dont `~=`, `if`/`elseif`/
+`else` + `while`, et **retour par variable de sortie**. Nouveau
+`SirStmt::Declare` (déclaration hoistée sans initialiseur, validée par
+l'analyse d'assignation-définie de Rust) pour les locales/sorties d'abord
+assignées en branche (`relu`, `sign`). L'oracle différentiel exécute désormais
+les cas MATLAB contre **Octave réel** (9 cas × 200 essais) en plus des 28 cas
+Python contre NumPy. **Oracle 37/37** ; **31 tests unitaires** (7 nouveaux pour
+MATLAB). Non-vacuité re-vérifiée côté MATLAB : casser l'indexation 1-based
+(`i-1` → `i-2`) fait planter `mysum` et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : matrice-matrice `A @ B` + transpose `A.T` (Phase 1, incrément 10)
 Complète l'algèbre linéaire dense. `A.T` (transpose) et `A @ B` (produit
 matrice-matrice) → `scirust_solvers::Matrix::transpose`/`matmul`. Nouveautés :
