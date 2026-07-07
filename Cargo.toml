@@ -20,6 +20,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
+# Used only by the bundled `openclaw-u` demo binary (src/main.rs) to
+# integrity-protect its `state.json` with an HMAC-SHA256 tag. Already present
+# transitively via scirust-trader, so this adds no new download to the lockfile.
+sha2 = "0.10"
 
 # The framework itself is exposed as the `scirust` library (src/lib.rs).
 # The bundled autonomous-agent demo (src/main.rs, "OpenClaw-U") is a separate,

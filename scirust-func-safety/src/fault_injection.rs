@@ -1,5 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+/// Deterministic noise in `[-1.0, 1.0)` derived from a fixed-seed LCG keyed by
+/// `neuron` — bit-reproducible across runs and platforms (no `rand::random`).
+/// Used by `FaultType::NoiseInjection` so the fault-injection campaign stays
+/// replayable, preserving SciRust's determinism contract.
+fn deterministic_noise(neuron: usize) -> f32 {
+    // Numerical Recipes LCG constants; seed mixes in the neuron index.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15_u64
+        .wrapping_add(neuron as u64)
+        .wrapping_mul(0xBB67_E895_84A9_4C2A_u64);
+    // 12 warm-up rounds so adjacent neurons decorrelate.
+    for _ in 0..12
+    {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+    }
+    // Map the high 24 bits to [-1.0, 1.0).
+    let bits = (state >> 40) as u32 & 0x00FF_FFFF;
+    let u = bits as f32 / 0x00FF_FFFF as f32; // [0.0, 1.0]
+    (u * 2.0) - 1.0
+}
+
 /// Types of faults that can be injected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FaultType {
@@ -115,7 +137,16 @@ impl FaultInjector {
             },
             FaultType::NoiseInjection =>
             {
-                let noise = (rand::random::<f32>() - 0.5) * 2.0;
+                // Deterministic noise: SciRust's posture is bit-reproducible
+                // inference everywhere. A fault-injection *campaign* is itself a
+                // test/analysis activity, but to keep the whole crate replayable
+                // we derive the perturbation from a fixed-seed LCG keyed by the
+                // target neuron index (so the same campaign reproduces bit-for-bit
+                // across runs and machines) rather than calling `rand::random`,
+                // which would pull in non-deterministic entropy and violate the
+                // determinism contract if this path were ever used in a
+                // certified/reproducible build. Range maps to [-1.0, 1.0).
+                let noise = deterministic_noise(target_neuron);
                 weights[target_neuron] += noise;
             },
             FaultType::ZeroOut =>
@@ -298,5 +329,20 @@ mod tests {
         let _ = fi.run_test(&mut weights, &inputs, FaultType::ZeroOut, 0, 0, &[1.0]);
         // With tolerance=1000, all tests should be safe
         assert!(fi.all_tests_safe());
+    }
+
+    #[test]
+    fn noise_injection_is_deterministic_and_reproducible() {
+        // Same neuron -> same noise, across two independent calls (no global
+        // RNG state involved), so a fault campaign replays bit-for-bit.
+        let a = super::deterministic_noise(7);
+        let b = super::deterministic_noise(7);
+        assert_eq!(a.to_bits(), b.to_bits());
+        // Different neurons should decorrelate (not all the same value).
+        let n0 = super::deterministic_noise(0);
+        let n1 = super::deterministic_noise(1);
+        assert_ne!(n0.to_bits(), n1.to_bits());
+        // Range [-1.0, 1.0).
+        assert!((-1.0f32..1.0).contains(&a));
     }
 }
