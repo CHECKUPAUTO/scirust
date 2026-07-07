@@ -211,3 +211,44 @@ fn resident_sync_roundtrips_into_model() {
     assert!(e < 3e-3, "post-sync model vs resident logits: rel_err {e}");
     eprintln!("post-sync round-trip rel_err {e:.2e} — PASS");
 }
+
+/// The **resident next-token pretraining loop** (`train_tokens`) learns a
+/// repeating token pattern: sliding a window over the stream and training each
+/// window on the GPU drops the loss. End-to-end proof of a resident pretraining
+/// run on the real model. Skips with no adapter.
+#[test]
+fn resident_train_tokens_reduces_loss() {
+    use scirust_sciagent::gpu::{ResidentModel, ResidentTrainConfig};
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let Some(mut rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident pretraining");
+        return;
+    };
+    // A short, learnable repeating pattern of valid token ids.
+    let pattern = [1u32, 5, 9, 2, 7, 3];
+    let tokens: Vec<u32> = (0..8 * 40).map(|i| pattern[i % pattern.len()]).collect();
+    let cfg = ResidentTrainConfig {
+        lr: 0.03,
+        seq_len: 8,
+        weight_decay: 0.0,
+        ..Default::default()
+    };
+
+    let losses = rm.train_tokens(&tokens, &cfg);
+    assert!(
+        losses.len() >= 20,
+        "expected many windows, got {}",
+        losses.len()
+    );
+    let first: f32 = losses[..5].iter().sum::<f32>() / 5.0;
+    let last: f32 = losses[losses.len() - 5..].iter().sum::<f32>() / 5.0;
+    eprintln!("resident pretraining: loss {first:.4} (first 5) -> {last:.4} (last 5)");
+    assert!(
+        last < first * 0.8,
+        "resident pretraining did not reduce the loss: {first} -> {last}"
+    );
+}
