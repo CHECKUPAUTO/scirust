@@ -135,6 +135,20 @@ fn ret_ty(t: Ty) -> &'static str {
     }
 }
 
+/// Type string for a hoisted local `let mut name: T;` — always an *owned* type
+/// (locals are values, not borrowed parameters).
+fn local_ty(t: Ty) -> &'static str {
+    match t
+    {
+        Ty::Array => "Vec<f64>",
+        Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
+        Ty::MatrixVal => "scirust_solvers::Matrix",
+        Ty::Int => "usize",
+        Ty::Bool => "bool",
+        _ => "f64",
+    }
+}
+
 fn indent(n: usize) -> String {
     "    ".repeat(n)
 }
@@ -143,6 +157,12 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
     let pad = indent(ind);
     match st
     {
+        SirStmt::Declare { name, ty } =>
+        {
+            // Uninitialised hoisted binding; Rust's definite-assignment analysis
+            // guarantees it is written before any read.
+            out.push_str(&format!("{}let mut {}: {};\n", pad, name, local_ty(*ty)));
+        },
         SirStmt::Let { name, ty, value } =>
         {
             let v = emit(value, ctx);

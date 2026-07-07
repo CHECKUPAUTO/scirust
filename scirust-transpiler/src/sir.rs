@@ -42,6 +42,13 @@ pub struct SirFunc {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SirStmt {
+    /// Hoisted declaration without initialiser: `let mut name: ty;` — Rust's
+    /// definite-assignment analysis validates it is assigned before use. Used
+    /// by the MATLAB front-end (output/locals assigned inside branches).
+    Declare {
+        name: String,
+        ty: Ty,
+    },
     /// First binding of a name: `let mut name: ty = value;`
     Let {
         name: String,
@@ -313,6 +320,8 @@ pub fn required_crates(m: &SirModule) -> Vec<&'static str> {
 fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
     match s
     {
+        SirStmt::Declare { .. } =>
+        {},
         SirStmt::Let { value, .. } | SirStmt::Reassign { value, .. } | SirStmt::Return(value) =>
         {
             scan_expr(value, solvers, signal)

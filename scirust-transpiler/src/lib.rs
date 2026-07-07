@@ -28,8 +28,10 @@
 //! real NumPy on seeded random inputs.
 
 pub mod emit;
+pub mod front_matlab;
 pub mod front_python;
 pub mod lower;
+pub mod lower_matlab;
 pub mod sir;
 
 pub use sir::{SirFunc, SirModule, Ty, required_crates};
@@ -48,6 +50,24 @@ pub fn transpile(python_src: &str) -> Result<String, String> {
 pub fn transpile_to_sir(python_src: &str) -> Result<SirModule, String> {
     let ast = front_python::parse_python(python_src)?;
     lower::lower_module(&ast)
+}
+
+/// Transpile a MATLAB/Octave subset source string into a Rust module string.
+///
+/// A second source front-end onto the *same* SIR + emitter as the Python path,
+/// so the MATLAB output inherits the same determinism and the same
+/// oracle-validated kernels.
+pub fn transpile_matlab(matlab_src: &str) -> Result<String, String> {
+    let ast = front_matlab::parse_matlab(matlab_src)?;
+    let sir = lower_matlab::lower_module(&ast)?;
+    Ok(emit::emit_module(&sir))
+}
+
+/// Transpile MATLAB and return the typed SIR (used for cross-front-end
+/// equivalence tests against the NumPy-proven Python path).
+pub fn transpile_matlab_to_sir(matlab_src: &str) -> Result<SirModule, String> {
+    let ast = front_matlab::parse_matlab(matlab_src)?;
+    lower_matlab::lower_module(&ast)
 }
 
 #[cfg(test)]
@@ -300,6 +320,80 @@ mod tests {
     #[test]
     fn std_only_module_needs_no_external_crates() {
         let sir = transpile_to_sir("def f(x):\n    return x + 1.0\n").unwrap();
+        assert!(required_crates(&sir).is_empty());
+    }
+
+    // ---- MATLAB front-end -------------------------------------------------
+
+    #[test]
+    fn matlab_norm2_infers_array_from_elementwise() {
+        // `.*` operands are array evidence, so `x` is inferred as an array;
+        // the body lowers to the same sqrt/sum/ew core as the Python `norm`.
+        let src = "function y = norm2(x)\n  y = sqrt(sum(x .* x));\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(sig_of(&rust, "norm2"), "pub fn norm2(x: &[f64]) -> f64 {");
+        assert!(rust.contains("np::sum(&(np::ew2(x, x, |x, y| x * y)))"));
+        assert!(rust.contains(").sqrt()"));
+    }
+
+    #[test]
+    fn matlab_relu_hoists_branch_assigned_output() {
+        // `y` is first assigned inside the `if`/`else`, so it must be hoisted to
+        // an uninitialised `let mut y: f64;` and written in every branch.
+        let src =
+            "function y = relu(x)\n  if x > 0.0\n    y = x;\n  else\n    y = 0.0;\n  end\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        let func = &rust[rust.find("pub fn relu").unwrap()..];
+        assert!(func.contains("let mut y: f64;"));
+        assert!(func.contains("if (x > 0.0f64) {"));
+        assert!(func.contains("} else {"));
+        assert!(func.contains("return y;"));
+    }
+
+    #[test]
+    fn matlab_for_loop_is_one_based_and_inclusive() {
+        // `for i = 1:length(x)` -> `for i in 1..(len+1)`; `x(i)` -> `x[i-1]`.
+        let src = "function s = mysum(x)\n  s = 0.0;\n  for i = 1:length(x)\n    s = s + x(i);\n  end\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert!(rust.contains("for i in (1usize)..((x.len() + 1usize)) {"));
+        assert!(rust.contains("x[(i - 1usize)]"));
+    }
+
+    #[test]
+    fn matlab_elementwise_array_output() {
+        let src = "function y = ew_scale(x, w)\n  y = x .* w + x;\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "ew_scale"),
+            "pub fn ew_scale(x: &[f64], w: &[f64]) -> Vec<f64> {"
+        );
+    }
+
+    #[test]
+    fn matlab_sequential_ifs_reassign_output() {
+        // `y` first bound at top level (`let mut y: f64 = x;`), then mutated by
+        // two independent `if`s — no hoisting needed here.
+        let src = "function y = clamp_m(x, lo, hi)\n  y = x;\n  if y < lo\n    y = lo;\n  end\n  if y > hi\n    y = hi;\n  end\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        let func = &rust[rust.find("pub fn clamp_m").unwrap()..];
+        assert!(func.contains("let mut y: f64 = x;"));
+        assert!(func.contains("if (y < lo) {"));
+        assert!(func.contains("y = lo;"));
+        assert!(func.contains("if (y > hi) {"));
+    }
+
+    #[test]
+    fn matlab_rejects_unknown_intrinsic() {
+        let src = "function y = f(x)\n  y = frobnicate(x);\nend\n";
+        let err = transpile_matlab(src).unwrap_err();
+        assert!(err.contains("unknown function or variable"));
+    }
+
+    #[test]
+    fn matlab_scalar_only_needs_no_external_crates() {
+        let sir =
+            transpile_matlab_to_sir("function y = poly_m(x)\n  y = x^3 - 2.0 * x^2 + 1.0;\nend\n")
+                .unwrap();
         assert!(required_crates(&sir).is_empty());
     }
 }
