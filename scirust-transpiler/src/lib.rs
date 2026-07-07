@@ -17,10 +17,13 @@
 //! * scalars (`f64`) and 1-D arrays (`Vec<f64>` / `&[f64]`);
 //! * arithmetic `+ - * / **`, unary minus, elementwise array ops and
 //!   scalar/array broadcasting;
-//! * intrinsics: `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `len`,
+//! * intrinsics: `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `np.diag`, `len`,
 //!   `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise);
 //! * `for i in range(...)` loops, indexing `a[i]`, index-assignment `a[i] = …`,
-//!   `return`.
+//!   `return`;
+//! * list literals `[a, b, c]` (→ `Vec<f64>`), tuple unpacking
+//!   `U, S, Vh = np.linalg.svd(A)`, and calls to **other user functions**
+//!   defined earlier in the module (define-before-use).
 //!
 //! Anything outside the subset is **refused with a diagnostic**, never guessed.
 //! Correctness of any given port is established by the differential oracle
@@ -448,5 +451,69 @@ mod tests {
         let src = "def f(x: np.ndarray):\n    a, b = np.sum(x)\n    return a\n";
         let err = transpile(src).unwrap_err();
         assert!(err.contains("multi-output kernel"));
+    }
+
+    // ---- Python élargi: user-defined function calls + lists ---------------
+
+    #[test]
+    fn user_call_scalar_composition() {
+        let src = "def sq(x):\n    return x * x\ndef sumsq(a, b):\n    return sq(a) + sq(b)\n";
+        let rust = transpile(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "sumsq"),
+            "pub fn sumsq(a: f64, b: f64) -> f64 {"
+        );
+        // Direct Rust calls to the earlier function.
+        assert!(rust.contains("return (sq(a) + sq(b));"));
+    }
+
+    #[test]
+    fn user_call_infers_array_param_from_callee_signature() {
+        // `x` is never indexed/summed directly here — its array-ness comes
+        // solely from `dbl`'s (hinted) array parameter.
+        let src = "def dbl(v: np.ndarray):\n    return 2.0 * v\ndef sumdbl(x):\n    return np.sum(dbl(x))\n";
+        let rust = transpile(src).unwrap();
+        assert_eq!(sig_of(&rust, "sumdbl"), "pub fn sumdbl(x: &[f64]) -> f64 {");
+        assert!(rust.contains("np::sum(&(dbl(x)))"));
+    }
+
+    #[test]
+    fn list_literal_is_a_vec() {
+        let src = "def wavg(x: np.ndarray):\n    w = [0.5, 0.3, 0.2]\n    return np.dot(x, w)\n";
+        let rust = transpile(src).unwrap();
+        assert!(rust.contains("let mut w: Vec<f64> = vec![0.5f64, 0.3f64, 0.2f64];"));
+        assert!(rust.contains("np::dot(x, &(w))"));
+    }
+
+    #[test]
+    fn call_to_undefined_function_is_rejected() {
+        let src = "def f(x):\n    return g(x)\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("unsupported function"));
+    }
+
+    #[test]
+    fn user_call_arity_mismatch_is_rejected() {
+        let src = "def sq(x):\n    return x * x\ndef f(a):\n    return sq(a, a)\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("expects 1 argument"));
+    }
+
+    #[test]
+    fn user_call_arg_type_mismatch_is_rejected() {
+        // `g` expects an array, but `a` is pinned to a scalar by its `float`
+        // hint, so passing it to `g` must be rejected (not silently coerced).
+        let src =
+            "def g(v: np.ndarray):\n    return np.sum(v)\ndef f(a: float):\n    return g(a)\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("expected") && err.contains("Array"));
+    }
+
+    #[test]
+    fn define_before_use_is_required() {
+        // `sumsq` calls `sq`, but `sq` is defined *after* it -> unknown.
+        let src = "def sumsq(a, b):\n    return sq(a) + sq(b)\ndef sq(x):\n    return x * x\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("unsupported function"));
     }
 }

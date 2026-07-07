@@ -95,6 +95,8 @@ pub enum PyExpr {
         l: Box<PyExpr>,
         r: Box<PyExpr>,
     },
+    /// A list literal `[a, b, c]`.
+    List(Vec<PyExpr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

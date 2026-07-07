@@ -378,6 +378,44 @@ fn cases() -> Vec<Case> {
                 hi: 2.0,
             }],
         },
+        // ---- Python élargi (Phase 2): user-defined function calls + lists ----
+        // Scalar composition: sumsq calls sq twice.
+        Case {
+            name: "user call: sumsq (scalar compose)",
+            call: "sumsq",
+            src: "def sq(x):\n    return x * x\ndef sumsq(a, b):\n    return sq(a) + sq(b)\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }, Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // Array composition, hint-free: `x` is inferred as an array purely from
+        // `dbl`'s (array) parameter type — no annotation needed.
+        Case {
+            name: "user call: sumdbl (array compose, hint-free)",
+            call: "sumdbl",
+            src: "def dbl(v: np.ndarray):\n    return 2.0 * v\ndef sumdbl(x):\n    return np.sum(dbl(x))\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // Three-level chain: chain -> twice -> inc.
+        Case {
+            name: "user call: chain (3-level)",
+            call: "chain",
+            src: "def inc(x):\n    return x + 1.0\ndef twice(x):\n    return inc(inc(x))\ndef chain(x):\n    return twice(x) * 2.0\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // List literal as a weight vector, consumed by np.dot (len must match x).
+        Case {
+            name: "list literal: weighted average",
+            call: "wavg",
+            src: "def wavg(x: np.ndarray):\n    w = [0.5, 0.3, 0.2]\n    return np.dot(x, w)\n",
+            args: vec![Array {
+                n: 3,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

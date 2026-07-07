@@ -8,16 +8,38 @@ use crate::front_python::ast::*;
 use crate::sir::*;
 use std::collections::HashMap;
 
+/// The signature of an already-lowered user function (for resolving calls to it
+/// from later functions in the same module).
+#[derive(Clone)]
+struct FuncSig {
+    params: Vec<Ty>,
+    ret: Ty,
+}
+
+/// Map of user-function name -> signature, built as the module is lowered.
+type Sigs = HashMap<String, FuncSig>;
+
 pub fn lower_module(m: &PyModule) -> Result<SirModule, String> {
-    let funcs = m
-        .funcs
-        .iter()
-        .map(lower_func)
-        .collect::<Result<Vec<_>, _>>()?;
+    // Lower functions in source order, growing the signature map so a function
+    // can call any function defined *before* it (define-before-use).
+    let mut sigs: Sigs = HashMap::new();
+    let mut funcs = Vec::new();
+    for f in &m.funcs
+    {
+        let lowered = lower_func(f, &sigs)?;
+        sigs.insert(
+            lowered.name.clone(),
+            FuncSig {
+                params: lowered.params.iter().map(|(_, t)| *t).collect(),
+                ret: lowered.ret,
+            },
+        );
+        funcs.push(lowered);
+    }
     Ok(SirModule { funcs })
 }
 
-fn lower_func(f: &PyFunc) -> Result<SirFunc, String> {
+fn lower_func(f: &PyFunc, sigs: &Sigs) -> Result<SirFunc, String> {
     let mut env: HashMap<String, Ty> = HashMap::new();
     let mut params = Vec::new();
     for p in &f.params
@@ -27,7 +49,7 @@ fn lower_func(f: &PyFunc) -> Result<SirFunc, String> {
             Some(TypeHint::Array) => Ty::Array,
             Some(TypeHint::Int) => Ty::Int,
             Some(TypeHint::Float) => Ty::Scalar,
-            None => infer_param_ty(&p.name, &f.body),
+            None => infer_param_ty(&p.name, &f.body, sigs),
         };
         env.insert(p.name.clone(), ty);
         params.push((p.name.clone(), ty));
@@ -35,7 +57,7 @@ fn lower_func(f: &PyFunc) -> Result<SirFunc, String> {
 
     let mut declared: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
     let mut ret: Option<Ty> = None;
-    let body = lower_block(&f.body, &mut env, &mut declared, true, &mut ret)?;
+    let body = lower_block(&f.body, &mut env, &mut declared, true, &mut ret, sigs)?;
 
     let ret = match (f.ret_hint, ret)
     {
@@ -69,11 +91,12 @@ fn lower_block(
     declared: &mut Vec<String>,
     top_level: bool,
     ret: &mut Option<Ty>,
+    sigs: &Sigs,
 ) -> Result<Vec<SirStmt>, String> {
     let mut out = Vec::new();
     for s in stmts
     {
-        out.push(lower_stmt(s, env, declared, top_level, ret)?);
+        out.push(lower_stmt(s, env, declared, top_level, ret, sigs)?);
     }
     Ok(out)
 }
@@ -84,12 +107,13 @@ fn lower_stmt(
     declared: &mut Vec<String>,
     top_level: bool,
     ret: &mut Option<Ty>,
+    sigs: &Sigs,
 ) -> Result<SirStmt, String> {
     match s
     {
         PyStmt::Assign { target, value } =>
         {
-            let v = lower_scalar(value, env)?;
+            let v = lower_scalar(value, env, sigs)?;
             let ty = normalize_ty(v.ty());
             if declared.contains(target)
             {
@@ -136,7 +160,7 @@ fn lower_stmt(
                         .into(),
                 );
             }
-            let tuple = lower_tuple_call(value, env)?;
+            let tuple = lower_tuple_call(value, env, sigs)?;
             let tys = tuple.elem_tys();
             if targets.len() != tys.len()
             {
@@ -190,8 +214,8 @@ fn lower_stmt(
                     ));
                 },
             }
-            let idx = lower_int(index, env)?;
-            let v = lower_scalar(value, env)?;
+            let idx = lower_int(index, env, sigs)?;
+            let v = lower_scalar(value, env, sigs)?;
             Ok(SirStmt::SetIndex {
                 name: target.clone(),
                 index: idx,
@@ -205,10 +229,10 @@ fn lower_stmt(
             body,
         } =>
         {
-            let start = lower_int(start, env)?;
-            let end = lower_int(end, env)?;
+            let start = lower_int(start, env, sigs)?;
+            let end = lower_int(end, env, sigs)?;
             let had = env.insert(var.clone(), Ty::Int);
-            let body = lower_block(body, env, declared, false, ret)?;
+            let body = lower_block(body, env, declared, false, ret, sigs)?;
             match had
             {
                 Some(t) =>
@@ -229,23 +253,23 @@ fn lower_stmt(
         },
         PyStmt::If { cond, then, els } =>
         {
-            let cond = lower_condition(cond, env)?;
+            let cond = lower_condition(cond, env, sigs)?;
             // Branches are nested scopes: they may reassign already-declared
             // names or `return`, but cannot first-declare a name expected to
             // survive the `if` (same rule as loops — hoist before the `if`).
-            let then = lower_block(then, env, declared, false, ret)?;
-            let els = lower_block(els, env, declared, false, ret)?;
+            let then = lower_block(then, env, declared, false, ret, sigs)?;
+            let els = lower_block(els, env, declared, false, ret, sigs)?;
             Ok(SirStmt::If { cond, then, els })
         },
         PyStmt::While { cond, body } =>
         {
-            let cond = lower_condition(cond, env)?;
-            let body = lower_block(body, env, declared, false, ret)?;
+            let cond = lower_condition(cond, env, sigs)?;
+            let body = lower_block(body, env, declared, false, ret, sigs)?;
             Ok(SirStmt::While { cond, body })
         },
         PyStmt::Return(Some(e)) =>
         {
-            let v = lower_scalar(e, env)?;
+            let v = lower_scalar(e, env, sigs)?;
             let t = normalize_ty(v.ty());
             merge_ret(ret, t)?;
             Ok(SirStmt::Return(v))
@@ -284,7 +308,7 @@ fn normalize_ty(t: Ty) -> Ty {
 
 // ---- integer (index/range/length) domain ----------------------------------
 
-fn lower_int(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
+fn lower_int(e: &PyExpr, env: &HashMap<String, Ty>, sigs: &Sigs) -> Result<SirExpr, String> {
     match e
     {
         PyExpr::Int(v) => Ok(SirExpr::IntLit(*v)),
@@ -305,8 +329,8 @@ fn lower_int(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
             let op = int_op(*op)?;
             Ok(SirExpr::IntBin {
                 op,
-                l: Box::new(lower_int(l, env)?),
-                r: Box::new(lower_int(r, env)?),
+                l: Box::new(lower_int(l, env, sigs)?),
+                r: Box::new(lower_int(r, env, sigs)?),
             })
         },
         PyExpr::Call { func, args } =>
@@ -314,7 +338,7 @@ fn lower_int(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
             if func == "len"
             {
                 need_args(func, args, 1)?;
-                let a = lower_scalar(&args[0], env)?;
+                let a = lower_scalar(&args[0], env, sigs)?;
                 expect_array(&a, "len")?;
                 Ok(SirExpr::Len(Box::new(a)))
             }
@@ -346,11 +370,33 @@ fn int_op(op: BinOp) -> Result<Op, String> {
 
 // ---- scalar / array (numeric) domain --------------------------------------
 
-fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
+fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>, sigs: &Sigs) -> Result<SirExpr, String> {
     match e
     {
         PyExpr::Float(v) => Ok(SirExpr::ScalarLit(*v)),
         PyExpr::Int(v) => Ok(SirExpr::ScalarLit(*v as f64)),
+        PyExpr::List(elems) =>
+        {
+            // A list literal of scalars -> Array.
+            let mut lowered = Vec::with_capacity(elems.len());
+            for el in elems
+            {
+                let v = lower_scalar(el, env, sigs)?;
+                if v.ty() != Ty::Scalar && v.ty() != Ty::Int
+                {
+                    return Err(format!(
+                        "list literals may only contain scalars, found {:?}",
+                        v.ty()
+                    ));
+                }
+                lowered.push(v);
+            }
+            if lowered.is_empty()
+            {
+                return Err("empty list literals are not supported (unknown element type)".into());
+            }
+            Ok(SirExpr::ArrayLit(lowered))
+        },
         // `A.T` — matrix transpose (parsed as the dotted name `A.T`).
         PyExpr::Name(n) if n.ends_with(".T") =>
         {
@@ -378,7 +424,7 @@ fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String
         },
         PyExpr::Neg(inner) =>
         {
-            let v = lower_scalar(inner, env)?;
+            let v = lower_scalar(inner, env, sigs)?;
             match v.ty()
             {
                 Ty::Array => Ok(SirExpr::ScalarBroadcast {
@@ -392,29 +438,33 @@ fn lower_scalar(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String
         },
         PyExpr::Index { base, index } =>
         {
-            let b = lower_scalar(base, env)?;
+            let b = lower_scalar(base, env, sigs)?;
             expect_array(&b, "index")?;
-            let idx = lower_int(index, env)?;
+            let idx = lower_int(index, env, sigs)?;
             Ok(SirExpr::Index {
                 base: Box::new(b),
                 idx: Box::new(idx),
             })
         },
-        PyExpr::Bin { op, l, r } => lower_bin(*op, l, r, env),
-        PyExpr::Call { func, args } => lower_call(func, args, env),
+        PyExpr::Bin { op, l, r } => lower_bin(*op, l, r, env, sigs),
+        PyExpr::Call { func, args } => lower_call(func, args, env, sigs),
         PyExpr::Cmp { .. } => Err("a comparison is only valid as an `if`/`elif` condition".into()),
     }
 }
 
 /// Lower the right-hand side of a tuple unpack — a supported multi-output
 /// kernel. Only `np.linalg.svd` is currently a tuple producer.
-fn lower_tuple_call(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<TupleExpr, String> {
+fn lower_tuple_call(
+    e: &PyExpr,
+    env: &HashMap<String, Ty>,
+    sigs: &Sigs,
+) -> Result<TupleExpr, String> {
     match e
     {
         PyExpr::Call { func, args } if strip_np(func) == "linalg.svd" =>
         {
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.svd expects a 2-D matrix argument".into());
@@ -430,13 +480,13 @@ fn lower_tuple_call(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<TupleExpr, 
 }
 
 /// Lower a boolean condition: a single scalar comparison.
-fn lower_condition(e: &PyExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
+fn lower_condition(e: &PyExpr, env: &HashMap<String, Ty>, sigs: &Sigs) -> Result<SirExpr, String> {
     match e
     {
         PyExpr::Cmp { op, l, r } =>
         {
-            let lv = lower_scalar(l, env)?;
-            let rv = lower_scalar(r, env)?;
+            let lv = lower_scalar(l, env, sigs)?;
+            let rv = lower_scalar(r, env, sigs)?;
             if lv.ty() == Ty::Array || rv.ty() == Ty::Array
             {
                 return Err("array comparisons are not supported in conditions".into());
@@ -470,11 +520,12 @@ fn lower_bin(
     l: &PyExpr,
     r: &PyExpr,
     env: &HashMap<String, Ty>,
+    sigs: &Sigs,
 ) -> Result<SirExpr, String> {
     if op == BinOp::Pow
     {
-        let base = lower_scalar(l, env)?;
-        let exp = lower_scalar(r, env)?;
+        let base = lower_scalar(l, env, sigs)?;
+        let exp = lower_scalar(r, env, sigs)?;
         if base.ty() == Ty::Array || exp.ty() == Ty::Array
         {
             return Err("`**` on arrays is not supported in this subset".into());
@@ -487,8 +538,8 @@ fn lower_bin(
     if op == BinOp::MatMul
     {
         // `A @ B` (matrix × matrix) or `A @ b` (matrix × vector).
-        let a = lower_scalar(l, env)?;
-        let b = lower_scalar(r, env)?;
+        let a = lower_scalar(l, env, sigs)?;
+        let b = lower_scalar(r, env, sigs)?;
         if !is_matrixish(a.ty())
         {
             return Err("`@` expects a 2-D matrix on the left".into());
@@ -507,8 +558,8 @@ fn lower_bin(
         });
     }
     let sop = num_op(op);
-    let lv = lower_scalar(l, env)?;
-    let rv = lower_scalar(r, env)?;
+    let lv = lower_scalar(l, env, sigs)?;
+    let rv = lower_scalar(r, env, sigs)?;
     let la = lv.ty() == Ty::Array;
     let ra = rv.ty() == Ty::Array;
     match (la, ra)
@@ -549,22 +600,33 @@ fn num_op(op: BinOp) -> Op {
     }
 }
 
-fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
+fn lower_call(
+    func: &str,
+    args: &[PyExpr],
+    env: &HashMap<String, Ty>,
+    sigs: &Sigs,
+) -> Result<SirExpr, String> {
+    // A call to another user-defined function (defined earlier in the module)
+    // takes precedence over the built-in intrinsics.
+    if let Some(sig) = sigs.get(func)
+    {
+        return lower_user_call(func, sig, args, env, sigs);
+    }
     let base = strip_np(func);
     match base
     {
         "sum" =>
         {
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             expect_array(&a, "np.sum")?;
             Ok(SirExpr::Sum(Box::new(a)))
         },
         "dot" =>
         {
             need_args(func, args, 2)?;
-            let a = lower_scalar(&args[0], env)?;
-            let b = lower_scalar(&args[1], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            let b = lower_scalar(&args[1], env, sigs)?;
             expect_array(&a, "np.dot")?;
             expect_array(&b, "np.dot")?;
             Ok(SirExpr::Dot(Box::new(a), Box::new(b)))
@@ -574,8 +636,8 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // np.linalg.solve(A, b): A an n×n matrix, b an n vector.
             // Routed to the verified LU solver in `scirust-solvers`.
             need_args(func, args, 2)?;
-            let a = lower_scalar(&args[0], env)?;
-            let b = lower_scalar(&args[1], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
+            let b = lower_scalar(&args[1], env, sigs)?;
             if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.solve expects a 2-D matrix as its first \
@@ -594,7 +656,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // np.linalg.det(A): determinant of an n×n matrix, routed to
             // `scirust-solvers` (LU-based).
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.det expects a 2-D matrix argument".into());
@@ -606,7 +668,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // np.linalg.eigvalsh(A): eigenvalues of a symmetric matrix (sorted
             // ascending), routed to `scirust-solvers::eigen_symmetric`.
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.eigvalsh expects a 2-D matrix argument".into());
@@ -618,7 +680,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             // np.linalg.inv(A): matrix inverse, routed to
             // `scirust-solvers::Matrix::inverse`.
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             if !is_matrixish(a.ty())
             {
                 return Err("np.linalg.inv expects a 2-D matrix argument".into());
@@ -636,7 +698,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         {
             // np.diag(v): 1-D array -> square diagonal matrix.
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             expect_array(&a, "np.diag")?;
             Ok(SirExpr::Diag(Box::new(a)))
         },
@@ -644,7 +706,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         {
             // np.fft.fft(x): full complex DFT of a real signal.
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             expect_array(&a, "np.fft.fft")?;
             Ok(SirExpr::Fft(Box::new(a)))
         },
@@ -652,7 +714,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         {
             // np.fft.rfft(x): real FFT (positive-frequency half spectrum).
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             expect_array(&a, "np.fft.rfft")?;
             Ok(SirExpr::Rfft(Box::new(a)))
         },
@@ -660,7 +722,7 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         {
             // np.fft.ifft(c): inverse DFT of a complex spectrum.
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             if a.ty() != Ty::ComplexArray
             {
                 return Err("np.fft.ifft expects a complex array (e.g. the result \
@@ -672,24 +734,24 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
         "zeros" =>
         {
             need_args(func, args, 1)?;
-            Ok(SirExpr::Zeros(Box::new(lower_int(&args[0], env)?)))
+            Ok(SirExpr::Zeros(Box::new(lower_int(&args[0], env, sigs)?)))
         },
         "ones" =>
         {
             need_args(func, args, 1)?;
-            Ok(SirExpr::Ones(Box::new(lower_int(&args[0], env)?)))
+            Ok(SirExpr::Ones(Box::new(lower_int(&args[0], env, sigs)?)))
         },
         "len" =>
         {
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             expect_array(&a, "len")?;
             Ok(SirExpr::Len(Box::new(a)))
         },
         "sqrt" | "exp" | "sin" | "cos" | "abs" | "tanh" =>
         {
             need_args(func, args, 1)?;
-            let a = lower_scalar(&args[0], env)?;
+            let a = lower_scalar(&args[0], env, sigs)?;
             let mf = match base
             {
                 "sqrt" => MathFn::Sqrt,
@@ -725,6 +787,64 @@ fn lower_call(func: &str, args: &[PyExpr], env: &HashMap<String, Ty>) -> Result<
             other
         )),
     }
+}
+
+/// Lower a call to another user-defined function, type-checking the arguments
+/// against its signature. Callee parameters are restricted to `Scalar`/`Array`
+/// so the argument coercion at emission is unambiguous.
+fn lower_user_call(
+    func: &str,
+    sig: &FuncSig,
+    args: &[PyExpr],
+    env: &HashMap<String, Ty>,
+    sigs: &Sigs,
+) -> Result<SirExpr, String> {
+    if args.len() != sig.params.len()
+    {
+        return Err(format!(
+            "`{}` expects {} argument(s), got {}",
+            func,
+            sig.params.len(),
+            args.len()
+        ));
+    }
+    let mut lowered = Vec::with_capacity(args.len());
+    for (i, (a, &pty)) in args.iter().zip(sig.params.iter()).enumerate()
+    {
+        if pty != Ty::Scalar && pty != Ty::Array
+        {
+            return Err(format!(
+                "calling `{}` is unsupported: parameter {} has type {:?} (only scalar/array \
+                 parameters can be passed between transpiled functions)",
+                func, i, pty
+            ));
+        }
+        let v = lower_scalar(a, env, sigs)?;
+        // A scalar parameter accepts a scalar or an integer (coerced to f64);
+        // an array parameter requires an array.
+        let ok = match pty
+        {
+            Ty::Scalar => matches!(v.ty(), Ty::Scalar | Ty::Int),
+            Ty::Array => v.ty() == Ty::Array,
+            _ => false,
+        };
+        if !ok
+        {
+            return Err(format!(
+                "argument {} to `{}` has type {:?}, expected {:?}",
+                i,
+                func,
+                v.ty(),
+                pty
+            ));
+        }
+        lowered.push(v);
+    }
+    Ok(SirExpr::UserCall {
+        func: func.to_string(),
+        args: lowered,
+        ret: sig.ret,
+    })
 }
 
 fn strip_np(func: &str) -> &str {
@@ -768,12 +888,12 @@ fn is_matrixish(t: Ty) -> bool {
 
 // ---- param type inference (no hint) ---------------------------------------
 
-fn infer_param_ty(name: &str, body: &[PyStmt]) -> Ty {
+fn infer_param_ty(name: &str, body: &[PyStmt], sigs: &Sigs) -> Ty {
     if matrix_evidence_block(name, body)
     {
         Ty::Matrix
     }
-    else if array_evidence_block(name, body)
+    else if array_evidence_block(name, body, sigs)
     {
         Ty::Array
     }
@@ -835,47 +955,52 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
     block(name, stmts)
 }
 
-fn array_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
+fn array_evidence_block(name: &str, stmts: &[PyStmt], sigs: &Sigs) -> bool {
     stmts.iter().any(|s| match s
     {
-        PyStmt::Assign { value, .. } => array_evidence_expr(name, value),
-        PyStmt::AssignTuple { value, .. } => array_evidence_expr(name, value),
+        PyStmt::Assign { value, .. } => array_evidence_expr(name, value, sigs),
+        PyStmt::AssignTuple { value, .. } => array_evidence_expr(name, value, sigs),
         PyStmt::AssignIndex {
             target,
             index,
             value,
-        } => target == name || array_evidence_expr(name, index) || array_evidence_expr(name, value),
+        } =>
+        {
+            target == name
+                || array_evidence_expr(name, index, sigs)
+                || array_evidence_expr(name, value, sigs)
+        },
         PyStmt::For {
             start, end, body, ..
         } =>
         {
-            array_evidence_expr(name, start)
-                || array_evidence_expr(name, end)
-                || array_evidence_block(name, body)
+            array_evidence_expr(name, start, sigs)
+                || array_evidence_expr(name, end, sigs)
+                || array_evidence_block(name, body, sigs)
         },
         PyStmt::If { cond, then, els } =>
         {
-            array_evidence_expr(name, cond)
-                || array_evidence_block(name, then)
-                || array_evidence_block(name, els)
+            array_evidence_expr(name, cond, sigs)
+                || array_evidence_block(name, then, sigs)
+                || array_evidence_block(name, els, sigs)
         },
         PyStmt::While { cond, body } =>
         {
-            array_evidence_expr(name, cond) || array_evidence_block(name, body)
+            array_evidence_expr(name, cond, sigs) || array_evidence_block(name, body, sigs)
         },
-        PyStmt::Return(Some(e)) => array_evidence_expr(name, e),
+        PyStmt::Return(Some(e)) => array_evidence_expr(name, e, sigs),
         PyStmt::Return(None) => false,
     })
 }
 
-fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
+fn array_evidence_expr(name: &str, e: &PyExpr, sigs: &Sigs) -> bool {
     match e
     {
         PyExpr::Index { base, index } =>
         {
             matches!(base.as_ref(), PyExpr::Name(n) if n == name)
-                || array_evidence_expr(name, base)
-                || array_evidence_expr(name, index)
+                || array_evidence_expr(name, base, sigs)
+                || array_evidence_expr(name, index, sigs)
         },
         PyExpr::Call { func, args } =>
         {
@@ -883,12 +1008,20 @@ fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
             // `np.linalg.solve(A, b)` — the *second* argument `b` is a vector.
             let solve_rhs = strip_np(func) == "linalg.solve"
                 && matches!(args.get(1), Some(PyExpr::Name(n)) if n == name);
+            // Passing `name` as the k-th argument of a user function whose k-th
+            // parameter is an array makes `name` an array (hint-free composition).
+            let user_arr = sigs.get(func).is_some_and(|sig| {
+                args.iter()
+                    .zip(sig.params.iter())
+                    .any(|(a, &pty)| pty == Ty::Array && matches!(a, PyExpr::Name(n) if n == name))
+            });
             (is_array_consumer
                 && args
                     .iter()
                     .any(|a| matches!(a, PyExpr::Name(n) if n == name)))
                 || solve_rhs
-                || args.iter().any(|a| array_evidence_expr(name, a))
+                || user_arr
+                || args.iter().any(|a| array_evidence_expr(name, a, sigs))
         },
         // Right operand of `@` (matrix @ vector) is a vector.
         PyExpr::Bin {
@@ -898,12 +1031,19 @@ fn array_evidence_expr(name: &str, e: &PyExpr) -> bool {
         } =>
         {
             matches!(r.as_ref(), PyExpr::Name(n) if n == name)
-                || array_evidence_expr(name, l)
-                || array_evidence_expr(name, r)
+                || array_evidence_expr(name, l, sigs)
+                || array_evidence_expr(name, r, sigs)
         },
-        PyExpr::Bin { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
-        PyExpr::Cmp { l, r, .. } => array_evidence_expr(name, l) || array_evidence_expr(name, r),
-        PyExpr::Neg(inner) => array_evidence_expr(name, inner),
+        PyExpr::Bin { l, r, .. } =>
+        {
+            array_evidence_expr(name, l, sigs) || array_evidence_expr(name, r, sigs)
+        },
+        PyExpr::Cmp { l, r, .. } =>
+        {
+            array_evidence_expr(name, l, sigs) || array_evidence_expr(name, r, sigs)
+        },
+        PyExpr::Neg(inner) => array_evidence_expr(name, inner, sigs),
+        PyExpr::List(elems) => elems.iter().any(|el| array_evidence_expr(name, el, sigs)),
         _ => false,
     }
 }
