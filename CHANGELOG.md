@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — crates voisines : carte CUSUM (`scirust-spc`) et incertitude élargie GUM (`scirust-metrology`)
+Deux compléments dans les crates voisines du tolérancement, chacun vérifié par
+un cross-check Monte-Carlo embarqué dans ses tests :
+
+- **`scirust-spc::cusum`** : **carte de contrôle CUSUM** tabulaire bilatérale.
+  Sommes cumulées `Cᵢ⁺ = max(0, Cᵢ₋₁⁺ + (xᵢ−μ₀) − K)` / `Cᵢ⁻` avec valeur de
+  référence `K = k·σ` et intervalle de décision `H = h·σ`, signal de dérive, et
+  **ARL** par l'approximation de Siegmund (`b = h+1,166`), combinée en bilatéral
+  `1/ARL = 1/ARL⁺ + 1/ARL⁻`. Complète EWMA comme détecteur à mémoire des petites
+  dérives soutenues. *Cross-check* : taux de fausse alarme Monte-Carlo (N(0,1))
+  vs l'ARL₀ ≈ 168 pour `k=0,5, h=4`.
+- **`scirust-metrology::expanded`** : **incertitude élargie** GUM. Degrés de
+  liberté effectifs de Welch–Satterthwaite `ν_eff = u_c⁴ / Σ(uᵢ⁴/νᵢ)`, facteur
+  d'élargissement `k = t_{(1+p)/2}(ν_eff)` (quantile de Student par développement
+  de Cornish–Fisher, exact quand `ν_eff→∞ ⇒ k→1,96`), incertitude élargie
+  `U = k·u_c` et intervalle de couverture. Boucle le GUM après `combined_uncertainty`.
+  *Cross-check* : quantiles `t` vs tables (t₀,₉₇₅(10)=2,228, …).
+
 ### Ajouté — plan & économie : ajustements ISO 286, échantillonnage double/séquentiel, perte de Taguchi (`scirust-tolerance`)
 Trois modules qui bordent la cotation : la table normalisée des ajustements, les
 plans d'échantillonnage à taille moyenne réduite, et le coût de non-qualité relié
