@@ -142,6 +142,42 @@ pub mod np {
         o.sort_by(|x, y| x.partial_cmp(y).unwrap());
         o
     }
+    /// Sample variance (MATLAB `var`, normalised by `N-1`; `0` for `N < 2`).
+    pub fn var(a: &[f64]) -> f64 {
+        let n = a.len();
+        if n < 2 {
+            return 0.0f64;
+        }
+        let mut s = 0.0f64;
+        for i in 0..n {
+            s += a[i];
+        }
+        let mean = s / n as f64;
+        let mut ss = 0.0f64;
+        for i in 0..n {
+            let d = a[i] - mean;
+            ss += d * d;
+        }
+        ss / (n as f64 - 1.0)
+    }
+    /// Sample standard deviation (`sqrt(var)`).
+    pub fn std(a: &[f64]) -> f64 {
+        var(a).sqrt()
+    }
+    /// Median (mean of the two middle values for even length).
+    pub fn median(a: &[f64]) -> f64 {
+        let mut b = a.to_vec();
+        b.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let n = b.len();
+        if n == 0 {
+            return f64::NAN;
+        }
+        if n % 2 == 1 {
+            b[n / 2]
+        } else {
+            0.5 * (b[n / 2 - 1] + b[n / 2])
+        }
+    }
     /// Elementwise map over one array.
     pub fn map1<F: Fn(f64) -> f64>(a: &[f64], f: F) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len());
@@ -625,6 +661,33 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let a = emit(a, ctx);
             Frag {
                 code: format!("np::min({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Variance(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::var({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Stdev(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::std({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Median(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::median({})", slice_of(&a)),
                 ty: Ty::Scalar,
                 borrowed: false,
             }
