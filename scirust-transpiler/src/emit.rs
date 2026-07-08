@@ -124,7 +124,7 @@ fn emit_func(f: &SirFunc) -> String {
         .iter()
         .map(|(n, t)| format!("{}: {}", n, param_ty(*t)))
         .collect();
-    let ret = ret_ty(f.ret);
+    let ret = ret_ty(&f.ret);
 
     let mut s = format!(
         "pub fn {}({}) -> {} {{\n",
@@ -153,13 +153,20 @@ fn param_ty(t: Ty) -> &'static str {
     }
 }
 
-fn ret_ty(t: Ty) -> &'static str {
-    match t
+/// The Rust return-type string: a single owned type, or a tuple of them.
+fn ret_ty(r: &RetTy) -> String {
+    match r
     {
-        Ty::Array => "Vec<f64>",
-        Ty::ComplexArray => "Vec<scirust_signal::complex::Complex>",
-        Ty::MatrixVal => "scirust_solvers::Matrix",
-        _ => "f64",
+        RetTy::Single(t) => local_ty(*t).to_string(),
+        RetTy::Tuple(ts) =>
+        {
+            let inner = ts
+                .iter()
+                .map(|t| local_ty(*t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({})", inner)
+        },
     }
 }
 
@@ -326,6 +333,23 @@ fn emit_stmt(st: &SirStmt, ctx: &Ctx, ind: usize, out: &mut String) {
                 },
                 _ => out.push_str(&format!("{}return {};\n", pad, scalar_of(v))),
             }
+        },
+        SirStmt::ReturnTuple(vals) =>
+        {
+            // `return (e0, e1, …);` — each element coerced to its owned type.
+            let elems: Vec<String> = vals
+                .iter()
+                .map(|e| {
+                    let v = emit(e, ctx);
+                    match v.ty
+                    {
+                        Ty::Array => owned_array(v),
+                        Ty::ComplexArray | Ty::MatrixVal => v.code,
+                        _ => scalar_of(v),
+                    }
+                })
+                .collect();
+            out.push_str(&format!("{}return ({});\n", pad, elems.join(", ")));
         },
     }
 }

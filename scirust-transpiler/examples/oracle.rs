@@ -15,7 +15,7 @@
 //!
 //! Run with:  `cargo run -p scirust-transpiler --example oracle`
 
-use scirust_transpiler::Ty;
+use scirust_transpiler::{RetTy, Ty};
 use std::process::Command;
 
 const ATOL: f64 = 1e-7;
@@ -477,6 +477,36 @@ fn cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- general tuple returns (Phase 2) ----
+        // `return a, b` — two scalars out, compared element-wise.
+        Case {
+            name: "tuple return: addsub (a+b, a-b)",
+            call: "addsub",
+            src: "def addsub(a, b):\n    return a + b, a - b\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }, Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // Array -> (scalar, scalar) tuple via reductions.
+        Case {
+            name: "tuple return: minmax (min, max)",
+            call: "minmax",
+            src: "def minmax(x: np.ndarray):\n    return np.min(x), np.max(x)\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // Three-element tuple return.
+        Case {
+            name: "tuple return: stats3 (min, mean, max)",
+            call: "stats3",
+            src: "def stats3(x: np.ndarray):\n    return np.min(x), np.mean(x), np.max(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 
@@ -739,13 +769,13 @@ fn sir_case(lang: Lang, src: &str) -> Result<scirust_transpiler::SirModule, Stri
     }
 }
 
-fn ret_ty(case: &Case, lang: Lang) -> Ty {
+fn ret_ty(case: &Case, lang: Lang) -> RetTy {
     let sir = sir_case(lang, case.src).expect("transpile to sir");
     sir.funcs
         .iter()
         .find(|f| f.name == case.call)
-        .map(|f| f.ret)
-        .unwrap_or(Ty::Scalar)
+        .map(|f| f.ret.clone())
+        .unwrap_or(RetTy::Single(Ty::Scalar))
 }
 
 /// Generate the arg-binding lines for the Rust `main` from the arg specs.
@@ -787,27 +817,43 @@ fn run_rust_batch(
     rust_fn: &str,
     deps: &[&str],
     trials: &[Vec<Val>],
-    ret: Ty,
+    ret: &RetTy,
     tmp: &std::path::Path,
     workspace_root: &std::path::Path,
     shared_target: &std::path::Path,
 ) -> Result<Vec<Vec<f64>>, String> {
     let (binds, call) = rust_bindings(&case.args);
-    let emit = match ret
+    let emit: String = match ret
     {
-        Ty::Array => "for v in r.iter() { print!(\"{:.17e} \", v); } println!();",
+        RetTy::Single(Ty::Array) =>
+        {
+            "for v in r.iter() { print!(\"{:.17e} \", v); } println!();".to_string()
+        },
         // Complex arrays are serialised as interleaved (re, im) — the Python
         // side does the same, so the vectors line up for comparison.
-        Ty::ComplexArray =>
+        RetTy::Single(Ty::ComplexArray) =>
         {
             "for c in r.iter() { print!(\"{:.17e} {:.17e} \", c.re, c.im); } println!();"
+                .to_string()
         },
         // A produced matrix: flatten row-major (Python side ravels the same way).
-        Ty::MatrixVal =>
+        RetTy::Single(Ty::MatrixVal) =>
         {
             "for __i in 0..r.rows() { for __v in r.row(__i).iter() { print!(\"{:.17e} \", __v); } } println!();"
+                .to_string()
         },
-        _ => "println!(\"{:.17e}\", r);",
+        // A tuple of scalars: print each field in order.
+        RetTy::Tuple(ts) =>
+        {
+            let mut s = String::new();
+            for i in 0..ts.len()
+            {
+                s.push_str(&format!("print!(\"{{:.17e}} \", r.{}); ", i));
+            }
+            s.push_str("println!();");
+            s
+        },
+        _ => "println!(\"{:.17e}\", r);".to_string(),
     };
     let program = format!(
         "{fns}\nuse std::io::BufRead;\nfn main() {{\n    let stdin = std::io::stdin();\n    for line in stdin.lock().lines() {{\n        let line = line.unwrap();\n        if line.trim().is_empty() {{ continue; }}\n        let nums: Vec<f64> = line.split_whitespace().map(|t| t.parse().unwrap()).collect();\n{binds}        let r = {call_name}({call});\n        {emit}\n    }}\n}}\n",
@@ -1147,7 +1193,7 @@ fn main() {
             &rust_fn,
             &deps,
             &trials,
-            ret,
+            &ret,
             &tmp,
             &workspace_root,
             &shared_target,

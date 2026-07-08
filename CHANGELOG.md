@@ -142,6 +142,20 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **retours de tuple généraux** (`return a, b`) prouvés contre NumPy réel (Phase 2, incrément 16)
+Complète l'histoire des tuples côté **production** : une fonction peut renvoyer
+plusieurs valeurs (`def minmax(x): return np.min(x), np.max(x)` → `-> (f64, f64)`).
+Nouveautés : `RetTy` (retour simple ou tuple, hors du treillis `Copy` `Ty`),
+`SirStmt::ReturnTuple`, parsing Python de `return e0, e1, …`, et sérialisation
+oracle des retours-tuple (impression champ par champ `r.0`, `r.1`, …). Les
+éléments de tuple sont restreints aux **scalaires** dans ce sous-ensemble ; un
+retour mixte simple/tuple est refusé, et une fonction renvoyant un tuple ne peut
+pas être appelée comme valeur (diagnostic clair). Trois cas d'oracle : `addsub`
+(a+b, a-b), `minmax` (min, max), `stats3` (min, mean, max). **Oracle 52/52**
+(200 essais chacun) ; **53 tests unitaires**. Non-vacuité re-vérifiée : inverser
+l'ordre des éléments du tuple à l'émission fait diverger les trois cas (|Δ|≈5)
+et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **vocabulaire numérique élargi** (log/floor/ceil/sinh/…, prod/mean/max/min) prouvé contre NumPy réel (Phase 2, incrément 15)
 Sept nouvelles fonctions math élémentaires (scalaire ou tableau) — `np.log`
 (→ `ln`), `np.log10`, `np.floor`, `np.ceil`, `np.sinh`, `np.cosh`, `np.arctan`

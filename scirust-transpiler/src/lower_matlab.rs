@@ -68,14 +68,16 @@ fn lower_func(f: &MFunc) -> Result<SirFunc, String> {
         name: f.out.clone(),
         ty: out_ty,
     }));
-    let ret = if out_ty == Ty::Int
-    {
-        Ty::Scalar
-    }
-    else
-    {
-        out_ty
-    };
+    let ret = RetTy::Single(
+        if out_ty == Ty::Int
+        {
+            Ty::Scalar
+        }
+        else
+        {
+            out_ty
+        },
+    );
 
     // Prepend hoisted declarations (first-assignment order) to the body.
     let mut full = Vec::with_capacity(lo.declares.len() + body.len());
