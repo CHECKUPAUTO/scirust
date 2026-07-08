@@ -65,6 +65,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
 | constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
+| constructor `logspace(a, b, n)` | deterministic `np::logspace` prelude helper (`n` log-spaced points `10^a..10^b`, defined as `10 .^ linspace`; the MATLAB `b == pi` special case is not replicated) |
 | two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` — scalar, elementwise on vectors, or scalar↔vector broadcast | `ScalarBinFn` / `EwBinFn` / `BroadcastFn` (dispatched on operand type); `power` shares `^`; `max`/`min` with one arg stay reductions |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
@@ -129,8 +130,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: atan2/hypot/max/min elementwise & broadcast 200/200 trials match (octave) (two-arg math on arrays, Phase 2)
   ✓ M: deg2rad / rad2deg + sign elementwise 200/200 trials match (octave) (angle conversion + vector sign, Phase 2)
   ✓ M: mod(cumsum(v),3) / rem(cumsum(v),3) 200/200 trials match (octave) (elementwise modular, broadcast, Phase 2)
+  ✓ M: logspace(a, b, 6)         200/200 trials match (octave) (MATLAB logarithmic vector constructor, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 106/106 cases match their reference runtime within tolerance
+  ORACLE GREEN — 107/107 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

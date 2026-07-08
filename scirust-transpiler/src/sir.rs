@@ -269,6 +269,14 @@ pub enum SirExpr {
         b: Box<SirExpr>,
         n: Box<SirExpr>,
     },
+    /// `logspace(a, b, n)` : (Scalar, Scalar, Int) -> Array of `n`
+    /// logarithmically-spaced points, i.e. `10 .^ linspace(a, b, n)`
+    /// (exact endpoints `10^a` .. `10^b`, matching MATLAB).
+    Logspace {
+        a: Box<SirExpr>,
+        b: Box<SirExpr>,
+        n: Box<SirExpr>,
+    },
     /// `cumsum(v)` : Array -> Array (running prefix sum, fixed left-to-right
     /// order -> bit-reproducible).
     Cumsum(Box<SirExpr>),
@@ -499,6 +507,7 @@ impl SirExpr {
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
             | SirExpr::Linspace { .. }
+            | SirExpr::Logspace { .. }
             | SirExpr::Cumsum(_)
             | SirExpr::Cumprod(_)
             | SirExpr::Cummax(_)
@@ -682,7 +691,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
             scan_expr(base, solvers, signal);
             scan_expr(exp, solvers, signal);
         },
-        SirExpr::Linspace { a, b, n } =>
+        SirExpr::Linspace { a, b, n } | SirExpr::Logspace { a, b, n } =>
         {
             scan_expr(a, solvers, signal);
             scan_expr(b, solvers, signal);

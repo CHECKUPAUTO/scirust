@@ -1194,6 +1194,15 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 2.0,
             }],
         },
+        // ---- MATLAB logarithmic constructor (Phase 2) ----
+        // logspace(a, b, 6) — 6 logarithmically-spaced points 10^a..10^b
+        // (fixed length; a, b fuzzed, kept clear of the pi special case).
+        Case {
+            name: "M: logspace(a, b, 6) (constructor)",
+            call: "mlogspace",
+            src: "function y = mlogspace(a, b)\n  y = logspace(a, b, 6);\nend\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }, Scalar { lo: -2.0, hi: 2.0 }],
+        },
     ]
 }
 

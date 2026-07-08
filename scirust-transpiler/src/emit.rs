@@ -95,6 +95,13 @@ pub mod np {
         o[n - 1] = b;
         o
     }
+    /// `n` logarithmically-spaced points, i.e. `10 .^ linspace(a, b, n)`
+    /// (exact power endpoints `10^a` .. `10^b`, matching MATLAB `logspace`;
+    /// `logspace(a, b, 1) == [10^b]`). The MATLAB `b == pi` special case is
+    /// deliberately not replicated — the plain `10.^linspace` definition is used.
+    pub fn logspace(a: f64, b: f64, n: usize) -> Vec<f64> {
+        linspace(a, b, n).iter().map(|e| 10.0f64.powf(*e)).collect()
+    }
     /// Running prefix sum in fixed left-to-right order (bit-reproducible).
     pub fn cumsum(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len());
@@ -892,6 +899,22 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code: format!(
                     "np::linspace({}, {}, {})",
+                    scalar_of(a),
+                    scalar_of(b),
+                    n.code
+                ),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Logspace { a, b, n } =>
+        {
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            let n = emit(n, ctx);
+            Frag {
+                code: format!(
+                    "np::logspace({}, {}, {})",
                     scalar_of(a),
                     scalar_of(b),
                     n.code

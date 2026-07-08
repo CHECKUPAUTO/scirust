@@ -893,6 +893,22 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             n: Box::new(n),
         });
     }
+    if func == "logspace"
+    {
+        // logspace(a, b, n) — n logarithmically-spaced points, 10^a .. 10^b
+        // (a, b scalars; n an integer count).
+        need_args(func, args, 3)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_scalar(&a, "logspace")?;
+        expect_scalar(&b, "logspace")?;
+        let n = lower_int(&args[2], env)?;
+        return Ok(SirExpr::Logspace {
+            a: Box::new(a),
+            b: Box::new(b),
+            n: Box::new(n),
+        });
+    }
     if func == "diag"
     {
         // MATLAB's overloaded `diag`, dispatched on the operand type:
@@ -1110,7 +1126,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
-             cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace, length, \
+             cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace/logspace, length, \
              det/inv/eig/trace)",
             func
         )),

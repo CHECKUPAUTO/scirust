@@ -722,6 +722,24 @@ mod tests {
     }
 
     #[test]
+    fn matlab_logspace_constructs_a_log_spaced_vector() {
+        // logspace(a, b, n) builds a vector of 10^a..10^b: scalar a/b params,
+        // integer count; routes to the deterministic `np::logspace` helper,
+        // which itself is defined in terms of `np::linspace`.
+        let rust =
+            transpile_matlab("function y = f(a, b)\n  y = logspace(a, b, 5);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(a: f64, b: f64) -> Vec<f64> {");
+        assert!(rust.contains("np::logspace(a, b, 5usize)"));
+        assert!(rust.contains("pub fn logspace(a: f64, b: f64, n: usize) -> Vec<f64>"));
+        assert!(rust.contains("10.0f64.powf"));
+        // The count may be a dynamic `length(x)`, not just a literal.
+        let dyn_n =
+            transpile_matlab("function y = f(a, b, x)\n  y = logspace(a, b, length(x));\nend\n")
+                .unwrap();
+        assert!(dyn_n.contains("np::logspace(a, b, x.len())"));
+    }
+
+    #[test]
     fn matlab_star_routes_matrix_products() {
         // matrix * vector -> matvec (A a matrix from `\`, x the vector solution).
         let mv =
