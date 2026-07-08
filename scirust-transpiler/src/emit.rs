@@ -152,6 +152,23 @@ pub mod np {
         o.reverse();
         o
     }
+    /// Circular shift by `k` positions (MATLAB `circshift`): `result[i] =
+    /// a[(i-k) mod n]`, with `k` rounded to the nearest integer and reduced
+    /// modulo `n` (so any sign / magnitude is valid). Empty input -> empty.
+    pub fn circshift(a: &[f64], k: f64) -> Vec<f64> {
+        let n = a.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let n_i = n as i64;
+        let k = (k.round() as i64).rem_euclid(n_i);
+        let mut o = Vec::with_capacity(n);
+        for i in 0..n {
+            let src = ((i as i64 - k).rem_euclid(n_i)) as usize;
+            o.push(a[src]);
+        }
+        o
+    }
     /// Consecutive differences (length `n-1`; empty for `n < 2`).
     pub fn diff(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len().saturating_sub(1));
@@ -983,6 +1000,16 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let a = emit(a, ctx);
             Frag {
                 code: format!("np::flip({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Circshift { arr, k } =>
+        {
+            let arr = emit(arr, ctx);
+            let k = emit(k, ctx);
+            Frag {
+                code: format!("np::circshift({}, {})", slice_of(&arr), scalar_of(k)),
                 ty: Ty::Array,
                 borrowed: false,
             }

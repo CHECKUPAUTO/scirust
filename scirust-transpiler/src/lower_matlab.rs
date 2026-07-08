@@ -970,6 +970,20 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&a, "trapz")?;
         return Ok(SirExpr::Trapz(Box::new(a)));
     }
+    if func == "circshift"
+    {
+        // circshift(v, k) — circular shift of a vector by `k` positions (`k` an
+        // integer, rounded; any sign). Array in, array out.
+        need_args(func, args, 2)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "circshift")?;
+        let k = lower_scalar(&args[1], env)?;
+        expect_scalar(&k, "circshift")?;
+        return Ok(SirExpr::Circshift {
+            arr: Box::new(a),
+            k: Box::new(k),
+        });
+    }
     if matches!(
         func,
         "cumsum"
@@ -1169,7 +1183,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
-             cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/diag, linspace/logspace, length, \
+             cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/diag, linspace/logspace, length, \
              det/inv/eig/trace)",
             func
         )),
@@ -1371,6 +1385,9 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 // `norm(v, p)` — the first argument is the vector; the optional
                 // `p` is a scalar (the 1-arg form is covered by the reduction arm).
                 || (func == "norm"
+                    && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                // `circshift(v, k)` — the first argument is the vector; `k` scalar.
+                || (func == "circshift"
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // Vector -> vector builtins whose (single) argument is a vector.
                 || (matches!(

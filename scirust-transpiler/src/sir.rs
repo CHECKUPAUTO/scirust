@@ -296,6 +296,13 @@ pub enum SirExpr {
     Sort(Box<SirExpr>),
     /// `flip(v)` : Array -> Array reversed.
     Flip(Box<SirExpr>),
+    /// `circshift(v, k)` : (Array, Scalar) -> Array circularly shifted by `k`
+    /// positions (`k` rounded to the nearest integer; MATLAB `circshift`,
+    /// `result[i] = v[(i-k) mod n]`, same length).
+    Circshift {
+        arr: Box<SirExpr>,
+        k: Box<SirExpr>,
+    },
     /// Scalar comparison `l <op> r` -> Bool (conditions only).
     Cmp {
         op: CmpOp,
@@ -541,6 +548,7 @@ impl SirExpr {
             | SirExpr::Gradient(_)
             | SirExpr::Sort(_)
             | SirExpr::Flip(_)
+            | SirExpr::Circshift { .. }
             | SirExpr::ArrayLit(_)
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
@@ -717,6 +725,11 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         {
             scan_expr(base, solvers, signal);
             scan_expr(exp, solvers, signal);
+        },
+        SirExpr::Circshift { arr, k } =>
+        {
+            scan_expr(arr, solvers, signal);
+            scan_expr(k, solvers, signal);
         },
         SirExpr::Linspace { a, b, n } | SirExpr::Logspace { a, b, n } =>
         {
