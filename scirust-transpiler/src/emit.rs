@@ -190,6 +190,19 @@ pub mod np {
         }
         s
     }
+    /// Diagonal of a square matrix (flat row-major) as a vector.
+    pub fn diag_extract(a: &[f64]) -> Vec<f64> {
+        let n = (a.len() as f64).sqrt() as usize;
+        (0..n).map(|i| a[i * n + i]).collect()
+    }
+    /// Trapezoidal integration with unit spacing (`0` for `n < 2`).
+    pub fn trapz(a: &[f64]) -> f64 {
+        let mut s = 0.0f64;
+        for i in 1..a.len() {
+            s += 0.5 * (a[i - 1] + a[i]);
+        }
+        s
+    }
     /// The 3-vector cross product `a × b`.
     pub fn cross(a: &[f64], b: &[f64]) -> Vec<f64> {
         vec![
@@ -1096,6 +1109,38 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code,
                 ty: Ty::MatrixVal,
+                borrowed: false,
+            }
+        },
+        SirExpr::DiagExtract(a) =>
+        {
+            // Extract the diagonal of a matrix. A flat matrix *parameter* uses
+            // the std-only prelude helper; a produced `Matrix` value uses its
+            // `.row(i)[i]` accessor.
+            let a = emit(a, ctx);
+            let code = if a.ty == Ty::MatrixVal
+            {
+                format!(
+                    "{{ let __m = {}; (0..__m.rows()).map(|__i| __m.row(__i)[__i]).collect::<Vec<f64>>() }}",
+                    a.code
+                )
+            }
+            else
+            {
+                format!("np::diag_extract({})", slice_of(&a))
+            };
+            Frag {
+                code,
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Trapz(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::trapz({})", slice_of(&a)),
+                ty: Ty::Scalar,
                 borrowed: false,
             }
         },
