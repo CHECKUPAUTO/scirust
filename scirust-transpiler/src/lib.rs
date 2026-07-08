@@ -749,6 +749,23 @@ mod tests {
     }
 
     #[test]
+    fn matlab_circshift_routes_to_prelude_and_infers_array() {
+        // circshift(v, k) — array in, array out; `v` inferred an array from the
+        // first-argument position, `k` a scalar shift.
+        let rust = transpile_matlab("function y = f(v)\n  y = circshift(v, 2);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(rust.contains("np::circshift(v, 2.0f64)"));
+        assert!(rust.contains("pub fn circshift(a: &[f64], k: f64) -> Vec<f64>"));
+        assert!(rust.contains("rem_euclid")); // modular reindexing
+        // A negative literal shift is accepted (any sign is valid).
+        let neg = transpile_matlab("function y = f(v)\n  y = circshift(v, -3);\nend\n").unwrap();
+        assert!(neg.contains("np::circshift(v,"));
+        // A scalar first argument is rejected (circshift is a vector op).
+        let bad = transpile_matlab("function y = f(x)\n  y = circshift(x * 2.0, 1);\nend\n");
+        assert!(bad.is_err());
+    }
+
+    #[test]
     fn matlab_reduction_stats_infer_array_and_return_scalar() {
         // var / std / median take a vector and return a scalar; the argument is
         // inferred as an array from the reduction.

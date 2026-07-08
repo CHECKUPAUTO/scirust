@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `circshift(v, k)`** — décalage circulaire, prouvé contre Octave réel (Phase 2, incrément 43)
+Réindexation modulaire : `circshift(v, k)` décale circulairement le vecteur de `k`
+positions (`result[i] = v[(i−k) mod n]`, longueur inchangée), avec `k` arrondi à
+l'entier le plus proche et réduit modulo `n` — donc **tout signe / toute amplitude**
+est valide. Nouveau nœud SIR `Circshift { arr, k }` et helper de prélude déterministe
+`np::circshift` (arithmétique via `rem_euclid`, sûre pour les décalages négatifs).
+
+- `circshift(v, k)` : `v` vecteur, `k` scalaire entier (littéral ou variable) →
+  vecteur décalé (même longueur).
+
+Deux cas d'oracle (`circshift(v, 2)` positif, `circshift(v, -3)` négatif). **Oracle
+121/121** (200 essais chacun) ; **91 tests unitaires** (1 nouveau).
+*Non-vacuité* : inverser le sens du décalage (`i + k` au lieu de `i − k`) fait
+diverger les deux cas `circshift` (positif ET négatif) — le sens de la réindexation
+est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `gradient(v)`** — gradient numérique à pas unitaire, prouvé contre Octave réel (Phase 2, incrément 42)
 Différentiation numérique : `gradient(v)` renvoie un vecteur de **même longueur**
 que l'entrée, par différences **centrées** à l'intérieur `(v[i+1] − v[i−1])/2` et

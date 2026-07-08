@@ -854,6 +854,28 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // circshift(v, 2) — circular shift by +2 (wraps the last two entries).
+        Case {
+            name: "M: circshift(v, 2) (positive)",
+            call: "mcshift",
+            src: "function y = mcshift(v)\n  y = circshift(v, 2);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // circshift(v, -3) — circular shift by -3 (negative shift, wraps).
+        Case {
+            name: "M: circshift(v, -3) (negative)",
+            call: "mcshiftn",
+            src: "function y = mcshiftn(v)\n  y = circshift(v, -3);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
         // sort(v) — ascending sort.
         Case {
             name: "M: sort(v) (ascending)",
