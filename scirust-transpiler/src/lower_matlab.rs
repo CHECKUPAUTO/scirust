@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 const MATH_FNS: &[&str] = &[
     "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "floor", "ceil", "sinh", "cosh",
-    "atan", "round", "fix",
+    "atan", "round", "fix", "expm1", "log1p",
 ];
 
 pub fn lower_module(m: &MModule) -> Result<SirModule, String> {
@@ -629,6 +629,8 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "atan" => MathFn::Atan,
             "round" => MathFn::Round,
             "fix" => MathFn::Trunc,
+            "expm1" => MathFn::Expm1,
+            "log1p" => MathFn::Log1p,
             _ => unreachable!(),
         };
         return Ok(
@@ -1018,7 +1020,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         Some(other) => Err(format!("cannot index non-array `{}` ({:?})", func, other)),
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
-             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
+             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace, length, \

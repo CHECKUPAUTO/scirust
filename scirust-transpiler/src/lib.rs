@@ -869,6 +869,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn matlab_expm1_log1p_map_to_f64_methods() {
+        // expm1 / log1p -> the accurate f64 methods, scalar and elementwise.
+        let s = transpile_matlab("function y = f(x)\n  y = expm1(x);\nend\n").unwrap();
+        assert!(s.contains("(x).exp_m1()"));
+        // Elementwise over an array (array-ness established by `.* v`).
+        let a = transpile_matlab("function y = f(v)\n  y = log1p(v) .* v;\nend\n").unwrap();
+        assert!(a.contains("|x| x.ln_1p()"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

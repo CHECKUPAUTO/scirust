@@ -402,6 +402,10 @@ pub enum MathFn {
     Round,
     /// Truncate toward zero (MATLAB `fix` → `f64::trunc`).
     Trunc,
+    /// `exp(x) - 1`, accurate near zero (MATLAB `expm1` → `f64::exp_m1`).
+    Expm1,
+    /// `ln(1 + x)`, accurate near zero (MATLAB `log1p` → `f64::ln_1p`).
+    Log1p,
 }
 
 impl MathFn {
@@ -423,6 +427,8 @@ impl MathFn {
             MathFn::Atan => "atan",
             MathFn::Round => "round",
             MathFn::Trunc => "trunc",
+            MathFn::Expm1 => "exp_m1",
+            MathFn::Log1p => "ln_1p",
         }
     }
 }
