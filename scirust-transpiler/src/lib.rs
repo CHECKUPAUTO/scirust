@@ -621,6 +621,27 @@ mod tests {
         assert!(rust2.contains(".powf(b)"));
     }
 
+    #[test]
+    fn matlab_elementwise_power_broadcasts_and_maps() {
+        // v .^ 2 — array base, scalar exponent -> map1 broadcast, array out.
+        let sq = transpile_matlab("function y = f(v)\n  y = v .^ 2;\nend\n").unwrap();
+        assert_eq!(sig_of(&sq, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(sq.contains("np::map1(v, |x| x.powf("));
+        // a .^ b — two arrays -> elementwise ew2.
+        let ew = transpile_matlab("function y = f(a, b)\n  y = a .^ b;\nend\n").unwrap();
+        assert!(ew.contains("np::ew2(a, b, |x, y| x.powf(y))"));
+        // 2 .^ v — scalar base, array exponent -> the scalar is on the left.
+        let bc = transpile_matlab("function y = f(v)\n  y = 2.0 .^ v;\nend\n").unwrap();
+        assert!(bc.contains("np::map1(v, |x| (2.0f64).powf(x))"));
+    }
+
+    #[test]
+    fn matlab_matrix_power_operator_on_arrays_is_rejected() {
+        // `^` (matrix power) on a vector is refused; `.^` is the elementwise form.
+        let err = transpile_matlab("function y = f(v)\n  y = v ^ 2 + sum(v);\nend\n").unwrap_err();
+        assert!(err.contains("matrix power"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

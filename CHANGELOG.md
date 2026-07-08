@@ -160,6 +160,24 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB puissance élément par élément `.^` sur tableaux** prouvée contre Octave réel (Phase 2, incrément 23)
+Première opération **vectorielle** à deux arguments — l'idiome au cœur de MATLAB.
+Ajoute une infrastructure réutilisable (`SirExpr::EwBinFn` pour tableau∘tableau,
+`SirExpr::BroadcastFn` pour scalaire↔tableau, variante `MathFn2::Powf`) qui
+resservira aux formes élément-par-élément de `max`/`min`/`atan2`/`hypot`.
+
+- **`v .^ w`** (deux tableaux) → `np::ew2(v, w, |x, y| x.powf(y))`.
+- **`v .^ 2`** (base tableau, exposant scalaire) → `np::map1(v, |x| x.powf(2))`.
+- **`2 .^ v`** (base scalaire, exposant tableau) → `np::map1(v, |x| (2).powf(x))`
+  — l'ordre des opérandes est préservé (`.^` n'est pas commutatif).
+- **`^` sur un tableau** (puissance matricielle `mpower`) reste **refusé** avec un
+  diagnostic pointant vers `.^`.
+
+`f64::powf` reproduit `.^` d'Octave (vérifié, y compris exposant entier). Trois
+cas d'oracle. **Oracle 73/73** (200 essais chacun) ; **71 tests unitaires** (2
+nouveaux). *Non-vacuité* : inverser l'ordre de diffusion de `2 .^ v` (calculer
+`v .^ 2`) fait diverger le cas (200/200, |Δ|≈0,83) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `max(a,b)` / `min(a,b)` (2-arg) + `power(a,b)`** prouvés contre Octave réel (Phase 2, incrément 22)
 Réutilise le nœud math binaire (`MathFn2`) pour les formes à deux arguments de
 `max`/`min`, distinguées de la **réduction** à un argument par le **nombre
