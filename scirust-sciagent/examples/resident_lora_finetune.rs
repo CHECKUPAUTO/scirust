@@ -1,10 +1,13 @@
-//! **Resident LoRA fine-tuning** — adapt a frozen base `SciAgentModel` on the
-//! fully-resident GPU path with small q/k/v/o LoRA adapters, then merge them back
-//! into a plain fine-tuned model. The base never moves; only the low-rank
-//! adapters train (tiny optimizer footprint), which is the resident path's
-//! natural strength now that full-weight training is throughput-bound at scale.
+//! **Resident LoRA / DoRA fine-tuning** — adapt a frozen base `SciAgentModel` on
+//! the fully-resident GPU path with small q/k/v/o adapters, then merge them back
+//! into a plain fine-tuned model. The base never moves; only the adapters train
+//! (tiny optimizer footprint), which is the resident path's natural strength now
+//! that full-weight training is throughput-bound at scale.
 //!
 //! Environment:
+//! - `SCIAGENT_ADAPTER` — `lora` (default) or `dora`. DoRA additionally learns a
+//!   per-row magnitude (direction/magnitude decomposition), often higher quality
+//!   at the same rank.
 //! - `SCIAGENT_BASE_CKPT` — a checkpoint dir (`step_N/`, as written by
 //!   `resident_pretrain`) to load the **base** model from. Without it a fresh
 //!   `byte` model is used (the loss still drops, but there's nothing meaningful
@@ -28,11 +31,49 @@
 use std::path::Path;
 
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::gpu::{LoraConfig, ResidentLoraModel};
+use scirust_sciagent::gpu::{DoraConfig, LoraConfig, ResidentDoraModel, ResidentLoraModel};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{
     CheckpointMeta, latest_checkpoint, load_checkpoint, read_meta, save_checkpoint,
 };
+
+/// A LoRA or DoRA resident fine-tuner, chosen by `SCIAGENT_ADAPTER`. Both expose
+/// the same train/sync/forward surface, so the loop below is adapter-agnostic.
+enum Finetuner {
+    Lora(ResidentLoraModel),
+    Dora(ResidentDoraModel),
+}
+
+impl Finetuner {
+    fn kind(&self) -> &'static str {
+        match self
+        {
+            Self::Lora(_) => "LoRA",
+            Self::Dora(_) => "DoRA",
+        }
+    }
+    fn adapter_name(&self) -> &str {
+        match self
+        {
+            Self::Lora(m) => m.adapter_name(),
+            Self::Dora(m) => m.adapter_name(),
+        }
+    }
+    fn train_step(&mut self, i: &[u32], t: &[u32], lr: f32, b: (f32, f32), e: f32, wd: f32) -> f32 {
+        match self
+        {
+            Self::Lora(m) => m.train_step(i, t, lr, b, e, wd),
+            Self::Dora(m) => m.train_step(i, t, lr, b, e, wd),
+        }
+    }
+    fn sync_to_model(&self, model: &mut SciAgentModel) {
+        match self
+        {
+            Self::Lora(m) => m.sync_to_model(model),
+            Self::Dora(m) => m.sync_to_model(model),
+        }
+    }
+}
 
 fn byte_config() -> SciAgentConfig {
     SciAgentConfig {
@@ -121,21 +162,26 @@ fn main() {
     }
     let config = model.config.clone();
 
-    let lora = LoraConfig {
-        rank: env_usize("SCIAGENT_RANK", 8),
-        alpha: env_f32("SCIAGENT_ALPHA", 16.0),
+    let rank = env_usize("SCIAGENT_RANK", 8);
+    let alpha = env_f32("SCIAGENT_ALPHA", 16.0);
+    let kind = std::env::var("SCIAGENT_ADAPTER").unwrap_or_else(|_| "lora".into());
+    let built = match kind.to_ascii_lowercase().as_str()
+    {
+        "dora" => ResidentDoraModel::from_model(&model, DoraConfig { rank }).map(Finetuner::Dora),
+        _ => ResidentLoraModel::from_model(&model, LoraConfig { rank, alpha }).map(Finetuner::Lora),
     };
-    let Some(mut rm) = ResidentLoraModel::from_model(&model, lora)
+    let Some(mut rm) = built
     else
     {
         eprintln!("no GPU adapter available. Install a Vulkan ICD or run on the Jetson Thor.");
         std::process::exit(2);
     };
-    println!("resident LoRA fine-tuning on: {}", rm.adapter_name());
     println!(
-        "LoRA rank {}, alpha {} on q/k/v/o (base frozen)\n",
-        lora.rank, lora.alpha
+        "resident {} fine-tuning on: {}",
+        rm.kind(),
+        rm.adapter_name()
     );
+    println!("rank {rank} on q/k/v/o (base frozen)\n");
 
     // Fine-tuning corpus: byte-level text or a synthetic pattern.
     let seq = env_usize("SCIAGENT_SEQ", 64).min(config.max_seq_len);
