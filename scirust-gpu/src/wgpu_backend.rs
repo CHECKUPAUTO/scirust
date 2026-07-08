@@ -1495,6 +1495,56 @@ impl WgpuContext {
         self.queue.submit(Some(encoder.finish()));
     }
 
+    /// **Vertically stack** two resident row-major matrices of equal width into a
+    /// fresh `(a.rows + b.rows) × cols` matrix, entirely on the device: the result
+    /// buffer is filled with two `copy_buffer_to_buffer` transfers (no shader, no
+    /// CPU round-trip). The oracle is [`crate::ops::cpu_concat_rows`].
+    ///
+    /// This is the append primitive for a **fully-resident KV cache**: the growing
+    /// per-layer key/value cache never leaves VRAM — each decode step stacks the
+    /// new token's one roped-key / value row onto the cache with a GPU-side copy,
+    /// replacing the previous download-extend-reupload round-trip.
+    pub fn concat_rows_resident(&self, a: &GpuMatrix, b: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        if a.cols != b.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "concat_rows: column mismatch a {} vs b {}",
+                a.cols, b.cols
+            )));
+        }
+        let cols = a.cols;
+        let rows = a.rows + b.rows;
+        let a_bytes = (a.rows * cols * std::mem::size_of::<f32>()) as u64;
+        let b_bytes = (b.rows * cols * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("concat-rows-res"),
+            size: (a_bytes + b_bytes).max(4),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("concat-rows"),
+            });
+        if a_bytes > 0
+        {
+            encoder.copy_buffer_to_buffer(&a.buf, 0, &out_buf, 0, a_bytes);
+        }
+        if b_bytes > 0
+        {
+            encoder.copy_buffer_to_buffer(&b.buf, 0, &out_buf, a_bytes, b_bytes);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows,
+            cols,
+        })
+    }
+
     /// Row-wise RMSNorm of a **resident** `rows × cols` matrix, result kept in
     /// VRAM — `x / sqrt(mean(x²) + eps) · weight`, matching
     /// [`crate::ops::cpu_rms_norm`]. `weight` is a resident `cols`-length gain

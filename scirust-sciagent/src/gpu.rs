@@ -300,9 +300,10 @@ impl ResidentModel {
             return Vec::new();
         }
         let n = self.blocks.len();
-        // Per-layer host caches of roped keys / raw values (row-major, kv_dim wide).
-        let mut kcache: Vec<Vec<f32>> = vec![Vec::new(); n];
-        let mut vcache: Vec<Vec<f32>> = vec![Vec::new(); n];
+        // Per-layer **resident** caches of roped keys / raw values (each grows one
+        // row per step, on-device — no host round-trip).
+        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
 
         // Prefill: feed the prompt one token at a time, keeping the last logits.
         let mut last_logits = Vec::new();
@@ -330,20 +331,20 @@ impl ResidentModel {
     /// One **incremental decode step**: embed `token` at absolute position `pos`,
     /// run the full stack using the per-layer KV caches (appending this token's
     /// roped key and raw value to each), and return the `vocab`-wide logits for
-    /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` caches (row-major,
-    /// `kv_dim` columns), each grown by one row here. Reproduces
+    /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` **resident** caches
+    /// (row-major, `kv_dim` columns), each grown by one row here via a GPU-side
+    /// `concat_rows` — nothing leaves VRAM. Reproduces
     /// [`GpuChain::gqa_transformer_block`] restricted to the single new row.
     fn decode_step(
         &self,
         token: u32,
         pos: usize,
-        kcache: &mut [Vec<f32>],
-        vcache: &mut [Vec<f32>],
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
     ) -> Vec<f32> {
         let chain = &self.chain;
         let d_model = self.embedding.cols();
         let dh = d_model / self.n_heads;
-        let kv_dim = self.n_kv_heads * dh;
 
         // Embed the single new token → [1 × d_model].
         let mut x = chain.embed(&[token], &self.embedding).expect("embed");
@@ -359,14 +360,22 @@ impl ResidentModel {
             // exactly as `gqa_attention` ropes the full-width q/k.
             let qr = chain.rope(&q, 1, pos, self.theta).expect("rope q");
             let kr = chain.rope(&k, 1, pos, self.theta).expect("rope k");
-            // Append this step's roped key and raw value to the layer caches.
-            kcache[l].extend_from_slice(&chain.download(&kr).expect("download kr"));
-            vcache[l].extend_from_slice(&chain.download(&v).expect("download v"));
-            let seq = kcache[l].len() / kv_dim;
-            let kmat = chain.upload(&kcache[l], seq, kv_dim);
-            let vmat = chain.upload(&vcache[l], seq, kv_dim);
+            // Append this step's roped key / raw value to the resident layer caches
+            // (GPU-side row stack — no download/re-upload round-trip).
+            kcache[l] = Some(match kcache[l].take()
+            {
+                None => kr,
+                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
+            });
+            vcache[l] = Some(match vcache[l].take()
+            {
+                None => v,
+                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
+            });
+            let kmat = kcache[l].as_ref().unwrap();
+            let vmat = vcache[l].as_ref().unwrap();
             // Single query attends over all cached keys/values (all ≤ pos ⇒ no mask).
-            let ctx = self.incr_attention(&qr, &kmat, &vmat, dh);
+            let ctx = self.incr_attention(&qr, kmat, vmat, dh);
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
             x = chain.add(&x, &attn_out).expect("attn residual");
             // MLP sub-block (pre-norm + residual).
