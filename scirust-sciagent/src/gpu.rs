@@ -59,6 +59,21 @@ pub fn attach_gpu(tape: &Tape) -> Option<String> {
     Some(name)
 }
 
+/// Index of the maximum element (first on ties) — the greedy next-token pick.
+fn argmax(xs: &[f32]) -> usize {
+    let mut best = 0usize;
+    let mut best_v = f32::NEG_INFINITY;
+    for (i, &v) in xs.iter().enumerate()
+    {
+        if v > best_v
+        {
+            best_v = v;
+            best = i;
+        }
+    }
+    best
+}
+
 /// One GQA block's weights mirrored into VRAM.
 struct ResidentBlock {
     norm1: GpuMatrix,
@@ -236,6 +251,33 @@ impl ResidentModel {
     pub fn loss(&self, tokens: &[u32], targets: &[u32]) -> f32 {
         let logits = self.forward(tokens);
         scirust_gpu::ops::cpu_cross_entropy(&logits, targets, tokens.len(), self.vocab)
+    }
+
+    /// **Greedy autoregressive generation** on the resident path: from `prompt`,
+    /// decode `max_new` tokens by repeatedly running the resident forward and
+    /// taking the `argmax` of the last position's logits. Deterministic (no
+    /// sampling), matching a CPU greedy decode of the same weights. Returns the
+    /// full sequence (`prompt` followed by the generated tokens).
+    ///
+    /// Each step re-runs the whole-sequence forward (no KV cache yet), so this is
+    /// `O(n²)` in the sequence length — fine for short on-device generations; a
+    /// resident KV cache is the throughput follow-up. Closes the on-device loop:
+    /// pretrain / fine-tune → merge → **generate**, all on the Thor.
+    pub fn generate(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
+        let mut toks = prompt.to_vec();
+        for _ in 0..max_new
+        {
+            if toks.is_empty()
+            {
+                break;
+            }
+            let logits = self.forward(&toks);
+            let seq = toks.len();
+            let last = &logits[(seq - 1) * self.vocab..seq * self.vocab];
+            let next = argmax(last) as u32;
+            toks.push(next);
+        }
+        toks
     }
 
     /// One **resident AdamW training step** on `(tokens, targets)`: forward →

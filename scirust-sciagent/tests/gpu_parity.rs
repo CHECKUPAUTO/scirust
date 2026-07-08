@@ -459,3 +459,65 @@ fn resident_dora_finetune_reduces_loss_and_syncs() {
     assert!(e < 3e-3, "post-sync merge mismatch: rel_err {e}");
     eprintln!("resident DoRA fine-tune + merge — PASS");
 }
+
+/// **Resident greedy generation** (`ResidentModel::generate`) matches a CPU greedy
+/// decode of the same weights: at each step the resident argmax next-token equals
+/// the CPU model's, and `generate` reproduces the step-by-step continuation. The
+/// on-device inference side of the loop (pretrain/fine-tune → merge → generate).
+/// Skips with no adapter.
+#[test]
+fn resident_generate_matches_cpu_greedy() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    fn argmax(xs: &[f32]) -> usize {
+        let mut best = 0usize;
+        let mut bv = f32::NEG_INFINITY;
+        for (i, &v) in xs.iter().enumerate()
+        {
+            if v > bv
+            {
+                bv = v;
+                best = i;
+            }
+        }
+        best
+    }
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident generate");
+        return;
+    };
+    eprintln!("resident generate on: {}", rm.adapter_name());
+    let vocab = config.vocab_size;
+
+    // Step-by-step greedy: the resident and CPU argmax next-token must agree.
+    let mut toks = prompt.clone();
+    let steps = 5usize;
+    for _ in 0..steps
+    {
+        let seq = toks.len();
+        let ids: Vec<usize> = toks.iter().map(|&t| t as usize).collect();
+        let tape = Tape::new();
+        let lv = model.forward(&tape, &ids, seq);
+        let cpu_logits = tape.value(lv.idx()).data;
+        let cpu_next = argmax(&cpu_logits[(seq - 1) * vocab..seq * vocab]);
+
+        let res_logits = rm.forward(&toks);
+        let res_next = argmax(&res_logits[(seq - 1) * vocab..seq * vocab]);
+        assert_eq!(
+            cpu_next, res_next,
+            "greedy next-token mismatch at seq {seq}"
+        );
+        toks.push(cpu_next as u32);
+    }
+
+    // The one-shot generate() reproduces the same continuation.
+    let gen = rm.generate(&prompt, steps);
+    assert_eq!(gen, toks, "generate() must match step-by-step greedy");
+    eprintln!("resident greedy generation matches CPU — PASS ({gen:?})");
+}
