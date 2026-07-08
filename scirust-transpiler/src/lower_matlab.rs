@@ -430,18 +430,48 @@ fn lower_bin(
     let ra = rv.ty() == Ty::Array;
     match op
     {
-        // Scalar power (`^`) — scalars only.
-        MBinOp::Pow | MBinOp::EPow =>
+        // Matrix power (`^`) — scalars only in this subset (`A^2` on a matrix is
+        // `mpower`, not supported; use `.^` for elementwise).
+        MBinOp::Pow =>
         {
             if la || ra
             {
-                return Err("`^`/`.^` on arrays is not supported in this subset".into());
+                return Err(
+                    "`^` (matrix power) on arrays is not supported — use `.^` for \
+                     elementwise power"
+                        .into(),
+                );
             }
             Ok(SirExpr::ScalarPow {
                 base: Box::new(lv),
                 exp: Box::new(rv),
             })
         },
+        // Elementwise power (`.^`): scalar∘scalar, array∘array, or broadcast.
+        MBinOp::EPow => Ok(match (la, ra)
+        {
+            (false, false) => SirExpr::ScalarPow {
+                base: Box::new(lv),
+                exp: Box::new(rv),
+            },
+            (true, true) => SirExpr::EwBinFn {
+                func: MathFn2::Powf,
+                l: Box::new(lv),
+                r: Box::new(rv),
+            },
+            (true, false) => SirExpr::BroadcastFn {
+                func: MathFn2::Powf,
+                scalar: Box::new(rv),
+                arr: Box::new(lv),
+                arr_is_left: true,
+            },
+            (false, true) => SirExpr::BroadcastFn {
+                func: MathFn2::Powf,
+                scalar: Box::new(lv),
+                arr: Box::new(rv),
+                arr_is_left: false,
+            },
+        }),
         // Element-wise ops: array∘array, or scalar broadcast, or plain scalar.
         MBinOp::EMul | MBinOp::EDiv =>
         {

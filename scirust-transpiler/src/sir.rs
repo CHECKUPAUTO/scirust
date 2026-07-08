@@ -201,6 +201,23 @@ pub enum SirExpr {
         func: MathFn,
         arg: Box<SirExpr>,
     },
+    /// Elementwise two-argument math over two equal-length arrays -> Array
+    /// (e.g. `v .^ w`, elementwise `max`/`min`/`atan2`/`hypot`).
+    EwBinFn {
+        func: MathFn2,
+        l: Box<SirExpr>,
+        r: Box<SirExpr>,
+    },
+    /// Broadcast a two-argument math intrinsic between a scalar and an array
+    /// (e.g. `v .^ 2` or `2 .^ v`) -> Array. `arr_is_left` selects the operand
+    /// order (`arr.f(scalar)` vs `scalar.f(arr)`), which matters for `atan2` and
+    /// `powf`.
+    BroadcastFn {
+        func: MathFn2,
+        scalar: Box<SirExpr>,
+        arr: Box<SirExpr>,
+        arr_is_left: bool,
+    },
     /// `np.sum(a)` : Array -> Scalar, fixed ascending reduction order.
     Sum(Box<SirExpr>),
     /// `np.prod(a)` : Array -> Scalar, fixed ascending reduction order.
@@ -367,6 +384,8 @@ pub enum MathFn2 {
     Max,
     /// `min(a, b)` → `f64::min` (smaller of two scalars).
     Min,
+    /// Elementwise/broadcast power (`.^`) → `f64::powf`.
+    Powf,
 }
 
 impl MathFn2 {
@@ -377,6 +396,7 @@ impl MathFn2 {
             MathFn2::Hypot => "hypot",
             MathFn2::Max => "max",
             MathFn2::Min => "min",
+            MathFn2::Powf => "powf",
         }
     }
 }
@@ -406,6 +426,8 @@ impl SirExpr {
             SirExpr::EwBin { .. }
             | SirExpr::ScalarBroadcast { .. }
             | SirExpr::ArrayUnaryFn { .. }
+            | SirExpr::EwBinFn { .. }
+            | SirExpr::BroadcastFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
             | SirExpr::ArrayLit(_)
@@ -528,10 +550,16 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::EwBin { l, r, .. }
         | SirExpr::Cmp { l, r, .. }
         | SirExpr::ScalarBinFn { l, r, .. }
+        | SirExpr::EwBinFn { l, r, .. }
         | SirExpr::Dot(l, r) =>
         {
             scan_expr(l, solvers, signal);
             scan_expr(r, solvers, signal);
+        },
+        SirExpr::BroadcastFn { scalar, arr, .. } =>
+        {
+            scan_expr(scalar, solvers, signal);
+            scan_expr(arr, solvers, signal);
         },
         SirExpr::ScalarNeg(x)
         | SirExpr::ScalarUnaryFn { arg: x, .. }

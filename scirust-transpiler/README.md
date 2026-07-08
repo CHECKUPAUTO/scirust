@@ -49,7 +49,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `function y = f(x) … end` / `endfunction` | one `pub fn` returning the output variable's final value |
 | 1-based indexing `a(i)` | `a[i-1]` (0-based) |
 | inclusive ranges `for i = 1:n` | `for i in 1..(n+1)` |
-| element-wise `.*` `./` `.^` (operands inferred as arrays) vs scalar `* / ^` | `EwBin` / broadcast vs scalar op |
+| element-wise `.*` `./` `.^` (arrays or scalar↔array broadcast) vs scalar `* / ^` | `EwBin`/`EwBinFn`/`BroadcastFn` vs scalar op (`^` on an array = `mpower`, refused) |
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
@@ -106,8 +106,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: round / fix / mod / rem / sign 200/200 trials match (octave) (MATLAB rounding & modular scalar functions, Phase 2)
   ✓ M: atan2(y,x) / hypot(a,b)    200/200 trials match (octave) (MATLAB two-argument scalar math, Phase 2)
   ✓ M: max(a,b) / min(a,b) / power(a,b) 200/200 trials match (octave) (MATLAB binary max/min & power, Phase 2)
+  ✓ M: v.^2 / a.^b / 2.^v         200/200 trials match (octave) (MATLAB elementwise power `.^`, broadcast, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 70/70 cases match their reference runtime within tolerance
+  ORACLE GREEN — 73/73 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

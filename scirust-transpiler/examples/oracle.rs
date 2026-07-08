@@ -778,6 +778,47 @@ fn matlab_cases() -> Vec<Case> {
             src: "function y = mpow(a, b)\n  y = power(a, b);\nend\n",
             args: vec![Scalar { lo: 0.2, hi: 3.0 }, Scalar { lo: -2.0, hi: 2.0 }],
         },
+        // ---- MATLAB elementwise power `.^` on arrays (Phase 2) ----
+        // v .^ 2 — array base, scalar (literal) exponent: broadcast, array out.
+        Case {
+            name: "M: v .^ 2 (broadcast, array base)",
+            call: "msqel",
+            src: "function y = msqel(v)\n  y = v .^ 2;\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // a .^ b — elementwise, both arrays (positive bases for a real result).
+        Case {
+            name: "M: a .^ b (elementwise, arrays)",
+            call: "mpowel",
+            src: "function y = mpowel(a, b)\n  y = a .^ b;\nend\n",
+            args: vec![
+                Array {
+                    n: 6,
+                    lo: 0.2,
+                    hi: 3.0,
+                },
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+        // 2 .^ v — scalar (literal) base, array exponent: broadcast the other way.
+        Case {
+            name: "M: 2 .^ v (broadcast, array exp)",
+            call: "mexpel",
+            src: "function y = mexpel(v)\n  y = 2.0 .^ v;\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

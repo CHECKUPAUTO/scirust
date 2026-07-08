@@ -641,6 +641,48 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::EwBinFn { func, l, r } =>
+        {
+            // Elementwise two-argument math over two arrays: `np::ew2(l, r, |x, y| x.f(y))`.
+            let l = emit(l, ctx);
+            let r = emit(r, ctx);
+            Frag {
+                code: format!(
+                    "np::ew2({}, {}, |x, y| x.{}(y))",
+                    slice_of(&l),
+                    slice_of(&r),
+                    func.rust_method()
+                ),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::BroadcastFn {
+            func,
+            scalar,
+            arr,
+            arr_is_left,
+        } =>
+        {
+            // Broadcast a scalar against an array: `np::map1(arr, |x| x.f(s))` or
+            // `np::map1(arr, |x| (s).f(x))`.
+            let s = emit(scalar, ctx);
+            let a = emit(arr, ctx);
+            let scode = scalar_of(s);
+            let body = if *arr_is_left
+            {
+                format!("|x| x.{}({})", func.rust_method(), scode)
+            }
+            else
+            {
+                format!("|x| ({}).{}(x)", scode, func.rust_method())
+            };
+            Frag {
+                code: format!("np::map1({}, {})", slice_of(&a), body),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
         SirExpr::Cmp { op, l, r } =>
         {
             let l = emit(l, ctx);
