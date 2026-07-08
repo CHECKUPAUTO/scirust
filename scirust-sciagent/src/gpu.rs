@@ -292,9 +292,11 @@ impl ResidentModel {
     /// logits are reproduced bit-for-bit (verified token-for-token in
     /// `tests/gpu_parity.rs`).
     ///
-    /// Caches live on the host as `n_layers` growing `Vec<f32>` (roped K, raw V,
-    /// `kv_dim` columns), re-uploaded per step; the compute stays resident.
-    /// Returns the full sequence (`prompt` followed by the generated tokens).
+    /// The per-layer caches are **resident** (roped K, raw V, `kv_dim` columns),
+    /// grown one row per step on-device; nothing leaves VRAM. The prompt is
+    /// consumed by a single batched [`Self::prefill`] (wide matmuls) rather than
+    /// token-by-token. Returns the full sequence (`prompt` then the generated
+    /// tokens).
     pub fn generate_cached(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
         if prompt.is_empty()
         {
@@ -306,12 +308,9 @@ impl ResidentModel {
         let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
         let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
 
-        // Prefill: feed the prompt one token at a time, keeping the last logits.
-        let mut last_logits = Vec::new();
-        for (pos, &tok) in prompt.iter().enumerate()
-        {
-            last_logits = self.decode_step(tok, pos, &mut kcache, &mut vcache);
-        }
+        // Prefill the whole prompt in one batched forward, seeding the caches and
+        // keeping the logits after the last prompt token.
+        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);
 
         // Decode: argmax → append → step, growing the same caches. The final
         // token needs no further forward (nothing is generated after it).
@@ -356,12 +355,8 @@ impl ResidentModel {
         let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
         let mut rng = seed_to_state(seed);
 
-        // Prefill: feed the prompt, keeping the logits after the last prompt token.
-        let mut last_logits = Vec::new();
-        for (pos, &tok) in prompt.iter().enumerate()
-        {
-            last_logits = self.decode_step(tok, pos, &mut kcache, &mut vcache);
-        }
+        // Prefill the whole prompt in one batched forward, seeding the caches.
+        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);
 
         let mut toks = prompt.to_vec();
         for i in 0..max_new
@@ -378,6 +373,72 @@ impl ResidentModel {
             }
         }
         toks
+    }
+
+    /// **Batched prompt prefill**: run one wide forward over the whole `prompt`
+    /// (positions `0..P`), seeding each layer's KV cache with the full `[P × kv_dim]`
+    /// roped-key / raw-value block, and return the `vocab`-wide logits for the
+    /// **last** prompt position (the first token to decode from).
+    ///
+    /// This is the standard prefill/decode split: the projections and attention run
+    /// as `m = P` matmuls (good GPU occupancy) instead of `P` separate `m = 1`
+    /// [`Self::decode_step`]s. It is arithmetically the whole-sequence
+    /// [`GpuChain::gqa_transformer_block`] over the prompt, so the seeded cache rows
+    /// and the returned last-row logits are **bit-for-bit** what the token-by-token
+    /// path would have produced — the subsequent [`Self::decode_step`]s append onto
+    /// exactly the rows they expect. Assumes a non-empty prompt (callers guard).
+    fn prefill(
+        &self,
+        prompt: &[u32],
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
+    ) -> Vec<f32> {
+        let chain = &self.chain;
+        let p = prompt.len();
+
+        let mut x = chain.embed(prompt, &self.embedding).expect("embed"); // [P × d_model]
+        for (l, b) in self.blocks.iter().enumerate()
+        {
+            // Attention sub-block (pre-norm + residual), batched over all P rows.
+            let xn = chain.rms_norm(&x, &b.norm1, self.eps).expect("norm1");
+            let q = chain.matmul(&xn, &b.wq).expect("wq"); // [P × d_model]
+            let k = chain.matmul(&xn, &b.wk).expect("wk"); // [P × kv_dim]
+            let v = chain.matmul(&xn, &b.wv).expect("wv"); // [P × kv_dim]
+            // Full causal attention over the prompt (ropes q/k internally).
+            let ctx = chain
+                .gqa_attention(
+                    &q,
+                    &k,
+                    &v,
+                    self.n_heads,
+                    self.n_kv_heads,
+                    p,
+                    self.theta,
+                    true,
+                )
+                .expect("gqa attention");
+            // Seed the caches with the prompt's roped keys / raw values. `kr` here
+            // is the same full-width RoPE (positions 0..P) `decode_step` produces
+            // one row at a time, so later appends line up exactly.
+            let kr = chain.rope(&k, p, 0, self.theta).expect("rope k");
+            kcache[l] = Some(kr);
+            vcache[l] = Some(v);
+            let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
+            x = chain.add(&x, &attn_out).expect("attn residual");
+            // MLP sub-block (pre-norm + residual).
+            let hn = chain.rms_norm(&x, &b.norm2, self.eps).expect("norm2");
+            let mlp = chain.swiglu_mlp(&hn, &b.wg, &b.wu, &b.wd).expect("mlp");
+            x = chain.add(&x, &mlp).expect("mlp residual");
+        }
+        // Final norm + tied LM head, then keep only the last position's logits.
+        let normed = chain
+            .rms_norm(&x, &self.final_norm, self.eps)
+            .expect("final norm");
+        let logits = chain
+            .matmul_t(&normed, &self.embedding, false, true)
+            .expect("logits");
+        let all = chain.download(&logits).expect("download logits");
+        all[(p - 1) * self.vocab..p * self.vocab].to_vec()
     }
 
     /// One **incremental decode step**: embed `token` at absolute position `pos`,
