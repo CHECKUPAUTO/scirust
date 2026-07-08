@@ -160,6 +160,21 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `conv` + `polyval`** prouvés contre Octave réel (Phase 2, incrément 33)
+Deux classiques du traitement du signal / numérique, câblés via des helpers
+déterministes du prélude :
+
+- **`conv(a, b)`** — convolution linéaire complète (longueur `len(a)+len(b)−1`,
+  ordre d'accumulation fixe donc bit-reproductible) ; les **deux** opérandes sont
+  inférés vecteurs.
+- **`polyval(p, x)`** — évaluation de Horner du polynôme de coefficients `p`
+  (degré décroissant) au point scalaire `x` ; `p` est inféré vecteur, `x` reste
+  scalaire.
+
+Deux cas d'oracle. **Oracle 96/96** (200 essais chacun) ; **81 tests unitaires**
+(1 nouveau). *Non-vacuité* : remplacer la récurrence de Horner `acc·x + p[i]` par
+`acc + x·p[i]` fait diverger `polyval` et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `kron` + `cumtrapz`** prouvés contre Octave réel (Phase 2, incrément 32)
 Deux opérations vectorielles supplémentaires, câblées via des helpers
 déterministes du prélude :

@@ -774,6 +774,30 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&b, "kron")?;
         return Ok(SirExpr::Kron(Box::new(a), Box::new(b)));
     }
+    if func == "conv"
+    {
+        // conv(a, b) — full linear convolution (both operands vectors).
+        need_args(func, args, 2)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_array(&a, "conv")?;
+        expect_array(&b, "conv")?;
+        return Ok(SirExpr::Conv(Box::new(a), Box::new(b)));
+    }
+    if func == "polyval"
+    {
+        // polyval(p, x) — evaluate the polynomial with coefficients `p` (highest
+        // degree first) at the scalar `x`.
+        need_args(func, args, 2)?;
+        let p = lower_scalar(&args[0], env)?;
+        let x = lower_scalar(&args[1], env)?;
+        expect_array(&p, "polyval")?;
+        expect_scalar(&x, "polyval")?;
+        return Ok(SirExpr::Polyval {
+            p: Box::new(p),
+            x: Box::new(x),
+        });
+    }
     if func == "linspace"
     {
         // linspace(a, b, n) — n evenly-spaced points from a to b (a, b scalars;
@@ -996,7 +1020,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
              mod/rem/sign/atan2/hypot/power, \
-             sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/trapz, \
+             sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace, length, \
              det/inv/eig/trace)",
             func
@@ -1186,11 +1210,16 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 || (is_reduction(func)
                     && args.len() == 1
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
-                // `dot(a, b)` / `cross(a, b)` / `kron(a, b)` — both operands are
-                // vectors, so either being the name is evidence (the generic
-                // reduction arm checks only the first argument).
-                || (matches!(func.as_str(), "dot" | "cross" | "kron")
+                // `dot(a, b)` / `cross(a, b)` / `kron(a, b)` / `conv(a, b)` —
+                // both operands are vectors, so either being the name is
+                // evidence (the generic reduction arm checks only the first
+                // argument).
+                || (matches!(func.as_str(), "dot" | "cross" | "kron" | "conv")
                     && args.iter().any(|a| is_ident(name, a)))
+                // `polyval(p, x)` — only the first argument (the coefficients)
+                // is a vector; `x` is a scalar.
+                || (func == "polyval"
+                    && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // Vector -> vector builtins whose (single) argument is a vector.
                 || (matches!(
                     func.as_str(),

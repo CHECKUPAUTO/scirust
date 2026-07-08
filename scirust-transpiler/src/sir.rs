@@ -242,6 +242,15 @@ pub enum SirExpr {
     /// `kron(a, b)` : (Array, Array) -> Array, the Kronecker product of two
     /// vectors (`out[i*n+j] = a[i]*b[j]`, length `len(a)*len(b)`).
     Kron(Box<SirExpr>, Box<SirExpr>),
+    /// `conv(a, b)` : (Array, Array) -> Array, full linear convolution
+    /// (length `len(a)+len(b)-1`).
+    Conv(Box<SirExpr>, Box<SirExpr>),
+    /// `polyval(p, x)` : (Array, Scalar) -> Scalar, Horner evaluation of the
+    /// polynomial with coefficients `p` (highest degree first) at `x`.
+    Polyval {
+        p: Box<SirExpr>,
+        x: Box<SirExpr>,
+    },
     /// `cumtrapz(v)` : Array -> Array, cumulative trapezoidal integral (unit
     /// spacing; first element `0`, same length).
     Cumtrapz(Box<SirExpr>),
@@ -471,6 +480,7 @@ impl SirExpr {
             | SirExpr::Median(_)
             | SirExpr::Trace(_)
             | SirExpr::Trapz(_)
+            | SirExpr::Polyval { .. }
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -494,6 +504,7 @@ impl SirExpr {
             | SirExpr::Matvec { .. }
             | SirExpr::Cross(_, _)
             | SirExpr::Kron(_, _)
+            | SirExpr::Conv(_, _)
             | SirExpr::Cumtrapz(_)
             | SirExpr::DiagExtract(_)
             | SirExpr::ComplexAbs(_) => Ty::Array,
@@ -615,10 +626,16 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::EwBinFn { l, r, .. }
         | SirExpr::Dot(l, r)
         | SirExpr::Cross(l, r)
-        | SirExpr::Kron(l, r) =>
+        | SirExpr::Kron(l, r)
+        | SirExpr::Conv(l, r) =>
         {
             scan_expr(l, solvers, signal);
             scan_expr(r, solvers, signal);
+        },
+        SirExpr::Polyval { p, x } =>
+        {
+            scan_expr(p, solvers, signal);
+            scan_expr(x, solvers, signal);
         },
         SirExpr::BroadcastFn { scalar, arr, .. } =>
         {
