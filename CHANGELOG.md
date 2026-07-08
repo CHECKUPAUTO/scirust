@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `mod` / `rem` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 37)
+`mod` et `rem` deviennent **vectoriels**. Le nouveau helper `lower_modrem`
+assemble `a − b·floor(a/b)` (resp. `a − b·fix(a/b)`) en déléguant chaque étape
+arithmétique à `ew_or_broadcast`, de sorte que la même logique couvre scalaires,
+deux vecteurs, ou une diffusion scalaire↔vecteur (avec `floor`/`fix` appliqué
+élément par élément quand le quotient est un tableau).
+
+- `mod(a, b)` / `rem(a, b)` acceptent désormais des **vecteurs** (élément par
+  élément) et des mélanges scalaire↔vecteur (diffusion), en plus des scalaires.
+
+Deux cas d'oracle (`mod(cumsum(v), 3)`, `rem(cumsum(v), 3)` en diffusion).
+**Oracle 106/106** (200 essais chacun) ; **85 tests unitaires** (1 nouveau).
+*Non-vacuité* : faire utiliser `floor` à `rem` (au lieu de `fix`) fait diverger
+les cas `rem` à dividende négatif (scalaire ET élément par élément) tandis que
+`mod` reste vert — la distinction `floor`/`fix` est donc bien portante.
+
 ### Ajouté — transpileur : **MATLAB `deg2rad` / `rad2deg` + `sign` élément par élément** prouvés contre Octave réel (Phase 2, incrément 36)
 Conversions d'angle et `sign` vectoriel :
 

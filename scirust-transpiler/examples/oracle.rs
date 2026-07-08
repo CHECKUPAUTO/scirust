@@ -1171,6 +1171,29 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 2.0,
             }],
         },
+        // ---- MATLAB elementwise mod / rem (broadcast over a vector) ----
+        // mod(v, 3) elementwise (array, scalar broadcast).
+        Case {
+            name: "M: mod(cumsum(v), 3) (broadcast)",
+            call: "mmodew",
+            src: "function y = mmodew(v)\n  y = mod(cumsum(v), 3.0);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // rem(v, 3) elementwise (array, scalar broadcast).
+        Case {
+            name: "M: rem(cumsum(v), 3) (broadcast)",
+            call: "mremew",
+            src: "function y = mremew(v)\n  y = rem(cumsum(v), 3.0);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
     ]
 }
 

@@ -60,7 +60,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
-| `mod(a,b)` / `rem(a,b)` (modular), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix`; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
+| `mod(a,b)` / `rem(a,b)` (modular; scalar, elementwise or broadcast), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix` (`mod` floors, `rem` truncates) via elementwise/broadcast on vectors; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
@@ -128,8 +128,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: expm1(x) / log1p(v)        200/200 trials match (octave) (accurate-near-zero exp/log, Phase 2)
   ✓ M: atan2/hypot/max/min elementwise & broadcast 200/200 trials match (octave) (two-arg math on arrays, Phase 2)
   ✓ M: deg2rad / rad2deg + sign elementwise 200/200 trials match (octave) (angle conversion + vector sign, Phase 2)
+  ✓ M: mod(cumsum(v),3) / rem(cumsum(v),3) 200/200 trials match (octave) (elementwise modular, broadcast, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 104/104 cases match their reference runtime within tolerance
+  ORACLE GREEN — 106/106 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -194,8 +195,8 @@ them.
   matrix `norm` (spectral norm) is a distinct quantity and is refused.
 * **`round` follows MATLAB, not NumPy.** It rounds half *away from zero*
   (`f64::round`), which differs from `numpy.round`'s banker's rounding — so it is
-  wired only on the MATLAB path. `mod`/`rem`/`sign` are scalar-only in this
-  subset (MATLAB applies them elementwise; array forms are a later increment).
+  wired only on the MATLAB path. `mod`/`rem`/`sign` apply elementwise (and
+  broadcast) over vectors as well as scalars, matching MATLAB.
 * **Unifying with `codetrans::Expr`** as the shared emission backend is future
   work: its `Function` node has untyped (`Vec<String>`) params, so this MVP
   uses a purpose-built typed emitter to produce compiling Rust.

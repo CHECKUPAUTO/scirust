@@ -914,6 +914,20 @@ mod tests {
         assert!(sv.contains("if x > 0.0"));
     }
 
+    #[test]
+    fn matlab_mod_rem_broadcast_over_vectors() {
+        // mod / rem now work elementwise: `mod(v, s)` broadcasts over a vector.
+        let m = transpile_matlab("function y = f(v)\n  y = mod(cumsum(v), 3.0);\nend\n").unwrap();
+        assert_eq!(sig_of(&m, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(m.contains("np::map1(")); // broadcast div and mul
+        assert!(m.contains(".floor()")); // mod uses floor
+        let r = transpile_matlab("function y = f(v)\n  y = rem(cumsum(v), 3.0);\nend\n").unwrap();
+        assert!(r.contains(".trunc()")); // rem uses trunc (fix)
+        // Scalar mod still lowers to the scalar composition.
+        let s = transpile_matlab("function y = f(a, b)\n  y = mod(a, b);\nend\n").unwrap();
+        assert_eq!(sig_of(&s, "f"), "pub fn f(a: f64, b: f64) -> f64 {");
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]
