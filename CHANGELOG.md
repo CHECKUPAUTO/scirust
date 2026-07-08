@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB algèbre linéaire — `det` / `inv` / `\` (résolution)** routés vers `scirust-solvers`, prouvés contre Octave réel (Phase 2, incrément 18)
+La couverture MATLAB gagne l'algèbre linéaire du cœur numérique, réutilisant les
+kernels vérifiés de `scirust-solvers` déjà branchés côté Python. (1) **`det(A)`**
+et **`inv(A)`** deviennent des intrinsèques MATLAB (déterminant scalaire,
+inverse matrice 2-D). (2) **`A \ b`** — l'opérateur de division à gauche, la
+manière idiomatique de résoudre `Ax = b` en MATLAB — se lexe (`\`), se parse
+(`MBinOp::LDiv`) et se lowerise en `LinSolve` (factorisation LU). (3) **Inférence
+de paramètre matrice** : les arguments de `det`/`inv` et la gauche de `\`
+prouvent qu'un paramètre est une **matrice** (`infer_param_ty` teste désormais
+la preuve-matrice avant la preuve-tableau) ; `\` exige une matrice à gauche et un
+vecteur à droite (diagnostic clair sinon). L'oracle Octave sérialise désormais
+les sorties matricielles en **ordre ligne-major** (`r.'`) et les vecteurs en
+**colonne** pour aligner la sémantique `A \ b`. Trois cas d'oracle : `det(A)`,
+`inv(A)` (sortie matrice), `A \ b` (résolution). **Oracle 59/59** (200 essais
+chacun) ; **60 tests unitaires** (3 nouveaux). *Non-vacuité* : sérialiser `inv`
+en colonne-major fait diverger le cas non symétrique et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB multi-sorties `[a,b] = f(…)` + vocabulaire MATLAB élargi** prouvés contre Octave réel (Phase 2, incrément 17)
 Vers une couverture MATLAB large et sûre. (1) **Fonctions multi-sorties** :
 `function [o1, o2, …] = f(x) … end` transpile vers un `pub fn … -> (T0, T1, …)`

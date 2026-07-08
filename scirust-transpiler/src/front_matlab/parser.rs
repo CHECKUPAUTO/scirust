@@ -343,6 +343,10 @@ impl<'a> Parser<'a> {
             {
                 MBinOp::EDiv
             }
+            else if self.is_sym("\\")
+            {
+                MBinOp::LDiv
+            }
             else
             {
                 break;
