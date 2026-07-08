@@ -42,19 +42,9 @@ fn flat_workgroups(threads: u32) -> u32 {
     threads.div_ceil(64).min(MAX_WORKGROUPS_PER_DIM)
 }
 
-/// General WGSL GEMM: `C = alpha·op(A)·op(B) + beta·C`, row-major. `op(A)` is
-/// `m×k`, `op(B)` is `k×n`, `C` is `m×n`; `ta`/`tb` flag whether the *stored*
-/// `a`/`b` is the transpose of `op`.
-///
-/// **Shared-memory tiled** (`16×16`): each workgroup cooperatively stages a
-/// `TILE×TILE` block of `op(A)` and `op(B)` into workgroup memory, then every
-/// thread accumulates from the fast on-chip tiles. This cuts global-memory
-/// traffic by ~`TILE×` versus a naïve one-load-per-MAC kernel — the dominant
-/// cost of a large matmul (e.g. the `128×1024·1024×32768` tied head). One thread
-/// still owns one output cell; the accumulation is the same sum, tile-blocked,
-/// so it matches the CPU oracle within the usual f32 tolerance. Tiles are 2·1 KB
-/// of the 16 KB `downlevel_defaults` workgroup-storage budget; `16×16 = 256`
-/// invocations is exactly the portable per-workgroup limit.
+/// General WGSL GEMM: `C = alpha·op(A)·op(B) + beta·C`, row-major, one
+/// invocation per output cell. `op(A)` is `m×k`, `op(B)` is `k×n`, `C` is `m×n`;
+/// `ta`/`tb` flag whether the *stored* `a`/`b` is the transpose of `op`.
 const GEMM_WGSL: &str = r#"
 struct P { m: u32, k: u32, n: u32, ta: u32, tb: u32, alpha: f32, beta: f32, _pad: u32, };
 
@@ -63,43 +53,21 @@ struct P { m: u32, k: u32, n: u32, ta: u32, tb: u32, alpha: f32, beta: f32, _pad
 @group(0) @binding(2) var<storage, read_write> c: array<f32>;
 @group(0) @binding(3) var<uniform>             p: P;
 
-const TILE: u32 = 16u;
-var<workgroup> tile_a: array<f32, 256>; // TILE*TILE
-var<workgroup> tile_b: array<f32, 256>;
-
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>,
-        @builtin(local_invocation_id) lid: vec3<u32>) {
-    let i = gid.x;   // C row in [0, m)
-    let j = gid.y;   // C col in [0, n)
-    let li = lid.x;
-    let lj = lid.y;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let j = gid.y;
+    if (i >= p.m || j >= p.n) { return; }
     var acc: f32 = 0.0;
-    let ntiles = (p.k + TILE - 1u) / TILE;
-    for (var t: u32 = 0u; t < ntiles; t = t + 1u) {
-        // Stage op(A)[i, t*TILE+lj] and op(B)[t*TILE+li, j] into shared tiles.
-        let ak = t * TILE + lj;
-        var av: f32 = 0.0;
-        if (i < p.m && ak < p.k) {
-            if (p.ta == 1u) { av = a[ak * p.m + i]; } else { av = a[i * p.k + ak]; }
-        }
-        tile_a[li * TILE + lj] = av;
-        let bk = t * TILE + li;
-        var bv: f32 = 0.0;
-        if (j < p.n && bk < p.k) {
-            if (p.tb == 1u) { bv = b[j * p.k + bk]; } else { bv = b[bk * p.n + j]; }
-        }
-        tile_b[li * TILE + lj] = bv;
-        workgroupBarrier();
-        for (var q: u32 = 0u; q < TILE; q = q + 1u) {
-            acc = acc + tile_a[li * TILE + q] * tile_b[q * TILE + lj];
-        }
-        workgroupBarrier();
+    for (var q: u32 = 0u; q < p.k; q = q + 1u) {
+        var av: f32;
+        var bv: f32;
+        if (p.ta == 1u) { av = a[q * p.m + i]; } else { av = a[i * p.k + q]; }
+        if (p.tb == 1u) { bv = b[j * p.k + q]; } else { bv = b[q * p.n + j]; }
+        acc = acc + av * bv;
     }
-    if (i < p.m && j < p.n) {
-        let idx = i * p.n + j;
-        c[idx] = p.alpha * acc + p.beta * c[idx];
-    }
+    let idx = i * p.n + j;
+    c[idx] = p.alpha * acc + p.beta * c[idx];
 }
 "#;
 
@@ -2740,7 +2708,7 @@ impl WgpuContext {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups((m as u32).div_ceil(16), (n as u32).div_ceil(16), 1);
+            pass.dispatch_workgroups((m as u32).div_ceil(8), (n as u32).div_ceil(8), 1);
         }
         encoder.copy_buffer_to_buffer(&c_buf, 0, &staging, 0, bytes);
         self.queue.submit(Some(encoder.finish()));
@@ -2935,7 +2903,7 @@ impl WgpuContext {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups((m as u32).div_ceil(16), (n as u32).div_ceil(16), 1);
+            pass.dispatch_workgroups((m as u32).div_ceil(8), (n as u32).div_ceil(8), 1);
         }
         self.queue.submit(Some(encoder.finish()));
     }
