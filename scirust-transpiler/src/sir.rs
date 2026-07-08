@@ -235,6 +235,10 @@ pub enum SirExpr {
     Median(Box<SirExpr>),
     /// `np.dot(a, b)` : (Array, Array) -> Scalar, fixed reduction order.
     Dot(Box<SirExpr>, Box<SirExpr>),
+    /// `trace(A)` : Matrix -> Scalar (sum of the diagonal).
+    Trace(Box<SirExpr>),
+    /// `cross(a, b)` : (Array, Array) -> Array, the 3-vector cross product.
+    Cross(Box<SirExpr>, Box<SirExpr>),
     /// `len(a)` / `a.shape[0]` : Array -> Int.
     Len(Box<SirExpr>),
     /// `np.zeros(n)` : Int -> Array.
@@ -453,6 +457,7 @@ impl SirExpr {
             | SirExpr::Variance(_)
             | SirExpr::Stdev(_)
             | SirExpr::Median(_)
+            | SirExpr::Trace(_)
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -474,6 +479,7 @@ impl SirExpr {
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
             | SirExpr::Matvec { .. }
+            | SirExpr::Cross(_, _)
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::UserCall { ret, .. } => *ret,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
@@ -591,7 +597,8 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Cmp { l, r, .. }
         | SirExpr::ScalarBinFn { l, r, .. }
         | SirExpr::EwBinFn { l, r, .. }
-        | SirExpr::Dot(l, r) =>
+        | SirExpr::Dot(l, r)
+        | SirExpr::Cross(l, r) =>
         {
             scan_expr(l, solvers, signal);
             scan_expr(r, solvers, signal);
@@ -621,7 +628,8 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Cummin(x)
         | SirExpr::Diff(x)
         | SirExpr::Sort(x)
-        | SirExpr::Flip(x) => scan_expr(x, solvers, signal),
+        | SirExpr::Flip(x)
+        | SirExpr::Trace(x) => scan_expr(x, solvers, signal),
         SirExpr::ScalarPow { base, exp } =>
         {
             scan_expr(base, solvers, signal);

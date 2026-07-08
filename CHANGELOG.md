@@ -160,6 +160,18 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `trace(A)` + `cross(a, b)`** prouvés contre Octave réel (Phase 2, incrément 30)
+Deux opérations classiques, câblées via des helpers déterministes du prélude :
+
+- **`trace(A)`** — somme de la diagonale d'une matrice (scalaire) ; `A` inférée
+  matrice depuis l'intrinsèque.
+- **`cross(a, b)`** — produit vectoriel de deux vecteurs 3D ; les **deux**
+  opérandes sont inférés vecteurs.
+
+Deux cas d'oracle. **Oracle 89/89** (200 essais chacun) ; **77 tests unitaires**
+(1 nouveau). *Non-vacuité* : inverser un signe dans une composante de `cross`
+fait diverger le cas (|Δ|≈1) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB opérateur de transposition `A'` / `A.'`** prouvé contre Octave réel (Phase 2, incrément 29)
 Ajoute l'opérateur postfixe de **transposition** — omniprésent en MATLAB — routé
 vers le nœud `Transpose` de la SIR (déjà prouvé côté Python via `A.T`).
