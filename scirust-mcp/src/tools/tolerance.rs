@@ -17,6 +17,7 @@ use scirust_tolerance::chain::{
 use scirust_tolerance::correlated::{correlated_inertia, uniform_correlation};
 use scirust_tolerance::distfit::{best_fit, percentile_capability};
 use scirust_tolerance::drift::{cpk_to_ppk, long_term_ppm, long_term_sigma};
+use scirust_tolerance::fits::{hole_basis_fit, it_grade_tolerance};
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::geometry::{
     cylindricity, cylindricity_inertia, flatness, flatness_inertia, roundness, roundness_inertia,
@@ -37,11 +38,15 @@ use scirust_tolerance::position::{
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::design_plan;
 use scirust_tolerance::sensitivity::{contributions, dual_contributions};
+use scirust_tolerance::sequential::{DoubleSamplingPlan, design_sequential_plan};
 use scirust_tolerance::sixsigma::{dpmo, dpmo_from_sigma, dpu, process_report, sigma_from_yield};
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
 };
 use scirust_tolerance::subgroup::subgroup_capability;
+use scirust_tolerance::taguchi::{
+    economic_tolerance, expected_loss_from_moments, loss_coefficient,
+};
 use scirust_tolerance::variables::design_variables_plan;
 use serde_json::json;
 
@@ -73,6 +78,9 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         attributes_plan_tool(),
         interference_tool(),
         subgroup_capability_tool(),
+        fits_tool(),
+        sequential_tool(),
+        taguchi_tool(),
     ]
 }
 
@@ -1632,6 +1640,177 @@ fn subgroup_capability_tool() -> McpTool {
     }
 }
 
+fn fits_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_fits".to_string(),
+        description: "ISO 286 limits and fits. With `nominal` + `hole_grade` alone, returns the \
+            standard tolerance ITn (µm). Add `shaft_grade` + `shaft_letter` (d/e/f/g/h) for a \
+            hole-basis fit H<hole_grade>/<letter><shaft_grade>: max/min clearance (µm, negative = \
+            interference) and the fit type (clearance/transition/interference). Nominal in mm (≤500)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "nominal": { "type": "number", "description": "nominal size in mm (0 < d ≤ 500)" },
+                "hole_grade": { "type": "integer", "description": "hole IT grade (5..18)" },
+                "shaft_grade": { "type": "integer", "description": "shaft IT grade (5..18, optional)" },
+                "shaft_letter": { "type": "string", "description": "shaft fundamental deviation letter d/e/f/g/h (optional)" },
+            },
+            "required": ["nominal", "hole_grade"],
+        }),
+        handler: Box::new(|args| {
+            let nominal = f64_field(&args, "nominal")?;
+            let hole_grade = args
+                .get("hole_grade")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing `hole_grade`")? as u8;
+            let it_hole = it_grade_tolerance(hole_grade, nominal)
+                .ok_or("invalid grade (5..18) or nominal (0<d≤500)")?;
+            let shaft_grade = args.get("shaft_grade").and_then(|v| v.as_u64());
+            let shaft_letter = args
+                .get("shaft_letter")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.chars().next());
+            match (shaft_grade, shaft_letter)
+            {
+                (Some(sg), Some(letter)) =>
+                {
+                    let fit = hole_basis_fit(nominal, hole_grade, sg as u8, letter)
+                        .ok_or("unsupported shaft letter (d/e/f/g/h) or grade/size")?;
+                    Ok(json!({
+                        "it_hole_um": it_hole,
+                        "max_clearance_um": fit.max_clearance,
+                        "min_clearance_um": fit.min_clearance,
+                        "fit_type": format!("{:?}", fit.fit_type),
+                    }))
+                }
+                _ => Ok(json!({ "it_hole_um": it_hole })),
+            }
+        }),
+    }
+}
+
+fn sequential_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_sequential".to_string(),
+        description: "Multi-stage acceptance sampling. Provide `aql`/`rql`/`alpha`/`beta` for a \
+            Wald sequential (SPRT) plan: the accept/reject boundary lines d = slope·n ∓ h. And/or \
+            provide a double-sampling plan `n1,c1,r1,n2,c2` with a fraction defective `p` to get its \
+            probability of acceptance and average sample number (ASN)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "aql": { "type": "number", "description": "producer quality (fraction, for SPRT)" },
+                "rql": { "type": "number", "description": "consumer quality (fraction > aql, for SPRT)" },
+                "alpha": { "type": "number", "description": "producer's risk (for SPRT)" },
+                "beta": { "type": "number", "description": "consumer's risk (for SPRT)" },
+                "n1": { "type": "integer", "description": "first sample size (double plan)" },
+                "c1": { "type": "integer", "description": "first acceptance number" },
+                "r1": { "type": "integer", "description": "first rejection number (> c1+1)" },
+                "n2": { "type": "integer", "description": "second sample size" },
+                "c2": { "type": "integer", "description": "combined acceptance number" },
+                "p": { "type": "number", "description": "fraction defective to evaluate the double plan" },
+            },
+        }),
+        handler: Box::new(|args| {
+            let mut out = json!({});
+            if let (Some(aql), Some(rql), Some(alpha), Some(beta)) = (
+                args.get("aql").and_then(|v| v.as_f64()),
+                args.get("rql").and_then(|v| v.as_f64()),
+                args.get("alpha").and_then(|v| v.as_f64()),
+                args.get("beta").and_then(|v| v.as_f64()),
+            )
+            {
+                let sprt =
+                    design_sequential_plan(aql, rql, alpha, beta).ok_or("invalid SPRT inputs")?;
+                out["sprt_slope"] = json!(sprt.slope);
+                out["sprt_accept_intercept"] = json!(sprt.accept_intercept);
+                out["sprt_reject_intercept"] = json!(sprt.reject_intercept);
+            }
+            let ints = ["n1", "c1", "r1", "n2", "c2"];
+            if ints.iter().all(|k| args.get(*k).and_then(|v| v.as_u64()).is_some())
+            {
+                let g = |k: &str| args.get(k).and_then(|v| v.as_u64()).unwrap() as usize;
+                let plan = DoubleSamplingPlan::new(g("n1"), g("c1"), g("r1"), g("n2"), g("c2"));
+                if let Some(p) = args.get("p").and_then(|v| v.as_f64())
+                {
+                    out["double_p_accept"] = json!(plan.probability_of_acceptance(p));
+                    out["double_asn"] = json!(plan.average_sample_number(p));
+                }
+            }
+            if out.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            {
+                return Err("provide SPRT inputs (aql/rql/alpha/beta) and/or a double plan + p".to_string());
+            }
+            Ok(out)
+        }),
+    }
+}
+
+fn taguchi_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_taguchi".to_string(),
+        description: "Taguchi quadratic loss and cost of non-quality. Give `cost_at_limit` + \
+            `half_tolerance` to get the loss coefficient k=A/Δ². With k (or those two) plus `mean`, \
+            `sd`, `target`, returns the expected loss E[L]=k·(σ²+δ²)=k·I². Give `functional_loss` + \
+            `functional_half_tol` + `rework_cost` for the economic manufacturing tolerance Δ=Δ₀·√(A/A₀)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cost_at_limit": { "type": "number", "description": "loss A at the tolerance limit" },
+                "half_tolerance": { "type": "number", "description": "half-tolerance Δ" },
+                "k": { "type": "number", "description": "loss coefficient (overrides cost/half_tolerance)" },
+                "mean": { "type": "number", "description": "batch mean μ" },
+                "sd": { "type": "number", "description": "batch std-dev σ" },
+                "target": { "type": "number", "description": "target T" },
+                "functional_loss": { "type": "number", "description": "loss A₀ at the functional limit" },
+                "functional_half_tol": { "type": "number", "description": "functional half-tolerance Δ₀" },
+                "rework_cost": { "type": "number", "description": "in-factory rework cost A" },
+            },
+        }),
+        handler: Box::new(|args| {
+            let mut out = json!({});
+            let k = args.get("k").and_then(|v| v.as_f64()).or_else(|| {
+                match (
+                    args.get("cost_at_limit").and_then(|v| v.as_f64()),
+                    args.get("half_tolerance").and_then(|v| v.as_f64()),
+                )
+                {
+                    (Some(a), Some(d)) => Some(loss_coefficient(a, d)),
+                    _ => None,
+                }
+            });
+            if let Some(k) = k
+            {
+                out["loss_coefficient"] = json!(k);
+                if let (Some(mean), Some(sd), Some(target)) = (
+                    args.get("mean").and_then(|v| v.as_f64()),
+                    args.get("sd").and_then(|v| v.as_f64()),
+                    args.get("target").and_then(|v| v.as_f64()),
+                )
+                {
+                    out["expected_loss"] = json!(expected_loss_from_moments(k, mean, sd, target));
+                }
+            }
+            if let (Some(a0), Some(d0), Some(a)) = (
+                args.get("functional_loss").and_then(|v| v.as_f64()),
+                args.get("functional_half_tol").and_then(|v| v.as_f64()),
+                args.get("rework_cost").and_then(|v| v.as_f64()),
+            )
+            {
+                out["economic_tolerance"] = json!(economic_tolerance(a0, d0, a));
+            }
+            if out.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            {
+                return Err("provide k (or cost_at_limit+half_tolerance), or functional_loss+functional_half_tol+rework_cost".to_string());
+            }
+            Ok(out)
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2211,5 +2390,61 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn fits_tool_reports_it_and_fit() {
+        let tool = fits_tool();
+        // IT7 at Ø25 ≈ 21 µm.
+        let it = (tool.handler)(json!({ "nominal": 25.0, "hole_grade": 7 })).unwrap();
+        assert!((it["it_hole_um"].as_f64().unwrap() - 21.0).abs() < 1.0);
+        // H7/g6 at Ø20 is a clearance fit.
+        let fit = (tool.handler)(json!({
+            "nominal": 20.0, "hole_grade": 7, "shaft_grade": 6, "shaft_letter": "g",
+        }))
+        .unwrap();
+        assert_eq!(fit["fit_type"], json!("Clearance"));
+        assert!(fit["min_clearance_um"].as_f64().unwrap() > 0.0);
+        assert!((tool.handler)(json!({ "nominal": 25.0, "hole_grade": 3 })).is_err());
+    }
+
+    #[test]
+    fn sequential_tool_designs_sprt_and_evaluates_double() {
+        let tool = sequential_tool();
+        let sprt = (tool.handler)(json!({
+            "aql": 0.01, "rql": 0.08, "alpha": 0.05, "beta": 0.10,
+        }))
+        .unwrap();
+        assert!(sprt["sprt_slope"].as_f64().unwrap() > 0.0);
+        assert!(sprt["sprt_reject_intercept"].as_f64().unwrap() > 0.0);
+        let dbl = (tool.handler)(json!({
+            "n1": 50, "c1": 1, "r1": 4, "n2": 50, "c2": 5, "p": 0.02,
+        }))
+        .unwrap();
+        assert!(dbl["double_p_accept"].as_f64().unwrap() > 0.5);
+        assert!(dbl["double_asn"].as_f64().unwrap() >= 50.0);
+        assert!((tool.handler)(json!({})).is_err());
+    }
+
+    #[test]
+    fn taguchi_tool_loss_and_economic_tolerance() {
+        let tool = taguchi_tool();
+        let out = (tool.handler)(json!({
+            "cost_at_limit": 12.0, "half_tolerance": 0.5, "mean": 10.1, "sd": 0.08, "target": 10.0,
+        }))
+        .unwrap();
+        // k = 12/0.25 = 48; E[L] = 48·(0.08²+0.1²).
+        assert!((out["loss_coefficient"].as_f64().unwrap() - 48.0).abs() < 1e-9);
+        let want = 48.0 * (0.08_f64.powi(2) + 0.1_f64.powi(2));
+        assert!((out["expected_loss"].as_f64().unwrap() - want).abs() < 1e-9);
+        // Economic tolerance Δ = Δ₀·√(A/A₀).
+        let econ = (tool.handler)(json!({
+            "functional_loss": 20.0, "functional_half_tol": 1.0, "rework_cost": 5.0,
+        }))
+        .unwrap();
+        assert!(
+            (econ["economic_tolerance"].as_f64().unwrap() - (5.0_f64 / 20.0).sqrt()).abs() < 1e-9
+        );
+        assert!((tool.handler)(json!({})).is_err());
     }
 }
