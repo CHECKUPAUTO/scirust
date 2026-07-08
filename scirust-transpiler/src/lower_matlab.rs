@@ -617,6 +617,35 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             r: Box::new(SirExpr::Len(Box::new(a))),
         });
     }
+    if func == "norm"
+    {
+        // norm(v) — Euclidean 2-norm of a *vector* = sqrt(sum(v .* v)).
+        // Restricted to a vector argument (a matrix `norm` is the spectral norm,
+        // a different quantity); built from existing verified nodes.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "norm")?;
+        let sq = SirExpr::EwBin {
+            op: Op::Mul,
+            l: Box::new(a.clone()),
+            r: Box::new(a),
+        };
+        return Ok(SirExpr::ScalarUnaryFn {
+            func: MathFn::Sqrt,
+            arg: Box::new(SirExpr::Sum(Box::new(sq))),
+        });
+    }
+    if func == "dot"
+    {
+        // dot(a, b) — inner product, routed to the fixed-order `np::dot` prelude
+        // (bit-reproducible reduction order).
+        need_args(func, args, 2)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_array(&a, "dot")?;
+        expect_array(&b, "dot")?;
+        return Ok(SirExpr::Dot(Box::new(a), Box::new(b)));
+    }
     if func == "det"
     {
         // det(A) -> routed to the verified LU-based determinant.
@@ -638,6 +667,20 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             return Err("inv expects a matrix argument".into());
         }
         return Ok(SirExpr::Inv(Box::new(a)));
+    }
+    if func == "eig"
+    {
+        // eig(A) -> eigenvalues (ascending), routed to the verified symmetric
+        // eigensolver. Octave's `eig` returns ascending real eigenvalues for a
+        // symmetric matrix, matching `scirust_solvers::eigen_symmetric`; this
+        // route is therefore proven on symmetric inputs (see the oracle).
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if !is_matrixish(a.ty())
+        {
+            return Err("eig expects a matrix argument".into());
+        }
+        return Ok(SirExpr::Eigvalsh(Box::new(a)));
     }
     if func == "length"
     {
@@ -665,7 +708,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan, \
-             sum/prod/mean/max/min, length)",
+             sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
             func
         )),
     }
@@ -779,7 +822,7 @@ fn matrix_evidence_expr(name: &str, e: &MExpr) -> bool {
     {
         MExpr::Call { func, args } =>
         {
-            (matches!(func.as_str(), "det" | "inv")
+            (matches!(func.as_str(), "det" | "inv" | "eig")
                 && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 || args.iter().any(|a| matrix_evidence_expr(name, a))
         },
@@ -836,6 +879,10 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
             (func == name && !MATH_FNS.contains(&func.as_str()) && !is_reduction(func))
                 || (is_reduction(func)
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                // `dot(a, b)` — both operands are vectors, so either being the
+                // name is evidence (the generic reduction arm checks only the
+                // first argument).
+                || (func == "dot" && args.iter().any(|a| is_ident(name, a)))
                 || args.iter().any(|a| array_evidence_expr(name, a))
         },
         // Element-wise operators (`.*`, `./`, `.^`) imply their operands are
@@ -871,6 +918,11 @@ fn is_ident(name: &str, e: &MExpr) -> bool {
 }
 
 /// A reduction intrinsic that consumes an array and yields a scalar/length.
+/// (`dot` is a two-argument reduction and is handled separately where both
+/// operands must count as evidence.)
 fn is_reduction(func: &str) -> bool {
-    matches!(func, "sum" | "prod" | "mean" | "max" | "min" | "length")
+    matches!(
+        func,
+        "sum" | "prod" | "mean" | "max" | "min" | "length" | "norm"
+    )
 }

@@ -160,6 +160,29 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `norm` / `dot` / `eig`** — normes, produit scalaire et valeurs propres, prouvés contre Octave réel (Phase 2, incrément 19)
+Poursuite de la couverture MATLAB large et sûre, en réutilisant des kernels déjà
+vérifiés (aucune nouvelle primitive à prouver depuis zéro). Trois intrinsèques,
+tous non ambigus :
+
+- **`norm(v)`** — norme euclidienne (2-norme) d'un **vecteur**, abaissée en
+  `sqrt(sum(v .* v))` à partir des nœuds SIR existants (restreinte à un vecteur ;
+  la `norm` d'une matrice est la norme spectrale, une quantité différente —
+  refusée avec un diagnostic).
+- **`dot(a, b)`** — produit scalaire, routé vers la réduction `np::dot` à **ordre
+  fixe** (bit-reproductible). L'inférence de type marque désormais les **deux**
+  opérandes comme vecteurs.
+- **`eig(A)`** — valeurs propres (ordre croissant) d'une matrice **symétrique**,
+  routées vers `scirust_solvers::eigen_symmetric`. `eig` d'Octave renvoie des
+  valeurs propres réelles croissantes pour une entrée symétrique, donc cette
+  route est prouvée sur entrées symétriques (via `SymMatrix` dans l'oracle) ;
+  `A` est inférée matrice à partir de l'intrinsèque.
+
+Trois cas d'oracle : `norm(v)`, `dot(a,b)`, `eig(A)`. **Oracle 62/62** (200
+essais chacun) ; **63 tests unitaires** (3 nouveaux). *Non-vacuité* : remplacer
+`v .* v` par `v + v` dans `norm` fait diverger le cas (99/200, |Δ|≈1,4) et passe
+l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB algèbre linéaire — `det` / `inv` / `\` (résolution)** routés vers `scirust-solvers`, prouvés contre Octave réel (Phase 2, incrément 18)
 La couverture MATLAB gagne l'algèbre linéaire du cœur numérique, réutilisant les
 kernels vérifiés de `scirust-solvers` déjà branchés côté Python. (1) **`det(A)`**
