@@ -1018,6 +1018,25 @@ mod tests {
     }
 
     #[test]
+    fn matlab_degree_trig_converts_then_applies() {
+        // sind/cosd/tand: scale the (scalar) argument by pi/180, then apply the
+        // matching trig method.
+        let s = transpile_matlab("function y = f(x)\n  y = sind(x);\nend\n").unwrap();
+        assert_eq!(sig_of(&s, "f"), "pub fn f(x: f64) -> f64 {");
+        assert!(s.contains("0.017453292519943295")); // pi/180 factor
+        assert!(s.contains(").sin()"));
+        let c = transpile_matlab("function y = f(x)\n  y = cosd(x);\nend\n").unwrap();
+        assert!(c.contains(").cos()"));
+        let t = transpile_matlab("function y = f(x)\n  y = tand(x);\nend\n").unwrap();
+        assert!(t.contains(").tan()"));
+        // Elementwise: cosd(flip(v)) -> broadcast scale then map1 cos over a vector.
+        let ew = transpile_matlab("function y = f(v)\n  y = cosd(flip(v));\nend\n").unwrap();
+        assert_eq!(sig_of(&ew, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(ew.contains("np::map1("));
+        assert!(ew.contains("x.cos()"));
+    }
+
+    #[test]
     fn matlab_mod_rem_broadcast_over_vectors() {
         // mod / rem now work elementwise: `mod(v, s)` broadcasts over a vector.
         let m = transpile_matlab("function y = f(v)\n  y = mod(cumsum(v), 3.0);\nend\n").unwrap();

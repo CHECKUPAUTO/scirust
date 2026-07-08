@@ -160,6 +160,24 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `sind` / `cosd` / `tand`** — trigonométrie en degrés, prouvée contre Octave réel (Phase 2, incrément 44)
+Trigonométrie à argument en **degrés** : `sind`/`cosd`/`tand` convertissent l'argument
+en radians (`× π/180`, scalaire ou par diffusion) puis appliquent `sin`/`cos`/`tan`
+(scalaire ou élément par élément). La logique de conversion est factorisée dans un
+helper `scale_by_const` partagé avec `deg2rad`/`rad2deg`.
+
+- `sind(x)`, `cosd(x)`, `tand(x)` : scalaire ou vecteur (élément par élément).
+
+*Frontière (honnête)* : les cas particuliers MATLAB (zéro exact / `Inf` exact aux
+multiples de 90°) ne sont **pas** répliqués — la définition simple `f(x·π/180)` est
+utilisée (l'oracle tire des angles aléatoires qui n'atteignent jamais ces points).
+
+Quatre cas d'oracle (`sind`/`cosd`/`tand` scalaires, plus `cosd(flip(v))` élément par
+élément). **Oracle 125/125** (200 essais chacun) ; **92 tests unitaires** (1 nouveau).
+*Non-vacuité* : remplacer le facteur `π/180` par `π/90` pour la trigo en degrés fait
+diverger les quatre cas `sind`/`cosd`/`tand` tandis que `deg2rad` (facteur propre)
+reste vert — le facteur de conversion est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `circshift(v, k)`** — décalage circulaire, prouvé contre Octave réel (Phase 2, incrément 43)
 Réindexation modulaire : `circshift(v, k)` décale circulairement le vecteur de `k`
 positions (`result[i] = v[(i−k) mod n]`, longueur inchangée), avec `k` arrondi à
