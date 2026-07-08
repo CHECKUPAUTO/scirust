@@ -401,10 +401,18 @@ pub enum MathFn {
     /// Natural logarithm (`np.log` → `f64::ln`).
     Ln,
     Log10,
+    /// Base-2 logarithm (MATLAB `log2` → `f64::log2`; domain `(0, ∞)`).
+    Log2,
     Floor,
     Ceil,
     Sinh,
     Cosh,
+    /// Inverse hyperbolic sine (`asinh` → `f64::asinh`; domain all reals).
+    Asinh,
+    /// Inverse hyperbolic cosine (`acosh` → `f64::acosh`; domain `[1, ∞)`).
+    Acosh,
+    /// Inverse hyperbolic tangent (`atanh` → `f64::atanh`; domain `(-1, 1)`).
+    Atanh,
     /// Tangent (`tan` → `f64::tan`).
     Tan,
     /// Inverse tangent (`np.arctan` → `f64::atan`).
@@ -438,8 +446,12 @@ impl MathFn {
             MathFn::Log10 => "log10",
             MathFn::Floor => "floor",
             MathFn::Ceil => "ceil",
+            MathFn::Log2 => "log2",
             MathFn::Sinh => "sinh",
             MathFn::Cosh => "cosh",
+            MathFn::Asinh => "asinh",
+            MathFn::Acosh => "acosh",
+            MathFn::Atanh => "atanh",
             MathFn::Tan => "tan",
             MathFn::Atan => "atan",
             MathFn::Asin => "asin",
