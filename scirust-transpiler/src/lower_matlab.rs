@@ -499,21 +499,51 @@ fn lower_bin(
             };
             Ok(ew_or_broadcast(sop, lv, rv, la, ra))
         },
-        MBinOp::Mul | MBinOp::Div =>
+        // `*` — matrix multiplication in MATLAB. When the left operand is a
+        // *matrix* (inferred from `det`/`inv`/`eig`/`\`), route to the verified
+        // matrix-vector / matrix-matrix product in `scirust-solvers`; otherwise
+        // it is scalar multiply or scalar↔array broadcast (`.*` is elementwise).
+        MBinOp::Mul =>
         {
-            let sop = if matches!(op, MBinOp::Mul)
+            let lm = is_matrixish(lv.ty());
+            let rm = is_matrixish(rv.ty());
+            if lm || rm
             {
-                Op::Mul
+                if lm && rv.ty() == Ty::Array
+                {
+                    return Ok(SirExpr::Matvec {
+                        a: Box::new(lv),
+                        b: Box::new(rv),
+                    });
+                }
+                if lm && rm
+                {
+                    return Ok(SirExpr::Matmul {
+                        a: Box::new(lv),
+                        b: Box::new(rv),
+                    });
+                }
+                return Err("unsupported matrix `*` form (supported: matrix*vector, \
+                            matrix*matrix; the matrix operand must be on the left)"
+                    .into());
             }
-            else
-            {
-                Op::Div
-            };
             if la && ra
             {
-                return Err("matrix `*`/`/` on two arrays is not supported — use `.*`/`./`".into());
+                return Err("matrix `*` on two arrays is not supported — use `.*`".into());
             }
-            Ok(ew_or_broadcast(sop, lv, rv, la, ra))
+            Ok(ew_or_broadcast(Op::Mul, lv, rv, la, ra))
+        },
+        MBinOp::Div =>
+        {
+            if is_matrixish(lv.ty()) || is_matrixish(rv.ty())
+            {
+                return Err("matrix `/` is not supported in this subset".into());
+            }
+            if la && ra
+            {
+                return Err("matrix `/` on two arrays is not supported — use `./`".into());
+            }
+            Ok(ew_or_broadcast(Op::Div, lv, rv, la, ra))
         },
         // `A \ b` — MATLAB left division (solve `A x = b`), routed to the
         // verified LU solver in `scirust-solvers`.

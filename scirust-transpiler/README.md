@@ -53,7 +53,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
-| linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver) |
+| linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul); `*` routes to a matrix product only when the left operand is an inferred matrix |
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
@@ -113,8 +113,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: cumprod / cummax / cummin / flip 200/200 trials match (octave) (more MATLAB vector→vector builtins, Phase 2)
   ✓ M: var(v) / std(v) / median(v) 200/200 trials match (octave) (MATLAB reduction statistics, N-1, Phase 2)
   ✓ M: linspace(a, b, 6)          200/200 trials match (octave) (MATLAB vector constructor, exact endpoints, Phase 2)
+  ✓ M: A*(A\b) / A*inv(A)         200/200 trials match (octave) (MATLAB matrix product * → matvec/matmul, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 83/83 cases match their reference runtime within tolerance
+  ORACLE GREEN — 85/85 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -162,10 +163,16 @@ them.
   reconstruction `U·diag(S)·Vᵀ`, not element-by-element.
 * **MATLAB is a scientific subset, not all of MATLAB.** No cell arrays, structs,
   anonymous functions, or `end` indexing yet; matrix routing covers `det`/`inv`/`\`/`eig`
-  (matrices are passed in, not constructed in-transpiler — though `linspace` now
-  constructs 1-D vectors), `zeros(n)` is not mapped (it is `n×n` in MATLAB, unlike
-  NumPy's 1-D `np.zeros(n)`), and element-wise operands are heuristically typed as
-  arrays.
+  and the product `A*b`/`A*B` (matrices are passed in, not constructed in-transpiler
+  — though `linspace` now constructs 1-D vectors), `zeros(n)` is not mapped (it is
+  `n×n` in MATLAB, unlike NumPy's 1-D `np.zeros(n)`), and element-wise operands are
+  heuristically typed as arrays.
+* **`*` routes to a matrix product only when the left operand is an inferred
+  matrix.** MATLAB's `A*b` is a matrix product, but `a*b` on two scalars is a scalar
+  multiply — syntactically identical. To stay safe, `*` becomes `matvec`/`matmul`
+  only when the left operand is already typed a matrix by another operation
+  (`det`/`inv`/`eig`/`\`); a bare `A*b` with no other evidence is treated as scalar
+  arithmetic, never guessed.
 * **`eig` is proven on symmetric inputs.** It routes to the verified symmetric
   eigensolver (real, ascending eigenvalues — matching Octave's `eig` on a
   symmetric matrix); general non-symmetric `eig` (complex eigenvalues, no

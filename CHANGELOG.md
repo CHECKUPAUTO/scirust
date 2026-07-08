@@ -160,6 +160,26 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB produit matriciel `A*b` / `A*B`** routé vers `scirust-solvers`, prouvé contre Octave réel (Phase 2, incrément 28)
+Complète l'algèbre linéaire MATLAB : l'opérateur `*` (multiplication **matricielle**
+en MATLAB, distincte de l'élément-par-élément `.*`) se route vers les kernels
+vérifiés `matvec` / `matmul` de `scirust-solvers` quand l'opérande de gauche est
+une **matrice** (inférée depuis `det`/`inv`/`eig`/`\`).
+
+- **`A * x`** (matrice × vecteur) → `matvec`.
+- **`A * B`** (matrice × matrice) → `matmul` (sortie matrice).
+- Sinon, `*` reste la multiplication scalaire ou la diffusion scalaire↔tableau ;
+  `A * b` avec deux tableaux reste refusé (pointant vers `.*`), et les formes
+  matricielles non gérées (scalaire×matrice, `matrice/`) sont refusées clairement.
+
+Désambiguïsation **sûre** : le routage n'a lieu que si l'opérande matrice est
+déjà typé matrice par une autre opération (jamais deviné). Les cas d'oracle
+l'exercent naturellement, sans code mort : **résidu `r = A*(A\b) ≈ b`** (matvec)
+et **`C = A*inv(A) ≈ I`** (matmul). **Oracle 85/85** (200 essais chacun) ; **75
+tests unitaires** (1 nouveau). *Non-vacuité* : transposer la matrice dans
+`matvec` fait diverger à la fois le résidu MATLAB et le cas `A @ b` Python
+(émetteur partagé) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `linspace(a, b, n)`** — constructeur de vecteur, prouvé contre Octave réel (Phase 2, incrément 27)
 Première **construction de tableau** du front-end MATLAB (jusqu'ici les tableaux
 venaient des paramètres ou de transformations). `linspace(a, b, n)` produit `n`

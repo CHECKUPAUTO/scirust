@@ -720,6 +720,38 @@ mod tests {
         assert!(dyn_n.contains("np::linspace(a, b, x.len())"));
     }
 
+    #[test]
+    fn matlab_star_routes_matrix_products() {
+        // matrix * vector -> matvec (A a matrix from `\`, x the vector solution).
+        let mv =
+            transpile_matlab("function r = f(A, b)\n  x = A \\ b;\n  r = A * x;\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&mv, "f"),
+            "pub fn f(A: &[f64], b: &[f64]) -> Vec<f64> {"
+        );
+        assert!(mv.contains(".matvec("));
+        // matrix * matrix -> matmul (A a matrix from `inv`, B a produced matrix).
+        let mm = transpile_matlab("function C = f(A)\n  B = inv(A);\n  C = A * B;\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&mm, "f"),
+            "pub fn f(A: &[f64]) -> scirust_solvers::Matrix {"
+        );
+        assert!(mm.contains(".matmul("));
+        assert_eq!(
+            required_crates(
+                &transpile_matlab_to_sir(
+                    "function r = f(A, b)\n  x = A \\ b;\n  r = A * x;\nend\n"
+                )
+                .unwrap()
+            ),
+            vec!["scirust-solvers"]
+        );
+        // Scalar * array is still broadcast, not a matrix product.
+        let bc = transpile_matlab("function y = f(x)\n  y = 2.0 * cumsum(x);\nend\n").unwrap();
+        assert!(bc.contains("np::map1"));
+        assert!(!bc.contains(".matvec("));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]
