@@ -80,8 +80,11 @@ mod tests {
     use super::*;
 
     fn sig_of(rust: &str, name: &str) -> String {
+        // Match the top-level `pub fn NAME(` (column 0) — prelude helpers live
+        // indented inside `pub mod np { … }`, so a same-named builtin (e.g.
+        // `np::cumsum`) does not shadow the user's function here.
         rust.lines()
-            .find(|l| l.contains(&format!("pub fn {}(", name)))
+            .find(|l| l.starts_with(&format!("pub fn {}(", name)))
             .unwrap_or("")
             .trim()
             .to_string()
@@ -640,6 +643,35 @@ mod tests {
         // `^` (matrix power) on a vector is refused; `.^` is the elementwise form.
         let err = transpile_matlab("function y = f(v)\n  y = v ^ 2 + sum(v);\nend\n").unwrap_err();
         assert!(err.contains("matrix power"));
+    }
+
+    #[test]
+    fn matlab_vector_builtins_infer_array_and_route_to_prelude() {
+        // cumsum / diff / sort take a vector and return a vector; the argument
+        // is inferred as an array purely from the builtin.
+        for (call, helper) in [
+            ("cumsum", "np::cumsum"),
+            ("diff", "np::diff"),
+            ("sort", "np::sort"),
+        ]
+        {
+            let src = format!("function y = f(v)\n  y = {}(v);\nend\n", call);
+            let rust = transpile_matlab(&src).unwrap();
+            assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+            assert!(rust.contains(helper), "{} should emit {}", call, helper);
+        }
+        // The prelude helpers are present and std-only.
+        let rust = transpile_matlab("function y = f(v)\n  y = cumsum(v);\nend\n").unwrap();
+        assert!(rust.contains("pub fn cumsum(a: &[f64]) -> Vec<f64>"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function y = f(v)\n  y = sort(v);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+        // A scalar argument (scalar expression) is rejected.
+        let bad = transpile_matlab("function y = f(x)\n  y = diff(x * 2.0);\nend\n");
+        assert!(bad.is_err());
     }
 
     // ---- tuples / SVD -----------------------------------------------------

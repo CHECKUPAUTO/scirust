@@ -234,6 +234,13 @@ pub enum SirExpr {
     Zeros(Box<SirExpr>),
     /// `np.ones(n)` : Int -> Array.
     Ones(Box<SirExpr>),
+    /// `cumsum(v)` : Array -> Array (running prefix sum, fixed left-to-right
+    /// order -> bit-reproducible).
+    Cumsum(Box<SirExpr>),
+    /// `diff(v)` : Array -> Array of consecutive differences (length `n-1`).
+    Diff(Box<SirExpr>),
+    /// `sort(v)` : Array -> Array sorted ascending (MATLAB `sort`).
+    Sort(Box<SirExpr>),
     /// Scalar comparison `l <op> r` -> Bool (conditions only).
     Cmp {
         op: CmpOp,
@@ -430,6 +437,9 @@ impl SirExpr {
             | SirExpr::BroadcastFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
+            | SirExpr::Cumsum(_)
+            | SirExpr::Diff(_)
+            | SirExpr::Sort(_)
             | SirExpr::ArrayLit(_)
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
@@ -571,7 +581,10 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Min(x)
         | SirExpr::Len(x)
         | SirExpr::Zeros(x)
-        | SirExpr::Ones(x) => scan_expr(x, solvers, signal),
+        | SirExpr::Ones(x)
+        | SirExpr::Cumsum(x)
+        | SirExpr::Diff(x)
+        | SirExpr::Sort(x) => scan_expr(x, solvers, signal),
         SirExpr::ScalarPow { base, exp } =>
         {
             scan_expr(base, solvers, signal);
