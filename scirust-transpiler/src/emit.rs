@@ -181,6 +181,23 @@ pub mod np {
     pub fn std(a: &[f64]) -> f64 {
         var(a).sqrt()
     }
+    /// Trace of a square matrix (flat row-major): sum of the diagonal.
+    pub fn trace(a: &[f64]) -> f64 {
+        let n = (a.len() as f64).sqrt() as usize;
+        let mut s = 0.0f64;
+        for i in 0..n {
+            s += a[i * n + i];
+        }
+        s
+    }
+    /// The 3-vector cross product `a × b`.
+    pub fn cross(a: &[f64], b: &[f64]) -> Vec<f64> {
+        vec![
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
     /// Median (mean of the two middle values for even length).
     pub fn median(a: &[f64]) -> f64 {
         let mut b = a.to_vec();
@@ -716,6 +733,25 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code: format!("np::dot({}, {})", slice_of(&a), slice_of(&b)),
                 ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Trace(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::trace({})", slice_of(&a)),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cross(a, b) =>
+        {
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            Frag {
+                code: format!("np::cross({}, {})", slice_of(&a), slice_of(&b)),
+                ty: Ty::Array,
                 borrowed: false,
             }
         },

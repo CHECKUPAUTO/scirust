@@ -967,6 +967,32 @@ fn matlab_cases() -> Vec<Case> {
             src: "function C = mgram(A)\n  C = A' * A;\nend\n",
             args: vec![Matrix { n: 4 }],
         },
+        // ---- MATLAB trace + cross product (Phase 2) ----
+        // trace(A) — sum of the diagonal (scalar out).
+        Case {
+            name: "M: trace(A) (diagonal sum)",
+            call: "mtrace",
+            src: "function t = mtrace(A)\n  t = trace(A);\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // cross(a, b) — the 3-vector cross product.
+        Case {
+            name: "M: cross(a, b) (3-vector)",
+            call: "mcross",
+            src: "function c = mcross(a, b)\n  c = cross(a, b);\nend\n",
+            args: vec![
+                Array {
+                    n: 3,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 3,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
     ]
 }
 

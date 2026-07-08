@@ -754,6 +754,16 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&b, "dot")?;
         return Ok(SirExpr::Dot(Box::new(a), Box::new(b)));
     }
+    if func == "cross"
+    {
+        // cross(a, b) — the 3-vector cross product (both operands are vectors).
+        need_args(func, args, 2)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_array(&a, "cross")?;
+        expect_array(&b, "cross")?;
+        return Ok(SirExpr::Cross(Box::new(a), Box::new(b)));
+    }
     if func == "linspace"
     {
         // linspace(a, b, n) — n evenly-spaced points from a to b (a, b scalars;
@@ -896,6 +906,17 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         }
         return Ok(SirExpr::Inv(Box::new(a)));
     }
+    if func == "trace"
+    {
+        // trace(A) -> sum of the diagonal of a matrix.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if !is_matrixish(a.ty())
+        {
+            return Err("trace expects a matrix argument".into());
+        }
+        return Ok(SirExpr::Trace(Box::new(a)));
+    }
     if func == "eig"
     {
         // eig(A) -> eigenvalues (ascending), routed to the verified symmetric
@@ -936,8 +957,8 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
-             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/var/std/median/norm/dot, \
-             cumsum/cumprod/cummax/cummin/diff/sort/flip, linspace, length, det/inv/eig)",
+             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/var/std/median/norm/dot/cross, \
+             cumsum/cumprod/cummax/cummin/diff/sort/flip, linspace, length, det/inv/eig/trace)",
             func
         )),
     }
@@ -1062,7 +1083,7 @@ fn matrix_evidence_expr(name: &str, e: &MExpr) -> bool {
     {
         MExpr::Call { func, args } =>
         {
-            (matches!(func.as_str(), "det" | "inv" | "eig")
+            (matches!(func.as_str(), "det" | "inv" | "eig" | "trace")
                 && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 || args.iter().any(|a| matrix_evidence_expr(name, a))
         },
@@ -1125,10 +1146,11 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 || (is_reduction(func)
                     && args.len() == 1
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
-                // `dot(a, b)` — both operands are vectors, so either being the
-                // name is evidence (the generic reduction arm checks only the
-                // first argument).
-                || (func == "dot" && args.iter().any(|a| is_ident(name, a)))
+                // `dot(a, b)` / `cross(a, b)` — both operands are vectors, so
+                // either being the name is evidence (the generic reduction arm
+                // checks only the first argument).
+                || (matches!(func.as_str(), "dot" | "cross")
+                    && args.iter().any(|a| is_ident(name, a)))
                 // Vector -> vector builtins whose (single) argument is a vector.
                 || (matches!(
                     func.as_str(),

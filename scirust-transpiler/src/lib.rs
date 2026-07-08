@@ -772,6 +772,31 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_trace_and_cross_route_to_prelude() {
+        // trace(A) -> scalar; `A` inferred a matrix from the intrinsic.
+        let t = transpile_matlab("function t = f(A)\n  t = trace(A);\nend\n").unwrap();
+        assert_eq!(sig_of(&t, "f"), "pub fn f(A: &[f64]) -> f64 {");
+        assert!(t.contains("np::trace(A)"));
+        // cross(a, b) -> vector; BOTH operands inferred vectors, std-only.
+        let c = transpile_matlab("function c = f(a, b)\n  c = cross(a, b);\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&c, "f"),
+            "pub fn f(a: &[f64], b: &[f64]) -> Vec<f64> {"
+        );
+        assert!(c.contains("np::cross(a, b)"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function c = f(a, b)\n  c = cross(a, b);\nend\n")
+                    .unwrap()
+            )
+            .is_empty()
+        );
+        // trace of a non-matrix (scalar expression) is rejected.
+        let bad = transpile_matlab("function t = f(x)\n  t = trace(x * 2.0);\nend\n");
+        assert!(bad.is_err());
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]
