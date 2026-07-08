@@ -436,6 +436,194 @@ pub fn cpu_lora_linear_backward(
     (dx, da, db)
 }
 
+/// CPU reference for a **DoRA-adapted linear** forward — the oracle for
+/// [`crate::GpuChain::dora_linear_forward`]. `x` is `m×in`, base `w0` is `in×out`
+/// (row-major, frozen), `a` is `in×r`, `b` is `r×out`, `mag` is length `in`
+/// (per-row magnitude). Returns `m×out` `y = x·W'` with
+/// `W' = mag ⊙ V/‖V‖_row`, `V = w0 + a·b` (per-row norm over the `out` columns,
+/// guarded by `1/√max(·, 1e-12)` to mirror the `rsqrt` kernel).
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_dora_linear(
+    x: &[f32],
+    w0: &[f32],
+    a: &[f32],
+    b: &[f32],
+    mag: &[f32],
+    m: usize,
+    in_f: usize,
+    r: usize,
+    out: usize,
+) -> Vec<f32> {
+    let (v, rnr) = dora_v_rnr(w0, a, b, in_f, r, out);
+    // W' = mag ⊙ V/‖V‖_row.
+    let mut wp = vec![0.0f32; in_f * out];
+    for p in 0..in_f
+    {
+        for o in 0..out
+        {
+            wp[p * out + o] = mag[p] * v[p * out + o] * rnr[p];
+        }
+    }
+    // y = x·W'.
+    let mut y = vec![0.0f32; m * out];
+    for i in 0..m
+    {
+        for o in 0..out
+        {
+            let mut s = 0.0f32;
+            for p in 0..in_f
+            {
+                s += x[i * in_f + p] * wp[p * out + o];
+            }
+            y[i * out + o] = s;
+        }
+    }
+    y
+}
+
+/// `V = w0 + a·b` (`in×out`) and the guarded reciprocal per-row norms `rnr`
+/// (`1/√max(Σ_o V², 1e-12)`, length `in`). Shared by the DoRA oracles.
+fn dora_v_rnr(
+    w0: &[f32],
+    a: &[f32],
+    b: &[f32],
+    in_f: usize,
+    r: usize,
+    out: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut v = vec![0.0f32; in_f * out];
+    for p in 0..in_f
+    {
+        for o in 0..out
+        {
+            let mut s = w0[p * out + o];
+            for k in 0..r
+            {
+                s += a[p * r + k] * b[k * out + o];
+            }
+            v[p * out + o] = s;
+        }
+    }
+    let mut rnr = vec![0.0f32; in_f];
+    for p in 0..in_f
+    {
+        let mut ss = 0.0f32;
+        for o in 0..out
+        {
+            ss += v[p * out + o] * v[p * out + o];
+        }
+        rnr[p] = 1.0 / ss.max(1e-12).sqrt();
+    }
+    (v, rnr)
+}
+
+/// CPU reference for the **DoRA-adapted linear backward** — the oracle for
+/// [`crate::GpuChain::dora_linear_backward`]. Returns `(dx, dA, dB, dm)` with
+/// shapes `m×in`, `in×r`, `r×out`, `in`; `w0` is frozen. With `dW' = xᵀ·dy`,
+/// `u = V/‖V‖_row`, `s = Σ_o dW'·u` (per row): `dm = s`,
+/// `dV = (mag/‖V‖_row)·(dW' − u·s)`, `dA = dV·Bᵀ`, `dB = Aᵀ·dV`, `dx = dy·W'ᵀ`.
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_dora_linear_backward(
+    x: &[f32],
+    w0: &[f32],
+    a: &[f32],
+    b: &[f32],
+    mag: &[f32],
+    dy: &[f32],
+    m: usize,
+    in_f: usize,
+    r: usize,
+    out: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let (v, rnr) = dora_v_rnr(w0, a, b, in_f, r, out);
+    let mut wp = vec![0.0f32; in_f * out];
+    for p in 0..in_f
+    {
+        for o in 0..out
+        {
+            wp[p * out + o] = mag[p] * v[p * out + o] * rnr[p];
+        }
+    }
+    // dW' = xᵀ·dy  (in×out).
+    let mut dwp = vec![0.0f32; in_f * out];
+    for p in 0..in_f
+    {
+        for o in 0..out
+        {
+            let mut s = 0.0f32;
+            for i in 0..m
+            {
+                s += x[i * in_f + p] * dy[i * out + o];
+            }
+            dwp[p * out + o] = s;
+        }
+    }
+    // dx = dy·W'ᵀ  (m×in).
+    let mut dx = vec![0.0f32; m * in_f];
+    for i in 0..m
+    {
+        for p in 0..in_f
+        {
+            let mut s = 0.0f32;
+            for o in 0..out
+            {
+                s += dy[i * out + o] * wp[p * out + o];
+            }
+            dx[i * in_f + p] = s;
+        }
+    }
+    // dm[p] = Σ_o dW'[p,o]·u[p,o], u = V/‖V‖_row.
+    let mut dm = vec![0.0f32; in_f];
+    for p in 0..in_f
+    {
+        let mut sp = 0.0f32;
+        for o in 0..out
+        {
+            sp += dwp[p * out + o] * (v[p * out + o] * rnr[p]);
+        }
+        dm[p] = sp;
+    }
+    // dV[p,o] = (mag/‖V‖_row)·(dW' − u·s).
+    let mut dv = vec![0.0f32; in_f * out];
+    for p in 0..in_f
+    {
+        for o in 0..out
+        {
+            let u = v[p * out + o] * rnr[p];
+            dv[p * out + o] = (mag[p] * rnr[p]) * (dwp[p * out + o] - u * dm[p]);
+        }
+    }
+    // dA = dV·Bᵀ  (in×r).
+    let mut da = vec![0.0f32; in_f * r];
+    for p in 0..in_f
+    {
+        for k in 0..r
+        {
+            let mut s = 0.0f32;
+            for o in 0..out
+            {
+                s += dv[p * out + o] * b[k * out + o];
+            }
+            da[p * r + k] = s;
+        }
+    }
+    // dB = Aᵀ·dV  (r×out).
+    let mut db = vec![0.0f32; r * out];
+    for k in 0..r
+    {
+        for o in 0..out
+        {
+            let mut s = 0.0f32;
+            for p in 0..in_f
+            {
+                s += a[p * r + k] * dv[p * out + o];
+            }
+            db[k * out + o] = s;
+        }
+    }
+    (dx, da, db, dm)
+}
+
 /// CPU reference for rotary position embedding — the bit-exact oracle for
 /// [`crate::WgpuContext::rope_resident`]. Rotates the interleaved lane pair
 /// `(2j, 2j+1)` of each row by `pos·freqⱼ`, with `pos = (row mod seq_len) +

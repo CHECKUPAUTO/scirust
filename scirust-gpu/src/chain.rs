@@ -194,6 +194,20 @@ pub struct LoraGrads {
     pub db: GpuMatrix,
 }
 
+/// Gradients of a **DoRA-adapted linear** ([`GpuChain::dora_linear_backward`]).
+/// The base weight `W₀` is frozen; the trainable parameters are the two low-rank
+/// factors and the per-row magnitude vector (plus `dx` for backprop).
+pub struct DoraGrads {
+    /// `∂L/∂x` (`m×in`).
+    pub dx: GpuMatrix,
+    /// `∂L/∂A` (`in×r`).
+    pub da: GpuMatrix,
+    /// `∂L/∂B` (`r×out`).
+    pub db: GpuMatrix,
+    /// `∂L/∂m` (`in×1`) — per-row (per-input-feature) magnitude gradient.
+    pub dm: GpuMatrix,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -239,6 +253,12 @@ impl GpuChain {
     /// Elementwise `relu(a)`, result resident.
     pub fn relu(&self, a: &GpuMatrix) -> BackendResult<GpuMatrix> {
         self.ctx.ew_resident(a, a, 2)
+    }
+
+    /// Elementwise reciprocal square root `1/√(max(a, 1e-12))`, result resident —
+    /// the guarded reciprocal column-norm used by DoRA's normalisation.
+    pub fn rsqrt(&self, a: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.ew_resident(a, a, 4)
     }
 
     /// **LoRA-adapted linear forward**, fully resident:
@@ -291,6 +311,94 @@ impl GpuChain {
         let dx_base = self.matmul_t(dy, w, false, true)?; // dy·Wᵀ           (m×in)
         let dx = self.add(&dx_base, &dx_delta)?;
         Ok(LoraGrads { dx, da, db })
+    }
+
+    /// The DoRA **effective weight** and the intermediates the backward reuses.
+    /// Returns `(W', V, rn_recip, scale_col)` where `V = W₀ + A·B` (`in×out`),
+    /// `rn_recip = 1/‖V‖_row` (`in×1`, per input feature / row), `scale_col =
+    /// m ⊙ rn_recip = m/‖V‖_row` (`in×1`), and `W' = m ⊙ V/‖V‖_row` (`in×out`).
+    /// Per-row (per-input-feature) normalisation — the transpose of DoRA's
+    /// per-column convention, matching the resident `[in, out]` weight layout.
+    #[allow(clippy::type_complexity)]
+    fn dora_effective(
+        &self,
+        w0: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        m: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix, GpuMatrix, GpuMatrix)> {
+        let out = w0.cols();
+        let ab = self.matmul(a, b)?; // A·B            (in×out)
+        let v = self.add(w0, &ab)?; // V = W₀ + A·B    (in×out)
+        let vsq = self.mul(&v, &v)?; // V²              (in×out)
+        let ones_out = self.upload(&vec![1.0f32; out], out, 1);
+        let ss = self.matmul(&vsq, &ones_out)?; // Σ_o V²  (in×1)
+        let rn_recip = self.rsqrt(&ss)?; // 1/‖V‖_row     (in×1)
+        let scale_col = self.mul(m, &rn_recip)?; // m/‖V‖_row (in×1)
+        let ones_row = self.upload(&vec![1.0f32; out], 1, out);
+        let scale_bc = self.matmul(&scale_col, &ones_row)?; // broadcast (in×out)
+        let wp = self.mul(&v, &scale_bc)?; // W'          (in×out)
+        Ok((wp, v, rn_recip, scale_col))
+    }
+
+    /// **DoRA-adapted linear forward**, fully resident: `y = x·W'` with the
+    /// magnitude/direction weight `W' = m ⊙ (W₀ + A·B)/‖W₀ + A·B‖_row`, the base
+    /// `W₀` (`in×out`) **frozen** and the low-rank factors `A` (`in×r`), `B`
+    /// (`r×out`) plus per-row magnitude `m` (`in×1`) trainable. `x` is `m×in`.
+    /// Composed from resident GEMMs + `rsqrt` + scale/add — no monolithic kernel.
+    /// With `B = 0` and `m = ‖W₀‖_row`, `W' = W₀`, so a fresh adapter reproduces
+    /// the base layer. The CPU contract is [`crate::ops::cpu_dora_linear`].
+    pub fn dora_linear_forward(
+        &self,
+        x: &GpuMatrix,
+        w0: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        m: &GpuMatrix,
+    ) -> BackendResult<GpuMatrix> {
+        let (wp, ..) = self.dora_effective(w0, a, b, m)?;
+        self.matmul(x, &wp)
+    }
+
+    /// **Backward of [`Self::dora_linear_forward`]**. Given `x`, the frozen `W₀`,
+    /// `A`/`B`/`m`, and the upstream gradient `dy` (`m×out`), returns `dx`, `dA`,
+    /// `dB`, and `dm` as [`DoraGrads`] (`W₀` frozen). Differentiates the per-row
+    /// normalisation: with `dW' = xᵀ·dy`, `u = V/‖V‖_row`, and
+    /// `s = Σ_o dW'·u` (per row), `dm = s`, `dV = (m/‖V‖_row)·(dW' − u·s)`, then
+    /// `dA = dV·Bᵀ`, `dB = Aᵀ·dV`, and `dx = dy·W'ᵀ`. The CPU contract is
+    /// [`crate::ops::cpu_dora_linear_backward`].
+    pub fn dora_linear_backward(
+        &self,
+        x: &GpuMatrix,
+        w0: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        m: &GpuMatrix,
+        dy: &GpuMatrix,
+    ) -> BackendResult<DoraGrads> {
+        let out = w0.cols();
+        let (wp, v, rn_recip, scale_col) = self.dora_effective(w0, a, b, m)?;
+        let dwp = self.matmul_t(x, dy, true, false)?; // ∂L/∂W' = xᵀ·dy  (in×out)
+        let dx = self.matmul_t(dy, &wp, false, true)?; // dy·W'ᵀ          (m×in)
+
+        let ones_row = self.upload(&vec![1.0f32; out], 1, out);
+        let ones_out = self.upload(&vec![1.0f32; out], out, 1);
+        // u = V/‖V‖_row  (broadcast rn_recip across the `out` columns).
+        let rn_bc = self.matmul(&rn_recip, &ones_row)?; // (in×out)
+        let u = self.mul(&v, &rn_bc)?; // (in×out)
+        // s[p] = Σ_o dW'[p,o]·u[p,o] = rowsum(dW' ⊙ u)  (in×1); dm = s.
+        let dwp_u = self.mul(&dwp, &u)?;
+        let s = self.matmul(&dwp_u, &ones_out)?; // (in×1)
+        // dV = (m/‖V‖_row) ⊙ (dW' − u·s).
+        let s_bc = self.matmul(&s, &ones_row)?; // (in×out)
+        let u_s = self.mul(&u, &s_bc)?; // u·s     (in×out)
+        let neg_u_s = self.scale_causal_mask(&u_s, -1.0, false)?; // −u·s
+        let diff = self.add(&dwp, &neg_u_s)?; // dW' − u·s (in×out)
+        let scale_bc = self.matmul(&scale_col, &ones_row)?; // (m/‖V‖_row) bc (in×out)
+        let dv = self.mul(&scale_bc, &diff)?; // dV        (in×out)
+        let da = self.matmul_t(&dv, b, false, true)?; // dV·Bᵀ  (in×r)
+        let db = self.matmul_t(a, &dv, true, false)?; // Aᵀ·dV  (r×out)
+        Ok(DoraGrads { dx, da, db, dm: s })
     }
 
     /// SwiGLU gate `silu(gate) ⊙ up` (same shape), result resident — the
@@ -3284,6 +3392,138 @@ mod tests {
         check("dx", &x, &dx_gpu, 0);
         check("dA", &a, &da_gpu, 1);
         check("dB", &b, &db_gpu, 2);
+    }
+
+    /// The **resident DoRA-adapted linear** forward + backward, gradient-checked
+    /// end-to-end. Forward `y = x·(mag ⊙ V/‖V‖_row)`, `V = W₀+A·B`, matches the CPU
+    /// oracle (and equals `x·W₀` when `B = 0`, `mag = ‖W₀‖_row`); the backward's
+    /// `dx`, `dA`, `dB`, `dm` match the CPU adjoint AND central finite differences
+    /// of `L = Σ dora(x)⊙G` over `x`, `A`, `B`, `mag`. The frozen `W₀` gets no
+    /// gradient. Skips if no adapter.
+    #[test]
+    fn dora_linear_backward_matches_finite_differences() {
+        use crate::ops::{cpu_dora_linear, cpu_dora_linear_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (mm, in_f, r, out) = (4usize, 6usize, 2usize, 5usize);
+        let gen = |n: usize, ph: f32, amp: f32| -> Vec<f32> {
+            (0..n).map(|i| (i as f32 * 0.17 + ph).sin() * amp).collect()
+        };
+        let x = gen(mm * in_f, 0.3, 1.2);
+        let w0 = gen(in_f * out, 1.1, 0.6);
+        let a = gen(in_f * r, 2.0, 0.3);
+        let b = gen(r * out, 0.7, 0.3);
+        // A non-trivial magnitude (not the init value), so the norm path is exercised.
+        let mag: Vec<f32> = (0..in_f).map(|p| 0.7 + 0.15 * p as f32).collect();
+        let g = gen(mm * out, 3.0, 1.0); // dL/dY
+
+        let gx = chain.upload(&x, mm, in_f);
+        let gw0 = chain.upload(&w0, in_f, out);
+        let ga = chain.upload(&a, in_f, r);
+        let gb = chain.upload(&b, r, out);
+        let gm = chain.upload(&mag, in_f, 1);
+        let gg = chain.upload(&g, mm, out);
+
+        // Forward parity.
+        let y_gpu = chain
+            .download(&chain.dora_linear_forward(&gx, &gw0, &ga, &gb, &gm).unwrap())
+            .unwrap();
+        let y_cpu = cpu_dora_linear(&x, &w0, &a, &b, &mag, mm, in_f, r, out);
+        assert!(rel_err(&y_gpu, &y_cpu) < 1e-4, "forward mismatch");
+
+        // B = 0, mag = ‖W₀‖_row ⇒ W' = W₀, so the adapter is exactly the base map.
+        let b0 = vec![0.0f32; r * out];
+        let rownorm: Vec<f32> = (0..in_f)
+            .map(|p| {
+                (0..out)
+                    .map(|o| w0[p * out + o] * w0[p * out + o])
+                    .sum::<f32>()
+                    .sqrt()
+            })
+            .collect();
+        let gb0 = chain.upload(&b0, r, out);
+        let grn = chain.upload(&rownorm, in_f, 1);
+        let y_base = chain
+            .download(
+                &chain
+                    .dora_linear_forward(&gx, &gw0, &ga, &gb0, &grn)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut x_w0 = vec![0.0f32; mm * out];
+        for i in 0..mm
+        {
+            for o in 0..out
+            {
+                let mut acc = 0.0f32;
+                for p in 0..in_f
+                {
+                    acc += x[i * in_f + p] * w0[p * out + o];
+                }
+                x_w0[i * out + o] = acc;
+            }
+        }
+        assert!(
+            rel_err(&y_base, &x_w0) < 3e-4,
+            "B=0,mag=‖W₀‖ must equal x·W₀"
+        );
+
+        // Backward vs the CPU adjoint.
+        let grads = chain
+            .dora_linear_backward(&gx, &gw0, &ga, &gb, &gm, &gg)
+            .unwrap();
+        let (dx_gpu, da_gpu, db_gpu, dm_gpu) = (
+            chain.download(&grads.dx).unwrap(),
+            chain.download(&grads.da).unwrap(),
+            chain.download(&grads.db).unwrap(),
+            chain.download(&grads.dm).unwrap(),
+        );
+        let (dx_cpu, da_cpu, db_cpu, dm_cpu) =
+            cpu_dora_linear_backward(&x, &w0, &a, &b, &mag, &g, mm, in_f, r, out);
+        assert!(rel_err(&dx_gpu, &dx_cpu) < 1e-4, "dx vs oracle");
+        assert!(rel_err(&da_gpu, &da_cpu) < 1e-4, "dA vs oracle");
+        assert!(rel_err(&db_gpu, &db_cpu) < 1e-4, "dB vs oracle");
+        assert!(rel_err(&dm_gpu, &dm_cpu) < 1e-4, "dm vs oracle");
+
+        // Gold standard: central finite differences of L = Σ dora(x)⊙G.
+        let loss = |xx: &[f32], aa: &[f32], bb: &[f32], mmag: &[f32]| -> f32 {
+            cpu_dora_linear(xx, &w0, aa, bb, mmag, mm, in_f, r, out)
+                .iter()
+                .zip(&g)
+                .map(|(u, v)| u * v)
+                .sum()
+        };
+        let h = 1e-3f32;
+        let check = |name: &str, base: &[f32], grad: &[f32], which: u8| {
+            for idx in 0..base.len()
+            {
+                let (mut vp, mut vm) = (base.to_vec(), base.to_vec());
+                vp[idx] += h;
+                vm[idx] -= h;
+                let (lp, lm) = match which
+                {
+                    0 => (loss(&vp, &a, &b, &mag), loss(&vm, &a, &b, &mag)),
+                    1 => (loss(&x, &vp, &b, &mag), loss(&x, &vm, &b, &mag)),
+                    2 => (loss(&x, &a, &vp, &mag), loss(&x, &a, &vm, &mag)),
+                    _ => (loss(&x, &a, &b, &vp), loss(&x, &a, &b, &vm)),
+                };
+                let fd = (lp - lm) / (2.0 * h);
+                assert!(
+                    (fd - grad[idx]).abs() < 2e-2,
+                    "{name}[{idx}]: fd={fd} gpu={}",
+                    grad[idx]
+                );
+            }
+        };
+        check("dx", &x, &dx_gpu, 0);
+        check("dA", &a, &da_gpu, 1);
+        check("dB", &b, &db_gpu, 2);
+        check("dm", &mag, &dm_gpu, 3);
     }
 
     /// Scale + causal-mask backward: `din = scale·dout` below/on the diagonal,
