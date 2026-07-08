@@ -593,8 +593,30 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&a, "prod")?;
         return Ok(SirExpr::Prod(Box::new(a)));
     }
+    if (func == "max" || func == "min") && args.len() == 2
+    {
+        // Two-argument form: `max(a, b)` / `min(a, b)` over two scalars.
+        let l = lower_scalar(&args[0], env)?;
+        let r = lower_scalar(&args[1], env)?;
+        expect_scalar(&l, func)?;
+        expect_scalar(&r, func)?;
+        let mf = if func == "max"
+        {
+            MathFn2::Max
+        }
+        else
+        {
+            MathFn2::Min
+        };
+        return Ok(SirExpr::ScalarBinFn {
+            func: mf,
+            l: Box::new(l),
+            r: Box::new(r),
+        });
+    }
     if func == "max"
     {
+        // One-argument form: reduction over a vector.
         need_args(func, args, 1)?;
         let a = lower_scalar(&args[0], env)?;
         expect_array(&a, "max")?;
@@ -717,6 +739,20 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             r: Box::new(r),
         });
     }
+    if func == "power"
+    {
+        // power(a, b) — the functional form of `a ^ b` (scalar exponentiation),
+        // sharing the `^` lowering (integer exponents fold to `powi`).
+        need_args(func, args, 2)?;
+        let base = lower_scalar(&args[0], env)?;
+        let exp = lower_scalar(&args[1], env)?;
+        expect_scalar(&base, "power")?;
+        expect_scalar(&exp, "power")?;
+        return Ok(SirExpr::ScalarPow {
+            base: Box::new(base),
+            exp: Box::new(exp),
+        });
+    }
     if func == "det"
     {
         // det(A) -> routed to the verified LU-based determinant.
@@ -779,7 +815,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
-             mod/rem/sign/atan2/hypot, sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
+             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
             func
         )),
     }
@@ -959,7 +995,11 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
         MExpr::Call { func, args } =>
         {
             (func == name && !MATH_FNS.contains(&func.as_str()) && !is_reduction(func))
+                // A reduction implies an array argument only in its 1-arg form;
+                // `max(a, b)` / `min(a, b)` are two-scalar intrinsics, not
+                // reductions, so they must not mark their operands as arrays.
                 || (is_reduction(func)
+                    && args.len() == 1
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // `dot(a, b)` — both operands are vectors, so either being the
                 // name is evidence (the generic reduction arm checks only the

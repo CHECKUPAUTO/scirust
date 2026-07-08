@@ -363,6 +363,10 @@ pub enum MathFn2 {
     Atan2,
     /// `hypot(a, b)` → `f64::hypot` (`√(a²+b²)` without overflow).
     Hypot,
+    /// `max(a, b)` → `f64::max` (larger of two scalars).
+    Max,
+    /// `min(a, b)` → `f64::min` (smaller of two scalars).
+    Min,
 }
 
 impl MathFn2 {
@@ -371,6 +375,8 @@ impl MathFn2 {
         {
             MathFn2::Atan2 => "atan2",
             MathFn2::Hypot => "hypot",
+            MathFn2::Max => "max",
+            MathFn2::Min => "min",
         }
     }
 }
