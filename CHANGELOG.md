@@ -160,6 +160,26 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `atan2` / `hypot` / `max` / `min` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 35)
+Les fonctions math à deux arguments deviennent **vectorielles** : elles se
+dispatchent désormais sur le type des opérandes (scalaire∘scalaire → scalaire,
+tableau∘tableau → élément par élément, mélange scalaire↔tableau → diffusion),
+réutilisant les nœuds `EwBinFn`/`BroadcastFn` (créés pour `.^`). Le nouveau
+helper `lower_math2` centralise cette logique pour `atan2`/`hypot`/`max`/`min`.
+
+- `atan2(y, x)`, `hypot(a, b)`, `max(a, b)`, `min(a, b)` acceptent maintenant des
+  **vecteurs** (élément par élément) et des mélanges scalaire↔vecteur (diffusion),
+  en plus des scalaires ; l'ordre des opérandes est préservé pour `atan2`.
+
+Trois cas d'oracle : `atan2(cumsum(v), flip(v))` (élément par élément),
+`hypot(cumsum(v), 2)` (diffusion), `max(…)−min(…)` sur tableaux — les opérandes
+étant construits par des builtins renvoyant des tableaux, l'inférence coule
+naturellement (sans code mort). **Oracle 101/101** (200 essais chacun) ; **83
+tests unitaires** (1 nouveau ; un ancien test mis à jour car `hypot` accepte
+désormais un vecteur). *Non-vacuité* : inverser l'ordre des opérandes élément par
+élément fait diverger `atan2` (ROUGE) tandis que `max`/`min`, commutatifs,
+restent verts.
+
 ### Ajouté — transpileur : **MATLAB `expm1` / `log1p`** prouvés contre Octave réel (Phase 2, incrément 34)
 Deux fonctions math **précises près de zéro**, mappées sur les méthodes IEEE
 exactes `f64::exp_m1` / `f64::ln_1p` et intégrées au motif `MATH_FNS`

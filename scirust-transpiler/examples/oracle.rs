@@ -1104,6 +1104,40 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB elementwise two-arg math on arrays (Phase 2) ----
+        // atan2 elementwise (array, array); operands built from array builtins.
+        Case {
+            name: "M: atan2(cumsum(v), flip(v)) (elementwise)",
+            call: "matan2ew",
+            src: "function y = matan2ew(v)\n  y = atan2(cumsum(v), flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // hypot broadcast (array, scalar).
+        Case {
+            name: "M: hypot(cumsum(v), 2) (broadcast)",
+            call: "mhypotbc",
+            src: "function y = mhypotbc(v)\n  y = hypot(cumsum(v), 2.0);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // elementwise max/min (array, array): the running spread.
+        Case {
+            name: "M: max/min elementwise (arrays)",
+            call: "mmmew",
+            src: "function y = mmmew(v)\n  y = max(cumsum(v), flip(v)) - min(cumsum(v), flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
     ]
 }
 

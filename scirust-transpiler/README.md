@@ -65,7 +65,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
 | constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
-| two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` | `(l).atan2/hypot/max/min(r)` (`ScalarBinFn`); `power` shares `^`. `max`/`min` with one arg stay reductions |
+| two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` — scalar, elementwise on vectors, or scalar↔vector broadcast | `ScalarBinFn` / `EwBinFn` / `BroadcastFn` (dispatched on operand type); `power` shares `^`; `max`/`min` with one arg stay reductions |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
 **matrix-ness** from `det`/`inv` arguments and the left side of `\`
@@ -126,8 +126,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: kron(a,b) / cumtrapz(v)    200/200 trials match (octave) (Kronecker product + cumulative integral, Phase 2)
   ✓ M: conv(a,b) / polyval(p,x)   200/200 trials match (octave) (convolution + Horner polynomial eval, Phase 2)
   ✓ M: expm1(x) / log1p(v)        200/200 trials match (octave) (accurate-near-zero exp/log, Phase 2)
+  ✓ M: atan2/hypot/max/min elementwise & broadcast 200/200 trials match (octave) (two-arg math on arrays, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 98/98 cases match their reference runtime within tolerance
+  ORACLE GREEN — 101/101 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

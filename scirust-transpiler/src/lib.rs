@@ -595,8 +595,8 @@ mod tests {
             )
             .is_empty()
         );
-        // A vector argument is refused (scalar-only in this subset).
-        let bad = transpile_matlab("function r = f(v)\n  r = hypot(sum(v), v);\nend\n");
+        // A matrix operand is refused (only scalar / vector operands allowed).
+        let bad = transpile_matlab("function r = f(A)\n  r = hypot(det(A), A);\nend\n");
         assert!(bad.is_err());
     }
 
@@ -877,6 +877,23 @@ mod tests {
         // Elementwise over an array (array-ness established by `.* v`).
         let a = transpile_matlab("function y = f(v)\n  y = log1p(v) .* v;\nend\n").unwrap();
         assert!(a.contains("|x| x.ln_1p()"));
+    }
+
+    #[test]
+    fn matlab_two_arg_math_dispatches_scalar_vs_elementwise() {
+        // Scalar operands -> the scalar `(l).atan2(r)` form.
+        let sc = transpile_matlab("function y = f(a, b)\n  y = atan2(a, b);\nend\n").unwrap();
+        assert!(sc.contains("(a).atan2(b)"));
+        // Array operands (from array builtins) -> elementwise `ew2`.
+        let ew =
+            transpile_matlab("function y = f(v)\n  y = atan2(cumsum(v), flip(v));\nend\n").unwrap();
+        assert!(ew.contains("np::ew2("));
+        assert!(ew.contains(".atan2(y))"));
+        // Array/scalar mix -> broadcast `map1`.
+        let bc =
+            transpile_matlab("function y = f(v)\n  y = hypot(cumsum(v), 2.0);\nend\n").unwrap();
+        assert!(bc.contains("np::map1("));
+        assert!(bc.contains(".hypot("));
     }
 
     // ---- tuples / SVD -----------------------------------------------------
