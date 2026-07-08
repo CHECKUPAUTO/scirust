@@ -349,7 +349,7 @@ secteurs réellement débloqués.
 | Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
 | Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
 | Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (75 tests) |
+| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (76 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
@@ -361,8 +361,8 @@ secteurs réellement débloqués.
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python, **algèbre linéaire `det`/`inv`/`\`/`eig` + produit matriciel `A*b`/`A*B` → `scirust-solvers`**, `norm`/`dot`, `.^`, vecteur→vecteur, `linspace`) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 85 cas au total : 43 Python prouvés
-contre **NumPy réel**, 42 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
+**Résultat de l'oracle (reproductible).** 87 cas au total : 43 Python prouvés
+contre **NumPy réel**, 44 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
 $ cargo run -p scirust-transpiler --example oracle
@@ -392,8 +392,9 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ M: var(v) / std(v) / median(v) (MATLAB reduction statistics, N-1 — Phase 2)
   ✓ M: linspace(a,b,n) (MATLAB vector constructor, exact endpoints — Phase 2)
   ✓ M: A*(A\b) / A*inv(A) (MATLAB matrix product `*` → matvec/matmul — Phase 2)
+  ✓ M: A' / A'*A (MATLAB transpose operator `'`, Gram matrix — Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 (`return a, b` — Phase 2)
-  ORACLE GREEN — 85/85 cases match their reference runtime within tolerance
+  ORACLE GREEN — 87/87 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

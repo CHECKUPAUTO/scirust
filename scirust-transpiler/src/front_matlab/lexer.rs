@@ -94,10 +94,17 @@ pub fn lex(src: &str) -> Result<Vec<MTok>, String> {
                 toks.push(MTok::Sym(",".into()));
                 i += 1;
             },
-            '.' if i + 1 < n && matches!(chars[i + 1], '*' | '/' | '^') =>
+            '.' if i + 1 < n && matches!(chars[i + 1], '*' | '/' | '^' | '\'') =>
             {
                 toks.push(MTok::Sym(format!(".{}", chars[i + 1])));
                 i += 2;
+            },
+            // Postfix transpose `'` (there are no character strings in this
+            // subset, so a `'` is always transpose, never a quote).
+            '\'' =>
+            {
+                toks.push(MTok::Sym("'".into()));
+                i += 1;
             },
             '~' if i + 1 < n && chars[i + 1] == '=' =>
             {

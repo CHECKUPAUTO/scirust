@@ -377,7 +377,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_pow(&mut self) -> Result<MExpr, String> {
-        let base = self.parse_atom()?;
+        let base = self.parse_postfix()?;
         let op = if self.is_sym("^")
         {
             Some(MBinOp::Pow)
@@ -401,6 +401,18 @@ impl<'a> Parser<'a> {
             });
         }
         Ok(base)
+    }
+
+    /// An atom followed by any number of postfix transpose operators (`A'`,
+    /// `A.'`). Transpose binds tighter than `^`, so it is applied here first.
+    fn parse_postfix(&mut self) -> Result<MExpr, String> {
+        let mut e = self.parse_atom()?;
+        while self.is_sym("'") || self.is_sym(".'")
+        {
+            self.bump();
+            e = MExpr::Transpose(Box::new(e));
+        }
+        Ok(e)
     }
 
     fn parse_atom(&mut self) -> Result<MExpr, String> {

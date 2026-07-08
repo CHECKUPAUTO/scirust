@@ -412,6 +412,15 @@ fn lower_scalar(e: &MExpr, env: &HashMap<String, Ty>) -> Result<SirExpr, String>
             }
         },
         MExpr::Bin { op, l, r } => lower_bin(*op, l, r, env),
+        MExpr::Transpose(inner) =>
+        {
+            let v = lower_scalar(inner, env)?;
+            if !is_matrixish(v.ty())
+            {
+                return Err("transpose `'` expects a matrix".into());
+            }
+            Ok(SirExpr::Transpose(Box::new(v)))
+        },
         MExpr::Cmp { .. } => Err("a comparison is only valid as an `if`/`while` condition".into()),
         MExpr::Index { .. } => unreachable!("parser produces Call, not Index"),
         MExpr::Call { func, args } => lower_call(func, args, env),
@@ -1068,6 +1077,8 @@ fn matrix_evidence_expr(name: &str, e: &MExpr) -> bool {
             matrix_evidence_expr(name, l) || matrix_evidence_expr(name, r)
         },
         MExpr::Neg(inner) => matrix_evidence_expr(name, inner),
+        // `name'` — only a matrix can be transposed in this subset.
+        MExpr::Transpose(inner) => is_ident(name, inner) || matrix_evidence_expr(name, inner),
         _ => false,
     }
 }

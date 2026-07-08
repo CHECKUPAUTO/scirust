@@ -50,10 +50,11 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | 1-based indexing `a(i)` | `a[i-1]` (0-based) |
 | inclusive ranges `for i = 1:n` | `for i in 1..(n+1)` |
 | element-wise `.*` `./` `.^` (arrays or scalar↔array broadcast) vs scalar `* / ^` | `EwBin`/`EwBinFn`/`BroadcastFn` vs scalar op (`^` on an array = `mpower`, refused) |
+| postfix transpose `A'` / `A.'` (real matrices) | `Transpose` (routed to `scirust-solvers`); operand inferred a matrix |
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
-| linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul); `*` routes to a matrix product only when the left operand is an inferred matrix |
+| linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B`, transpose `A'` / `A.'` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul / transpose); `*` routes to a matrix product only when the left operand is an inferred matrix |
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
@@ -114,8 +115,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: var(v) / std(v) / median(v) 200/200 trials match (octave) (MATLAB reduction statistics, N-1, Phase 2)
   ✓ M: linspace(a, b, 6)          200/200 trials match (octave) (MATLAB vector constructor, exact endpoints, Phase 2)
   ✓ M: A*(A\b) / A*inv(A)         200/200 trials match (octave) (MATLAB matrix product * → matvec/matmul, Phase 2)
+  ✓ M: A' / A'*A                  200/200 trials match (octave) (MATLAB transpose operator ', Gram matrix, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 85/85 cases match their reference runtime within tolerance
+  ORACLE GREEN — 87/87 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
