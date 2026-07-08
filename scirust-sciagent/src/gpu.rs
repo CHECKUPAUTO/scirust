@@ -280,6 +280,145 @@ impl ResidentModel {
         toks
     }
 
+    /// **KV-cached greedy generation** — the `O(n)`-per-token equivalent of
+    /// [`Self::generate`]. Where `generate` re-runs the whole-sequence forward at
+    /// every step (`O(n²)` total), this processes only the newly-added token: its
+    /// per-layer roped key and raw value are appended to a growing per-layer cache,
+    /// and the single query attends over the cached keys/values. The arithmetic is
+    /// [`Self::forward`] restricted to the last row, so this yields the **same
+    /// tokens** as [`Self::generate`] — in fact the naive one-cell-per-thread GEMM
+    /// reduces each output independently of the matrix height, so the last row's
+    /// logits are reproduced bit-for-bit (verified token-for-token in
+    /// `tests/gpu_parity.rs`).
+    ///
+    /// Caches live on the host as `n_layers` growing `Vec<f32>` (roped K, raw V,
+    /// `kv_dim` columns), re-uploaded per step; the compute stays resident.
+    /// Returns the full sequence (`prompt` followed by the generated tokens).
+    pub fn generate_cached(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
+        if prompt.is_empty()
+        {
+            return Vec::new();
+        }
+        let n = self.blocks.len();
+        // Per-layer host caches of roped keys / raw values (row-major, kv_dim wide).
+        let mut kcache: Vec<Vec<f32>> = vec![Vec::new(); n];
+        let mut vcache: Vec<Vec<f32>> = vec![Vec::new(); n];
+
+        // Prefill: feed the prompt one token at a time, keeping the last logits.
+        let mut last_logits = Vec::new();
+        for (pos, &tok) in prompt.iter().enumerate()
+        {
+            last_logits = self.decode_step(tok, pos, &mut kcache, &mut vcache);
+        }
+
+        // Decode: argmax → append → step, growing the same caches. The final
+        // token needs no further forward (nothing is generated after it).
+        let mut toks = prompt.to_vec();
+        for i in 0..max_new
+        {
+            let next = argmax(&last_logits) as u32;
+            let pos = toks.len();
+            toks.push(next);
+            if i + 1 < max_new
+            {
+                last_logits = self.decode_step(next, pos, &mut kcache, &mut vcache);
+            }
+        }
+        toks
+    }
+
+    /// One **incremental decode step**: embed `token` at absolute position `pos`,
+    /// run the full stack using the per-layer KV caches (appending this token's
+    /// roped key and raw value to each), and return the `vocab`-wide logits for
+    /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` caches (row-major,
+    /// `kv_dim` columns), each grown by one row here. Reproduces
+    /// [`GpuChain::gqa_transformer_block`] restricted to the single new row.
+    fn decode_step(
+        &self,
+        token: u32,
+        pos: usize,
+        kcache: &mut [Vec<f32>],
+        vcache: &mut [Vec<f32>],
+    ) -> Vec<f32> {
+        let chain = &self.chain;
+        let d_model = self.embedding.cols();
+        let dh = d_model / self.n_heads;
+        let kv_dim = self.n_kv_heads * dh;
+
+        // Embed the single new token → [1 × d_model].
+        let mut x = chain.embed(&[token], &self.embedding).expect("embed");
+        for (l, b) in self.blocks.iter().enumerate()
+        {
+            // Attention sub-block (pre-norm + residual).
+            let xn = chain.rms_norm(&x, &b.norm1, self.eps).expect("norm1");
+            let q = chain.matmul(&xn, &b.wq).expect("wq"); // [1 × d_model]
+            let k = chain.matmul(&xn, &b.wk).expect("wk"); // [1 × kv_dim]
+            let v = chain.matmul(&xn, &b.wv).expect("wv"); // [1 × kv_dim]
+            // RoPE the single new row at its absolute position (seq_len 1, offset
+            // pos ⇒ position = pos). Each width feeds its own frequency schedule,
+            // exactly as `gqa_attention` ropes the full-width q/k.
+            let qr = chain.rope(&q, 1, pos, self.theta).expect("rope q");
+            let kr = chain.rope(&k, 1, pos, self.theta).expect("rope k");
+            // Append this step's roped key and raw value to the layer caches.
+            kcache[l].extend_from_slice(&chain.download(&kr).expect("download kr"));
+            vcache[l].extend_from_slice(&chain.download(&v).expect("download v"));
+            let seq = kcache[l].len() / kv_dim;
+            let kmat = chain.upload(&kcache[l], seq, kv_dim);
+            let vmat = chain.upload(&vcache[l], seq, kv_dim);
+            // Single query attends over all cached keys/values (all ≤ pos ⇒ no mask).
+            let ctx = self.incr_attention(&qr, &kmat, &vmat, dh);
+            let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
+            x = chain.add(&x, &attn_out).expect("attn residual");
+            // MLP sub-block (pre-norm + residual).
+            let hn = chain.rms_norm(&x, &b.norm2, self.eps).expect("norm2");
+            let mlp = chain.swiglu_mlp(&hn, &b.wg, &b.wu, &b.wd).expect("mlp");
+            x = chain.add(&x, &mlp).expect("mlp residual");
+        }
+        // Final norm + tied LM head → [1 × vocab].
+        let normed = chain
+            .rms_norm(&x, &self.final_norm, self.eps)
+            .expect("final norm");
+        let logits = chain
+            .matmul_t(&normed, &self.embedding, false, true)
+            .expect("logits");
+        chain.download(&logits).expect("download logits")
+    }
+
+    /// Incremental analogue of [`GpuChain::gqa_attention`] for a **single query
+    /// row**: `qr` is `1 × d_model` (already RoPE'd), attending over the cached
+    /// keys `kmat` and values `vmat` (`seq × kv_dim`; keys already RoPE'd, values
+    /// raw). No causal mask is needed — every cached position is ≤ the query's, so
+    /// all are visible. Returns the `1 × d_model` concatenated context (the caller
+    /// applies `w_o`), summing the placed per-head slices exactly as the full path.
+    fn incr_attention(
+        &self,
+        qr: &GpuMatrix,
+        kmat: &GpuMatrix,
+        vmat: &GpuMatrix,
+        dh: usize,
+    ) -> GpuMatrix {
+        let chain = &self.chain;
+        let d_model = qr.cols();
+        let repeat = self.n_heads / self.n_kv_heads;
+        let mut out: Option<GpuMatrix> = None;
+        for head in 0..self.n_heads
+        {
+            let kv = head / repeat;
+            let qs = chain.slice_cols(qr, head * dh, dh).expect("slice q");
+            let ks = chain.slice_cols(kmat, kv * dh, dh).expect("slice k");
+            let vs = chain.slice_cols(vmat, kv * dh, dh).expect("slice v");
+            let ctx = chain.attention(&qs, &ks, &vs, false).expect("attn head"); // scale 1/√dh
+            let padded = chain.place_cols(&ctx, head * dh, d_model).expect("place");
+            out = Some(match out
+            {
+                None => padded,
+                Some(acc) => chain.add(&acc, &padded).expect("head sum"),
+            });
+        }
+        // n_heads ≥ 1 for any real config, so `out` is always Some.
+        out.expect("gqa: n_heads must be ≥ 1")
+    }
+
     /// One **resident AdamW training step** on `(tokens, targets)`: forward →
     /// cross-entropy grad → full backward → AdamW update of every trainable
     /// weight (the tied embedding, the final RMSNorm gain, and each block's two

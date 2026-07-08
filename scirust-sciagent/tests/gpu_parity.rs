@@ -521,3 +521,45 @@ fn resident_generate_matches_cpu_greedy() {
     assert_eq!(gen, toks, "generate() must match step-by-step greedy");
     eprintln!("resident greedy generation matches CPU — PASS ({gen:?})");
 }
+
+/// **KV-cached generation** (`ResidentModel::generate_cached`) is token-for-token
+/// identical to the whole-sequence [`ResidentModel::generate`]: the incremental
+/// decode (per-layer roped-K/raw-V caches, single query attending over the cache)
+/// reproduces the last-row logits of the full forward, so the greedy picks agree
+/// at every step — the `O(n)`-per-token inference path with no accuracy loss.
+/// Skips with no adapter.
+#[test]
+fn resident_kv_cache_matches_greedy() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping KV-cache parity");
+        return;
+    };
+    eprintln!("resident KV-cache on: {}", rm.adapter_name());
+
+    // Long enough to exercise several cache-growth steps across both layers.
+    let steps = 8usize;
+    let full = rm.generate(&prompt, steps);
+    let cached = rm.generate_cached(&prompt, steps);
+    assert_eq!(
+        cached.len(),
+        prompt.len() + steps,
+        "cached generation must return prompt + max_new tokens"
+    );
+    assert_eq!(
+        &cached[..prompt.len()],
+        &prompt[..],
+        "cached generation must preserve the prompt prefix"
+    );
+    assert_eq!(
+        full, cached,
+        "generate_cached must match generate token-for-token"
+    );
+    eprintln!("resident KV-cache matches whole-sequence generate — PASS ({cached:?})");
+}
