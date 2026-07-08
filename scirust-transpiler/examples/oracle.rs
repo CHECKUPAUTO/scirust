@@ -1194,6 +1194,48 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 1.0,
             }],
         },
+        // ---- MATLAB degree-argument trigonometry (Phase 2) ----
+        // sind(x) — scalar, degrees; fuzzed clear of exact special angles.
+        Case {
+            name: "M: sind(x) (scalar, degrees)",
+            call: "msind",
+            src: "function y = msind(x)\n  y = sind(x);\nend\n",
+            args: vec![Scalar {
+                lo: -170.0,
+                hi: 170.0,
+            }],
+        },
+        // cosd(x) — scalar, degrees.
+        Case {
+            name: "M: cosd(x) (scalar, degrees)",
+            call: "mcosd",
+            src: "function y = mcosd(x)\n  y = cosd(x);\nend\n",
+            args: vec![Scalar {
+                lo: -170.0,
+                hi: 170.0,
+            }],
+        },
+        // tand(x) — scalar, degrees; kept well inside (-90, 90) to avoid poles.
+        Case {
+            name: "M: tand(x) (scalar, degrees)",
+            call: "mtand",
+            src: "function y = mtand(x)\n  y = tand(x);\nend\n",
+            args: vec![Scalar {
+                lo: -60.0,
+                hi: 60.0,
+            }],
+        },
+        // cosd(flip(v)) — elementwise over a vector of degree values.
+        Case {
+            name: "M: cosd(flip(v)) (elementwise, degrees)",
+            call: "mcosdv",
+            src: "function y = mcosdv(v)\n  y = cosd(flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -170.0,
+                hi: 170.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",

@@ -664,6 +664,30 @@ fn unary_fn(func: MathFn, e: SirExpr) -> SirExpr {
     }
 }
 
+/// Multiply an expression by the constant `k` (scalar product, or scalar
+/// broadcast over a vector). Used by degree/radian conversion and the
+/// degree-argument trigonometric functions.
+fn scale_by_const(a: SirExpr, k: f64, ctx: &str) -> Result<SirExpr, String> {
+    if a.ty() == Ty::Array
+    {
+        Ok(SirExpr::ScalarBroadcast {
+            op: Op::Mul,
+            scalar: Box::new(SirExpr::ScalarLit(k)),
+            arr: Box::new(a),
+            arr_is_left: false,
+        })
+    }
+    else
+    {
+        expect_scalar(&a, ctx)?;
+        Ok(SirExpr::ScalarBin {
+            op: Op::Mul,
+            l: Box::new(a),
+            r: Box::new(SirExpr::ScalarLit(k)),
+        })
+    }
+}
+
 /// Lower `mod`/`rem` as `a - b * round_fn(a / b)` (round_fn = `floor` for `mod`,
 /// `trunc` for `rem`), delegating each arithmetic step to [`ew_or_broadcast`] so
 /// it works for scalar operands, two vectors, or a scalar↔vector broadcast.
@@ -1062,21 +1086,24 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         {
             180.0 / std::f64::consts::PI
         };
-        if a.ty() == Ty::Array
+        return scale_by_const(a, k, func);
+    }
+    if matches!(func, "sind" | "cosd" | "tand")
+    {
+        // Degree-argument trig: convert to radians (× π/180, scalar or broadcast)
+        // then apply the corresponding trig intrinsic, scalar or elementwise.
+        // (The MATLAB exact-zero / exact-Inf special cases at multiples of 90°
+        // are not replicated — the plain `f(x·π/180)` definition is used.)
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        let rad = scale_by_const(a, std::f64::consts::PI / 180.0, func)?;
+        let mf = match func
         {
-            return Ok(SirExpr::ScalarBroadcast {
-                op: Op::Mul,
-                scalar: Box::new(SirExpr::ScalarLit(k)),
-                arr: Box::new(a),
-                arr_is_left: false,
-            });
-        }
-        expect_scalar(&a, func)?;
-        return Ok(SirExpr::ScalarBin {
-            op: Op::Mul,
-            l: Box::new(a),
-            r: Box::new(SirExpr::ScalarLit(k)),
-        });
+            "sind" => MathFn::Sin,
+            "cosd" => MathFn::Cos,
+            _ => MathFn::Tan,
+        };
+        return Ok(unary_fn(mf, rad));
     }
     if func == "atan2" || func == "hypot"
     {
@@ -1181,7 +1208,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
-             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
+             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/diag, linspace/logspace, length, \
              det/inv/eig/trace)",
