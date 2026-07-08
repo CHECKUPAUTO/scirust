@@ -579,6 +579,44 @@ fn is_matrixish(t: Ty) -> bool {
     matches!(t, Ty::Matrix | Ty::MatrixVal)
 }
 
+/// Dispatch a two-argument scalar math intrinsic (`atan2`/`hypot`/`max`/`min`)
+/// over scalar and array operands, mirroring elementwise `.*` / broadcast:
+/// scalar∘scalar stays scalar, array∘array is elementwise, and a scalar↔array
+/// mix broadcasts (operand order preserved for non-commutative `atan2`).
+fn lower_math2(func: &str, mf: MathFn2, lv: SirExpr, rv: SirExpr) -> Result<SirExpr, String> {
+    let la = lv.ty() == Ty::Array;
+    let ra = rv.ty() == Ty::Array;
+    if is_matrixish(lv.ty()) || is_matrixish(rv.ty())
+    {
+        return Err(format!("`{}` expects scalar or vector operands", func));
+    }
+    Ok(match (la, ra)
+    {
+        (false, false) => SirExpr::ScalarBinFn {
+            func: mf,
+            l: Box::new(lv),
+            r: Box::new(rv),
+        },
+        (true, true) => SirExpr::EwBinFn {
+            func: mf,
+            l: Box::new(lv),
+            r: Box::new(rv),
+        },
+        (true, false) => SirExpr::BroadcastFn {
+            func: mf,
+            scalar: Box::new(rv),
+            arr: Box::new(lv),
+            arr_is_left: true,
+        },
+        (false, true) => SirExpr::BroadcastFn {
+            func: mf,
+            scalar: Box::new(lv),
+            arr: Box::new(rv),
+            arr_is_left: false,
+        },
+    })
+}
+
 fn ew_or_broadcast(op: Op, lv: SirExpr, rv: SirExpr, la: bool, ra: bool) -> SirExpr {
     match (la, ra)
     {
@@ -666,11 +704,9 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if (func == "max" || func == "min") && args.len() == 2
     {
-        // Two-argument form: `max(a, b)` / `min(a, b)` over two scalars.
+        // Two-argument form: `max(a, b)` / `min(a, b)`, scalar or elementwise.
         let l = lower_scalar(&args[0], env)?;
         let r = lower_scalar(&args[1], env)?;
-        expect_scalar(&l, func)?;
-        expect_scalar(&r, func)?;
         let mf = if func == "max"
         {
             MathFn2::Max
@@ -679,11 +715,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         {
             MathFn2::Min
         };
-        return Ok(SirExpr::ScalarBinFn {
-            func: mf,
-            l: Box::new(l),
-            r: Box::new(r),
-        });
+        return lower_math2(func, mf, l, r);
     }
     if func == "max"
     {
@@ -914,12 +946,10 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if func == "atan2" || func == "hypot"
     {
-        // Two-argument scalar math: atan2(y, x) / hypot(a, b). Scalar operands.
+        // Two-argument math: atan2(y, x) / hypot(a, b), scalar or elementwise.
         need_args(func, args, 2)?;
         let l = lower_scalar(&args[0], env)?;
         let r = lower_scalar(&args[1], env)?;
-        expect_scalar(&l, func)?;
-        expect_scalar(&r, func)?;
         let mf = if func == "atan2"
         {
             MathFn2::Atan2
@@ -928,11 +958,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         {
             MathFn2::Hypot
         };
-        return Ok(SirExpr::ScalarBinFn {
-            func: mf,
-            l: Box::new(l),
-            r: Box::new(r),
-        });
+        return lower_math2(func, mf, l, r);
     }
     if func == "power"
     {
