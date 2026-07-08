@@ -1,7 +1,7 @@
 # Route B — native CUDA + Tensor cores for the Thor (design & feasibility)
 
-**Status: design only. No code until the go/no-go gate (B0) passes on the Thor and
-the open decisions below are made.** This is the scoping companion to
+**Status: B0 (feasibility gate) PASSED on the Thor — 12.9× measured. Design agreed
+on the open decisions below; B1 is the first code.** This is the scoping companion to
 `JETSON_THOR.md`, which has the measured Route-A ceiling this route exists to lift.
 
 ## TL;DR
@@ -13,13 +13,13 @@ the open decisions below are made.** This is the scoping companion to
   not a tuning problem.
 - Route B = a **mixed-precision CUDA backend** (bf16 compute on Tensor cores, fp32
   accumulate, fp32 master weights). This is the **only** lever with an
-  order-of-magnitude multiplier left (~10–30× is the working hypothesis, **to be
-  confirmed by B0**).
-- It is a **second full backend** — bigger than the entire Route-A inference arc.
-  Do it **only if B0 proves the speedup on this specific machine's CUDA toolchain.**
-- **Recommendation:** run **B0 first** (a half-day probe, below). Its single number
-  (cuBLASLt bf16 GEMM TFLOP/s vs the wgpu fp32 GEMM on 350M shapes) decides go/no-go.
-  Everything after B0 is gated on it.
+  order-of-magnitude multiplier left.
+- **B0 gate: PASSED.** On the Thor (CUDA 13.0, `compute_110`), a 350M-shaped GEMM
+  `[512×4096]·[4096×4096]`: fp32 CUDA cores **3,038 GFLOP/s** vs bf16 Tensor cores
+  **39,140 GFLOP/s = 12.9×** (measured under load; idle likely higher). The lever is
+  real on this exact machine.
+- It is a **second full backend** — bigger than the entire Route-A inference arc — but
+  B0 justifies starting.
 
 ## Why (the measured ceiling)
 
@@ -98,11 +98,9 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
 
 ## Phased plan (each phase gated on the previous)
 
-- **B0 — feasibility gate (do FIRST; ~half a day; probe below).**
-  On the Thor: confirm the CUDA toolkit exists and **targets sm_110/Blackwell Tensor
-  cores**, then benchmark a **cuBLASLt bf16 GEMM vs the wgpu fp32 GEMM** on 350M-shaped
-  matmuls (e.g. `[512×4096]·[4096×4096]`). **Go if bf16 ≥ ~8–10× the wgpu fp32
-  GFLOP/s; stop otherwise** (blocked on a JetPack/CUDA upgrade, not on us).
+- **B0 — feasibility gate. ✅ PASSED.** CUDA 13.0 on the Thor lists `compute_110`;
+  a bf16 Tensor-core GEMM measured **12.9×** the fp32 CUDA-core GEMM on a 350M shape
+  (39.1 vs 3.0 TFLOP/s, under load). Well past the ~8–10× go threshold ⇒ **GO**.
 - **B1 — plumbing + one GEMM.** `scirust-cuda` crate; device/stream/buffers; one
   cuBLASLt bf16 GEMM wrapped and **gradient-checked** vs CPU at bf16 tolerance.
 - **B2 — elementwise/attention kernels.** Port the validated WGSL ops to `.cu`
@@ -138,23 +136,13 @@ undertaking; B0 is what tells us it's worth starting.
 - **Build coupling:** `nvcc` in the build, CUDA libs linked; keep it entirely behind
   the `cuda` feature so non-Thor builds are unaffected.
 
-## B0 — the go/no-go probe (run on the Thor)
+## B0 — the go/no-go probe (done)
 
-```bash
-# 1. Is there a CUDA toolkit, and does it know Blackwell (sm_110 / sm_120)?
-nvcc --version
-nvcc --list-gpu-arch          # look for compute_110 (or the Thor's actual cc)
-nvidia-smi                    # driver + reported compute capability
+Ran on the Thor: `nvcc` **13.0** lists `compute_110` (driver 580, CUDA 13.0), and a
+`cublasGemmEx` bf16 GEMM vs `cublasSgemm` fp32 on `[512×4096]·[4096×4096]` gave
+**39,140 vs 3,038 GFLOP/s = 12.9×** (under an active ollama load). **GO.**
 
-# 2. Tensor-core bf16 GEMM vs fp32, same shape — the decisive number.
-#    (writes/compiles a ~30-line cuBLASLt bf16 vs cublas fp32 microbench;
-#     I'll provide the .cu once you confirm nvcc + arch above.)
-```
-
-Report back: `nvcc` version, whether `compute_110` (or the Thor's real cc) is listed,
-and — once confirmed — the bf16-vs-fp32 GFLOP/s. That triple decides B0.
-
-## Open decisions (yours)
+## Open decisions
 
 1. **Plumbing:** `cudarc` (safer, batteries-included) vs raw FFI (`cuda-sys`/`cust`,
    more control). *Recommend `cudarc`.*
@@ -162,5 +150,3 @@ and — once confirmed — the bf16-vs-fp32 GFLOP/s. That triple decides B0.
 3. **Scope:** full CUDA resident path (recommended — mixing wgpu+CUDA in one process
    is painful) vs a GEMM-only CUDA shim under the existing wgpu chain (not
    recommended).
-4. **When:** now (start B0), or park Route B and keep Route A as the shipping path for
-   fine-tuning + inference.
