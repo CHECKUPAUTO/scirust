@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB opérateur de transposition `A'` / `A.'`** prouvé contre Octave réel (Phase 2, incrément 29)
+Ajoute l'opérateur postfixe de **transposition** — omniprésent en MATLAB — routé
+vers le nœud `Transpose` de la SIR (déjà prouvé côté Python via `A.T`).
+
+- **`A'`** (transposée conjuguée) et **`A.'`** (transposée simple) — identiques
+  pour les matrices réelles. Le lexer reconnaît `'` (postfixe, jamais une chaîne
+  puisque le sous-ensemble n'a pas de chaînes de caractères), le parser
+  l'applique en postfixe (liant plus fort que `^`), le lowering exige une matrice.
+- `A'` **prouve** que son opérande est une matrice (nouvelle preuve-matrice),
+  d'où l'inférence sans indice.
+
+Deux cas d'oracle : `B = A'` (transposition simple) et `C = A' * A` (matrice de
+Gram, composant transposition et produit matriciel). **Oracle 87/87** (200 essais
+chacun) ; **76 tests unitaires** (1 nouveau). *Non-vacuité* : parser `A'` comme
+l'identité (sans transposer) fait perdre à `A` son type matrice et casse les deux
+cas (ROUGE).
+
 ### Ajouté — transpileur : **MATLAB produit matriciel `A*b` / `A*B`** routé vers `scirust-solvers`, prouvé contre Octave réel (Phase 2, incrément 28)
 Complète l'algèbre linéaire MATLAB : l'opérateur `*` (multiplication **matricielle**
 en MATLAB, distincte de l'élément-par-élément `.*`) se route vers les kernels

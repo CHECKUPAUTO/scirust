@@ -952,6 +952,21 @@ fn matlab_cases() -> Vec<Case> {
             src: "function C = minvcheck(A)\n  B = inv(A);\n  C = A * B;\nend\n",
             args: vec![Matrix { n: 4 }],
         },
+        // ---- MATLAB transpose operator `'` (Phase 2) ----
+        // Plain transpose B = A' (matrix out). `A` is inferred a matrix from `'`.
+        Case {
+            name: "M: A' (transpose)",
+            call: "mtrans",
+            src: "function B = mtrans(A)\n  B = A';\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // Gram matrix C = A' * A (transpose composed with matmul; symmetric out).
+        Case {
+            name: "M: A' * A (Gram matrix)",
+            call: "mgram",
+            src: "function C = mgram(A)\n  C = A' * A;\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
     ]
 }
 

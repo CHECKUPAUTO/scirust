@@ -752,6 +752,26 @@ mod tests {
         assert!(!bc.contains(".matvec("));
     }
 
+    #[test]
+    fn matlab_transpose_operator_routes_to_transpose() {
+        // `A'` -> Transpose (matrix out); `A` inferred a matrix from the operator.
+        let t = transpile_matlab("function B = f(A)\n  B = A';\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&t, "f"),
+            "pub fn f(A: &[f64]) -> scirust_solvers::Matrix {"
+        );
+        assert!(t.contains(".transpose()"));
+        // `.'` (non-conjugate transpose) parses the same for real matrices.
+        assert!(transpile_matlab("function B = f(A)\n  B = A.';\nend\n").is_ok());
+        // Composes with `*`: A' * A -> transpose then matmul (Gram matrix).
+        let g = transpile_matlab("function C = f(A)\n  C = A' * A;\nend\n").unwrap();
+        assert!(g.contains(".transpose()"));
+        assert!(g.contains(".matmul("));
+        // Transposing a scalar is rejected (only matrices transpose).
+        let bad = transpile_matlab("function y = f(x)\n  y = (x + 1.0)';\nend\n");
+        assert!(bad.is_err());
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

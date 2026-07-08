@@ -58,6 +58,8 @@ pub enum MExpr {
         r: Box<MExpr>,
     },
     Neg(Box<MExpr>),
+    /// Postfix transpose `A'` / `A.'` (identical for real matrices).
+    Transpose(Box<MExpr>),
     /// A call to an intrinsic (`sqrt`, `sum`, `zeros`, `length`, …).
     Call {
         func: String,
