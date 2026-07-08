@@ -59,7 +59,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
-| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
+| math `sqrt/exp/log/log10/sin/cos/tan/sinh/cosh/tanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular; scalar, elementwise or broadcast), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix` (`mod` floors, `rem` truncates) via elementwise/broadcast on vectors; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
@@ -132,8 +132,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: mod(cumsum(v),3) / rem(cumsum(v),3) 200/200 trials match (octave) (elementwise modular, broadcast, Phase 2)
   ✓ M: logspace(a, b, 6)         200/200 trials match (octave) (MATLAB logarithmic vector constructor, Phase 2)
   ✓ M: norm(v, 1) / norm(v, p)   200/200 trials match (octave) (MATLAB general finite vector p-norm, Phase 2)
+  ✓ M: tan / asin / acos         200/200 trials match (octave) (MATLAB elementary/inverse trig, scalar & elementwise, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 109/109 cases match their reference runtime within tolerance
+  ORACLE GREEN — 113/113 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `tan` / `asin` / `acos`** — trigonométrie élémentaire et inverse, prouvées contre Octave réel (Phase 2, incrément 40)
+Complète le vocabulaire trigonométrique : la **tangente** `tan` et les inverses
+**arc-sinus** `asin` / **arc-cosinus** `acos`, chacune une fonction unaire qui
+s'applique en scalaire **ou** élément par élément (même mécanisme éprouvé que
+`sin`/`cos`/`atan`), mappée 1:1 sur la méthode `f64` correspondante.
+
+- `tan(x)`, `asin(x)`, `acos(x)` : scalaire ou vecteur (élément par élément).
+- Domaines : `asin`/`acos` sur `[-1, 1]` ; `tan` fini hors des pôles `±π/2`.
+
+Quatre cas d'oracle (`tan`, `asin`, `acos` scalaires sur des plages dans le
+domaine, plus `asin(flip(v))` élément par élément). **Oracle 113/113** (200 essais
+chacun) ; **88 tests unitaires** (1 nouveau).
+*Non-vacuité* : router `asin` vers la méthode `acos` fait diverger les deux cas
+`asin` (scalaire ET élément par élément) tandis que `acos` et `tan` restent verts —
+le mappage nom→méthode est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `norm(v, p)`** — p-norme vectorielle finie générale, prouvée contre Octave réel (Phase 2, incrément 39)
 `norm` accepte désormais une **seconde forme** `norm(v, p)` calculant la p-norme
 vectorielle `(Σ |vᵢ|^p)^{1/p}` pour un `p` **fini** quelconque (`norm(v, 1)` = somme
