@@ -482,6 +482,367 @@ impl ResidentModel {
     }
 }
 
+/// LoRA configuration for [`ResidentLoraModel`].
+#[derive(Debug, Clone, Copy)]
+pub struct LoraConfig {
+    /// Low-rank dimension `r`.
+    pub rank: usize,
+    /// LoRA `alpha`; the adapter is scaled by `alpha / rank`.
+    pub alpha: f32,
+}
+
+impl Default for LoraConfig {
+    fn default() -> Self {
+        Self {
+            rank: 8,
+            alpha: 16.0,
+        }
+    }
+}
+
+/// One projection's LoRA adapter: the low-rank factors `A` (`in×r`), `B` (`r×out`)
+/// and their AdamW moment buffers. `B` starts at **zero** so the adapter is a
+/// no-op at init (`W + scaling·A·B = W`); `A` is seeded deterministically.
+struct LoraAdapter {
+    a: GpuMatrix,
+    b: GpuMatrix,
+    m_a: GpuMatrix,
+    v_a: GpuMatrix,
+    m_b: GpuMatrix,
+    v_b: GpuMatrix,
+}
+
+/// LoRA adapters for one block's four **attention** projections (the standard
+/// LoRA target set). The MLP projections and the norms stay frozen.
+struct BlockAdapters {
+    wq: LoraAdapter,
+    wk: LoraAdapter,
+    wv: LoraAdapter,
+    wo: LoraAdapter,
+}
+
+/// Effective (base + adapter) attention weights for one block, materialised for a
+/// forward/backward pass: `W_eff = W + scaling·(A·B)`.
+struct EffBlock {
+    wq: GpuMatrix,
+    wk: GpuMatrix,
+    wv: GpuMatrix,
+    wo: GpuMatrix,
+}
+
+/// **Resident LoRA fine-tuning** of a [`SciAgentModel`]: the whole base model is
+/// mirrored into VRAM and **frozen**; only small LoRA adapters on the four
+/// attention projections train. Far less optimizer state and far fewer trainable
+/// parameters than full-weight training — the natural on-device fine-tuning fit
+/// for the resident path.
+///
+/// Rather than change the validated `GpuChain` forward/backward, it uses the
+/// **effective-weight** identity: with `W_eff = W + scaling·A·B`, running the
+/// ordinary [`GpuChain::gqa_model_backward`] yields `dW_eff = ∂L/∂W_eff`, and the
+/// adapter gradients follow exactly as `dA = scaling·dW_eff·Bᵀ` and
+/// `dB = scaling·Aᵀ·dW_eff`. So the same gradient-checked full-model kernels drive
+/// LoRA training; only `A`/`B` receive an AdamW step, the base never moves.
+///
+/// **Tied-embedding models only.**
+pub struct ResidentLoraModel {
+    chain: GpuChain,
+    embedding: GpuMatrix,
+    final_norm: GpuMatrix,
+    blocks: Vec<ResidentBlock>,
+    adapters: Vec<BlockAdapters>,
+    n_heads: usize,
+    n_kv_heads: usize,
+    theta: f32,
+    eps: f32,
+    causal: bool,
+    vocab: usize,
+    scaling: f32,
+    step: u32,
+}
+
+impl ResidentLoraModel {
+    /// Upload `model` to VRAM (frozen) and attach zero-initialised LoRA adapters
+    /// of rank `cfg.rank` to each block's q/k/v/o projections. Returns `None` if
+    /// no GPU adapter is available. Panics if the model is not tied-embedding.
+    pub fn from_model(model: &SciAgentModel, cfg: LoraConfig) -> Option<Self> {
+        assert!(
+            model.config.tie_embeddings,
+            "ResidentLoraModel requires a tied-embedding model"
+        );
+        assert!(cfg.rank >= 1, "LoRA rank must be ≥ 1");
+        let chain = GpuChain::new()?;
+        let up = |t: &Tensor| chain.upload(&t.data, t.rows, t.cols);
+        let embedding = up(&model.embed.weight);
+        let final_norm = up(&model.rms_final.weight);
+        let blocks: Vec<ResidentBlock> = model
+            .layers
+            .iter()
+            .map(|l| ResidentBlock {
+                norm1: up(&l.rms_attn.weight),
+                wq: up(&l.attn.w_q.weight),
+                wk: up(&l.attn.w_k.weight),
+                wv: up(&l.attn.w_v.weight),
+                wo: up(&l.attn.w_o.weight),
+                norm2: up(&l.rms_ffn.weight),
+                wg: up(&l.ffn.gate.weight),
+                wu: up(&l.ffn.up.weight),
+                wd: up(&l.ffn.down.weight),
+            })
+            .collect();
+        let r = cfg.rank;
+        let adapter_of = |w: &GpuMatrix| -> LoraAdapter {
+            let (in_f, out) = (w.rows(), w.cols());
+            // Deterministic A seed: a low-discrepancy pattern in [-s, s],
+            // s = 1/√in (keeps the initial update well-scaled). B = 0.
+            let s = (1.0 / in_f as f32).sqrt();
+            let a: Vec<f32> = (0..in_f * r)
+                .map(|i| s * (((i as f32) * 0.618_034).fract() * 2.0 - 1.0))
+                .collect();
+            let ga = chain.upload(&a, in_f, r);
+            let gb = chain.upload(&vec![0.0f32; r * out], r, out);
+            let z = |rows: usize, cols: usize| chain.upload(&vec![0.0f32; rows * cols], rows, cols);
+            LoraAdapter {
+                a: ga,
+                b: gb,
+                m_a: z(in_f, r),
+                v_a: z(in_f, r),
+                m_b: z(r, out),
+                v_b: z(r, out),
+            }
+        };
+        let adapters: Vec<BlockAdapters> = blocks
+            .iter()
+            .map(|b| BlockAdapters {
+                wq: adapter_of(&b.wq),
+                wk: adapter_of(&b.wk),
+                wv: adapter_of(&b.wv),
+                wo: adapter_of(&b.wo),
+            })
+            .collect();
+        Some(Self {
+            chain,
+            embedding,
+            final_norm,
+            blocks,
+            adapters,
+            n_heads: model.config.n_heads,
+            n_kv_heads: model.config.n_kv_heads,
+            theta: model.config.rope_theta,
+            eps: model.config.eps,
+            causal: true,
+            vocab: model.config.vocab_size,
+            scaling: cfg.alpha / cfg.rank as f32,
+            step: 0,
+        })
+    }
+
+    /// Name of the underlying GPU adapter.
+    pub fn adapter_name(&self) -> &str {
+        self.chain.adapter_name()
+    }
+
+    /// `W_eff = base + scaling·(A·B)`, resident.
+    fn effective(&self, base: &GpuMatrix, ad: &LoraAdapter) -> GpuMatrix {
+        let ab = self.chain.matmul(&ad.a, &ad.b).expect("A·B");
+        let ab_s = self
+            .chain
+            .scale_causal_mask(&ab, self.scaling, false)
+            .expect("scale");
+        self.chain.add(base, &ab_s).expect("W + ΔW")
+    }
+
+    /// Materialise every block's effective attention weights.
+    fn effective_blocks(&self) -> Vec<EffBlock> {
+        self.blocks
+            .iter()
+            .zip(&self.adapters)
+            .map(|(b, ad)| EffBlock {
+                wq: self.effective(&b.wq, &ad.wq),
+                wk: self.effective(&b.wk, &ad.wk),
+                wv: self.effective(&b.wv, &ad.wv),
+                wo: self.effective(&b.wo, &ad.wo),
+            })
+            .collect()
+    }
+
+    /// Borrowed `GqaBlockWeights` over the effective attention weights (`eff`) and
+    /// the frozen norms / MLP.
+    fn block_views<'a>(&'a self, eff: &'a [EffBlock]) -> Vec<GqaBlockWeights<'a>> {
+        self.blocks
+            .iter()
+            .zip(eff)
+            .map(|(b, e)| GqaBlockWeights {
+                norm1: &b.norm1,
+                wq: &e.wq,
+                wk: &e.wk,
+                wv: &e.wv,
+                wo: &e.wo,
+                norm2: &b.norm2,
+                wg: &b.wg,
+                wu: &b.wu,
+                wd: &b.wd,
+                n_heads: self.n_heads,
+                n_kv_heads: self.n_kv_heads,
+                theta: self.theta,
+            })
+            .collect()
+    }
+
+    /// Resident forward `tokens → logits` with the current adapters applied.
+    pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
+        let eff = self.effective_blocks();
+        let blocks = self.block_views(&eff);
+        let mw = GqaModelWeights {
+            embedding: &self.embedding,
+            blocks: &blocks,
+            final_norm: &self.final_norm,
+        };
+        let logits = self
+            .chain
+            .gqa_model_forward(tokens, &mw, self.eps, self.causal)
+            .expect("resident lora forward");
+        self.chain.download(&logits).expect("download logits")
+    }
+
+    /// Cross-entropy loss of the resident LoRA forward on `(tokens, targets)`.
+    pub fn loss(&self, tokens: &[u32], targets: &[u32]) -> f32 {
+        let logits = self.forward(tokens);
+        scirust_gpu::ops::cpu_cross_entropy(&logits, targets, tokens.len(), self.vocab)
+    }
+
+    /// One **resident LoRA fine-tuning step**: forward with `W_eff` → cross-entropy
+    /// grad → full backward → derive the adapter gradients from `dW_eff` and AdamW
+    /// them. Only the q/k/v/o LoRA factors move; the base model is frozen. Returns
+    /// the pre-update cross-entropy loss.
+    #[allow(clippy::too_many_arguments)]
+    pub fn train_step(
+        &mut self,
+        tokens: &[u32],
+        targets: &[u32],
+        lr: f32,
+        betas: (f32, f32),
+        adam_eps: f32,
+        weight_decay: f32,
+    ) -> f32 {
+        self.step += 1;
+        let (loss, grads) = {
+            let eff = self.effective_blocks();
+            let blocks = self.block_views(&eff);
+            let mw = GqaModelWeights {
+                embedding: &self.embedding,
+                blocks: &blocks,
+                final_norm: &self.final_norm,
+            };
+            let logits = self
+                .chain
+                .gqa_model_forward(tokens, &mw, self.eps, self.causal)
+                .expect("resident lora forward");
+            let host = self.chain.download(&logits).expect("download logits");
+            let loss =
+                scirust_gpu::ops::cpu_cross_entropy(&host, targets, tokens.len(), self.vocab);
+            let dl = self
+                .chain
+                .cross_entropy_grad(&logits, targets)
+                .expect("cross-entropy grad");
+            let grads = self
+                .chain
+                .gqa_model_backward(tokens, &mw, &dl, self.eps, self.causal)
+                .expect("resident backward");
+            (loss, grads)
+        };
+
+        // Derive adapter grads from dW_eff and AdamW-update A, B in place.
+        let (step, scaling) = (self.step, self.scaling);
+        let update = |ad: &LoraAdapter, dweff: &GpuMatrix| {
+            // dA = scaling · dW_eff · Bᵀ   (in×r)
+            let da = self
+                .chain
+                .matmul_t(dweff, &ad.b, false, true)
+                .expect("dW_eff·Bᵀ");
+            let da = self
+                .chain
+                .scale_causal_mask(&da, scaling, false)
+                .expect("scale dA");
+            // dB = scaling · Aᵀ · dW_eff   (r×out)
+            let db = self
+                .chain
+                .matmul_t(&ad.a, dweff, true, false)
+                .expect("Aᵀ·dW_eff");
+            let db = self
+                .chain
+                .scale_causal_mask(&db, scaling, false)
+                .expect("scale dB");
+            self.chain
+                .adamw_step(
+                    &ad.a,
+                    &da,
+                    &ad.m_a,
+                    &ad.v_a,
+                    lr,
+                    betas,
+                    adam_eps,
+                    weight_decay,
+                    step,
+                )
+                .expect("adamw A");
+            self.chain
+                .adamw_step(
+                    &ad.b,
+                    &db,
+                    &ad.m_b,
+                    &ad.v_b,
+                    lr,
+                    betas,
+                    adam_eps,
+                    weight_decay,
+                    step,
+                )
+                .expect("adamw B");
+        };
+        for (i, bg) in grads.blocks.iter().enumerate()
+        {
+            let ad = &self.adapters[i];
+            update(&ad.wq, &bg.dwq);
+            update(&ad.wk, &bg.dwk);
+            update(&ad.wv, &bg.dwv);
+            update(&ad.wo, &bg.dwo);
+        }
+        loss
+    }
+
+    /// **Merge** the adapters into the base and write the result back into `model`
+    /// (each attention projection becomes `W + scaling·A·B`; everything else is the
+    /// frozen base). Produces a plain fine-tuned `SciAgentModel` — no LoRA runtime
+    /// needed for inference.
+    pub fn sync_to_model(&self, model: &mut SciAgentModel) {
+        let dl = |m: &GpuMatrix| {
+            Tensor::from_vec(
+                self.chain.download(m).expect("download"),
+                m.rows(),
+                m.cols(),
+            )
+        };
+        let merged = |base: &GpuMatrix, ad: &LoraAdapter| dl(&self.effective(base, ad));
+        model.embed.weight = dl(&self.embedding);
+        model.rms_final.weight = dl(&self.final_norm);
+        for (l, (b, ad)) in model
+            .layers
+            .iter_mut()
+            .zip(self.blocks.iter().zip(&self.adapters))
+        {
+            l.rms_attn.weight = dl(&b.norm1);
+            l.attn.w_q.weight = merged(&b.wq, &ad.wq);
+            l.attn.w_k.weight = merged(&b.wk, &ad.wk);
+            l.attn.w_v.weight = merged(&b.wv, &ad.wv);
+            l.attn.w_o.weight = merged(&b.wo, &ad.wo);
+            l.rms_ffn.weight = dl(&b.norm2);
+            l.ffn.gate.weight = dl(&b.wg);
+            l.ffn.up.weight = dl(&b.wu);
+            l.ffn.down.weight = dl(&b.wd);
+        }
+    }
+}
+
 /// Hyper-parameters for [`ResidentModel::train_tokens`].
 #[derive(Debug, Clone, Copy)]
 pub struct ResidentTrainConfig {

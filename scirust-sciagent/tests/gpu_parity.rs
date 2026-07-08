@@ -326,3 +326,73 @@ fn resident_pretrain_schedules_and_checkpoints() {
         latest.display()
     );
 }
+
+/// **Resident LoRA fine-tuning** (`ResidentLoraModel`): the base model is frozen
+/// and only q/k/v/o LoRA adapters train. Checks (1) at init the adapters are a
+/// no-op — the LoRA forward equals the base model's forward; (2) fine-tuning the
+/// adapters reduces the loss; (3) `sync_to_model` merges the adapters into the
+/// base so the model's own CPU forward matches the LoRA forward. Skips with no
+/// adapter.
+#[test]
+fn resident_lora_finetune_reduces_loss_and_syncs() {
+    use scirust_sciagent::gpu::{LoraConfig, ResidentLoraModel};
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let seq_len = 8usize;
+    let ids: Vec<usize> = (0..seq_len)
+        .map(|i| (i * 7 + 3) % config.vocab_size)
+        .collect();
+
+    // Base model's own CPU forward (reference for "adapters are a no-op at init").
+    let tape = Tape::new();
+    let lv = model.forward(&tape, &ids, seq_len);
+    let cpu_base = tape.value(lv.idx()).data;
+
+    let Some(mut rm) = ResidentLoraModel::from_model(
+        &model,
+        LoraConfig {
+            rank: 4,
+            alpha: 8.0,
+        },
+    )
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident LoRA");
+        return;
+    };
+    eprintln!("resident LoRA on: {}", rm.adapter_name());
+
+    // At init (B = 0) the adapters are identity ⇒ LoRA forward == base forward.
+    let tokens: Vec<u32> = ids.iter().map(|&i| i as u32).collect();
+    let lora0 = rm.forward(&tokens);
+    let e0 = rel_err(&lora0, &cpu_base);
+    assert!(e0 < 3e-3, "init LoRA forward must equal base: rel_err {e0}");
+
+    // Fine-tune only the adapters on a fixed (tokens, targets) pair.
+    let targets: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+    let betas = (0.9, 0.999);
+    let first = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    let mut last = first;
+    for _ in 0..30
+    {
+        last = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    }
+    eprintln!("resident LoRA fine-tune: loss {first:.4} -> {last:.4}");
+    assert!(
+        last < first * 0.8,
+        "LoRA fine-tune must reduce the loss: {first} -> {last}"
+    );
+
+    // sync merges the adapters into the base: model CPU forward == LoRA forward.
+    rm.sync_to_model(&mut model);
+    let tape = Tape::new();
+    let lv = model.forward(&tape, &ids, seq_len);
+    let cpu_merged = tape.value(lv.idx()).data;
+    let lora_now = rm.forward(&tokens);
+    let e = rel_err(&cpu_merged, &lora_now);
+    assert!(e < 3e-3, "post-sync merge mismatch: rel_err {e}");
+    eprintln!("resident LoRA fine-tune + merge — PASS");
+}
