@@ -1105,6 +1105,22 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         };
         return Ok(unary_fn(mf, rad));
     }
+    if matches!(func, "asind" | "acosd" | "atand")
+    {
+        // Inverse degree-argument trig: apply the inverse trig intrinsic (radian
+        // result, scalar or elementwise) then convert the angle to degrees
+        // (× 180/π, scalar or broadcast). `asind`/`acosd` require `|x| ≤ 1`.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        let mf = match func
+        {
+            "asind" => MathFn::Asin,
+            "acosd" => MathFn::Acos,
+            _ => MathFn::Atan,
+        };
+        let rad = unary_fn(mf, a);
+        return scale_by_const(rad, 180.0 / std::f64::consts::PI, func);
+    }
     if func == "atan2" || func == "hypot"
     {
         // Two-argument math: atan2(y, x) / hypot(a, b), scalar or elementwise.
@@ -1208,7 +1224,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
-             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand, \
+             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand/asind/acosd/atand, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/diag, linspace/logspace, length, \
              det/inv/eig/trace)",

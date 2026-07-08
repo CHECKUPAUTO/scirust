@@ -1037,6 +1037,25 @@ mod tests {
     }
 
     #[test]
+    fn matlab_inverse_degree_trig_applies_then_converts() {
+        // asind/acosd/atand: apply the inverse trig method, then scale radians to
+        // degrees by 180/pi.
+        let a = transpile_matlab("function y = f(x)\n  y = asind(x);\nend\n").unwrap();
+        assert_eq!(sig_of(&a, "f"), "pub fn f(x: f64) -> f64 {");
+        assert!(a.contains(").asin()"));
+        assert!(a.contains("57.29577951308232")); // 180/pi factor
+        let c = transpile_matlab("function y = f(x)\n  y = acosd(x);\nend\n").unwrap();
+        assert!(c.contains(").acos()"));
+        let t = transpile_matlab("function y = f(x)\n  y = atand(x);\nend\n").unwrap();
+        assert!(t.contains(").atan()"));
+        // Elementwise: atand(flip(v)) -> map1 atan over a vector then broadcast scale.
+        let ew = transpile_matlab("function y = f(v)\n  y = atand(flip(v));\nend\n").unwrap();
+        assert_eq!(sig_of(&ew, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(ew.contains("np::map1("));
+        assert!(ew.contains("x.atan()"));
+    }
+
+    #[test]
     fn matlab_mod_rem_broadcast_over_vectors() {
         // mod / rem now work elementwise: `mod(v, s)` broadcasts over a vector.
         let m = transpile_matlab("function y = f(v)\n  y = mod(cumsum(v), 3.0);\nend\n").unwrap();

@@ -62,6 +62,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | math `sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular; scalar, elementwise or broadcast), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix` (`mod` floors, `rem` truncates) via elementwise/broadcast on vectors; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
 | degree-argument trig `sind`/`cosd`/`tand` (scalar or elementwise) | convert to radians (`× π/180`) then apply `sin`/`cos`/`tan`; the MATLAB exact-zero/Inf special cases at multiples of 90° are not replicated |
+| inverse degree trig `asind`/`acosd`/`atand` (scalar or elementwise) | apply `asin`/`acos`/`atan` then convert radians to degrees (`× 180/π`); `asind`/`acosd` require `\|x\| ≤ 1` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`gradient`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, unit-spacing numerical gradient, ascending sort, reverse) |
 | `circshift(v, k)` (circular shift by `k` positions) | deterministic `np::circshift` prelude helper (`k` rounded to integer, reduced mod `n`; any sign) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
@@ -139,8 +140,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: gradient(v)               200/200 trials match (octave) (MATLAB unit-spacing numerical gradient, Phase 2)
   ✓ M: circshift(v, 2) / (v, -3) 200/200 trials match (octave) (MATLAB circular shift, both signs, Phase 2)
   ✓ M: sind / cosd / tand         200/200 trials match (octave) (MATLAB degree-argument trig, scalar & elementwise, Phase 2)
+  ✓ M: asind / acosd / atand      200/200 trials match (octave) (MATLAB inverse degree trig, scalar & elementwise, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 125/125 cases match their reference runtime within tolerance
+  ORACLE GREEN — 129/129 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
