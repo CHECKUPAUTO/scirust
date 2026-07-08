@@ -664,6 +664,28 @@ fn unary_fn(func: MathFn, e: SirExpr) -> SirExpr {
     }
 }
 
+/// Build `1.0 / e` (scalar reciprocal, or `1.0` broadcast over a vector). Used
+/// by the reciprocal trigonometric functions `sec`/`csc`/`cot`.
+fn reciprocal(e: SirExpr) -> SirExpr {
+    if e.ty() == Ty::Array
+    {
+        SirExpr::ScalarBroadcast {
+            op: Op::Div,
+            scalar: Box::new(SirExpr::ScalarLit(1.0)),
+            arr: Box::new(e),
+            arr_is_left: false,
+        }
+    }
+    else
+    {
+        SirExpr::ScalarBin {
+            op: Op::Div,
+            l: Box::new(SirExpr::ScalarLit(1.0)),
+            r: Box::new(e),
+        }
+    }
+}
+
 /// Multiply an expression by the constant `k` (scalar product, or scalar
 /// broadcast over a vector). Used by degree/radian conversion and the
 /// degree-argument trigonometric functions.
@@ -1121,6 +1143,20 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         let rad = unary_fn(mf, a);
         return scale_by_const(rad, 180.0 / std::f64::consts::PI, func);
     }
+    if matches!(func, "sec" | "csc" | "cot")
+    {
+        // Reciprocal trig: sec = 1/cos, csc = 1/sin, cot = 1/tan. Apply the base
+        // trig intrinsic (scalar or elementwise) then take the reciprocal.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        let mf = match func
+        {
+            "sec" => MathFn::Cos,
+            "csc" => MathFn::Sin,
+            _ => MathFn::Tan,
+        };
+        return Ok(reciprocal(unary_fn(mf, a)));
+    }
     if func == "atan2" || func == "hypot"
     {
         // Two-argument math: atan2(y, x) / hypot(a, b), scalar or elementwise.
@@ -1224,7 +1260,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
-             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand/asind/acosd/atand, \
+             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand/asind/acosd/atand/sec/csc/cot, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/diag, linspace/logspace, length, \
              det/inv/eig/trace)",

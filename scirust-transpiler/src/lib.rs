@@ -1056,6 +1056,24 @@ mod tests {
     }
 
     #[test]
+    fn matlab_reciprocal_trig_is_one_over_base() {
+        // sec = 1/cos, csc = 1/sin, cot = 1/tan (scalar: 1.0 / base).
+        let s = transpile_matlab("function y = f(x)\n  y = sec(x);\nend\n").unwrap();
+        assert_eq!(sig_of(&s, "f"), "pub fn f(x: f64) -> f64 {");
+        assert!(s.contains(").cos()"));
+        assert!(s.contains("1f64 /") || s.contains("1.0f64 /"));
+        let c = transpile_matlab("function y = f(x)\n  y = csc(x);\nend\n").unwrap();
+        assert!(c.contains(").sin()"));
+        let t = transpile_matlab("function y = f(x)\n  y = cot(x);\nend\n").unwrap();
+        assert!(t.contains(").tan()"));
+        // Elementwise: sec(flip(v)) -> map1 cos then broadcast `1.0 / x` over a vector.
+        let ew = transpile_matlab("function y = f(v)\n  y = sec(flip(v));\nend\n").unwrap();
+        assert_eq!(sig_of(&ew, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(ew.contains("np::map1("));
+        assert!(ew.contains("x.cos()"));
+    }
+
+    #[test]
     fn matlab_mod_rem_broadcast_over_vectors() {
         // mod / rem now work elementwise: `mod(v, s)` broadcasts over a vector.
         let m = transpile_matlab("function y = f(v)\n  y = mod(cumsum(v), 3.0);\nend\n").unwrap();

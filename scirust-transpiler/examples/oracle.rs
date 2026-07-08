@@ -1268,6 +1268,39 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 5.0,
             }],
         },
+        // ---- MATLAB reciprocal trigonometry (Phase 2) ----
+        // sec(x) = 1/cos(x); x kept where cos is bounded away from 0.
+        Case {
+            name: "M: sec(x) (scalar)",
+            call: "msec",
+            src: "function y = msec(x)\n  y = sec(x);\nend\n",
+            args: vec![Scalar { lo: -1.0, hi: 1.0 }],
+        },
+        // csc(x) = 1/sin(x); x kept clear of 0 and π.
+        Case {
+            name: "M: csc(x) (scalar)",
+            call: "mcsc",
+            src: "function y = mcsc(x)\n  y = csc(x);\nend\n",
+            args: vec![Scalar { lo: 0.3, hi: 1.2 }],
+        },
+        // cot(x) = 1/tan(x); x kept clear of 0 and π/2.
+        Case {
+            name: "M: cot(x) (scalar)",
+            call: "mcot",
+            src: "function y = mcot(x)\n  y = cot(x);\nend\n",
+            args: vec![Scalar { lo: 0.3, hi: 1.2 }],
+        },
+        // sec(flip(v)) — elementwise reciprocal trig over a vector.
+        Case {
+            name: "M: sec(flip(v)) (elementwise)",
+            call: "msecv",
+            src: "function y = msecv(v)\n  y = sec(flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",
