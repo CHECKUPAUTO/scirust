@@ -536,6 +536,46 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_round_and_fix_map_to_f64_methods() {
+        // `round` (half away from zero) and `fix` (truncate) map to the f64
+        // methods; both work elementwise, so a bare scalar stays std-only.
+        let rust = transpile_matlab("function y = f(x)\n  y = round(x) + fix(x);\nend\n").unwrap();
+        assert!(rust.contains("(x).round()"));
+        assert!(rust.contains("(x).trunc()"));
+    }
+
+    #[test]
+    fn matlab_mod_and_rem_compose_from_floor_and_trunc() {
+        // mod(a,b) = a - b*floor(a/b); rem(a,b) = a - b*fix(a/b). Both std-only.
+        let m = transpile_matlab("function y = f(a, b)\n  y = mod(a, b);\nend\n").unwrap();
+        assert!(m.contains(".floor()"));
+        assert!(!m.contains(".trunc()"));
+        let r = transpile_matlab("function y = f(a, b)\n  y = rem(a, b);\nend\n").unwrap();
+        assert!(r.contains(".trunc()"));
+        assert!(!r.contains(".floor()"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function y = f(a, b)\n  y = mod(a, b);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn matlab_sign_is_minus_one_zero_plus_one() {
+        // sign(x) -> -1/0/+1 with sign(0) == 0 (NOT f64::signum); argument bound
+        // once.
+        let rust = transpile_matlab("function y = f(x)\n  y = sign(x);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(x: f64) -> f64 {");
+        assert!(rust.contains("if __x > 0.0"));
+        assert!(rust.contains("else if __x < 0.0"));
+        assert!(!rust.contains("signum"));
+        // `sign` on an array (a vector) is refused in this subset.
+        let bad = transpile_matlab("function y = f(v)\n  y = sign(v) + sum(v);\nend\n");
+        assert!(bad.is_err());
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

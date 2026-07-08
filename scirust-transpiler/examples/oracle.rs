@@ -720,6 +720,35 @@ fn matlab_cases() -> Vec<Case> {
             src: "function e = meig(A)\n  e = eig(A);\nend\n",
             args: vec![SymMatrix { n: 5 }],
         },
+        // ---- MATLAB rounding / modular scalar functions (Phase 2) ----
+        // round (half away from zero) + fix (truncate toward zero).
+        Case {
+            name: "M: round + fix (rounding)",
+            call: "mround",
+            src: "function y = mround(x)\n  y = round(x) + fix(x);\nend\n",
+            args: vec![Scalar { lo: -4.0, hi: 4.0 }],
+        },
+        // mod(a, b) — result follows the divisor sign.
+        Case {
+            name: "M: mod(a, b) (modulo)",
+            call: "mmod",
+            src: "function y = mmod(a, b)\n  y = mod(a, b);\nend\n",
+            args: vec![Scalar { lo: -5.0, hi: 5.0 }, Scalar { lo: 1.0, hi: 4.0 }],
+        },
+        // rem(a, b) — result follows the dividend sign.
+        Case {
+            name: "M: rem(a, b) (remainder)",
+            call: "mrem",
+            src: "function y = mrem(a, b)\n  y = rem(a, b);\nend\n",
+            args: vec![Scalar { lo: -5.0, hi: 5.0 }, Scalar { lo: 1.0, hi: 4.0 }],
+        },
+        // sign(x) — -1 / 0 / +1 (sign(0) == 0).
+        Case {
+            name: "M: sign(x) (-1/0/+1)",
+            call: "msign",
+            src: "function y = msign(x)\n  y = sign(x);\nend\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
     ]
 }
 

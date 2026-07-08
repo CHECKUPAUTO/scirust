@@ -169,6 +169,10 @@ pub enum SirExpr {
         func: MathFn,
         arg: Box<SirExpr>,
     },
+    /// `sign(x)` : Scalar -> Scalar, returning -1/0/+1 (MATLAB semantics, where
+    /// `sign(0) == 0` — distinct from `f64::signum`). Emitted as a bound
+    /// if/else so the argument is evaluated once.
+    Sign(Box<SirExpr>),
 
     // ---- array-producing / array-consuming intrinsics (routed to the prelude)
     /// Elementwise binary op between two arrays of equal length -> Array.
@@ -316,6 +320,11 @@ pub enum MathFn {
     Cosh,
     /// Inverse tangent (`np.arctan` → `f64::atan`).
     Atan,
+    /// Round half away from zero (MATLAB `round` → `f64::round`). Note: this is
+    /// *not* NumPy's banker's rounding, so it is wired only on the MATLAB path.
+    Round,
+    /// Truncate toward zero (MATLAB `fix` → `f64::trunc`).
+    Trunc,
 }
 
 impl MathFn {
@@ -335,6 +344,8 @@ impl MathFn {
             MathFn::Sinh => "sinh",
             MathFn::Cosh => "cosh",
             MathFn::Atan => "atan",
+            MathFn::Round => "round",
+            MathFn::Trunc => "trunc",
         }
     }
 }
@@ -357,6 +368,7 @@ impl SirExpr {
             | SirExpr::Max(_)
             | SirExpr::Min(_)
             | SirExpr::Det(_)
+            | SirExpr::Sign(_)
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -491,6 +503,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         SirExpr::ScalarNeg(x)
         | SirExpr::ScalarUnaryFn { arg: x, .. }
         | SirExpr::ArrayUnaryFn { arg: x, .. }
+        | SirExpr::Sign(x)
         | SirExpr::Sum(x)
         | SirExpr::Prod(x)
         | SirExpr::Max(x)
