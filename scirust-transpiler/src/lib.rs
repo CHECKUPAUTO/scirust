@@ -507,6 +507,26 @@ mod tests {
     }
 
     #[test]
+    fn matlab_norm_p_is_the_general_vector_p_norm() {
+        // `norm(v, p)` -> (sum(|v|.^p))^(1/p): elementwise abs, broadcast power,
+        // fixed-order sum, then a scalar reciprocal-power. Still a vector-only,
+        // std-only quantity.
+        let src = "function y = f(v, p)\n  y = norm(v, p);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64], p: f64) -> f64 {");
+        assert!(rust.contains(".abs()")); // elementwise |v|
+        assert!(rust.contains(".powf(")); // both the .^p and the ^(1/p)
+        assert!(rust.contains("np::sum(")); // fixed-order reduction
+        assert!(required_crates(&transpile_matlab_to_sir(src).unwrap()).is_empty());
+        // A literal p also works (e.g. the 1-norm).
+        let one = transpile_matlab("function y = f(v)\n  y = norm(v, 1);\nend\n").unwrap();
+        assert!(one.contains(".abs()") && one.contains("np::sum("));
+        // A vector p is nonsensical and rejected (`p` must be scalar).
+        let bad = transpile_matlab("function y = f(v, w)\n  y = norm(v, cumsum(w));\nend\n");
+        assert!(bad.is_err());
+    }
+
+    #[test]
     fn matlab_dot_routes_to_fixed_order_reduction() {
         // `dot(a, b)` -> the fixed-order `np::dot`; BOTH operands infer as
         // vectors (the second argument is evidence too).

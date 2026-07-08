@@ -806,20 +806,46 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if func == "norm"
     {
-        // norm(v) — Euclidean 2-norm of a *vector* = sqrt(sum(v .* v)).
-        // Restricted to a vector argument (a matrix `norm` is the spectral norm,
-        // a different quantity); built from existing verified nodes.
-        need_args(func, args, 1)?;
+        // norm(v)     — Euclidean 2-norm of a *vector* = sqrt(sum(v .* v)).
+        // norm(v, p)  — general vector p-norm = (sum(abs(v).^p))^(1/p), for a
+        // *finite* p. Restricted to a vector argument (the matrix spectral norm
+        // and the p = Inf / -Inf norms are distinct quantities not covered here);
+        // built from existing verified nodes.
+        if args.len() != 1 && args.len() != 2
+        {
+            return Err("`norm` expects `norm(v)` or `norm(v, p)`".into());
+        }
         let a = lower_scalar(&args[0], env)?;
         expect_array(&a, "norm")?;
-        let sq = SirExpr::EwBin {
-            op: Op::Mul,
-            l: Box::new(a.clone()),
-            r: Box::new(a),
+        if args.len() == 1
+        {
+            let sq = SirExpr::EwBin {
+                op: Op::Mul,
+                l: Box::new(a.clone()),
+                r: Box::new(a),
+            };
+            return Ok(SirExpr::ScalarUnaryFn {
+                func: MathFn::Sqrt,
+                arg: Box::new(SirExpr::Sum(Box::new(sq))),
+            });
+        }
+        // Two-argument p-norm: (sum(|v|.^p))^(1/p).
+        let p = lower_scalar(&args[1], env)?;
+        expect_scalar(&p, "norm")?;
+        let powered = SirExpr::BroadcastFn {
+            func: MathFn2::Powf,
+            scalar: Box::new(p.clone()),
+            arr: Box::new(unary_fn(MathFn::Abs, a)),
+            arr_is_left: true,
         };
-        return Ok(SirExpr::ScalarUnaryFn {
-            func: MathFn::Sqrt,
-            arg: Box::new(SirExpr::Sum(Box::new(sq))),
+        let inv_p = SirExpr::ScalarBin {
+            op: Op::Div,
+            l: Box::new(SirExpr::ScalarLit(1.0)),
+            r: Box::new(p),
+        };
+        return Ok(SirExpr::ScalarPow {
+            base: Box::new(SirExpr::Sum(Box::new(powered))),
+            exp: Box::new(inv_p),
         });
     }
     if func == "dot"
@@ -1324,6 +1350,10 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 // `polyval(p, x)` — only the first argument (the coefficients)
                 // is a vector; `x` is a scalar.
                 || (func == "polyval"
+                    && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                // `norm(v, p)` — the first argument is the vector; the optional
+                // `p` is a scalar (the 1-arg form is covered by the reduction arm).
+                || (func == "norm"
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // Vector -> vector builtins whose (single) argument is a vector.
                 || (matches!(
