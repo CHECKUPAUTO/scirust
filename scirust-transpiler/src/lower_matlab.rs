@@ -715,6 +715,22 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&b, "dot")?;
         return Ok(SirExpr::Dot(Box::new(a), Box::new(b)));
     }
+    if func == "linspace"
+    {
+        // linspace(a, b, n) — n evenly-spaced points from a to b (a, b scalars;
+        // n an integer count, e.g. a literal or `length(x)`).
+        need_args(func, args, 3)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_scalar(&a, "linspace")?;
+        expect_scalar(&b, "linspace")?;
+        let n = lower_int(&args[2], env)?;
+        return Ok(SirExpr::Linspace {
+            a: Box::new(a),
+            b: Box::new(b),
+            n: Box::new(n),
+        });
+    }
     if matches!(
         func,
         "cumsum" | "cumprod" | "cummax" | "cummin" | "diff" | "sort" | "flip"
@@ -882,7 +898,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
              mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/var/std/median/norm/dot, \
-             cumsum/cumprod/cummax/cummin/diff/sort/flip, length, det/inv/eig)",
+             cumsum/cumprod/cummax/cummin/diff/sort/flip, linspace, length, det/inv/eig)",
             func
         )),
     }

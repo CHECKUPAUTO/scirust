@@ -160,6 +160,21 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `linspace(a, b, n)`** — constructeur de vecteur, prouvé contre Octave réel (Phase 2, incrément 27)
+Première **construction de tableau** du front-end MATLAB (jusqu'ici les tableaux
+venaient des paramètres ou de transformations). `linspace(a, b, n)` produit `n`
+points régulièrement espacés de `a` à `b` inclus, avec **extrémités exactes**
+(comme MATLAB, qui force `y(end) = b`) et le cas `linspace(a, b, 1) = [b]`.
+
+- `a`, `b` sont des scalaires ; `n` est un **entier** (littéral ou expression
+  entière comme `length(x)`), abaissé via le chemin d'index entier existant.
+- Câblé via un helper déterministe du prélude.
+
+Un cas d'oracle (longueur fixe 6, `a`/`b` tirés au sort). **Oracle 83/83** (200
+essais chacun) ; **74 tests unitaires** (1 nouveau). *Non-vacuité* : utiliser le
+pas `(b−a)/n` au lieu de `(b−a)/(n−1)` fait diverger les points intérieurs et
+passe l'oracle au ROUGE (200/200, |Δ|≈0,13).
+
 ### Ajouté — transpileur : **MATLAB `var` / `std` / `median`** — statistiques de réduction, prouvées contre Octave réel (Phase 2, incrément 26)
 Trois réductions statistiques (vecteur → scalaire), alignées exactement sur la
 convention d'Octave (vérifiée empiriquement avant câblage) :

@@ -78,6 +78,23 @@ pub mod np {
     pub fn ones(n: usize) -> Vec<f64> {
         vec![1.0f64; n]
     }
+    /// `n` evenly-spaced points from `a` to `b` inclusive, with exact endpoints
+    /// (matching MATLAB `linspace`; `linspace(a, b, 1) == [b]`).
+    pub fn linspace(a: f64, b: f64, n: usize) -> Vec<f64> {
+        if n == 0 {
+            return Vec::new();
+        }
+        if n == 1 {
+            return vec![b];
+        }
+        let mut o = Vec::with_capacity(n);
+        let step = (b - a) / (n as f64 - 1.0);
+        for i in 0..n {
+            o.push(a + step * i as f64);
+        }
+        o[n - 1] = b;
+        o
+    }
     /// Running prefix sum in fixed left-to-right order (bit-reproducible).
     pub fn cumsum(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len());
@@ -716,6 +733,22 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let n = emit(n, ctx);
             Frag {
                 code: format!("np::ones({})", n.code),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Linspace { a, b, n } =>
+        {
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            let n = emit(n, ctx);
+            Frag {
+                code: format!(
+                    "np::linspace({}, {}, {})",
+                    scalar_of(a),
+                    scalar_of(b),
+                    n.code
+                ),
                 ty: Ty::Array,
                 borrowed: false,
             }
