@@ -920,6 +920,14 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB vector constructor (Phase 2) ----
+        // linspace(a, b, 6) — 6 evenly-spaced points (fixed length; a, b fuzzed).
+        Case {
+            name: "M: linspace(a, b, 6) (constructor)",
+            call: "mlinspace",
+            src: "function y = mlinspace(a, b)\n  y = linspace(a, b, 6);\nend\n",
+            args: vec![Scalar { lo: -5.0, hi: 5.0 }, Scalar { lo: -5.0, hi: 5.0 }],
+        },
     ]
 }
 

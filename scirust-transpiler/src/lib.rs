@@ -705,6 +705,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn matlab_linspace_constructs_a_vector_from_scalars() {
+        // linspace(a, b, n) builds a vector: scalar a/b params, integer count.
+        let rust =
+            transpile_matlab("function y = f(a, b)\n  y = linspace(a, b, 5);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(a: f64, b: f64) -> Vec<f64> {");
+        assert!(rust.contains("np::linspace(a, b, 5usize)"));
+        assert!(rust.contains("pub fn linspace(a: f64, b: f64, n: usize) -> Vec<f64>"));
+        // The count may be a `length(x)`, not just a literal.
+        let dyn_n =
+            transpile_matlab("function y = f(a, b, x)\n  y = linspace(a, b, length(x));\nend\n")
+                .unwrap();
+        assert!(dyn_n.contains("np::linspace(a, b, x.len())"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

@@ -241,6 +241,13 @@ pub enum SirExpr {
     Zeros(Box<SirExpr>),
     /// `np.ones(n)` : Int -> Array.
     Ones(Box<SirExpr>),
+    /// `linspace(a, b, n)` : (Scalar, Scalar, Int) -> Array of `n` evenly-spaced
+    /// points from `a` to `b` inclusive (exact endpoints, matching MATLAB).
+    Linspace {
+        a: Box<SirExpr>,
+        b: Box<SirExpr>,
+        n: Box<SirExpr>,
+    },
     /// `cumsum(v)` : Array -> Array (running prefix sum, fixed left-to-right
     /// order -> bit-reproducible).
     Cumsum(Box<SirExpr>),
@@ -455,6 +462,7 @@ impl SirExpr {
             | SirExpr::BroadcastFn { .. }
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
+            | SirExpr::Linspace { .. }
             | SirExpr::Cumsum(_)
             | SirExpr::Cumprod(_)
             | SirExpr::Cummax(_)
@@ -618,6 +626,12 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         {
             scan_expr(base, solvers, signal);
             scan_expr(exp, solvers, signal);
+        },
+        SirExpr::Linspace { a, b, n } =>
+        {
+            scan_expr(a, solvers, signal);
+            scan_expr(b, solvers, signal);
+            scan_expr(n, solvers, signal);
         },
         SirExpr::Index { base, idx } =>
         {

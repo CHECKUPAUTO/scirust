@@ -58,6 +58,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, differences, ascending sort, reverse) |
+| constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
 | two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` | `(l).atan2/hypot/max/min(r)` (`ScalarBinFn`); `power` shares `^`. `max`/`min` with one arg stay reductions |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
@@ -111,8 +112,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: cumsum(v) / diff(v) / sort(v) 200/200 trials match (octave) (MATLAB vector→vector builtins, Phase 2)
   ✓ M: cumprod / cummax / cummin / flip 200/200 trials match (octave) (more MATLAB vector→vector builtins, Phase 2)
   ✓ M: var(v) / std(v) / median(v) 200/200 trials match (octave) (MATLAB reduction statistics, N-1, Phase 2)
+  ✓ M: linspace(a, b, 6)          200/200 trials match (octave) (MATLAB vector constructor, exact endpoints, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 82/82 cases match their reference runtime within tolerance
+  ORACLE GREEN — 83/83 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -160,9 +162,10 @@ them.
   reconstruction `U·diag(S)·Vᵀ`, not element-by-element.
 * **MATLAB is a scientific subset, not all of MATLAB.** No cell arrays, structs,
   anonymous functions, or `end` indexing yet; matrix routing covers `det`/`inv`/`\`/`eig`
-  (matrix inputs passed in, not yet constructed in-transpiler), `zeros(n)` is
-  not mapped (it is `n×n` in MATLAB, unlike NumPy's 1-D `np.zeros(n)`), and
-  element-wise operands are heuristically typed as arrays.
+  (matrices are passed in, not constructed in-transpiler — though `linspace` now
+  constructs 1-D vectors), `zeros(n)` is not mapped (it is `n×n` in MATLAB, unlike
+  NumPy's 1-D `np.zeros(n)`), and element-wise operands are heuristically typed as
+  arrays.
 * **`eig` is proven on symmetric inputs.** It routes to the verified symmetric
   eigensolver (real, ascending eigenvalues — matching Octave's `eig` on a
   symmetric matrix); general non-symmetric `eig` (complex eigenvalues, no
