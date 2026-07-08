@@ -72,8 +72,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 "#;
 
 /// Elementwise kernel: `op` selects `0=add`, `1=mul` (binary, `a` and `b`),
-/// `2=relu` (unary, `b` ignored), or `3=swiglu` (binary: `silu(a)·b`, the
-/// SwiGLU gate — `silu(x) = x·σ(x)`). One invocation per element.
+/// `2=relu` (unary, `b` ignored), `3=swiglu` (binary: `silu(a)·b`, the SwiGLU
+/// gate — `silu(x) = x·σ(x)`), or `4=rsqrt` (unary: `1/√(max(a, 1e-12))`, the
+/// reciprocal column-norm used by DoRA). One invocation per element.
 const EW_WGSL: &str = r#"
 struct P { n: u32, op: u32, _p0: u32, _p1: u32, };
 
@@ -91,7 +92,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
         if (p.op == 0u) { c[i] = a[i] + b[i]; }
         else if (p.op == 1u) { c[i] = a[i] * b[i]; }
         else if (p.op == 2u) { c[i] = max(a[i], 0.0); }
-        else { c[i] = (a[i] / (1.0 + exp(-a[i]))) * b[i]; }
+        else if (p.op == 3u) { c[i] = (a[i] / (1.0 + exp(-a[i]))) * b[i]; }
+        else { c[i] = 1.0 / sqrt(max(a[i], 1e-12)); }
         i = i + stride;
     }
 }
