@@ -164,6 +164,13 @@ impl ShardLoader {
         self.buffer.len()
     }
 
+    /// The raw loaded token buffer (little-endian `u32` ids, unsanitised). Lets a
+    /// caller inspect the id range — e.g. to detect a vocab / tokenizer mismatch
+    /// before training — or stream the tokens directly.
+    pub fn tokens(&self) -> &[u32] {
+        &self.buffer
+    }
+
     pub fn into_dataset(self, seq_len: usize, vocab_size: usize) -> PretrainDataset {
         PretrainDataset::from_slice(&self.buffer, seq_len, vocab_size)
     }

@@ -252,3 +252,77 @@ fn resident_train_tokens_reduces_loss() {
         "resident pretraining did not reduce the loss: {first} -> {last}"
     );
 }
+
+/// The **production resident pretraining harness** (`pretrain`): a warmup + cosine
+/// LR schedule and periodic checkpointing over a token stream, all in VRAM.
+/// Checks the loss descends, exactly `total_steps` windows run, a checkpoint is
+/// written at `save_interval` with the right `meta.step`, and it reloads into a
+/// fresh `SciAgentModel` producing finite, correctly-shaped logits. Skips with no
+/// adapter.
+#[test]
+fn resident_pretrain_schedules_and_checkpoints() {
+    use scirust_sciagent::gpu::{ResidentModel, ResidentPretrainConfig};
+    use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint};
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let Some(mut rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident pretrain");
+        return;
+    };
+    let pattern = [1u32, 5, 9, 2, 7, 3];
+    let tokens: Vec<u32> = (0..8 * 30).map(|i| pattern[i % pattern.len()]).collect();
+
+    let ckpt_dir = std::env::temp_dir().join("scirust_resident_pretrain_ckpt");
+    let _ = std::fs::remove_dir_all(&ckpt_dir);
+    let cfg = ResidentPretrainConfig {
+        base_lr: 0.03,
+        min_lr: 0.003,
+        warmup_steps: 5,
+        total_steps: 40,
+        start_step: 0,
+        seq_len: 8,
+        weight_decay: 0.0,
+        log_interval: 0,
+        save_interval: 20,
+        checkpoint_dir: ckpt_dir.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+
+    let losses = rm.pretrain(&tokens, &mut model, &config, &cfg);
+    assert_eq!(losses.len(), 40, "should run exactly total_steps windows");
+    let first: f32 = losses[..5].iter().sum::<f32>() / 5.0;
+    let last: f32 = losses[losses.len() - 5..].iter().sum::<f32>() / 5.0;
+    eprintln!("resident pretrain: loss {first:.4} -> {last:.4}");
+    assert!(
+        last < first * 0.8,
+        "pretrain must descend: {first} -> {last}"
+    );
+
+    // A checkpoint was written and reloads into a fresh model.
+    let latest = latest_checkpoint(&ckpt_dir).expect("a checkpoint should exist");
+    let mut reloaded = SciAgentModel::new(&config);
+    let meta = load_checkpoint(&mut reloaded, &latest).expect("checkpoint should load");
+    assert_eq!(
+        meta.step, 40,
+        "latest checkpoint should be the last save step"
+    );
+    let ids: Vec<usize> = (0..8usize)
+        .map(|i| pattern[i % pattern.len()] as usize)
+        .collect();
+    let tape = Tape::new();
+    let lv = reloaded.forward(&tape, &ids, 8);
+    let logits = tape.value(lv.idx()).data;
+    assert_eq!(logits.len(), 8 * config.vocab_size);
+    assert!(
+        logits.iter().all(|x| x.is_finite()),
+        "reloaded logits must be finite"
+    );
+    let _ = std::fs::remove_dir_all(&ckpt_dir);
+    eprintln!(
+        "resident pretrain: checkpoint at {} reloaded — PASS",
+        latest.display()
+    );
+}
