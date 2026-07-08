@@ -3457,6 +3457,60 @@ mod tests {
         );
     }
 
+    /// **Grid-stride coverage past the 65535-workgroup dispatch limit.** A flat
+    /// 1-D kernel over `n > 65535·64 = 4_194_240` elements would want more than
+    /// 65535 workgroups — which real hardware (the Jetson Thor) rejects at 350M
+    /// scale (e.g. AdamW over the `32768×1024` tied embedding = 33.5M params, or
+    /// the `128×32768` logits in `xent_grad`). The launch is capped at 65535 and
+    /// the flat kernels grid-stride (`i += num_workgroups.x·64`), so every element
+    /// must still be updated. Runs a full AdamW step over 5M params and checks it
+    /// against the CPU oracle — a stride bug would leave a tail untouched.
+    /// (lavapipe doesn't enforce the limit, but this still validates coverage; the
+    /// Thor validates the fix itself.) Skips if no adapter.
+    #[test]
+    fn flat_kernels_grid_stride_past_65535_workgroups() {
+        use crate::ops::cpu_adamw_step;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let n = 5_000_000usize; // > 65535 * 64 = 4_194_240
+        let mut param: Vec<f32> = (0..n).map(|i| ((i % 101) as f32) * 0.01 - 0.5).collect();
+        let grad: Vec<f32> = (0..n).map(|i| ((i % 37) as f32) * 0.02 - 0.3).collect();
+        let mut m = vec![0.0f32; n];
+        let mut v = vec![0.0f32; n];
+        let (lr, betas, eps, wd) = (0.01f32, (0.9f32, 0.999f32), 1e-8f32, 0.01f32);
+
+        let gp = chain.upload(&param, 1, n);
+        let gg = chain.upload(&grad, 1, n);
+        let gm = chain.upload(&m, 1, n);
+        let gv = chain.upload(&v, 1, n);
+        chain
+            .adamw_step(&gp, &gg, &gm, &gv, lr, betas, eps, wd, 1)
+            .unwrap();
+        cpu_adamw_step(&mut param, &grad, &mut m, &mut v, lr, betas, eps, wd, 1);
+
+        let gp_h = chain.download(&gp).unwrap();
+        // Probe the boundaries where the cap/stride interact, then the whole vector.
+        let boundary = 65535usize * 64;
+        for &i in &[0usize, boundary - 1, boundary, boundary + 1, n - 1]
+        {
+            assert!(
+                (gp_h[i] - param[i]).abs() < 1e-4,
+                "param mismatch at {i}: {} vs {}",
+                gp_h[i],
+                param[i]
+            );
+        }
+        assert!(
+            rel_err(&gp_h, &param) < 1e-5,
+            "grid-stride AdamW missed elements past the dispatch cap"
+        );
+    }
+
     /// An AdamW training loop reduces the loss on-device. Same linear + cross-
     /// entropy model as the SGD capstone, but the update is the resident AdamW
     /// step with persistent `m`/`v` moments. Asserts the loss ends well below the
