@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `diag` (surchargé) + `trapz`** prouvés contre Octave réel (Phase 2, incrément 31)
+Deux ajouts, dont la **surcharge `diag`** de MATLAB, désambiguïsée par le **type
+de l'opérande** (jamais deviné) :
+
+- **`diag(A)`** où `A` est une matrice → **extraction** de la diagonale (vecteur ;
+  nouveau nœud `DiagExtract`).
+- **`diag(v)`** où `v` est un vecteur → **construction** d'une matrice diagonale
+  (réutilise le nœud `Diag` existant, déjà prouvé côté Python via `np.diag`).
+- **`trapz(v)`** — intégration trapézoïdale à pas unité (`Σ ½·(v[i−1]+v[i])`).
+
+Trois cas d'oracle, exerçant les deux voies de `diag` naturellement :
+`diag(A' * A)` (extraction — diagonale de la matrice de Gram) et
+`diag(cumsum(v))` (construction), plus `trapz(v)`. **Oracle 92/92** (200 essais
+chacun) ; **79 tests unitaires** (2 nouveaux). *Non-vacuité* : retirer le facteur
+`½` de `trapz` double le résultat et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `trace(A)` + `cross(a, b)`** prouvés contre Octave réel (Phase 2, incrément 30)
 Deux opérations classiques, câblées via des helpers déterministes du prélude :
 

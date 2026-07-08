@@ -797,6 +797,36 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_diag_dispatches_on_operand_type() {
+        // diag(matrix) -> EXTRACT the diagonal (vector out).
+        let ex = transpile_matlab("function d = f(A)\n  d = diag(A' * A);\nend\n").unwrap();
+        assert_eq!(sig_of(&ex, "f"), "pub fn f(A: &[f64]) -> Vec<f64> {");
+        assert!(ex.contains(".row(__i)[__i]"));
+        // diag(vector) -> CONSTRUCT a diagonal matrix (matrix out).
+        let ct = transpile_matlab("function M = f(v)\n  M = diag(cumsum(v));\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&ct, "f"),
+            "pub fn f(v: &[f64]) -> scirust_solvers::Matrix {"
+        );
+        assert!(ct.contains("from_fn"));
+    }
+
+    #[test]
+    fn matlab_trapz_integrates_and_is_std_only() {
+        // trapz(v) -> scalar via the fixed 0.5*(v[i-1]+v[i]) trapezoid rule.
+        let rust = transpile_matlab("function t = f(v)\n  t = trapz(v);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> f64 {");
+        assert!(rust.contains("np::trapz(v)"));
+        assert!(rust.contains("0.5 * (a[i - 1] + a[i])"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function t = f(v)\n  t = trapz(v);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

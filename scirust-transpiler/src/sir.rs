@@ -304,7 +304,13 @@ pub enum SirExpr {
     Transpose(Box<SirExpr>),
     /// `np.diag(v)` : 1-D Array -> MatrixVal (square diagonal matrix with `v` on
     /// the diagonal). Used to reconstruct a matrix from an SVD (`U·diag(S)·Vᵀ`).
+    /// In MATLAB this is `diag(v)` where `v` is a vector.
     Diag(Box<SirExpr>),
+    /// `diag(A)` where `A` is a matrix : Matrix -> Array (extract the diagonal).
+    /// The other half of MATLAB's overloaded `diag`.
+    DiagExtract(Box<SirExpr>),
+    /// `trapz(v)` : Array -> Scalar, trapezoidal integration with unit spacing.
+    Trapz(Box<SirExpr>),
     /// A list literal `[a, b, c]` of scalars -> Array (`vec![…]`).
     ArrayLit(Vec<SirExpr>),
     /// A call to *another user-defined function* in the same module. `ret` is
@@ -458,6 +464,7 @@ impl SirExpr {
             | SirExpr::Stdev(_)
             | SirExpr::Median(_)
             | SirExpr::Trace(_)
+            | SirExpr::Trapz(_)
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -480,6 +487,7 @@ impl SirExpr {
             | SirExpr::Eigvalsh(_)
             | SirExpr::Matvec { .. }
             | SirExpr::Cross(_, _)
+            | SirExpr::DiagExtract(_)
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::UserCall { ret, .. } => *ret,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
@@ -629,7 +637,9 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Diff(x)
         | SirExpr::Sort(x)
         | SirExpr::Flip(x)
-        | SirExpr::Trace(x) => scan_expr(x, solvers, signal),
+        | SirExpr::Trace(x)
+        | SirExpr::DiagExtract(x)
+        | SirExpr::Trapz(x) => scan_expr(x, solvers, signal),
         SirExpr::ScalarPow { base, exp } =>
         {
             scan_expr(base, solvers, signal);

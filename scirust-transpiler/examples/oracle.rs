@@ -993,6 +993,36 @@ fn matlab_cases() -> Vec<Case> {
                 },
             ],
         },
+        // ---- MATLAB overloaded diag + trapz (Phase 2) ----
+        // diag(A' * A) — EXTRACT the diagonal of the Gram matrix (vector out).
+        Case {
+            name: "M: diag(A'*A) (extract diagonal)",
+            call: "mdiagex",
+            src: "function d = mdiagex(A)\n  d = diag(A' * A);\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // diag(cumsum(v)) — CONSTRUCT a diagonal matrix from a vector (matrix out).
+        Case {
+            name: "M: diag(cumsum(v)) (construct matrix)",
+            call: "mdiagct",
+            src: "function M = mdiagct(v)\n  M = diag(cumsum(v));\nend\n",
+            args: vec![Array {
+                n: 5,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // trapz(v) — trapezoidal integration.
+        Case {
+            name: "M: trapz(v) (integration)",
+            call: "mtrapz",
+            src: "function t = mtrapz(v)\n  t = trapz(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -2.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

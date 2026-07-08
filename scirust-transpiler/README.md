@@ -57,6 +57,8 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B`, transpose `A'` / `A.'` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul / transpose); `*` routes to a matrix product only when the left operand is an inferred matrix |
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product), `cross(a, b)` (3-vector) | `sqrt(sum(v.*v))` / fixed-order `np::dot` / `np::cross` |
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
+| overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
+| `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, differences, ascending sort, reverse) |
@@ -118,8 +120,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: A*(A\b) / A*inv(A)         200/200 trials match (octave) (MATLAB matrix product * → matvec/matmul, Phase 2)
   ✓ M: A' / A'*A                  200/200 trials match (octave) (MATLAB transpose operator ', Gram matrix, Phase 2)
   ✓ M: trace(A) / cross(a,b)      200/200 trials match (octave) (MATLAB diagonal sum + 3-vector cross product, Phase 2)
+  ✓ M: diag(A'*A) / diag(cumsum(v)) / trapz(v) 200/200 trials match (octave) (overloaded diag + integration, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 89/89 cases match their reference runtime within tolerance
+  ORACLE GREEN — 92/92 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

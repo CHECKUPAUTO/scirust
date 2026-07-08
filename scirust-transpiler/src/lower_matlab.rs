@@ -780,6 +780,33 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             n: Box::new(n),
         });
     }
+    if func == "diag"
+    {
+        // MATLAB's overloaded `diag`, dispatched on the operand type:
+        //   diag(A) with A a matrix  -> extract the diagonal (a vector);
+        //   diag(v) with v a vector  -> construct a diagonal matrix.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if is_matrixish(a.ty())
+        {
+            return Ok(SirExpr::DiagExtract(Box::new(a)));
+        }
+        if a.ty() == Ty::Array
+        {
+            return Ok(SirExpr::Diag(Box::new(a)));
+        }
+        return Err("diag expects a matrix (extract the diagonal) or a vector \
+                    (construct a diagonal matrix)"
+            .into());
+    }
+    if func == "trapz"
+    {
+        // trapz(v) — trapezoidal integration with unit spacing.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "trapz")?;
+        return Ok(SirExpr::Trapz(Box::new(a)));
+    }
     if matches!(
         func,
         "cumsum" | "cumprod" | "cummax" | "cummin" | "diff" | "sort" | "flip"
@@ -957,8 +984,9 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
-             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/var/std/median/norm/dot/cross, \
-             cumsum/cumprod/cummax/cummin/diff/sort/flip, linspace, length, det/inv/eig/trace)",
+             mod/rem/sign/atan2/hypot/power, \
+             sum/prod/mean/max/min/var/std/median/norm/dot/cross/trapz, \
+             cumsum/cumprod/cummax/cummin/diff/sort/flip/diag, linspace, length, det/inv/eig/trace)",
             func
         )),
     }
@@ -1196,6 +1224,16 @@ fn is_ident(name: &str, e: &MExpr) -> bool {
 fn is_reduction(func: &str) -> bool {
     matches!(
         func,
-        "sum" | "prod" | "mean" | "max" | "min" | "length" | "norm" | "var" | "std" | "median"
+        "sum"
+            | "prod"
+            | "mean"
+            | "max"
+            | "min"
+            | "length"
+            | "norm"
+            | "var"
+            | "std"
+            | "median"
+            | "trapz"
     )
 }
