@@ -5,6 +5,7 @@
 //! réimplémenter les formules côté agent.
 
 use crate::registry::McpTool;
+use scirust_tolerance::attributes::design_attributes_plan;
 use scirust_tolerance::attribution::attribute;
 use scirust_tolerance::capability::{
     CapabilitySummary, cp_confidence_interval, cpk_confidence_interval,
@@ -22,6 +23,7 @@ use scirust_tolerance::geometry::{
     straightness, straightness_inertia,
 };
 use scirust_tolerance::inertia::{Inertia, InertiaCone, i_max_from_tolerance};
+use scirust_tolerance::interference::clearance_fit;
 use scirust_tolerance::interval::tolerance_interval;
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::montecarlo::{Distribution, linear, simulate};
@@ -39,6 +41,7 @@ use scirust_tolerance::sixsigma::{dpmo, dpmo_from_sigma, dpu, process_report, si
 use scirust_tolerance::spatial::{
     Feature, Torsor, inertia_decomposition, surface_inertia_from_torsors,
 };
+use scirust_tolerance::subgroup::subgroup_capability;
 use scirust_tolerance::variables::design_variables_plan;
 use serde_json::json;
 
@@ -67,6 +70,9 @@ pub fn tolerance_tools() -> Vec<McpTool> {
         variables_plan_tool(),
         six_sigma_tool(),
         attribution_tool(),
+        attributes_plan_tool(),
+        interference_tool(),
+        subgroup_capability_tool(),
     ]
 }
 
@@ -1494,6 +1500,138 @@ fn attribution_tool() -> McpTool {
     }
 }
 
+fn attributes_plan_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_attributes_plan".to_string(),
+        description: "Acceptance sampling by attributes (ISO 2859-1 / MIL-STD-105): designs a \
+            single-sampling go/no-go plan (sample size n, acceptance number c — accept when \
+            defectives ≤ c) whose binomial OC clears the producer point (aql, 1−alpha) and consumer \
+            point (rql, beta). Reports the achieved acceptance probabilities. No measurement needed, \
+            only pass/fail per item."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "aql": { "type": "number", "description": "acceptable quality level (fraction defective, e.g. 0.01)" },
+                "rql": { "type": "number", "description": "rejectable quality level (fraction, > aql, e.g. 0.10)" },
+                "alpha": { "type": "number", "description": "producer's risk (e.g. 0.05)" },
+                "beta": { "type": "number", "description": "consumer's risk (e.g. 0.10)" },
+                "max_n": { "type": "integer", "description": "search cap on the sample size (default 500)" },
+            },
+            "required": ["aql", "rql", "alpha", "beta"],
+        }),
+        handler: Box::new(|args| {
+            let aql = f64_field(&args, "aql")?;
+            let rql = f64_field(&args, "rql")?;
+            let alpha = f64_field(&args, "alpha")?;
+            let beta = f64_field(&args, "beta")?;
+            let max_n = args
+                .get("max_n")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(500) as usize;
+            let plan = design_attributes_plan(aql, rql, alpha, beta, max_n)
+                .ok_or("no plan up to max_n meets both points (check 0<aql<rql<1, risks in (0,1))")?;
+            Ok(json!({
+                "sample_size": plan.sample_size,
+                "acceptance_number": plan.acceptance_number,
+                "p_accept_aql": plan.probability_of_acceptance(aql),
+                "p_accept_rql": plan.probability_of_acceptance(rql),
+            }))
+        }),
+    }
+}
+
+fn interference_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_interference".to_string(),
+        description: "Stress–strength interference / assembly-fit reliability. Given a strength (or \
+            hole) N(mean_strength, sd_strength) and a stress (or shaft) N(mean_stress, sd_stress), \
+            returns the reliability R = P(strength > stress) = Φ((μS−μL)/√(σS²+σL²)), the reliability \
+            index β, and the clearance-fit split (mean/sd of clearance = strength−stress, P(clearance>0) \
+            vs P(interference<0)). Reads as fit reliability for a random hole/shaft pair."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "mean_strength": { "type": "number", "description": "mean strength (or hole size)" },
+                "sd_strength": { "type": "number", "description": "strength (hole) standard deviation" },
+                "mean_stress": { "type": "number", "description": "mean stress (or shaft size)" },
+                "sd_stress": { "type": "number", "description": "stress (shaft) standard deviation" },
+            },
+            "required": ["mean_strength", "sd_strength", "mean_stress", "sd_stress"],
+        }),
+        handler: Box::new(|args| {
+            let ms = f64_field(&args, "mean_strength")?;
+            let ss = f64_field(&args, "sd_strength")?;
+            let ml = f64_field(&args, "mean_stress")?;
+            let sl = f64_field(&args, "sd_stress")?;
+            let f = clearance_fit(ms, ss, ml, sl);
+            Ok(json!({
+                "reliability": f.prob_clearance,
+                "prob_interference": f.prob_interference,
+                "reliability_index": f.reliability_index,
+                "mean_clearance": f.mean_clearance,
+                "sd_clearance": f.sd_clearance,
+            }))
+        }),
+    }
+}
+
+fn subgroup_capability_tool() -> McpTool {
+    McpTool {
+        name: "tolerance_subgroup_capability".to_string(),
+        description: "Rational-subgroup capability study (AIAG / ISO 22514-2): from balanced \
+            subgroups (each of size 2..25) and a spec [lsl, usl], separates within-subgroup spread \
+            σ_within = R̄/d₂ (short-term) from the overall spread, and reports Cp/Cpk (capability, from \
+            within) alongside Pp/Ppk (performance, from overall). A large Cp with a small Pp flags a \
+            stable-but-wandering process."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "subgroups": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "number" } },
+                    "description": "subgroups[i] = readings of subgroup i; balanced, size 2..25, ≥2 subgroups",
+                },
+                "lsl": { "type": "number", "description": "lower spec limit" },
+                "usl": { "type": "number", "description": "upper spec limit" },
+            },
+            "required": ["subgroups", "lsl", "usl"],
+        }),
+        handler: Box::new(|args| {
+            let rows = args
+                .get("subgroups")
+                .and_then(|v| v.as_array())
+                .ok_or("missing `subgroups`")?;
+            let groups: Vec<Vec<f64>> = rows
+                .iter()
+                .map(|g| {
+                    g.as_array()
+                        .ok_or("`subgroups` must be 2-deep".to_string())?
+                        .iter()
+                        .map(|x| x.as_f64().ok_or("non-numeric reading".to_string()))
+                        .collect::<Result<Vec<f64>, String>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let lsl = f64_field(&args, "lsl")?;
+            let usl = f64_field(&args, "usl")?;
+            let s = subgroup_capability(&groups, lsl, usl)
+                .ok_or("unbalanced / subgroup size outside [2,25] / <2 subgroups / usl≤lsl")?;
+            Ok(json!({
+                "grand_mean": s.grand_mean,
+                "sigma_within": s.sigma_within,
+                "sigma_overall": s.sigma_overall,
+                "mean_range": s.mean_range,
+                "cp": s.cp,
+                "cpk": s.cpk,
+                "pp": s.pp,
+                "ppk": s.ppk,
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2013,6 +2151,65 @@ mod tests {
         // Too few observations ⇒ error.
         assert!(
             (tool.handler)(json!({ "columns": [[1.0, 2.0]], "assembly": [1.0, 2.0] })).is_err()
+        );
+    }
+
+    #[test]
+    fn attributes_plan_tool_designs_and_meets_points() {
+        let tool = attributes_plan_tool();
+        let out = (tool.handler)(json!({
+            "aql": 0.01, "rql": 0.10, "alpha": 0.05, "beta": 0.10,
+        }))
+        .unwrap();
+        assert!(out["sample_size"].as_u64().unwrap() >= 1);
+        assert!(out["p_accept_aql"].as_f64().unwrap() >= 0.95 - 1e-9);
+        assert!(out["p_accept_rql"].as_f64().unwrap() <= 0.10 + 1e-9);
+        // aql ≥ rql is rejected.
+        assert!(
+            (tool.handler)(json!({ "aql": 0.10, "rql": 0.01, "alpha": 0.05, "beta": 0.10 }))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn interference_tool_reports_reliability() {
+        let tool = interference_tool();
+        // β = (25−20)/√(9+16) = 1 ⇒ R = Φ(1) ≈ 0.8413.
+        let out = (tool.handler)(json!({
+            "mean_strength": 25.0, "sd_strength": 3.0, "mean_stress": 20.0, "sd_stress": 4.0,
+        }))
+        .unwrap();
+        assert!((out["reliability_index"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!((out["reliability"].as_f64().unwrap() - 0.8413).abs() < 1e-3);
+        assert!(
+            (out["reliability"].as_f64().unwrap() + out["prob_interference"].as_f64().unwrap()
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn subgroup_capability_tool_separates_within_and_overall() {
+        let tool = subgroup_capability_tool();
+        let out = (tool.handler)(json!({
+            "subgroups": [
+                [10.0, 10.1, 9.9, 10.05],
+                [10.2, 10.15, 10.25, 10.1],
+                [9.8, 9.85, 9.75, 9.9],
+            ],
+            "lsl": 9.0, "usl": 11.0,
+        }))
+        .unwrap();
+        // Between-subgroup shift ⇒ overall spread exceeds within ⇒ Pp < Cp.
+        assert!(out["sigma_overall"].as_f64().unwrap() > out["sigma_within"].as_f64().unwrap());
+        assert!(out["pp"].as_f64().unwrap() < out["cp"].as_f64().unwrap());
+        // Unbalanced ⇒ error.
+        assert!(
+            (tool.handler)(json!({
+                "subgroups": [[1.0, 2.0], [1.0]], "lsl": 0.0, "usl": 3.0,
+            }))
+            .is_err()
         );
     }
 }

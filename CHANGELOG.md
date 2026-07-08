@@ -5,6 +5,39 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — atelier : échantillonnage aux attributs, interférence contrainte-résistance, étude de capabilité par sous-groupes (`scirust-tolerance`)
+Trois modules qui complètent la boîte à outils qualité d'atelier : accepter un
+lot sans mesurer, chiffrer la fiabilité d'un **ajustement** aléatoire, et mener
+une vraie **étude de capabilité** à sous-groupes rationnels. Chaque module est
+vérifié par cross-check de fuzzing contre une **référence indépendante** :
+
+- **`attributes`** : **échantillonnage aux attributs** (ISO 2859-1 / MIL-STD-105).
+  Plan simple `(n, c)` — accepter si défectueux `≤ c` — de courbe d'efficacité
+  binomiale exacte `Pa(p) = Σ_{d≤c} C(n,d) pᵈ(1−p)ⁿ⁻ᵈ` (récurrence stable), avec
+  **conception à deux points** (balayage de `c` croissant, plus petit `n` tenant
+  le point producteur) et qualité moyenne après contrôle (AOQ). *Cross-check* :
+  Monte-Carlo direct de la règle d'acceptation vs la CE binomiale ; les plans
+  conçus tiennent les deux points nominaux.
+- **`interference`** : **interférence contrainte-résistance** et fiabilité
+  d'ajustement. Fiabilité `R = P(S > L) = Φ(β)`, `β = (μ_S−μ_L)/√(σ_S²+σ_L²)`
+  (indice de fiabilité), et analyse d'**ajustement** alésage/arbre : jeu
+  `C = alésage − arbre ∼ N(μ_h−μ_s, σ_h²+σ_s²)`, `P(jeu > 0)` (ajustement libre)
+  vs `P(jeu < 0)` (serrage) — la probabilité qu'une paire tirée au hasard
+  s'assemble comme prévu, qu'un pire-cas min/max ne donne pas. *Cross-check* :
+  Monte-Carlo de `P(S>L)` vs la forme close ; identités de partition du jeu.
+- **`subgroup`** : **étude de capabilité par sous-groupes rationnels** (MSA AIAG /
+  ISO 22514-2). Sépare la dispersion **intra-sous-groupe** (court terme,
+  `σ̂ = R̄/d₂ = s̄/c₄` via les constantes de cartes de contrôle) qui porte les
+  indices de **capabilité** `Cp`/`Cpk`, de la dispersion **globale** (long terme)
+  qui porte les indices de **performance** `Pp`/`Ppk` : un grand `Cp` avec un
+  petit `Pp` signale un procédé stable mais qui dérive. *Cross-check* :
+  recalcul indépendant du σ global ; accord des estimateurs `R̄/d₂` et `s̄/c₄` ;
+  identité du `Cp`.
+
+Câblés dans `scirust-mcp` (`tolerance_attributes_plan`, `tolerance_interference`,
+`tolerance_subgroup_capability`). Fuzz global : **113 336 checks / 0 erreur** sur
+26 modules.
+
 ### Ajouté — qualité de procédé : échantillonnage aux mesures, Six-Sigma, attribution des causes (`scirust-tolerance`)
 Trois modules qui prolongent la couche mesure & analyse vers le **pilotage
 qualité** que les suites concurrentes (Minitab, Q-DAS) offrent autour de la

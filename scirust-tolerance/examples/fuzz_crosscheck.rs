@@ -38,9 +38,16 @@
 //!   RTY vs an explicit product; Poisson `−ln Y = DPU`.
 //! - `attribution` — the `Σcⱼ = R²` decomposition identity, coefficient recovery
 //!   against known generators, and single-regressor `c = corr²`.
+//! - `attributes` — the binomial OC `P(D≤c)` vs a direct Monte-Carlo of the
+//!   accept rule; designed plans clear both nominal points.
+//! - `interference` — `R = Φ(β)` vs a Monte-Carlo of `P(S>L)`; clearance-fit
+//!   partition identities.
+//! - `subgroup` — the overall-sigma recomputation; range- vs s-method within
+//!   sigma agreement; the `Cp` identity.
 //!
 //! Run: `cargo run -p scirust-tolerance --example fuzz_crosscheck [N]`
 
+use scirust_tolerance::attributes::{AttributesPlan, design_attributes_plan};
 use scirust_tolerance::attribution::attribute;
 use scirust_tolerance::capability::{cp as cap_cp, cp_confidence_interval, nonconformity_ppm};
 use scirust_tolerance::chain::{
@@ -58,6 +65,7 @@ use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::geometry::{
     flatness, least_squares_plane, parallelism, perpendicularity, roundness,
 };
+use scirust_tolerance::interference::{clearance_fit, interference_reliability};
 use scirust_tolerance::interval::tolerance_factor_two_sided;
 use scirust_tolerance::modal::{ModalBasis, modal_inertias};
 use scirust_tolerance::montecarlo::{Distribution, linear as mc_linear, simulate};
@@ -81,6 +89,7 @@ use scirust_tolerance::spatial::{
 use scirust_tolerance::special::{
     chi2_cdf, chi2_quantile, erf, erfc, ncchi2_cdf, normal_cdf, normal_sf,
 };
+use scirust_tolerance::subgroup::{sigma_within_s_method, subgroup_capability};
 use scirust_tolerance::variables::{VariablesPlan, design_variables_plan};
 
 /// Deterministic xorshift64* RNG with a Box–Muller normal.
@@ -1343,6 +1352,144 @@ fn check_attribution(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_attributes(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 3000;
+    for _ in 0..n
+    {
+        let nn = rng.int(10, 60);
+        let c = rng.int(0, 4);
+        let plan = AttributesPlan::new(nn, c);
+        let p = rng.uniform(0.01, 0.20);
+        // Independent Monte-Carlo: draw Binomial(nn, p) as nn Bernoulli trials,
+        // accept when defectives ≤ c; the accept rate estimates Pa(p).
+        let mut acc = 0u64;
+        for _ in 0..trials
+        {
+            let d = (0..nn).filter(|_| rng.uniform(0.0, 1.0) < p).count();
+            if d <= c
+            {
+                acc += 1;
+            }
+        }
+        let emp = acc as f64 / trials as f64;
+        r.check(
+            (plan.probability_of_acceptance(p) - emp).abs(),
+            0.05,
+            || {
+                format!(
+                    "attributes OC Pa {:.3} vs MC {emp:.3} (n={nn}, c={c}, p={p:.3})",
+                    plan.probability_of_acceptance(p)
+                )
+            },
+        );
+        // A designed plan clears both nominal points.
+        let (aql, rql) = (rng.uniform(0.005, 0.02), rng.uniform(0.08, 0.15));
+        let (alpha, beta) = (0.05, 0.10);
+        if let Some(d) = design_attributes_plan(aql, rql, alpha, beta, 400)
+        {
+            r.check(
+                (1.0 - alpha - d.probability_of_acceptance(aql)).max(0.0),
+                1e-9,
+                || "attributes design Pa(AQL)>=1-alpha".into(),
+            );
+            r.check(
+                (d.probability_of_acceptance(rql) - beta).max(0.0),
+                1e-9,
+                || "attributes design Pa(RQL)<=beta".into(),
+            );
+        }
+    }
+    r
+}
+
+fn check_interference(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 4000;
+    for _ in 0..n
+    {
+        let mu_s = rng.uniform(8.0, 12.0);
+        let sd_s = rng.uniform(0.3, 1.5);
+        let mu_l = rng.uniform(6.0, 11.0);
+        let sd_l = rng.uniform(0.3, 1.5);
+        let rel = interference_reliability(mu_s, sd_s, mu_l, sd_l);
+        // Independent Monte-Carlo of P(S > L).
+        let mut surv = 0u64;
+        for _ in 0..trials
+        {
+            let s = mu_s + sd_s * rng.normal();
+            let l = mu_l + sd_l * rng.normal();
+            if s > l
+            {
+                surv += 1;
+            }
+        }
+        let emp = surv as f64 / trials as f64;
+        r.check((rel - emp).abs(), 0.03, || {
+            format!("interference R {rel:.3} vs MC {emp:.3}")
+        });
+        // Clearance fit: prob_clearance == reliability of hole>shaft; partition.
+        let f = clearance_fit(mu_s, sd_s, mu_l, sd_l);
+        r.check((f.prob_clearance - rel).abs(), 1e-12, || {
+            "interference clearance==R".into()
+        });
+        r.check(
+            (f.prob_clearance + f.prob_interference - 1.0).abs(),
+            1e-12,
+            || "interference partition".into(),
+        );
+        r.check(
+            (f.sd_clearance - (sd_s * sd_s + sd_l * sd_l).sqrt()).abs(),
+            1e-12,
+            || "interference sd_clearance".into(),
+        );
+    }
+    r
+}
+
+fn check_subgroup(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    for _ in 0..n
+    {
+        let k = rng.int(15, 40); // subgroups
+        let m = rng.int(3, 8); // subgroup size
+        let mu = rng.uniform(50.0, 100.0);
+        let sigma = rng.uniform(0.5, 3.0);
+        let groups: Vec<Vec<f64>> = (0..k)
+            .map(|_| (0..m).map(|_| mu + sigma * rng.normal()).collect())
+            .collect();
+        let (lsl, usl) = (mu - 6.0 * sigma, mu + 6.0 * sigma);
+        let s = subgroup_capability(&groups, lsl, usl).unwrap();
+        // (1) Independent recomputation of the overall sigma (pooled about grand).
+        let all: Vec<f64> = groups.iter().flatten().copied().collect();
+        let nf = all.len() as f64;
+        let gmean = all.iter().sum::<f64>() / nf;
+        let so = (all.iter().map(|x| (x - gmean).powi(2)).sum::<f64>() / (nf - 1.0)).sqrt();
+        r.check((s.sigma_overall - so).abs(), 1e-9, || {
+            "subgroup overall sigma".into()
+        });
+        // (2) Range-method and s-method within-sigma agree (two estimators).
+        let s_method = sigma_within_s_method(&groups).unwrap();
+        r.check(
+            (s.sigma_within - s_method).abs() / s.sigma_within,
+            0.15,
+            || {
+                format!(
+                    "subgroup within R̄/d₂ {:.4} vs s̄/c₄ {s_method:.4}",
+                    s.sigma_within
+                )
+            },
+        );
+        // (3) Cp identity from the within spread.
+        r.check(
+            (s.cp * 6.0 * s.sigma_within - (usl - lsl)).abs() / (usl - lsl),
+            1e-12,
+            || "subgroup Cp identity".into(),
+        );
+    }
+    r
+}
+
 /// Standard-normal quantile via the crate's `special`, wrapped for local use.
 fn normal_cdf_inv(p: f64) -> f64 {
     scirust_tolerance::special::inv_normal_cdf(p)
@@ -1379,6 +1526,9 @@ fn main() {
         ("variables", check_variables(&mut rng, n.min(120))),
         ("sixsigma", check_sixsigma(&mut rng, n)),
         ("attribution", check_attribution(&mut rng, n.min(120))),
+        ("attributes", check_attributes(&mut rng, n.min(120))),
+        ("interference", check_interference(&mut rng, n.min(150))),
+        ("subgroup", check_subgroup(&mut rng, n.min(150))),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");

@@ -152,5 +152,8 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_variables_plan"));
         assert!(registry.names().contains(&"tolerance_six_sigma"));
         assert!(registry.names().contains(&"tolerance_attribution"));
+        assert!(registry.names().contains(&"tolerance_attributes_plan"));
+        assert!(registry.names().contains(&"tolerance_interference"));
+        assert!(registry.names().contains(&"tolerance_subgroup_capability"));
     }
 }
