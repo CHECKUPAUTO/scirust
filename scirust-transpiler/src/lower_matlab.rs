@@ -695,6 +695,28 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_scalar(&a, "sign")?;
         return Ok(SirExpr::Sign(Box::new(a)));
     }
+    if func == "atan2" || func == "hypot"
+    {
+        // Two-argument scalar math: atan2(y, x) / hypot(a, b). Scalar operands.
+        need_args(func, args, 2)?;
+        let l = lower_scalar(&args[0], env)?;
+        let r = lower_scalar(&args[1], env)?;
+        expect_scalar(&l, func)?;
+        expect_scalar(&r, func)?;
+        let mf = if func == "atan2"
+        {
+            MathFn2::Atan2
+        }
+        else
+        {
+            MathFn2::Hypot
+        };
+        return Ok(SirExpr::ScalarBinFn {
+            func: mf,
+            l: Box::new(l),
+            r: Box::new(r),
+        });
+    }
     if func == "det"
     {
         // det(A) -> routed to the verified LU-based determinant.
@@ -757,7 +779,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
-             mod/rem/sign, sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
+             mod/rem/sign/atan2/hypot, sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
             func
         )),
     }

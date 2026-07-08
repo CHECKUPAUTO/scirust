@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `atan2` / `hypot`** — fonctions math à deux arguments, prouvées contre Octave réel (Phase 2, incrément 21)
+Ajoute à la SIR un **nœud math scalaire binaire** réutilisable
+(`SirExpr::ScalarBinFn` + `MathFn2`), émis en `(l).méthode(r)`, et câble les deux
+premières fonctions à deux arguments côté MATLAB :
+
+- **`atan2(y, x)`** — arctangente à quatre quadrants (`f64::atan2`), l'ordre des
+  arguments est significatif.
+- **`hypot(a, b)`** — longueur euclidienne `√(a²+b²)` sans dépassement
+  (`f64::hypot`).
+
+Opérandes scalaires dans ce sous-ensemble. Vérifiées empiriquement contre Octave
+(cas des quatre quadrants inclus) avant câblage. Deux cas d'oracle. **Oracle
+68/68** (200 essais chacun) ; **67 tests unitaires** (1 nouveau). *Non-vacuité* :
+inverser l'ordre des arguments d'`atan2` fait diverger le cas (200/200,
+|Δ|≈0,22) et passe l'oracle au ROUGE — tandis que `hypot`, symétrique, reste
+vert (le test prouve donc la position, pas seulement la présence).
+
 ### Ajouté — transpileur : **MATLAB `round` / `fix` / `mod` / `rem` / `sign`** — arrondi et arithmétique modulaire, prouvés contre Octave réel (Phase 2, incrément 20)
 Élargissement du vocabulaire scalaire MATLAB, chaque fonction alignée exactement
 sur la sémantique d'Octave (vérifié empiriquement avant câblage) :

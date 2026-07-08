@@ -57,6 +57,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
+| two-arg math `atan2(y,x)`, `hypot(a,b)` | `(l).atan2(r)` / `(l).hypot(r)` (`ScalarBinFn`) |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
 **matrix-ness** from `det`/`inv` arguments and the left side of `\`
@@ -103,8 +104,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: det(A) / inv(A) / A \ b   200/200 trials match (octave) (MATLAB linear algebra → scirust-solvers, Phase 2)
   ✓ M: norm(v) / dot(a,b) / eig(A) 200/200 trials match (octave) (MATLAB vector & symmetric-eigen intrinsics, Phase 2)
   ✓ M: round / fix / mod / rem / sign 200/200 trials match (octave) (MATLAB rounding & modular scalar functions, Phase 2)
+  ✓ M: atan2(y,x) / hypot(a,b)    200/200 trials match (octave) (MATLAB two-argument scalar math, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 66/66 cases match their reference runtime within tolerance
+  ORACLE GREEN — 68/68 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

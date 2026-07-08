@@ -749,6 +749,20 @@ fn matlab_cases() -> Vec<Case> {
             src: "function y = msign(x)\n  y = sign(x);\nend\n",
             args: vec![Scalar { lo: -2.0, hi: 2.0 }],
         },
+        // atan2(y, x) — four-quadrant arctangent (both signs exercised).
+        Case {
+            name: "M: atan2(y, x) (four-quadrant)",
+            call: "matan2",
+            src: "function a = matan2(y, x)\n  a = atan2(y, x);\nend\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }, Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // hypot(a, b) — Euclidean length without overflow.
+        Case {
+            name: "M: hypot(a, b) (2D length)",
+            call: "mhypot",
+            src: "function h = mhypot(a, b)\n  h = hypot(a, b);\nend\n",
+            args: vec![Scalar { lo: -4.0, hi: 4.0 }, Scalar { lo: -4.0, hi: 4.0 }],
+        },
     ]
 }
 

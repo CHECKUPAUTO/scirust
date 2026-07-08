@@ -504,6 +504,22 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::ScalarBinFn { func, l, r } =>
+        {
+            // Two-argument scalar math: `(l).atan2(r)` / `(l).hypot(r)`.
+            let l = emit(l, ctx);
+            let r = emit(r, ctx);
+            Frag {
+                code: format!(
+                    "({}).{}({})",
+                    scalar_of(l),
+                    func.rust_method(),
+                    scalar_of(r)
+                ),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
         SirExpr::Len(a) =>
         {
             let a = emit(a, ctx);
