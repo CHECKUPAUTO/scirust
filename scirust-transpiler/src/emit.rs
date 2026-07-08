@@ -697,6 +697,19 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::ArraySign(a) =>
+        {
+            // Elementwise MATLAB sign: -1/0/+1 per element.
+            let a = emit(a, ctx);
+            Frag {
+                code: format!(
+                    "np::map1({}, |x| if x > 0.0 {{ 1.0 }} else if x < 0.0 {{ -1.0 }} else {{ 0.0 }})",
+                    slice_of(&a)
+                ),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
         SirExpr::ScalarBinFn { func, l, r } =>
         {
             // Two-argument scalar math: `(l).atan2(r)` / `(l).hypot(r)`.

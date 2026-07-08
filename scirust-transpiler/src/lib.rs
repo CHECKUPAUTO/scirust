@@ -574,8 +574,9 @@ mod tests {
         assert!(rust.contains("if __x > 0.0"));
         assert!(rust.contains("else if __x < 0.0"));
         assert!(!rust.contains("signum"));
-        // `sign` on an array (a vector) is refused in this subset.
-        let bad = transpile_matlab("function y = f(v)\n  y = sign(v) + sum(v);\nend\n");
+        // `sign` on a matrix is refused (scalar or vector only); `A` is a
+        // matrix from `det`.
+        let bad = transpile_matlab("function y = f(A)\n  y = sign(A) + det(A);\nend\n");
         assert!(bad.is_err());
     }
 
@@ -894,6 +895,23 @@ mod tests {
             transpile_matlab("function y = f(v)\n  y = hypot(cumsum(v), 2.0);\nend\n").unwrap();
         assert!(bc.contains("np::map1("));
         assert!(bc.contains(".hypot("));
+    }
+
+    #[test]
+    fn matlab_deg_rad_and_elementwise_sign() {
+        // deg2rad (scalar) -> multiply by the pi/180 constant.
+        let d = transpile_matlab("function y = f(x)\n  y = deg2rad(x);\nend\n").unwrap();
+        assert_eq!(sig_of(&d, "f"), "pub fn f(x: f64) -> f64 {");
+        assert!(d.contains("0.017453292519943295"));
+        // rad2deg elementwise -> broadcast map1 over an array.
+        let r = transpile_matlab("function y = f(v)\n  y = rad2deg(cumsum(v));\nend\n").unwrap();
+        assert!(r.contains("np::map1("));
+        // sign(scalar) stays the bound if/else; sign(vector) is elementwise.
+        let ss = transpile_matlab("function y = f(x)\n  y = sign(x);\nend\n").unwrap();
+        assert!(ss.contains("let __x: f64"));
+        let sv = transpile_matlab("function y = f(v)\n  y = sign(cumsum(v));\nend\n").unwrap();
+        assert!(sv.contains("np::map1("));
+        assert!(sv.contains("if x > 0.0"));
     }
 
     // ---- tuples / SVD -----------------------------------------------------

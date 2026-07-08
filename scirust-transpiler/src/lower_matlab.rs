@@ -938,11 +938,46 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if func == "sign"
     {
-        // sign(x) -> -1/0/+1 (MATLAB semantics; sign(0) == 0). Scalar only.
+        // sign(x) -> -1/0/+1 (MATLAB semantics; sign(0) == 0), scalar or
+        // elementwise over a vector.
         need_args(func, args, 1)?;
         let a = lower_scalar(&args[0], env)?;
+        if a.ty() == Ty::Array
+        {
+            return Ok(SirExpr::ArraySign(Box::new(a)));
+        }
         expect_scalar(&a, "sign")?;
         return Ok(SirExpr::Sign(Box::new(a)));
+    }
+    if func == "deg2rad" || func == "rad2deg"
+    {
+        // Degree/radian conversion — multiply by a constant, scalar or
+        // broadcast over a vector.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        let k = if func == "deg2rad"
+        {
+            std::f64::consts::PI / 180.0
+        }
+        else
+        {
+            180.0 / std::f64::consts::PI
+        };
+        if a.ty() == Ty::Array
+        {
+            return Ok(SirExpr::ScalarBroadcast {
+                op: Op::Mul,
+                scalar: Box::new(SirExpr::ScalarLit(k)),
+                arr: Box::new(a),
+                arr_is_left: false,
+            });
+        }
+        expect_scalar(&a, func)?;
+        return Ok(SirExpr::ScalarBin {
+            op: Op::Mul,
+            l: Box::new(a),
+            r: Box::new(SirExpr::ScalarLit(k)),
+        });
     }
     if func == "atan2" || func == "hypot"
     {
@@ -1047,7 +1082,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p, \
-             mod/rem/sign/atan2/hypot/power, \
+             mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace, length, \
              det/inv/eig/trace)",

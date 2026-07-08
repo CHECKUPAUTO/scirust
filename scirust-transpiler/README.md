@@ -60,7 +60,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
-| `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
+| `mod(a,b)` / `rem(a,b)` (modular), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix`; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
@@ -127,8 +127,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: conv(a,b) / polyval(p,x)   200/200 trials match (octave) (convolution + Horner polynomial eval, Phase 2)
   ✓ M: expm1(x) / log1p(v)        200/200 trials match (octave) (accurate-near-zero exp/log, Phase 2)
   ✓ M: atan2/hypot/max/min elementwise & broadcast 200/200 trials match (octave) (two-arg math on arrays, Phase 2)
+  ✓ M: deg2rad / rad2deg + sign elementwise 200/200 trials match (octave) (angle conversion + vector sign, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 101/101 cases match their reference runtime within tolerance
+  ORACLE GREEN — 104/104 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
