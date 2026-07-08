@@ -576,6 +576,27 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_atan2_and_hypot_map_to_binary_f64_methods() {
+        // atan2(y, x) / hypot(a, b) -> `(l).method(r)`, argument order preserved.
+        let a = transpile_matlab("function r = f(y, x)\n  r = atan2(y, x);\nend\n").unwrap();
+        assert_eq!(sig_of(&a, "f"), "pub fn f(y: f64, x: f64) -> f64 {");
+        assert!(a.contains("(y).atan2(x)"));
+        let h = transpile_matlab("function r = f(a, b)\n  r = hypot(a, b);\nend\n").unwrap();
+        assert!(h.contains("(a).hypot(b)"));
+        // Both are std-only (no external crate).
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function r = f(y, x)\n  r = atan2(y, x);\nend\n")
+                    .unwrap()
+            )
+            .is_empty()
+        );
+        // A vector argument is refused (scalar-only in this subset).
+        let bad = transpile_matlab("function r = f(v)\n  r = hypot(sum(v), v);\nend\n");
+        assert!(bad.is_err());
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

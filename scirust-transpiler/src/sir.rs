@@ -173,6 +173,12 @@ pub enum SirExpr {
     /// `sign(0) == 0` — distinct from `f64::signum`). Emitted as a bound
     /// if/else so the argument is evaluated once.
     Sign(Box<SirExpr>),
+    /// Two-argument scalar math intrinsic: `atan2(y, x)` / `hypot(a, b)`.
+    ScalarBinFn {
+        func: MathFn2,
+        l: Box<SirExpr>,
+        r: Box<SirExpr>,
+    },
 
     // ---- array-producing / array-consuming intrinsics (routed to the prelude)
     /// Elementwise binary op between two arrays of equal length -> Array.
@@ -350,6 +356,25 @@ impl MathFn {
     }
 }
 
+/// A two-argument scalar math intrinsic, emitted as `(l).method(r)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MathFn2 {
+    /// `atan2(y, x)` → `f64::atan2` (four-quadrant arctangent).
+    Atan2,
+    /// `hypot(a, b)` → `f64::hypot` (`√(a²+b²)` without overflow).
+    Hypot,
+}
+
+impl MathFn2 {
+    pub fn rust_method(self) -> &'static str {
+        match self
+        {
+            MathFn2::Atan2 => "atan2",
+            MathFn2::Hypot => "hypot",
+        }
+    }
+}
+
 impl SirExpr {
     /// Static type of the expression (used by the emitter and the checker).
     pub fn ty(&self) -> Ty {
@@ -369,6 +394,7 @@ impl SirExpr {
             | SirExpr::Min(_)
             | SirExpr::Det(_)
             | SirExpr::Sign(_)
+            | SirExpr::ScalarBinFn { .. }
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -495,6 +521,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::IntBin { l, r, .. }
         | SirExpr::EwBin { l, r, .. }
         | SirExpr::Cmp { l, r, .. }
+        | SirExpr::ScalarBinFn { l, r, .. }
         | SirExpr::Dot(l, r) =>
         {
             scan_expr(l, solvers, signal);
