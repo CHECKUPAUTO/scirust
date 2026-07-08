@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `var` / `std` / `median`** — statistiques de réduction, prouvées contre Octave réel (Phase 2, incrément 26)
+Trois réductions statistiques (vecteur → scalaire), alignées exactement sur la
+convention d'Octave (vérifiée empiriquement avant câblage) :
+
+- **`var(v)`** — variance **d'échantillon**, normalisée par **`N−1`** (comme la
+  valeur par défaut de MATLAB, pas `N`) ; `0` pour `N < 2`.
+- **`std(v)`** — écart-type d'échantillon (`√var`).
+- **`median(v)`** — médiane (valeur du milieu ; moyenne des deux valeurs
+  centrales pour une longueur paire).
+
+Câblées via des helpers déterministes du prélude ; l'argument est inféré vecteur
+(ajoutées à `is_reduction`). Trois cas d'oracle (var+std, médiane paire, médiane
+impaire). **Oracle 82/82** (200 essais chacun) ; **73 tests unitaires** (1
+nouveau). *Non-vacuité* : normaliser `var` par `N` au lieu de `N−1` fait diverger
+le cas (200/200, |Δ|≈0,89) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `cumprod` / `cummax` / `cummin` / `flip`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 25)
 Quatre fonctions natives supplémentaires (un vecteur en entrée, un vecteur en
 sortie), sur le même modèle que `cumsum`/`diff`/`sort` (helpers déterministes du

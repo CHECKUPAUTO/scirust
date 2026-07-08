@@ -226,6 +226,13 @@ pub enum SirExpr {
     Max(Box<SirExpr>),
     /// `np.min(a)` : Array -> Scalar.
     Min(Box<SirExpr>),
+    /// `var(v)` : Array -> Scalar, MATLAB sample variance (normalised by `N-1`).
+    Variance(Box<SirExpr>),
+    /// `std(v)` : Array -> Scalar, `sqrt(var(v))`.
+    Stdev(Box<SirExpr>),
+    /// `median(v)` : Array -> Scalar (middle of the sorted values; mean of the
+    /// two middle values for even length).
+    Median(Box<SirExpr>),
     /// `np.dot(a, b)` : (Array, Array) -> Scalar, fixed reduction order.
     Dot(Box<SirExpr>, Box<SirExpr>),
     /// `len(a)` / `a.shape[0]` : Array -> Int.
@@ -436,6 +443,9 @@ impl SirExpr {
             | SirExpr::Det(_)
             | SirExpr::Sign(_)
             | SirExpr::ScalarBinFn { .. }
+            | SirExpr::Variance(_)
+            | SirExpr::Stdev(_)
+            | SirExpr::Median(_)
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
             SirExpr::EwBin { .. }
@@ -591,6 +601,9 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Prod(x)
         | SirExpr::Max(x)
         | SirExpr::Min(x)
+        | SirExpr::Variance(x)
+        | SirExpr::Stdev(x)
+        | SirExpr::Median(x)
         | SirExpr::Len(x)
         | SirExpr::Zeros(x)
         | SirExpr::Ones(x)

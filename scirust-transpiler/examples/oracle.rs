@@ -886,6 +886,40 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB reduction statistics (Phase 2) ----
+        // var (sample, N-1) and std in one expression.
+        Case {
+            name: "M: var(v) + std(v) (sample stats)",
+            call: "mvarstd",
+            src: "function y = mvarstd(v)\n  y = var(v) + std(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // median with even length (mean of the two middle values).
+        Case {
+            name: "M: median(v) (even length)",
+            call: "mmedian",
+            src: "function y = mmedian(v)\n  y = median(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // median with odd length (the middle value).
+        Case {
+            name: "M: median(v) (odd length)",
+            call: "mmedodd",
+            src: "function y = mmedodd(v)\n  y = median(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

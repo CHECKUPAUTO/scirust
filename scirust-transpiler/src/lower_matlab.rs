@@ -671,6 +671,21 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             r: Box::new(SirExpr::Len(Box::new(a))),
         });
     }
+    if matches!(func, "var" | "std" | "median")
+    {
+        // Reduction statistics (array -> scalar): MATLAB sample variance
+        // (`N-1`), its square root, and the median.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, func)?;
+        let boxed = Box::new(a);
+        return Ok(match func
+        {
+            "var" => SirExpr::Variance(boxed),
+            "std" => SirExpr::Stdev(boxed),
+            _ => SirExpr::Median(boxed),
+        });
+    }
     if func == "norm"
     {
         // norm(v) — Euclidean 2-norm of a *vector* = sqrt(sum(v .* v)).
@@ -866,7 +881,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
-             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/norm/dot, \
+             mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/var/std/median/norm/dot, \
              cumsum/cumprod/cummax/cummin/diff/sort/flip, length, det/inv/eig)",
             func
         )),
@@ -1102,6 +1117,6 @@ fn is_ident(name: &str, e: &MExpr) -> bool {
 fn is_reduction(func: &str) -> bool {
     matches!(
         func,
-        "sum" | "prod" | "mean" | "max" | "min" | "length" | "norm"
+        "sum" | "prod" | "mean" | "max" | "min" | "length" | "norm" | "var" | "std" | "median"
     )
 }

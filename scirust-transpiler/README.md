@@ -55,7 +55,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
 | linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver) |
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
-| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
+| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, differences, ascending sort, reverse) |
 | two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` | `(l).atan2/hypot/max/min(r)` (`ScalarBinFn`); `power` shares `^`. `max`/`min` with one arg stay reductions |
@@ -110,8 +110,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: v.^2 / a.^b / 2.^v         200/200 trials match (octave) (MATLAB elementwise power `.^`, broadcast, Phase 2)
   ✓ M: cumsum(v) / diff(v) / sort(v) 200/200 trials match (octave) (MATLAB vector→vector builtins, Phase 2)
   ✓ M: cumprod / cummax / cummin / flip 200/200 trials match (octave) (more MATLAB vector→vector builtins, Phase 2)
+  ✓ M: var(v) / std(v) / median(v) 200/200 trials match (octave) (MATLAB reduction statistics, N-1, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 79/79 cases match their reference runtime within tolerance
+  ORACLE GREEN — 82/82 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

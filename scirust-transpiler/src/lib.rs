@@ -679,6 +679,32 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_reduction_stats_infer_array_and_return_scalar() {
+        // var / std / median take a vector and return a scalar; the argument is
+        // inferred as an array from the reduction.
+        for (call, helper) in [
+            ("var", "np::var"),
+            ("std", "np::std"),
+            ("median", "np::median"),
+        ]
+        {
+            let src = format!("function y = f(v)\n  y = {}(v);\nend\n", call);
+            let rust = transpile_matlab(&src).unwrap();
+            assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> f64 {");
+            assert!(rust.contains(helper), "{} should emit {}", call, helper);
+        }
+        // `var` uses the sample (N-1) normalisation, std-only.
+        let rust = transpile_matlab("function y = f(v)\n  y = var(v);\nend\n").unwrap();
+        assert!(rust.contains("ss / (n as f64 - 1.0)"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function y = f(v)\n  y = std(v);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]
