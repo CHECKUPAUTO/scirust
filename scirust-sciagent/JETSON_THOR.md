@@ -18,11 +18,14 @@ critical-path work, and a phased plan.
   (recompute, don't store, per-layer activations). Without them the run does
   not fit; with them, even 7B fits.
 - **Status (Route A, done):** a fully-resident wgpu/Vulkan backend now trains the
-  real 350M model end-to-end on the Thor, every op gradient-checked. But its
-  **fp32 throughput is measured at ~34 tok/s (<5% of peak)** — correct, not fast.
-  From-scratch 350M pretraining needs FP16/Tensor cores (**Route B**); Route A's
-  near-term value is fine-tuning, inference, and small-model training. See
-  *Measured on the Thor* below.
+  real 350M model end-to-end on the Thor, every op gradient-checked, and runs the
+  full on-device loop **train → fine-tune (LoRA/DoRA) → merge → generate**
+  (KV-cached, sampled, batched prefill). But its **fp32 throughput is measured at
+  ~34 tok/s training / ~3.5 tok/s single-stream 350M decode (<5% of peak)** —
+  correct, not fast. Prompt **prefill** is far better (batched `m=P`: ~149 tok/s
+  ingest at 350M, saturating). From-scratch 350M pretraining — and fast
+  decode — needs FP16/Tensor cores (**Route B**); Route A's near-term value is
+  fine-tuning, inference, and small-model training. See *Measured on the Thor* below.
 
 ## The memory reality (run it yourself)
 
@@ -143,6 +146,47 @@ Where Route A earns its keep, then, is **correctness (a gradient-checked on-devi
 reference), fine-tuning, inference, and small-model training** — not from-scratch
 350M pretraining. That gates Route B as the real prerequisite for large-scale
 training throughput.
+
+### Inference throughput (measured)
+
+The resident inference path (KV-cached generation with batched prefill) is now
+measured on the Thor too (`examples/resident_infer_bench`, fp32, single sequence,
+random weights — throughput is weight-independent). Two regimes, both timed through
+the public `generate_cached` API:
+
+| config | prefill ingest @ P=512 | decode (m=1) | ratio |
+|--------|-----------------------:|-------------:|------:|
+| d512 · 8L · ff1408   | **1078 tok/s** | 14.6 tok/s | ~74× |
+| d1024 · 24L · ff4096 (~350M) | **149 tok/s** | 3.5 tok/s | ~43× |
+
+Prefill ingestion vs prompt length (350M-class, `m = P` one forward):
+
+| P | tok/s |
+|--:|------:|
+| 16 | 45 |
+| 64 | 92 |
+| 128 | 127 |
+| 256 | 149 |
+| 512 | 149 |
+
+Reading it:
+- **Prefill ingestion saturates** (256→512 is flat, 149→149) — the batched
+  `m = P` forward becomes fully compute-bound past P≈256, so adding rows scales
+  linearly (constant tok/s). At small P the per-forward fixed cost (dispatch,
+  embedding gather, LM head) dominates, so tok/s is lower. This is the
+  **batched-prefill win (infer-4) quantified**: ingesting a prompt at 149 tok/s
+  vs decoding at 3.5 tok/s is the same GPU doing `m = P` vs `m = 1` work.
+- **Decode is `m = 1`** — one row per forward, so it barely occupies the GPU:
+  3.5 tok/s at 350M, ~43× below the saturated prefill rate. This — not memory —
+  is the autoregressive-decode wall on the fp32 path, and it is the *same*
+  kernel-efficiency ceiling the training numbers hit, seen from the worst-case
+  `m = 1` end. It is exactly where **Route B (FP16/Tensor cores)** and/or
+  batched-sequence or speculative decode (DeepSpec, below) would pay off.
+
+**Conclusion.** On-device inference is *usable now* for short, latency-tolerant
+generations and for prompt-heavy workloads (fast batched prefill), but single-stream
+decode at a few tok/s for 350M confirms the same fp32 kernel-efficiency ceiling —
+the order-of-magnitude lever remains Route B.
 
 ## What already works on the Thor today (verified)
 
