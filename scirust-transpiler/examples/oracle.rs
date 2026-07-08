@@ -682,6 +682,44 @@ fn matlab_cases() -> Vec<Case> {
                 },
             ],
         },
+        // norm(v) — Euclidean 2-norm of a vector (sqrt(sum(v .* v))).
+        Case {
+            name: "M: norm(v) (vector 2-norm)",
+            call: "mnorm",
+            src: "function y = mnorm(v)\n  y = norm(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // dot(a, b) — MATLAB inner-product intrinsic (fixed-order reduction).
+        Case {
+            name: "M: dot(a, b) (inner product)",
+            call: "mdot",
+            src: "function s = mdot(a, b)\n  s = dot(a, b);\nend\n",
+            args: vec![
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 6,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+        // eig(A) — eigenvalues (ascending) of a symmetric matrix, routed to the
+        // verified symmetric eigensolver. Octave's `eig` returns ascending real
+        // eigenvalues for a symmetric input, so this is proven on SymMatrix.
+        Case {
+            name: "M: eig(A) -> scirust-solvers (symmetric)",
+            call: "meig",
+            src: "function e = meig(A)\n  e = eig(A);\nend\n",
+            args: vec![SymMatrix { n: 5 }],
+        },
     ]
 }
 

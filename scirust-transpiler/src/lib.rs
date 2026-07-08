@@ -487,6 +487,55 @@ mod tests {
         assert!(err.contains("expects a matrix on the left"));
     }
 
+    #[test]
+    fn matlab_norm_is_euclidean_and_needs_a_vector() {
+        // `norm(v)` -> sqrt(sum(v .* v)); `v` inferred a vector purely from the
+        // intrinsic, and the emitted code is std-only (no external crate).
+        let src = "function y = mnorm(v)\n  y = norm(v);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(sig_of(&rust, "mnorm"), "pub fn mnorm(v: &[f64]) -> f64 {");
+        assert!(rust.contains("np::sum"));
+        assert!(rust.contains(".sqrt()"));
+        assert!(required_crates(&transpile_matlab_to_sir(src).unwrap()).is_empty());
+        // A scalar argument (here a scalar expression) is rejected — `norm` of a
+        // vector only.
+        let bad = transpile_matlab("function y = f(x)\n  y = norm(x * 2.0);\nend\n");
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn matlab_dot_routes_to_fixed_order_reduction() {
+        // `dot(a, b)` -> the fixed-order `np::dot`; BOTH operands infer as
+        // vectors (the second argument is evidence too).
+        let src = "function s = mdot(a, b)\n  s = dot(a, b);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "mdot"),
+            "pub fn mdot(a: &[f64], b: &[f64]) -> f64 {"
+        );
+        assert!(rust.contains("np::dot"));
+    }
+
+    #[test]
+    fn matlab_eig_routes_to_symmetric_eigensolver() {
+        // `eig(A)` -> ascending eigenvalues via the verified symmetric
+        // eigensolver; `A` inferred a matrix, result an (array) vector.
+        let src = "function e = meig(A)\n  e = eig(A);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "meig"),
+            "pub fn meig(A: &[f64]) -> Vec<f64> {"
+        );
+        assert!(rust.contains("eigen_symmetric"));
+        assert_eq!(
+            required_crates(&transpile_matlab_to_sir(src).unwrap()),
+            vec!["scirust-solvers"]
+        );
+        // `eig` on a non-matrix (scalar expression) argument is rejected.
+        let bad = transpile_matlab("function e = f(x)\n  e = eig(x * 2.0);\nend\n");
+        assert!(bad.is_err());
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

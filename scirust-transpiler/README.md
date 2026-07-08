@@ -53,7 +53,8 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
-| linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve) |
+| linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver) |
+| vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
@@ -99,8 +100,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: sumdiff / normstats / stats3 200/200 trials match (octave) (MATLAB multi-output [a,b]=f, Phase 2)
   ✓ M: mathx (log/floor/atan)    200/200 trials match (octave) (expanded MATLAB intrinsics)
   ✓ M: det(A) / inv(A) / A \ b   200/200 trials match (octave) (MATLAB linear algebra → scirust-solvers, Phase 2)
+  ✓ M: norm(v) / dot(a,b) / eig(A) 200/200 trials match (octave) (MATLAB vector & symmetric-eigen intrinsics, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 59/59 cases match their reference runtime within tolerance
+  ORACLE GREEN — 62/62 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -147,10 +149,15 @@ them.
   gauge, so U and V are validated only through the gauge-invariant
   reconstruction `U·diag(S)·Vᵀ`, not element-by-element.
 * **MATLAB is a scientific subset, not all of MATLAB.** No cell arrays, structs,
-  anonymous functions, or `end` indexing yet; matrix routing covers `det`/`inv`/`\`
+  anonymous functions, or `end` indexing yet; matrix routing covers `det`/`inv`/`\`/`eig`
   (matrix inputs passed in, not yet constructed in-transpiler), `zeros(n)` is
   not mapped (it is `n×n` in MATLAB, unlike NumPy's 1-D `np.zeros(n)`), and
   element-wise operands are heuristically typed as arrays.
+* **`eig` is proven on symmetric inputs.** It routes to the verified symmetric
+  eigensolver (real, ascending eigenvalues — matching Octave's `eig` on a
+  symmetric matrix); general non-symmetric `eig` (complex eigenvalues, no
+  guaranteed order) is out of the subset. `norm(v)` is the vector 2-norm; a
+  matrix `norm` (spectral norm) is a distinct quantity and is refused.
 * **Unifying with `codetrans::Expr`** as the shared emission backend is future
   work: its `Function` node has untyped (`Vec<String>`) params, so this MVP
   uses a purpose-built typed emitter to produce compiling Rust.
