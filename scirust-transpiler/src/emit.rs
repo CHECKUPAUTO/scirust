@@ -78,6 +78,30 @@ pub mod np {
     pub fn ones(n: usize) -> Vec<f64> {
         vec![1.0f64; n]
     }
+    /// Running prefix sum in fixed left-to-right order (bit-reproducible).
+    pub fn cumsum(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len());
+        let mut s = 0.0f64;
+        for i in 0..a.len() {
+            s += a[i];
+            o.push(s);
+        }
+        o
+    }
+    /// Consecutive differences (length `n-1`; empty for `n < 2`).
+    pub fn diff(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len().saturating_sub(1));
+        for i in 1..a.len() {
+            o.push(a[i] - a[i - 1]);
+        }
+        o
+    }
+    /// Ascending sort (MATLAB `sort`); panics on NaN, which is outside domain.
+    pub fn sort(a: &[f64]) -> Vec<f64> {
+        let mut o = a.to_vec();
+        o.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        o
+    }
     /// Elementwise map over one array.
     pub fn map1<F: Fn(f64) -> f64>(a: &[f64], f: F) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len());
@@ -589,6 +613,33 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let n = emit(n, ctx);
             Frag {
                 code: format!("np::ones({})", n.code),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cumsum(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::cumsum({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Diff(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::diff({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Sort(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::sort({})", slice_of(&a)),
                 ty: Ty::Array,
                 borrowed: false,
             }

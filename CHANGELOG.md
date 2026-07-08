@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `cumsum` / `diff` / `sort`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 24)
+Trois fonctions natives non ambiguës (un vecteur en entrée, un vecteur en
+sortie), câblées via de nouveaux helpers déterministes du prélude :
+
+- **`cumsum(v)`** — somme cumulée en ordre **gauche→droite fixe** (donc
+  bit-reproductible), même longueur.
+- **`diff(v)`** — différences consécutives `v[i+1] − v[i]` (longueur `n−1`).
+- **`sort(v)`** — tri **croissant** (`sort` de MATLAB).
+
+L'argument est inféré comme un vecteur à partir de l'intrinsèque. Trois cas
+d'oracle. **Oracle 76/76** (200 essais chacun) ; **72 tests unitaires** (1
+nouveau ; le helper `sig_of` des tests cible désormais le `pub fn` de premier
+niveau pour ne pas confondre une fonction utilisateur avec un homonyme du
+prélude, p. ex. `np::cumsum`). *Non-vacuité* : inverser l'ordre de soustraction
+de `diff` (`v[i−1] − v[i]`) nie chaque élément et passe l'oracle au ROUGE
+(200/200, |Δ|≈2,4).
+
 ### Ajouté — transpileur : **MATLAB puissance élément par élément `.^` sur tableaux** prouvée contre Octave réel (Phase 2, incrément 23)
 Première opération **vectorielle** à deux arguments — l'idiome au cœur de MATLAB.
 Ajoute une infrastructure réutilisable (`SirExpr::EwBinFn` pour tableau∘tableau,

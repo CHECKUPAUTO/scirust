@@ -819,6 +819,40 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB vector -> vector builtins (Phase 2) ----
+        // cumsum(v) — running prefix sum (fixed order), same length.
+        Case {
+            name: "M: cumsum(v) (prefix sum)",
+            call: "mcumsum",
+            src: "function y = mcumsum(v)\n  y = cumsum(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // diff(v) — consecutive differences (length n-1).
+        Case {
+            name: "M: diff(v) (differences)",
+            call: "mdiff",
+            src: "function y = mdiff(v)\n  y = diff(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // sort(v) — ascending sort.
+        Case {
+            name: "M: sort(v) (ascending)",
+            call: "msort",
+            src: "function y = msort(v)\n  y = sort(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 
