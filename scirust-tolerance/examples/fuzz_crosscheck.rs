@@ -44,6 +44,12 @@
 //!   partition identities.
 //! - `subgroup` — the overall-sigma recomputation; range- vs s-method within
 //!   sigma agreement; the `Cp` identity.
+//! - `fits` — the `clearance range = IT_hole + IT_shaft` identity, IT-grade
+//!   monotonicity and the ×10-per-5-grades law.
+//! - `sequential` — double-sampling OC / ASN vs Monte-Carlo; SPRT OC guarantee
+//!   at both design points.
+//! - `taguchi` — `E[L] = k·I²` (inertia vs moments) vs a Monte-Carlo of the
+//!   quadratic loss; the economic-tolerance balance.
 //!
 //! Run: `cargo run -p scirust-tolerance --example fuzz_crosscheck [N]`
 
@@ -61,6 +67,7 @@ use scirust_tolerance::distfit::{
     FittedDistribution, fit_lognormal, fit_rayleigh, fit_weibull, percentile_capability,
 };
 use scirust_tolerance::drift::{cpk_to_ppk, long_term_sigma, ppk_to_cpk};
+use scirust_tolerance::fits::{hole_basis_fit, it_grade_tolerance};
 use scirust_tolerance::form::FormBatch;
 use scirust_tolerance::geometry::{
     flatness, least_squares_plane, parallelism, perpendicularity, roundness,
@@ -78,6 +85,9 @@ use scirust_tolerance::position::{
 use scirust_tolerance::process::{Combination, ProcessOption, allocate_discrete};
 use scirust_tolerance::sampling::SamplingPlan;
 use scirust_tolerance::sensitivity::{contributions, correlated_contributions, dual_contributions};
+use scirust_tolerance::sequential::{
+    DoubleSamplingPlan, SequentialVerdict, design_sequential_plan,
+};
 use scirust_tolerance::sixsigma::{
     dpmo_from_sigma, normalized_yield, process_report, rolled_throughput_yield, sigma_from_dpmo,
     sigma_from_yield, throughput_yield, yield_from_sigma,
@@ -90,6 +100,10 @@ use scirust_tolerance::special::{
     chi2_cdf, chi2_quantile, erf, erfc, ncchi2_cdf, normal_cdf, normal_sf,
 };
 use scirust_tolerance::subgroup::{sigma_within_s_method, subgroup_capability};
+use scirust_tolerance::taguchi::{
+    economic_tolerance, expected_loss, expected_loss_from_moments, loss_coefficient,
+    quadratic_loss, smaller_the_better_loss,
+};
 use scirust_tolerance::variables::{VariablesPlan, design_variables_plan};
 
 /// Deterministic xorshift64* RNG with a Box–Muller normal.
@@ -1490,6 +1504,230 @@ fn check_subgroup(rng: &mut Rng, n: usize) -> Report {
     r
 }
 
+fn check_fits(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let letters = ['d', 'e', 'f', 'g', 'h'];
+    for _ in 0..n
+    {
+        let nominal = rng.uniform(1.0, 500.0);
+        let hole_grade = rng.int(5, 12) as u8;
+        let shaft_grade = rng.int(5, 12) as u8;
+        let letter = letters[rng.int(0, 4)];
+        let it_hole = it_grade_tolerance(hole_grade, nominal).unwrap();
+        let it_shaft = it_grade_tolerance(shaft_grade, nominal).unwrap();
+        let fit = hole_basis_fit(nominal, hole_grade, shaft_grade, letter).unwrap();
+        // Independent identity: the clearance range equals the summed tolerances.
+        r.check(
+            (fit.max_clearance - fit.min_clearance - (it_hole + it_shaft)).abs()
+                / (it_hole + it_shaft),
+            1e-12,
+            || "fits clearance range == IT_hole+IT_shaft".into(),
+        );
+        // Grade monotonicity: a coarser grade is a wider tolerance.
+        let coarser = it_grade_tolerance(hole_grade + 1, nominal).unwrap();
+        r.check((it_hole - coarser).max(0.0), 0.0, || {
+            "fits IT monotone in grade".into()
+        });
+        // Independent parallel recomputation of the IT magnitude from the
+        // i-factor formula (a different code path than the module).
+        let hi = [
+            3.0, 6.0, 10.0, 18.0, 30.0, 50.0, 80.0, 120.0, 180.0, 250.0, 315.0, 400.0, 500.0,
+        ];
+        let mult = [
+            7.0, 10.0, 16.0, 25.0, 40.0, 63.0, 100.0, 160.0, 250.0, 400.0, 640.0, 1000.0, 1600.0,
+            2500.0,
+        ];
+        let mut d = 0.0;
+        for (j, &h) in hi.iter().enumerate()
+        {
+            let lo = if j == 0 { 1.0 } else { hi[j - 1] };
+            if nominal > lo && nominal <= h
+            {
+                d = (lo * h).sqrt();
+                break;
+            }
+        }
+        let it_ref = mult[(hole_grade - 5) as usize] * (0.45 * d.cbrt() + 0.001 * d);
+        r.check((it_hole - it_ref).abs() / it_hole, 1e-12, || {
+            "fits IT vs independent i-factor formula".into()
+        });
+    }
+    r
+}
+
+fn check_sequential(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 3000;
+    for _ in 0..n
+    {
+        // --- Double sampling: OC and ASN vs direct Monte-Carlo. ---
+        let n1 = rng.int(20, 60);
+        let c1 = rng.int(0, 2);
+        let r1 = c1 + rng.int(2, 4);
+        let n2 = rng.int(20, 60);
+        let c2 = r1 + rng.int(0, 3);
+        let plan = DoubleSamplingPlan::new(n1, c1, r1, n2, c2);
+        let p = rng.uniform(0.01, 0.12);
+        let (mut acc, mut total_n) = (0u64, 0u64);
+        for _ in 0..trials
+        {
+            let d1 = (0..n1).filter(|_| rng.uniform(0.0, 1.0) < p).count();
+            if d1 <= c1
+            {
+                acc += 1;
+                total_n += n1 as u64;
+            }
+            else if d1 >= r1
+            {
+                total_n += n1 as u64;
+            }
+            else
+            {
+                let d2 = (0..n2).filter(|_| rng.uniform(0.0, 1.0) < p).count();
+                total_n += (n1 + n2) as u64;
+                if d1 + d2 <= c2
+                {
+                    acc += 1;
+                }
+            }
+        }
+        let emp_pa = acc as f64 / trials as f64;
+        let emp_asn = total_n as f64 / trials as f64;
+        r.check(
+            (plan.probability_of_acceptance(p) - emp_pa).abs(),
+            0.05,
+            || {
+                format!(
+                    "double OC {:.3} vs MC {emp_pa:.3}",
+                    plan.probability_of_acceptance(p)
+                )
+            },
+        );
+        r.check(
+            (plan.average_sample_number(p) - emp_asn).abs() / emp_asn,
+            0.05,
+            || {
+                format!(
+                    "double ASN {:.1} vs MC {emp_asn:.1}",
+                    plan.average_sample_number(p)
+                )
+            },
+        );
+
+        // --- SPRT: OC guarantee at the two design points. ---
+        let (aql, rql) = (rng.uniform(0.01, 0.03), rng.uniform(0.08, 0.15));
+        let (alpha, beta) = (0.05, 0.10);
+        let sprt = design_sequential_plan(aql, rql, alpha, beta).unwrap();
+        let max_n = 2000;
+        let sim = |pp: f64, rng: &mut Rng| {
+            let mut ok = 0u64;
+            for _ in 0..1000
+            {
+                let (mut nn, mut d) = (0usize, 0usize);
+                loop
+                {
+                    nn += 1;
+                    if rng.uniform(0.0, 1.0) < pp
+                    {
+                        d += 1;
+                    }
+                    match sprt.verdict(nn, d)
+                    {
+                        SequentialVerdict::Accept =>
+                        {
+                            ok += 1;
+                            break;
+                        },
+                        SequentialVerdict::Reject => break,
+                        SequentialVerdict::Continue =>
+                        {
+                            if nn >= max_n
+                            {
+                                break;
+                            }
+                        },
+                    }
+                }
+            }
+            ok as f64 / 1000.0
+        };
+        let pa_good = sim(aql, rng);
+        let pa_bad = sim(rql, rng);
+        // Wald's SPRT holds Pa(AQL) ≳ 1−α and Pa(RQL) ≲ β (bounds are conservative).
+        r.check(((1.0 - alpha) - pa_good).max(0.0), 0.07, || {
+            format!("sprt Pa(AQL) {pa_good:.3} vs 1−α {:.3}", 1.0 - alpha)
+        });
+        r.check((pa_bad - beta).max(0.0), 0.07, || {
+            format!("sprt Pa(RQL) {pa_bad:.3} vs β {beta:.3}")
+        });
+    }
+    r
+}
+
+fn check_taguchi(rng: &mut Rng, n: usize) -> Report {
+    let mut r = Report::default();
+    let trials = 20000;
+    for _ in 0..n
+    {
+        let k = rng.uniform(1.0, 50.0);
+        let target = rng.uniform(-5.0, 5.0);
+        let mean = target + rng.uniform(-1.0, 1.0);
+        let sd = rng.uniform(0.05, 1.0);
+        let delta = mean - target;
+        let inertia = (delta * delta + sd * sd).sqrt();
+        // Identity: E[L] via inertia == via moments == k·I².
+        r.check(
+            (expected_loss(k, inertia) - expected_loss_from_moments(k, mean, sd, target)).abs(),
+            1e-9,
+            || "taguchi E[L] inertia==moments".into(),
+        );
+        // Independent Monte-Carlo of the mean quadratic loss.
+        let mut acc = 0.0;
+        for _ in 0..trials
+        {
+            let y = mean + sd * rng.normal();
+            acc += quadratic_loss(k, y, target);
+        }
+        let emp = acc / trials as f64;
+        let want = expected_loss(k, inertia);
+        r.check((emp - want).abs() / want, 0.06, || {
+            format!("taguchi E[L] {want:.3} vs MC {emp:.3}")
+        });
+        // Loss coefficient: a part at the limit costs exactly `cost`.
+        let (cost, half_tol) = (rng.uniform(1.0, 100.0), rng.uniform(0.1, 2.0));
+        let kk = loss_coefficient(cost, half_tol);
+        r.check(
+            (quadratic_loss(kk, target + half_tol, target) - cost).abs(),
+            1e-9,
+            || "taguchi coeff hits cost at limit".into(),
+        );
+        // Economic tolerance balances functional loss against rework cost.
+        let (a0, delta0, a) = (
+            rng.uniform(5.0, 50.0),
+            rng.uniform(0.5, 2.0),
+            rng.uniform(1.0, 20.0),
+        );
+        let econ = economic_tolerance(a0, delta0, a);
+        let k0 = loss_coefficient(a0, delta0);
+        r.check((k0 * econ * econ - a).abs(), 1e-9, || {
+            "taguchi econ tol balance".into()
+        });
+        // Smaller-the-better vs a Monte-Carlo about 0.
+        let mut acc2 = 0.0;
+        for _ in 0..trials
+        {
+            let y = mean + sd * rng.normal();
+            acc2 += k * y * y;
+        }
+        let emp2 = acc2 / trials as f64;
+        let want2 = smaller_the_better_loss(k, mean, sd);
+        r.check((emp2 - want2).abs() / want2, 0.06, || {
+            "taguchi smaller-the-better".into()
+        });
+    }
+    r
+}
+
 /// Standard-normal quantile via the crate's `special`, wrapped for local use.
 fn normal_cdf_inv(p: f64) -> f64 {
     scirust_tolerance::special::inv_normal_cdf(p)
@@ -1529,6 +1767,9 @@ fn main() {
         ("attributes", check_attributes(&mut rng, n.min(120))),
         ("interference", check_interference(&mut rng, n.min(150))),
         ("subgroup", check_subgroup(&mut rng, n.min(150))),
+        ("fits", check_fits(&mut rng, n)),
+        ("sequential", check_sequential(&mut rng, n.min(60))),
+        ("taguchi", check_taguchi(&mut rng, n.min(80))),
     ];
 
     println!("=== fuzz_crosscheck ({n} instances/module, independent references) ===");

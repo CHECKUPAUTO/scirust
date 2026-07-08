@@ -155,5 +155,8 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_attributes_plan"));
         assert!(registry.names().contains(&"tolerance_interference"));
         assert!(registry.names().contains(&"tolerance_subgroup_capability"));
+        assert!(registry.names().contains(&"tolerance_fits"));
+        assert!(registry.names().contains(&"tolerance_sequential"));
+        assert!(registry.names().contains(&"tolerance_taguchi"));
     }
 }

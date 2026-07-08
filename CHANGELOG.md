@@ -5,6 +5,35 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — plan & économie : ajustements ISO 286, échantillonnage double/séquentiel, perte de Taguchi (`scirust-tolerance`)
+Trois modules qui bordent la cotation : la table normalisée des ajustements, les
+plans d'échantillonnage à taille moyenne réduite, et le coût de non-qualité relié
+à l'inertie. Chaque module est vérifié par cross-check de fuzzing contre une
+**référence indépendante** :
+
+- **`fits`** : **limites et ajustements ISO 286**. Tolérance normalisée `ITn` à
+  partir du facteur `i = 0,45·∛D + 0,001·D` (µm) et des multiplicateurs de grade
+  (IT5–IT18), écarts fondamentaux d'**arbre** `d, e, f, g, h` (formules ISO
+  vérifiées), et **classification d'ajustement** trou/arbre en système à trou de
+  base H (jeu maxi/mini, catégorie jeu / incertain / serrage). *Cross-check* :
+  identité « étendue de jeu = IT_trou + IT_arbre », recomputation indépendante du
+  `IT` par la formule du facteur `i`, monotonie en grade.
+- **`sequential`** : **échantillonnage double et séquentiel** (SPRT de Wald).
+  Plan double `(n1,c1,r1,n2,c2)` de CE binomiale `Pa(p) = P(d1≤c1) + Σ P(d1=k)·P(d2≤c2−k)`
+  et nombre moyen d'échantillon `ASN = n1 + n2·P(c1<d1<r1)` ; SPRT à deux droites
+  frontières `d = s·n ∓ h` (accepter / rejeter / continuer). *Cross-check* :
+  CE et ASN du plan double vs Monte-Carlo direct ; garantie de la CE du SPRT aux
+  deux points de conception.
+- **`taguchi`** : **perte de Taguchi et coût de non-qualité**. Perte quadratique
+  `L = k(y−T)²`, coefficient `k = A/Δ²` calé sur le coût à la limite, et l'identité
+  `E[L] = k·(σ²+δ²) = k·I²` — la raison exacte pour laquelle le tolérancement
+  inertiel minimise directement la perte de Taguchi. Variantes plus-petit/plus-grand-
+  c'est-mieux et **tolérance économique** `Δ = Δ₀·√(A/A₀)`. *Cross-check* : Monte-Carlo
+  de la perte quadratique vs `k·I²` ; équilibre de la tolérance économique.
+
+Câblés dans `scirust-mcp` (`tolerance_fits`, `tolerance_sequential`,
+`tolerance_taguchi`). Fuzz global : **118 476 checks / 0 erreur** sur 29 modules.
+
 ### Ajouté — atelier : échantillonnage aux attributs, interférence contrainte-résistance, étude de capabilité par sous-groupes (`scirust-tolerance`)
 Trois modules qui complètent la boîte à outils qualité d'atelier : accepter un
 lot sans mesurer, chiffrer la fiabilité d'un **ajustement** aléatoire, et mener
