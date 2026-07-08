@@ -667,3 +667,70 @@ fn resident_streaming_matches_sampled() {
     }
     eprintln!("resident streaming matches sampled (tokens + order) — PASS");
 }
+
+/// **Speculative decoding** (`ResidentModel::speculative_generate`) is exact: its
+/// greedy output equals plain greedy `generate_cached` **token-for-token, for any
+/// draft** — the draft only changes how many target forwards it takes, never the
+/// tokens. Checked with (a) the target as its own draft (100% acceptance, exercises
+/// the all-accepted / bonus path) and (b) a structurally different draft (exercises
+/// rejection + cache rollback), plus the `k = 0` plain-greedy fallback. Skips with
+/// no adapter.
+#[test]
+fn resident_speculative_matches_greedy() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let model = SciAgentModel::new(&tiny_tied());
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(target) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping speculative decoding");
+        return;
+    };
+    eprintln!(
+        "resident speculative decoding on: {}",
+        target.adapter_name()
+    );
+    let steps = 8usize;
+    let greedy = target.generate_cached(&prompt, steps);
+
+    // (a) Target drafts for itself: every proposal is its own greedy pick, so all
+    //     are accepted — and the output is exactly the greedy decode.
+    for k in [1usize, 3, 5]
+    {
+        let (spec, stats) = target.speculative_generate(&target, &prompt, steps, k);
+        assert_eq!(
+            spec, greedy,
+            "self-draft speculative (k={k}) must match greedy"
+        );
+        assert_eq!(
+            stats.accepted, stats.drafted,
+            "self-draft must accept every proposed token (k={k})"
+        );
+    }
+
+    // (b) A structurally different (1-layer) draft ⇒ frequent rejections and cache
+    //     rollbacks — the output must STILL be the target's exact greedy decode.
+    let draft_cfg = SciAgentConfig {
+        n_layers: 1,
+        ..tiny_tied()
+    };
+    let draft_model = SciAgentModel::new(&draft_cfg);
+    let draft = ResidentModel::from_model(&draft_model).expect("draft adapter");
+    for k in [2usize, 4]
+    {
+        let (spec, _) = target.speculative_generate(&draft, &prompt, steps, k);
+        assert_eq!(
+            spec, greedy,
+            "cross-draft speculative (k={k}) must match greedy"
+        );
+    }
+
+    // k = 0 is the plain-greedy fallback.
+    assert_eq!(
+        target.speculative_generate(&target, &prompt, steps, 0).0,
+        greedy,
+        "k=0 must equal plain greedy"
+    );
+    eprintln!("resident speculative decoding matches greedy (self + cross draft) — PASS");
+}

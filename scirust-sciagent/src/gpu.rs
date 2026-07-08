@@ -75,6 +75,51 @@ fn argmax(xs: &[f32]) -> usize {
     best
 }
 
+/// Roll a per-layer resident cache back to its first `len` rows (a GPU-side
+/// `slice_rows` per layer; a no-op where the cache is already `len`). Used to
+/// discard rejected speculative rows before feeding the accepted correction.
+fn truncate_cache(chain: &GpuChain, cache: &mut [Option<GpuMatrix>], len: usize) {
+    for slot in cache.iter_mut()
+    {
+        if let Some(m) = slot.as_ref()
+        {
+            if m.rows() > len
+            {
+                *slot = Some(chain.slice_rows(m, 0, len).expect("truncate cache"));
+            }
+        }
+    }
+}
+
+/// Statistics from a [`ResidentModel::speculative_generate`] run — the draft's
+/// hit rate, which sets the achieved speedup (accuracy is unaffected: the output
+/// is always the target's exact greedy decode).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SpecStats {
+    /// Verify rounds executed.
+    pub rounds: usize,
+    /// Draft tokens proposed in total.
+    pub drafted: usize,
+    /// Draft tokens the target accepted (matched its own greedy pick).
+    pub accepted: usize,
+    /// Target forwards run (one wide `decode_batch` + one `decode_step` per round).
+    pub target_forwards: usize,
+}
+
+impl SpecStats {
+    /// Fraction of drafted tokens the target accepted (`0` if none drafted).
+    pub fn acceptance_rate(&self) -> f32 {
+        if self.drafted == 0
+        {
+            0.0
+        }
+        else
+        {
+            self.accepted as f32 / self.drafted as f32
+        }
+    }
+}
+
 /// One GQA block's weights mirrored into VRAM.
 struct ResidentBlock {
     norm1: GpuMatrix,
@@ -395,6 +440,111 @@ impl ResidentModel {
         toks
     }
 
+    /// **Greedy speculative decoding**: a (cheap) `draft` model proposes `k` tokens
+    /// each round; `self` (the target) **verifies** them with a single wide
+    /// [`Self::decode_batch`] and accepts the longest prefix that matches its own
+    /// greedy pick, plus one token — the target's correction at the first mismatch,
+    /// or a free bonus when all `k` matched. Both caches are then rolled back to the
+    /// accepted length and advanced by the accepted extra token.
+    ///
+    /// The output is **identical to plain greedy** [`Self::generate_cached`] —
+    /// token-for-token, for *any* draft — because every emitted token is the
+    /// target's own `argmax`; the draft changes only *how many* target forwards it
+    /// takes to get there (that's the speedup, when the draft guesses well). Returns
+    /// the full sequence and the run's [`SpecStats`]. `draft` must share the target's
+    /// vocabulary; `k = 0` is plain greedy.
+    pub fn speculative_generate(
+        &self,
+        draft: &ResidentModel,
+        prompt: &[u32],
+        max_new: usize,
+        k: usize,
+    ) -> (Vec<u32>, SpecStats) {
+        let mut stats = SpecStats::default();
+        if prompt.is_empty() || max_new == 0
+        {
+            return (prompt.to_vec(), stats);
+        }
+        if k == 0
+        {
+            return (self.generate_cached(prompt, max_new), stats);
+        }
+        debug_assert_eq!(
+            self.vocab, draft.vocab,
+            "draft and target must share a vocab"
+        );
+
+        let (nt, nd) = (self.blocks.len(), draft.blocks.len());
+        let mut tkc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
+        let mut tvc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
+        let mut dkc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
+        let mut dvc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
+
+        // Prefill both on the prompt; tlast/dlast predict the first undecided
+        // position `cur`, and each cache holds `cur` rows.
+        let mut tlast = self.prefill(prompt, &mut tkc, &mut tvc);
+        let mut dlast = draft.prefill(prompt, &mut dkc, &mut dvc);
+        let mut toks = prompt.to_vec();
+        let mut cur = prompt.len();
+        let target = prompt.len() + max_new;
+
+        while toks.len() < target
+        {
+            // 1. Draft proposes k tokens greedily from its current state.
+            let mut drafts = Vec::with_capacity(k);
+            for i in 0..k
+            {
+                let d = argmax(&dlast) as u32;
+                drafts.push(d);
+                dlast = draft.decode_step(d, cur + i, &mut dkc, &mut dvc);
+            }
+            // 2. Target verifies all k in one wide forward. rows[i] predicts cur+i+1.
+            let rows = self.decode_batch(&drafts, cur, &mut tkc, &mut tvc);
+            stats.rounds += 1;
+            stats.drafted += k;
+            stats.target_forwards += 1;
+
+            // 3. Accept the longest prefix where draft[i] == target's argmax at cur+i.
+            let mut accepted = 0usize;
+            let mut prev: &[f32] = &tlast; // logits predicting position cur+accepted
+            for i in 0..k
+            {
+                if drafts[i] == argmax(prev) as u32
+                {
+                    accepted += 1;
+                    prev = &rows[i];
+                }
+                else
+                {
+                    break;
+                }
+            }
+            stats.accepted += accepted;
+            // The extra token: the target's greedy pick at position cur+accepted
+            // (its correction on mismatch, or the free bonus when all k matched).
+            let extra = argmax(prev) as u32;
+
+            // 4. Emit the accepted drafts (== the target's picks) then the extra.
+            toks.extend_from_slice(&drafts[..accepted]);
+            toks.push(extra);
+            cur += accepted; // position of `extra`
+
+            // 5. Drop the rejected rows from both caches, then feed `extra` so both
+            //    models are positioned to predict cur+1.
+            truncate_cache(&self.chain, &mut tkc, cur);
+            truncate_cache(&self.chain, &mut tvc, cur);
+            truncate_cache(&draft.chain, &mut dkc, cur);
+            truncate_cache(&draft.chain, &mut dvc, cur);
+            tlast = self.decode_step(extra, cur, &mut tkc, &mut tvc);
+            dlast = draft.decode_step(extra, cur, &mut dkc, &mut dvc);
+            stats.target_forwards += 1;
+            cur += 1;
+        }
+
+        toks.truncate(target);
+        (toks, stats)
+    }
+
     /// **Batched prompt prefill**: run one wide forward over the whole `prompt`
     /// (positions `0..P`), seeding each layer's KV cache with the full `[P × kv_dim]`
     /// roped-key / raw-value block, and return the `vocab`-wide logits for the
@@ -540,9 +690,6 @@ impl ResidentModel {
     /// to the token-by-token path (verified in the in-module tests). It is the
     /// **verify** step of speculative decoding — check `k` draft tokens with a
     /// single wide target forward instead of `k` narrow ones.
-    // Consumed by the speculative-decode driver (specB); for now exercised by the
-    // `decode_batch_matches_sequential_decode_steps` parity test.
-    #[allow(dead_code)]
     fn decode_batch(
         &self,
         tokens: &[u32],
