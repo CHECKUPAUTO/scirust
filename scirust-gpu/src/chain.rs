@@ -376,29 +376,61 @@ impl GpuChain {
         m: &GpuMatrix,
         dy: &GpuMatrix,
     ) -> BackendResult<DoraGrads> {
-        let out = w0.cols();
-        let (wp, v, rn_recip, scale_col) = self.dora_effective(w0, a, b, m)?;
+        let wp = self.dora_effective_weight(w0, a, b, m)?;
         let dwp = self.matmul_t(x, dy, true, false)?; // ∂L/∂W' = xᵀ·dy  (in×out)
         let dx = self.matmul_t(dy, &wp, false, true)?; // dy·W'ᵀ          (m×in)
+        let (da, db, dm) = self.dora_weight_grads(w0, a, b, m, &dwp)?;
+        Ok(DoraGrads { dx, da, db, dm })
+    }
 
+    /// The DoRA **effective weight** `W' = m ⊙ (W₀ + A·B)/‖W₀ + A·B‖_row`
+    /// (`in×out`), resident. Materialises the adapted weight so it can be used as
+    /// a plain projection — e.g. by a resident DoRA fine-tune loop that runs the
+    /// full-model forward on `W'` and derives the adapter grads from `∂L/∂W'` via
+    /// [`Self::dora_weight_grads`]. See [`Self::dora_linear_forward`].
+    pub fn dora_effective_weight(
+        &self,
+        w0: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        m: &GpuMatrix,
+    ) -> BackendResult<GpuMatrix> {
+        let (wp, ..) = self.dora_effective(w0, a, b, m)?;
+        Ok(wp)
+    }
+
+    /// The DoRA adapter gradients from the **weight** gradient `gw = ∂L/∂W'`
+    /// (`in×out`): returns `(dA, dB, dm)` (shapes `in×r`, `r×out`, `in×1`), with
+    /// `W₀` frozen. This is the weight-space half of [`Self::dora_linear_backward`]
+    /// (which is `dW' = xᵀ·dy` then this), factored out so a resident model can
+    /// feed the `∂L/∂W'` returned by its full-model backward straight in. With
+    /// `u = V/‖V‖_row` and `s = Σ_o gw·u` (per row): `dm = s`,
+    /// `dV = (m/‖V‖_row)·(gw − u·s)`, `dA = dV·Bᵀ`, `dB = Aᵀ·dV`.
+    pub fn dora_weight_grads(
+        &self,
+        w0: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        m: &GpuMatrix,
+        gw: &GpuMatrix,
+    ) -> BackendResult<(GpuMatrix, GpuMatrix, GpuMatrix)> {
+        let out = w0.cols();
+        let (_, v, rn_recip, scale_col) = self.dora_effective(w0, a, b, m)?;
         let ones_row = self.upload(&vec![1.0f32; out], 1, out);
         let ones_out = self.upload(&vec![1.0f32; out], out, 1);
-        // u = V/‖V‖_row  (broadcast rn_recip across the `out` columns).
         let rn_bc = self.matmul(&rn_recip, &ones_row)?; // (in×out)
-        let u = self.mul(&v, &rn_bc)?; // (in×out)
-        // s[p] = Σ_o dW'[p,o]·u[p,o] = rowsum(dW' ⊙ u)  (in×1); dm = s.
-        let dwp_u = self.mul(&dwp, &u)?;
-        let s = self.matmul(&dwp_u, &ones_out)?; // (in×1)
-        // dV = (m/‖V‖_row) ⊙ (dW' − u·s).
+        let u = self.mul(&v, &rn_bc)?; // V/‖V‖_row  (in×out)
+        let gw_u = self.mul(gw, &u)?;
+        let s = self.matmul(&gw_u, &ones_out)?; // s = rowsum(gw⊙u)  (in×1) = dm
         let s_bc = self.matmul(&s, &ones_row)?; // (in×out)
         let u_s = self.mul(&u, &s_bc)?; // u·s     (in×out)
         let neg_u_s = self.scale_causal_mask(&u_s, -1.0, false)?; // −u·s
-        let diff = self.add(&dwp, &neg_u_s)?; // dW' − u·s (in×out)
+        let diff = self.add(gw, &neg_u_s)?; // gw − u·s (in×out)
         let scale_bc = self.matmul(&scale_col, &ones_row)?; // (m/‖V‖_row) bc (in×out)
         let dv = self.mul(&scale_bc, &diff)?; // dV        (in×out)
         let da = self.matmul_t(&dv, b, false, true)?; // dV·Bᵀ  (in×r)
         let db = self.matmul_t(a, &dv, true, false)?; // Aᵀ·dV  (r×out)
-        Ok(DoraGrads { dx, da, db, dm: s })
+        Ok((da, db, s))
     }
 
     /// SwiGLU gate `silu(gate) ⊙ up` (same shape), result resident — the

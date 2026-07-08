@@ -843,6 +843,324 @@ impl ResidentLoraModel {
     }
 }
 
+/// LoRA rank for [`ResidentDoraModel`]. (DoRA folds the LoRA scaling into the
+/// learnable magnitude, so there is no separate `alpha`.)
+#[derive(Debug, Clone, Copy)]
+pub struct DoraConfig {
+    /// Low-rank dimension `r` of the direction update.
+    pub rank: usize,
+}
+
+impl Default for DoraConfig {
+    fn default() -> Self {
+        Self { rank: 8 }
+    }
+}
+
+/// One projection's DoRA adapter: the low-rank direction factors `A` (`in×r`),
+/// `B` (`r×out`, zero-init), the per-row magnitude `m` (`in×1`, init = the base's
+/// row norms), and AdamW moment buffers for each.
+struct DoraAdapter {
+    a: GpuMatrix,
+    b: GpuMatrix,
+    mag: GpuMatrix,
+    m_a: GpuMatrix,
+    v_a: GpuMatrix,
+    m_b: GpuMatrix,
+    v_b: GpuMatrix,
+    m_mag: GpuMatrix,
+    v_mag: GpuMatrix,
+}
+
+/// DoRA adapters for one block's four attention projections.
+struct BlockDoraAdapters {
+    wq: DoraAdapter,
+    wk: DoraAdapter,
+    wv: DoraAdapter,
+    wo: DoraAdapter,
+}
+
+/// **Resident DoRA fine-tuning** of a [`SciAgentModel`] — the DoRA analogue of
+/// [`ResidentLoraModel`]. The base is frozen; each attention projection gets a
+/// DoRA adapter (`W' = m ⊙ (W₀ + A·B)/‖W₀ + A·B‖_row`) and only `A`/`B`/`m` train.
+/// DoRA separates *magnitude* from *direction*, which tends to fine-tune better
+/// than plain LoRA at the same rank.
+///
+/// Reuses the validated full-model kernels via the effective-weight identity:
+/// materialise `W'` per projection ([`GpuChain::dora_effective_weight`]), run the
+/// ordinary [`GpuChain::gqa_model_backward`] to get `dW' = ∂L/∂W'`, then map that
+/// to the adapter grads with [`GpuChain::dora_weight_grads`]. Only the adapters
+/// take an AdamW step. **Tied-embedding models only.**
+pub struct ResidentDoraModel {
+    chain: GpuChain,
+    embedding: GpuMatrix,
+    final_norm: GpuMatrix,
+    blocks: Vec<ResidentBlock>,
+    adapters: Vec<BlockDoraAdapters>,
+    n_heads: usize,
+    n_kv_heads: usize,
+    theta: f32,
+    eps: f32,
+    causal: bool,
+    vocab: usize,
+    step: u32,
+}
+
+impl ResidentDoraModel {
+    /// Upload `model` (frozen) and attach zero-perturbation DoRA adapters of rank
+    /// `cfg.rank` to each block's q/k/v/o projection. `B = 0` and `m = ‖W₀‖_row`,
+    /// so the effective weight starts exactly at the base. `None` if no adapter.
+    pub fn from_model(model: &SciAgentModel, cfg: DoraConfig) -> Option<Self> {
+        assert!(
+            model.config.tie_embeddings,
+            "ResidentDoraModel requires a tied-embedding model"
+        );
+        assert!(cfg.rank >= 1, "DoRA rank must be ≥ 1");
+        let chain = GpuChain::new()?;
+        let up = |t: &Tensor| chain.upload(&t.data, t.rows, t.cols);
+        let embedding = up(&model.embed.weight);
+        let final_norm = up(&model.rms_final.weight);
+        let blocks: Vec<ResidentBlock> = model
+            .layers
+            .iter()
+            .map(|l| ResidentBlock {
+                norm1: up(&l.rms_attn.weight),
+                wq: up(&l.attn.w_q.weight),
+                wk: up(&l.attn.w_k.weight),
+                wv: up(&l.attn.w_v.weight),
+                wo: up(&l.attn.w_o.weight),
+                norm2: up(&l.rms_ffn.weight),
+                wg: up(&l.ffn.gate.weight),
+                wu: up(&l.ffn.up.weight),
+                wd: up(&l.ffn.down.weight),
+            })
+            .collect();
+        let r = cfg.rank;
+        let z = |rows: usize, cols: usize| chain.upload(&vec![0.0f32; rows * cols], rows, cols);
+        let adapter_of = |t: &Tensor| -> DoraAdapter {
+            let (in_f, out) = (t.rows, t.cols);
+            // m = per-row L2 norm of the base (guarded like the rsqrt kernel), so
+            // W' = base at init.
+            let mag: Vec<f32> = (0..in_f)
+                .map(|p| {
+                    let ss: f32 = (0..out).map(|o| t.data[p * out + o].powi(2)).sum();
+                    ss.max(1e-12).sqrt()
+                })
+                .collect();
+            // A: deterministic low-discrepancy seed in ±1/√in; B = 0.
+            let s = (1.0 / in_f as f32).sqrt();
+            let a: Vec<f32> = (0..in_f * r)
+                .map(|i| s * (((i as f32) * 0.618_034).fract() * 2.0 - 1.0))
+                .collect();
+            DoraAdapter {
+                a: chain.upload(&a, in_f, r),
+                b: z(r, out),
+                mag: chain.upload(&mag, in_f, 1),
+                m_a: z(in_f, r),
+                v_a: z(in_f, r),
+                m_b: z(r, out),
+                v_b: z(r, out),
+                m_mag: z(in_f, 1),
+                v_mag: z(in_f, 1),
+            }
+        };
+        let adapters: Vec<BlockDoraAdapters> = model
+            .layers
+            .iter()
+            .map(|l| BlockDoraAdapters {
+                wq: adapter_of(&l.attn.w_q.weight),
+                wk: adapter_of(&l.attn.w_k.weight),
+                wv: adapter_of(&l.attn.w_v.weight),
+                wo: adapter_of(&l.attn.w_o.weight),
+            })
+            .collect();
+        Some(Self {
+            chain,
+            embedding,
+            final_norm,
+            blocks,
+            adapters,
+            n_heads: model.config.n_heads,
+            n_kv_heads: model.config.n_kv_heads,
+            theta: model.config.rope_theta,
+            eps: model.config.eps,
+            causal: true,
+            vocab: model.config.vocab_size,
+            step: 0,
+        })
+    }
+
+    /// Name of the underlying GPU adapter.
+    pub fn adapter_name(&self) -> &str {
+        self.chain.adapter_name()
+    }
+
+    /// Materialise every block's effective (DoRA-adapted) attention weights.
+    fn effective_blocks(&self) -> Vec<EffBlock> {
+        let eff = |base: &GpuMatrix, ad: &DoraAdapter| {
+            self.chain
+                .dora_effective_weight(base, &ad.a, &ad.b, &ad.mag)
+                .expect("dora effective weight")
+        };
+        self.blocks
+            .iter()
+            .zip(&self.adapters)
+            .map(|(b, ad)| EffBlock {
+                wq: eff(&b.wq, &ad.wq),
+                wk: eff(&b.wk, &ad.wk),
+                wv: eff(&b.wv, &ad.wv),
+                wo: eff(&b.wo, &ad.wo),
+            })
+            .collect()
+    }
+
+    fn block_views<'a>(&'a self, eff: &'a [EffBlock]) -> Vec<GqaBlockWeights<'a>> {
+        self.blocks
+            .iter()
+            .zip(eff)
+            .map(|(b, e)| GqaBlockWeights {
+                norm1: &b.norm1,
+                wq: &e.wq,
+                wk: &e.wk,
+                wv: &e.wv,
+                wo: &e.wo,
+                norm2: &b.norm2,
+                wg: &b.wg,
+                wu: &b.wu,
+                wd: &b.wd,
+                n_heads: self.n_heads,
+                n_kv_heads: self.n_kv_heads,
+                theta: self.theta,
+            })
+            .collect()
+    }
+
+    /// Resident forward `tokens → logits` with the current DoRA adapters applied.
+    pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
+        let eff = self.effective_blocks();
+        let blocks = self.block_views(&eff);
+        let mw = GqaModelWeights {
+            embedding: &self.embedding,
+            blocks: &blocks,
+            final_norm: &self.final_norm,
+        };
+        let logits = self
+            .chain
+            .gqa_model_forward(tokens, &mw, self.eps, self.causal)
+            .expect("resident dora forward");
+        self.chain.download(&logits).expect("download logits")
+    }
+
+    /// Cross-entropy loss of the resident DoRA forward on `(tokens, targets)`.
+    pub fn loss(&self, tokens: &[u32], targets: &[u32]) -> f32 {
+        let logits = self.forward(tokens);
+        scirust_gpu::ops::cpu_cross_entropy(&logits, targets, tokens.len(), self.vocab)
+    }
+
+    /// One **resident DoRA fine-tuning step**: forward with `W'` → cross-entropy
+    /// grad → full backward (`dW' = ∂L/∂W'` per projection) → map to adapter grads
+    /// (`dA`/`dB`/`dm`) and AdamW them. Only q/k/v/o adapters move; the base is
+    /// frozen. Returns the pre-update cross-entropy loss.
+    #[allow(clippy::too_many_arguments)]
+    pub fn train_step(
+        &mut self,
+        tokens: &[u32],
+        targets: &[u32],
+        lr: f32,
+        betas: (f32, f32),
+        adam_eps: f32,
+        weight_decay: f32,
+    ) -> f32 {
+        self.step += 1;
+        let (loss, grads) = {
+            let eff = self.effective_blocks();
+            let blocks = self.block_views(&eff);
+            let mw = GqaModelWeights {
+                embedding: &self.embedding,
+                blocks: &blocks,
+                final_norm: &self.final_norm,
+            };
+            let logits = self
+                .chain
+                .gqa_model_forward(tokens, &mw, self.eps, self.causal)
+                .expect("resident dora forward");
+            let host = self.chain.download(&logits).expect("download logits");
+            let loss =
+                scirust_gpu::ops::cpu_cross_entropy(&host, targets, tokens.len(), self.vocab);
+            let dl = self
+                .chain
+                .cross_entropy_grad(&logits, targets)
+                .expect("cross-entropy grad");
+            let grads = self
+                .chain
+                .gqa_model_backward(tokens, &mw, &dl, self.eps, self.causal)
+                .expect("resident backward");
+            (loss, grads)
+        };
+
+        let step = self.step;
+        let update = |base: &GpuMatrix, ad: &DoraAdapter, dweff: &GpuMatrix| {
+            let (da, db, dm) = self
+                .chain
+                .dora_weight_grads(base, &ad.a, &ad.b, &ad.mag, dweff)
+                .expect("dora weight grads");
+            let adam = |p: &GpuMatrix, g: &GpuMatrix, mo: &GpuMatrix, vo: &GpuMatrix| {
+                self.chain
+                    .adamw_step(p, g, mo, vo, lr, betas, adam_eps, weight_decay, step)
+                    .expect("adamw");
+            };
+            adam(&ad.a, &da, &ad.m_a, &ad.v_a);
+            adam(&ad.b, &db, &ad.m_b, &ad.v_b);
+            adam(&ad.mag, &dm, &ad.m_mag, &ad.v_mag);
+        };
+        for (i, bg) in grads.blocks.iter().enumerate()
+        {
+            let (b, ad) = (&self.blocks[i], &self.adapters[i]);
+            update(&b.wq, &ad.wq, &bg.dwq);
+            update(&b.wk, &ad.wk, &bg.dwk);
+            update(&b.wv, &ad.wv, &bg.dwv);
+            update(&b.wo, &ad.wo, &bg.dwo);
+        }
+        loss
+    }
+
+    /// **Merge** the DoRA adapters into the base and write the result into `model`
+    /// (each attention projection becomes its effective weight `W'`; everything
+    /// else is the frozen base). Produces a plain fine-tuned `SciAgentModel`.
+    pub fn sync_to_model(&self, model: &mut SciAgentModel) {
+        let dl = |m: &GpuMatrix| {
+            Tensor::from_vec(
+                self.chain.download(m).expect("download"),
+                m.rows(),
+                m.cols(),
+            )
+        };
+        let merged = |base: &GpuMatrix, ad: &DoraAdapter| {
+            dl(&self
+                .chain
+                .dora_effective_weight(base, &ad.a, &ad.b, &ad.mag)
+                .expect("dora effective weight"))
+        };
+        model.embed.weight = dl(&self.embedding);
+        model.rms_final.weight = dl(&self.final_norm);
+        for (l, (b, ad)) in model
+            .layers
+            .iter_mut()
+            .zip(self.blocks.iter().zip(&self.adapters))
+        {
+            l.rms_attn.weight = dl(&b.norm1);
+            l.attn.w_q.weight = merged(&b.wq, &ad.wq);
+            l.attn.w_k.weight = merged(&b.wk, &ad.wk);
+            l.attn.w_v.weight = merged(&b.wv, &ad.wv);
+            l.attn.w_o.weight = merged(&b.wo, &ad.wo);
+            l.rms_ffn.weight = dl(&b.norm2);
+            l.ffn.gate.weight = dl(&b.wg);
+            l.ffn.up.weight = dl(&b.wu);
+            l.ffn.down.weight = dl(&b.wd);
+        }
+    }
+}
+
 /// Hyper-parameters for [`ResidentModel::train_tokens`].
 #[derive(Debug, Clone, Copy)]
 pub struct ResidentTrainConfig {

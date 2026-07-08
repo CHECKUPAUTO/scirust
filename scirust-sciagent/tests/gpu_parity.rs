@@ -396,3 +396,66 @@ fn resident_lora_finetune_reduces_loss_and_syncs() {
     assert!(e < 3e-3, "post-sync merge mismatch: rel_err {e}");
     eprintln!("resident LoRA fine-tune + merge — PASS");
 }
+
+/// **Resident DoRA fine-tuning** (`ResidentDoraModel`): the base is frozen and
+/// only q/k/v/o DoRA adapters (direction `A`/`B` + per-row magnitude `m`) train.
+/// Checks (1) at init the adapters are a no-op — the DoRA forward equals the base
+/// model's forward (`B = 0`, `m = ‖W₀‖_row`); (2) fine-tuning reduces the loss;
+/// (3) `sync_to_model` merges the effective weights so the model's own CPU forward
+/// matches the DoRA forward. Skips with no adapter.
+#[test]
+fn resident_dora_finetune_reduces_loss_and_syncs() {
+    use scirust_sciagent::gpu::{DoraConfig, ResidentDoraModel};
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let seq_len = 8usize;
+    let ids: Vec<usize> = (0..seq_len)
+        .map(|i| (i * 7 + 3) % config.vocab_size)
+        .collect();
+
+    let tape = Tape::new();
+    let lv = model.forward(&tape, &ids, seq_len);
+    let cpu_base = tape.value(lv.idx()).data;
+
+    let Some(mut rm) = ResidentDoraModel::from_model(&model, DoraConfig { rank: 4 })
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident DoRA");
+        return;
+    };
+    eprintln!("resident DoRA on: {}", rm.adapter_name());
+
+    // At init (B = 0, m = ‖W₀‖_row) the effective weight is exactly W₀.
+    let tokens: Vec<u32> = ids.iter().map(|&i| i as u32).collect();
+    let dora0 = rm.forward(&tokens);
+    let e0 = rel_err(&dora0, &cpu_base);
+    assert!(e0 < 3e-3, "init DoRA forward must equal base: rel_err {e0}");
+
+    // Fine-tune only the DoRA adapters.
+    let targets: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+    let betas = (0.9, 0.999);
+    let first = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    let mut last = first;
+    for _ in 0..30
+    {
+        last = rm.train_step(&tokens, &targets, 0.05, betas, 1e-8, 0.0);
+    }
+    eprintln!("resident DoRA fine-tune: loss {first:.4} -> {last:.4}");
+    assert!(
+        last < first * 0.8,
+        "DoRA fine-tune must reduce the loss: {first} -> {last}"
+    );
+
+    // sync merges the effective weights: model CPU forward == DoRA forward.
+    rm.sync_to_model(&mut model);
+    let tape = Tape::new();
+    let lv = model.forward(&tape, &ids, seq_len);
+    let cpu_merged = tape.value(lv.idx()).data;
+    let dora_now = rm.forward(&tokens);
+    let e = rel_err(&cpu_merged, &dora_now);
+    assert!(e < 3e-3, "post-sync merge mismatch: rel_err {e}");
+    eprintln!("resident DoRA fine-tune + merge — PASS");
+}
