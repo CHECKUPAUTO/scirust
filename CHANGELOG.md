@@ -160,6 +160,28 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `round` / `fix` / `mod` / `rem` / `sign`** — arrondi et arithmétique modulaire, prouvés contre Octave réel (Phase 2, incrément 20)
+Élargissement du vocabulaire scalaire MATLAB, chaque fonction alignée exactement
+sur la sémantique d'Octave (vérifié empiriquement avant câblage) :
+
+- **`round(x)`** — arrondi au plus proche, **départager en s'éloignant de zéro**
+  (`f64::round`). C'est *volontairement* différent de l'arrondi bancaire de NumPy
+  (`round half to even`), donc `round` n'est câblé que sur le chemin MATLAB.
+- **`fix(x)`** — troncature **vers zéro** (`f64::trunc`).
+- **`mod(a, b)`** — modulo, résultat du **signe du diviseur** ;
+  abaissé en `a - b·floor(a/b)`.
+- **`rem(a, b)`** — reste, résultat du **signe du dividende** ;
+  abaissé en `a - b·fix(a/b)`.
+- **`sign(x)`** — `-1 / 0 / +1` avec **`sign(0) = 0`** (sémantique MATLAB,
+  distincte de `f64::signum`) ; nouveau nœud `SirExpr::Sign` émis en `if/else`
+  lié (l'argument n'est évalué qu'une fois).
+
+`round`/`fix` fonctionnent aussi élément par élément (comme les autres
+intrinsèques math) ; `mod`/`rem`/`sign` sont scalaires dans ce sous-ensemble.
+Quatre cas d'oracle. **Oracle 66/66** (200 essais chacun) ; **66 tests
+unitaires** (3 nouveaux). *Non-vacuité* : inverser les branches `+1`/`-1` de
+`sign` fait diverger le cas (200/200, |Δ|=2) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `norm` / `dot` / `eig`** — normes, produit scalaire et valeurs propres, prouvés contre Octave réel (Phase 2, incrément 19)
 Poursuite de la couverture MATLAB large et sûre, en réutilisant des kernels déjà
 vérifiés (aucune nouvelle primitive à prouver depuis zéro). Trois intrinsèques,

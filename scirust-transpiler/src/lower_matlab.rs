@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 const MATH_FNS: &[&str] = &[
     "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "floor", "ceil", "sinh", "cosh",
-    "atan",
+    "atan", "round", "fix",
 ];
 
 pub fn lower_module(m: &MModule) -> Result<SirModule, String> {
@@ -558,6 +558,8 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "sinh" => MathFn::Sinh,
             "cosh" => MathFn::Cosh,
             "atan" => MathFn::Atan,
+            "round" => MathFn::Round,
+            "fix" => MathFn::Trunc,
             _ => unreachable!(),
         };
         return Ok(
@@ -646,6 +648,53 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&b, "dot")?;
         return Ok(SirExpr::Dot(Box::new(a), Box::new(b)));
     }
+    if func == "mod" || func == "rem"
+    {
+        // MATLAB scalar modulo/remainder, built from existing nodes:
+        //   mod(a, b) = a - b * floor(a / b)   (result follows the divisor sign)
+        //   rem(a, b) = a - b * fix(a / b)     (result follows the dividend sign)
+        // `fix` is truncate-toward-zero.
+        need_args(func, args, 2)?;
+        let a = lower_scalar(&args[0], env)?;
+        let b = lower_scalar(&args[1], env)?;
+        expect_scalar(&a, func)?;
+        expect_scalar(&b, func)?;
+        let round_fn = if func == "mod"
+        {
+            MathFn::Floor
+        }
+        else
+        {
+            MathFn::Trunc
+        };
+        let quotient = SirExpr::ScalarBin {
+            op: Op::Div,
+            l: Box::new(a.clone()),
+            r: Box::new(b.clone()),
+        };
+        let rounded = SirExpr::ScalarUnaryFn {
+            func: round_fn,
+            arg: Box::new(quotient),
+        };
+        let scaled = SirExpr::ScalarBin {
+            op: Op::Mul,
+            l: Box::new(b),
+            r: Box::new(rounded),
+        };
+        return Ok(SirExpr::ScalarBin {
+            op: Op::Sub,
+            l: Box::new(a),
+            r: Box::new(scaled),
+        });
+    }
+    if func == "sign"
+    {
+        // sign(x) -> -1/0/+1 (MATLAB semantics; sign(0) == 0). Scalar only.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_scalar(&a, "sign")?;
+        return Ok(SirExpr::Sign(Box::new(a)));
+    }
     if func == "det"
     {
         // det(A) -> routed to the verified LU-based determinant.
@@ -707,8 +756,8 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         Some(other) => Err(format!("cannot index non-array `{}` ({:?})", func, other)),
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
-             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan, \
-             sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
+             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
+             mod/rem/sign, sum/prod/mean/max/min/norm/dot, length, det/inv/eig)",
             func
         )),
     }
@@ -768,6 +817,17 @@ fn expect_array(e: &SirExpr, ctx: &str) -> Result<(), String> {
     else
     {
         Err(format!("{} expects an array argument", ctx))
+    }
+}
+
+fn expect_scalar(e: &SirExpr, ctx: &str) -> Result<(), String> {
+    if e.ty() == Ty::Scalar
+    {
+        Ok(())
+    }
+    else
+    {
+        Err(format!("{} expects a scalar argument in this subset", ctx))
     }
 }
 

@@ -55,7 +55,8 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
 | linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver) |
 | vector `norm(v)` (2-norm), `dot(a, b)` (inner product) | `sqrt(sum(v.*v))` / fixed-order `np::dot` |
-| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
+| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
+| `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
 **matrix-ness** from `det`/`inv` arguments and the left side of `\`
@@ -101,8 +102,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: mathx (log/floor/atan)    200/200 trials match (octave) (expanded MATLAB intrinsics)
   ✓ M: det(A) / inv(A) / A \ b   200/200 trials match (octave) (MATLAB linear algebra → scirust-solvers, Phase 2)
   ✓ M: norm(v) / dot(a,b) / eig(A) 200/200 trials match (octave) (MATLAB vector & symmetric-eigen intrinsics, Phase 2)
+  ✓ M: round / fix / mod / rem / sign 200/200 trials match (octave) (MATLAB rounding & modular scalar functions, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 62/62 cases match their reference runtime within tolerance
+  ORACLE GREEN — 66/66 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -158,6 +160,10 @@ them.
   symmetric matrix); general non-symmetric `eig` (complex eigenvalues, no
   guaranteed order) is out of the subset. `norm(v)` is the vector 2-norm; a
   matrix `norm` (spectral norm) is a distinct quantity and is refused.
+* **`round` follows MATLAB, not NumPy.** It rounds half *away from zero*
+  (`f64::round`), which differs from `numpy.round`'s banker's rounding — so it is
+  wired only on the MATLAB path. `mod`/`rem`/`sign` are scalar-only in this
+  subset (MATLAB applies them elementwise; array forms are a later increment).
 * **Unifying with `codetrans::Expr`** as the shared emission backend is future
   work: its `Function` node has untyped (`Vec<String>`) params, so this MVP
   uses a purpose-built typed emitter to produce compiling Rust.

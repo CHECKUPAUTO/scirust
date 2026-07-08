@@ -490,6 +490,20 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
                 borrowed: false,
             }
         },
+        SirExpr::Sign(a) =>
+        {
+            // MATLAB sign: -1/0/+1, with sign(0) == 0. Bind the argument so it is
+            // evaluated exactly once regardless of how complex it is.
+            let a = emit(a, ctx);
+            Frag {
+                code: format!(
+                    "{{ let __x: f64 = {}; if __x > 0.0 {{ 1.0 }} else if __x < 0.0 {{ -1.0 }} else {{ 0.0 }} }}",
+                    scalar_of(a)
+                ),
+                ty: Ty::Scalar,
+                borrowed: false,
+            }
+        },
         SirExpr::Len(a) =>
         {
             let a = emit(a, ctx);
