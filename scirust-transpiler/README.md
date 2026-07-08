@@ -52,7 +52,8 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | element-wise `.*` `./` `.^` (operands inferred as arrays) vs scalar `* / ^` | `EwBin` / broadcast vs scalar op |
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
-| `sqrt/exp/sin/cos/abs/tanh`, `sum`, `length` | scalar/elementwise intrinsics + reductions |
+| **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
+| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
 
 Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands
 (MATLAB has no type hints); ambiguous scalar-vs-array uses are refused.
@@ -93,8 +94,10 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: norm2 / dot / relu / sign 200/200 trials match (octave) (MATLAB front-end, Phase 2)
   ✓ M: clamp / poly / mysum      200/200 trials match (octave) (1-based idx, for/while, ^)
   ✓ M: newton / ew_scale         200/200 trials match (octave) (while, element-wise array out)
+  ✓ M: sumdiff / normstats / stats3 200/200 trials match (octave) (MATLAB multi-output [a,b]=f, Phase 2)
+  ✓ M: mathx (log/floor/atan)    200/200 trials match (octave) (expanded MATLAB intrinsics)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 52/52 cases match their reference runtime within tolerance
+  ORACLE GREEN — 56/56 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

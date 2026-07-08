@@ -90,7 +90,34 @@ impl<'a> Parser<'a> {
 
     fn parse_func(&mut self) -> Result<MFunc, String> {
         self.eat_ident("function")?;
-        let out = self.take_ident()?;
+        // Output list: a single `out` or a bracketed `[o1, o2, …]`.
+        let outs = if self.is_sym("[")
+        {
+            self.eat_sym("[")?;
+            let mut outs = Vec::new();
+            while !self.is_sym("]")
+            {
+                outs.push(self.take_ident()?);
+                if self.is_sym(",")
+                {
+                    self.eat_sym(",")?;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            self.eat_sym("]")?;
+            if outs.is_empty()
+            {
+                return Err("a function must declare at least one output".into());
+            }
+            outs
+        }
+        else
+        {
+            vec![self.take_ident()?]
+        };
         self.eat_sym("=")?;
         let name = self.take_ident()?;
         self.eat_sym("(")?;
@@ -123,7 +150,7 @@ impl<'a> Parser<'a> {
         }
         Ok(MFunc {
             name,
-            out,
+            outs,
             params,
             body,
         })

@@ -9,7 +9,10 @@ use crate::front_matlab::ast::*;
 use crate::sir::*;
 use std::collections::{HashMap, HashSet};
 
-const MATH_FNS: &[&str] = &["sqrt", "exp", "sin", "cos", "abs", "tanh"];
+const MATH_FNS: &[&str] = &[
+    "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "floor", "ceil", "sinh", "cosh",
+    "atan",
+];
 
 pub fn lower_module(m: &MModule) -> Result<SirModule, String> {
     let funcs = m
@@ -59,25 +62,36 @@ fn lower_func(f: &MFunc) -> Result<SirFunc, String> {
     let mut body = Vec::new();
     lower_block(&f.body, &mut lo, true, &mut body)?;
 
-    // MATLAB returns the output variable's final value.
-    let out_ty = *lo
-        .env
-        .get(&f.out)
-        .ok_or_else(|| format!("output variable `{}` is never assigned", f.out))?;
-    body.push(SirStmt::Return(SirExpr::Var {
-        name: f.out.clone(),
-        ty: out_ty,
-    }));
-    let ret = RetTy::Single(
-        if out_ty == Ty::Int
-        {
-            Ty::Scalar
-        }
-        else
-        {
-            out_ty
-        },
-    );
+    // MATLAB returns the output variable(s)' final value(s). A single output
+    // is a plain return; multiple outputs `[o1, o2]` become a tuple return
+    // (mapped onto the same `RetTy::Tuple`/`ReturnTuple` machinery as Python's
+    // `return a, b`).
+    let mut out_vars = Vec::with_capacity(f.outs.len());
+    let mut out_tys = Vec::with_capacity(f.outs.len());
+    for o in &f.outs
+    {
+        let ty = *lo
+            .env
+            .get(o)
+            .ok_or_else(|| format!("output variable `{}` is never assigned", o))?;
+        // `Int` accumulators leave the index domain on return -> `Scalar`.
+        let ret_ty = if ty == Ty::Int { Ty::Scalar } else { ty };
+        out_vars.push(SirExpr::Var {
+            name: o.clone(),
+            ty,
+        });
+        out_tys.push(ret_ty);
+    }
+    let ret = if out_tys.len() == 1
+    {
+        body.push(SirStmt::Return(out_vars.into_iter().next().unwrap()));
+        RetTy::Single(out_tys[0])
+    }
+    else
+    {
+        body.push(SirStmt::ReturnTuple(out_vars));
+        RetTy::Tuple(out_tys)
+    };
 
     // Prepend hoisted declarations (first-assignment order) to the body.
     let mut full = Vec::with_capacity(lo.declares.len() + body.len());
@@ -515,6 +529,13 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "cos" => MathFn::Cos,
             "abs" => MathFn::Abs,
             "tanh" => MathFn::Tanh,
+            "log" => MathFn::Ln,
+            "log10" => MathFn::Log10,
+            "floor" => MathFn::Floor,
+            "ceil" => MathFn::Ceil,
+            "sinh" => MathFn::Sinh,
+            "cosh" => MathFn::Cosh,
+            "atan" => MathFn::Atan,
             _ => unreachable!(),
         };
         return Ok(
@@ -541,6 +562,39 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&a, "sum")?;
         return Ok(SirExpr::Sum(Box::new(a)));
     }
+    if func == "prod"
+    {
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "prod")?;
+        return Ok(SirExpr::Prod(Box::new(a)));
+    }
+    if func == "max"
+    {
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "max")?;
+        return Ok(SirExpr::Max(Box::new(a)));
+    }
+    if func == "min"
+    {
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "min")?;
+        return Ok(SirExpr::Min(Box::new(a)));
+    }
+    if func == "mean"
+    {
+        // mean(x) = sum(x) / length(x) — reuses existing nodes.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "mean")?;
+        return Ok(SirExpr::ScalarBin {
+            op: Op::Div,
+            l: Box::new(SirExpr::Sum(Box::new(a.clone()))),
+            r: Box::new(SirExpr::Len(Box::new(a))),
+        });
+    }
     if func == "length"
     {
         need_args(func, args, 1)?;
@@ -566,7 +620,8 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         Some(other) => Err(format!("cannot index non-array `{}` ({:?})", func, other)),
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
-             sqrt/exp/sin/cos/abs/tanh, sum, length)",
+             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan, \
+             sum/prod/mean/max/min, length)",
             func
         )),
     }
@@ -673,15 +728,12 @@ fn array_evidence_block(name: &str, stmts: &[MStmt]) -> bool {
 fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
     match e
     {
-        // `name(idx)` — indexing a variable makes it an array; `sum(name)` /
-        // `length(name)` also imply an array.
+        // `name(idx)` — indexing a variable makes it an array; a reduction such
+        // as `sum(name)` / `length(name)` / `min(name)` also implies an array.
         MExpr::Call { func, args } =>
         {
-            (func == name
-                && !MATH_FNS.contains(&func.as_str())
-                && func != "sum"
-                && func != "length")
-                || (matches!(func.as_str(), "sum" | "length")
+            (func == name && !MATH_FNS.contains(&func.as_str()) && !is_reduction(func))
+                || (is_reduction(func)
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 || args.iter().any(|a| array_evidence_expr(name, a))
         },
@@ -709,4 +761,9 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
 
 fn is_ident(name: &str, e: &MExpr) -> bool {
     matches!(e, MExpr::Ident(n) if n == name)
+}
+
+/// A reduction intrinsic that consumes an array and yields a scalar/length.
+fn is_reduction(func: &str) -> bool {
+    matches!(func, "sum" | "prod" | "mean" | "max" | "min" | "length")
 }

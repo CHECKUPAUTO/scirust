@@ -402,6 +402,49 @@ mod tests {
         assert!(required_crates(&sir).is_empty());
     }
 
+    #[test]
+    fn matlab_multi_output_returns_a_tuple() {
+        let src = "function [s, d] = sumdiff(a, b)\n  s = a + b;\n  d = a - b;\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "sumdiff"),
+            "pub fn sumdiff(a: f64, b: f64) -> (f64, f64) {"
+        );
+        assert!(rust.contains("return (s, d);"));
+    }
+
+    #[test]
+    fn matlab_single_output_unchanged() {
+        let rust = transpile_matlab("function y = sq(x)\n  y = x * x;\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "sq"), "pub fn sq(x: f64) -> f64 {");
+        assert!(rust.contains("return y;"));
+    }
+
+    #[test]
+    fn matlab_three_outputs_with_new_reductions() {
+        // Exercises `[a, b, c] = …` plus the MATLAB min/mean/max reductions.
+        let src = "function [lo, mu, hi] = stats3(x)\n  lo = min(x);\n  mu = mean(x);\n  hi = max(x);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "stats3"),
+            "pub fn stats3(x: &[f64]) -> (f64, f64, f64) {"
+        );
+        assert!(rust.contains("np::min(x)"));
+        assert!(rust.contains("np::max(x)"));
+        assert!(rust.contains("np::sum(x)") && rust.contains("x.len()"));
+        assert!(rust.contains("return (lo, mu, hi);"));
+    }
+
+    #[test]
+    fn matlab_new_math_intrinsics() {
+        let rust =
+            transpile_matlab("function y = mathx(x)\n  y = log(x) + floor(x) + atan(x);\nend\n")
+                .unwrap();
+        assert!(rust.contains("(x).ln()"));
+        assert!(rust.contains("(x).floor()"));
+        assert!(rust.contains("(x).atan()"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

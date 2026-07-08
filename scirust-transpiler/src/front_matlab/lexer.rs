@@ -72,6 +72,22 @@ pub fn lex(src: &str) -> Result<Vec<MTok>, String> {
                 toks.push(MTok::Sym(")".into()));
                 i += 1;
             },
+            '[' =>
+            {
+                depth += 1;
+                toks.push(MTok::Sym("[".into()));
+                i += 1;
+            },
+            ']' =>
+            {
+                depth -= 1;
+                if depth < 0
+                {
+                    return Err("unbalanced `]`".into());
+                }
+                toks.push(MTok::Sym("]".into()));
+                i += 1;
+            },
             ',' =>
             {
                 // Inside parentheses: argument separator.

@@ -615,6 +615,44 @@ fn matlab_cases() -> Vec<Case> {
                 },
             ],
         },
+        // ---- MATLAB multi-output `[a, b] = f(...)` (Phase 2) ----
+        // Two scalar outputs from two scalar inputs.
+        Case {
+            name: "M: sumdiff [s,d] (multi-output)",
+            call: "sumdiff",
+            src: "function [s, d] = sumdiff(a, b)\n  s = a + b;\n  d = a - b;\nend\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }, Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // Array -> two scalar outputs: norm and its square.
+        Case {
+            name: "M: normstats [n,ss] (multi-output)",
+            call: "normstats",
+            src: "function [n, ss] = normstats(x)\n  ss = sum(x .* x);\n  n = sqrt(ss);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
+        // Array -> three scalar outputs exercising the NEW MATLAB reductions
+        // (min/mean/max) together with multi-output.
+        Case {
+            name: "M: stats3 [lo,mu,hi] (min/mean/max)",
+            call: "stats3",
+            src: "function [lo, mu, hi] = stats3(x)\n  lo = min(x);\n  mu = mean(x);\n  hi = max(x);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // Expanded MATLAB math intrinsics (single output): log/floor/atan.
+        Case {
+            name: "M: mathx (log/floor/atan)",
+            call: "mathx",
+            src: "function y = mathx(x)\n  y = log(x) + floor(x) + atan(x);\nend\n",
+            args: vec![Scalar { lo: 0.5, hi: 5.0 }],
+        },
     ]
 }
 
@@ -1010,18 +1048,39 @@ fn octave_tuple(args: &[Val]) -> String {
 fn run_octave_batch(
     case: &Case,
     trials: &[Vec<Val>],
+    ret: &RetTy,
     tmp: &std::path::Path,
 ) -> Result<Vec<Vec<f64>>, String> {
     let rows: Vec<String> = trials.iter().map(|t| octave_tuple(t)).collect();
+    // Single-output: `__r = f(args)`. Multi-output: `[__o1, …] = f(args)` and
+    // serialise each output in order (matching the Rust tuple print order).
+    let call_and_ser = match ret
+    {
+        RetTy::Tuple(ts) =>
+        {
+            let names: Vec<String> = (0..ts.len()).map(|i| format!("__o{}", i)).collect();
+            let sers: Vec<String> = names.iter().map(|n| format!("__ser({})", n)).collect();
+            format!(
+                "[{}] = {call}(__args{{:}});\n  printf('%s\\n', [{}]);",
+                names.join(", "),
+                sers.join(", "),
+                call = case.call,
+            )
+        },
+        _ => format!(
+            "__r = {call}(__args{{:}});\n  printf('%s\\n', __ser(__r));",
+            call = case.call
+        ),
+    };
     let script = format!(
-        "1;\n{src}\nfunction __s = __ser(r)\n  a = r(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  __r = {call}(__args{{:}});\n  printf('%s\\n', __ser(__r));\nend\n",
+        "1;\n{src}\nfunction __s = __ser(r)\n  a = r(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  {call_and_ser}\nend\n",
         src = case.src,
         rows = rows
             .iter()
             .map(|r| format!("  {},", r))
             .collect::<Vec<_>>()
             .join("\n"),
-        call = case.call,
+        call_and_ser = call_and_ser,
     );
     let path = tmp.join(format!("mcase_{}.m", case.call));
     std::fs::write(&path, script).map_err(|e| e.to_string())?;
@@ -1201,7 +1260,7 @@ fn main() {
         let ref_out = match lang
         {
             Lang::Python => run_python_batch(&case, &trials, &tmp),
-            Lang::Matlab => run_octave_batch(&case, &trials, &tmp),
+            Lang::Matlab => run_octave_batch(&case, &trials, &ret, &tmp),
         };
         match (rust_out, ref_out)
         {
