@@ -1023,6 +1023,36 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB kron + cumtrapz (Phase 2) ----
+        // kron(a, b) — Kronecker product of two vectors (length 3*2 = 6).
+        Case {
+            name: "M: kron(a, b) (Kronecker)",
+            call: "mkron",
+            src: "function k = mkron(a, b)\n  k = kron(a, b);\nend\n",
+            args: vec![
+                Array {
+                    n: 3,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 2,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+        // cumtrapz(v) — cumulative trapezoidal integral (same length).
+        Case {
+            name: "M: cumtrapz(v) (cumulative integral)",
+            call: "mcumtrapz",
+            src: "function y = mcumtrapz(v)\n  y = cumtrapz(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -2.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

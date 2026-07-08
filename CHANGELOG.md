@@ -160,6 +160,20 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `kron` + `cumtrapz`** prouvés contre Octave réel (Phase 2, incrément 32)
+Deux opérations vectorielles supplémentaires, câblées via des helpers
+déterministes du prélude :
+
+- **`kron(a, b)`** — produit de Kronecker de deux vecteurs (`out[i·n+j] =
+  a[i]·b[j]`, longueur `len(a)·len(b)`) ; les **deux** opérandes sont inférés
+  vecteurs.
+- **`cumtrapz(v)`** — intégrale trapézoïdale **cumulée** à pas unité (premier
+  élément `0`, même longueur).
+
+Deux cas d'oracle. **Oracle 94/94** (200 essais chacun) ; **80 tests unitaires**
+(1 nouveau). *Non-vacuité* : échanger l'ordre d'imbrication des boucles de `kron`
+réordonne la sortie et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `diag` (surchargé) + `trapz`** prouvés contre Octave réel (Phase 2, incrément 31)
 Deux ajouts, dont la **surcharge `diag`** de MATLAB, désambiguïsée par le **type
 de l'opérande** (jamais deviné) :

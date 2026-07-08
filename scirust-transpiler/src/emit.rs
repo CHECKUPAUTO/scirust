@@ -211,6 +211,29 @@ pub mod np {
             a[0] * b[1] - a[1] * b[0],
         ]
     }
+    /// Kronecker product of two vectors (`out[i*n+j] = a[i]*b[j]`).
+    pub fn kron(a: &[f64], b: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len() * b.len());
+        for i in 0..a.len() {
+            for j in 0..b.len() {
+                o.push(a[i] * b[j]);
+            }
+        }
+        o
+    }
+    /// Cumulative trapezoidal integral (unit spacing; first element `0`).
+    pub fn cumtrapz(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len());
+        if !a.is_empty() {
+            o.push(0.0f64);
+        }
+        let mut s = 0.0f64;
+        for i in 1..a.len() {
+            s += 0.5 * (a[i - 1] + a[i]);
+            o.push(s);
+        }
+        o
+    }
     /// Median (mean of the two middle values for even length).
     pub fn median(a: &[f64]) -> f64 {
         let mut b = a.to_vec();
@@ -764,6 +787,25 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let b = emit(b, ctx);
             Frag {
                 code: format!("np::cross({}, {})", slice_of(&a), slice_of(&b)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Kron(a, b) =>
+        {
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            Frag {
+                code: format!("np::kron({}, {})", slice_of(&a), slice_of(&b)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cumtrapz(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::cumtrapz({})", slice_of(&a)),
                 ty: Ty::Array,
                 borrowed: false,
             }
