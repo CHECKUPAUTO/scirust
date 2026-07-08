@@ -1229,6 +1229,41 @@ fn matlab_cases() -> Vec<Case> {
                 Scalar { lo: 1.0, hi: 5.0 },
             ],
         },
+        // ---- MATLAB elementary & inverse trigonometry (Phase 2) ----
+        // tan(x) — scalar; x kept well inside (-pi/2, pi/2) to avoid the poles.
+        Case {
+            name: "M: tan(x) (scalar)",
+            call: "mtan",
+            src: "function y = mtan(x)\n  y = tan(x);\nend\n",
+            args: vec![Scalar { lo: -1.0, hi: 1.0 }],
+        },
+        // asin(x) — scalar; domain [-1, 1] (fuzzed clear of the endpoints).
+        Case {
+            name: "M: asin(x) (scalar)",
+            call: "masin",
+            src: "function y = masin(x)\n  y = asin(x);\nend\n",
+            args: vec![Scalar { lo: -0.9, hi: 0.9 }],
+        },
+        // acos(x) — scalar; domain [-1, 1].
+        Case {
+            name: "M: acos(x) (scalar)",
+            call: "macos",
+            src: "function y = macos(x)\n  y = acos(x);\nend\n",
+            args: vec![Scalar { lo: -0.9, hi: 0.9 }],
+        },
+        // asin(flip(v)) — elementwise over a vector (proves the array path for the
+        // new intrinsic names); `flip` establishes array-ness and preserves every
+        // entry inside the domain [-1, 1].
+        Case {
+            name: "M: asin(flip(v)) (elementwise)",
+            call: "masinv",
+            src: "function y = masinv(v)\n  y = asin(flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -0.9,
+                hi: 0.9,
+            }],
+        },
     ]
 }
 

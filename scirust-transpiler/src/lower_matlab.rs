@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 const MATH_FNS: &[&str] = &[
     "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "floor", "ceil", "sinh", "cosh",
-    "atan", "round", "fix", "expm1", "log1p",
+    "tan", "atan", "asin", "acos", "round", "fix", "expm1", "log1p",
 ];
 
 pub fn lower_module(m: &MModule) -> Result<SirModule, String> {
@@ -709,7 +709,10 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "ceil" => MathFn::Ceil,
             "sinh" => MathFn::Sinh,
             "cosh" => MathFn::Cosh,
+            "tan" => MathFn::Tan,
             "atan" => MathFn::Atan,
+            "asin" => MathFn::Asin,
+            "acos" => MathFn::Acos,
             "round" => MathFn::Round,
             "fix" => MathFn::Trunc,
             "expm1" => MathFn::Expm1,
@@ -1149,7 +1152,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         Some(other) => Err(format!("cannot index non-array `{}` ({:?})", func, other)),
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
-             sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p, \
+             sqrt/exp/log/log10/sin/cos/tan/sinh/cosh/tanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace/logspace, length, \

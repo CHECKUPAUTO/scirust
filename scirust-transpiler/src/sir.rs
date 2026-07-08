@@ -405,8 +405,14 @@ pub enum MathFn {
     Ceil,
     Sinh,
     Cosh,
+    /// Tangent (`tan` → `f64::tan`).
+    Tan,
     /// Inverse tangent (`np.arctan` → `f64::atan`).
     Atan,
+    /// Inverse sine (`asin` → `f64::asin`; domain `[-1, 1]`).
+    Asin,
+    /// Inverse cosine (`acos` → `f64::acos`; domain `[-1, 1]`).
+    Acos,
     /// Round half away from zero (MATLAB `round` → `f64::round`). Note: this is
     /// *not* NumPy's banker's rounding, so it is wired only on the MATLAB path.
     Round,
@@ -434,7 +440,10 @@ impl MathFn {
             MathFn::Ceil => "ceil",
             MathFn::Sinh => "sinh",
             MathFn::Cosh => "cosh",
+            MathFn::Tan => "tan",
             MathFn::Atan => "atan",
+            MathFn::Asin => "asin",
+            MathFn::Acos => "acos",
             MathFn::Round => "round",
             MathFn::Trunc => "trunc",
             MathFn::Expm1 => "exp_m1",
