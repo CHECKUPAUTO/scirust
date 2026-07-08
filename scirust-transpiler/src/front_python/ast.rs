@@ -64,6 +64,8 @@ pub enum PyStmt {
     While { cond: PyExpr, body: Vec<PyStmt> },
     /// `return expr`
     Return(Option<PyExpr>),
+    /// `return e0, e1, …` — a tuple return (2+ values).
+    ReturnTuple(Vec<PyExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

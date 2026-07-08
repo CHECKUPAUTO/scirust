@@ -225,6 +225,22 @@ impl<'a> Parser<'a> {
                 return Ok(PyStmt::Return(None));
             }
             let e = self.parse_expr()?;
+            // `return e0, e1, …` — a tuple return.
+            if self.is_sym(",")
+            {
+                let mut vals = vec![e];
+                while self.is_sym(",")
+                {
+                    self.eat_sym(",")?;
+                    // Allow a trailing comma (`return a,`).
+                    if matches!(self.peek(), Tok::Newline | Tok::Dedent | Tok::Eof)
+                    {
+                        break;
+                    }
+                    vals.push(self.parse_expr()?);
+                }
+                return Ok(PyStmt::ReturnTuple(vals));
+            }
             return Ok(PyStmt::Return(Some(e)));
         }
         if self.is_name("for")

@@ -34,7 +34,7 @@ auditable, matching the SciRust doctrine.
 | Intrinsics    | reductions `np.sum/prod/mean/max/min`, `np.dot`; builders `np.zeros/ones/diag`, `len`; elementwise/scalar math `np.sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/arctan` |
 | Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)`, `np.linalg.eigvalsh(A)`, `np.linalg.inv(A)`, `A @ b` → `scirust-solvers` (verified LU / symmetric eigensolver); `np.fft.fft(x)` / `np.fft.rfft(x)` / `np.fft.ifft(...)` / `np.abs(np.fft.fft(x))` → `scirust-signal` (verified FFT, real→complex) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
 | Multi-output  | `U, S, Vh = np.linalg.svd(A)` (thin SVD, `Vh = Vᵀ`) and `Q, R = np.linalg.qr(A)` (Householder QR) → `scirust-solvers` via tuple unpacking (square `A`, where reduced = full) |
-| Composition   | list literals `[a, b, c]` → `Vec<f64>`; **calls to other user functions** defined earlier in the module (define-before-use), with array-ness inferred *across* calls from the callee's signature (no annotation needed) |
+| Composition   | list literals `[a, b, c]` → `Vec<f64>`; **general tuple returns** `return a, b` → `(f64, f64)` (scalar elements); **calls to other user functions** defined earlier in the module (define-before-use), with array-ness inferred *across* calls from the callee's signature (no annotation needed) |
 | Control/flow  | `for i in range(...)`, `while cond:`, `if`/`elif`/`else` + comparisons `< <= > >= == !=`, indexing `a[i]`, index-assignment `a[i] = …`, `return` |
 
 Anything outside the subset is **refused with a diagnostic** — never guessed.
@@ -93,7 +93,8 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: norm2 / dot / relu / sign 200/200 trials match (octave) (MATLAB front-end, Phase 2)
   ✓ M: clamp / poly / mysum      200/200 trials match (octave) (1-based idx, for/while, ^)
   ✓ M: newton / ew_scale         200/200 trials match (octave) (while, element-wise array out)
-  ORACLE GREEN — 49/49 cases match their reference runtime within tolerance
+  ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
+  ORACLE GREEN — 52/52 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -120,13 +121,15 @@ them.
 * **No bit-exact equality with CPython.** NumPy's reduction/BLAS order isn't
   specified; we guarantee a *declared tolerance* to NumPy and *internal*
   Rust bit-reproducibility, not bit-identity with CPython.
-* **General 2-D arrays** and more routed kernels (`np.linalg.eig` →
-  `scirust-solvers`, general tuple *returns*, **recursion / mutual recursion**)
-  are the next increments — see the roadmap in `docs/TRANSPILER_DESIGN.md`.
-  (`if`/`elif`/`else`, scalar comparisons, `while` loops and `np.linalg.solve`
-  routing landed in Phase 1; the MATLAB/Octave front-end, `np.linalg.svd`/`qr`
-  via tuple unpacking, and user-function composition + list literals landed in
-  Phase 2.)
+* **General 2-D arrays**, MATLAB multi-output `[a, b] = f(...)`, and
+  **recursion / mutual recursion** are the next increments — see the roadmap in
+  `docs/TRANSPILER_DESIGN.md`. (`if`/`elif`/`else`, scalar comparisons, `while`
+  loops and `np.linalg.solve` routing landed in Phase 1; the MATLAB/Octave
+  front-end, `np.linalg.svd`/`qr` via tuple unpacking, user-function composition,
+  list literals, and general tuple returns landed in Phase 2.)
+* **Tuple returns carry scalar elements only.** `return a, b` where `a`/`b` are
+  scalars → `(f64, f64)`; array/matrix tuple elements aren't emitted yet, and a
+  tuple-returning function can't be called as a value (only used at the top).
 * **User calls are define-before-use and non-recursive.** A function may call
   any function defined earlier in the module; forward references and (mutual)
   recursion are refused. Callee parameters must be scalar or array (so argument

@@ -23,8 +23,9 @@
 //! * `for i in range(...)` loops, indexing `a[i]`, index-assignment `a[i] = …`,
 //!   `return`;
 //! * list literals `[a, b, c]` (→ `Vec<f64>`), tuple unpacking
-//!   `U, S, Vh = np.linalg.svd(A)` / `Q, R = np.linalg.qr(A)`, and calls to
-//!   **other user functions** defined earlier in the module (define-before-use).
+//!   `U, S, Vh = np.linalg.svd(A)` / `Q, R = np.linalg.qr(A)`, tuple returns
+//!   `return a, b` (scalar elements), and calls to **other user functions**
+//!   defined earlier in the module (define-before-use).
 //!
 //! Anything outside the subset is **refused with a diagnostic**, never guessed.
 //! Correctness of any given port is established by the differential oracle
@@ -38,7 +39,7 @@ pub mod lower;
 pub mod lower_matlab;
 pub mod sir;
 
-pub use sir::{SirFunc, SirModule, Ty, required_crates};
+pub use sir::{RetTy, SirFunc, SirModule, Ty, required_crates};
 
 /// Transpile a Python/NumPy subset source string into a Rust module string.
 ///
@@ -568,5 +569,54 @@ mod tests {
         let src = "def sumsq(a, b):\n    return sq(a) + sq(b)\ndef sq(x):\n    return x * x\n";
         let err = transpile(src).unwrap_err();
         assert!(err.contains("unsupported function"));
+    }
+
+    // ---- general tuple returns --------------------------------------------
+
+    #[test]
+    fn tuple_return_two_scalars() {
+        let rust = transpile("def addsub(a, b):\n    return a + b, a - b\n").unwrap();
+        assert_eq!(
+            sig_of(&rust, "addsub"),
+            "pub fn addsub(a: f64, b: f64) -> (f64, f64) {"
+        );
+        assert!(rust.contains("return ((a + b), (a - b));"));
+    }
+
+    #[test]
+    fn tuple_return_three_scalars_from_reductions() {
+        let rust =
+            transpile("def s(x: np.ndarray):\n    return np.min(x), np.mean(x), np.max(x)\n")
+                .unwrap();
+        assert_eq!(
+            sig_of(&rust, "s"),
+            "pub fn s(x: &[f64]) -> (f64, f64, f64) {"
+        );
+        assert!(
+            rust.contains("return (np::min(x), (np::sum(x) / ((x.len()) as f64)), np::max(x));")
+        );
+    }
+
+    #[test]
+    fn tuple_return_of_arrays_is_rejected() {
+        // Tuple elements must be scalars in this subset.
+        let src = "def f(x: np.ndarray):\n    return x, x\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("tuple return elements must be scalars"));
+    }
+
+    #[test]
+    fn inconsistent_single_vs_tuple_return_is_rejected() {
+        let src = "def f(x):\n    if x > 0.0:\n        return x, x\n    return x\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("inconsistent types"));
+    }
+
+    #[test]
+    fn calling_a_tuple_returning_function_is_rejected() {
+        // `pair` returns a tuple; using it as a value in `g` is unsupported.
+        let src = "def pair(x):\n    return x, x\ndef g(x):\n    return pair(x)\n";
+        let err = transpile(src).unwrap_err();
+        assert!(err.contains("returns a tuple"));
     }
 }

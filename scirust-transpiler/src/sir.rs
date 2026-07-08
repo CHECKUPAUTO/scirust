@@ -36,8 +36,16 @@ pub struct SirModule {
 pub struct SirFunc {
     pub name: String,
     pub params: Vec<(String, Ty)>,
-    pub ret: Ty,
+    pub ret: RetTy,
     pub body: Vec<SirStmt>,
+}
+
+/// A function's return: a single value, or a tuple of values (`return a, b`).
+/// Kept separate from the `Copy` [`Ty`] lattice (a tuple carries a `Vec`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RetTy {
+    Single(Ty),
+    Tuple(Vec<Ty>),
 }
 
 /// A tuple-producing routed call (a *multi-output* kernel). Consumed only by
@@ -120,6 +128,8 @@ pub enum SirStmt {
         body: Vec<SirStmt>,
     },
     Return(SirExpr),
+    /// `return (e0, e1, …);` — a tuple of scalar values.
+    ReturnTuple(Vec<SirExpr>),
 }
 
 /// A typed SIR expression. `ty()` reports the static type used by the emitter.
@@ -400,6 +410,10 @@ fn scan_stmt(s: &SirStmt, solvers: &mut bool, signal: &mut bool) {
         SirStmt::Declare { .. } =>
         {},
         SirStmt::LetTuple { value, .. } => scan_tuple(value, solvers, signal),
+        SirStmt::ReturnTuple(vals) =>
+        {
+            vals.iter().for_each(|v| scan_expr(v, solvers, signal));
+        },
         SirStmt::Let { value, .. } | SirStmt::Reassign { value, .. } | SirStmt::Return(value) =>
         {
             scan_expr(value, solvers, signal)

@@ -13,7 +13,9 @@ use std::collections::HashMap;
 #[derive(Clone)]
 struct FuncSig {
     params: Vec<Ty>,
-    ret: Ty,
+    /// The single return type, or `None` if the function returns a tuple
+    /// (which cannot be called as a value — only used at the top level).
+    ret: Option<Ty>,
 }
 
 /// Map of user-function name -> signature, built as the module is lowered.
@@ -31,7 +33,11 @@ pub fn lower_module(m: &PyModule) -> Result<SirModule, String> {
             lowered.name.clone(),
             FuncSig {
                 params: lowered.params.iter().map(|(_, t)| *t).collect(),
-                ret: lowered.ret,
+                ret: match &lowered.ret
+                {
+                    RetTy::Single(t) => Some(*t),
+                    RetTy::Tuple(_) => None,
+                },
             },
         );
         funcs.push(lowered);
@@ -56,25 +62,31 @@ fn lower_func(f: &PyFunc, sigs: &Sigs) -> Result<SirFunc, String> {
     }
 
     let mut declared: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    let mut ret: Option<Ty> = None;
+    let mut ret: Option<RetTy> = None;
     let body = lower_block(&f.body, &mut env, &mut declared, true, &mut ret, sigs)?;
 
-    let ret = match (f.ret_hint, ret)
+    // A tuple return uses its accumulated element types directly; a single
+    // (or absent) return applies the optional `-> hint`.
+    let ret = match ret
     {
-        (Some(TypeHint::Array), _) => Ty::Array,
-        (Some(TypeHint::Float), _) | (Some(TypeHint::Int), _) => Ty::Scalar,
-        (None, Some(t)) =>
+        Some(RetTy::Tuple(ts)) => RetTy::Tuple(ts),
+        single => RetTy::Single(match (f.ret_hint, single)
         {
-            if t == Ty::Int
+            (Some(TypeHint::Array), _) => Ty::Array,
+            (Some(TypeHint::Float), _) | (Some(TypeHint::Int), _) => Ty::Scalar,
+            (None, Some(RetTy::Single(t))) =>
             {
-                Ty::Scalar
-            }
-            else
-            {
-                t
-            }
-        },
-        (None, None) => Ty::Scalar,
+                if t == Ty::Int
+                {
+                    Ty::Scalar
+                }
+                else
+                {
+                    t
+                }
+            },
+            (None, _) => Ty::Scalar,
+        }),
     };
 
     Ok(SirFunc {
@@ -90,7 +102,7 @@ fn lower_block(
     env: &mut HashMap<String, Ty>,
     declared: &mut Vec<String>,
     top_level: bool,
-    ret: &mut Option<Ty>,
+    ret: &mut Option<RetTy>,
     sigs: &Sigs,
 ) -> Result<Vec<SirStmt>, String> {
     let mut out = Vec::new();
@@ -106,7 +118,7 @@ fn lower_stmt(
     env: &mut HashMap<String, Ty>,
     declared: &mut Vec<String>,
     top_level: bool,
-    ret: &mut Option<Ty>,
+    ret: &mut Option<RetTy>,
     sigs: &Sigs,
 ) -> Result<SirStmt, String> {
     match s
@@ -271,17 +283,39 @@ fn lower_stmt(
         {
             let v = lower_scalar(e, env, sigs)?;
             let t = normalize_ty(v.ty());
-            merge_ret(ret, t)?;
+            merge_ret(ret, RetTy::Single(t))?;
             Ok(SirStmt::Return(v))
         },
         PyStmt::Return(None) =>
         {
             Err("bare `return` (no value) is not supported in this subset".into())
         },
+        PyStmt::ReturnTuple(exprs) =>
+        {
+            // `return e0, e1, …` — each element must be a scalar in this subset.
+            let mut vals = Vec::with_capacity(exprs.len());
+            let mut tys = Vec::with_capacity(exprs.len());
+            for e in exprs
+            {
+                let v = lower_scalar(e, env, sigs)?;
+                let t = normalize_ty(v.ty());
+                if t != Ty::Scalar
+                {
+                    return Err(format!(
+                        "tuple return elements must be scalars in this subset, found {:?}",
+                        t
+                    ));
+                }
+                tys.push(t);
+                vals.push(v);
+            }
+            merge_ret(ret, RetTy::Tuple(tys))?;
+            Ok(SirStmt::ReturnTuple(vals))
+        },
     }
 }
 
-fn merge_ret(ret: &mut Option<Ty>, t: Ty) -> Result<(), String> {
+fn merge_ret(ret: &mut Option<RetTy>, t: RetTy) -> Result<(), String> {
     match ret
     {
         None =>
@@ -854,6 +888,13 @@ fn lower_user_call(
     env: &HashMap<String, Ty>,
     sigs: &Sigs,
 ) -> Result<SirExpr, String> {
+    let ret = sig.ret.ok_or_else(|| {
+        format!(
+            "`{}` returns a tuple; calling a tuple-returning function as a value is not \
+             supported (only single-value user functions can be called)",
+            func
+        )
+    })?;
     if args.len() != sig.params.len()
     {
         return Err(format!(
@@ -898,7 +939,7 @@ fn lower_user_call(
     Ok(SirExpr::UserCall {
         func: func.to_string(),
         args: lowered,
-        ret: sig.ret,
+        ret,
     })
 }
 
@@ -1009,6 +1050,7 @@ fn matrix_evidence_block(name: &str, stmts: &[PyStmt]) -> bool {
             },
             PyStmt::While { cond, body } => expr(name, cond) || block(name, body),
             PyStmt::Return(Some(e)) => expr(name, e),
+            PyStmt::ReturnTuple(es) => es.iter().any(|e| expr(name, e)),
             PyStmt::Return(None) => false,
         })
     }
@@ -1049,6 +1091,7 @@ fn array_evidence_block(name: &str, stmts: &[PyStmt], sigs: &Sigs) -> bool {
             array_evidence_expr(name, cond, sigs) || array_evidence_block(name, body, sigs)
         },
         PyStmt::Return(Some(e)) => array_evidence_expr(name, e, sigs),
+        PyStmt::ReturnTuple(es) => es.iter().any(|e| array_evidence_expr(name, e, sigs)),
         PyStmt::Return(None) => false,
     })
 }
