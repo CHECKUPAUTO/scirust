@@ -346,6 +346,25 @@ impl ResidentModel {
         params: &SamplingParams,
         seed: u64,
     ) -> Vec<u32> {
+        self.generate_streaming(prompt, max_new, params, seed, |_| {})
+    }
+
+    /// **Streaming** sampled generation — identical to [`Self::generate_sampled`]
+    /// (same KV-cached decode, same shared sampler, same tokens for a given
+    /// `(params, seed)`), but each newly-decoded token is handed to `on_token` the
+    /// moment it is sampled, *before* the next forward. Callers can print tokens as
+    /// they arrive (a live REPL / CLI) instead of waiting for the whole
+    /// continuation. Returns the full sequence (`prompt` then the generated tokens)
+    /// exactly as `generate_sampled` does — streaming changes *when* tokens surface,
+    /// never *which* ones.
+    pub fn generate_streaming(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+        mut on_token: impl FnMut(u32),
+    ) -> Vec<u32> {
         if prompt.is_empty()
         {
             return Vec::new();
@@ -365,6 +384,7 @@ impl ResidentModel {
             // decoded so far, exactly as the CPU `Generator` passes them.
             let recent: Vec<usize> = toks.iter().map(|&t| t as usize).collect();
             let next = sample_row(&last_logits, params, &recent, &mut rng) as u32;
+            on_token(next); // emit as soon as it is decoded (before the next forward)
             let pos = toks.len();
             toks.push(next);
             if i + 1 < max_new

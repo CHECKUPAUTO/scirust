@@ -223,34 +223,32 @@ fn main() {
         let budget = config.max_seq_len.saturating_sub(prompt.len());
         let n = max_new.min(budget);
 
+        // Stream tokens as they decode — no silent wait for the whole continuation.
         let t = Instant::now();
-        let out = rm.generate_sampled(&prompt, n, &params, seed);
+        let mut so = io::stdout();
+        let out = rm.generate_streaming(&prompt, n, &params, seed, |tok| {
+            if byte_level
+            {
+                let _ = so.write_all(&[tok as u8]);
+            }
+            else
+            {
+                let _ = write!(so, "{tok} ");
+            }
+            let _ = so.flush();
+        });
+        let _ = writeln!(so);
         let ms = t.elapsed().as_secs_f64() * 1e3;
-        let generated = &out[prompt.len()..];
-
-        if byte_level
-        {
-            let bytes: Vec<u8> = generated.iter().map(|&t| t as u8).collect();
-            println!("{}", String::from_utf8_lossy(&bytes));
-        }
-        else
-        {
-            println!("{generated:?}");
-        }
+        let generated = out.len() - prompt.len();
         let tps = if ms > 0.0
         {
-            generated.len() as f64 / (ms / 1e3)
+            generated as f64 / (ms / 1e3)
         }
         else
         {
             0.0
         };
-        eprintln!(
-            "[{} tokens · {:.0} ms · {:.1} tok/s]",
-            generated.len(),
-            ms,
-            tps
-        );
+        eprintln!("[{generated} tokens · {ms:.0} ms · {tps:.1} tok/s]");
 
         print!("> ");
         let _ = io::stdout().flush();

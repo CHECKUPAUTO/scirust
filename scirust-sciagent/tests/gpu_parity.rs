@@ -617,3 +617,53 @@ fn resident_sampled_generation_is_greedy_at_t0_and_seed_deterministic() {
     assert_ne!(a1, b, "different seeds should sample differently at T=2");
     eprintln!("resident sampling: T=0 greedy-parity + seed determinism — PASS");
 }
+
+/// **Streaming** (`ResidentModel::generate_streaming`) emits exactly the tokens
+/// `generate_sampled` produces, in order, and returns the identical full sequence:
+/// the callback fires per decoded token but changes only *when* tokens surface,
+/// never *which*. Checked at both `T=0` (greedy) and `T>0` (sampled). Skips with
+/// no adapter.
+#[test]
+fn resident_streaming_matches_sampled() {
+    use scirust_sciagent::generate::SamplingParams;
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident streaming");
+        return;
+    };
+    eprintln!("resident streaming on: {}", rm.adapter_name());
+    let steps = 8usize;
+
+    for (label, params, seed) in [
+        ("T=0", SamplingParams::default(), 0u64),
+        (
+            "T=1.5",
+            SamplingParams {
+                temperature: 1.5,
+                ..SamplingParams::default()
+            },
+            7u64,
+        ),
+    ]
+    {
+        let full = rm.generate_sampled(&prompt, steps, &params, seed);
+        let mut streamed = Vec::new();
+        let returned = rm.generate_streaming(&prompt, steps, &params, seed, |t| streamed.push(t));
+        assert_eq!(
+            returned, full,
+            "{label}: generate_streaming return must match generate_sampled"
+        );
+        assert_eq!(
+            streamed,
+            full[prompt.len()..].to_vec(),
+            "{label}: callback must see exactly the generated tokens, in order"
+        );
+    }
+    eprintln!("resident streaming matches sampled (tokens + order) — PASS");
+}

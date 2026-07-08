@@ -27,6 +27,7 @@
 //! Exit code 2 means no GPU adapter was found — run on the Thor or install a
 //! Vulkan ICD.
 
+use std::io::{self, Write};
 use std::path::Path;
 
 use scirust_sciagent::config::SciAgentConfig;
@@ -154,23 +155,30 @@ fn main() {
         params.repetition_penalty
     );
 
-    let out = rm.generate_sampled(&prompt, max_new, &params, seed);
-    let generated = &out[prompt.len()..];
-
+    // Echo the prompt, then stream the continuation token-by-token as it decodes.
     if byte_level
     {
         let prompt_bytes: Vec<u8> = prompt.iter().map(|&t| t as u8).collect();
-        let gen_bytes: Vec<u8> = generated.iter().map(|&t| t as u8).collect();
         println!("=== prompt ===\n{}", String::from_utf8_lossy(&prompt_bytes));
-        println!(
-            "=== continuation ({} tokens) ===\n{}",
-            generated.len(),
-            String::from_utf8_lossy(&gen_bytes)
-        );
+        println!("=== continuation (streaming) ===");
     }
     else
     {
         println!("prompt ids:       {prompt:?}");
-        println!("continuation ids: {generated:?}");
+        print!("continuation ids: ");
     }
+    let mut so = io::stdout();
+    let out = rm.generate_streaming(&prompt, max_new, &params, seed, |tok| {
+        if byte_level
+        {
+            let _ = so.write_all(&[tok as u8]);
+        }
+        else
+        {
+            let _ = write!(so, "{tok} ");
+        }
+        let _ = so.flush();
+    });
+    let _ = writeln!(so);
+    eprintln!("[{} tokens generated]", out.len() - prompt.len());
 }
