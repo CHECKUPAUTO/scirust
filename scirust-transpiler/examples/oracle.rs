@@ -842,6 +842,18 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // gradient(v) — unit-spacing numerical gradient (same length; one-sided
+        // at the ends, centred interior).
+        Case {
+            name: "M: gradient(v) (numerical gradient)",
+            call: "mgrad",
+            src: "function y = mgrad(v)\n  y = gradient(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
         // sort(v) — ascending sort.
         Case {
             name: "M: sort(v) (ascending)",
