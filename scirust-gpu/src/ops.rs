@@ -290,6 +290,152 @@ pub fn cpu_rms_norm_gain_backward(
     dweight
 }
 
+/// CPU reference for a **LoRA-adapted linear** forward — the oracle for
+/// [`crate::GpuChain::lora_linear_forward`]. `x` is `m×in`, base `w` is `in×out`
+/// (row-major, frozen), `a` is `in×r`, `b` is `r×out`; returns the `m×out`
+/// `y = x·W + scaling·(x·A)·B`.
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_lora_linear(
+    x: &[f32],
+    w: &[f32],
+    a: &[f32],
+    b: &[f32],
+    scaling: f32,
+    m: usize,
+    in_f: usize,
+    r: usize,
+    out: usize,
+) -> Vec<f32> {
+    // xa = x·A  (m×r)
+    let mut xa = vec![0.0f32; m * r];
+    for i in 0..m
+    {
+        for kk in 0..r
+        {
+            let mut s = 0.0f32;
+            for p in 0..in_f
+            {
+                s += x[i * in_f + p] * a[p * r + kk];
+            }
+            xa[i * r + kk] = s;
+        }
+    }
+    let mut y = vec![0.0f32; m * out];
+    for i in 0..m
+    {
+        for j in 0..out
+        {
+            let mut base = 0.0f32;
+            for p in 0..in_f
+            {
+                base += x[i * in_f + p] * w[p * out + j];
+            }
+            let mut xab = 0.0f32;
+            for kk in 0..r
+            {
+                xab += xa[i * r + kk] * b[kk * out + j];
+            }
+            y[i * out + j] = base + scaling * xab;
+        }
+    }
+    y
+}
+
+/// CPU reference for the **LoRA-adapted linear backward** — the oracle for
+/// [`crate::GpuChain::lora_linear_backward`]. Returns `(dx, dA, dB)` with shapes
+/// `m×in`, `in×r`, `r×out`; the base `W` is frozen (no gradient). For
+/// `delta = scaling·(x·A·B)`: `dB = (x·A)ᵀ·(scaling·dy)`,
+/// `dA = xᵀ·((scaling·dy)·Bᵀ)`, `dx = dy·Wᵀ + ((scaling·dy)·Bᵀ)·Aᵀ`.
+#[allow(clippy::too_many_arguments)]
+pub fn cpu_lora_linear_backward(
+    x: &[f32],
+    w: &[f32],
+    a: &[f32],
+    b: &[f32],
+    dy: &[f32],
+    scaling: f32,
+    m: usize,
+    in_f: usize,
+    r: usize,
+    out: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    // xa = x·A  (m×r)
+    let mut xa = vec![0.0f32; m * r];
+    for i in 0..m
+    {
+        for kk in 0..r
+        {
+            let mut s = 0.0f32;
+            for p in 0..in_f
+            {
+                s += x[i * in_f + p] * a[p * r + kk];
+            }
+            xa[i * r + kk] = s;
+        }
+    }
+    // d_xa = (scaling·dy)·Bᵀ  (m×r)
+    let mut d_xa = vec![0.0f32; m * r];
+    for i in 0..m
+    {
+        for kk in 0..r
+        {
+            let mut s = 0.0f32;
+            for j in 0..out
+            {
+                s += scaling * dy[i * out + j] * b[kk * out + j];
+            }
+            d_xa[i * r + kk] = s;
+        }
+    }
+    // dB = (x·A)ᵀ·(scaling·dy)  (r×out)
+    let mut db = vec![0.0f32; r * out];
+    for kk in 0..r
+    {
+        for j in 0..out
+        {
+            let mut s = 0.0f32;
+            for i in 0..m
+            {
+                s += xa[i * r + kk] * scaling * dy[i * out + j];
+            }
+            db[kk * out + j] = s;
+        }
+    }
+    // dA = xᵀ·d_xa  (in×r)
+    let mut da = vec![0.0f32; in_f * r];
+    for p in 0..in_f
+    {
+        for kk in 0..r
+        {
+            let mut s = 0.0f32;
+            for i in 0..m
+            {
+                s += x[i * in_f + p] * d_xa[i * r + kk];
+            }
+            da[p * r + kk] = s;
+        }
+    }
+    // dx = dy·Wᵀ + d_xa·Aᵀ  (m×in)
+    let mut dx = vec![0.0f32; m * in_f];
+    for i in 0..m
+    {
+        for p in 0..in_f
+        {
+            let mut s = 0.0f32;
+            for j in 0..out
+            {
+                s += dy[i * out + j] * w[p * out + j];
+            }
+            for kk in 0..r
+            {
+                s += d_xa[i * r + kk] * a[p * r + kk];
+            }
+            dx[i * in_f + p] = s;
+        }
+    }
+    (dx, da, db)
+}
+
 /// CPU reference for rotary position embedding — the bit-exact oracle for
 /// [`crate::WgpuContext::rope_resident`]. Rotates the interleaved lane pair
 /// `(2j, 2j+1)` of each row by `pos·freqⱼ`, with `pos = (row mod seq_len) +

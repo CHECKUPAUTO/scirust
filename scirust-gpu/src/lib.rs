@@ -60,7 +60,7 @@ mod wgpu_backend;
 #[cfg(feature = "wgpu")]
 pub use chain::{
     BlockCache, BlockGrads, BlockWeights, GpuChain, GqaBlockGrads, GqaBlockWeights, GqaModelGrads,
-    GqaModelWeights, ModelWeights,
+    GqaModelWeights, LoraGrads, ModelWeights,
 };
 #[cfg(feature = "wgpu")]
 pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};

@@ -182,6 +182,18 @@ pub struct GqaModelGrads {
     pub d_final_norm: GpuMatrix,
 }
 
+/// Gradients of a **LoRA-adapted linear** ([`GpuChain::lora_linear_backward`]).
+/// The base weight `W` is frozen, so only the two low-rank factors get a
+/// gradient (plus the input gradient `dx` for backprop through the layer).
+pub struct LoraGrads {
+    /// `∂L/∂x` (`m×in`) — flows to the previous layer.
+    pub dx: GpuMatrix,
+    /// `∂L/∂A` (`in×r`).
+    pub da: GpuMatrix,
+    /// `∂L/∂B` (`r×out`).
+    pub db: GpuMatrix,
+}
+
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
@@ -227,6 +239,58 @@ impl GpuChain {
     /// Elementwise `relu(a)`, result resident.
     pub fn relu(&self, a: &GpuMatrix) -> BackendResult<GpuMatrix> {
         self.ctx.ew_resident(a, a, 2)
+    }
+
+    /// **LoRA-adapted linear forward**, fully resident:
+    /// `y = x·W + scaling·(x·A)·B`, with the base `W` (`in×out`) **frozen** and
+    /// the low-rank factors `A` (`in×r`), `B` (`r×out`) trainable. `x` is `m×in`,
+    /// `y` is `m×out`. Composed from resident GEMMs + a scalar scale + an add — no
+    /// new kernel. `scaling` is the LoRA `α/r`. The CPU contract is
+    /// [`crate::ops::cpu_lora_linear`]. With `B = 0` this is exactly `x·W`, so a
+    /// freshly-initialised adapter reproduces the base layer.
+    pub fn lora_linear_forward(
+        &self,
+        x: &GpuMatrix,
+        w: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        scaling: f32,
+    ) -> BackendResult<GpuMatrix> {
+        let base = self.matmul(x, w)?; // x·W        (m×out)
+        let xa = self.matmul(x, a)?; // x·A          (m×r)
+        let xab = self.matmul(&xa, b)?; // (x·A)·B    (m×out)
+        let delta = self.scale_causal_mask(&xab, scaling, false)?; // scaling·xab
+        self.add(&base, &delta)
+    }
+
+    /// **Backward of [`Self::lora_linear_forward`]**. Given `x`, the frozen `W`,
+    /// the factors `A`/`B`, `scaling`, and the upstream gradient `dy` (`m×out`),
+    /// returns `dx` (`m×in`) and the adapter gradients `dA` (`in×r`), `dB`
+    /// (`r×out`) as [`LoraGrads`]. `W` is frozen, so it gets no gradient. The
+    /// forward intermediate `xa = x·A` is recomputed here (cheap resident GEMM).
+    ///
+    /// With `delta = scaling·(x·A·B)` and `y = x·W + delta`:
+    /// `dB = (x·A)ᵀ·(scaling·dy)`, `dA = xᵀ·((scaling·dy)·Bᵀ)`, and
+    /// `dx = dy·Wᵀ + ((scaling·dy)·Bᵀ)·Aᵀ`. The CPU contract is
+    /// [`crate::ops::cpu_lora_linear_backward`].
+    pub fn lora_linear_backward(
+        &self,
+        x: &GpuMatrix,
+        w: &GpuMatrix,
+        a: &GpuMatrix,
+        b: &GpuMatrix,
+        dy: &GpuMatrix,
+        scaling: f32,
+    ) -> BackendResult<LoraGrads> {
+        let xa = self.matmul(x, a)?; // recompute x·A            (m×r)
+        let d_xab = self.scale_causal_mask(dy, scaling, false)?; // scaling·dy (m×out)
+        let db = self.matmul_t(&xa, &d_xab, true, false)?; // (x·A)ᵀ·d_xab   (r×out)
+        let d_xa = self.matmul_t(&d_xab, b, false, true)?; // d_xab·Bᵀ       (m×r)
+        let da = self.matmul_t(x, &d_xa, true, false)?; // xᵀ·d_xa           (in×r)
+        let dx_delta = self.matmul_t(&d_xa, a, false, true)?; // d_xa·Aᵀ     (m×in)
+        let dx_base = self.matmul_t(dy, w, false, true)?; // dy·Wᵀ           (m×in)
+        let dx = self.add(&dx_base, &dx_delta)?;
+        Ok(LoraGrads { dx, da, db })
     }
 
     /// SwiGLU gate `silu(gate) ⊙ up` (same shape), result resident — the
@@ -3114,6 +3178,112 @@ mod tests {
                 dw_gpu[j]
             );
         }
+    }
+
+    /// The **resident LoRA-adapted linear** forward + adapter backward,
+    /// gradient-checked end-to-end. Forward `y = x·W + scaling·(x·A)·B` matches
+    /// the CPU oracle (and equals `x·W` when `B = 0`); the backward's `dA`, `dB`,
+    /// `dx` match the CPU adjoint AND central finite differences of
+    /// `L = Σ lora(x; W,A,B) ⊙ G` over `A`, `B`, and `x`. The frozen `W` gets no
+    /// gradient. Skips if no adapter.
+    #[test]
+    fn lora_linear_backward_matches_finite_differences() {
+        use crate::ops::{cpu_lora_linear, cpu_lora_linear_backward};
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (m, in_f, r, out) = (4usize, 6usize, 2usize, 5usize);
+        let scaling = 0.5f32;
+        let gen = |n: usize, ph: f32, amp: f32| -> Vec<f32> {
+            (0..n).map(|i| (i as f32 * 0.17 + ph).sin() * amp).collect()
+        };
+        let x = gen(m * in_f, 0.3, 1.2);
+        let w = gen(in_f * out, 1.1, 0.4);
+        let a = gen(in_f * r, 2.0, 0.3);
+        let b = gen(r * out, 0.7, 0.3);
+        let g = gen(m * out, 3.0, 1.0); // dL/dY
+
+        let gx = chain.upload(&x, m, in_f);
+        let gw = chain.upload(&w, in_f, out);
+        let ga = chain.upload(&a, in_f, r);
+        let gb = chain.upload(&b, r, out);
+        let gg = chain.upload(&g, m, out);
+
+        // Forward parity.
+        let y_gpu = chain
+            .download(
+                &chain
+                    .lora_linear_forward(&gx, &gw, &ga, &gb, scaling)
+                    .unwrap(),
+            )
+            .unwrap();
+        let y_cpu = cpu_lora_linear(&x, &w, &a, &b, scaling, m, in_f, r, out);
+        assert!(rel_err(&y_gpu, &y_cpu) < 1e-4, "forward mismatch");
+
+        // B = 0 ⇒ the adapter is exactly the base map `x·W`.
+        let b0 = vec![0.0f32; r * out];
+        let gb0 = chain.upload(&b0, r, out);
+        let y_base = chain
+            .download(
+                &chain
+                    .lora_linear_forward(&gx, &gw, &ga, &gb0, scaling)
+                    .unwrap(),
+            )
+            .unwrap();
+        let base_only = cpu_lora_linear(&x, &w, &a, &b0, scaling, m, in_f, r, out);
+        assert!(rel_err(&y_base, &base_only) < 1e-4, "B=0 must equal base");
+
+        // Backward vs the CPU adjoint.
+        let grads = chain
+            .lora_linear_backward(&gx, &gw, &ga, &gb, &gg, scaling)
+            .unwrap();
+        let (dx_gpu, da_gpu, db_gpu) = (
+            chain.download(&grads.dx).unwrap(),
+            chain.download(&grads.da).unwrap(),
+            chain.download(&grads.db).unwrap(),
+        );
+        let (dx_cpu, da_cpu, db_cpu) =
+            cpu_lora_linear_backward(&x, &w, &a, &b, &g, scaling, m, in_f, r, out);
+        assert!(rel_err(&dx_gpu, &dx_cpu) < 1e-4, "dx vs oracle");
+        assert!(rel_err(&da_gpu, &da_cpu) < 1e-4, "dA vs oracle");
+        assert!(rel_err(&db_gpu, &db_cpu) < 1e-4, "dB vs oracle");
+
+        // Gold standard: central finite differences of L = Σ lora(x)⊙G.
+        let loss = |xx: &[f32], aa: &[f32], bb: &[f32]| -> f32 {
+            cpu_lora_linear(xx, &w, aa, bb, scaling, m, in_f, r, out)
+                .iter()
+                .zip(&g)
+                .map(|(u, v)| u * v)
+                .sum()
+        };
+        let h = 1e-3f32;
+        let check = |name: &str, base: &[f32], grad: &[f32], which: u8| {
+            for idx in 0..base.len()
+            {
+                let (mut vp, mut vm) = (base.to_vec(), base.to_vec());
+                vp[idx] += h;
+                vm[idx] -= h;
+                let (lp, lm) = match which
+                {
+                    0 => (loss(&vp, &a, &b), loss(&vm, &a, &b)),
+                    1 => (loss(&x, &vp, &b), loss(&x, &vm, &b)),
+                    _ => (loss(&x, &a, &vp), loss(&x, &a, &vm)),
+                };
+                let fd = (lp - lm) / (2.0 * h);
+                assert!(
+                    (fd - grad[idx]).abs() < 2e-2,
+                    "{name}[{idx}]: fd={fd} gpu={}",
+                    grad[idx]
+                );
+            }
+        };
+        check("dx", &x, &dx_gpu, 0);
+        check("dA", &a, &da_gpu, 1);
+        check("dB", &b, &db_gpu, 2);
     }
 
     /// Scale + causal-mask backward: `din = scale·dout` below/on the diagonal,
