@@ -160,6 +160,20 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `cumprod` / `cummax` / `cummin` / `flip`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 25)
+Quatre fonctions natives supplémentaires (un vecteur en entrée, un vecteur en
+sortie), sur le même modèle que `cumsum`/`diff`/`sort` (helpers déterministes du
+prélude, argument inféré vecteur) :
+
+- **`cumprod(v)`** — produit cumulé en ordre gauche→droite fixe.
+- **`cummax(v)`** / **`cummin(v)`** — maximum / minimum courant.
+- **`flip(v)`** — vecteur inversé.
+
+Quatre cas d'oracle. **Oracle 79/79** (200 essais chacun) ; **72 tests
+unitaires** (le test des builtins vectoriels couvre désormais les sept fonctions).
+*Non-vacuité* : remplacer `>` par `<` dans `cummax` fait diverger le cas
+(200/200, |Δ|=∞) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `cumsum` / `diff` / `sort`** — fonctions vecteur → vecteur, prouvées contre Octave réel (Phase 2, incrément 24)
 Trois fonctions natives non ambiguës (un vecteur en entrée, un vecteur en
 sortie), câblées via de nouveaux helpers déterministes du prélude :

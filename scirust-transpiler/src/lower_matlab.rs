@@ -700,17 +700,25 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&b, "dot")?;
         return Ok(SirExpr::Dot(Box::new(a), Box::new(b)));
     }
-    if matches!(func, "cumsum" | "diff" | "sort")
+    if matches!(
+        func,
+        "cumsum" | "cumprod" | "cummax" | "cummin" | "diff" | "sort" | "flip"
+    )
     {
         // Vector -> vector builtins (array in, array out).
         need_args(func, args, 1)?;
         let a = lower_scalar(&args[0], env)?;
         expect_array(&a, func)?;
+        let boxed = Box::new(a);
         return Ok(match func
         {
-            "cumsum" => SirExpr::Cumsum(Box::new(a)),
-            "diff" => SirExpr::Diff(Box::new(a)),
-            _ => SirExpr::Sort(Box::new(a)),
+            "cumsum" => SirExpr::Cumsum(boxed),
+            "cumprod" => SirExpr::Cumprod(boxed),
+            "cummax" => SirExpr::Cummax(boxed),
+            "cummin" => SirExpr::Cummin(boxed),
+            "diff" => SirExpr::Diff(boxed),
+            "sort" => SirExpr::Sort(boxed),
+            _ => SirExpr::Flip(boxed),
         });
     }
     if func == "mod" || func == "rem"
@@ -859,7 +867,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix, \
              mod/rem/sign/atan2/hypot/power, sum/prod/mean/max/min/norm/dot, \
-             cumsum/diff/sort, length, det/inv/eig)",
+             cumsum/cumprod/cummax/cummin/diff/sort/flip, length, det/inv/eig)",
             func
         )),
     }
@@ -1050,8 +1058,10 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 // first argument).
                 || (func == "dot" && args.iter().any(|a| is_ident(name, a)))
                 // Vector -> vector builtins whose (single) argument is a vector.
-                || (matches!(func.as_str(), "cumsum" | "diff" | "sort")
-                    && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                || (matches!(
+                    func.as_str(),
+                    "cumsum" | "cumprod" | "cummax" | "cummin" | "diff" | "sort" | "flip"
+                ) && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 || args.iter().any(|a| array_evidence_expr(name, a))
         },
         // Element-wise operators (`.*`, `./`, `.^`) imply their operands are

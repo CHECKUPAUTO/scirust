@@ -853,6 +853,39 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // cumprod(v) — running prefix product (bounded range so it stays O(1)).
+        Case {
+            name: "M: cumprod(v) (prefix product)",
+            call: "mcumprod",
+            src: "function y = mcumprod(v)\n  y = cumprod(v);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: 0.5,
+                hi: 1.5,
+            }],
+        },
+        // cummax(v) - cummin(v) — running max/min in one expression.
+        Case {
+            name: "M: cummax(v) - cummin(v) (running)",
+            call: "mcumrange",
+            src: "function y = mcumrange(v)\n  y = cummax(v) - cummin(v);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // flip(v) — reversed vector.
+        Case {
+            name: "M: flip(v) (reverse)",
+            call: "mflip",
+            src: "function y = mflip(v)\n  y = flip(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

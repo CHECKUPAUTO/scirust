@@ -237,10 +237,18 @@ pub enum SirExpr {
     /// `cumsum(v)` : Array -> Array (running prefix sum, fixed left-to-right
     /// order -> bit-reproducible).
     Cumsum(Box<SirExpr>),
+    /// `cumprod(v)` : Array -> Array (running prefix product, fixed order).
+    Cumprod(Box<SirExpr>),
+    /// `cummax(v)` : Array -> Array (running maximum).
+    Cummax(Box<SirExpr>),
+    /// `cummin(v)` : Array -> Array (running minimum).
+    Cummin(Box<SirExpr>),
     /// `diff(v)` : Array -> Array of consecutive differences (length `n-1`).
     Diff(Box<SirExpr>),
     /// `sort(v)` : Array -> Array sorted ascending (MATLAB `sort`).
     Sort(Box<SirExpr>),
+    /// `flip(v)` : Array -> Array reversed.
+    Flip(Box<SirExpr>),
     /// Scalar comparison `l <op> r` -> Bool (conditions only).
     Cmp {
         op: CmpOp,
@@ -438,8 +446,12 @@ impl SirExpr {
             | SirExpr::Zeros(_)
             | SirExpr::Ones(_)
             | SirExpr::Cumsum(_)
+            | SirExpr::Cumprod(_)
+            | SirExpr::Cummax(_)
+            | SirExpr::Cummin(_)
             | SirExpr::Diff(_)
             | SirExpr::Sort(_)
+            | SirExpr::Flip(_)
             | SirExpr::ArrayLit(_)
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
@@ -583,8 +595,12 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Zeros(x)
         | SirExpr::Ones(x)
         | SirExpr::Cumsum(x)
+        | SirExpr::Cumprod(x)
+        | SirExpr::Cummax(x)
+        | SirExpr::Cummin(x)
         | SirExpr::Diff(x)
-        | SirExpr::Sort(x) => scan_expr(x, solvers, signal),
+        | SirExpr::Sort(x)
+        | SirExpr::Flip(x) => scan_expr(x, solvers, signal),
         SirExpr::ScalarPow { base, exp } =>
         {
             scan_expr(base, solvers, signal);

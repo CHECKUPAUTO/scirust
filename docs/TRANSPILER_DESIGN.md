@@ -361,8 +361,8 @@ secteurs réellement débloqués.
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python, **algèbre linéaire `det`/`inv`/`\`/`eig` → `scirust-solvers`**, `norm`/`dot`) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 76 cas au total : 43 Python prouvés
-contre **NumPy réel**, 33 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
+**Résultat de l'oracle (reproductible).** 79 cas au total : 43 Python prouvés
+contre **NumPy réel**, 36 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
 $ cargo run -p scirust-transpiler --example oracle
@@ -388,8 +388,9 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ M: max(a,b) / min(a,b) (2-arg) / power(a,b) (MATLAB binary max/min & power — Phase 2)
   ✓ M: v.^2 / a.^b / 2.^v (MATLAB elementwise power `.^` on arrays, broadcast — Phase 2)
   ✓ M: cumsum(v) / diff(v) / sort(v) (MATLAB vector→vector builtins — Phase 2)
+  ✓ M: cumprod / cummax / cummin / flip (more MATLAB vector→vector builtins — Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 (`return a, b` — Phase 2)
-  ORACLE GREEN — 76/76 cases match their reference runtime within tolerance
+  ORACLE GREEN — 79/79 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
