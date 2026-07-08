@@ -647,12 +647,17 @@ mod tests {
 
     #[test]
     fn matlab_vector_builtins_infer_array_and_route_to_prelude() {
-        // cumsum / diff / sort take a vector and return a vector; the argument
-        // is inferred as an array purely from the builtin.
+        // cumsum / cumprod / cummax / cummin / diff / sort / flip take a vector
+        // and return a vector; the argument is inferred as an array purely from
+        // the builtin.
         for (call, helper) in [
             ("cumsum", "np::cumsum"),
+            ("cumprod", "np::cumprod"),
+            ("cummax", "np::cummax"),
+            ("cummin", "np::cummin"),
             ("diff", "np::diff"),
             ("sort", "np::sort"),
+            ("flip", "np::flip"),
         ]
         {
             let src = format!("function y = f(v)\n  y = {}(v);\nend\n", call);

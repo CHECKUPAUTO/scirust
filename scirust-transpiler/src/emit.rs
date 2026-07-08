@@ -88,6 +88,46 @@ pub mod np {
         }
         o
     }
+    /// Running prefix product in fixed left-to-right order.
+    pub fn cumprod(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len());
+        let mut p = 1.0f64;
+        for i in 0..a.len() {
+            p *= a[i];
+            o.push(p);
+        }
+        o
+    }
+    /// Running maximum.
+    pub fn cummax(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len());
+        let mut m = f64::NEG_INFINITY;
+        for i in 0..a.len() {
+            if a[i] > m {
+                m = a[i];
+            }
+            o.push(m);
+        }
+        o
+    }
+    /// Running minimum.
+    pub fn cummin(a: &[f64]) -> Vec<f64> {
+        let mut o = Vec::with_capacity(a.len());
+        let mut m = f64::INFINITY;
+        for i in 0..a.len() {
+            if a[i] < m {
+                m = a[i];
+            }
+            o.push(m);
+        }
+        o
+    }
+    /// Reversed copy.
+    pub fn flip(a: &[f64]) -> Vec<f64> {
+        let mut o = a.to_vec();
+        o.reverse();
+        o
+    }
     /// Consecutive differences (length `n-1`; empty for `n < 2`).
     pub fn diff(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len().saturating_sub(1));
@@ -622,6 +662,42 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let a = emit(a, ctx);
             Frag {
                 code: format!("np::cumsum({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cumprod(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::cumprod({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cummax(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::cummax({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Cummin(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::cummin({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Flip(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::flip({})", slice_of(&a)),
                 ty: Ty::Array,
                 borrowed: false,
             }
