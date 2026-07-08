@@ -288,6 +288,10 @@ pub enum SirExpr {
     Cummin(Box<SirExpr>),
     /// `diff(v)` : Array -> Array of consecutive differences (length `n-1`).
     Diff(Box<SirExpr>),
+    /// `gradient(v)` : Array -> Array numerical gradient (unit spacing): central
+    /// differences on the interior, one-sided at the two ends (MATLAB
+    /// `gradient`, same length as the input).
+    Gradient(Box<SirExpr>),
     /// `sort(v)` : Array -> Array sorted ascending (MATLAB `sort`).
     Sort(Box<SirExpr>),
     /// `flip(v)` : Array -> Array reversed.
@@ -534,6 +538,7 @@ impl SirExpr {
             | SirExpr::Cummax(_)
             | SirExpr::Cummin(_)
             | SirExpr::Diff(_)
+            | SirExpr::Gradient(_)
             | SirExpr::Sort(_)
             | SirExpr::Flip(_)
             | SirExpr::ArrayLit(_)
@@ -701,6 +706,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Cummax(x)
         | SirExpr::Cummin(x)
         | SirExpr::Diff(x)
+        | SirExpr::Gradient(x)
         | SirExpr::Sort(x)
         | SirExpr::Flip(x)
         | SirExpr::Trace(x)

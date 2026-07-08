@@ -704,15 +704,16 @@ mod tests {
 
     #[test]
     fn matlab_vector_builtins_infer_array_and_route_to_prelude() {
-        // cumsum / cumprod / cummax / cummin / diff / sort / flip take a vector
-        // and return a vector; the argument is inferred as an array purely from
-        // the builtin.
+        // cumsum / cumprod / cummax / cummin / diff / gradient / sort / flip take
+        // a vector and return a vector; the argument is inferred as an array
+        // purely from the builtin.
         for (call, helper) in [
             ("cumsum", "np::cumsum"),
             ("cumprod", "np::cumprod"),
             ("cummax", "np::cummax"),
             ("cummin", "np::cummin"),
             ("diff", "np::diff"),
+            ("gradient", "np::gradient"),
             ("sort", "np::sort"),
             ("flip", "np::flip"),
         ]
@@ -734,6 +735,17 @@ mod tests {
         // A scalar argument (scalar expression) is rejected.
         let bad = transpile_matlab("function y = f(x)\n  y = diff(x * 2.0);\nend\n");
         assert!(bad.is_err());
+    }
+
+    #[test]
+    fn matlab_gradient_helper_uses_centred_and_one_sided_differences() {
+        // The gradient prelude helper must exist and encode the MATLAB formula:
+        // one-sided at the ends, centred (`/ 2.0`) on the interior.
+        let rust = transpile_matlab("function y = f(v)\n  y = gradient(v);\nend\n").unwrap();
+        assert!(rust.contains("pub fn gradient(a: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains("(a[i + 1] - a[i - 1]) / 2.0")); // centred interior
+        assert!(rust.contains("a[1] - a[0]")); // one-sided left end
+        assert!(rust.contains("a[n - 1] - a[n - 2]")); // one-sided right end
     }
 
     #[test]

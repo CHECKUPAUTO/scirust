@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `gradient(v)`** — gradient numérique à pas unitaire, prouvé contre Octave réel (Phase 2, incrément 42)
+Différentiation numérique : `gradient(v)` renvoie un vecteur de **même longueur**
+que l'entrée, par différences **centrées** à l'intérieur `(v[i+1] − v[i−1])/2` et
+**unilatérales** aux deux extrémités (`v[1] − v[0]`, `v[n−1] − v[n−2]`), à pas
+unitaire — exactement `gradient` de MATLAB/Octave. Nouveau nœud SIR `Gradient`
+(vecteur→vecteur, comme `diff`) et helper de prélude déterministe `np::gradient`.
+
+- `gradient(v)` : `v` vecteur → vecteur de dérivées numériques (même longueur).
+- Cas limites : `gradient([x]) = [0]` ; `gradient([]) = []`.
+
+Un cas d'oracle (`gradient(v)` sur un vecteur de 7 éléments). **Oracle 119/119**
+(200 essais chacun) ; **90 tests unitaires** (2 nouveaux — routage + structure de la
+formule centrée/unilatérale).
+*Non-vacuité* : diviser la différence centrée par `3` au lieu de `2` fait diverger
+le cas `gradient` (dès l'indice intérieur) tandis que `diff` reste vert — le facteur
+central est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `log2` / `asinh` / `acosh` / `atanh`** — log base-2 et trigonométrie hyperbolique inverse, prouvées contre Octave réel (Phase 2, incrément 41)
 Achève le vocabulaire élémentaire : le **logarithme base 2** `log2` et les trois
 inverses hyperboliques **arc-sinus** `asinh` / **arc-cosinus** `acosh` /

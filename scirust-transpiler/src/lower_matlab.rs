@@ -972,7 +972,15 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if matches!(
         func,
-        "cumsum" | "cumprod" | "cummax" | "cummin" | "diff" | "sort" | "flip" | "cumtrapz"
+        "cumsum"
+            | "cumprod"
+            | "cummax"
+            | "cummin"
+            | "diff"
+            | "gradient"
+            | "sort"
+            | "flip"
+            | "cumtrapz"
     )
     {
         // Vector -> vector builtins (array in, array out).
@@ -987,6 +995,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "cummax" => SirExpr::Cummax(boxed),
             "cummin" => SirExpr::Cummin(boxed),
             "diff" => SirExpr::Diff(boxed),
+            "gradient" => SirExpr::Gradient(boxed),
             "sort" => SirExpr::Sort(boxed),
             "cumtrapz" => SirExpr::Cumtrapz(boxed),
             _ => SirExpr::Flip(boxed),
@@ -1160,7 +1169,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
-             cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace/logspace, length, \
+             cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/diag, linspace/logspace, length, \
              det/inv/eig/trace)",
             func
         )),
@@ -1371,6 +1380,7 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                         | "cummax"
                         | "cummin"
                         | "diff"
+                        | "gradient"
                         | "sort"
                         | "flip"
                         | "cumtrapz"

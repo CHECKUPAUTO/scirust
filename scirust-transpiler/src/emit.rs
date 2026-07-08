@@ -160,6 +160,25 @@ pub mod np {
         }
         o
     }
+    /// Numerical gradient with unit spacing (MATLAB `gradient`, same length):
+    /// one-sided differences at the two ends, centred differences interior.
+    /// `n == 1` yields `[0.0]`; `n == 0` yields an empty vector.
+    pub fn gradient(a: &[f64]) -> Vec<f64> {
+        let n = a.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        if n == 1 {
+            return vec![0.0f64];
+        }
+        let mut o = Vec::with_capacity(n);
+        o.push(a[1] - a[0]);
+        for i in 1..n - 1 {
+            o.push((a[i + 1] - a[i - 1]) / 2.0);
+        }
+        o.push(a[n - 1] - a[n - 2]);
+        o
+    }
     /// Ascending sort (MATLAB `sort`); panics on NaN, which is outside domain.
     pub fn sort(a: &[f64]) -> Vec<f64> {
         let mut o = a.to_vec();
@@ -973,6 +992,15 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let a = emit(a, ctx);
             Frag {
                 code: format!("np::diff({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Gradient(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::gradient({})", slice_of(&a)),
                 ty: Ty::Array,
                 borrowed: false,
             }

@@ -61,7 +61,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
 | math `sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular; scalar, elementwise or broadcast), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix` (`mod` floors, `rem` truncates) via elementwise/broadcast on vectors; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
-| vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
+| vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`gradient`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, unit-spacing numerical gradient, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
 | constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
@@ -134,8 +134,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: norm(v, 1) / norm(v, p)   200/200 trials match (octave) (MATLAB general finite vector p-norm, Phase 2)
   ✓ M: tan / asin / acos         200/200 trials match (octave) (MATLAB elementary/inverse trig, scalar & elementwise, Phase 2)
   ✓ M: log2 / asinh / acosh / atanh 200/200 trials match (octave) (base-2 log + inverse hyperbolic, scalar & elementwise, Phase 2)
+  ✓ M: gradient(v)               200/200 trials match (octave) (MATLAB unit-spacing numerical gradient, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 118/118 cases match their reference runtime within tolerance
+  ORACLE GREEN — 119/119 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
