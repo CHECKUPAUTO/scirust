@@ -55,7 +55,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
 | linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B`, transpose `A'` / `A.'` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul / transpose); `*` routes to a matrix product only when the left operand is an inferred matrix |
-| vector `norm(v)` (2-norm), `dot(a, b)` (inner product), `cross(a, b)` (3-vector) | `sqrt(sum(v.*v))` / fixed-order `np::dot` / `np::cross` |
+| vector `norm(v)` (2-norm), `norm(v, p)` (general finite p-norm), `dot(a, b)` (inner product), `cross(a, b)` (3-vector) | `sqrt(sum(v.*v))` / `(sum(abs(v).^p))^(1/p)` / fixed-order `np::dot` / `np::cross` |
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
@@ -131,8 +131,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: deg2rad / rad2deg + sign elementwise 200/200 trials match (octave) (angle conversion + vector sign, Phase 2)
   ✓ M: mod(cumsum(v),3) / rem(cumsum(v),3) 200/200 trials match (octave) (elementwise modular, broadcast, Phase 2)
   ✓ M: logspace(a, b, 6)         200/200 trials match (octave) (MATLAB logarithmic vector constructor, Phase 2)
+  ✓ M: norm(v, 1) / norm(v, p)   200/200 trials match (octave) (MATLAB general finite vector p-norm, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 107/107 cases match their reference runtime within tolerance
+  ORACLE GREEN — 109/109 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -193,8 +194,9 @@ them.
 * **`eig` is proven on symmetric inputs.** It routes to the verified symmetric
   eigensolver (real, ascending eigenvalues — matching Octave's `eig` on a
   symmetric matrix); general non-symmetric `eig` (complex eigenvalues, no
-  guaranteed order) is out of the subset. `norm(v)` is the vector 2-norm; a
-  matrix `norm` (spectral norm) is a distinct quantity and is refused.
+  guaranteed order) is out of the subset. `norm(v)` is the vector 2-norm and
+  `norm(v, p)` the general vector p-norm for a *finite* `p`; the `p = Inf`/`-Inf`
+  norms and the matrix (spectral) `norm` are distinct quantities and are refused.
 * **`round` follows MATLAB, not NumPy.** It rounds half *away from zero*
   (`f64::round`), which differs from `numpy.round`'s banker's rounding — so it is
   wired only on the MATLAB path. `mod`/`rem`/`sign` apply elementwise (and

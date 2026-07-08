@@ -1203,6 +1203,32 @@ fn matlab_cases() -> Vec<Case> {
             src: "function y = mlogspace(a, b)\n  y = logspace(a, b, 6);\nend\n",
             args: vec![Scalar { lo: -2.0, hi: 2.0 }, Scalar { lo: -2.0, hi: 2.0 }],
         },
+        // ---- MATLAB vector p-norm (Phase 2) ----
+        // norm(v, 1) — the 1-norm (sum of absolute values), literal p.
+        Case {
+            name: "M: norm(v, 1) (1-norm)",
+            call: "mnorm1",
+            src: "function y = mnorm1(v)\n  y = norm(v, 1);\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // norm(v, p) — the general finite p-norm with p a fuzzed scalar in [1, 5].
+        Case {
+            name: "M: norm(v, p) (p-norm)",
+            call: "mnormp",
+            src: "function y = mnormp(v, p)\n  y = norm(v, p);\nend\n",
+            args: vec![
+                Array {
+                    n: 6,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+                Scalar { lo: 1.0, hi: 5.0 },
+            ],
+        },
     ]
 }
 

@@ -160,6 +160,27 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `norm(v, p)`** — p-norme vectorielle finie générale, prouvée contre Octave réel (Phase 2, incrément 39)
+`norm` accepte désormais une **seconde forme** `norm(v, p)` calculant la p-norme
+vectorielle `(Σ |vᵢ|^p)^{1/p}` pour un `p` **fini** quelconque (`norm(v, 1)` = somme
+des valeurs absolues, `norm(v, 2)` = norme euclidienne, etc.). Composée depuis des
+nœuds déjà vérifiés : `abs` élément par élément, `.^ p` par diffusion, somme à ordre
+fixe, puis puissance scalaire `^(1/p)`. La forme à un argument `norm(v)` (2-norme)
+est inchangée.
+
+- `norm(v, p)` : `v` vecteur, `p` scalaire fini → p-norme.
+- L'inférence de type reconnaît le premier argument de `norm(v, p)` comme un
+  vecteur (comme `polyval`), `p` restant scalaire.
+
+*Frontière (honnête)* : les normes `p = Inf`/`-Inf` et la norme matricielle
+(spectrale) sont des quantités distinctes et restent **refusées**.
+
+Deux cas d'oracle (`norm(v, 1)` littéral, `norm(v, p)` avec `p` fuzzé dans `[1, 5]`).
+**Oracle 109/109** (200 essais chacun) ; **87 tests unitaires** (1 nouveau).
+*Non-vacuité* : remplacer l'exposant `1/p` par `2/p` (numérateur `1`→`2`) fait
+diverger les deux cas p-norme tandis que la 2-norme `norm(v)` (chemin séparé) reste
+verte — l'exposant réciproque est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `logspace(a, b, n)`** — constructeur de vecteur logarithmique, prouvé contre Octave réel (Phase 2, incrément 38)
 Frère de `linspace` : `logspace(a, b, n)` produit `n` points espacés
 logarithmiquement, `10^a .. 10^b`. Défini exactement comme `10 .^ linspace(a, b, n)`,
