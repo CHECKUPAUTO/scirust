@@ -1236,6 +1236,38 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 170.0,
             }],
         },
+        // asind(x) — inverse degree trig; domain [-1, 1], result in degrees.
+        Case {
+            name: "M: asind(x) (scalar, degrees)",
+            call: "masind",
+            src: "function y = masind(x)\n  y = asind(x);\nend\n",
+            args: vec![Scalar { lo: -0.9, hi: 0.9 }],
+        },
+        // acosd(x) — inverse degree trig; domain [-1, 1].
+        Case {
+            name: "M: acosd(x) (scalar, degrees)",
+            call: "macosd",
+            src: "function y = macosd(x)\n  y = acosd(x);\nend\n",
+            args: vec![Scalar { lo: -0.9, hi: 0.9 }],
+        },
+        // atand(x) — inverse degree trig; domain all reals.
+        Case {
+            name: "M: atand(x) (scalar, degrees)",
+            call: "matand",
+            src: "function y = matand(x)\n  y = atand(x);\nend\n",
+            args: vec![Scalar { lo: -5.0, hi: 5.0 }],
+        },
+        // atand(flip(v)) — elementwise inverse degree trig over a vector.
+        Case {
+            name: "M: atand(flip(v)) (elementwise, degrees)",
+            call: "matandv",
+            src: "function y = matandv(v)\n  y = atand(flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -5.0,
+                hi: 5.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",

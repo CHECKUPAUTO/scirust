@@ -160,6 +160,21 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `asind` / `acosd` / `atand`** — trigonométrie inverse en degrés, prouvée contre Octave réel (Phase 2, incrément 45)
+Complète la famille trigonométrique en degrés : `asind`/`acosd`/`atand` appliquent
+l'inverse `asin`/`acos`/`atan` (résultat en radians, scalaire ou élément par élément)
+puis convertissent l'angle en **degrés** (`× 180/π`, via le helper `scale_by_const`
+partagé avec `rad2deg`).
+
+- `asind(x)`, `acosd(x)`, `atand(x)` : scalaire ou vecteur (élément par élément).
+- Domaines : `asind`/`acosd` sur `[-1, 1]` ; `atand` sur tous les réels.
+
+Quatre cas d'oracle (`asind`/`acosd`/`atand` scalaires, plus `atand(flip(v))` élément
+par élément). **Oracle 129/129** (200 essais chacun) ; **93 tests unitaires** (1 nouveau).
+*Non-vacuité* : remplacer le facteur `180/π` par `90/π` pour la trigo inverse en
+degrés fait diverger les quatre cas tandis que `rad2deg` (facteur propre) reste vert —
+le facteur de conversion est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `sind` / `cosd` / `tand`** — trigonométrie en degrés, prouvée contre Octave réel (Phase 2, incrément 44)
 Trigonométrie à argument en **degrés** : `sind`/`cosd`/`tand` convertissent l'argument
 en radians (`× π/180`, scalaire ou par diffusion) puis appliquent `sin`/`cos`/`tan`
