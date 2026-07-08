@@ -188,6 +188,38 @@ generations and for prompt-heavy workloads (fast batched prefill), but single-st
 decode at a few tok/s for 350M confirms the same fp32 kernel-efficiency ceiling —
 the order-of-magnitude lever remains Route B.
 
+### Speculative decoding (measured cost model)
+
+Speculative decoding attacks the `m = 1` decode wall **algorithmically**: a cheap
+draft proposes `k` tokens, the target verifies all `k` in one wide `decode_batch`
+(`m = k`), and accepts the longest prefix matching its own greedy pick plus one
+correction. It is **exact** — the output equals plain greedy for *any* draft
+(hardware-confirmed: `resident_speculative_matches_greedy` PASSes, and the bench's
+`exact` column reads `yes` at every `k` even with a useless random draft). The
+*speedup* is entirely a function of the draft's acceptance rate.
+
+Measured on the Thor (`examples/resident_spec_bench`, fp32; target d512·8L, draft
+d512·2L):
+
+- greedy target **14.4 tok/s** (69.5 ms/tok); the 2-layer draft is **3.5× cheaper**
+  (19.9 ms/tok).
+- Cost model `speedup(a) = (a+1)·t_g / (k·t_d + 2·t_g)` (a = tokens accepted per
+  round of `k`):
+
+  | k | accept 50% | accept 75% | accept 100% | break-even accept |
+  |--:|-----------:|-----------:|------------:|------------------:|
+  | 2 | 0.78× | 0.97× | 1.17× | ~1.6 / 2 |
+  | 4 | 0.95× | 1.27× | 1.59× | ~2.1 / 4 |
+  | 8 | 1.17× | 1.63× | 2.10× | ~3.3 / 8 |
+
+Reading it: on **random** weights the draft agrees ~by chance (≈0.4 %), so measured
+speedup is `<1×` — the draft/verify overhead dominates. The value is the cost model:
+with a 3.5×-cheaper draft, `k = 8` **breaks even at ~41 % acceptance** and a draft
+**trained to track the target** (acceptance ~0.6–0.8, typical in practice) would
+deliver **~1.6–2.1×**. So speculative decoding is a real, order-of-~2 lever for
+single-stream decode *given a trained draft* — complementary to Route B (which lifts
+the per-forward ceiling itself), not a substitute.
+
 ## What already works on the Thor today (verified)
 
 - The whole workspace **cross-checks for `aarch64-unknown-linux-gnu`** in CI —
