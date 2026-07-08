@@ -31,7 +31,7 @@ auditable, matching the SciRust doctrine.
 | Definitions   | top-level `def`s; params `float` / `int` / `np.ndarray` (hints optional, array-ness inferred from indexing / `np.sum` / `np.dot` / `len`) |
 | Types         | scalar `f64`, 1-D array `Vec<f64>` / `&[f64]` |
 | Arithmetic    | `+ - * / **`, unary minus, `@` matrix-vector / matrix-matrix product, `A.T` transpose; elementwise array ops; scalar↔array broadcasting |
-| Intrinsics    | `np.sum`, `np.dot`, `np.zeros`, `np.ones`, `np.diag`, `len`, `np.sqrt/exp/sin/cos/abs/tanh` (scalar or elementwise) |
+| Intrinsics    | reductions `np.sum/prod/mean/max/min`, `np.dot`; builders `np.zeros/ones/diag`, `len`; elementwise/scalar math `np.sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/arctan` |
 | Routed kernels | `np.linalg.solve(A, b)`, `np.linalg.det(A)`, `np.linalg.eigvalsh(A)`, `np.linalg.inv(A)`, `A @ b` → `scirust-solvers` (verified LU / symmetric eigensolver); `np.fft.fft(x)` / `np.fft.rfft(x)` / `np.fft.ifft(...)` / `np.abs(np.fft.fft(x))` → `scirust-signal` (verified FFT, real→complex) — the emitted code calls the oracle-validated kernel instead of re-deriving it |
 | Multi-output  | `U, S, Vh = np.linalg.svd(A)` (thin SVD, `Vh = Vᵀ`) and `Q, R = np.linalg.qr(A)` (Householder QR) → `scirust-solvers` via tuple unpacking (square `A`, where reduced = full) |
 | Composition   | list literals `[a, b, c]` → `Vec<f64>`; **calls to other user functions** defined earlier in the module (define-before-use), with array-ness inferred *across* calls from the callee's signature (no annotation needed) |
@@ -89,10 +89,11 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ user calls: sumsq / sumdbl / chain 200/200 trials match (numpy)  (function composition, Phase 2)
   ✓ list literal: weighted average 200/200 trials match (numpy)  (Python list → Vec, Phase 2)
   ✓ sin/cos/abs / exp / ** / ones 200/200 trials match (numpy) (full intrinsic coverage)
+  ✓ log / floor / sinh / max-min-mean / prod 200/200 trials match (numpy) (expanded vocabulary)
   ✓ M: norm2 / dot / relu / sign 200/200 trials match (octave) (MATLAB front-end, Phase 2)
   ✓ M: clamp / poly / mysum      200/200 trials match (octave) (1-based idx, for/while, ^)
   ✓ M: newton / ew_scale         200/200 trials match (octave) (while, element-wise array out)
-  ORACLE GREEN — 44/44 cases match their reference runtime within tolerance
+  ORACLE GREEN — 49/49 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

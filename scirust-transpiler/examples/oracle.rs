@@ -387,6 +387,58 @@ fn cases() -> Vec<Case> {
                 hi: 2.0,
             }],
         },
+        // ---- expanded intrinsic vocabulary (Phase 2) ----
+        // log / log10 (positive domain), elementwise over an array.
+        Case {
+            name: "log + log10 (array)",
+            call: "logs",
+            src: "def logs(x: np.ndarray):\n    return np.log(x) + np.log10(x)\n",
+            args: vec![Array {
+                n: 6,
+                lo: 0.1,
+                hi: 5.0,
+            }],
+        },
+        // floor / ceil, elementwise.
+        Case {
+            name: "floor + ceil (array)",
+            call: "rounding",
+            src: "def rounding(x: np.ndarray):\n    return np.floor(x) + np.ceil(x)\n",
+            args: vec![Array {
+                n: 6,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // sinh / cosh / arctan (scalar).
+        Case {
+            name: "sinh/cosh/arctan (scalar)",
+            call: "hyp",
+            src: "def hyp(x):\n    return np.sinh(x) + np.cosh(x) + np.arctan(x)\n",
+            args: vec![Scalar { lo: -2.0, hi: 2.0 }],
+        },
+        // max / min / mean reductions in one expression.
+        Case {
+            name: "max - min + mean (reductions)",
+            call: "stats",
+            src: "def stats(x: np.ndarray):\n    return np.max(x) - np.min(x) + np.mean(x)\n",
+            args: vec![Array {
+                n: 8,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // prod reduction (well-conditioned range so the product stays O(1)).
+        Case {
+            name: "prod (reduction)",
+            call: "prodf",
+            src: "def prodf(x: np.ndarray):\n    return np.prod(x)\n",
+            args: vec![Array {
+                n: 5,
+                lo: 0.5,
+                hi: 1.5,
+            }],
+        },
         // ---- Python élargi (Phase 2): user-defined function calls + lists ----
         // Scalar composition: sumsq calls sq twice.
         Case {

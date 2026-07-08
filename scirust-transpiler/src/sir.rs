@@ -183,6 +183,12 @@ pub enum SirExpr {
     },
     /// `np.sum(a)` : Array -> Scalar, fixed ascending reduction order.
     Sum(Box<SirExpr>),
+    /// `np.prod(a)` : Array -> Scalar, fixed ascending reduction order.
+    Prod(Box<SirExpr>),
+    /// `np.max(a)` : Array -> Scalar (numpy errors on empty; so does the emit).
+    Max(Box<SirExpr>),
+    /// `np.min(a)` : Array -> Scalar.
+    Min(Box<SirExpr>),
     /// `np.dot(a, b)` : (Array, Array) -> Scalar, fixed reduction order.
     Dot(Box<SirExpr>, Box<SirExpr>),
     /// `len(a)` / `a.shape[0]` : Array -> Int.
@@ -291,6 +297,15 @@ pub enum MathFn {
     Cos,
     Abs,
     Tanh,
+    /// Natural logarithm (`np.log` → `f64::ln`).
+    Ln,
+    Log10,
+    Floor,
+    Ceil,
+    Sinh,
+    Cosh,
+    /// Inverse tangent (`np.arctan` → `f64::atan`).
+    Atan,
 }
 
 impl MathFn {
@@ -303,6 +318,13 @@ impl MathFn {
             MathFn::Cos => "cos",
             MathFn::Abs => "abs",
             MathFn::Tanh => "tanh",
+            MathFn::Ln => "ln",
+            MathFn::Log10 => "log10",
+            MathFn::Floor => "floor",
+            MathFn::Ceil => "ceil",
+            MathFn::Sinh => "sinh",
+            MathFn::Cosh => "cosh",
+            MathFn::Atan => "atan",
         }
     }
 }
@@ -321,6 +343,9 @@ impl SirExpr {
             | SirExpr::Index { .. }
             | SirExpr::ScalarUnaryFn { .. }
             | SirExpr::Sum(_)
+            | SirExpr::Prod(_)
+            | SirExpr::Max(_)
+            | SirExpr::Min(_)
             | SirExpr::Det(_)
             | SirExpr::Dot(_, _) => Ty::Scalar,
             SirExpr::IntBin { .. } | SirExpr::Len(_) => Ty::Int,
@@ -453,6 +478,9 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::ScalarUnaryFn { arg: x, .. }
         | SirExpr::ArrayUnaryFn { arg: x, .. }
         | SirExpr::Sum(x)
+        | SirExpr::Prod(x)
+        | SirExpr::Max(x)
+        | SirExpr::Min(x)
         | SirExpr::Len(x)
         | SirExpr::Zeros(x)
         | SirExpr::Ones(x) => scan_expr(x, solvers, signal),

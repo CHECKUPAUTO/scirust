@@ -80,6 +80,19 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **vocabulaire numérique élargi** (log/floor/ceil/sinh/…, prod/mean/max/min) prouvé contre NumPy réel (Phase 2, incrément 15)
+Sept nouvelles fonctions math élémentaires (scalaire ou tableau) — `np.log`
+(→ `ln`), `np.log10`, `np.floor`, `np.ceil`, `np.sinh`, `np.cosh`, `np.arctan`
+(→ `atan`) — et quatre réductions — `np.prod`, `np.mean` (désucrée en
+`sum(a)/len(a)`, sans nouveau nœud), `np.max`, `np.min`. Nouveaux `MathFn`
+(Ln/Log10/Floor/Ceil/Sinh/Cosh/Atan) et `SirExpr::Prod`/`Max`/`Min` avec
+helpers de prélude à ordre pinné (`prod` ascendant reproductible). Les
+réductions comptent aussi comme preuve de tableau pour l'inférence de type des
+paramètres. Cinq cas d'oracle (log+log10, floor+ceil, sinh/cosh/arctan,
+max−min+mean, prod). **Oracle 49/49** (200 essais chacun) ; **48 tests
+unitaires**. Non-vacuité re-vérifiée : mapper `np.log` sur `log10` fait diverger
+le cas (|Δ|≈0,9) et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **`np.linalg.qr`** (déstructuration `Q, R = …`) prouvé contre NumPy réel (Phase 2, incrément 14)
 Deuxième noyau multi-sorties, sur le même point d'extension `TupleExpr` que la
 SVD. `Q, R = np.linalg.qr(A)` transpile vers la QR de Householder vérifiée

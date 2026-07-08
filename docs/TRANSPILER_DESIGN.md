@@ -349,7 +349,7 @@ secteurs réellement débloqués.
 | Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
 | Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
 | Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (43 tests) |
+| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (48 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
@@ -360,7 +360,7 @@ secteurs réellement débloqués.
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 44 cas au total : 35 Python prouvés
+**Résultat de l'oracle (reproductible).** 49 cas au total : 40 Python prouvés
 contre **NumPy réel**, 9 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
@@ -376,9 +376,10 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ qr reconstruction Q@R (tuple unpack → scirust-solvers — Phase 2)
   ✓ user calls: sumsq / sumdbl / chain (function composition, hint-free inference — Phase 2)
   ✓ list literal: weighted average (Python list → Vec — Phase 2)
+  ✓ log/log10 / floor/ceil / sinh/cosh/arctan / max-min-mean / prod (vocabulaire élargi — Phase 2)
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
   ✓ M: norm2 / dot / relu / sign / clamp / poly / mysum / newton / ew_scale (MATLAB → Octave — Phase 2)
-  ORACLE GREEN — 44/44 cases match their reference runtime within tolerance
+  ORACLE GREEN — 49/49 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
