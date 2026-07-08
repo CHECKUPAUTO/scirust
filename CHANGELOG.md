@@ -160,6 +160,20 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `sec` / `csc` / `cot`** — trigonométrie réciproque, prouvée contre Octave réel (Phase 2, incrément 46)
+Achève la trigonométrie : les fonctions réciproques `sec = 1/cos`, `csc = 1/sin`,
+`cot = 1/tan`, chacune appliquant la fonction trig de base (scalaire ou élément par
+élément) puis prenant l'inverse via le nouveau helper `reciprocal` (`1.0 / e`,
+scalaire ou diffusion).
+
+- `sec(x)`, `csc(x)`, `cot(x)` : scalaire ou vecteur (élément par élément).
+
+Quatre cas d'oracle (`sec`/`csc`/`cot` scalaires sur des plages hors pôles, plus
+`sec(flip(v))` élément par élément). **Oracle 133/133** (200 essais chacun) ;
+**94 tests unitaires** (1 nouveau).
+*Non-vacuité* : router `sec` vers `sin` (au lieu de `cos`) fait diverger les deux cas
+`sec` tandis que `csc`/`cot` restent verts — le mappage réciproque est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `asind` / `acosd` / `atand`** — trigonométrie inverse en degrés, prouvée contre Octave réel (Phase 2, incrément 45)
 Complète la famille trigonométrique en degrés : `asind`/`acosd`/`atand` appliquent
 l'inverse `asin`/`acos`/`atan` (résultat en radians, scalaire ou élément par élément)
