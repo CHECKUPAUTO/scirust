@@ -526,6 +526,96 @@ impl ResidentModel {
         chain.download(&logits).expect("download logits")
     }
 
+    /// **Batched multi-token decode**: process `tokens` (at absolute positions
+    /// `start_pos .. start_pos + m`) in **one wide forward** over the KV caches,
+    /// appending all `m` roped-key / raw-value rows and returning `m` `vocab`-wide
+    /// logit rows (one per input position). The projections and MLP run as `m`-row
+    /// matmuls; only the attention is per-row, each query attending over the cache
+    /// prefix `[0, old + i]` (all accepted context + the new keys up to and
+    /// including itself — the causal structure).
+    ///
+    /// This is exactly `m` sequential [`Self::decode_step`]s fused into one forward:
+    /// every op is height-independent and query `i` sees the same prefix either way,
+    /// so the returned logits and the resulting cache are **bit-for-bit** identical
+    /// to the token-by-token path (verified in the in-module tests). It is the
+    /// **verify** step of speculative decoding — check `k` draft tokens with a
+    /// single wide target forward instead of `k` narrow ones.
+    // Consumed by the speculative-decode driver (specB); for now exercised by the
+    // `decode_batch_matches_sequential_decode_steps` parity test.
+    #[allow(dead_code)]
+    fn decode_batch(
+        &self,
+        tokens: &[u32],
+        start_pos: usize,
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
+    ) -> Vec<Vec<f32>> {
+        let chain = &self.chain;
+        let d_model = self.embedding.cols();
+        let dh = d_model / self.n_heads;
+        let m = tokens.len();
+
+        let mut x = chain.embed(tokens, &self.embedding).expect("embed"); // [m × d]
+        for (l, b) in self.blocks.iter().enumerate()
+        {
+            let xn = chain.rms_norm(&x, &b.norm1, self.eps).expect("norm1");
+            let q = chain.matmul(&xn, &b.wq).expect("wq"); // [m × d]
+            let k = chain.matmul(&xn, &b.wk).expect("wk"); // [m × kv_dim]
+            let v = chain.matmul(&xn, &b.wv).expect("wv"); // [m × kv_dim]
+            // Row r sits at absolute position start_pos + r.
+            let qr = chain.rope(&q, m, start_pos, self.theta).expect("rope q");
+            let kr = chain.rope(&k, m, start_pos, self.theta).expect("rope k");
+            // Append all m roped keys / values to the resident caches.
+            kcache[l] = Some(match kcache[l].take()
+            {
+                None => kr,
+                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
+            });
+            vcache[l] = Some(match vcache[l].take()
+            {
+                None => v,
+                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
+            });
+            let kfull = kcache[l].as_ref().unwrap();
+            let vfull = vcache[l].as_ref().unwrap();
+            let old = kfull.rows() - m; // accepted-context length before this batch
+            // Per-row causal attention: query i attends over cache rows [0, old+i].
+            let mut ctx_rows: Option<GpuMatrix> = None;
+            for i in 0..m
+            {
+                let qr_i = chain.slice_rows(&qr, i, 1).expect("slice qr row");
+                let keys_i = chain
+                    .slice_rows(kfull, 0, old + i + 1)
+                    .expect("keys prefix");
+                let vals_i = chain
+                    .slice_rows(vfull, 0, old + i + 1)
+                    .expect("vals prefix");
+                let ctx_i = self.incr_attention(&qr_i, &keys_i, &vals_i, dh); // [1 × d]
+                ctx_rows = Some(match ctx_rows
+                {
+                    None => ctx_i,
+                    Some(acc) => chain.concat_rows(&acc, &ctx_i).expect("stack ctx"),
+                });
+            }
+            let ctx = ctx_rows.expect("m ≥ 1");
+            let attn_out = chain.matmul(&ctx, &b.wo).expect("wo"); // [m × d]
+            x = chain.add(&x, &attn_out).expect("attn residual");
+            let hn = chain.rms_norm(&x, &b.norm2, self.eps).expect("norm2");
+            let mlp = chain.swiglu_mlp(&hn, &b.wg, &b.wu, &b.wd).expect("mlp");
+            x = chain.add(&x, &mlp).expect("mlp residual");
+        }
+        let normed = chain
+            .rms_norm(&x, &self.final_norm, self.eps)
+            .expect("final norm");
+        let logits = chain
+            .matmul_t(&normed, &self.embedding, false, true)
+            .expect("logits"); // [m × vocab]
+        let all = chain.download(&logits).expect("download logits");
+        (0..m)
+            .map(|i| all[i * self.vocab..(i + 1) * self.vocab].to_vec())
+            .collect()
+    }
+
     /// Incremental analogue of [`GpuChain::gqa_attention`] for a **single query
     /// row**: `qr` is `1 × d_model` (already RoPE'd), attending over the cached
     /// keys `kmat` and values `vmat` (`seq × kv_dim`; keys already RoPE'd, values
@@ -1558,5 +1648,81 @@ impl Default for ResidentPretrainConfig {
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tiny tied-embedding config for the resident private-path tests.
+    fn tiny_tied() -> SciAgentConfig {
+        SciAgentConfig {
+            vocab_size: 48,
+            d_model: 32,
+            n_layers: 2,
+            n_heads: 4,
+            n_kv_heads: 2,
+            d_ff: 64,
+            max_seq_len: 128,
+            rope_theta: 10_000.0,
+            tie_embeddings: true,
+            use_bias: false,
+            eps: 1e-5,
+        }
+    }
+
+    /// The batched multi-token decode ([`ResidentModel::decode_batch`]) is
+    /// **bit-for-bit** `m` sequential [`ResidentModel::decode_step`]s: identical
+    /// per-position logits *and* identical resulting KV cache. This is the
+    /// exactness the speculative-decode verify relies on. Skips with no adapter.
+    #[test]
+    fn decode_batch_matches_sequential_decode_steps() {
+        let model = SciAgentModel::new(&tiny_tied());
+        let Some(rm) = ResidentModel::from_model(&model)
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping decode_batch parity");
+            return;
+        };
+        let n = rm.blocks.len();
+        let tokens: Vec<u32> = vec![5, 2, 9, 1, 7]; // m = 5 at positions 0..5
+
+        // Batched: one wide forward.
+        let mut kb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let batched = rm.decode_batch(&tokens, 0, &mut kb, &mut vb);
+
+        // Sequential: one decode_step per token.
+        let mut ks: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vs: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let seq: Vec<Vec<f32>> = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| rm.decode_step(t, i, &mut ks, &mut vs))
+            .collect();
+
+        assert_eq!(
+            batched, seq,
+            "decode_batch logits must match sequential decode_steps"
+        );
+
+        // The resulting caches must be identical too (same rows, same bytes).
+        for l in 0..n
+        {
+            let b = rm.chain.download(kb[l].as_ref().unwrap()).unwrap();
+            let s = rm.chain.download(ks[l].as_ref().unwrap()).unwrap();
+            assert_eq!(
+                b, s,
+                "layer {l} K cache must match after batched vs sequential"
+            );
+            let bv = rm.chain.download(vb[l].as_ref().unwrap()).unwrap();
+            let sv = rm.chain.download(vs[l].as_ref().unwrap()).unwrap();
+            assert_eq!(
+                bv, sv,
+                "layer {l} V cache must match after batched vs sequential"
+            );
+        }
+        eprintln!("decode_batch matches sequential decode_steps (logits + cache) — PASS");
     }
 }

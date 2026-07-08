@@ -745,6 +745,13 @@ pub fn cpu_concat_rows(a: &[f32], b: &[f32], cols: usize) -> Vec<f32> {
     out
 }
 
+/// CPU reference for the row-range gather — the oracle for
+/// [`crate::WgpuContext::slice_rows_resident`]. `x` is `rows × cols`; returns the
+/// contiguous `count × cols` block starting at row `start`.
+pub fn cpu_slice_rows(x: &[f32], cols: usize, start: usize, count: usize) -> Vec<f32> {
+    x[start * cols..(start + count) * cols].to_vec()
+}
+
 /// CPU reference for resident multi-head grouped-query attention, single
 /// sequence (`rows = seq_len`) — the oracle for
 /// [`crate::GpuChain::gqa_attention`]. Matches the sciagent model's attention

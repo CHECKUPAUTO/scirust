@@ -567,6 +567,20 @@ impl GpuChain {
         self.ctx.concat_rows_resident(a, b)
     }
 
+    /// Gather the resident **row range** `[start, start + count)` into a fresh
+    /// `count × cols` matrix (one GPU-side copy of the contiguous slice). The row
+    /// analogue of [`Self::slice_cols`]: read a KV-cache prefix, or roll the cache
+    /// back to the accepted length after a rejected speculative token.
+    /// Oracle: [`crate::ops::cpu_slice_rows`].
+    pub fn slice_rows(
+        &self,
+        x: &GpuMatrix,
+        start: usize,
+        count: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.slice_rows_resident(x, start, count)
+    }
+
     /// **Resident multi-head grouped-query attention**, single sequence
     /// (`rows = seq_len`), matching the sciagent model's attention:
     ///
@@ -1872,6 +1886,39 @@ mod tests {
             });
         }
         assert_eq!(chain.download(&cache.unwrap()).unwrap(), full);
+    }
+
+    /// `slice_rows` gathers a contiguous row range bit-exactly (a GPU-side copy),
+    /// including the prefix (`start = 0`) and rollback shapes the speculative-decode
+    /// path relies on.
+    #[test]
+    fn resident_slice_rows_matches_cpu_oracle() {
+        use crate::ops::cpu_slice_rows;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (7usize, 5usize);
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.19 - 0.4).cos())
+            .collect();
+        let gx = chain.upload(&x, rows, cols);
+
+        for (start, count) in [(0usize, 7usize), (0, 3), (2, 4), (5, 2), (6, 1), (3, 0)]
+        {
+            let sliced = chain.slice_rows(&gx, start, count).unwrap();
+            assert_eq!(sliced.rows(), count);
+            assert_eq!(sliced.cols(), cols);
+            assert_eq!(
+                chain.download(&sliced).unwrap(),
+                cpu_slice_rows(&x, cols, start, count),
+                "slice_rows [{start}, {})",
+                start + count
+            );
+        }
     }
 
     /// `slice_cols` backward: RoPE-style gradient check. For `L = Σ slice(X)⊙G`

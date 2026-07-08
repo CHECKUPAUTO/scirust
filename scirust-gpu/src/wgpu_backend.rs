@@ -1545,6 +1545,57 @@ impl WgpuContext {
         })
     }
 
+    /// Gather the **row range** `[start, start + count)` of a resident row-major
+    /// matrix into a fresh `count × cols` matrix, on-device (one
+    /// `copy_buffer_to_buffer` of the contiguous slice — no shader, no host
+    /// round-trip). Oracle: [`crate::ops::cpu_slice_rows`].
+    ///
+    /// The row analogue of [`Self::slice_cols_resident`]. Used by the resident
+    /// speculative-decode path: read a prefix of the KV cache (the keys/values a
+    /// mid-batch query may attend to), and roll the cache back to the accepted
+    /// length after a rejected draft token (`start = 0`).
+    pub fn slice_rows_resident(
+        &self,
+        x: &GpuMatrix,
+        start: usize,
+        count: usize,
+    ) -> BackendResult<GpuMatrix> {
+        if start + count > x.rows
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "slice_rows: [{start}, {}) out of {} rows",
+                start + count,
+                x.rows
+            )));
+        }
+        let cols = x.cols;
+        let bytes = (count * cols * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("slice-rows-res"),
+            size: bytes.max(4),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if bytes > 0
+        {
+            let src_off = (start * cols * std::mem::size_of::<f32>()) as u64;
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("slice-rows"),
+                });
+            encoder.copy_buffer_to_buffer(&x.buf, src_off, &out_buf, 0, bytes);
+            self.queue.submit(Some(encoder.finish()));
+        }
+        Ok(GpuMatrix {
+            buf: out_buf,
+            rows: count,
+            cols,
+        })
+    }
+
     /// Row-wise RMSNorm of a **resident** `rows × cols` matrix, result kept in
     /// VRAM — `x / sqrt(mean(x²) + eps) · weight`, matching
     /// [`crate::ops::cpu_rms_norm`]. `weight` is a resident `cols`-length gain
