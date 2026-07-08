@@ -1264,6 +1264,47 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 0.9,
             }],
         },
+        // ---- MATLAB base-2 log & inverse hyperbolic functions (Phase 2) ----
+        // log2(x) — scalar; domain (0, ∞).
+        Case {
+            name: "M: log2(x) (scalar)",
+            call: "mlog2",
+            src: "function y = mlog2(x)\n  y = log2(x);\nend\n",
+            args: vec![Scalar { lo: 0.1, hi: 8.0 }],
+        },
+        // asinh(x) — scalar; domain all reals.
+        Case {
+            name: "M: asinh(x) (scalar)",
+            call: "masinh",
+            src: "function y = masinh(x)\n  y = asinh(x);\nend\n",
+            args: vec![Scalar { lo: -3.0, hi: 3.0 }],
+        },
+        // acosh(x) — scalar; domain [1, ∞).
+        Case {
+            name: "M: acosh(x) (scalar)",
+            call: "macosh",
+            src: "function y = macosh(x)\n  y = acosh(x);\nend\n",
+            args: vec![Scalar { lo: 1.0, hi: 6.0 }],
+        },
+        // atanh(x) — scalar; domain (-1, 1).
+        Case {
+            name: "M: atanh(x) (scalar)",
+            call: "matanh",
+            src: "function y = matanh(x)\n  y = atanh(x);\nend\n",
+            args: vec![Scalar { lo: -0.9, hi: 0.9 }],
+        },
+        // atanh(flip(v)) — elementwise over a vector (array path for the new
+        // names); `flip` gives array-ness and keeps entries inside (-1, 1).
+        Case {
+            name: "M: atanh(flip(v)) (elementwise)",
+            call: "matanhv",
+            src: "function y = matanhv(v)\n  y = atanh(flip(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -0.9,
+                hi: 0.9,
+            }],
+        },
     ]
 }
 

@@ -160,6 +160,25 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `log2` / `asinh` / `acosh` / `atanh`** — log base-2 et trigonométrie hyperbolique inverse, prouvées contre Octave réel (Phase 2, incrément 41)
+Achève le vocabulaire élémentaire : le **logarithme base 2** `log2` et les trois
+inverses hyperboliques **arc-sinus** `asinh` / **arc-cosinus** `acosh` /
+**arc-tangente** `atanh`, chacune une fonction unaire s'appliquant en scalaire **ou**
+élément par élément (même mécanisme éprouvé que `sin`/`asin`), mappée 1:1 sur la
+méthode `f64` correspondante.
+
+- `log2(x)`, `asinh(x)`, `acosh(x)`, `atanh(x)` : scalaire ou vecteur (élément par
+  élément).
+- Domaines : `log2` sur `(0, ∞)` ; `asinh` sur tous les réels ; `acosh` sur `[1, ∞)` ;
+  `atanh` sur `(-1, 1)`.
+
+Cinq cas d'oracle (`log2`, `asinh`, `acosh`, `atanh` scalaires sur des plages dans
+le domaine, plus `atanh(flip(v))` élément par élément). **Oracle 118/118** (200 essais
+chacun) ; **89 tests unitaires** (1 nouveau).
+*Non-vacuité* : router `atanh` vers la méthode `asinh` fait diverger les deux cas
+`atanh` (scalaire ET élément par élément) tandis que `log2`/`asinh`/`acosh` restent
+verts — le mappage nom→méthode est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `tan` / `asin` / `acos`** — trigonométrie élémentaire et inverse, prouvées contre Octave réel (Phase 2, incrément 40)
 Complète le vocabulaire trigonométrique : la **tangente** `tan` et les inverses
 **arc-sinus** `asin` / **arc-cosinus** `acos`, chacune une fonction unaire qui

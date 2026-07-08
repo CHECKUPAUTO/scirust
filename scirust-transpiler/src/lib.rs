@@ -466,6 +466,25 @@ mod tests {
     }
 
     #[test]
+    fn matlab_log2_and_inverse_hyperbolic() {
+        // log2/asinh/acosh/atanh map 1:1 to the std f64 methods, scalar form.
+        let sc = transpile_matlab(
+            "function y = f(x)\n  y = log2(x) + asinh(x) + acosh(x) + atanh(x);\nend\n",
+        )
+        .unwrap();
+        assert!(sc.contains("(x).log2()"));
+        assert!(sc.contains("(x).asinh()"));
+        assert!(sc.contains("(x).acosh()"));
+        assert!(sc.contains("(x).atanh()"));
+        // Elementwise over a vector: `flip(v)` gives array-ness, `atanh` maps.
+        let ew = transpile_matlab("function y = f(v)\n  y = atanh(flip(v));\nend\n").unwrap();
+        assert_eq!(sig_of(&ew, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(ew.contains("np::map1("));
+        assert!(ew.contains("np::flip(v)"));
+        assert!(ew.contains("x.atanh()"));
+    }
+
+    #[test]
     fn matlab_det_and_inv_route_to_solvers() {
         // `A` is inferred as a matrix purely from `det(A)` / `inv(A)`.
         let d = transpile_matlab("function d = mdet(A)\n  d = det(A);\nend\n").unwrap();

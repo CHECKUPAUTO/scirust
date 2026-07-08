@@ -10,8 +10,9 @@ use crate::sir::*;
 use std::collections::{HashMap, HashSet};
 
 const MATH_FNS: &[&str] = &[
-    "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "floor", "ceil", "sinh", "cosh",
-    "tan", "atan", "asin", "acos", "round", "fix", "expm1", "log1p",
+    "sqrt", "exp", "sin", "cos", "abs", "tanh", "log", "log10", "log2", "floor", "ceil", "sinh",
+    "cosh", "asinh", "acosh", "atanh", "tan", "atan", "asin", "acos", "round", "fix", "expm1",
+    "log1p",
 ];
 
 pub fn lower_module(m: &MModule) -> Result<SirModule, String> {
@@ -705,10 +706,14 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "tanh" => MathFn::Tanh,
             "log" => MathFn::Ln,
             "log10" => MathFn::Log10,
+            "log2" => MathFn::Log2,
             "floor" => MathFn::Floor,
             "ceil" => MathFn::Ceil,
             "sinh" => MathFn::Sinh,
             "cosh" => MathFn::Cosh,
+            "asinh" => MathFn::Asinh,
+            "acosh" => MathFn::Acosh,
+            "atanh" => MathFn::Atanh,
             "tan" => MathFn::Tan,
             "atan" => MathFn::Atan,
             "asin" => MathFn::Asin,
@@ -1152,7 +1157,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         Some(other) => Err(format!("cannot index non-array `{}` ({:?})", func, other)),
         None => Err(format!(
             "unknown function or variable `{}` (supported intrinsics: \
-             sqrt/exp/log/log10/sin/cos/tan/sinh/cosh/tanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
+             sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/sort/flip/diag, linspace/logspace, length, \
