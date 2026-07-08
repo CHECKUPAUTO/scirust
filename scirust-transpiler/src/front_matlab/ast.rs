@@ -89,6 +89,8 @@ pub enum MBinOp {
     EDiv,
     /// Element-wise `.^`
     EPow,
+    /// Left division `A \ b` — the MATLAB *solve* operator (`x` s.t. `A x = b`).
+    LDiv,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

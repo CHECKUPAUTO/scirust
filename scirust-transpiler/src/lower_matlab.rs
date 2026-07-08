@@ -485,7 +485,29 @@ fn lower_bin(
             }
             Ok(ew_or_broadcast(sop, lv, rv, la, ra))
         },
+        // `A \ b` — MATLAB left division (solve `A x = b`), routed to the
+        // verified LU solver in `scirust-solvers`.
+        MBinOp::LDiv =>
+        {
+            if !is_matrixish(lv.ty())
+            {
+                return Err("`\\` (left division / solve) expects a matrix on the left".into());
+            }
+            if rv.ty() != Ty::Array
+            {
+                return Err("`\\` (left division / solve) expects a vector on the right".into());
+            }
+            Ok(SirExpr::LinSolve {
+                a: Box::new(lv),
+                b: Box::new(rv),
+            })
+        },
     }
+}
+
+/// A matrix operand: either a flat `&[f64]` parameter or a produced `Matrix`.
+fn is_matrixish(t: Ty) -> bool {
+    matches!(t, Ty::Matrix | Ty::MatrixVal)
 }
 
 fn ew_or_broadcast(op: Op, lv: SirExpr, rv: SirExpr, la: bool, ra: bool) -> SirExpr {
@@ -595,6 +617,28 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             r: Box::new(SirExpr::Len(Box::new(a))),
         });
     }
+    if func == "det"
+    {
+        // det(A) -> routed to the verified LU-based determinant.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if !is_matrixish(a.ty())
+        {
+            return Err("det expects a matrix argument".into());
+        }
+        return Ok(SirExpr::Det(Box::new(a)));
+    }
+    if func == "inv"
+    {
+        // inv(A) -> routed to the verified matrix inverse (returns a matrix).
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if !is_matrixish(a.ty())
+        {
+            return Err("inv expects a matrix argument".into());
+        }
+        return Ok(SirExpr::Inv(Box::new(a)));
+    }
     if func == "length"
     {
         need_args(func, args, 1)?;
@@ -687,13 +731,70 @@ fn expect_array(e: &SirExpr, ctx: &str) -> Result<(), String> {
 // ---- param type inference -------------------------------------------------
 
 fn infer_param_ty(name: &str, body: &[MStmt]) -> Ty {
-    if array_evidence_block(name, body)
+    if matrix_evidence_block(name, body)
+    {
+        Ty::Matrix
+    }
+    else if array_evidence_block(name, body)
     {
         Ty::Array
     }
     else
     {
         Ty::Scalar
+    }
+}
+
+/// A MATLAB param is a matrix if it is the argument of `det`/`inv` (or another
+/// matrix-taking intrinsic) or the *left* operand of `\` (left division).
+fn matrix_evidence_block(name: &str, stmts: &[MStmt]) -> bool {
+    stmts.iter().any(|s| match s
+    {
+        MStmt::Assign { value, .. } => matrix_evidence_expr(name, value),
+        MStmt::AssignIndex { index, value, .. } =>
+        {
+            matrix_evidence_expr(name, index) || matrix_evidence_expr(name, value)
+        },
+        MStmt::For { lo, hi, body, .. } =>
+        {
+            matrix_evidence_expr(name, lo)
+                || matrix_evidence_expr(name, hi)
+                || matrix_evidence_block(name, body)
+        },
+        MStmt::If { cond, then, els } =>
+        {
+            matrix_evidence_expr(name, cond)
+                || matrix_evidence_block(name, then)
+                || matrix_evidence_block(name, els)
+        },
+        MStmt::While { cond, body } =>
+        {
+            matrix_evidence_expr(name, cond) || matrix_evidence_block(name, body)
+        },
+    })
+}
+
+fn matrix_evidence_expr(name: &str, e: &MExpr) -> bool {
+    match e
+    {
+        MExpr::Call { func, args } =>
+        {
+            (matches!(func.as_str(), "det" | "inv")
+                && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                || args.iter().any(|a| matrix_evidence_expr(name, a))
+        },
+        // `name \ b` — the left operand of left-division is a matrix.
+        MExpr::Bin {
+            op: MBinOp::LDiv,
+            l,
+            r,
+        } => is_ident(name, l) || matrix_evidence_expr(name, l) || matrix_evidence_expr(name, r),
+        MExpr::Bin { l, r, .. } | MExpr::Cmp { l, r, .. } =>
+        {
+            matrix_evidence_expr(name, l) || matrix_evidence_expr(name, r)
+        },
+        MExpr::Neg(inner) => matrix_evidence_expr(name, inner),
+        _ => false,
     }
 }
 
@@ -750,6 +851,12 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                 || array_evidence_expr(name, l)
                 || array_evidence_expr(name, r)
         },
+        // `A \ b` — left division: the *right* operand is a vector.
+        MExpr::Bin {
+            op: MBinOp::LDiv,
+            l: _,
+            r,
+        } => is_ident(name, r) || array_evidence_expr(name, r),
         MExpr::Bin { l, r, .. } | MExpr::Cmp { l, r, .. } =>
         {
             array_evidence_expr(name, l) || array_evidence_expr(name, r)

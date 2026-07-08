@@ -109,7 +109,7 @@ pub fn lex(src: &str) -> Result<Vec<MTok>, String> {
                 toks.push(MTok::Sym(format!("{}=", c)));
                 i += 2;
             },
-            '+' | '-' | '*' | '/' | '^' | ':' | '=' | '<' | '>' =>
+            '+' | '-' | '*' | '/' | '\\' | '^' | ':' | '=' | '<' | '>' =>
             {
                 toks.push(MTok::Sym(c.to_string()));
                 i += 1;

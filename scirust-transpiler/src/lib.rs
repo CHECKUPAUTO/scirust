@@ -445,6 +445,48 @@ mod tests {
         assert!(rust.contains("(x).atan()"));
     }
 
+    #[test]
+    fn matlab_det_and_inv_route_to_solvers() {
+        // `A` is inferred as a matrix purely from `det(A)` / `inv(A)`.
+        let d = transpile_matlab("function d = mdet(A)\n  d = det(A);\nend\n").unwrap();
+        assert_eq!(sig_of(&d, "mdet"), "pub fn mdet(A: &[f64]) -> f64 {");
+        assert!(d.contains(".determinant()"));
+        let sir = transpile_matlab_to_sir("function d = mdet(A)\n  d = det(A);\nend\n").unwrap();
+        assert_eq!(required_crates(&sir), vec!["scirust-solvers"]);
+
+        let inv = transpile_matlab("function B = minv(A)\n  B = inv(A);\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&inv, "minv"),
+            "pub fn minv(A: &[f64]) -> scirust_solvers::Matrix {"
+        );
+        assert!(inv.contains(".inverse()"));
+    }
+
+    #[test]
+    fn matlab_backslash_routes_to_lu_solver() {
+        // `A \ b` -> LU solve; `A` inferred matrix, `b` inferred vector.
+        let src = "function x = msolve(A, b)\n  x = A \\ b;\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "msolve"),
+            "pub fn msolve(A: &[f64], b: &[f64]) -> Vec<f64> {"
+        );
+        assert!(rust.contains("scirust_solvers::linalg::solve"));
+        assert_eq!(
+            required_crates(&transpile_matlab_to_sir(src).unwrap()),
+            vec!["scirust-solvers"]
+        );
+    }
+
+    #[test]
+    fn matlab_backslash_needs_a_matrix_on_the_left() {
+        // A scalar on the left of `\` (scalar left-division) is outside the
+        // subset and rejected — only `matrix \ vector` (solve) is supported.
+        let src = "function x = f(b)\n  s = 2.0;\n  x = s \\ b;\nend\n";
+        let err = transpile_matlab(src).unwrap_err();
+        assert!(err.contains("expects a matrix on the left"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

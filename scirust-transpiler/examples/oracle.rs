@@ -653,6 +653,35 @@ fn matlab_cases() -> Vec<Case> {
             src: "function y = mathx(x)\n  y = log(x) + floor(x) + atan(x);\nend\n",
             args: vec![Scalar { lo: 0.5, hi: 5.0 }],
         },
+        // ---- MATLAB linear algebra routed to scirust-solvers (Phase 2) ----
+        // det(A) — A inferred as a matrix from the intrinsic; scalar out.
+        Case {
+            name: "M: det(A) -> scirust-solvers",
+            call: "mdet",
+            src: "function d = mdet(A)\n  d = det(A);\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // inv(A) — matrix out (row-major flatten vs Octave inv(A)).
+        Case {
+            name: "M: inv(A) -> scirust-solvers (matrix out)",
+            call: "minv",
+            src: "function B = minv(A)\n  B = inv(A);\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
+        // A \ b (backslash left-division / solve) -> verified LU solver.
+        Case {
+            name: "M: A \\ b (solve) -> scirust-solvers",
+            call: "msolve",
+            src: "function x = msolve(A, b)\n  x = A \\ b;\nend\n",
+            args: vec![
+                Matrix { n: 5 },
+                Array {
+                    n: 5,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+            ],
+        },
     ]
 }
 
@@ -1018,7 +1047,9 @@ fn run_python_batch(
 }
 
 /// One trial's args as an Octave cell literal `{ a1, a2, ... }`.
-/// Arrays become row vectors, matrices become `[r1; r2; ...]`.
+/// Arrays become **column** vectors (so `A \ b` is conformant), matrices become
+/// `[r1; r2; ...]`. Reductions/element-wise ops are orientation-agnostic in the
+/// values they produce, so a column orientation is safe for every case.
 fn octave_tuple(args: &[Val]) -> String {
     let items: Vec<String> = args
         .iter()
@@ -1027,7 +1058,7 @@ fn octave_tuple(args: &[Val]) -> String {
             Val::Scalar(x) => lit(*x),
             Val::Array(xs) => format!(
                 "[{}]",
-                xs.iter().map(|x| lit(*x)).collect::<Vec<_>>().join(", ")
+                xs.iter().map(|x| lit(*x)).collect::<Vec<_>>().join("; ")
             ),
             Val::Matrix(rows) =>
             {
@@ -1073,7 +1104,7 @@ fn run_octave_batch(
         ),
     };
     let script = format!(
-        "1;\n{src}\nfunction __s = __ser(r)\n  a = r(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  {call_and_ser}\nend\n",
+        "1;\n{src}\nfunction __s = __ser(r)\n  __t = r.';\n  a = __t(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  {call_and_ser}\nend\n",
         src = case.src,
         rows = rows
             .iter()

@@ -53,9 +53,11 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `if`/`elseif`/`else`, `while`, comparisons incl. `~=` | same control-flow IR as Python |
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
+| linear algebra `det(A)`, `inv(A)`, left-division `A \ b` (solve `Ax = b`) | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve) |
 | math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan`; reductions `sum/prod/mean/max/min`, `length` | scalar/elementwise intrinsics + reductions |
 
-Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands
+Array-ness is inferred from indexing, `sum`/`length`, and element-wise operands;
+**matrix-ness** from `det`/`inv` arguments and the left side of `\`
 (MATLAB has no type hints); ambiguous scalar-vs-array uses are refused.
 
 ## Determinism & safety
@@ -96,8 +98,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: newton / ew_scale         200/200 trials match (octave) (while, element-wise array out)
   ✓ M: sumdiff / normstats / stats3 200/200 trials match (octave) (MATLAB multi-output [a,b]=f, Phase 2)
   ✓ M: mathx (log/floor/atan)    200/200 trials match (octave) (expanded MATLAB intrinsics)
+  ✓ M: det(A) / inv(A) / A \ b   200/200 trials match (octave) (MATLAB linear algebra → scirust-solvers, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 56/56 cases match their reference runtime within tolerance
+  ORACLE GREEN — 59/59 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
@@ -124,12 +127,13 @@ them.
 * **No bit-exact equality with CPython.** NumPy's reduction/BLAS order isn't
   specified; we guarantee a *declared tolerance* to NumPy and *internal*
   Rust bit-reproducibility, not bit-identity with CPython.
-* **General 2-D arrays**, MATLAB multi-output `[a, b] = f(...)`, and
-  **recursion / mutual recursion** are the next increments — see the roadmap in
-  `docs/TRANSPILER_DESIGN.md`. (`if`/`elif`/`else`, scalar comparisons, `while`
-  loops and `np.linalg.solve` routing landed in Phase 1; the MATLAB/Octave
-  front-end, `np.linalg.svd`/`qr` via tuple unpacking, user-function composition,
-  list literals, and general tuple returns landed in Phase 2.)
+* **General 2-D arrays** and **recursion / mutual recursion** are the next
+  increments — see the roadmap in `docs/TRANSPILER_DESIGN.md`. (`if`/`elif`/`else`,
+  scalar comparisons, `while` loops and `np.linalg.solve` routing landed in
+  Phase 1; the MATLAB/Octave front-end, `np.linalg.svd`/`qr` via tuple unpacking,
+  user-function composition, list literals, general tuple returns, MATLAB
+  multi-output `[a, b] = f(...)`, and MATLAB linear-algebra routing
+  (`det`/`inv`/`\`) landed in Phase 2.)
 * **Tuple returns carry scalar elements only.** `return a, b` where `a`/`b` are
   scalars → `(f64, f64)`; array/matrix tuple elements aren't emitted yet, and a
   tuple-returning function can't be called as a value (only used at the top).
@@ -143,7 +147,8 @@ them.
   gauge, so U and V are validated only through the gauge-invariant
   reconstruction `U·diag(S)·Vᵀ`, not element-by-element.
 * **MATLAB is a scientific subset, not all of MATLAB.** No cell arrays, structs,
-  anonymous functions, `end` indexing, or 2-D matrix routing yet; `zeros(n)` is
+  anonymous functions, or `end` indexing yet; matrix routing covers `det`/`inv`/`\`
+  (matrix inputs passed in, not yet constructed in-transpiler), `zeros(n)` is
   not mapped (it is `n×n` in MATLAB, unlike NumPy's 1-D `np.zeros(n)`), and
   element-wise operands are heuristically typed as arrays.
 * **Unifying with `codetrans::Expr`** as the shared emission backend is future

@@ -349,7 +349,7 @@ secteurs réellement débloqués.
 | Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
 | Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
 | Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (57 tests) |
+| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (60 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
@@ -358,11 +358,11 @@ secteurs réellement débloqués.
 | **Retours de tuple généraux** (`return a, b`, éléments scalaires) | ✅ livré (Phase 2) | `sir.rs` (`RetTy`, `SirStmt::ReturnTuple`) + `emit.rs` |
 | **Appels de fonctions utilisateur** (composition, inférence de type inter-fonctions) + **listes littérales** | ✅ livré (Phase 2) | `lower.rs` (`FuncSig`/`Sigs`) + `sir.rs` (`SirExpr::UserCall`, `ArrayLit`) |
 | Tableaux 2-D généraux                       | ⏳ Phase 1 | — |
-| **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
+| **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python, **algèbre linéaire `det`/`inv`/`\` → `scirust-solvers`**) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 56 cas au total : 43 Python prouvés
-contre **NumPy réel**, 13 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
+**Résultat de l'oracle (reproductible).** 59 cas au total : 43 Python prouvés
+contre **NumPy réel**, 16 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
 $ cargo run -p scirust-transpiler --example oracle
@@ -381,8 +381,9 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ sin/cos/abs / exp / ** / ones  (full intrinsic & operator coverage)
   ✓ M: norm2 / dot / relu / sign / clamp / poly / mysum / newton / ew_scale (MATLAB → Octave — Phase 2)
   ✓ M: sumdiff / normstats / stats3 [a,b]=f(…) + mathx (MATLAB multi-output + log/floor/atan/min/max/mean — Phase 2)
+  ✓ M: det(A) / inv(A) / A \ b (MATLAB linear algebra → scirust-solvers — Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 (`return a, b` — Phase 2)
-  ORACLE GREEN — 56/56 cases match their reference runtime within tolerance
+  ORACLE GREEN — 59/59 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec
