@@ -86,6 +86,13 @@
 //! - [`subgroup`] — rational-subgroup capability study (AIAG / ISO 22514-2):
 //!   within-subgroup `σ̂ = R̄/d₂ = s̄/c₄` driving `Cp`/`Cpk` vs the overall spread
 //!   driving `Pp`/`Ppk`.
+//! - [`fits`] — ISO 286 limits and fits: standard tolerance grades `ITn` from the
+//!   tolerance factor `i`, shaft fundamental deviations `d..h`, and hole/shaft
+//!   clearance-fit classification.
+//! - [`sequential`] — multi-stage acceptance sampling: double-sampling OC / ASN
+//!   and Wald's sequential probability ratio test.
+//! - [`taguchi`] — the Taguchi quadratic loss and cost of non-quality: the
+//!   `E[L] = k·I²` link to inertia and the economic manufacturing tolerance.
 //! - [`special`] — error function / normal CDF / central & non-central χ².
 //!
 //! Beyond the single-characteristic core, [`inertia`] also covers **lot
@@ -131,6 +138,7 @@ pub mod chart;
 pub mod correlated;
 pub mod distfit;
 pub mod drift;
+pub mod fits;
 pub mod form;
 pub mod geometry;
 pub mod inertia;
@@ -145,10 +153,12 @@ pub mod position;
 pub mod process;
 pub mod sampling;
 pub mod sensitivity;
+pub mod sequential;
 pub mod sixsigma;
 pub mod spatial;
 pub mod special;
 pub mod subgroup;
+pub mod taguchi;
 pub mod variables;
 
 pub use attributes::{AttributesPlan, design_attributes_plan};
@@ -165,6 +175,10 @@ pub use chart::{PilotingAction, PilotingChart, PilotingSignal};
 pub use correlated::{correlated_inertia, correlated_variance, gradient, second_order_mean};
 pub use distfit::{FittedDistribution, best_fit, percentile_capability};
 pub use drift::{cpk_to_ppk, long_term_inertia, long_term_ppm, long_term_sigma};
+pub use fits::{
+    Fit, FitType, fit_from_deviations, hole_basis_fit, it_grade_tolerance,
+    shaft_fundamental_deviation,
+};
 pub use form::FormBatch;
 pub use geometry::{
     angularity, cylindricity, flatness, parallelism, perpendicularity, profile, roundness,
@@ -189,10 +203,17 @@ pub use position::{
 pub use process::{Combination, ProcessOption, allocate_discrete};
 pub use sampling::{SamplingPlan, design_plan, plan_for_producer_risk};
 pub use sensitivity::{Contribution, DualContribution, contributions, dual_contributions};
+pub use sequential::{
+    DoubleSamplingPlan, SequentialPlan, SequentialVerdict, design_sequential_plan,
+};
 pub use sixsigma::{
     ProcessReport, dpmo, dpmo_from_sigma, dpu, normalized_yield, process_report,
     rolled_throughput_yield, sigma_from_dpmo, sigma_from_yield, throughput_yield, yield_from_sigma,
 };
 pub use spatial::{Feature, Torsor, surface_inertia_from_torsors};
 pub use subgroup::{SubgroupCapability, sigma_within_s_method, subgroup_capability};
+pub use taguchi::{
+    economic_tolerance, expected_loss, expected_loss_from_moments, larger_the_better_loss,
+    loss_coefficient, quadratic_loss, smaller_the_better_loss,
+};
 pub use variables::{VariablesPlan, design_variables_plan};
