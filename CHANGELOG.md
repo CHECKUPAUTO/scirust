@@ -160,6 +160,23 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `max(a,b)` / `min(a,b)` (2-arg) + `power(a,b)`** prouvés contre Octave réel (Phase 2, incrément 22)
+Réutilise le nœud math binaire (`MathFn2`) pour les formes à deux arguments de
+`max`/`min`, distinguées de la **réduction** à un argument par le **nombre
+d'arguments** :
+
+- **`max(a, b)`** / **`min(a, b)`** (deux scalaires) → `f64::max` / `f64::min`.
+  La forme à un argument reste la réduction sur un vecteur ; l'inférence de type
+  ne marque plus les opérandes de la forme à deux arguments comme des tableaux
+  (garde `args.len() == 1` sur la preuve de réduction).
+- **`power(a, b)`** → forme fonctionnelle de `a ^ b` (partage l'abaissement de
+  `^` : un exposant entier se replie sur `powi`).
+
+Opérandes scalaires. Deux cas d'oracle. **Oracle 70/70** (200 essais chacun) ;
+**69 tests unitaires** (2 nouveaux). *Non-vacuité* : échanger `max`/`min` dans la
+forme à deux arguments inverse le signe de l'étendue `max−min` et passe l'oracle
+au ROUGE (200/200, |Δ|≈6,2).
+
 ### Ajouté — transpileur : **MATLAB `atan2` / `hypot`** — fonctions math à deux arguments, prouvées contre Octave réel (Phase 2, incrément 21)
 Ajoute à la SIR un **nœud math scalaire binaire** réutilisable
 (`SirExpr::ScalarBinFn` + `MathFn2`), émis en `(l).méthode(r)`, et câble les deux

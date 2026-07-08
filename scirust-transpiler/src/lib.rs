@@ -597,6 +597,30 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    #[test]
+    fn matlab_two_arg_max_min_vs_one_arg_reduction() {
+        // Two args -> f64::max/min on two scalars; the operands stay scalar
+        // (NOT inferred as arrays by the reduction rule).
+        let two =
+            transpile_matlab("function s = f(a, b)\n  s = max(a, b) - min(a, b);\nend\n").unwrap();
+        assert_eq!(sig_of(&two, "f"), "pub fn f(a: f64, b: f64) -> f64 {");
+        assert!(two.contains("(a).max(b)"));
+        assert!(two.contains("(a).min(b)"));
+        // One arg -> the reduction over a vector is still available.
+        let one = transpile_matlab("function m = f(v)\n  m = max(v);\nend\n").unwrap();
+        assert_eq!(sig_of(&one, "f"), "pub fn f(v: &[f64]) -> f64 {");
+        assert!(one.contains("np::max(v)"));
+    }
+
+    #[test]
+    fn matlab_power_is_the_functional_form_of_pow() {
+        // power(a, b) shares the `^` lowering; an integer exponent folds to powi.
+        let rust = transpile_matlab("function y = f(a)\n  y = power(a, 3.0);\nend\n").unwrap();
+        assert!(rust.contains(".powi(3)"));
+        let rust2 = transpile_matlab("function y = f(a, b)\n  y = power(a, b);\nend\n").unwrap();
+        assert!(rust2.contains(".powf(b)"));
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

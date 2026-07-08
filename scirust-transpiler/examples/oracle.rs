@@ -763,6 +763,21 @@ fn matlab_cases() -> Vec<Case> {
             src: "function h = mhypot(a, b)\n  h = hypot(a, b);\nend\n",
             args: vec![Scalar { lo: -4.0, hi: 4.0 }, Scalar { lo: -4.0, hi: 4.0 }],
         },
+        // Two-argument max(a, b) / min(a, b) (scalar form) in one expression.
+        Case {
+            name: "M: max(a,b) - min(a,b) (2-arg)",
+            call: "mspread",
+            src: "function s = mspread(a, b)\n  s = max(a, b) - min(a, b);\nend\n",
+            args: vec![Scalar { lo: -5.0, hi: 5.0 }, Scalar { lo: -5.0, hi: 5.0 }],
+        },
+        // power(a, b) — functional form of `a ^ b` (positive base for a real
+        // result over the fuzzed exponent range).
+        Case {
+            name: "M: power(a, b) (a ^ b)",
+            call: "mpow",
+            src: "function y = mpow(a, b)\n  y = power(a, b);\nend\n",
+            args: vec![Scalar { lo: 0.2, hi: 3.0 }, Scalar { lo: -2.0, hi: 2.0 }],
+        },
     ]
 }
 
