@@ -1138,6 +1138,39 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 2.0,
             }],
         },
+        // ---- MATLAB deg2rad/rad2deg + elementwise sign (Phase 2) ----
+        // deg2rad (scalar).
+        Case {
+            name: "M: deg2rad(x) (scalar)",
+            call: "md2r",
+            src: "function y = md2r(x)\n  y = deg2rad(x);\nend\n",
+            args: vec![Scalar {
+                lo: -360.0,
+                hi: 360.0,
+            }],
+        },
+        // rad2deg elementwise over an array (built from an array builtin).
+        Case {
+            name: "M: rad2deg(cumsum(v)) (broadcast array)",
+            call: "mr2d",
+            src: "function y = mr2d(v)\n  y = rad2deg(cumsum(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // sign elementwise over an array.
+        Case {
+            name: "M: sign(cumsum(v)) (elementwise)",
+            call: "msignew",
+            src: "function y = msignew(v)\n  y = sign(cumsum(v));\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -2.0,
+                hi: 2.0,
+            }],
+        },
     ]
 }
 

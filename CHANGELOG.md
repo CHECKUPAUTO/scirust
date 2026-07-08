@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `deg2rad` / `rad2deg` + `sign` élément par élément** prouvés contre Octave réel (Phase 2, incrément 36)
+Conversions d'angle et `sign` vectoriel :
+
+- **`deg2rad(x)`** / **`rad2deg(x)`** — conversion degré↔radian (multiplication par
+  `π/180` resp. `180/π`), scalaire ou par diffusion sur un vecteur (réutilise
+  `ScalarBin`/`ScalarBroadcast`, aucune nouvelle primitive).
+- **`sign(v)`** — forme **élément par élément** de `sign` (nouveau nœud
+  `ArraySign`, `-1/0/+1` par élément) ; `sign(x)` scalaire reste le nœud `Sign`.
+  Dispatch non ambigu sur le type de l'argument (unaire).
+
+Trois cas d'oracle : `deg2rad(x)` (scalaire), `rad2deg(cumsum(v))` (diffusion),
+`sign(cumsum(v))` (élément par élément). **Oracle 104/104** (200 essais chacun) ;
+**84 tests unitaires** (1 nouveau ; un ancien test mis à jour car `sign` accepte
+désormais un vecteur). *Non-vacuité* : inverser les branches `>`/`<` de
+`ArraySign` fait diverger le cas (|Δ|=2, ROUGE).
+
 ### Ajouté — transpileur : **MATLAB `atan2` / `hypot` / `max` / `min` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 35)
 Les fonctions math à deux arguments deviennent **vectorielles** : elles se
 dispatchent désormais sur le type des opérandes (scalaire∘scalaire → scalaire,

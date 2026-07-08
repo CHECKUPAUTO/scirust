@@ -173,6 +173,8 @@ pub enum SirExpr {
     /// `sign(0) == 0` — distinct from `f64::signum`). Emitted as a bound
     /// if/else so the argument is evaluated once.
     Sign(Box<SirExpr>),
+    /// `sign(v)` : Array -> Array, the elementwise form of [`SirExpr::Sign`].
+    ArraySign(Box<SirExpr>),
     /// Two-argument scalar math intrinsic: `atan2(y, x)` / `hypot(a, b)`.
     ScalarBinFn {
         func: MathFn2,
@@ -513,6 +515,7 @@ impl SirExpr {
             | SirExpr::Conv(_, _)
             | SirExpr::Cumtrapz(_)
             | SirExpr::DiagExtract(_)
+            | SirExpr::ArraySign(_)
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::UserCall { ret, .. } => *ret,
             SirExpr::Fft(_) | SirExpr::Rfft(_) | SirExpr::Ifft(_) => Ty::ComplexArray,
@@ -652,6 +655,7 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::ScalarUnaryFn { arg: x, .. }
         | SirExpr::ArrayUnaryFn { arg: x, .. }
         | SirExpr::Sign(x)
+        | SirExpr::ArraySign(x)
         | SirExpr::Sum(x)
         | SirExpr::Prod(x)
         | SirExpr::Max(x)
