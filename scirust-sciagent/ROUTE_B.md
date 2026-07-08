@@ -1,0 +1,166 @@
+# Route B — native CUDA + Tensor cores for the Thor (design & feasibility)
+
+**Status: design only. No code until the go/no-go gate (B0) passes on the Thor and
+the open decisions below are made.** This is the scoping companion to
+`JETSON_THOR.md`, which has the measured Route-A ceiling this route exists to lift.
+
+## TL;DR
+
+- Route A (wgpu/Vulkan, fp32) is **done and validated** end-to-end on the Thor, but
+  it is **kernel-efficiency bound**: ~34 tok/s training and ~3.5 tok/s single-stream
+  350M decode — **<5 % of the Thor's fp32 peak** (measured, see `JETSON_THOR.md`).
+  wgpu/WGSL cannot reach Blackwell **Tensor cores**, so this ceiling is structural,
+  not a tuning problem.
+- Route B = a **mixed-precision CUDA backend** (bf16 compute on Tensor cores, fp32
+  accumulate, fp32 master weights). This is the **only** lever with an
+  order-of-magnitude multiplier left (~10–30× is the working hypothesis, **to be
+  confirmed by B0**).
+- It is a **second full backend** — bigger than the entire Route-A inference arc.
+  Do it **only if B0 proves the speedup on this specific machine's CUDA toolchain.**
+- **Recommendation:** run **B0 first** (a half-day probe, below). Its single number
+  (cuBLASLt bf16 GEMM TFLOP/s vs the wgpu fp32 GEMM on 350M shapes) decides go/no-go.
+  Everything after B0 is gated on it.
+
+## Why (the measured ceiling)
+
+From `JETSON_THOR.md`, all on the Thor's Blackwell, fp32, single sequence:
+
+| regime | Route A (wgpu fp32) | why it's low |
+|--------|--------------------:|--------------|
+| training 350M | ~34 tok/s | ~120 GFLOP/s, <5 % of peak — kernel-bound |
+| decode 350M (`m=1`) | ~3.5 tok/s | one row per forward, GPU idle |
+| prefill 350M (`m=P`) | ~149 tok/s | compute-bound, but still CUDA-core fp32 |
+
+The wall is **arithmetic throughput of fp32 CUDA-core GEMMs**. Blackwell's headline
+FLOPs are in the **Tensor cores** at bf16/fp16/fp8/fp4 — unreachable from WGSL.
+Nothing within Route A (bigger tiles, fusion, fewer submits — all tried or scoped)
+changes the order of magnitude; a shared-memory tiled GEMM was even a **measured
+regression** here (Blackwell's L2 already absorbs the reuse). Route B is the only
+door to the other 95 %.
+
+## The lever: mixed precision on Tensor cores
+
+- **Compute** GEMMs in **bf16** (inputs) with **fp32 accumulation** — the standard
+  Tensor-core mode. **bf16 over fp16** because its exponent range matches fp32, so
+  **no loss scaling** is needed (fp16 would need it). Blackwell also offers fp8/fp4;
+  those are a later, inference-only option, not the first target.
+- **Master weights fp32**, **optimizer moments (AdamW m/v) fp32** — updates happen in
+  fp32; a bf16 copy of each weight is produced for the forward/backward GEMMs. This
+  is textbook mixed-precision training and preserves convergence.
+- **Inference**: bf16 (or fp16) resident weights halve memory traffic — this is what
+  helps the memory/latency-bound `m=1` **decode** path, on top of the FLOP boost that
+  helps prefill/training.
+
+Expected gains (**hypothesis, B0 confirms**): training 34 → few-hundred tok/s;
+decode 3.5 → ~20–40 tok/s (decode gains less than the raw FLOP ratio because it stays
+partly launch/memory bound). Even the low end changes 350M from-scratch pretrain from
+"years" to "weeks", and makes speculative decoding (already built, exact) genuinely
+worthwhile.
+
+## How to reach Tensor cores from Rust — options
+
+| option | what | pro | con | verdict |
+|--------|------|-----|-----|---------|
+| **B-cuBLASLt** | FFI to cuBLASLt for every GEMM (bf16 in, fp32 acc) | vendor-optimal GEMM for free; least kernel code | descriptor plumbing; still need CUDA kernels for the non-GEMM ops | **recommended** |
+| B-CUTLASS | templated CUDA GEMM/epilogue | fuse epilogues (bias, act) into the GEMM | C++ templates, longer build, marginal vs cuBLASLt here | later, if fusion matters |
+| B-WMMA | hand-written `mma.sync`/WMMA kernels | full control | will not beat cuBLASLt; large effort | no |
+
+**Non-GEMM ops** (softmax, scale/mask, RMSNorm, RoPE, SwiGLU, slice/place,
+concat/slice-rows, embed gather, cross-entropy, AdamW) still need **CUDA kernels** —
+but they are a **1:1 port of the already-validated WGSL kernels** in `scirust-gpu`,
+not new math. Attention can start as compose-from-primitives (as Route A does) and
+later move to a **fused flash-attention** kernel for the real decode win.
+
+**Rust↔CUDA plumbing:** `cudarc` (safe-ish driver API + cuBLAS bindings, already
+named in `JETSON_THOR.md`) for device/stream/buffer management and cuBLASLt, plus a
+`build.rs` that `nvcc`-compiles the custom `.cu` kernels to PTX/cubin and loads them
+at runtime. Alternative: raw `cuda-sys`/`cust` FFI. **Decision needed** (see below).
+
+## Integration architecture
+
+A new **feature-gated `scirust-cuda` crate** (sibling to `scirust-gpu`), exposing a
+`CudaChain` that **mirrors `GpuChain`'s API** (`matmul`, `matmul_t`, `rms_norm`,
+`rope`, `attention`, `swiglu_mlp`, `slice_cols`, `concat_rows`, `adamw_step`, …).
+Because `ResidentModel` is written against that resident-op surface, wiring it to a
+`CudaChain` is then a **backend swap**, not a rewrite — the whole
+train/fine-tune/generate/speculative stack rides on top unchanged.
+
+- **Feature-gated & CI-safe:** `cuda` is off by default; the workspace must still
+  `cargo build`/`clippy` with no CUDA present. Route B is **Thor-only** to build and
+  test (CI has no GPU *and* no CUDA — worse than Route A, which at least builds and
+  runs on lavapipe). Every Route-B test is `#[cfg(feature = "cuda")]` and skips (or
+  is absent) elsewhere.
+- **Validation unchanged in spirit:** each op **gradient-checked against the CPU
+  oracle**, brick by brick — but at a **bf16-appropriate tolerance** (looser than
+  fp32's `~2e-2`; expect `~2e-1` relative on some grads). The project's "bit-à-bit
+  where possible" becomes "gradient-checked to a documented reduced-precision
+  tolerance" — and that must be stated honestly wherever a number is quoted.
+
+## Phased plan (each phase gated on the previous)
+
+- **B0 — feasibility gate (do FIRST; ~half a day; probe below).**
+  On the Thor: confirm the CUDA toolkit exists and **targets sm_110/Blackwell Tensor
+  cores**, then benchmark a **cuBLASLt bf16 GEMM vs the wgpu fp32 GEMM** on 350M-shaped
+  matmuls (e.g. `[512×4096]·[4096×4096]`). **Go if bf16 ≥ ~8–10× the wgpu fp32
+  GFLOP/s; stop otherwise** (blocked on a JetPack/CUDA upgrade, not on us).
+- **B1 — plumbing + one GEMM.** `scirust-cuda` crate; device/stream/buffers; one
+  cuBLASLt bf16 GEMM wrapped and **gradient-checked** vs CPU at bf16 tolerance.
+- **B2 — elementwise/attention kernels.** Port the validated WGSL ops to `.cu`
+  (softmax, scale/mask, RMSNorm ± gain-grad, RoPE ±, SwiGLU ±, slice/place,
+  concat/slice-rows, embed ± scatter, cross-entropy grad). Each gradient-checked.
+- **B3 — resident forward.** Compose `CudaChain` GQA forward → full 350M
+  `tokens→logits`, parity vs CPU (reduced-precision tolerance).
+- **B4 — backward + AdamW.** Mixed-precision backward, fp32-master AdamW step;
+  resident training step reduces loss; `ResidentModel` runs on `CudaChain`.
+- **B5 — measure & document.** Training + decode throughput vs Route A; fold the real
+  numbers into `JETSON_THOR.md` (and re-run the speculative cost model with the new
+  `t_g`). This is where the 10–30× hypothesis becomes a measured fact or a corrected
+  one.
+
+Realistically B1–B4 is **many gradient-checked bricks** (comparable to the whole
+`scirust-gpu` build-out), each validated on the Thor. This is a multi-session
+undertaking; B0 is what tells us it's worth starting.
+
+## Risks / honesty
+
+- **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
+  there is **no Tensor-core codegen** and Route B is blocked until JetPack/CUDA is
+  upgraded. B0 catches this on day one.
+- **CI can't cover it:** unlike Route A (lavapipe), nothing in CI builds or runs the
+  CUDA path. Regressions are Thor-only to catch. Mitigate by keeping `CudaChain`'s CPU
+  oracles and parity tests identical in structure to Route A's, run on the Thor.
+- **Determinism erodes further:** bf16 + Tensor-core accumulation widens the gap to
+  the CPU reference beyond fp32-wgpu's. Tolerances must be re-derived and **documented
+  per op**; some finite-difference grad checks may need larger epsilons.
+- **Effort vs payoff:** it's a second backend. Justified **only** by B0's number and
+  by the intent to actually do large-scale training or fast serving on the Thor — for
+  fine-tuning + short on-device generation, Route A already suffices.
+- **Build coupling:** `nvcc` in the build, CUDA libs linked; keep it entirely behind
+  the `cuda` feature so non-Thor builds are unaffected.
+
+## B0 — the go/no-go probe (run on the Thor)
+
+```bash
+# 1. Is there a CUDA toolkit, and does it know Blackwell (sm_110 / sm_120)?
+nvcc --version
+nvcc --list-gpu-arch          # look for compute_110 (or the Thor's actual cc)
+nvidia-smi                    # driver + reported compute capability
+
+# 2. Tensor-core bf16 GEMM vs fp32, same shape — the decisive number.
+#    (writes/compiles a ~30-line cuBLASLt bf16 vs cublas fp32 microbench;
+#     I'll provide the .cu once you confirm nvcc + arch above.)
+```
+
+Report back: `nvcc` version, whether `compute_110` (or the Thor's real cc) is listed,
+and — once confirmed — the bf16-vs-fp32 GFLOP/s. That triple decides B0.
+
+## Open decisions (yours)
+
+1. **Plumbing:** `cudarc` (safer, batteries-included) vs raw FFI (`cuda-sys`/`cust`,
+   more control). *Recommend `cudarc`.*
+2. **Precision:** bf16 (no loss scaling) vs fp16 (needs it). *Recommend bf16.*
+3. **Scope:** full CUDA resident path (recommended — mixing wgpu+CUDA in one process
+   is painful) vs a GEMM-only CUDA shim under the existing wgpu chain (not
+   recommended).
+4. **When:** now (start B0), or park Route B and keep Route A as the shipping path for
+   fine-tuning + inference.

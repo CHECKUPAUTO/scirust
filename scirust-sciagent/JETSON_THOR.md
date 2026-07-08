@@ -102,6 +102,11 @@ autodiff must run on GPU tensors. Two routes:
   cuDNN or hand-written WMMA kernels; a flash-attention kernel.
 - Pro: maximum tokens/sec. Con: a substantial new backend; ties the build to
   the CUDA toolchain.
+- **Design & feasibility: see [`ROUTE_B.md`](ROUTE_B.md)** — mixed-precision
+  (bf16 compute + fp32 master) cuBLASLt approach, a `CudaChain` mirroring
+  `GpuChain` so `ResidentModel` is a backend swap, the phased B0–B5 plan, and the
+  **go/no-go probe (B0)**: a cuBLASLt bf16-vs-fp32 GEMM microbench on the Thor whose
+  single number decides whether Route B is worth starting.
 
 Recommended sequencing: **A to get correctness and a working run on the Thor,
 then B to make it fast.**
