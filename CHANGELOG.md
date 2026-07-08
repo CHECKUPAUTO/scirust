@@ -160,6 +160,26 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `logspace(a, b, n)`** — constructeur de vecteur logarithmique, prouvé contre Octave réel (Phase 2, incrément 38)
+Frère de `linspace` : `logspace(a, b, n)` produit `n` points espacés
+logarithmiquement, `10^a .. 10^b`. Défini exactement comme `10 .^ linspace(a, b, n)`,
+il hérite donc des **extrémités exactes** de `linspace` (`y(end) = 10^b`) et du
+cas `logspace(a, b, 1) = [10^b]`. Nouveau nœud SIR `Logspace { a, b, n }` (mêmes
+règles de type/scan que `Linspace`) et helper de prélude déterministe `np::logspace`
+bâti sur `np::linspace`.
+
+- `logspace(a, b, n)` : `a`, `b` scalaires, `n` compte entier (littéral ou
+  `length(x)`) → vecteur de `n` valeurs `10^a..10^b`.
+
+*Frontière (honnête)* : le cas particulier MATLAB « si `b == pi`, points entre
+`10^a` et `pi` » n'est **pas** répliqué — la définition simple `10.^linspace` est
+utilisée (l'oracle tire des bornes aléatoires qui ne valent jamais `pi`).
+
+Un cas d'oracle (`logspace(a, b, 6)`). **Oracle 107/107** (200 essais chacun) ;
+**86 tests unitaires** (1 nouveau). *Non-vacuité* : remplacer la base `10` par `2`
+dans `np::logspace` fait diverger le cas `logspace` seul (base erronée) tandis que
+tous les autres restent verts — la base 10 est donc bien portante.
+
 ### Ajouté — transpileur : **MATLAB `mod` / `rem` élément par élément sur tableaux** prouvés contre Octave réel (Phase 2, incrément 37)
 `mod` et `rem` deviennent **vectoriels**. Le nouveau helper `lower_modrem`
 assemble `a − b·floor(a/b)` (resp. `a − b·fix(a/b)`) en déléguant chaque étape
