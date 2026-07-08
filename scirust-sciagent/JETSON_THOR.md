@@ -17,6 +17,12 @@ critical-path work, and a phased plan.
   (never materialize the `S×S` score matrix) and **activation checkpointing**
   (recompute, don't store, per-layer activations). Without them the run does
   not fit; with them, even 7B fits.
+- **Status (Route A, done):** a fully-resident wgpu/Vulkan backend now trains the
+  real 350M model end-to-end on the Thor, every op gradient-checked. But its
+  **fp32 throughput is measured at ~34 tok/s (<5% of peak)** — correct, not fast.
+  From-scratch 350M pretraining needs FP16/Tensor cores (**Route B**); Route A's
+  near-term value is fine-tuning, inference, and small-model training. See
+  *Measured on the Thor* below.
 
 ## The memory reality (run it yourself)
 
@@ -70,8 +76,21 @@ autodiff must run on GPU tensors. Two routes:
   autodiff graph unchanged, non-GEMM ops (softmax/RMSNorm/mask) on CPU. Parity
   vs the CPU reference (logits + every parameter gradient) is checked in
   `tests/gpu_parity.rs` and on-device by `examples/gpu_forward_parity.rs`. GEMMs
-  are the dominant transformer FLOPs; the fully-resident all-op path
-  (`GpuChain`, where the 8–60× `gpu_bench` speedups live) is the next lift.
+  are the dominant transformer FLOPs.
+- **✅ Done (v2 — fully-resident all-op path).** `ResidentModel`
+  (`scirust-sciagent/src/gpu.rs`) mirrors every `SciAgentModel` weight into VRAM
+  and runs the whole decoder on `scirust-gpu`'s `GpuChain` — embed → N×GQA blocks
+  → final RMSNorm → tied LM head → cross-entropy → **full backward → AdamW**,
+  nothing leaving VRAM between ops (the path that beats the per-op tape ~4.15× on
+  the Thor). **Every trainable weight** updates on-device: the tied embedding, all
+  seven per-block projections, **and** all RMSNorm gains (`rms_norm_gain_backward`
+  wired through the block and model backward). Each op is gradient-checked against
+  a CPU oracle to f32 tolerance. A production run harness ships with it
+  (`examples/resident_pretrain.rs`): real shard streaming, byte-level ingestion
+  (no tokenizer needed), warmup+cosine LR, resumable safetensors checkpointing,
+  throughput logging. Two hardware-only bugs the Thor caught and we fixed along
+  the way — the swiglu 5-storage-buffer limit and the 65535-workgroup dispatch
+  limit at 350M (grid-stride) — both invisible on lavapipe.
 
 ### Route B — native CUDA for Blackwell (sm_110) — later, for throughput
 - CUDA 13, `cudarc` 0.19+, compute capability sm_110; Tensor cores with
@@ -83,6 +102,47 @@ autodiff must run on GPU tensors. Two routes:
 
 Recommended sequencing: **A to get correctness and a working run on the Thor,
 then B to make it fast.**
+
+## Measured on the Thor (resident path, Route A)
+
+Route A is complete and validated on the Thor's Blackwell: the full **350M** step
+(304.1M params) runs end-to-end, bit-tolerant to the CPU reference. Memory sat at
+the planner's estimate (~1.2 GB weights + ~2.4 GB AdamW state in fp32, activations
+extra) — comfortably within 128 GB. The open question was throughput, now measured
+(`examples/resident_pretrain`, 350M config, single sequence, fp32):
+
+| seq_len | tok/s |
+|--------:|------:|
+| 128 | ~40 (naive GEMM) |
+| 128 | 25 (tiled GEMM) |
+| 256 | 30 |
+| 512 | 34 |
+| 1024 | 33 |
+
+Reading it:
+- Throughput **rises modestly with `seq_len` then saturates at ~34 tok/s by
+  seq 512** — beyond that the step is compute-bound and per-op submit overhead is
+  already amortized. Larger `m` (seq/batch) fills the GPU only up to this ceiling.
+- At seq 512 a 350M fwd+bwd over 512 tokens is ~0.93 TFLOP in ~7.7 s ≈
+  **120 GFLOP/s — under 5% of the Thor's fp32 peak.** The wall is **kernel
+  efficiency**, not memory or `m`.
+- A **shared-memory tiled GEMM was tried and is a net regression here**
+  (25 vs 40 tok/s at seq 128): Blackwell's L2 already absorbs the reuse tiling
+  saves, so the `workgroupBarrier`/occupancy cost is pure overhead for these
+  short-and-fat (`m=128`) matmuls. Kept the naive kernel. (PR closed with the
+  measurement; output was bit-identical, so it was purely a perf call.)
+
+**Conclusion.** Pure-fp32 WGSL compute tops out well below what a from-scratch
+pretrain needs: at ~34 tok/s, a Chinchilla-optimal ~7B-token run for 350M would
+take **6+ years** on one Thor. The only lever with an order-of-magnitude
+multiplier left is **FP16/BF16 + Tensor cores (Route B)** — 10–30× on Blackwell —
+which wgpu cannot reach; everything else (bigger tiles, kernel fusion, fewer
+submits) is a fraction of that and does not change the order of magnitude.
+
+Where Route A earns its keep, then, is **correctness (a gradient-checked on-device
+reference), fine-tuning, inference, and small-model training** — not from-scratch
+350M pretraining. That gates Route B as the real prerequisite for large-scale
+training throughput.
 
 ## What already works on the Thor today (verified)
 
@@ -111,13 +171,20 @@ then B to make it fast.**
      forward+backward via the tape engine; see Route A above.)
    - Parity tests: GPU logits + all parameter grads vs CPU within tolerance. ✅
      (`tests/gpu_parity.rs`, `examples/gpu_forward_parity.rs`.)
-   - Remaining: fully-resident all-op path (`GpuChain`) to cut per-op host
-     round-trips; mixed precision (bf16 compute, fp32 optimizer master).
-3. **Scale-up run.**
-   - `sciagent_350m` with flash + checkpointing, seq 2048→4096, bf16, on the
-     Thor. Use `sciagent-plan` to pick seq/batch for the memory budget.
+   - Fully-resident all-op path (`GpuChain` / `ResidentModel`), every weight
+     trainable, gradient-checked; production run harness. ✅ (see *Measured on the
+     Thor* above). **Throughput characterized: ~34 tok/s, fp32 kernel-bound.**
+   - Remaining (gated by Route B): mixed precision (bf16/fp16 compute, fp32
+     optimizer master) — the order-of-magnitude throughput lever.
+3. **Scale-up run — blocked on Route B for throughput, not correctness.**
+   - The step *runs* at 350M today; a real from-scratch pretrain is not
+     throughput-feasible in fp32 (see *Measured*). Use the resident path now for
+     **fine-tuning / small-model training / inference**; defer from-scratch 350M
+     pretraining until FP16/Tensor-core compute lands.
    - Checkpoint to the 128 GB host memory / NVMe; evaluate with `sciagent-eval`.
-4. **Route B CUDA (optional, for throughput).**
+4. **Route B CUDA / FP16 Tensor cores — now the critical path for training
+   throughput** (was "optional"). The measured fp32 ceiling makes this the only
+   route to a practical large-scale run.
 
 ## Related: speculative decoding (DeepSpec)
 
@@ -137,9 +204,14 @@ on the 350M existing first.
 
 ## Risks / honesty
 
-- A correct, fast GPU backend is a multi-week systems project, not a
-  single-session change; it must be developed where a GPU is present.
-- The planner is first-order: validate real peak memory with a profiler on the
-  first Thor runs and adjust the linear constants.
-- 7B "fits" at batch 1 / 72 GB, but throughput on a single Thor makes 350M the
-  pragmatic target first.
+- A **correct** GPU backend was built and validated on the Thor (Route A). A
+  **fast** one is a different, larger project: the measured fp32 ceiling
+  (~34 tok/s, <5% of peak) confirms that practical training throughput needs
+  FP16/Tensor cores (Route B), which wgpu cannot reach.
+- The planner is first-order but held up: measured 350M memory matched the
+  estimate. Still validate real peak with a profiler on longer runs.
+- 7B "fits" at batch 1 / 72 GB, but even 350M is throughput-bound in fp32, so it
+  remains the pragmatic target — and only once Route B exists.
+- "The step runs" ≠ "the model can be trained from scratch here." At fp32
+  throughput a Chinchilla-optimal 350M run is measured in years on one Thor; the
+  resident path's near-term value is fine-tuning, inference, and small models.
