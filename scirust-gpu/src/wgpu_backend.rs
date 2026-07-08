@@ -25,6 +25,23 @@ use wgpu::util::DeviceExt;
 
 use crate::{BackendError, BackendResult};
 
+/// Max workgroups per dispatch dimension under `downlevel_defaults` (and the
+/// Vulkan spec's `maxComputeWorkGroupCount`): **65535**. lavapipe does not
+/// enforce it, but real hardware (e.g. the Jetson Thor) rejects any dispatch
+/// dimension above it. Flat-indexed kernels grid-stride (`i += num_workgroups.x
+/// * 64`), so capping the launch here still covers tensors of any size — the
+/// loop picks up the remainder. Needed at 350M scale, where e.g. the tied
+/// embedding (`32768×1024` = 33.5M elements) would otherwise want 524288
+/// workgroups and the logits (`128×32768`) 65536.
+const MAX_WORKGROUPS_PER_DIM: u32 = 65535;
+
+/// Workgroup count for a flat, grid-stride 1-D kernel over `threads` elements at
+/// workgroup size 64, capped to [`MAX_WORKGROUPS_PER_DIM`].
+#[inline]
+fn flat_workgroups(threads: u32) -> u32 {
+    threads.div_ceil(64).min(MAX_WORKGROUPS_PER_DIM)
+}
+
 /// General WGSL GEMM: `C = alpha·op(A)·op(B) + beta·C`, row-major, one
 /// invocation per output cell. `op(A)` is `m×k`, `op(B)` is `k×n`, `C` is `m×n`;
 /// `ta`/`tb` flag whether the *stored* `a`/`b` is the transpose of `op`.
@@ -66,13 +83,17 @@ struct P { n: u32, op: u32, _p0: u32, _p1: u32, };
 @group(0) @binding(3) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= p.n) { return; }
-    if (p.op == 0u) { c[i] = a[i] + b[i]; }
-    else if (p.op == 1u) { c[i] = a[i] * b[i]; }
-    else if (p.op == 2u) { c[i] = max(a[i], 0.0); }
-    else { c[i] = (a[i] / (1.0 + exp(-a[i]))) * b[i]; }
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let stride = nwg.x * 64u;
+    var i = gid.x;
+    while (i < p.n) {
+        if (p.op == 0u) { c[i] = a[i] + b[i]; }
+        else if (p.op == 1u) { c[i] = a[i] * b[i]; }
+        else if (p.op == 2u) { c[i] = max(a[i], 0.0); }
+        else { c[i] = (a[i] / (1.0 + exp(-a[i]))) * b[i]; }
+        i = i + stride;
+    }
 }
 "#;
 
@@ -89,13 +110,18 @@ struct P { rows: u32, d: u32, vocab: u32, _p0: u32, };
 @group(0) @binding(3) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= p.rows * p.d) { return; }
-    let row = i / p.d;
-    let col = i % p.d;
-    let tok = min(tokens[row], p.vocab - 1u);
-    out[i] = table[tok * p.d + col];
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let n = p.rows * p.d;
+    let stride = nwg.x * 64u;
+    var i = gid.x;
+    while (i < n) {
+        let row = i / p.d;
+        let col = i % p.d;
+        let tok = min(tokens[row], p.vocab - 1u);
+        out[i] = table[tok * p.d + col];
+        i = i + stride;
+    }
 }
 "#;
 
@@ -165,14 +191,18 @@ struct P { n: u32, _p0: u32, _p1: u32, _p2: u32, };
 @group(0) @binding(4) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= p.n) { return; }
-    let sig = 1.0 / (1.0 + exp(-a[i]));
-    let silu = a[i] * sig;
-    let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
-    dab[i] = dc[i] * dsilu * b[i];       // da
-    dab[p.n + i] = dc[i] * silu;         // db
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let stride = nwg.x * 64u;
+    var i = gid.x;
+    while (i < p.n) {
+        let sig = 1.0 / (1.0 + exp(-a[i]));
+        let silu = a[i] * sig;
+        let dsilu = sig * (1.0 + a[i] * (1.0 - sig));
+        dab[i] = dc[i] * dsilu * b[i];       // da
+        dab[p.n + i] = dc[i] * silu;         // db
+        i = i + stride;
+    }
 }
 "#;
 
@@ -248,16 +278,21 @@ struct P { rows: u32, d: u32, vocab: u32, _p0: u32, };
 @group(0) @binding(3) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= p.vocab * p.d) { return; }
-    let v = idx / p.d;
-    let c = idx % p.d;
-    var acc = 0.0;
-    for (var i: u32 = 0u; i < p.rows; i = i + 1u) {
-        if (min(tokens[i], p.vocab - 1u) == v) { acc = acc + dout[i * p.d + c]; }
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let n = p.vocab * p.d;
+    let stride = nwg.x * 64u;
+    var idx = gid.x;
+    while (idx < n) {
+        let v = idx / p.d;
+        let c = idx % p.d;
+        var acc = 0.0;
+        for (var i: u32 = 0u; i < p.rows; i = i + 1u) {
+            if (min(tokens[i], p.vocab - 1u) == v) { acc = acc + dout[i * p.d + c]; }
+        }
+        dtable[idx] = acc;
+        idx = idx + stride;
     }
-    dtable[idx] = acc;
 }
 "#;
 
@@ -274,14 +309,19 @@ struct P { rows: u32, cols: u32, inv_n_bits: u32, _p0: u32, };
 @group(0) @binding(3) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let idx = gid.x;
-    if (idx >= p.rows * p.cols) { return; }
-    let i = idx / p.cols;
-    let j = idx % p.cols;
-    var v = prob[idx];
-    if (j == targets[i]) { v = v - 1.0; }
-    dlogits[idx] = v * bitcast<f32>(p.inv_n_bits);
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let n = p.rows * p.cols;
+    let stride = nwg.x * 64u;
+    var idx = gid.x;
+    while (idx < n) {
+        let i = idx / p.cols;
+        let j = idx % p.cols;
+        var v = prob[idx];
+        if (j == targets[i]) { v = v - 1.0; }
+        dlogits[idx] = v * bitcast<f32>(p.inv_n_bits);
+        idx = idx + stride;
+    }
 }
 "#;
 
@@ -297,10 +337,14 @@ struct P { n: u32, lr_bits: u32, _p0: u32, _p1: u32, };
 @group(0) @binding(3) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= p.n) { return; }
-    out[i] = param[i] - bitcast<f32>(p.lr_bits) * grad[i];
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
+    let stride = nwg.x * 64u;
+    var i = gid.x;
+    while (i < p.n) {
+        out[i] = param[i] - bitcast<f32>(p.lr_bits) * grad[i];
+        i = i + stride;
+    }
 }
 "#;
 
@@ -322,22 +366,26 @@ struct P {
 @group(0) @binding(4) var<uniform>             p: P;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= p.n) { return; }
+fn main(@builtin(global_invocation_id) gid: vec3<u32>,
+        @builtin(num_workgroups) nwg: vec3<u32>) {
     let lr = bitcast<f32>(p.lr);
     let b1 = bitcast<f32>(p.b1);
     let b2 = bitcast<f32>(p.b2);
     let eps = bitcast<f32>(p.eps);
     let wd = bitcast<f32>(p.wd);
-    let g = grad[i];
-    let mi = b1 * m[i] + (1.0 - b1) * g;
-    let vi = b2 * v[i] + (1.0 - b2) * g * g;
-    m[i] = mi;
-    v[i] = vi;
-    let mhat = mi / bitcast<f32>(p.bc1);
-    let vhat = vi / bitcast<f32>(p.bc2);
-    param[i] = param[i] - lr * (mhat / (sqrt(vhat) + eps) + wd * param[i]);
+    let stride = nwg.x * 64u;
+    var i = gid.x;
+    while (i < p.n) {
+        let g = grad[i];
+        let mi = b1 * m[i] + (1.0 - b1) * g;
+        let vi = b2 * v[i] + (1.0 - b2) * g * g;
+        m[i] = mi;
+        v[i] = vi;
+        let mhat = mi / bitcast<f32>(p.bc1);
+        let vhat = vi / bitcast<f32>(p.bc2);
+        param[i] = param[i] - lr * (mhat / (sqrt(vhat) + eps) + wd * param[i]);
+        i = i + stride;
+    }
 }
 "#;
 
@@ -1608,7 +1656,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.embed_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(elems as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
@@ -1786,7 +1834,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.swiglu_bwd_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(n as u32), 1, 1);
             }
             // Split the packed [da | db] into the two resident result buffers.
             encoder.copy_buffer_to_buffer(&dab, 0, &da, 0, bytes);
@@ -1961,7 +2009,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.sgd_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(n as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
@@ -2061,7 +2109,7 @@ impl WgpuContext {
             });
             pass.set_pipeline(&self.adamw_pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+            pass.dispatch_workgroups(flat_workgroups(n as u32), 1, 1);
         }
         self.queue.submit(Some(encoder.finish()));
         Ok(())
@@ -2147,7 +2195,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.xent_grad_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(elems as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
@@ -2236,7 +2284,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.embed_bwd_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((elems as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(elems as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
@@ -2385,7 +2433,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.ew_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(n as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
@@ -2535,7 +2583,7 @@ impl WgpuContext {
                 });
                 pass.set_pipeline(&self.ew_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups((n as u32).div_ceil(64), 1, 1);
+                pass.dispatch_workgroups(flat_workgroups(n as u32), 1, 1);
             }
             self.queue.submit(Some(encoder.finish()));
         }
