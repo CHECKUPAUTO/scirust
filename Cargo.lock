@@ -571,6 +571,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cudarc"
+version = "0.19.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42310153e06cf4cd532901f7096beb27504d681736a29ee90728ae4e2d93b2a8"
+dependencies = [
+ "half",
+ "libloading 0.9.0",
+]
+
+[[package]]
 name = "d3d12"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1036,6 +1046,9 @@ checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
 dependencies = [
  "cfg-if",
  "crunchy",
+ "num-traits",
+ "rand 0.9.4",
+ "rand_distr 0.5.1",
  "zerocopy",
 ]
 
@@ -1550,6 +1563,16 @@ name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
  "cfg-if",
  "windows-link",
@@ -2227,6 +2250,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
+dependencies = [
+ "num-traits",
+ "rand 0.9.4",
+]
+
+[[package]]
 name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2473,7 +2506,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2677,7 +2710,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "rand 0.8.6",
- "rand_distr",
+ "rand_distr 0.4.3",
  "rayon",
  "scirust-autodiff",
  "scirust-gpu-macros",
@@ -2687,6 +2720,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "scirust-cuda"
+version = "0.1.0"
+dependencies = [
+ "cudarc",
+ "half",
 ]
 
 [[package]]
@@ -2757,7 +2798,7 @@ name = "scirust-evo"
 version = "0.1.0"
 dependencies = [
  "rand 0.8.6",
- "rand_distr",
+ "rand_distr 0.4.3",
  "rayon",
  "thiserror 2.0.18",
  "tracing",
@@ -3116,7 +3157,7 @@ name = "scirust-rsi"
 version = "0.1.0"
 dependencies = [
  "rand 0.8.6",
- "rand_distr",
+ "rand_distr 0.4.3",
  "rayon",
  "scirust-core",
  "scirust-learning",

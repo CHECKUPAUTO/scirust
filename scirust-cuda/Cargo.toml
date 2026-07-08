@@ -1,0 +1,18 @@
+[package]
+name = "scirust-cuda"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Route B — CUDA + Tensor-core backend for the Jetson Thor (bf16 mixed precision). Feature-gated; builds CUDA-free unless `cuda` is on."
+
+[features]
+default = []
+# The whole CUDA path is behind this feature. Off ⇒ no cudarc dependency, so the
+# workspace builds and CI runs without any CUDA toolkit. On ⇒ needs CUDA (the
+# Jetson Thor) to build and run. `cuda-13000` pins the API to CUDA 13; cudarc's
+# default `fallback-dynamic-loading` loads the libs at runtime.
+cuda = ["dep:cudarc", "dep:half"]
+
+[dependencies]
+cudarc = { version = "0.19", features = ["f16", "cuda-13000"], optional = true }
+half = { version = "2", optional = true }
