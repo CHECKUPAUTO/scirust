@@ -563,3 +563,47 @@ fn resident_kv_cache_matches_greedy() {
     );
     eprintln!("resident KV-cache matches whole-sequence generate — PASS ({cached:?})");
 }
+
+/// **Resident sampling** (`ResidentModel::generate_sampled`) shares the CPU
+/// decoder's deterministic sampler: at `T = 0` it is greedy and reproduces
+/// `generate_cached` token-for-token; at `T > 0` the same seed reproduces the
+/// same sample, while different seeds diverge (proving the RNG is actually
+/// driving the draw). Skips with no adapter.
+#[test]
+fn resident_sampled_generation_is_greedy_at_t0_and_seed_deterministic() {
+    use scirust_sciagent::generate::SamplingParams;
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident sampling");
+        return;
+    };
+    eprintln!("resident sampling on: {}", rm.adapter_name());
+    let steps = 8usize;
+
+    // T = 0 (default) is a hard argmax ⇒ identical to the greedy KV-cache path.
+    let greedy = rm.generate_cached(&prompt, steps);
+    let sampled_t0 = rm.generate_sampled(&prompt, steps, &SamplingParams::default(), 42);
+    assert_eq!(
+        greedy, sampled_t0,
+        "generate_sampled at T=0 must match greedy generate_cached"
+    );
+
+    // T > 0: same seed reproduces, different seeds diverge (random-init logits
+    // are near-uniform, so 8 identical draws across seeds is negligibly likely).
+    let hot = SamplingParams {
+        temperature: 2.0,
+        ..SamplingParams::default()
+    };
+    let a1 = rm.generate_sampled(&prompt, steps, &hot, 1);
+    let a2 = rm.generate_sampled(&prompt, steps, &hot, 1);
+    assert_eq!(a1, a2, "same seed must reproduce the same sample");
+    let b = rm.generate_sampled(&prompt, steps, &hot, 2);
+    assert_ne!(a1, b, "different seeds should sample differently at T=2");
+    eprintln!("resident sampling: T=0 greedy-parity + seed determinism — PASS");
+}

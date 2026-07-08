@@ -29,6 +29,7 @@ use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights};
 
 use crate::config::SciAgentConfig;
+use crate::generate::{SamplingParams, sample_row, seed_to_state};
 use crate::model::SciAgentModel;
 use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::scheduler::WarmupCosineSchedule;
@@ -318,6 +319,57 @@ impl ResidentModel {
         for i in 0..max_new
         {
             let next = argmax(&last_logits) as u32;
+            let pos = toks.len();
+            toks.push(next);
+            if i + 1 < max_new
+            {
+                last_logits = self.decode_step(next, pos, &mut kcache, &mut vcache);
+            }
+        }
+        toks
+    }
+
+    /// **KV-cached sampled generation** — like [`Self::generate_cached`], but each
+    /// next token is drawn with the shared deterministic sampler
+    /// [`crate::generate::sample_row`] (repetition penalty → temperature → top-k →
+    /// top-p → inverse-CDF draw) instead of a hard argmax. This is the *same*
+    /// decode policy the CPU [`crate::generate::Generator`] uses, so the resident
+    /// and CPU paths sample identically for a given `(params, seed)`.
+    ///
+    /// With `params.temperature <= 0` it is greedy and reproduces
+    /// [`Self::generate_cached`] exactly; with `T > 0` it samples reproducibly from
+    /// `seed`. Same `O(n)`-per-token fully-resident KV cache. Returns the full
+    /// sequence (`prompt` followed by the generated tokens).
+    pub fn generate_sampled(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+    ) -> Vec<u32> {
+        if prompt.is_empty()
+        {
+            return Vec::new();
+        }
+        let n = self.blocks.len();
+        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut rng = seed_to_state(seed);
+
+        // Prefill: feed the prompt, keeping the logits after the last prompt token.
+        let mut last_logits = Vec::new();
+        for (pos, &tok) in prompt.iter().enumerate()
+        {
+            last_logits = self.decode_step(tok, pos, &mut kcache, &mut vcache);
+        }
+
+        let mut toks = prompt.to_vec();
+        for i in 0..max_new
+        {
+            // Trailing context (token ids) for the repetition penalty — the tokens
+            // decoded so far, exactly as the CPU `Generator` passes them.
+            let recent: Vec<usize> = toks.iter().map(|&t| t as usize).collect();
+            let next = sample_row(&last_logits, params, &recent, &mut rng) as u32;
             let pos = toks.len();
             toks.push(next);
             if i + 1 < max_new
