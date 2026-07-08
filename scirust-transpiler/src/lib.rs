@@ -827,6 +827,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn matlab_kron_and_cumtrapz_route_to_prelude() {
+        // kron(a, b) -> vector; BOTH operands inferred vectors, std-only.
+        let k = transpile_matlab("function k = f(a, b)\n  k = kron(a, b);\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&k, "f"),
+            "pub fn f(a: &[f64], b: &[f64]) -> Vec<f64> {"
+        );
+        assert!(k.contains("np::kron(a, b)"));
+        // cumtrapz(v) -> vector; argument inferred a vector.
+        let c = transpile_matlab("function y = f(v)\n  y = cumtrapz(v);\nend\n").unwrap();
+        assert_eq!(sig_of(&c, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(c.contains("np::cumtrapz(v)"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function k = f(a, b)\n  k = kron(a, b);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

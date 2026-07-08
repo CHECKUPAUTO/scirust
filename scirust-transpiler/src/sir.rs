@@ -239,6 +239,12 @@ pub enum SirExpr {
     Trace(Box<SirExpr>),
     /// `cross(a, b)` : (Array, Array) -> Array, the 3-vector cross product.
     Cross(Box<SirExpr>, Box<SirExpr>),
+    /// `kron(a, b)` : (Array, Array) -> Array, the Kronecker product of two
+    /// vectors (`out[i*n+j] = a[i]*b[j]`, length `len(a)*len(b)`).
+    Kron(Box<SirExpr>, Box<SirExpr>),
+    /// `cumtrapz(v)` : Array -> Array, cumulative trapezoidal integral (unit
+    /// spacing; first element `0`, same length).
+    Cumtrapz(Box<SirExpr>),
     /// `len(a)` / `a.shape[0]` : Array -> Int.
     Len(Box<SirExpr>),
     /// `np.zeros(n)` : Int -> Array.
@@ -487,6 +493,8 @@ impl SirExpr {
             | SirExpr::Eigvalsh(_)
             | SirExpr::Matvec { .. }
             | SirExpr::Cross(_, _)
+            | SirExpr::Kron(_, _)
+            | SirExpr::Cumtrapz(_)
             | SirExpr::DiagExtract(_)
             | SirExpr::ComplexAbs(_) => Ty::Array,
             SirExpr::UserCall { ret, .. } => *ret,
@@ -606,7 +614,8 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::ScalarBinFn { l, r, .. }
         | SirExpr::EwBinFn { l, r, .. }
         | SirExpr::Dot(l, r)
-        | SirExpr::Cross(l, r) =>
+        | SirExpr::Cross(l, r)
+        | SirExpr::Kron(l, r) =>
         {
             scan_expr(l, solvers, signal);
             scan_expr(r, solvers, signal);
@@ -639,7 +648,8 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Flip(x)
         | SirExpr::Trace(x)
         | SirExpr::DiagExtract(x)
-        | SirExpr::Trapz(x) => scan_expr(x, solvers, signal),
+        | SirExpr::Trapz(x)
+        | SirExpr::Cumtrapz(x) => scan_expr(x, solvers, signal),
         SirExpr::ScalarPow { base, exp } =>
         {
             scan_expr(base, solvers, signal);
