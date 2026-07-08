@@ -349,7 +349,7 @@ secteurs réellement débloqués.
 | Lowering + inférence de types/formes        | ✅ livré | `scirust-transpiler/src/lower.rs` |
 | Émission Rust déterministe (ordre pinné)    | ✅ livré | `scirust-transpiler/src/emit.rs` |
 | Oracle différentiel contre NumPy réel **et Octave réel** | ✅ livré | `scirust-transpiler/examples/oracle.rs` |
-| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (84 tests) |
+| Tests unitaires (gate CI, sans Python/Octave) | ✅ livré | `scirust-transpiler/src/lib.rs` (85 tests) |
 | Contrôle de flux `if`/`elif`/`else` + comparaisons | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Boucles `while` (algorithmes itératifs)     | ✅ livré (Phase 1) | `front_python/` + `sir.rs` + `emit.rs` |
 | Routage `np.linalg.solve`/`det`/`eigvalsh`/`inv` + `A @ b` (matvec) → `scirust-solvers` (retour matrice 2-D pour `inv`) | ✅ livré (Phase 1) | `sir.rs` (`LinSolve`, `Det`, `Eigvalsh`, `Matvec`, `Inv`, `Ty::MatrixVal`) + `emit.rs` |
@@ -361,8 +361,8 @@ secteurs réellement débloqués.
 | **Front-end MATLAB/Octave** (lexer + parser + lowering, prouvé vs Octave ; **multi-sorties `[a,b]=f(…)`**, intrinsèques math/réductions alignés sur Python, **algèbre linéaire `det`/`inv`/`\`/`eig` + produit matriciel `A*b`/`A*B` → `scirust-solvers`**, `norm`/`dot`, `.^`, vecteur→vecteur, `linspace`) | ✅ livré (Phase 2) | `scirust-transpiler/src/front_matlab/` + `lower_matlab.rs` |
 | Front-ends Fortran / C++                     | ⏳ Phases 3-4 | — |
 
-**Résultat de l'oracle (reproductible).** 104 cas au total : 43 Python prouvés
-contre **NumPy réel**, 61 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
+**Résultat de l'oracle (reproductible).** 106 cas au total : 43 Python prouvés
+contre **NumPy réel**, 63 MATLAB prouvés contre **Octave réel** (chacun 200 essais).
 
 ```
 $ cargo run -p scirust-transpiler --example oracle
@@ -400,8 +400,9 @@ tolerance: |Δ| ≤ 1e-7 + 1e-9·|ref|, 200 trials/case
   ✓ M: expm1(x) / log1p(v) (MATLAB accurate-near-zero exp/log — Phase 2)
   ✓ M: atan2/hypot/max/min elementwise & broadcast on arrays (Phase 2)
   ✓ M: deg2rad / rad2deg + sign elementwise (MATLAB angle conversion + vector sign — Phase 2)
+  ✓ M: mod(cumsum(v),3) / rem(cumsum(v),3) (MATLAB elementwise modular, broadcast — Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 (`return a, b` — Phase 2)
-  ORACLE GREEN — 104/104 cases match their reference runtime within tolerance
+  ORACLE GREEN — 106/106 cases match their reference runtime within tolerance
 ```
 
 Un point d'entrée unique lance toute la suite (tests unitaires + oracle) avec

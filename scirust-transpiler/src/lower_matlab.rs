@@ -645,6 +645,51 @@ fn ew_or_broadcast(op: Op, lv: SirExpr, rv: SirExpr, la: bool, ra: bool) -> SirE
     }
 }
 
+/// Apply a unary math intrinsic to an expression, elementwise if it is an array.
+fn unary_fn(func: MathFn, e: SirExpr) -> SirExpr {
+    if e.ty() == Ty::Array
+    {
+        SirExpr::ArrayUnaryFn {
+            func,
+            arg: Box::new(e),
+        }
+    }
+    else
+    {
+        SirExpr::ScalarUnaryFn {
+            func,
+            arg: Box::new(e),
+        }
+    }
+}
+
+/// Lower `mod`/`rem` as `a - b * round_fn(a / b)` (round_fn = `floor` for `mod`,
+/// `trunc` for `rem`), delegating each arithmetic step to [`ew_or_broadcast`] so
+/// it works for scalar operands, two vectors, or a scalar↔vector broadcast.
+fn lower_modrem(
+    op_name: &str,
+    round_fn: MathFn,
+    a: SirExpr,
+    b: SirExpr,
+) -> Result<SirExpr, String> {
+    if is_matrixish(a.ty()) || is_matrixish(b.ty())
+    {
+        return Err(format!("`{}` expects scalar or vector operands", op_name));
+    }
+    let a_arr = a.ty() == Ty::Array;
+    let b_arr = b.ty() == Ty::Array;
+    // q = a / b
+    let q = ew_or_broadcast(Op::Div, a.clone(), b.clone(), a_arr, b_arr);
+    // fq = floor/trunc(q)  (elementwise if q is an array)
+    let fq = unary_fn(round_fn, q);
+    let fq_arr = fq.ty() == Ty::Array;
+    // bfq = b * fq
+    let bfq = ew_or_broadcast(Op::Mul, b, fq, b_arr, fq_arr);
+    let bfq_arr = bfq.ty() == Ty::Array;
+    // result = a - bfq
+    Ok(ew_or_broadcast(Op::Sub, a, bfq, a_arr, bfq_arr))
+}
+
 fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<SirExpr, String> {
     if MATH_FNS.contains(&func)
     {
@@ -899,15 +944,14 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     }
     if func == "mod" || func == "rem"
     {
-        // MATLAB scalar modulo/remainder, built from existing nodes:
+        // MATLAB modulo/remainder, built from existing nodes (scalar or
+        // elementwise/broadcast over vectors — see `lower_modrem`):
         //   mod(a, b) = a - b * floor(a / b)   (result follows the divisor sign)
         //   rem(a, b) = a - b * fix(a / b)     (result follows the dividend sign)
         // `fix` is truncate-toward-zero.
         need_args(func, args, 2)?;
         let a = lower_scalar(&args[0], env)?;
         let b = lower_scalar(&args[1], env)?;
-        expect_scalar(&a, func)?;
-        expect_scalar(&b, func)?;
         let round_fn = if func == "mod"
         {
             MathFn::Floor
@@ -916,25 +960,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         {
             MathFn::Trunc
         };
-        let quotient = SirExpr::ScalarBin {
-            op: Op::Div,
-            l: Box::new(a.clone()),
-            r: Box::new(b.clone()),
-        };
-        let rounded = SirExpr::ScalarUnaryFn {
-            func: round_fn,
-            arg: Box::new(quotient),
-        };
-        let scaled = SirExpr::ScalarBin {
-            op: Op::Mul,
-            l: Box::new(b),
-            r: Box::new(rounded),
-        };
-        return Ok(SirExpr::ScalarBin {
-            op: Op::Sub,
-            l: Box::new(a),
-            r: Box::new(scaled),
-        });
+        return lower_modrem(func, round_fn, a, b);
     }
     if func == "sign"
     {
