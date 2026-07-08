@@ -928,6 +928,30 @@ fn matlab_cases() -> Vec<Case> {
             src: "function y = mlinspace(a, b)\n  y = linspace(a, b, 6);\nend\n",
             args: vec![Scalar { lo: -5.0, hi: 5.0 }, Scalar { lo: -5.0, hi: 5.0 }],
         },
+        // ---- MATLAB matrix product `*` (Phase 2) ----
+        // Matrix-vector: residual r = A*(A\b) ≈ b. `A` is inferred a matrix from
+        // `\`; `x` is the (vector) solution, so `A * x` routes to matvec.
+        Case {
+            name: "M: A*(A\\b) residual (matvec)",
+            call: "mresid",
+            src: "function r = mresid(A, b)\n  x = A \\ b;\n  r = A * x;\nend\n",
+            args: vec![
+                Matrix { n: 5 },
+                Array {
+                    n: 5,
+                    lo: -3.0,
+                    hi: 3.0,
+                },
+            ],
+        },
+        // Matrix-matrix: A * inv(A) ≈ I. `A` is a matrix (from inv), `B` a
+        // produced matrix, so `A * B` routes to matmul (matrix out).
+        Case {
+            name: "M: A*inv(A) (matmul -> ~I)",
+            call: "minvcheck",
+            src: "function C = minvcheck(A)\n  B = inv(A);\n  C = A * B;\nend\n",
+            args: vec![Matrix { n: 4 }],
+        },
     ]
 }
 
