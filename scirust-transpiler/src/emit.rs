@@ -221,6 +221,29 @@ pub mod np {
         }
         o
     }
+    /// Full linear convolution `a ∗ b` (length `m+n-1`, fixed accumulation
+    /// order so it is bit-reproducible).
+    pub fn conv(a: &[f64], b: &[f64]) -> Vec<f64> {
+        if a.is_empty() || b.is_empty() {
+            return Vec::new();
+        }
+        let mut o = vec![0.0f64; a.len() + b.len() - 1];
+        for i in 0..a.len() {
+            for j in 0..b.len() {
+                o[i + j] += a[i] * b[j];
+            }
+        }
+        o
+    }
+    /// Horner evaluation of the polynomial with coefficients `p` (highest degree
+    /// first) at `x`.
+    pub fn polyval(p: &[f64], x: f64) -> f64 {
+        let mut acc = 0.0f64;
+        for i in 0..p.len() {
+            acc = acc * x + p[i];
+        }
+        acc
+    }
     /// Cumulative trapezoidal integral (unit spacing; first element `0`).
     pub fn cumtrapz(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len());
@@ -798,6 +821,26 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             Frag {
                 code: format!("np::kron({}, {})", slice_of(&a), slice_of(&b)),
                 ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Conv(a, b) =>
+        {
+            let a = emit(a, ctx);
+            let b = emit(b, ctx);
+            Frag {
+                code: format!("np::conv({}, {})", slice_of(&a), slice_of(&b)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Polyval { p, x } =>
+        {
+            let p = emit(p, ctx);
+            let x = emit(x, ctx);
+            Frag {
+                code: format!("np::polyval({}, {})", slice_of(&p), scalar_of(x)),
+                ty: Ty::Scalar,
                 borrowed: false,
             }
         },

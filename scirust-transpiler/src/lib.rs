@@ -848,6 +848,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn matlab_conv_and_polyval_route_to_prelude() {
+        // conv(a, b) -> vector; both operands inferred vectors.
+        let c = transpile_matlab("function c = f(a, b)\n  c = conv(a, b);\nend\n").unwrap();
+        assert_eq!(
+            sig_of(&c, "f"),
+            "pub fn f(a: &[f64], b: &[f64]) -> Vec<f64> {"
+        );
+        assert!(c.contains("np::conv(a, b)"));
+        // polyval(p, x) -> scalar; `p` is a vector, `x` stays scalar.
+        let p = transpile_matlab("function y = f(p, x)\n  y = polyval(p, x);\nend\n").unwrap();
+        assert_eq!(sig_of(&p, "f"), "pub fn f(p: &[f64], x: f64) -> f64 {");
+        assert!(p.contains("np::polyval(p, x)"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function c = f(a, b)\n  c = conv(a, b);\nend\n").unwrap()
+            )
+            .is_empty()
+        );
+    }
+
     // ---- tuples / SVD -----------------------------------------------------
 
     #[test]

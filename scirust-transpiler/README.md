@@ -63,6 +63,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
+| `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
 | constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
 | two-arg math `atan2(y,x)`, `hypot(a,b)`, `max(a,b)`, `min(a,b)`, `power(a,b)` | `(l).atan2/hypot/max/min(r)` (`ScalarBinFn`); `power` shares `^`. `max`/`min` with one arg stay reductions |
 
@@ -123,8 +124,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: trace(A) / cross(a,b)      200/200 trials match (octave) (MATLAB diagonal sum + 3-vector cross product, Phase 2)
   ✓ M: diag(A'*A) / diag(cumsum(v)) / trapz(v) 200/200 trials match (octave) (overloaded diag + integration, Phase 2)
   ✓ M: kron(a,b) / cumtrapz(v)    200/200 trials match (octave) (Kronecker product + cumulative integral, Phase 2)
+  ✓ M: conv(a,b) / polyval(p,x)   200/200 trials match (octave) (convolution + Horner polynomial eval, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 94/94 cases match their reference runtime within tolerance
+  ORACLE GREEN — 96/96 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

@@ -1053,6 +1053,39 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 3.0,
             }],
         },
+        // ---- MATLAB conv + polyval (Phase 2) ----
+        // conv(a, b) — full linear convolution (length 5 + 3 - 1 = 7).
+        Case {
+            name: "M: conv(a, b) (convolution)",
+            call: "mconv",
+            src: "function c = mconv(a, b)\n  c = conv(a, b);\nend\n",
+            args: vec![
+                Array {
+                    n: 5,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Array {
+                    n: 3,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+            ],
+        },
+        // polyval(p, x) — Horner evaluation (coefficients vector, scalar point).
+        Case {
+            name: "M: polyval(p, x) (Horner)",
+            call: "mpolyval",
+            src: "function y = mpolyval(p, x)\n  y = polyval(p, x);\nend\n",
+            args: vec![
+                Array {
+                    n: 4,
+                    lo: -2.0,
+                    hi: 2.0,
+                },
+                Scalar { lo: -1.5, hi: 1.5 },
+            ],
+        },
     ]
 }
 
