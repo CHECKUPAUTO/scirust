@@ -1086,6 +1086,24 @@ fn matlab_cases() -> Vec<Case> {
                 Scalar { lo: -1.5, hi: 1.5 },
             ],
         },
+        // expm1 (scalar) + log1p (elementwise array) — accurate near zero.
+        Case {
+            name: "M: expm1(x) (scalar)",
+            call: "mexpm1",
+            src: "function y = mexpm1(x)\n  y = expm1(x);\nend\n",
+            args: vec![Scalar { lo: -1.0, hi: 1.0 }],
+        },
+        // log1p elementwise over an array; `.* v` establishes `v` as a vector.
+        Case {
+            name: "M: log1p(v) .* v (elementwise array)",
+            call: "mlog1p",
+            src: "function y = mlog1p(v)\n  y = log1p(v) .* v;\nend\n",
+            args: vec![Array {
+                n: 6,
+                lo: -0.5,
+                hi: 3.0,
+            }],
+        },
     ]
 }
 

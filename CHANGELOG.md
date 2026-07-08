@@ -160,6 +160,19 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `expm1` / `log1p`** prouvés contre Octave réel (Phase 2, incrément 34)
+Deux fonctions math **précises près de zéro**, mappées sur les méthodes IEEE
+exactes `f64::exp_m1` / `f64::ln_1p` et intégrées au motif `MATH_FNS`
+(scalaire *et* élément par élément) :
+
+- **`expm1(x)`** = `exp(x) − 1` sans perte de précision pour `x` proche de 0.
+- **`log1p(x)`** = `ln(1 + x)` sans perte de précision pour `x` proche de 0.
+
+Deux cas d'oracle (`expm1` scalaire ; `log1p` élément par élément). **Oracle
+98/98** (200 essais chacun) ; **82 tests unitaires** (1 nouveau). *Non-vacuité* :
+mapper `expm1` sur `exp` au lieu de `exp_m1` décale le résultat de 1 et passe
+l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **MATLAB `conv` + `polyval`** prouvés contre Octave réel (Phase 2, incrément 33)
 Deux classiques du traitement du signal / numérique, câblés via des helpers
 déterministes du prélude :

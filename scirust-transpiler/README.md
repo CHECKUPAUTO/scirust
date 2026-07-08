@@ -59,7 +59,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
-| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
+| math `sqrt/exp/log/log10/sin/cos/sinh/cosh/tanh/abs/floor/ceil/atan/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular), `sign(x)` (−1/0/+1, `sign(0)=0`) | composed from `floor`/`fix`; bound if/else for `sign` |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, ascending sort, reverse) |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
@@ -125,8 +125,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: diag(A'*A) / diag(cumsum(v)) / trapz(v) 200/200 trials match (octave) (overloaded diag + integration, Phase 2)
   ✓ M: kron(a,b) / cumtrapz(v)    200/200 trials match (octave) (Kronecker product + cumulative integral, Phase 2)
   ✓ M: conv(a,b) / polyval(p,x)   200/200 trials match (octave) (convolution + Horner polynomial eval, Phase 2)
+  ✓ M: expm1(x) / log1p(v)        200/200 trials match (octave) (accurate-near-zero exp/log, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 96/96 cases match their reference runtime within tolerance
+  ORACLE GREEN — 98/98 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
