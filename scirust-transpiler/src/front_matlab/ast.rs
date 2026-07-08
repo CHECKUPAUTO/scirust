@@ -1,20 +1,22 @@
 //! MATLAB (subset) AST produced by the front-end parser.
 //!
-//! A contractual subset of MATLAB/Octave: `function out = f(args) … end`,
-//! scalar/vector arithmetic (with element-wise `.*` `./` `.^`), 1-based
-//! indexing, `if`/`for`/`while`, and a small intrinsic set. Anything else is
-//! refused with a diagnostic.
+//! A contractual subset of MATLAB/Octave: `function out = f(args) … end` and
+//! `function [o1, o2] = f(args) … end`, scalar/vector arithmetic (with
+//! element-wise `.*` `./` `.^`), 1-based indexing, `if`/`for`/`while`, and a
+//! small intrinsic set. Anything else is refused with a diagnostic.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MModule {
     pub funcs: Vec<MFunc>,
 }
 
-/// `function out = name(params) body end`.
+/// `function out = name(params) body end` or
+/// `function [o1, o2, …] = name(params) body end`. `outs` holds the output
+/// variable(s) in declaration order (length 1 for a single-output function).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MFunc {
     pub name: String,
-    pub out: String,
+    pub outs: Vec<String>,
     pub params: Vec<String>,
     pub body: Vec<MStmt>,
 }

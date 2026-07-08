@@ -160,6 +160,22 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB multi-sorties `[a,b] = f(…)` + vocabulaire MATLAB élargi** prouvés contre Octave réel (Phase 2, incrément 17)
+Vers une couverture MATLAB large et sûre. (1) **Fonctions multi-sorties** :
+`function [o1, o2, …] = f(x) … end` transpile vers un `pub fn … -> (T0, T1, …)`
+(retour tuple), réutilisant la machinerie `RetTy::Tuple`/`ReturnTuple` du côté
+Python (incrément 16). Lexer étendu (`[`/`]` avec suivi de profondeur), parser
+(liste de sorties entre crochets), lowering (`ReturnTuple` des variables de
+sortie). (2) **Intrinsèques MATLAB alignés sur Python** : nouvelles fonctions
+math `log`/`log10`/`floor`/`ceil`/`sinh`/`cosh`/`atan` et réductions
+`prod`/`mean`/`max`/`min` (les réductions comptent aussi comme preuve de tableau
+pour l'inférence des paramètres). L'oracle Octave capture désormais plusieurs
+sorties (`[o1,…] = f(args)`). Quatre cas d'oracle : `[s,d]=sumdiff`,
+`[n,ss]=normstats`, `[lo,mu,hi]=stats3` (min/mean/max), `mathx` (log/floor/atan).
+**Oracle 56/56** (200 essais chacun) ; **57 tests unitaires** (4 nouveaux).
+Non-vacuité re-vérifiée : inverser l'ordre des sorties fait diverger les cas
+multi-sorties et passe l'oracle au ROUGE.
+
 ### Ajouté — transpileur : **retours de tuple généraux** (`return a, b`) prouvés contre NumPy réel (Phase 2, incrément 16)
 Complète l'histoire des tuples côté **production** : une fonction peut renvoyer
 plusieurs valeurs (`def minmax(x): return np.min(x), np.max(x)` → `-> (f64, f64)`).
