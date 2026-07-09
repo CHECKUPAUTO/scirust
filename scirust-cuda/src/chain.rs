@@ -165,6 +165,117 @@ extern "C" __global__ void embed_kernel(
         out[idx] = table[(size_t)tokens[i] * d + j];
     }
 }
+
+// ---- backward adjoints (B4) ----
+
+// Softmax backward: dx = y ⊙ (dy − Σⱼ dyⱼyⱼ) per row. One thread per row.
+extern "C" __global__ void softmax_bwd_kernel(
+    unsigned short* dx, const unsigned short* y, const unsigned short* dy,
+    const size_t rows, const size_t cols)
+{
+    size_t r = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < rows) {
+        float s = 0.0f;
+        for (size_t j = 0; j < cols; j++) s += b2f(dy[r*cols+j]) * b2f(y[r*cols+j]);
+        for (size_t j = 0; j < cols; j++) {
+            float yv = b2f(y[r*cols+j]);
+            dx[r*cols+j] = f2b(yv * (b2f(dy[r*cols+j]) - s));
+        }
+    }
+}
+
+// SwiGLU backward of c = silu(a) ⊙ b: da = dc·silu'(a)·b, db = dc·silu(a),
+// silu'(x) = σ(x)·(1 + x·(1−σ(x))). Elementwise, two outputs.
+extern "C" __global__ void swiglu_bwd_kernel(
+    unsigned short* da, unsigned short* db,
+    const unsigned short* a, const unsigned short* b, const unsigned short* dc,
+    const size_t n)
+{
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        float av = b2f(a[i]);
+        float sig = 1.0f / (1.0f + __expf(-av));
+        float silu = av * sig;
+        float dsilu = sig * (1.0f + av * (1.0f - sig));
+        float dcv = b2f(dc[i]);
+        da[i] = f2b(dcv * dsilu * b2f(b[i]));
+        db[i] = f2b(dcv * silu);
+    }
+}
+
+// RMSNorm input backward: dx_j = dy_j·w_j/rms − x_j·(Σₖ dyₖwₖxₖ)/(cols·rms³),
+// rms = √(mean(x²)+eps). One thread per row (matches rmsnorm_kernel's reduction).
+extern "C" __global__ void rmsnorm_bwd_kernel(
+    unsigned short* dx, const unsigned short* x, const unsigned short* w,
+    const unsigned short* dy, const size_t rows, const size_t cols, const float eps)
+{
+    size_t r = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < rows) {
+        float ss = 0.0f;
+        for (size_t j = 0; j < cols; j++) { float v = b2f(x[r*cols+j]); ss += v*v; }
+        float ms = ss / (float)cols + eps;
+        float rms = sqrtf(ms);
+        float dot = 0.0f;
+        for (size_t j = 0; j < cols; j++)
+            dot += b2f(dy[r*cols+j]) * b2f(w[j]) * b2f(x[r*cols+j]);
+        float coef = dot / ((float)cols * ms * rms);
+        for (size_t j = 0; j < cols; j++)
+            dx[r*cols+j] = f2b(b2f(dy[r*cols+j]) * b2f(w[j]) / rms - b2f(x[r*cols+j]) * coef);
+    }
+}
+
+// RMSNorm gain backward: dw_j = Σ_r dy[r,j]·x[r,j]/rms[r]. One thread per column;
+// each recomputes the per-row rms (self-contained, no shared per-row buffer).
+extern "C" __global__ void rmsnorm_gain_bwd_kernel(
+    unsigned short* dw, const unsigned short* x, const unsigned short* dy,
+    const size_t rows, const size_t cols, const float eps)
+{
+    size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (j < cols) {
+        float acc = 0.0f;
+        for (size_t r = 0; r < rows; r++) {
+            float ss = 0.0f;
+            for (size_t k = 0; k < cols; k++) { float v = b2f(x[r*cols+k]); ss += v*v; }
+            float rms = sqrtf(ss / (float)cols + eps);
+            acc += b2f(dy[r*cols+j]) * b2f(x[r*cols+j]) / rms;
+        }
+        dw[j] = f2b(acc);
+    }
+}
+
+// Scale + causal-mask backward: din = scale·dout at kept positions, 0 above the
+// diagonal (masked keys carry no gradient). Elementwise.
+extern "C" __global__ void scale_mask_bwd_kernel(
+    unsigned short* din, const unsigned short* dout,
+    const size_t rows, const size_t cols, const float scale, const int causal)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * cols) {
+        size_t i = idx / cols, j = idx % cols;
+        float v = (causal && j > i) ? 0.0f : b2f(dout[idx]) * scale;
+        din[idx] = f2b(v);
+    }
+}
+
+// RoPE backward — the adjoint (transpose) rotation, same pos/freq as rope_kernel:
+// dx[2p] = c·dy[2p] + s·dy[2p+1], dx[2p+1] = −s·dy[2p] + c·dy[2p+1].
+extern "C" __global__ void rope_bwd_kernel(
+    unsigned short* dx, const unsigned short* dy, const size_t rows, const size_t dim,
+    const size_t seq_len, const size_t offset, const float theta)
+{
+    size_t pairs = dim / 2;
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * pairs) {
+        size_t r = idx / pairs, p = idx % pairs;
+        float pos = (float)((r % seq_len) + offset);
+        float freq = powf(theta, -2.0f * (float)p / (float)dim);
+        float ang = pos * freq, c = cosf(ang), s = sinf(ang);
+        float ge = b2f(dy[r*dim + 2*p]);
+        float go = b2f(dy[r*dim + 2*p + 1]);
+        dx[r*dim + 2*p]     = f2b(c * ge + s * go);
+        dx[r*dim + 2*p + 1] = f2b(-s * ge + c * go);
+    }
+}
 "#;
 
 /// A resident row-major `rows × cols` matrix in VRAM, stored in **bf16** (the
@@ -201,6 +312,12 @@ struct Kernels {
     scale_mask: CudaFunction,
     rope: CudaFunction,
     embed: CudaFunction,
+    softmax_bwd: CudaFunction,
+    swiglu_bwd: CudaFunction,
+    rmsnorm_bwd: CudaFunction,
+    rmsnorm_gain_bwd: CudaFunction,
+    scale_mask_bwd: CudaFunction,
+    rope_bwd: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -255,6 +372,12 @@ impl CudaChain {
             scale_mask: f("scale_mask_kernel"),
             rope: f("rope_kernel"),
             embed: f("embed_kernel"),
+            softmax_bwd: f("softmax_bwd_kernel"),
+            swiglu_bwd: f("swiglu_bwd_kernel"),
+            rmsnorm_bwd: f("rmsnorm_bwd_kernel"),
+            rmsnorm_gain_bwd: f("rmsnorm_gain_bwd_kernel"),
+            scale_mask_bwd: f("scale_mask_bwd_kernel"),
+            rope_bwd: f("rope_bwd_kernel"),
         })
     }
 
@@ -690,6 +813,251 @@ impl CudaChain {
             cols: d,
         }
     }
+
+    // ---- backward adjoints (B4) ----
+
+    /// Softmax backward: given the forward output `y` and upstream grad `dy`,
+    /// `dx = y ⊙ (dy − Σⱼ dyⱼyⱼ)` per row. One thread per row.
+    pub fn softmax_backward(&self, y: &CudaMatrix, dy: &CudaMatrix) -> CudaMatrix {
+        assert_eq!(
+            (y.rows, y.cols),
+            (dy.rows, dy.cols),
+            "softmax_backward: y {}x{} vs dy {}x{}",
+            y.rows,
+            y.cols,
+            dy.rows,
+            dy.cols
+        );
+        let (rows, cols) = (y.rows, y.cols);
+        let mut dx = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc");
+        let (rows_a, cols_a) = (rows, cols);
+        let mut builder = self.stream.launch_builder(&self.kernels().softmax_bwd);
+        builder.arg(&mut dx);
+        builder.arg(&y.buf);
+        builder.arg(&dy.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        // SAFETY: arg order/types match `softmax_bwd_kernel`; one thread per row.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(rows as u32))
+                .expect("launch softmax_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: dx,
+            rows,
+            cols,
+        }
+    }
+
+    /// SwiGLU backward of `c = silu(a) ⊙ b`: returns `(da, db)` with
+    /// `da = dc·silu'(a)·b`, `db = dc·silu(a)`. Elementwise.
+    pub fn swiglu_backward(
+        &self,
+        a: &CudaMatrix,
+        b: &CudaMatrix,
+        dc: &CudaMatrix,
+    ) -> (CudaMatrix, CudaMatrix) {
+        assert_eq!(
+            (a.rows, a.cols),
+            (b.rows, b.cols),
+            "swiglu_backward: a/b shape"
+        );
+        assert_eq!(
+            (a.rows, a.cols),
+            (dc.rows, dc.cols),
+            "swiglu_backward: a/dc shape"
+        );
+        let (rows, cols) = (a.rows, a.cols);
+        let n = rows * cols;
+        let mut da = self.stream.alloc_zeros::<bf16>(n).expect("cuda alloc");
+        let mut db = self.stream.alloc_zeros::<bf16>(n).expect("cuda alloc");
+        let n_a = n;
+        let mut builder = self.stream.launch_builder(&self.kernels().swiglu_bwd);
+        builder.arg(&mut da);
+        builder.arg(&mut db);
+        builder.arg(&a.buf);
+        builder.arg(&b.buf);
+        builder.arg(&dc.buf);
+        builder.arg(&n_a);
+        // SAFETY: arg order/types match `swiglu_bwd_kernel`; grid covers n.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(n as u32))
+                .expect("launch swiglu_bwd_kernel");
+        }
+        (
+            CudaMatrix {
+                buf: da,
+                rows,
+                cols,
+            },
+            CudaMatrix {
+                buf: db,
+                rows,
+                cols,
+            },
+        )
+    }
+
+    /// RMSNorm **input** backward: `dx_j = dy_j·w_j/rms − x_j·(Σₖ dyₖwₖxₖ)/(cols·rms³)`
+    /// per row, `rms = √(mean(x²)+eps)`. `weight` is a `cols`-length gain. One thread
+    /// per row.
+    pub fn rms_norm_backward(
+        &self,
+        x: &CudaMatrix,
+        weight: &CudaMatrix,
+        dy: &CudaMatrix,
+        eps: f32,
+    ) -> CudaMatrix {
+        assert_eq!(
+            (x.rows, x.cols),
+            (dy.rows, dy.cols),
+            "rms_norm_backward: x/dy shape"
+        );
+        assert_eq!(
+            weight.rows * weight.cols,
+            x.cols,
+            "rms_norm_backward: weight {} elems, expected {}",
+            weight.rows * weight.cols,
+            x.cols
+        );
+        let (rows, cols) = (x.rows, x.cols);
+        let mut dx = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc");
+        let (rows_a, cols_a, eps_a) = (rows, cols, eps);
+        let mut builder = self.stream.launch_builder(&self.kernels().rmsnorm_bwd);
+        builder.arg(&mut dx);
+        builder.arg(&x.buf);
+        builder.arg(&weight.buf);
+        builder.arg(&dy.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        builder.arg(&eps_a);
+        // SAFETY: arg order/types match `rmsnorm_bwd_kernel`; one thread per row.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(rows as u32))
+                .expect("launch rmsnorm_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: dx,
+            rows,
+            cols,
+        }
+    }
+
+    /// RMSNorm **gain** backward: `dw_j = Σ_r dy[r,j]·x[r,j]/rms[r]`; result is a
+    /// `1×cols` row vector. One thread per column (each recomputes the per-row rms).
+    pub fn rms_norm_gain_backward(&self, x: &CudaMatrix, dy: &CudaMatrix, eps: f32) -> CudaMatrix {
+        assert_eq!(
+            (x.rows, x.cols),
+            (dy.rows, dy.cols),
+            "rms_norm_gain_backward: x/dy shape"
+        );
+        let (rows, cols) = (x.rows, x.cols);
+        let mut dw = self.stream.alloc_zeros::<bf16>(cols).expect("cuda alloc");
+        let (rows_a, cols_a, eps_a) = (rows, cols, eps);
+        let mut builder = self.stream.launch_builder(&self.kernels().rmsnorm_gain_bwd);
+        builder.arg(&mut dw);
+        builder.arg(&x.buf);
+        builder.arg(&dy.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        builder.arg(&eps_a);
+        // SAFETY: arg order/types match `rmsnorm_gain_bwd_kernel`; one thread per col.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(cols as u32))
+                .expect("launch rmsnorm_gain_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: dw,
+            rows: 1,
+            cols,
+        }
+    }
+
+    /// Scale + causal-mask backward: `din = scale·dout` at kept positions, `0` above
+    /// the diagonal (masked keys carry no gradient). Elementwise.
+    pub fn scale_causal_mask_backward(
+        &self,
+        dout: &CudaMatrix,
+        scale: f32,
+        causal: bool,
+    ) -> CudaMatrix {
+        let (rows, cols) = (dout.rows, dout.cols);
+        let total = rows * cols;
+        let mut din = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (rows_a, cols_a, scale_a) = (rows, cols, scale);
+        let causal_a: i32 = causal as i32;
+        let mut builder = self.stream.launch_builder(&self.kernels().scale_mask_bwd);
+        builder.arg(&mut din);
+        builder.arg(&dout.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        builder.arg(&scale_a);
+        builder.arg(&causal_a);
+        // SAFETY: arg order/types match `scale_mask_bwd_kernel`; grid covers rows*cols.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch scale_mask_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: din,
+            rows,
+            cols,
+        }
+    }
+
+    /// RoPE backward — the adjoint (transpose) rotation, same `pos`/`freq` as
+    /// [`Self::rope`]. `dim` (cols) must be even. One thread per `(row, pair)`.
+    pub fn rope_backward(
+        &self,
+        dy: &CudaMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> CudaMatrix {
+        assert_eq!(
+            dy.cols % 2,
+            0,
+            "rope_backward: dim must be even, got {}",
+            dy.cols
+        );
+        let (rows, dim) = (dy.rows, dy.cols);
+        let total = rows * (dim / 2);
+        let mut dx = self
+            .stream
+            .alloc_zeros::<bf16>(rows * dim)
+            .expect("cuda alloc");
+        let (rows_a, dim_a, seq_a, off_a, theta_a) = (rows, dim, seq_len, offset, theta);
+        let mut builder = self.stream.launch_builder(&self.kernels().rope_bwd);
+        builder.arg(&mut dx);
+        builder.arg(&dy.buf);
+        builder.arg(&rows_a);
+        builder.arg(&dim_a);
+        builder.arg(&seq_a);
+        builder.arg(&off_a);
+        builder.arg(&theta_a);
+        // SAFETY: arg order/types match `rope_bwd_kernel`; one thread per (row, pair).
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch rope_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: dx,
+            rows,
+            cols: dim,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1076,5 +1444,148 @@ mod tests {
         }
         assert_eq!(got, want, "embed must gather the exact table rows");
         eprintln!("bf16 embed gather — PASS");
+    }
+
+    /// The B4 backward adjoints (`softmax_backward`, `swiglu_backward`,
+    /// `rms_norm_backward`, `rms_norm_gain_backward`, `scale_causal_mask_backward`,
+    /// `rope_backward`) each match their CPU fp32 oracle within bf16 tolerance —
+    /// these are the VJP building blocks the CudaModel backward composes. Skips with
+    /// no device.
+    #[test]
+    fn bf16_backward_adjoints_match_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping backward-adjoint parity");
+            return;
+        };
+        let (rows, cols) = (4usize, 8usize);
+        let n = rows * cols;
+        let x: Vec<f32> = (0..n).map(|i| (i as f32 * 0.13 - 0.6).sin()).collect();
+        let dy: Vec<f32> = (0..n)
+            .map(|i| (i as f32 * 0.09 + 0.2).cos() * 0.5)
+            .collect();
+        let gx = chain.upload(&x, rows, cols);
+        let gdy = chain.upload(&dy, rows, cols);
+
+        // softmax backward: dx = y ⊙ (dy − Σⱼ dyⱼyⱼ), y = softmax(x).
+        let y = cpu_softmax(&x, rows, cols);
+        let gy = chain.upload(&y, rows, cols);
+        let sm_bwd = chain.download(&chain.softmax_backward(&gy, &gdy));
+        let mut want_sm = vec![0.0f32; n];
+        for r in 0..rows
+        {
+            let base = r * cols;
+            let s: f32 = (0..cols).map(|j| dy[base + j] * y[base + j]).sum();
+            for j in 0..cols
+            {
+                want_sm[base + j] = y[base + j] * (dy[base + j] - s);
+            }
+        }
+        let e_sm = rel_err(&sm_bwd, &want_sm);
+        assert!(e_sm < 5e-2, "softmax_backward rel_err {e_sm}");
+
+        // SwiGLU backward of c = silu(a) ⊙ b, with a = x, b = another signal.
+        let b: Vec<f32> = (0..n).map(|i| (i as f32 * 0.17 + 0.4).sin()).collect();
+        let gb = chain.upload(&b, rows, cols);
+        let (da, db) = chain.swiglu_backward(&gx, &gb, &gdy);
+        let (da, db) = (chain.download(&da), chain.download(&db));
+        let mut want_da = vec![0.0f32; n];
+        let mut want_db = vec![0.0f32; n];
+        for i in 0..n
+        {
+            let sig = 1.0 / (1.0 + (-x[i]).exp());
+            let silu = x[i] * sig;
+            let dsilu = sig * (1.0 + x[i] * (1.0 - sig));
+            want_da[i] = dy[i] * dsilu * b[i];
+            want_db[i] = dy[i] * silu;
+        }
+        let e_da = rel_err(&da, &want_da);
+        let e_db = rel_err(&db, &want_db);
+        assert!(e_da < 5e-2, "swiglu_backward da rel_err {e_da}");
+        assert!(e_db < 5e-2, "swiglu_backward db rel_err {e_db}");
+
+        // RMSNorm input + gain backward.
+        let eps = 1e-5f32;
+        let w: Vec<f32> = (0..cols).map(|j| 0.5 + 0.1 * j as f32).collect();
+        let gw = chain.upload(&w, 1, cols);
+        let rn_dx = chain.download(&chain.rms_norm_backward(&gx, &gw, &gdy, eps));
+        let rn_dw = chain.download(&chain.rms_norm_gain_backward(&gx, &gdy, eps));
+        let mut want_dx = vec![0.0f32; n];
+        let mut want_dw = vec![0.0f32; cols];
+        for r in 0..rows
+        {
+            let base = r * cols;
+            let ms = x[base..base + cols].iter().map(|v| v * v).sum::<f32>() / cols as f32 + eps;
+            let rms = ms.sqrt();
+            let dot: f32 = (0..cols).map(|j| dy[base + j] * w[j] * x[base + j]).sum();
+            let coef = dot / (cols as f32 * ms * rms);
+            for j in 0..cols
+            {
+                want_dx[base + j] = dy[base + j] * w[j] / rms - x[base + j] * coef;
+                want_dw[j] += dy[base + j] * x[base + j] / rms;
+            }
+        }
+        let e_dx = rel_err(&rn_dx, &want_dx);
+        let e_dw = rel_err(&rn_dw, &want_dw);
+        assert!(e_dx < 5e-2, "rms_norm_backward dx rel_err {e_dx}");
+        assert!(e_dw < 5e-2, "rms_norm_gain_backward dw rel_err {e_dw}");
+
+        // Scale + causal-mask backward on a square t×t score grad.
+        let t = 5usize;
+        let scale = 0.5f32;
+        let sg: Vec<f32> = (0..t * t).map(|i| (i as f32 * 0.23 - 1.0).cos()).collect();
+        let smask_bwd = chain.download(&chain.scale_causal_mask_backward(
+            &chain.upload(&sg, t, t),
+            scale,
+            true,
+        ));
+        let mut want_smask = vec![0.0f32; t * t];
+        for i in 0..t
+        {
+            for j in 0..t
+            {
+                want_smask[i * t + j] = if j > i { 0.0 } else { sg[i * t + j] * scale };
+            }
+        }
+        let e_smask = rel_err(&smask_bwd, &want_smask);
+        assert!(
+            e_smask < 5e-2,
+            "scale_causal_mask_backward rel_err {e_smask}"
+        );
+
+        // RoPE backward — the transpose rotation.
+        let (rrows, dim, seq_len, theta) = (6usize, 8usize, 6usize, 10_000.0f32);
+        let rdy: Vec<f32> = (0..rrows * dim)
+            .map(|i| (i as f32 * 0.15 - 0.3).sin())
+            .collect();
+        let rope_bwd = chain.download(&chain.rope_backward(
+            &chain.upload(&rdy, rrows, dim),
+            seq_len,
+            0,
+            theta,
+        ));
+        let mut want_rope = vec![0.0f32; rrows * dim];
+        for r in 0..rrows
+        {
+            let base = r * dim;
+            let pos = (r % seq_len) as f32;
+            for p in 0..dim / 2
+            {
+                let freq = theta.powf(-2.0 * p as f32 / dim as f32);
+                let (s, c) = (pos * freq).sin_cos();
+                let ge = rdy[base + 2 * p];
+                let go = rdy[base + 2 * p + 1];
+                want_rope[base + 2 * p] = c * ge + s * go;
+                want_rope[base + 2 * p + 1] = -s * ge + c * go;
+            }
+        }
+        let e_rope = rel_err(&rope_bwd, &want_rope);
+        assert!(e_rope < 5e-2, "rope_backward rel_err {e_rope}");
+
+        eprintln!(
+            "bf16 backward adjoints vs CPU — softmax {e_sm:.2e}, swiglu(da {e_da:.2e}, db {e_db:.2e}), \
+             rms(dx {e_dx:.2e}, dw {e_dw:.2e}), scale_mask {e_smask:.2e}, rope {e_rope:.2e} — PASS"
+        );
     }
 }
