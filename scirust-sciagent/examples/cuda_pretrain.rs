@@ -7,8 +7,9 @@
 //!
 //! Same environment interface as `resident_pretrain` so the two are drop-in:
 //!
-//! - `SCIAGENT_CONFIG` — model preset: `350m`, `small`, `byte`, or `demo` (default).
-//!   On resume the checkpoint's own config wins.
+//! - `SCIAGENT_CONFIG` — model preset: `350m` (BPE, needs shards), `code350m`
+//!   (byte-level ~270M — a real large run with no tokenizer), `small`, `byte`, or
+//!   `demo` (default). On resume the checkpoint's own config wins.
 //! - `SCIAGENT_TEXT` — a file/dir ingested **byte-level** (vocab 256, no tokenizer).
 //!   Auto-selects the `byte` config when `SCIAGENT_CONFIG` is unset.
 //! - `SCIAGENT_SHARDS` — a dir of little-endian `u32` `.bin` token shards; aborts if
@@ -20,7 +21,12 @@
 //! # self-contained smoke run (synthetic corpus, demo config):
 //! cargo run -p scirust-sciagent --features cuda --release --example cuda_pretrain
 //!
-//! # real 350M bf16 run on BPE shards:
+//! # real ~270M byte-level run on a code tree — no tokenizer, turnkey:
+//! SCIAGENT_CONFIG=code350m SCIAGENT_TEXT=$HOME/corpus SCIAGENT_SEQ=512 \
+//!   SCIAGENT_STEPS=20000 \
+//!   cargo run -p scirust-sciagent --features cuda --release --example cuda_pretrain
+//!
+//! # full 350M bf16 run on BPE shards (needs the collect-data → tokenizer pipeline):
 //! SCIAGENT_CONFIG=350m SCIAGENT_SHARDS=$HOME/data/shards SCIAGENT_STEPS=2000 \
 //!   cargo run -p scirust-sciagent --features cuda --release --example cuda_pretrain
 //! ```
@@ -56,6 +62,26 @@ fn byte_config() -> SciAgentConfig {
     }
 }
 
+/// A **byte-level large** config — the `sciagent_350m` trunk shape (d1024, 24
+/// layers, 16h/4kv, d_ff 2816) at vocab 256, so a genuine ~270M-parameter model
+/// trains from scratch on raw bytes with **no tokenizer or shard pipeline**. This
+/// is the turnkey large run: point `SCIAGENT_TEXT` at a code tree and go.
+fn code_large_config() -> SciAgentConfig {
+    SciAgentConfig {
+        vocab_size: 256,
+        d_model: 1024,
+        n_layers: 24,
+        n_heads: 16,
+        n_kv_heads: 4,
+        d_ff: 2816,
+        max_seq_len: 2048,
+        rope_theta: 1_000_000.0,
+        tie_embeddings: true,
+        use_bias: false,
+        eps: 1e-5,
+    }
+}
+
 /// The default self-contained demo config (tied, vocab 512).
 fn demo_config() -> SciAgentConfig {
     SciAgentConfig {
@@ -77,6 +103,10 @@ fn preset_by_name(name: &str) -> (SciAgentConfig, String) {
     match name.to_ascii_lowercase().as_str()
     {
         "350m" => (SciAgentConfig::sciagent_350m(), "350m".into()),
+        "code350m" | "large" | "byte-large" =>
+        {
+            (code_large_config(), "code350m (byte-level ~270M)".into())
+        },
         "small" => (SciAgentConfig::small(), "small".into()),
         "byte" => (byte_config(), "byte".into()),
         "demo" => (demo_config(), "demo".into()),
