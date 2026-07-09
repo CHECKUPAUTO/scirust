@@ -120,7 +120,12 @@ impl QModel {
         }
         let mut p = 4usize;
         let n = ru32(b, &mut p) as usize;
-        let mut layers = Vec::with_capacity(n);
+        // `n` is an untrusted u32 (up to ~4.3e9). Each layer needs at least a
+        // 4-byte tag, so `n` cannot exceed `b.len() / 4`; capping the initial
+        // reservation to that bound prevents a crafted header from requesting a
+        // multi-gigabyte allocation (OOM DoS) before the loop ever reads a layer.
+        // (Truncated bodies still surface as a read error from the helpers.)
+        let mut layers = Vec::with_capacity(n.min(b.len() / 4));
         for _ in 0..n
         {
             let tag = ru32(b, &mut p);

@@ -17,8 +17,34 @@ impl CsrTensor<f32> {
         rows: usize,
         cols: usize,
     ) -> Self {
-        assert_eq!(row_offsets.len(), rows + 1);
-        assert_eq!(values.len(), column_indices.len());
+        assert_eq!(
+            row_offsets.len(),
+            rows + 1,
+            "CsrTensor: row_offsets.len() must be rows+1"
+        );
+        assert_eq!(
+            values.len(),
+            column_indices.len(),
+            "CsrTensor: values.len() must equal column_indices.len()"
+        );
+        // Validate the CSR structure so a malformed operand cannot cause an
+        // out-of-bounds `values[idx]` / `column_indices[idx]` read later in
+        // `spmm_dense`: offsets must start at 0, be non-decreasing, and end
+        // exactly at `values.len()`. Column indices must be valid columns.
+        assert_eq!(row_offsets[0], 0, "CsrTensor: row_offsets[0] must be 0");
+        assert!(
+            row_offsets.windows(2).all(|w| w[0] <= w[1]),
+            "CsrTensor: row_offsets must be non-decreasing"
+        );
+        assert_eq!(
+            row_offsets[rows],
+            values.len(),
+            "CsrTensor: row_offsets[rows] must equal values.len()"
+        );
+        assert!(
+            column_indices.iter().all(|&c| c < cols),
+            "CsrTensor: a column index is out of range [0, cols)"
+        );
         Self {
             values,
             column_indices,

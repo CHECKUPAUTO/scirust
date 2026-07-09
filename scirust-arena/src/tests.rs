@@ -193,3 +193,34 @@ fn test_arena_alloc_with() {
     *val = 99.0;
     assert_eq!(*val, 99.0);
 }
+
+// A pathological `n` whose byte length (`n * size_of::<T>()`) overflows `usize`
+// must be rejected as `Overflow`, NOT wrapped to a small `required` that passes
+// the capacity check and then materialises an oversized slice via
+// `from_raw_parts_mut` (an out-of-bounds read/write in release builds).
+#[test]
+fn alloc_slice_rejects_byte_length_overflow_instead_of_going_oob() {
+    use crate::ArenaError;
+    let mut arena = PinnedArena::new(4096);
+    // usize::MAX / 4 + 1 elements of f32 (4 bytes) overflows usize on multiply.
+    let n = usize::MAX / 4 + 1;
+    let r = arena.alloc_slice::<f32>(n);
+    assert_eq!(r.err(), Some(ArenaError::Overflow));
+    // The arena must remain usable and consistent after a rejected allocation.
+    let ok = arena.alloc_slice_fill::<f32>(8, 1.0).unwrap();
+    assert_eq!(ok.len(), 8);
+    assert!(ok.iter().all(|&x| x == 1.0));
+}
+
+// `u8` allocations make `n * size_of::<T>() == n`, so a near-`usize::MAX` count
+// exercises the `checked_add(aligned_offset, byte_len)` guard rather than the
+// multiply guard.
+#[test]
+fn alloc_slice_rejects_offset_plus_len_overflow() {
+    use crate::ArenaError;
+    let mut arena = PinnedArena::new(4096);
+    // Bump the offset a little so aligned_offset > 0.
+    let _ = arena.alloc_slice_fill::<u8>(64, 0).unwrap();
+    let r = arena.alloc_slice::<u8>(usize::MAX);
+    assert_eq!(r.err(), Some(ArenaError::Overflow));
+}

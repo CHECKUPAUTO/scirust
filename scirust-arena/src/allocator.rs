@@ -142,7 +142,14 @@ impl PinnedArena {
         assert!(num > 0);
         let elem_size = std::mem::size_of::<T>();
         let alignment = std::mem::align_of::<T>().max(16);
-        let total = num * elem_size;
+        // `num * elem_size` doit être vérifié : sinon un `num` trop grand
+        // wrappe en release et sous-dimensionne l'arène (les `alloc_slice`
+        // ultérieurs échoueront proprement, mais une taille wrappée est un
+        // piège silencieux). On panique explicitement, comme `new` le fait
+        // déjà pour une taille invalide.
+        let total = num
+            .checked_mul(elem_size)
+            .expect("Arena::new_for_type: num * size_of::<T>() overflows usize");
         // Assurer un alignement minimal de ALIGNMENT
         let size = if alignment >= MIN_ALIGN_BYTES
         {
@@ -174,10 +181,31 @@ impl PinnedArena {
         let elem_size = std::mem::size_of::<T>();
         let alignment = std::mem::align_of::<T>().max(16);
 
-        // Aligner l'offset courant
-        let aligned_offset = align_up_to(self.offset, alignment);
+        // The backing block is only guaranteed to be aligned to `MIN_ALIGN_BYTES`
+        // (128). A type whose alignment exceeds that could receive a pointer that
+        // is 128-aligned but NOT `align_of::<T>()`-aligned — a misaligned
+        // `from_raw_parts_mut` is UB. Over-aligned types are unsupported: reject
+        // them explicitly instead of handing back a falsely-aligned slice.
+        if alignment > MIN_ALIGN_BYTES
+        {
+            return Err(ArenaError::Overflow);
+        }
 
-        let required = aligned_offset + n * elem_size;
+        // Aligner l'offset courant. `align_up_to` peut déborder `usize` sur un
+        // `offset` proche de `usize::MAX`; il renvoie donc `None` plutôt que de
+        // wrapper silencieusement (ce qui, en release, transformerait un dépassement
+        // en allocation sous-dimensionnée puis en accès hors bornes).
+        let aligned_offset = align_up_to(self.offset, alignment).ok_or(ArenaError::Overflow)?;
+
+        // `n * elem_size` et `aligned_offset + …` doivent être vérifiés : en
+        // build release l'arithmétique `usize` wrappe au lieu de paniquer, donc
+        // un `n` trop grand rendrait `required` petit, passerait le test de
+        // capacité, puis `from_raw_parts_mut(ptr, n)` fabriquerait un slice de
+        // `n` éléments au-dessus d'un tampon minuscule → lecture/écriture OOB.
+        let byte_len = n.checked_mul(elem_size).ok_or(ArenaError::Overflow)?;
+        let required = aligned_offset
+            .checked_add(byte_len)
+            .ok_or(ArenaError::Overflow)?;
 
         if required > self.block.capacity
         {
@@ -197,7 +225,7 @@ impl PinnedArena {
             *elem = T::default();
         }
 
-        let new_offset = aligned_offset + n * elem_size;
+        let new_offset = required; // = aligned_offset + n * elem_size (déjà vérifié)
         self.allocated_bytes += new_offset - self.offset; // self.offset is still the old value
         self.offset = new_offset;
         self.alloc_count += 1;
@@ -252,9 +280,14 @@ impl PinnedArena {
     /// Retourne la quantité de mémoire restante dans l'arène.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.block
-            .capacity
-            .saturating_sub(align_up_to(self.offset, 16))
+        // `self.offset` est toujours ≤ capacity (invariant maintenu par
+        // `alloc_slice`), donc l'alignement à 16 ne déborde jamais ici; en cas
+        // improbable de débordement on renvoie 0 (arène pleine).
+        match align_up_to(self.offset, 16)
+        {
+            Some(used) => self.block.capacity.saturating_sub(used),
+            None => 0,
+        }
     }
 
     /// Retourne la quantité totale allouée.
@@ -278,7 +311,7 @@ impl PinnedArena {
     /// Retourne le taux d'utilisation en pourcentage.
     #[inline]
     pub fn utilization(&self) -> f64 {
-        let used = align_up_to(self.offset, 16);
+        let used = align_up_to(self.offset, 16).unwrap_or(self.block.capacity);
         used as f64 / self.block.capacity as f64 * 100.0
     }
 
@@ -290,9 +323,13 @@ impl PinnedArena {
 }
 
 /// Aligner un offset up à `alignment` (qui doit être une puissance de 2).
+/// Renvoie `None` si `offset + alignment - 1` déborde `usize` (au lieu de
+/// wrapper silencieusement en release et de sous-aligner une allocation).
 #[inline]
-fn align_up_to(offset: usize, alignment: usize) -> usize {
-    (offset + alignment - 1) & !(alignment - 1)
+fn align_up_to(offset: usize, alignment: usize) -> Option<usize> {
+    offset
+        .checked_add(alignment - 1)
+        .map(|v| v & !(alignment - 1))
 }
 
 impl Default for PinnedArena {

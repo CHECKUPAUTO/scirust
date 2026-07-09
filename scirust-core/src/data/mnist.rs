@@ -52,7 +52,29 @@ pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, 
     let h = read_be_u32(&mut f)? as usize;
     let w = read_be_u32(&mut f)? as usize;
 
-    let total = n * h * w;
+    // `n`, `h`, `w` come straight from the (untrusted) file header. `n * h * w`
+    // can overflow `usize`, and even without overflow a crafted header can claim
+    // billions of pixels — `vec![0u8; total]` would then be an allocation bomb
+    // (OOM DoS) that fires *before* `read_exact` ever discovers the file is
+    // short. Use checked arithmetic and bound the claimed size by the bytes that
+    // actually remain in the file (header read so far = 4 × u32 = 16 bytes).
+    let total = n
+        .checked_mul(h)
+        .and_then(|nh| nh.checked_mul(w))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "IDX image dimensions overflow usize",
+            )
+        })?;
+    let remaining = f.metadata()?.len().saturating_sub(16);
+    if total as u64 > remaining
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("IDX header claims {total} pixels but only {remaining} bytes remain"),
+        ));
+    }
     let mut raw = vec![0u8; total];
     f.read_exact(&mut raw)?;
 
@@ -73,6 +95,16 @@ pub fn load_idx_labels<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
         ));
     }
     let n = read_be_u32(&mut f)? as usize;
+    // Bound the claimed label count by the remaining file bytes (header so far =
+    // 2 × u32 = 8 bytes) so a crafted header cannot force a huge allocation.
+    let remaining = f.metadata()?.len().saturating_sub(8);
+    if n as u64 > remaining
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("IDX header claims {n} labels but only {remaining} bytes remain"),
+        ));
+    }
     let mut labels = vec![0u8; n];
     f.read_exact(&mut labels)?;
     Ok(labels)

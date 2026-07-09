@@ -470,10 +470,14 @@ use std::arch::is_x86_feature_detected;
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 fn has_sve() -> bool {
-    unsafe {
-        let hwcap = libc::getauxval(33); // AT_HWCAP
-        (hwcap & (1 << 31)) != 0
-    }
+    // AT_HWCAP is auxv key 16 (key 33 is AT_SYSINFO_EHDR — a pointer, whose high
+    // bits are effectively random, which is why the old `getauxval(33) & (1<<31)`
+    // both read the wrong entry and tested the wrong bit). On aarch64 Linux SVE
+    // is advertised by HWCAP_SVE = bit 22 of AT_HWCAP.
+    const AT_HWCAP: libc::c_ulong = 16;
+    const HWCAP_SVE: libc::c_ulong = 1 << 22;
+    let hwcap = unsafe { libc::getauxval(AT_HWCAP) };
+    (hwcap & HWCAP_SVE) != 0
 }
 
 #[cfg(not(target_arch = "aarch64"))]

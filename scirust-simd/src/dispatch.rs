@@ -245,6 +245,11 @@ impl SimdBackend for Avx2Backend {
 #[target_feature(enable = "avx2")]
 unsafe fn saxpy_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
     use core::arch::x86_64::*;
+    // `x` and `y` must be the same length: the loop indexes both at `0..x.len()`
+    // through raw `loadu`/`storeu`, so a shorter `y` would be an out-of-bounds
+    // read *and write*. Validate up front (panics in every profile) rather than
+    // relying on the caller.
+    assert_eq!(x.len(), y.len(), "saxpy: x.len() != y.len()");
     let alpha8 = _mm256_set1_ps(alpha);
     let n = x.len();
     let mut i = 0;
@@ -265,6 +270,7 @@ unsafe fn saxpy_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
 #[target_feature(enable = "avx2")]
 unsafe fn daxpy_f64_avx2(alpha: f64, x: &[f64], y: &mut [f64]) {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "daxpy: x.len() != y.len()");
     let alpha4 = _mm256_set1_pd(alpha);
     let n = x.len();
     let mut i = 0;
@@ -285,6 +291,7 @@ unsafe fn daxpy_f64_avx2(alpha: f64, x: &[f64], y: &mut [f64]) {
 #[target_feature(enable = "avx2")]
 unsafe fn sdot_f32_avx2(x: &[f32], y: &[f32]) -> f32 {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "sdot: x.len() != y.len()");
     let n = x.len();
     let mut acc = _mm256_setzero_ps();
     let mut i = 0;
@@ -311,6 +318,7 @@ unsafe fn sdot_f32_avx2(x: &[f32], y: &[f32]) -> f32 {
 #[target_feature(enable = "avx2")]
 unsafe fn ddot_f64_avx2(x: &[f64], y: &[f64]) -> f64 {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "ddot: x.len() != y.len()");
     let n = x.len();
     let mut acc = _mm256_setzero_pd();
     let mut i = 0;

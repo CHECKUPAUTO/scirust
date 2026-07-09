@@ -14,6 +14,19 @@
 
 #[inline(never)]
 pub fn compute_kernel(c: &mut [f64], a: &[f64], b: &[f64], n: usize) {
+    // SECURITY GUARD (added by audit — port this to the `inject_elite` generator
+    // template so it survives regeneration): this is a *safe* `pub fn` but the
+    // loop below reads/writes `a`, `b`, `c` at indices up to `n*n - 1` through
+    // raw pointers with no bounds check. Without this guard, a caller passing a
+    // slice shorter than `n*n` (or an `n*n` that overflows `usize`) triggers
+    // out-of-bounds reads/writes (UB) from 100% safe code.
+    let nn = n
+        .checked_mul(n)
+        .expect("discovered_gemm::compute_kernel: n*n overflows usize");
+    assert!(
+        a.len() >= nn && b.len() >= nn && c.len() >= nn,
+        "discovered_gemm::compute_kernel: a/b/c must each hold at least n*n = {nn} elements"
+    );
     // Pre-zeroage de C : produit C = A*B (ecrasement, pas accumulation)
     for elem in c.iter_mut()
     {

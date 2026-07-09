@@ -41,7 +41,11 @@ impl AlignedVec {
         T: Copy,
     {
         let alignment = std::mem::align_of::<T>().max(16).max(MIN_ALIGN_BYTES);
-        let byte_len = len * std::mem::size_of::<T>();
+        // Checked: `len * size_of::<T>()` wraps in release, which would
+        // under-allocate the backing and turn later accessors into OOB reads.
+        let byte_len = len
+            .checked_mul(std::mem::size_of::<T>())
+            .expect("AlignedVec::new: len * size_of::<T>() overflows usize");
         let n_blocks = byte_len.div_ceil(128).max(1);
         let blocks = vec![Block([0u8; 128]); n_blocks];
         Self {
@@ -84,6 +88,19 @@ impl AlignedVec {
             self.alignment,
             std::mem::align_of::<T>()
         );
+        // `self.len` counts elements of the *construction* type. Reinterpreting
+        // as a larger `T` here would return a slice that reads past the backing
+        // (`from_raw_parts` is type-erased). Require that `len` elements of the
+        // accessor's `T` actually fit in the allocated bytes.
+        let need = self
+            .len
+            .checked_mul(std::mem::size_of::<T>())
+            .expect("AlignedVec::as_mut_slice: len * size_of::<T>() overflows usize");
+        assert!(
+            need <= self.blocks.len() * 128,
+            "AlignedVec::as_mut_slice::<T>(): {need} bytes exceed the {}-byte backing",
+            self.blocks.len() * 128
+        );
         let ptr = self.byte_ptr_mut() as *mut T;
         unsafe { std::slice::from_raw_parts_mut(ptr, self.len) }
     }
@@ -99,6 +116,17 @@ impl AlignedVec {
             "AlignedVec alignment {} < required alignment {}",
             self.alignment,
             std::mem::align_of::<T>()
+        );
+        // See `as_mut_slice`: bound `len` elements of `T` by the backing bytes so
+        // a type-erased reinterpretation cannot read out of bounds.
+        let need = self
+            .len
+            .checked_mul(std::mem::size_of::<T>())
+            .expect("AlignedVec::as_slice: len * size_of::<T>() overflows usize");
+        assert!(
+            need <= self.blocks.len() * 128,
+            "AlignedVec::as_slice::<T>(): {need} bytes exceed the {}-byte backing",
+            self.blocks.len() * 128
         );
         let ptr = self.byte_ptr() as *const T;
         unsafe { std::slice::from_raw_parts(ptr, self.len) }

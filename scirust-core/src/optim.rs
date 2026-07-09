@@ -72,7 +72,13 @@ pub struct AdamW {
     pub weight_decay: f32, // Default: 0.01 (decoupled weight decay)
     m: HashMap<String, Vec<f32>>, // First moment (mean)
     v: HashMap<String, Vec<f32>>, // Second moment (variance)
-    t: u32,       // Timestep for bias correction
+    // Bias-correction timestep, tracked **per parameter**. `step` is called once
+    // per parameter tensor per optimization step, so a single global counter
+    // would advance by (number of parameters) each step and make the bias
+    // correction `1 - beta^t` wrong for any model with more than one tensor. A
+    // per-parameter counter makes each tensor's correction match the number of
+    // updates it has actually received (the Adam paper's `t`).
+    t: HashMap<String, u32>,
 }
 
 impl AdamW {
@@ -85,7 +91,7 @@ impl AdamW {
             weight_decay: 0.01,
             m: HashMap::new(),
             v: HashMap::new(),
-            t: 0,
+            t: HashMap::new(),
         }
     }
 
@@ -95,7 +101,11 @@ impl AdamW {
     }
 
     pub fn step(&mut self, param_id: &str, grad: &[f32], param: &mut [f32]) {
-        self.t += 1;
+        let t = {
+            let e = self.t.entry(param_id.to_string()).or_insert(0);
+            *e += 1;
+            *e
+        };
 
         let m = self
             .m
@@ -106,8 +116,8 @@ impl AdamW {
             .entry(param_id.to_string())
             .or_insert_with(|| vec![0.0; grad.len()]);
 
-        let bias_correction1 = 1.0 - self.beta1.powi(self.t as i32);
-        let bias_correction2 = 1.0 - self.beta2.powi(self.t as i32);
+        let bias_correction1 = 1.0 - self.beta1.powi(t as i32);
+        let bias_correction2 = 1.0 - self.beta2.powi(t as i32);
 
         for i in 0..grad.len()
         {
@@ -138,7 +148,9 @@ pub struct LAMB {
     pub weight_decay: f32,
     m: HashMap<String, Vec<f32>>,
     v: HashMap<String, Vec<f32>>,
-    t: u32,
+    // Per-parameter bias-correction timestep — see the note on `AdamW::t`. A
+    // single global counter would be wrong for any multi-tensor model.
+    t: HashMap<String, u32>,
 }
 
 impl LAMB {
@@ -151,12 +163,16 @@ impl LAMB {
             weight_decay: 0.01,
             m: HashMap::new(),
             v: HashMap::new(),
-            t: 0,
+            t: HashMap::new(),
         }
     }
 
     pub fn step(&mut self, param_id: &str, grad: &[f32], param: &mut [f32]) {
-        self.t += 1;
+        let t = {
+            let e = self.t.entry(param_id.to_string()).or_insert(0);
+            *e += 1;
+            *e
+        };
 
         let m = self
             .m
@@ -167,8 +183,8 @@ impl LAMB {
             .entry(param_id.to_string())
             .or_insert_with(|| vec![0.0; grad.len()]);
 
-        let bias_correction1 = 1.0 - self.beta1.powi(self.t as i32);
-        let bias_correction2 = 1.0 - self.beta2.powi(self.t as i32);
+        let bias_correction1 = 1.0 - self.beta1.powi(t as i32);
+        let bias_correction2 = 1.0 - self.beta2.powi(t as i32);
 
         // First pass: build the per-element Adam direction (with decoupled weight
         // decay folded in) and accumulate the per-tensor norms of the parameters
@@ -226,6 +242,36 @@ mod tests {
         optimizer.step("param_0", &grads);
         let update = optimizer.get_update("param_0").unwrap();
         assert!(update.iter().any(|&x| x != 0.0));
+    }
+
+    // Regression: the bias-correction timestep must be per-parameter. Two
+    // parameters stepped once each must both behave as t==1. A shared global
+    // counter would give the second parameter t==2 (inflated), producing a
+    // different update than an identical single-parameter optimizer at t==1.
+    #[test]
+    fn adamw_timestep_is_per_parameter_not_global() {
+        let grads = vec![0.1_f32, 0.2, 0.3];
+
+        // Reference: a fresh optimizer taking one step on "a" (t == 1).
+        let mut reference = AdamW::new(0.001);
+        let mut ref_param = vec![1.0_f32, 2.0, 3.0];
+        reference.step("a", &grads, &mut ref_param);
+
+        // Two-parameter optimizer: step "a" then "b". With a per-parameter
+        // timestep, "b"'s update must equal the reference (both at t==1).
+        let mut multi = AdamW::new(0.001);
+        let mut pa = vec![1.0_f32, 2.0, 3.0];
+        let mut pb = vec![1.0_f32, 2.0, 3.0];
+        multi.step("a", &grads, &mut pa);
+        multi.step("b", &grads, &mut pb);
+
+        for (got, want) in pb.iter().zip(ref_param.iter())
+        {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "second parameter must see t==1, got {got} vs {want}"
+            );
+        }
     }
 
     #[test]

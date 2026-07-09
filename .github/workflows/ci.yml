@@ -15,6 +15,17 @@ on:
   pull_request:
     branches: [master, main, develop]
 
+# Least privilege for the automatically-provided GITHUB_TOKEN. None of the CI
+# jobs write back to the repository — they only read the checked-out code and
+# (for the coverage/SBOM jobs) upload artifacts / hit external services with
+# their own tokens. Declaring `contents: read` at the top level drops every
+# job to read-only regardless of the repository/organization default token
+# scope, so a compromised action step cannot push code, open PRs, or mutate
+# releases. Any future job that legitimately needs more must opt in with its
+# own job-level `permissions:` block.
+permissions:
+  contents: read
+
 env:
   RUST_BACKTRACE: 1
   CARGO_INCREMENTAL: 0

@@ -32,12 +32,17 @@ pub fn matmul_int8(a: &[i8], b: &[i8], m: usize, k: usize, n: usize) -> Vec<i32>
     {
         for j in 0..n
         {
-            let mut sum = 0i32;
+            // Accumulate in i64: each i8*i8 product fits in i32, but summing
+            // more than ~133k of them overflows i32 (a debug-mode panic and a
+            // silent wraparound → wrong result in release). i64 holds any
+            // realistic contraction length; the final value is saturated into
+            // the i32 output range instead of wrapping.
+            let mut sum = 0i64;
             for kk in 0..k
             {
-                sum += a[i * k + kk] as i32 * b[kk * n + j] as i32;
+                sum += a[i * k + kk] as i64 * b[kk * n + j] as i64;
             }
-            result[i * n + j] = sum;
+            result[i * n + j] = sum.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
         }
     }
     result
@@ -1137,10 +1142,16 @@ pub fn nf4_quantize(w: &[f32]) -> (Vec<u8>, f32) {
 }
 
 /// Dequantise NF4 codes back to `f32`: `NF4_LEVELS[code] · absmax`.
+///
+/// NF4 codes are 4-bit; only the low nibble of each byte is meaningful. A
+/// corrupted or untrusted packed-weights buffer may carry bytes ≥ 16, which
+/// would index `NF4_LEVELS` (16 entries) out of bounds and panic (DoS). Masking
+/// to the low nibble decodes an out-of-range byte deterministically instead of
+/// aborting the process.
 pub fn nf4_dequantize(codes: &[u8], absmax: f32) -> Vec<f32> {
     codes
         .iter()
-        .map(|&c| NF4_LEVELS[c as usize] * absmax)
+        .map(|&c| NF4_LEVELS[(c & 0x0F) as usize] * absmax)
         .collect()
 }
 
