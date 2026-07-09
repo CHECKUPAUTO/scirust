@@ -132,8 +132,17 @@ impl DegradedModeController {
 
         let new_level = self.compute_level(confidence, sensor_failures);
 
-        // Apply hysteresis: don't transition too quickly
-        if new_level != self.current_level && self.time_in_level_ms >= self.min_dwell_time_ms
+        // Hysteresis, but ONLY on recovery. `DegradationLevel` is ordered
+        // `Level0 < … < Level3`, so a *higher* level is a more-degraded, safer
+        // response. Escalation to a safer level (confidence collapse, sensor
+        // failure) must take effect immediately — gating it behind the dwell
+        // time would keep the system in a less-safe state for up to
+        // `min_dwell_time_ms`, defeating the purpose of a degraded-mode
+        // controller. The dwell time exists only to prevent rapid oscillation
+        // when *recovering* to a less-degraded level.
+        let escalating = new_level > self.current_level;
+        if new_level != self.current_level
+            && (escalating || self.time_in_level_ms >= self.min_dwell_time_ms)
         {
             self.current_level = new_level;
             self.time_in_level_ms = 0.0;
@@ -249,19 +258,48 @@ mod tests {
         assert_eq!(ctrl.current_level, DegradationLevel::Level3);
     }
 
+    // Hysteresis must gate RECOVERY only. Escalation to a safer (more-degraded)
+    // level must be immediate — a degraded-mode controller that delays entry to
+    // the safe state is a safety defect. Before the fix, the dwell-time gate
+    // blocked escalation too, so this scenario stayed at Level0 for up to
+    // `min_dwell_time_ms` after a confidence collapse.
     #[test]
-    fn test_hysteresis() {
+    fn test_hysteresis_gates_recovery_not_escalation() {
         let mut ctrl = DegradedModeController::new();
         ctrl.min_dwell_time_ms = 1000.0;
 
-        // First update: confidence drops, but dwell time not met
+        // Confidence collapses on the very first update (dwell time not yet met):
+        // escalation Level0 -> Level2 must take effect IMMEDIATELY.
         ctrl.update(0.3, 0, 100.0);
-        // Should still be Level0 because dwell time < 1000ms
-        assert_eq!(ctrl.current_level, DegradationLevel::Level0);
+        assert_eq!(
+            ctrl.current_level,
+            DegradationLevel::Level2,
+            "escalation to a safer level must not be delayed by the dwell time"
+        );
 
-        // After enough time, should transition
-        ctrl.update(0.3, 0, 1000.0);
-        assert_eq!(ctrl.current_level, DegradationLevel::Level2);
+        // Now confidence recovers, but the dwell time in Level2 is not yet met:
+        // recovery (de-escalation) MUST be held back by hysteresis.
+        ctrl.update(0.99, 0, 100.0);
+        assert_eq!(
+            ctrl.current_level,
+            DegradationLevel::Level2,
+            "recovery must be gated by the dwell time"
+        );
+
+        // After the dwell time elapses, recovery is allowed.
+        ctrl.update(0.99, 0, 1000.0);
+        assert_eq!(ctrl.current_level, DegradationLevel::Level0);
+    }
+
+    // Escalation must be immediate even when jumping multiple levels (e.g. a
+    // sudden double sensor failure driving straight to emergency).
+    #[test]
+    fn test_escalation_is_immediate_on_sensor_failure() {
+        let mut ctrl = DegradedModeController::new();
+        ctrl.min_dwell_time_ms = 5000.0;
+        // 2 * max_sensor_failures (2) = 4 -> Level3, on the first tick.
+        ctrl.update(1.0, 4, 1.0);
+        assert_eq!(ctrl.current_level, DegradationLevel::Level3);
     }
 
     #[test]

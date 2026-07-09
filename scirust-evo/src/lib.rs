@@ -33,6 +33,18 @@ impl Individual {
     }
 }
 
+/// Ordering for a **descending** fitness sort that never panics. A NaN fitness
+/// (e.g. from a fitness function that overflowed or divided 0/0) is treated as
+/// the *least* fit — sorted to the bottom, matching the `NEG_INFINITY` default —
+/// so a broken individual cannot dominate elitism/recombination. Replaces the
+/// `partial_cmp().unwrap()` that panicked on NaN across the optimizers.
+#[inline]
+fn cmp_fitness_desc(a: f64, b: f64) -> std::cmp::Ordering {
+    let a = if a.is_nan() { f64::NEG_INFINITY } else { a };
+    let b = if b.is_nan() { f64::NEG_INFINITY } else { b };
+    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+}
+
 pub struct GeneticAlgorithm {
     pub pop_size: usize,
     pub mutation_rate: f64,
@@ -76,7 +88,8 @@ impl GeneticAlgorithm {
         {
             population[i].fitness = *fit;
         }
-        population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+        // Descending by fitness, NaN-safe (see `cmp_fitness_desc`).
+        population.sort_by(|a, b| cmp_fitness_desc(a.fitness, b.fitness));
         // Carry over the elite, clamping to the population size so a small
         // population (e.g. smaller than `elitism`) cannot slice out of bounds.
         let elite = self.elitism.min(population.len());
@@ -179,7 +192,7 @@ impl CmaEs {
         {
             offspring[i].fitness = *fit;
         }
-        offspring.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
+        offspring.sort_by(|a, b| cmp_fitness_desc(a.fitness, b.fitness));
         let w: Vec<f64> = (0..mu).map(|i| (mu as f64 - i as f64).max(0.0)).collect();
         let sw: f64 = w.iter().sum();
         for (i, val) in theta.iter_mut().enumerate().take(dims)
@@ -257,10 +270,13 @@ impl OpenEs {
             theta[j] += f * grad[j];
             theta[j] = theta[j].clamp(self.bounds.0, self.bounds.1);
         }
-        *rewards
+        // Max reward, NaN-safe: `unwrap_or(Equal)` avoids a panic if a reward is
+        // NaN; `unwrap_or(0.0)` covers an (unexpected) empty reward set.
+        rewards
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap()
+            .copied()
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.0)
     }
 }
 
@@ -1183,5 +1199,35 @@ mod tests {
                 .collect::<Vec<u64>>()
         };
         assert_eq!(run(), run(), "seeded NSGA-II must be bit-reproducible");
+    }
+
+    // Regression: a fitness function that yields NaN must not panic the sort and
+    // must not let the broken individual dominate (NaN is treated as least fit).
+    #[test]
+    fn evolve_tolerates_nan_fitness_without_panicking() {
+        let ga = GeneticAlgorithm::seeded(7);
+        let mut pop: Vec<Individual> = (0..8).map(|i| Individual::new(vec![i as f64])).collect();
+        // Individual 3 gets a NaN fitness; the rest score by their gene value.
+        ga.evolve(&mut pop, |p| {
+            p.iter()
+                .map(|ind| {
+                    if ind.genome[0] == 3.0
+                    {
+                        f64::NAN
+                    }
+                    else
+                    {
+                        ind.genome[0]
+                    }
+                })
+                .collect()
+        });
+        // Must have produced a full new population without panicking, and the
+        // best-carried elite must be a finite (non-NaN) individual.
+        assert_eq!(pop.len(), ga.pop_size);
+        assert!(
+            pop[0].fitness.is_finite() || pop[0].fitness == f64::NEG_INFINITY,
+            "elite fitness must not be NaN"
+        );
     }
 }
