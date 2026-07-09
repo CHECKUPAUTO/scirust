@@ -3192,6 +3192,7 @@ dependencies = [
  "rand 0.8.6",
  "scirust-autodiff",
  "scirust-core",
+ "scirust-cuda",
  "scirust-gpu",
  "serde",
  "serde_json",

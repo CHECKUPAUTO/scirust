@@ -10,6 +10,7 @@ description = "SCIAGENT — SLM deterministe entraine from scratch, specialise R
 scirust-core = { path = "../scirust-core" }
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-gpu = { path = "../scirust-gpu", optional = true }
+scirust-cuda = { path = "../scirust-cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
@@ -34,6 +35,11 @@ fetch = ["dep:ureq", "dep:sha2"]
 # and backward on the device. Off by default: it pulls `wgpu` (and a device at
 # runtime), which the pure-Rust default build and the aarch64 check must not need.
 gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
+# Route B: the bf16 + Tensor-core CUDA backend (Jetson Thor). Pulls scirust-cuda's
+# CudaChain and runs the whole resident forward on Tensor cores. Off by default and
+# Thor-only to build (needs the CUDA toolkit); parity vs the CPU model is checked
+# at bf16 tolerance in tests/cuda_parity.rs.
+cuda = ["dep:scirust-cuda", "scirust-cuda/cuda"]
 
 [[bin]]
 name = "fetch-crates"
