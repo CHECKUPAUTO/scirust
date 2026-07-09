@@ -90,3 +90,8 @@ required-features = ["gpu", "cuda"]
 [[example]]
 name = "cuda_train_bench"
 required-features = ["gpu", "cuda"]
+
+# Route B production pretraining harness — CUDA-only (no wgpu/gpu needed).
+[[example]]
+name = "cuda_pretrain"
+required-features = ["cuda"]

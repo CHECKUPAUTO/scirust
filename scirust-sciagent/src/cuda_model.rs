@@ -11,9 +11,13 @@
 //! whole 350M forward on Tensor cores. Backward + AdamW is B4.
 
 use scirust_core::autodiff::reverse::Tensor;
+use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_cuda::{CudaChain, CudaF32, CudaMatrix};
 
+use crate::config::SciAgentConfig;
 use crate::model::SciAgentModel;
+use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
+use crate::train::scheduler::WarmupCosineSchedule;
 
 /// One GQA block's weights mirrored into VRAM (bf16).
 struct CudaBlock {
@@ -632,5 +636,183 @@ impl CudaTrainer {
     /// pass-through to the inner [`CudaModel::forward`] for eval between steps.
     pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
         self.model.forward(tokens)
+    }
+
+    /// The device/adapter name (for logging) — always the CUDA path here.
+    pub fn adapter_name(&self) -> &'static str {
+        "CUDA bf16 Tensor cores"
+    }
+
+    /// Reset the AdamW step counter to 0 (fresh bias correction). Used when
+    /// resuming from a checkpoint: `from_model` re-uploads the saved weights but
+    /// zero-inits the moments, and the warmup schedule re-absorbs the restart.
+    pub fn reset_step(&mut self) {
+        self.step = 0;
+    }
+
+    /// Write the (trained) **fp32 master** weights back into `model`, replacing each
+    /// host `Tensor`. Syncs from the fp32 masters (not the bf16 views), so a
+    /// checkpoint keeps full precision. Shapes are taken from `model`'s current
+    /// tensors (training never changes them).
+    pub fn sync_to_model(&self, model: &mut SciAgentModel) {
+        let ch = &self.model.chain;
+        let dl = |x: &CudaF32, rows: usize, cols: usize| {
+            Tensor::from_vec(ch.download_f32(x), rows, cols)
+        };
+        let (r, c) = (model.embed.weight.rows, model.embed.weight.cols);
+        model.embed.weight = dl(&self.master_embedding, r, c);
+        let (r, c) = (model.rms_final.weight.rows, model.rms_final.weight.cols);
+        model.rms_final.weight = dl(&self.master_final_norm, r, c);
+        for (l, mb) in model.layers.iter_mut().zip(&self.master_blocks)
+        {
+            let shape = |t: &Tensor| (t.rows, t.cols);
+            let (r, c) = shape(&l.rms_attn.weight);
+            l.rms_attn.weight = dl(&mb.norm1, r, c);
+            let (r, c) = shape(&l.attn.w_q.weight);
+            l.attn.w_q.weight = dl(&mb.wq, r, c);
+            let (r, c) = shape(&l.attn.w_k.weight);
+            l.attn.w_k.weight = dl(&mb.wk, r, c);
+            let (r, c) = shape(&l.attn.w_v.weight);
+            l.attn.w_v.weight = dl(&mb.wv, r, c);
+            let (r, c) = shape(&l.attn.w_o.weight);
+            l.attn.w_o.weight = dl(&mb.wo, r, c);
+            let (r, c) = shape(&l.rms_ffn.weight);
+            l.rms_ffn.weight = dl(&mb.norm2, r, c);
+            let (r, c) = shape(&l.ffn.gate.weight);
+            l.ffn.gate.weight = dl(&mb.wg, r, c);
+            let (r, c) = shape(&l.ffn.up.weight);
+            l.ffn.up.weight = dl(&mb.wu, r, c);
+            let (r, c) = shape(&l.ffn.down.weight);
+            l.ffn.down.weight = dl(&mb.wd, r, c);
+        }
+    }
+
+    /// **Production-scale resident bf16 pretraining** over a flat `u32` token stream —
+    /// the Route-B analogue of `ResidentModel::pretrain`, on Tensor cores. Runs
+    /// `cfg.total_steps − cfg.start_step` steps over non-overlapping `cfg.seq_len`
+    /// windows (deterministic, in-order — the corpus wraps), each a full
+    /// [`Self::train_step`] at the warmup+cosine schedule's `lr`. Every
+    /// `cfg.save_interval` steps it [`Self::sync_to_model`]s the fp32 masters back
+    /// and writes a safetensors checkpoint, so a long run is resumable. Returns the
+    /// per-step pre-update loss.
+    pub fn pretrain(
+        &mut self,
+        tokens: &[u32],
+        model: &mut SciAgentModel,
+        config: &SciAgentConfig,
+        cfg: &CudaPretrainConfig,
+    ) -> Vec<f32> {
+        let s = cfg.seq_len;
+        let mut losses = Vec::new();
+        if tokens.len() <= s
+        {
+            eprintln!(
+                "cuda pretrain: token stream ({}) shorter than a single window ({}); nothing to do",
+                tokens.len(),
+                s + 1
+            );
+            return losses;
+        }
+        let schedule =
+            WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
+        let mut step = cfg.start_step;
+        let mut cursor = 0usize;
+        let t0 = std::time::Instant::now();
+        while step < cfg.total_steps
+        {
+            if cursor + s + 1 > tokens.len()
+            {
+                cursor = 0;
+            }
+            let inputs = &tokens[cursor..cursor + s];
+            let targets = &tokens[cursor + 1..cursor + s + 1];
+            let lr = schedule.lr_at(step);
+            let loss = self.train_step(
+                inputs,
+                targets,
+                lr,
+                cfg.betas,
+                cfg.adam_eps,
+                cfg.weight_decay,
+            );
+            losses.push(loss);
+            cursor += s;
+            step += 1;
+
+            if cfg.log_interval > 0 && step % cfg.log_interval == 0
+            {
+                let done = (step - cfg.start_step) * s;
+                let secs = t0.elapsed().as_secs_f64().max(1e-9);
+                let tps = done as f64 / secs;
+                println!("[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | {tps:>8.0} tok/s");
+            }
+            if cfg.save_interval > 0 && step % cfg.save_interval == 0
+            {
+                self.sync_to_model(model);
+                let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
+                let meta = CheckpointMeta {
+                    step,
+                    loss,
+                    lr,
+                    config: config.clone(),
+                };
+                match save_checkpoint(model, &meta, &dir)
+                {
+                    Ok(()) => println!("  checkpoint → {}", dir.display()),
+                    Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
+                }
+            }
+        }
+        losses
+    }
+}
+
+/// Run configuration for [`CudaTrainer::pretrain`] — the Route-B counterpart of
+/// `ResidentPretrainConfig` (kept here so the CUDA path carries no `gpu`-feature
+/// dependency). Warmup+cosine LR, AdamW hyperparameters, and checkpoint cadence.
+#[derive(Debug, Clone)]
+pub struct CudaPretrainConfig {
+    /// Peak (post-warmup) AdamW learning rate.
+    pub base_lr: f32,
+    /// Floor learning rate the cosine decays to.
+    pub min_lr: f32,
+    /// Linear warmup length, in optimizer steps.
+    pub warmup_steps: usize,
+    /// Total optimizer steps for the run (also the cosine period end).
+    pub total_steps: usize,
+    /// Step to start the LR schedule from (for resuming).
+    pub start_step: usize,
+    /// AdamW `(β₁, β₂)`.
+    pub betas: (f32, f32),
+    /// AdamW epsilon.
+    pub adam_eps: f32,
+    /// Decoupled weight decay.
+    pub weight_decay: f32,
+    /// Sequence length of each training window.
+    pub seq_len: usize,
+    /// Print a loss/lr line every this many steps (0 = never).
+    pub log_interval: usize,
+    /// Write a checkpoint every this many steps (0 = never).
+    pub save_interval: usize,
+    /// Directory the `step_N/` checkpoints are written under.
+    pub checkpoint_dir: String,
+}
+
+impl Default for CudaPretrainConfig {
+    fn default() -> Self {
+        Self {
+            base_lr: 3e-4,
+            min_lr: 3e-5,
+            warmup_steps: 2000,
+            total_steps: 50_000,
+            start_step: 0,
+            betas: (0.9, 0.95),
+            adam_eps: 1e-8,
+            weight_decay: 0.1,
+            seq_len: 128,
+            log_interval: 100,
+            save_interval: 500,
+            checkpoint_dir: "checkpoints".to_string(),
+        }
     }
 }
