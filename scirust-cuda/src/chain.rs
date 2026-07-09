@@ -103,6 +103,68 @@ extern "C" __global__ void place_cols_kernel(
                      ? x[r * ncols + (c - col_start)] : (unsigned short)0;
     }
 }
+
+// Row-wise softmax, max-subtracted for stability. One thread per row.
+extern "C" __global__ void softmax_kernel(
+    unsigned short* out, const unsigned short* x, const size_t rows, const size_t cols)
+{
+    size_t r = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < rows) {
+        float mx = -3.0e38f;
+        for (size_t j = 0; j < cols; j++) { float v = b2f(x[r*cols+j]); if (v > mx) mx = v; }
+        float sum = 0.0f;
+        for (size_t j = 0; j < cols; j++) sum += __expf(b2f(x[r*cols+j]) - mx);
+        for (size_t j = 0; j < cols; j++)
+            out[r*cols+j] = f2b(__expf(b2f(x[r*cols+j]) - mx) / sum);
+    }
+}
+
+// Scale a t×t score matrix by `scale`, and (if causal) mask j>i to a large
+// negative so softmax drives it to ~0.
+extern "C" __global__ void scale_mask_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t rows, const size_t cols, const float scale, const int causal)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * cols) {
+        size_t i = idx / cols, j = idx % cols;
+        float v = b2f(x[idx]) * scale;
+        if (causal && j > i) v = -1.0e30f;
+        out[idx] = f2b(v);
+    }
+}
+
+// RoPE: interleaved-pair rotation. pos = (row mod seq_len) + offset,
+// freq_p = theta^(-2p/dim), angle = pos*freq_p; one thread per (row, pair).
+extern "C" __global__ void rope_kernel(
+    unsigned short* out, const unsigned short* x, const size_t rows, const size_t dim,
+    const size_t seq_len, const size_t offset, const float theta)
+{
+    size_t pairs = dim / 2;
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * pairs) {
+        size_t r = idx / pairs, p = idx % pairs;
+        float pos = (float)((r % seq_len) + offset);
+        float freq = powf(theta, -2.0f * (float)p / (float)dim);
+        float ang = pos * freq, c = cosf(ang), s = sinf(ang);
+        float x0 = b2f(x[r*dim + 2*p]);
+        float x1 = b2f(x[r*dim + 2*p + 1]);
+        out[r*dim + 2*p]     = f2b(x0 * c - x1 * s);
+        out[r*dim + 2*p + 1] = f2b(x0 * s + x1 * c);
+    }
+}
+
+// Embedding gather: out row i = table row tokens[i]. Pure copy.
+extern "C" __global__ void embed_kernel(
+    unsigned short* out, const unsigned int* tokens, const unsigned short* table,
+    const size_t n_tokens, const size_t d)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n_tokens * d) {
+        size_t i = idx / d, j = idx % d;
+        out[idx] = table[(size_t)tokens[i] * d + j];
+    }
+}
 "#;
 
 /// A resident row-major `rows × cols` matrix in VRAM, stored in **bf16** (the
@@ -135,6 +197,10 @@ struct Kernels {
     rmsnorm: CudaFunction,
     slice_cols: CudaFunction,
     place_cols: CudaFunction,
+    softmax: CudaFunction,
+    scale_mask: CudaFunction,
+    rope: CudaFunction,
+    embed: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -185,6 +251,10 @@ impl CudaChain {
             rmsnorm: f("rmsnorm_kernel"),
             slice_cols: f("slice_cols_kernel"),
             place_cols: f("place_cols_kernel"),
+            softmax: f("softmax_kernel"),
+            scale_mask: f("scale_mask_kernel"),
+            rope: f("rope_kernel"),
+            embed: f("embed_kernel"),
         })
     }
 
@@ -455,6 +525,120 @@ impl CudaChain {
             cols: dst_cols,
         }
     }
+
+    /// Row-wise softmax (max-subtracted), result resident. One thread per row.
+    pub fn softmax(&self, x: &CudaMatrix) -> CudaMatrix {
+        let (rows, cols) = (x.rows, x.cols);
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc");
+        let (rows_a, cols_a) = (rows, cols);
+        let mut builder = self.stream.launch_builder(&self.kernels().softmax);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        // SAFETY: arg order/types match `softmax_kernel`; one thread per row.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(rows as u32))
+                .expect("launch softmax_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols,
+        }
+    }
+
+    /// Scale a `t×t` score matrix by `scale` and (optionally) apply the causal
+    /// mask (`j>i` → large negative so softmax zeroes it), result resident.
+    pub fn scale_causal_mask(&self, x: &CudaMatrix, scale: f32, causal: bool) -> CudaMatrix {
+        let (rows, cols) = (x.rows, x.cols);
+        let total = rows * cols;
+        let mut out = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (rows_a, cols_a, scale_a) = (rows, cols, scale);
+        let causal_a: i32 = causal as i32;
+        let mut builder = self.stream.launch_builder(&self.kernels().scale_mask);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        builder.arg(&scale_a);
+        builder.arg(&causal_a);
+        // SAFETY: arg order/types match `scale_mask_kernel`; grid covers rows*cols.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch scale_mask_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols,
+        }
+    }
+
+    /// RoPE: interleaved-pair rotation of a `rows × dim` matrix, `pos = (row mod
+    /// seq_len) + offset`, `freq_p = theta^(-2p/dim)`. `dim` must be even. One
+    /// thread per `(row, pair)`.
+    pub fn rope(&self, x: &CudaMatrix, seq_len: usize, offset: usize, theta: f32) -> CudaMatrix {
+        assert_eq!(x.cols % 2, 0, "rope: dim must be even, got {}", x.cols);
+        let (rows, dim) = (x.rows, x.cols);
+        let total = rows * (dim / 2);
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(rows * dim)
+            .expect("cuda alloc");
+        let (rows_a, dim_a, seq_a, off_a, theta_a) = (rows, dim, seq_len, offset, theta);
+        let mut builder = self.stream.launch_builder(&self.kernels().rope);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&rows_a);
+        builder.arg(&dim_a);
+        builder.arg(&seq_a);
+        builder.arg(&off_a);
+        builder.arg(&theta_a);
+        // SAFETY: arg order/types match `rope_kernel`; one thread per (row, pair).
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch rope_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols: dim,
+        }
+    }
+
+    /// Token embedding gather: build a `tokens.len() × d` matrix whose row `i` is
+    /// row `tokens[i]` of the `vocab × d` `table`.
+    pub fn embed(&self, tokens: &[u32], table: &CudaMatrix) -> CudaMatrix {
+        let (n, d) = (tokens.len(), table.cols);
+        let toks = self.stream.clone_htod(tokens).expect("cuda htod tokens");
+        let total = n * d;
+        let mut out = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (n_a, d_a) = (n, d);
+        let mut builder = self.stream.launch_builder(&self.kernels().embed);
+        builder.arg(&mut out);
+        builder.arg(&toks);
+        builder.arg(&table.buf);
+        builder.arg(&n_a);
+        builder.arg(&d_a);
+        // SAFETY: arg order/types match `embed_kernel`; grid covers n*d.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch embed_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows: n,
+            cols: d,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -668,5 +852,144 @@ mod tests {
             "place_cols must scatter into a zero slot"
         );
         eprintln!("bf16 slice_cols/place_cols round-trip — PASS");
+    }
+
+    fn cpu_softmax(x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; rows * cols];
+        for r in 0..rows
+        {
+            let row = &x[r * cols..(r + 1) * cols];
+            let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let exps: Vec<f32> = row.iter().map(|&v| (v - mx).exp()).collect();
+            let sum: f32 = exps.iter().sum();
+            for j in 0..cols
+            {
+                out[r * cols + j] = exps[j] / sum;
+            }
+        }
+        out
+    }
+
+    /// `softmax` and the `scale_causal_mask → softmax` attention-score pipeline
+    /// match their CPU references within bf16 tolerance. Skips with no device.
+    #[test]
+    fn bf16_softmax_and_causal_mask_match_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping softmax/mask parity");
+            return;
+        };
+        let (rows, cols) = (5usize, 5usize);
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.3 - 2.0).sin())
+            .collect();
+        let gx = chain.upload(&x, rows, cols);
+
+        // Plain row softmax.
+        let sm = chain.download(&chain.softmax(&gx));
+        let e_sm = rel_err(&sm, &cpu_softmax(&x, rows, cols));
+        assert!(e_sm < 5e-2, "softmax rel_err {e_sm}");
+
+        // Scaled + causally-masked softmax (the attention score path).
+        let scale = 0.5f32;
+        let masked = chain.softmax(&chain.scale_causal_mask(&gx, scale, true));
+        let got = chain.download(&masked);
+        // CPU reference: scale, mask upper triangle to -inf, softmax.
+        let mut ref_in = vec![0.0f32; rows * cols];
+        for i in 0..rows
+        {
+            for j in 0..cols
+            {
+                ref_in[i * cols + j] = if j > i
+                {
+                    f32::NEG_INFINITY
+                }
+                else
+                {
+                    x[i * cols + j] * scale
+                };
+            }
+        }
+        let e_mask = rel_err(&got, &cpu_softmax(&ref_in, rows, cols));
+        assert!(e_mask < 5e-2, "causal-masked softmax rel_err {e_mask}");
+        eprintln!("bf16 softmax {e_sm:.2e} + causal-masked softmax {e_mask:.2e} vs CPU — PASS");
+    }
+
+    fn cpu_rope(
+        x: &[f32],
+        rows: usize,
+        dim: usize,
+        seq_len: usize,
+        off: usize,
+        theta: f32,
+    ) -> Vec<f32> {
+        let mut out = vec![0.0f32; rows * dim];
+        for r in 0..rows
+        {
+            let pos = ((r % seq_len) + off) as f32;
+            for p in 0..dim / 2
+            {
+                let freq = theta.powf(-2.0 * p as f32 / dim as f32);
+                let (s, c) = (pos * freq).sin_cos();
+                let x0 = x[r * dim + 2 * p];
+                let x1 = x[r * dim + 2 * p + 1];
+                out[r * dim + 2 * p] = x0 * c - x1 * s;
+                out[r * dim + 2 * p + 1] = x0 * s + x1 * c;
+            }
+        }
+        out
+    }
+
+    /// `rope` matches a CPU interleaved-pair rotation within bf16 tolerance (the
+    /// convention is confirmed end-to-end by the B3 forward parity). Skips with no
+    /// device.
+    #[test]
+    fn bf16_rope_matches_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping rope parity");
+            return;
+        };
+        let (rows, dim, seq_len, theta) = (6usize, 8usize, 6usize, 10_000.0f32);
+        let x: Vec<f32> = (0..rows * dim)
+            .map(|i| (i as f32 * 0.21 - 0.7).cos())
+            .collect();
+        let got = chain.download(&chain.rope(&chain.upload(&x, rows, dim), seq_len, 0, theta));
+        let e = rel_err(&got, &cpu_rope(&x, rows, dim, seq_len, 0, theta));
+        assert!(e < 5e-2, "rope rel_err {e}");
+        eprintln!("bf16 rope vs CPU interleaved rotation: rel_err {e:.3e} — PASS");
+    }
+
+    /// `embed` gathers table rows by token id — exact (pure copy) against the
+    /// bf16-rounded table. Skips with no device.
+    #[test]
+    fn bf16_embed_gathers_rows() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping embed parity");
+            return;
+        };
+        let (vocab, d) = (10usize, 4usize);
+        let table: Vec<f32> = (0..vocab * d)
+            .map(|i| (i as f32 * 0.19 - 0.5).sin())
+            .collect();
+        let gtab = chain.upload(&table, vocab, d);
+        let tokens = [3u32, 0, 7, 3, 9];
+        let got = chain.download(&chain.embed(&tokens, &gtab));
+
+        let tbf: Vec<f32> = table.iter().map(|&v| bf16::from_f32(v).to_f32()).collect();
+        let mut want = Vec::with_capacity(tokens.len() * d);
+        for &t in &tokens
+        {
+            for j in 0..d
+            {
+                want.push(tbf[t as usize * d + j]);
+            }
+        }
+        assert_eq!(got, want, "embed must gather the exact table rows");
+        eprintln!("bf16 embed gather — PASS");
     }
 }
