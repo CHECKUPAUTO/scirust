@@ -14,6 +14,13 @@ pub fn soft_gemm(
     n: usize,
     k: usize,
 ) {
+    // `alpha_scale` is the fixed-point denominator; 0 would be an integer
+    // divide-by-zero (process abort). Reject it explicitly with a clear message
+    // rather than crashing deep inside the inner loop.
+    assert!(
+        alpha_scale != 0,
+        "soft_gemm: alpha_scale must be non-zero (fixed-point denominator)"
+    );
     // Isolated from FPU: strictly integer arithmetic
     for i in 0..m
     {

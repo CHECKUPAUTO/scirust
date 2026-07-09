@@ -125,6 +125,22 @@ impl Default for TilingConfig {
     }
 }
 
+/// Validate that the operand slices are large enough for a contiguous
+/// (row-major) `m×k · k×n → m×n` product. The tiled kernels index `a`, `b` and
+/// `c` through raw/SIMD pointers with no per-access bounds check, so a caller
+/// passing a slice shorter than the `(m,k,n)` contract would otherwise read or
+/// write out of bounds (UB) rather than panic. `checked_mul` also rejects a
+/// dimension product that would overflow `usize`.
+#[inline]
+fn assert_contiguous_dims(a_len: usize, b_len: usize, c_len: usize, m: usize, k: usize, n: usize) {
+    let mk = m.checked_mul(k).expect("matmul tiled: m*k overflows usize");
+    let kn = k.checked_mul(n).expect("matmul tiled: k*n overflows usize");
+    let mn = m.checked_mul(n).expect("matmul tiled: m*n overflows usize");
+    assert!(a_len >= mk, "matmul tiled: a.len() {a_len} < m*k {mk}");
+    assert!(b_len >= kn, "matmul tiled: b.len() {b_len} < k*n {kn}");
+    assert!(c_len >= mn, "matmul tiled: c.len() {c_len} < m*n {mn}");
+}
+
 /// Matmul tuilée avec le backend SIMD automatique et portable.
 #[inline]
 #[allow(clippy::too_many_arguments)]
@@ -139,6 +155,7 @@ pub fn matmul_tiled_f32(
     n: usize,
     config: Option<&TilingConfig>,
 ) {
+    assert_contiguous_dims(a.len(), b.len(), c.len(), m, k, n);
     matmul_tiled_strided_f32(alpha, a, b, beta, c, m, k, n, k, 1, n, 1, n, 1, config)
 }
 
@@ -257,6 +274,8 @@ pub fn matmul_neon_tiled_f32(
 ) {
     use std::arch::aarch64::*;
 
+    assert_contiguous_dims(a.len(), b.len(), c.len(), m, k, n);
+
     let (tile_m, tile_k, tile_n) = (64, 64, 64);
 
     #[allow(clippy::needless_range_loop)]
@@ -334,6 +353,8 @@ pub fn matmul_avx2_tiled_f32(
     n: usize,
 ) {
     use std::arch::x86_64::*;
+
+    assert_contiguous_dims(a.len(), b.len(), c.len(), m, k, n);
 
     let (tile_m, tile_k, tile_n) = (64, 64, 64);
 

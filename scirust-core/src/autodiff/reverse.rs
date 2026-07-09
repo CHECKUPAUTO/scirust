@@ -3565,6 +3565,13 @@ impl<'t> Var<'t> {
             data: w_data,
         };
 
+        // The sgemm below uses `a.cols` as the contraction dimension and reads
+        // the reconstructed weight (in_features × out_features) with row stride
+        // out_features. If `a.cols != in_features` it would read past
+        // `w_tensor.data` (OOB). Validate the inner dimension first, exactly as
+        // `try_matmul` does, so a shape mismatch is a clean `Err` instead of UB.
+        crate::error::check_inner_dim("tt_contract", a.cols, in_features)?;
+
         let mut out_data = vec![0.0; a.rows * out_features];
         unsafe {
             sgemm(

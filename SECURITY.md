@@ -32,6 +32,20 @@ d'issue publique pour une faille exploitable. Accusé de réception sous
   > compilé par la CI, et est conservé à titre historique. Il est donc
   > **hors périmètre** des garanties ci-dessus.
 
+  > **Note *features* optionnelles (réseau/TLS).** La garantie « aucune FFI
+  > consommée » vaut pour le **build par défaut**
+  > (`cargo build --workspace`, vérifiable par `cargo tree --workspace`, qui
+  > ne fait apparaître ni `ring` ni `aws-lc-sys` ni `reqwest`). Trois
+  > *features* **désactivées par défaut** tirent en revanche une pile TLS
+  > qui **relie du C/assembleur** : `scirust-trader/live` (→ `reqwest` +
+  > `rustls` + `aws-lc-sys`), `scirust-rsi/anthropic` et
+  > `scirust-sciagent/fetch` (→ `ureq` + `ring`). Ces *crates* figurent donc
+  > dans `Cargo.lock` (qui liste toutes les dépendances optionnelles) mais
+  > ne sont **compilées et liées que si l'on active explicitement la
+  > *feature*** ; `scirust-sciagent/Cargo.toml` documente déjà ce compromis.
+  > Un déploiement qui doit rester 100 % pur-Rust laisse simplement ces
+  > *features* éteintes.
+
 - **`unsafe` confiné et justifié** : le `unsafe` apparaît dans plusieurs
   modules (intrinsics SIMD `scirust-simd/src/{dispatch,complex}.rs`,
   alignement mémoire `scirust-arena/src/{slab,aligned,allocator}.rs` avec
