@@ -558,6 +558,29 @@ impl GpuChain {
         self.ctx.place_cols_resident(x, col_start, dst_cols)
     }
 
+    /// **Vertically stack** two resident matrices of equal width into a fresh
+    /// `(a.rows + b.rows) × cols` matrix, entirely on the device (two GPU-side
+    /// buffer copies, no host round-trip). The append primitive for a
+    /// fully-resident KV cache: stack the new token's row onto the growing cache
+    /// without leaving VRAM. Oracle: [`crate::ops::cpu_concat_rows`].
+    pub fn concat_rows(&self, a: &GpuMatrix, b: &GpuMatrix) -> BackendResult<GpuMatrix> {
+        self.ctx.concat_rows_resident(a, b)
+    }
+
+    /// Gather the resident **row range** `[start, start + count)` into a fresh
+    /// `count × cols` matrix (one GPU-side copy of the contiguous slice). The row
+    /// analogue of [`Self::slice_cols`]: read a KV-cache prefix, or roll the cache
+    /// back to the accepted length after a rejected speculative token.
+    /// Oracle: [`crate::ops::cpu_slice_rows`].
+    pub fn slice_rows(
+        &self,
+        x: &GpuMatrix,
+        start: usize,
+        count: usize,
+    ) -> BackendResult<GpuMatrix> {
+        self.ctx.slice_rows_resident(x, start, count)
+    }
+
     /// **Resident multi-head grouped-query attention**, single sequence
     /// (`rows = seq_len`), matching the sciagent model's attention:
     ///
@@ -1816,6 +1839,86 @@ mod tests {
             placed,
             cpu_place_cols(&sliced, rows, ncols, col_start, src_cols)
         );
+    }
+
+    /// `concat_rows` stacks two equal-width resident matrices bit-exactly (a
+    /// GPU-side copy, so no accumulation reorder), and repeated one-row appends
+    /// reproduce the whole matrix — the fully-resident KV-cache growth pattern.
+    #[test]
+    fn resident_concat_rows_matches_cpu_oracle() {
+        use crate::ops::cpu_concat_rows;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let cols = 6usize;
+        let a: Vec<f32> = (0..3 * cols)
+            .map(|i| (i as f32 * 0.31 - 0.5).cos())
+            .collect();
+        let b: Vec<f32> = (0..2 * cols)
+            .map(|i| (i as f32 * 0.13 + 0.2).sin())
+            .collect();
+
+        let ga = chain.upload(&a, 3, cols);
+        let gb = chain.upload(&b, 2, cols);
+        let stacked = chain.concat_rows(&ga, &gb).unwrap();
+        assert_eq!(stacked.rows(), 5);
+        assert_eq!(stacked.cols(), cols);
+        assert_eq!(
+            chain.download(&stacked).unwrap(),
+            cpu_concat_rows(&a, &b, cols)
+        );
+
+        // Grow a cache one row at a time and confirm it equals the full matrix —
+        // the exact access pattern `decode_step` uses for the KV cache.
+        let full: Vec<f32> = (0..5 * cols).map(|i| (i as f32 * 0.07).sin()).collect();
+        let mut cache: Option<GpuMatrix> = None;
+        for r in 0..5
+        {
+            let row = chain.upload(&full[r * cols..(r + 1) * cols], 1, cols);
+            cache = Some(match cache
+            {
+                None => row,
+                Some(prev) => chain.concat_rows(&prev, &row).unwrap(),
+            });
+        }
+        assert_eq!(chain.download(&cache.unwrap()).unwrap(), full);
+    }
+
+    /// `slice_rows` gathers a contiguous row range bit-exactly (a GPU-side copy),
+    /// including the prefix (`start = 0`) and rollback shapes the speculative-decode
+    /// path relies on.
+    #[test]
+    fn resident_slice_rows_matches_cpu_oracle() {
+        use crate::ops::cpu_slice_rows;
+
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+        let (rows, cols) = (7usize, 5usize);
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.19 - 0.4).cos())
+            .collect();
+        let gx = chain.upload(&x, rows, cols);
+
+        for (start, count) in [(0usize, 7usize), (0, 3), (2, 4), (5, 2), (6, 1), (3, 0)]
+        {
+            let sliced = chain.slice_rows(&gx, start, count).unwrap();
+            assert_eq!(sliced.rows(), count);
+            assert_eq!(sliced.cols(), cols);
+            assert_eq!(
+                chain.download(&sliced).unwrap(),
+                cpu_slice_rows(&x, cols, start, count),
+                "slice_rows [{start}, {})",
+                start + count
+            );
+        }
     }
 
     /// `slice_cols` backward: RoPE-style gradient check. For `L = Σ slice(X)⊙G`

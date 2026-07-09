@@ -18,11 +18,14 @@ critical-path work, and a phased plan.
   (recompute, don't store, per-layer activations). Without them the run does
   not fit; with them, even 7B fits.
 - **Status (Route A, done):** a fully-resident wgpu/Vulkan backend now trains the
-  real 350M model end-to-end on the Thor, every op gradient-checked. But its
-  **fp32 throughput is measured at ~34 tok/s (<5% of peak)** — correct, not fast.
-  From-scratch 350M pretraining needs FP16/Tensor cores (**Route B**); Route A's
-  near-term value is fine-tuning, inference, and small-model training. See
-  *Measured on the Thor* below.
+  real 350M model end-to-end on the Thor, every op gradient-checked, and runs the
+  full on-device loop **train → fine-tune (LoRA/DoRA) → merge → generate**
+  (KV-cached, sampled, batched prefill). But its **fp32 throughput is measured at
+  ~34 tok/s training / ~3.5 tok/s single-stream 350M decode (<5% of peak)** —
+  correct, not fast. Prompt **prefill** is far better (batched `m=P`: ~149 tok/s
+  ingest at 350M, saturating). From-scratch 350M pretraining — and fast
+  decode — needs FP16/Tensor cores (**Route B**); Route A's near-term value is
+  fine-tuning, inference, and small-model training. See *Measured on the Thor* below.
 
 ## The memory reality (run it yourself)
 
@@ -99,6 +102,33 @@ autodiff must run on GPU tensors. Two routes:
   cuDNN or hand-written WMMA kernels; a flash-attention kernel.
 - Pro: maximum tokens/sec. Con: a substantial new backend; ties the build to
   the CUDA toolchain.
+- **Design & feasibility: see [`ROUTE_B.md`](ROUTE_B.md)** — mixed-precision
+  (bf16 compute + fp32 master) cuBLASLt approach, a `CudaChain` mirroring
+  `GpuChain` so `ResidentModel` is a backend swap, the phased B0–B5 plan, and the
+  **go/no-go probe (B0)**: a cuBLASLt bf16-vs-fp32 GEMM microbench on the Thor whose
+  single number decides whether Route B is worth starting.
+- **✅ DONE and validated (B1–B5, forward *and* training).** `scirust-cuda`
+  (feature-gated) runs the **whole bf16 decoder forward+backward+AdamW on Blackwell
+  Tensor cores** — every op gradient-checked vs the CPU, the full `CudaModel` forward
+  matches the CPU model to **rel_err ~2.4 %**, the composed backward matches the CPU
+  tape's tied-embedding grad (**rel_err 1.9e-1**), and the closed training loop reduces
+  loss **4.81 → 0.04** over 41 steps (`tests/cuda_parity.rs`). **Measured speedup vs
+  Route A (same work, fp32 wgpu vs bf16 Tensor cores):**
+
+  | config | regime | Route A (wgpu fp32) | Route B (bf16 TC) | speedup |
+  |--------|--------|--------------------:|------------------:|--------:|
+  | d512 · 8L, seq 128        | forward  | 760 tok/s | **4,529 tok/s** | **6.0×** |
+  | d1024 · 24L (~350M), seq 256 | forward  | 139 tok/s | **1,158 tok/s** | **8.3×** |
+  | d512 · 8L, seq 128        | training | 413 tok/s | **1,285 tok/s** | **3.1×** |
+  | d1024 · 24L (~350M), seq 256 | training | 45.7 tok/s | **213 tok/s** | **4.7×** |
+
+  The lever is real at the model level: **6–8.3×** forward (bigger models trend toward
+  the B0 microbench's 12.9× as GEMMs dominate; the gap is non-GEMM kernels + the host
+  logits download) and **3.1–4.7×** for a full AdamW training step, at a ~2.4 % bf16
+  accuracy cost. Training's multiplier is lower than the forward's because the backward
+  carries more non-GEMM adjoint kernels and the fp32-master AdamW step is memory-bound
+  — both dilute the raw bf16-GEMM win. `examples/cuda_forward_bench` /
+  `examples/cuda_train_bench` reproduce the numbers.
 
 Recommended sequencing: **A to get correctness and a working run on the Thor,
 then B to make it fast.**
@@ -143,6 +173,79 @@ Where Route A earns its keep, then, is **correctness (a gradient-checked on-devi
 reference), fine-tuning, inference, and small-model training** — not from-scratch
 350M pretraining. That gates Route B as the real prerequisite for large-scale
 training throughput.
+
+### Inference throughput (measured)
+
+The resident inference path (KV-cached generation with batched prefill) is now
+measured on the Thor too (`examples/resident_infer_bench`, fp32, single sequence,
+random weights — throughput is weight-independent). Two regimes, both timed through
+the public `generate_cached` API:
+
+| config | prefill ingest @ P=512 | decode (m=1) | ratio |
+|--------|-----------------------:|-------------:|------:|
+| d512 · 8L · ff1408   | **1078 tok/s** | 14.6 tok/s | ~74× |
+| d1024 · 24L · ff4096 (~350M) | **149 tok/s** | 3.5 tok/s | ~43× |
+
+Prefill ingestion vs prompt length (350M-class, `m = P` one forward):
+
+| P | tok/s |
+|--:|------:|
+| 16 | 45 |
+| 64 | 92 |
+| 128 | 127 |
+| 256 | 149 |
+| 512 | 149 |
+
+Reading it:
+- **Prefill ingestion saturates** (256→512 is flat, 149→149) — the batched
+  `m = P` forward becomes fully compute-bound past P≈256, so adding rows scales
+  linearly (constant tok/s). At small P the per-forward fixed cost (dispatch,
+  embedding gather, LM head) dominates, so tok/s is lower. This is the
+  **batched-prefill win (infer-4) quantified**: ingesting a prompt at 149 tok/s
+  vs decoding at 3.5 tok/s is the same GPU doing `m = P` vs `m = 1` work.
+- **Decode is `m = 1`** — one row per forward, so it barely occupies the GPU:
+  3.5 tok/s at 350M, ~43× below the saturated prefill rate. This — not memory —
+  is the autoregressive-decode wall on the fp32 path, and it is the *same*
+  kernel-efficiency ceiling the training numbers hit, seen from the worst-case
+  `m = 1` end. It is exactly where **Route B (FP16/Tensor cores)** and/or
+  batched-sequence or speculative decode (DeepSpec, below) would pay off.
+
+**Conclusion.** On-device inference is *usable now* for short, latency-tolerant
+generations and for prompt-heavy workloads (fast batched prefill), but single-stream
+decode at a few tok/s for 350M confirms the same fp32 kernel-efficiency ceiling —
+the order-of-magnitude lever remains Route B.
+
+### Speculative decoding (measured cost model)
+
+Speculative decoding attacks the `m = 1` decode wall **algorithmically**: a cheap
+draft proposes `k` tokens, the target verifies all `k` in one wide `decode_batch`
+(`m = k`), and accepts the longest prefix matching its own greedy pick plus one
+correction. It is **exact** — the output equals plain greedy for *any* draft
+(hardware-confirmed: `resident_speculative_matches_greedy` PASSes, and the bench's
+`exact` column reads `yes` at every `k` even with a useless random draft). The
+*speedup* is entirely a function of the draft's acceptance rate.
+
+Measured on the Thor (`examples/resident_spec_bench`, fp32; target d512·8L, draft
+d512·2L):
+
+- greedy target **14.4 tok/s** (69.5 ms/tok); the 2-layer draft is **3.5× cheaper**
+  (19.9 ms/tok).
+- Cost model `speedup(a) = (a+1)·t_g / (k·t_d + 2·t_g)` (a = tokens accepted per
+  round of `k`):
+
+  | k | accept 50% | accept 75% | accept 100% | break-even accept |
+  |--:|-----------:|-----------:|------------:|------------------:|
+  | 2 | 0.78× | 0.97× | 1.17× | ~1.6 / 2 |
+  | 4 | 0.95× | 1.27× | 1.59× | ~2.1 / 4 |
+  | 8 | 1.17× | 1.63× | 2.10× | ~3.3 / 8 |
+
+Reading it: on **random** weights the draft agrees ~by chance (≈0.4 %), so measured
+speedup is `<1×` — the draft/verify overhead dominates. The value is the cost model:
+with a 3.5×-cheaper draft, `k = 8` **breaks even at ~41 % acceptance** and a draft
+**trained to track the target** (acceptance ~0.6–0.8, typical in practice) would
+deliver **~1.6–2.1×**. So speculative decoding is a real, order-of-~2 lever for
+single-stream decode *given a trained draft* — complementary to Route B (which lifts
+the per-forward ceiling itself), not a substitute.
 
 ## What already works on the Thor today (verified)
 

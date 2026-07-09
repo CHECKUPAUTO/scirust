@@ -561,5 +561,176 @@ fn resident_kv_cache_matches_greedy() {
         full, cached,
         "generate_cached must match generate token-for-token"
     );
+
+    // A longer prompt exercises the batched prefill over more rows (m = P wide
+    // matmuls seeding the cache), which must still match the whole-sequence path.
+    let long_prompt: Vec<u32> = vec![5, 2, 9, 1, 7, 3, 8, 0, 6];
+    assert_eq!(
+        rm.generate(&long_prompt, steps),
+        rm.generate_cached(&long_prompt, steps),
+        "batched prefill (P={}) must match generate token-for-token",
+        long_prompt.len()
+    );
     eprintln!("resident KV-cache matches whole-sequence generate — PASS ({cached:?})");
+}
+
+/// **Resident sampling** (`ResidentModel::generate_sampled`) shares the CPU
+/// decoder's deterministic sampler: at `T = 0` it is greedy and reproduces
+/// `generate_cached` token-for-token; at `T > 0` the same seed reproduces the
+/// same sample, while different seeds diverge (proving the RNG is actually
+/// driving the draw). Skips with no adapter.
+#[test]
+fn resident_sampled_generation_is_greedy_at_t0_and_seed_deterministic() {
+    use scirust_sciagent::generate::SamplingParams;
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident sampling");
+        return;
+    };
+    eprintln!("resident sampling on: {}", rm.adapter_name());
+    let steps = 8usize;
+
+    // T = 0 (default) is a hard argmax ⇒ identical to the greedy KV-cache path.
+    let greedy = rm.generate_cached(&prompt, steps);
+    let sampled_t0 = rm.generate_sampled(&prompt, steps, &SamplingParams::default(), 42);
+    assert_eq!(
+        greedy, sampled_t0,
+        "generate_sampled at T=0 must match greedy generate_cached"
+    );
+
+    // T > 0: same seed reproduces, different seeds diverge (random-init logits
+    // are near-uniform, so 8 identical draws across seeds is negligibly likely).
+    let hot = SamplingParams {
+        temperature: 2.0,
+        ..SamplingParams::default()
+    };
+    let a1 = rm.generate_sampled(&prompt, steps, &hot, 1);
+    let a2 = rm.generate_sampled(&prompt, steps, &hot, 1);
+    assert_eq!(a1, a2, "same seed must reproduce the same sample");
+    let b = rm.generate_sampled(&prompt, steps, &hot, 2);
+    assert_ne!(a1, b, "different seeds should sample differently at T=2");
+    eprintln!("resident sampling: T=0 greedy-parity + seed determinism — PASS");
+}
+
+/// **Streaming** (`ResidentModel::generate_streaming`) emits exactly the tokens
+/// `generate_sampled` produces, in order, and returns the identical full sequence:
+/// the callback fires per decoded token but changes only *when* tokens surface,
+/// never *which*. Checked at both `T=0` (greedy) and `T>0` (sampled). Skips with
+/// no adapter.
+#[test]
+fn resident_streaming_matches_sampled() {
+    use scirust_sciagent::generate::SamplingParams;
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(rm) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping resident streaming");
+        return;
+    };
+    eprintln!("resident streaming on: {}", rm.adapter_name());
+    let steps = 8usize;
+
+    for (label, params, seed) in [
+        ("T=0", SamplingParams::default(), 0u64),
+        (
+            "T=1.5",
+            SamplingParams {
+                temperature: 1.5,
+                ..SamplingParams::default()
+            },
+            7u64,
+        ),
+    ]
+    {
+        let full = rm.generate_sampled(&prompt, steps, &params, seed);
+        let mut streamed = Vec::new();
+        let returned = rm.generate_streaming(&prompt, steps, &params, seed, |t| streamed.push(t));
+        assert_eq!(
+            returned, full,
+            "{label}: generate_streaming return must match generate_sampled"
+        );
+        assert_eq!(
+            streamed,
+            full[prompt.len()..].to_vec(),
+            "{label}: callback must see exactly the generated tokens, in order"
+        );
+    }
+    eprintln!("resident streaming matches sampled (tokens + order) — PASS");
+}
+
+/// **Speculative decoding** (`ResidentModel::speculative_generate`) is exact: its
+/// greedy output equals plain greedy `generate_cached` **token-for-token, for any
+/// draft** — the draft only changes how many target forwards it takes, never the
+/// tokens. Checked with (a) the target as its own draft (100% acceptance, exercises
+/// the all-accepted / bonus path) and (b) a structurally different draft (exercises
+/// rejection + cache rollback), plus the `k = 0` plain-greedy fallback. Skips with
+/// no adapter.
+#[test]
+fn resident_speculative_matches_greedy() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let model = SciAgentModel::new(&tiny_tied());
+    let prompt: Vec<u32> = vec![3, 7, 1, 4];
+    let Some(target) = ResidentModel::from_model(&model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping speculative decoding");
+        return;
+    };
+    eprintln!(
+        "resident speculative decoding on: {}",
+        target.adapter_name()
+    );
+    let steps = 8usize;
+    let greedy = target.generate_cached(&prompt, steps);
+
+    // (a) Target drafts for itself: every proposal is its own greedy pick, so all
+    //     are accepted — and the output is exactly the greedy decode.
+    for k in [1usize, 3, 5]
+    {
+        let (spec, stats) = target.speculative_generate(&target, &prompt, steps, k);
+        assert_eq!(
+            spec, greedy,
+            "self-draft speculative (k={k}) must match greedy"
+        );
+        assert_eq!(
+            stats.accepted, stats.drafted,
+            "self-draft must accept every proposed token (k={k})"
+        );
+    }
+
+    // (b) A structurally different (1-layer) draft ⇒ frequent rejections and cache
+    //     rollbacks — the output must STILL be the target's exact greedy decode.
+    let draft_cfg = SciAgentConfig {
+        n_layers: 1,
+        ..tiny_tied()
+    };
+    let draft_model = SciAgentModel::new(&draft_cfg);
+    let draft = ResidentModel::from_model(&draft_model).expect("draft adapter");
+    for k in [2usize, 4]
+    {
+        let (spec, _) = target.speculative_generate(&draft, &prompt, steps, k);
+        assert_eq!(
+            spec, greedy,
+            "cross-draft speculative (k={k}) must match greedy"
+        );
+    }
+
+    // k = 0 is the plain-greedy fallback.
+    assert_eq!(
+        target.speculative_generate(&target, &prompt, steps, 0).0,
+        greedy,
+        "k=0 must equal plain greedy"
+    );
+    eprintln!("resident speculative decoding matches greedy (self + cross draft) — PASS");
 }

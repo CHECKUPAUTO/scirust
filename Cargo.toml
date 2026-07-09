@@ -46,6 +46,7 @@ members = [
     "scirust-simd",
     "scirust-gpu",
     "scirust-gpu-macros",
+    "scirust-cuda",
     "scirust-core",
     "scirust-runtime",
     "scirust-embedded",

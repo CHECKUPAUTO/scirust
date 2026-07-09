@@ -10,6 +10,7 @@ description = "SCIAGENT — SLM deterministe entraine from scratch, specialise R
 scirust-core = { path = "../scirust-core" }
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-gpu = { path = "../scirust-gpu", optional = true }
+scirust-cuda = { path = "../scirust-cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
@@ -34,6 +35,11 @@ fetch = ["dep:ureq", "dep:sha2"]
 # and backward on the device. Off by default: it pulls `wgpu` (and a device at
 # runtime), which the pure-Rust default build and the aarch64 check must not need.
 gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
+# Route B: the bf16 + Tensor-core CUDA backend (Jetson Thor). Pulls scirust-cuda's
+# CudaChain and runs the whole resident forward on Tensor cores. Off by default and
+# Thor-only to build (needs the CUDA toolkit); parity vs the CPU model is checked
+# at bf16 tolerance in tests/cuda_parity.rs.
+cuda = ["dep:scirust-cuda", "scirust-cuda/cuda"]
 
 [[bin]]
 name = "fetch-crates"
@@ -55,3 +61,37 @@ required-features = ["gpu"]
 [[example]]
 name = "resident_lora_finetune"
 required-features = ["gpu"]
+
+# These resident examples use the `gpu` module (ResidentModel), so they must be
+# gated behind the `gpu` feature — otherwise `cargo test/build --features cuda`
+# (no `gpu`) tries to compile them and fails on the `scirust_sciagent::gpu` import.
+[[example]]
+name = "resident_generate"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_infer_bench"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_repl"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_spec_bench"
+required-features = ["gpu"]
+
+# Route B forward-throughput bench needs both backends (wgpu + CUDA) to compare.
+[[example]]
+name = "cuda_forward_bench"
+required-features = ["gpu", "cuda"]
+
+# Route B training-throughput bench (full AdamW step) — both backends to compare.
+[[example]]
+name = "cuda_train_bench"
+required-features = ["gpu", "cuda"]
+
+# Route B production pretraining harness — CUDA-only (no wgpu/gpu needed).
+[[example]]
+name = "cuda_pretrain"
+required-features = ["cuda"]

@@ -29,6 +29,7 @@ use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights};
 
 use crate::config::SciAgentConfig;
+use crate::generate::{SamplingParams, sample_row, seed_to_state};
 use crate::model::SciAgentModel;
 use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::scheduler::WarmupCosineSchedule;
@@ -72,6 +73,51 @@ fn argmax(xs: &[f32]) -> usize {
         }
     }
     best
+}
+
+/// Roll a per-layer resident cache back to its first `len` rows (a GPU-side
+/// `slice_rows` per layer; a no-op where the cache is already `len`). Used to
+/// discard rejected speculative rows before feeding the accepted correction.
+fn truncate_cache(chain: &GpuChain, cache: &mut [Option<GpuMatrix>], len: usize) {
+    for slot in cache.iter_mut()
+    {
+        if let Some(m) = slot.as_ref()
+        {
+            if m.rows() > len
+            {
+                *slot = Some(chain.slice_rows(m, 0, len).expect("truncate cache"));
+            }
+        }
+    }
+}
+
+/// Statistics from a [`ResidentModel::speculative_generate`] run — the draft's
+/// hit rate, which sets the achieved speedup (accuracy is unaffected: the output
+/// is always the target's exact greedy decode).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SpecStats {
+    /// Verify rounds executed.
+    pub rounds: usize,
+    /// Draft tokens proposed in total.
+    pub drafted: usize,
+    /// Draft tokens the target accepted (matched its own greedy pick).
+    pub accepted: usize,
+    /// Target forwards run (one wide `decode_batch` + one `decode_step` per round).
+    pub target_forwards: usize,
+}
+
+impl SpecStats {
+    /// Fraction of drafted tokens the target accepted (`0` if none drafted).
+    pub fn acceptance_rate(&self) -> f32 {
+        if self.drafted == 0
+        {
+            0.0
+        }
+        else
+        {
+            self.accepted as f32 / self.drafted as f32
+        }
+    }
 }
 
 /// One GQA block's weights mirrored into VRAM.
@@ -291,25 +337,25 @@ impl ResidentModel {
     /// logits are reproduced bit-for-bit (verified token-for-token in
     /// `tests/gpu_parity.rs`).
     ///
-    /// Caches live on the host as `n_layers` growing `Vec<f32>` (roped K, raw V,
-    /// `kv_dim` columns), re-uploaded per step; the compute stays resident.
-    /// Returns the full sequence (`prompt` followed by the generated tokens).
+    /// The per-layer caches are **resident** (roped K, raw V, `kv_dim` columns),
+    /// grown one row per step on-device; nothing leaves VRAM. The prompt is
+    /// consumed by a single batched [`Self::prefill`] (wide matmuls) rather than
+    /// token-by-token. Returns the full sequence (`prompt` then the generated
+    /// tokens).
     pub fn generate_cached(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
         if prompt.is_empty()
         {
             return Vec::new();
         }
         let n = self.blocks.len();
-        // Per-layer host caches of roped keys / raw values (row-major, kv_dim wide).
-        let mut kcache: Vec<Vec<f32>> = vec![Vec::new(); n];
-        let mut vcache: Vec<Vec<f32>> = vec![Vec::new(); n];
+        // Per-layer **resident** caches of roped keys / raw values (each grows one
+        // row per step, on-device — no host round-trip).
+        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
 
-        // Prefill: feed the prompt one token at a time, keeping the last logits.
-        let mut last_logits = Vec::new();
-        for (pos, &tok) in prompt.iter().enumerate()
-        {
-            last_logits = self.decode_step(tok, pos, &mut kcache, &mut vcache);
-        }
+        // Prefill the whole prompt in one batched forward, seeding the caches and
+        // keeping the logits after the last prompt token.
+        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);
 
         // Decode: argmax → append → step, growing the same caches. The final
         // token needs no further forward (nothing is generated after it).
@@ -327,23 +373,261 @@ impl ResidentModel {
         toks
     }
 
+    /// **KV-cached sampled generation** — like [`Self::generate_cached`], but each
+    /// next token is drawn with the shared deterministic sampler
+    /// [`crate::generate::sample_row`] (repetition penalty → temperature → top-k →
+    /// top-p → inverse-CDF draw) instead of a hard argmax. This is the *same*
+    /// decode policy the CPU [`crate::generate::Generator`] uses, so the resident
+    /// and CPU paths sample identically for a given `(params, seed)`.
+    ///
+    /// With `params.temperature <= 0` it is greedy and reproduces
+    /// [`Self::generate_cached`] exactly; with `T > 0` it samples reproducibly from
+    /// `seed`. Same `O(n)`-per-token fully-resident KV cache. Returns the full
+    /// sequence (`prompt` followed by the generated tokens).
+    pub fn generate_sampled(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+    ) -> Vec<u32> {
+        self.generate_streaming(prompt, max_new, params, seed, |_| {})
+    }
+
+    /// **Streaming** sampled generation — identical to [`Self::generate_sampled`]
+    /// (same KV-cached decode, same shared sampler, same tokens for a given
+    /// `(params, seed)`), but each newly-decoded token is handed to `on_token` the
+    /// moment it is sampled, *before* the next forward. Callers can print tokens as
+    /// they arrive (a live REPL / CLI) instead of waiting for the whole
+    /// continuation. Returns the full sequence (`prompt` then the generated tokens)
+    /// exactly as `generate_sampled` does — streaming changes *when* tokens surface,
+    /// never *which* ones.
+    pub fn generate_streaming(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+        mut on_token: impl FnMut(u32),
+    ) -> Vec<u32> {
+        if prompt.is_empty()
+        {
+            return Vec::new();
+        }
+        let n = self.blocks.len();
+        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut rng = seed_to_state(seed);
+
+        // Prefill the whole prompt in one batched forward, seeding the caches.
+        let mut last_logits = self.prefill(prompt, &mut kcache, &mut vcache);
+
+        let mut toks = prompt.to_vec();
+        for i in 0..max_new
+        {
+            // Trailing context (token ids) for the repetition penalty — the tokens
+            // decoded so far, exactly as the CPU `Generator` passes them.
+            let recent: Vec<usize> = toks.iter().map(|&t| t as usize).collect();
+            let next = sample_row(&last_logits, params, &recent, &mut rng) as u32;
+            on_token(next); // emit as soon as it is decoded (before the next forward)
+            let pos = toks.len();
+            toks.push(next);
+            if i + 1 < max_new
+            {
+                last_logits = self.decode_step(next, pos, &mut kcache, &mut vcache);
+            }
+        }
+        toks
+    }
+
+    /// **Greedy speculative decoding**: a (cheap) `draft` model proposes `k` tokens
+    /// each round; `self` (the target) **verifies** them with a single wide
+    /// [`Self::decode_batch`] and accepts the longest prefix that matches its own
+    /// greedy pick, plus one token — the target's correction at the first mismatch,
+    /// or a free bonus when all `k` matched. Both caches are then rolled back to the
+    /// accepted length and advanced by the accepted extra token.
+    ///
+    /// The output is **identical to plain greedy** [`Self::generate_cached`] —
+    /// token-for-token, for *any* draft — because every emitted token is the
+    /// target's own `argmax`; the draft changes only *how many* target forwards it
+    /// takes to get there (that's the speedup, when the draft guesses well). Returns
+    /// the full sequence and the run's [`SpecStats`]. `draft` must share the target's
+    /// vocabulary; `k = 0` is plain greedy.
+    pub fn speculative_generate(
+        &self,
+        draft: &ResidentModel,
+        prompt: &[u32],
+        max_new: usize,
+        k: usize,
+    ) -> (Vec<u32>, SpecStats) {
+        let mut stats = SpecStats::default();
+        if prompt.is_empty() || max_new == 0
+        {
+            return (prompt.to_vec(), stats);
+        }
+        if k == 0
+        {
+            return (self.generate_cached(prompt, max_new), stats);
+        }
+        debug_assert_eq!(
+            self.vocab, draft.vocab,
+            "draft and target must share a vocab"
+        );
+
+        let (nt, nd) = (self.blocks.len(), draft.blocks.len());
+        let mut tkc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
+        let mut tvc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
+        let mut dkc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
+        let mut dvc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
+
+        // Prefill both on the prompt; tlast/dlast predict the first undecided
+        // position `cur`, and each cache holds `cur` rows.
+        let mut tlast = self.prefill(prompt, &mut tkc, &mut tvc);
+        let mut dlast = draft.prefill(prompt, &mut dkc, &mut dvc);
+        let mut toks = prompt.to_vec();
+        let mut cur = prompt.len();
+        let target = prompt.len() + max_new;
+
+        while toks.len() < target
+        {
+            // 1. Draft proposes k tokens greedily from its current state.
+            let mut drafts = Vec::with_capacity(k);
+            for i in 0..k
+            {
+                let d = argmax(&dlast) as u32;
+                drafts.push(d);
+                dlast = draft.decode_step(d, cur + i, &mut dkc, &mut dvc);
+            }
+            // 2. Target verifies all k in one wide forward. rows[i] predicts cur+i+1.
+            let rows = self.decode_batch(&drafts, cur, &mut tkc, &mut tvc);
+            stats.rounds += 1;
+            stats.drafted += k;
+            stats.target_forwards += 1;
+
+            // 3. Accept the longest prefix where draft[i] == target's argmax at cur+i.
+            let mut accepted = 0usize;
+            let mut prev: &[f32] = &tlast; // logits predicting position cur+accepted
+            for i in 0..k
+            {
+                if drafts[i] == argmax(prev) as u32
+                {
+                    accepted += 1;
+                    prev = &rows[i];
+                }
+                else
+                {
+                    break;
+                }
+            }
+            stats.accepted += accepted;
+            // The extra token: the target's greedy pick at position cur+accepted
+            // (its correction on mismatch, or the free bonus when all k matched).
+            let extra = argmax(prev) as u32;
+
+            // 4. Emit the accepted drafts (== the target's picks) then the extra.
+            toks.extend_from_slice(&drafts[..accepted]);
+            toks.push(extra);
+            cur += accepted; // position of `extra`
+
+            // 5. Drop the rejected rows from both caches, then feed `extra` so both
+            //    models are positioned to predict cur+1.
+            truncate_cache(&self.chain, &mut tkc, cur);
+            truncate_cache(&self.chain, &mut tvc, cur);
+            truncate_cache(&draft.chain, &mut dkc, cur);
+            truncate_cache(&draft.chain, &mut dvc, cur);
+            tlast = self.decode_step(extra, cur, &mut tkc, &mut tvc);
+            dlast = draft.decode_step(extra, cur, &mut dkc, &mut dvc);
+            stats.target_forwards += 1;
+            cur += 1;
+        }
+
+        toks.truncate(target);
+        (toks, stats)
+    }
+
+    /// **Batched prompt prefill**: run one wide forward over the whole `prompt`
+    /// (positions `0..P`), seeding each layer's KV cache with the full `[P × kv_dim]`
+    /// roped-key / raw-value block, and return the `vocab`-wide logits for the
+    /// **last** prompt position (the first token to decode from).
+    ///
+    /// This is the standard prefill/decode split: the projections and attention run
+    /// as `m = P` matmuls (good GPU occupancy) instead of `P` separate `m = 1`
+    /// [`Self::decode_step`]s. It is arithmetically the whole-sequence
+    /// [`GpuChain::gqa_transformer_block`] over the prompt, so the seeded cache rows
+    /// and the returned last-row logits are **bit-for-bit** what the token-by-token
+    /// path would have produced — the subsequent [`Self::decode_step`]s append onto
+    /// exactly the rows they expect. Assumes a non-empty prompt (callers guard).
+    fn prefill(
+        &self,
+        prompt: &[u32],
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
+    ) -> Vec<f32> {
+        let chain = &self.chain;
+        let p = prompt.len();
+
+        let mut x = chain.embed(prompt, &self.embedding).expect("embed"); // [P × d_model]
+        for (l, b) in self.blocks.iter().enumerate()
+        {
+            // Attention sub-block (pre-norm + residual), batched over all P rows.
+            let xn = chain.rms_norm(&x, &b.norm1, self.eps).expect("norm1");
+            let q = chain.matmul(&xn, &b.wq).expect("wq"); // [P × d_model]
+            let k = chain.matmul(&xn, &b.wk).expect("wk"); // [P × kv_dim]
+            let v = chain.matmul(&xn, &b.wv).expect("wv"); // [P × kv_dim]
+            // Full causal attention over the prompt (ropes q/k internally).
+            let ctx = chain
+                .gqa_attention(
+                    &q,
+                    &k,
+                    &v,
+                    self.n_heads,
+                    self.n_kv_heads,
+                    p,
+                    self.theta,
+                    true,
+                )
+                .expect("gqa attention");
+            // Seed the caches with the prompt's roped keys / raw values. `kr` here
+            // is the same full-width RoPE (positions 0..P) `decode_step` produces
+            // one row at a time, so later appends line up exactly.
+            let kr = chain.rope(&k, p, 0, self.theta).expect("rope k");
+            kcache[l] = Some(kr);
+            vcache[l] = Some(v);
+            let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
+            x = chain.add(&x, &attn_out).expect("attn residual");
+            // MLP sub-block (pre-norm + residual).
+            let hn = chain.rms_norm(&x, &b.norm2, self.eps).expect("norm2");
+            let mlp = chain.swiglu_mlp(&hn, &b.wg, &b.wu, &b.wd).expect("mlp");
+            x = chain.add(&x, &mlp).expect("mlp residual");
+        }
+        // Final norm + tied LM head, then keep only the last position's logits.
+        let normed = chain
+            .rms_norm(&x, &self.final_norm, self.eps)
+            .expect("final norm");
+        let logits = chain
+            .matmul_t(&normed, &self.embedding, false, true)
+            .expect("logits");
+        let all = chain.download(&logits).expect("download logits");
+        all[(p - 1) * self.vocab..p * self.vocab].to_vec()
+    }
+
     /// One **incremental decode step**: embed `token` at absolute position `pos`,
     /// run the full stack using the per-layer KV caches (appending this token's
     /// roped key and raw value to each), and return the `vocab`-wide logits for
-    /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` caches (row-major,
-    /// `kv_dim` columns), each grown by one row here. Reproduces
+    /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` **resident** caches
+    /// (row-major, `kv_dim` columns), each grown by one row here via a GPU-side
+    /// `concat_rows` — nothing leaves VRAM. Reproduces
     /// [`GpuChain::gqa_transformer_block`] restricted to the single new row.
     fn decode_step(
         &self,
         token: u32,
         pos: usize,
-        kcache: &mut [Vec<f32>],
-        vcache: &mut [Vec<f32>],
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
     ) -> Vec<f32> {
         let chain = &self.chain;
         let d_model = self.embedding.cols();
         let dh = d_model / self.n_heads;
-        let kv_dim = self.n_kv_heads * dh;
 
         // Embed the single new token → [1 × d_model].
         let mut x = chain.embed(&[token], &self.embedding).expect("embed");
@@ -359,14 +643,22 @@ impl ResidentModel {
             // exactly as `gqa_attention` ropes the full-width q/k.
             let qr = chain.rope(&q, 1, pos, self.theta).expect("rope q");
             let kr = chain.rope(&k, 1, pos, self.theta).expect("rope k");
-            // Append this step's roped key and raw value to the layer caches.
-            kcache[l].extend_from_slice(&chain.download(&kr).expect("download kr"));
-            vcache[l].extend_from_slice(&chain.download(&v).expect("download v"));
-            let seq = kcache[l].len() / kv_dim;
-            let kmat = chain.upload(&kcache[l], seq, kv_dim);
-            let vmat = chain.upload(&vcache[l], seq, kv_dim);
+            // Append this step's roped key / raw value to the resident layer caches
+            // (GPU-side row stack — no download/re-upload round-trip).
+            kcache[l] = Some(match kcache[l].take()
+            {
+                None => kr,
+                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
+            });
+            vcache[l] = Some(match vcache[l].take()
+            {
+                None => v,
+                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
+            });
+            let kmat = kcache[l].as_ref().unwrap();
+            let vmat = vcache[l].as_ref().unwrap();
             // Single query attends over all cached keys/values (all ≤ pos ⇒ no mask).
-            let ctx = self.incr_attention(&qr, &kmat, &vmat, dh);
+            let ctx = self.incr_attention(&qr, kmat, vmat, dh);
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
             x = chain.add(&x, &attn_out).expect("attn residual");
             // MLP sub-block (pre-norm + residual).
@@ -382,6 +674,93 @@ impl ResidentModel {
             .matmul_t(&normed, &self.embedding, false, true)
             .expect("logits");
         chain.download(&logits).expect("download logits")
+    }
+
+    /// **Batched multi-token decode**: process `tokens` (at absolute positions
+    /// `start_pos .. start_pos + m`) in **one wide forward** over the KV caches,
+    /// appending all `m` roped-key / raw-value rows and returning `m` `vocab`-wide
+    /// logit rows (one per input position). The projections and MLP run as `m`-row
+    /// matmuls; only the attention is per-row, each query attending over the cache
+    /// prefix `[0, old + i]` (all accepted context + the new keys up to and
+    /// including itself — the causal structure).
+    ///
+    /// This is exactly `m` sequential [`Self::decode_step`]s fused into one forward:
+    /// every op is height-independent and query `i` sees the same prefix either way,
+    /// so the returned logits and the resulting cache are **bit-for-bit** identical
+    /// to the token-by-token path (verified in the in-module tests). It is the
+    /// **verify** step of speculative decoding — check `k` draft tokens with a
+    /// single wide target forward instead of `k` narrow ones.
+    fn decode_batch(
+        &self,
+        tokens: &[u32],
+        start_pos: usize,
+        kcache: &mut [Option<GpuMatrix>],
+        vcache: &mut [Option<GpuMatrix>],
+    ) -> Vec<Vec<f32>> {
+        let chain = &self.chain;
+        let d_model = self.embedding.cols();
+        let dh = d_model / self.n_heads;
+        let m = tokens.len();
+
+        let mut x = chain.embed(tokens, &self.embedding).expect("embed"); // [m × d]
+        for (l, b) in self.blocks.iter().enumerate()
+        {
+            let xn = chain.rms_norm(&x, &b.norm1, self.eps).expect("norm1");
+            let q = chain.matmul(&xn, &b.wq).expect("wq"); // [m × d]
+            let k = chain.matmul(&xn, &b.wk).expect("wk"); // [m × kv_dim]
+            let v = chain.matmul(&xn, &b.wv).expect("wv"); // [m × kv_dim]
+            // Row r sits at absolute position start_pos + r.
+            let qr = chain.rope(&q, m, start_pos, self.theta).expect("rope q");
+            let kr = chain.rope(&k, m, start_pos, self.theta).expect("rope k");
+            // Append all m roped keys / values to the resident caches.
+            kcache[l] = Some(match kcache[l].take()
+            {
+                None => kr,
+                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
+            });
+            vcache[l] = Some(match vcache[l].take()
+            {
+                None => v,
+                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
+            });
+            let kfull = kcache[l].as_ref().unwrap();
+            let vfull = vcache[l].as_ref().unwrap();
+            let old = kfull.rows() - m; // accepted-context length before this batch
+            // Per-row causal attention: query i attends over cache rows [0, old+i].
+            let mut ctx_rows: Option<GpuMatrix> = None;
+            for i in 0..m
+            {
+                let qr_i = chain.slice_rows(&qr, i, 1).expect("slice qr row");
+                let keys_i = chain
+                    .slice_rows(kfull, 0, old + i + 1)
+                    .expect("keys prefix");
+                let vals_i = chain
+                    .slice_rows(vfull, 0, old + i + 1)
+                    .expect("vals prefix");
+                let ctx_i = self.incr_attention(&qr_i, &keys_i, &vals_i, dh); // [1 × d]
+                ctx_rows = Some(match ctx_rows
+                {
+                    None => ctx_i,
+                    Some(acc) => chain.concat_rows(&acc, &ctx_i).expect("stack ctx"),
+                });
+            }
+            let ctx = ctx_rows.expect("m ≥ 1");
+            let attn_out = chain.matmul(&ctx, &b.wo).expect("wo"); // [m × d]
+            x = chain.add(&x, &attn_out).expect("attn residual");
+            let hn = chain.rms_norm(&x, &b.norm2, self.eps).expect("norm2");
+            let mlp = chain.swiglu_mlp(&hn, &b.wg, &b.wu, &b.wd).expect("mlp");
+            x = chain.add(&x, &mlp).expect("mlp residual");
+        }
+        let normed = chain
+            .rms_norm(&x, &self.final_norm, self.eps)
+            .expect("final norm");
+        let logits = chain
+            .matmul_t(&normed, &self.embedding, false, true)
+            .expect("logits"); // [m × vocab]
+        let all = chain.download(&logits).expect("download logits");
+        (0..m)
+            .map(|i| all[i * self.vocab..(i + 1) * self.vocab].to_vec())
+            .collect()
     }
 
     /// Incremental analogue of [`GpuChain::gqa_attention`] for a **single query
@@ -1416,5 +1795,81 @@ impl Default for ResidentPretrainConfig {
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tiny tied-embedding config for the resident private-path tests.
+    fn tiny_tied() -> SciAgentConfig {
+        SciAgentConfig {
+            vocab_size: 48,
+            d_model: 32,
+            n_layers: 2,
+            n_heads: 4,
+            n_kv_heads: 2,
+            d_ff: 64,
+            max_seq_len: 128,
+            rope_theta: 10_000.0,
+            tie_embeddings: true,
+            use_bias: false,
+            eps: 1e-5,
+        }
+    }
+
+    /// The batched multi-token decode ([`ResidentModel::decode_batch`]) is
+    /// **bit-for-bit** `m` sequential [`ResidentModel::decode_step`]s: identical
+    /// per-position logits *and* identical resulting KV cache. This is the
+    /// exactness the speculative-decode verify relies on. Skips with no adapter.
+    #[test]
+    fn decode_batch_matches_sequential_decode_steps() {
+        let model = SciAgentModel::new(&tiny_tied());
+        let Some(rm) = ResidentModel::from_model(&model)
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping decode_batch parity");
+            return;
+        };
+        let n = rm.blocks.len();
+        let tokens: Vec<u32> = vec![5, 2, 9, 1, 7]; // m = 5 at positions 0..5
+
+        // Batched: one wide forward.
+        let mut kb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let batched = rm.decode_batch(&tokens, 0, &mut kb, &mut vb);
+
+        // Sequential: one decode_step per token.
+        let mut ks: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut vs: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let seq: Vec<Vec<f32>> = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| rm.decode_step(t, i, &mut ks, &mut vs))
+            .collect();
+
+        assert_eq!(
+            batched, seq,
+            "decode_batch logits must match sequential decode_steps"
+        );
+
+        // The resulting caches must be identical too (same rows, same bytes).
+        for l in 0..n
+        {
+            let b = rm.chain.download(kb[l].as_ref().unwrap()).unwrap();
+            let s = rm.chain.download(ks[l].as_ref().unwrap()).unwrap();
+            assert_eq!(
+                b, s,
+                "layer {l} K cache must match after batched vs sequential"
+            );
+            let bv = rm.chain.download(vb[l].as_ref().unwrap()).unwrap();
+            let sv = rm.chain.download(vs[l].as_ref().unwrap()).unwrap();
+            assert_eq!(
+                bv, sv,
+                "layer {l} V cache must match after batched vs sequential"
+            );
+        }
+        eprintln!("decode_batch matches sequential decode_steps (logits + cache) — PASS");
     }
 }

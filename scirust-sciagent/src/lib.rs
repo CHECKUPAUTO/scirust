@@ -5,6 +5,8 @@ pub mod bpe;
 pub mod ccos;
 pub mod checkpointing;
 pub mod config;
+#[cfg(feature = "cuda")]
+pub mod cuda_model;
 pub mod flash_attention;
 pub mod generate;
 #[cfg(feature = "gpu")]

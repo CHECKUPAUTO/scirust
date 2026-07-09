@@ -199,7 +199,10 @@ impl Generator {
     }
 }
 
-fn seed_to_state(seed: u64) -> u64 {
+/// Scramble a user seed into a non-zero xorshift state. Public so alternative
+/// decoders (e.g. the resident GPU path) seed the **same** RNG and reproduce
+/// identical samples for a given seed.
+pub fn seed_to_state(seed: u64) -> u64 {
     // splitmix64: xorshift's first outputs correlate strongly with a
     // low-entropy seed (seed=1 gives u≈1e-10, i.e. "always token 0"), and
     // state 0 is a fixed point — scrambling fixes both.
@@ -229,7 +232,23 @@ fn sample_next(
 ) -> usize {
     let t = tape.value(logits_idx);
     let row_start = t.data.len() - vocab;
-    let mut row: Vec<f32> = t.data[row_start..row_start + vocab].to_vec();
+    sample_row(&t.data[row_start..row_start + vocab], params, recent, rng)
+}
+
+/// The decode policy over a single `vocab`-length **logits row**, factored out of
+/// [`sample_next`] so any decoder (the CPU tape path, the resident GPU path) runs
+/// the *same* deterministic sampler: repetition penalty → greedy-argmax (`T ≤ 0`)
+/// or `softmax(logits/T)` → top-k → top-p → renormalise → inverse-CDF draw from
+/// `rng`. `recent` is the trailing context (token ids) for the repetition
+/// penalty. Everything is deterministic given `(row, params, recent, rng)`.
+pub fn sample_row(
+    logits: &[f32],
+    params: &SamplingParams,
+    recent: &[usize],
+    rng: &mut u64,
+) -> usize {
+    let vocab = logits.len();
+    let mut row: Vec<f32> = logits.to_vec();
 
     // Repetition penalty (CTRL, Keskar et al. 2019): demote tokens already
     // present in the trailing window. Dividing a positive logit and
