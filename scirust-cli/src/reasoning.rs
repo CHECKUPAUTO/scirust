@@ -128,7 +128,7 @@ pub fn run_sat(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             2
         },
     }

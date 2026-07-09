@@ -15,6 +15,70 @@ pub mod sciagent;
 pub mod symbolic;
 pub mod synergy;
 pub mod trader;
+pub mod ux;
+
+/// Every dispatchable command name, used for "did you mean?" suggestions on a
+/// mistyped command. Keep in sync with the `run` dispatch below.
+const ALL_COMMANDS: &[&str] = &[
+    "help",
+    "version",
+    "info",
+    "quickstart",
+    "som",
+    "certify",
+    "conformal",
+    "calibrate",
+    "kvcache",
+    "guard",
+    "attest",
+    "pinn",
+    "quantum",
+    "gptq",
+    "awq",
+    "bitnet",
+    "evo",
+    "cmaes",
+    "diff",
+    "simplify",
+    "eval",
+    "solve",
+    "prove",
+    "gradient",
+    "to-rust",
+    "regress",
+    "symreg",
+    "trig",
+    "patterns",
+    "sat",
+    "integrate",
+    "root",
+    "minimize",
+    "optimize",
+    "linsolve",
+    "lstsq",
+    "det",
+    "cholesky",
+    "qr",
+    "cg",
+    "polyroots",
+    "ode",
+    "inverse",
+    "solve-system",
+    "fem-heat",
+    "tt",
+    "bpe",
+    "lm",
+    "deltanet",
+    "mamba",
+    "retnet",
+    "gla",
+    "hgrn",
+    "rwkv",
+    "sciagent",
+    "analyze",
+    "verify",
+    "trader",
+];
 
 /// One registered command for the help listing.
 struct Command {
@@ -450,17 +514,25 @@ const GROUPS: &[(&str, &[Command])] = &[
 ];
 
 fn print_help() {
-    println!("scirust — pure-Rust deterministic ML & scientific-computing toolkit\n");
-    println!("usage: scirust <command> [args]\n");
+    println!(
+        "{} — pure-Rust deterministic ML & scientific-computing toolkit\n",
+        ux::bold("scirust")
+    );
+    println!("{} scirust <command> [args]\n", ux::dim("usage:"));
+    // Cap the description column so a single long signature (e.g. `sciagent`'s
+    // 53-char arg list) does not spread every short command across the screen.
+    // Signatures longer than the cap simply get a 2-space gap before the text.
+    const COL_CAP: usize = 34;
     let width = GROUPS
         .iter()
         .flat_map(|(_, cs)| cs.iter())
         .map(|c| c.name.len() + c.args.len() + 1)
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .min(COL_CAP);
     for (group, cmds) in GROUPS
     {
-        println!("{group}");
+        println!("{}", ux::heading(group));
         for c in *cmds
         {
             let sig = if c.args.is_empty()
@@ -471,17 +543,34 @@ fn print_help() {
             {
                 format!("{} {}", c.name, c.args)
             };
-            println!("  {sig:<width$}  {}", c.about);
+            // Pad on the plain signature length (never on the coloured string,
+            // whose ANSI codes would break column alignment), with a 2-space
+            // minimum so over-long signatures still separate from their text.
+            let pad = width.saturating_sub(sig.len()).max(2);
+            let coloured = if c.args.is_empty()
+            {
+                ux::green(c.name)
+            }
+            else
+            {
+                format!("{} {}", ux::green(c.name), ux::dim(c.args))
+            };
+            println!("  {coloured}{:pad$}{}", "", c.about, pad = pad);
         }
         println!();
     }
-    println!("run a command with no further args for its specific usage.");
+    println!(
+        "{}",
+        ux::dim("run a command with no further args for its specific usage.")
+    );
 }
 
 fn print_info() {
     println!(
-        "scirust {} — pure Rust, zero FFI\n",
-        env!("CARGO_PKG_VERSION")
+        "{} {} ({}) — pure Rust, zero FFI\n",
+        ux::bold("scirust"),
+        env!("SCIRUST_VERSION"),
+        ux::dim(env!("SCIRUST_GIT_SHA"))
     );
     println!("Guarantees:");
     println!("  • Deterministic: seeded PCG RNG everywhere; same seed ⇒ bit-identical output.");
@@ -509,8 +598,34 @@ fn print_info() {
     println!("Docs: README.md · docs/REFERENCE.md · `cargo doc --workspace --no-deps --open`");
 }
 
-/// Dispatch `args` (excluding the program name). Returns the exit code.
+/// Entry point: dispatch `args` (excluding the program name) and, on an
+/// interactive terminal, report how long real work took — the affordance cargo
+/// and uv give. Timing goes to **stderr** and is gated on a TTY, so piped or
+/// scripted stdout stays byte-for-byte deterministic (the platform's headline
+/// guarantee) and meta commands stay silent.
 pub fn run(args: &[String]) -> u8 {
+    let start = std::time::Instant::now();
+    let code = dispatch(args);
+    let is_meta = matches!(
+        args.first().map(String::as_str),
+        None | Some("help")
+            | Some("-h")
+            | Some("--help")
+            | Some("version")
+            | Some("--version")
+            | Some("-V")
+            | Some("info")
+    );
+    if ux::color_enabled() && !is_meta
+    {
+        let secs = start.elapsed().as_secs_f64();
+        eprintln!("{}", ux::dim(&format!("  ✓ done in {secs:.2}s")));
+    }
+    code
+}
+
+/// Dispatch `args` (excluding the program name). Returns the exit code.
+fn dispatch(args: &[String]) -> u8 {
     let rest = if args.len() > 1 { &args[1..] } else { &[] };
     match args.first().map(String::as_str)
     {
@@ -521,7 +636,12 @@ pub fn run(args: &[String]) -> u8 {
         },
         Some("version") | Some("--version") | Some("-V") =>
         {
-            println!("scirust {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "{} {} ({})",
+                ux::bold("scirust"),
+                env!("SCIRUST_VERSION"),
+                ux::dim(env!("SCIRUST_GIT_SHA"))
+            );
             0
         },
         Some("info") =>
@@ -586,8 +706,20 @@ pub fn run(args: &[String]) -> u8 {
         Some("trader") => trader::run(rest),
         Some(other) =>
         {
-            eprintln!("unknown command: `{other}`\n");
-            print_help();
+            eprintln!(
+                "{} unknown command: `{}`",
+                ux::error_prefix(),
+                ux::bold(other)
+            );
+            if let Some(s) = ux::suggest(other, ALL_COMMANDS)
+            {
+                eprintln!("       did you mean `{}`?", ux::green(s));
+            }
+            eprintln!(
+                "\nRun `{}` to see all commands, or `{}` for the guarantees.",
+                ux::green("scirust help"),
+                ux::green("scirust info")
+            );
             2
         },
     }

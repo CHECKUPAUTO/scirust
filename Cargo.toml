@@ -140,6 +140,7 @@ members = [
     "scirust-fatigue",
     "scirust-tolerance",
     "scirust-sigma",
+    "scirust-special",
 ]
 exclude = [
     "scirust-rustc-driver",

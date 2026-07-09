@@ -128,7 +128,7 @@ pub fn run_integrate(args: &[String]) -> u8 {
             Ok(v) => v,
             Err(e) =>
             {
-                println!("error: {e:?}");
+                eprintln!("error: {e}");
                 return 2;
             },
         },
@@ -200,7 +200,7 @@ pub fn run_root(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("no root found in [{a}, {b}]: {e:?}");
+            eprintln!("no root found in [{a}, {b}]: {e}");
             1
         },
     }
@@ -298,7 +298,7 @@ pub fn run_linsolve(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("no unique solution: {e:?}");
+            eprintln!("no unique solution: {e}");
             1
         },
     }
@@ -338,7 +338,7 @@ pub fn run_det(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             2
         },
     }
@@ -373,7 +373,7 @@ pub fn run_polyroots(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             2
         },
     }
@@ -465,7 +465,7 @@ pub fn run_ode(args: &[String]) -> u8 {
             },
             Err(e) =>
             {
-                println!("integration failed: {e:?}");
+                eprintln!("integration failed: {e}");
                 1
             },
         },
@@ -537,7 +537,7 @@ pub fn run_lstsq(args: &[String]) -> u8 {
         Ok(q) => q,
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             return 2;
         },
     };
@@ -551,7 +551,7 @@ pub fn run_lstsq(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             1
         },
     }
@@ -591,7 +591,7 @@ pub fn run_cholesky(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("not SPD / error: {e:?}");
+            eprintln!("not SPD / error: {e}");
             1
         },
     }
@@ -657,7 +657,7 @@ pub fn run_optimize(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             1
         },
     }
@@ -681,7 +681,7 @@ pub fn run_qr(args: &[String]) -> u8 {
         Ok(q) => q,
         Err(e) =>
         {
-            println!("error: {e:?}");
+            eprintln!("error: {e}");
             return 2;
         },
     };
@@ -746,7 +746,7 @@ pub fn run_cg(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("did not converge (is A SPD?): {e:?}");
+            eprintln!("did not converge (is A SPD?): {e}");
             1
         },
     }
@@ -787,7 +787,7 @@ pub fn run_inverse(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("singular / error: {e:?}");
+            eprintln!("singular / error: {e}");
             1
         },
     }
@@ -884,7 +884,7 @@ pub fn run_solve_system(args: &[String]) -> u8 {
         },
         Err(e) =>
         {
-            println!("did not converge: {e:?}");
+            eprintln!("did not converge: {e}");
             1
         },
     }
