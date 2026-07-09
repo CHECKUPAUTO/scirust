@@ -78,6 +78,31 @@ extern "C" __global__ void rmsnorm_kernel(
             out[r*cols+j] = f2b(b2f(x[r*cols+j]) * inv * b2f(w[j]));
     }
 }
+
+// Gather columns [col_start, col_start+ncols) — a pure bf16 copy (no math).
+extern "C" __global__ void slice_cols_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t rows, const size_t src_cols, const size_t col_start, const size_t ncols)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * ncols) {
+        size_t r = idx / ncols, c = idx % ncols;
+        out[idx] = x[r * src_cols + col_start + c];
+    }
+}
+
+// Scatter a narrow block into a zero-padded wide matrix at col_start.
+extern "C" __global__ void place_cols_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t rows, const size_t ncols, const size_t col_start, const size_t dst_cols)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * dst_cols) {
+        size_t r = idx / dst_cols, c = idx % dst_cols;
+        out[idx] = (c >= col_start && c < col_start + ncols)
+                     ? x[r * ncols + (c - col_start)] : (unsigned short)0;
+    }
+}
 "#;
 
 /// A resident row-major `rows × cols` matrix in VRAM, stored in **bf16** (the
@@ -108,6 +133,8 @@ struct Kernels {
     mul: CudaFunction,
     swiglu: CudaFunction,
     rmsnorm: CudaFunction,
+    slice_cols: CudaFunction,
+    place_cols: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -156,6 +183,8 @@ impl CudaChain {
             mul: f("mul_kernel"),
             swiglu: f("swiglu_kernel"),
             rmsnorm: f("rmsnorm_kernel"),
+            slice_cols: f("slice_cols_kernel"),
+            place_cols: f("place_cols_kernel"),
         })
     }
 
@@ -312,6 +341,120 @@ impl CudaChain {
             cols,
         }
     }
+
+    /// `C = A · Bᵀ` on Tensor cores: `a` is `m×k`, `b` is `n×k`, result `m×n`
+    /// (row-major). The tied LM head is `normed · Eᵀ` (E is `vocab×d`).
+    ///
+    /// Column-major identity: `Cᵀ = B·Aᵀ`. My row-major `b` viewed column-major is
+    /// `bᵀ`, so `transa=true` recovers `b`; my row-major `a` viewed column-major is
+    /// already `aᵀ`. Hence `matmul(transa=true, transb=false, m=n, n=m, k)` over
+    /// `(b, a)` yields row-major `A·Bᵀ`.
+    pub fn matmul_bt(&self, a: &CudaMatrix, b: &CudaMatrix) -> CudaMatrix {
+        let (m, k, n) = (a.rows, a.cols, b.rows);
+        assert_eq!(
+            b.cols, k,
+            "matmul_bt: inner dims disagree ({}x{} · ({}x{})ᵀ)",
+            a.rows, a.cols, b.rows, b.cols
+        );
+        let mut c = self
+            .stream
+            .alloc_zeros::<bf16>(m * n)
+            .expect("cuda alloc C");
+        let cfg = MatmulConfig {
+            transa: true,
+            transb: false,
+            transc: false,
+            m: n as u64,
+            n: m as u64,
+            k: k as u64,
+            alpha: 1.0,
+            lda: k as i64,
+            ldb: k as i64,
+            beta: 0.0,
+            ldc: n as i64,
+            stride_a: None,
+            stride_b: None,
+            stride_c: None,
+            stride_bias: None,
+            batch_size: None,
+        };
+        // SAFETY: shapes/leading-dims match the buffers; epilogues unused.
+        unsafe {
+            self.blas
+                .matmul(cfg, &b.buf, &a.buf, &mut c, None, None)
+                .expect("cublasLt bf16 matmul_bt");
+        }
+        CudaMatrix {
+            buf: c,
+            rows: m,
+            cols: n,
+        }
+    }
+
+    /// Gather columns `[col_start, col_start+ncols)` into a `rows × ncols` matrix
+    /// (one head's slice of a full-width projection).
+    pub fn slice_cols(&self, x: &CudaMatrix, col_start: usize, ncols: usize) -> CudaMatrix {
+        assert!(
+            col_start + ncols <= x.cols,
+            "slice_cols: [{col_start}, {}) out of {} cols",
+            col_start + ncols,
+            x.cols
+        );
+        let (rows, src_cols) = (x.rows, x.cols);
+        let total = rows * ncols;
+        let mut out = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (rows_a, src_a, start_a, ncols_a) = (rows, src_cols, col_start, ncols);
+        let mut builder = self.stream.launch_builder(&self.kernels().slice_cols);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&rows_a);
+        builder.arg(&src_a);
+        builder.arg(&start_a);
+        builder.arg(&ncols_a);
+        // SAFETY: arg order/types match `slice_cols_kernel`; grid covers rows*ncols.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch slice_cols_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols: ncols,
+        }
+    }
+
+    /// Scatter a `rows × ncols` block into a zero-padded `rows × dst_cols` matrix
+    /// at `col_start` (place a head's context back into its `d_model` slot).
+    pub fn place_cols(&self, x: &CudaMatrix, col_start: usize, dst_cols: usize) -> CudaMatrix {
+        assert!(
+            col_start + x.cols <= dst_cols,
+            "place_cols: block [{col_start}, {}) does not fit in {dst_cols}",
+            col_start + x.cols
+        );
+        let (rows, ncols) = (x.rows, x.cols);
+        let total = rows * dst_cols;
+        let mut out = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (rows_a, ncols_a, start_a, dst_a) = (rows, ncols, col_start, dst_cols);
+        let mut builder = self.stream.launch_builder(&self.kernels().place_cols);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&rows_a);
+        builder.arg(&ncols_a);
+        builder.arg(&start_a);
+        builder.arg(&dst_a);
+        // SAFETY: arg order/types match `place_cols_kernel`; grid covers rows*dst_cols.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch place_cols_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols: dst_cols,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -441,5 +584,89 @@ mod tests {
         eprintln!(
             "bf16 kernels vs CPU — add {e_add:.2e}, mul {e_mul:.2e}, swiglu {e_swi:.2e}, rms_norm {e_rn:.2e} — PASS"
         );
+    }
+
+    /// `matmul_bt` computes `A·Bᵀ` (the tied LM head shape) within bf16 tolerance —
+    /// confirms the transpose config + column-major layout. Skips with no device.
+    #[test]
+    fn bf16_matmul_bt_matches_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping matmul_bt parity");
+            return;
+        };
+        // a: m×k, b: n×k, want a·bᵀ : m×n.
+        let (m, k, n) = (4usize, 6usize, 5usize);
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.13 - 0.4).sin()).collect();
+        let b: Vec<f32> = (0..n * k).map(|i| (i as f32 * 0.09 + 0.2).cos()).collect();
+        let got =
+            chain.download(&chain.matmul_bt(&chain.upload(&a, m, k), &chain.upload(&b, n, k)));
+        // CPU a·bᵀ : out[i,j] = Σ_p a[i,p]·b[j,p].
+        let mut want = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                want[i * n + j] = (0..k).map(|p| a[i * k + p] * b[j * k + p]).sum();
+            }
+        }
+        let e = rel_err(&got, &want);
+        assert!(
+            e < 5e-2,
+            "matmul_bt rel_err {e}\n got {got:?}\n want {want:?}"
+        );
+        eprintln!("bf16 matmul_bt (A·Bᵀ) vs CPU fp32: rel_err {e:.3e} — PASS");
+    }
+
+    /// `slice_cols` then `place_cols` round-trips a head slice back into its slot
+    /// (zeros elsewhere) — the per-head attention split/merge. Exact (pure copy),
+    /// so compares bit-for-bit against the bf16-rounded input. Skips with no device.
+    #[test]
+    fn bf16_slice_place_cols_round_trip() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping slice/place parity");
+            return;
+        };
+        let (rows, cols) = (4usize, 12usize);
+        let (start, ncols) = (4usize, 3usize); // a "head" at columns [4, 7)
+        let x: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.17 - 1.0).sin())
+            .collect();
+        let gx = chain.upload(&x, rows, cols);
+
+        let sliced = chain.slice_cols(&gx, start, ncols);
+        assert_eq!((sliced.rows(), sliced.cols()), (rows, ncols), "slice shape");
+        let sliced_h = chain.download(&sliced);
+        // Reference: the bf16-rounded input's slice (pure copy ⇒ bit-exact).
+        let x_bf: Vec<f32> = x.iter().map(|&v| bf16::from_f32(v).to_f32()).collect();
+        let mut want_slice = Vec::with_capacity(rows * ncols);
+        for r in 0..rows
+        {
+            for c in 0..ncols
+            {
+                want_slice.push(x_bf[r * cols + start + c]);
+            }
+        }
+        assert_eq!(sliced_h, want_slice, "slice_cols must be an exact gather");
+
+        let placed = chain.place_cols(&sliced, start, cols);
+        assert_eq!((placed.rows(), placed.cols()), (rows, cols), "place shape");
+        let placed_h = chain.download(&placed);
+        let mut want_place = vec![0.0f32; rows * cols];
+        for r in 0..rows
+        {
+            for c in 0..ncols
+            {
+                want_place[r * cols + start + c] = x_bf[r * cols + start + c];
+            }
+        }
+        assert_eq!(
+            placed_h, want_place,
+            "place_cols must scatter into a zero slot"
+        );
+        eprintln!("bf16 slice_cols/place_cols round-trip — PASS");
     }
 }
