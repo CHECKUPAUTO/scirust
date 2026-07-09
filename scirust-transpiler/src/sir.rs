@@ -303,6 +303,12 @@ pub enum SirExpr {
         arr: Box<SirExpr>,
         k: Box<SirExpr>,
     },
+    /// `fftshift(v)` : Array -> Array, swap the two halves so the zero-frequency
+    /// component moves to the centre (MATLAB `fftshift`, `circshift` by `⌊n/2⌋`).
+    Fftshift(Box<SirExpr>),
+    /// `ifftshift(v)` : Array -> Array, the inverse of `fftshift` (`circshift` by
+    /// `⌈n/2⌉`; exact inverse for both even and odd lengths).
+    Ifftshift(Box<SirExpr>),
     /// Scalar comparison `l <op> r` -> Bool (conditions only).
     Cmp {
         op: CmpOp,
@@ -549,6 +555,8 @@ impl SirExpr {
             | SirExpr::Sort(_)
             | SirExpr::Flip(_)
             | SirExpr::Circshift { .. }
+            | SirExpr::Fftshift(_)
+            | SirExpr::Ifftshift(_)
             | SirExpr::ArrayLit(_)
             | SirExpr::LinSolve { .. }
             | SirExpr::Eigvalsh(_)
@@ -717,6 +725,8 @@ fn scan_expr(e: &SirExpr, solvers: &mut bool, signal: &mut bool) {
         | SirExpr::Gradient(x)
         | SirExpr::Sort(x)
         | SirExpr::Flip(x)
+        | SirExpr::Fftshift(x)
+        | SirExpr::Ifftshift(x)
         | SirExpr::Trace(x)
         | SirExpr::DiagExtract(x)
         | SirExpr::Trapz(x)

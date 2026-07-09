@@ -169,6 +169,16 @@ pub mod np {
         }
         o
     }
+    /// Swap the two halves so the zero-frequency term moves to the centre
+    /// (MATLAB `fftshift`): a circular shift by `floor(n/2)`.
+    pub fn fftshift(a: &[f64]) -> Vec<f64> {
+        circshift(a, (a.len() / 2) as f64)
+    }
+    /// Inverse of `fftshift` (MATLAB `ifftshift`): a circular shift by
+    /// `ceil(n/2)`, exact inverse for even and odd lengths alike.
+    pub fn ifftshift(a: &[f64]) -> Vec<f64> {
+        circshift(a, ((a.len() + 1) / 2) as f64)
+    }
     /// Consecutive differences (length `n-1`; empty for `n < 2`).
     pub fn diff(a: &[f64]) -> Vec<f64> {
         let mut o = Vec::with_capacity(a.len().saturating_sub(1));
@@ -1010,6 +1020,24 @@ fn emit(e: &SirExpr, ctx: &Ctx) -> Frag {
             let k = emit(k, ctx);
             Frag {
                 code: format!("np::circshift({}, {})", slice_of(&arr), scalar_of(k)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Fftshift(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::fftshift({})", slice_of(&a)),
+                ty: Ty::Array,
+                borrowed: false,
+            }
+        },
+        SirExpr::Ifftshift(a) =>
+        {
+            let a = emit(a, ctx);
+            Frag {
+                code: format!("np::ifftshift({})", slice_of(&a)),
                 ty: Ty::Array,
                 borrowed: false,
             }

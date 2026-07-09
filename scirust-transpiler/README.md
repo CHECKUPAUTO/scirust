@@ -67,6 +67,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | reciprocal trig `sec`/`csc`/`cot` (scalar or elementwise) | `1/cos`, `1/sin`, `1/tan` — apply the base trig then take the reciprocal |
 | vector→vector `cumsum`/`cumprod`/`cummax`/`cummin`/`cumtrapz`/`diff`/`gradient`/`sort`/`flip` | deterministic prelude helpers (fixed-order prefix scans, cumulative integral, differences, unit-spacing numerical gradient, ascending sort, reverse) |
 | `circshift(v, k)` (circular shift by `k` positions) | deterministic `np::circshift` prelude helper (`k` rounded to integer, reduced mod `n`; any sign) |
+| `fftshift(v)` / `ifftshift(v)` (centre / un-centre the zero-frequency term) | `circshift` by `⌊n/2⌋` / `⌈n/2⌉` — exact inverses for even *and* odd lengths |
 | `kron(a, b)` (Kronecker product of vectors) | deterministic `np::kron` prelude helper |
 | `conv(a, b)` (convolution), `polyval(p, x)` (Horner) | deterministic `np::conv` / `np::polyval` prelude helpers |
 | constructor `linspace(a, b, n)` | deterministic prelude helper (`n` evenly-spaced points, exact endpoints; `n` may be `length(x)`) |
@@ -145,8 +146,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: asind / acosd / atand      200/200 trials match (octave) (MATLAB inverse degree trig, scalar & elementwise, Phase 2)
   ✓ M: sec / csc / cot            200/200 trials match (octave) (MATLAB reciprocal trig, scalar & elementwise, Phase 2)
   ✓ M: fft / abs(fft) / ifft(fft) 200/200 trials match (octave) (MATLAB FFT routed to scirust-signal, complex, Phase 2)
+  ✓ M: fftshift / ifftshift       200/200 trials match (octave) (MATLAB spectrum centring, floor/ceil shifts, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 136/136 cases match their reference runtime within tolerance
+  ORACLE GREEN — 139/139 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:

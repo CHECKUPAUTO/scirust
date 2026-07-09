@@ -160,6 +160,24 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `fftshift` / `ifftshift`** — centrage du spectre, prouvés contre Octave réel (Phase 2, incrément 48)
+Compagnons de la FFT : `fftshift(v)` ramène la composante de fréquence nulle au
+centre (échange des deux moitiés = `circshift` de `⌊n/2⌋`) et `ifftshift(v)` l'inverse
+(`circshift` de `⌈n/2⌉`) — inverses **exacts** pour les longueurs paires **et
+impaires**. Nouveaux nœuds SIR `Fftshift`/`Ifftshift` (vecteur→vecteur) et helpers de
+prélude déterministes bâtis sur `np::circshift`, réutilisant la réindexation modulaire
+déjà prouvée.
+
+- `fftshift(v)`, `ifftshift(v)` : vecteur réel → vecteur (même longueur).
+- S'appliquent naturellement sur un spectre de magnitude réel : `fftshift(abs(fft(x)))`.
+
+Trois cas d'oracle (`fftshift`/`ifftshift` en longueur **impaire** pour distinguer
+`⌊·⌋`/`⌈·⌉`, plus `fftshift(abs(fft(x)))` — FFT routée + abs complexe + décalage).
+**Oracle 139/139** (200 essais chacun) ; **96 tests unitaires** (1 nouveau).
+*Non-vacuité* : faire utiliser `⌊n/2⌋` à `ifftshift` (au lieu de `⌈n/2⌉`) fait diverger
+le cas `ifftshift` en longueur impaire tandis que `fftshift` reste vert — la distinction
+plancher/plafond est bien portante.
+
 ### Ajouté — transpileur : **MATLAB `fft` / `ifft`** routées vers `scirust-signal`, prouvées contre Octave réel (Phase 2, incrément 47)
 Premier **routage de traitement du signal** côté MATLAB : `fft(x)` (DFT complexe
 d'un vecteur réel), `ifft(c)` (DFT inverse) et `abs(fft(x))` (spectre de magnitude)

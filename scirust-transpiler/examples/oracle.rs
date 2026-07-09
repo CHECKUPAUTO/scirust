@@ -1336,6 +1336,40 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 1.0,
             }],
         },
+        // fftshift(v) — swap halves (odd length exercises floor/ceil split).
+        Case {
+            name: "M: fftshift(v) (odd length)",
+            call: "mfftsh",
+            src: "function y = mfftsh(v)\n  y = fftshift(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // ifftshift(v) — inverse shift (odd length).
+        Case {
+            name: "M: ifftshift(v) (odd length)",
+            call: "mifftsh",
+            src: "function y = mifftsh(v)\n  y = ifftshift(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -3.0,
+                hi: 3.0,
+            }],
+        },
+        // fftshift(abs(fft(x))) — centre the magnitude spectrum (integration:
+        // routed FFT + complex abs + shift).
+        Case {
+            name: "M: fftshift(abs(fft(x))) (centred spectrum)",
+            call: "mfftshmag",
+            src: "function y = mfftshmag(x)\n  y = fftshift(abs(fft(x)));\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",

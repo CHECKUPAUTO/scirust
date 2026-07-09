@@ -716,6 +716,8 @@ mod tests {
             ("gradient", "np::gradient"),
             ("sort", "np::sort"),
             ("flip", "np::flip"),
+            ("fftshift", "np::fftshift"),
+            ("ifftshift", "np::ifftshift"),
         ]
         {
             let src = format!("function y = f(v)\n  y = {}(v);\nend\n", call);
@@ -1097,6 +1099,30 @@ mod tests {
         // ifft on a non-complex argument is rejected.
         let bad = transpile_matlab("function y = f(x)\n  y = ifft(x);\nend\n");
         assert!(bad.is_err());
+    }
+
+    #[test]
+    fn matlab_fftshift_helpers_compose_from_circshift() {
+        // fftshift/ifftshift are std-only vector reindexings built on circshift
+        // (floor(n/2) and ceil(n/2) shifts respectively).
+        let rust = transpile_matlab("function y = f(v)\n  y = fftshift(v);\nend\n").unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> Vec<f64> {");
+        assert!(rust.contains("np::fftshift(v)"));
+        assert!(rust.contains("pub fn fftshift(a: &[f64]) -> Vec<f64>"));
+        assert!(rust.contains("circshift(a, (a.len() / 2) as f64)")); // floor(n/2)
+        assert!(rust.contains("circshift(a, ((a.len() + 1) / 2) as f64)")); // ceil(n/2)
+        // fftshift over a real magnitude spectrum still routes the FFT to signal.
+        let mag =
+            transpile_matlab("function y = f(x)\n  y = fftshift(abs(fft(x)));\nend\n").unwrap();
+        assert!(mag.contains("np::fftshift("));
+        assert!(mag.contains("scirust_signal::fft::fft"));
+        assert!(
+            required_crates(
+                &transpile_matlab_to_sir("function y = f(x)\n  y = fftshift(abs(fft(x)));\nend\n")
+                    .unwrap()
+            )
+            .contains(&"scirust-signal")
+        );
     }
 
     #[test]
