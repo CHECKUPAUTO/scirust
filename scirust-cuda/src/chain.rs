@@ -276,6 +276,50 @@ extern "C" __global__ void rope_bwd_kernel(
         dx[r*dim + 2*p + 1] = f2b(-s * ge + c * go);
     }
 }
+
+// Embedding gather backward (scatter-add): dtable[v,c] = Σ_i (clamp(tok_i)==v)·dout[i,c].
+// One thread per (vocab row, col) output element — atomic-free and deterministic
+// (each output owns its full reduction over the token stream). Token ids are
+// clamped to vocab-1, matching cpu_embed_backward.
+extern "C" __global__ void embed_bwd_kernel(
+    unsigned short* dtable, const unsigned int* tokens, const unsigned short* dout,
+    const size_t n_tokens, const size_t d, const size_t vocab)
+{
+    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < vocab * d) {
+        size_t v = idx / d, c = idx % d;
+        float acc = 0.0f;
+        for (size_t i = 0; i < n_tokens; i++) {
+            size_t t = (size_t)tokens[i];
+            if (t >= vocab) t = vocab - 1;
+            if (t == v) acc += b2f(dout[i * d + c]);
+        }
+        dtable[idx] = f2b(acc);
+    }
+}
+
+// Cross-entropy gradient w.r.t. logits: d = (softmax(logits) − onehot(target))/rows.
+// One thread per row (fp32 max-subtracted softmax); target clamped to cols-1.
+extern "C" __global__ void ce_grad_kernel(
+    unsigned short* d, const unsigned short* logits, const unsigned int* targets,
+    const size_t rows, const size_t cols)
+{
+    size_t r = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < rows) {
+        float mx = -3.0e38f;
+        for (size_t j = 0; j < cols; j++) { float v = b2f(logits[r*cols+j]); if (v > mx) mx = v; }
+        float sum = 0.0f;
+        for (size_t j = 0; j < cols; j++) sum += __expf(b2f(logits[r*cols+j]) - mx);
+        size_t tgt = (size_t)targets[r];
+        if (tgt >= cols) tgt = cols - 1;
+        float inv = 1.0f / (float)rows;
+        for (size_t j = 0; j < cols; j++) {
+            float p = __expf(b2f(logits[r*cols+j]) - mx) / sum;
+            if (j == tgt) p -= 1.0f;
+            d[r*cols+j] = f2b(p * inv);
+        }
+    }
+}
 "#;
 
 /// A resident row-major `rows × cols` matrix in VRAM, stored in **bf16** (the
@@ -318,6 +362,8 @@ struct Kernels {
     rmsnorm_gain_bwd: CudaFunction,
     scale_mask_bwd: CudaFunction,
     rope_bwd: CudaFunction,
+    embed_bwd: CudaFunction,
+    ce_grad: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -378,6 +424,8 @@ impl CudaChain {
             rmsnorm_gain_bwd: f("rmsnorm_gain_bwd_kernel"),
             scale_mask_bwd: f("scale_mask_bwd_kernel"),
             rope_bwd: f("rope_bwd_kernel"),
+            embed_bwd: f("embed_bwd_kernel"),
+            ce_grad: f("ce_grad_kernel"),
         })
     }
 
@@ -1058,6 +1106,72 @@ impl CudaChain {
             cols: dim,
         }
     }
+
+    /// Embedding-gather backward (scatter-add): accumulate `dout` (`tokens.len()×d`)
+    /// into a `vocab×d` table gradient — row `v` sums the `dout` rows whose (clamped)
+    /// token id is `v`. Atomic-free (one thread owns each output element's reduction).
+    pub fn embed_backward(&self, tokens: &[u32], dout: &CudaMatrix, vocab: usize) -> CudaMatrix {
+        let (n, d) = (tokens.len(), dout.cols);
+        assert_eq!(
+            dout.rows, n,
+            "embed_backward: dout rows {} != tokens {}",
+            dout.rows, n
+        );
+        let toks = self.stream.clone_htod(tokens).expect("cuda htod tokens");
+        let total = vocab * d;
+        let mut dtable = self.stream.alloc_zeros::<bf16>(total).expect("cuda alloc");
+        let (n_a, d_a, vocab_a) = (n, d, vocab);
+        let mut builder = self.stream.launch_builder(&self.kernels().embed_bwd);
+        builder.arg(&mut dtable);
+        builder.arg(&toks);
+        builder.arg(&dout.buf);
+        builder.arg(&n_a);
+        builder.arg(&d_a);
+        builder.arg(&vocab_a);
+        // SAFETY: arg order/types match `embed_bwd_kernel`; grid covers vocab*d.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch embed_bwd_kernel");
+        }
+        CudaMatrix {
+            buf: dtable,
+            rows: vocab,
+            cols: d,
+        }
+    }
+
+    /// Cross-entropy gradient w.r.t. the logits: `(softmax(logits) − onehot(target))
+    /// / rows`, one row per target. The loss itself is computed host-side from the
+    /// downloaded logits (as Route A does), so only the grad is resident here.
+    pub fn cross_entropy_grad(&self, logits: &CudaMatrix, targets: &[u32]) -> CudaMatrix {
+        let (rows, cols) = (logits.rows, logits.cols);
+        assert_eq!(
+            targets.len(),
+            rows,
+            "cross_entropy_grad: {} targets != {rows} rows",
+            targets.len()
+        );
+        let tgt = self.stream.clone_htod(targets).expect("cuda htod targets");
+        let mut d = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc");
+        let (rows_a, cols_a) = (rows, cols);
+        let mut builder = self.stream.launch_builder(&self.kernels().ce_grad);
+        builder.arg(&mut d);
+        builder.arg(&logits.buf);
+        builder.arg(&tgt);
+        builder.arg(&rows_a);
+        builder.arg(&cols_a);
+        // SAFETY: arg order/types match `ce_grad_kernel`; one thread per row.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(rows as u32))
+                .expect("launch ce_grad_kernel");
+        }
+        CudaMatrix { buf: d, rows, cols }
+    }
 }
 
 #[cfg(test)]
@@ -1586,6 +1700,64 @@ mod tests {
         eprintln!(
             "bf16 backward adjoints vs CPU — softmax {e_sm:.2e}, swiglu(da {e_da:.2e}, db {e_db:.2e}), \
              rms(dx {e_dx:.2e}, dw {e_dw:.2e}), scale_mask {e_smask:.2e}, rope {e_rope:.2e} — PASS"
+        );
+    }
+
+    /// The loss-adjacent backward kernels — `embed_backward` (scatter-add table
+    /// gradient) and `cross_entropy_grad` ((softmax − onehot)/rows) — match their CPU
+    /// oracles within bf16 tolerance. These close the two ends of the backward chain.
+    /// Skips with no device.
+    #[test]
+    fn bf16_embed_and_ce_grad_backward_match_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping embed/ce-grad backward parity");
+            return;
+        };
+
+        // embed_backward: scatter-add dout rows into their token's table row.
+        let (vocab, d) = (6usize, 4usize);
+        let tokens = [3u32, 0, 5, 3, 0, 3];
+        let n = tokens.len();
+        let dout: Vec<f32> = (0..n * d).map(|i| (i as f32 * 0.21 - 0.5).sin()).collect();
+        let dtable =
+            chain.download(&chain.embed_backward(&tokens, &chain.upload(&dout, n, d), vocab));
+        let mut want_dt = vec![0.0f32; vocab * d];
+        for (i, &t) in tokens.iter().enumerate()
+        {
+            let v = (t as usize).min(vocab - 1);
+            for c in 0..d
+            {
+                want_dt[v * d + c] += dout[i * d + c];
+            }
+        }
+        let e_embed = rel_err(&dtable, &want_dt);
+        assert!(e_embed < 5e-2, "embed_backward rel_err {e_embed}");
+
+        // cross_entropy_grad: (softmax(logits) − onehot(target)) / rows.
+        let (rows, cols) = (4usize, 7usize);
+        let logits: Vec<f32> = (0..rows * cols)
+            .map(|i| (i as f32 * 0.17 - 1.0).cos())
+            .collect();
+        let targets = [2u32, 6, 0, 5];
+        let ce =
+            chain.download(&chain.cross_entropy_grad(&chain.upload(&logits, rows, cols), &targets));
+        let mut want_ce = cpu_softmax(&logits, rows, cols);
+        let inv = 1.0f32 / rows as f32;
+        for (i, &t) in targets.iter().enumerate()
+        {
+            want_ce[i * cols + (t as usize).min(cols - 1)] -= 1.0;
+        }
+        for v in want_ce.iter_mut()
+        {
+            *v *= inv;
+        }
+        let e_ce = rel_err(&ce, &want_ce);
+        assert!(e_ce < 5e-2, "cross_entropy_grad rel_err {e_ce}");
+
+        eprintln!(
+            "bf16 embed_backward {e_embed:.2e} + cross_entropy_grad {e_ce:.2e} vs CPU — PASS"
         );
     }
 }
