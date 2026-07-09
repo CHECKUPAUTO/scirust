@@ -13,16 +13,26 @@ use half::bf16;
 /// Custom device kernels, compiled once at runtime via NVRTC (no build-time
 /// nvcc). B2 starts with element-wise `add` (the residual adds); the rest of the
 /// validated WGSL ops (RMSNorm, RoPE, SwiGLU, softmax, slice/place, embed) port
-/// here the same way. bf16 math goes through fp32 conversion (widely supported;
-/// no `sm_80`-only intrinsics), matching the fp32-accumulate contract.
+/// here the same way.
+///
+/// bf16 is handled **header-free**: a bf16 value is exactly the top 16 bits of an
+/// fp32, so we widen with `<<16` (via `__uint_as_float`) and round back to nearest-
+/// even with the standard bias — using only `__uint_as_float`/`__float_as_uint`,
+/// which every arch has and NVRTC compiles with no include path. This sidesteps
+/// `<cuda_bf16.h>` (NVRTC's usual friction) while keeping the fp32-accumulate
+/// contract. The buffers are `CudaSlice<half::bf16>` (2 bytes); the kernel views
+/// them as `unsigned short` — byte-identical.
 const KERNELS_SRC: &str = r#"
-#include <cuda_bf16.h>
 extern "C" __global__ void add_kernel(
-    __nv_bfloat16* c, const __nv_bfloat16* a, const __nv_bfloat16* b, const size_t n)
+    unsigned short* c, const unsigned short* a, const unsigned short* b, const size_t n)
 {
     size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
-        c[i] = __float2bfloat16(__bfloat162float(a[i]) + __bfloat162float(b[i]));
+        float fa = __uint_as_float(((unsigned int)a[i]) << 16);
+        float fb = __uint_as_float(((unsigned int)b[i]) << 16);
+        unsigned int s = __float_as_uint(fa + fb);
+        unsigned int bias = 0x00007FFFu + ((s >> 16) & 1u);  // round to nearest even
+        c[i] = (unsigned short)((s + bias) >> 16);
     }
 }
 "#;
@@ -69,11 +79,22 @@ impl CudaChain {
         let ctx = CudaContext::new(0).ok()?;
         let stream = ctx.default_stream();
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
-        // Compile the custom kernels once (non-fatal: GEMM works regardless).
-        let add_fn = compile_ptx(KERNELS_SRC)
-            .ok()
-            .and_then(|ptx| ctx.load_module(ptx).ok())
-            .and_then(|m| m.load_function("add_kernel").ok());
+        // Compile the custom kernels once (non-fatal: GEMM works regardless). Any
+        // NVRTC error is surfaced to stderr so a kernel issue is diagnosable
+        // rather than silently disabling `add`.
+        let add_fn = match compile_ptx(KERNELS_SRC)
+        {
+            Ok(ptx) => ctx
+                .load_module(ptx)
+                .and_then(|m| m.load_function("add_kernel"))
+                .map_err(|e| eprintln!("scirust-cuda: load add_kernel failed: {e}"))
+                .ok(),
+            Err(e) =>
+            {
+                eprintln!("scirust-cuda: NVRTC compile failed: {e}");
+                None
+            },
+        };
         Some(Self {
             ctx,
             stream,
@@ -244,6 +265,19 @@ mod tests {
             "bf16 matmul rel_err {e} too large\n got  {got:?}\n want {want:?}"
         );
         eprintln!("bf16 Tensor-core matmul vs CPU fp32: rel_err {e:.3e} — PASS");
+    }
+
+    /// The kernel source compiles under NVRTC — surfaces the compiler log verbatim
+    /// on failure (so a broken kernel is diagnosable, not a silent `None`). Does
+    /// not need a device to launch, but NVRTC needs the CUDA runtime, so it still
+    /// only runs on the Thor.
+    #[test]
+    fn nvrtc_kernels_compile() {
+        match compile_ptx(KERNELS_SRC)
+        {
+            Ok(_) => eprintln!("NVRTC compiled scirust-cuda kernels — PASS"),
+            Err(e) => panic!("NVRTC failed to compile kernels:\n{e}"),
+        }
     }
 
     /// The NVRTC `add_kernel` computes element-wise `A + B` in bf16, matching a CPU
