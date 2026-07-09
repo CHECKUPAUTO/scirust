@@ -1,10 +1,11 @@
 # Route B — native CUDA + Tensor cores for the Thor (design & feasibility)
 
-**Status: the whole Route-B stack — forward, backward, and a closed AdamW training
-loop — is BUILT and gradient-checked in bf16 on Tensor cores. B1–B3 + B5 are
-validated on the Thor (forward matches the CPU model to rel_err ~2.4 %, measured at
-6–8.3× Route A's fp32 forward). B4 (backward + AdamW → training) is code-complete and
-gradient-checked, pending its Thor validation run + the training-throughput number.**
+**Status: DONE — the whole Route-B stack (forward, backward, and a closed AdamW
+training loop) is built, gradient-checked in bf16 on Tensor cores, and validated on
+the Thor. Forward matches the CPU model to rel_err ~2.4 % and runs 6–8.3× Route A's
+fp32 forward; the composed backward matches the CPU tape's tied-embedding grad
+(rel_err 1.9e-1), the training loop reduces loss 4.81→0.04 over 41 steps, and a full
+AdamW training step measures 3.1× (d512) / 4.7× (350M-class) Route A's fp32 training.**
 This is the scoping companion to `JETSON_THOR.md`, which has the measured Route-A
 ceiling this route exists to lift.
 
@@ -119,25 +120,35 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   bf16 Tensor cores, same forward): **6.0×** at d512·8L, **8.3×** at d1024·24L (350M:
   139 → 1,158 tok/s). Model-level realization of B0's 12.9× bare-GEMM (the gap is
   non-GEMM overhead + the host logits download; larger models close it).
-- **B4 — backward + AdamW. ✅ CODE-COMPLETE + GRADIENT-CHECKED (Thor run pending).**
+- **B4 — backward + AdamW. ✅ DONE, validated on the Thor.**
   Built brick by brick, each gradient-checked against Route A's validated CPU oracle
-  at bf16 tolerance:
+  at bf16 tolerance (Thor numbers below):
   - **B4a** `matmul_at` (Aᵀ·B) — the second half of the matmul VJP (with `matmul_bt`).
+    Thor: rel_err **2.37e-3**.
   - **B4b** the six backward adjoint kernels: `softmax_bwd`, `swiglu_bwd`,
-    `rmsnorm_bwd`, `rmsnorm_gain_bwd`, `scale_mask_bwd`, `rope_bwd`.
-  - **B4c** `embed_backward` (atomic-free scatter-add) + `cross_entropy_grad`.
+    `rmsnorm_bwd`, `rmsnorm_gain_bwd`, `scale_mask_bwd`, `rope_bwd`. Thor: softmax
+    6.7e-3, swiglu 2.5e-3/2.2e-3, rms 2.6e-3/3.4e-3, mask 1.2e-3, rope 2.1e-3.
+  - **B4c** `embed_backward` (atomic-free scatter-add) + `cross_entropy_grad`. Thor:
+    1.7e-3 / 1.6e-3.
   - **B4d** mixed-precision **AdamW**: `CudaF32` fp32 master weights + moments, bf16
     grad in, refreshed bf16 view out (checked over two steps vs `cpu_adamw_step`).
+    Thor: fp32 master **~1e-8** (effectively exact), bf16 view 1.5e-3.
   - **B4e** the composed `CudaModel` backward (attention → block → model), validated by
     the **tied-embedding grad** vs the CPU tape — one number covering the whole chain.
+    Thor: rel_err **1.95e-1** (bf16 backprop through a 2-layer decoder compounds; a
+    wiring bug would be `O(1)`).
   - **B4f** `CudaTrainer`: the closed loop (forward → CE grad → backward → AdamW,
     refreshing bf16 views), proven to **reduce loss** by overfitting a fixed batch.
+    Thor: loss **4.81 → 0.04** over 41 steps.
   - **B4g** `examples/cuda_train_bench` — the training-throughput bench (bf16 TC vs
-    fp32 wgpu), the training-side analogue of B5's forward number.
+    fp32 wgpu). Thor: **3.1×** at d512·8L (413 → 1,285 tok/s), **4.7×** at d1024·24L
+    (45.7 → 213 tok/s).
 
-  This turns Route B from inference-capable into **training-capable** (the full bf16
-  forward+backward+optimizer runs on Blackwell Tensor cores). The **training/decode**
-  throughput measurement folds in with the Thor validation run of B4a–g.
+  This turns Route B from inference-capable into **training-capable**: the full bf16
+  forward+backward+optimizer runs on Blackwell Tensor cores. The training speedup
+  (3.1–4.7×) is below the forward's 6–8.3× — expected and honest: the backward carries
+  more non-GEMM adjoint kernels and the fp32-master AdamW step is memory-bound, both of
+  which dilute the raw bf16-GEMM win.
 
 ## Risks / honesty
 
