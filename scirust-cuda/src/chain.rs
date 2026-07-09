@@ -328,11 +328,11 @@ extern "C" __global__ void ce_grad_kernel(
 extern "C" __global__ void adamw_kernel(
     float* param, float* m, float* v, const unsigned short* grad, unsigned short* param_bf,
     const size_t n, const float lr, const float b1, const float b2,
-    const float eps, const float wd, const float bc1, const float bc2)
+    const float eps, const float wd, const float bc1, const float bc2, const float grad_scale)
 {
     size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
-        float g = b2f(grad[i]);
+        float g = b2f(grad[i]) * grad_scale;
         float mi = b1 * m[i] + (1.0f - b1) * g;
         float vi = b2 * v[i] + (1.0f - b2) * g * g;
         m[i] = mi;
@@ -344,6 +344,27 @@ extern "C" __global__ void adamw_kernel(
         param[i] = p;
         param_bf[i] = f2b(p);
     }
+}
+
+// Sum of squares of a bf16 buffer, accumulated (fp32) into accum[0] — the building
+// block for the global gradient L2 norm (grad clipping). Block-local reduction in
+// shared memory, then one atomicAdd per block. Launch with block_dim = 256 (the
+// shared array size). `accum` must be zeroed before the first launch of a step.
+extern "C" __global__ void sumsq_kernel(
+    const unsigned short* g, const size_t n, float* accum)
+{
+    __shared__ float sdata[256];
+    unsigned int tid = threadIdx.x;
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    float v = 0.0f;
+    if (i < n) { float x = b2f(g[i]); v = x * x; }
+    sdata[tid] = v;
+    __syncthreads();
+    for (unsigned int s = blockDim.x >> 1; s > 0; s >>= 1) {
+        if (tid < s) sdata[tid] += sdata[tid + s];
+        __syncthreads();
+    }
+    if (tid == 0) atomicAdd(accum, sdata[0]);
 }
 "#;
 
@@ -411,6 +432,7 @@ struct Kernels {
     embed_bwd: CudaFunction,
     ce_grad: CudaFunction,
     adamw: CudaFunction,
+    sumsq: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -474,6 +496,7 @@ impl CudaChain {
             embed_bwd: f("embed_bwd_kernel"),
             ce_grad: f("ce_grad_kernel"),
             adamw: f("adamw_kernel"),
+            sumsq: f("sumsq_kernel"),
         })
     }
 
@@ -1251,10 +1274,12 @@ impl CudaChain {
     }
 
     /// One in-place AdamW step at `step` (1-based) in the mixed-precision regime:
-    /// fp32 master `param`, fp32 moments `m`/`v`, a bf16 `grad`. Updates `param`/`m`/
-    /// `v` in fp32 and refreshes `param_bf16` (the bf16 view fed to the next
-    /// forward/backward GEMM). `bc1`/`bc2` bias corrections are computed host-side.
-    /// Matches `cpu_adamw_step` exactly.
+    /// fp32 master `param`, fp32 moments `m`/`v`, a bf16 `grad`. `grad_scale`
+    /// multiplies the gradient before the moment update (the global-norm clip
+    /// factor; pass `1.0` for no clipping). Updates `param`/`m`/`v` in fp32 and
+    /// refreshes `param_bf16` (the bf16 view fed to the next forward/backward GEMM).
+    /// `bc1`/`bc2` bias corrections are computed host-side. With `grad_scale = 1.0`
+    /// this matches `cpu_adamw_step` exactly.
     #[allow(clippy::too_many_arguments)]
     pub fn adamw_step(
         &self,
@@ -1268,6 +1293,7 @@ impl CudaChain {
         eps: f32,
         weight_decay: f32,
         step: u32,
+        grad_scale: f32,
     ) {
         let n = param.len;
         assert_eq!(m.len, n, "adamw_step: m len {} != param {n}", m.len);
@@ -1287,8 +1313,8 @@ impl CudaChain {
         let (b1, b2) = betas;
         let bc1 = 1.0 - b1.powi(step as i32);
         let bc2 = 1.0 - b2.powi(step as i32);
-        let (n_a, lr_a, b1_a, b2_a, eps_a, wd_a, bc1_a, bc2_a) =
-            (n, lr, b1, b2, eps, weight_decay, bc1, bc2);
+        let (n_a, lr_a, b1_a, b2_a, eps_a, wd_a, bc1_a, bc2_a, gs_a) =
+            (n, lr, b1, b2, eps, weight_decay, bc1, bc2, grad_scale);
         let mut builder = self.stream.launch_builder(&self.kernels().adamw);
         builder.arg(&mut param.buf);
         builder.arg(&mut m.buf);
@@ -1303,12 +1329,49 @@ impl CudaChain {
         builder.arg(&wd_a);
         builder.arg(&bc1_a);
         builder.arg(&bc2_a);
+        builder.arg(&gs_a);
         // SAFETY: arg order/types match `adamw_kernel`; grid covers n.
         unsafe {
             builder
                 .launch(LaunchConfig::for_num_elems(n as u32))
                 .expect("launch adamw_kernel");
         }
+    }
+
+    /// The global L2 norm `sqrt(Σᵢ ‖gᵢ‖²)` over a set of gradient matrices — for
+    /// gradient clipping. Each grad's sum-of-squares is reduced on-device (fp32) and
+    /// accumulated into one scalar, downloaded once. The atomic accumulation order
+    /// varies run-to-run, but only below the bf16 noise floor (the grads are already
+    /// bf16), so this doesn't add meaningful non-determinism. Returns `+inf`/`NaN`
+    /// faithfully if any grad is non-finite (so the caller can skip the step).
+    pub fn global_grad_norm(&self, grads: &[&CudaMatrix]) -> f32 {
+        let mut accum = self.stream.alloc_zeros::<f32>(1).expect("cuda alloc accum");
+        for g in grads
+        {
+            let n = g.rows * g.cols;
+            if n == 0
+            {
+                continue;
+            }
+            let block = 256u32;
+            let grid = (n as u32).div_ceil(block);
+            let n_a = n;
+            let mut builder = self.stream.launch_builder(&self.kernels().sumsq);
+            builder.arg(&g.buf);
+            builder.arg(&n_a);
+            builder.arg(&mut accum);
+            let cfg = LaunchConfig {
+                grid_dim: (grid, 1, 1),
+                block_dim: (block, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            // SAFETY: arg order/types match `sumsq_kernel`; block_dim 256 = sdata size.
+            unsafe {
+                builder.launch(cfg).expect("launch sumsq_kernel");
+            }
+        }
+        let host = self.stream.clone_dtoh(&accum).expect("cuda dtoh accum");
+        host[0].sqrt()
     }
 }
 
@@ -1947,6 +2010,7 @@ mod tests {
                 eps,
                 wd,
                 step,
+                1.0, // grad_scale = 1.0 → no clipping, matches cpu_adamw_step
             );
             // cpu_adamw_step, inlined (same as scirust_gpu::ops::cpu_adamw_step).
             let (b1, b2) = betas;
@@ -1978,5 +2042,53 @@ mod tests {
         eprintln!(
             "adamw fp32 master (param {e_p:.2e}, m {e_m:.2e}, v {e_v:.2e}) + bf16 view {e_bf:.2e} vs CPU — PASS"
         );
+    }
+
+    /// `global_grad_norm` computes `sqrt(Σ ‖gᵢ‖²)` over several matrices, matching a
+    /// CPU fp32 reference (over the bf16-rounded values). The clip building block.
+    /// Skips with no device.
+    #[test]
+    fn global_grad_norm_matches_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping grad-norm parity");
+            return;
+        };
+        // A few grads of different shapes (like a block's weights).
+        let shapes = [(7usize, 5usize), (32, 1), (3, 40), (256, 1)];
+        let mats: Vec<(Vec<f32>, usize, usize)> = shapes
+            .iter()
+            .enumerate()
+            .map(|(k, &(r, c))| {
+                let data: Vec<f32> = (0..r * c)
+                    .map(|i| ((i + k) as f32 * 0.037 - 0.5).sin() * 0.3)
+                    .collect();
+                (data, r, c)
+            })
+            .collect();
+        let uploaded: Vec<CudaMatrix> = mats
+            .iter()
+            .map(|(d, r, c)| chain.upload(d, *r, *c))
+            .collect();
+        let refs: Vec<&CudaMatrix> = uploaded.iter().collect();
+        let got = chain.global_grad_norm(&refs);
+        // CPU reference over the bf16-rounded values (what the kernel sees).
+        let mut ss = 0.0f64;
+        for (d, _, _) in &mats
+        {
+            for &x in d
+            {
+                let bx = bf16::from_f32(x).to_f32();
+                ss += (bx as f64) * (bx as f64);
+            }
+        }
+        let want = ss.sqrt() as f32;
+        let rel = (got - want).abs() / want.max(1e-30);
+        assert!(
+            rel < 5e-2,
+            "global_grad_norm {got} vs cpu {want} (rel {rel})"
+        );
+        eprintln!("global_grad_norm {got:.4} vs CPU {want:.4} — rel {rel:.2e} — PASS");
     }
 }

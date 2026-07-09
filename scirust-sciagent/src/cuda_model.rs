@@ -461,6 +461,10 @@ pub struct CudaTrainer {
     m_blocks: Vec<BlockMasters>,
     v_blocks: Vec<BlockMasters>,
     step: u32,
+    /// Global grad-norm clip threshold (`<= 0` disables). Default `1.0`.
+    max_grad_norm: f32,
+    /// The last step's pre-clip global grad norm (for logging / diagnostics).
+    last_grad_norm: f32,
 }
 
 impl CudaTrainer {
@@ -519,12 +523,26 @@ impl CudaTrainer {
             m_blocks,
             v_blocks,
             step: 0,
+            max_grad_norm: 1.0,
+            last_grad_norm: 0.0,
         })
     }
 
     /// The vocabulary width (logit columns).
     pub fn vocab(&self) -> usize {
         self.model.vocab
+    }
+
+    /// Set the global grad-norm clip threshold (`<= 0` disables clipping). Standard
+    /// pretraining practice is `1.0` (the default).
+    pub fn set_max_grad_norm(&mut self, max_norm: f32) {
+        self.max_grad_norm = max_norm;
+    }
+
+    /// The last training step's pre-clip global gradient L2 norm — the diagnostic
+    /// that reveals gradient spikes.
+    pub fn last_grad_norm(&self) -> f32 {
+        self.last_grad_norm
     }
 
     /// One mixed-precision AdamW training step on `(tokens, targets)`: forward →
@@ -553,6 +571,42 @@ impl CudaTrainer {
         let dlogits = self.model.chain.cross_entropy_grad(&logits, targets);
         let grads = self.model.backward(tokens, &dlogits);
 
+        // Global gradient-norm clipping: compute ‖g‖ over every weight's grad, then
+        // scale so the update's norm is ≤ max_grad_norm. A non-finite norm (NaN/inf
+        // from a pathological batch) → scale 0, i.e. skip the update so a spike can't
+        // corrupt the weights. This is what keeps the 270M bf16 pretrain from
+        // diverging at a bad batch.
+        let max_norm = self.max_grad_norm;
+        let gnorm = {
+            let mut grad_refs: Vec<&CudaMatrix> = vec![&grads.d_embedding, &grads.d_final_norm];
+            for bg in &grads.blocks
+            {
+                grad_refs.push(&bg.dnorm1);
+                grad_refs.push(&bg.dwq);
+                grad_refs.push(&bg.dwk);
+                grad_refs.push(&bg.dwv);
+                grad_refs.push(&bg.dwo);
+                grad_refs.push(&bg.dnorm2);
+                grad_refs.push(&bg.dwg);
+                grad_refs.push(&bg.dwu);
+                grad_refs.push(&bg.dwd);
+            }
+            self.model.chain.global_grad_norm(&grad_refs)
+        };
+        self.last_grad_norm = gnorm;
+        let scale = if !gnorm.is_finite()
+        {
+            0.0
+        }
+        else if max_norm > 0.0 && gnorm > max_norm
+        {
+            max_norm / gnorm
+        }
+        else
+        {
+            1.0
+        };
+
         // AdamW updates — fp32 masters mutated in place, bf16 views refreshed.
         let step = self.step;
         let ch = &self.model.chain;
@@ -567,6 +621,7 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
+            scale,
         );
         ch.adamw_step(
             &mut self.master_final_norm,
@@ -579,6 +634,7 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
+            scale,
         );
         for i in 0..self.model.blocks.len()
         {
@@ -605,6 +661,7 @@ impl CudaTrainer {
                     adam_eps,
                     weight_decay,
                     step,
+                    scale,
                 );
             };
             one(
@@ -713,6 +770,7 @@ impl CudaTrainer {
             );
             return losses;
         }
+        self.max_grad_norm = cfg.max_grad_norm;
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
@@ -744,7 +802,12 @@ impl CudaTrainer {
                 let done = (step - cfg.start_step) * s;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
                 let tps = done as f64 / secs;
-                println!("[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | {tps:>8.0} tok/s");
+                // gnorm is the pre-clip grad norm — a spike shows here even though the
+                // clip keeps it from corrupting the weights.
+                let gnorm = self.last_grad_norm();
+                println!(
+                    "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
+                );
             }
             if cfg.save_interval > 0 && step % cfg.save_interval == 0
             {
@@ -796,6 +859,9 @@ pub struct CudaPretrainConfig {
     pub save_interval: usize,
     /// Directory the `step_N/` checkpoints are written under.
     pub checkpoint_dir: String,
+    /// Global gradient-norm clip threshold (`<= 0` disables). Default `1.0` —
+    /// standard for pretraining, and what keeps a bad batch from diverging the run.
+    pub max_grad_norm: f32,
 }
 
 impl Default for CudaPretrainConfig {
@@ -813,6 +879,7 @@ impl Default for CudaPretrainConfig {
             log_interval: 100,
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
+            max_grad_norm: 1.0,
         }
     }
 }

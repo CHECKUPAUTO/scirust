@@ -301,6 +301,11 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default_lr);
+    // Global grad-norm clip (default 1.0; SCIAGENT_CLIP overrides, <= 0 disables).
+    let max_grad_norm = std::env::var("SCIAGENT_CLIP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0f32);
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -312,6 +317,7 @@ fn main() {
         log_interval: 25,
         save_interval: 100,
         checkpoint_dir: ckpt_dir.clone(),
+        max_grad_norm,
         ..Default::default()
     };
     println!(
