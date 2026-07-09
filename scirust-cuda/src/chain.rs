@@ -461,6 +461,57 @@ impl CudaChain {
         }
     }
 
+    /// `C = Aᵀ · B` on Tensor cores: `a` is `k×m`, `b` is `k×n`, result `m×n`
+    /// (row-major). The weight-gradient GEMM: with [`Self::matmul_bt`], the two give
+    /// the full matmul VJP — `dA = dC·Bᵀ` (`matmul_bt(dC, B)`), `dB = Aᵀ·dC`
+    /// (`matmul_at(A, dC)`).
+    ///
+    /// Column-major identity: `Cᵀ = Bᵀ·A`. My row-major `b` viewed column-major is
+    /// `bᵀ`, used as-is; my row-major `a` viewed column-major is `aᵀ`, so
+    /// `transb=true` recovers `a`. Hence `matmul(transa=false, transb=true, m=n,
+    /// n=m, k)` over `(b, a)` yields row-major `Aᵀ·B`.
+    pub fn matmul_at(&self, a: &CudaMatrix, b: &CudaMatrix) -> CudaMatrix {
+        let (k, m, n) = (a.rows, a.cols, b.cols);
+        assert_eq!(
+            b.rows, k,
+            "matmul_at: outer dims disagree (({}x{})ᵀ · {}x{})",
+            a.rows, a.cols, b.rows, b.cols
+        );
+        let mut c = self
+            .stream
+            .alloc_zeros::<bf16>(m * n)
+            .expect("cuda alloc C");
+        let cfg = MatmulConfig {
+            transa: false,
+            transb: true,
+            transc: false,
+            m: n as u64,
+            n: m as u64,
+            k: k as u64,
+            alpha: 1.0,
+            lda: n as i64,
+            ldb: m as i64,
+            beta: 0.0,
+            ldc: n as i64,
+            stride_a: None,
+            stride_b: None,
+            stride_c: None,
+            stride_bias: None,
+            batch_size: None,
+        };
+        // SAFETY: shapes/leading-dims match the buffers; epilogues unused.
+        unsafe {
+            self.blas
+                .matmul(cfg, &b.buf, &a.buf, &mut c, None, None)
+                .expect("cublasLt bf16 matmul_at");
+        }
+        CudaMatrix {
+            buf: c,
+            rows: m,
+            cols: n,
+        }
+    }
+
     /// Gather columns `[col_start, col_start+ncols)` into a `rows × ncols` matrix
     /// (one head's slice of a full-width projection).
     pub fn slice_cols(&self, x: &CudaMatrix, col_start: usize, ncols: usize) -> CudaMatrix {
@@ -801,6 +852,40 @@ mod tests {
             "matmul_bt rel_err {e}\n got {got:?}\n want {want:?}"
         );
         eprintln!("bf16 matmul_bt (A·Bᵀ) vs CPU fp32: rel_err {e:.3e} — PASS");
+    }
+
+    /// `matmul_at` computes `Aᵀ·B` (the weight-gradient GEMM) within bf16 tolerance.
+    /// With `matmul_bt` this is the full matmul VJP: for `C = A·B`, `dA = dC·Bᵀ =
+    /// matmul_bt(dC, B)` and `dB = Aᵀ·dC = matmul_at(A, dC)`. Skips with no device.
+    #[test]
+    fn bf16_matmul_at_matches_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping matmul_at parity");
+            return;
+        };
+        // a: k×m, b: k×n, want aᵀ·b : m×n.
+        let (k, m, n) = (6usize, 4usize, 5usize);
+        let a: Vec<f32> = (0..k * m).map(|i| (i as f32 * 0.11 - 0.4).sin()).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.07 + 0.3).cos()).collect();
+        let got =
+            chain.download(&chain.matmul_at(&chain.upload(&a, k, m), &chain.upload(&b, k, n)));
+        // CPU aᵀ·b : out[i,j] = Σ_p a[p,i]·b[p,j].
+        let mut want = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                want[i * n + j] = (0..k).map(|p| a[p * m + i] * b[p * n + j]).sum();
+            }
+        }
+        let e = rel_err(&got, &want);
+        assert!(
+            e < 5e-2,
+            "matmul_at rel_err {e}\n got {got:?}\n want {want:?}"
+        );
+        eprintln!("bf16 matmul_at (Aᵀ·B) vs CPU fp32: rel_err {e:.3e} — PASS");
     }
 
     /// `slice_cols` then `place_cols` round-trips a head slice back into its slot
