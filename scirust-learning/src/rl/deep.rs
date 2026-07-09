@@ -57,10 +57,16 @@ impl<M: Module> DQNAgent<M> {
             let s_var = tape.input(state.clone());
             let q_values = self.model.forward(&tape, s_var);
             let vals = tape.value(q_values.idx());
+            // Argmax over Q-values, robust to NaN/inf: a diverging network can
+            // emit non-finite Q-values, and `partial_cmp(NaN).unwrap()` would
+            // panic (crashing action selection). Filter to finite values first —
+            // then `partial_cmp` is total and never `None`; if every value is
+            // non-finite, fall back to action 0.
             vals.data
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .filter(|(_, v)| v.is_finite())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i)
                 .unwrap_or(0)
         }

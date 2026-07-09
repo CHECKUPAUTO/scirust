@@ -293,11 +293,18 @@ impl RuleBasedNer {
         let mut cap_words: Vec<String> = Vec::new();
         for word in &words
         {
-            let word_start = text[char_offset..]
-                .find(word)
+            // `text.get(..)` (not `text[..]`) so a `char_offset` that is not a
+            // UTF-8 char boundary yields `None` instead of panicking. This
+            // matters because `split_whitespace` splits on *any* Unicode
+            // whitespace (e.g. U+00A0, U+3000), which is multibyte — the old
+            // `word_end + 1` advance assumed a 1-byte ASCII space and could land
+            // `char_offset` mid-character, panicking `text[char_offset..]`.
+            let word_start = text
+                .get(char_offset..)
+                .and_then(|s| s.find(word))
                 .map(|p| char_offset + p)
-                .unwrap_or(char_offset);
-            let word_end = word_start + word.len();
+                .unwrap_or_else(|| char_offset.min(text.len()));
+            let word_end = (word_start + word.len()).min(text.len());
             let is_cap = word
                 .chars()
                 .next()
@@ -336,7 +343,11 @@ impl RuleBasedNer {
                 cap_start = None;
                 cap_words.clear();
             }
-            char_offset = word_end + 1; // +1 for space
+            // Resume the search right after this word. The next word's `find`
+            // skips the separator regardless of its byte width, so we must NOT
+            // add a hard-coded 1 (that assumed an ASCII space and broke on
+            // multibyte whitespace). `word_end` is always a char boundary.
+            char_offset = word_end;
         }
         // flush trailing capitalized run
         if cap_words.len() >= 2
@@ -937,6 +948,25 @@ mod tests {
             .expect("İé pattern should match");
         assert_eq!(m.text, "İé");
         assert_eq!(&text[m.start..m.end], "İé");
+    }
+
+    // Regression: multibyte Unicode whitespace between capitalized words must
+    // not panic. The capitalized-word heuristic tracked byte offsets assuming a
+    // 1-byte ASCII space; a non-breaking space (U+00A0, 2 bytes) or ideographic
+    // space (U+3000, 3 bytes) pushed `char_offset` off a char boundary and
+    // panicked `text[char_offset..]` — a DoS on untrusted text.
+    #[test]
+    fn extract_does_not_panic_on_multibyte_whitespace() {
+        let ner = RuleBasedNer::new(Gazetteer::new());
+        for text in [
+            "Alice\u{00A0}Bob went home",    // non-breaking space
+            "Alice\u{3000}Bob\u{2009}Carol", // ideographic + thin space
+            "Élise\u{00A0}Dupont arrived",
+        ]
+        {
+            // Must return (any result) without panicking.
+            let _ = ner.extract(text);
+        }
     }
 
     #[test]

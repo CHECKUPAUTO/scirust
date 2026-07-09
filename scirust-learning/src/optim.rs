@@ -27,7 +27,14 @@ pub fn simplex(c: &[f64], a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
         tableau[m][j] = -c[j];
     }
 
-    loop
+    // Bound the number of pivots. Dantzig's "most negative" rule can cycle
+    // indefinitely on a degenerate LP; without a cap `simplex` would loop
+    // forever (a hang / DoS on crafted or ill-conditioned input). A bound
+    // proportional to the tableau size is far above any non-degenerate solve;
+    // exceeding it means the problem is cycling or ill-posed -> fail with None.
+    let max_iters = 50 * (n + m + 1);
+    let mut converged = false;
+    for _ in 0..max_iters
     {
         // Find entering column (most negative value in bottom row)
         let mut pivot_col = 0;
@@ -44,6 +51,7 @@ pub fn simplex(c: &[f64], a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
 
         if min_val >= -1e-10
         {
+            converged = true;
             break; // optimal
         }
 
@@ -86,6 +94,13 @@ pub fn simplex(c: &[f64], a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
                 }
             }
         }
+    }
+
+    if !converged
+    {
+        // Hit the pivot cap without reaching optimality: the LP is cycling or
+        // ill-conditioned. Fail explicitly rather than hang the caller.
+        return None;
     }
 
     // Extract solution
