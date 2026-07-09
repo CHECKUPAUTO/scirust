@@ -66,3 +66,8 @@ required-features = ["gpu"]
 [[example]]
 name = "cuda_forward_bench"
 required-features = ["gpu", "cuda"]
+
+# Route B training-throughput bench (full AdamW step) — both backends to compare.
+[[example]]
+name = "cuda_train_bench"
+required-features = ["gpu", "cuda"]
