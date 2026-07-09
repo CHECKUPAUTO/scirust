@@ -29,7 +29,7 @@
 #[cfg(feature = "cuda")]
 mod chain;
 #[cfg(feature = "cuda")]
-pub use chain::{CudaChain, CudaMatrix};
+pub use chain::{CudaChain, CudaF32, CudaMatrix};
 
 /// Whether this build includes the CUDA backend (the `cuda` feature). `false`
 /// builds carry no CUDA dependency and expose no device API.

@@ -13,7 +13,7 @@
 
 use scirust_core::autodiff::reverse::Tape;
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::cuda_model::CudaModel;
+use scirust_sciagent::cuda_model::{CudaModel, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::cross_entropy_loss;
 
@@ -135,4 +135,44 @@ fn cuda_backward_matches_cpu_embedding_grad() {
         "CUDA bf16 backward rel_err {e} too large (wiring bug?)"
     );
     eprintln!("CUDA bf16 Tensor-core backward vs CPU tied-embedding grad: rel_err {e:.3e} — PASS");
+}
+
+/// The mixed-precision [`CudaTrainer`] actually **learns**: repeated AdamW steps on
+/// a fixed batch drive the cross-entropy loss down — B4f of `ROUTE_B.md`, the closed
+/// bf16 training loop (forward → CE grad → backward → fp32-master AdamW → refreshed
+/// bf16 views, all on Tensor cores). A memorization check: overfitting one batch is
+/// the minimal proof the whole loop's signs and scales are right. Skips with no
+/// device.
+#[test]
+fn cuda_trainer_reduces_loss() {
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let seq_len = 8usize;
+    let tokens: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 7 + 3) % config.vocab_size) as u32)
+        .collect();
+    let targets: Vec<u32> = (0..seq_len)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+
+    let Some(mut trainer) = CudaTrainer::from_model(&model)
+    else
+    {
+        eprintln!("cuda: no device, skipping CUDA trainer loss-decrease");
+        return;
+    };
+
+    let (lr, betas, eps, wd) = (3e-3f32, (0.9f32, 0.999f32), 1e-8f32, 0.0f32);
+    let first = trainer.train_step(&tokens, &targets, lr, betas, eps, wd);
+    let mut last = first;
+    for _ in 0..40
+    {
+        last = trainer.train_step(&tokens, &targets, lr, betas, eps, wd);
+    }
+    eprintln!("CUDA bf16 trainer: loss {first:.4} → {last:.4} over 41 steps");
+    assert!(
+        last < first * 0.7,
+        "CUDA bf16 training did not reduce loss: {first:.4} → {last:.4}"
+    );
+    eprintln!("CUDA bf16 Tensor-core training loop reduces loss — PASS");
 }

@@ -11,7 +11,7 @@
 //! whole 350M forward on Tensor cores. Backward + AdamW is B4.
 
 use scirust_core::autodiff::reverse::Tensor;
-use scirust_cuda::{CudaChain, CudaMatrix};
+use scirust_cuda::{CudaChain, CudaF32, CudaMatrix};
 
 use crate::model::SciAgentModel;
 
@@ -370,5 +370,267 @@ impl CudaModel {
         let dlogits = self.chain.cross_entropy_grad(&logits, targets);
         let grads = self.backward(tokens, &dlogits);
         self.chain.download(&grads.d_embedding)
+    }
+}
+
+/// One GQA block's **fp32 master** copies (or AdamW moments) — the full-precision
+/// mirror of [`CudaBlock`]'s nine trainable weights. Master weights and the
+/// moments `m`/`v` all use this layout; the forward/backward see only the bf16
+/// [`CudaMatrix`] views held in [`CudaBlock`].
+struct BlockMasters {
+    norm1: CudaF32,
+    wq: CudaF32,
+    wk: CudaF32,
+    wv: CudaF32,
+    wo: CudaF32,
+    norm2: CudaF32,
+    wg: CudaF32,
+    wu: CudaF32,
+    wd: CudaF32,
+}
+
+impl BlockMasters {
+    /// Upload a layer's nine weights to fp32 masters.
+    fn from_layer(chain: &CudaChain, l: &crate::block::SciAgentBlock) -> Self {
+        let up = |t: &Tensor| chain.upload_f32(&t.data);
+        Self {
+            norm1: up(&l.rms_attn.weight),
+            wq: up(&l.attn.w_q.weight),
+            wk: up(&l.attn.w_k.weight),
+            wv: up(&l.attn.w_v.weight),
+            wo: up(&l.attn.w_o.weight),
+            norm2: up(&l.rms_ffn.weight),
+            wg: up(&l.ffn.gate.weight),
+            wu: up(&l.ffn.up.weight),
+            wd: up(&l.ffn.down.weight),
+        }
+    }
+
+    /// Zero moments matching a layer's weight shapes.
+    fn zeros_like(chain: &CudaChain, l: &crate::block::SciAgentBlock) -> Self {
+        let z = |t: &Tensor| chain.zeros_f32(t.data.len());
+        Self {
+            norm1: z(&l.rms_attn.weight),
+            wq: z(&l.attn.w_q.weight),
+            wk: z(&l.attn.w_k.weight),
+            wv: z(&l.attn.w_v.weight),
+            wo: z(&l.attn.w_o.weight),
+            norm2: z(&l.rms_ffn.weight),
+            wg: z(&l.ffn.gate.weight),
+            wu: z(&l.ffn.up.weight),
+            wd: z(&l.ffn.down.weight),
+        }
+    }
+}
+
+/// Host mean cross-entropy `−(1/rows)·Σ log P[i, tgtᵢ]` over row-major logits —
+/// the pre-update loss (matches `train::cross_entropy_loss`). Kept here so the CUDA
+/// path needs no `scirust-gpu` dependency.
+fn host_cross_entropy(logits: &[f32], targets: &[u32], rows: usize, cols: usize) -> f32 {
+    let mut loss = 0.0f32;
+    for r in 0..rows
+    {
+        let row = &logits[r * cols..(r + 1) * cols];
+        let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let sum: f32 = row.iter().map(|&v| (v - mx).exp()).sum();
+        let t = (targets[r] as usize).min(cols - 1);
+        let logp = (row[t] - mx) - sum.ln();
+        loss -= logp;
+    }
+    loss / rows as f32
+}
+
+/// A trainable [`CudaModel`]: the bf16 model plus **fp32 master weights and AdamW
+/// moments** (the mixed-precision contract). Each [`Self::train_step`] runs the
+/// whole forward → cross-entropy grad → backward → AdamW update on Tensor cores,
+/// updating the fp32 masters and refreshing the bf16 views in one pass — Route B's
+/// training half. Tied-embedding models only.
+pub struct CudaTrainer {
+    model: CudaModel,
+    master_embedding: CudaF32,
+    m_embedding: CudaF32,
+    v_embedding: CudaF32,
+    master_final_norm: CudaF32,
+    m_final_norm: CudaF32,
+    v_final_norm: CudaF32,
+    master_blocks: Vec<BlockMasters>,
+    m_blocks: Vec<BlockMasters>,
+    v_blocks: Vec<BlockMasters>,
+    step: u32,
+}
+
+impl CudaTrainer {
+    /// Build a trainer from `model`: mirror the bf16 [`CudaModel`] and upload fp32
+    /// masters (from the original fp32 weights, not the bf16 views) plus zero
+    /// moments. Returns `None` if no CUDA device is available.
+    pub fn from_model(model: &SciAgentModel) -> Option<Self> {
+        let inner = CudaModel::from_model(model)?;
+        // Build all fp32 masters + zero moments in a scope so the `chain` borrow
+        // ends before `inner` is moved into the struct.
+        let (
+            master_embedding,
+            m_embedding,
+            v_embedding,
+            master_final_norm,
+            m_final_norm,
+            v_final_norm,
+            master_blocks,
+            m_blocks,
+            v_blocks,
+        ) = {
+            let chain = &inner.chain;
+            (
+                chain.upload_f32(&model.embed.weight.data),
+                chain.zeros_f32(model.embed.weight.data.len()),
+                chain.zeros_f32(model.embed.weight.data.len()),
+                chain.upload_f32(&model.rms_final.weight.data),
+                chain.zeros_f32(model.rms_final.weight.data.len()),
+                chain.zeros_f32(model.rms_final.weight.data.len()),
+                model
+                    .layers
+                    .iter()
+                    .map(|l| BlockMasters::from_layer(chain, l))
+                    .collect::<Vec<_>>(),
+                model
+                    .layers
+                    .iter()
+                    .map(|l| BlockMasters::zeros_like(chain, l))
+                    .collect::<Vec<_>>(),
+                model
+                    .layers
+                    .iter()
+                    .map(|l| BlockMasters::zeros_like(chain, l))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        Some(Self {
+            model: inner,
+            master_embedding,
+            m_embedding,
+            v_embedding,
+            master_final_norm,
+            m_final_norm,
+            v_final_norm,
+            master_blocks,
+            m_blocks,
+            v_blocks,
+            step: 0,
+        })
+    }
+
+    /// The vocabulary width (logit columns).
+    pub fn vocab(&self) -> usize {
+        self.model.vocab
+    }
+
+    /// One mixed-precision AdamW training step on `(tokens, targets)`: forward →
+    /// host cross-entropy grad → backward → AdamW update of every trainable weight
+    /// (tied embedding, final RMSNorm gain, and each block's nine weights), fp32
+    /// masters updated and bf16 views refreshed in place. Returns the **pre-update**
+    /// mean cross-entropy loss.
+    #[allow(clippy::too_many_arguments)]
+    pub fn train_step(
+        &mut self,
+        tokens: &[u32],
+        targets: &[u32],
+        lr: f32,
+        betas: (f32, f32),
+        adam_eps: f32,
+        weight_decay: f32,
+    ) -> f32 {
+        self.step += 1;
+        let rows = tokens.len();
+        let vocab = self.model.vocab;
+
+        // Forward (resident) → host loss → cross-entropy grad → backward.
+        let logits = self.model.forward_resident(tokens);
+        let host = self.model.chain.download(&logits);
+        let loss = host_cross_entropy(&host, targets, rows, vocab);
+        let dlogits = self.model.chain.cross_entropy_grad(&logits, targets);
+        let grads = self.model.backward(tokens, &dlogits);
+
+        // AdamW updates — fp32 masters mutated in place, bf16 views refreshed.
+        let step = self.step;
+        let ch = &self.model.chain;
+        ch.adamw_step(
+            &mut self.master_embedding,
+            &mut self.m_embedding,
+            &mut self.v_embedding,
+            &grads.d_embedding,
+            &mut self.model.embedding,
+            lr,
+            betas,
+            adam_eps,
+            weight_decay,
+            step,
+        );
+        ch.adamw_step(
+            &mut self.master_final_norm,
+            &mut self.m_final_norm,
+            &mut self.v_final_norm,
+            &grads.d_final_norm,
+            &mut self.model.final_norm,
+            lr,
+            betas,
+            adam_eps,
+            weight_decay,
+            step,
+        );
+        for i in 0..self.model.blocks.len()
+        {
+            let bg = &grads.blocks[i];
+            let (mb, mm, mv) = (
+                &mut self.master_blocks[i],
+                &mut self.m_blocks[i],
+                &mut self.v_blocks[i],
+            );
+            let b = &mut self.model.blocks[i];
+            let one = |master: &mut CudaF32,
+                       mo: &mut CudaF32,
+                       vo: &mut CudaF32,
+                       grad: &CudaMatrix,
+                       view: &mut CudaMatrix| {
+                ch.adamw_step(
+                    master,
+                    mo,
+                    vo,
+                    grad,
+                    view,
+                    lr,
+                    betas,
+                    adam_eps,
+                    weight_decay,
+                    step,
+                );
+            };
+            one(
+                &mut mb.norm1,
+                &mut mm.norm1,
+                &mut mv.norm1,
+                &bg.dnorm1,
+                &mut b.norm1,
+            );
+            one(&mut mb.wq, &mut mm.wq, &mut mv.wq, &bg.dwq, &mut b.wq);
+            one(&mut mb.wk, &mut mm.wk, &mut mv.wk, &bg.dwk, &mut b.wk);
+            one(&mut mb.wv, &mut mm.wv, &mut mv.wv, &bg.dwv, &mut b.wv);
+            one(&mut mb.wo, &mut mm.wo, &mut mv.wo, &bg.dwo, &mut b.wo);
+            one(
+                &mut mb.norm2,
+                &mut mm.norm2,
+                &mut mv.norm2,
+                &bg.dnorm2,
+                &mut b.norm2,
+            );
+            one(&mut mb.wg, &mut mm.wg, &mut mv.wg, &bg.dwg, &mut b.wg);
+            one(&mut mb.wu, &mut mm.wu, &mut mv.wu, &bg.dwu, &mut b.wu);
+            one(&mut mb.wd, &mut mm.wd, &mut mv.wd, &bg.dwd, &mut b.wd);
+        }
+        loss
+    }
+
+    /// Forward `tokens → logits` on the (possibly trained) bf16 model — a thin
+    /// pass-through to the inner [`CudaModel::forward`] for eval between steps.
+    pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
+        self.model.forward(tokens)
     }
 }
