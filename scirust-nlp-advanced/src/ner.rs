@@ -957,7 +957,7 @@ mod tests {
     // panicked `text[char_offset..]` — a DoS on untrusted text.
     #[test]
     fn extract_does_not_panic_on_multibyte_whitespace() {
-        let mut ner = RuleBasedNer::new(Gazetteer::new());
+        let ner = RuleBasedNer::new(Gazetteer::new());
         for text in [
             "Alice\u{00A0}Bob went home",    // non-breaking space
             "Alice\u{3000}Bob\u{2009}Carol", // ideographic + thin space
