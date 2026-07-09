@@ -62,7 +62,10 @@ pub fn load_idx_images<P: AsRef<Path>>(path: P) -> io::Result<(Vec<f32>, usize, 
         .checked_mul(h)
         .and_then(|nh| nh.checked_mul(w))
         .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "IDX image dimensions overflow usize")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "IDX image dimensions overflow usize",
+            )
         })?;
     let remaining = f.metadata()?.len().saturating_sub(16);
     if total as u64 > remaining

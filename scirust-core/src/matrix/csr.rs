@@ -17,7 +17,11 @@ impl CsrTensor<f32> {
         rows: usize,
         cols: usize,
     ) -> Self {
-        assert_eq!(row_offsets.len(), rows + 1, "CsrTensor: row_offsets.len() must be rows+1");
+        assert_eq!(
+            row_offsets.len(),
+            rows + 1,
+            "CsrTensor: row_offsets.len() must be rows+1"
+        );
         assert_eq!(
             values.len(),
             column_indices.len(),
