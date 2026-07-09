@@ -62,6 +62,25 @@ required-features = ["gpu"]
 name = "resident_lora_finetune"
 required-features = ["gpu"]
 
+# These resident examples use the `gpu` module (ResidentModel), so they must be
+# gated behind the `gpu` feature — otherwise `cargo test/build --features cuda`
+# (no `gpu`) tries to compile them and fails on the `scirust_sciagent::gpu` import.
+[[example]]
+name = "resident_generate"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_infer_bench"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_repl"
+required-features = ["gpu"]
+
+[[example]]
+name = "resident_spec_bench"
+required-features = ["gpu"]
+
 # Route B forward-throughput bench needs both backends (wgpu + CUDA) to compare.
 [[example]]
 name = "cuda_forward_bench"
