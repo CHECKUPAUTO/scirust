@@ -150,6 +150,17 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   more non-GEMM adjoint kernels and the fp32-master AdamW step is memory-bound, both of
   which dilute the raw bf16-GEMM win.
 
+- **B6 — production pretraining harness. ✅ DONE, validated on the Thor.**
+  `CudaTrainer::pretrain` (warmup+cosine LR, wrapping token windows, throughput
+  logging, resumable safetensors checkpointing) + `sync_to_model` (writes the fp32
+  masters back, full-fidelity checkpoints), driven by `examples/cuda_pretrain` — the
+  Route-B twin of `resident_pretrain`, but CUDA-only (no wgpu dependency), same
+  `SCIAGENT_*` env interface. **Thor:** a real from-scratch byte-level pretrain on the
+  scirust code tree (16 M bytes) drove loss **6.41 → 2.99 nats/byte** (53 %) over 500
+  bf16 steps at ~2,300 tok/s, with checkpoint/resume across separate invocations. The
+  350M-from-scratch pretrain — the goal that motivated the whole route — now runs in
+  bf16 on the Thor, resumable.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

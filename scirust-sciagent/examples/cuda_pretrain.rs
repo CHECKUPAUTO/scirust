@@ -205,9 +205,16 @@ fn main() {
     let tokens: Vec<u32> = if let Ok(dir) = std::env::var("SCIAGENT_SHARDS")
     {
         let mut loader = ShardLoader::new();
-        loader
-            .load_dir(&dir)
-            .unwrap_or_else(|e| panic!("failed to load shards from {dir}: {e}"));
+        if let Err(e) = loader.load_dir(&dir)
+        {
+            eprintln!(
+                "failed to load shards from {dir}: {e}\n\
+                 (SCIAGENT_SHARDS must point at a directory of little-endian u32 .bin token\n\
+                 shards, as written by the collect-data binary. For a tokenizer-free run,\n\
+                 use SCIAGENT_TEXT=<file|dir> instead for byte-level ingestion.)"
+            );
+            std::process::exit(1);
+        }
         let raw = loader.tokens();
         let maxid = raw.iter().copied().max().unwrap_or(0) as usize;
         if maxid >= config.vocab_size
