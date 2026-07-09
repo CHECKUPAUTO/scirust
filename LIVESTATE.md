@@ -1,7 +1,32 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-06-18
+> Dernière mise à jour : 2026-07-09
+
+## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
+- **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance
+  externe, `std` seul) encode σ = « couvercle de zéro » par régime numérique. σ = plus petit
+  positif représentable dans la voie : entier `1`, Q15.16 `2⁻¹⁶`, Q31.32 `2⁻³²`, f32 sanitized
+  `f32::MIN_POSITIVE`, f32/f64 bruts = plus petit sous-normal. Invariant central
+  `is_valid_guard_f32` : une garde anti-zéro SOUS σ est morte sur la voie 3 (sanitize_f32 l'écrase).
+- Constantes `SIGMA_*` + `sigma_f32/f64` + `guard_denominator_f32/f64`. Bords (0/négatif/NaN/régime
+  sans σ f32) définis+testés. 12 tests lib (valeurs bit-à-bit) + 1 test d'alignement qui affirme,
+  SANS coupler à scirust-gpu, que le seuil de `sanitize_f32` == `SIGMA_SANITIZED_F32` bit-à-bit
+  (casse si l'un bouge sans l'autre). N'a PAS touché `sanitize_f32` ni les defaults Adam/AdamW/Lion.
+- **Binaire `epsilon-audit`** (std-only ; `sha2` déjà au lockfile pour sceller le rapport) : scanner
+  lexical maison (hors commentaires/chaînes), classe ~14 425 littéraux `<1.0` en A/B/C/D/U →
+  `docs/EPSILON_AUDIT.md` (déterministe, SHA-256 en pied, reproductible bit-à-bit vérifié).
+  Totaux : A=112, B=364, C=10229, D=25, U=3695. Ne modifie AUCUN fichier (lecture seule).
+- **Gate CI (une ligne à ajouter au job `clippy`/nouveau job)** :
+  `cargo run -q -p scirust-sigma --bin epsilon-audit -- --root . --check`
+  → exit ≠ 0 ssi une garde f32 sous σ_sanitized subsiste hors test dans `scirust-gpu/src`.
+  **Exit 0 vérifié** sur l'arbre actuel (686 littéraux gpu/src, 0 violation, 0 warning ambigu).
+- **Sécurité** : contrôle préventif d'un défaut de sûreté latent (garde morte → Inf/NaN silencieux,
+  invisible en revue), zéro nouveau crate (deny.toml/lockfile intacts), rapport scellé SHA-256.
+- **Migration σ future (top candidats B, hors périmètre de ce volet)** : 9 gardes `1e-300` en f64
+  (hmm.rs, svd.rs:98, fdd.rs:40, chain.rs:254, optimize.rs:298) — mortes si un jour portées sur la
+  voie f32 sanitized. Audit d'abord, migration ensuite.
+- docs : CHANGELOG + LIVESTATE + docs/EPSILON_AUDIT.md. fmt+clippy(-D warnings)+13 tests verts.
 
 ## Session 2026-06-18 — volet 106 : simulateur quantique MPS / Tensor-Train
 - `quantum::Mps`/`MpsNode` : état n-qubits en chaîne de tenseurs rang-3 (au lieu de 2ⁿ) ⇒ coût

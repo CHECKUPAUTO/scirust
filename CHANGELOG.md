@@ -5,6 +5,35 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sigma` : bornes structurelles σ (« couvercle de zéro ») + audit des epsilons
+Nouvelle crate feuille **sans dépendance externe** (`std` seul) qui nomme et
+encode l'invariant numérique jusqu'ici implicite du contrat de déterminisme :
+
+- **σ = couvercle de zéro par régime.** Chaque voie numérique déterministe
+  (`scirust-gpu/src/deterministic.rs`) a un plus petit positif représentable :
+  entier exact `1`, fixe Q15.16 `2⁻¹⁶`, fixe Q31.32 `2⁻³²`, f32 *sanitized*
+  `f32::MIN_POSITIVE`, f32 brut / f64 brut = plus petit sous-normal. Constantes
+  nommées (`SIGMA_SANITIZED_F32`, `SIGMA_RAW_F32`, `SIGMA_RAW_F64`, `SIGMA_Q15_16`,
+  `SIGMA_Q31_32`), `sigma_f32`/`sigma_f64`, `guard_denominator_f32/f64`, et
+  l'**invariant central** `is_valid_guard_f32` (une garde anti-zéro sous σ est
+  *morte* sur la voie sanitized : `sanitize_f32` l'écrase). Comportements de bord
+  (0, négatif, NaN, régime sans σ f32) définis et testés — 12 tests unitaires
+  aux valeurs bit-à-bit (`to_bits()`).
+- **Test d'alignement** (`tests/sanitize_alignment.rs`) : affirme, sans coupler
+  la crate à `scirust-gpu`, que le seuil de `sanitize_f32` (= `f32::MIN_POSITIVE`)
+  est bit-identique à `SIGMA_SANITIZED_F32`. Casse si l'un bouge sans l'autre.
+- **Binaire `epsilon-audit`** (std-only ; `sha2` déjà au lockfile scelle le
+  rapport) : scanner lexical maison (hors commentaires/chaînes) qui classe les
+  ~14 400 littéraux flottants `< 1.0` du workspace en A (algorithme, ne pas
+  migrer) / B (garde zéro, cible σ) / C (test) / D (convergence) / U (non classé),
+  et produit `docs/EPSILON_AUDIT.md` (rapport déterministe, scellé SHA-256).
+- **Gate CI `--check`** : sort ≠ 0 si une garde f32 sous σ_sanitized subsiste
+  hors test dans `scirust-gpu/src`. Exit 0 sur l'arbre actuel (aucune garde
+  morte sur la voie sanitized ; 686 littéraux gpu/src inspectés). Sécurité :
+  contrôle préventif d'une classe de défauts (garde morte → `Inf`/`NaN`
+  silencieux) invisible en revue humaine, sans surface d'approvisionnement
+  ajoutée, artefact scellé, binaire strictement en lecture seule.
+
 ### Ajouté — crates voisines : carte CUSUM (`scirust-spc`) et incertitude élargie GUM (`scirust-metrology`)
 Deux compléments dans les crates voisines du tolérancement, chacun vérifié par
 un cross-check Monte-Carlo embarqué dans ses tests :

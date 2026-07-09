@@ -1,0 +1,25 @@
+[package]
+name = "scirust-sigma"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.85"
+description = "SciRust σ — bornes structurelles (« couvercle de zéro ») par régime numérique déterministe, et audit lexical des littéraux epsilon du workspace"
+
+# La bibliothèque `scirust-sigma` est une feuille SANS dépendance externe :
+# `src/lib.rs` n'utilise que `std`. `sha2` (déjà présent au lockfile racine,
+# donc aucun nouveau téléchargement) est optionnel et n'est référencé QUE par
+# le binaire d'audit, sous le drapeau `report-hash` ci-dessous.
+autobins = false
+
+[features]
+default = ["report-hash"]
+# Active le hachage SHA-256 du corps du rapport dans le binaire `epsilon-audit`.
+report-hash = ["dep:sha2"]
+
+[dependencies]
+sha2 = { version = "0.10", optional = true }
+
+[[bin]]
+name = "epsilon-audit"
+path = "src/bin/epsilon_audit.rs"
