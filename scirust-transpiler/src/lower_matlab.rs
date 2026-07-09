@@ -858,6 +858,18 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
         expect_array(&a, "min")?;
         return Ok(SirExpr::Min(Box::new(a)));
     }
+    if func == "range"
+    {
+        // range(x) = max(x) - min(x) — reuses the existing reduction nodes.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "range")?;
+        return Ok(SirExpr::ScalarBin {
+            op: Op::Sub,
+            l: Box::new(SirExpr::Max(Box::new(a.clone()))),
+            r: Box::new(SirExpr::Min(Box::new(a))),
+        });
+    }
     if func == "mean"
     {
         // mean(x) = sum(x) / length(x) — reuses existing nodes.
@@ -1292,7 +1304,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
             "unknown function or variable `{}` (supported intrinsics: \
              sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p, \
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand/asind/acosd/atand/sec/csc/cot, \
-             sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
+             sum/prod/mean/max/min/range/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/fftshift/ifftshift/diag, linspace/logspace, length, \
              fft/ifft, det/inv/eig/trace)",
             func
@@ -1567,6 +1579,7 @@ fn is_reduction(func: &str) -> bool {
             | "var"
             | "std"
             | "median"
+            | "range"
             | "trapz"
     )
 }

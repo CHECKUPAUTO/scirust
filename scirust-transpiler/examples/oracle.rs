@@ -1370,6 +1370,17 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 1.0,
             }],
         },
+        // range(v) = max(v) - min(v) (statistical spread reduction).
+        Case {
+            name: "M: range(v) (max - min)",
+            call: "mrange",
+            src: "function y = mrange(v)\n  y = range(v);\nend\n",
+            args: vec![Array {
+                n: 7,
+                lo: -4.0,
+                hi: 4.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",

@@ -60,7 +60,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
 | `trapz(v)` (trapezoidal integration, unit spacing) | deterministic `np::trapz` prelude helper |
-| math `sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`var`/`std` use the sample `N−1` normalisation) |
+| math `sqrt/exp/log/log10/log2/sin/cos/tan/sinh/cosh/tanh/asinh/acosh/atanh/abs/floor/ceil/atan/asin/acos/round/fix/expm1/log1p`; reductions `sum/prod/mean/max/min/range/var/std/median`, `length` | scalar/elementwise intrinsics + reductions (`range` = `max−min`; `var`/`std` use the sample `N−1` normalisation) |
 | `mod(a,b)` / `rem(a,b)` (modular; scalar, elementwise or broadcast), `sign(x)`/`sign(v)` (−1/0/+1, `sign(0)=0`; scalar or elementwise), `deg2rad`/`rad2deg` (scalar or broadcast) | composed from `floor`/`fix` (`mod` floors, `rem` truncates) via elementwise/broadcast on vectors; bound if/else (`Sign`) or `map1` (`ArraySign`) for sign; constant multiply for angle conversion |
 | degree-argument trig `sind`/`cosd`/`tand` (scalar or elementwise) | convert to radians (`× π/180`) then apply `sin`/`cos`/`tan`; the MATLAB exact-zero/Inf special cases at multiples of 90° are not replicated |
 | inverse degree trig `asind`/`acosd`/`atand` (scalar or elementwise) | apply `asin`/`acos`/`atan` then convert radians to degrees (`× 180/π`); `asind`/`acosd` require `\|x\| ≤ 1` |
@@ -147,8 +147,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: sec / csc / cot            200/200 trials match (octave) (MATLAB reciprocal trig, scalar & elementwise, Phase 2)
   ✓ M: fft / abs(fft) / ifft(fft) 200/200 trials match (octave) (MATLAB FFT routed to scirust-signal, complex, Phase 2)
   ✓ M: fftshift / ifftshift       200/200 trials match (octave) (MATLAB spectrum centring, floor/ceil shifts, Phase 2)
+  ✓ M: range(v)                   200/200 trials match (octave) (MATLAB max−min spread reduction, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 139/139 cases match their reference runtime within tolerance
+  ORACLE GREEN — 140/140 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
