@@ -34,12 +34,19 @@ pub enum Device {
 // ================================================================== //
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SciRustError {
     /// Shapes incompatibles entre opérandes
     ShapeMismatch {
         op: &'static str,
         expected: (usize, usize),
         got: (usize, usize),
+    },
+    /// Dimension intérieure d'un produit incompatible (a.cols != b.rows).
+    DimMismatch {
+        op: &'static str,
+        a_cols: usize,
+        b_rows: usize,
     },
     /// Tenseurs sur des devices différents
     DeviceMismatch {
@@ -82,6 +89,14 @@ impl fmt::Display for SciRustError {
                     f,
                     "shape mismatch in '{op}': expected {:?}, got {:?}",
                     expected, got
+                )
+            },
+            SciRustError::DimMismatch { op, a_cols, b_rows } =>
+            {
+                write!(
+                    f,
+                    "inner dimension mismatch in '{op}': left has {a_cols} column(s) \
+                     but right has {b_rows} row(s)"
                 )
             },
             SciRustError::DeviceMismatch { op, expected, got } =>
@@ -134,6 +149,57 @@ impl fmt::Display for SciRustError {
             {
                 write!(f, "{what} index out of bounds: {index} >= {bound}")
             },
+        }
+    }
+}
+
+impl SciRustError {
+    /// A short, machine-stable code for the error category — useful for logging,
+    /// dashboards, and scripting (`E_SHAPE`, `E_GPU`, …). Stable across releases
+    /// even as the human message text is refined.
+    pub fn code(&self) -> &'static str {
+        match self
+        {
+            SciRustError::ShapeMismatch { .. } => "E_SHAPE",
+            SciRustError::DimMismatch { .. } => "E_DIM",
+            SciRustError::DeviceMismatch { .. } => "E_DEVICE",
+            SciRustError::WrongDevice { .. } => "E_DEVICE",
+            SciRustError::InvalidConfig(_) => "E_CONFIG",
+            SciRustError::GpuNotAvailable => "E_GPU_ABSENT",
+            SciRustError::GpuError(_) => "E_GPU",
+            SciRustError::IoError(_) => "E_IO",
+            SciRustError::InvalidFormat { .. } => "E_FORMAT",
+            SciRustError::IndexOutOfBounds { .. } => "E_BOUNDS",
+        }
+    }
+
+    /// A one-line, actionable hint on how to resolve the error — the affordance
+    /// the Rust compiler and `miette` give (`help: …`). `None` when no generic
+    /// remedy applies. Callers can print it as a second line under the message.
+    pub fn hint(&self) -> Option<&'static str> {
+        match self
+        {
+            SciRustError::ShapeMismatch { .. } =>
+            {
+                Some("check the operand shapes; transpose or reshape one side so they match")
+            },
+            SciRustError::DimMismatch { .. } => Some(
+                "for `a · b`, `a.cols` must equal `b.rows`; transpose one operand or fix the layer width",
+            ),
+            SciRustError::DeviceMismatch { .. } | SciRustError::WrongDevice { .. } => Some(
+                "move both tensors to the same device with `.to_cpu()` / `.to_gpu()` before the op",
+            ),
+            SciRustError::GpuNotAvailable => Some(
+                "rebuild with `--features wgpu` and ensure a compatible GPU adapter is visible, or run on CPU",
+            ),
+            SciRustError::InvalidFormat { .. } => Some(
+                "the file is corrupt or from an unsupported version; re-export it or check the producer",
+            ),
+            SciRustError::IndexOutOfBounds { .. } =>
+            {
+                Some("the index is past the end; check the length before indexing")
+            },
+            _ => None,
         }
     }
 }
@@ -192,9 +258,7 @@ pub fn check_shape(op: &'static str, expected: (usize, usize), got: (usize, usiz
 pub fn check_inner_dim(op: &'static str, a_cols: usize, b_rows: usize) -> Result<()> {
     if a_cols != b_rows
     {
-        Err(SciRustError::InvalidConfig(format!(
-            "matmul '{op}': inner dim mismatch {a_cols} != {b_rows}"
-        )))
+        Err(SciRustError::DimMismatch { op, a_cols, b_rows })
     }
     else
     {
@@ -250,6 +314,23 @@ mod tests {
     fn check_shape_fails_when_different() {
         let r = check_shape("test", (1, 2), (3, 4));
         assert!(matches!(r, Err(SciRustError::ShapeMismatch { .. })));
+    }
+
+    #[test]
+    fn dim_mismatch_has_code_and_actionable_hint() {
+        let e = check_inner_dim("matmul", 3, 4).unwrap_err();
+        assert_eq!(e.code(), "E_DIM");
+        let msg = format!("{e}");
+        assert!(msg.contains("3") && msg.contains("4"));
+        let hint = e.hint().expect("dim mismatch should carry a hint");
+        assert!(hint.contains("a.cols") || hint.contains("transpose"));
+    }
+
+    #[test]
+    fn every_variant_has_a_stable_code() {
+        // A representative set; `code()` must be total (compiles only if so).
+        assert_eq!(SciRustError::GpuNotAvailable.code(), "E_GPU_ABSENT");
+        assert_eq!(SciRustError::InvalidConfig("x".into()).code(), "E_CONFIG");
     }
 
     #[test]

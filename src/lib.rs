@@ -26,3 +26,18 @@ pub use scirust_rsi as rsi;
 pub use scirust_simd as simd;
 pub use scirust_solvers as solvers;
 pub use scirust_symbolic as symbolic;
+
+/// One-import entry point: `use scirust::prelude::*;` brings the tensor,
+/// autodiff, neural-network, error, and symbolic essentials into scope — the
+/// exact symbols the README quickstart uses — so a first program needs a single
+/// `use`.
+///
+/// ```
+/// use scirust::prelude::*;
+///
+/// let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+/// assert_eq!(t.shape(), (2, 2));
+/// ```
+pub mod prelude {
+    pub use scirust_core::prelude::*;
+}

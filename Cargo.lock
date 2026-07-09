@@ -3384,6 +3384,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-special"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-symbolic"
 version = "0.1.0"
 dependencies = [
