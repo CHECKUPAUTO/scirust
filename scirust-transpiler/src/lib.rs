@@ -1074,6 +1074,32 @@ mod tests {
     }
 
     #[test]
+    fn matlab_fft_routes_to_signal_crate() {
+        // fft(x) -> complex DFT routed to scirust-signal; `x` inferred an array,
+        // return type is a complex vector, and the routed crate is required.
+        let src = "function y = f(x)\n  y = fft(x);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(
+            sig_of(&rust, "f"),
+            "pub fn f(x: &[f64]) -> Vec<scirust_signal::complex::Complex> {"
+        );
+        assert!(rust.contains("scirust_signal::fft::fft"));
+        let sir = transpile_matlab_to_sir(src).unwrap();
+        assert!(required_crates(&sir).contains(&"scirust-signal"));
+        // abs(fft(x)) is the real magnitude spectrum (complex abs), returning a
+        // real vector but still routing through the signal crate.
+        let mag = transpile_matlab("function y = f(x)\n  y = abs(fft(x));\nend\n").unwrap();
+        assert_eq!(sig_of(&mag, "f"), "pub fn f(x: &[f64]) -> Vec<f64> {");
+        assert!(mag.contains("scirust_signal::fft::fft"));
+        // ifft(fft(x)) round-trips through the inverse DFT.
+        let rt = transpile_matlab("function y = f(x)\n  y = ifft(fft(x));\nend\n").unwrap();
+        assert!(rt.contains("scirust_signal::fft::ifft"));
+        // ifft on a non-complex argument is rejected.
+        let bad = transpile_matlab("function y = f(x)\n  y = ifft(x);\nend\n");
+        assert!(bad.is_err());
+    }
+
+    #[test]
     fn matlab_mod_rem_broadcast_over_vectors() {
         // mod / rem now work elementwise: `mod(v, s)` broadcasts over a vector.
         let m = transpile_matlab("function y = f(v)\n  y = mod(cumsum(v), 3.0);\nend\n").unwrap();

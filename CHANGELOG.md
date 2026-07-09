@@ -160,6 +160,27 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `fft` / `ifft`** routées vers `scirust-signal`, prouvées contre Octave réel (Phase 2, incrément 47)
+Premier **routage de traitement du signal** côté MATLAB : `fft(x)` (DFT complexe
+d'un vecteur réel), `ifft(c)` (DFT inverse) et `abs(fft(x))` (spectre de magnitude)
+émettent le kernel FFT vérifié de `scirust-signal` plutôt que de le redériver —
+réutilisant exactement la machinerie complexe (`Fft`/`Ifft`/`ComplexArray`/`ComplexAbs`)
+déjà prouvée côté Python.
+
+- `fft(x)` : vecteur réel → vecteur complexe (spectre complet à N points).
+- `ifft(c)` : vecteur complexe → vecteur complexe (DFT inverse, `1/N`).
+- `abs(z)` sur un spectre complexe → tableau réel des magnitudes (routé
+  distinctement de l'`abs` réel élément par élément).
+
+Le harnais de l'oracle sérialise désormais les résultats complexes d'Octave en
+`(re, im)` entrelacés pour s'aligner sur la sortie Rust `ComplexArray` (un
+`ifft(fft(x))` qu'Octave réduit au réel est complété par des parties imaginaires
+nulles). Trois cas d'oracle prouvés contre Octave réel (compilés via cargo avec
+`scirust-signal`). **Oracle 136/136** (200 essais chacun) ; **95 tests unitaires**
+(1 nouveau).
+*Non-vacuité* : router `fft` vers `rfft` (demi-spectre) fait diverger les trois cas
+FFT (longueurs 10/16 et 5/8, crash du round-trip) — le routage `fft` est bien portant.
+
 ### Ajouté — transpileur : **MATLAB `sec` / `csc` / `cot`** — trigonométrie réciproque, prouvée contre Octave réel (Phase 2, incrément 46)
 Achève la trigonométrie : les fonctions réciproques `sec = 1/cos`, `csc = 1/sin`,
 `cot = 1/tan`, chacune appliquant la fonction trig de base (scalaire ou élément par

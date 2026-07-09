@@ -55,6 +55,7 @@ maps the MATLAB dialect onto the *same* SIR, handling its distinct semantics:
 | output/locals first assigned inside a branch | **hoisted** to `let mut y: T;`, validated by Rust's definite-assignment analysis |
 | **multi-output** `function [a, b] = f(x) … end` | `pub fn f(…) -> (T0, T1)` (tuple return) |
 | linear algebra `det(A)`, `inv(A)`, `A \ b` (solve `Ax = b`), `eig(A)` (symmetric eigenvalues), matrix product `A*b` / `A*B`, transpose `A'` / `A.'` | routed to **`scirust-solvers`** (verified determinant / LU inverse / LU solve / symmetric eigensolver / matvec / matmul / transpose); `*` routes to a matrix product only when the left operand is an inferred matrix |
+| FFT `fft(x)` (real→complex DFT), `ifft(c)` (inverse DFT), `abs(fft(x))` (magnitude spectrum) | routed to **`scirust-signal`** (verified radix-2 FFT); complex vector type; `abs` over a spectrum is the real magnitude |
 | vector `norm(v)` (2-norm), `norm(v, p)` (general finite p-norm), `dot(a, b)` (inner product), `cross(a, b)` (3-vector) | `sqrt(sum(v.*v))` / `(sum(abs(v).^p))^(1/p)` / fixed-order `np::dot` / `np::cross` |
 | `trace(A)` (diagonal sum of a matrix) | deterministic `np::trace` prelude helper |
 | overloaded `diag`: `diag(A)` extract diagonal (matrix→vector) / `diag(v)` construct diagonal matrix (vector→matrix) | dispatched on operand type: `DiagExtract` vs `Diag` |
@@ -143,8 +144,9 @@ $ cargo run -p scirust-transpiler --example oracle
   ✓ M: sind / cosd / tand         200/200 trials match (octave) (MATLAB degree-argument trig, scalar & elementwise, Phase 2)
   ✓ M: asind / acosd / atand      200/200 trials match (octave) (MATLAB inverse degree trig, scalar & elementwise, Phase 2)
   ✓ M: sec / csc / cot            200/200 trials match (octave) (MATLAB reciprocal trig, scalar & elementwise, Phase 2)
+  ✓ M: fft / abs(fft) / ifft(fft) 200/200 trials match (octave) (MATLAB FFT routed to scirust-signal, complex, Phase 2)
   ✓ tuple returns: addsub / minmax / stats3 200/200 trials match (numpy)  (return a, b, Phase 2)
-  ORACLE GREEN — 133/133 cases match their reference runtime within tolerance
+  ORACLE GREEN — 136/136 cases match their reference runtime within tolerance
 ```
 
 Run the whole suite (unit tests + oracle) from one entry point:
