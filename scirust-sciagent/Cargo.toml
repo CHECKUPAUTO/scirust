@@ -61,3 +61,8 @@ required-features = ["gpu"]
 [[example]]
 name = "resident_lora_finetune"
 required-features = ["gpu"]
+
+# Route B forward-throughput bench needs both backends (wgpu + CUDA) to compare.
+[[example]]
+name = "cuda_forward_bench"
+required-features = ["gpu", "cuda"]
