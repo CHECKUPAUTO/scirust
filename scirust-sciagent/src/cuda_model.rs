@@ -873,7 +873,9 @@ impl Default for CudaPretrainConfig {
             total_steps: 50_000,
             start_step: 0,
             betas: (0.9, 0.95),
-            adam_eps: 1e-8,
+            // bf16-appropriate epsilon: larger than the fp32 default 1e-8 to keep the
+            // AdamW `m/(√v+eps)` ratio well-conditioned when moments get tiny.
+            adam_eps: 1e-5,
             weight_decay: 0.1,
             seq_len: 128,
             log_interval: 100,

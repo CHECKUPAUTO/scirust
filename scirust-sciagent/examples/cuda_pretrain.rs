@@ -306,6 +306,11 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1.0f32);
+    // AdamW epsilon (default 1e-5, bf16-appropriate; SCIAGENT_EPS overrides).
+    let adam_eps = std::env::var("SCIAGENT_EPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1e-5f32);
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -314,6 +319,7 @@ fn main() {
         start_step,
         seq_len,
         weight_decay: 0.0,
+        adam_eps,
         log_interval: 25,
         save_interval: 100,
         checkpoint_dir: ckpt_dir.clone(),
@@ -321,7 +327,8 @@ fn main() {
         ..Default::default()
     };
     println!(
-        "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | ckpt → {ckpt_dir}\n"
+        "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
+         eps {adam_eps:.0e} | clip {max_grad_norm} | ckpt → {ckpt_dir}\n"
     );
 
     let losses = trainer.pretrain(&tokens, &mut model, &config, &cfg);
