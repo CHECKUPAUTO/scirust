@@ -1301,6 +1301,41 @@ fn matlab_cases() -> Vec<Case> {
                 hi: 1.0,
             }],
         },
+        // ---- MATLAB FFT routed to scirust-signal (Phase 2) ----
+        // fft(x) — full complex DFT of a real vector, compared re/im interleaved
+        // against Octave's fft. n = 8 (radix-2).
+        Case {
+            name: "M: fft(x) -> scirust-signal (complex out)",
+            call: "mfft",
+            src: "function y = mfft(x)\n  y = fft(x);\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // abs(fft(x)) — real magnitude spectrum (complex abs over the spectrum).
+        Case {
+            name: "M: abs(fft(x)) magnitude spectrum",
+            call: "mfftmag",
+            src: "function y = mfftmag(x)\n  y = abs(fft(x));\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
+        // ifft(fft(x)) — round-trip, recovers x (complex, imaginary ≈ 0).
+        Case {
+            name: "M: ifft(fft(x)) round-trip",
+            call: "mfftrt",
+            src: "function y = mfftrt(x)\n  y = ifft(fft(x));\nend\n",
+            args: vec![Array {
+                n: 8,
+                lo: -1.0,
+                hi: 1.0,
+            }],
+        },
         // sign elementwise over an array.
         Case {
             name: "M: sign(cumsum(v)) (elementwise)",
@@ -1867,9 +1902,23 @@ fn run_octave_batch(
             call = case.call
         ),
     };
+    // A complex-returning case (e.g. `fft`) is serialised interleaved (re, im)
+    // to line up with the Rust `ComplexArray` print. `ifft(fft(x))` collapses to
+    // a real vector in Octave, so we pad every element with a zero imaginary part
+    // (via `real`/`imag`, which are identities on a real array) to keep the
+    // length aligned. Real-returning cases print straight through.
+    let ser_body = if matches!(ret, RetTy::Single(Ty::ComplexArray))
+    {
+        "  b = zeros(2*numel(a), 1);\n  b(1:2:end) = real(a);\n  b(2:2:end) = imag(a);\n  __s = sprintf('%.17e ', b);"
+    }
+    else
+    {
+        "  __s = sprintf('%.17e ', a);"
+    };
     let script = format!(
-        "1;\n{src}\nfunction __s = __ser(r)\n  __t = r.';\n  a = __t(:);\n  __s = sprintf('%.17e ', a);\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  {call_and_ser}\nend\n",
+        "1;\n{src}\nfunction __s = __ser(r)\n  __t = r.';\n  a = __t(:);\n{ser_body}\nend\ninputs = {{\n{rows}\n}};\nfor __k = 1:numel(inputs)\n  __args = inputs{{__k}};\n  {call_and_ser}\nend\n",
         src = case.src,
+        ser_body = ser_body,
         rows = rows
             .iter()
             .map(|r| format!("  {},", r))

@@ -742,6 +742,12 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
     {
         need_args(func, args, 1)?;
         let a = lower_scalar(&args[0], env)?;
+        // `abs` over a complex spectrum (e.g. `abs(fft(x))`) is the magnitude,
+        // a real array — routed distinctly from the real elementwise `abs`.
+        if func == "abs" && a.ty() == Ty::ComplexArray
+        {
+            return Ok(SirExpr::ComplexAbs(Box::new(a)));
+        }
         let mf = match func
         {
             "sqrt" => MathFn::Sqrt,
@@ -786,6 +792,27 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
                 }
             },
         );
+    }
+    if func == "fft"
+    {
+        // fft(x) — full complex DFT of a real vector, routed to scirust-signal
+        // (all N bins, matching MATLAB `fft`). Output is a complex array.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        expect_array(&a, "fft")?;
+        return Ok(SirExpr::Fft(Box::new(a)));
+    }
+    if func == "ifft"
+    {
+        // ifft(c) — inverse DFT of a complex spectrum (e.g. the result of `fft`),
+        // routed to scirust-signal. Requires a complex-array argument.
+        need_args(func, args, 1)?;
+        let a = lower_scalar(&args[0], env)?;
+        if a.ty() != Ty::ComplexArray
+        {
+            return Err("`ifft` expects a complex array (e.g. the result of `fft`)".into());
+        }
+        return Ok(SirExpr::Ifft(Box::new(a)));
     }
     if func == "sum"
     {
@@ -1263,7 +1290,7 @@ fn lower_call(func: &str, args: &[MExpr], env: &HashMap<String, Ty>) -> Result<S
              mod/rem/sign/atan2/hypot/power/deg2rad/rad2deg/sind/cosd/tand/asind/acosd/atand/sec/csc/cot, \
              sum/prod/mean/max/min/var/std/median/norm/dot/cross/kron/conv/polyval/trapz, \
              cumsum/cumprod/cummax/cummin/cumtrapz/diff/gradient/sort/flip/circshift/diag, linspace/logspace, length, \
-             det/inv/eig/trace)",
+             fft/ifft, det/inv/eig/trace)",
             func
         )),
     }
@@ -1467,6 +1494,9 @@ fn array_evidence_expr(name: &str, e: &MExpr) -> bool {
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // `circshift(v, k)` — the first argument is the vector; `k` scalar.
                 || (func == "circshift"
+                    && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
+                // `fft(v)` — the (single) argument is a real vector.
+                || (func == "fft"
                     && matches!(args.first(), Some(MExpr::Ident(n)) if n == name))
                 // Vector -> vector builtins whose (single) argument is a vector.
                 || (matches!(
