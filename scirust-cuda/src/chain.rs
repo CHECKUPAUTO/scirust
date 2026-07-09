@@ -320,6 +320,31 @@ extern "C" __global__ void ce_grad_kernel(
         }
     }
 }
+
+// AdamW step (mixed precision): fp32 master `param`, fp32 moments `m`/`v`, bf16
+// `grad`. Updates param/m/v in fp32 in place and writes a fresh bf16 `param_bf`
+// view for the next forward. bc1/bc2 = 1 − beta^step are host-computed. Matches
+// cpu_adamw_step exactly (decoupled weight decay).
+extern "C" __global__ void adamw_kernel(
+    float* param, float* m, float* v, const unsigned short* grad, unsigned short* param_bf,
+    const size_t n, const float lr, const float b1, const float b2,
+    const float eps, const float wd, const float bc1, const float bc2)
+{
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        float g = b2f(grad[i]);
+        float mi = b1 * m[i] + (1.0f - b1) * g;
+        float vi = b2 * v[i] + (1.0f - b2) * g * g;
+        m[i] = mi;
+        v[i] = vi;
+        float mhat = mi / bc1;
+        float vhat = vi / bc2;
+        float p = param[i];
+        p -= lr * (mhat / (sqrtf(vhat) + eps) + wd * p);
+        param[i] = p;
+        param_bf[i] = f2b(p);
+    }
+}
 "#;
 
 /// A resident row-major `rows × cols` matrix in VRAM, stored in **bf16** (the
@@ -339,6 +364,27 @@ impl CudaMatrix {
     /// Column count.
     pub fn cols(&self) -> usize {
         self.cols
+    }
+}
+
+/// A resident **fp32** vector in VRAM — the mixed-precision contract's *master*
+/// storage: master weights and the AdamW moments (`m`, `v`) live here in full
+/// precision, while their bf16 [`CudaMatrix`] views feed the Tensor-core GEMMs.
+/// The optimizer update happens on these fp32 buffers; only the forward/backward
+/// see bf16.
+pub struct CudaF32 {
+    buf: CudaSlice<f32>,
+    len: usize,
+}
+
+impl CudaF32 {
+    /// Element count.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    /// Whether the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
@@ -364,6 +410,7 @@ struct Kernels {
     rope_bwd: CudaFunction,
     embed_bwd: CudaFunction,
     ce_grad: CudaFunction,
+    adamw: CudaFunction,
 }
 
 /// The CUDA backend handle: a device context, its default stream, a cuBLASLt
@@ -426,6 +473,7 @@ impl CudaChain {
             rope_bwd: f("rope_bwd_kernel"),
             embed_bwd: f("embed_bwd_kernel"),
             ce_grad: f("ce_grad_kernel"),
+            adamw: f("adamw_kernel"),
         })
     }
 
@@ -447,6 +495,35 @@ impl CudaChain {
     pub fn download(&self, m: &CudaMatrix) -> Vec<f32> {
         let bf: Vec<bf16> = self.stream.clone_dtoh(&m.buf).expect("cuda dtoh");
         bf.iter().map(|x| x.to_f32()).collect()
+    }
+
+    /// Upload an fp32 vector to VRAM **without** rounding (master-weight / moment
+    /// storage — see [`CudaF32`]).
+    pub fn upload_f32(&self, data: &[f32]) -> CudaF32 {
+        let buf = self.stream.clone_htod(data).expect("cuda htod f32");
+        CudaF32 {
+            buf,
+            len: data.len(),
+        }
+    }
+
+    /// Download an fp32 resident vector.
+    pub fn download_f32(&self, x: &CudaF32) -> Vec<f32> {
+        self.stream.clone_dtoh(&x.buf).expect("cuda dtoh f32")
+    }
+
+    /// A zero-filled fp32 resident vector of length `n` (fresh AdamW moments).
+    pub fn zeros_f32(&self, n: usize) -> CudaF32 {
+        let buf = self.stream.alloc_zeros::<f32>(n).expect("cuda alloc f32");
+        CudaF32 { buf, len: n }
+    }
+
+    /// Round an fp32 master vector down to a bf16 [`CudaMatrix`] view of shape
+    /// `rows × cols` (the Tensor-core input produced from the master weight).
+    pub fn to_bf16(&self, x: &CudaF32, rows: usize, cols: usize) -> CudaMatrix {
+        assert_eq!(x.len, rows * cols, "to_bf16: len != rows*cols");
+        let host = self.download_f32(x);
+        self.upload(&host, rows, cols)
     }
 
     /// `C = A · B` on Tensor cores: `a` is `m×k`, `b` is `k×n`, result `m×n`
@@ -1172,6 +1249,67 @@ impl CudaChain {
         }
         CudaMatrix { buf: d, rows, cols }
     }
+
+    /// One in-place AdamW step at `step` (1-based) in the mixed-precision regime:
+    /// fp32 master `param`, fp32 moments `m`/`v`, a bf16 `grad`. Updates `param`/`m`/
+    /// `v` in fp32 and refreshes `param_bf16` (the bf16 view fed to the next
+    /// forward/backward GEMM). `bc1`/`bc2` bias corrections are computed host-side.
+    /// Matches `cpu_adamw_step` exactly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step(
+        &self,
+        param: &mut CudaF32,
+        m: &mut CudaF32,
+        v: &mut CudaF32,
+        grad: &CudaMatrix,
+        param_bf16: &mut CudaMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+    ) {
+        let n = param.len;
+        assert_eq!(m.len, n, "adamw_step: m len {} != param {n}", m.len);
+        assert_eq!(v.len, n, "adamw_step: v len {} != param {n}", v.len);
+        assert_eq!(
+            grad.rows * grad.cols,
+            n,
+            "adamw_step: grad has {} elems != {n}",
+            grad.rows * grad.cols
+        );
+        assert_eq!(
+            param_bf16.rows * param_bf16.cols,
+            n,
+            "adamw_step: param_bf16 has {} elems != {n}",
+            param_bf16.rows * param_bf16.cols
+        );
+        let (b1, b2) = betas;
+        let bc1 = 1.0 - b1.powi(step as i32);
+        let bc2 = 1.0 - b2.powi(step as i32);
+        let (n_a, lr_a, b1_a, b2_a, eps_a, wd_a, bc1_a, bc2_a) =
+            (n, lr, b1, b2, eps, weight_decay, bc1, bc2);
+        let mut builder = self.stream.launch_builder(&self.kernels().adamw);
+        builder.arg(&mut param.buf);
+        builder.arg(&mut m.buf);
+        builder.arg(&mut v.buf);
+        builder.arg(&grad.buf);
+        builder.arg(&mut param_bf16.buf);
+        builder.arg(&n_a);
+        builder.arg(&lr_a);
+        builder.arg(&b1_a);
+        builder.arg(&b2_a);
+        builder.arg(&eps_a);
+        builder.arg(&wd_a);
+        builder.arg(&bc1_a);
+        builder.arg(&bc2_a);
+        // SAFETY: arg order/types match `adamw_kernel`; grid covers n.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(n as u32))
+                .expect("launch adamw_kernel");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1758,6 +1896,87 @@ mod tests {
 
         eprintln!(
             "bf16 embed_backward {e_embed:.2e} + cross_entropy_grad {e_ce:.2e} vs CPU — PASS"
+        );
+    }
+
+    /// The mixed-precision AdamW step updates fp32 master `param`/`m`/`v` exactly like
+    /// `cpu_adamw_step` (fed the same bf16-rounded grad) and refreshes the bf16 view.
+    /// The fp32 master path is checked tightly (fp32 arithmetic, rel_err ~1e-3); the
+    /// refreshed bf16 view at bf16 tolerance. Skips with no device.
+    #[test]
+    fn adamw_step_matches_cpu() {
+        let Some(chain) = CudaChain::new()
+        else
+        {
+            eprintln!("cuda: no device, skipping adamw parity");
+            return;
+        };
+        let n = 32usize;
+        let param0: Vec<f32> = (0..n)
+            .map(|i| (i as f32 * 0.13 - 0.5).sin() * 0.2)
+            .collect();
+        let grad_f: Vec<f32> = (0..n)
+            .map(|i| (i as f32 * 0.29 + 0.1).cos() * 0.05)
+            .collect();
+        let (lr, betas, eps, wd) = (1e-3f32, (0.9f32, 0.999f32), 1e-8f32, 0.01f32);
+
+        // Resident state: fp32 master + moments, bf16 grad + bf16 view.
+        let mut param = chain.upload_f32(&param0);
+        let mut m = chain.zeros_f32(n);
+        let mut v = chain.zeros_f32(n);
+        let ggrad = chain.upload(&grad_f, 1, n);
+        // The grad the kernel actually sees is bf16-rounded — feed the same to the
+        // CPU oracle so only the AdamW arithmetic is under test.
+        let grad_bf = chain.download(&ggrad);
+        let mut param_bf = chain.upload(&param0, 1, n);
+
+        // Two steps so bias correction (bc1/bc2) is exercised at step ≥ 2.
+        let mut cpu_p = param0.clone();
+        let mut cpu_m = vec![0.0f32; n];
+        let mut cpu_v = vec![0.0f32; n];
+        for step in 1..=2u32
+        {
+            chain.adamw_step(
+                &mut param,
+                &mut m,
+                &mut v,
+                &ggrad,
+                &mut param_bf,
+                lr,
+                betas,
+                eps,
+                wd,
+                step,
+            );
+            // cpu_adamw_step, inlined (same as scirust_gpu::ops::cpu_adamw_step).
+            let (b1, b2) = betas;
+            let bc1 = 1.0 - b1.powi(step as i32);
+            let bc2 = 1.0 - b2.powi(step as i32);
+            for i in 0..n
+            {
+                let g = grad_bf[i];
+                cpu_m[i] = b1 * cpu_m[i] + (1.0 - b1) * g;
+                cpu_v[i] = b2 * cpu_v[i] + (1.0 - b2) * g * g;
+                let mhat = cpu_m[i] / bc1;
+                let vhat = cpu_v[i] / bc2;
+                cpu_p[i] -= lr * (mhat / (vhat.sqrt() + eps) + wd * cpu_p[i]);
+            }
+        }
+
+        let got_p = chain.download_f32(&param);
+        let got_m = chain.download_f32(&m);
+        let got_v = chain.download_f32(&v);
+        let e_p = rel_err(&got_p, &cpu_p);
+        let e_m = rel_err(&got_m, &cpu_m);
+        let e_v = rel_err(&got_v, &cpu_v);
+        assert!(e_p < 1e-3, "adamw param rel_err {e_p}");
+        assert!(e_m < 1e-3, "adamw m rel_err {e_m}");
+        assert!(e_v < 1e-3, "adamw v rel_err {e_v}");
+        // The refreshed bf16 view must equal the fp32 master, rounded.
+        let e_bf = rel_err(&chain.download(&param_bf), &cpu_p);
+        assert!(e_bf < 5e-2, "adamw bf16 view rel_err {e_bf}");
+        eprintln!(
+            "adamw fp32 master (param {e_p:.2e}, m {e_m:.2e}, v {e_v:.2e}) + bf16 view {e_bf:.2e} vs CPU — PASS"
         );
     }
 }
