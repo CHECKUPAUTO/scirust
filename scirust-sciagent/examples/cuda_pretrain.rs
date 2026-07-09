@@ -293,7 +293,10 @@ fn main() {
     };
 
     let total_steps = start_step + env_usize("SCIAGENT_STEPS", 300);
-    let default_lr = if config.vocab_size <= 512 { 3e-3 } else { 3e-4 };
+    // LR must key off model *size*, not vocab: a 270M byte-level model (vocab 256)
+    // diverges at the 3e-3 that suits a tiny demo. Small trunks (d_model ≤ 256) can
+    // take the hot 3e-3; anything larger gets the standard 3e-4 (with warmup+cosine).
+    let default_lr = if config.d_model <= 256 { 3e-3 } else { 3e-4 };
     let base_lr = std::env::var("SCIAGENT_LR")
         .ok()
         .and_then(|v| v.parse().ok())
