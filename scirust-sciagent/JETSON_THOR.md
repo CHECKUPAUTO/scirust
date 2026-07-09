@@ -107,6 +107,22 @@ autodiff must run on GPU tensors. Two routes:
   `GpuChain` so `ResidentModel` is a backend swap, the phased B0–B5 plan, and the
   **go/no-go probe (B0)**: a cuBLASLt bf16-vs-fp32 GEMM microbench on the Thor whose
   single number decides whether Route B is worth starting.
+- **✅ Underway and validated (B1–B3, B5).** `scirust-cuda` (feature-gated) now runs
+  the **whole bf16 decoder forward on Blackwell Tensor cores** — every op
+  gradient-checked vs the CPU, and the full `CudaModel` forward matches the CPU model
+  to **rel_err ~2.4 %** (`tests/cuda_parity.rs`). **Measured forward speedup vs Route
+  A (`examples/cuda_forward_bench`, same forward, fp32 wgpu vs bf16 Tensor cores):**
+
+  | config | Route A (wgpu fp32) | Route B (bf16 TC) | speedup |
+  |--------|--------------------:|------------------:|--------:|
+  | d512 · 8L, seq 128        | 760 tok/s | **4,529 tok/s** | **6.0×** |
+  | d1024 · 24L (~350M), seq 256 | 139 tok/s | **1,158 tok/s** | **8.3×** |
+
+  The lever is real at the model level: **6–8.3×** forward throughput (bigger models
+  trend toward the B0 microbench's 12.9× as GEMMs dominate; the gap is non-GEMM
+  kernels + the host logits download), at a ~2.4 % bf16 accuracy cost. **Remaining:**
+  the mixed-precision **backward + AdamW** (B4) to make Route B training-capable, then
+  the training/decode throughput numbers.
 
 Recommended sequencing: **A to get correctness and a working run on the Thor,
 then B to make it fast.**

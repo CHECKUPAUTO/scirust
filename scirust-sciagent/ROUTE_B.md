@@ -1,8 +1,10 @@
 # Route B — native CUDA + Tensor cores for the Thor (design & feasibility)
 
-**Status: B0 (feasibility gate) PASSED on the Thor — 12.9× measured. Design agreed
-on the open decisions below; B1 is the first code.** This is the scoping companion to
-`JETSON_THOR.md`, which has the measured Route-A ceiling this route exists to lift.
+**Status: B1–B3 + B5 DONE and validated on the Thor. The whole bf16 forward runs on
+Tensor cores (matches the CPU model to rel_err ~2.4 %) and is measured at 6–8.3×
+Route A's fp32 forward. B4 (backward + AdamW → training) is the remaining piece.**
+This is the scoping companion to `JETSON_THOR.md`, which has the measured Route-A
+ceiling this route exists to lift.
 
 ## TL;DR
 
@@ -101,23 +103,28 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
 - **B0 — feasibility gate. ✅ PASSED.** CUDA 13.0 on the Thor lists `compute_110`;
   a bf16 Tensor-core GEMM measured **12.9×** the fp32 CUDA-core GEMM on a 350M shape
   (39.1 vs 3.0 TFLOP/s, under load). Well past the ~8–10× go threshold ⇒ **GO**.
-- **B1 — plumbing + one GEMM.** `scirust-cuda` crate; device/stream/buffers; one
-  cuBLASLt bf16 GEMM wrapped and **gradient-checked** vs CPU at bf16 tolerance.
-- **B2 — elementwise/attention kernels.** Port the validated WGSL ops to `.cu`
-  (softmax, scale/mask, RMSNorm ± gain-grad, RoPE ±, SwiGLU ±, slice/place,
-  concat/slice-rows, embed ± scatter, cross-entropy grad). Each gradient-checked.
-- **B3 — resident forward.** Compose `CudaChain` GQA forward → full 350M
-  `tokens→logits`, parity vs CPU (reduced-precision tolerance).
-- **B4 — backward + AdamW.** Mixed-precision backward, fp32-master AdamW step;
-  resident training step reduces loss; `ResidentModel` runs on `CudaChain`.
-- **B5 — measure & document.** Training + decode throughput vs Route A; fold the real
-  numbers into `JETSON_THOR.md` (and re-run the speculative cost model with the new
-  `t_g`). This is where the 10–30× hypothesis becomes a measured fact or a corrected
-  one.
+- **B1 — plumbing + one GEMM. ✅ DONE.** `scirust-cuda` crate (cudarc, cuBLASLt,
+  bf16); `CudaChain`/`CudaMatrix`; the bf16 Tensor-core GEMM gradient-checked vs CPU
+  (rel_err 3.4e-3). Builds CUDA-free without the feature.
+- **B2 — elementwise/attention kernels. ✅ DONE (forward).** NVRTC runtime-compiled,
+  header-free bf16: `add`, `mul`, `swiglu`, `rms_norm`, `slice_cols`/`place_cols`,
+  `softmax`, `scale_causal_mask`, `rope`, `embed`, plus cuBLASLt `matmul_bt` (A·Bᵀ).
+  Each gradient-checked vs CPU at bf16 tolerance. (Backward adjoints are part of B4.)
+- **B3 — resident forward. ✅ DONE.** `CudaModel` (`scirust-sciagent`, feature `cuda`)
+  composes the full `embed → N×GQA → final RMSNorm → tied head` on `CudaChain` and
+  matches the CPU `SciAgentModel` to **rel_err 2.37e-2** (`tests/cuda_parity.rs`).
+- **B5 — measure (forward). ✅ DONE.** `examples/cuda_forward_bench` (fp32 wgpu vs
+  bf16 Tensor cores, same forward): **6.0×** at d512·8L, **8.3×** at d1024·24L (350M:
+  139 → 1,158 tok/s). Model-level realization of B0's 12.9× bare-GEMM (the gap is
+  non-GEMM overhead + the host logits download; larger models close it).
+- **B4 — backward + AdamW. ⏳ REMAINING.** Mixed-precision backward adjoints for every
+  op + fp32-master AdamW → a bf16 training step that reduces loss, gradient-checked.
+  This is the large piece that turns Route B from inference-capable into
+  training-capable (and finally answers from-scratch-pretrain feasibility in bf16).
+  The **training/decode** throughput measurement folds in once B4 lands.
 
-Realistically B1–B4 is **many gradient-checked bricks** (comparable to the whole
-`scirust-gpu` build-out), each validated on the Thor. This is a multi-session
-undertaking; B0 is what tells us it's worth starting.
+Realistically B4 is **many gradient-checked bricks** (comparable to Route A's backward
+build-out), each validated on the Thor.
 
 ## Risks / honesty
 
