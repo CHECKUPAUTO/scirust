@@ -3226,6 +3226,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-sigma"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "scirust-signal"
 version = "0.1.0"
 dependencies = [
