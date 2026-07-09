@@ -1,0 +1,9 @@
+[package]
+name = "scirust-stats"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Probability distributions and classical statistical inference (t/Welch/ANOVA/χ²-GOF/KS) on the audited scirust-special numeric base. Unified Distribution trait, deterministic sampling, oracle-tested. Pure Rust, no unsafe."
+
+[dependencies]
+scirust-special = { path = "../scirust-special" }

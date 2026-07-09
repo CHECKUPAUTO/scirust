@@ -6,6 +6,7 @@ publish = false
 description = "SciRust inertial tolerancing (tolérancement inertiel, Pillet) — inertia I=√(δ²+σ²), inertial capability Cpi, Cpm/Cpk/Pp/Ppk, 1D tolerance-chain analysis & allocation (worst-case / statistical / weighted / guaranteed-Cpk), and the inertial piloting chart"
 
 [dependencies]
+scirust-special = { path = "../scirust-special" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
