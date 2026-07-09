@@ -160,6 +160,18 @@ Câblés dans `scirust-mcp` (`tolerance_gage_rr`, `tolerance_statistical_interva
 `tolerance_dual_sensitivity`, `tolerance_distribution_fit`, `tolerance_gdt`,
 `tolerance_capability_ci`). Fuzz global : **98 858 checks / 0 erreur**.
 
+### Ajouté — transpileur : **MATLAB `range(v)`** — étendue statistique, prouvée contre Octave réel (Phase 2, incrément 49)
+`range(v) = max(v) − min(v)` (étendue de l'échantillon), composée depuis les nœuds de
+réduction `Max`/`Min` déjà vérifiés — aucun nouveau nœud SIR, std-only. L'inférence de
+type reconnaît `range` comme une réduction (argument vecteur).
+
+- `range(v)` : vecteur → scalaire (différence max−min).
+
+Un cas d'oracle (`range(v)` sur un vecteur de 7 éléments). **Oracle 140/140** (200
+essais chacun) ; **97 tests unitaires** (1 nouveau).
+*Non-vacuité* : remplacer la soustraction par une addition (`max+min` au lieu de
+`max−min`) fait diverger le cas `range` — la composition est bien portante.
+
 ### Ajouté — transpileur : **MATLAB `fftshift` / `ifftshift`** — centrage du spectre, prouvés contre Octave réel (Phase 2, incrément 48)
 Compagnons de la FFT : `fftshift(v)` ramène la composante de fréquence nulle au
 centre (échange des deux moitiés = `circshift` de `⌊n/2⌋`) et `ifftshift(v)` l'inverse

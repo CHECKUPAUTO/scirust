@@ -794,6 +794,20 @@ mod tests {
     }
 
     #[test]
+    fn matlab_range_is_max_minus_min() {
+        // range(v) = max(v) - min(v), composed from the existing reduction nodes;
+        // `v` inferred an array, scalar result, std-only.
+        let src = "function y = f(v)\n  y = range(v);\nend\n";
+        let rust = transpile_matlab(src).unwrap();
+        assert_eq!(sig_of(&rust, "f"), "pub fn f(v: &[f64]) -> f64 {");
+        assert!(rust.contains("np::max(") && rust.contains("np::min("));
+        assert!(required_crates(&transpile_matlab_to_sir(src).unwrap()).is_empty());
+        // A scalar expression argument is rejected (range is a vector reduction).
+        let bad = transpile_matlab("function y = f(x)\n  y = range(x * 2.0);\nend\n");
+        assert!(bad.is_err());
+    }
+
+    #[test]
     fn matlab_linspace_constructs_a_vector_from_scalars() {
         // linspace(a, b, n) builds a vector: scalar a/b params, integer count.
         let rust =
