@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         let path = &args[pos + 2];
         let f = pf::certify::FUNCTIONS
             .iter()
-            .find(|(n, _, _)| n == name)
+            .find(|(n, _, _, _)| n == name)
             .unwrap_or_else(|| panic!("fonction inconnue : {name}"))
             .1;
         let body = std::fs::read_to_string(path).expect("lecture");
@@ -67,12 +67,12 @@ fn main() -> ExitCode {
             std::env::consts::FAMILY
         );
         let t = Instant::now();
-        for (name, public, eval) in pf::certify::FUNCTIONS
+        for (name, public, eval, exceptions) in pf::certify::FUNCTIONS
         {
-            let rep = pf::certify::sweep(public, eval, 1);
+            let rep = pf::certify::sweep(public, eval, exceptions, 1);
             println!(
-                "{name}.certify analytic={} certified={} uncertified={}",
-                rep.analytic, rep.certified, rep.uncertified
+                "{name}.certify analytic={} oracle={} certified={} uncertified={}",
+                rep.analytic, rep.oracle, rep.certified, rep.uncertified
             );
             // liste complète pour la vérification hors ligne (gitignorée)
             if !rep.samples.is_empty()

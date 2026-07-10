@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — preuve CR totale, all-reduce arbre fixe, basses précisions (volet 115)
+- **Arrondi correct sur 100 % du domaine f32** pour les 7 transcendantales
+  portables : les 465 entrées fautives identifiées au volet 114 (sorties
+  vérifiées par l'oracle en précision arbitraire) sont servies par des
+  **tables d'exceptions** consultées avant le chemin analytique — résultat de
+  classe RLIBM (CR sur tout le domaine), obtenu par vérification exhaustive ;
+  la preuve formelle machine-checkée des bornes reste l'étape suivante
+  (documenté). Catégorie `oracle` dans le certificat ; empreintes
+  dense/exhaustives re-récoltées.
+- **`scirust-core::tree_allreduce`** : all-reduce **à arbre fixe**,
+  transport-agnostique — absorption des enfants dans l'ordre de l'arbre
+  (hors-ordre mis en attente) ⇒ résultat indépendant du timing ; avec
+  `ExactSum` (Kulisch), indépendant aussi de la topologie et correctement
+  arrondi. Démontré sous gigue adversariale (Philox) sur n ∈ {2,3,5,8,16}.
+  Le jalon « réduction multi-nœud à arbre fixe » du GROWTH_PLAN.
+- **`scirust-core::lowprec`** : bf16/f16/FP8 (OCP E4M3/E5M2) reproductibles —
+  conversions RNE bit-manipulées (portables par construction, roundtrips
+  exhaustifs 65 536 + 256 codes, frontières au milieu exact), **arrondi
+  stochastique contre-basé** (Philox : reproductible, order-independent,
+  non biaisé), `gemm_bf16_exact` (produits exacts, accumulation ordre fixe).
+  Explicitement hors périmètre de RepDL.
 ### Ajouté — 4 lois discrètes supplémentaires (`scirust-stats::discrete`, suite du volet loterie)
 - Comble les écarts vs SciPy listés « suites possibles » dans la PR #280 :
   **`NegativeBinomial`** (échecs avant le r-ième succès, convention
