@@ -27,8 +27,22 @@
   0x418f903e10257c1e / dense 0xa25de6342faed6e8 / exhaustif 0xd6f9e8508d19f785,
   sigmoid contract 0xea084f0622bdfec4 / dense 0xb82676717c581433 / exhaustif
   0x6796eabedfe7cb02. Binaire de preuve étendu (4 fonctions balayées).
-  Débloque : LSTM/GRU portables, GELU-tanh. Reste du lot 1 : sin/cos
-  (réduction Payne-Hanek pour grands arguments) puis erf (GELU exact).
+  Débloque : LSTM/GRU portables, GELU-tanh.
+- **Lot 1 (suite) — sin/cos portables avec Payne–Hanek** : `sin_f32`/`cos_f32`
+  dans portable_f32. Réduction d'argument de Payne & Hanek en **arithmétique
+  entière pure u128** (exacte pour tout f32 fini jusqu'à 3,4e38) : produit
+  mantisse × 448 bits de 2/π — bits GÉNÉRÉS par nos soins (π par Chudnovsky
+  en Decimal, vérifié par recomposition ; aucune table copiée) — quadrant +
+  128 bits de fraction signée, r = fraction·(π/2) à ~2⁻⁵² relatif (conversion
+  i128→f64 correctement arrondie ⇒ fidèle même aux pires cas de réduction f32,
+  |r| ≳ 2⁻³²). Polynômes de Taylor sin(deg 15)/cos(deg 16) sur [−π/4, π/4].
+  Oracle ≤ 1 ulp vs libm f64 sur 200 k points TOUTES magnitudes ; parités
+  bit-exactes ; sin²+cos² = 1 à 1e38. Contrats commis : sin contract
+  0x39c99b71fdbce247 / dense 0x084d235e4d8ddac7 / exhaustif 0xc0719c2d610d8685,
+  cos contract 0xcdc07dac0d401d29 / dense 0xcde8a193db4b2f5c / exhaustif
+  0xb9b0750ee67e5475. Binaire de preuve : 6 fonctions balayées. Débloque :
+  RoPE portable (transformers), FFT portable (scirust-signal), encodages
+  positionnels. Reste du lot 1 : erf (GELU exact).
 - Validation avant commit : preuve native x86 PASS + QEMU aarch64 PASS
   (tests, proof_portable_f32, proof_portable_training).
 

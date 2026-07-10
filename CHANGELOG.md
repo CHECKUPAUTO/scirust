@@ -23,8 +23,18 @@ versions sémantiques à partir de la prochaine release taguée.
   impaire exacte) : fidèlement arrondis (≤ 1 ulp vs oracle libm f64 sur
   200 000 points), contrats contract/dense/exhaustif commis, binaire de
   preuve étendu à 4 fonctions. Premier lot de la cartographie des trous
-  (AUDIT_REPDL §post-scriptum) : débloque LSTM/GRU portables et GELU-tanh ;
-  sin/cos (Payne-Hanek) et erf suivront.
+  (AUDIT_REPDL §post-scriptum) : débloque LSTM/GRU portables et GELU-tanh.
+- **`sin_f32` / `cos_f32`** portables avec réduction d'argument de
+  **Payne & Hanek en arithmétique entière pure** (u128) — exacte pour tout
+  f32 fini jusqu'à 3,4×10³⁸. Les 448 bits de 2/π sont générés par nos soins
+  (π par Chudnovsky, vérification par recomposition — aucune table copiée
+  d'une libm). Quadrant + 128 bits de fraction signée ; conversion
+  i128 → f64 correctement arrondie ⇒ fidélité maintenue même aux pires cas
+  de réduction du format f32. Oracle ≤ 1 ulp vs libm f64 sur 200 000 points
+  toutes magnitudes ; parités bit-exactes ; contrats
+  contract/dense/exhaustif commis (binaire de preuve : 6 fonctions).
+  Débloque : RoPE portable (transformers), FFT portable, encodages
+  positionnels. Reste du lot 1 : erf (GELU exact).
 
 ### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
 - **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**

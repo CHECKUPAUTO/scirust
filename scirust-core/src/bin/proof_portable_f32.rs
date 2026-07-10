@@ -93,6 +93,16 @@ fn main() -> ExitCode {
         pf::sweep_fingerprint(pf::sigmoid_f32, pf::PROOF_STEP_CONTRACT),
         pf::PROOF_SIGMOID_FP_CONTRACT,
     );
+    ok &= check_fp(
+        "sin.contract",
+        pf::sweep_fingerprint(pf::sin_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_SIN_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "cos.contract",
+        pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_COS_FP_CONTRACT,
+    );
 
     // --- Balayage dense (pas 257, ≈ 16,7 M d'entrées par fonction) ---
     println!("dense.step={}", pf::PROOF_STEP_DENSE);
@@ -116,6 +126,16 @@ fn main() -> ExitCode {
         "sigmoid.dense",
         pf::sweep_fingerprint(pf::sigmoid_f32, pf::PROOF_STEP_DENSE),
         pf::PROOF_SIGMOID_FP_DENSE,
+    );
+    ok &= check_fp(
+        "sin.dense",
+        pf::sweep_fingerprint(pf::sin_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_SIN_FP_DENSE,
+    );
+    ok &= check_fp(
+        "cos.dense",
+        pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_COS_FP_DENSE,
     );
     println!("# duree_dense_s={:.1}", t.elapsed().as_secs_f64());
 
@@ -151,6 +171,16 @@ fn main() -> ExitCode {
             "sigmoid.exhaustive",
             pf::sweep_fingerprint(pf::sigmoid_f32, 1),
             pf::PROOF_SIGMOID_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "sin.exhaustive",
+            pf::sweep_fingerprint(pf::sin_f32, 1),
+            pf::PROOF_SIN_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "cos.exhaustive",
+            pf::sweep_fingerprint(pf::cos_f32, 1),
+            pf::PROOF_COS_FP_EXHAUSTIVE,
         );
         println!("# duree_exhaustive_s={:.1}", t.elapsed().as_secs_f64());
     }
