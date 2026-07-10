@@ -3112,6 +3112,29 @@ plutôt qu'une formule devinée) :
   18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
 - 48 tests + doctest sur le crate, clippy 0 avertissement.
 
+### Ajouté — interval/expect + Yule-Simon + Boltzmann (5e passe du volet probabilités)
+> Entrée en bas de section (voir la note de la 4e passe) pour éviter les
+> conflits de merge systématiques sur le bloc de tête.
+- **`scirust-stats::discrete` — `interval` et `expect`** ajoutés par défaut au
+  trait `DiscreteDistribution`, complétant la parité `scipy.stats` :
+  `interval(c)` renvoie l'intervalle équilibré `(quantile((1−c)/2),
+  quantile((1+c)/2))` ; `expect(f)` calcule `E[f(X)] = Σ f(k)·pmf(k)` par
+  sommation déterministe bornée (arrêt quand la masse de queue `sf(k)` est
+  négligeable, plafond de sécurité). Validés SciPy (intervalles binomiale/
+  Poisson/Yule-Simon, `E[X]`/`E[X²]` = moyenne / var+moyenne²).
+- **`scirust-stats::discrete::YuleSimon`** — loi **à queue lourde** sur k ≥ 1,
+  `pmf(k) = α·B(k, α+1)` (attachement préférentiel : fréquences de mots,
+  citations). Queue en loi de puissance `k^(−(α+1))` ⇒ moyenne finie ssi
+  α > 1, variance ssi α > 2 ; survie en forme fermée `sf(k) = k·B(k, α+1)`.
+  Oracles SciPy `yulesimon(2.5)` et identité exacte `α=2 ⇒ 4/(k(k+1)(k+2))`.
+- **`scirust-stats::discrete::Boltzmann`** — géométrique tronquée à `0..=n−1`
+  (Planck tronquée, `scipy.stats.boltzmann`),
+  `pmf(k) = (1−e^(−λ))e^(−λk)/(1−e^(−λN))` ; pmf/cdf/survie directe et
+  moments en forme fermée (normalisation via `−expm1` pour la précision aux
+  petits `λN`). Oracles SciPy `boltzmann(1.4, 10)`.
+- 51 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
+  16 lois discrètes (13 univariées + 3 vectorielles).
+
 ## [0.14.0] — 2026-06-13
 
 ### Réparé
