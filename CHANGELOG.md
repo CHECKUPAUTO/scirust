@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — 4 lois discrètes supplémentaires (`scirust-stats::discrete`, suite du volet loterie)
+- Comble les écarts vs SciPy listés « suites possibles » dans la PR #280 :
+  **`NegativeBinomial`** (échecs avant le r-ième succès, convention
+  `scipy.stats.nbinom`, r réel autorisé — paramétrisation de Pólya pour la
+  régression de comptage surdispersée ; CDF fermée par bêta incomplète
+  régularisée I_p(r, k+1), survie directe sans `1 − cdf`),
+  **`BetaBinomial`** (binomiale à p Beta(a, b)-distribué — proportions
+  surdispersées ; a = b = 1 redonne l'uniforme discrète, testé),
+  **`Zipfian`** finie sur les rangs 1..=n (`scipy.stats.zipfian` ;
+  normalisation harmonique généralisée sommée petits-termes-d'abord en ordre
+  fixe ; s = 0 = uniforme ; la zêta à support infini nécessiterait ζ de
+  Riemann et n'est volontairement pas approximée), et **`Skellam`**
+  (différence de deux Poisson — support ℤ entier, donc API `i64` propre hors
+  du trait u64 ; pmf/cdf/sf par convolution déterministe à troncature fixe
+  sur la base `scirust-special` plutôt que par Bessel I_k, ~1e-12 vs SciPy ;
+  tirage déterministe = différence de deux tirages Poisson inverse-CDF).
+- Validation : oracles SciPy 1.17.1 en dur dans les tests (pmf/cdf/sf/ppf,
+  moments), invariants Σ pmf = 1, symétrie de Skellam à taux égaux,
+  cdf + sf = 1 sur les deux queues ℤ, r = 1 ⇒ géométrique décalée.
+  40 tests unitaires + doctest au total sur le crate, clippy propre.
+
 ### Ajouté — mécanique des fluides & thermodynamique (`scirust-fluids`, `scirust-thermo`)
 - **`scirust-fluids`** — mécanique des fluides déterministe (Rust pur, zéro
   dépendance, `forbid(unsafe_code)`, entrées validées → `FluidsError` typé) :

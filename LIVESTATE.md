@@ -3,6 +3,40 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités discrètes, combinatoire exacte & loterie honnête
+- **Contexte** : demande utilisateur — « lacunes graves en probabilités,
+  capacité à fournir des algorithmes de prévision des résultats de loterie ».
+  Réponse en deux temps : (a) la lacune réelle (aucune loi discrète publique,
+  pas d'hypergéométrique, pas de combinatoire exacte) est comblée ; (b) la
+  « prévision » de loterie est mathématiquement impossible (tirages i.i.d.
+  uniformes, sophisme du joueur — Clotfelter & Cook 1993) et le module
+  `lottery` n'expose délibérément aucun `predict`, doc explicite à l'appui.
+- **PR #280 (MERGÉE)** : `scirust-stats::discrete` (trait
+  `DiscreteDistribution` + Binomiale/Poisson/Hypergéométrique/Géométrique,
+  conventions SciPy, survie directe, tirage inverse-CDF `SplitMix64`),
+  `::comb` (factorial/binomial/permutations/multichoose exacts en u128
+  vérifié + formes ln), `::lottery` (`LotteryGame` — cotes exactes
+  k-de-n + bonus par produit d'hypergéométriques, `expected_gain`/`net`,
+  audit χ² des fréquences ; constructeurs loto_france/euromillions/
+  powerball/lotto_6of49). Oracles : SciPy 1.17.1, fractions exactes,
+  tables officielles (Powerball 9 rangs au centième conforme
+  powerball.com, EuroMillions 5+1 = 1/6 991 908 exact, FDJ 1/19 068 840).
+- **2e passe (cette branche)** : +4 lois — `NegativeBinomial` (r réel,
+  CDF bêta incomplète), `BetaBinomial`, `Zipfian` finie, `Skellam`
+  (support ℤ, API i64 hors trait, convolution déterministe sans Bessel).
+  40 tests + doctest verts, clippy 0 avertissement.
+- **Veille effectuée** (docs officielles) : SciPy = 21 lois discrètes
+  univariées ; statrs 9 ; rand_distr échantillonnage seul ; R d/p/q/r ;
+  3 paramétrisations hypergéométriques incompatibles dans l'écosystème —
+  convention statrs (`population/successes/draws`) retenue et documentée.
+- **Suite possible** : Poisson-binomiale, multivariées discrètes
+  (multinomiale, hypergéométrique multivariée), `logcdf`/`isf`, pmf de
+  Loader (saddle-point) pour binomiale à très grand n, zêta infinie (ζ de
+  Riemann dans `scirust-special` d'abord) — non entamé.
+- **NB identité** : décision volet 110 réaffirmée par l'utilisateur —
+  l'acteur est TAREK ZEKRITI (identité git locale configurée dans la
+  session ; « CHECKUPAUTO » ne doit plus apparaître comme acteur).
+
 ## Session 2026-07-10 — mécanique des fluides & thermodynamique
 - **Contexte** : demande utilisateur — « scirust n'offre pas de solutions aux
   problématiques de mécanique des fluides, la thermodynamique… ». Constat
