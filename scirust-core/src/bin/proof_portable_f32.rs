@@ -103,6 +103,16 @@ fn main() -> ExitCode {
         pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_CONTRACT),
         pf::PROOF_COS_FP_CONTRACT,
     );
+    ok &= check_fp(
+        "erf.contract",
+        pf::sweep_fingerprint(pf::erf_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_ERF_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "gelu.contract",
+        pf::sweep_fingerprint(pf::gelu_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_GELU_FP_CONTRACT,
+    );
 
     // --- Balayage dense (pas 257, ≈ 16,7 M d'entrées par fonction) ---
     println!("dense.step={}", pf::PROOF_STEP_DENSE);
@@ -136,6 +146,16 @@ fn main() -> ExitCode {
         "cos.dense",
         pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_DENSE),
         pf::PROOF_COS_FP_DENSE,
+    );
+    ok &= check_fp(
+        "erf.dense",
+        pf::sweep_fingerprint(pf::erf_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_ERF_FP_DENSE,
+    );
+    ok &= check_fp(
+        "gelu.dense",
+        pf::sweep_fingerprint(pf::gelu_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_GELU_FP_DENSE,
     );
     println!("# duree_dense_s={:.1}", t.elapsed().as_secs_f64());
 
@@ -181,6 +201,11 @@ fn main() -> ExitCode {
             "cos.exhaustive",
             pf::sweep_fingerprint(pf::cos_f32, 1),
             pf::PROOF_COS_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "erf.exhaustive",
+            pf::sweep_fingerprint(pf::erf_f32, 1),
+            pf::PROOF_ERF_FP_EXHAUSTIVE,
         );
         println!("# duree_exhaustive_s={:.1}", t.elapsed().as_secs_f64());
     }

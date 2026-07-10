@@ -42,7 +42,22 @@
   cos contract 0xcdc07dac0d401d29 / dense 0xcde8a193db4b2f5c / exhaustif
   0xb9b0750ee67e5475. Binaire de preuve : 6 fonctions balayées. Débloque :
   RoPE portable (transformers), FFT portable (scirust-signal), encodages
-  positionnels. Reste du lot 1 : erf (GELU exact).
+  positionnels.
+- **Lot 1 (fin) — erf + GELU exact portables** : `erf_f32` (série de Maclaurin
+  f64, arrêt relatif déterministe, saturation |x| ≥ 4 → ±1, raccourci
+  |x| < 1e-4 qui préserve ±0 — bug de signe de zéro attrapé par le test
+  specials et corrigé avant commit des goldens) et `gelu_f32` (x/2·(1+erf(x/√2))
+  via le cœur f64, sans cast intermédiaire ; gelu(−∞) = −0). Précision
+  vérifiée contre une **table de référence indépendante** (série en Decimal
+  60 chiffres, générée par nos soins — pas la libm, qui n'a pas d'erf en Rust
+  std). Contrats : erf contract 0xfe817b5a5db40dc8 / dense 0xb7d54a90605132c5 /
+  exhaustif 0x37655614b70cf42d ; gelu contract 0x8f06fb9eb406d63f / dense
+  0xf1a6e6ae9f03349b. Binaire de preuve : 8 balayages. **LOT 1 COMPLET** :
+  la voie portable offre exp, ln, tanh, sigmoid, sin, cos, erf, GELU —
+  soit STRICTEMENT PLUS que les transcendantales de RepDL (exp/log), toutes
+  sous contrat exhaustif ou dense. Prochains candidats de la carto : RNG
+  contre-basé (Philox), GEMM classe ReproBLAS, erf dans scirust-special
+  (remplacer la claim libm « partout » par la voie portable).
 - Validation avant commit : preuve native x86 PASS + QEMU aarch64 PASS
   (tests, proof_portable_f32, proof_portable_training).
 

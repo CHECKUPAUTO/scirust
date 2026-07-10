@@ -34,7 +34,18 @@ versions sémantiques à partir de la prochaine release taguée.
   toutes magnitudes ; parités bit-exactes ; contrats
   contract/dense/exhaustif commis (binaire de preuve : 6 fonctions).
   Débloque : RoPE portable (transformers), FFT portable, encodages
-  positionnels. Reste du lot 1 : erf (GELU exact).
+  positionnels.
+- **`erf_f32` / `gelu_f32`** portables — **lot 1 complet**. erf : série de
+  Maclaurin f64 à arrêt relatif déterministe, saturation |x| ≥ 4,
+  raccourci petit-argument préservant ±0 ; GELU **exact**
+  (x/2·(1+erf(x/√2)) via le cœur f64, sans cast intermédiaire).
+  Précision vérifiée contre une table de référence **indépendante**
+  (série en Decimal 60 chiffres — pas la libm). Contrats
+  contract/dense(/exhaustif pour erf) commis ; binaire de preuve :
+  8 balayages. La voie portable offre désormais exp, ln, tanh, sigmoid,
+  sin, cos, erf, GELU — strictement plus que les transcendantales de
+  RepDL — toutes fidèlement arrondies et bit-exactes inter-plates-formes
+  par construction.
 
 ### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
 - **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**

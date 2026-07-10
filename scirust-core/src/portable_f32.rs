@@ -357,6 +357,86 @@ pub fn cos_f32(x: f32) -> f32 {
     }) as f32
 }
 
+/// `erf(x)` portable : bit-exact inter-plates-formes par construction,
+/// fidèlement arrondi. Série de Maclaurin en f64
+/// (erf(x) = 2/√π · Σ (−1)ⁿ x²ⁿ⁺¹/(n!(2n+1))) avec arrêt **relatif**
+/// déterministe (comparaisons IEEE identiques partout) et plafond
+/// d'itérations ; `erf(±0) = ±0`, fonction impaire bit-exacte ; NaN et
+/// ±∞ → NaN canonique / ±1 ; saturation `|x| ≥ 4` → `±1`
+/// (erfc(4) ≈ 1,5e-8 arrondit à 1 en f32). La cancellation alternée
+/// culmine à ~2¹⁷ vers x = 4 : l'erreur f64 résiduelle (~2⁻³⁶) reste très
+/// au-dessous du demi-ulp f32.
+pub fn erf_f32(x: f32) -> f32 {
+    if x.is_nan()
+    {
+        return CANONICAL_NAN;
+    }
+    let ax = x.abs();
+    if ax >= 4.0
+    {
+        return 1.0f32.copysign(x); // couvre aussi ±∞
+    }
+    if ax < 1e-4
+    {
+        // erf(x) ≈ (2/√π)·x (terme suivant < 2⁻²⁸ relatif) ; préserve ±0
+        // (la série perdrait le signe du zéro : (−0) + (+0) = +0 en IEEE).
+        return ((x as f64) * core::f64::consts::FRAC_2_SQRT_PI) as f32;
+    }
+    (erf_f64_core(x as f64) * core::f64::consts::FRAC_2_SQRT_PI) as f32
+}
+
+/// Cœur f64 de la série de Maclaurin d'erf (sans le facteur 2/√π).
+/// Précondition : |y| < ~4,1 (garanti par les gardes des appelants).
+fn erf_f64_core(y: f64) -> f64 {
+    let z = -y * y;
+    let mut term = y; // x^(2n+1)·(−1)ⁿ/n! par récurrence
+    let mut sum = y;
+    let mut n = 1.0f64;
+    while n < 80.0
+    {
+        term = term * z / n;
+        let contrib = term / (2.0 * n + 1.0);
+        sum += contrib;
+        if contrib.abs() < sum.abs() * 1e-18
+        {
+            break;
+        }
+        n += 1.0;
+    }
+    sum
+}
+
+/// GELU **exact** portable : `x/2 · (1 + erf(x/√2))` — l'activation standard
+/// des transformers, composée d'opérations IEEE de base et du cœur d'erf en
+/// f64 (aucun cast intermédiaire), donc bit-exacte inter-plates-formes et
+/// fidèlement arrondie (ni RepDL ni la voie libm de scirust-special ne
+/// l'offrent sous garantie de portabilité).
+pub fn gelu_f32(x: f32) -> f32 {
+    if x.is_nan()
+    {
+        return CANONICAL_NAN;
+    }
+    if x == f32::NEG_INFINITY
+    {
+        return -0.0; // x·Φ(x) → 0⁻ (évite −∞·0 = NaN)
+    }
+    if x == 0.0
+    {
+        return x; // ±0 (et évite le tour complet de la série à zéro)
+    }
+    let y = x as f64;
+    let u = y * core::f64::consts::FRAC_1_SQRT_2;
+    let e = if u.abs() >= 4.0
+    {
+        1.0f64.copysign(u) // saturation d'erf (couvre aussi ±∞)
+    }
+    else
+    {
+        erf_f64_core(u) * core::f64::consts::FRAC_2_SQRT_PI
+    };
+    (0.5 * y * (1.0 + e)) as f32
+}
+
 /// `ln(x)` portable : bit-exact inter-plates-formes par construction,
 /// fidèlement arrondi (cf. doc du module). `ln(NaN)` et `ln(x<0)` → NaN
 /// canonique, `ln(±0)` → `−∞`, `ln(+∞)` → `+∞` ; les entrées sous-normales
@@ -536,6 +616,17 @@ pub const PROOF_COS_FP_DENSE: u64 = 0xcde8_a193_db4b_2f5c;
 pub const PROOF_SIN_FP_EXHAUSTIVE: u64 = 0xc071_9c2d_610d_8685;
 /// Empreinte attendue de `cos_f32` sur le balayage exhaustif.
 pub const PROOF_COS_FP_EXHAUSTIVE: u64 = 0xb9b0_750e_e67e_5475;
+
+/// Empreinte attendue de `erf_f32` sur le balayage-contrat.
+pub const PROOF_ERF_FP_CONTRACT: u64 = 0xfe81_7b5a_5db4_0dc8;
+/// Empreinte attendue de `erf_f32` sur le balayage dense.
+pub const PROOF_ERF_FP_DENSE: u64 = 0xb7d5_4a90_6051_32c5;
+/// Empreinte attendue de `erf_f32` sur le balayage exhaustif.
+pub const PROOF_ERF_FP_EXHAUSTIVE: u64 = 0x3765_5614_b70c_f42d;
+/// Empreinte attendue de `gelu_f32` sur le balayage-contrat.
+pub const PROOF_GELU_FP_CONTRACT: u64 = 0x8f06_fb9e_b406_d63f;
+/// Empreinte attendue de `gelu_f32` sur le balayage dense.
+pub const PROOF_GELU_FP_DENSE: u64 = 0xf1a6_e6ae_9f03_349b;
 
 /// Empreinte attendue du softmax-contrat (PCG(7), n = 64, plage [−10, 10)).
 pub const PROOF_SOFTMAX_FP: u64 = 0x2b0c_3ead_12aa_19d5;
@@ -828,6 +919,82 @@ mod tests {
                 "cos_f32({x}) = {c_got}, libm = {c_ref}"
             );
         }
+    }
+
+    /// erf : ≤ 1 ulp d'une table de référence calculée indépendamment en
+    /// précision arbitraire (série de Maclaurin en Decimal, 60 chiffres,
+    /// volet 113 — pas la libm). Bits attendus commis.
+    #[test]
+    fn erf_matches_independent_reference() {
+        let table: [(f32, u32); 16] = [
+            (9.999999974752427e-07, 0x359772d0),
+            (9.999999747378752e-05, 0x38eca365),
+            (0.009999999776482582, 0x3c38de13),
+            (0.10000000149011612, 0x3de652f5),
+            (0.25, 0x3e8d7aa7),
+            (0.5, 0x3f053f7b),
+            (0.75, 0x3f360e4c),
+            (1.0, 0x3f57bb3d),
+            (1.25, 0x3f6c432f),
+            (1.5, 0x3f7752ab),
+            (2.0, 0x3f7ecd71),
+            (2.5, 0x3f7fe554),
+            (3.0, 0x3f7ffe8d),
+            (3.5, 0x3f7ffff4),
+            (3.9000000953674316, 0x3f7fffff),
+            (3.990000009536743, 0x3f800000),
+        ];
+        for &(x, ref_bits) in &table
+        {
+            let got = erf_f32(x);
+            let reference = f32::from_bits(ref_bits);
+            assert!(
+                ulp_diff(got, reference) <= 1,
+                "erf_f32({x}) = {got} ({:#010x}), référence = {reference}",
+                got.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn erf_gelu_specials_and_symmetry() {
+        assert_eq!(erf_f32(f32::NAN).to_bits(), 0x7fc0_0000);
+        assert_eq!(gelu_f32(f32::NAN).to_bits(), 0x7fc0_0000);
+        assert_eq!(erf_f32(0.0).to_bits(), 0.0f32.to_bits());
+        assert_eq!(erf_f32(-0.0).to_bits(), (-0.0f32).to_bits());
+        assert_eq!(erf_f32(f32::INFINITY), 1.0);
+        assert_eq!(erf_f32(f32::NEG_INFINITY), -1.0);
+        assert_eq!(erf_f32(5.0), 1.0);
+        assert_eq!(erf_f32(-5.0), -1.0);
+        // erf impaire, bit à bit
+        for i in 1..400
+        {
+            let x = i as f32 * 0.011;
+            assert_eq!(erf_f32(-x).to_bits(), (-erf_f32(x)).to_bits());
+        }
+        // GELU : 0 en 0, ≈ x pour x grand, ≈ 0⁻ pour x très négatif
+        assert_eq!(gelu_f32(0.0), 0.0);
+        assert_eq!(gelu_f32(10.0), 10.0);
+        assert_eq!(gelu_f32(f32::INFINITY), f32::INFINITY);
+        assert_eq!(gelu_f32(f32::NEG_INFINITY).to_bits(), (-0.0f32).to_bits());
+        assert_eq!(gelu_f32(-40.0), -0.0);
+        // valeur de référence : gelu(1) = 0,5·(1+erf(1/√2)) = 0,8413447…
+        assert!((gelu_f32(1.0) - 0.841_344_7).abs() < 1e-6);
+        // monotonie locale autour de 0 (propriété de GELU exact)
+        assert!(gelu_f32(-0.5) < gelu_f32(0.0));
+        assert!(gelu_f32(0.0) < gelu_f32(0.5));
+    }
+
+    #[test]
+    fn erf_fingerprint_bit_sweep() {
+        let fp = sweep_fingerprint(erf_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(fp, PROOF_ERF_FP_CONTRACT, "empreinte erf : 0x{fp:016x}");
+    }
+
+    #[test]
+    fn gelu_fingerprint_bit_sweep() {
+        let fp = sweep_fingerprint(gelu_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(fp, PROOF_GELU_FP_CONTRACT, "empreinte gelu : 0x{fp:016x}");
     }
 
     #[test]
