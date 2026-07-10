@@ -73,6 +73,10 @@ pub fn exp_f32(x: f32) -> f32 {
     {
         return CANONICAL_NAN;
     }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_EXP, x)
+    {
+        return r;
+    }
     if x >= 89.0
     {
         return f32::INFINITY;
@@ -133,6 +137,10 @@ pub fn sigmoid_f32(x: f32) -> f32 {
     {
         return CANONICAL_NAN;
     }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_SIGMOID, x)
+    {
+        return r;
+    }
     if x >= 30.0
     {
         return 1.0; // 1 − e⁻³⁰ ≈ 1 − 9,4e-14 arrondit à 1 en f32
@@ -162,6 +170,10 @@ pub fn tanh_f32(x: f32) -> f32 {
     if x.is_nan()
     {
         return CANONICAL_NAN;
+    }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_TANH, x)
+    {
+        return r;
     }
     let ax = x.abs();
     if ax >= 10.0
@@ -315,6 +327,10 @@ pub fn sin_f32(x: f32) -> f32 {
     {
         return CANONICAL_NAN;
     }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_SIN, x)
+    {
+        return r;
+    }
     let ax = x.abs();
     if ax < 1e-4
     {
@@ -342,6 +358,10 @@ pub fn cos_f32(x: f32) -> f32 {
     if !x.is_finite()
     {
         return CANONICAL_NAN;
+    }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_COS, x)
+    {
+        return r;
     }
     let ax = x.abs();
     if ax < 1e-4
@@ -403,6 +423,10 @@ pub fn erf_f32(x: f32) -> f32 {
     if x.is_nan()
     {
         return CANONICAL_NAN;
+    }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_ERF, x)
+    {
+        return r;
     }
     let ax = x.abs();
     if ax >= 4.0
@@ -470,6 +494,208 @@ pub fn gelu_f32(x: f32) -> f32 {
     (0.5 * y * (1.0 + e)) as f32
 }
 
+// ================================================================== //
+//  Tables d'exceptions d'arrondi correct (volet 115)                  //
+// ================================================================== //
+// Les 465 entrées où le chemin analytique rend le voisin à 1 ulp du
+// résultat correctement arrondi — identifiées par la campagne exhaustive
+// du volet 114 (certificat d'intervalle sur 7×2³² entrées), sorties
+// vérifiées par l'oracle en précision arbitraire
+// (scripts/verify-certify-offline.py, Decimal 60 chiffres, milieux
+// rationnels exacts). Consultées AVANT le chemin principal : avec elles,
+// les 7 fonctions sont CORRECTEMENT ARRONDIES sur la totalité du domaine
+// f32. Triées par bits d'entrée (recherche binaire).
+
+#[rustfmt::skip]
+const CR_EXCEPTIONS_EXP: [(u32, u32); 2] = [
+    (0x4288942b, 0x70b7a4c5), (0xc16912cd, 0x34fd331b),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_LN: [(u32, u32); 5] = [
+    (0x3c413d3a, 0xc08e158f), (0x41178feb, 0x400fe5e7), (0x4c5d65a5, 0x418f034b),
+    (0x65d890d3, 0x4254d1f9), (0x6f31a8ec, 0x42845a89),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_TANH: [(u32, u32); 20] = [
+    (0x39b89b9e, 0x39b89b9e), (0x39b89b9f, 0x39b89b9f), (0x39b89ba0, 0x39b89ba0),
+    (0x39b89ba1, 0x39b89ba1), (0x39b89ba2, 0x39b89ba2), (0x39b89ba6, 0x39b89ba5),
+    (0x39b89ba7, 0x39b89ba6), (0x39b89ba8, 0x39b89ba7), (0x3a27ba3a, 0x3a27ba39),
+    (0x3adbc904, 0x3adbc8f6), (0xb9b89b9e, 0xb9b89b9e), (0xb9b89b9f, 0xb9b89b9f),
+    (0xb9b89ba0, 0xb9b89ba0), (0xb9b89ba1, 0xb9b89ba1), (0xb9b89ba2, 0xb9b89ba2),
+    (0xb9b89ba6, 0xb9b89ba5), (0xb9b89ba7, 0xb9b89ba6), (0xb9b89ba8, 0xb9b89ba7),
+    (0xba27ba3a, 0xba27ba39), (0xbadbc904, 0xbadbc8f6),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_SIGMOID: [(u32, u32); 78] = [
+    (0x34c00000, 0x3f000001), (0x35600000, 0x3f000003), (0x35b00000, 0x3f000005),
+    (0x35f00000, 0x3f000007), (0x36180000, 0x3f000009), (0x36380000, 0x3f00000b),
+    (0x36580000, 0x3f00000d), (0x36780000, 0x3f00000f), (0x368c0000, 0x3f000011),
+    (0x369c0000, 0x3f000013), (0x36ac0000, 0x3f000015), (0x36bc0000, 0x3f000017),
+    (0x36cc0000, 0x3f000019), (0x36dc0000, 0x3f00001b), (0x36ec0000, 0x3f00001d),
+    (0x36fc0000, 0x3f00001f), (0x37060000, 0x3f000021), (0x370e0000, 0x3f000023),
+    (0x37160000, 0x3f000025), (0x371e0000, 0x3f000027), (0x372e0000, 0x3f00002b),
+    (0x37360000, 0x3f00002d), (0x373e0000, 0x3f00002f), (0x37460000, 0x3f000031),
+    (0x374e0000, 0x3f000033), (0x37560000, 0x3f000035), (0x375e0000, 0x3f000037),
+    (0x37660000, 0x3f000039), (0xb4400000, 0x3effffff), (0xb4e00000, 0x3efffffd),
+    (0xb5300000, 0x3efffffb), (0xb5700000, 0x3efffff9), (0xb5980000, 0x3efffff7),
+    (0xb5b80000, 0x3efffff5), (0xb5d80000, 0x3efffff3), (0xb5f80000, 0x3efffff1),
+    (0xb60c0000, 0x3effffef), (0xb61c0000, 0x3effffed), (0xb62c0000, 0x3effffeb),
+    (0xb63c0000, 0x3effffe9), (0xb64c0000, 0x3effffe7), (0xb65c0000, 0x3effffe5),
+    (0xb66c0000, 0x3effffe3), (0xb67c0000, 0x3effffe1), (0xb6860000, 0x3effffdf),
+    (0xb68e0000, 0x3effffdd), (0xb6960000, 0x3effffdb), (0xb69e0000, 0x3effffd9),
+    (0xb6a60000, 0x3effffd7), (0xb6ae0000, 0x3effffd5), (0xb6b60000, 0x3effffd3),
+    (0xb6be0000, 0x3effffd1), (0xb6c60000, 0x3effffcf), (0xb6ce0000, 0x3effffcd),
+    (0xb6d60000, 0x3effffcb), (0xb6de0000, 0x3effffc9), (0xb6e60000, 0x3effffc7),
+    (0xb6ea0000, 0x3effffc6), (0xb6ee0000, 0x3effffc5), (0xb6f20000, 0x3effffc4),
+    (0xb6f60000, 0x3effffc3), (0xb6fa0000, 0x3effffc2), (0xb6fe0000, 0x3effffc1),
+    (0xb7030000, 0x3effffbf), (0xb7070000, 0x3effffbd), (0xb70b0000, 0x3effffbb),
+    (0xb70f0000, 0x3effffb9), (0xb7130000, 0x3effffb7), (0xb7170000, 0x3effffb5),
+    (0xb71b0000, 0x3effffb3), (0xb71f0000, 0x3effffb1), (0xb7230000, 0x3effffaf),
+    (0xb7270000, 0x3effffad), (0xb72b0000, 0x3effffab), (0xb72f0000, 0x3effffa9),
+    (0xb7330000, 0x3effffa7), (0xb7370000, 0x3effffa5), (0xb7730000, 0x3effff87),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_SIN: [(u32, u32); 2] = [
+    (0x46199998, 0xbeb1fa5d), (0xc6199998, 0x3eb1fa5d),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_COS: [(u32, u32); 6] = [
+    (0x5922aa80, 0x3f08aebf), (0x5f18b878, 0x3f7f14bb), (0x6115cb11, 0x3f78142f),
+    (0xd922aa80, 0x3f08aebf), (0xdf18b878, 0x3f7f14bb), (0xe115cb11, 0x3f78142f),
+];
+#[rustfmt::skip]
+const CR_EXCEPTIONS_ERF: [(u32, u32); 352] = [
+    (0x404f9394, 0x3f7fffb4), (0x40569971, 0x3f7fffdc), (0x405b26b1, 0x3f7fffeb),
+    (0x405eaa73, 0x3f7ffff2), (0x406181fe, 0x3f7ffff5), (0x406261da, 0x3f7ffff6),
+    (0x406359b3, 0x3f7ffff8), (0x406359b4, 0x3f7ffff8), (0x40646f6d, 0x3f7ffff8),
+    (0x4065ab74, 0x3f7ffff9), (0x40671a62, 0x3f7ffffa), (0x4068d05e, 0x3f7ffffc),
+    (0x406af0a5, 0x3f7ffffc), (0x406af0a8, 0x3f7ffffc), (0x406af0aa, 0x3f7ffffd),
+    (0x406af0ab, 0x3f7ffffd), (0x406af0ad, 0x3f7ffffd), (0x406af0af, 0x3f7ffffd),
+    (0x406dc238, 0x3f7ffffd), (0x406dc239, 0x3f7ffffd), (0x406dc23b, 0x3f7ffffd),
+    (0x406dc23d, 0x3f7ffffd), (0x406dc23f, 0x3f7ffffd), (0x406dc241, 0x3f7ffffe),
+    (0x406dc245, 0x3f7ffffe), (0x4071fa74, 0x3f7ffffe), (0x4071fa91, 0x3f7ffffe),
+    (0x4071fa93, 0x3f7ffffe), (0x4071fa95, 0x3f7ffffe), (0x4071fa96, 0x3f7ffffe),
+    (0x4071faa0, 0x3f7ffffe), (0x4071faa1, 0x3f7ffffe), (0x4071faa2, 0x3f7ffffe),
+    (0x4071faa3, 0x3f7ffffe), (0x4071faa5, 0x3f7ffffe), (0x4071faa7, 0x3f7ffffe),
+    (0x4071faa9, 0x3f7ffffe), (0x4071faaa, 0x3f7ffffe), (0x4071faab, 0x3f7fffff),
+    (0x4071faae, 0x3f7fffff), (0x4071fab1, 0x3f7fffff), (0x4071fab2, 0x3f7fffff),
+    (0x4071fab3, 0x3f7fffff), (0x4071fabc, 0x3f7fffff), (0x4071fabd, 0x3f7fffff),
+    (0x4071fac1, 0x3f7fffff), (0x4071fac5, 0x3f7fffff), (0x4071fad0, 0x3f7fffff),
+    (0x407ad2d9, 0x3f7fffff), (0x407ad2f6, 0x3f7fffff), (0x407ad30c, 0x3f7fffff),
+    (0x407ad310, 0x3f7fffff), (0x407ad326, 0x3f7fffff), (0x407ad334, 0x3f7fffff),
+    (0x407ad357, 0x3f7fffff), (0x407ad35d, 0x3f7fffff), (0x407ad38a, 0x3f7fffff),
+    (0x407ad38d, 0x3f7fffff), (0x407ad399, 0x3f7fffff), (0x407ad39c, 0x3f7fffff),
+    (0x407ad3a2, 0x3f7fffff), (0x407ad3a9, 0x3f7fffff), (0x407ad3af, 0x3f7fffff),
+    (0x407ad3b5, 0x3f7fffff), (0x407ad3b9, 0x3f7fffff), (0x407ad3ba, 0x3f7fffff),
+    (0x407ad3c1, 0x3f7fffff), (0x407ad3c3, 0x3f7fffff), (0x407ad3ca, 0x3f7fffff),
+    (0x407ad3cb, 0x3f7fffff), (0x407ad3d1, 0x3f7fffff), (0x407ad3d8, 0x3f7fffff),
+    (0x407ad3d9, 0x3f7fffff), (0x407ad3e1, 0x3f7fffff), (0x407ad3e6, 0x3f7fffff),
+    (0x407ad3ea, 0x3f7fffff), (0x407ad3ec, 0x3f7fffff), (0x407ad3f0, 0x3f7fffff),
+    (0x407ad3f1, 0x3f7fffff), (0x407ad3ff, 0x3f7fffff), (0x407ad401, 0x3f7fffff),
+    (0x407ad402, 0x3f7fffff), (0x407ad403, 0x3f7fffff), (0x407ad408, 0x3f7fffff),
+    (0x407ad40a, 0x3f7fffff), (0x407ad40c, 0x3f7fffff), (0x407ad40d, 0x3f7fffff),
+    (0x407ad40f, 0x3f7fffff), (0x407ad410, 0x3f7fffff), (0x407ad412, 0x3f7fffff),
+    (0x407ad413, 0x3f7fffff), (0x407ad415, 0x3f7fffff), (0x407ad41a, 0x3f7fffff),
+    (0x407ad41b, 0x3f7fffff), (0x407ad41f, 0x3f7fffff), (0x407ad420, 0x3f7fffff),
+    (0x407ad422, 0x3f7fffff), (0x407ad428, 0x3f7fffff), (0x407ad42a, 0x3f7fffff),
+    (0x407ad42c, 0x3f7fffff), (0x407ad42d, 0x3f7fffff), (0x407ad42e, 0x3f7fffff),
+    (0x407ad431, 0x3f7fffff), (0x407ad432, 0x3f7fffff), (0x407ad433, 0x3f7fffff),
+    (0x407ad435, 0x3f7fffff), (0x407ad436, 0x3f7fffff), (0x407ad438, 0x3f7fffff),
+    (0x407ad43b, 0x3f7fffff), (0x407ad43d, 0x3f7fffff), (0x407ad441, 0x3f7fffff),
+    (0x407ad443, 0x3f7fffff), (0x407ad44c, 0x3f800000), (0x407ad44f, 0x3f800000),
+    (0x407ad451, 0x3f800000), (0x407ad452, 0x3f800000), (0x407ad455, 0x3f800000),
+    (0x407ad457, 0x3f800000), (0x407ad458, 0x3f800000), (0x407ad459, 0x3f800000),
+    (0x407ad45a, 0x3f800000), (0x407ad45b, 0x3f800000), (0x407ad45c, 0x3f800000),
+    (0x407ad45e, 0x3f800000), (0x407ad460, 0x3f800000), (0x407ad463, 0x3f800000),
+    (0x407ad466, 0x3f800000), (0x407ad46a, 0x3f800000), (0x407ad46c, 0x3f800000),
+    (0x407ad46f, 0x3f800000), (0x407ad472, 0x3f800000), (0x407ad473, 0x3f800000),
+    (0x407ad476, 0x3f800000), (0x407ad477, 0x3f800000), (0x407ad47b, 0x3f800000),
+    (0x407ad47c, 0x3f800000), (0x407ad47e, 0x3f800000), (0x407ad481, 0x3f800000),
+    (0x407ad482, 0x3f800000), (0x407ad484, 0x3f800000), (0x407ad48a, 0x3f800000),
+    (0x407ad48e, 0x3f800000), (0x407ad48f, 0x3f800000), (0x407ad495, 0x3f800000),
+    (0x407ad499, 0x3f800000), (0x407ad4a6, 0x3f800000), (0x407ad4a8, 0x3f800000),
+    (0x407ad4aa, 0x3f800000), (0x407ad4ab, 0x3f800000), (0x407ad4ae, 0x3f800000),
+    (0x407ad4b0, 0x3f800000), (0x407ad4b6, 0x3f800000), (0x407ad4b7, 0x3f800000),
+    (0x407ad4b9, 0x3f800000), (0x407ad4bc, 0x3f800000), (0x407ad4bd, 0x3f800000),
+    (0x407ad4bf, 0x3f800000), (0x407ad4c0, 0x3f800000), (0x407ad4d7, 0x3f800000),
+    (0x407ad4dd, 0x3f800000), (0x407ad4de, 0x3f800000), (0x407ad4e1, 0x3f800000),
+    (0x407ad4e6, 0x3f800000), (0x407ad4e8, 0x3f800000), (0x407ad4eb, 0x3f800000),
+    (0x407ad4ed, 0x3f800000), (0x407ad4ee, 0x3f800000), (0x407ad506, 0x3f800000),
+    (0x407ad51d, 0x3f800000), (0x407ad52f, 0x3f800000), (0x407ad54c, 0x3f800000),
+    (0x407ad555, 0x3f800000), (0x407ad55d, 0x3f800000), (0x407ad584, 0x3f800000),
+    (0x407ad58b, 0x3f800000), (0x407ad5a3, 0x3f800000), (0xc04f9394, 0xbf7fffb4),
+    (0xc0569971, 0xbf7fffdc), (0xc05b26b1, 0xbf7fffeb), (0xc05eaa73, 0xbf7ffff2),
+    (0xc06181fe, 0xbf7ffff5), (0xc06261da, 0xbf7ffff6), (0xc06359b3, 0xbf7ffff8),
+    (0xc06359b4, 0xbf7ffff8), (0xc0646f6d, 0xbf7ffff8), (0xc065ab74, 0xbf7ffff9),
+    (0xc0671a62, 0xbf7ffffa), (0xc068d05e, 0xbf7ffffc), (0xc06af0a5, 0xbf7ffffc),
+    (0xc06af0a8, 0xbf7ffffc), (0xc06af0aa, 0xbf7ffffd), (0xc06af0ab, 0xbf7ffffd),
+    (0xc06af0ad, 0xbf7ffffd), (0xc06af0af, 0xbf7ffffd), (0xc06dc238, 0xbf7ffffd),
+    (0xc06dc239, 0xbf7ffffd), (0xc06dc23b, 0xbf7ffffd), (0xc06dc23d, 0xbf7ffffd),
+    (0xc06dc23f, 0xbf7ffffd), (0xc06dc241, 0xbf7ffffe), (0xc06dc245, 0xbf7ffffe),
+    (0xc071fa74, 0xbf7ffffe), (0xc071fa91, 0xbf7ffffe), (0xc071fa93, 0xbf7ffffe),
+    (0xc071fa95, 0xbf7ffffe), (0xc071fa96, 0xbf7ffffe), (0xc071faa0, 0xbf7ffffe),
+    (0xc071faa1, 0xbf7ffffe), (0xc071faa2, 0xbf7ffffe), (0xc071faa3, 0xbf7ffffe),
+    (0xc071faa5, 0xbf7ffffe), (0xc071faa7, 0xbf7ffffe), (0xc071faa9, 0xbf7ffffe),
+    (0xc071faaa, 0xbf7ffffe), (0xc071faab, 0xbf7fffff), (0xc071faae, 0xbf7fffff),
+    (0xc071fab1, 0xbf7fffff), (0xc071fab2, 0xbf7fffff), (0xc071fab3, 0xbf7fffff),
+    (0xc071fabc, 0xbf7fffff), (0xc071fabd, 0xbf7fffff), (0xc071fac1, 0xbf7fffff),
+    (0xc071fac5, 0xbf7fffff), (0xc071fad0, 0xbf7fffff), (0xc07ad2d9, 0xbf7fffff),
+    (0xc07ad2f6, 0xbf7fffff), (0xc07ad30c, 0xbf7fffff), (0xc07ad310, 0xbf7fffff),
+    (0xc07ad326, 0xbf7fffff), (0xc07ad334, 0xbf7fffff), (0xc07ad357, 0xbf7fffff),
+    (0xc07ad35d, 0xbf7fffff), (0xc07ad38a, 0xbf7fffff), (0xc07ad38d, 0xbf7fffff),
+    (0xc07ad399, 0xbf7fffff), (0xc07ad39c, 0xbf7fffff), (0xc07ad3a2, 0xbf7fffff),
+    (0xc07ad3a9, 0xbf7fffff), (0xc07ad3af, 0xbf7fffff), (0xc07ad3b5, 0xbf7fffff),
+    (0xc07ad3b9, 0xbf7fffff), (0xc07ad3ba, 0xbf7fffff), (0xc07ad3c1, 0xbf7fffff),
+    (0xc07ad3c3, 0xbf7fffff), (0xc07ad3ca, 0xbf7fffff), (0xc07ad3cb, 0xbf7fffff),
+    (0xc07ad3d1, 0xbf7fffff), (0xc07ad3d8, 0xbf7fffff), (0xc07ad3d9, 0xbf7fffff),
+    (0xc07ad3e1, 0xbf7fffff), (0xc07ad3e6, 0xbf7fffff), (0xc07ad3ea, 0xbf7fffff),
+    (0xc07ad3ec, 0xbf7fffff), (0xc07ad3f0, 0xbf7fffff), (0xc07ad3f1, 0xbf7fffff),
+    (0xc07ad3ff, 0xbf7fffff), (0xc07ad401, 0xbf7fffff), (0xc07ad402, 0xbf7fffff),
+    (0xc07ad403, 0xbf7fffff), (0xc07ad408, 0xbf7fffff), (0xc07ad40a, 0xbf7fffff),
+    (0xc07ad40c, 0xbf7fffff), (0xc07ad40d, 0xbf7fffff), (0xc07ad40f, 0xbf7fffff),
+    (0xc07ad410, 0xbf7fffff), (0xc07ad412, 0xbf7fffff), (0xc07ad413, 0xbf7fffff),
+    (0xc07ad415, 0xbf7fffff), (0xc07ad41a, 0xbf7fffff), (0xc07ad41b, 0xbf7fffff),
+    (0xc07ad41f, 0xbf7fffff), (0xc07ad420, 0xbf7fffff), (0xc07ad422, 0xbf7fffff),
+    (0xc07ad428, 0xbf7fffff), (0xc07ad42a, 0xbf7fffff), (0xc07ad42c, 0xbf7fffff),
+    (0xc07ad42d, 0xbf7fffff), (0xc07ad42e, 0xbf7fffff), (0xc07ad431, 0xbf7fffff),
+    (0xc07ad432, 0xbf7fffff), (0xc07ad433, 0xbf7fffff), (0xc07ad435, 0xbf7fffff),
+    (0xc07ad436, 0xbf7fffff), (0xc07ad438, 0xbf7fffff), (0xc07ad43b, 0xbf7fffff),
+    (0xc07ad43d, 0xbf7fffff), (0xc07ad441, 0xbf7fffff), (0xc07ad443, 0xbf7fffff),
+    (0xc07ad44c, 0xbf800000), (0xc07ad44f, 0xbf800000), (0xc07ad451, 0xbf800000),
+    (0xc07ad452, 0xbf800000), (0xc07ad455, 0xbf800000), (0xc07ad457, 0xbf800000),
+    (0xc07ad458, 0xbf800000), (0xc07ad459, 0xbf800000), (0xc07ad45a, 0xbf800000),
+    (0xc07ad45b, 0xbf800000), (0xc07ad45c, 0xbf800000), (0xc07ad45e, 0xbf800000),
+    (0xc07ad460, 0xbf800000), (0xc07ad463, 0xbf800000), (0xc07ad466, 0xbf800000),
+    (0xc07ad46a, 0xbf800000), (0xc07ad46c, 0xbf800000), (0xc07ad46f, 0xbf800000),
+    (0xc07ad472, 0xbf800000), (0xc07ad473, 0xbf800000), (0xc07ad476, 0xbf800000),
+    (0xc07ad477, 0xbf800000), (0xc07ad47b, 0xbf800000), (0xc07ad47c, 0xbf800000),
+    (0xc07ad47e, 0xbf800000), (0xc07ad481, 0xbf800000), (0xc07ad482, 0xbf800000),
+    (0xc07ad484, 0xbf800000), (0xc07ad48a, 0xbf800000), (0xc07ad48e, 0xbf800000),
+    (0xc07ad48f, 0xbf800000), (0xc07ad495, 0xbf800000), (0xc07ad499, 0xbf800000),
+    (0xc07ad4a6, 0xbf800000), (0xc07ad4a8, 0xbf800000), (0xc07ad4aa, 0xbf800000),
+    (0xc07ad4ab, 0xbf800000), (0xc07ad4ae, 0xbf800000), (0xc07ad4b0, 0xbf800000),
+    (0xc07ad4b6, 0xbf800000), (0xc07ad4b7, 0xbf800000), (0xc07ad4b9, 0xbf800000),
+    (0xc07ad4bc, 0xbf800000), (0xc07ad4bd, 0xbf800000), (0xc07ad4bf, 0xbf800000),
+    (0xc07ad4c0, 0xbf800000), (0xc07ad4d7, 0xbf800000), (0xc07ad4dd, 0xbf800000),
+    (0xc07ad4de, 0xbf800000), (0xc07ad4e1, 0xbf800000), (0xc07ad4e6, 0xbf800000),
+    (0xc07ad4e8, 0xbf800000), (0xc07ad4eb, 0xbf800000), (0xc07ad4ed, 0xbf800000),
+    (0xc07ad4ee, 0xbf800000), (0xc07ad506, 0xbf800000), (0xc07ad51d, 0xbf800000),
+    (0xc07ad52f, 0xbf800000), (0xc07ad54c, 0xbf800000), (0xc07ad555, 0xbf800000),
+    (0xc07ad55d, 0xbf800000), (0xc07ad584, 0xbf800000), (0xc07ad58b, 0xbf800000),
+    (0xc07ad5a3, 0xbf800000),
+];
+
+/// Cherche `x` dans une table d'exceptions (bits triés) — `Some(résultat
+/// correctement arrondi)` si présent.
+#[inline]
+fn cr_exception(table: &[(u32, u32)], x: f32) -> Option<f32> {
+    let bits = x.to_bits();
+    table
+        .binary_search_by_key(&bits, |&(i, _)| i)
+        .ok()
+        .map(|k| f32::from_bits(table[k].1))
+}
+
 /// Certification d'**arrondi correct** (premier pas concret vers la
 /// résolution du dilemme du fabricant de tables, cartographie volet 111).
 ///
@@ -493,6 +719,9 @@ pub mod certify {
     pub struct Report {
         /// Entrées correctes par analyse du chemin de garde.
         pub analytic: u64,
+        /// Entrées servies par la table d'exceptions (sortie vérifiée par
+        /// l'oracle en précision arbitraire — correctement arrondie).
+        pub oracle: u64,
         /// Entrées prouvées correctement arrondies par le certificat.
         pub certified: u64,
         /// Entrées non certifiées (statut à trancher hors ligne).
@@ -634,17 +863,17 @@ pub mod certify {
     }
 
     /// Une entrée certifiable : (nom, fonction publiée, évaluateur).
-    pub type Entry = (&'static str, fn(f32) -> f32, Eval);
+    pub type Entry = (&'static str, fn(f32) -> f32, Eval, &'static [(u32, u32)]);
 
     /// Les fonctions certifiables.
     pub const FUNCTIONS: [Entry; 7] = [
-        ("exp", exp_f32, eval_exp),
-        ("ln", ln_f32, eval_ln),
-        ("tanh", tanh_f32, eval_tanh),
-        ("sigmoid", sigmoid_f32, eval_sigmoid),
-        ("sin", sin_f32, eval_sin),
-        ("cos", cos_f32, eval_cos),
-        ("erf", erf_f32, eval_erf),
+        ("exp", exp_f32, eval_exp, &CR_EXCEPTIONS_EXP),
+        ("ln", ln_f32, eval_ln, &CR_EXCEPTIONS_LN),
+        ("tanh", tanh_f32, eval_tanh, &CR_EXCEPTIONS_TANH),
+        ("sigmoid", sigmoid_f32, eval_sigmoid, &CR_EXCEPTIONS_SIGMOID),
+        ("sin", sin_f32, eval_sin, &CR_EXCEPTIONS_SIN),
+        ("cos", cos_f32, eval_cos, &CR_EXCEPTIONS_COS),
+        ("erf", erf_f32, eval_erf, &CR_EXCEPTIONS_ERF),
     ];
 
     /// f32 suivant/précédent en direction de ±∞ (hors NaN), via les bits.
@@ -672,12 +901,23 @@ pub mod certify {
 
     /// Balayage de certification de `f` par pas `step` sur tout l'espace des
     /// bits f32.
-    pub fn sweep(public: fn(f32) -> f32, eval: Eval, step: u64) -> Report {
+    pub fn sweep(
+        public: fn(f32) -> f32,
+        eval: Eval,
+        exceptions: &[(u32, u32)],
+        step: u64,
+    ) -> Report {
         let mut rep = Report::default();
         let mut i = 0u64;
         while i <= u32::MAX as u64
         {
             let x = f32::from_bits(i as u32);
+            if cr_exception(exceptions, x).is_some()
+            {
+                rep.oracle += 1;
+                i += step;
+                continue;
+            }
             match eval(x)
             {
                 None => rep.analytic += 1,
@@ -749,6 +989,10 @@ pub fn ln_f32(x: f32) -> f32 {
     if x.is_nan() || x < 0.0
     {
         return CANONICAL_NAN;
+    }
+    if let Some(r) = cr_exception(&CR_EXCEPTIONS_LN, x)
+    {
+        return r;
     }
     if x == 0.0
     {
@@ -837,9 +1081,9 @@ pub const PROOF_EXP_FP_DENSE: u64 = 0x6495_da04_866c_1c4b;
 pub const PROOF_LN_FP_DENSE: u64 = 0x19e7_fd49_7cff_d94b;
 /// Empreinte attendue de `exp_f32` sur le balayage **exhaustif** (pas 1 :
 /// les 2³² entrées possibles — `--full` du binaire de preuve).
-pub const PROOF_EXP_FP_EXHAUSTIVE: u64 = 0xda65_ffaf_8fe9_f4f4;
+pub const PROOF_EXP_FP_EXHAUSTIVE: u64 = 0xadf2_83b2_b8a0_4772;
 /// Empreinte attendue de `ln_f32` sur le balayage **exhaustif**.
-pub const PROOF_LN_FP_EXHAUSTIVE: u64 = 0xb9ad_67e0_8ae8_f0fa;
+pub const PROOF_LN_FP_EXHAUSTIVE: u64 = 0xd5f1_51cb_ded3_238d;
 
 /// Entrées des goldens ponctuels de `exp_f32`.
 pub const PROOF_EXP_GOLDEN_INPUTS: [f32; 10] =
@@ -875,11 +1119,11 @@ pub const PROOF_SIGMOID_FP_CONTRACT: u64 = 0xea08_4f06_22bd_fec4;
 /// Empreinte attendue de `tanh_f32` sur le balayage dense.
 pub const PROOF_TANH_FP_DENSE: u64 = 0xa25d_e634_2fae_d6e8;
 /// Empreinte attendue de `sigmoid_f32` sur le balayage dense.
-pub const PROOF_SIGMOID_FP_DENSE: u64 = 0xb826_7671_7c58_1433;
+pub const PROOF_SIGMOID_FP_DENSE: u64 = 0x29e9_bb6c_5589_7062;
 /// Empreinte attendue de `tanh_f32` sur le balayage exhaustif.
-pub const PROOF_TANH_FP_EXHAUSTIVE: u64 = 0xd6f9_e850_8d19_f785;
+pub const PROOF_TANH_FP_EXHAUSTIVE: u64 = 0xb9e4_d436_6525_fb29;
 /// Empreinte attendue de `sigmoid_f32` sur le balayage exhaustif.
-pub const PROOF_SIGMOID_FP_EXHAUSTIVE: u64 = 0x6796_eabe_dfe7_cb02;
+pub const PROOF_SIGMOID_FP_EXHAUSTIVE: u64 = 0xa86e_3909_a363_bb2c;
 
 /// Empreinte attendue de `sin_f32` sur le balayage-contrat.
 pub const PROOF_SIN_FP_CONTRACT: u64 = 0x39c9_9b71_fdbc_e247;
@@ -890,16 +1134,16 @@ pub const PROOF_SIN_FP_DENSE: u64 = 0x084d_235e_4d8d_dac7;
 /// Empreinte attendue de `cos_f32` sur le balayage dense.
 pub const PROOF_COS_FP_DENSE: u64 = 0xcde8_a193_db4b_2f5c;
 /// Empreinte attendue de `sin_f32` sur le balayage exhaustif.
-pub const PROOF_SIN_FP_EXHAUSTIVE: u64 = 0xc071_9c2d_610d_8685;
+pub const PROOF_SIN_FP_EXHAUSTIVE: u64 = 0xf759_2077_0869_47e5;
 /// Empreinte attendue de `cos_f32` sur le balayage exhaustif.
-pub const PROOF_COS_FP_EXHAUSTIVE: u64 = 0xb9b0_750e_e67e_5475;
+pub const PROOF_COS_FP_EXHAUSTIVE: u64 = 0x8d60_31dd_c2ab_bc79;
 
 /// Empreinte attendue de `erf_f32` sur le balayage-contrat.
 pub const PROOF_ERF_FP_CONTRACT: u64 = 0xfe81_7b5a_5db4_0dc8;
 /// Empreinte attendue de `erf_f32` sur le balayage dense.
-pub const PROOF_ERF_FP_DENSE: u64 = 0xb7d5_4a90_6051_32c5;
+pub const PROOF_ERF_FP_DENSE: u64 = 0x142f_d4be_40a4_7b80;
 /// Empreinte attendue de `erf_f32` sur le balayage exhaustif.
-pub const PROOF_ERF_FP_EXHAUSTIVE: u64 = 0x3765_5614_b70c_f42d;
+pub const PROOF_ERF_FP_EXHAUSTIVE: u64 = 0x3e65_d7f9_2092_5f55;
 /// Empreinte attendue de `gelu_f32` sur le balayage-contrat.
 pub const PROOF_GELU_FP_CONTRACT: u64 = 0x8f06_fb9e_b406_d63f;
 /// Empreinte attendue de `gelu_f32` sur le balayage dense.

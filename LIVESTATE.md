@@ -3,6 +3,50 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 115 : preuve a priori (tables CR) + all-reduce arbre fixe + basses précisions
+- **Contexte** : PR #277 (verdict volet 114) MERGÉE ; demande utilisateur : « allons
+  sur la preuve formelle a priori (RLIBM), l'all-reduce multi-nœud à arbre fixe,
+  et les basses précisions (bf16/FP8) reproductibles ».
+- **A — Arrondi correct sur 100 % du domaine (résultat de classe RLIBM)** :
+  les 465 entrées fautives (sorties oracle-vérifiées) deviennent des **tables
+  d'exceptions** consultées avant le chemin analytique (recherche binaire,
+  générées depuis misrounds-*.txt) ⇒ les 7 fonctions sont **CORRECTEMENT
+  ARRONDIES sur la totalité des 2³² entrées chacune**, adossé à : certificat
+  d'intervalle (~99,997 %) ∪ oracle précision arbitraire (le reste). Catégorie
+  `oracle` ajoutée au certify. Empreintes dense (sigmoid/erf) et exhaustives
+  (les 7) re-récoltées. Honnêteté : c'est une preuve par vérification
+  exhaustive, pas une preuve formelle machine-checkée des bornes (Gappa/RLIBM
+  restent l'étape ultérieure) ; gelu passe par le cœur f64 (pas de table),
+  claim gelu inchangée (fidèle).
+- **B — All-reduce à arbre fixe** (`scirust-core::tree_allreduce`) :
+  arbre binaire fixe sur n rangs, absorption des enfants DANS L'ORDRE DE
+  L'ARBRE (messages hors ordre mis en attente, jamais jetés) ⇒ le résultat ne
+  dépend que de la topologie, pas du timing. Deux combinaisons : FixedOrderSum
+  (f32, déterministe à topologie donnée) et **ExactSum** (accumulateurs de
+  Kulisch : indépendant du timing ET de la topologie, correctement arrondi).
+  Démontré par gigue adversariale Philox (5 essais × n ∈ {2,3,5,8,16} :
+  bit-identique). Transport-agnostique (threads+mpsc fournis ; TCP/MPI = même
+  logique de combinaison).
+- **C — Basses précisions reproductibles** (`scirust-core::lowprec`) :
+  conversions **bit-manipulées** (zéro flottant ⇒ portables par construction)
+  f32↔bf16 (RNE), f32↔f16 IEEE (RNE, sous-normaux/saturations — roundtrip
+  exact sur les 65 536 codes), f32↔FP8 OCP **E4M3** (biais 7, sans infini,
+  NaN S.1111.111, max ±448) et **E5M2** (biais 15, ±inf/NaN IEEE, max ±57344),
+  saturantes (convention d'entraînement, documentée) — roundtrip exact sur les
+  256 codes, frontières d'arrondi vérifiées au milieu exact (pair) ± 1 ulp.
+  **Arrondi stochastique piloté par Philox** : reproductible, indépendant de
+  l'ordre d'appel, non biaisé (testé) — l'« arrondi stochastique
+  reproductible » de la carto. `gemm_bf16_exact` : produits bf16 exacts en
+  f32, accumulation f64 ordre fixe (empreinte-contrat commise).
+- **VERDICT FINAL DE LA CHAÎNE CR (bouclée de bout en bout)** :
+  re-certification exhaustive → oracle = 465 exactement (exp 2, ln 5,
+  tanh 20, sigmoid 78, sin 2, cos 6, erf 352) ; vérification offline des
+  94 517 non-certifiées restantes → **94 517 correctement arrondies,
+  0 fidèle, 0 pire**. Chaque entrée des 7×2³² est donc couverte par une des
+  trois preuves (certificat ∪ table-oracle ∪ oracle) : **ARRONDI CORRECT SUR
+  100 % DU DOMAINE f32**. QEMU aarch64 : lowprec 7/7, tree_allreduce 4/4,
+  portable_f32 25/25 (tables comprises) ; suite native complète 752 verts.
+
 ## Session 2026-07-10 — volet 114 : les 4 chantiers restants de la cartographie
 - **Contexte** : PR #273 (volet 113) MERGÉE ; branche repartie de master.
   Demande utilisateur : « continu sur les 4 points » (RNG contre-basé, GEMM

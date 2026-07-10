@@ -175,7 +175,7 @@ def main():
             [str(binary), "--eval", name, str(path)],
             capture_output=True, text=True, check=True,
         ).stdout
-        cr, faithful, worse = 0, 0, []
+        cr, faithful, worse, misrounds = 0, 0, [], []
         for line in out.strip().splitlines():
             in_hex, out_hex = line.split()
             xf = Fraction(bits_to_f32(int(in_hex, 16)))
@@ -187,6 +187,7 @@ def main():
                 cr += 1
             elif abs(got_bits - ref_bits) == 1:
                 faithful += 1
+                misrounds.append((in_hex, ref_bits))
             else:
                 worse.append(in_hex)
         total = cr + faithful + len(worse)
@@ -195,6 +196,11 @@ def main():
         grand_faithful += faithful
         print(f"{name}: {total} vérifiées → {cr} correctement arrondies, "
               f"{faithful} fidèles (1 ulp), {len(worse)} pires{worse[:8]}")
+        if misrounds:
+            # table d'exceptions : (entrée, sortie correctement arrondie)
+            with open(f"misrounds-{name}.txt", "w") as fh:
+                for in_hex, ref_bits in misrounds:
+                    fh.write(f"{in_hex} {ref_bits:08x}\n")
     print(f"\nTOTAL : {grand_total} entrées non certifiées vérifiées → "
           f"{grand_cr} correctement arrondies, {grand_faithful} fidèles (1 ulp)")
 
