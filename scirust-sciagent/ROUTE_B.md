@@ -183,6 +183,18 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   step-325 cliff. Lesson: a data-quality bug can masquerade as a numerics bug — the
   fix was hygiene, not the optimizer.
 
+- **B9 — BPE-350M pipeline, validated end-to-end.** The *true* 350M (32768-vocab
+  BPE, 304M params) runs the full path on the Thor: `train-tokenizer` (32574 merges)
+  → `collect-data` (3.25M tokens → LE-u32 shards, multi-extension + dir hygiene) →
+  `cuda_pretrain SCIAGENT_CONFIG=350m SCIAGENT_SHARDS=…`. 3000 bf16 steps at ~129
+  tok/s: loss **10.45 → 8.94** — which *looks* weak but is the ln(32768)=10.4 vocab
+  scale; **normalized per character it's ~1.79 nats/char** (8.94 ÷ ~5 chars/token),
+  matching the byte model's 1.97 nats/char while processing 5× fewer tokens per
+  document — the efficiency BPE buys. The plateau is under-training, not instability
+  (3000 × 512 = 1.5 M tokens ≈ half an epoch of a 304M model; `gnorm` small, no
+  collapse). Both a byte-level ~270M and a BPE ~304M from-scratch pretrain now run
+  raw-source → trained checkpoint in bf16 on the Thor, resumable.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
