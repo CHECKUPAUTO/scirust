@@ -332,6 +332,23 @@ impl ParallelTape {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.hadamard(&av.exp()));
                 },
+                Op::ExpPortable(a) =>
+                {
+                    // depuis la sortie stockée — aucun appel libm.
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[i]));
+                },
+                Op::LnPortable(a) =>
+                {
+                    let av = &values[a];
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&av.reciprocal()));
+                },
+                Op::MatMulPortable(a, b) =>
+                {
+                    // dA = g · Bᵀ ; dB = Aᵀ · g — via le GEMM portable.
+                    let (av, bv) = (values[a].clone(), values[b].clone());
+                    t_grads[a] = t_grads[a].add(&g.matmul_portable(&bv.transpose()));
+                    t_grads[b] = t_grads[b].add(&av.transpose().matmul_portable(&g));
+                },
                 Op::Log(a) =>
                 {
                     let av = &values[a];

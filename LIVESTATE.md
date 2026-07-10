@@ -3,6 +3,64 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 113 : entraînement 100 % portable + tanh/sigmoid (lot 1 carto)
+- **Contexte** : PR #272 (volet 112) MERGÉE ; branche repartie de master. Programme
+  utilisateur acté : CE portable → entraînement MNIST-like portable avec contrat
+  de poids → cartographie des trous (lot 1 : transcendantales).
+- **CrossEntropyLoss portable** : nouveaux nœuds opt-in `Var::{exp_portable,
+  ln_portable, matmul_portable}` (backwards sans libm : Exp depuis la sortie
+  stockée, Ln = g⊙1/x, MatMul via le GEMM portable + transpose) dans reverse.rs
+  ET parallel.rs ; `CrossEntropyLoss::new_portable()` bascule le log-softmax
+  interne sur exp/ln portables. Test : perte+gradient ≡ voie libm (1e-6) +
+  empreinte figée 0x40b66c65dceb9772.
+- **Entraînement 100 % portable — `proof_portable_training`** : MLP 32×16×10,
+  batch 8, 30 pas Adam, données/init PCG déterministes ; chaque nœud du graphe
+  est portable (matmul_portable, ReLU, CE portable ; Adam = IEEE + powi/sqrt).
+  Contrats commis (x86-64) : trajectoire de perte 0x531f63eb50666b8a, **poids
+  finaux 0x4bbd3d8dc162b305**. Intégré au script de preuve (report-training.txt
+  dans le bundle) et au job CI QEMU. C'est LA réponse à « l'entraînement
+  reproductible cross-platform » : mêmes poids au bit près sur toute machine.
+- **Lot 1 carto — tanh/sigmoid portables** : `tanh_f32`/`sigmoid_f32` dans
+  portable_f32 (cœur exp_f64 factorisé ; formes stables sans cancellation ;
+  saturations analysées ; tanh impaire exacte, ±0 préservés). Oracles ≤ 1 ulp
+  vs libm f64 sur 200 k points ; contrats commis : tanh contract
+  0x418f903e10257c1e / dense 0xa25de6342faed6e8 / exhaustif 0xd6f9e8508d19f785,
+  sigmoid contract 0xea084f0622bdfec4 / dense 0xb82676717c581433 / exhaustif
+  0x6796eabedfe7cb02. Binaire de preuve étendu (4 fonctions balayées).
+  Débloque : LSTM/GRU portables, GELU-tanh.
+- **Lot 1 (suite) — sin/cos portables avec Payne–Hanek** : `sin_f32`/`cos_f32`
+  dans portable_f32. Réduction d'argument de Payne & Hanek en **arithmétique
+  entière pure u128** (exacte pour tout f32 fini jusqu'à 3,4e38) : produit
+  mantisse × 448 bits de 2/π — bits GÉNÉRÉS par nos soins (π par Chudnovsky
+  en Decimal, vérifié par recomposition ; aucune table copiée) — quadrant +
+  128 bits de fraction signée, r = fraction·(π/2) à ~2⁻⁵² relatif (conversion
+  i128→f64 correctement arrondie ⇒ fidèle même aux pires cas de réduction f32,
+  |r| ≳ 2⁻³²). Polynômes de Taylor sin(deg 15)/cos(deg 16) sur [−π/4, π/4].
+  Oracle ≤ 1 ulp vs libm f64 sur 200 k points TOUTES magnitudes ; parités
+  bit-exactes ; sin²+cos² = 1 à 1e38. Contrats commis : sin contract
+  0x39c99b71fdbce247 / dense 0x084d235e4d8ddac7 / exhaustif 0xc0719c2d610d8685,
+  cos contract 0xcdc07dac0d401d29 / dense 0xcde8a193db4b2f5c / exhaustif
+  0xb9b0750ee67e5475. Binaire de preuve : 6 fonctions balayées. Débloque :
+  RoPE portable (transformers), FFT portable (scirust-signal), encodages
+  positionnels.
+- **Lot 1 (fin) — erf + GELU exact portables** : `erf_f32` (série de Maclaurin
+  f64, arrêt relatif déterministe, saturation |x| ≥ 4 → ±1, raccourci
+  |x| < 1e-4 qui préserve ±0 — bug de signe de zéro attrapé par le test
+  specials et corrigé avant commit des goldens) et `gelu_f32` (x/2·(1+erf(x/√2))
+  via le cœur f64, sans cast intermédiaire ; gelu(−∞) = −0). Précision
+  vérifiée contre une **table de référence indépendante** (série en Decimal
+  60 chiffres, générée par nos soins — pas la libm, qui n'a pas d'erf en Rust
+  std). Contrats : erf contract 0xfe817b5a5db40dc8 / dense 0xb7d54a90605132c5 /
+  exhaustif 0x37655614b70cf42d ; gelu contract 0x8f06fb9eb406d63f / dense
+  0xf1a6e6ae9f03349b. Binaire de preuve : 8 balayages. **LOT 1 COMPLET** :
+  la voie portable offre exp, ln, tanh, sigmoid, sin, cos, erf, GELU —
+  soit STRICTEMENT PLUS que les transcendantales de RepDL (exp/log), toutes
+  sous contrat exhaustif ou dense. Prochains candidats de la carto : RNG
+  contre-basé (Philox), GEMM classe ReproBLAS, erf dans scirust-special
+  (remplacer la claim libm « partout » par la voie portable).
+- Validation avant commit : preuve native x86 PASS + QEMU aarch64 PASS
+  (tests, proof_portable_f32, proof_portable_training).
+
 ## Session 2026-07-10 — volet 112 : preuve cross-platform exécutable de portable_f32 (x86_64 ↔ Jetson)
 - **Contexte** : PR #271 (volet 111) MERGÉE ; branche repartie de master (protocole
   branche-mergée). Demande utilisateur : « on doit prouver sur jetson et x86_64

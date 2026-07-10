@@ -5,6 +5,48 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — entraînement 100 % portable + tanh/sigmoid portables (volet 113)
+- **`Var::{exp_portable, ln_portable, matmul_portable}`** : primitives
+  d'autodiff opt-in dont forward ET backward n'appellent aucune libm ni
+  noyau SIMD par architecture — bit-exactes inter-plates-formes (backwards :
+  exp depuis la sortie stockée ; ln = g⊙1/x division IEEE ; matmul via le
+  GEMM portable et des transposes). `CrossEntropyLoss::new_portable()`
+  bascule le log-softmax interne dessus (perte + gradient portables ;
+  gradient ≡ voie libm à 1e-6, empreinte figée).
+- **`scirust-core --bin proof_portable_training`** : entraînement témoin
+  100 % portable (MLP 32×16×10, 30 pas Adam, données/init PCG) dont la
+  trajectoire de perte et les **poids finaux** sont comparés à des
+  empreintes commises — mêmes poids au bit près sur toute machine conforme.
+  Intégré à `scripts/proof-portable-f32.sh` et au job CI QEMU aarch64.
+- **`tanh_f32` / `sigmoid_f32`** dans `portable_f32` (cœur `exp_f64`
+  factorisé, formes stables des deux côtés, saturations analysées, tanh
+  impaire exacte) : fidèlement arrondis (≤ 1 ulp vs oracle libm f64 sur
+  200 000 points), contrats contract/dense/exhaustif commis, binaire de
+  preuve étendu à 4 fonctions. Premier lot de la cartographie des trous
+  (AUDIT_REPDL §post-scriptum) : débloque LSTM/GRU portables et GELU-tanh.
+- **`sin_f32` / `cos_f32`** portables avec réduction d'argument de
+  **Payne & Hanek en arithmétique entière pure** (u128) — exacte pour tout
+  f32 fini jusqu'à 3,4×10³⁸. Les 448 bits de 2/π sont générés par nos soins
+  (π par Chudnovsky, vérification par recomposition — aucune table copiée
+  d'une libm). Quadrant + 128 bits de fraction signée ; conversion
+  i128 → f64 correctement arrondie ⇒ fidélité maintenue même aux pires cas
+  de réduction du format f32. Oracle ≤ 1 ulp vs libm f64 sur 200 000 points
+  toutes magnitudes ; parités bit-exactes ; contrats
+  contract/dense/exhaustif commis (binaire de preuve : 6 fonctions).
+  Débloque : RoPE portable (transformers), FFT portable, encodages
+  positionnels.
+- **`erf_f32` / `gelu_f32`** portables — **lot 1 complet**. erf : série de
+  Maclaurin f64 à arrêt relatif déterministe, saturation |x| ≥ 4,
+  raccourci petit-argument préservant ±0 ; GELU **exact**
+  (x/2·(1+erf(x/√2)) via le cœur f64, sans cast intermédiaire).
+  Précision vérifiée contre une table de référence **indépendante**
+  (série en Decimal 60 chiffres — pas la libm). Contrats
+  contract/dense(/exhaustif pour erf) commis ; binaire de preuve :
+  8 balayages. La voie portable offre désormais exp, ln, tanh, sigmoid,
+  sin, cos, erf, GELU — strictement plus que les transcendantales de
+  RepDL — toutes fidèlement arrondies et bit-exactes inter-plates-formes
+  par construction.
+
 ### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
 - **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
   (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de

@@ -176,11 +176,33 @@ impl Tensor {
         }
         out
     }
+    /// exp élément par élément via la voie portable
+    /// ([`crate::portable_f32::exp_f32`], sans libm) : bit-exact
+    /// inter-plates-formes, contrairement à [`Tensor::exp`].
+    pub fn exp_portable(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data
+        {
+            *x = crate::portable_f32::exp_f32(*x);
+        }
+        out
+    }
     pub fn log(&self) -> Tensor {
         let mut out = self.clone();
         for x in &mut out.data
         {
             *x = x.ln();
+        }
+        out
+    }
+    /// ln élément par élément via la voie portable
+    /// ([`crate::portable_f32::ln_f32`], sans libm) : bit-exact
+    /// inter-plates-formes, contrairement à [`Tensor::log`].
+    pub fn ln_portable(&self) -> Tensor {
+        let mut out = self.clone();
+        for x in &mut out.data
+        {
+            *x = crate::portable_f32::ln_f32(*x);
         }
         out
     }
@@ -452,6 +474,28 @@ impl Tensor {
         out
     }
 
+    /// Matmul via la voie portable ([`crate::portable_f32::gemm_f32`] :
+    /// produits f64 exacts, accumulation séquentielle en ordre fixe, aucun
+    /// noyau SIMD dépendant de l'architecture) : bit-exact
+    /// inter-plates-formes, contrairement à [`Tensor::matmul`] dont le
+    /// `sgemm` blocké change d'ordre d'accumulation selon le micro-noyau.
+    /// Voie de référence, plus lente.
+    pub fn matmul_portable(&self, other: &Tensor) -> Tensor {
+        assert_eq!(
+            self.cols, other.rows,
+            "matmul_portable: inner dim mismatch {}x{} @ {}x{}",
+            self.rows, self.cols, other.rows, other.cols
+        );
+        let data = crate::portable_f32::gemm_f32(
+            &self.data,
+            &other.data,
+            self.rows,
+            self.cols,
+            other.cols,
+        );
+        Tensor::from_vec(data, self.rows, other.cols)
+    }
+
     pub fn reshape(&self, rows: usize, cols: usize) -> Tensor {
         assert_eq!(self.data.len(), rows * cols, "reshape: size mismatch");
         Tensor {
@@ -631,7 +675,13 @@ pub enum Op {
     },
     Neg(usize),
     Exp(usize),
+    /// exp portable (forward sans libm ; backward depuis la sortie stockée).
+    ExpPortable(usize),
     Log(usize),
+    /// ln portable (forward sans libm ; backward = g ⊙ 1/x, division IEEE).
+    LnPortable(usize),
+    /// Matmul portable (GEMM f64 en ordre fixe ; backward via le même GEMM).
+    MatMulPortable(usize, usize),
     Sqrt(usize),
     Reciprocal(usize),
     Sin(usize),
@@ -1422,10 +1472,33 @@ impl Tape {
                     let val = &values[i].as_cpu();
                     grads[a].add_assign(&g.hadamard(val));
                 },
+                Op::ExpPortable(a) =>
+                {
+                    // idem Exp : depuis la sortie stockée — aucun appel libm,
+                    // le nœud complet reste bit-exact inter-plates-formes.
+                    let val = &values[i].as_cpu();
+                    grads[a].add_assign(&g.hadamard(val));
+                },
                 Op::Log(a) =>
                 {
                     let av = &values[a].as_cpu();
                     grads[a].add_assign(&g.hadamard(&av.reciprocal()));
+                },
+                Op::LnPortable(a) =>
+                {
+                    // g ⊙ 1/x : division IEEE, sans libm.
+                    let av = &values[a].as_cpu();
+                    grads[a].add_assign(&g.hadamard(&av.reciprocal()));
+                },
+                Op::MatMulPortable(a, b) =>
+                {
+                    // dA = g · Bᵀ ; dB = Aᵀ · g — via le GEMM portable
+                    // (transposition = pur mouvement de données) : le
+                    // backward reste bit-exact inter-plates-formes.
+                    let av = values[a].as_cpu().clone();
+                    let bv = values[b].as_cpu().clone();
+                    grads[a] = grads[a].add(&g.matmul_portable(&bv.transpose()));
+                    grads[b] = grads[b].add(&av.transpose().matmul_portable(&g));
                 },
                 Op::Sqrt(a) =>
                 {
@@ -3060,6 +3133,60 @@ impl<'t> Var<'t> {
         let new_idx =
             self.tape
                 .push_with_saved(Op::Exp(self.idx), DeviceTensor::cpu(out), SavedData::None);
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    /// exp **portable** (sans libm) : forward via
+    /// [`crate::portable_f32::exp_f32`], backward depuis la sortie stockée —
+    /// nœud bit-exact inter-plates-formes, contrairement à [`Var::exp`].
+    pub fn exp_portable(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.exp_portable();
+        let new_idx = self.tape.push_with_saved(
+            Op::ExpPortable(self.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    /// ln **portable** (sans libm) : forward via
+    /// [`crate::portable_f32::ln_f32`], backward `g ⊙ 1/x` (division IEEE) —
+    /// nœud bit-exact inter-plates-formes, contrairement à [`Var::log`].
+    pub fn ln_portable(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.ln_portable();
+        let new_idx = self.tape.push_with_saved(
+            Op::LnPortable(self.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
+    /// Matmul **portable** : forward ET backward via le GEMM portable
+    /// ([`crate::portable_f32::gemm_f32`], ordre fixe, sans noyau SIMD par
+    /// architecture) — nœud bit-exact inter-plates-formes, contrairement à
+    /// [`Var::matmul`]. Voie de référence, plus lente.
+    pub fn matmul_portable(self, other: Var<'t>) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        crate::error::check_inner_dim("matmul_portable", a.cols, b.rows).unwrap();
+        let out = a.matmul_portable(&b);
+        let new_idx = self.tape.push_with_saved(
+            Op::MatMulPortable(self.idx, other.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
         Var {
             tape: self.tape,
             idx: new_idx,
