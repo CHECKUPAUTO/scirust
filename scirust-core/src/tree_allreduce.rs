@@ -186,6 +186,136 @@ pub fn tree_all_reduce<C: Combine>(
     result.expect("le rang 0 produit le résultat")
 }
 
+// ================================================================== //
+//  Transport TCP réel                                                 //
+// ================================================================== //
+
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+
+/// État sérialisable pour le transport réseau. Les encodages sont en
+/// **little-endian explicite** : les octets sont identiques sur toute
+/// plate-forme, la garantie bit-exacte traverse donc le réseau.
+pub trait WireState: Sized {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn from_bytes(b: &[u8]) -> Self;
+}
+
+impl WireState for Vec<f32> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 * self.len());
+        for &x in self
+        {
+            out.extend_from_slice(&x.to_bits().to_le_bytes());
+        }
+        out
+    }
+    fn from_bytes(b: &[u8]) -> Self {
+        b.chunks_exact(4)
+            .map(|c| f32::from_bits(u32::from_le_bytes(c.try_into().unwrap())))
+            .collect()
+    }
+}
+
+impl WireState for Vec<ExactAcc> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for acc in self
+        {
+            for w in acc.to_words()
+            {
+                out.extend_from_slice(&w.to_le_bytes());
+            }
+        }
+        out
+    }
+    fn from_bytes(b: &[u8]) -> Self {
+        let per = core::mem::size_of::<u64>() * 22; // 2 × 11 mots
+        b.chunks_exact(per)
+            .map(|chunk| {
+                let mut words = [0u64; 22];
+                for (i, c) in chunk.chunks_exact(8).enumerate()
+                {
+                    words[i] = u64::from_le_bytes(c.try_into().unwrap());
+                }
+                ExactAcc::from_words(&words)
+            })
+            .collect()
+    }
+}
+
+fn send_state(stream: &mut TcpStream, rank: u32, bytes: &[u8]) -> std::io::Result<()> {
+    stream.write_all(&rank.to_le_bytes())?;
+    stream.write_all(&(bytes.len() as u64).to_le_bytes())?;
+    stream.write_all(bytes)?;
+    stream.flush()
+}
+
+fn recv_state(stream: &mut TcpStream) -> std::io::Result<(u32, Vec<u8>)> {
+    let mut hdr = [0u8; 12];
+    stream.read_exact(&mut hdr)?;
+    let rank = u32::from_le_bytes(hdr[..4].try_into().unwrap());
+    let len = u64::from_le_bytes(hdr[4..].try_into().unwrap()) as usize;
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body)?;
+    Ok((rank, body))
+}
+
+/// Un rang de l'all-reduce à arbre fixe **sur TCP réel** — la version
+/// multi-processus/multi-machine du moteur in-process : même topologie,
+/// même ordre d'absorption (par enfant, hors-ordre mis en attente), donc
+/// mêmes bits. `listener` : socket lié du rang courant (None pour les
+/// feuilles) ; `parent` : adresse du parent (None pour le rang 0, qui
+/// renvoie `Some(résultat)`).
+pub fn tcp_tree_all_reduce_rank<C: Combine>(
+    rank: usize,
+    n: usize,
+    listener: Option<&TcpListener>,
+    parent: Option<SocketAddr>,
+    input: &[f32],
+    combine: &C,
+) -> std::io::Result<Option<Vec<f32>>>
+where
+    C::State: WireState,
+{
+    let mut state = combine.leaf(input);
+    let children: Vec<usize> = [2 * rank + 1, 2 * rank + 2]
+        .into_iter()
+        .filter(|&c| c < n)
+        .collect();
+    if !children.is_empty()
+    {
+        let listener = listener.expect("rang interne sans listener");
+        // collecte les états des enfants (l'ordre de CONNEXION est libre)
+        let mut pending: Vec<(u32, Vec<u8>)> = Vec::new();
+        while pending.len() < children.len()
+        {
+            let (mut s, _) = listener.accept()?;
+            pending.push(recv_state(&mut s)?);
+        }
+        // absorption DANS L'ORDRE DE L'ARBRE, quel que soit l'ordre d'arrivée
+        for &child in &children
+        {
+            let pos = pending
+                .iter()
+                .position(|(from, _)| *from == child as u32)
+                .expect("enfant manquant");
+            let (_, bytes) = pending.swap_remove(pos);
+            combine.absorb(&mut state, C::State::from_bytes(&bytes));
+        }
+    }
+    match parent
+    {
+        Some(addr) =>
+        {
+            let mut s = TcpStream::connect(addr)?;
+            send_state(&mut s, rank as u32, &state.to_bytes())?;
+            Ok(None)
+        },
+        None => Ok(Some(combine.finish(state))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +404,97 @@ mod tests {
         {
             let expected = inputs[0][i] + inputs[1][i] + inputs[2][i];
             assert_eq!(result[i].to_bits(), expected.to_bits(), "élément {i}");
+        }
+    }
+
+    /// TCP réel (sockets 127.0.0.1) : bit-identique au moteur in-process,
+    /// sous gigue, pour les deux combinaisons — la garantie traverse le
+    /// réseau (encodage little-endian explicite).
+    #[test]
+    fn tcp_transport_matches_in_process_bitwise() {
+        for &n in &[3usize, 8]
+        {
+            let inputs = make_inputs(n, 32, 2026);
+            let expected_fixed = tree_all_reduce(&inputs, &FixedOrderSum, None);
+            let expected_exact = tree_all_reduce(&inputs, &ExactSum, None);
+
+            for exact in [false, true]
+            {
+                // listeners liés d'abord (ports éphémères), adresses connues
+                let listeners: Vec<Option<std::net::TcpListener>> = (0..n)
+                    .map(|r| {
+                        if 2 * r + 1 < n
+                        {
+                            Some(std::net::TcpListener::bind("127.0.0.1:0").unwrap())
+                        }
+                        else
+                        {
+                            None
+                        }
+                    })
+                    .collect();
+                let addrs: Vec<Option<std::net::SocketAddr>> = listeners
+                    .iter()
+                    .map(|l| l.as_ref().map(|l| l.local_addr().unwrap()))
+                    .collect();
+
+                let jitter_rng = Philox4x32::new(4242);
+                let mut result: Option<Vec<f32>> = None;
+                std::thread::scope(|scope| {
+                    let mut handles = Vec::new();
+                    for r in (0..n).rev()
+                    {
+                        let listener = listeners[r].as_ref();
+                        let parent = if r > 0 { addrs[(r - 1) / 2] } else { None };
+                        let input = &inputs[r];
+                        let delay = (jitter_rng.u32_at(0, r as u64) % 6) as u64;
+                        handles.push(scope.spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(delay));
+                            if exact
+                            {
+                                tcp_tree_all_reduce_rank(r, n, listener, parent, input, &ExactSum)
+                                    .unwrap()
+                            }
+                            else
+                            {
+                                tcp_tree_all_reduce_rank(
+                                    r,
+                                    n,
+                                    listener,
+                                    parent,
+                                    input,
+                                    &FixedOrderSum,
+                                )
+                                .unwrap()
+                            }
+                        }));
+                    }
+                    for h in handles
+                    {
+                        if let Some(res) = h.join().unwrap()
+                        {
+                            result = Some(res);
+                        }
+                    }
+                });
+                let got = result.expect("rang 0");
+                let expected = if exact
+                {
+                    &expected_exact
+                }
+                else
+                {
+                    &expected_fixed
+                };
+                for i in 0..32
+                {
+                    assert_eq!(
+                        got[i].to_bits(),
+                        expected[i].to_bits(),
+                        "n={n}, exact={exact}, élément {i}"
+                    );
+                }
+            }
         }
     }
 

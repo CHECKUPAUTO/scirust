@@ -60,6 +60,7 @@ mkdir -p "$OUT"
 echo "== build (release) =="
 cargo build --release -p scirust-core \
     --bin proof_portable_f32 --bin proof_portable_training \
+    --bin proof_lowprec_training \
     --manifest-path "$REPO/Cargo.toml"
 
 echo "== preuve : fonctions portables =="
@@ -75,7 +76,14 @@ RC2=${PIPESTATUS[0]}
 set -e
 [[ $RC -eq 0 ]] && RC=$RC2
 
-grep -v '^#' "$OUT/report.txt" "$OUT/report-training.txt" | sha256sum | tee "$OUT/canonical.sha256"
+echo "== preuve : entraînement bf16 + arrondi stochastique (contrat codes bf16) =="
+set +e
+"$REPO/target/release/proof_lowprec_training" | tee "$OUT/report-lowprec.txt"
+RC3=${PIPESTATUS[0]}
+set -e
+[[ $RC -eq 0 ]] && RC=$RC3
+
+grep -v '^#' "$OUT/report.txt" "$OUT/report-training.txt" "$OUT/report-lowprec.txt" | sha256sum | tee "$OUT/canonical.sha256"
 echo "bundle : $OUT"
 if [[ $RC -eq 0 ]]; then
     echo "VERDICT : PASS — cette machine reproduit bit à bit le contrat commis."

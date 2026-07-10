@@ -3,6 +3,27 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 116 : all-reduce sur TCP réel + entraînement bf16-SR reproductible
+- **A — Transport TCP réel pour l'arbre fixe** : `WireState` (encodage
+  little-endian explicite ⇒ la garantie bit-exacte traverse le réseau ;
+  implémenté pour Vec<f32> et Vec<ExactAcc> via to_words/from_words) +
+  `tcp_tree_all_reduce_rank` (listeners réels, collecte des enfants dans
+  n'importe quel ordre de connexion, absorption DANS L'ORDRE DE L'ARBRE).
+  Test : sockets 127.0.0.1 éphémères, threads + gigue Philox, n ∈ {3, 8},
+  les deux combinaisons → bit-identique au moteur in-process. La trajectoire
+  « transport réel » du volet 115 est fermée (multi-processus/multi-machine
+  ready — même protocole).
+- **B — Entraînement basse précision reproductible (`proof_lowprec_training`)** :
+  recette standard maîtres f32 + copies forward bf16, quantification par
+  **arrondi stochastique Philox** (contre-basé : indexé (pas, poids) ⇒
+  déterministe et indépendant du découpage), graphe portable (matmul/CE),
+  Adam sur les maîtres. Contrats commis (x86-64) : trajectoire de perte
+  0xd6c134950dac2ee0, codes bf16 finaux 0x09c0f6bebbb0ef71 — validés QEMU
+  aarch64 avant commit. Intégré au script de preuve (report-lowprec.txt)
+  et au job CI QEMU. Capacité de synthèse : « entraînement bf16 à arrondi
+  stochastique, bit-reproductible cross-platform, sous contrat » —
+  sans équivalent (RepDL exclut les basses précisions).
+
 ## Session 2026-07-10 — fluides & thermo, volet 2 (IF97 complet, convection, réseaux)
 - **Contexte** : PR #281 (volet 1) MERGÉE ; « continu » → exécution des trois
   « suites possibles » du volet 1. Branche repartie de master
