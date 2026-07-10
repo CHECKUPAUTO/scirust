@@ -1,0 +1,6 @@
+[package]
+name = "scirust-units"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Runtime dimensional analysis over the 7 SI base dimensions: Quantity values with dimension-checked arithmetic, derived units (N/J/W/Pa/Hz/…), powi/sqrt. Rejects dimensionally inconsistent operations. Pure Rust, no unsafe, no dependencies."

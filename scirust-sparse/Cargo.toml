@@ -1,0 +1,6 @@
+[package]
+name = "scirust-sparse"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Sparse matrices (COO/CSR/CSC) with SpMV and direct/iterative solvers (Thomas tridiagonal, banded LU, sparse LU, conjugate gradient). Validated, deterministic, oracle-tested. Pure Rust, no unsafe, no dependencies."
