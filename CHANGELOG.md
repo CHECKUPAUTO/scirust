@@ -5,6 +5,36 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
+Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
+--release` a tourné sur une **même machine** — le seul mode de comparaison
+autorisé (voir la discipline « claims backed by measurements »).
+
+**Machine** : Jetson, L4T R38.4 (`generic` board), noyau `6.8.12-tegra`,
+aarch64, 14 cœurs (`uname -a` / `/etc/nv_tegra_release` / `nproc` — modèle
+exact non capturé par ces commandes ; classe Thor d'après le L4T R38 et les
+références Jetson existantes du dépôt).
+
+| n | `scirust::VectorRls` | padasip `FilterRLS` | rapport |
+|---|---|---|---|
+| 4 | 59,7 ns | 8 636,2 ns | **144,7×** |
+| 16 | 532,3 ns | 10 640,4 ns | **20,0×** |
+| 64 | 7 792,0 ns | 73 349,3 ns | **9,4×** |
+
+Le rapport se resserre franchement avec `n` — comportement attendu et
+honnête, pas un artefact : à petit `n` le coût fixe par appel de
+l'interpréteur Python/NumPy (création d'objets, dispatch) domine ; à mesure
+que `n` grandit, le BLAS vectorisé de NumPy amortit ce coût et rattrape du
+terrain sur l'implémentation Rust scalaire boucle-par-boucle. Sur cette même
+machine, `QrRls` reproduit l'avantage déjà observé en conteneur x86_64 (plus
+rapide que `VectorRls` dès n=16 : 433,5 ns vs 532,3 ns à n=16, 6 278,9 ns vs
+7 792,0 ns à n=64 — pas de passe de symétrisation). `RlsFilterConst`, en
+revanche, ne montre **pas** ici l'avantage net vu en conteneur (34,0 ns à
+n=4, mais 7 894,2 ns à n=64, à peu près à égalité avec la version tas) —
+chiffres bruts consignés sans lissage, l'écart de déroulage/vectorisation
+entre cibles aarch64 et x86_64 reste à creuser plutôt qu'à sur-interpréter
+sur un seul run.
+
 ### Ajouté — RLS niveau 3 : oubli directionnel, annulation multi-référence, QrRlsConst, re-conditionnement
 Le lot complet validé — l'anti-windup principiel et le bouclage avec le
 pipeline de débruitage :
