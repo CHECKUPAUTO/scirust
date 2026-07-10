@@ -49,8 +49,31 @@ versions sémantiques à partir de la prochaine release taguée.
   `paper/PAPER_PLAN.md` (titre + 2 variantes ; venues : atelier
   correctness/reproducibility recommandé — JOSS bloqué par la licence
   PolyForm non-OSI en l'état ; plan de sections ; **table claims →
-  évidence** T1-P1 mappant chaque claim sur son test exact avec commande,
-  3 `TODO-EVIDENCE` explicites ; réponses aux faiblesses anticipées).
+  évidence** T1-P1 mappant chaque claim sur son test exact avec commande ;
+  réponses aux faiblesses anticipées).
+- **Fermeture des TODO-EVIDENCE du plan (S2, R4, O1)** — décisions actées :
+  - **S2** : le gate `epsilon-audit --check` est câblé en CI (nouveau job
+    `epsilon-audit` dans `.github/workflows/ci.yml`) — aucune garde f32
+    sous σ_sanitized ne peut plus entrer dans `scirust-gpu/src` sans
+    casser le build.
+  - **R4** : nouveau test CI
+    `forward_fingerprint_is_thread_count_invariant`
+    (`scirust-runtime/tests/fingerprint_thread_invariance.rs`) — le
+    fingerprint 64 bits du forward (MLP 784-256-10, batches synthétiques
+    100 % entiers, portables) est bit-identique sous des pools rayon de
+    1/2/4/8 threads, et stable à la ré-exécution. `rayon` ajouté en
+    dev-dependency de `scirust-runtime` (déjà au lockfile — zéro nouveau
+    téléchargement).
+  - **O1** : banc « coût du déterminisme »
+    (`scirust-core/src/bin/bench_reduction_overhead.rs`) — réduction en
+    ordre de worker figé (pattern de `train_batch_threaded`) vs
+    accumulation en ordre d'arrivée (canal), magnitudes ±1e16 rendant
+    l'ordre observable, empreintes bit-à-bit par répétition. Mesure x86
+    (4 cœurs, release, dim=100 352, 30 reps) : **l'ordre figé est plus
+    rapide** (0,76×-0,93× du temps de la baseline) et bit-stable ; la
+    baseline « arrivée » a produit 3 empreintes distinctes à 8 threads
+    (non-déterminisme réel observé). Wall-clock ⇒ protocole, jamais CI ;
+    volet Jetson/aarch64 restant.
 
 ### Ajouté — `scirust-sigma` : bornes structurelles σ (« couvercle de zéro ») + audit des epsilons
 Nouvelle crate feuille **sans dépendance externe** (`std` seul) qui nomme et

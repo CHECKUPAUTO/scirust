@@ -39,9 +39,24 @@
   non-OSI** ; table claims→évidence T1-P1 avec test exact + commande par claim ;
   TODO-EVIDENCE : R4 fingerprint thread-count en CI, S2 gate epsilon-audit à câbler
   en job CI, O1 banc overhead ordre-figé vs libre ; réponses rapporteurs a/b/c).
-- **Décisions restant humaines** : (1) poster ou non de futurs bug reports (sans objet
-  ici — NO-GO) ; (2) choix de venue + re-licence éventuelle pour JOSS ; (3) go/no-go
-  d'écriture du paper complet (conditionné au banc O1).
+- **Décisions actées (recommandations acceptées par l'utilisateur)** : (1) bug reports
+  extérieurs : clos, zéro contact (NO-GO) ; (2) venue : atelier correctness/reproducibility,
+  PAS de re-licence pour JOSS ; (3) paper : GO conditionnel engagé → S2/R4/O1 exécutés :
+  - **S2 fait** : job CI `epsilon-audit` (gate `--check` σ_sanitized sur scirust-gpu/src)
+    ajouté à `.github/workflows/ci.yml`.
+  - **R4 fait** : `scirust-runtime/tests/fingerprint_thread_invariance.rs` — fingerprint
+    du forward bit-identique sous pools rayon 1/2/4/8 (batches synthétiques entiers,
+    modèle construit DANS la fermeture install : Sequential contient des Box<dyn Module>
+    non-Send). rayon en dev-dep de scirust-runtime (déjà au lockfile). Test vert.
+  - **O1 fait (volet x86)** : `scirust-core/src/bin/bench_reduction_overhead.rs` —
+    ordre figé (slots indexés, pattern train_batch_threaded) vs ordre d'arrivée (canal
+    mpsc), ±1e16, empreintes bit-à-bit. Mesure x86 4 cœurs release (dim=100 352,
+    30 reps) : figé/arrivée = 0,930×/0,895×/0,756×/0,846× à 1/2/4/8 threads → le
+    déterminisme du pattern de réduction est GRATUIT (même plus rapide : pas de canal,
+    pas de contention) ; empreinte figée unique par n ; baseline arrivée = 3 empreintes
+    distinctes à 8 threads (non-déterminisme observé). PAPER_PLAN §4 (R4/S2/O1 → [CI]/
+    mesuré) et §6 (décisions) mis à jour. **Reste humain** : atelier précis + run Jetson
+    du banc O1 + déclenchement de l'écriture du paper.
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance

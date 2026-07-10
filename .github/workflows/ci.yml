@@ -68,6 +68,24 @@ jobs:
       - name: Run clippy (scirust-gpu wgpu feature)
         run: cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings
 
+  # Gate σ (S2 de paper/PAPER_PLAN.md) : échoue si une garde f32 sous
+  # σ_sanitized (= f32::MIN_POSITIVE) subsiste hors test dans scirust-gpu/src
+  # — une telle garde est morte sur la voie sanitized (sanitize_f32 l'écrase).
+  # Ambiguïtés f32/f64 = WARNING non bloquant (zéro faux positif).
+  epsilon-audit:
+    name: Epsilon Audit (σ gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run epsilon-audit --check
+        run: cargo run -q -p scirust-sigma --bin epsilon-audit -- --root . --check
+
   build-test:
     name: Build & Test (nightly, x86_64)
     runs-on: ubuntu-latest
