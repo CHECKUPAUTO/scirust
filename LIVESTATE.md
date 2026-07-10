@@ -3,6 +3,30 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités, 4e passe (parité SciPy queues + Dirichlet-multinomiale)
+- **Contexte** : « continu » après PR #287 (3e passe : ζ de Riemann +
+  Zeta/PoissonBinomial/Multinomial/MultivariateHypergeometric) MERGÉE.
+  Branche repartie de `origin/master` à jour.
+- **Livré** : (a) `logcdf`/`logsf`/`isf` ajoutés par défaut au trait
+  `DiscreteDistribution` — parité `scipy.stats`, `logsf`/`isf` s'appuient sur
+  la survie directe (pas de `ln(1−cdf)`) ; (b) `DirichletMultinomial`
+  (Pólya multivariée) — ln_pmf/pmf forme fermée ln Γ, moyenne, covariance
+  avec facteur de surdispersion ρ=(n+A)/(1+A), tirage par bêta-binomiales
+  conditionnelles (stick-breaking, reproductible). Oracles SciPy 1.17.1 +
+  fraction exacte 18/143 ; 2 catégories = bêta-binomiale, α=[1,1]=uniforme.
+  48 tests + doctest, clippy 0 avertissement.
+- **Convention conflits** : entrée CHANGELOG placée **en bas** de la section
+  « Non publié » (pas en tête) — les volets parallèles collent tous la leur
+  en tête, d'où des conflits systématiques ; #287 a dû être rebasée 2×.
+- **Bilan volet probabilités** : 14 lois discrètes (11 univariées + 3
+  vectorielles) + combinatoire exacte + module loterie honnête (aucune
+  « prédiction », impossible et documentée). Dépasse statrs (9 univariées).
+- **Suite possible** : pmf de Loader (saddle-point) pour binomiale/Poisson à
+  très grand n, `interval`/`expect` façon SciPy, lois discrètes restantes
+  (Yule-Simon, Boltzmann) — non entamé.
+- **NB CI** : la panne Actions du dépôt (runners non assignés, logs 404,
+  ~17h29 UTC) persistait ; validations locales uniquement (tests+clippy).
+
 ## Session 2026-07-10 — fluides & thermo, volet 3 (région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook)
 - **Contexte** : PR #285 (volet 2) MERGÉE ; « continu » → les trois
   « suites possibles » notées à la fin du volet 2. Branche repartie de
