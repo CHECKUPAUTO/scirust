@@ -176,12 +176,20 @@ Décisions actées (recommandations acceptées) :
 - **Paper** : GO conditionnel engagé — S2 câblé en CI, R4 verrouillé en CI,
   banc O1 livré avec chiffres x86 (voir table §4).
 
-Décisions restant humaines :
+Décisions — toutes actées au 2026-07-10 :
 
-1. Choix de l'atelier précis et de l'édition (deadlines).
+1. ~~Choix de l'atelier précis~~ — **fait** : **Correctness '26** (10ᵉ
+   International Workshop on Software Correctness for HPC Applications,
+   SC26, Chicago). Deadline soumission : **23 juillet 2026** ; notification :
+   1ᵉʳ septembre 2026. Format ACM sigconf, papier régulier 7-8 pages hors
+   références (repli : papier court 4 pages). CFP :
+   correctness-workshop.github.io/2026. Plateforme d'évaluation du paper :
+   **Jetson AGX Thor** (décision utilisateur).
 2. ~~Exécution du volet Jetson/aarch64 du protocole O1~~ — **fait 2026-07-10**
    (AGX Thor, voir ligne O1 : déterminisme quasi gratuit, et réduction figée
    bit-identique x86_64 ↔ aarch64).
-3. Déclenchement de l'écriture du paper complet (tout le matériel amont est
-   prêt : RELATED_WORK citable, table claims → évidence sans TODO bloquant,
-   les deux volets d'O1 mesurés).
+3. ~~Déclenchement de l'écriture du paper complet~~ — **fait** : draft
+   complet dans `paper/correctness26/` (`main.tex` ACM sigconf +
+   `references.bib` vérifiées + README de build). TODO restants marqués
+   dans le tex : affiliation, lien d'artefact relecteurs, vérif anonymat
+   CFP, contrôle de longueur après compilation.
