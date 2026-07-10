@@ -78,6 +78,19 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "AVERTISSEMENT : machine $(uname -m), pas aarch64 — ce volet vise le Jetson." >&2
 fi
 
+# Sous sudo, secure_path ne contient pas ~/.cargo/bin : recharger l'env cargo
+# de l'utilisateur (root ou SUDO_USER) plutôt que d'échouer au build.
+if ! command -v cargo >/dev/null 2>&1; then
+  for env_file in "$HOME/.cargo/env" "/home/${SUDO_USER:-}/.cargo/env"; do
+    # shellcheck disable=SC1090
+    [[ -f "$env_file" ]] && source "$env_file" && break
+  done
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo introuvable (même après ~/.cargo/env) — installer rustup d'abord." >&2
+  exit 2
+fi
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$REPO/bench-o1-jetson-$STAMP"
 mkdir -p "$OUT"
@@ -129,9 +142,11 @@ done
 echo "== tests natifs ARM (Q3 + R4) =="
 {
   echo "-- Q3 : NEON int8 bit-exact (scirust-core) --"
-  cargo test --release -p scirust-core neon_matches_scalar_bit_exact 2>&1 | tail -4
+  # --lib : le test vit dans le target lib ; sans cela, cargo exécute TOUS
+  # les targets de test et le dernier résumé (0 match) masquerait le vrai.
+  cargo test --release -p scirust-core --lib neon_matches_scalar_bit_exact 2>&1 | tail -5
   echo "-- R4 : fingerprint invariant aux threads (scirust-runtime) --"
-  cargo test --release -p scirust-runtime --test fingerprint_thread_invariance 2>&1 | tail -4
+  cargo test --release -p scirust-runtime --test fingerprint_thread_invariance 2>&1 | tail -5
 } | tee "$OUT/tests.txt"
 # Gate strict sur ARM seulement : Q3 est cfg(aarch64) (0 test sur x86, où ce
 # script ne sert qu'au test de fumée) ; sur Jetson les DEUX doivent passer.

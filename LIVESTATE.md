@@ -64,6 +64,19 @@
     empreintes « figé » identiques entre processus (0x60daf62c…/0x9bf7c3f3…/
     0xd5b8e15f…/0x7e99a9d0… aux 4 nombres de threads) — stabilité inter-processus du
     banc vérifiée. Section « On-device Jetson bench (O1) » ajoutée à TEST_PROTOCOL.md.
+  - **O1 volet Jetson EXÉCUTÉ (2026-07-10, par l'utilisateur, sortie collée en session)** :
+    Jetson AGX Thor Dev Kit, 14 cœurs, 128 Go, L4T R38.4.0, noyau 6.8.12-tegra, MAXN
+    (horloges épinglées par la 1re invocation), rustc nightly af3d95584, commit 0c2f1bf,
+    3 runs × 30 reps. Overhead figé/arrivée : ≈0,99× (1 thr), 0,93-0,95× (2), 1,01-1,03×
+    (4), 1,06-1,11× (8) ; arrivée non déterministe (2 empreintes distinctes à 8 thr,
+    runs 2-3). **RÉSULTAT CLÉ : empreintes « figé » bit-identiques x86_64 ↔ aarch64**
+    aux 4 nombres de threads — la réduction f32 à ordre figé est cross-platform, mesuré.
+    Deux corrections de script au passage : (1) sous sudo, secure_path n'a pas
+    ~/.cargo/bin → le script source $HOME/.cargo/env (et /home/$SUDO_USER/.cargo/env) ;
+    (2) Q3 : `cargo test -p scirust-core <filtre>` exécute TOUS les targets et le
+    tail -4 n'affichait que le dernier résumé (0 match) → `--lib` ajouté (sur x86 :
+    « 697 filtered out » confirme le bon target ; re-run Jetson conseillé pour
+    l'évidence Q3 propre). PAPER_PLAN O1 + §6 mis à jour (volet Jetson : fait).
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance
