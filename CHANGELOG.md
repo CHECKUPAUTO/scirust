@@ -47,6 +47,44 @@ versions sémantiques à partir de la prochaine release taguée.
   RepDL — toutes fidèlement arrondies et bit-exactes inter-plates-formes
   par construction.
 
+### Ajouté — débruitage & détection de bruit extensibles (`scirust-signal::denoise`)
+- **Nouveau module `denoise`** : une boîte à outils de suppression de bruit
+  pensée pour être *exhaustive par familles* plutôt que par énumération. Une
+  taxonomie fermée (`DenoiserFamily` : Linear / Rank / Transform / Variational /
+  Adaptive) et un trait uniforme `Denoiser` : ajouter une méthode = choisir sa
+  famille et implémenter le trait. Couverture actuelle, chaque routine validée
+  par un gain de SNR mesuré sur un signal synthétique à référence propre connue :
+  - **Linéaire** (`linear`) : moyenne mobile, lissage gaussien, **Savitzky-Golay**
+    (ajustement polynomial par moindres carrés, préserve les pics — testé exact
+    sur un polynôme), moyenne mobile exponentielle.
+  - **Rang / ordre** (`rank`) : filtre **médian**, **Hampel** (rejet d'impulsions
+    par MAD, filtre à décision), moyenne α-tronquée, plus `impulse_mask` qui
+    étiquette explicitement quels échantillons sont du bruit.
+  - **Transformé** (`transform`) : passe-bas/passe-haut FFT idéaux, **notch** et
+    suppression du 50/60 Hz + harmoniques, filtre de **Wiener** (bruit blanc),
+    **débruitage par ondelettes** (Haar multi-niveaux, seuil universel VisuShrink
+    `σ√(2 ln N)` avec σ robuste par MAD, seuillage doux/dur).
+  - **Variationnel** (`variational`) : lisseur de **Tikhonov** (L2, système
+    tridiagonal résolu par Thomas) et **Variation Totale** (L1, IRLS lagged-
+    diffusivity, préserve les fronts — vérifié meilleur que Tikhonov sur un
+    échelon bruité).
+- **Détection & séparation bruit/information** (`denoise::detect`) : `classify`
+  caractérise le bruit sans le nommer via un panel fixe de descripteurs (σ robuste
+  par MAD ; kurtosis/facteur de crête du résidu ; planéité spectrale ; périodicité
+  par **test g de Fisher** insensible au nombre de bins ; force de tendance ;
+  pente de couleur `1/f`) et un arbre de décision → `NoiseType`
+  (Gaussian / Impulsive / Periodic / Colored / Baseline / LowNoise). `separate`
+  décompose le signal en information + bruit **puis falsifie la séparation** par un
+  **test de blancheur** du résidu (autocorrélation vs bande `±1.96/√N`) :
+  `leaked_structure` signale si de l'information a fui dans le bruit — la garantie
+  qui rend la séparation vérifiable et non simplement plausible.
+- **Pipeline « débruiteur universel »** `denoise_auto` : détecte → choisit la
+  famille adaptée → applique (Hampel pour l'impulsif, notch pour le tonal,
+  retrait de tendance pour la dérive, Wiener/ondelettes pour le large bande),
+  et `catalog()` fournit un jeu de débruiteurs par défaut couvrant chaque famille.
+- 27 tests unitaires + 1 doctest ; zéro dépendance hors `scirust-core`/serde ;
+  `cargo fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
 - **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
   (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de

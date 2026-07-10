@@ -13,10 +13,14 @@
 //! - **Bearing diagnostics** — BPFO, BPFI, BSF, FTF calculation, fault frequency
 //!   detection for rolling-element bearings
 //! - **Order analysis** — order tracking, resampling for variable-speed rotating machinery
+//! - **Denoising & noise detection** — extensible noise-removal families (linear,
+//!   rank, transform, variational) plus a noise characterizer/classifier and a
+//!   detect-then-denoise auto pipeline with a residual whiteness self-check
 
 pub mod bearing;
 pub mod cepstrum;
 pub mod complex;
+pub mod denoise;
 pub mod envelope;
 pub mod features;
 pub mod fft;
@@ -28,6 +32,11 @@ pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing
 pub use cepstrum::{dominant_quefrency, real_cepstrum};
 /// Re-export commonly used types.
 pub use complex::Complex;
+pub use denoise::{
+    AutoResult, Denoiser, DenoiserFamily, NoiseProfile, NoiseType, Separation, catalog, classify,
+    denoise_auto, estimate_noise_std, moving_average as denoise_moving_average, savitzky_golay,
+    separate, total_variation, wavelet_denoise,
+};
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{
     band_power, psd, spectral_centroid, spectral_entropy, spectral_flatness, spectral_rolloff,
