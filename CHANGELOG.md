@@ -5,31 +5,109 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — `scirust-sim` : pas adaptatif + pharmacocinétique + corps rigide
-Suite du crate d'environnements de simulation multi-domaines (PR #288) :
-- **Intégrateur adaptatif `simulate_adaptive`** (`scirust-sim::engine`) —
-  paire de Runge–Kutta **Dormand–Prince 5(4)** (le schéma d'`ode45`) à
-  contrôle d'erreur : pas initial automatique (heuristique de Hairer),
-  contrôleur élémentaire à exposant 1/5, propriété FSAL, garde
-  `SimError::StepUnderflow` sur singularité. Le pas se resserre dans les
-  transitoires rapides et s'élargit dans les portions lisses. Testé contre
-  oracle : reproduit e^{-t} à 1e-8 en <300 pas là où un RK4 fixe en
-  demanderait ~1700, l'erreur au point final décroît avec la tolérance, le
-  pas croît une fois le transitoire de `y'=-50y` amorti, et une singularité
-  en temps fini est signalée (jamais un faux succès).
-- **`scirust-sim::pharmacokinetics`** — absorption orale à un compartiment
-  (fonction de Bateman, t_max analytique) et bolus IV à deux compartiments
-  (déclin biexponentiel, constantes hybrides α/β) ; l'aire sous la courbe
-  centrale, intégrée par le solveur adaptatif, retrouve l'identité exacte
-  `dose/k₁₀`.
-- **`scirust-sim::rigid_body`** — rotation libre (équations d'Euler sans
-  couple) : l'énergie cinétique de rotation et |L|² sont conservées à 1e-8,
-  la précession du toupie symétrique suit sa forme close, et le théorème de
-  l'axe intermédiaire (effet Dzhanibekov) est reproduit — instable autour de
-  l'axe moyen, stable autour des axes extrêmes.
-- Zéro dépendance, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`, 83
-  tests + 2 doctests, `cargo miri test` vert (les runs lourds ignorés sous
-  Miri selon la convention `scirust-stiff`).
+### Ajouté — fluides & thermo, volet 4 : région 3 IF97 (Helmholtz) et équations backward officielles
+Les deux derniers chantiers notés « suite possible » sont livrés :
+- **`scirust-thermo::steam::region3`/`region3_from_tp`** — IAPWS-IF97
+  région 3 (fluide dense autour du point critique), seule région dont
+  les variables naturelles sont **T et ρ** (et non T et p) : équation de
+  **Helmholtz** (et non Gibbs), 39 coefficients. `region3(t, rho)`
+  évalue directement (v, h, u, s, cp, cv, w, p — p est ici une sortie
+  dérivée). `region3_from_tp(t, p)` localise la densité par bissection
+  déterministe, **restreinte au domaine supercritique** (T ≥ 647,096 K) :
+  en dessous du point critique, une densité de type liquide et une de
+  type vapeur peuvent partager le même (T, p) (région 3 chevauche la
+  cloche diphasique côté sous-critique), ce qui rendrait la racine
+  ambiguë — vérifié empiriquement par balayage fin que P(ρ) sur
+  ρ ∈ [80, 800] kg/m³ est strictement croissante pour tout T du domaine
+  supercritique de la région 3, donc la solution y est unique par
+  construction. Oracles : **table de vérification officielle IF97 33**
+  (trois points T,ρ, toutes propriétés, à 1e-8/1e-6), aller-retour
+  densité→pression→densité sur une grille de 5 points, jointure physique
+  avec la région 2 à la frontière B23.
+- **`scirust-thermo::backward`** — équations **backward** officielles
+  T(p,h) et T(p,s) pour les régions 1 et 2 (closed-form, sans bissection) :
+  région 1 (20 coefficients chacune), région 2 en trois sous-régions
+  fittées 2a/2b/2c (34+38+23 et 46+44+30 coefficients) avec le
+  dispatch officiel (frontière `p_2bc`/`h_bc` par enthalpie, seuil
+  d'entropie 5,85 kJ/(kg·K)) et l'ajustement `T = max(T_sat, T)` près de
+  la ligne de saturation. Piège découvert et corrigé : la région 2a de
+  T(p,s) utilise des exposants en **quarts d'entier** sur la pression
+  réduite (-1,5 à 1,5, `powf`), contrairement à toutes les autres
+  corrélations du module qui n'utilisent que des entiers (`powi`) —
+  repéré parce qu'une régénération programmatique avec assertion de
+  longueur a démasqué la troncature silencieuse `int()` d'un script
+  antérieur qui aurait sinon introduit une erreur de calcul silencieuse.
+  Oracles : 16 exemples numériques officiels des publications
+  d'équations backward IF97, aller-retour contre les équations directes
+  sur 6 points (régions 1 et 2, toutes sous-régions).
+- Bilan : scirust-thermo 74 tests (+11), clippy `-D warnings` propre,
+  rustfmt appliqué. Avec ce volet, les deux chantiers explicitement
+  demandés par l'utilisateur (« la région 3 IF97… et les équations
+  backward officielles… ») sont complets.
+
+### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
+Les trois « suites possibles » restantes du volet 2 sont livrées :
+- **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur
+  très haute température, 1073,15 < T ≤ 2273,15 K, ≤ 50 MPa : échappement
+  de turbine à gaz, chaudières de récupération ultra-supercritiques).
+  Même structure Gibbs idéal + résiduel que la région 2 (coefficients
+  extraits du même paquet de référence `iapws`, vérifiés en Python pur).
+  Oracles : les **exemples numériques officiels de la publication IF97**
+  pour la région 5 (v, h, u, s, cp, cv, w — six valeurs à 1e-8) ; jointure
+  physique avec la région 2 vérifiée à la frontière 1073,15 K.
+- **`scirust-thermo::cycles::rankine_real`** — cycle de Rankine
+  **irréversible** : turbine et pompe à rendement isentropique réel
+  (`RankineCycleReal`, avec l'efficacité idéale jointe pour comparaison
+  directe). L'état de sortie réel de la turbine est localisé directement
+  depuis son enthalpie réelle (titre direct dans la cloche, ou bissection
+  déterministe sur h si encore surchauffée) — sans avoir besoin des
+  lourdes équations « backward » T(p,h) IF97 par sous-région. Vérifié :
+  η_t=η_p=1 reproduit exactement le cycle idéal ; à 85 %/85 % le
+  rendement réel chute sous l'idéal et — fait physique non trivial —
+  la vapeur d'échappement devient plus sèche (titre plus élevé) qu'à
+  l'idéal, car une détente moins efficace laisse plus d'enthalpie dans
+  la vapeur ; premier principe vérifié exact sur le cycle réel.
+- **`scirust-fluids::network::hardy_cross_darcy`** — couplage direct de
+  Hardy Cross à `pipe::friction_factor` : `PhysicalPipe` (diamètre,
+  longueur, rugosité réels) plutôt qu'une résistance précalculée ; à
+  chaque itération externe, le facteur de friction de Darcy est
+  recalculé au Reynolds courant (laminaire/Colebrook-White/mélange,
+  exactement comme dans `scirust-fluids::pipe`), substitution successive
+  jusqu'à convergence — la méthode standard des solveurs de réseaux réels
+  pour la dépendance (faible) de f à Re. Vérifié : conduite plus large
+  transporte plus de débit, continuité exacte préservée, et la perte de
+  charge Darcy-Weisbach recalculée **à partir des dimensions physiques**
+  ferme la boucle à 1e-6 près (validation physique de bout en bout, pas
+  seulement la cohérence interne d'une itération).
+- Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
+  clippy `-D warnings` propre, rustfmt appliqué.
+### Ajouté — RLS MIMO, le cran au-dessus : QR-RLS multi-sorties, FIR spatio-temporel, auto-λ, oracle Kalman
+Améliorations du filtre RLS MIMO en réutilisant les briques du dépôt :
+- **`QrRlsMimo`** : la forme racine carrée (facteur de Potter, PSD par
+  construction) étendue aux sorties multiples — le facteur `S` ne dépend que
+  des entrées, donc une seule récursion partagée entre toutes les sorties
+  (`O(n_in² + n_out·n_in)`/échantillon, zéro allocation). Tests : ligne 0
+  **bit-identique** au `QrRls` scalaire ; équivalence 1e-6 avec `RlsFilter`
+  sur système 2 sorties.
+- **Oracle croisé RLS ≡ Kalman** : à λ=1 le RLS *est* un filtre de Kalman à
+  état statique (`F=I, Q=0, H_k=u_kᵀ, R=1`). Nouveau test qui rejoue la même
+  trajectoire dans le `KalmanFilter` du crate (chemin matriciel générique avec
+  inversion explicite, reconstruit à chaque pas avec le `H` courant) et exige
+  l'accord à 1e-8 sur 300 pas — deux implémentations indépendantes du même
+  estimateur se vérifient mutuellement.
+- **`MimoFirRls`** : le vrai filtre adaptatif MIMO **spatio-temporel** —
+  lignes à retard par canal d'entrée, régresseur empilé sur un cœur
+  `RlsFilter`, noyau FIR identifié exposé par paire (sortie, entrée). Test :
+  un couplage convolutif 2×2 à 3 coefficients (diaphonie/écho) est identifié
+  à 1e-3 près sur bruit blanc. C'est la dimension temporelle qui manquait au
+  filtre instantané.
+- **`tune_lambda`** : choix du facteur d'oubli par **blancheur des
+  innovations** — chaque λ candidat est scoré par le test d'autocorrélation
+  `±1.96/√N`, et le plus grand λ que le diagnostic ne rejette pas gagne (la
+  règle de parcimonie de `denoise::adaptive::kalman_smooth_auto`, réappliquée
+  à l'identification). Tests : système statique → garde λ=1 ; système
+  dérivant → rejette λ=1.
+- 41 tests `scirust-estimation` verts ; fmt/clippy `-D warnings` propres.
 
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1

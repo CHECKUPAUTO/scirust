@@ -7,3 +7,9 @@ description = "SciRust state estimation — deterministic Kalman/EKF filters and
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Cross-oracle only (tests): the local Cholesky used by the RLS recondition
+# paths is verified against scirust-solvers' independent implementation.
+# Dev-dependency on purpose — it must not weigh down dependents of this crate.
+scirust-solvers = { path = "../scirust-solvers" }

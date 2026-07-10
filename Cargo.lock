@@ -2754,6 +2754,7 @@ version = "0.1.0"
 name = "scirust-estimation"
 version = "0.1.0"
 dependencies = [
+ "scirust-solvers",
  "serde",
 ]
 
