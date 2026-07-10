@@ -8,11 +8,15 @@
 //!
 //! 1. **A deterministic time-stepping engine** ([`engine`]) — the [`System`]
 //!    trait describes any continuous-time dynamical system `y' = f(t, y)`;
-//!    [`simulate`] integrates it with classical fixed-step RK4 and returns a
-//!    [`Trajectory`]. The [`SecondOrderSystem`] trait describes mechanical
-//!    systems `q'' = a(t, q, q')` and [`simulate_second_order`] integrates
-//!    them with the *symplectic* (semi-implicit) Euler method, whose energy
-//!    error stays bounded over long horizons where the explicit method drifts.
+//!    [`simulate`] integrates it with classical fixed-step RK4, while
+//!    [`simulate_adaptive`] uses the error-controlled **Dormand–Prince 5(4)**
+//!    method (the `ode45` scheme) to choose the step size automatically —
+//!    small through fast transients, large through smooth stretches — and
+//!    both return a [`Trajectory`]. The [`SecondOrderSystem`] trait describes
+//!    mechanical systems `q'' = a(t, q, q')` and [`simulate_second_order`]
+//!    integrates them with the *symplectic* (semi-implicit) Euler method,
+//!    whose energy error stays bounded over long horizons where the explicit
+//!    method drifts.
 //! 2. **A gym-style interaction layer** ([`env`]) — the [`Environment`] trait
 //!    (`reset` / `step(action) -> observation, reward, done`) for
 //!    agent-in-the-loop simulation, with ready-made control environments
@@ -27,7 +31,12 @@
 //!    - [`thermal`] — Newton cooling, 1-D heat conduction (method of lines);
 //!    - [`electrical`] — RC charging, series RLC;
 //!    - [`stochastic`] — geometric Brownian motion, Ornstein–Uhlenbeck,
-//!      and an M/M/1 queue by discrete-event simulation.
+//!      and an M/M/1 queue by discrete-event simulation;
+//!    - [`pharmacokinetics`] — oral one-compartment and IV two-compartment
+//!      drug models (closed-form and AUC oracles);
+//!    - [`rigid_body`] — torque-free rotation (Euler's equations), with
+//!      energy/angular-momentum conservation and the intermediate-axis
+//!      instability.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
 //! generator and every model are implemented here. There are no dependencies,
@@ -84,12 +93,15 @@ pub mod envs;
 pub mod epidemiology;
 pub mod mechanics;
 pub mod orbital;
+pub mod pharmacokinetics;
+pub mod rigid_body;
 pub mod rng;
 pub mod stochastic;
 pub mod thermal;
 
 pub use engine::{
-    SecondOrderSystem, SimError, System, Trajectory, simulate, simulate_second_order,
+    SecondOrderSystem, SimError, System, Trajectory, simulate, simulate_adaptive,
+    simulate_second_order,
 };
 pub use env::{Environment, Step, run_episode};
 pub use rng::SplitMix64;

@@ -120,6 +120,13 @@ pub enum SimError {
         /// The time at which a non-finite component first appeared.
         t: f64,
     },
+    /// The adaptive step size collapsed below the smallest permissible value
+    /// while trying to meet the requested tolerance (e.g. approaching a
+    /// singularity, or tolerances asked tighter than `f64` can deliver).
+    StepUnderflow {
+        /// The time at which progress stalled.
+        t: f64,
+    },
 }
 
 impl fmt::Display for SimError {
@@ -139,6 +146,14 @@ impl fmt::Display for SimError {
                 write!(
                     f,
                     "state became non-finite at t = {t}; reduce the step size"
+                )
+            },
+            SimError::StepUnderflow { t } =>
+            {
+                write!(
+                    f,
+                    "adaptive step size underflowed at t = {t}; the tolerance is \
+                     unreachable (approaching a singularity, or too tight for f64)"
                 )
             },
         }
@@ -255,6 +270,341 @@ pub fn simulate<S: System>(
         }
         traj.t.push(t);
         traj.y.push(y.clone());
+    }
+    Ok(traj)
+}
+
+// The Dormand–Prince 5(4) Butcher tableau (the method behind MATLAB's
+// `ode45`): a seven-stage explicit Runge–Kutta pair whose fifth-order solution
+// advances the state while the embedded fourth-order solution supplies the
+// local-error estimate that drives step-size control.
+//
+// Nodes c_i for stages 2..=6 (c1 = 0 and c7 = 1 are handled inline).
+const DP_C: [f64; 5] = [1.0 / 5.0, 3.0 / 10.0, 4.0 / 5.0, 8.0 / 9.0, 1.0];
+// Strictly-lower-triangular coupling coefficients a_ij, one row per stage
+// 2..=6 (row for stage i has i-1 entries).
+const DP_A2: [f64; 1] = [1.0 / 5.0];
+const DP_A3: [f64; 2] = [3.0 / 40.0, 9.0 / 40.0];
+const DP_A4: [f64; 3] = [44.0 / 45.0, -56.0 / 15.0, 32.0 / 9.0];
+const DP_A5: [f64; 4] = [
+    19372.0 / 6561.0,
+    -25360.0 / 2187.0,
+    64448.0 / 6561.0,
+    -212.0 / 729.0,
+];
+const DP_A6: [f64; 5] = [
+    9017.0 / 3168.0,
+    -355.0 / 33.0,
+    46732.0 / 5247.0,
+    49.0 / 176.0,
+    -5103.0 / 18656.0,
+];
+// Fifth-order weights b_i for k1..k6 (b7 = 0); these advance the solution.
+const DP_B5: [f64; 6] = [
+    35.0 / 384.0,
+    0.0,
+    500.0 / 1113.0,
+    125.0 / 192.0,
+    -2187.0 / 6784.0,
+    11.0 / 84.0,
+];
+// Fourth-order weights b*_i for k1..k7, used only for the error estimate.
+const DP_B4: [f64; 7] = [
+    5179.0 / 57600.0,
+    0.0,
+    7571.0 / 16695.0,
+    393.0 / 640.0,
+    -92097.0 / 339200.0,
+    187.0 / 2100.0,
+    1.0 / 40.0,
+];
+
+// Write `stage[i] = y[i] + h·Σ_j a[j]·k[j][i]` for one Runge–Kutta stage.
+fn stage_input(y: &[f64], h: f64, k: &[Vec<f64>], a: &[f64], stage: &mut [f64]) {
+    for i in 0..y.len()
+    {
+        let mut acc = 0.0;
+        for j in 0..a.len()
+        {
+            acc += a[j] * k[j][i];
+        }
+        stage[i] = y[i] + h * acc;
+    }
+}
+
+// Automatic initial step size (Hairer, Nørsett & Wanner, *Solving Ordinary
+// Differential Equations I*, §II.4): balance the scaled sizes of `y`, `f` and
+// the finite-difference second derivative so the very first step is neither
+// wildly too large nor needlessly tiny.
+fn initial_step<S: System>(
+    system: &S,
+    t0: f64,
+    y0: &[f64],
+    f0: &[f64],
+    span: f64,
+    rtol: f64,
+    atol: f64,
+) -> f64 {
+    let dim = y0.len();
+    let sc = |i: usize| atol + rtol * y0[i].abs();
+    let rms = |v: &[f64]| -> f64 {
+        let mut s = 0.0;
+        for (i, &vi) in v.iter().enumerate()
+        {
+            let r = vi / sc(i);
+            s += r * r;
+        }
+        (s / dim as f64).sqrt()
+    };
+    let d0 = rms(y0);
+    let d1 = rms(f0);
+    let h0 = if d0 < 1e-5 || d1 < 1e-5
+    {
+        1e-6
+    }
+    else
+    {
+        0.01 * d0 / d1
+    };
+
+    // One explicit-Euler probe to estimate the second derivative's scale.
+    let mut y1 = vec![0.0; dim];
+    for (y1i, (&y0i, &f0i)) in y1.iter_mut().zip(y0.iter().zip(f0.iter()))
+    {
+        *y1i = y0i + h0 * f0i;
+    }
+    let mut f1 = vec![0.0; dim];
+    system.derivatives(t0 + h0, &y1, &mut f1);
+    let mut d2 = 0.0;
+    for (i, (&f1i, &f0i)) in f1.iter().zip(f0.iter()).enumerate()
+    {
+        let r = (f1i - f0i) / sc(i);
+        d2 += r * r;
+    }
+    d2 = (d2 / dim as f64).sqrt() / h0;
+
+    // Require the estimated local error ~ 0.01 for a method of order p = 5.
+    let h1 = if d1.max(d2) <= 1e-15
+    {
+        (h0 * 1e-3).max(1e-6)
+    }
+    else
+    {
+        (0.01 / d1.max(d2)).powf(1.0 / 6.0)
+    };
+    (100.0 * h0).min(h1).min(span)
+}
+
+/// Integrate `system` from `y0` over `[t0, t_end]` with the adaptive,
+/// error-controlled **Dormand–Prince 5(4)** method — the scheme behind
+/// MATLAB's `ode45`.
+///
+/// Unlike [`simulate`], the step size is chosen automatically to keep the
+/// estimated local error of each component below `atol + rtol·|y|`: the
+/// integrator takes small steps through fast transients and long steps
+/// through smooth stretches, so a sharp initial layer followed by a slow tail
+/// is handled efficiently and accurately in a single call. The returned
+/// [`Trajectory`] samples the *accepted* steps (their number and spacing are
+/// solution-dependent), always starting at `t0` and ending exactly at
+/// `t_end`.
+///
+/// `rtol` and `atol` must be finite and positive. Returns
+/// [`SimError::StepUnderflow`] when the tolerance cannot be met (approaching a
+/// singularity, or asked tighter than `f64` can resolve),
+/// [`SimError::NonFinite`] on blow-up, and [`SimError::BadInput`] on a
+/// malformed request.
+///
+/// # Example
+///
+/// ```
+/// use scirust_sim::{simulate_adaptive, System};
+///
+/// struct Decay;
+/// impl System for Decay {
+///     fn dim(&self) -> usize {
+///         1
+///     }
+///     fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+///         dydt[0] = -y[0];
+///     }
+/// }
+///
+/// let traj = simulate_adaptive(&Decay, &[1.0], 0.0, 10.0, 1e-9, 1e-12).unwrap();
+/// // Ends exactly on t_end and matches e^{-10} to the requested accuracy.
+/// assert_eq!(traj.last_time(), Some(10.0));
+/// assert!((traj.last_state().unwrap()[0] - (-10.0f64).exp()).abs() < 1e-8);
+/// ```
+pub fn simulate_adaptive<S: System>(
+    system: &S,
+    y0: &[f64],
+    t0: f64,
+    t_end: f64,
+    rtol: f64,
+    atol: f64,
+) -> Result<Trajectory, SimError> {
+    let dim = system.dim();
+    if dim == 0
+    {
+        return Err(SimError::BadInput("system dimension is zero".to_string()));
+    }
+    if y0.len() != dim
+    {
+        return Err(SimError::DimMismatch {
+            expected: dim,
+            got: y0.len(),
+        });
+    }
+    if y0.iter().any(|c| !c.is_finite())
+    {
+        return Err(SimError::BadInput(
+            "initial state has a non-finite component".to_string(),
+        ));
+    }
+    if !t0.is_finite() || !t_end.is_finite() || t_end <= t0
+    {
+        return Err(SimError::BadInput(format!(
+            "time span [{t0}, {t_end}] must be finite with t_end > t0"
+        )));
+    }
+    if !rtol.is_finite() || rtol <= 0.0 || !atol.is_finite() || atol <= 0.0
+    {
+        return Err(SimError::BadInput(format!(
+            "tolerances rtol = {rtol}, atol = {atol} must be finite and positive"
+        )));
+    }
+
+    let span = t_end - t0;
+    let h_min = 16.0 * f64::EPSILON * span.max(1.0);
+
+    let mut traj = Trajectory {
+        t: vec![t0],
+        y: vec![y0.to_vec()],
+    };
+
+    let mut y = y0.to_vec();
+    let mut t = t0;
+
+    // Seven stage-derivative buffers, a stage-input buffer and the candidate.
+    let mut k: [Vec<f64>; 7] = std::array::from_fn(|_| vec![0.0; dim]);
+    let mut stage = vec![0.0; dim];
+    let mut y_next = vec![0.0; dim];
+
+    // k[0] = f(t0, y0); reused across the run by the FSAL property below.
+    system.derivatives(t, &y, &mut k[0]);
+    let mut h = initial_step(system, t, &y, &k[0], span, rtol, atol);
+
+    let mut rejected_last = false;
+    let mut steps = 0usize;
+    while t < t_end
+    {
+        if steps >= MAX_STEPS
+        {
+            return Err(SimError::BadInput(format!(
+                "adaptive integration exceeded the {MAX_STEPS}-step budget"
+            )));
+        }
+        steps += 1;
+
+        // Never step past t_end; the last accepted step lands exactly on it.
+        if t + h > t_end
+        {
+            h = t_end - t;
+        }
+        if h < h_min
+        {
+            return Err(SimError::StepUnderflow { t });
+        }
+
+        // k[0] already holds f(t, y). Stages 2..=6:
+        stage_input(&y, h, &k[..1], &DP_A2, &mut stage);
+        system.derivatives(t + DP_C[0] * h, &stage, &mut k[1]);
+        stage_input(&y, h, &k[..2], &DP_A3, &mut stage);
+        system.derivatives(t + DP_C[1] * h, &stage, &mut k[2]);
+        stage_input(&y, h, &k[..3], &DP_A4, &mut stage);
+        system.derivatives(t + DP_C[2] * h, &stage, &mut k[3]);
+        stage_input(&y, h, &k[..4], &DP_A5, &mut stage);
+        system.derivatives(t + DP_C[3] * h, &stage, &mut k[4]);
+        stage_input(&y, h, &k[..5], &DP_A6, &mut stage);
+        system.derivatives(t + DP_C[4] * h, &stage, &mut k[5]);
+
+        // Fifth-order solution advances the state (b7 = 0).
+        for i in 0..dim
+        {
+            let mut acc = 0.0;
+            for s in 0..6
+            {
+                acc += DP_B5[s] * k[s][i];
+            }
+            y_next[i] = y[i] + h * acc;
+        }
+        // Seventh stage at (t + h, y_next): feeds the error estimate and, on
+        // acceptance, becomes the next step's k[0] (FSAL).
+        system.derivatives(t + h, &y_next, &mut k[6]);
+
+        // Scaled error norm: RMS over components of err_i / (atol + rtol·|y|).
+        let mut err_sq = 0.0;
+        for i in 0..dim
+        {
+            let mut e = 0.0;
+            for s in 0..7
+            {
+                let b5 = if s < 6 { DP_B5[s] } else { 0.0 };
+                e += (b5 - DP_B4[s]) * k[s][i];
+            }
+            let sc = atol + rtol * y[i].abs().max(y_next[i].abs());
+            let ratio = h * e / sc;
+            err_sq += ratio * ratio;
+        }
+        let err_norm = (err_sq / dim as f64).sqrt();
+        if !err_norm.is_finite()
+        {
+            return Err(SimError::NonFinite { t: t + h });
+        }
+
+        // Elementary I-controller; the estimator has order 4, hence the 1/5
+        // exponent. Safety and clamp factors are the textbook defaults.
+        const SAFETY: f64 = 0.9;
+        const MIN_SCALE: f64 = 0.2;
+        const MAX_SCALE: f64 = 5.0;
+        let scale = if err_norm == 0.0
+        {
+            MAX_SCALE
+        }
+        else
+        {
+            (SAFETY * err_norm.powf(-0.2)).clamp(MIN_SCALE, MAX_SCALE)
+        };
+
+        if err_norm <= 1.0
+        {
+            t += h;
+            // Erase float rounding on the final shortened step.
+            if t_end - t < h_min
+            {
+                t = t_end;
+            }
+            y.copy_from_slice(&y_next);
+            if y.iter().any(|c| !c.is_finite())
+            {
+                return Err(SimError::NonFinite { t });
+            }
+            traj.t.push(t);
+            traj.y.push(y.clone());
+            // FSAL: the seventh stage becomes the next first stage.
+            k.swap(0, 6);
+            // Forbid step growth immediately after a rejection (Hairer's rule)
+            // to avoid a reject/accept limit cycle.
+            let grow = if rejected_last { scale.min(1.0) } else { scale };
+            h *= grow;
+            rejected_last = false;
+        }
+        else
+        {
+            // Reject: shrink and retry; nothing is recorded and (t, y, k[0])
+            // are unchanged, so the retry is exact.
+            h *= scale;
+            rejected_last = true;
+        }
     }
     Ok(traj)
 }
@@ -502,5 +852,143 @@ mod tests {
         }
         .to_string();
         assert!(text.contains('3') && text.contains('1'));
+        let text = SimError::StepUnderflow { t: 0.9 }.to_string();
+        assert!(text.contains("0.9") && text.contains("underflow"));
+    }
+
+    /// `y' = -50 y`: a fast transient that decays to a flat tail — the case
+    /// adaptive stepping is meant to handle in one pass.
+    struct StiffDecay;
+
+    impl System for StiffDecay {
+        fn dim(&self) -> usize {
+            1
+        }
+
+        fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+            dydt[0] = -50.0 * y[0];
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn adaptive_matches_exponential_decay_to_tolerance() {
+        let traj = simulate_adaptive(&Decay, &[1.0], 0.0, 10.0, 1e-9, 1e-12).unwrap();
+        // Ends exactly on t_end and every accepted sample matches e^{-t}.
+        assert_eq!(traj.last_time(), Some(10.0));
+        for (t, y) in traj.t.iter().zip(traj.y.iter())
+        {
+            assert!((y[0] - (-t).exp()).abs() < 1e-8, "t = {t}: {}", y[0]);
+        }
+        // A smooth problem needs far fewer steps than the fixed-step method
+        // would at comparable accuracy: fixed RK4 at 1e-9 would need h ~ 6e-3
+        // (~1700 steps over this span); the adaptive solver uses a small
+        // fraction of that.
+        assert!(traj.len() < 300, "took {} steps", traj.len());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn adaptive_endpoint_error_tightens_with_tolerance() {
+        let endpoint_err = |tol: f64| {
+            let traj = simulate_adaptive(&Decay, &[1.0], 0.0, 5.0, tol, tol * 1e-3).unwrap();
+            (traj.last_state().unwrap()[0] - (-5.0f64).exp()).abs()
+        };
+        let loose = endpoint_err(1e-4);
+        let tight = endpoint_err(1e-9);
+        assert!(tight < loose, "tight {tight} not below loose {loose}");
+        assert!(tight < 1e-7, "tight endpoint error {tight}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn adaptive_grows_the_step_once_the_transient_settles() {
+        // On y' = -50y the solution changes fast near t = 0 and is flat by
+        // t = 5; the average accepted step in the tail must exceed that near
+        // the start.
+        let traj = simulate_adaptive(&StiffDecay, &[1.0], 0.0, 5.0, 1e-6, 1e-9).unwrap();
+        let dt: Vec<f64> = traj.t.windows(2).map(|w| w[1] - w[0]).collect();
+        let quarter = dt.len() / 4;
+        let mean = |s: &[f64]| s.iter().sum::<f64>() / s.len() as f64;
+        let early = mean(&dt[..quarter]);
+        let late = mean(&dt[3 * quarter..]);
+        assert!(
+            late > 5.0 * early,
+            "no step growth: early {early}, late {late}"
+        );
+        // And accuracy held throughout.
+        for (t, y) in traj.t.iter().zip(traj.y.iter())
+        {
+            assert!((y[0] - (-50.0 * t).exp()).abs() < 1e-5, "t = {t}");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn adaptive_handles_the_vector_valued_oscillator() {
+        // Two-component state through the second-order-to-first-order wrapper:
+        // q(t) = cos t, v(t) = -sin t.
+        let sys = FirstOrderForm(&Harmonic);
+        let traj = simulate_adaptive(&sys, &[1.0, 0.0], 0.0, 6.0, 1e-10, 1e-12).unwrap();
+        let last = traj.last_state().unwrap();
+        assert!((last[0] - 6.0f64.cos()).abs() < 1e-8, "q = {}", last[0]);
+        assert!((last[1] + 6.0f64.sin()).abs() < 1e-8, "v = {}", last[1]);
+    }
+
+    #[test]
+    fn adaptive_lands_exactly_on_t_end() {
+        let traj = simulate_adaptive(&Decay, &[1.0], 0.0, 3.7, 1e-6, 1e-9).unwrap();
+        assert_eq!(traj.last_time(), Some(3.7));
+        assert!(
+            traj.t.windows(2).all(|w| w[1] > w[0]),
+            "times must strictly increase"
+        );
+    }
+
+    #[test]
+    fn adaptive_rejects_bad_requests() {
+        assert!(matches!(
+            simulate_adaptive(&Decay, &[1.0, 2.0], 0.0, 1.0, 1e-6, 1e-9),
+            Err(SimError::DimMismatch { .. })
+        ));
+        assert!(matches!(
+            simulate_adaptive(&Decay, &[1.0], 0.0, 1.0, 0.0, 1e-9),
+            Err(SimError::BadInput(_))
+        ));
+        assert!(matches!(
+            simulate_adaptive(&Decay, &[1.0], 0.0, 1.0, 1e-6, -1e-9),
+            Err(SimError::BadInput(_))
+        ));
+        assert!(matches!(
+            simulate_adaptive(&Decay, &[1.0], 1.0, 1.0, 1e-6, 1e-9),
+            Err(SimError::BadInput(_))
+        ));
+        assert!(matches!(
+            simulate_adaptive(&Decay, &[f64::NAN], 0.0, 1.0, 1e-6, 1e-9),
+            Err(SimError::BadInput(_))
+        ));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn adaptive_reports_a_finite_time_singularity() {
+        // y' = y^2 from y(0) = 1 blows up at t = 1; integrating to t = 2 must
+        // fail (step underflow as the step collapses, or non-finite state) —
+        // never a silent bogus success.
+        struct BlowUp;
+        impl System for BlowUp {
+            fn dim(&self) -> usize {
+                1
+            }
+
+            fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+                dydt[0] = y[0] * y[0];
+            }
+        }
+        let result = simulate_adaptive(&BlowUp, &[1.0], 0.0, 2.0, 1e-8, 1e-10);
+        assert!(matches!(
+            result,
+            Err(SimError::StepUnderflow { .. }) | Err(SimError::NonFinite { .. })
+        ));
     }
 }
