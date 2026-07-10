@@ -161,6 +161,28 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   350M-from-scratch pretrain — the goal that motivated the whole route — now runs in
   bf16 on the Thor, resumable.
 
+- **B7/B8 — training stability at 270M (debugged on the Thor).** Scaling to a
+  byte-level ~270M model (`code350m` preset) exposed a **deterministic collapse**: the
+  loss fell to ~2, then jumped to the `ln(256) = 5.55` uniform floor and stuck. The
+  debugging is worth recording because three plausible fixes each *disproved* a
+  hypothesis:
+  - **LR** (3e-3 → 3e-4): collapsed at the *same* step — not LR magnitude.
+  - **B7 grad-norm clipping** (`sumsq` reduction + `global_grad_norm` + a `grad_scale`
+    in `adamw_step`, gradient-checked): the `gnorm` it logged stayed *small* (~5) at the
+    collapse — no spike — and Adam's `m/√v` is nearly scale-invariant to global clipping
+    anyway, so it was a near-no-op. (Kept as hygiene + the `gnorm` diagnostic.)
+  - **AdamW eps** (1e-8 → 1e-5, bf16-appropriate): no change.
+
+  The **localizer** settled it: the collapse was at the *same corpus byte offset*
+  (~166,400) at two seq lengths (step 325 @ 512, step 650 @ 256), i.e. a **pathological
+  batch, not the optimizer**. The sorted file walk reads `.git` first, so byte 166 K was
+  deep in **`.git`'s packed binary objects** — the model was training on compressed
+  garbage. **B8** fixes ingestion to source text only (skip `.git`/`target`/… and
+  non-UTF-8/NUL files). With clean data the same 270M run trains **stably**: loss
+  **12.16 → 1.97 nats/byte** (84 %) over 500 steps, sailing straight through the old
+  step-325 cliff. Lesson: a data-quality bug can masquerade as a numerics bug — the
+  fix was hygiene, not the optimizer.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
