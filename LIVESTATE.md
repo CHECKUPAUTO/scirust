@@ -77,6 +77,12 @@
     tail -4 n'affichait que le dernier résumé (0 match) → `--lib` ajouté (sur x86 :
     « 697 filtered out » confirme le bon target ; re-run Jetson conseillé pour
     l'évidence Q3 propre). PAPER_PLAN O1 + §6 mis à jour (volet Jetson : fait).
+  - **Re-run Jetson au commit 014795f (script corrigé, --pin-clocks opérationnel)** :
+    Q3 EXÉCUTÉ SUR CIBLE — `quantization::tests_neon::neon_matches_scalar_bit_exact
+    ... ok` (1 passed, 697 filtered out) + R4 vert nativement sur ARM. Banc reconfirmé
+    (0,93-1,01× à 1-4 thr, 1,06-1,10× à 8), mêmes 4 empreintes → identité cross-platform
+    x86_64 ↔ aarch64 revérifiée sur run indépendant. Toutes les lignes de la table
+    claims→évidence relevant du Jetson sont désormais adossées à une exécution réelle.
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance
