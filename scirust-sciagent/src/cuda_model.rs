@@ -689,6 +689,36 @@ impl CudaTrainer {
         loss
     }
 
+    /// Mean cross-entropy over up to `max_windows` non-overlapping `seq_len` windows
+    /// of `val_tokens` — **no update** (pure forward), so it measures held-out
+    /// generalization rather than the train loss on the repeatedly-seen corpus.
+    /// Returns `NaN` if there isn't a full window.
+    pub fn eval_loss(&self, val_tokens: &[u32], seq_len: usize, max_windows: usize) -> f32 {
+        let s = seq_len;
+        let vocab = self.model.vocab;
+        let mut total = 0.0f64;
+        let mut count = 0usize;
+        let mut cursor = 0usize;
+        while cursor + s < val_tokens.len() && count < max_windows.max(1)
+        {
+            let inputs = &val_tokens[cursor..cursor + s];
+            let targets = &val_tokens[cursor + 1..cursor + s + 1];
+            let logits = self.model.forward_resident(inputs);
+            let host = self.model.chain.download(&logits);
+            total += host_cross_entropy(&host, targets, s, vocab) as f64;
+            count += 1;
+            cursor += s;
+        }
+        if count == 0
+        {
+            f32::NAN
+        }
+        else
+        {
+            (total / count as f64) as f32
+        }
+    }
+
     /// Forward `tokens → logits` on the (possibly trained) bf16 model — a thin
     /// pass-through to the inner [`CudaModel::forward`] for eval between steps.
     pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
@@ -771,6 +801,30 @@ impl CudaTrainer {
             return losses;
         }
         self.max_grad_norm = cfg.max_grad_norm;
+
+        // Hold out the tail as a validation split (never trained on) so we can track
+        // generalization, not just train loss on the repeatedly-seen corpus. Keep at
+        // least one train window and one val window, else skip validation.
+        let val_len = ((tokens.len() as f32 * cfg.val_frac.max(0.0)) as usize)
+            .min(tokens.len().saturating_sub(s + 1));
+        let (train_tokens, val_tokens): (&[u32], &[u32]) = if val_len > s + 1
+        {
+            let cut = tokens.len() - val_len;
+            (&tokens[..cut], &tokens[cut..])
+        }
+        else
+        {
+            (tokens, &[])
+        };
+        if !val_tokens.is_empty()
+        {
+            println!(
+                "held-out validation: {} tokens ({:.0}% tail)\n",
+                val_tokens.len(),
+                cfg.val_frac * 100.0
+            );
+        }
+
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
@@ -778,12 +832,12 @@ impl CudaTrainer {
         let t0 = std::time::Instant::now();
         while step < cfg.total_steps
         {
-            if cursor + s + 1 > tokens.len()
+            if cursor + s + 1 > train_tokens.len()
             {
                 cursor = 0;
             }
-            let inputs = &tokens[cursor..cursor + s];
-            let targets = &tokens[cursor + 1..cursor + s + 1];
+            let inputs = &train_tokens[cursor..cursor + s];
+            let targets = &train_tokens[cursor + 1..cursor + s + 1];
             let lr = schedule.lr_at(step);
             let loss = self.train_step(
                 inputs,
@@ -808,6 +862,11 @@ impl CudaTrainer {
                 println!(
                     "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
                 );
+            }
+            if cfg.eval_interval > 0 && !val_tokens.is_empty() && step % cfg.eval_interval == 0
+            {
+                let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                println!("            └─ held-out val loss {val:>9.4}");
             }
             if cfg.save_interval > 0 && step % cfg.save_interval == 0
             {
@@ -862,6 +921,13 @@ pub struct CudaPretrainConfig {
     /// Global gradient-norm clip threshold (`<= 0` disables). Default `1.0` —
     /// standard for pretraining, and what keeps a bad batch from diverging the run.
     pub max_grad_norm: f32,
+    /// Fraction of the token stream held out (from the tail) for validation
+    /// (`0.0` disables held-out eval). Default `0.02`.
+    pub val_frac: f32,
+    /// Report held-out validation loss every this many steps (0 = never).
+    pub eval_interval: usize,
+    /// Max validation windows averaged per eval (bounds eval cost). Default `32`.
+    pub eval_windows: usize,
 }
 
 impl Default for CudaPretrainConfig {
@@ -882,6 +948,9 @@ impl Default for CudaPretrainConfig {
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
             max_grad_norm: 1.0,
+            val_frac: 0.02,
+            eval_interval: 250,
+            eval_windows: 32,
         }
     }
 }

@@ -358,6 +358,11 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1e-5f32);
+    // Held-out validation fraction (tail; default 2%; SCIAGENT_VAL_FRAC overrides, 0 disables).
+    let val_frac = std::env::var("SCIAGENT_VAL_FRAC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.02f32);
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -371,6 +376,8 @@ fn main() {
         save_interval: 100,
         checkpoint_dir: ckpt_dir.clone(),
         max_grad_norm,
+        val_frac,
+        eval_interval: 100,
         ..Default::default()
     };
     println!(
