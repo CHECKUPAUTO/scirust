@@ -3,6 +3,58 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 112 : preuve cross-platform exécutable de portable_f32 (x86_64 ↔ Jetson)
+- **Contexte** : PR #271 (volet 111) MERGÉE ; branche repartie de master (protocole
+  branche-mergée). Demande utilisateur : « on doit prouver sur jetson et x86_64
+  debian ».
+- **Livré** : `scirust-core --bin proof_portable_f32` (auto-vérifiant : goldens +
+  balayages contrat 65 537 / dense 257 / **exhaustif pas 1 = 2³² entrées** avec
+  `--full` + composites softmax/GEMM, vs constantes `PROOF_*` commises ; exit 0 ⇔
+  verdict=PASS ; lignes canoniques vs contexte `#`, SHA-256 comparable entre
+  machines) + `scripts/proof-portable-f32.sh` (bundle d'évidence à la convention
+  O1, `.gitignore`d) + section `docs/TEST_PROTOCOL.md`. Contrat rendu public et
+  partagé tests/binaire ; empreintes denses (exp 0x6495da04866c1c4b,
+  ln 0x19e7fd497cffd94b) et exhaustives (exp 0xda65ffaf8fe9f4f4,
+  ln 0xb9ad67e08ae8f0fa) ajoutées au contrat.
+- **Volet x86_64 exécuté** (conteneur Ubuntu 24.04 x86_64, rustc nightly du
+  toolchain épinglé) : `scripts/proof-portable-f32.sh --full` →
+  **verdict=PASS** (goldens, contrat, dense, softmax, GEMM, exhaustif — tout
+  OK), balayage exhaustif ≈ 89 s, SHA canonique `--full` =
+  `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
+  Les autres machines (Debian x86_64, Jetson) doivent reproduire verdict=PASS
+  ET ce SHA exact en mode `--full`.
+- **PREUVE CONSTATÉE SUR LES 3 PLATES-FORMES (2026-07-10, commit dc8918e,
+  sorties fournies par l'utilisateur)** — mode `--full`, SHA canonique
+  IDENTIQUE partout : `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
+  - **Jetson (aarch64)** : verdict=PASS, exhaustif 83,2 s,
+    bundle `proof-portable-f32-20260710T152117Z` (sur l'appareil).
+  - **Debian x86_64** : verdict=PASS, exhaustif 97,4 s,
+    bundle `proof-portable-f32-20260710T152258Z` (sur la machine).
+  - **Conteneur Ubuntu x86_64** : verdict=PASS, exhaustif 89,2 s,
+    bundle `proof-portable-f32-20260710T144512Z`.
+  Conclusion : l'identité bit à bit x86-64 ↔ aarch64 de la voie f32 portable
+  est **constatée sur la totalité des 2³² entrées** de exp_f32 et ln_f32
+  (goldens, balayages contrat/dense/exhaustif, softmax, GEMM — tout OK).
+  La claim « bit-exact inter-plates-formes par construction » est désormais
+  adossée à une exécution multi-machines, conformément à la discipline
+  claims → évidence du dépôt.
+- **Preuve aarch64 EN CI (suite de session, ferme le « reste ouvert » CI
+  check-only)** : le job `cross-check-aarch64` exécute désormais réellement
+  du code aarch64 — qemu-user + gcc-aarch64, `cargo test portable_f32` +
+  binaire de preuve (mode standard : goldens + contrat + dense + composites)
+  sur target aarch64-unknown-linux-gnu. Validé localement avant commit :
+  13/13 tests + verdict=PASS sous qemu (dense 5,8 s). Chaque run CI est donc
+  une vérification x86↔ARM réelle du contrat.
+- **Softmax portable branché dans la tape AD (opt-in)** :
+  `Var::softmax_portable()` / `Tensor::softmax_portable()` +
+  `Op::SoftmaxPortable` (reverse.rs et parallel.rs) — forward via
+  `portable_f32::softmax_f32`, backward **depuis la sortie stockée** (aucun
+  appel libm dans le jacobien) ⇒ nœud complet forward+gradient bit-exact
+  inter-plates-formes. Le softmax libm existant est inchangé (aucune
+  régression d'empreintes). Tests : forward bit-identique à portable_f32,
+  gradient ≈ gradient libm (1e-5) + empreinte gradient figée
+  0x5ba09810fa590787 (contrat cross-platform du backward).
+
 ## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
 - **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
   23 items de l'API publique de RepDL (ops/func/nn/optim/utils/from_torch_module)

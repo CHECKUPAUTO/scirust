@@ -140,6 +140,11 @@ jobs:
   # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
   # A pure `cargo check` needs no cross linker and would have caught the
   # 2026-06-12 sgemv merge regression on the NEON side.
+  # Additionally EXECUTES the portable-f32 cross-platform proof on aarch64
+  # under qemu-user: qemu faithfully implements IEEE-754 arithmetic, so a
+  # PASS here is a real x86↔ARM bit-exactness check on every CI run
+  # (docs/TEST_PROTOCOL.md, « Cross-platform proof »; native legs: Jetson +
+  # x86_64 Debian, LIVESTATE volet 112).
   cross-check-aarch64:
     name: Cross-check (aarch64)
     runs-on: ubuntu-latest
@@ -154,6 +159,17 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check workspace for aarch64
         run: cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu
+      - name: Install qemu-user + aarch64 cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user gcc-aarch64-linux-gnu
+      - name: Run portable-f32 proof on aarch64 (qemu)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+        run: |
+          cargo test -p scirust-core --lib portable_f32 --release --target aarch64-unknown-linux-gnu
+          cargo run --release -p scirust-core --bin proof_portable_f32 --target aarch64-unknown-linux-gnu
 
   deny:
     name: License & Security Audit

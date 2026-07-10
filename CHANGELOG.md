@@ -5,6 +5,43 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
+- **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
+  (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de
+  preuve en mode standard sur `aarch64-unknown-linux-gnu`. QEMU implémente
+  fidèlement IEEE-754 : chaque run CI vérifie réellement l'identité bit à
+  bit x86↔ARM du contrat commis (commandes validées localement : 13/13
+  tests + verdict=PASS sous qemu). Ferme le point ouvert « CI aarch64 =
+  check only » tracé depuis le volet 108.
+- **`Var::softmax_portable()`** (+ `Tensor::softmax_portable`,
+  `Op::SoftmaxPortable` dans reverse.rs et parallel.rs) : softmax par ligne
+  dont le forward passe par `portable_f32::softmax_f32` et dont le backward
+  calcule le jacobien **depuis la sortie stockée** — aucun appel libm dans
+  le nœud, donc forward ET gradient bit-exacts inter-plates-formes. Opt-in :
+  `Var::softmax` (libm) est inchangé. Tests : forward bit-identique à la
+  référence portable, gradient équivalent au nœud libm (≤ 1e-5), empreinte
+  du gradient figée (contrat cross-platform de l'entraînement).
+
+### Ajouté — preuve cross-platform exécutable de la voie f32 portable (volet 112)
+- **`scirust-core --bin proof_portable_f32`** : binaire de preuve
+  auto-vérifiant — recalcule sur la machine locale les goldens ponctuels,
+  les empreintes FNV-1a des balayages de l'espace des bits f32 de
+  `exp_f32`/`ln_f32` (contrat pas 65 537, dense pas 257, **exhaustif pas 1**
+  — les 2³² entrées — avec `--full`) et les composites softmax/GEMM, puis
+  compare tout aux constantes `PROOF_*` **commises dans le dépôt**
+  (calculées sur x86-64). Code de sortie 0 ⇔ `verdict=PASS` ⇔ la machine
+  reproduit les résultats x86-64 bit à bit. Lignes canoniques hors
+  contexte `#` : leur SHA-256 doit être identique entre machines.
+- **`scripts/proof-portable-f32.sh`** : enrobage à la convention du dépôt
+  (bundle d'évidence horodaté `proof-portable-f32-<UTC>/` : platform.txt,
+  report.txt, canonical.sha256 ; reste sur la machine, `.gitignore`d).
+  Protocole documenté dans `docs/TEST_PROTOCOL.md` (volet x86_64 Debian +
+  volet Jetson/aarch64).
+- Le contrat de preuve de `portable_f32` est désormais public
+  (`PROOF_*`, `sweep_fingerprint`, `proof_softmax_fingerprint`,
+  `proof_gemm_fingerprint`) et partagé entre les tests unitaires et le
+  binaire ; empreintes denses et exhaustives ajoutées au contrat.
+
 ### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 111)
 - **`AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
   élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)

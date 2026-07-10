@@ -210,18 +210,114 @@ pub fn gemm_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> 
     c
 }
 
+// ================================================================== //
+//  Contrat de preuve cross-platform                                   //
+// ================================================================== //
+// Constantes et générateurs partagés par les tests unitaires et par le
+// binaire de preuve `src/bin/proof_portable_f32.rs`, à exécuter sur chaque
+// plate-forme cible (x86-64 Debian, Jetson/aarch64, …) : toute plate-forme
+// conforme doit reproduire exactement ces bits. Les empreintes ont été
+// calculées une fois sur x86-64 et sont commises comme contrat.
+
+/// Pas du balayage-contrat de l'espace des bits f32 (≈ 65 536 entrées).
+pub const PROOF_STEP_CONTRACT: u64 = 65_537;
+/// Pas du balayage dense (≈ 16,7 M d'entrées, ≈ 1 s en release).
+pub const PROOF_STEP_DENSE: u64 = 257;
+
+/// Empreinte attendue de `exp_f32` sur le balayage-contrat.
+pub const PROOF_EXP_FP_CONTRACT: u64 = 0x71e6_3f5e_1688_a7f1;
+/// Empreinte attendue de `ln_f32` sur le balayage-contrat.
+pub const PROOF_LN_FP_CONTRACT: u64 = 0x8892_b8ba_72ff_b8b6;
+/// Empreinte attendue de `exp_f32` sur le balayage dense.
+pub const PROOF_EXP_FP_DENSE: u64 = 0x6495_da04_866c_1c4b;
+/// Empreinte attendue de `ln_f32` sur le balayage dense.
+pub const PROOF_LN_FP_DENSE: u64 = 0x19e7_fd49_7cff_d94b;
+/// Empreinte attendue de `exp_f32` sur le balayage **exhaustif** (pas 1 :
+/// les 2³² entrées possibles — `--full` du binaire de preuve).
+pub const PROOF_EXP_FP_EXHAUSTIVE: u64 = 0xda65_ffaf_8fe9_f4f4;
+/// Empreinte attendue de `ln_f32` sur le balayage **exhaustif**.
+pub const PROOF_LN_FP_EXHAUSTIVE: u64 = 0xb9ad_67e0_8ae8_f0fa;
+
+/// Entrées des goldens ponctuels de `exp_f32`.
+pub const PROOF_EXP_GOLDEN_INPUTS: [f32; 10] =
+    [0.5, 1.0, -1.0, 2.0, 10.0, -10.0, 88.0, -87.0, 1e-8, -103.9];
+/// Bits attendus de `exp_f32` sur [`PROOF_EXP_GOLDEN_INPUTS`].
+pub const PROOF_EXP_GOLDEN_BITS: [u32; 10] = [
+    1070795084, 1076754516, 1052531378, 1089237798, 1185682670, 943614926, 2130215607, 11744903,
+    1065353216, 1,
+];
+/// Entrées des goldens ponctuels de `ln_f32`.
+pub const PROOF_LN_GOLDEN_INPUTS: [f32; 10] = [
+    0.5,
+    1.5,
+    2.0,
+    10.0,
+    0.1,
+    1e30,
+    1e-30,
+    f32::MIN_POSITIVE,
+    3.4e38,
+    1.0000001,
+];
+/// Bits attendus de `ln_f32` sur [`PROOF_LN_GOLDEN_INPUTS`].
+pub const PROOF_LN_GOLDEN_BITS: [u32; 10] = [
+    3207688728, 1053792543, 1060205080, 1075010958, 3222494606, 1116350389, 3263834037, 3266227280,
+    1118925227, 872415231,
+];
+
+/// Empreinte attendue du softmax-contrat (PCG(7), n = 64, plage [−10, 10)).
+pub const PROOF_SOFTMAX_FP: u64 = 0x2b0c_3ead_12aa_19d5;
+/// Empreinte attendue du GEMM-contrat (PCG(1113), 17×13 · 13×11, [−2, 2)).
+pub const PROOF_GEMM_FP: u64 = 0x53df_bea9_109b_bd20;
+
+/// État initial FNV-1a 64 bits (même discipline que scirust-runtime).
+pub const fn fnv1a_init() -> u64 {
+    0xcbf2_9ce4_8422_2325
+}
+
+/// Replie les bits d'un f32 dans une empreinte FNV-1a 64 bits.
+pub const fn fnv1a_fold_bits(mut fp: u64, bits: u32) -> u64 {
+    fp ^= bits as u64;
+    fp.wrapping_mul(0x0000_0100_0000_01b3)
+}
+
+/// Empreinte FNV-1a de `f` sur le balayage de l'espace des bits f32 par pas
+/// `step` (NaN et infinis inclus — les sorties sont canonicalisées).
+pub fn sweep_fingerprint(f: fn(f32) -> f32, step: u64) -> u64 {
+    assert!(step > 0, "sweep_fingerprint: pas nul");
+    let mut fp = fnv1a_init();
+    let mut i = 0u64;
+    while i <= u32::MAX as u64
+    {
+        fp = fnv1a_fold_bits(fp, f(f32::from_bits(i as u32)).to_bits());
+        i += step;
+    }
+    fp
+}
+
+/// Recalcule l'empreinte du softmax-contrat ([`PROOF_SOFTMAX_FP`]).
+pub fn proof_softmax_fingerprint() -> u64 {
+    let mut rng = crate::nn::PcgEngine::new(7);
+    let xs: Vec<f32> = (0..64).map(|_| rng.float() * 20.0 - 10.0).collect();
+    softmax_f32(&xs)
+        .iter()
+        .fold(fnv1a_init(), |fp, v| fnv1a_fold_bits(fp, v.to_bits()))
+}
+
+/// Recalcule l'empreinte du GEMM-contrat ([`PROOF_GEMM_FP`]).
+pub fn proof_gemm_fingerprint() -> u64 {
+    let mut rng = crate::nn::PcgEngine::new(1113);
+    let a: Vec<f32> = (0..17 * 13).map(|_| rng.float() * 4.0 - 2.0).collect();
+    let b: Vec<f32> = (0..13 * 11).map(|_| rng.float() * 4.0 - 2.0).collect();
+    gemm_f32(&a, &b, 17, 13, 11)
+        .iter()
+        .fold(fnv1a_init(), |fp, v| fnv1a_fold_bits(fp, v.to_bits()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::nn::PcgEngine;
-
-    /// FNV-1a sur les bits d'un f32 — même discipline d'empreinte que
-    /// scirust-runtime. Les constantes GOLDEN_* ci-dessous SONT le contrat de
-    /// portabilité : ce test doit passer tel quel sur x86-64, aarch64, etc.
-    fn fnv_fold(mut fp: u64, bits: u32) -> u64 {
-        fp ^= bits as u64;
-        fp.wrapping_mul(0x0000_0100_0000_01b3)
-    }
 
     /// Clé monotone sur les f32 non-NaN (ordre total) pour compter les ulps.
     fn ord_key(x: f32) -> i64 {
@@ -271,66 +367,36 @@ mod tests {
     /// remarquables. Toute plate-forme qui calcule autrement échoue ici.
     #[test]
     fn exp_golden_bits() {
-        let inputs = [
-            0.5f32, 1.0, -1.0, 2.0, 10.0, -10.0, 88.0, -87.0, 1e-8, -103.9,
-        ];
-        let got: Vec<u32> = inputs.iter().map(|&x| exp_f32(x).to_bits()).collect();
-        let expected: Vec<u32> = vec![
-            1070795084, 1076754516, 1052531378, 1089237798, 1185682670, 943614926, 2130215607,
-            11744903, 1065353216, 1,
-        ];
-        assert_eq!(got, expected);
+        let got: Vec<u32> = PROOF_EXP_GOLDEN_INPUTS
+            .iter()
+            .map(|&x| exp_f32(x).to_bits())
+            .collect();
+        assert_eq!(got, PROOF_EXP_GOLDEN_BITS.to_vec());
     }
 
     #[test]
     fn ln_golden_bits() {
-        let inputs = [
-            0.5f32,
-            1.5,
-            2.0,
-            10.0,
-            0.1,
-            1e30,
-            1e-30,
-            f32::MIN_POSITIVE,
-            3.4e38,
-            1.0000001,
-        ];
-        let got: Vec<u32> = inputs.iter().map(|&x| ln_f32(x).to_bits()).collect();
-        let expected: Vec<u32> = vec![
-            3207688728, 1053792543, 1060205080, 1075010958, 3222494606, 1116350389, 3263834037,
-            3266227280, 1118925227, 872415231,
-        ];
-        assert_eq!(got, expected);
+        let got: Vec<u32> = PROOF_LN_GOLDEN_INPUTS
+            .iter()
+            .map(|&x| ln_f32(x).to_bits())
+            .collect();
+        assert_eq!(got, PROOF_LN_GOLDEN_BITS.to_vec());
     }
 
     /// Empreinte FNV sur un balayage systématique de TOUT l'espace des bits
     /// f32 (pas 65 537) — NaN et infinis inclus (sorties canonicalisées).
-    /// C'est l'empreinte à comparer entre x86-64 et ARM.
+    /// C'est l'empreinte à comparer entre x86-64 et ARM (le binaire
+    /// `proof_portable_f32` rejoue ce contrat sur chaque machine).
     #[test]
     fn exp_fingerprint_bit_sweep() {
-        let mut fp = 0xcbf2_9ce4_8422_2325u64;
-        let mut i = 0u64;
-        while i <= u32::MAX as u64
-        {
-            let x = f32::from_bits(i as u32);
-            fp = fnv_fold(fp, exp_f32(x).to_bits());
-            i += 65_537;
-        }
-        assert_eq!(fp, 0x71e6_3f5e_1688_a7f1, "empreinte exp : 0x{fp:016x}");
+        let fp = sweep_fingerprint(exp_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(fp, PROOF_EXP_FP_CONTRACT, "empreinte exp : 0x{fp:016x}");
     }
 
     #[test]
     fn ln_fingerprint_bit_sweep() {
-        let mut fp = 0xcbf2_9ce4_8422_2325u64;
-        let mut i = 0u64;
-        while i <= u32::MAX as u64
-        {
-            let x = f32::from_bits(i as u32);
-            fp = fnv_fold(fp, ln_f32(x).to_bits());
-            i += 65_537;
-        }
-        assert_eq!(fp, 0x8892_b8ba_72ff_b8b6, "empreinte ln : 0x{fp:016x}");
+        let fp = sweep_fingerprint(ln_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(fp, PROOF_LN_FP_CONTRACT, "empreinte ln : 0x{fp:016x}");
     }
 
     /// Oracle de précision (plate-forme de dev) : ≤ 1 ulp de la référence
@@ -414,12 +480,8 @@ mod tests {
             );
         }
         // Empreinte (contrat de portabilité)
-        let mut fp = 0xcbf2_9ce4_8422_2325u64;
-        for &v in &q
-        {
-            fp = fnv_fold(fp, v.to_bits());
-        }
-        assert_eq!(fp, 0x2b0c_3ead_12aa_19d5, "empreinte softmax : 0x{fp:016x}");
+        let fp = proof_softmax_fingerprint();
+        assert_eq!(fp, PROOF_SOFTMAX_FP, "empreinte softmax : 0x{fp:016x}");
     }
 
     #[test]
@@ -449,15 +511,7 @@ mod tests {
 
     #[test]
     fn gemm_fingerprint() {
-        let mut rng = PcgEngine::new(1113);
-        let a: Vec<f32> = (0..17 * 13).map(|_| rng.float() * 4.0 - 2.0).collect();
-        let b: Vec<f32> = (0..13 * 11).map(|_| rng.float() * 4.0 - 2.0).collect();
-        let c = gemm_f32(&a, &b, 17, 13, 11);
-        let mut fp = 0xcbf2_9ce4_8422_2325u64;
-        for &v in &c
-        {
-            fp = fnv_fold(fp, v.to_bits());
-        }
-        assert_eq!(fp, 0x53df_bea9_109b_bd20, "empreinte gemm : 0x{fp:016x}");
+        let fp = proof_gemm_fingerprint();
+        assert_eq!(fp, PROOF_GEMM_FP, "empreinte gemm : 0x{fp:016x}");
     }
 }

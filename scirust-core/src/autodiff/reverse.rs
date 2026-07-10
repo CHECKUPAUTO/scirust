@@ -387,6 +387,21 @@ impl Tensor {
         let sum = exp.sum_axis(axis);
         exp.div(&sum.broadcast_to(self.rows, self.cols))
     }
+    /// Softmax **portable** par ligne (équivalent de `softmax(axis = 1)`) :
+    /// chaque ligne passe par [`crate::portable_f32::softmax_f32`] — exp sans
+    /// libm, somme indépendante de l'ordre — donc résultat bit-exact
+    /// inter-plates-formes, contrairement à [`Tensor::softmax`] dont
+    /// l'`exp` dépend de la libm de la plate-forme.
+    pub fn softmax_portable(&self) -> Tensor {
+        let mut out = Tensor::zeros(self.rows, self.cols);
+        for r in 0..self.rows
+        {
+            let row = &self.data[r * self.cols..(r + 1) * self.cols];
+            out.data[r * self.cols..(r + 1) * self.cols]
+                .copy_from_slice(&crate::portable_f32::softmax_f32(row));
+        }
+        out
+    }
     /// Numerically stable log-softmax: `x - logsumexp(x)`, max-shifted.
     /// Computing `log(softmax(x))` instead underflows a strongly-masked entry
     /// (e.g. a `-1e9` causal-mask fill) to `softmax = 0` and then `log(0) = -inf`;
@@ -649,6 +664,11 @@ pub enum Op {
     Softmax {
         input: usize,
         axis: u8,
+    },
+    /// Softmax portable par ligne : forward via `portable_f32::softmax_f32`,
+    /// backward depuis la sortie stockée — nœud bit-exact inter-plates-formes.
+    SoftmaxPortable {
+        input: usize,
     },
     LogSoftmax {
         input: usize,
@@ -1653,6 +1673,18 @@ impl Tape {
                     let gs = g_broadcast.hadamard(&sm);
                     let sum_gs = gs.sum_axis(axis);
                     let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
+                    grads[input] = grads[input].add(&diff);
+                },
+                Op::SoftmaxPortable { input } =>
+                {
+                    // Même jacobien que Softmax (axe 1), mais depuis la
+                    // SORTIE STOCKÉE du nœud : aucun appel libm dans le
+                    // backward, qui reste donc bit-exact inter-plates-formes
+                    // comme le forward.
+                    let sm = values[i].as_cpu();
+                    let gs = g.hadamard(sm);
+                    let sum_gs = gs.sum_axis(1);
+                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(sm.rows, sm.cols)));
                     grads[input] = grads[input].add(&diff);
                 },
                 Op::LogSoftmax { input, axis } =>
@@ -3221,6 +3253,26 @@ impl<'t> Var<'t> {
         self.try_softmax(axis).unwrap()
     }
 
+    /// Softmax **portable** par ligne (axe 1) : forward via
+    /// [`crate::portable_f32::softmax_f32`] (exp sans libm, somme indépendante
+    /// de l'ordre) et backward depuis la sortie stockée — le nœud complet
+    /// (forward ET gradient) est bit-exact inter-plates-formes, contrairement
+    /// à [`Var::softmax`] dont l'exp dépend de la libm. Pour l'axe 0,
+    /// transposer avant/après. Voie de référence, plus lente que `softmax`.
+    pub fn softmax_portable(self) -> Var<'t> {
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let out = a.softmax_portable();
+        let new_idx = self.tape.push_with_saved(
+            Op::SoftmaxPortable { input: self.idx },
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Var {
+            tape: self.tape,
+            idx: new_idx,
+        }
+    }
+
     pub fn try_log_softmax(self, axis: u8) -> crate::error::Result<Var<'t>> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         if axis > 1
@@ -4216,6 +4268,86 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------- SoftmaxPortable ---------- //
+
+    /// Le forward du nœud portable est bit-identique à
+    /// `portable_f32::softmax_f32` ligne par ligne, et numériquement
+    /// équivalent (≤ 1e-6) au softmax libm existant.
+    #[test]
+    fn softmax_portable_forward_matches() {
+        let mut rng = crate::nn::PcgEngine::new(42);
+        let data: Vec<f32> = (0..3 * 7).map(|_| rng.float() * 12.0 - 6.0).collect();
+        let t = Tensor::from_vec(data.clone(), 3, 7);
+
+        let portable = t.softmax_portable();
+        for r in 0..3
+        {
+            let row_ref = crate::portable_f32::softmax_f32(&data[r * 7..(r + 1) * 7]);
+            for (c, expected) in row_ref.iter().enumerate()
+            {
+                assert_eq!(portable.data[r * 7 + c].to_bits(), expected.to_bits());
+            }
+        }
+
+        let libm = t.softmax(1);
+        for j in 0..portable.data.len()
+        {
+            assert!(
+                (portable.data[j] - libm.data[j]).abs() < 1e-6,
+                "écart au softmax libm en {j}"
+            );
+        }
+    }
+
+    /// Gradient du nœud portable ≈ gradient du nœud softmax existant
+    /// (les forwards ne diffèrent que d'ulps), et empreinte du gradient
+    /// figée — c'est le contrat cross-platform du BACKWARD.
+    #[test]
+    fn softmax_portable_gradient_matches_and_is_fingerprinted() {
+        let mut rng = crate::nn::PcgEngine::new(4242);
+        let data: Vec<f32> = (0..4 * 5).map(|_| rng.float() * 8.0 - 4.0).collect();
+        let w: Vec<f32> = (0..4 * 5).map(|_| rng.float()).collect();
+
+        // Perte scalaire : Σ w ⊙ softmax(x) — gradient non trivial.
+        let grad_portable = {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(data.clone(), 4, 5));
+            let wv = tape.input(Tensor::from_vec(w.clone(), 4, 5));
+            let loss = x.softmax_portable().hadamard(wv).sum();
+            tape.backward(loss.idx());
+            tape.grad(x.idx())
+        };
+        let grad_libm = {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(data.clone(), 4, 5));
+            let wv = tape.input(Tensor::from_vec(w.clone(), 4, 5));
+            let loss = x.softmax(1).hadamard(wv).sum();
+            tape.backward(loss.idx());
+            tape.grad(x.idx())
+        };
+        for j in 0..grad_portable.data.len()
+        {
+            assert!(
+                (grad_portable.data[j] - grad_libm.data[j]).abs() < 1e-5,
+                "gradient portable ≠ gradient libm en {j}: {} vs {}",
+                grad_portable.data[j],
+                grad_libm.data[j]
+            );
+        }
+
+        // Contrat de portabilité du backward (forward + jacobien portables).
+        let fp = grad_portable
+            .data
+            .iter()
+            .fold(crate::portable_f32::fnv1a_init(), |fp, v| {
+                crate::portable_f32::fnv1a_fold_bits(fp, v.to_bits())
+            });
+        assert_eq!(
+            fp, 0x5ba0_9810_fa59_0787,
+            "empreinte gradient softmax portable : 0x{fp:016x}"
+        );
+    }
 
     #[test]
     fn test_tensor_in_place_ops() {
