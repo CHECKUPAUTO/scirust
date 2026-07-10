@@ -926,26 +926,30 @@ mod tests {
     /// volet 113 — pas la libm). Bits attendus commis.
     #[test]
     fn erf_matches_independent_reference() {
-        let table: [(f32, u32); 16] = [
-            (9.999999974752427e-07, 0x359772d0),
-            (9.999999747378752e-05, 0x38eca365),
-            (0.009999999776482582, 0x3c38de13),
-            (0.10000000149011612, 0x3de652f5),
-            (0.25, 0x3e8d7aa7),
-            (0.5, 0x3f053f7b),
-            (0.75, 0x3f360e4c),
-            (1.0, 0x3f57bb3d),
-            (1.25, 0x3f6c432f),
-            (1.5, 0x3f7752ab),
-            (2.0, 0x3f7ecd71),
-            (2.5, 0x3f7fe554),
-            (3.0, 0x3f7ffe8d),
-            (3.5, 0x3f7ffff4),
-            (3.9000000953674316, 0x3f7fffff),
-            (3.990000009536743, 0x3f800000),
+        // (bits de l'entrée f32, bits attendus de erf) — table générée en
+        // Decimal 60 chiffres (les entrées en bits évitent tout littéral
+        // à précision excessive).
+        let table: [(u32, u32); 16] = [
+            (0x358637bd, 0x359772d0), // 1e-6
+            (0x38d1b717, 0x38eca365), // 1e-4
+            (0x3c23d70a, 0x3c38de13), // 0,01
+            (0x3dcccccd, 0x3de652f5), // 0,1
+            (0x3e800000, 0x3e8d7aa7), // 0,25
+            (0x3f000000, 0x3f053f7b), // 0,5
+            (0x3f400000, 0x3f360e4c), // 0,75
+            (0x3f800000, 0x3f57bb3d), // 1
+            (0x3fa00000, 0x3f6c432f), // 1,25
+            (0x3fc00000, 0x3f7752ab), // 1,5
+            (0x40000000, 0x3f7ecd71), // 2
+            (0x40200000, 0x3f7fe554), // 2,5
+            (0x40400000, 0x3f7ffe8d), // 3
+            (0x40600000, 0x3f7ffff4), // 3,5
+            (0x4079999a, 0x3f7fffff), // 3,9
+            (0x407f5c29, 0x3f800000), // 3,99
         ];
-        for &(x, ref_bits) in &table
+        for &(x_bits, ref_bits) in &table
         {
+            let x = f32::from_bits(x_bits);
             let got = erf_f32(x);
             let reference = f32::from_bits(ref_bits);
             assert!(
