@@ -13,10 +13,11 @@
 //!   survival function, quantile, moments, and deterministic inverse-CDF sampling.
 //! - **Discrete distributions** ([`discrete`]): `Binomial`, `Poisson`,
 //!   `Hypergeometric`, `Geometric`, `NegativeBinomial`, `BetaBinomial`,
-//!   `Zipfian`, `Zeta` (via `riemann_zeta`), `PoissonBinomial`, plus
-//!   `Skellam` on ℤ and the vector-valued `Multinomial` /
-//!   `MultivariateHypergeometric` — pmf/ln-pmf, cdf, direct survival
-//!   function, SciPy-convention quantile, moments, deterministic sampling.
+//!   `Zipfian`, `Zeta` (via `riemann_zeta`), `PoissonBinomial`, `Skellam`
+//!   on ℤ, and the vector-valued `Multinomial`, `MultivariateHypergeometric`
+//!   and `DirichletMultinomial` — pmf/ln-pmf, cdf, direct survival function,
+//!   `logcdf`/`logsf`/`isf` (SciPy parity), quantile, moments, deterministic
+//!   sampling.
 //! - **Exact combinatorics** ([`comb`]): `factorial`, `binomial`, `permutations`,
 //!   `multichoose` in checked `u128` (`None` on overflow, never a wrong number),
 //!   plus overflow-free `ln_factorial` / `ln_binomial`.
@@ -68,8 +69,9 @@ pub mod lottery;
 pub mod rng;
 
 pub use discrete::{
-    BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
-    MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta, Zipfian,
+    BetaBinomial, Binomial, DirichletMultinomial, DiscreteDistribution, Geometric, Hypergeometric,
+    Multinomial, MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam,
+    Zeta, Zipfian,
 };
 pub use dist::{
     Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
@@ -88,9 +90,9 @@ pub mod prelude {
     };
     pub use crate::describe::{mean, median, quantile, std_dev, std_error, variance};
     pub use crate::discrete::{
-        BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
-        MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta,
-        Zipfian,
+        BetaBinomial, Binomial, DirichletMultinomial, DiscreteDistribution, Geometric,
+        Hypergeometric, Multinomial, MultivariateHypergeometric, NegativeBinomial, Poisson,
+        PoissonBinomial, Skellam, Zeta, Zipfian,
     };
     pub use crate::dist::{
         Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,

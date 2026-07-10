@@ -65,6 +65,37 @@ Suite du crate d'environnements de simulation multi-domaines (PR #288) :
   trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
   bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
   script de preuve et au job CI QEMU.
+### Ajouté — durcissement RLS : zéro-allocation, const-generic, QR-RLS racine carrée, benchmarks mesurés
+Les 4 points du plan validé après la revue du texte Gemini — chaque
+affirmation de ce lot est adossée à un test ou une mesure :
+- **`update()` zéro-allocation** (`RlsFilter`, `VectorRls`) : les
+  intermédiaires (`P·u`, erreur a priori) vivent dans des buffers persistants
+  (`#[serde(skip)]`, redimensionnement paresseux post-désérialisation) ; le
+  gain est replié à la volée — plus aucune allocation tas par échantillon
+  (l'ancienne boucle en faisait 4). `RlsFilter::update` retourne désormais
+  `&[f64]` (vue interne) au lieu d'un `Vec` alloué.
+- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`) : variante
+  entièrement sur pile, `core`-only (extractible en `no_std` pour
+  l'embarqué), dimensions connues du compilateur ⇒ déroulage/vectorisation
+  réels. Arithmétique **bit-identique** à la version tas — vérifié par un
+  test qui compare les trajectoires de poids au bit près sur 500 pas.
+- **`QrRls`** (`qr_rls`) : RLS **racine carrée** — propage le facteur `S`
+  (`P = S·Sᵀ`, mise à jour de rang 1 de Potter, la famille de méthodes du
+  `UdFilter` maison). La semi-définie-positivité de la covariance tient **par
+  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), pas par re-symétrisation forcée —
+  la réponse honnête au risque de divergence du RLS standard (aucune
+  prétention au-delà : l'estimée reste tributaire de l'excitation, documenté).
+  Tests : équivalence aux poids près (1e-6) avec le RLS standard sur données
+  saines ; stress 100 000 pas, λ=0,9, entrées quasi-colinéaires → P finie,
+  diagonale ≥ 0, mineurs principaux 2×2 ≥ 0 ; suivi d'un système dérivant.
+- **Benchmarks mesurés** (`--bin bench_rls`, release, conteneur CI x86_64 —
+  chiffres liés à cette machine, à re-mesurer ailleurs) : ns/update
+  `VectorRls` / `QrRls` / `RlsFilterConst` : n=4 → 40 / 47 / 34 ; n=16 →
+  633 / 476 / 326 ; n=64 → 10 017 / 6 740 / 8 451. Constats mesurés : la
+  variante const-generic est ~2× plus rapide à n=16 (déroulage réel), et le
+  QR-RLS **bat** le RLS standard dès n=16 (pas de passe de symétrisation).
+  Comparaison padasip non réalisée ici (échec d'installation dans le
+  conteneur) — point ouvert, aucune revendication inter-bibliothèques.
 
 ### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
 Suite annoncée du volet précédent — les trois chantiers « suite possible »
@@ -3056,6 +3087,30 @@ plutôt qu'une formule devinée) :
   CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
   une **boucle SGD multi-pas complète** dont la trajectoire de poids est
   bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
+
+### Ajouté — parité SciPy des queues et Dirichlet-multinomiale (4e passe du volet probabilités)
+> Entrée placée en bas de la section « Non publié » à dessein : chaque volet
+> parallèle insère la sienne en tête, d'où des conflits systématiques sur le
+> même bloc ; l'ajouter ici les évite.
+- **`scirust-stats::discrete` — méthodes de queue en log** : `logcdf`,
+  `logsf` et `isf` (fonction de survie inverse) ajoutées par défaut au trait
+  `DiscreteDistribution`, alignant l'API sur `scipy.stats`. `logsf` s'appuie
+  sur la survie **directe** déjà surchargée sur chaque loi (pas de
+  `ln(1 − cdf)` qui explose en queue), et `isf(p)` fait sa dichotomie sur
+  `sf` — plus précis que `quantile(1 − p)` pour les très petits `p`. Validé
+  contre SciPy (binomiale, Poisson, zêta) et par cohérence
+  `exp(logcdf) = cdf`, aller-retour `isf∘sf`.
+- **`scirust-stats::discrete::DirichletMultinomial`** — Pólya multivariée :
+  une multinomiale à probabilités Dirichlet(α)-distribuées, généralisation
+  vectorielle de la bêta-binomiale pour les **vecteurs de comptages
+  surdispersés** (comptages de mots/thèmes, essais catégoriels répétés à
+  dérive). `ln_pmf`/`pmf` par la forme fermée en ln Γ, moyenne `n·αᵢ/A`,
+  covariance avec le facteur de surdispersion `ρ = (n+A)/(1+A)`, tirage
+  séquentiel par bêta-binomiales conditionnelles (stick-breaking exact,
+  ordre fixe ⇒ reproductible bit-à-bit). Oracles SciPy 1.17.1
+  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) et fraction exacte
+  18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
+- 48 tests + doctest sur le crate, clippy 0 avertissement.
 
 ## [0.14.0] — 2026-06-13
 

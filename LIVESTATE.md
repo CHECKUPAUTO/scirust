@@ -3,6 +3,77 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités, 4e passe (parité SciPy queues + Dirichlet-multinomiale)
+- **Contexte** : « continu » après PR #287 (3e passe : ζ de Riemann +
+  Zeta/PoissonBinomial/Multinomial/MultivariateHypergeometric) MERGÉE.
+  Branche repartie de `origin/master` à jour.
+- **Livré** : (a) `logcdf`/`logsf`/`isf` ajoutés par défaut au trait
+  `DiscreteDistribution` — parité `scipy.stats`, `logsf`/`isf` s'appuient sur
+  la survie directe (pas de `ln(1−cdf)`) ; (b) `DirichletMultinomial`
+  (Pólya multivariée) — ln_pmf/pmf forme fermée ln Γ, moyenne, covariance
+  avec facteur de surdispersion ρ=(n+A)/(1+A), tirage par bêta-binomiales
+  conditionnelles (stick-breaking, reproductible). Oracles SciPy 1.17.1 +
+  fraction exacte 18/143 ; 2 catégories = bêta-binomiale, α=[1,1]=uniforme.
+  48 tests + doctest, clippy 0 avertissement.
+- **Convention conflits** : entrée CHANGELOG placée **en bas** de la section
+  « Non publié » (pas en tête) — les volets parallèles collent tous la leur
+  en tête, d'où des conflits systématiques ; #287 a dû être rebasée 2×.
+- **Bilan volet probabilités** : 14 lois discrètes (11 univariées + 3
+  vectorielles) + combinatoire exacte + module loterie honnête (aucune
+  « prédiction », impossible et documentée). Dépasse statrs (9 univariées).
+- **Suite possible** : pmf de Loader (saddle-point) pour binomiale/Poisson à
+  très grand n, `interval`/`expect` façon SciPy, lois discrètes restantes
+  (Yule-Simon, Boltzmann) — non entamé.
+- **NB CI** : la panne Actions du dépôt (runners non assignés, logs 404,
+  ~17h29 UTC) persistait ; validations locales uniquement (tests+clippy).
+
+## Session 2026-07-10 — fluides & thermo, volet 3 (région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook)
+- **Contexte** : PR #285 (volet 2) MERGÉE ; « continu » → les trois
+  « suites possibles » notées à la fin du volet 2. Branche repartie de
+  master (procédure branche-mergée).
+- **Région 5 IF97** (`steam::region5`) : coefficients (6+6 termes,
+  bien plus compacts que régions 1/2) extraits du même script sur le
+  paquet `iapws` que les volets précédents ; formules vérifiées en
+  Python pur AVANT le Rust — les 6 exemples numériques officiels de la
+  publication IF97 pour la région 5 passent à 1e-8 du premier coup.
+  Note technique : le code de référence utilise pour cv/w de la région 5
+  une forme algébrique différente (dérivées totales, dénominateur
+  `gopp+grpp` sans le terme `1-π²·`) de celle de la région 2 ; vérifié
+  par calcul à la main qu'elles sont algébriquement identiques (le
+  terme idéal `g0ππ=-1/π²` absorbe exactement la différence) — réutilisé
+  la forme région-2 (résiduel seul + `1-π²grpp`) pour cohérence de code,
+  pas de nouvelle famille de formule à maintenir.
+- **Rankine réel** (`cycles::rankine_real`) : au lieu d'implémenter les
+  énormes tables de coefficients des équations « backward » officielles
+  IF97 T(p,h)/T(p,s) par sous-région (2a/2b/2c, ~40 termes chacune),
+  décision de réutiliser le même principe de bissection déterministe déjà
+  en place pour l'échappement surchauffé (volet 2), mais sur h au lieu
+  de s — beaucoup moins de code, même garantie déterministe, couvre
+  exactement le besoin (localiser l'état réel d'échappement depuis son
+  enthalpie réelle). RankineCycleReal expose `ideal_efficiency` pour
+  comparaison directe en un seul appel. Résultat physique intéressant
+  vérifié par test : à rendement dégradé, la vapeur d'échappement
+  devient PLUS sèche (pas plus humide) — moins de travail extrait laisse
+  plus d'enthalpie dans la vapeur.
+- **Hardy Cross ↔ Colebrook** (`network::hardy_cross_darcy`) :
+  `PhysicalPipe` + boucle externe de substitution successive qui
+  recalcule f(Re) à chaque itération via `pipe::friction_factor` puis
+  appelle `hardy_cross` (interne, r figé) jusqu'à convergence des deux
+  boucles. Vérifié que h=f(L/D)V²/(2g) est intrinsèquement quadratique
+  en V par construction (le comportement linéaire de Hagen-Poiseuille en
+  laminaire vient de f∝1/Re, pas d'une loi de puissance différente) donc
+  le point fixe de l'itération EST la solution physique exacte, pas une
+  approximation — vérifié par un test qui recalcule la perte de charge
+  Darcy-Weisbach à partir des dimensions physiques après convergence et
+  contrôle la fermeture de boucle à 1e-6.
+- **Vérifié** : scirust-fluids 57 tests (+3 vs volet 2), scirust-thermo
+  63 tests (+6), clippy `-D warnings` propre, fmt appliqué.
+- **Suite possible** : IF97 région 3 (Helmholtz, autour du point
+  critique — nécessite un solveur de densité itératif, nettement plus
+  complexe que les régions Gibbs explicites) ; équations backward
+  officielles T(p,h)/T(p,s) si un jour la bissection s'avère insuffisante
+  (par ex. pour des besoins de performance) — non entamé.
+
 ## Session 2026-07-10 — volet 116 : all-reduce sur TCP réel + entraînement bf16-SR reproductible
 - **A — Transport TCP réel pour l'arbre fixe** : `WireState` (encodage
   little-endian explicite ⇒ la garantie bit-exacte traverse le réseau ;
