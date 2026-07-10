@@ -458,12 +458,124 @@ fn beta_cf(a: f64, b: f64, x: f64) -> f64 {
     h
 }
 
+// ============================================================ //
+//  Riemann zeta                                                //
+// ============================================================ //
+
+/// `B_{2k} / (2k)!` for `k = 1..=10` — the Bernoulli coefficients of the
+/// Euler–Maclaurin correction (B₂ = 1/6, B₄ = −1/30, … B₂₀ = −174611/330).
+const BERNOULLI_OVER_FACT: [f64; 10] = [
+    8.333_333_333_333_333e-2,
+    -1.388_888_888_888_889e-3,
+    3.306_878_306_878_307e-5,
+    -8.267_195_767_195_768e-7,
+    2.087_675_698_786_81e-8,
+    -5.284_190_138_687_493e-10,
+    1.338_253_653_068_468e-11,
+    -3.389_680_296_322_583e-13,
+    8.586_062_056_277_845e-15,
+    -2.174_868_698_558_062e-16,
+];
+
+/// Euler–Maclaurin tail `Σ_{j=m}^{∞} j^(−s)` for `s > 1`, `m ≥ 10`.
+///
+/// `∫_m^∞ x^(−s) dx + f(m)/2 + Σ_k B_{2k}/(2k)! · s(s+1)…(s+2k−2) ·
+/// m^(−s−2k+1)` with a fixed 10-term budget — deterministic, and free of the
+/// `ζ(s) − partial-sum` cancellation, which is what a far-tail survival
+/// function needs.
+pub fn riemann_zeta_tail(s: f64, m: f64) -> f64 {
+    if s <= 1.0 || m < 10.0 || s.is_nan() || m.is_nan()
+    {
+        return f64::NAN;
+    }
+    let mut acc = m.powf(1.0 - s) / (s - 1.0) + 0.5 * m.powf(-s);
+    let mut poch = s;
+    let mut mpow = m.powf(-s - 1.0);
+    for (k, c) in BERNOULLI_OVER_FACT.iter().enumerate()
+    {
+        acc += c * poch * mpow;
+        let i = 2.0 * (k as f64 + 1.0);
+        poch *= (s + i - 1.0) * (s + i);
+        mpow /= m * m;
+    }
+    acc
+}
+
+/// Riemann zeta `ζ(s) = Σ_{j≥1} j^(−s)` for real `s > 1` (`NaN` otherwise).
+///
+/// Direct sum of the first 19 terms (smallest first, fixed order) plus the
+/// Euler–Maclaurin tail at `m = 20` — deterministic, ~1e-15 relative across
+/// the domain (checked against `scipy.special.zeta`: ζ(2) = π²/6,
+/// ζ(3) = 1.2020569031595942…, ζ(1.5) = 2.6123753486854882…).
+pub fn riemann_zeta(s: f64) -> f64 {
+    if s <= 1.0 || s.is_nan()
+    {
+        return f64::NAN;
+    }
+    let mut acc = 0.0;
+    for j in (1..20u32).rev()
+    {
+        acc += f64::from(j).powf(-s);
+    }
+    acc + riemann_zeta_tail(s, 20.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() <= tol * (1.0 + b.abs())
+    }
+
+    // ---- Riemann zeta ----
+
+    #[test]
+    fn riemann_zeta_matches_reference() {
+        // ζ(2) = π²/6 (Basel), ζ(4) = π⁴/90.
+        let pi = std::f64::consts::PI;
+        assert!(close(riemann_zeta(2.0), pi * pi / 6.0, 1e-14));
+        assert!(close(riemann_zeta(4.0), pi.powi(4) / 90.0, 1e-14));
+        // scipy.special.zeta oracles.
+        assert!(close(riemann_zeta(1.5), 2.612_375_348_685_488, 1e-14));
+        assert!(close(riemann_zeta(2.5), 1.341_487_257_250_917_3, 1e-14));
+        assert!(close(riemann_zeta(3.0), 1.202_056_903_159_594_2, 1e-14));
+        assert!(close(riemann_zeta(4.2), 1.069_751_477_233_809_5, 1e-14));
+        assert!(close(riemann_zeta(10.0), 1.000_994_575_127_818, 1e-14));
+        assert!(close(riemann_zeta(25.0), 1.000_000_029_803_503_4, 1e-14));
+        // Divergence pole side and invalid domain.
+        assert!(riemann_zeta(1.0).is_nan());
+        assert!(riemann_zeta(0.5).is_nan());
+        assert!(riemann_zeta(f64::NAN).is_nan());
+        // Near the pole: ζ(s) ~ 1/(s−1) + γ.
+        let s = 1.000_001;
+        assert!(close(
+            riemann_zeta(s),
+            1.0 / (s - 1.0) + 0.577_215_664_901_532_9,
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn riemann_zeta_tail_consistent_with_partial_sums() {
+        // ζ(s) = Σ_{j<m} j^(−s) + tail(s, m) for any split m ≥ 10.
+        for &s in &[1.2, 2.0, 3.7, 8.0]
+        {
+            for &m in &[10.0, 25.0, 100.0]
+            {
+                let mut partial = 0.0;
+                let mi = m as u32;
+                for j in (1..mi).rev()
+                {
+                    partial += f64::from(j).powf(-s);
+                }
+                assert!(
+                    close(partial + riemann_zeta_tail(s, m), riemann_zeta(s), 1e-13),
+                    "s = {s}, m = {m}"
+                );
+            }
+        }
+        assert!(riemann_zeta_tail(2.0, 5.0).is_nan()); // m below the budgeted floor
     }
 
     // ---- gamma family ----

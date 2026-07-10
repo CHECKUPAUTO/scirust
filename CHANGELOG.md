@@ -5,6 +5,28 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
+- **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
+  par Euler–Maclaurin à budget fixe (somme directe des 19 premiers termes,
+  petits d'abord, + queue à m = 20 avec 10 termes de Bernoulli), ~1e-15
+  relatif, validé contre `scipy.special.zeta` et les identités ζ(2) = π²/6,
+  ζ(4) = π⁴/90, comportement au pôle ζ(s) ~ 1/(s−1) + γ. La **queue**
+  `Σ_{j≥m} j^(−s)` est exposée séparément : c'est elle qui donne une
+  fonction de survie de loi zêta O(1) et sans annulation `ζ − somme partielle`.
+- **`scirust-stats::discrete`, 5 lois** : **`Zeta`** (Zipf à support infini,
+  `scipy.stats.zipf` — tête sommée directement, queue Euler–Maclaurin ⇒
+  quantile utilisable même dans le régime à queue lourde s ≤ 2 où la
+  moyenne diverge) ; **`PoissonBinomial`** (succès de n Bernoulli
+  **hétérogènes** — fiabilité système, défauts par lot ; vecteur de masses
+  précalculé par la récurrence de convolution O(n²) exacte, cas homogène
+  = binomiale, testé) ; **`Multinomial`** et **`MultivariateHypergeometric`**
+  (vectorielles, API slice dédiée hors du trait univarié : ln_pmf/pmf,
+  moyenne, covariance pour la multinomiale, tirage séquentiel conditionnel
+  déterministe — binomiales en cascade / hypergéométriques sur l'urne
+  restante ; cas à 2 catégories = lois univariées, testé) ; oracles SciPy
+  1.17.1 et fraction exacte 280/2001 (`multivariate_hypergeom`).
+  45 tests + doctest sur le crate, clippy 0 avertissement.
+
 ### Ajouté — all-reduce TCP réel + entraînement bf16-SR reproductible (volet 116)
 - **`tcp_tree_all_reduce_rank`** (+ trait `WireState`, sérialisation
   little-endian de Vec<f32>/Vec<ExactAcc>) : l'all-reduce à arbre fixe sur
