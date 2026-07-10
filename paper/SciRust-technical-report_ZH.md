@@ -1,8 +1,8 @@
 # SciRust：纯 Rust 深度学习框架 —— 便携式 GPU 加速、符号回归引擎和确定性推理运行时
 
 **Tarek Zekriti**
-独立研究员 · contact@checkupauto.fr
-代码库：https://github.com/CHECKUPAUTO/scirust
+独立研究员 · zekrititarek@gmail.com
+代码库：https://github.com/Memorithm/scirust
 
 ---
 

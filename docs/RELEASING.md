@@ -62,7 +62,7 @@ informational (`continue-on-error`) and should **not** be marked as required.
 ### Via the GitHub API (alternative)
 
 ```sh
-gh api -X PUT repos/CHECKUPAUTO/scirust/branches/master/protection \
+gh api -X PUT repos/Memorithm/scirust/branches/master/protection \
   --input - <<'JSON'
 {
   "required_status_checks": {

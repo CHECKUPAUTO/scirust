@@ -5,7 +5,7 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 109)
+### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 111)
 - **`AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
   élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)
   (MIT, arXiv:2510.09180) contre SciRust — 18/23 items déjà couverts, 2 par
@@ -29,6 +29,43 @@ versions sémantiques à partir de la prochaine release taguée.
   correctement arrondi hors dilemme du fabricant de tables ; identité
   inter-plates-formes probable mais non prouvée). Test de fidélité
   ≤ 0,5 ulp sur 8 000 points.
+
+### Modifié — acteur CHECKUPAUTO remplacé par TAREK ZEKRITI
+- **Attribution** : le champ `authors` de `scirust-burn-bridge` passe de
+  "CheckupAuto" à "Tarek Zekriti" ; l'identité git locale des commits est
+  désormais TAREK ZEKRITI \<zekrititarek@gmail.com\>.
+- **URLs/slugs GitHub** : toutes les références `CHECKUPAUTO/*` (26 fichiers —
+  `repository` des Cargo.toml, README, LICENSE.md, RELEASING, SBOM CycloneDX,
+  rapports techniques ×8 langues, scripts de protocole, docs scirust-rsi,
+  URI SARIF de scirust-som) pointent vers `Memorithm/*`, l'org qui héberge
+  réellement les dépôts.
+- **Marque également remplacée (2e passe, sur confirmation utilisateur)** :
+  emails de contact `contact@checkupauto.fr` → `zekrititarek@gmail.com`
+  (LICENSE, LICENSING, SECURITY, plaquette, en-têtes des rapports ×8 langues)
+  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` →
+  `LicenseRef-TarekZekriti-Dual` (LICENSE + Cargo.toml racine,
+  scirust-burn-bridge, scirust-license ; `deny.toml` et le SBOM n'y
+  référençaient rien).
+
+### Ajouté — draft de soumission Correctness '26 (`paper/correctness26/`)
+- **Venue actée** : Correctness '26 (10ᵉ Int. Workshop on Software
+  Correctness for HPC Applications, SC26 Chicago), deadline 23 juillet 2026,
+  notification 1ᵉʳ septembre. Plateforme d'évaluation : **Jetson AGX Thor**
+  (décision utilisateur). JOSS écarté (licence PolyForm non-OSI, décision
+  utilisateur de ne pas re-licencier).
+- **Draft complet** : `main.tex` (ACM sigconf, ~8 pages : intro
+  « déterminisme-comme-évidence », related work avec pivot RepDL honnête,
+  trois régimes numériques + invariant σ, entraînement bit-reproductible
+  T1-T4, inférence-comme-artefact d'audit, int8 déterministe edge, gate σ +
+  étude négative « dead guards » 22 dépôts/9,16 M LOC, coût mesuré du
+  déterminisme avec la table x86-64/Thor et l'identité bit-à-bit
+  cross-platform des empreintes, limitations, table claims → évidence en
+  `table*`) ; `references.bib` (7 références, métadonnées vérifiées sur
+  arXiv/éditeur le 2026-07-10, aucune référence inventée) ; `README.md`
+  (build latexmk/Overleaf, TODO de soumission). Contrôle structurel
+  effectué : environnements/accolades équilibrés, citations et refs toutes
+  résolues. Chaque claim du papier est adossée à la table de
+  `paper/PAPER_PLAN.md` — aucune claim sans témoin exécutable.
 
 ### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
 - **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
