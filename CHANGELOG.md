@@ -5,6 +5,48 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
+Suite annoncée du volet précédent — les trois chantiers « suite possible »
+du LIVESTATE sont livrés :
+- **`scirust-thermo::steam` — IAPWS-IF97 régions 1 et 2** (en plus de la
+  région 4 existante) : équations de Gibbs complètes donnant v, h, u, s,
+  cp, cv et la vitesse du son pour le **liquide comprimé** (région 1,
+  273,15–623,15 K, jusqu'à 100 MPa) et la **vapeur surchauffée**
+  (région 2, jusqu'à 1073,15 K, bornée par la ligne de saturation et la
+  parabole **B23** région 2/3, elle aussi implémentée). Les 34 + 9 + 43
+  coefficients ont été extraits **programmatiquement** de
+  l'implémentation de référence (paquet `iapws`) — zéro transcription
+  manuelle. États saturés `saturated_liquid`/`saturated_vapor`.
+  Oracles : **tables de vérification officielles IF97 5 et 15**
+  reproduites à 1e-8 sur les six points (toutes propriétés), paire B23,
+  tables vapeur classiques à 100 °C, cohérence d'équilibre de phase
+  (g_f ≈ g_g, h_fg ≈ T·s_fg à ~1e-4 près, l'écart des fits régionaux).
+- **`scirust-thermo::cycles::rankine_ideal` — cycle de Rankine complet**
+  sur les propriétés IF97 : pompe isentropique (v·Δp), chaudière isobare,
+  détente isentropique (échappement humide par titrage dans la cloche,
+  ou surchauffé par bissection déterministe), condenseur isobare.
+  Rendement, travaux, chaleurs, titre de sortie. Oracles : exemple
+  classique de Cengel (3 MPa/350 °C/75 kPa → η ≈ 26,0 %, x₄ ≈ 0,886),
+  premier principe exact, borne de Carnot, sens physique de la pression
+  de condenseur.
+- **`scirust-thermo::convection`** — convection externe et naturelle :
+  plaque plane laminaire (0,664, = analogie de Colburn exacte) et mixte
+  (raccord continu à Re = 5×10⁵ vérifié), **Churchill–Bernstein**
+  (cylindre en écoulement transverse), **Ranz–Marshall** (sphère, limite
+  de conduction Nu = 2 exacte), **Churchill–Chu** (plaque verticale et
+  cylindre horizontal en convection naturelle), nombre de Rayleigh.
+  Domaines de validité imposés.
+- **`scirust-fluids::network` — méthode de Hardy Cross** pour les
+  réseaux de conduites maillés : loi de perte de charge
+  h = r·|Q|^{n−1}·Q (n = 2 Darcy–Weisbach, 1,852 Hazen–Williams),
+  corrections de boucle préservant exactement la continuité aux nœuds,
+  balayage déterministe, inversion de débit gérée par la loi signée.
+  Oracles : répartitions analytiques (2 et 3 conduites en parallèle,
+  fermeture des boucles à ~1e-8), exposant Hazen–Williams, entrées
+  dégénérées rejetées.
+- Bilan : scirust-fluids 54 tests (+6), scirust-thermo 57 tests (+18),
+  clippy `-D warnings` propre, rustfmt appliqué.
+
 ### Ajouté — mécanique des fluides & thermodynamique (`scirust-fluids`, `scirust-thermo`)
 - **`scirust-fluids`** — mécanique des fluides déterministe (Rust pur, zéro
   dépendance, `forbid(unsafe_code)`, entrées validées → `FluidsError` typé) :

@@ -12,8 +12,9 @@
 //! | [`ideal_gas`] | perfect-gas state equation, process work/heat (isothermal, isobaric, isochoric, adiabatic, polytropic), entropy changes |
 //! | [`cycles`] | Carnot (efficiency & COPs), Otto, Diesel, Brayton air-standard cycles |
 //! | [`heat_transfer`] | conduction resistances (plane, cylindrical), convection, radiation, LMTD, effectiveness-NTU, Dittus–Boelter |
+//! | [`convection`] | external & natural convection: flat plate, Churchill–Bernstein cylinder, Ranz–Marshall sphere, Churchill–Chu free convection, Rayleigh number |
 //! | [`psychro`] | moist air: Hyland–Wexler saturation pressure, humidity ratio, dew point, enthalpy, specific volume |
-//! | [`steam`] | water saturation line, IAPWS-IF97 region 4 (`p_sat(T)`, `T_sat(p)`) |
+//! | [`steam`] | IAPWS-IF97 water/steam: saturation line (region 4), compressed liquid (region 1), superheated steam (region 2), B23 boundary |
 //!
 //! ## Guarantees
 //!
@@ -47,6 +48,7 @@
 
 mod error;
 
+pub mod convection;
 pub mod cycles;
 pub mod heat_transfer;
 pub mod ideal_gas;
