@@ -8,3 +8,9 @@ publish = false
 sha2 = "0.10"
 scirust-edge = { path = "../scirust-edge" }
 scirust-core = { path = "../scirust-core" }
+
+[dev-dependencies]
+# Déjà présent au lockfile via scirust-core (feature par défaut) : aucun
+# nouveau téléchargement. Sert au test d'invariance du fingerprint à
+# construire des pools de 1/2/4/8 threads (tests/fingerprint_thread_invariance.rs).
+rayon = "1.8"

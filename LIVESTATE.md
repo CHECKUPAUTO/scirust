@@ -1,7 +1,88 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-07-09
+> Dernière mise à jour : 2026-07-10
+
+## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
+- **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this
+  guarantee tested » falsifiée par RepDL (arXiv:2510.09180, reproductibilité bit-à-bit
+  cross-platform f32 par arrondi correct, surcouche PyTorch). Remplacée partout
+  (README.md, docs/INDUSTRIAL_ROADMAP.md, docs/DOSSIER_FINANCEURS.md ; entrée 0.14.0 du
+  CHANGELOG rectifiée avec note datée) par la formulation « à notre connaissance, seul
+  framework auto-contenu (100 % Rust, zéro FFI) offrant simultanément multi-thread
+  bit-identique CI + int8 embarqué + pièces d'audit ; RepDL plus fort sur cross-platform
+  f32 ». Preuve : `grep -rn "No mainstream framework"` et `"framework grand public"` → 0.
+  Le rapport technique ne portait PAS la claim (« treat as best-effort » — défendable).
+- **Lot 2a (fait)** : `epsilon-audit --mine <dir>` — nouveau module public
+  `scirust-sigma::mine` (std-only). M1 = f32 sous `f32::MIN_POSITIVE` (flush FTZ/DAZ),
+  M2 = sous `1/f32::MAX` (1/d → inf sans FTZ), M2 ⊂ M1 classés séparément. Typage :
+  Rust suffixe/ligne ; C nu = double (jamais compté) ; shaders f32 par défaut. Piège
+  résolu : comparaison au seuil sur la valeur ARRONDIE f32 (`1.17549435e-38` parse f64
+  sous σ exact mais arrondit À `f32::MIN_POSITIVE` → garde licite, non capturée).
+  Exclusions test*/bench*/vendor ; fast-math (`-ffast-math`, `use_fast_math`,
+  `-funsafe-math-optimizations`, `ftz`) dans les fichiers de build. 27 tests fixtures.
+  fmt + clippy -D warnings + 27 tests verts. Gate `--check` existant intact.
+- **Lot 2b (fait)** : campagne `/tmp/mining` sur 22 dépôts (SHA notés dans l'étude),
+  clones sparse pour les géants, 22 450 fichiers / 9 160 848 lignes. 14 candidats bruts,
+  TOUS relus en contexte : 12 = tolérances de test approx de ndarray (`#[cfg(test)]`
+  inline dans src/), 2 = constantes `*_SUBNORMAL_F32` du lexer WGSL de naga (tests).
+  → **0 CONFIRMED_DEAD_GUARD, verdict NO-GO** (règle ≥3 confirmés dans ≥2 dépôts).
+  Modèle de menace FTZ néanmoins confirmé : 9/22 dépôts activent fast-math/FTZ en build
+  (ggml/llama.cpp/whisper CPU+CUDA+HIP, pytorch QNNPACK, tensorflow kernels mlir ftz,
+  candle flash-attn, OpenBLAS power, ncnn, tract bench). Étude complète, méthodo, table
+  SHA+LOC, findings, limitations, règle de décision : `docs/DEAD_GUARDS_STUDY.md`.
+  Aucun bug report posté (branche GO non prise) ; aucune issue/PR externe.
+- **Lot 3 (fait)** : `paper/RELATED_WORK.md` (FR, citable ; pivot RepDL honnête ;
+  motivation voie sanitized via arXiv:2410.09172 ; PAS de section prévalence — NO-GO)
+  + `paper/PAPER_PLAN.md` (titre + 2 variantes ; recommandation VENUE : atelier
+  correctness/reproducibility d'abord — **JOSS bloqué par la licence PolyForm
+  non-OSI** ; table claims→évidence T1-P1 avec test exact + commande par claim ;
+  TODO-EVIDENCE : R4 fingerprint thread-count en CI, S2 gate epsilon-audit à câbler
+  en job CI, O1 banc overhead ordre-figé vs libre ; réponses rapporteurs a/b/c).
+- **Décisions actées (recommandations acceptées par l'utilisateur)** : (1) bug reports
+  extérieurs : clos, zéro contact (NO-GO) ; (2) venue : atelier correctness/reproducibility,
+  PAS de re-licence pour JOSS ; (3) paper : GO conditionnel engagé → S2/R4/O1 exécutés :
+  - **S2 fait** : job CI `epsilon-audit` (gate `--check` σ_sanitized sur scirust-gpu/src)
+    ajouté à `.github/workflows/ci.yml`.
+  - **R4 fait** : `scirust-runtime/tests/fingerprint_thread_invariance.rs` — fingerprint
+    du forward bit-identique sous pools rayon 1/2/4/8 (batches synthétiques entiers,
+    modèle construit DANS la fermeture install : Sequential contient des Box<dyn Module>
+    non-Send). rayon en dev-dep de scirust-runtime (déjà au lockfile). Test vert.
+  - **O1 fait (volet x86)** : `scirust-core/src/bin/bench_reduction_overhead.rs` —
+    ordre figé (slots indexés, pattern train_batch_threaded) vs ordre d'arrivée (canal
+    mpsc), ±1e16, empreintes bit-à-bit. Mesure x86 4 cœurs release (dim=100 352,
+    30 reps) : figé/arrivée = 0,930×/0,895×/0,756×/0,846× à 1/2/4/8 threads → le
+    déterminisme du pattern de réduction est GRATUIT (même plus rapide : pas de canal,
+    pas de contention) ; empreinte figée unique par n ; baseline arrivée = 3 empreintes
+    distinctes à 8 threads (non-déterminisme observé). PAPER_PLAN §4 (R4/S2/O1 → [CI]/
+    mesuré) et §6 (décisions) mis à jour. **Reste humain** : atelier précis + run Jetson
+    du banc O1 + déclenchement de l'écriture du paper.
+  - **Protocole Jetson prêt** : `scripts/bench-o1-jetson.sh` (auto-contenu : rapport
+    plateforme avec nvpmodel consigné, `--pin-clocks` explicite jamais silencieux,
+    3 runs du banc, tests natifs Q3 NEON + R4 fingerprint, bundle d'évidence horodaté
+    ignoré par git). Smoke-testé sur x86 : chiffres cohérents avec le run initial ET
+    empreintes « figé » identiques entre processus (0x60daf62c…/0x9bf7c3f3…/
+    0xd5b8e15f…/0x7e99a9d0… aux 4 nombres de threads) — stabilité inter-processus du
+    banc vérifiée. Section « On-device Jetson bench (O1) » ajoutée à TEST_PROTOCOL.md.
+  - **O1 volet Jetson EXÉCUTÉ (2026-07-10, par l'utilisateur, sortie collée en session)** :
+    Jetson AGX Thor Dev Kit, 14 cœurs, 128 Go, L4T R38.4.0, noyau 6.8.12-tegra, MAXN
+    (horloges épinglées par la 1re invocation), rustc nightly af3d95584, commit 0c2f1bf,
+    3 runs × 30 reps. Overhead figé/arrivée : ≈0,99× (1 thr), 0,93-0,95× (2), 1,01-1,03×
+    (4), 1,06-1,11× (8) ; arrivée non déterministe (2 empreintes distinctes à 8 thr,
+    runs 2-3). **RÉSULTAT CLÉ : empreintes « figé » bit-identiques x86_64 ↔ aarch64**
+    aux 4 nombres de threads — la réduction f32 à ordre figé est cross-platform, mesuré.
+    Deux corrections de script au passage : (1) sous sudo, secure_path n'a pas
+    ~/.cargo/bin → le script source $HOME/.cargo/env (et /home/$SUDO_USER/.cargo/env) ;
+    (2) Q3 : `cargo test -p scirust-core <filtre>` exécute TOUS les targets et le
+    tail -4 n'affichait que le dernier résumé (0 match) → `--lib` ajouté (sur x86 :
+    « 697 filtered out » confirme le bon target ; re-run Jetson conseillé pour
+    l'évidence Q3 propre). PAPER_PLAN O1 + §6 mis à jour (volet Jetson : fait).
+  - **Re-run Jetson au commit 014795f (script corrigé, --pin-clocks opérationnel)** :
+    Q3 EXÉCUTÉ SUR CIBLE — `quantization::tests_neon::neon_matches_scalar_bit_exact
+    ... ok` (1 passed, 697 filtered out) + R4 vert nativement sur ARM. Banc reconfirmé
+    (0,93-1,01× à 1-4 thr, 1,06-1,10× à 8), mêmes 4 empreintes → identité cross-platform
+    x86_64 ↔ aarch64 revérifiée sur run indépendant. Toutes les lignes de la table
+    claims→évidence relevant du Jetson sont désormais adossées à une exécution réelle.
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance

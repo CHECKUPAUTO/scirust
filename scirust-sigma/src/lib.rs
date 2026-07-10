@@ -40,10 +40,13 @@
 //! ## Zéro dépendance
 //!
 //! Cette bibliothèque n'utilise que `std`. Le binaire `epsilon-audit` (audit
-//! lexical des ~2 600 littéraux epsilon du workspace) vit dans la même crate
-//! mais n'ajoute aucune dépendance à la bibliothèque.
+//! lexical des ~2 600 littéraux epsilon du workspace, plus le mode `--mine`
+//! de minage multi-langage des gardes mortes — voir [`mine`]) vit dans la
+//! même crate mais n'ajoute aucune dépendance à la bibliothèque.
 
 #![forbid(unsafe_code)]
+
+pub mod mine;
 
 /// Régime numérique déterministe. À chaque voie correspond un σ distinct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -5,6 +5,85 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
+- **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
+  framework ships this guarantee tested » (README) et ses équivalents FR
+  (`docs/INDUSTRIAL_ROADMAP.md`, `docs/DOSSIER_FINANCEURS.md`, entrée
+  historique 0.14.0 de ce fichier — rectifiée, pas réécrite) sont
+  **falsifiées par RepDL** (Microsoft, 2025, arXiv:2510.09180 :
+  reproductibilité bit-à-bit **cross-platform** d'un sous-ensemble f32 de
+  PyTorch par arrondi correct). Remplacées par la formulation exacte : à
+  notre connaissance, SciRust est le seul framework DL **auto-contenu**
+  (pile 100 % Rust auditable, zéro FFI dans le chemin de calcul) offrant
+  simultanément entraînement multi-thread bit-identique testé en CI, int8
+  déterministe embarqué et artefacts d'audit ; RepDL est plus fort sur
+  l'axe cross-platform f32, en surcouche d'un TCB C++/Python, sans basse
+  précision ni pièces d'audit.
+- **`epsilon-audit --mine <dir>`** (crate `scirust-sigma`, module public
+  `mine`, std-only) : minage multi-langage (Rust, C/C++/CUDA/OpenCL,
+  shaders WGSL/GLSL/Metal/compute) des « gardes epsilon mortes » — littéraux
+  f32 sous `f32::MIN_POSITIVE` (M1, flush FTZ/DAZ) ou sous `1/f32::MAX`
+  (M2, inversion en `inf`). Heuristiques de typage documentées
+  (suffixe/ligne ; littéral nu C = double, jamais compté ; shaders f32 par
+  défaut), comparaison au seuil sur la valeur **arrondie en f32**
+  (sémantique de matérialisation), exclusions `test*/`/`bench*/`/vendor,
+  détection des drapeaux fast-math/FTZ dans les fichiers de build, rapport
+  Markdown+TSV déterministe scellé SHA-256. 27 tests unitaires sur fixtures
+  synthétiques (M1 réel, M2 réel, f64 bénin, exclusion test, bornes de
+  plage, commentaires/chaînes). Lecture seule, exit 0 (analytique).
+- **Étude empirique `docs/DEAD_GUARDS_STUDY.md`** : campagne sur **22 dépôts
+  publics** (llama.cpp, ggml, candle, burn, pytorch, tensorflow,
+  onnxruntime, OpenBLAS, eigen, cutlass, ndarray, nalgebra, faer-rs, tract,
+  wgpu, glam, ncnn, MNN, tvm, whisper.cpp, stable-diffusion.cpp, wonnx —
+  SHA enregistrés, 0 échec de clone), **9 160 848 lignes** scannées,
+  14 candidats bruts, revue manuelle intégrale → **0 garde morte
+  confirmée** (14 BENIGN : tolérances de test `approx` de ndarray,
+  constantes sous-normales délibérées du lexer WGSL de naga). Verdict
+  **NO-GO** (règle : ≥ 3 confirmés dans ≥ 2 dépôts) — résultat négatif
+  consigné honnêtement ; en contrepartie, le modèle de menace FTZ est
+  confirmé (9/22 dépôts activent fast-math/FTZ dans leurs builds). Aucune
+  issue/PR ouverte, aucun contact extérieur.
+- **Matériel paper (Lot 3)** : `paper/RELATED_WORK.md` (section citable —
+  Goldberg/Monniaux/ReproBLAS ; PyTorch deterministic mode/EasyScale/RepDL
+  avec paragraphe pivot ; arXiv:2410.09172 pour la voie sanitized) et
+  `paper/PAPER_PLAN.md` (titre + 2 variantes ; venues : atelier
+  correctness/reproducibility recommandé — JOSS bloqué par la licence
+  PolyForm non-OSI en l'état ; plan de sections ; **table claims →
+  évidence** T1-P1 mappant chaque claim sur son test exact avec commande ;
+  réponses aux faiblesses anticipées).
+- **Fermeture des TODO-EVIDENCE du plan (S2, R4, O1)** — décisions actées :
+  - **S2** : le gate `epsilon-audit --check` est câblé en CI (nouveau job
+    `epsilon-audit` dans `.github/workflows/ci.yml`) — aucune garde f32
+    sous σ_sanitized ne peut plus entrer dans `scirust-gpu/src` sans
+    casser le build.
+  - **R4** : nouveau test CI
+    `forward_fingerprint_is_thread_count_invariant`
+    (`scirust-runtime/tests/fingerprint_thread_invariance.rs`) — le
+    fingerprint 64 bits du forward (MLP 784-256-10, batches synthétiques
+    100 % entiers, portables) est bit-identique sous des pools rayon de
+    1/2/4/8 threads, et stable à la ré-exécution. `rayon` ajouté en
+    dev-dependency de `scirust-runtime` (déjà au lockfile — zéro nouveau
+    téléchargement).
+  - **O1** : banc « coût du déterminisme »
+    (`scirust-core/src/bin/bench_reduction_overhead.rs`) — réduction en
+    ordre de worker figé (pattern de `train_batch_threaded`) vs
+    accumulation en ordre d'arrivée (canal), magnitudes ±1e16 rendant
+    l'ordre observable, empreintes bit-à-bit par répétition. Mesure x86
+    (4 cœurs, release, dim=100 352, 30 reps) : **l'ordre figé est plus
+    rapide** (0,76×-0,93× du temps de la baseline) et bit-stable ; la
+    baseline « arrivée » a produit 3 empreintes distinctes à 8 threads
+    (non-déterminisme réel observé). Wall-clock ⇒ protocole, jamais CI ;
+    volet Jetson via `scripts/bench-o1-jetson.sh` (rapport plateforme
+    consigné, épinglage d'horloges opt-in `--pin-clocks`, 3 runs, tests
+    natifs Q3 NEON + R4 fingerprint, bundle d'évidence horodaté et
+    git-ignoré), documenté dans `docs/TEST_PROTOCOL.md`. **Volet Jetson
+    mesuré (AGX Thor, 14 cœurs, MAXN, 3×30 reps)** : ordre figé ≈ gratuit
+    jusqu'à 2 threads (0,93-0,99×), ~1-3 % à 4, ~6-11 % à 8 ; et les
+    empreintes de la réduction figée sont **bit-identiques x86_64 ↔
+    aarch64** — reproductibilité cross-platform du pattern, mesurée.
+    Corrections script : env cargo sous sudo (secure_path) ; `--lib` sur le
+    filtre Q3 (le tail ne montrait que le dernier target de test).
+
 ### Ajouté — `scirust-sigma` : bornes structurelles σ (« couvercle de zéro ») + audit des epsilons
 Nouvelle crate feuille **sans dépendance externe** (`std` seul) qui nomme et
 encode l'invariant numérique jusqu'ici implicite du contrat de déterminisme :
@@ -2402,7 +2481,10 @@ plutôt qu'une formule devinée) :
   les gradients dans un ordre fixe (worker 0,1,…,n-1), indépendant de
   l'ordonnanceur. L'addition flottante n'étant pas associative, le résultat
   est **bit-identique pour 1/2/4/8 threads** et identique au séquentiel —
-  garantie testée que les frameworks grand public n'offrent pas. Trois tests
+  garantie testée en CI. *(Rectifié 2026-07-10 : la claim d'unicité notée ici
+  à l'époque est retirée — RepDL, arXiv:2510.09180, fournit depuis oct. 2025
+  la reproductibilité bit-à-bit cross-platform d'un sous-ensemble f32 de
+  PyTorch ; voir l'entrée 2026-07-10.)* Trois tests
   CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
   une **boucle SGD multi-pas complète** dont la trajectoire de poids est
   bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
