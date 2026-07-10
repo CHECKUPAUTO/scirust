@@ -12,12 +12,14 @@
   RELEASING, SBOM, rapports techniques ×8 langues, scripts, scirust-rsi docs,
   SARIF de scirust-som) → `Memorithm/*` (l'org qui héberge — un nom de personne
   n'est pas une URL valide).
-- **Intouché (marque CheckupAuto, à trancher séparément si voulu)** : emails
-  `contact@checkupauto.fr` (SECURITY, LICENSING, plaquette, en-têtes des rapports)
-  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` (Cargo.toml ×3 + LICENSE).
-- **Reste** : CCOS_EXTENDED (dépôt séparé Memorithm/CCOS_EXTENDED) contient ~30
-  occurrences équivalentes (docs, papers, Dockerfiles, authors "Forge CHECKUPAUTO
-  <forge@checkupauto.io>") — même sweep à faire là-bas sur demande.
+- **2e passe (confirmée par l'utilisateur : « oui continu »)** : marque aussi —
+  emails `contact@checkupauto.fr` → `zekrititarek@gmail.com` (LICENSE, LICENSING,
+  SECURITY, plaquette, en-têtes des rapports ×8) et SPDX
+  `LicenseRef-CheckupAuto-Dual` → `LicenseRef-TarekZekriti-Dual` (LICENSE +
+  3 Cargo.toml ; deny.toml/SBOM sans référence). git grep -i checkupauto → 0
+  hors entrées narratives CHANGELOG/LIVESTATE.
+- **Reste** : sweep équivalent dans CCOS_EXTENDED (dépôt séparé) — en cours
+  dans la même session.
 
 ## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
 - **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this

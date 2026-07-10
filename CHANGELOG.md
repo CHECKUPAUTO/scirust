@@ -14,8 +14,13 @@ versions sémantiques à partir de la prochaine release taguée.
   rapports techniques ×8 langues, scripts de protocole, docs scirust-rsi,
   URI SARIF de scirust-som) pointent vers `Memorithm/*`, l'org qui héberge
   réellement les dépôts.
-- **Non modifié (marque, décision séparée)** : emails `contact@checkupauto.fr`
-  et identifiant SPDX `LicenseRef-CheckupAuto-Dual`.
+- **Marque également remplacée (2e passe, sur confirmation utilisateur)** :
+  emails de contact `contact@checkupauto.fr` → `zekrititarek@gmail.com`
+  (LICENSE, LICENSING, SECURITY, plaquette, en-têtes des rapports ×8 langues)
+  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` →
+  `LicenseRef-TarekZekriti-Dual` (LICENSE + Cargo.toml racine,
+  scirust-burn-bridge, scirust-license ; `deny.toml` et le SBOM n'y
+  référençaient rien).
 
 ### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
 - **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream

@@ -2,7 +2,7 @@
 
 ## Signalement de vulnérabilités
 
-Signalez toute vulnérabilité en privé à **contact@checkupauto.fr**
+Signalez toute vulnérabilité en privé à **zekrititarek@gmail.com**
 (mainteneur, cf. `paper/SciRust-technical-report.md`). N'ouvrez pas
 d'issue publique pour une faille exploitable. Accusé de réception sous
 7 jours.

@@ -162,4 +162,4 @@ exclude = [
     "scirust-burn-bridge",
 ]
 resolver = "2"
-license = "LicenseRef-CheckupAuto-Dual"
+license = "LicenseRef-TarekZekriti-Dual"

@@ -1,7 +1,7 @@
 # SciRust: 순수 Rust 딥러닝 프레임워크 — 이식 가능한 GPU 가속, 심볼릭 회귀 엔진 및 결정론적 추론 런타임
 
 **Tarek Zekriti**
-독립 연구원 · contact@checkupauto.fr
+독립 연구원 · zekrititarek@gmail.com
 저장소: https://github.com/Memorithm/scirust
 
 ---

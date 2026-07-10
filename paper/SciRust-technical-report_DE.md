@@ -1,7 +1,7 @@
 # SciRust: Ein Pure-Rust Deep Learning Framework — Portable GPU-Beschleunigung, eine symbolische Regressions-Engine und eine deterministische Inferenz-Runtime
 
 **Tarek Zekriti**
-Unabhängiger Forscher · contact@checkupauto.fr
+Unabhängiger Forscher · zekrititarek@gmail.com
 Repository: https://github.com/Memorithm/scirust
 
 ---

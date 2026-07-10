@@ -3,7 +3,7 @@
 > Plaquette commerciale · à destination des clients et intégrateurs
 > Le cœur est libre pour l'usage non commercial ; l'usage professionnel se
 > déverrouille **par module**, via une licence signée. Contact :
-> contact@checkupauto.fr
+> zekrititarek@gmail.com
 
 ---
 
@@ -185,4 +185,4 @@ ce vide** — et vous n'en payez que les modules dont vous avez besoin.
 
 *Le cœur de SciRust est libre pour l'usage non commercial. Pour une licence
 commerciale, un devis par modules ou un kit de certification :*
-**contact@checkupauto.fr**
+**zekrititarek@gmail.com**

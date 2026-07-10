@@ -32,7 +32,7 @@ never the raw id — and is part of the signed payload, so it cannot be edited o
 removed. See [`scirust-license/README.md`](scirust-license/README.md) for the
 per-machine flow.
 
-To obtain a commercial license, contact: contact@checkupauto.fr
+To obtain a commercial license, contact: zekrititarek@gmail.com
 
 ## 3. Copyright
 
