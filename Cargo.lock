@@ -2822,6 +2822,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-forecast"
+version = "0.1.0"
+
+[[package]]
+name = "scirust-frame"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-func-safety"
 version = "0.1.0"
 dependencies = [
@@ -2841,6 +2849,10 @@ dependencies = [
  "scirust-simd",
  "sha2",
 ]
+
+[[package]]
+name = "scirust-gp"
+version = "0.1.0"
 
 [[package]]
 name = "scirust-gpu"
@@ -2939,6 +2951,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "scirust-interp"
+version = "0.1.0"
 
 [[package]]
 name = "scirust-learning"
@@ -3377,6 +3393,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-sparse"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-spc"
 version = "0.1.0"
 dependencies = [
@@ -3395,6 +3415,10 @@ version = "0.1.0"
 dependencies = [
  "scirust-special",
 ]
+
+[[package]]
+name = "scirust-stiff"
+version = "0.1.0"
 
 [[package]]
 name = "scirust-symbolic"
@@ -3500,6 +3524,10 @@ dependencies = [
 
 [[package]]
 name = "scirust-transpiler"
+version = "0.1.0"
+
+[[package]]
+name = "scirust-units"
 version = "0.1.0"
 
 [[package]]

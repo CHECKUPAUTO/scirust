@@ -62,3 +62,6 @@ systemd/turboquant-*.service
 # les chiffres sont reportés dans paper/PAPER_PLAN.md et LIVESTATE.md,
 # le bundle brut reste sur la machine de mesure.
 bench-o1-jetson-*/
+
+# The fuzz harness is its own cargo workspace and builds into its own target dir.
+fuzz/target/

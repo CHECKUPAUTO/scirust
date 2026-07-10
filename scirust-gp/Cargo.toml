@@ -1,0 +1,6 @@
+[package]
+name = "scirust-gp"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Gaussian process regression: RBF / Matern-3/2 / Matern-5/2 kernels, exact Cholesky inference, predictive mean & variance, log marginal likelihood. Self-contained dense linear algebra, deterministic, oracle-tested. Pure Rust, no unsafe, no dependencies."

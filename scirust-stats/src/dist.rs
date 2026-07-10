@@ -628,6 +628,13 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: `sample` goes through the quantile (erfinv/ln), and
+    // Miri deliberately randomizes the last ULPs of transcendental float
+    // intrinsics per call, so lockstep bit-identity cannot hold under the
+    // interpreter. On real hardware the property holds and stays enforced by
+    // the native Build & Test jobs. (SplitMix64 itself is integer-only and
+    // stays Miri-checked via the rng tests.)
+    #[cfg_attr(miri, ignore)]
     fn sampling_is_deterministic_and_plausible() {
         let n = Normal::new(5.0, 2.0);
         let mut r1 = SplitMix64::new(123);

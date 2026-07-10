@@ -165,6 +165,71 @@ jobs:
         with:
           command: check
 
+  # Miri runs the pure-numeric crates' test suites under the interpreter to
+  # catch undefined behaviour (out-of-bounds, invalid alignment, use of
+  # uninitialised memory, strict-provenance violations). These crates are all
+  # `#![forbid(unsafe_code)]`, do no I/O, and use only in-memory data, so they
+  # execute quickly under Miri and any UB would be a genuine soundness bug —
+  # this is a real merge gate, not informational. Crates that legitimately use
+  # `unsafe`/SIMD/FFI are intentionally excluded here.
+  miri:
+    name: Miri (unsafe-free numeric crates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain + miri
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly
+          components: miri
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run Miri on pure-numeric crates
+        run: |
+          cargo miri test \
+            -p scirust-special -p scirust-stats \
+            -p scirust-interp -p scirust-sparse -p scirust-stiff \
+            -p scirust-gp -p scirust-units -p scirust-frame -p scirust-forecast
+
+  # Informational: build the cargo-fuzz targets for the untrusted-input parsers
+  # and smoke-run them for a bounded time. The `fuzz` crate is a separate
+  # nightly-only workspace (excluded from the main build). This does not gate
+  # merges — bounded fuzzing rarely finds new crashes — but it keeps the fuzz
+  # harness building and would surface a crash (e.g. a parser regression) in the
+  # job log. Long-running campaigns are run out-of-band.
+  fuzz:
+    name: Fuzz (untrusted parsers, smoke)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # cargo-fuzz builds third-party crates (libfuzzer-sys) and instruments the
+    # binary itself; do not impose the workspace-wide `-D warnings`.
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
+        with:
+          tool: cargo-fuzz
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: fuzz
+      # The --target is explicit because prebuilt cargo-fuzz binaries are
+      # musl-linked and default their build target to their own compile-time
+      # platform (x86_64-unknown-linux-musl), where the sanitizer runtime is
+      # unavailable ("sanitizer is incompatible with statically linked libc").
+      - name: Build fuzz targets
+        working-directory: fuzz
+        run: cargo fuzz build --target x86_64-unknown-linux-gnu
+      - name: Smoke-run QSR1 deserializer fuzzer
+        working-directory: fuzz
+        run: cargo fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
   gpu-wgpu:

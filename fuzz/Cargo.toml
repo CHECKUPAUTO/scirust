@@ -1,0 +1,35 @@
+# Fuzz harness for SciRust's untrusted-input parsers.
+#
+# This is a SEPARATE, self-contained cargo workspace (note the empty
+# `[workspace]` table below) and is also listed in the root Cargo.toml
+# `exclude` list, so it never participates in the main workspace build,
+# clippy, or cargo-deny run. It is built and exercised only by the dedicated
+# `fuzz` CI job (and locally via `cargo +nightly fuzz run <target>`).
+#
+# libfuzzer-sys / cargo-fuzz require a nightly toolchain; the main workspace
+# stays buildable on stable.
+[package]
+name = "scirust-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+scirust-runtime = { path = "../scirust-runtime" }
+
+# Keep this crate out of any parent workspace discovery.
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "qsr1_from_bytes"
+path = "fuzz_targets/qsr1_from_bytes.rs"
+test = false
+doc = false
+bench = false
