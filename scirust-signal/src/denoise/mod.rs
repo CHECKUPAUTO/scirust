@@ -15,7 +15,7 @@
 //!    | [`DenoiserFamily::Rank`] | order statistics (median, Hampel, α-trimmed mean) | impulsive / salt-and-pepper spikes |
 //!    | [`DenoiserFamily::Transform`] | Fourier / wavelet shrinkage (low-pass, notch, Wiener, wavelet threshold) | tonal interference, white & colored noise |
 //!    | [`DenoiserFamily::Variational`] | penalized least squares (Tikhonov, Total Variation) | edge-preserving smoothing, baseline drift |
-//!    | [`DenoiserFamily::Adaptive`] | model / data-driven (Kalman, LMS/RLS — future) | non-stationary noise |
+//!    | [`DenoiserFamily::Adaptive`] | model / data-driven (Kalman RTS smoother, LMS/RLS line enhancers) | non-stationary noise, drifting tones |
 //!
 //! 2. **How do we detect "any" noise on "any" signal?** By *characterizing* the
 //!    noise with a fixed feature set rather than trying to recognize it by name.
@@ -57,20 +57,24 @@
 //! assert!(sep.residual_whiteness >= 0.0 && sep.residual_whiteness <= 1.0);
 //! ```
 
+pub mod adaptive;
 pub mod detect;
 pub mod linear;
 pub mod rank;
 pub mod transform;
 pub mod variational;
 
+pub use adaptive::{
+    KalmanFit, kalman_smooth, kalman_smooth_auto, lms_line_enhancer, rls_line_enhancer,
+};
 pub use detect::{
     NoiseProfile, NoiseType, Separation, classify, estimate_noise_std, estimate_snr_db, separate,
 };
 pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_golay};
 pub use rank::{alpha_trimmed_mean, hampel_filter, impulse_mask, median_filter};
 pub use transform::{
-    ThresholdMode, fft_highpass, fft_lowpass, notch_filter, remove_mains_hum, wavelet_denoise,
-    wiener_white,
+    ThresholdMode, Wavelet, fft_highpass, fft_lowpass, notch_filter, remove_mains_hum,
+    spectral_subtraction, wavelet_denoise, wavelet_denoise_with, wiener_white,
 };
 pub use variational::{tikhonov_smooth, total_variation, total_variation_norm};
 
@@ -86,7 +90,8 @@ pub enum DenoiserFamily {
     Transform,
     /// Penalized-least-squares / total-variation optimization.
     Variational,
-    /// Model-based / adaptive (Kalman, LMS/RLS) — reserved for future methods.
+    /// Model-based / adaptive: Kalman RTS smoother (auto-tuned by innovation
+    /// whiteness), LMS/RLS adaptive line enhancers.
     Adaptive,
 }
 
@@ -180,6 +185,22 @@ denoiser!(
     DenoiserFamily::Variational,
     |s: &Tikhonov, x: &[f64]| tikhonov_smooth(x, s.lambda)
 );
+denoiser!(
+    KalmanAuto {},
+    "kalman_smooth_auto",
+    DenoiserFamily::Adaptive,
+    |_s: &KalmanAuto, x: &[f64]| kalman_smooth_auto(x).output
+);
+denoiser!(
+    AdaptiveLine {
+        taps: usize,
+        delay: usize,
+        mu: f64
+    },
+    "lms_line_enhancer",
+    DenoiserFamily::Adaptive,
+    |s: &AdaptiveLine, x: &[f64]| lms_line_enhancer(x, s.taps, s.delay, s.mu)
+);
 
 /// A reasonable default catalog spanning every family — a starting point that
 /// callers can extend with their own [`Denoiser`] implementations.
@@ -205,6 +226,7 @@ pub fn catalog() -> Vec<Box<dyn Denoiser>> {
             iters: 8,
         }),
         Box::new(Tikhonov { lambda: 10.0 }),
+        Box::new(KalmanAuto {}),
     ]
 }
 
@@ -409,5 +431,77 @@ pub(crate) mod testutil {
             .map(|(&c, &e)| (c - e) * (c - e))
             .sum();
         10.0 * (sig / err.max(1.0e-30)).log10()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testutil::Lcg;
+    use super::*;
+    use core::f64::consts::PI;
+
+    fn noisy_sine(n: usize) -> Vec<f64> {
+        let mut rng = Lcg::new(79);
+        (0..n)
+            .map(|i| (2.0 * PI * 4.0 * i as f64 / n as f64).sin() + 0.3 * rng.gauss())
+            .collect()
+    }
+
+    #[test]
+    fn catalog_spans_every_family_and_every_entry_runs() {
+        let obs = noisy_sine(256);
+        let cat = catalog();
+        let mut families = Vec::new();
+        for d in cat.iter()
+        {
+            let out = d.apply(&obs);
+            assert_eq!(out.len(), obs.len(), "{} changed the length", d.name());
+            assert!(
+                out.iter().all(|v| v.is_finite()),
+                "{} produced non-finite output",
+                d.name()
+            );
+            assert!(!d.name().is_empty());
+            if !families.contains(&d.family())
+            {
+                families.push(d.family());
+            }
+        }
+        for fam in [
+            DenoiserFamily::Linear,
+            DenoiserFamily::Rank,
+            DenoiserFamily::Transform,
+            DenoiserFamily::Variational,
+            DenoiserFamily::Adaptive,
+        ]
+        {
+            assert!(families.contains(&fam), "catalog misses family {fam:?}");
+        }
+    }
+
+    #[test]
+    fn denoiser_wrappers_match_their_functions() {
+        // The trait wrappers must plumb their parameters through in the right
+        // order — a taps/delay transposition would compile silently.
+        let obs = noisy_sine(512);
+        let wrapper = AdaptiveLine {
+            taps: 12,
+            delay: 2,
+            mu: 0.3,
+        };
+        assert_eq!(wrapper.apply(&obs), lms_line_enhancer(&obs, 12, 2, 0.3));
+        assert_eq!(wrapper.family(), DenoiserFamily::Adaptive);
+        let kalman = KalmanAuto {};
+        assert_eq!(kalman.apply(&obs), kalman_smooth_auto(&obs).output);
+        let sg = SavitzkyGolay {
+            poly_order: 2,
+            half_window: 5,
+        };
+        assert_eq!(sg.apply(&obs), savitzky_golay(&obs, 2, 5));
+        let hampel = Hampel {
+            half_window: 3,
+            n_sigma: 3.0,
+        };
+        assert_eq!(hampel.apply(&obs), hampel_filter(&obs, 3, 3.0));
     }
 }
