@@ -5,6 +5,43 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
+Les trois « suites possibles » restantes du volet 2 sont livrées :
+- **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur
+  très haute température, 1073,15 < T ≤ 2273,15 K, ≤ 50 MPa : échappement
+  de turbine à gaz, chaudières de récupération ultra-supercritiques).
+  Même structure Gibbs idéal + résiduel que la région 2 (coefficients
+  extraits du même paquet de référence `iapws`, vérifiés en Python pur).
+  Oracles : les **exemples numériques officiels de la publication IF97**
+  pour la région 5 (v, h, u, s, cp, cv, w — six valeurs à 1e-8) ; jointure
+  physique avec la région 2 vérifiée à la frontière 1073,15 K.
+- **`scirust-thermo::cycles::rankine_real`** — cycle de Rankine
+  **irréversible** : turbine et pompe à rendement isentropique réel
+  (`RankineCycleReal`, avec l'efficacité idéale jointe pour comparaison
+  directe). L'état de sortie réel de la turbine est localisé directement
+  depuis son enthalpie réelle (titre direct dans la cloche, ou bissection
+  déterministe sur h si encore surchauffée) — sans avoir besoin des
+  lourdes équations « backward » T(p,h) IF97 par sous-région. Vérifié :
+  η_t=η_p=1 reproduit exactement le cycle idéal ; à 85 %/85 % le
+  rendement réel chute sous l'idéal et — fait physique non trivial —
+  la vapeur d'échappement devient plus sèche (titre plus élevé) qu'à
+  l'idéal, car une détente moins efficace laisse plus d'enthalpie dans
+  la vapeur ; premier principe vérifié exact sur le cycle réel.
+- **`scirust-fluids::network::hardy_cross_darcy`** — couplage direct de
+  Hardy Cross à `pipe::friction_factor` : `PhysicalPipe` (diamètre,
+  longueur, rugosité réels) plutôt qu'une résistance précalculée ; à
+  chaque itération externe, le facteur de friction de Darcy est
+  recalculé au Reynolds courant (laminaire/Colebrook-White/mélange,
+  exactement comme dans `scirust-fluids::pipe`), substitution successive
+  jusqu'à convergence — la méthode standard des solveurs de réseaux réels
+  pour la dépendance (faible) de f à Re. Vérifié : conduite plus large
+  transporte plus de débit, continuité exacte préservée, et la perte de
+  charge Darcy-Weisbach recalculée **à partir des dimensions physiques**
+  ferme la boucle à 1e-6 près (validation physique de bout en bout, pas
+  seulement la cohérence interne d'une itération).
+- Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
+  clippy `-D warnings` propre, rustfmt appliqué.
+
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
   par Euler–Maclaurin à budget fixe (somme directe des 19 premiers termes,

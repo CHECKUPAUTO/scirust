@@ -211,6 +211,96 @@ pub fn rankine_ideal(
     })
 }
 
+/// Energy balance of a **real** (irreversible) Rankine cycle: same
+/// layout as [`RankineCycle`], plus the ideal-cycle efficiency for
+/// direct comparison.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RankineCycleReal {
+    /// Actual pump work input \[J/kg\].
+    pub pump_work: f64,
+    /// Heat added in the boiler \[J/kg\].
+    pub boiler_heat: f64,
+    /// Actual turbine work output \[J/kg\].
+    pub turbine_work: f64,
+    /// Heat rejected in the condenser \[J/kg\].
+    pub condenser_heat: f64,
+    /// Net work `w_t − w_p` \[J/kg\].
+    pub net_work: f64,
+    /// Thermal efficiency `w_net / q_in`.
+    pub efficiency: f64,
+    /// Steam quality at the turbine exit (1.0 if still superheated).
+    pub exit_quality: f64,
+    /// Efficiency of the corresponding ideal (isentropic) cycle, for
+    /// direct comparison.
+    pub ideal_efficiency: f64,
+}
+
+/// Real (irreversible) **Rankine** cycle: same layout as
+/// [`rankine_ideal`], but the turbine and pump fall short of their
+/// isentropic work by the given efficiencies.
+///
+/// The turbine actually delivers `η_t (h₃ − h₄ₛ)` rather than the full
+/// isentropic drop, so it leaves a higher-enthalpy (drier) exhaust; its
+/// exact state at `p_condenser` is located from that actual enthalpy —
+/// a direct quality formula inside the two-phase dome, or a
+/// deterministic bisection on `h` (monotone in T) if still superheated.
+/// The pump correspondingly consumes `w_p,ideal / η_p`.
+///
+/// * `turbine_efficiency`, `pump_efficiency` — isentropic efficiencies,
+///   each in `(0, 1]`
+///
+/// Other arguments are as [`rankine_ideal`].
+pub fn rankine_real(
+    p_boiler: f64,
+    p_condenser: f64,
+    t_turbine_inlet: f64,
+    turbine_efficiency: f64,
+    pump_efficiency: f64,
+) -> Result<RankineCycleReal, ThermoError> {
+    in_range(
+        "turbine_efficiency",
+        turbine_efficiency,
+        f64::MIN_POSITIVE,
+        1.0,
+    )?;
+    in_range("pump_efficiency", pump_efficiency, f64::MIN_POSITIVE, 1.0)?;
+
+    let ideal = rankine_ideal(p_boiler, p_condenser, t_turbine_inlet)?;
+
+    let t_cond = crate::steam::saturation_temperature(p_condenser)?;
+    let liq = crate::steam::saturated_liquid(t_cond)?;
+    let vap = crate::steam::saturated_vapor(t_cond)?;
+    let st3 = crate::steam::region2(t_turbine_inlet, p_boiler)?;
+
+    let pump_work = ideal.pump_work / pump_efficiency;
+    let h2 = liq.h + pump_work;
+
+    let turbine_work = turbine_efficiency * ideal.turbine_work;
+    let h4 = st3.h - turbine_work;
+    let exit_quality = if h4 <= vap.h
+    {
+        (h4 - liq.h) / (vap.h - liq.h)
+    }
+    else
+    {
+        1.0
+    };
+
+    let boiler_heat = st3.h - h2;
+    let condenser_heat = h4 - liq.h;
+    let net_work = turbine_work - pump_work;
+    Ok(RankineCycleReal {
+        pump_work,
+        boiler_heat,
+        turbine_work,
+        condenser_heat,
+        net_work,
+        efficiency: net_work / boiler_heat,
+        exit_quality,
+        ideal_efficiency: ideal.efficiency,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +416,57 @@ mod tests {
         assert!(rankine_ideal(3.0e6, 75.0e3, 400.0).is_err());
         // Condenser pressure outside region 4.
         assert!(rankine_ideal(3.0e6, 100.0, 623.15).is_err());
+    }
+
+    #[test]
+    fn rankine_real_at_unit_efficiency_matches_ideal() {
+        // η_t = η_p = 1 must reproduce the ideal cycle exactly.
+        let (pb, pc, t) = (3.0e6, 75.0e3, 623.15);
+        let ideal = rankine_ideal(pb, pc, t).unwrap();
+        let real = rankine_real(pb, pc, t, 1.0, 1.0).unwrap();
+        assert!((real.efficiency - ideal.efficiency).abs() < 1e-9);
+        assert!((real.exit_quality - ideal.exit_quality).abs() < 1e-9);
+        assert!((real.pump_work - ideal.pump_work).abs() < 1e-6);
+        assert!((real.turbine_work - ideal.turbine_work).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rankine_real_irreversibility_effects() {
+        // Typical isentropic efficiencies (85 %): real efficiency must
+        // fall below the ideal one, and the wetter-turbine physics
+        // reverses — a less-effective expansion leaves MORE enthalpy in
+        // the exhaust, hence a HIGHER (drier) exit quality.
+        let (pb, pc, t) = (3.0e6, 75.0e3, 623.15);
+        let ideal = rankine_ideal(pb, pc, t).unwrap();
+        let real = rankine_real(pb, pc, t, 0.85, 0.85).unwrap();
+        assert!(
+            real.efficiency < real.ideal_efficiency,
+            "real={}, ideal={}",
+            real.efficiency,
+            real.ideal_efficiency
+        );
+        assert!((real.ideal_efficiency - ideal.efficiency).abs() < 1e-9);
+        assert!(
+            real.exit_quality > ideal.exit_quality,
+            "real x4={}, ideal x4={}",
+            real.exit_quality,
+            ideal.exit_quality
+        );
+        // Degraded pump needs more work; degraded turbine yields less.
+        assert!(real.pump_work > ideal.pump_work);
+        assert!(real.turbine_work < ideal.turbine_work);
+        // First law still closes exactly for the real cycle.
+        assert!(
+            (real.boiler_heat - real.condenser_heat - real.net_work).abs() / real.net_work < 1e-12
+        );
+    }
+
+    #[test]
+    fn rankine_real_rejects_bad_efficiencies() {
+        let (pb, pc, t) = (3.0e6, 75.0e3, 623.15);
+        assert!(rankine_real(pb, pc, t, 0.0, 0.85).is_err());
+        assert!(rankine_real(pb, pc, t, 0.85, 0.0).is_err());
+        assert!(rankine_real(pb, pc, t, 1.1, 0.85).is_err());
+        assert!(rankine_real(pb, pc, t, 0.85, -0.5).is_err());
     }
 }
