@@ -11,11 +11,16 @@
 //! Conventions match SciPy: `cdf(k) = P(X ≤ k)`, `sf(k) = P(X > k)`, and
 //! `quantile(p)` is the smallest `k` with `cdf(k) ≥ p`. [`Geometric`] counts
 //! the number of trials up to and including the first success (support
-//! `k ≥ 1`, SciPy's `geom`), not the number of failures (R's `dgeom`).
+//! `k ≥ 1`, SciPy's `geom`), not the number of failures (R's `dgeom`);
+//! [`NegativeBinomial`] counts the failures before the `r`-th success
+//! (SciPy's `nbinom`). [`Skellam`] lives on all of ℤ, so it exposes its own
+//! `i64` methods instead of the non-negative-integer trait.
 
 use crate::comb::{ln_binomial, ln_factorial};
 use crate::rng::SplitMix64;
-use scirust_special::{regularized_gamma_p, regularized_gamma_q, regularized_incomplete_beta};
+use scirust_special::{
+    ln_beta, ln_gamma, regularized_gamma_p, regularized_gamma_q, regularized_incomplete_beta,
+};
 
 /// A univariate distribution on the non-negative integers.
 ///
@@ -356,6 +361,347 @@ impl DiscreteDistribution for Geometric {
     }
 }
 
+// ============================================================ //
+//  Negative binomial                                           //
+// ============================================================ //
+
+/// Negative binomial distribution: number of **failures** before the `r`-th
+/// success of independent Bernoulli(`p`) trials (SciPy's `nbinom` convention;
+/// R's `dnbinom` counts the same way). `r` may be real-valued (the
+/// Pólya / overdispersed-Poisson parametrization used in count regression).
+#[derive(Debug, Clone, Copy)]
+pub struct NegativeBinomial {
+    r: f64,
+    p: f64,
+}
+
+impl NegativeBinomial {
+    /// `r > 0` successes (possibly non-integer), per-trial success
+    /// probability `p ∈ (0, 1]`.
+    pub fn new(r: f64, p: f64) -> Self {
+        assert!(
+            r > 0.0 && r.is_finite(),
+            "NegativeBinomial: r must be finite and > 0"
+        );
+        assert!(
+            p > 0.0 && p <= 1.0,
+            "NegativeBinomial: p must be within (0, 1]"
+        );
+        Self { r, p }
+    }
+}
+
+impl DiscreteDistribution for NegativeBinomial {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        // ln C(k + r − 1, k) generalized to real r via ln Γ.
+        let kf = k as f64;
+        let ln_coeff = ln_gamma(kf + self.r) - ln_gamma(self.r) - ln_factorial(k);
+        // Guard k = 0 so p = 1 avoids 0·ln(0).
+        let t_fail = if k == 0 { 0.0 } else { kf * (-self.p).ln_1p() };
+        ln_coeff + self.r * self.p.ln() + t_fail
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        // P(X ≤ k) = I_p(r, k + 1).
+        regularized_incomplete_beta(self.r, k as f64 + 1.0, self.p)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        // P(X > k) = I_{1−p}(k + 1, r) — direct upper tail.
+        regularized_incomplete_beta(k as f64 + 1.0, self.r, 1.0 - self.p)
+    }
+    fn mean(&self) -> f64 {
+        self.r * (1.0 - self.p) / self.p
+    }
+    fn variance(&self) -> f64 {
+        self.r * (1.0 - self.p) / (self.p * self.p)
+    }
+}
+
+// ============================================================ //
+//  Beta-binomial                                               //
+// ============================================================ //
+
+/// Beta-binomial distribution: a Binomial(`n`, `p`) whose `p` is itself
+/// Beta(`a`, `b`)-distributed — the standard model for overdispersed
+/// proportions (defect rates varying batch to batch, per-site response
+/// rates…). `a = b = 1` reduces to the discrete uniform on `0..=n`.
+#[derive(Debug, Clone, Copy)]
+pub struct BetaBinomial {
+    n: u64,
+    a: f64,
+    b: f64,
+}
+
+impl BetaBinomial {
+    /// `n` trials, Beta shape parameters `a > 0`, `b > 0`.
+    pub fn new(n: u64, a: f64, b: f64) -> Self {
+        assert!(
+            a > 0.0 && b > 0.0 && a.is_finite() && b.is_finite(),
+            "BetaBinomial: shapes must be finite and > 0"
+        );
+        Self { n, a, b }
+    }
+}
+
+impl DiscreteDistribution for BetaBinomial {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k > self.n
+        {
+            return f64::NEG_INFINITY;
+        }
+        let kf = k as f64;
+        ln_binomial(self.n, k) + ln_beta(kf + self.a, (self.n - k) as f64 + self.b)
+            - ln_beta(self.a, self.b)
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k >= self.n
+        {
+            return 1.0;
+        }
+        let mut acc = 0.0;
+        for i in 0..=k
+        {
+            acc += self.pmf(i);
+        }
+        acc.min(1.0)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        if k >= self.n
+        {
+            return 0.0;
+        }
+        // Direct upper-tail sum over the finite support.
+        let mut acc = 0.0;
+        for i in (k + 1)..=self.n
+        {
+            acc += self.pmf(i);
+        }
+        acc.min(1.0)
+    }
+    fn mean(&self) -> f64 {
+        self.n as f64 * self.a / (self.a + self.b)
+    }
+    fn variance(&self) -> f64 {
+        let (n, a, b) = (self.n as f64, self.a, self.b);
+        let s = a + b;
+        n * a * b * (s + n) / (s * s * (s + 1.0))
+    }
+}
+
+// ============================================================ //
+//  Zipfian (finite)                                            //
+// ============================================================ //
+
+/// Finite Zipfian distribution on ranks `1..=n`: `pmf(k) ∝ k^(−s)`
+/// (SciPy's `zipfian`). The rank-frequency law of natural language, city
+/// sizes, and access patterns; `s = 0` is the discrete uniform on `1..=n`.
+///
+/// The infinite-support zeta distribution (SciPy's `zipf`) needs the Riemann
+/// ζ function and is deliberately not approximated here.
+#[derive(Debug, Clone, Copy)]
+pub struct Zipfian {
+    s: f64,
+    n: u64,
+    /// Generalized harmonic normalizer `H(n, s) = Σ_{j=1..n} j^(−s)`,
+    /// pre-summed smallest-terms-first in a fixed order (deterministic).
+    h: f64,
+}
+
+impl Zipfian {
+    /// Exponent `s ≥ 0` over ranks `1..=n`, `n ≥ 1`.
+    pub fn new(s: f64, n: u64) -> Self {
+        assert!(
+            s >= 0.0 && s.is_finite(),
+            "Zipfian: s must be finite and ≥ 0"
+        );
+        assert!(n >= 1, "Zipfian: n must be ≥ 1");
+        Self {
+            s,
+            n,
+            h: Self::harmonic(s, n),
+        }
+    }
+    /// `H(n, s) = Σ_{j=1..n} j^(−s)` summed descending (small terms first).
+    fn harmonic(s: f64, n: u64) -> f64 {
+        let mut acc = 0.0;
+        for j in (1..=n).rev()
+        {
+            acc += (j as f64).powf(-s);
+        }
+        acc
+    }
+    /// `Σ_{j=1..n} j^(power)` with the same deterministic order.
+    fn power_sum(&self, power: f64) -> f64 {
+        let mut acc = 0.0;
+        for j in (1..=self.n).rev()
+        {
+            acc += (j as f64).powf(power);
+        }
+        acc
+    }
+}
+
+impl DiscreteDistribution for Zipfian {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k == 0 || k > self.n
+        {
+            return f64::NEG_INFINITY;
+        }
+        -self.s * (k as f64).ln() - self.h.ln()
+    }
+    fn pmf(&self, k: u64) -> f64 {
+        if k == 0 || k > self.n
+        {
+            return 0.0;
+        }
+        (k as f64).powf(-self.s) / self.h
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k >= self.n
+        {
+            return 1.0;
+        }
+        let mut acc = 0.0;
+        for j in (1..=k.min(self.n)).rev()
+        {
+            acc += (j as f64).powf(-self.s);
+        }
+        (acc / self.h).min(1.0)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        if k >= self.n
+        {
+            return 0.0;
+        }
+        let mut acc = 0.0;
+        for j in ((k + 1)..=self.n).rev()
+        {
+            acc += (j as f64).powf(-self.s);
+        }
+        (acc / self.h).min(1.0)
+    }
+    fn mean(&self) -> f64 {
+        // Σ k·k^(−s) / H = H(n, s−1) / H(n, s).
+        self.power_sum(1.0 - self.s) / self.h
+    }
+    fn variance(&self) -> f64 {
+        let m = self.mean();
+        self.power_sum(2.0 - self.s) / self.h - m * m
+    }
+}
+
+// ============================================================ //
+//  Skellam (support ℤ — outside the u64 trait)                 //
+// ============================================================ //
+
+/// Skellam distribution: the difference `X₁ − X₂` of two independent Poisson
+/// counts with rates `μ₁` and `μ₂` (score differences, detector count
+/// differences, queue drift…).
+///
+/// Its support is **all of ℤ**, so it deliberately does not implement
+/// [`DiscreteDistribution`] (which lives on the non-negative integers);
+/// the same method names are provided over `i64`. The pmf is evaluated by
+/// the defining convolution `Σ_j pois₁(k + j)·pois₂(j)` with a fixed
+/// deterministic truncation rule (stop once terms fall below 1e-18 of the
+/// running peak past the summand's mode) rather than via Bessel `I_k`, so it
+/// stays on the audited `scirust-special` base; accuracy vs SciPy is ~1e-12.
+#[derive(Debug, Clone, Copy)]
+pub struct Skellam {
+    mu1: f64,
+    mu2: f64,
+}
+
+impl Skellam {
+    /// Rates `μ₁ > 0`, `μ₂ > 0` of the two Poisson components.
+    pub fn new(mu1: f64, mu2: f64) -> Self {
+        assert!(
+            mu1 > 0.0 && mu1.is_finite() && mu2 > 0.0 && mu2.is_finite(),
+            "Skellam: both rates must be finite and > 0"
+        );
+        Self { mu1, mu2 }
+    }
+
+    /// Convolution engine: `Σ_{j ≥ j0} w(j)` where `w` climbs to a single
+    /// peak then decays super-exponentially. Deterministic truncation.
+    fn convolve(&self, j0: u64, term: impl Fn(u64) -> f64) -> f64 {
+        let mut acc = 0.0;
+        let mut peak = 0.0_f64;
+        let mut j = j0;
+        loop
+        {
+            let t = term(j);
+            acc += t;
+            peak = peak.max(t);
+            // Past the peak and negligible: stop. The +8 floor makes the
+            // rule fixed for tiny rates too.
+            if (t < peak * 1e-18 && j > j0 + 8) || j > j0 + 100_000
+            {
+                break;
+            }
+            j += 1;
+        }
+        acc
+    }
+
+    /// Probability mass `P(X₁ − X₂ = k)`, `k ∈ ℤ`.
+    pub fn pmf(&self, k: i64) -> f64 {
+        let p1 = Poisson::new(self.mu1);
+        let p2 = Poisson::new(self.mu2);
+        // X₁ = k + j, X₂ = j, j ≥ max(0, −k).
+        let j0 = (-k).max(0) as u64;
+        self.convolve(j0, |j| {
+            (p1.ln_pmf((k + j as i64) as u64) + p2.ln_pmf(j)).exp()
+        })
+    }
+
+    /// Cumulative distribution `P(X₁ − X₂ ≤ k)`.
+    pub fn cdf(&self, k: i64) -> f64 {
+        let p1 = Poisson::new(self.mu1);
+        let p2 = Poisson::new(self.mu2);
+        // Condition on X₂ = j: P(X₁ ≤ k + j); zero until k + j ≥ 0.
+        let j0 = (-k).max(0) as u64;
+        self.convolve(j0, |j| p2.pmf(j) * p1.cdf((k + j as i64) as u64))
+            .min(1.0)
+    }
+
+    /// Survival function `P(X₁ − X₂ > k)`, summed directly (no `1 − cdf`).
+    pub fn sf(&self, k: i64) -> f64 {
+        let p1 = Poisson::new(self.mu1);
+        let p2 = Poisson::new(self.mu2);
+        // Condition on X₂ = j: P(X₁ > k + j), which is 1 until k + j ≥ 0.
+        let mut acc = 0.0;
+        // Terms with k + j < 0 contribute pois₂(j) whole.
+        if k < 0
+        {
+            for j in 0..((-k) as u64)
+            {
+                acc += p2.pmf(j);
+            }
+        }
+        let j0 = (-k).max(0) as u64;
+        acc + self.convolve(j0, |j| p2.pmf(j) * p1.sf((k + j as i64) as u64))
+    }
+
+    /// Mean `μ₁ − μ₂`.
+    pub fn mean(&self) -> f64 {
+        self.mu1 - self.mu2
+    }
+    /// Variance `μ₁ + μ₂`.
+    pub fn variance(&self) -> f64 {
+        self.mu1 + self.mu2
+    }
+    /// Standard deviation.
+    pub fn std_dev(&self) -> f64 {
+        self.variance().sqrt()
+    }
+    /// One deterministic draw as the difference of two inverse-CDF Poisson
+    /// draws consuming the rng in a fixed order (X₁ first, then X₂).
+    pub fn sample(&self, rng: &mut SplitMix64) -> i64 {
+        let x1 = Poisson::new(self.mu1).sample(rng) as i64;
+        let x2 = Poisson::new(self.mu2).sample(rng) as i64;
+        x1 - x2
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,5 +844,114 @@ mod tests {
         let sp: Vec<u64> = (0..20_000).map(|_| p.sample(&mut r)).collect();
         let mp = sp.iter().sum::<u64>() as f64 / sp.len() as f64;
         assert!((mp - 6.5).abs() < 0.1, "mean {mp}");
+    }
+
+    #[test]
+    fn negative_binomial_matches_scipy() {
+        // SciPy nbinom(5, 0.4): failures before the 5th success.
+        let nb = NegativeBinomial::new(5.0, 0.4);
+        assert!(close(nb.pmf(0), 0.010_239_999_999_999_996, 1e-12));
+        assert!(close(nb.pmf(4), 0.092_897_280_000_000_03, 1e-12));
+        assert!(close(nb.pmf(10), 0.061_979_281_588_224_036, 1e-12));
+        assert!(close(nb.cdf(7), 0.561_821_777_92, 1e-12));
+        assert!(close(nb.sf(7), 0.438_178_222_08, 1e-12));
+        assert_eq!(nb.quantile(0.5), 7);
+        assert_eq!(nb.quantile(0.95), 16);
+        assert!(close(nb.mean(), 7.5, 1e-14));
+        assert!(close(nb.variance(), 18.75, 1e-13));
+        // Real-valued r (Pólya).
+        let nb2 = NegativeBinomial::new(2.5, 0.3);
+        assert!(close(nb2.pmf(3), 0.110_960_031_985_585_6, 1e-12));
+        assert!(close(nb2.cdf(5), 0.556_183_734_708_268_1, 1e-12));
+        // r = 1 is Geometric shifted to failures: pmf(k) = p(1−p)^k.
+        let nb1 = NegativeBinomial::new(1.0, 0.25);
+        assert!(close(nb1.pmf(2), 0.25 * 0.75 * 0.75, 1e-14));
+        // p = 1: point mass at zero failures.
+        let sure = NegativeBinomial::new(3.0, 1.0);
+        assert!(close(sure.pmf(0), 1.0, 1e-15));
+        assert_eq!(sure.pmf(1), 0.0);
+    }
+
+    #[test]
+    fn beta_binomial_matches_scipy() {
+        // SciPy betabinom(10, 2, 3).
+        let bb = BetaBinomial::new(10, 2.0, 3.0);
+        assert!(close(bb.pmf(0), 0.065_934_065_934_065_95, 1e-12));
+        assert!(close(bb.pmf(4), 0.139_860_139_860_139_76, 1e-12));
+        assert!(close(bb.pmf(10), 0.010_989_010_989_010_992, 1e-12));
+        assert!(close(bb.cdf(4), 0.594_405_594_405_594_4, 1e-12));
+        assert!(close(bb.sf(4), 0.405_594_405_594_405_6, 1e-12));
+        assert_eq!(bb.quantile(0.5), 4);
+        assert!(close(bb.mean(), 4.0, 1e-14));
+        assert!(close(bb.variance(), 6.0, 1e-13));
+        // a = b = 1 is the discrete uniform on 0..=n.
+        let u = BetaBinomial::new(6, 1.0, 1.0);
+        assert!(close(u.pmf(3), 1.0 / 7.0, 1e-13));
+        // Total mass 1.
+        let total: f64 = (0..=10).map(|k| bb.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-13));
+    }
+
+    #[test]
+    fn zipfian_matches_scipy() {
+        // SciPy zipfian(1.5, 20), support 1..=20.
+        let z = Zipfian::new(1.5, 20);
+        assert!(close(z.pmf(1), 0.460_684_691_303_022_2, 1e-13));
+        assert!(close(z.pmf(2), 0.162_876_634_604_599_42, 1e-13));
+        assert!(close(z.pmf(5), 0.041_204_891_437_882_57, 1e-13));
+        assert!(close(z.pmf(20), 0.005_150_611_429_735_321, 1e-13));
+        assert_eq!(z.pmf(0), 0.0);
+        assert_eq!(z.pmf(21), 0.0);
+        assert!(close(z.cdf(5), 0.811_010_613_936_828_4, 1e-13));
+        assert!(close(z.sf(5), 0.188_989_386_063_171_64, 1e-13));
+        assert_eq!(z.quantile(0.5), 2);
+        assert!(close(z.mean(), 3.499_017_716_693_377, 1e-13));
+        assert!(close(z.variance(), 16.165_446_970_218_827, 1e-12));
+        // s = 0 is the discrete uniform on 1..=n.
+        let u = Zipfian::new(0.0, 10);
+        assert!(close(u.pmf(7), 0.1, 1e-14));
+        assert!(close(u.cdf(10), 1.0, 1e-15));
+    }
+
+    #[test]
+    fn skellam_matches_scipy() {
+        // SciPy skellam(3.2, 1.5).
+        let s = Skellam::new(3.2, 1.5);
+        assert!(close(s.pmf(-4), 0.004_693_621_474_905_621, 1e-11));
+        assert!(close(s.pmf(-1), 0.086_025_279_807_399_57, 1e-11));
+        assert!(close(s.pmf(0), 0.143_310_965_409_640_56, 1e-11));
+        assert!(close(s.pmf(2), 0.183_382_994_925_598_12, 1e-11));
+        assert!(close(s.pmf(6), 0.026_216_209_058_590_838, 1e-11));
+        assert!(close(s.cdf(0), 0.291_039_386_736_692_55, 1e-11));
+        assert!(close(s.cdf(3), 0.804_942_925_451_844, 1e-11));
+        assert!(close(s.sf(3), 0.195_057_074_548_156_02, 1e-11));
+        assert!(close(s.mean(), 1.7, 1e-14));
+        assert!(close(s.variance(), 4.7, 1e-14));
+        // cdf + sf = 1 across ℤ, both tails included.
+        for k in -8..=10_i64
+        {
+            assert!(close(s.cdf(k) + s.sf(k), 1.0, 1e-12), "k = {k}");
+        }
+        // Equal rates ⇒ symmetric about 0.
+        let sym = Skellam::new(2.0, 2.0);
+        assert!(close(sym.pmf(0), 0.207_001_921_223_986_64, 1e-11));
+        assert!(close(sym.pmf(1), sym.pmf(-1), 1e-13));
+        assert!(close(sym.pmf(1), 0.178_750_839_502_435_3, 1e-11));
+        // Total mass over a wide window is 1.
+        let total: f64 = (-40..=40_i64).map(|k| s.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-11));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn skellam_sampling_is_deterministic_and_plausible() {
+        let s = Skellam::new(3.2, 1.5);
+        let mut r1 = SplitMix64::new(99);
+        let mut r2 = SplitMix64::new(99);
+        let a: Vec<i64> = (0..20_000).map(|_| s.sample(&mut r1)).collect();
+        let b: Vec<i64> = (0..20_000).map(|_| s.sample(&mut r2)).collect();
+        assert_eq!(a, b);
+        let m = a.iter().sum::<i64>() as f64 / a.len() as f64;
+        assert!((m - 1.7).abs() < 0.06, "mean {m}");
     }
 }
