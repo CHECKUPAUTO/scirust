@@ -795,6 +795,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this accuracy test integrates with a tiny fixed
+    // step (tens of thousands of Newton+LU steps), which is minutes-slow under
+    // the interpreter and exercises no unsafe surface beyond what the fast
+    // Miri-checked tests already cover. Native Build & Test jobs enforce it.
+    #[cfg_attr(miri, ignore)]
     fn backward_euler_matches_exponential_with_small_step() {
         // With a small step, match e^{-50 t} to a documented tolerance.
         // Backward Euler for y' = -50 y has relative error ~ 1250·t·h, so at
@@ -811,6 +816,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this accuracy test integrates with a tiny fixed
+    // step (tens of thousands of Newton+LU steps), which is minutes-slow under
+    // the interpreter and exercises no unsafe surface beyond what the fast
+    // Miri-checked tests already cover. Native Build & Test jobs enforce it.
+    #[cfg_attr(miri, ignore)]
     fn backward_euler_two_d_linear_matches_matrix_exponential() {
         // A = [[-100, 1], [0, -1]], stiffness ratio 100.
         let f = |_t: f64, y: &[f64]| vec![-100.0 * y[0] + y[1], -y[1]];
@@ -870,6 +880,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this accuracy test integrates with a tiny fixed
+    // step (tens of thousands of Newton+LU steps), which is minutes-slow under
+    // the interpreter and exercises no unsafe surface beyond what the fast
+    // Miri-checked tests already cover. Native Build & Test jobs enforce it.
+    #[cfg_attr(miri, ignore)]
     fn rosenbrock_two_d_matches_tiny_step_backward_euler() {
         // Reference from a tiny-step backward Euler on the same system.
         let f = |_t: f64, y: &[f64]| vec![-100.0 * y[0] + y[1], -y[1]];
@@ -881,6 +896,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this accuracy test integrates with a tiny fixed
+    // step (tens of thousands of Newton+LU steps), which is minutes-slow under
+    // the interpreter and exercises no unsafe surface beyond what the fast
+    // Miri-checked tests already cover. Native Build & Test jobs enforce it.
+    #[cfg_attr(miri, ignore)]
     fn rosenbrock_nonlinear_van_der_pol_matches_reference() {
         // Van der Pol at moderate stiffness (mu = 5).
         let vdp = |_t: f64, y: &[f64]| {
