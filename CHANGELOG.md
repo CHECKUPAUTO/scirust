@@ -42,6 +42,54 @@ versions sémantiques à partir de la prochaine release taguée.
   comparés en rationnels exacts — pas de double arrondi). Résultats de la
   campagne : voir LIVESTATE volet 114.
 
+### Ajouté — famille Adaptive, ondelettes Db4, soustraction spectrale (`scirust-signal::denoise`, suite)
+- **Famille `Adaptive` livrée** (`denoise::adaptive`) — la cinquième famille de la
+  taxonomie n'est plus « réservée » :
+  - **`kalman_smooth`** : filtre de Kalman à niveau local (marche aléatoire +
+    bruit blanc) suivi du lisseur **Rauch-Tung-Striebel** — estimation
+    bidirectionnelle sans déphasage.
+  - **`kalman_smooth_auto`** : auto-réglage des variances par **règle de
+    parcimonie sur la blancheur des innovations** — un filtre bien spécifié
+    produit des innovations blanches, mais sur un signal non-marche-aléatoire la
+    blancheur croît indéfiniment avec `q` (le filtre finit par tout suivre) ;
+    on prend donc le plus petit `q` dont la blancheur reste à une tolérance du
+    maximum : le modèle le plus lisse que le diagnostic ne rejette pas. Vérifié :
+    ~17 dB de gain SNR sur sinusoïde bruitée là où l'argmax naïf n'en donnait
+    que ~1,4 ; suit un échelon de niveau sans le gommer.
+  - **`lms_line_enhancer` / `rls_line_enhancer`** : rehausseurs de ligne
+    adaptatifs (prédicteur sur le signal retardé — NLMS normalisé, RLS à oubli
+    exponentiel). Extraient une raie périodique du bruit large bande **sans
+    référence externe ni fréquence a priori**, et la suivent si elle dérive.
+    RLS vérifié convergent sur enregistrement court (~2·taps échantillons).
+- **Ondelettes Daubechies-4** (`Wavelet::Db4`) : la DWT est refactorisée en
+  banc de filtres orthonormal **périodisé générique** (`Wavelet::{Haar, Db4}`,
+  miroir en quadrature `g[j]=(−1)^j·h[K−1−j]`) ; `wavelet_denoise_with` expose le
+  choix de base, `wavelet_denoise` reste l'enveloppe Haar rétro-compatible.
+  Tests : orthonormalité des taps, **reconstruction parfaite** mono- et
+  multi-niveaux (< 1e-10) pour les deux bases, et Db4 > Haar en SNR sur signal
+  lisse (2 moments nuls ⇒ moins d'artefacts blocs).
+- **Soustraction spectrale** (`spectral_subtraction`) : soustraction en
+  **puissance** avec sur-soustraction et plancher spectral
+  (Berouti-Schwartz-Makhoul 1979, le raffinement de la méthode de Boll — pas
+  sa règle en magnitude) : gain par bin `√(max(floor², 1 − over·P_n/|X|²))`,
+  phase bruitée conservée — le front-end classique du rehaussement de parole.
+- **Garde-fou NLMS** : `lms_line_enhancer` refuse `mu ≥ 2` (limite de stabilité
+  en moyenne quadratique — au-delà la sortie divergeait vers ±∞) par
+  passe-plat, la convention du module pour les paramètres hors plage.
+- `catalog()` couvre désormais réellement les cinq familles (`KalmanAuto` ajouté) ;
+  wrappers `Denoiser` pour Kalman auto et ALE ; ré-exports crate-niveau.
+- **Revue adversariale multi-agents passée sur le diff** (4 dimensions ×
+  vérification contradictoire, mutation testing) ; les manques de tests
+  confirmés sont comblés par des tests *discriminants* : la passe arrière RTS
+  est vérifiée par l'absence de déphasage (pic de corrélation croisée au lag 0
+  — un mutant réduit au filtre causal échoue à lag 8), les paramètres
+  `over`/`floor` de la soustraction spectrale sont épinglés par une identité
+  exacte (`over` énorme ⇒ sortie ≡ `floor·x`), et chaque entrée du `catalog()`
+  est exécutée avec vérification du câblage des wrappers (une transposition
+  `taps`/`delay` compilerait silencieusement).
+- 77 tests unitaires + 1 doctest au total sur le crate ; `cargo fmt`/`clippy -D
+  warnings` propres ; toujours zéro dépendance hors `scirust-core`/serde.
+
 ### Ajouté — entraînement 100 % portable + tanh/sigmoid portables (volet 113)
 - **`Var::{exp_portable, ln_portable, matmul_portable}`** : primitives
   d'autodiff opt-in dont forward ET backward n'appellent aucune libm ni
