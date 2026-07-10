@@ -50,6 +50,10 @@ enum Op {
     /// Rotary position embedding over `(…, seq, d)` (position = axis −2); `f32`
     /// is the frequency base. Backward applies the inverse rotation.
     Rope(usize, f32),
+    /// RoPE **portable** : fréquences et rotations via la voie
+    /// `portable_f32` (exp/ln/sin/cos sans libm) — nœud bit-exact
+    /// inter-plates-formes, forward et backward.
+    RopePortable(usize, f32),
     Sum(usize),
     /// Row lookup (embedding): select rows of a `(vocab, dim)` table by the
     /// integer indices. Backward scatter-adds the upstream rows back.
@@ -251,6 +255,11 @@ impl NdTape {
                 {
                     // RoPE is an orthogonal rotation R(pos); dx = Rᵀ·g = R(−pos)·g.
                     accumulate(&mut grads[a], &rope_lastaxis(&g, base, true));
+                },
+                Op::RopePortable(a, base) =>
+                {
+                    // Même transposée, via les rotations portables.
+                    accumulate(&mut grads[a], &rope_portable_lastaxis(&g, base, true));
                 },
                 Op::Relu(a) =>
                 {
@@ -494,6 +503,16 @@ impl<'t> NdVar<'t> {
         let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
         let out = rope_lastaxis(&a, base, false);
         self.tape.push(Op::Rope(self.idx, base), out)
+    }
+
+    /// RoPE **portable** : fréquences `base^(−2p/d)` via exp/ln portables et
+    /// rotations via sin/cos portables (réduction de Payne–Hanek) — forward
+    /// ET backward bit-exacts inter-plates-formes, contrairement à
+    /// [`NdVar::rope`] (powf/sin_cos libm). Voie de référence, plus lente.
+    pub fn rope_portable(self, base: f32) -> NdVar<'t> {
+        let a = self.tape.nodes.borrow()[self.idx].value.to_contiguous();
+        let out = rope_portable_lastaxis(&a, base, false);
+        self.tape.push(Op::RopePortable(self.idx, base), out)
     }
 
     /// Permute the axes (e.g. `(seq, heads, d) → (heads, seq, d)` for attention).
@@ -948,6 +967,41 @@ fn rope_lastaxis(t: &TensorND, base: f32, inverse: bool) -> TensorND {
     TensorND::new(out, t.shape.clone())
 }
 
+/// Variante **portable** de [`rope_lastaxis`] : fréquences
+/// `base^(−2p/d) = exp((−2p/d)·ln base)` via `portable_f32::{exp_f32, ln_f32}`
+/// et rotations via `portable_f32::{sin_f32, cos_f32}` — aucune libm, donc
+/// bit-exact inter-plates-formes (mêmes rotations pour l'inverse/transposée
+/// du backward).
+fn rope_portable_lastaxis(t: &TensorND, base: f32, inverse: bool) -> TensorND {
+    use crate::portable_f32::{cos_f32, exp_f32, ln_f32, sin_f32};
+    let nd = t.ndim();
+    assert!(nd >= 2, "rope: need ndim >= 2 (…, seq, d)");
+    let d = t.shape[nd - 1];
+    let seq = t.shape[nd - 2];
+    assert!(d % 2 == 0, "rope: last axis must be even");
+    let m = t.data.len() / (seq * d).max(1);
+    let mut out = vec![0.0f32; t.data.len()];
+    let sign = if inverse { -1.0 } else { 1.0 };
+    let ln_base = ln_f32(base);
+    for outer in 0..m
+    {
+        for s in 0..seq
+        {
+            let row = (outer * seq + s) * d;
+            for p in 0..d / 2
+            {
+                let theta = exp_f32(ln_base * (-2.0 * p as f32 / d as f32));
+                let ang = sign * s as f32 * theta;
+                let (sin, cos) = (sin_f32(ang), cos_f32(ang));
+                let (a, b) = (t.data[row + 2 * p], t.data[row + 2 * p + 1]);
+                out[row + 2 * p] = a * cos - b * sin;
+                out[row + 2 * p + 1] = a * sin + b * cos;
+            }
+        }
+    }
+    TensorND::new(out, t.shape.clone())
+}
+
 /// Swap the last two axes (`(…,a,b) → (…,b,a)`); its own inverse.
 fn transpose_last2(t: &TensorND) -> TensorND {
     let nd = t.ndim();
@@ -1087,6 +1141,51 @@ fn bmm_backward(a: &TensorND, b: &TensorND, g: &TensorND) -> (TensorND, TensorND
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// RoPE portable ≈ RoPE libm (fréquences/rotations à quelques ulps),
+    /// gradient = rotation transposée exacte (roundtrip bit-cohérent), et
+    /// empreintes forward + gradient FIGÉES — contrat cross-platform.
+    #[test]
+    fn rope_portable_matches_and_is_fingerprinted() {
+        let (seq, d) = (7usize, 8usize);
+        let data: Vec<f32> = (0..seq * d)
+            .map(|i| ((i.wrapping_mul(2_654_435_761)) % 1024) as f32 / 512.0 - 1.0)
+            .collect();
+        let x = TensorND::new(data.clone(), vec![seq, d]);
+
+        // parité avec la voie libm
+        let libm = rope_lastaxis(&x, 10_000.0, false);
+        let portable = rope_portable_lastaxis(&x, 10_000.0, false);
+        for i in 0..seq * d
+        {
+            assert!(
+                (libm.data[i] - portable.data[i]).abs() < 1e-4,
+                "élément {i}: libm {} vs portable {}",
+                libm.data[i],
+                portable.data[i]
+            );
+        }
+
+        // gradient via la tape : loss = sum(rope_portable(x)) ; le backward
+        // applique la rotation inverse — vérifie le câblage de l'op.
+        let tape = NdTape::new();
+        let xv = tape.input(TensorND::new(data.clone(), vec![seq, d]));
+        let loss = xv.rope_portable(10_000.0).sum();
+        let grads = tape.backward(loss);
+        let gx = &grads[xv.idx()];
+        assert_eq!(gx.data.len(), seq * d);
+
+        // empreintes (forward puis gradient)
+        let mut fp = crate::portable_f32::fnv1a_init();
+        for &v in portable.data.iter().chain(gx.data.iter())
+        {
+            fp = crate::portable_f32::fnv1a_fold_bits(fp, v.to_bits());
+        }
+        assert_eq!(
+            fp, 0xfffe_ed24_261e_b5d6,
+            "empreinte rope portable : 0x{fp:016x}"
+        );
+    }
 
     /// Build `loss = sum( relu(X·W + b) * V )` and return the scalar loss.
     /// `b` is `(1, out)` and broadcasts over the batch — exercising add/mul

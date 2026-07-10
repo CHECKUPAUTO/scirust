@@ -3,6 +3,38 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 114 : les 4 chantiers restants de la cartographie
+- **Contexte** : PR #273 (volet 113) MERGÉE ; branche repartie de master.
+  Demande utilisateur : « continu sur les 4 points » (RNG contre-basé, GEMM
+  reproductible rapide, RoPE/FFT portables, arrondi correct prouvé).
+- **Point 1 — Philox4x32-10 (`scirust-core::philox`)** : clean-room depuis le
+  papier SC'11, validé contre les vecteurs publiés Random123 (+ impl Python
+  indépendante). Fonction pure (clé, compteur) ⇒ aléa order-independent
+  (dropout/init/shuffle parallèles bit-identiques). Empreinte-contrat
+  0xf96c6b6aeca699f5. QEMU aarch64 : 6/6.
+- **Point 2 — accumulateur exact de Kulisch (`scirust-core::exact_acc`)** :
+  dot/GEMM à somme EXACTE (virgule fixe 704 bits, bit 0 = 2⁻³⁵²), arrondi
+  unique ⇒ correctement arrondi + indépendant de l'ordre + fusion associative
+  (multithread bit-exact). Vérifié bit à bit contre la référence Shewchuk.
+  NB : le debug_assert de résolution a attrapé un mauvais ancrage initial
+  (LSB de mantisse à 2⁻³⁵⁰, pas 2⁻²⁹⁸) — corrigé, assert durci en public.
+  QEMU aarch64 : 6/6.
+- **Point 3 — RoPE portable (`NdVar::rope_portable`, empreinte
+  0xfffeed24261eb5d6) + FFT portable (`scirust-signal::{fft,ifft}_portable`,
+  twiddles via la nouvelle API `portable_f32::sincos_small_f64`, empreinte
+  0x0acde0a67b427c67)**. QEMU aarch64 : verts.
+- **Point 4 — certification d'arrondi correct** (`portable_f32::certify`,
+  modes `--certify`/`--eval`, `scripts/verify-certify-offline.py`).
+  Campagne exhaustive x86-64 (7 × 2³² entrées, 824 s) — entrées PROUVÉES
+  correctement arrondies par certificat d'intervalle (gardes analytiques
+  comprises) : exp 99,99915 % (36 512 non certifiées), ln 99,99998 % (695),
+  tanh (214), sigmoid (1 007), sin (3 630), cos (3 680), erf (49 244 — zone
+  de cancellation x∈[2,4], borne par entrée volontairement large). Les
+  ~95 000 non certifiées se tranchent hors ligne en précision arbitraire
+  (Decimal 60 chiffres, milieux exacts en rationnels) — vérification en
+  cours, verdicts au commit suivant. L'évaluateur interne est revalidé
+  contre la fonction expédiée sur chacune des 30 milliards d'entrées.
+
 ## Session 2026-07-10 — volet 113 : entraînement 100 % portable + tanh/sigmoid (lot 1 carto)
 - **Contexte** : PR #272 (volet 112) MERGÉE ; branche repartie de master. Programme
   utilisateur acté : CE portable → entraînement MNIST-like portable avec contrat

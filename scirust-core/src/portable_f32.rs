@@ -357,6 +357,34 @@ pub fn cos_f32(x: f32) -> f32 {
     }) as f32
 }
 
+/// π/2 tronqué à ~32 bits de mantisse : k·PIO2_HI est exact pour |k| ≤ 2²⁰.
+const PIO2_HI: f64 = f64::from_bits(core::f64::consts::FRAC_PI_2.to_bits() & 0xFFFF_FFFF_F000_0000);
+/// Reste π/2 − PIO2_HI (différence exacte en f64).
+const PIO2_LO: f64 = core::f64::consts::FRAC_PI_2 - PIO2_HI;
+
+/// (sin y, cos y) **en f64**, portable, pour |y| ≤ 100 : réduction de
+/// Cody & Waite (π/2 scindé hi/lo, k·PIO2_HI exact) + les polynômes de
+/// Taylor de la voie portable. Erreur **absolue** ≤ ~2⁻⁵² — exactement ce
+/// qu'il faut pour des twiddle factors de FFT (|T| = 1) ou des angles
+/// bornés (RoPE) ; pour l'argument f32 arbitraire, utiliser
+/// [`sin_f32`]/[`cos_f32`] (réduction de Payne–Hanek).
+pub fn sincos_small_f64(y: f64) -> (f64, f64) {
+    assert!(
+        y.is_finite() && y.abs() <= 100.0,
+        "sincos_small_f64: |y| ≤ 100 requis (reçu {y})"
+    );
+    let k = (y * core::f64::consts::FRAC_2_PI).round();
+    let r = (y - k * PIO2_HI) - k * PIO2_LO;
+    let (s, c) = (sin_poly(r), cos_poly(r));
+    match (k as i64).rem_euclid(4)
+    {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        _ => (-c, s),
+    }
+}
+
 /// `erf(x)` portable : bit-exact inter-plates-formes par construction,
 /// fidèlement arrondi. Série de Maclaurin en f64
 /// (erf(x) = 2/√π · Σ (−1)ⁿ x²ⁿ⁺¹/(n!(2n+1))) avec arrêt **relatif**
@@ -437,6 +465,277 @@ pub fn gelu_f32(x: f32) -> f32 {
     (0.5 * y * (1.0 + e)) as f32
 }
 
+/// Certification d'**arrondi correct** (premier pas concret vers la
+/// résolution du dilemme du fabricant de tables, cartographie volet 111).
+///
+/// Pour une entrée `x` du chemin analytique d'une fonction, on connaît la
+/// valeur interne f64 `y` et une borne d'erreur relative `b` (analyse de
+/// l'implémentation). Si l'intervalle `[y·(1−b), y·(1+b)]` — qui contient la
+/// valeur exacte — tombe strictement entre les deux frontières d'arrondi f32
+/// qui encadrent `y as f32`, alors le résultat publié est **prouvé
+/// correctement arrondi** pour cette entrée. Les entrées des chemins de garde
+/// (saturations, raccourcis petit-argument) sont correctes par analyse
+/// directe (« analytic »). Les entrées restantes (« uncertified ») ne sont
+/// pas fausses — leur statut se tranche hors ligne en précision arbitraire.
+///
+/// L'évaluateur interne est REVALIDÉ contre la fonction publiée sur chaque
+/// entrée (`assert`) : le certificat porte bien sur le code expédié.
+pub mod certify {
+    use super::*;
+
+    /// Résultat d'un balayage de certification.
+    #[derive(Debug, Clone, Default)]
+    pub struct Report {
+        /// Entrées correctes par analyse du chemin de garde.
+        pub analytic: u64,
+        /// Entrées prouvées correctement arrondies par le certificat.
+        pub certified: u64,
+        /// Entrées non certifiées (statut à trancher hors ligne).
+        pub uncertified: u64,
+        /// Bits de TOUTES les entrées non certifiées (pour la vérification
+        /// hors ligne en précision arbitraire).
+        pub samples: Vec<u32>,
+    }
+
+    /// (valeur interne f64, borne d'erreur relative) ou None = chemin de
+    /// garde correct par analyse.
+    type Eval = fn(f32) -> Option<(f64, f64)>;
+
+    fn eval_exp(x: f32) -> Option<(f64, f64)> {
+        if x.is_nan() || x >= 89.0 || x <= -105.0
+        {
+            return None;
+        }
+        Some((exp_f64_core(x as f64), 2f64.powi(-46)))
+    }
+
+    fn eval_ln(x: f32) -> Option<(f64, f64)> {
+        if x.is_nan() || x <= 0.0 || x == f32::INFINITY
+        {
+            return None;
+        }
+        Some((ln_f64_core(x as f64), 2f64.powi(-46)))
+    }
+
+    fn eval_tanh(x: f32) -> Option<(f64, f64)> {
+        let ax = x.abs();
+        if x.is_nan() || ax >= 10.0 || ax < 1e-4
+        {
+            return None;
+        }
+        let t = exp_f64_core(-2.0 * (ax as f64));
+        let r = (1.0 - t) / (1.0 + t);
+        Some((if x > 0.0 { r } else { -r }, 2f64.powi(-45)))
+    }
+
+    fn eval_sigmoid(x: f32) -> Option<(f64, f64)> {
+        if x.is_nan() || x >= 30.0 || x <= -120.0
+        {
+            return None;
+        }
+        let y = x as f64;
+        let v = if y >= 0.0
+        {
+            1.0 / (1.0 + exp_f64_core(-y))
+        }
+        else
+        {
+            let t = exp_f64_core(y);
+            t / (1.0 + t)
+        };
+        Some((v, 2f64.powi(-46)))
+    }
+
+    fn eval_sin(x: f32) -> Option<(f64, f64)> {
+        if !x.is_finite() || x.abs() < 1e-4
+        {
+            return None;
+        }
+        let ax = x.abs();
+        let v = if (ax as f64) <= core::f64::consts::FRAC_PI_4
+        {
+            sin_poly(x as f64)
+        }
+        else
+        {
+            let (q, r) = payne_hanek_reduce(x);
+            let s = match q
+            {
+                0 => sin_poly(r),
+                1 => cos_poly(r),
+                2 => -sin_poly(r),
+                _ => -cos_poly(r),
+            };
+            if x < 0.0 { -s } else { s }
+        };
+        Some((v, 2f64.powi(-44)))
+    }
+
+    fn eval_cos(x: f32) -> Option<(f64, f64)> {
+        if !x.is_finite() || x.abs() < 1e-4
+        {
+            return None;
+        }
+        let ax = x.abs();
+        let v = if (ax as f64) <= core::f64::consts::FRAC_PI_4
+        {
+            cos_poly(ax as f64)
+        }
+        else
+        {
+            let (q, r) = payne_hanek_reduce(x);
+            match q
+            {
+                0 => cos_poly(r),
+                1 => -sin_poly(r),
+                2 => -cos_poly(r),
+                _ => sin_poly(r),
+            }
+        };
+        Some((v, 2f64.powi(-44)))
+    }
+
+    fn eval_erf(x: f32) -> Option<(f64, f64)> {
+        let ax = x.abs();
+        if x.is_nan() || ax >= 4.0 || ax < 1e-4
+        {
+            return None;
+        }
+        // Rejoue la série en suivant le pic de cancellation pour une borne
+        // PAR ENTRÉE : erreur ≈ (max |terme| / |somme|) · itérations · 2⁻⁵³.
+        let y = x as f64;
+        let z = -y * y;
+        let mut term = y;
+        let mut sum = y;
+        let mut max_c = y.abs();
+        let mut n = 1.0f64;
+        let mut iters = 1.0f64;
+        while n < 80.0
+        {
+            term = term * z / n;
+            let contrib = term / (2.0 * n + 1.0);
+            sum += contrib;
+            max_c = max_c.max(contrib.abs());
+            if contrib.abs() < sum.abs() * 1e-18
+            {
+                break;
+            }
+            n += 1.0;
+            iters += 1.0;
+        }
+        let v = sum * core::f64::consts::FRAC_2_SQRT_PI;
+        let bound = (max_c / sum.abs()) * iters * 2f64.powi(-53) + 2f64.powi(-52);
+        Some((v, bound))
+    }
+
+    /// Une entrée certifiable : (nom, fonction publiée, évaluateur).
+    pub type Entry = (&'static str, fn(f32) -> f32, Eval);
+
+    /// Les fonctions certifiables.
+    pub const FUNCTIONS: [Entry; 7] = [
+        ("exp", exp_f32, eval_exp),
+        ("ln", ln_f32, eval_ln),
+        ("tanh", tanh_f32, eval_tanh),
+        ("sigmoid", sigmoid_f32, eval_sigmoid),
+        ("sin", sin_f32, eval_sin),
+        ("cos", cos_f32, eval_cos),
+        ("erf", erf_f32, eval_erf),
+    ];
+
+    /// f32 suivant/précédent en direction de ±∞ (hors NaN), via les bits.
+    fn next_up(x: f32) -> f32 {
+        let b = x.to_bits();
+        if x == f32::INFINITY
+        {
+            return x;
+        }
+        f32::from_bits(
+            if x >= 0.0
+            {
+                if b == 0x8000_0000 { 1 } else { b + 1 }
+            }
+            else
+            {
+                b - 1
+            },
+        )
+    }
+
+    fn next_down(x: f32) -> f32 {
+        -next_up(-x)
+    }
+
+    /// Balayage de certification de `f` par pas `step` sur tout l'espace des
+    /// bits f32.
+    pub fn sweep(public: fn(f32) -> f32, eval: Eval, step: u64) -> Report {
+        let mut rep = Report::default();
+        let mut i = 0u64;
+        while i <= u32::MAX as u64
+        {
+            let x = f32::from_bits(i as u32);
+            match eval(x)
+            {
+                None => rep.analytic += 1,
+                Some((y, b)) =>
+                {
+                    let r = y as f32;
+                    assert_eq!(
+                        r.to_bits(),
+                        public(x).to_bits(),
+                        "certify: évaluateur ≠ fonction publiée en {x}"
+                    );
+                    // frontières d'arrondi encadrant r (milieux exacts en f64)
+                    let lo_mid = (next_down(r) as f64 + r as f64) * 0.5;
+                    let hi_mid = (r as f64 + next_up(r) as f64) * 0.5;
+                    let eps = y.abs() * b;
+                    if y - eps > lo_mid && y + eps < hi_mid
+                    {
+                        rep.certified += 1;
+                    }
+                    else
+                    {
+                        rep.uncertified += 1;
+                        rep.samples.push(i as u32);
+                    }
+                },
+            }
+            i += step;
+        }
+        rep
+    }
+}
+
+/// Cœur f64 du logarithme portable (cf. [`ln_f32`]). Précondition : `y` fini,
+/// strictement positif.
+fn ln_f64_core(y: f64) -> f64 {
+    let bits = y.to_bits();
+    let mut e = (((bits >> 52) & 0x7ff) as i64) - 1023;
+    let mut m = f64::from_bits((bits & 0x000F_FFFF_FFFF_FFFF) | (1023u64 << 52));
+    if m > core::f64::consts::SQRT_2
+    {
+        m *= 0.5;
+        e += 1;
+    }
+    let s = (m - 1.0) / (m + 1.0);
+    let z = s * s;
+    let mut q = 1.0 / 25.0;
+    q = q * z + 1.0 / 23.0;
+    q = q * z + 1.0 / 21.0;
+    q = q * z + 1.0 / 19.0;
+    q = q * z + 1.0 / 17.0;
+    q = q * z + 1.0 / 15.0;
+    q = q * z + 1.0 / 13.0;
+    q = q * z + 1.0 / 11.0;
+    q = q * z + 1.0 / 9.0;
+    q = q * z + 1.0 / 7.0;
+    q = q * z + 1.0 / 5.0;
+    q = q * z + 1.0 / 3.0;
+    let two_s = s + s;
+    let ln_m = two_s * (z * q) + two_s;
+    let ef = e as f64;
+    ef * LN2_HI + (ln_m + ef * LN2_LO)
+}
+
 /// `ln(x)` portable : bit-exact inter-plates-formes par construction,
 /// fidèlement arrondi (cf. doc du module). `ln(NaN)` et `ln(x<0)` → NaN
 /// canonique, `ln(±0)` → `−∞`, `ln(+∞)` → `+∞` ; les entrées sous-normales
@@ -454,35 +753,8 @@ pub fn ln_f32(x: f32) -> f32 {
     {
         return f32::INFINITY;
     }
-    let y = x as f64; // promotion exacte (les sous-normaux f32 deviennent normaux)
-    let bits = y.to_bits();
-    let mut e = (((bits >> 52) & 0x7ff) as i64) - 1023;
-    let mut m = f64::from_bits((bits & 0x000F_FFFF_FFFF_FFFF) | (1023u64 << 52));
-    if m > core::f64::consts::SQRT_2
-    {
-        m *= 0.5;
-        e += 1;
-    }
-    // ln m = 2·atanh(s), s = (m−1)/(m+1) ∈ [−0,1716, 0,1716]
-    let s = (m - 1.0) / (m + 1.0);
-    let z = s * s;
-    // q = 1/3 + z/5 + … + z¹¹/25 (troncature < 2⁻⁶⁰)
-    let mut q = 1.0 / 25.0;
-    q = q * z + 1.0 / 23.0;
-    q = q * z + 1.0 / 21.0;
-    q = q * z + 1.0 / 19.0;
-    q = q * z + 1.0 / 17.0;
-    q = q * z + 1.0 / 15.0;
-    q = q * z + 1.0 / 13.0;
-    q = q * z + 1.0 / 11.0;
-    q = q * z + 1.0 / 9.0;
-    q = q * z + 1.0 / 7.0;
-    q = q * z + 1.0 / 5.0;
-    q = q * z + 1.0 / 3.0;
-    let two_s = s + s; // exact
-    let ln_m = two_s * (z * q) + two_s;
-    let ef = e as f64; // exact (|e| ≤ 1075)
-    (ef * LN2_HI + (ln_m + ef * LN2_LO)) as f32
+    // promotion exacte (les sous-normaux f32 deviennent des f64 normaux)
+    ln_f64_core(x as f64) as f32
 }
 
 /// Softmax portable d'une ligne : soustraction du max (stabilité), [`exp_f32`]
