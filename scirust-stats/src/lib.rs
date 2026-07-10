@@ -13,7 +13,9 @@
 //!   survival function, quantile, moments, and deterministic inverse-CDF sampling.
 //! - **Discrete distributions** ([`discrete`]): `Binomial`, `Poisson`,
 //!   `Hypergeometric`, `Geometric`, `NegativeBinomial`, `BetaBinomial`,
-//!   `Zipfian`, plus `Skellam` on ℤ — pmf/ln-pmf, cdf, direct survival
+//!   `Zipfian`, `Zeta` (via `riemann_zeta`), `PoissonBinomial`, plus
+//!   `Skellam` on ℤ and the vector-valued `Multinomial` /
+//!   `MultivariateHypergeometric` — pmf/ln-pmf, cdf, direct survival
 //!   function, SciPy-convention quantile, moments, deterministic sampling.
 //! - **Exact combinatorics** ([`comb`]): `factorial`, `binomial`, `permutations`,
 //!   `multichoose` in checked `u128` (`None` on overflow, never a wrong number),
@@ -66,8 +68,8 @@ pub mod lottery;
 pub mod rng;
 
 pub use discrete::{
-    BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, NegativeBinomial,
-    Poisson, Skellam, Zipfian,
+    BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
+    MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta, Zipfian,
 };
 pub use dist::{
     Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
@@ -86,8 +88,9 @@ pub mod prelude {
     };
     pub use crate::describe::{mean, median, quantile, std_dev, std_error, variance};
     pub use crate::discrete::{
-        BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, NegativeBinomial,
-        Poisson, Skellam, Zipfian,
+        BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
+        MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta,
+        Zipfian,
     };
     pub use crate::dist::{
         Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,

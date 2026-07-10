@@ -120,13 +120,28 @@
   univariées ; statrs 9 ; rand_distr échantillonnage seul ; R d/p/q/r ;
   3 paramétrisations hypergéométriques incompatibles dans l'écosystème —
   convention statrs (`population/successes/draws`) retenue et documentée.
-- **Suite possible** : Poisson-binomiale, multivariées discrètes
-  (multinomiale, hypergéométrique multivariée), `logcdf`/`isf`, pmf de
-  Loader (saddle-point) pour binomiale à très grand n, zêta infinie (ζ de
-  Riemann dans `scirust-special` d'abord) — non entamé.
+- **3e passe (« continu », après merge de la 2e en PR #283)** :
+  `riemann_zeta`/`riemann_zeta_tail` dans `scirust-special`
+  (Euler–Maclaurin budget fixe, ~1e-15, oracles scipy + π²/6, pôle
+  1/(s−1) + γ ; la queue exposée = survie zêta O(1) sans annulation), puis
+  5 lois : `Zeta` (zipf infini, quantile OK même à moyenne divergente),
+  `PoissonBinomial` (convolution O(n²) exacte précalculée, cas homogène
+  = binomiale testé), `Multinomial` + `MultivariateHypergeometric`
+  (vectorielles hors trait, tirage séquentiel conditionnel déterministe,
+  dégénérescence 2 catégories = univarié testée). 45 tests + doctest,
+  clippy 0. Dépendants de scirust-special (spc, tolerance) recompilés OK.
+- **Suite possible** : `logcdf`/`isf`, pmf de Loader (saddle-point) pour
+  binomiale à très grand n, Dirichlet-multinomiale — non entamé.
 - **NB identité** : décision volet 110 réaffirmée par l'utilisateur —
   l'acteur est TAREK ZEKRITI (identité git locale configurée dans la
   session ; « CHECKUPAUTO » ne doit plus apparaître comme acteur).
+- **NB CI (2026-07-10 ~19h-20h UTC)** : tous les runs Actions du dépôt
+  échouent en masse depuis ~17h29 UTC — aucun runner assigné, 0 étape,
+  logs HTTP 404, `runner_id: 0` (motif « starvation »/limite de dépense
+  GitHub Actions, dépôt privé). Vérifié : identique sur des commits
+  antérieurs au volet probabilités ⇒ panne d'infra, pas le code. Les PR
+  #280/#283 ont été mergées sans signal CI réel ; relancer la CI sur
+  master quand les runners reviennent.
 
 ## Session 2026-07-10 — mécanique des fluides & thermodynamique
 - **Contexte** : demande utilisateur — « scirust n'offre pas de solutions aux

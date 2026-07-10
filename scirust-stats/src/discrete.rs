@@ -20,6 +20,7 @@ use crate::comb::{ln_binomial, ln_factorial};
 use crate::rng::SplitMix64;
 use scirust_special::{
     ln_beta, ln_gamma, regularized_gamma_p, regularized_gamma_q, regularized_incomplete_beta,
+    riemann_zeta, riemann_zeta_tail,
 };
 
 /// A univariate distribution on the non-negative integers.
@@ -702,6 +703,416 @@ impl Skellam {
     }
 }
 
+// ============================================================ //
+//  Zeta (infinite Zipf)                                        //
+// ============================================================ //
+
+/// Zeta distribution on `k ≥ 1`: `pmf(k) = k^(−s) / ζ(s)`, `s > 1` (SciPy's
+/// `zipf`). The infinite-support limit of [`Zipfian`], now expressible since
+/// `scirust-special` provides `riemann_zeta`.
+///
+/// The far tail is handled without `ζ(s) − partial-sum` cancellation via the
+/// Euler–Maclaurin tail (`riemann_zeta_tail`), so `sf`/`cdf` are O(1) for
+/// `k ≥ 19` — which keeps the default bracket-and-bisect `quantile` usable
+/// even in the heavy-tail regime `s ≤ 2` where the mean is infinite.
+#[derive(Debug, Clone, Copy)]
+pub struct Zeta {
+    s: f64,
+    zeta_s: f64,
+}
+
+impl Zeta {
+    /// Exponent `s > 1` (the pmf is not normalizable at `s ≤ 1`).
+    pub fn new(s: f64) -> Self {
+        assert!(s > 1.0 && s.is_finite(), "Zeta: s must be finite and > 1");
+        Self {
+            s,
+            zeta_s: riemann_zeta(s),
+        }
+    }
+}
+
+impl DiscreteDistribution for Zeta {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return f64::NEG_INFINITY;
+        }
+        -self.s * (k as f64).ln() - self.zeta_s.ln()
+    }
+    fn pmf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return 0.0;
+        }
+        (k as f64).powf(-self.s) / self.zeta_s
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return 0.0;
+        }
+        if k < 20
+        {
+            // Short head: direct sum, no cancellation.
+            let mut acc = 0.0;
+            for j in (1..=k).rev()
+            {
+                acc += (j as f64).powf(-self.s);
+            }
+            return (acc / self.zeta_s).min(1.0);
+        }
+        // cdf ≈ 1 here; the tiny complement carries the accuracy.
+        1.0 - self.sf(k)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        let t = if k < 19
+        {
+            // Tail = the few explicit terms up to 19 plus the E–M remainder.
+            let mut acc = riemann_zeta_tail(self.s, 20.0);
+            for j in ((k + 1)..20).rev()
+            {
+                acc += (j as f64).powf(-self.s);
+            }
+            acc
+        }
+        else
+        {
+            riemann_zeta_tail(self.s, k as f64 + 1.0)
+        };
+        (t / self.zeta_s).min(1.0)
+    }
+    fn mean(&self) -> f64 {
+        if self.s > 2.0
+        {
+            riemann_zeta(self.s - 1.0) / self.zeta_s
+        }
+        else
+        {
+            f64::INFINITY
+        }
+    }
+    fn variance(&self) -> f64 {
+        if self.s > 3.0
+        {
+            let m = self.mean();
+            riemann_zeta(self.s - 2.0) / self.zeta_s - m * m
+        }
+        else
+        {
+            f64::INFINITY
+        }
+    }
+}
+
+// ============================================================ //
+//  Poisson-binomial                                            //
+// ============================================================ //
+
+/// Poisson-binomial distribution: number of successes among `n` independent
+/// Bernoulli trials with **heterogeneous** probabilities `p₁ … pₙ` — the
+/// exact law of "how many of these n distinct risky events occur" (system
+/// reliability, portfolio defaults, per-lot defect counts).
+///
+/// The full mass vector is computed once at construction by the standard
+/// O(n²) convolution recurrence — exact, deterministic, no FFT round-off —
+/// so `pmf`/`cdf`/`sf` are table lookups afterwards.
+#[derive(Debug, Clone)]
+pub struct PoissonBinomial {
+    mass: Vec<f64>,
+    mean: f64,
+    var: f64,
+}
+
+impl PoissonBinomial {
+    /// Success probabilities, each in `[0, 1]`; at least one trial.
+    pub fn new(probs: &[f64]) -> Self {
+        assert!(
+            !probs.is_empty(),
+            "PoissonBinomial: need at least one trial"
+        );
+        assert!(
+            probs.iter().all(|&p| (0.0..=1.0).contains(&p)),
+            "PoissonBinomial: every probability must be within [0, 1]"
+        );
+        let mut mass = vec![0.0; probs.len() + 1];
+        mass[0] = 1.0;
+        for (i, &p) in probs.iter().enumerate()
+        {
+            for k in (1..=i + 1).rev()
+            {
+                mass[k] = mass[k] * (1.0 - p) + mass[k - 1] * p;
+            }
+            mass[0] *= 1.0 - p;
+        }
+        let mean = probs.iter().sum();
+        let var = probs.iter().map(|&p| p * (1.0 - p)).sum();
+        Self { mass, mean, var }
+    }
+    /// Number of trials `n`.
+    pub fn trials(&self) -> u64 {
+        (self.mass.len() - 1) as u64
+    }
+}
+
+impl DiscreteDistribution for PoissonBinomial {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        self.pmf(k).ln()
+    }
+    fn pmf(&self, k: u64) -> f64 {
+        usize::try_from(k)
+            .ok()
+            .and_then(|i| self.mass.get(i))
+            .copied()
+            .unwrap_or(0.0)
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k >= self.trials()
+        {
+            return 1.0;
+        }
+        let mut acc = 0.0;
+        for i in 0..=k as usize
+        {
+            acc += self.mass[i];
+        }
+        acc.min(1.0)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        if k >= self.trials()
+        {
+            return 0.0;
+        }
+        let mut acc = 0.0;
+        for i in (k as usize + 1)..self.mass.len()
+        {
+            acc += self.mass[i];
+        }
+        acc.min(1.0)
+    }
+    fn mean(&self) -> f64 {
+        self.mean
+    }
+    fn variance(&self) -> f64 {
+        self.var
+    }
+}
+
+// ============================================================ //
+//  Multinomial (vector-valued — outside the univariate trait)  //
+// ============================================================ //
+
+/// Multinomial distribution: `n` independent trials, each landing in one of
+/// `m ≥ 2` categories with probabilities `p₁ … pₘ`; the outcome is the vector
+/// of category counts. Vector-valued, so it exposes its own slice-based API
+/// instead of the univariate [`DiscreteDistribution`] trait.
+#[derive(Debug, Clone)]
+pub struct Multinomial {
+    n: u64,
+    probs: Vec<f64>,
+}
+
+impl Multinomial {
+    /// `n` trials over `probs.len() ≥ 2` categories; probabilities must be
+    /// non-negative and sum to 1 within 1e-9 (they are renormalized exactly).
+    pub fn new(n: u64, probs: &[f64]) -> Self {
+        assert!(
+            probs.len() >= 2,
+            "Multinomial: need at least two categories"
+        );
+        assert!(
+            probs.iter().all(|&p| p >= 0.0 && p.is_finite()),
+            "Multinomial: probabilities must be finite and ≥ 0"
+        );
+        let total: f64 = probs.iter().sum();
+        assert!(
+            (total - 1.0).abs() <= 1e-9,
+            "Multinomial: probabilities must sum to 1"
+        );
+        Self {
+            n,
+            probs: probs.iter().map(|&p| p / total).collect(),
+        }
+    }
+
+    /// Natural log of `P(counts)`; `−∞` unless `Σ counts = n` (and every
+    /// zero-probability category has a zero count). Panics if `counts` has
+    /// the wrong length.
+    pub fn ln_pmf(&self, counts: &[u64]) -> f64 {
+        assert_eq!(
+            counts.len(),
+            self.probs.len(),
+            "Multinomial: counts length must match the number of categories"
+        );
+        if counts.iter().sum::<u64>() != self.n
+        {
+            return f64::NEG_INFINITY;
+        }
+        let mut acc = ln_factorial(self.n);
+        for (&k, &p) in counts.iter().zip(&self.probs)
+        {
+            acc -= ln_factorial(k);
+            if k > 0
+            {
+                if p == 0.0
+                {
+                    return f64::NEG_INFINITY;
+                }
+                acc += k as f64 * p.ln();
+            }
+        }
+        acc
+    }
+    /// Probability mass `P(counts)`.
+    pub fn pmf(&self, counts: &[u64]) -> f64 {
+        self.ln_pmf(counts).exp()
+    }
+    /// Mean vector `n·pᵢ`.
+    pub fn mean(&self) -> Vec<f64> {
+        self.probs.iter().map(|&p| self.n as f64 * p).collect()
+    }
+    /// Covariance matrix: `n·pᵢ(1−pᵢ)` on the diagonal, `−n·pᵢpⱼ` off it.
+    pub fn covariance(&self) -> Vec<Vec<f64>> {
+        let n = self.n as f64;
+        self.probs
+            .iter()
+            .enumerate()
+            .map(|(i, &pi)| {
+                self.probs
+                    .iter()
+                    .enumerate()
+                    .map(|(j, &pj)| {
+                        if i == j
+                        {
+                            n * pi * (1.0 - pi)
+                        }
+                        else
+                        {
+                            -n * pi * pj
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+    /// One deterministic draw: sequential conditional binomials, one uniform
+    /// consumed per category except the last (fixed order ⇒ reproducible).
+    pub fn sample(&self, rng: &mut SplitMix64) -> Vec<u64> {
+        let m = self.probs.len();
+        let mut out = Vec::with_capacity(m);
+        let mut remaining = self.n;
+        let mut rest = 1.0_f64;
+        for (i, &p) in self.probs.iter().enumerate()
+        {
+            if i + 1 == m
+            {
+                out.push(remaining);
+                break;
+            }
+            let cond = if rest > 0.0
+            {
+                (p / rest).clamp(0.0, 1.0)
+            }
+            else
+            {
+                1.0
+            };
+            let k = Binomial::new(remaining, cond).sample(rng);
+            out.push(k);
+            remaining -= k;
+            rest -= p;
+        }
+        out
+    }
+}
+
+// ============================================================ //
+//  Multivariate hypergeometric (vector-valued)                 //
+// ============================================================ //
+
+/// Multivariate hypergeometric distribution: draw `draws` items without
+/// replacement from an urn holding `colors[i]` items of each of `m ≥ 2`
+/// colors; the outcome is the vector of per-color counts (stratified lot
+/// sampling, multi-tier lottery pools, capture panels).
+#[derive(Debug, Clone)]
+pub struct MultivariateHypergeometric {
+    colors: Vec<u64>,
+    total: u64,
+    draws: u64,
+}
+
+impl MultivariateHypergeometric {
+    /// Urn composition (`≥ 2` colors) and number of draws `≤ Σ colors`.
+    pub fn new(colors: &[u64], draws: u64) -> Self {
+        assert!(
+            colors.len() >= 2,
+            "MultivariateHypergeometric: need at least two colors"
+        );
+        let total: u64 = colors.iter().sum();
+        assert!(
+            draws <= total,
+            "MultivariateHypergeometric: draws must not exceed the urn size"
+        );
+        Self {
+            colors: colors.to_vec(),
+            total,
+            draws,
+        }
+    }
+
+    /// Natural log of `P(counts)`; `−∞` unless `Σ counts = draws` with every
+    /// `counts[i] ≤ colors[i]`. Panics if `counts` has the wrong length.
+    pub fn ln_pmf(&self, counts: &[u64]) -> f64 {
+        assert_eq!(
+            counts.len(),
+            self.colors.len(),
+            "MultivariateHypergeometric: counts length must match the number of colors"
+        );
+        if counts.iter().sum::<u64>() != self.draws
+        {
+            return f64::NEG_INFINITY;
+        }
+        let mut acc = -ln_binomial(self.total, self.draws);
+        for (&k, &c) in counts.iter().zip(&self.colors)
+        {
+            acc += ln_binomial(c, k); // −∞ when k > c
+        }
+        acc
+    }
+    /// Probability mass `P(counts)`.
+    pub fn pmf(&self, counts: &[u64]) -> f64 {
+        self.ln_pmf(counts).exp()
+    }
+    /// Mean vector `draws·colorsᵢ/total`.
+    pub fn mean(&self) -> Vec<f64> {
+        self.colors
+            .iter()
+            .map(|&c| self.draws as f64 * c as f64 / self.total as f64)
+            .collect()
+    }
+    /// One deterministic draw: sequential conditional univariate
+    /// hypergeometrics over the remaining urn (fixed order ⇒ reproducible).
+    pub fn sample(&self, rng: &mut SplitMix64) -> Vec<u64> {
+        let m = self.colors.len();
+        let mut out = Vec::with_capacity(m);
+        let mut pop = self.total;
+        let mut remaining = self.draws;
+        for (i, &c) in self.colors.iter().enumerate()
+        {
+            if i + 1 == m
+            {
+                out.push(remaining);
+                break;
+            }
+            let k = Hypergeometric::new(pop.max(1), c, remaining).sample(rng);
+            out.push(k);
+            pop -= c;
+            remaining -= k;
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -953,5 +1364,153 @@ mod tests {
         assert_eq!(a, b);
         let m = a.iter().sum::<i64>() as f64 / a.len() as f64;
         assert!((m - 1.7).abs() < 0.06, "mean {m}");
+    }
+
+    #[test]
+    fn zeta_matches_scipy() {
+        // SciPy zipf(2.5) — infinite-support zeta law.
+        let z = Zeta::new(2.5);
+        assert_eq!(z.pmf(0), 0.0);
+        assert!(close(z.pmf(1), 0.745_441_296_288_777, 1e-13));
+        assert!(close(z.pmf(2), 0.131_776_648_895_571_14, 1e-13));
+        assert!(close(z.pmf(3), 0.047_820_081_453_043_214, 1e-13));
+        assert!(close(z.pmf(10), 0.002_357_292_358_220_957_2, 1e-13));
+        assert!(close(z.cdf(5), 0.961_667_926_440_313_7, 1e-13));
+        assert!(close(z.sf(5), 0.038_332_073_559_686_264, 1e-13));
+        assert_eq!(z.quantile(0.9), 3);
+        assert_eq!(z.quantile(0.99), 14);
+        // mean = ζ(1.5)/ζ(2.5); variance diverges at s ≤ 3.
+        assert!(close(z.mean(), 1.947_372_466_316_956, 1e-13));
+        assert!(z.variance().is_infinite());
+        // s = 4: both moments finite.
+        let z4 = Zeta::new(4.0);
+        assert!(close(z4.pmf(2), 0.057_746_150_182_599_39, 1e-13));
+        assert!(close(z4.mean(), 1.110_626_535_326_148, 1e-13));
+        assert!(close(z4.variance(), 0.286_326_453_664_503_4, 1e-12));
+        // cdf + sf = 1 across the head/tail split at k = 19/20.
+        for k in [1u64, 5, 18, 19, 20, 50, 1000]
+        {
+            assert!(close(z.cdf(k) + z.sf(k), 1.0, 1e-12), "k = {k}");
+        }
+        // Far-tail sf stays accurate and O(1): sf(k) ~ k^(1−s)/((s−1)ζ(s)).
+        let k = 1_000_000_u64;
+        let approx = (k as f64).powf(-1.5) / (1.5 * 1.341_487_257_250_917_3);
+        assert!(close(z.sf(k), approx, 1e-3));
+    }
+
+    #[test]
+    fn poisson_binomial_matches_scipy() {
+        // SciPy poisson_binom([0.1, 0.4, 0.75, 0.5, 0.9]).
+        let pb = PoissonBinomial::new(&[0.1, 0.4, 0.75, 0.5, 0.9]);
+        assert!(close(pb.pmf(0), 0.006_749_999_999_999_999, 1e-13));
+        assert!(close(pb.pmf(1), 0.093, 1e-13));
+        assert!(close(pb.pmf(2), 0.332, 1e-13));
+        assert!(close(pb.pmf(3), 0.393_5, 1e-13));
+        assert!(close(pb.pmf(4), 0.161_25, 1e-13));
+        assert!(close(pb.pmf(5), 0.013_5, 1e-13));
+        assert_eq!(pb.pmf(6), 0.0);
+        assert!(close(pb.cdf(2), 0.431_75, 1e-13));
+        assert!(close(pb.sf(2), 0.568_25, 1e-13));
+        assert_eq!(pb.quantile(0.5), 3);
+        assert!(close(pb.mean(), 2.65, 1e-14));
+        assert!(close(pb.variance(), 0.857_5, 1e-14));
+        assert_eq!(pb.trials(), 5);
+        // Homogeneous probabilities collapse to the Binomial.
+        let pb_h = PoissonBinomial::new(&[0.3; 20]);
+        let b = Binomial::new(20, 0.3);
+        for k in [0u64, 3, 6, 10, 20]
+        {
+            assert!(close(pb_h.pmf(k), b.pmf(k), 1e-12), "k = {k}");
+        }
+        // Total mass 1.
+        let total: f64 = (0..=5).map(|k| pb.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-14));
+    }
+
+    #[test]
+    fn multinomial_matches_scipy() {
+        // SciPy multinomial(8, [0.2, 0.3, 0.5]).
+        let m = Multinomial::new(8, &[0.2, 0.3, 0.5]);
+        assert!(close(m.pmf(&[2, 3, 3]), 0.075_599_999_999_999_96, 1e-12));
+        assert!(close(m.pmf(&[1, 2, 5]), 0.094_500_000_000_000_2, 1e-12));
+        assert!(close(m.pmf(&[8, 0, 0]), 2.560_000_000_000_001_7e-6, 1e-12));
+        assert!(close(m.ln_pmf(&[2, 3, 3]), -2.582_298_995_796_650_2, 1e-12));
+        // Wrong total ⇒ impossible outcome.
+        assert_eq!(m.pmf(&[2, 3, 4]), 0.0);
+        // Moments.
+        let mean = m.mean();
+        assert!(close(mean[0], 1.6, 1e-14) && close(mean[1], 2.4, 1e-14));
+        let cov = m.covariance();
+        assert!(close(cov[0][0], 1.28, 1e-14));
+        assert!(close(cov[0][1], -0.48, 1e-14));
+        assert!(close(cov[2][2], 2.0, 1e-14));
+        // Zero-probability category: only zero counts allowed.
+        let z = Multinomial::new(4, &[0.5, 0.5, 0.0]);
+        assert_eq!(z.pmf(&[2, 1, 1]), 0.0);
+        assert!(z.pmf(&[2, 2, 0]) > 0.0);
+        // Two categories degenerate to the Binomial.
+        let m2 = Multinomial::new(20, &[0.3, 0.7]);
+        let b = Binomial::new(20, 0.3);
+        assert!(close(m2.pmf(&[6, 14]), b.pmf(6), 1e-12));
+    }
+
+    #[test]
+    fn multivariate_hypergeometric_matches_scipy() {
+        // SciPy multivariate_hypergeom(m=[10, 5, 15], n=8);
+        // exact pmf([3,1,4]) = C(10,3)·C(5,1)·C(15,4)/C(30,8) = 280/2001.
+        let mh = MultivariateHypergeometric::new(&[10, 5, 15], 8);
+        assert!(close(mh.pmf(&[3, 1, 4]), 280.0 / 2001.0, 1e-12));
+        assert!(close(
+            mh.pmf(&[0, 0, 8]),
+            0.001_099_450_274_862_565_7,
+            1e-12
+        ));
+        // Wrong total or over-drawing a color ⇒ impossible.
+        assert_eq!(mh.pmf(&[3, 1, 3]), 0.0);
+        assert_eq!(mh.pmf(&[0, 6, 2]), 0.0);
+        let mean = mh.mean();
+        assert!(close(mean[0], 8.0 / 3.0, 1e-14));
+        assert!(close(mean[1], 4.0 / 3.0, 1e-14));
+        assert!(close(mean[2], 4.0, 1e-14));
+        // Two colors degenerate to the univariate Hypergeometric.
+        let mh2 = MultivariateHypergeometric::new(&[6, 43], 6);
+        let h = Hypergeometric::new(49, 6, 6);
+        for k in 0..=6u64
+        {
+            assert!(close(mh2.pmf(&[k, 6 - k]), h.pmf(k), 1e-12), "k = {k}");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn vector_sampling_is_deterministic_and_consistent() {
+        // Multinomial draws always sum to n and reproduce bit-for-bit.
+        let m = Multinomial::new(50, &[0.2, 0.3, 0.5]);
+        let mut r1 = SplitMix64::new(11);
+        let mut r2 = SplitMix64::new(11);
+        let mut totals = [0u64; 3];
+        for _ in 0..2_000
+        {
+            let a = m.sample(&mut r1);
+            let b = m.sample(&mut r2);
+            assert_eq!(a, b);
+            assert_eq!(a.iter().sum::<u64>(), 50);
+            for (t, &x) in totals.iter_mut().zip(&a)
+            {
+                *t += x;
+            }
+        }
+        // Empirical means near n·p = [10, 15, 25].
+        assert!((totals[0] as f64 / 2_000.0 - 10.0).abs() < 0.2);
+        assert!((totals[2] as f64 / 2_000.0 - 25.0).abs() < 0.3);
+        // Multivariate hypergeometric draws sum to `draws` and respect caps.
+        let mh = MultivariateHypergeometric::new(&[10, 5, 15], 8);
+        let mut r = SplitMix64::new(23);
+        for _ in 0..2_000
+        {
+            let d = mh.sample(&mut r);
+            assert_eq!(d.iter().sum::<u64>(), 8);
+            assert!(d[0] <= 10 && d[1] <= 5 && d[2] <= 15);
+        }
     }
 }
