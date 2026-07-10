@@ -26,6 +26,78 @@ versions sémantiques à partir de la prochaine release taguée.
   stochastique contre-basé** (Philox : reproductible, order-independent,
   non biaisé), `gemm_bf16_exact` (produits exacts, accumulation ordre fixe).
   Explicitement hors périmètre de RepDL.
+### Ajouté — 4 lois discrètes supplémentaires (`scirust-stats::discrete`, suite du volet loterie)
+- Comble les écarts vs SciPy listés « suites possibles » dans la PR #280 :
+  **`NegativeBinomial`** (échecs avant le r-ième succès, convention
+  `scipy.stats.nbinom`, r réel autorisé — paramétrisation de Pólya pour la
+  régression de comptage surdispersée ; CDF fermée par bêta incomplète
+  régularisée I_p(r, k+1), survie directe sans `1 − cdf`),
+  **`BetaBinomial`** (binomiale à p Beta(a, b)-distribué — proportions
+  surdispersées ; a = b = 1 redonne l'uniforme discrète, testé),
+  **`Zipfian`** finie sur les rangs 1..=n (`scipy.stats.zipfian` ;
+  normalisation harmonique généralisée sommée petits-termes-d'abord en ordre
+  fixe ; s = 0 = uniforme ; la zêta à support infini nécessiterait ζ de
+  Riemann et n'est volontairement pas approximée), et **`Skellam`**
+  (différence de deux Poisson — support ℤ entier, donc API `i64` propre hors
+  du trait u64 ; pmf/cdf/sf par convolution déterministe à troncature fixe
+  sur la base `scirust-special` plutôt que par Bessel I_k, ~1e-12 vs SciPy ;
+  tirage déterministe = différence de deux tirages Poisson inverse-CDF).
+- Validation : oracles SciPy 1.17.1 en dur dans les tests (pmf/cdf/sf/ppf,
+  moments), invariants Σ pmf = 1, symétrie de Skellam à taux égaux,
+  cdf + sf = 1 sur les deux queues ℤ, r = 1 ⇒ géométrique décalée.
+  40 tests unitaires + doctest au total sur le crate, clippy propre.
+
+### Ajouté — mécanique des fluides & thermodynamique (`scirust-fluids`, `scirust-thermo`)
+- **`scirust-fluids`** — mécanique des fluides déterministe (Rust pur, zéro
+  dépendance, `forbid(unsafe_code)`, entrées validées → `FluidsError` typé) :
+  - `dimensionless` : Reynolds, Prandtl, Mach, Froude, Weber, Péclet,
+    Strouhal, Nusselt ;
+  - `pipe` : facteurs de friction de Darcy (laminaire 64/Re,
+    **Colebrook–White implicite** résolu par Newton déterministe, Haaland,
+    Swamee–Jain), dispatch continu sur tout le domaine de Reynolds
+    (zone critique = interpolation documentée), pertes de charge
+    Darcy–Weisbach (Δp et hauteur), pertes singulières, diamètre
+    hydraulique ;
+  - `bernoulli` : pressions dynamique/totale, Pitot, Torricelli, équation
+    de Bernoulli entre deux stations, débitmétrie Venturi et orifice ;
+  - `external` : traînée de Stokes, courbe de traînée standard de la
+    sphère (Clift–Gauvin, Re ≤ 3×10⁵), **vitesse terminale de chute**
+    (bissection déterministe sur le bilan des forces) ;
+  - `boundary_layer` : plaque plane Blasius (δ, δ*, θ, c_f) et
+    corrélations turbulentes en loi 1/7 ;
+  - `compressible` : vitesse du son, rapports isentropiques (T₀/T, p₀/p,
+    ρ₀/ρ, A/A*), **relations de choc normal** (M₂, p₂/p₁, ρ₂/ρ₁, T₂/T₁,
+    p₀₂/p₀₁) ;
+  - `channel` : équation de Manning, profondeurs critique et normale
+    (bissection déterministe), énergie spécifique, ressaut hydraulique
+    (Bélanger).
+  49 tests oracle : diagramme de Moody, tables NACA 1135 (fractions
+  exactes du choc à M=2 : p₂/p₁ = 4,5, ρ₂/ρ₁ = 8/3), constantes de
+  Blasius, courbe de traînée standard, résidu Colebrook ≤ 1e-10, ISA.
+- **`scirust-thermo`** — thermodynamique déterministe (mêmes garanties,
+  `ThermoError` typé) :
+  - `ideal_gas` : gaz parfait calorifiquement idéal (état, cp/cv,
+    travail/chaleur des processus isotherme, isobare, isochore,
+    adiabatique, polytropique, variation d'entropie) ;
+  - `cycles` : Carnot (rendement + COP frigo/pompe à chaleur), Otto,
+    Diesel, Brayton (air standard) ;
+  - `heat_transfer` : résistances de conduction (mur plan, coquille
+    cylindrique), convection, rayonnement (σ CODATA exacte), **DTLM**,
+    **efficacité-NUT** (contre-courant et co-courant, limites C_r = 0/1
+    exactes), Dittus–Boelter à domaine de validité **imposé** ;
+  - `psychro` : air humide ASHRAE (pression de saturation
+    **Hyland–Wexler** sur glace et eau liquide, rapport d'humidité, point
+    de rosée par bissection déterministe, enthalpie, volume spécifique) ;
+  - `steam` : ligne de saturation eau/vapeur **IAPWS-IF97 région 4**
+    (p_sat(T) et T_sat(p), formes fermées mutuellement inverses).
+  40 tests oracle : tables de vérification officielles IF97 (35/36,
+  concordance 1e-8), tables psychrométriques ASHRAE, rendements
+  classiques des cycles, tables NUT d'Incropera ; cohérence croisée
+  IF97 ↔ Hyland–Wexler (< 0,5 %) et cycle de Carnot à entropie nulle.
+- Réponse au constat « scirust n'offre pas de solutions aux
+  problématiques de mécanique des fluides et de thermodynamique » :
+  ces deux crates posent le socle (corrélations et relations exactes
+  de référence) sur lequel des verticaux CFD/procédés pourront s'appuyer.
 
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon

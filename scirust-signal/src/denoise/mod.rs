@@ -65,7 +65,8 @@ pub mod transform;
 pub mod variational;
 
 pub use adaptive::{
-    KalmanFit, kalman_smooth, kalman_smooth_auto, lms_line_enhancer, rls_line_enhancer,
+    KalmanFit, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth, lms_line_enhancer,
+    rls_line_enhancer,
 };
 pub use detect::{
     NoiseProfile, NoiseType, Separation, classify, estimate_noise_std, estimate_snr_db, separate,
@@ -74,9 +75,12 @@ pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_g
 pub use rank::{alpha_trimmed_mean, hampel_filter, impulse_mask, median_filter};
 pub use transform::{
     ThresholdMode, Wavelet, fft_highpass, fft_lowpass, notch_filter, remove_mains_hum,
-    spectral_subtraction, wavelet_denoise, wavelet_denoise_with, wiener_white,
+    spectral_subtraction, wavelet_denoise, wavelet_denoise_sure, wavelet_denoise_with,
+    wiener_white,
 };
-pub use variational::{tikhonov_smooth, total_variation, total_variation_norm};
+pub use variational::{
+    tikhonov_smooth, total_variation, total_variation_exact, total_variation_norm,
+};
 
 /// The family a denoiser belongs to — the taxonomy axis along which this toolkit
 /// is meant to be *exhaustive*.

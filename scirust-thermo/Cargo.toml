@@ -1,0 +1,6 @@
+[package]
+name = "scirust-thermo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic engineering thermodynamics: ideal-gas processes (work, heat, entropy), power cycles (Carnot, Otto, Diesel, Brayton), heat transfer (conduction resistances, LMTD, effectiveness-NTU, radiation), psychrometrics of moist air (ASHRAE/Hyland-Wexler), and IAPWS-IF97 region-4 water saturation. Validated inputs, oracle-tested. Pure Rust, no unsafe, no dependencies."
