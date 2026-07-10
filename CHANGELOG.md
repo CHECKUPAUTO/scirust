@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
+- **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
+  (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de
+  preuve en mode standard sur `aarch64-unknown-linux-gnu`. QEMU implémente
+  fidèlement IEEE-754 : chaque run CI vérifie réellement l'identité bit à
+  bit x86↔ARM du contrat commis (commandes validées localement : 13/13
+  tests + verdict=PASS sous qemu). Ferme le point ouvert « CI aarch64 =
+  check only » tracé depuis le volet 108.
+- **`Var::softmax_portable()`** (+ `Tensor::softmax_portable`,
+  `Op::SoftmaxPortable` dans reverse.rs et parallel.rs) : softmax par ligne
+  dont le forward passe par `portable_f32::softmax_f32` et dont le backward
+  calcule le jacobien **depuis la sortie stockée** — aucun appel libm dans
+  le nœud, donc forward ET gradient bit-exacts inter-plates-formes. Opt-in :
+  `Var::softmax` (libm) est inchangé. Tests : forward bit-identique à la
+  référence portable, gradient équivalent au nœud libm (≤ 1e-5), empreinte
+  du gradient figée (contrat cross-platform de l'entraînement).
+
 ### Ajouté — preuve cross-platform exécutable de la voie f32 portable (volet 112)
 - **`scirust-core --bin proof_portable_f32`** : binaire de preuve
   auto-vérifiant — recalcule sur la machine locale les goldens ponctuels,

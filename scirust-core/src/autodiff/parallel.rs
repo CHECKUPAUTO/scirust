@@ -524,6 +524,16 @@ impl ParallelTape {
                     let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
                     t_grads[input] = t_grads[input].add(&diff);
                 },
+                Op::SoftmaxPortable { input } =>
+                {
+                    // Jacobien depuis la sortie stockée (cf. reverse.rs) :
+                    // aucun appel libm, bit-exact inter-plates-formes.
+                    let sm = &values[i];
+                    let gs = g.hadamard(sm);
+                    let sum_gs = gs.sum_axis(1);
+                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(sm.rows, sm.cols)));
+                    t_grads[input] = t_grads[input].add(&diff);
+                },
                 Op::LogSoftmax { input, axis } =>
                 {
                     let av = &values[input];

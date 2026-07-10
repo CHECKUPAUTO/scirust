@@ -38,6 +38,22 @@
   La claim « bit-exact inter-plates-formes par construction » est désormais
   adossée à une exécution multi-machines, conformément à la discipline
   claims → évidence du dépôt.
+- **Preuve aarch64 EN CI (suite de session, ferme le « reste ouvert » CI
+  check-only)** : le job `cross-check-aarch64` exécute désormais réellement
+  du code aarch64 — qemu-user + gcc-aarch64, `cargo test portable_f32` +
+  binaire de preuve (mode standard : goldens + contrat + dense + composites)
+  sur target aarch64-unknown-linux-gnu. Validé localement avant commit :
+  13/13 tests + verdict=PASS sous qemu (dense 5,8 s). Chaque run CI est donc
+  une vérification x86↔ARM réelle du contrat.
+- **Softmax portable branché dans la tape AD (opt-in)** :
+  `Var::softmax_portable()` / `Tensor::softmax_portable()` +
+  `Op::SoftmaxPortable` (reverse.rs et parallel.rs) — forward via
+  `portable_f32::softmax_f32`, backward **depuis la sortie stockée** (aucun
+  appel libm dans le jacobien) ⇒ nœud complet forward+gradient bit-exact
+  inter-plates-formes. Le softmax libm existant est inchangé (aucune
+  régression d'empreintes). Tests : forward bit-identique à portable_f32,
+  gradient ≈ gradient libm (1e-5) + empreinte gradient figée
+  0x5ba09810fa590787 (contrat cross-platform du backward).
 
 ## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
 - **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
