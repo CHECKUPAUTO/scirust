@@ -19,8 +19,8 @@
 use crate::comb::{ln_binomial, ln_factorial};
 use crate::rng::SplitMix64;
 use scirust_special::{
-    ln_beta, ln_gamma, regularized_gamma_p, regularized_gamma_q, regularized_incomplete_beta,
-    riemann_zeta, riemann_zeta_tail,
+    ln_beta, ln_binomial_pmf, ln_gamma, ln_poisson_pmf, regularized_gamma_p, regularized_gamma_q,
+    regularized_incomplete_beta, riemann_zeta, riemann_zeta_tail,
 };
 
 /// A univariate distribution on the non-negative integers.
@@ -212,21 +212,9 @@ impl Binomial {
 
 impl DiscreteDistribution for Binomial {
     fn ln_pmf(&self, k: u64) -> f64 {
-        if k > self.n
-        {
-            return f64::NEG_INFINITY;
-        }
-        // Guard the 0·ln(0) corners so p = 0 and p = 1 stay exact.
-        let t_succ = if k == 0 { 0.0 } else { k as f64 * self.p.ln() };
-        let t_fail = if k == self.n
-        {
-            0.0
-        }
-        else
-        {
-            (self.n - k) as f64 * (-self.p).ln_1p()
-        };
-        ln_binomial(self.n, k) + t_succ + t_fail
+        // Loader's saddle-point form: full relative accuracy at large n and
+        // exact `p = 0`/`p = 1`/`k = 0`/`k = n` endpoints (see scirust-special).
+        ln_binomial_pmf(k, self.n, self.p)
     }
     fn cdf(&self, k: u64) -> f64 {
         if k >= self.n
@@ -275,7 +263,8 @@ impl Poisson {
 
 impl DiscreteDistribution for Poisson {
     fn ln_pmf(&self, k: u64) -> f64 {
-        k as f64 * self.lambda.ln() - self.lambda - ln_factorial(k)
+        // Loader's saddle-point form: full relative accuracy at large λ.
+        ln_poisson_pmf(k, self.lambda)
     }
     fn cdf(&self, k: u64) -> f64 {
         // P(X ≤ k) = Q(k + 1, λ).
@@ -1469,6 +1458,110 @@ impl DiscreteDistribution for Boltzmann {
     }
 }
 
+// ============================================================ //
+//  Logarithmic (log-series)                                    //
+// ============================================================ //
+
+/// Logarithmic (log-series) distribution on `k ≥ 1`:
+/// `pmf(k) = −pᵏ / (k·ln(1−p))` (SciPy's `logser`). Fisher's model for
+/// species abundance and a common law for the number of items per purchase;
+/// the term-frequency companion to the [`Zeta`]/[`YuleSimon`] family.
+#[derive(Debug, Clone, Copy)]
+pub struct Logarithmic {
+    p: f64,
+    /// `−1/ln(1−p) > 0`, the normalizing constant, precomputed.
+    c: f64,
+}
+
+impl Logarithmic {
+    /// Parameter `p ∈ (0, 1)`.
+    pub fn new(p: f64) -> Self {
+        assert!(p > 0.0 && p < 1.0, "Logarithmic: p must be within (0, 1)");
+        Self {
+            p,
+            c: -1.0 / (-p).ln_1p(),
+        }
+    }
+}
+
+impl DiscreteDistribution for Logarithmic {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return f64::NEG_INFINITY;
+        }
+        // ln pmf = k·ln p − ln k + ln c.
+        k as f64 * self.p.ln() - (k as f64).ln() + self.c.ln()
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return 0.0;
+        }
+        // Head sum over the finite range 1..=k (geometric-decay terms).
+        let mut acc = 0.0;
+        for i in 1..=k
+        {
+            acc += self.pmf(i);
+        }
+        acc.min(1.0)
+    }
+    fn mean(&self) -> f64 {
+        // −p / ((1−p)·ln(1−p)) = c·p/(1−p).
+        self.c * self.p / (1.0 - self.p)
+    }
+    fn variance(&self) -> f64 {
+        let r = (-self.p).ln_1p(); // ln(1−p) < 0
+        -self.p * (self.p + r) / ((1.0 - self.p) * (1.0 - self.p) * r * r)
+    }
+}
+
+// ============================================================ //
+//  Planck (non-truncated)                                      //
+// ============================================================ //
+
+/// Planck distribution on `k ≥ 0`: `pmf(k) = (1−e^(−λ))·e^(−λk)` (SciPy's
+/// `planck`). The geometric law counting *failures* (support from 0), i.e.
+/// the `n → ∞` limit of [`Boltzmann`]; models unbounded discrete
+/// energy-level occupation.
+#[derive(Debug, Clone, Copy)]
+pub struct Planck {
+    lambda: f64,
+}
+
+impl Planck {
+    /// Decay rate `λ > 0`.
+    pub fn new(lambda: f64) -> Self {
+        assert!(
+            lambda > 0.0 && lambda.is_finite(),
+            "Planck: λ must be finite and > 0"
+        );
+        Self { lambda }
+    }
+}
+
+impl DiscreteDistribution for Planck {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        // ln(1−e^(−λ)) − λk.
+        (-(-self.lambda).exp_m1()).ln() - self.lambda * k as f64
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        // 1 − e^(−λ(k+1)).
+        -(-self.lambda * (k as f64 + 1.0)).exp_m1()
+    }
+    fn sf(&self, k: u64) -> f64 {
+        // e^(−λ(k+1)) — direct upper tail.
+        (-self.lambda * (k as f64 + 1.0)).exp()
+    }
+    fn mean(&self) -> f64 {
+        1.0 / self.lambda.exp_m1()
+    }
+    fn variance(&self) -> f64 {
+        let q = (-self.lambda).exp();
+        q / ((1.0 - q) * (1.0 - q))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2035,5 +2128,68 @@ mod tests {
         {
             assert!(close(b.cdf(k) + b.sf(k), 1.0, 1e-12), "k = {k}");
         }
+    }
+
+    #[test]
+    fn logarithmic_matches_scipy() {
+        // SciPy logser(0.6), support k ≥ 1.
+        let l = Logarithmic::new(0.6);
+        assert!(close(l.pmf(1), 0.654_814_000_762_375, 1e-12));
+        assert!(close(l.pmf(2), 0.196_444_200_228_712_48, 1e-12));
+        assert!(close(l.pmf(3), 0.078_577_680_091_484_98, 1e-12));
+        assert!(close(l.pmf(10), 0.000_659_901_643_622_698, 1e-12));
+        assert_eq!(l.pmf(0), 0.0);
+        assert!(close(l.cdf(3), 0.929_835_881_082_572_4, 1e-12));
+        assert!(close(l.sf(3), 0.070_164_118_917_427_7, 1e-11));
+        assert!(close(l.mean(), 1.637_035_001_905_937, 1e-12));
+        assert!(close(l.variance(), 1.412_703_907_299_671_4, 1e-11));
+        // Total head mass converges to 1.
+        let total: f64 = (1..=200).map(|k| l.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-12));
+    }
+
+    #[test]
+    fn planck_matches_scipy_and_equals_geometric_shift() {
+        // SciPy planck(0.9), support k ≥ 0.
+        let pl = Planck::new(0.9);
+        assert!(close(pl.pmf(0), 0.593_430_340_259_400_9, 1e-12));
+        assert!(close(pl.pmf(1), 0.241_270_771_519_012_58, 1e-12));
+        assert!(close(pl.pmf(2), 0.098_093_375_481_836_78, 1e-12));
+        assert!(close(pl.pmf(5), 0.006_592_415_595_629_638, 1e-12));
+        assert!(close(pl.cdf(3), 0.972_676_277_552_707_5, 1e-12));
+        assert!(close(pl.sf(3), 0.027_323_722_447_292_56, 1e-11));
+        assert!(close(pl.mean(), 0.685_117_750_405_007_9, 1e-12));
+        assert!(close(pl.variance(), 1.154_504_082_325_026_5, 1e-11));
+        // Planck(λ) is the failures-count geometric: pmf(k) = (1−q)qᵏ with
+        // q = e^(−λ); relates to Geometric(1−q) shifted by one trial.
+        let g = Geometric::new(1.0 - (-0.9_f64).exp());
+        for k in 0..8u64
+        {
+            assert!(close(pl.pmf(k), g.pmf(k + 1), 1e-12), "k = {k}");
+        }
+        // cdf + sf = 1.
+        for k in 0..20
+        {
+            assert!(close(pl.cdf(k) + pl.sf(k), 1.0, 1e-12), "k = {k}");
+        }
+    }
+
+    #[test]
+    fn binomial_poisson_loader_accurate_at_large_n() {
+        // The Loader path keeps full relative accuracy where the old
+        // exp(Σ lnΓ) form drifted (values from SciPy, which uses Loader).
+        let b = Binomial::new(100_000, 0.3);
+        assert!(close(b.pmf(30_000), 0.002_752_954_648_397_429, 1e-12));
+        assert!(close(b.pmf(31_000), 1.444_411_387_472_601_2e-13, 1e-11));
+        let p = Poisson::new(10_000.0);
+        assert!(close(p.pmf(10_000), 0.003_989_389_558_963_281, 1e-12));
+        // Small-n values (unchanged behaviour) still match exactly.
+        let s = Binomial::new(20, 0.3);
+        assert!(close(s.pmf(6), 0.191_638_982_753_442_54, 1e-12));
+        assert!(close(
+            Poisson::new(4.2).pmf(3),
+            0.185_165_382_579_258_7,
+            1e-12
+        ));
     }
 }

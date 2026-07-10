@@ -3241,6 +3241,30 @@ plutôt qu'une formule devinée) :
 - 51 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
   16 lois discrètes (13 univariées + 3 vectorielles).
 
+### Ajouté — log-series, Planck, et pmf de Loader (6e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes) pour éviter
+> les conflits de merge sur le bloc de tête.
+- **`scirust-special` — algorithme de Loader (saddle-point, Loader 2000)** :
+  `stirling_error(x)` (reste de la série de Stirling δ, série asymptotique
+  en 1/x pour x ≥ 16, forme directe sinon — validé contre mpmath 40 chiffres),
+  `binom_deviance(x, np)` (D₀ par série près de x ≈ np pour éviter
+  l'annulation), et les pmf en log `ln_poisson_pmf`/`ln_binomial_pmf`. Gagne
+  la **pleine précision relative à grand n/λ** là où `exp(Σ lnΓ)` dérivait
+  (~1e-10 → ~1e-15). `Binomial::ln_pmf` et `Poisson::ln_pmf` recâblés dessus
+  (c'est l'algorithme qu'utilise R `dbinom`/`dpois` et SciPy). Validé contre
+  SciPy : `binom(1e5, 0.3)`, `poisson(1e4)`, endpoints exacts.
+- **`scirust-stats::discrete::Logarithmic`** — loi log-séries sur k ≥ 1,
+  `pmf(k) = −pᵏ/(k·ln(1−p))` (`scipy.stats.logser`), modèle d'abondance
+  d'espèces de Fisher ; moyenne/variance en forme fermée. Oracles
+  `logser(0.6)`.
+- **`scirust-stats::discrete::Planck`** — géométrique **non tronquée** sur
+  k ≥ 0, `pmf(k) = (1−e^(−λ))e^(−λk)` (`scipy.stats.planck`), limite n → ∞
+  de Boltzmann ; testée égale à la géométrique décalée. Oracles
+  `planck(0.9)`.
+- scirust-special 16 tests, scirust-stats 54 tests + doctest, clippy 0
+  avertissement. Couverture : **18 lois discrètes** (15 univariées + 3
+  vectorielles).
+
 ## [0.14.0] — 2026-06-13
 
 ### Réparé
