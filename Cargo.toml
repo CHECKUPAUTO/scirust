@@ -151,6 +151,7 @@ members = [
     "scirust-forecast",
     "scirust-fluids",
     "scirust-thermo",
+    "scirust-sim",
 ]
 exclude = [
     "scirust-rustc-driver",

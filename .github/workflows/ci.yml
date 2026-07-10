@@ -206,7 +206,8 @@ jobs:
           cargo miri test \
             -p scirust-special -p scirust-stats \
             -p scirust-interp -p scirust-sparse -p scirust-stiff \
-            -p scirust-gp -p scirust-units -p scirust-frame -p scirust-forecast
+            -p scirust-gp -p scirust-units -p scirust-frame -p scirust-forecast \
+            -p scirust-sim
 
   # Informational: build the cargo-fuzz targets for the untrusted-input parsers
   # and smoke-run them for a bounded time. The `fuzz` crate is a separate

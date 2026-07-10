@@ -197,6 +197,40 @@ du LIVESTATE sont livrés :
 - Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
   `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
   `scirust-core`/serde.
+### Ajouté — environnements de simulation multi-domaines (`scirust-sim`)
+- **`scirust-sim`** — la couche unifiée « voici un système, avance-le dans le
+  temps, laisse un agent interagir avec » qui manquait à la plate-forme :
+  - **Moteur déterministe** : trait `System` (`y' = f(t, y)`, même forme
+    in-place que les fermetures de `scirust-solvers::ode::dopri5`) + RK4 à pas
+    fixe (`simulate` → `Trajectory`, invariants linéaires préservés à
+    l'arrondi près) ; trait `SecondOrderSystem` + **Euler symplectique**
+    (`simulate_second_order`) — le test montre l'orbite à deux corps qui reste
+    fermée là où Euler explicite spirale visiblement vers l'extérieur.
+  - **Couche agent-dans-la-boucle** : trait `Environment` façon gym
+    (`reset` / `step(action) → observation, récompense, fin`, miroir de
+    `scirust-learning::rl::Env`), `run_episode`, **CartPole** (constantes de
+    l'implémentation de référence, épisodes bit-rejouables par graine) et
+    **GridWorld** déterministe.
+  - **Huit domaines, tous testés contre oracle** : mécanique
+    (masse-ressort-amortisseur vs forme close sous-amortie, pendule non
+    linéaire avec conservation d'énergie à grande amplitude, projectile à
+    traînée linéaire vs solution exacte), orbital (Kepler deux corps :
+    énergie et moment cinétique conservés à 1e-9, orbite circulaire fermée
+    après exactement une période), épidémiologie (SIR/SEIR : population
+    conservée à l'arrondi, seuil épidémique à R₀ = 1, relation
+    transcendante exacte de taille finale), écologie (intégrale première de
+    Lotka–Volterra conservée, forme close logistique), chimie (réactions
+    consécutives vs solution de Bateman, réaction réversible relaxant vers
+    K = k_f/k_r), thermique (refroidissement de Newton, barreau 1-D validé
+    sur le taux de décroissance du mode propre *discret* et le principe du
+    maximum), électrique (charge RC, RLC série vs forme close + passivité),
+    stochastique/files d'attente (GBM et Ornstein–Uhlenbeck échantillonnés
+    par leurs lois de transition *exactes*, file M/M/1 par événements
+    discrets retrouvant L = ρ/(1−ρ), W = 1/(μ−λ) et la loi de Little).
+  - **SplitMix64** semé explicite (vecteurs de référence publiés vérifiés),
+    zéro dépendance, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`,
+    aucune panique sur entrée malformée (`SimError`), 66 tests + doctest,
+    ajouté à la porte Miri de la CI.
 
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
