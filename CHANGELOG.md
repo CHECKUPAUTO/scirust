@@ -5,6 +5,42 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — lois discrètes, combinatoire exacte et mathématiques honnêtes de loterie (`scirust-stats`)
+- **`scirust-stats::discrete`** — trait `DiscreteDistribution` (pmf/ln-pmf,
+  cdf, fonction de survie **directe** — pas de `1 − cdf` qui s'annule en
+  queue —, quantile convention SciPy « plus petit k tel que cdf(k) ≥ p »,
+  moments, tirage inverse-CDF déterministe par `SplitMix64`) et quatre lois :
+  **Binomiale** (CDF par bêta incomplète régularisée), **Poisson** (CDF par
+  gamma incomplète régularisée), **Hypergéométrique** (paramètres nommés
+  `population/successes/draws` comme statrs — trois conventions incompatibles
+  coexistent chez SciPy/R/statrs, la nôtre est documentée), **Géométrique**
+  (essais jusqu'au premier succès, convention `scipy.stats.geom`). Validées
+  contre SciPy 1.17 et des fractions exactes (`math.comb`) à 1e-12 près ;
+  cas dégénérés couverts (p = 0, p = 1, n = 0, support tronqué).
+- **`scirust-stats::comb`** — combinatoire **exacte en `u128` vérifié**
+  (`None` en cas de dépassement, jamais un résultat faux) : `factorial`
+  (34! max), `binomial` (récurrence multiplicative + pré-réduction gcd —
+  exact jusqu'à C(130, 65) ≈ 9,5 × 10³⁷ là où `num_integer::binomial` u64
+  plafonne à n ≤ 67), `permutations`, `multichoose`, et les formes
+  logarithmiques `ln_factorial`/`ln_binomial` sans dépassement.
+- **`scirust-stats::lottery`** — la réponse **honnête** à la demande
+  « prédiction de loterie » : les tirages équitables étant i.i.d. uniformes,
+  aucune prédiction n'est mathématiquement possible (sophisme du joueur —
+  Clotfelter & Cook, Management Science 39(12), 1993) et le module n'expose
+  **délibérément aucun `predict`**. Il fournit ce que les mathématiques
+  savent faire : `LotteryGame` (matrice k-de-n + machine bonus indépendante,
+  constructeurs `loto_france`/`euromillions`/`powerball`/`lotto_6of49`),
+  cotes exactes par produit d'hypergéométriques (`p_match`, `odds_against`,
+  `total_combinations` exact en u128), espérance de gain d'un ticket contre
+  une table de lots (`expected_gain`/`expected_net` — structurellement
+  négative), et audit d'équité χ² des fréquences de tirage
+  (`draw_frequency_chi_square`). Reproduit **exactement les tables
+  officielles publiées** : Powerball 1/292 201 338 (9 rangs, arrondis au
+  centième conformes à powerball.com), EuroMillions 1/139 838 160
+  (5+1 étoile = 1/6 991 908 exact), Loto FDJ 1/19 068 840, 6/49
+  = 1/13 983 816 (rang 3 = 8 815/499 422, fraction Wikipédia). 12 tests
+  dont l'invariant de partition Σ p_match = 1.
+
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
   et al., SC'11), clean-room depuis le papier et **validé contre les
