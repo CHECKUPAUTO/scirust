@@ -41,6 +41,33 @@ Les trois « suites possibles » restantes du volet 2 sont livrées :
   seulement la cohérence interne d'une itération).
 - Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
   clippy `-D warnings` propre, rustfmt appliqué.
+### Ajouté — RLS MIMO, le cran au-dessus : QR-RLS multi-sorties, FIR spatio-temporel, auto-λ, oracle Kalman
+Améliorations du filtre RLS MIMO en réutilisant les briques du dépôt :
+- **`QrRlsMimo`** : la forme racine carrée (facteur de Potter, PSD par
+  construction) étendue aux sorties multiples — le facteur `S` ne dépend que
+  des entrées, donc une seule récursion partagée entre toutes les sorties
+  (`O(n_in² + n_out·n_in)`/échantillon, zéro allocation). Tests : ligne 0
+  **bit-identique** au `QrRls` scalaire ; équivalence 1e-6 avec `RlsFilter`
+  sur système 2 sorties.
+- **Oracle croisé RLS ≡ Kalman** : à λ=1 le RLS *est* un filtre de Kalman à
+  état statique (`F=I, Q=0, H_k=u_kᵀ, R=1`). Nouveau test qui rejoue la même
+  trajectoire dans le `KalmanFilter` du crate (chemin matriciel générique avec
+  inversion explicite, reconstruit à chaque pas avec le `H` courant) et exige
+  l'accord à 1e-8 sur 300 pas — deux implémentations indépendantes du même
+  estimateur se vérifient mutuellement.
+- **`MimoFirRls`** : le vrai filtre adaptatif MIMO **spatio-temporel** —
+  lignes à retard par canal d'entrée, régresseur empilé sur un cœur
+  `RlsFilter`, noyau FIR identifié exposé par paire (sortie, entrée). Test :
+  un couplage convolutif 2×2 à 3 coefficients (diaphonie/écho) est identifié
+  à 1e-3 près sur bruit blanc. C'est la dimension temporelle qui manquait au
+  filtre instantané.
+- **`tune_lambda`** : choix du facteur d'oubli par **blancheur des
+  innovations** — chaque λ candidat est scoré par le test d'autocorrélation
+  `±1.96/√N`, et le plus grand λ que le diagnostic ne rejette pas gagne (la
+  règle de parcimonie de `denoise::adaptive::kalman_smooth_auto`, réappliquée
+  à l'identification). Tests : système statique → garde λ=1 ; système
+  dérivant → rejette λ=1.
+- 41 tests `scirust-estimation` verts ; fmt/clippy `-D warnings` propres.
 
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
