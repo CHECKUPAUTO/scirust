@@ -14,7 +14,7 @@
 //! | [`heat_transfer`] | conduction resistances (plane, cylindrical), convection, radiation, LMTD, effectiveness-NTU, Dittus–Boelter |
 //! | [`convection`] | external & natural convection: flat plate, Churchill–Bernstein cylinder, Ranz–Marshall sphere, Churchill–Chu free convection, Rayleigh number |
 //! | [`psychro`] | moist air: Hyland–Wexler saturation pressure, humidity ratio, dew point, enthalpy, specific volume |
-//! | [`steam`] | IAPWS-IF97 water/steam: saturation line (region 4), compressed liquid (region 1), superheated steam (region 2), B23 boundary |
+//! | [`steam`] | IAPWS-IF97 water/steam: saturation line (region 4), compressed liquid (region 1), superheated steam (region 2), high-temperature steam (region 5), B23 boundary |
 //!
 //! ## Guarantees
 //!

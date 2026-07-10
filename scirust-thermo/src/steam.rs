@@ -1,4 +1,4 @@
-//! Water/steam properties — IAPWS-IF97, regions 1, 2 and 4.
+//! Water/steam properties — IAPWS-IF97, regions 1, 2, 4 and 5.
 //!
 //! Clean-room implementation of the IAPWS Industrial Formulation 1997:
 //!
@@ -9,10 +9,14 @@
 //! - **Region 2** (superheated steam): ideal + residual Gibbs-energy
 //!   equation, same properties, bounded above by the saturation line and
 //!   the region-2/3 **B23** parabola.
+//! - **Region 5** (high-temperature steam, `1073.15 < T ≤ 2273.15 K`):
+//!   same ideal + residual structure as region 2, over gas-turbine
+//!   exhaust / ultra-supercritical HRSG conditions.
 //!
 //! All public interfaces are SI (K, Pa, J/kg, J/(kg·K), m³/kg, m/s);
 //! the IF97-native MPa/kJ units are internal. Oracle values are the
-//! official verification tables 5, 15, 35 and 36 of the IF97 release.
+//! official verification tables 5, 15, 35 and 36 of the IF97 release,
+//! plus the region-5 worked examples of the IF97 release document.
 
 use crate::error::{ThermoError, in_range};
 
@@ -33,6 +37,12 @@ pub const P_MAX: f64 = 100.0e6;
 pub const T_MAX_REGION1: f64 = 623.15;
 /// Upper temperature bound of region 2 \[K\].
 pub const T_MAX_REGION2: f64 = 1073.15;
+/// Lower temperature bound of region 5 \[K\] (region 2's upper bound).
+pub const T_MIN_REGION5: f64 = 1073.15;
+/// Upper temperature bound of region 5 \[K\].
+pub const T_MAX_REGION5: f64 = 2273.15;
+/// Upper pressure bound of region 5 \[Pa\].
+pub const P_MAX_REGION5: f64 = 50.0e6;
 
 /// IF97 region-4 coefficients n₁…n₁₀.
 const N4: [f64; 10] = [
@@ -168,6 +178,32 @@ const R2_N: [f64; 43] = [
     -9.436970724121e-07,
 ];
 
+/// IF97 region-5 ideal-gas exponents J⁰₁…J⁰₆ (Table 37).
+const R5_J0: [i32; 6] = [0, 1, -3, -2, -1, 2];
+/// IF97 region-5 ideal-gas coefficients n⁰₁…n⁰₆ (Table 37).
+const R5_N0: [f64; 6] = [
+    -13.179983674201,
+    6.8540841634434,
+    -0.024805148933466,
+    0.36901534980333,
+    -3.1161318213925,
+    -0.32961626538917,
+];
+
+/// IF97 region-5 residual exponents I₁…I₆ (Table 38).
+const R5_I: [i32; 6] = [1, 1, 1, 2, 2, 3];
+/// IF97 region-5 residual exponents J₁…J₆ (Table 38).
+const R5_J: [i32; 6] = [1, 2, 3, 3, 9, 7];
+/// IF97 region-5 residual coefficients n₁…n₆ (Table 38).
+const R5_N: [f64; 6] = [
+    0.0015736404855259,
+    0.00090153761673944,
+    -0.0050270077677648,
+    2.2440037409485e-06,
+    -4.1163275453471e-06,
+    3.7919454822955e-08,
+];
+
 /// Thermodynamic state of water or steam at a (T, p) point, SI units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SteamState {
@@ -286,6 +322,48 @@ fn gibbs2(pi: f64, tau: f64) -> ((f64, f64, f64, f64, f64, f64), (f64, f64, f64)
     )
 }
 
+/// Dimensionless Gibbs energy of region 5 (ideal + residual), same
+/// shape as [`gibbs2`] but with `τ = 1000/T` and a plain `π^I τ^J`
+/// residual basis (no `τ − 0.5` shift).
+#[allow(clippy::type_complexity)]
+fn gibbs5(pi: f64, tau: f64) -> ((f64, f64, f64, f64, f64, f64), (f64, f64, f64)) {
+    let mut g0 = pi.ln();
+    let g0p = 1.0 / pi;
+    let g0pp = -1.0 / (pi * pi);
+    let (mut g0t, mut g0tt) = (0.0, 0.0);
+    for k in 0..R5_N0.len()
+    {
+        let (j, n) = (R5_J0[k], R5_N0[k]);
+        g0 += n * tau.powi(j);
+        g0t += n * f64::from(j) * tau.powi(j - 1);
+        g0tt += n * f64::from(j) * f64::from(j - 1) * tau.powi(j - 2);
+    }
+    let (mut gr, mut grp, mut grpp, mut grt, mut grtt, mut grpt) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for k in 0..R5_N.len()
+    {
+        let (i, j, n) = (R5_I[k], R5_J[k], R5_N[k]);
+        let pi_i = pi.powi(i);
+        let tj = tau.powi(j);
+        gr += n * pi_i * tj;
+        grp += n * f64::from(i) * pi.powi(i - 1) * tj;
+        grpp += n * f64::from(i) * f64::from(i - 1) * pi.powi(i - 2) * tj;
+        grt += n * f64::from(j) * pi_i * tau.powi(j - 1);
+        grtt += n * f64::from(j) * f64::from(j - 1) * pi_i * tau.powi(j - 2);
+        grpt += n * f64::from(i) * f64::from(j) * pi.powi(i - 1) * tau.powi(j - 1);
+    }
+    (
+        (
+            g0 + gr,
+            g0p + grp,
+            g0pp + grpp,
+            g0t + grt,
+            g0tt + grtt,
+            grpt,
+        ),
+        (grp, grpp, grpt),
+    )
+}
+
 /// Properties of **compressed / subcooled liquid water** (IF97
 /// region 1) at temperature `t` \[K\] and pressure `p` \[Pa\].
 ///
@@ -350,6 +428,39 @@ pub fn region2(t: f64, p: f64) -> Result<SteamState, ThermoError> {
     let s = r * (tau * gt - g);
     let cp = -r * tau * tau * gtt;
     // IF97 Table 12: a uses the residual part only, gtt the total.
+    let a = 1.0 + pi * grp - tau * pi * grpt;
+    let cv = r * (-tau * tau * gtt - a * a / (1.0 - pi * pi * grpp));
+    let w = (r * t * 1000.0 * (1.0 + 2.0 * pi * grp + pi * pi * grp * grp)
+        / (1.0 - pi * pi * grpp + a * a / (tau * tau * gtt)))
+        .sqrt();
+    Ok(SteamState {
+        v,
+        h: h * 1000.0,
+        u: (h - p_mpa * 1000.0 * v) * 1000.0,
+        s: s * 1000.0,
+        cp: cp * 1000.0,
+        cv: cv * 1000.0,
+        w,
+    })
+}
+
+/// Properties of **high-temperature steam** (IF97 region 5) at
+/// temperature `t` \[K\] and pressure `p` \[Pa\] — gas-turbine exhaust /
+/// HRSG conditions above the range of region 2.
+///
+/// Validity (enforced): `1073.15 < t ≤ 2273.15 K`, `0 < p ≤ 50 MPa`.
+pub fn region5(t: f64, p: f64) -> Result<SteamState, ThermoError> {
+    in_range("t", t, T_MIN_REGION5, T_MAX_REGION5)?;
+    in_range("p", p, f64::MIN_POSITIVE, P_MAX_REGION5)?;
+    let p_mpa = p / 1.0e6;
+    let pi = p_mpa;
+    let tau = 1000.0 / t;
+    let ((g, gp, _, gt, gtt, _), (grp, grpp, grpt)) = gibbs5(pi, tau);
+    let r = R_WATER / 1000.0;
+    let v = pi * gp * r * t / p_mpa / 1000.0;
+    let h = tau * gt * r * t;
+    let s = r * (tau * gt - g);
+    let cp = -r * tau * tau * gtt;
     let a = 1.0 + pi * grp - tau * pi * grpt;
     let cv = r * (-tau * tau * gtt - a * a / (1.0 - pi * pi * grpp));
     let w = (r * t * 1000.0 * (1.0 + 2.0 * pi * grp + pi * pi * grp * grp)
@@ -662,5 +773,80 @@ mod tests {
         assert!(region2(700.0, 40.0e6).is_err()); // above B23 → region 3
         assert!(region2(1100.0, 1.0e6).is_err()); // T beyond region 2
         assert!(saturated_liquid(640.0).is_err()); // beyond 623.15 K
+    }
+
+    #[test]
+    fn if97_region_5_worked_examples() {
+        // Official IF97 release document, region-5 worked examples.
+        let st = region5(1500.0, 0.5e6).unwrap();
+        assert!(
+            (st.v - 1.38455090).abs() / 1.38455090 < 1e-8,
+            "v = {}",
+            st.v
+        );
+        assert!(
+            (st.h - 5_219_768.55).abs() / 5_219_768.55 < 1e-8,
+            "h = {}",
+            st.h
+        );
+        assert!(
+            (st.u - 4_527_493.10).abs() / 4_527_493.10 < 1e-8,
+            "u = {}",
+            st.u
+        );
+
+        let st = region5(1500.0, 30.0e6).unwrap();
+        assert!(
+            (st.s - 7729.70133).abs() / 7729.70133 < 1e-8,
+            "s = {}",
+            st.s
+        );
+        assert!(
+            (st.cp - 2727.24317).abs() / 2727.24317 < 1e-8,
+            "cp = {}",
+            st.cp
+        );
+        assert!(
+            (st.cv - 2192.74829).abs() / 2192.74829 < 1e-8,
+            "cv = {}",
+            st.cv
+        );
+
+        let st = region5(2000.0, 30.0e6).unwrap();
+        assert!(
+            (st.w - 1067.36948).abs() / 1067.36948 < 1e-8,
+            "w = {}",
+            st.w
+        );
+    }
+
+    #[test]
+    fn region5_joins_region2_at_the_boundary() {
+        // Both regions use the same ideal+residual Gibbs structure; at
+        // T = 1073.15 K they must agree closely (independent fits, so
+        // not bit-exact, but the physical state is continuous).
+        let p = 10.0e6;
+        let r2 = region2(T_MAX_REGION2, p).unwrap();
+        let r5 = region5(T_MIN_REGION5 + 1e-6, p).unwrap();
+        assert!(
+            (r2.h - r5.h).abs() / r2.h < 1e-4,
+            "h2={}, h5={}",
+            r2.h,
+            r5.h
+        );
+        assert!(
+            (r2.s - r5.s).abs() / r2.s < 1e-4,
+            "s2={}, s5={}",
+            r2.s,
+            r5.s
+        );
+    }
+
+    #[test]
+    fn region5_rejects_out_of_domain() {
+        assert!(region5(1000.0, 1.0e6).is_err()); // below region 5
+        assert!(region5(2300.0, 1.0e6).is_err()); // above region 5
+        assert!(region5(1500.0, 60.0e6).is_err()); // above 50 MPa
+        assert!(region5(1500.0, 0.0).is_err());
     }
 }

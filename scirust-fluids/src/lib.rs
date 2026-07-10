@@ -15,7 +15,7 @@
 //! | [`boundary_layer`] | Blasius laminar & 1/7-power turbulent flat-plate results |
 //! | [`compressible`] | speed of sound, isentropic ratios, `A/A*`, normal-shock jump relations |
 //! | [`channel`] | Manning's equation, critical & normal depth, specific energy, hydraulic jump |
-//! | [`network`] | looped pipe networks solved by the Hardy Cross method |
+//! | [`network`] | looped pipe networks solved by the Hardy Cross method, coupled to [`pipe::friction_factor`] for physically-sized pipes |
 //!
 //! ## Guarantees
 //!
