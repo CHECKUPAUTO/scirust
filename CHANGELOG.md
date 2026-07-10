@@ -47,6 +47,48 @@ du LIVESTATE sont livrés :
 - Bilan : scirust-fluids 54 tests (+6), scirust-thermo 57 tests (+18),
   clippy `-D warnings` propre, rustfmt appliqué.
 
+### Ajouté — preuve CR totale, all-reduce arbre fixe, basses précisions (volet 115)
+- **Arrondi correct sur 100 % du domaine f32** pour les 7 transcendantales
+  portables : les 465 entrées fautives identifiées au volet 114 (sorties
+  vérifiées par l'oracle en précision arbitraire) sont servies par des
+  **tables d'exceptions** consultées avant le chemin analytique — résultat de
+  classe RLIBM (CR sur tout le domaine), obtenu par vérification exhaustive ;
+  la preuve formelle machine-checkée des bornes reste l'étape suivante
+  (documenté). Catégorie `oracle` dans le certificat ; empreintes
+  dense/exhaustives re-récoltées.
+- **`scirust-core::tree_allreduce`** : all-reduce **à arbre fixe**,
+  transport-agnostique — absorption des enfants dans l'ordre de l'arbre
+  (hors-ordre mis en attente) ⇒ résultat indépendant du timing ; avec
+  `ExactSum` (Kulisch), indépendant aussi de la topologie et correctement
+  arrondi. Démontré sous gigue adversariale (Philox) sur n ∈ {2,3,5,8,16}.
+  Le jalon « réduction multi-nœud à arbre fixe » du GROWTH_PLAN.
+- **`scirust-core::lowprec`** : bf16/f16/FP8 (OCP E4M3/E5M2) reproductibles —
+  conversions RNE bit-manipulées (portables par construction, roundtrips
+  exhaustifs 65 536 + 256 codes, frontières au milieu exact), **arrondi
+  stochastique contre-basé** (Philox : reproductible, order-independent,
+  non biaisé), `gemm_bf16_exact` (produits exacts, accumulation ordre fixe).
+  Explicitement hors périmètre de RepDL.
+### Ajouté — 4 lois discrètes supplémentaires (`scirust-stats::discrete`, suite du volet loterie)
+- Comble les écarts vs SciPy listés « suites possibles » dans la PR #280 :
+  **`NegativeBinomial`** (échecs avant le r-ième succès, convention
+  `scipy.stats.nbinom`, r réel autorisé — paramétrisation de Pólya pour la
+  régression de comptage surdispersée ; CDF fermée par bêta incomplète
+  régularisée I_p(r, k+1), survie directe sans `1 − cdf`),
+  **`BetaBinomial`** (binomiale à p Beta(a, b)-distribué — proportions
+  surdispersées ; a = b = 1 redonne l'uniforme discrète, testé),
+  **`Zipfian`** finie sur les rangs 1..=n (`scipy.stats.zipfian` ;
+  normalisation harmonique généralisée sommée petits-termes-d'abord en ordre
+  fixe ; s = 0 = uniforme ; la zêta à support infini nécessiterait ζ de
+  Riemann et n'est volontairement pas approximée), et **`Skellam`**
+  (différence de deux Poisson — support ℤ entier, donc API `i64` propre hors
+  du trait u64 ; pmf/cdf/sf par convolution déterministe à troncature fixe
+  sur la base `scirust-special` plutôt que par Bessel I_k, ~1e-12 vs SciPy ;
+  tirage déterministe = différence de deux tirages Poisson inverse-CDF).
+- Validation : oracles SciPy 1.17.1 en dur dans les tests (pmf/cdf/sf/ppf,
+  moments), invariants Σ pmf = 1, symétrie de Skellam à taux égaux,
+  cdf + sf = 1 sur les deux queues ℤ, r = 1 ⇒ géométrique décalée.
+  40 tests unitaires + doctest au total sur le crate, clippy propre.
+
 ### Ajouté — mécanique des fluides & thermodynamique (`scirust-fluids`, `scirust-thermo`)
 - **`scirust-fluids`** — mécanique des fluides déterministe (Rust pur, zéro
   dépendance, `forbid(unsafe_code)`, entrées validées → `FluidsError` typé) :
