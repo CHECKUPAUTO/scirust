@@ -1,0 +1,533 @@
+% =============================================================================
+% Correctness '26 (SC26) — soumission papier régulier (7-8 pages hors réfs).
+% Compiler : latexmk -pdf main.tex  (ou Overleaf, classe acmart standard).
+% Deadline : 23 juillet 2026 ; notification : 1er septembre 2026.
+% TODO avant soumission : affiliation exacte de l'auteur ; dates/ISBN de la
+% conférence (fournis par les organisateurs à l'acceptation) ; lien d'artefact
+% public si le dépôt est ouvert aux relecteurs.
+% =============================================================================
+\documentclass[sigconf,review]{acmart}
+
+% Le workshop est single-blind (auteurs visibles) sauf indication contraire du
+% CFP — si le CFP exige l'anonymat, remplacer par [sigconf,review,anonymous].
+
+\setcopyright{none}
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+
+\acmConference[Correctness '26]{10th International Workshop on Software
+Correctness for HPC Applications}{November 2026}{Chicago, IL, USA}
+\acmBooktitle{Correctness '26: 10th International Workshop on Software
+Correctness for HPC Applications, November 2026, Chicago, IL, USA}
+
+\usepackage{booktabs}
+
+\begin{document}
+
+\title{Determinism as Certification Evidence: A Fully Auditable Rust Stack
+for Bit-Reproducible Training and Quantized Edge Inference}
+
+\author{Tarek Zekriti}
+\affiliation{%
+  \institution{Memorithm}% TODO: affiliation exacte
+  \city{}\country{France}}
+\email{zekrititarek@gmail.com}
+
+\begin{abstract}
+Mainstream deep-learning frameworks treat numerical determinism as a
+best-effort execution mode: opt-in, configuration-scoped, and unverified.
+For safety-critical and regulated deployments, this is insufficient ---
+auditors need \emph{evidence}, not modes. We present the determinism
+architecture of SciRust, a self-contained deep-learning stack written
+entirely in Rust with no foreign-function interface in the compute path,
+designed around a single discipline: \emph{every reproducibility claim ships
+with an executable test}, and any claim without one is removed. The stack
+offers a spectrum of numeric regimes (exact integer and fixed point,
+cross-platform by construction; sanitized \texttt{f32}, deterministic within
+an architecture); data-parallel training whose fixed worker-order reduction
+is bit-identical for 1/2/4/8 threads and equal to the sequential path,
+CI-tested through a real autograd backward and composed over multi-step SGD;
+an inference runtime that emits audit artifacts (64-bit output fingerprints
+stable across thread counts and processes, manifest-based model
+reconstruction, tamper detection, hash-chained logs); and a fully-integer
+int8 pipeline whose NEON kernel is bit-exact against its scalar reference on
+embedded ARM. We measure the cost of the deterministic reduction pattern on
+an NVIDIA Jetson AGX Thor and on x86-64: it is free up to two threads
+(0.93--1.01$\times$ the time of a nondeterministic arrival-order baseline)
+and costs at most 11\% at eight threads, while the baseline observably
+diverges; the fixed-order results are, moreover, bit-identical
+\emph{across} the two architectures. Finally, a lexical CI gate blocks
+subnormal ``dead guards'' from entering the GPU-sanitized path, and we
+report honestly the negative result of a 22-repository, 9.2-million-line
+field study of that bug class.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10011007.10011074.10011099</concept_id>
+<concept_desc>Software and its engineering~Software verification and validation</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10010147.10010169</concept_id>
+<concept_desc>Computing methodologies~Parallel computing methodologies</concept_desc>
+<concept_significance>300</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Software and its engineering~Software verification and validation}
+\ccsdesc[300]{Computing methodologies~Parallel computing methodologies}
+
+\keywords{reproducibility, determinism, floating point, deep learning,
+certification, quantization, edge inference, Rust}
+
+\maketitle
+
+\section{Introduction}
+
+When a machine-learning component enters a safety-critical or regulated
+system --- industrial monitoring, navigation, functional safety --- the
+question asked by an assessor is not \emph{``is the computation usually the
+same?''} but \emph{``can you prove what was computed?''}. Floating-point
+addition is not associative~\cite{goldberg1991}, so any framework that lets
+a scheduler decide the order of a parallel reduction produces results that
+vary with thread count, machine load, and hardware generation. Mainstream
+frameworks acknowledge the problem with best-effort switches such as
+PyTorch's \texttt{torch.use\_deterministic\_algorithms}~\cite{pytorchdet},
+which pins kernels to deterministic variants \emph{for a fixed
+configuration} --- same build, same device, same thread count --- but
+guarantees nothing across thread counts or platforms, and is not itself
+accompanied by a test suite an auditor could re-run.
+
+This paper describes a different contract, implemented in
+SciRust\footnote{Artifact: the SciRust repository; all test names, file
+paths, and commands cited in this paper refer to it. TODO: public artifact
+link for reviewers.}, a deep-learning and scientific-computing stack written
+entirely in safe-by-default Rust with \emph{zero} foreign-function calls in
+the compute path. The contract is: \textbf{determinism is not an execution
+mode but a piece of certification evidence}. Concretely, (i) every
+determinism claim made by the project maps to a named, executable test or
+measurement protocol --- the mapping is a maintained table, and claims
+without executable evidence are deleted rather than published; (ii) the
+runtime \emph{emits} evidence at inference time (output fingerprints,
+hash-chained logs, reconstruction manifests) so that determinism can be
+checked after the fact by a third party; and (iii) the numerical
+preconditions of determinism are themselves guarded mechanically in CI.
+
+We make the following contributions:
+\begin{itemize}
+  \item a three-regime numeric architecture (exact integer / fixed-point,
+    sanitized \texttt{f32}, raw float) with an explicit, tested
+    \emph{zero-cover} invariant $\sigma$ per regime
+    (Section~\ref{sec:regimes});
+  \item data-parallel training whose gradient reduction is pinned to a fixed
+    worker order: bit-identical for 1/2/4/8 threads, equal to the sequential
+    path, tested in CI through a real reverse-mode autograd backward, and
+    shown to compose over a multi-step SGD trajectory
+    (Section~\ref{sec:training});
+  \item an inference runtime that treats determinism as an \emph{artifact}:
+    64-bit output fingerprints invariant across thread counts and process
+    boundaries, manifest-based reconstruction with tamper detection, and a
+    deterministic int8 pipeline whose ARM NEON kernel is bit-exact against
+    its scalar reference on the target device (Sections~\ref{sec:inference}
+    and~\ref{sec:int8});
+  \item a mechanized CI gate against \emph{dead guards} --- subnormal
+    \texttt{f32} guard constants that flush to zero under FTZ/DAZ --- and an
+    honest negative result: a lexical field study of 22 public numerical
+    codebases (9.16\,MLOC) found the threat environment (fast-math/FTZ
+    build flags in 9 of 22 projects) but zero confirmed instances of the
+    bug class (Section~\ref{sec:guards});
+  \item a measured answer to \emph{``what does determinism cost?''} on edge
+    hardware: on a 14-core Jetson AGX Thor the fixed-order reduction is
+    free up to 2 threads and costs 6--11\% at 8 threads relative to a
+    nondeterministic arrival-order baseline --- which we catch producing
+    divergent results --- and its outputs are bit-identical across x86-64
+    and aarch64 (Section~\ref{sec:cost}).
+\end{itemize}
+
+Table~\ref{tab:claims} summarizes the claim-to-evidence mapping that
+underpins the paper: each row is a claim made here, the exact test or
+protocol that substantiates it, and where it runs.
+
+\begin{table*}
+\caption{Claims-to-evidence mapping (excerpt). [CI] = enforced by the
+project's continuous integration on every commit; [protocol] = documented
+measurement run (wall-clock or target-hardware bound, reproducible but not
+CI-gated by nature).}
+\label{tab:claims}
+\small
+\begin{tabular}{llll}
+\toprule
+\# & Claim & Evidence (test / binary) & Where \\
+\midrule
+T1 & one training batch is bit-identical for 1/2/4/8 threads $=$ sequential &
+\texttt{train\_batch\_threaded\_is\_thread\_count\_invariant} & [CI] \\
+T2 & invariance holds through a real autograd backward &
+\texttt{parallel\_tape\_training\_is\_deterministic\_across\_threads} & [CI] \\
+T3 & invariance composes over a multi-step SGD weight trajectory &
+\texttt{multi\_step\_training\_is\_thread\_count\_invariant} & [CI] \\
+T4 & all-reduce averages bit-exactly for any thread count &
+\texttt{all\_reduce\_averages\_across\_threads\_bit\_exactly} & [CI] \\
+R1 & artifacts reconstruct from manifest; tampering is detected &
+\texttt{emit\_then\_verify\_roundtrip\_and\_tamper\_detection} & [CI] \\
+R4 & forward fingerprint invariant across rayon pools of 1/2/4/8 threads &
+\texttt{forward\_fingerprint\_is\_thread\_count\_invariant} & [CI] \\
+Q1 & int8 linear layer matches fp32 within tolerance, deterministically &
+\texttt{test\_quantized\_linear\_\{matches\_fp32,deterministic\}} & [CI] \\
+Q3 & NEON int8 kernel bit-exact vs.\ scalar reference &
+\texttt{neon\_matches\_scalar\_bit\_exact} & [protocol, on-target] \\
+S1 & sanitize threshold $=\sigma=$ \texttt{f32::MIN\_POSITIVE}, pinned by test &
+\texttt{sanitize\_threshold\_matches\_sigma\_sanitized\_f32} & [CI] \\
+S2 & no sub-$\sigma$ f32 guard can enter the sanitized path &
+\texttt{epsilon-audit -{}-check} (CI job) & [CI] \\
+A1 & hash-chained audit log detects link tampering &
+\texttt{test\_chain\_tamper\_detection} & [CI] \\
+O1 & cost of fixed-order vs.\ arrival-order reduction &
+\texttt{bench\_reduction\_overhead} (x86-64 + Jetson AGX Thor) & [protocol] \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Background and related work}
+\label{sec:related}
+
+\paragraph{Classical floating-point reproducibility.}
+The pitfalls are well documented. Goldberg~\cite{goldberg1991} establishes
+the foundations: floating-point addition is not associative and two
+mathematically equivalent evaluations may differ bit-for-bit.
+Monniaux~\cite{monniaux2008} shows the divergence is also \emph{material and
+compilational}: extended-precision x87 registers, FMA contraction,
+flush-to-zero (FTZ/DAZ) modes, and fast-math flags make the same source
+produce different results on different platforms and compilers. These two
+references ground our position: bit-reproducibility is never a default; it
+is a property one must \emph{construct and then prove by execution}. On the
+construction side, ReproBLAS~\cite{demmel2013} is the classical foundation:
+reproducible summations whose result is \emph{independent of operand
+order}, insulating reductions from parallel scheduling. SciRust takes the
+other route to the same invariant: instead of making the sum
+order-insensitive, it \emph{pins the order} (fixed worker-order reduction,
+sequential orthogonalizations, fixed iteration budgets). Both deliver
+bit-identical results under parallelism; order-pinning is simpler to audit,
+at the price of a sequentialization point --- which we measure rather than
+deny (Section~\ref{sec:cost}).
+
+\paragraph{Determinism for deep learning.}
+PyTorch's deterministic mode~\cite{pytorchdet} provides run-to-run
+determinism at fixed configuration; it is neither bit-identical across
+thread counts nor across platforms, and some operations simply have no
+deterministic variant. EasyScale~\cite{li2022easyscale} extends the scope to
+elastic distributed training: bit-identical results under varying numbers of
+heterogeneous GPUs, by preserving per-logical-worker state and pinning the
+effective reduction order --- proof that parallelism-degree invariance is
+attainable at scale with dedicated engineering.
+RepDL~\cite{xie2025repdl} is, to our knowledge, the strongest work on the
+portability axis: bitwise-reproducible training and inference \emph{across}
+platforms (different CPUs/GPUs), via correctly-rounded operations and order
+invariance. The respective positioning deserves plain statement. On the
+cross-platform \texttt{float32} axis, \textbf{RepDL is stronger than
+SciRust's sanitized-\texttt{f32} regime}, which is deterministic only within
+one architecture. Conversely, RepDL is an overlay on a PyTorch runtime ---
+a C++/Python trusted computing base of millions of lines outside the audit
+perimeter --- limited to a \texttt{float32} operator subset, without
+low-precision support (bf16/int8 explicitly out of scope), and its
+technical report contains no evaluation section (no benchmark, no measured
+overhead). SciRust occupies the complementary niche: a stack auditable
+end-to-end with no FFI in the compute path, where determinism is also an
+\emph{evidence artifact} (fingerprints, hash-chained logs, manifests, one
+test per claim), and a fully-integer int8 pipeline --- bit-exact
+cross-platform by construction --- that a correctly-rounded-\texttt{float32}
+approach does not cover. The two works are less competitors than
+orthogonal: RepDL strengthens the \emph{numerical kernel} of an existing
+ecosystem; SciRust rebuilds the entire \emph{chain of trust} above a
+deliberately simpler kernel.
+
+\paragraph{Cross-vendor GPU divergence.}
+Zahid et al.~\cite{zahid2024gpu} document numerical differences between
+NVIDIA and AMD GPUs running the same computation, aggravated by the fact
+that floating-point exceptions are not signaled on GPUs: underflows,
+divergent roundings, and subnormal behaviors pass silently. This is
+precisely the regime SciRust's sanitized path neutralizes \emph{within} an
+architecture (Section~\ref{sec:regimes}): flushing every subnormal removes
+from the compute path the value class whose treatment differs most across
+hardware and driver FTZ/DAZ modes.
+
+\section{A spectrum of deterministic regimes}
+\label{sec:regimes}
+
+SciRust does not promise one determinism; it offers three regimes with
+different, explicitly stated guarantees:
+
+\begin{enumerate}
+  \item \textbf{Exact integer and fixed-point} (Q15.16, Q31.32): bit-exact
+    across platforms by construction --- integer arithmetic has no rounding
+    modes to disagree on. This regime carries the quantized inference path
+    (Section~\ref{sec:int8}).
+  \item \textbf{Sanitized \texttt{f32}}: every value entering the
+    GPU-oriented path is passed through \texttt{sanitize\_f32}, which
+    flushes all subnormals ($|x| <$ \texttt{f32::MIN\_POSITIVE}) to zero.
+    Deterministic within one architecture; portable in behavior because the
+    value class on which drivers and FTZ/DAZ modes disagree most
+    \cite{monniaux2008,zahid2024gpu} is removed at the source.
+  \item \textbf{Raw \texttt{f32}/\texttt{f64}}: measured, not guaranteed.
+\end{enumerate}
+
+Each regime has a named \emph{zero cover} $\sigma$: the smallest strictly
+positive value representable \emph{in that regime} (the integer $1$;
+$2^{-16}$; \texttt{f32::MIN\_POSITIVE} for the sanitized path; the smallest
+subnormal for raw floats). The central invariant, encoded in a dedicated
+leaf crate (\texttt{scirust-sigma}, standard library only), is that
+\emph{an anti-zero guard below $\sigma$ is not a guard}: on the sanitized
+path, a denominator floor of, say, $10^{-40}$ is flushed to zero before it
+can protect anything, silently re-admitting the division by zero it claimed
+to prevent. The sanitize threshold and the $\sigma$ constant are pinned to
+each other by an alignment test (S1 in Table~\ref{tab:claims}) that fails
+if either moves alone.
+
+The trusted computing base is deliberately small: the Rust compiler and
+standard library, a locked dependency graph (\texttt{Cargo.lock}, license
+and advisory audit in CI, CycloneDX SBOM), and no C, C++, CUDA, or Fortran
+source anywhere in the compute path. An auditor who wants to know what
+\texttt{x.max(g)} does on the sanitized path can read the one function that
+defines it.
+
+\section{Bit-reproducible data-parallel training}
+\label{sec:training}
+
+The data-parallel trainer runs $N$ workers on OS threads with work stealing
+via an atomic counter --- scheduling is free --- but each worker writes its
+gradient contribution into \emph{its own indexed slot}, and the reduction
+always walks the slots in worker order $0,1,\dots,N{-}1$. Since float
+addition is not associative, a reduction that accumulated ``as workers
+finish'' would depend on the scheduler; this one does not. The result is
+bit-identical for 1, 2, 4, and 8 threads and equal to the sequential path.
+
+Four CI tests pin the property (T1--T4 in Table~\ref{tab:claims}). T1 uses
+contributions deliberately order-sensitive ($\pm 10^{16}$ magnitudes mixed
+with unit magnitudes) so that any reordering flips output bits: the test
+would detect a single swapped addition. T2 replaces the synthetic
+contributions with a real reverse-mode autograd backward on per-thread
+tapes. T3 closes the composition argument: a full multi-step SGD loop
+(shared linear model, per-worker shards, MSE loss, real autograd) produces
+a bit-identical weight trajectory for 1/2/4 threads --- batch invariance
+composes over training, so the guarantee does not depend on the number of
+layers or steps. T4 pins the same property for the all-reduce primitive.
+
+The design contrast with ReproBLAS~\cite{demmel2013} is worth restating:
+order-insensitive summation buys freedom of schedule at the cost of a more
+sophisticated accumulator; order-pinning buys a trivially auditable
+accumulator at the cost of a fixed reduction point. Section~\ref{sec:cost}
+quantifies that cost and finds it small --- and negative in some regimes.
+
+\section{Inference as an audit artifact}
+\label{sec:inference}
+
+A deterministic forward pass is only useful to an auditor if its
+determinism is \emph{observable}. The runtime therefore emits evidence:
+
+\paragraph{Output fingerprints.}
+The forward pass of a fixed model over fixed inputs is folded, bit-for-bit
+(\texttt{to\_bits}, not tolerance), into a 64-bit FNV fingerprint. On the
+reference MLP (784--256--10), 5\,120 logit comparisons showed zero
+divergence, and the fingerprint is identical across repeated calls, across
+thread counts, and across separate processes. A CI test (R4) rebuilds the
+model under rayon pools of 1/2/4/8 threads --- with synthetic inputs
+derived from integer arithmetic only, hence portable --- and asserts
+fingerprint equality; this turns the structural argument (row-parallel
+matmul with fixed intra-row order) into a regression trap.
+
+\paragraph{Reconstruction and tamper evidence.}
+A model artifact is a plain-text manifest plus a weight file; an emitted
+artifact must reconstruct and re-produce its fingerprint, and any
+single-byte tampering of weights, manifest, or output must be rejected
+(tests R1 and the \texttt{vinfer} soundness suite: substituted outputs,
+wrong model commitments, and tampered payloads are all refused). Audit
+trails are hash-chained: each entry commits to its predecessor, so link
+tampering is detected (A1).
+
+\paragraph{Bounded latency.}
+Determinism of \emph{values} says nothing about time. The measured tail on
+the reference MLP is p99/p50 $= 1.15$ (1.20 for a small CNN) under the
+documented protocol --- wall-clock properties are measured in protocol runs,
+never asserted in CI, where they would be flaky by nature.
+
+\section{Deterministic int8 for the edge}
+\label{sec:int8}
+
+The quantized path is the regime where cross-platform bit-exactness is
+free: weight-only int8 is lossless w.r.t.\ the quantized model and
+4$\times$ smaller; the calibrated pipeline is fully integer (no float in
+the inner loop); and the portable artifact (QSR1/QModel) round-trips
+deterministically (R2, Q1, Q2). On ARM, a NEON int8 kernel accelerates the
+integer matmul roughly an order of magnitude over the scalar reference
+\emph{at bit-exact equality} --- the test \texttt{neon\_matches\_scalar\_%
+bit\_exact} compares full output matrices, including the non-multiple-of-16
+tail, and was executed natively on the evaluation target (Jetson AGX Thor,
+Section~\ref{sec:cost}) rather than only cross-compiled.
+
+\section{Guarding the guards: the $\sigma$ gate and a field study}
+\label{sec:guards}
+
+Section~\ref{sec:regimes} defined the dead-guard hazard: an anti-zero guard
+constant below $\sigma$. Two death mechanisms are distinguished:
+\textbf{M1 (flush)} --- a subnormal \texttt{f32} literal
+($0 < |v| < 1.17549435\cdot10^{-38}$) is flushed to zero under FTZ/DAZ, so
+\texttt{x.max(g)} degenerates to \texttt{x.max(0)}; and \textbf{M2
+(inversion)} --- even without FTZ, if $g < 1/\texttt{f32::MAX} \approx
+2.94\cdot10^{-39}$ then $1.0/(\texttt{x.max}(g))$ overflows to infinity.
+SciRust's CI runs a lexical auditor (\texttt{epsilon-audit -{}-check}) that
+fails the build if any \texttt{f32} literal below $\sigma$ appears outside
+tests in the sanitized-path sources; ambiguous typings warn without
+failing, so the gate has no false-positive pressure to be disabled.
+
+\paragraph{Does the bug class exist in the wild?}
+To find out whether this gate guards against a real-world failure mode or a
+theoretical one, we mined 22 public numerical codebases --- among them
+llama.cpp, ggml, PyTorch (\texttt{aten}, \texttt{c10}), TensorFlow core
+kernels, ONNX Runtime, OpenBLAS, Eigen, CUTLASS, ncnn, MNN, TVM, and the
+Rust ecosystem (ndarray, nalgebra, faer, tract, wgpu, glam, burn, candle)
+--- 22\,450 files and 9\,160\,848 lines at pinned commits, with a
+multi-language lexical scanner (Rust, C/C++/CUDA/OpenCL, WGSL/GLSL/Metal
+shaders), documented per-language \texttt{f32}-typing heuristics, and
+threshold comparison on the value \emph{as materialized in
+\texttt{f32}}\footnote{The common literal \texttt{1.17549435e-38} parses in
+double precision to just below the exact \texttt{f32::MIN\_POSITIVE}, but
+rounds in \texttt{f32} exactly to it --- a valid guard. Comparing decimal
+values instead of materialized values would flag it falsely.}. Every
+candidate was manually reviewed in context.
+
+The result is negative, and we report it as such: \textbf{zero confirmed
+dead guards}. All 14 raw candidates were deliberate test values (subnormal
+tolerance probes in ndarray's approx-comparison tests; named
+\texttt{*\_SUBNORMAL\_F32} constants in wgpu/naga's WGSL lexer tests). The
+\emph{threat environment}, however, is real: 9 of the 22 projects enable
+fast-math or explicit FTZ control in their build files (ggml/llama.cpp CPU
+and CUDA flags, PyTorch's QNNPACK, TensorFlow's generated-kernel
+\texttt{ftz} switches, among others). Our reading: mature, widely reviewed
+numerical code does not currently exhibit this bug class at the
+mechanically detectable level; the $\sigma$ gate is therefore positioned as
+\emph{prevention} --- it keeps a cheap invariant true forever in a codebase
+whose sanitized path makes the hazard structural --- not as a response to
+observed prevalence. Study methodology, per-repository commit hashes,
+counts, and all candidate classifications are in the artifact
+(\texttt{docs/DEAD\_GUARDS\_STUDY.md}).
+
+\section{The measured cost of determinism}
+\label{sec:cost}
+
+\paragraph{Benchmark design.}
+We isolate the pattern that Section~\ref{sec:training} standardizes: $N$
+workers each produce a 100\,352-element \texttt{f32} gradient (deterministic
+integer-mixer content; magnitudes alternate between $\pm 10^{16}$ and
+$\pm 1$ across workers so that addition order is observable in the output
+bits). Variant~A (\emph{fixed order}, the trainer's pattern) has each
+worker write its own indexed slot, then reduces slots in order $0..N$.
+Variant~B (\emph{arrival order}, the nondeterministic baseline) has workers
+send results over a channel, accumulated in completion order. Each variant
+runs 30 repetitions per thread count; we report medians and fold each
+reduced vector into a 64-bit bit-fingerprint. Wall-clock benches run under
+a documented protocol (release build, pinned clocks) and are never CI
+gates.
+
+\begin{table}
+\caption{Fixed-order (deterministic) vs.\ arrival-order (nondeterministic)
+reduction. Medians over 30 reps; overhead $=$ fixed/arrival time ratio
+(ranges over 3 protocol runs). ``div.'' $=$ distinct arrival-order
+fingerprints observed in 30 reps (fixed-order: always exactly 1).}
+\label{tab:cost}
+\small
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{Jetson AGX Thor (14 cores)} &
+\multicolumn{2}{c}{x86-64 (4 cores)} \\
+Threads & overhead & div.\ (B) & overhead & div.\ (B) \\
+\midrule
+1 & 0.97--1.01$\times$ & 1 & 0.93--0.97$\times$ & 1 \\
+2 & 0.93--0.94$\times$ & 1 & 0.90--0.91$\times$ & 1 \\
+4 & 1.00--1.03$\times$ & 1 & 0.76--0.78$\times$ & 1 \\
+8 & 1.06--1.10$\times$ & 1--2 & 0.64--0.85$\times$ & 3--7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Results.}
+Table~\ref{tab:cost} summarizes runs on the evaluation platform --- an
+NVIDIA Jetson AGX Thor developer kit (14-core aarch64, L4T R38.4.0, MAXN
+power mode, clocks pinned) --- and on a 4-core x86-64 host. Three findings:
+
+\begin{enumerate}
+  \item \textbf{Determinism is essentially free at moderate parallelism.}
+    Up to two threads the fixed-order variant is \emph{faster} than the
+    baseline on both platforms (indexed slots avoid channel transfers and
+    contention); at four threads the two are within 3\% on Thor; at eight
+    threads (oversubscription territory on the 4-core x86 host, half the
+    cores on Thor) the deterministic pattern costs 6--11\% on Thor while
+    remaining faster on x86.
+  \item \textbf{The baseline's nondeterminism is not hypothetical.} At
+    eight threads the arrival-order variant produced up to 2 distinct
+    result fingerprints per 30 repetitions on Thor and up to 7 on the x86
+    host --- with identical inputs. The fixed-order variant produced
+    exactly one fingerprint per configuration, every time, on both
+    machines and across independent protocol runs.
+  \item \textbf{Fixed order buys cross-platform bit-identity.} The four
+    fixed-order fingerprints (one per thread count) are \emph{identical on
+    x86-64 and aarch64}: \texttt{0x60daf62cf2cb2c29},
+    \texttt{0x9bf7c3f3e9b18898}, \texttt{0xd5b8e15fc7c028e6},
+    \texttt{0x7e99a9d050da4d55}. For IEEE-754 basic operations executed in
+    a pinned order without FMA contraction or reassociation this is the
+    expected behavior --- but for a certification argument, \emph{measured}
+    beats \emph{expected}, and it delimits sharply which part of the
+    cross-platform story needs correctly-rounded libraries
+    (transcendentals) and which part is already free (pinned-order
+    add/multiply reductions).
+\end{enumerate}
+
+\paragraph{Threats to validity.}
+This is a micro-benchmark of the reduction pattern, not of end-to-end
+training throughput; worker payload generation stands in for
+forward/backward compute. Wall-clock figures come from one machine per
+architecture, under pinned clocks, and are reported as ranges over
+independent protocol runs rather than single numbers. The cross-platform
+fingerprint identity covers pinned-order add/multiply reductions --- it
+does not extend to transcendental functions, whose correct rounding in
+pure Rust is future work (Section~\ref{sec:limits}).
+
+\section{Limitations and future work}
+\label{sec:limits}
+
+Our sanitized-\texttt{f32} regime is deterministic within an architecture;
+RepDL's correctly-rounded approach~\cite{xie2025repdl} is stronger on the
+cross-platform \texttt{float32} axis, and closing that gap in pure Rust ---
+correctly-rounded transcendentals without re-importing a C TCB --- is the
+natural next step; Section~\ref{sec:cost} shows the reduction layer already
+crosses architectures bit-exactly. The operator set is a deliberately
+oracle-gated subset (each op admitted with a gradient check or bit-exact
+reference test), published as a coverage table rather than hidden; SciRust
+is a reference stack for auditable deployments, not a drop-in replacement
+for production frameworks. The dead-guard study is lexical --- no semantic
+type inference, no macro expansion, no constant propagation --- and its
+negative result is an upper bound only on \emph{mechanically detectable}
+instances of the class. Finally, multi-node training with a fixed reduction
+tree (extending thread-level invariance across machines) remains open.
+
+\section{Conclusion}
+
+Certification does not ask for fast nondeterminism smoothed over by
+tolerance; it asks for evidence. We showed that a deep-learning stack can
+make bit-reproducibility a first-class, \emph{tested} property --- pinned
+reduction orders with CI regression traps, inference that emits fingerprints
+and tamper-evident artifacts, an int8 path that is exact by construction,
+and a CI gate that keeps the numerical preconditions true --- and that the
+measured price on real edge hardware is between negative and 11\%. The
+discipline that we would most like to see travel is not any single
+mechanism but the contract behind Table~\ref{tab:claims}: no determinism
+claim without an executable witness.
+
+\begin{acks}
+% TODO: remerciements éventuels.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}
