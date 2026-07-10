@@ -30,10 +30,19 @@
   comprises) : exp 99,99915 % (36 512 non certifiées), ln 99,99998 % (695),
   tanh (214), sigmoid (1 007), sin (3 630), cos (3 680), erf (49 244 — zone
   de cancellation x∈[2,4], borne par entrée volontairement large). Les
-  ~95 000 non certifiées se tranchent hors ligne en précision arbitraire
-  (Decimal 60 chiffres, milieux exacts en rationnels) — vérification en
-  cours, verdicts au commit suivant. L'évaluateur interne est revalidé
-  contre la fonction expédiée sur chacune des 30 milliards d'entrées.
+  94 982 non certifiées ont été tranchées hors ligne en précision arbitraire
+  (Decimal 60 chiffres, milieux exacts en rationnels — script corrigé pour
+  le seuil d'overflow 2¹²⁸−2¹⁰³ et l'entrée f32 exacte via son rationnel).
+  **VERDICT FINAL : 94 517 sont en fait correctement arrondies ; il reste
+  465 entrées fidèles à 1 ulp — ZÉRO cas au-delà — sur les 30 064 771 072
+  évaluations.** Par fonction (misroundings / 2³²) : exp 2, ln 5, tanh 20,
+  sigmoid 78, sin 2, cos 6, erf 352. Taux global : 1,5×10⁻⁸. Comme les
+  fonctions sont bit-identiques inter-plates-formes (contrats exhaustifs),
+  ce verdict vaut sur TOUTES les plates-formes conformes. Claim mise à jour
+  dans la doc du module : « correctement arrondi pour 99,9999985 % des
+  entrées, vérifié exhaustivement ; le reste fidèle (1 ulp), listé ».
+  L'évaluateur interne est revalidé contre la fonction expédiée sur chacune
+  des 30 milliards d'entrées.
 
 ## Session 2026-07-10 — volet 113 : entraînement 100 % portable + tanh/sigmoid (lot 1 carto)
 - **Contexte** : PR #272 (volet 112) MERGÉE ; branche repartie de master. Programme
