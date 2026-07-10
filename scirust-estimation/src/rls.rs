@@ -35,6 +35,13 @@ pub struct RlsFilter {
     w: Vec<f64>,
     /// Inverse input covariance (n_in × n_in), row-major.
     p: Vec<f64>,
+    /// Scratch: gain numerator `P·u` (n_in). Persistent so [`Self::update`]
+    /// performs **zero heap allocations** per sample.
+    #[serde(skip, default)]
+    scratch_pu: Vec<f64>,
+    /// Scratch: a-priori error `e = d − ŷ` (n_out), also the return storage.
+    #[serde(skip, default)]
+    scratch_e: Vec<f64>,
 }
 
 impl RlsFilter {
@@ -58,6 +65,8 @@ impl RlsFilter {
             lambda,
             w,
             p,
+            scratch_pu: vec![0.0; n_in],
+            scratch_e: vec![0.0; n_out],
         }
     }
 
@@ -77,48 +86,58 @@ impl RlsFilter {
 
     /// Filter one sample: predict `d̂ = w · u`, update weights using target `d`.
     ///
-    /// Returns the prediction error `e = d - d̂`.
+    /// Returns the a-priori prediction error `e = d - d̂` (a view into internal
+    /// storage, valid until the next call). The hot loop performs **no heap
+    /// allocation**: all intermediates live in persistent scratch buffers, and
+    /// the Kalman gain `k = pu/denom` is folded into the updates on the fly.
     #[allow(clippy::needless_range_loop)]
-    pub fn update(&mut self, u: &[f64], d: &[f64]) -> Vec<f64> {
+    pub fn update(&mut self, u: &[f64], d: &[f64]) -> &[f64] {
         assert_eq!(u.len(), self.n_in);
         assert_eq!(d.len(), self.n_out);
+        // One-time resize after deserialization (scratch is #[serde(skip)]).
+        if self.scratch_pu.len() != self.n_in
+        {
+            self.scratch_pu.resize(self.n_in, 0.0);
+        }
+        if self.scratch_e.len() != self.n_out
+        {
+            self.scratch_e.resize(self.n_out, 0.0);
+        }
 
-        // Prediction: d̂ = w · u
-        let mut d_hat = vec![0.0; self.n_out];
+        // Error: e = d - w·u  (prediction folded in).
         for i in 0..self.n_out
         {
             let row_start = i * self.n_in;
+            let mut d_hat = 0.0;
             for j in 0..self.n_in
             {
-                d_hat[i] += self.w[row_start + j] * u[j];
+                d_hat += self.w[row_start + j] * u[j];
             }
+            self.scratch_e[i] = d[i] - d_hat;
         }
 
-        // Error: e = d - d̂
-        let e: Vec<f64> = d.iter().zip(&d_hat).map(|(a, b)| a - b).collect();
-
-        // Gain: k = P·u / (λ + uᵀ·P·u)
-        let mut pu = vec![0.0; self.n_in];
+        // Gain numerator: pu = P·u ; denominator: λ + uᵀ·P·u.
         for i in 0..self.n_in
         {
             let row_start = i * self.n_in;
+            let mut acc = 0.0;
             for j in 0..self.n_in
             {
-                pu[i] += self.p[row_start + j] * u[j];
+                acc += self.p[row_start + j] * u[j];
             }
+            self.scratch_pu[i] = acc;
         }
-        let upu: f64 = u.iter().zip(&pu).map(|(a, b)| a * b).sum();
+        let upu: f64 = u.iter().zip(&self.scratch_pu).map(|(a, b)| a * b).sum();
         let denom = self.lambda + upu;
-        let gain: Vec<f64> = pu.iter().map(|v| v / denom).collect();
 
-        // Weight update: w += k ⊗ e  (outer product)
+        // Weight update: w += k ⊗ e with k[j] = pu[j]/denom.
         for i in 0..self.n_out
         {
             let row_start = i * self.n_in;
-            let ei = e[i];
+            let ei = self.scratch_e[i];
             for j in 0..self.n_in
             {
-                self.w[row_start + j] += gain[j] * ei;
+                self.w[row_start + j] += self.scratch_pu[j] / denom * ei;
             }
         }
 
@@ -127,10 +146,11 @@ impl RlsFilter {
         for i in 0..self.n_in
         {
             let row_start = i * self.n_in;
-            let ki = gain[i];
+            let ki = self.scratch_pu[i] / denom;
             for j in 0..self.n_in
             {
-                self.p[row_start + j] = (self.p[row_start + j] - ki * pu[j]) / self.lambda;
+                self.p[row_start + j] =
+                    (self.p[row_start + j] - ki * self.scratch_pu[j]) / self.lambda;
             }
         }
         // Enforce exact symmetry: P = (P + Pᵀ) / 2
@@ -145,7 +165,7 @@ impl RlsFilter {
             }
         }
 
-        e
+        &self.scratch_e
     }
 
     /// Current weight matrix (row-major `n_out × n_in`).
@@ -216,6 +236,9 @@ pub struct VectorRls {
     lambda: f64,
     w: Vec<f64>,
     p: Vec<f64>,
+    /// Scratch buffer `P·u` — persistent so `update` never allocates.
+    #[serde(skip, default)]
+    scratch_pu: Vec<f64>,
 }
 
 impl VectorRls {
@@ -228,40 +251,52 @@ impl VectorRls {
         {
             p[i * n + i] = delta;
         }
-        Self { n, lambda, w, p }
+        Self {
+            n,
+            lambda,
+            w,
+            p,
+            scratch_pu: vec![0.0; n],
+        }
     }
 
     /// Update with one input vector `u` and scalar target `d`.
-    /// Returns the prediction error `e = d - w·u`.
+    /// Returns the prediction error `e = d - w·u`. Zero heap allocation per call.
     #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, u: &[f64], d: f64) -> f64 {
         assert_eq!(u.len(), self.n);
+        if self.scratch_pu.len() != self.n
+        {
+            self.scratch_pu.resize(self.n, 0.0);
+        }
 
         let d_hat: f64 = self.w.iter().zip(u).map(|(a, b)| a * b).sum();
         let e = d - d_hat;
 
         // Gain numerator: pu = P·u
-        let mut pu = vec![0.0; self.n];
         for i in 0..self.n
         {
             let row_start = i * self.n;
+            let mut acc = 0.0;
             for j in 0..self.n
             {
-                pu[i] += self.p[row_start + j] * u[j];
+                acc += self.p[row_start + j] * u[j];
             }
+            self.scratch_pu[i] = acc;
         }
-        let upu: f64 = u.iter().zip(&pu).map(|(a, b)| a * b).sum();
+        let upu: f64 = u.iter().zip(&self.scratch_pu).map(|(a, b)| a * b).sum();
         let denom = self.lambda + upu;
 
         // Weight and covariance updates (symmetric form)
         for i in 0..self.n
         {
-            let ki = pu[i] / denom;
+            let ki = self.scratch_pu[i] / denom;
             self.w[i] += ki * e;
             let row_start = i * self.n;
             for j in 0..self.n
             {
-                self.p[row_start + j] = (self.p[row_start + j] - ki * pu[j]) / self.lambda;
+                self.p[row_start + j] =
+                    (self.p[row_start + j] - ki * self.scratch_pu[j]) / self.lambda;
             }
         }
         // Enforce exact symmetry: P = (P + Pᵀ) / 2
