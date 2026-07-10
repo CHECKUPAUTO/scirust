@@ -81,6 +81,33 @@ Les trois « suites possibles » restantes du volet 2 sont livrées :
   seulement la cohérence interne d'une itération).
 - Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
   clippy `-D warnings` propre, rustfmt appliqué.
+### Ajouté — RLS MIMO, le cran au-dessus : QR-RLS multi-sorties, FIR spatio-temporel, auto-λ, oracle Kalman
+Améliorations du filtre RLS MIMO en réutilisant les briques du dépôt :
+- **`QrRlsMimo`** : la forme racine carrée (facteur de Potter, PSD par
+  construction) étendue aux sorties multiples — le facteur `S` ne dépend que
+  des entrées, donc une seule récursion partagée entre toutes les sorties
+  (`O(n_in² + n_out·n_in)`/échantillon, zéro allocation). Tests : ligne 0
+  **bit-identique** au `QrRls` scalaire ; équivalence 1e-6 avec `RlsFilter`
+  sur système 2 sorties.
+- **Oracle croisé RLS ≡ Kalman** : à λ=1 le RLS *est* un filtre de Kalman à
+  état statique (`F=I, Q=0, H_k=u_kᵀ, R=1`). Nouveau test qui rejoue la même
+  trajectoire dans le `KalmanFilter` du crate (chemin matriciel générique avec
+  inversion explicite, reconstruit à chaque pas avec le `H` courant) et exige
+  l'accord à 1e-8 sur 300 pas — deux implémentations indépendantes du même
+  estimateur se vérifient mutuellement.
+- **`MimoFirRls`** : le vrai filtre adaptatif MIMO **spatio-temporel** —
+  lignes à retard par canal d'entrée, régresseur empilé sur un cœur
+  `RlsFilter`, noyau FIR identifié exposé par paire (sortie, entrée). Test :
+  un couplage convolutif 2×2 à 3 coefficients (diaphonie/écho) est identifié
+  à 1e-3 près sur bruit blanc. C'est la dimension temporelle qui manquait au
+  filtre instantané.
+- **`tune_lambda`** : choix du facteur d'oubli par **blancheur des
+  innovations** — chaque λ candidat est scoré par le test d'autocorrélation
+  `±1.96/√N`, et le plus grand λ que le diagnostic ne rejette pas gagne (la
+  règle de parcimonie de `denoise::adaptive::kalman_smooth_auto`, réappliquée
+  à l'identification). Tests : système statique → garde λ=1 ; système
+  dérivant → rejette λ=1.
+- 41 tests `scirust-estimation` verts ; fmt/clippy `-D warnings` propres.
 
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
@@ -116,6 +143,37 @@ Les trois « suites possibles » restantes du volet 2 sont livrées :
   trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
   bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
   script de preuve et au job CI QEMU.
+### Ajouté — durcissement RLS : zéro-allocation, const-generic, QR-RLS racine carrée, benchmarks mesurés
+Les 4 points du plan validé après la revue du texte Gemini — chaque
+affirmation de ce lot est adossée à un test ou une mesure :
+- **`update()` zéro-allocation** (`RlsFilter`, `VectorRls`) : les
+  intermédiaires (`P·u`, erreur a priori) vivent dans des buffers persistants
+  (`#[serde(skip)]`, redimensionnement paresseux post-désérialisation) ; le
+  gain est replié à la volée — plus aucune allocation tas par échantillon
+  (l'ancienne boucle en faisait 4). `RlsFilter::update` retourne désormais
+  `&[f64]` (vue interne) au lieu d'un `Vec` alloué.
+- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`) : variante
+  entièrement sur pile, `core`-only (extractible en `no_std` pour
+  l'embarqué), dimensions connues du compilateur ⇒ déroulage/vectorisation
+  réels. Arithmétique **bit-identique** à la version tas — vérifié par un
+  test qui compare les trajectoires de poids au bit près sur 500 pas.
+- **`QrRls`** (`qr_rls`) : RLS **racine carrée** — propage le facteur `S`
+  (`P = S·Sᵀ`, mise à jour de rang 1 de Potter, la famille de méthodes du
+  `UdFilter` maison). La semi-définie-positivité de la covariance tient **par
+  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), pas par re-symétrisation forcée —
+  la réponse honnête au risque de divergence du RLS standard (aucune
+  prétention au-delà : l'estimée reste tributaire de l'excitation, documenté).
+  Tests : équivalence aux poids près (1e-6) avec le RLS standard sur données
+  saines ; stress 100 000 pas, λ=0,9, entrées quasi-colinéaires → P finie,
+  diagonale ≥ 0, mineurs principaux 2×2 ≥ 0 ; suivi d'un système dérivant.
+- **Benchmarks mesurés** (`--bin bench_rls`, release, conteneur CI x86_64 —
+  chiffres liés à cette machine, à re-mesurer ailleurs) : ns/update
+  `VectorRls` / `QrRls` / `RlsFilterConst` : n=4 → 40 / 47 / 34 ; n=16 →
+  633 / 476 / 326 ; n=64 → 10 017 / 6 740 / 8 451. Constats mesurés : la
+  variante const-generic est ~2× plus rapide à n=16 (déroulage réel), et le
+  QR-RLS **bat** le RLS standard dès n=16 (pas de passe de symétrisation).
+  Comparaison padasip non réalisée ici (échec d'installation dans le
+  conteneur) — point ouvert, aucune revendication inter-bibliothèques.
 
 ### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
 Suite annoncée du volet précédent — les trois chantiers « suite possible »
@@ -3107,6 +3165,53 @@ plutôt qu'une formule devinée) :
   CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
   une **boucle SGD multi-pas complète** dont la trajectoire de poids est
   bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
+
+### Ajouté — parité SciPy des queues et Dirichlet-multinomiale (4e passe du volet probabilités)
+> Entrée placée en bas de la section « Non publié » à dessein : chaque volet
+> parallèle insère la sienne en tête, d'où des conflits systématiques sur le
+> même bloc ; l'ajouter ici les évite.
+- **`scirust-stats::discrete` — méthodes de queue en log** : `logcdf`,
+  `logsf` et `isf` (fonction de survie inverse) ajoutées par défaut au trait
+  `DiscreteDistribution`, alignant l'API sur `scipy.stats`. `logsf` s'appuie
+  sur la survie **directe** déjà surchargée sur chaque loi (pas de
+  `ln(1 − cdf)` qui explose en queue), et `isf(p)` fait sa dichotomie sur
+  `sf` — plus précis que `quantile(1 − p)` pour les très petits `p`. Validé
+  contre SciPy (binomiale, Poisson, zêta) et par cohérence
+  `exp(logcdf) = cdf`, aller-retour `isf∘sf`.
+- **`scirust-stats::discrete::DirichletMultinomial`** — Pólya multivariée :
+  une multinomiale à probabilités Dirichlet(α)-distribuées, généralisation
+  vectorielle de la bêta-binomiale pour les **vecteurs de comptages
+  surdispersés** (comptages de mots/thèmes, essais catégoriels répétés à
+  dérive). `ln_pmf`/`pmf` par la forme fermée en ln Γ, moyenne `n·αᵢ/A`,
+  covariance avec le facteur de surdispersion `ρ = (n+A)/(1+A)`, tirage
+  séquentiel par bêta-binomiales conditionnelles (stick-breaking exact,
+  ordre fixe ⇒ reproductible bit-à-bit). Oracles SciPy 1.17.1
+  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) et fraction exacte
+  18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
+- 48 tests + doctest sur le crate, clippy 0 avertissement.
+
+### Ajouté — interval/expect + Yule-Simon + Boltzmann (5e passe du volet probabilités)
+> Entrée en bas de section (voir la note de la 4e passe) pour éviter les
+> conflits de merge systématiques sur le bloc de tête.
+- **`scirust-stats::discrete` — `interval` et `expect`** ajoutés par défaut au
+  trait `DiscreteDistribution`, complétant la parité `scipy.stats` :
+  `interval(c)` renvoie l'intervalle équilibré `(quantile((1−c)/2),
+  quantile((1+c)/2))` ; `expect(f)` calcule `E[f(X)] = Σ f(k)·pmf(k)` par
+  sommation déterministe bornée (arrêt quand la masse de queue `sf(k)` est
+  négligeable, plafond de sécurité). Validés SciPy (intervalles binomiale/
+  Poisson/Yule-Simon, `E[X]`/`E[X²]` = moyenne / var+moyenne²).
+- **`scirust-stats::discrete::YuleSimon`** — loi **à queue lourde** sur k ≥ 1,
+  `pmf(k) = α·B(k, α+1)` (attachement préférentiel : fréquences de mots,
+  citations). Queue en loi de puissance `k^(−(α+1))` ⇒ moyenne finie ssi
+  α > 1, variance ssi α > 2 ; survie en forme fermée `sf(k) = k·B(k, α+1)`.
+  Oracles SciPy `yulesimon(2.5)` et identité exacte `α=2 ⇒ 4/(k(k+1)(k+2))`.
+- **`scirust-stats::discrete::Boltzmann`** — géométrique tronquée à `0..=n−1`
+  (Planck tronquée, `scipy.stats.boltzmann`),
+  `pmf(k) = (1−e^(−λ))e^(−λk)/(1−e^(−λN))` ; pmf/cdf/survie directe et
+  moments en forme fermée (normalisation via `−expm1` pour la précision aux
+  petits `λN`). Oracles SciPy `boltzmann(1.4, 10)`.
+- 51 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
+  16 lois discrètes (13 univariées + 3 vectorielles).
 
 ## [0.14.0] — 2026-06-13
 

@@ -47,6 +47,61 @@ pub trait DiscreteDistribution {
     fn sf(&self, k: u64) -> f64 {
         1.0 - self.cdf(k)
     }
+    /// Log of the CDF, `ln P(X ≤ k)` (SciPy's `logcdf`). Defaults to
+    /// `ln(cdf)`; since every override computes `cdf` directly this stays
+    /// accurate in the lower tail where `cdf` itself does not cancel.
+    fn logcdf(&self, k: u64) -> f64 {
+        self.cdf(k).ln()
+    }
+    /// Log of the survival function, `ln P(X > k)` (SciPy's `logsf`).
+    /// Defaults to `ln(sf)`; because `sf` is overridden to a direct upper-tail
+    /// form on every distribution here, this avoids the `ln(1 − cdf)`
+    /// catastrophic cancellation of the far tail.
+    fn logsf(&self, k: u64) -> f64 {
+        self.sf(k).ln()
+    }
+    /// Inverse survival function: smallest `k` with `sf(k) ≤ p`, i.e.
+    /// `quantile(1 − p)` evaluated through the direct `sf` (SciPy's `isf`).
+    ///
+    /// More accurate than `quantile(1 − p)` for tiny `p`, where forming
+    /// `1 − p` loses precision. Deterministic bracket-and-bisect on `sf`.
+    fn isf(&self, p: f64) -> u64 {
+        let pt = p.clamp(0.0, 1.0);
+        // sf is non-increasing; want the smallest k with sf(k) <= pt.
+        if self.sf(0) <= pt
+        {
+            return 0;
+        }
+        let guess = self.mean() + 10.0 * self.std_dev();
+        let mut hi: u64 = if guess.is_finite() && guess >= 1.0
+        {
+            guess.ceil() as u64
+        }
+        else
+        {
+            1
+        };
+        let mut guard = 0;
+        while self.sf(hi) > pt && guard < 200
+        {
+            hi = hi.saturating_mul(2);
+            guard += 1;
+        }
+        let mut lo: u64 = 0;
+        while lo < hi
+        {
+            let mid = lo + (hi - lo) / 2;
+            if self.sf(mid) > pt
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        lo
+    }
     /// Standard deviation, `sqrt(variance)`.
     fn std_dev(&self) -> f64 {
         self.variance().sqrt()
@@ -93,6 +148,37 @@ pub trait DiscreteDistribution {
             }
         }
         lo
+    }
+    /// Equal-tailed `confidence`-level interval `(low, high)` such that
+    /// `P(X < low) ≤ (1−c)/2` and `P(X > high) ≤ (1−c)/2` (SciPy's
+    /// `interval`): `low = quantile((1−c)/2)`, `high = quantile((1+c)/2)`.
+    fn interval(&self, confidence: f64) -> (u64, u64) {
+        let c = confidence.clamp(0.0, 1.0);
+        (
+            self.quantile((1.0 - c) / 2.0),
+            self.quantile((1.0 + c) / 2.0),
+        )
+    }
+    /// Expectation `E[f(X)] = Σ_k f(k)·pmf(k)` over the support (SciPy's
+    /// `expect`). Deterministic finite sum: accumulates until the remaining
+    /// tail mass `sf(k)` is negligible, with a hard term cap as a backstop.
+    ///
+    /// Assumes `f` grows slower than the tail decays (true for moments of the
+    /// light-tailed laws); for a heavy-tailed law whose moment diverges the
+    /// truncated sum is only a partial sum, by construction.
+    fn expect(&self, f: &dyn Fn(u64) -> f64) -> f64 {
+        let mut acc = 0.0;
+        let mut k: u64 = 0;
+        loop
+        {
+            acc += self.pmf(k) * f(k);
+            if (k > 0 && self.sf(k) < 1e-16) || k >= 10_000_000
+            {
+                break;
+            }
+            k += 1;
+        }
+        acc
     }
     /// One deterministic draw via inverse-CDF from a seeded uniform source.
     fn sample(&self, rng: &mut SplitMix64) -> u64 {
@@ -1113,6 +1199,276 @@ impl MultivariateHypergeometric {
     }
 }
 
+// ============================================================ //
+//  Dirichlet-multinomial (vector-valued)                       //
+// ============================================================ //
+
+/// Dirichlet-multinomial (multivariate Pólya) distribution: a
+/// [`Multinomial`] whose category probabilities are themselves Dirichlet(`α`)
+/// distributed — the multivariate generalization of [`BetaBinomial`] and the
+/// standard model for **overdispersed count vectors** (topic/word counts,
+/// repeated categorical trials with batch-to-batch drift). `m = 2` categories
+/// reduce to the beta-binomial; `α → ∞` (with fixed ratios) recovers the
+/// multinomial.
+#[derive(Debug, Clone)]
+pub struct DirichletMultinomial {
+    n: u64,
+    alpha: Vec<f64>,
+    alpha_sum: f64,
+}
+
+impl DirichletMultinomial {
+    /// `n` trials over `alpha.len() ≥ 2` categories with concentration
+    /// parameters `alpha[i] > 0`.
+    pub fn new(n: u64, alpha: &[f64]) -> Self {
+        assert!(
+            alpha.len() >= 2,
+            "DirichletMultinomial: need at least two categories"
+        );
+        assert!(
+            alpha.iter().all(|&a| a > 0.0 && a.is_finite()),
+            "DirichletMultinomial: concentrations must be finite and > 0"
+        );
+        Self {
+            n,
+            alpha: alpha.to_vec(),
+            alpha_sum: alpha.iter().sum(),
+        }
+    }
+
+    /// Natural log of `P(counts)`; `−∞` unless `Σ counts = n`. Panics if
+    /// `counts` has the wrong length.
+    ///
+    /// Uses the closed form
+    /// `ln Γ(A) − ln Γ(n+A) + ln n! + Σ[ln Γ(kᵢ+αᵢ) − ln Γ(αᵢ) − ln kᵢ!]`
+    /// with `A = Σ αᵢ`.
+    pub fn ln_pmf(&self, counts: &[u64]) -> f64 {
+        assert_eq!(
+            counts.len(),
+            self.alpha.len(),
+            "DirichletMultinomial: counts length must match the number of categories"
+        );
+        if counts.iter().sum::<u64>() != self.n
+        {
+            return f64::NEG_INFINITY;
+        }
+        let mut acc = ln_gamma(self.alpha_sum) - ln_gamma(self.n as f64 + self.alpha_sum)
+            + ln_factorial(self.n);
+        for (&k, &a) in counts.iter().zip(&self.alpha)
+        {
+            acc += ln_gamma(k as f64 + a) - ln_gamma(a) - ln_factorial(k);
+        }
+        acc
+    }
+    /// Probability mass `P(counts)`.
+    pub fn pmf(&self, counts: &[u64]) -> f64 {
+        self.ln_pmf(counts).exp()
+    }
+    /// Mean vector `n·αᵢ/A`.
+    pub fn mean(&self) -> Vec<f64> {
+        self.alpha
+            .iter()
+            .map(|&a| self.n as f64 * a / self.alpha_sum)
+            .collect()
+    }
+    /// Covariance matrix. Each entry carries the multinomial value times the
+    /// overdispersion factor `ρ = (n+A)/(1+A)`:
+    /// `Var(Xᵢ) = n·pᵢ(1−pᵢ)·ρ`, `Cov(Xᵢ,Xⱼ) = −n·pᵢpⱼ·ρ` with `pᵢ = αᵢ/A`.
+    pub fn covariance(&self) -> Vec<Vec<f64>> {
+        let n = self.n as f64;
+        let a = self.alpha_sum;
+        let rho = (n + a) / (1.0 + a);
+        let p: Vec<f64> = self.alpha.iter().map(|&ai| ai / a).collect();
+        p.iter()
+            .enumerate()
+            .map(|(i, &pi)| {
+                p.iter()
+                    .enumerate()
+                    .map(|(j, &pj)| {
+                        if i == j
+                        {
+                            n * pi * (1.0 - pi) * rho
+                        }
+                        else
+                        {
+                            -n * pi * pj * rho
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+    /// One deterministic draw: sequential conditional beta-binomials — the
+    /// exact stick-breaking of a Dirichlet-multinomial — consuming one
+    /// uniform per category except the last (fixed order ⇒ reproducible).
+    pub fn sample(&self, rng: &mut SplitMix64) -> Vec<u64> {
+        let m = self.alpha.len();
+        let mut out = Vec::with_capacity(m);
+        let mut remaining = self.n;
+        let mut rest_alpha = self.alpha_sum;
+        for (i, &a) in self.alpha.iter().enumerate()
+        {
+            if i + 1 == m
+            {
+                out.push(remaining);
+                break;
+            }
+            // Xᵢ | rest ~ BetaBinomial(remaining, αᵢ, A_rest − αᵢ).
+            let b = rest_alpha - a;
+            let k = if b > 0.0
+            {
+                BetaBinomial::new(remaining, a, b).sample(rng)
+            }
+            else
+            {
+                remaining
+            };
+            out.push(k);
+            remaining -= k;
+            rest_alpha -= a;
+        }
+        out
+    }
+}
+
+// ============================================================ //
+//  Yule–Simon                                                  //
+// ============================================================ //
+
+/// Yule–Simon distribution: a **heavy-tailed** law on `k ≥ 1` with
+/// `pmf(k) = α·B(k, α+1)` (`B` the beta function), arising from
+/// preferential-attachment / "rich-get-richer" processes (word frequencies,
+/// citation counts, species-per-genus). The tail decays as a power law
+/// `k^(−(α+1))`, so the mean is finite only for `α > 1` and the variance only
+/// for `α > 2`; the survival function has the closed form `sf(k) = k·B(k, α+1)`.
+#[derive(Debug, Clone, Copy)]
+pub struct YuleSimon {
+    alpha: f64,
+}
+
+impl YuleSimon {
+    /// Shape `α > 0` (larger `α` ⇒ lighter tail).
+    pub fn new(alpha: f64) -> Self {
+        assert!(
+            alpha > 0.0 && alpha.is_finite(),
+            "YuleSimon: α must be finite and > 0"
+        );
+        Self { alpha }
+    }
+}
+
+impl DiscreteDistribution for YuleSimon {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k == 0
+        {
+            return f64::NEG_INFINITY;
+        }
+        self.alpha.ln() + ln_beta(k as f64, self.alpha + 1.0)
+    }
+    fn sf(&self, k: u64) -> f64 {
+        // P(X > k) = k·B(k, α+1); at k = 0 the whole mass (support k ≥ 1) is above.
+        if k == 0
+        {
+            return 1.0;
+        }
+        ((k as f64).ln() + ln_beta(k as f64, self.alpha + 1.0)).exp()
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        1.0 - self.sf(k)
+    }
+    fn mean(&self) -> f64 {
+        if self.alpha > 1.0
+        {
+            self.alpha / (self.alpha - 1.0)
+        }
+        else
+        {
+            f64::INFINITY
+        }
+    }
+    fn variance(&self) -> f64 {
+        if self.alpha > 2.0
+        {
+            let a = self.alpha;
+            a * a / ((a - 1.0) * (a - 1.0) * (a - 2.0))
+        }
+        else
+        {
+            f64::INFINITY
+        }
+    }
+}
+
+// ============================================================ //
+//  Boltzmann (truncated Planck)                                //
+// ============================================================ //
+
+/// Boltzmann distribution — a geometric law truncated to `0..=n−1`
+/// (SciPy's `boltzmann`, the "truncated Planck"):
+/// `pmf(k) = (1−e^(−λ))·e^(−λk) / (1−e^(−λN))`. Models discrete energy-level
+/// occupation and any exponentially-decaying count capped at `n` levels.
+#[derive(Debug, Clone, Copy)]
+pub struct Boltzmann {
+    lambda: f64,
+    n: u64,
+}
+
+impl Boltzmann {
+    /// Decay rate `λ > 0` over `n ≥ 1` levels (support `0..=n−1`).
+    pub fn new(lambda: f64, n: u64) -> Self {
+        assert!(
+            lambda > 0.0 && lambda.is_finite(),
+            "Boltzmann: λ must be finite and > 0"
+        );
+        assert!(n >= 1, "Boltzmann: n must be ≥ 1");
+        Self { lambda, n }
+    }
+    /// `1 − e^(−λN)`, the normalizer, via `−expm1` for accuracy at small `λN`.
+    fn denom(&self) -> f64 {
+        -(-self.lambda * self.n as f64).exp_m1()
+    }
+}
+
+impl DiscreteDistribution for Boltzmann {
+    fn ln_pmf(&self, k: u64) -> f64 {
+        if k >= self.n
+        {
+            return f64::NEG_INFINITY;
+        }
+        // ln(1−e^(−λ)) − λk − ln(1−e^(−λN)).
+        (-(-self.lambda).exp_m1()).ln() - self.lambda * k as f64 - self.denom().ln()
+    }
+    fn cdf(&self, k: u64) -> f64 {
+        if k >= self.n - 1
+        {
+            return 1.0;
+        }
+        // (1 − e^(−λ(k+1))) / (1 − e^(−λN)).
+        -(-self.lambda * (k as f64 + 1.0)).exp_m1() / self.denom()
+    }
+    fn sf(&self, k: u64) -> f64 {
+        if k >= self.n - 1
+        {
+            return 0.0;
+        }
+        // (e^(−λ(k+1)) − e^(−λN)) / (1 − e^(−λN)) — direct upper tail.
+        let a = (-self.lambda * (k as f64 + 1.0)).exp();
+        let b = (-self.lambda * self.n as f64).exp();
+        (a - b) / self.denom()
+    }
+    fn mean(&self) -> f64 {
+        let z = (-self.lambda).exp();
+        let zn = (-self.lambda * self.n as f64).exp();
+        z / (1.0 - z) - self.n as f64 * zn / (1.0 - zn)
+    }
+    fn variance(&self) -> f64 {
+        let z = (-self.lambda).exp();
+        let zn = (-self.lambda * self.n as f64).exp();
+        let nn = self.n as f64;
+        z / ((1.0 - z) * (1.0 - z)) - nn * nn * zn / ((1.0 - zn) * (1.0 - zn))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1511,6 +1867,173 @@ mod tests {
             let d = mh.sample(&mut r);
             assert_eq!(d.iter().sum::<u64>(), 8);
             assert!(d[0] <= 10 && d[1] <= 5 && d[2] <= 15);
+        }
+    }
+
+    #[test]
+    fn dirichlet_multinomial_matches_scipy() {
+        // SciPy dirichlet_multinomial(alpha=[1, 2, 3], n=10).
+        let dm = DirichletMultinomial::new(10, &[1.0, 2.0, 3.0]);
+        assert!(close(dm.pmf(&[2, 3, 5]), 0.027_972_027_972_027_96, 1e-12));
+        assert!(close(dm.pmf(&[0, 0, 10]), 0.021_978_021_978_021_907, 1e-12));
+        assert!(close(
+            dm.pmf(&[10, 0, 0]),
+            0.000_333_000_333_000_332_7,
+            1e-12
+        ));
+        assert!(close(dm.ln_pmf(&[3, 3, 4]), -3.913_022_505_761_23, 1e-12));
+        // Wrong total ⇒ impossible.
+        assert_eq!(dm.pmf(&[1, 1, 1]), 0.0);
+        let mean = dm.mean();
+        assert!(close(mean[0], 10.0 / 6.0, 1e-14));
+        assert!(close(mean[1], 10.0 / 3.0, 1e-14));
+        assert!(close(mean[2], 5.0, 1e-14));
+        // Covariance vs SciPy .cov().
+        let cov = dm.covariance();
+        assert!(close(cov[0][0], 3.174_603_174_603_17, 1e-12));
+        assert!(close(cov[1][1], 5.079_365_079_365_08, 1e-12));
+        assert!(close(cov[2][2], 5.714_285_714_285_71, 1e-12));
+        assert!(close(cov[0][1], -1.269_841_269_841_27, 1e-12));
+        assert!(close(cov[1][2], -3.809_523_809_523_81, 1e-12));
+        // Total mass 1 over the simplex Σ = n.
+        let mut total = 0.0;
+        for i in 0..=10
+        {
+            for j in 0..=(10 - i)
+            {
+                total += dm.pmf(&[i, j, 10 - i - j]);
+            }
+        }
+        assert!(close(total, 1.0, 1e-12));
+        // Two categories reduce to the beta-binomial; α = [1,1] ⇒ uniform.
+        let dm2 = DirichletMultinomial::new(5, &[1.0, 1.0]);
+        for k in 0..=5u64
+        {
+            assert!(close(dm2.pmf(&[k, 5 - k]), 1.0 / 6.0, 1e-13), "k = {k}");
+        }
+        let bb = BetaBinomial::new(5, 2.0, 3.0);
+        let dm3 = DirichletMultinomial::new(5, &[2.0, 3.0]);
+        for k in 0..=5u64
+        {
+            assert!(close(dm3.pmf(&[k, 5 - k]), bb.pmf(k), 1e-12), "k = {k}");
+        }
+        // Exact rational: alpha=[2,3,5], n=4, counts=[1,1,2] = 18/143.
+        let dm4 = DirichletMultinomial::new(4, &[2.0, 3.0, 5.0]);
+        assert!(close(dm4.pmf(&[1, 1, 2]), 18.0 / 143.0, 1e-12));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn dirichlet_multinomial_sampling_is_deterministic_and_consistent() {
+        let dm = DirichletMultinomial::new(30, &[1.0, 2.0, 3.0]);
+        let mut r1 = SplitMix64::new(77);
+        let mut r2 = SplitMix64::new(77);
+        let mut totals = [0u64; 3];
+        for _ in 0..3_000
+        {
+            let a = dm.sample(&mut r1);
+            let b = dm.sample(&mut r2);
+            assert_eq!(a, b);
+            assert_eq!(a.iter().sum::<u64>(), 30);
+            for (t, &x) in totals.iter_mut().zip(&a)
+            {
+                *t += x;
+            }
+        }
+        // Empirical means near n·α/A = [5, 10, 15].
+        assert!((totals[0] as f64 / 3_000.0 - 5.0).abs() < 0.4);
+        assert!((totals[2] as f64 / 3_000.0 - 15.0).abs() < 0.6);
+    }
+
+    #[test]
+    fn log_tail_and_isf_methods() {
+        // logcdf / logsf / isf against SciPy.
+        let b = Binomial::new(20, 0.3);
+        assert!(close(b.logcdf(6), -0.497_564_258_657_831_5, 1e-12));
+        assert!(close(b.logsf(10), -4.066_059_399_962_81, 1e-12));
+        assert_eq!(b.isf(0.05), 9);
+        let p = Poisson::new(4.2);
+        assert!(close(p.logsf(15), -11.632_281_509_965_878, 1e-11));
+        assert_eq!(p.isf(1e-6), 17);
+        // Zeta: logsf stays finite deep in the heavy tail (no ln(1−cdf) blowup).
+        let z = Zeta::new(2.5);
+        assert!(close(z.logsf(5), -3.261_468_303_487_377, 1e-10));
+        assert_eq!(z.isf(0.01), 14);
+        // Consistency: exp(logcdf) == cdf, exp(logsf) == sf, isf∘sf round-trip.
+        assert!(close(b.logcdf(6).exp(), b.cdf(6), 1e-13));
+        assert!(close(p.logsf(7).exp(), p.sf(7), 1e-13));
+        // isf(p) is the smallest k with sf(k) ≤ p.
+        let k = p.isf(0.1);
+        assert!(p.sf(k) <= 0.1 && (k == 0 || p.sf(k - 1) > 0.1));
+    }
+
+    #[test]
+    fn interval_and_expect_match_scipy() {
+        let b = Binomial::new(20, 0.3);
+        assert_eq!(b.interval(0.9), (3, 9));
+        assert_eq!(b.interval(0.95), (2, 10));
+        let p = Poisson::new(4.2);
+        assert_eq!(p.interval(0.9), (1, 8));
+        // E[X] = mean, E[X²] = var + mean².
+        assert!(close(p.expect(&|k| k as f64), 4.2, 1e-12));
+        assert!(close(p.expect(&|k| (k * k) as f64), 21.84, 1e-11));
+        assert!(close(b.expect(&|k| k as f64), 6.0, 1e-12));
+        // E[1] = 1 (total mass).
+        assert!(close(p.expect(&|_| 1.0), 1.0, 1e-13));
+        let y = YuleSimon::new(2.5);
+        assert_eq!(y.interval(0.8), (1, 3));
+    }
+
+    #[test]
+    fn yule_simon_matches_scipy() {
+        // SciPy yulesimon(2.5), support k ≥ 1.
+        let y = YuleSimon::new(2.5);
+        assert!(close(y.pmf(1), 0.714_285_714_285_714_4, 1e-12));
+        assert!(close(y.pmf(2), 0.158_730_158_730_158_75, 1e-12));
+        assert!(close(y.pmf(3), 0.057_720_057_720_057_74, 1e-12));
+        assert!(close(y.pmf(10), 0.001_762_566_414_605_72, 1e-12));
+        assert_eq!(y.pmf(0), 0.0);
+        assert!(close(y.cdf(3), 0.930_735_930_735_930_7, 1e-12));
+        assert!(close(y.sf(3), 0.069_264_069_264_069_28, 1e-12));
+        assert!(close(y.sf(10), 0.007_050_265_658_422_88, 1e-11));
+        assert!(close(y.mean(), 5.0 / 3.0, 1e-13));
+        assert!(close(y.variance(), 50.0 / 9.0, 1e-12));
+        // α = 2: pmf(k) = 4/(k(k+1)(k+2)) exactly.
+        let y2 = YuleSimon::new(2.0);
+        for k in 1..=6u64
+        {
+            let exact = 4.0 / (k * (k + 1) * (k + 2)) as f64;
+            assert!(close(y2.pmf(k), exact, 1e-12), "k = {k}");
+        }
+        assert!(close(y2.mean(), 2.0, 1e-13));
+        // Heavy tail: mean/variance diverge for α ≤ 1.
+        let y3 = YuleSimon::new(0.8);
+        assert_eq!(y3.mean(), f64::INFINITY);
+        assert!(close(y3.pmf(1), 0.444_444_444_444_444_5, 1e-12));
+    }
+
+    #[test]
+    fn boltzmann_matches_scipy() {
+        // SciPy boltzmann(1.4, 10), support 0..=9.
+        let b = Boltzmann::new(1.4, 10);
+        assert!(close(b.pmf(0), 0.753_403_662_535_176, 1e-12));
+        assert!(close(b.pmf(1), 0.185_787_055_803_661_06, 1e-12));
+        assert!(close(b.pmf(5), 0.000_687_015_212_648_547_8, 1e-12));
+        assert!(close(b.pmf(9), 2.540_488_627_524_870_7e-6, 1e-11));
+        assert_eq!(b.pmf(10), 0.0);
+        assert!(close(b.cdf(3), 0.996_302_964_738_045_1, 1e-12));
+        assert!(close(b.sf(3), 0.003_697_035_261_954_862, 1e-11));
+        assert!(close(b.mean(), 0.327_302_502_607_209_3, 1e-11));
+        assert!(close(b.variance(), 0.434_360_036_406_343_8, 1e-11));
+        // Total mass 1 and cdf reaches exactly 1 at the top level.
+        let total: f64 = (0..10).map(|k| b.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-13));
+        assert_eq!(b.cdf(9), 1.0);
+        assert_eq!(b.sf(9), 0.0);
+        // cdf + sf = 1 across the support.
+        for k in 0..10
+        {
+            assert!(close(b.cdf(k) + b.sf(k), 1.0, 1e-12), "k = {k}");
         }
     }
 }
