@@ -83,6 +83,134 @@ pub fn brayton_efficiency(pressure_ratio: f64, gamma: f64) -> Result<f64, Thermo
     Ok(1.0 - pressure_ratio.powf(-(gamma - 1.0) / gamma))
 }
 
+/// Energy balance of an ideal (isentropic) **Rankine** steam cycle,
+/// all quantities specific \[J/kg\] except the dimensionless efficiency
+/// and exit quality.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RankineCycle {
+    /// Pump work input `w_p = v_f (p_boiler − p_condenser)` \[J/kg\].
+    pub pump_work: f64,
+    /// Heat added in the boiler `q_in = h₃ − h₂` \[J/kg\].
+    pub boiler_heat: f64,
+    /// Turbine work output `w_t = h₃ − h₄` \[J/kg\].
+    pub turbine_work: f64,
+    /// Heat rejected in the condenser `q_out = h₄ − h₁` \[J/kg\].
+    pub condenser_heat: f64,
+    /// Net work `w_t − w_p` \[J/kg\].
+    pub net_work: f64,
+    /// Thermal efficiency `w_net / q_in`.
+    pub efficiency: f64,
+    /// Steam quality at the turbine exit (1.0 if the exhaust is still
+    /// superheated).
+    pub exit_quality: f64,
+}
+
+/// Ideal (isentropic) **Rankine** cycle on the IAPWS-IF97 water
+/// properties of [`crate::steam`]:
+///
+/// 1 → 2 isentropic pumping of saturated liquid from `p_condenser` to
+/// `p_boiler` (incompressible-liquid work `v Δp`); 2 → 3 isobaric heating
+/// to superheated steam at `t_turbine_inlet`; 3 → 4 isentropic expansion
+/// back to `p_condenser` (wet or, for very hot inlets, still-superheated
+/// exhaust — solved by deterministic bisection in either case);
+/// 4 → 1 isobaric condensation.
+///
+/// * `p_boiler` — boiler pressure \[Pa\], > `p_condenser`
+/// * `p_condenser` — condenser pressure \[Pa\], within region 4 and with
+///   `T_sat ≤ 623.15 K`
+/// * `t_turbine_inlet` — turbine inlet temperature \[K\]; the point
+///   `(t, p_boiler)` must lie in IF97 region 2 (superheated)
+pub fn rankine_ideal(
+    p_boiler: f64,
+    p_condenser: f64,
+    t_turbine_inlet: f64,
+) -> Result<RankineCycle, ThermoError> {
+    positive("p_boiler", p_boiler)?;
+    positive("p_condenser", p_condenser)?;
+    if p_boiler <= p_condenser
+    {
+        return Err(ThermoError::OutOfRange {
+            name: "p_boiler",
+            value: p_boiler,
+            min: p_condenser,
+            max: f64::MAX,
+        });
+    }
+    let t_cond = crate::steam::saturation_temperature(p_condenser)?;
+    in_range(
+        "t_sat(p_condenser)",
+        t_cond,
+        273.15,
+        crate::steam::T_MAX_REGION1,
+    )?;
+
+    // State 1: saturated liquid at the condenser pressure.
+    let liq = crate::steam::saturated_liquid(t_cond)?;
+    let vap = crate::steam::saturated_vapor(t_cond)?;
+    // State 2: after the ideal pump.
+    let pump_work = liq.v * (p_boiler - p_condenser);
+    let h2 = liq.h + pump_work;
+    // State 3: superheated steam at the boiler exit.
+    let st3 = crate::steam::region2(t_turbine_inlet, p_boiler)?;
+    // State 4: isentropic expansion to the condenser pressure.
+    let h4 = if st3.s <= vap.s
+    {
+        // Wet exhaust: interpolate inside the dome at t_cond.
+        let x = (st3.s - liq.s) / (vap.s - liq.s);
+        if x < 0.0
+        {
+            return Err(ThermoError::OutOfRange {
+                name: "t_turbine_inlet",
+                value: t_turbine_inlet,
+                min: t_cond,
+                max: crate::steam::T_MAX_REGION2,
+            });
+        }
+        liq.h + x * (vap.h - liq.h)
+    }
+    else
+    {
+        // Superheated exhaust: find T with s(T, p_cond) = s₃ by
+        // deterministic bisection (s is strictly increasing in T).
+        let (mut lo, mut hi) = (t_cond, crate::steam::T_MAX_REGION2);
+        for _ in 0..200
+        {
+            let mid = 0.5 * (lo + hi);
+            if crate::steam::region2(mid, p_condenser)?.s > st3.s
+            {
+                hi = mid;
+            }
+            else
+            {
+                lo = mid;
+            }
+        }
+        crate::steam::region2(0.5 * (lo + hi), p_condenser)?.h
+    };
+    let exit_quality = if st3.s <= vap.s
+    {
+        (st3.s - liq.s) / (vap.s - liq.s)
+    }
+    else
+    {
+        1.0
+    };
+
+    let boiler_heat = st3.h - h2;
+    let turbine_work = st3.h - h4;
+    let condenser_heat = h4 - liq.h;
+    let net_work = turbine_work - pump_work;
+    Ok(RankineCycle {
+        pump_work,
+        boiler_heat,
+        turbine_work,
+        condenser_heat,
+        net_work,
+        efficiency: net_work / boiler_heat,
+        exit_quality,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +266,65 @@ mod tests {
         assert!(otto_efficiency(1.0, 1.4).is_err());
         assert!(diesel_efficiency(18.0, 20.0, 1.4).is_err()); // r_c > r
         assert!(brayton_efficiency(0.5, 1.4).is_err());
+    }
+
+    #[test]
+    fn rankine_cengel_textbook_example() {
+        // Cengel & Boles ex. 10-1: boiler 3 MPa, turbine inlet 350 °C,
+        // condenser 75 kPa → η ≈ 26.0 %, exit quality ≈ 0.886.
+        let cy = rankine_ideal(3.0e6, 75.0e3, 623.15).unwrap();
+        assert!(
+            (cy.efficiency - 0.260).abs() < 3e-3,
+            "eta = {}",
+            cy.efficiency
+        );
+        assert!(
+            (cy.exit_quality - 0.886).abs() < 4e-3,
+            "x4 = {}",
+            cy.exit_quality
+        );
+        // Pump work is tiny next to turbine work (backwork ratio < 1 %).
+        assert!(cy.pump_work / cy.turbine_work < 0.01);
+    }
+
+    #[test]
+    fn rankine_first_and_second_law() {
+        let cy = rankine_ideal(8.0e6, 10.0e3, 753.15).unwrap();
+        // First law around the cycle: q_in − q_out = w_net (exact).
+        assert!((cy.boiler_heat - cy.condenser_heat - cy.net_work).abs() / cy.net_work < 1e-12);
+        // Second law: below Carnot between the extreme temperatures.
+        let t_cond = crate::steam::saturation_temperature(10.0e3).unwrap();
+        let eta_carnot = carnot_efficiency(753.15, t_cond).unwrap();
+        assert!(cy.efficiency < eta_carnot);
+        assert!(cy.efficiency > 0.0 && cy.exit_quality <= 1.0);
+    }
+
+    #[test]
+    fn rankine_lower_condenser_pressure_helps() {
+        // Textbook fact: dropping the condenser pressure raises η.
+        let hi = rankine_ideal(3.0e6, 100.0e3, 623.15).unwrap();
+        let lo = rankine_ideal(3.0e6, 10.0e3, 623.15).unwrap();
+        assert!(lo.efficiency > hi.efficiency);
+    }
+
+    #[test]
+    fn rankine_superheated_exhaust_branch() {
+        // Very hot inlet at modest boiler pressure: the isentropic
+        // expansion ends still-superheated; quality is reported as 1
+        // and the enthalpy comes from the bisection branch.
+        let cy = rankine_ideal(0.5e6, 200.0e3, 1000.0).unwrap();
+        assert!((cy.exit_quality - 1.0).abs() < 1e-12);
+        assert!(cy.turbine_work > 0.0 && cy.efficiency > 0.0);
+    }
+
+    #[test]
+    fn rankine_rejects_bad_configurations() {
+        // Boiler below condenser pressure.
+        assert!(rankine_ideal(50.0e3, 75.0e3, 623.15).is_err());
+        // Turbine inlet not superheated at the boiler pressure
+        // (T below saturation at 3 MPa → region-2 validation fails).
+        assert!(rankine_ideal(3.0e6, 75.0e3, 400.0).is_err());
+        // Condenser pressure outside region 4.
+        assert!(rankine_ideal(3.0e6, 100.0, 623.15).is_err());
     }
 }
