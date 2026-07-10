@@ -23,11 +23,21 @@
   `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
   Les autres machines (Debian x86_64, Jetson) doivent reproduire verdict=PASS
   ET ce SHA exact en mode `--full`.
-- **Volet Jetson (à exécuter par l'utilisateur sur l'appareil)** :
-  `git fetch && git checkout <branche de la PR>` puis
-  `scripts/proof-portable-f32.sh --full` — verdict=PASS attendu + SHA canonique
-  identique au volet x86_64. Idem sur la machine x86_64 Debian de l'utilisateur.
-  Reporter verdict/SHA/commit ici.
+- **PREUVE CONSTATÉE SUR LES 3 PLATES-FORMES (2026-07-10, commit dc8918e,
+  sorties fournies par l'utilisateur)** — mode `--full`, SHA canonique
+  IDENTIQUE partout : `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
+  - **Jetson (aarch64)** : verdict=PASS, exhaustif 83,2 s,
+    bundle `proof-portable-f32-20260710T152117Z` (sur l'appareil).
+  - **Debian x86_64** : verdict=PASS, exhaustif 97,4 s,
+    bundle `proof-portable-f32-20260710T152258Z` (sur la machine).
+  - **Conteneur Ubuntu x86_64** : verdict=PASS, exhaustif 89,2 s,
+    bundle `proof-portable-f32-20260710T144512Z`.
+  Conclusion : l'identité bit à bit x86-64 ↔ aarch64 de la voie f32 portable
+  est **constatée sur la totalité des 2³² entrées** de exp_f32 et ln_f32
+  (goldens, balayages contrat/dense/exhaustif, softmax, GEMM — tout OK).
+  La claim « bit-exact inter-plates-formes par construction » est désormais
+  adossée à une exécution multi-machines, conformément à la discipline
+  claims → évidence du dépôt.
 
 ## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
 - **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
