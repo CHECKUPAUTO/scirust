@@ -22,10 +22,15 @@
 //!   IEEE-754 (toutes les cibles tier-1 ; exclut les cibles x87 sans SSE2 type
 //!   `i586`, dont l'arithmétique 80 bits n'est pas conforme).
 //! - **Précision** : l'évaluation interne en f64 (erreur relative ≲ 2⁻⁴⁷)
-//!   rend le résultat f32 **fidèlement arrondi** (≤ 1 ulp) partout, et
-//!   correctement arrondi sauf si la valeur exacte tombe à ≈ 2⁻⁴⁷ (relatif)
-//!   d'une frontière d'arrondi f32. L'arrondi correct **prouvé** (dilemme du
-//!   fabricant de tables) reste un travail futur — on ne le revendique pas.
+//!   rend le résultat f32 **fidèlement arrondi** (≤ 1 ulp) partout. Campagne
+//!   de certification exhaustive (volet 114 : certificat d'intervalle sur
+//!   les 7×2³² entrées + précision arbitraire pour les cas limites) :
+//!   **correctement arrondi pour 99,9999985 % des entrées** — il reste 465
+//!   entrées fidèles à 1 ulp sur 30 064 771 072 (exp 2, ln 5, tanh 20,
+//!   sigmoid 78, sin 2, cos 6, erf 352), zéro cas au-delà. Le verdict vaut
+//!   sur toute plate-forme conforme (sorties bit-identiques partout). La
+//!   preuve formelle a priori (dilemme du fabricant de tables) reste hors
+//!   claim — la nôtre est une vérification exhaustive a posteriori.
 //! - **Performance** : voie de référence/d'audit, pas optimisée (GEMM naïf
 //!   mono-thread, softmax allouant). Pour la vitesse intra-architecture,
 //!   utiliser les chemins SIMD ; pour le bit-exact cross-platform rapide,

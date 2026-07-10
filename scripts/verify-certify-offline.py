@@ -124,14 +124,29 @@ def next_up(x):
 def next_down(x):
     return -next_up(-x)
 
+# Seuil d'overflow f32 : les valeurs ≥ 2¹²⁸ − 2¹⁰³ arrondissent à +inf
+OVERFLOW_MID = Fraction(2**128 - 2**103)
+
+def frac_of_f32(x: float) -> Fraction:
+    """Fraction exacte d'un f32 fini ; les infinis sont gérés par l'appelant."""
+    return Fraction(x)
+
 def correctly_rounded_f32(v: Decimal) -> float:
     """Le f32 le plus proche de v — milieux comparés EXACTEMENT (Fraction)."""
     vf = Fraction(v)
+    if vf >= OVERFLOW_MID:
+        return float("inf")
+    if vf <= -OVERFLOW_MID:
+        return float("-inf")
     c = bits_to_f32(f32_to_bits(float(v)))  # candidat (à ≤ 1 ulp du bon)
+    if c == float("inf"):
+        c = bits_to_f32(0x7F7FFFFF)  # f32::MAX (v < seuil d'overflow)
+    if c == float("-inf"):
+        c = bits_to_f32(0xFF7FFFFF)
     for _ in range(4):
         hi, lo = next_up(c), next_down(c)
-        mid_hi = (Fraction(c) + Fraction(hi)) / 2
-        mid_lo = (Fraction(lo) + Fraction(c)) / 2
+        mid_hi = OVERFLOW_MID if hi == float("inf") else (frac_of_f32(c) + frac_of_f32(hi)) / 2
+        mid_lo = -OVERFLOW_MID if lo == float("-inf") else (frac_of_f32(lo) + frac_of_f32(c)) / 2
         if vf > mid_hi:
             c = hi
             continue
@@ -163,7 +178,8 @@ def main():
         cr, faithful, worse = 0, 0, []
         for line in out.strip().splitlines():
             in_hex, out_hex = line.split()
-            x = Decimal(repr(bits_to_f32(int(in_hex, 16))))
+            xf = Fraction(bits_to_f32(int(in_hex, 16)))
+            x = Decimal(xf.numerator) / Decimal(xf.denominator)  # exact à 60 chiffres
             got_bits = int(out_hex, 16)
             ref = correctly_rounded_f32(FUNCS[name](x))
             ref_bits = f32_to_bits(ref)
