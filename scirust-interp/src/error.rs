@@ -39,22 +39,27 @@ pub enum InterpError {
 
 impl fmt::Display for InterpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InterpError::LengthMismatch { xs, ys } => {
+        match self
+        {
+            InterpError::LengthMismatch { xs, ys } =>
+            {
                 write!(f, "length mismatch: xs has {xs} points but ys has {ys}")
-            }
-            InterpError::TooFewPoints { got, need } => {
+            },
+            InterpError::TooFewPoints { got, need } =>
+            {
                 write!(f, "too few points: got {got}, need at least {need}")
-            }
-            InterpError::NotStrictlyIncreasing { index } => {
+            },
+            InterpError::NotStrictlyIncreasing { index } =>
+            {
                 write!(
                     f,
                     "xs must be strictly increasing: violated at index {index}"
                 )
-            }
-            InterpError::NonFinite { index } => {
+            },
+            InterpError::NonFinite { index } =>
+            {
                 write!(f, "non-finite value (NaN or infinity) at index {index}")
-            }
+            },
         }
     }
 }

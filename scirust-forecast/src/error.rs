@@ -60,29 +60,52 @@ pub enum ForecastError {
 
 impl fmt::Display for ForecastError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             ForecastError::EmptySeries => write!(f, "the input series was empty"),
-            ForecastError::InvalidSmoothing { name, value } => {
-                write!(f, "smoothing parameter `{name}` = {value} is outside [0, 1]")
-            }
-            ForecastError::SeriesTooShort { got, need } => {
-                write!(f, "series too short: got {got} observations, need at least {need}")
-            }
-            ForecastError::InvalidPeriod { period } => {
+            ForecastError::InvalidSmoothing { name, value } =>
+            {
+                write!(
+                    f,
+                    "smoothing parameter `{name}` = {value} is outside [0, 1]"
+                )
+            },
+            ForecastError::SeriesTooShort { got, need } =>
+            {
+                write!(
+                    f,
+                    "series too short: got {got} observations, need at least {need}"
+                )
+            },
+            ForecastError::InvalidPeriod { period } =>
+            {
                 write!(f, "invalid seasonal period {period}: must be at least 1")
-            }
-            ForecastError::InvalidWindow { window } => {
-                write!(f, "invalid moving-average window {window}: must be at least 1")
-            }
-            ForecastError::InvalidOrder { order } => {
-                write!(f, "invalid autoregressive order {order}: must be at least 1")
-            }
-            ForecastError::LengthMismatch { left, right } => {
+            },
+            ForecastError::InvalidWindow { window } =>
+            {
+                write!(
+                    f,
+                    "invalid moving-average window {window}: must be at least 1"
+                )
+            },
+            ForecastError::InvalidOrder { order } =>
+            {
+                write!(
+                    f,
+                    "invalid autoregressive order {order}: must be at least 1"
+                )
+            },
+            ForecastError::LengthMismatch { left, right } =>
+            {
                 write!(f, "length mismatch: {left} vs {right}")
-            }
-            ForecastError::ZeroActual { index } => {
-                write!(f, "actual value at index {index} is zero; MAPE is undefined")
-            }
+            },
+            ForecastError::ZeroActual { index } =>
+            {
+                write!(
+                    f,
+                    "actual value at index {index} is zero; MAPE is undefined"
+                )
+            },
         }
     }
 }

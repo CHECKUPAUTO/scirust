@@ -50,7 +50,8 @@ fn compute_slopes(xs: &[f64], ys: &[f64]) -> Vec<f64> {
     // Extend with two phantom slopes at each end (Akima's rule):
     //   s[k] corresponds to secant m_{k-2}, for k in 0..=n+1.
     let mut s = vec![0.0; n + 3];
-    for (slot, &mi) in s[2..2 + m.len()].iter_mut().zip(m.iter()) {
+    for (slot, &mi) in s[2..2 + m.len()].iter_mut().zip(m.iter())
+    {
         *slot = mi;
     }
     s[1] = 2.0 * s[2] - s[3]; // m_{-1}
@@ -65,10 +66,13 @@ fn compute_slopes(xs: &[f64], ys: &[f64]) -> Vec<f64> {
             let w_right = (s[i + 3] - s[i + 2]).abs(); // |m_{i+1} - m_i|
             let w_left = (s[i + 1] - s[i]).abs(); // |m_{i-1} - m_{i-2}|
             let denom = w_right + w_left;
-            if denom == 0.0 {
+            if denom == 0.0
+            {
                 // Four equal surrounding slopes → average of the two central.
                 0.5 * (s[i + 1] + s[i + 2])
-            } else {
+            }
+            else
+            {
                 (w_right * s[i + 1] + w_left * s[i + 2]) / denom
             }
         })
@@ -79,6 +83,13 @@ impl Interpolator for AkimaSpline {
     fn eval(&self, x: f64) -> f64 {
         let i = find_segment(&self.xs, x);
         let h = self.xs[i + 1] - self.xs[i];
-        hermite(self.ys[i], self.ys[i + 1], self.d[i], self.d[i + 1], h, x - self.xs[i])
+        hermite(
+            self.ys[i],
+            self.ys[i + 1],
+            self.d[i],
+            self.d[i + 1],
+            h,
+            x - self.xs[i],
+        )
     }
 }

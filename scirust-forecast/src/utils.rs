@@ -22,10 +22,12 @@ pub fn difference(series: &[f64], lag: usize) -> Vec<f64> {
 /// [`ForecastError::InvalidWindow`] when `window` is zero or larger than the
 /// series.
 pub fn moving_average(series: &[f64], window: usize) -> Result<Vec<f64>, ForecastError> {
-    if series.is_empty() {
+    if series.is_empty()
+    {
         return Err(ForecastError::EmptySeries);
     }
-    if window == 0 || window > series.len() {
+    if window == 0 || window > series.len()
+    {
         return Err(ForecastError::InvalidWindow { window });
     }
     let inv = 1.0 / window as f64;

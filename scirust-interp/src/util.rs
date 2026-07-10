@@ -8,35 +8,39 @@ use crate::error::InterpError;
 ///
 /// Checks, in order: equal lengths, at least `min_points` points, all values
 /// finite (rejecting NaN/±∞), and strictly increasing abscissae.
-pub(crate) fn validate_nodes(
-    xs: &[f64],
-    ys: &[f64],
-    min_points: usize,
-) -> Result<(), InterpError> {
-    if xs.len() != ys.len() {
+pub(crate) fn validate_nodes(xs: &[f64], ys: &[f64], min_points: usize) -> Result<(), InterpError> {
+    if xs.len() != ys.len()
+    {
         return Err(InterpError::LengthMismatch {
             xs: xs.len(),
             ys: ys.len(),
         });
     }
-    if xs.len() < min_points {
+    if xs.len() < min_points
+    {
         return Err(InterpError::TooFewPoints {
             got: xs.len(),
             need: min_points,
         });
     }
-    for (i, &v) in xs.iter().enumerate() {
-        if !v.is_finite() {
+    for (i, &v) in xs.iter().enumerate()
+    {
+        if !v.is_finite()
+        {
             return Err(InterpError::NonFinite { index: i });
         }
     }
-    for (i, &v) in ys.iter().enumerate() {
-        if !v.is_finite() {
+    for (i, &v) in ys.iter().enumerate()
+    {
+        if !v.is_finite()
+        {
             return Err(InterpError::NonFinite { index: i });
         }
     }
-    for (i, w) in xs.windows(2).enumerate() {
-        if w[1] <= w[0] {
+    for (i, w) in xs.windows(2).enumerate()
+    {
+        if w[1] <= w[0]
+        {
             return Err(InterpError::NotStrictlyIncreasing { index: i + 1 });
         }
     }
@@ -51,19 +55,25 @@ pub(crate) fn validate_nodes(
 /// each method's extrapolation). Callers guarantee `xs.len() >= 2`.
 pub(crate) fn find_segment(xs: &[f64], x: f64) -> usize {
     let n = xs.len();
-    if x <= xs[0] {
+    if x <= xs[0]
+    {
         return 0;
     }
-    if x >= xs[n - 1] {
+    if x >= xs[n - 1]
+    {
         return n - 2;
     }
     let mut lo = 0usize;
     let mut hi = n - 1;
-    while hi - lo > 1 {
+    while hi - lo > 1
+    {
         let mid = (lo + hi) / 2;
-        if xs[mid] <= x {
+        if xs[mid] <= x
+        {
             lo = mid;
-        } else {
+        }
+        else
+        {
             hi = mid;
         }
     }
@@ -97,14 +107,16 @@ pub(crate) fn thomas(a: &[f64], b: &[f64], c: &[f64], d: &[f64]) -> Vec<f64> {
     let mut dp = vec![0.0; n];
     cp[0] = c[0] / b[0];
     dp[0] = d[0] / b[0];
-    for i in 1..n {
+    for i in 1..n
+    {
         let m = b[i] - a[i] * cp[i - 1];
         cp[i] = if i < n - 1 { c[i] / m } else { 0.0 };
         dp[i] = (d[i] - a[i] * dp[i - 1]) / m;
     }
     let mut x = vec![0.0; n];
     x[n - 1] = dp[n - 1];
-    for i in (0..n - 1).rev() {
+    for i in (0..n - 1).rev()
+    {
         x[i] = dp[i] - cp[i] * x[i + 1];
     }
     x

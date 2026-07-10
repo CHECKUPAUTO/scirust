@@ -201,12 +201,16 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: fuzz
+      # The --target is explicit because prebuilt cargo-fuzz binaries are
+      # musl-linked and default their build target to their own compile-time
+      # platform (x86_64-unknown-linux-musl), where the sanitizer runtime is
+      # unavailable ("sanitizer is incompatible with statically linked libc").
       - name: Build fuzz targets
         working-directory: fuzz
-        run: cargo fuzz build
+        run: cargo fuzz build --target x86_64-unknown-linux-gnu
       - name: Smoke-run QSR1 deserializer fuzzer
         working-directory: fuzz
-        run: cargo fuzz run qsr1_from_bytes -- -max_total_time=45 -runs=500000
+        run: cargo fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
 
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.

@@ -31,14 +31,21 @@ impl BarycentricLagrange {
         validate_nodes(xs, ys, 2)?;
         let n = xs.len();
         let cap = (xs[n - 1] - xs[0]) / 4.0;
-        let mut w = vec![1.0; n];
-        for j in 0..n {
-            for (k, &xk) in xs.iter().enumerate() {
-                if k != j {
-                    w[j] *= cap / (xs[j] - xk);
+        let w: Vec<f64> = xs
+            .iter()
+            .enumerate()
+            .map(|(j, &xj)| {
+                let mut wj = 1.0;
+                for (k, &xk) in xs.iter().enumerate()
+                {
+                    if k != j
+                    {
+                        wj *= cap / (xj - xk);
+                    }
                 }
-            }
-        }
+                wj
+            })
+            .collect();
         Ok(Self {
             xs: xs.to_vec(),
             ys: ys.to_vec(),
@@ -51,14 +58,16 @@ impl Interpolator for BarycentricLagrange {
     fn eval(&self, x: f64) -> f64 {
         let mut num = 0.0;
         let mut den = 0.0;
-        for j in 0..self.xs.len() {
-            let diff = x - self.xs[j];
-            if diff == 0.0 {
+        for ((&xj, &yj), &wj) in self.xs.iter().zip(&self.ys).zip(&self.w)
+        {
+            let diff = x - xj;
+            if diff == 0.0
+            {
                 // Exactly on a node: return that ordinate (avoids 0/0).
-                return self.ys[j];
+                return yj;
             }
-            let t = self.w[j] / diff;
-            num += t * self.ys[j];
+            let t = wj / diff;
+            num += t * yj;
             den += t;
         }
         num / den

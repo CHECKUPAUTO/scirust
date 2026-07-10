@@ -44,11 +44,11 @@ pub mod metrics;
 pub mod smoothing;
 pub mod utils;
 
-pub use autoreg::{ar_fit, ArModel};
+pub use autoreg::{ArModel, ar_fit};
 pub use error::ForecastError;
 pub use metrics::{mae, mape, rmse};
 pub use smoothing::{
-    holt, holt_winters, simple_exp_smoothing, Holt, HoltWinters, Seasonality, Ses,
+    Holt, HoltWinters, Seasonality, Ses, holt, holt_winters, simple_exp_smoothing,
 };
 pub use utils::{difference, moving_average};
 
@@ -86,7 +86,8 @@ mod tests {
         let series = [7.0; 12];
         let model = simple_exp_smoothing(&series, 0.3).unwrap();
         assert!(approx(model.level(), 7.0, TOL));
-        for v in model.forecast(5) {
+        for v in model.forecast(5)
+        {
             assert!(approx(v, 7.0, TOL));
         }
         assert_eq!(model.fitted().len(), series.len());
@@ -108,7 +109,8 @@ mod tests {
         let series = [42.0; 8];
         let model = holt(&series, 0.5, 0.5).unwrap();
         assert!(approx(model.trend(), 0.0, TOL));
-        for v in model.forecast(4) {
+        for v in model.forecast(4)
+        {
             assert!(approx(v, 42.0, TOL));
         }
     }
@@ -122,7 +124,8 @@ mod tests {
         let model = holt(&series, 0.5, 0.5).unwrap();
         assert!(approx(model.trend(), b, 1e-6));
         let fc = model.forecast(5);
-        for (i, v) in fc.iter().enumerate() {
+        for (i, v) in fc.iter().enumerate()
+        {
             let t = 20 + i; // next indices
             let truth = a + b * t as f64;
             assert!(approx(*v, truth, 1e-3), "h={i}: {v} vs {truth}");
@@ -137,17 +140,18 @@ mod tests {
         let pattern = [10.0, -5.0, 3.0, -8.0]; // sums to zero
         let level = 100.0;
         let series: Vec<f64> = (0..32).map(|t| level + pattern[t % m]).collect();
-        let model =
-            holt_winters(&series, 0.3, 0.1, 0.3, m, Seasonality::Additive).unwrap();
+        let model = holt_winters(&series, 0.3, 0.1, 0.3, m, Seasonality::Additive).unwrap();
 
         // Forecast one full period ahead should match the underlying truth.
         let fc = model.forecast(m);
-        for (i, v) in fc.iter().enumerate() {
+        for (i, v) in fc.iter().enumerate()
+        {
             let truth = level + pattern[(32 + i) % m];
             assert!(approx(*v, truth, 1e-6), "h={i}: {v} vs {truth}");
         }
         // The recovered seasonal cycle matches the pattern.
-        for (i, s) in model.seasonals().iter().enumerate() {
+        for (i, s) in model.seasonals().iter().enumerate()
+        {
             assert!(approx(*s, pattern[(32 - m + i) % m], 1e-6));
         }
     }
@@ -158,11 +162,11 @@ mod tests {
         let factors = [1.2, 0.8, 1.1, 0.9]; // mean 1.0
         let level = 50.0;
         let series: Vec<f64> = (0..32).map(|t| level * factors[t % m]).collect();
-        let model =
-            holt_winters(&series, 0.3, 0.1, 0.3, m, Seasonality::Multiplicative).unwrap();
+        let model = holt_winters(&series, 0.3, 0.1, 0.3, m, Seasonality::Multiplicative).unwrap();
 
         let fc = model.forecast(m);
-        for (i, v) in fc.iter().enumerate() {
+        for (i, v) in fc.iter().enumerate()
+        {
             let truth = level * factors[(32 + i) % m];
             assert!(approx(*v, truth, 1e-6), "h={i}: {v} vs {truth}");
         }
@@ -174,7 +178,8 @@ mod tests {
     fn ar_constant_series_forecasts_constant() {
         let series = [9.0; 30];
         let model = ar_fit(&series, 2).unwrap();
-        for v in model.forecast(5) {
+        for v in model.forecast(5)
+        {
             assert!(approx(v, 9.0, 1e-6));
         }
     }
@@ -186,7 +191,8 @@ mod tests {
         let mut state = 0x1234_5678_9ABC_DEF0_u64;
         let n = 2000;
         let mut x = vec![0.0; n];
-        for t in 1..n {
+        for t in 1..n
+        {
             x[t] = phi * x[t - 1] + 0.5 * next_unit(&mut state);
         }
         let model = ar_fit(&x, 1).unwrap();
@@ -282,8 +288,15 @@ mod tests {
         ));
         // Period longer than series (needs two full seasons).
         assert!(matches!(
-            holt_winters(&[1.0, 2.0, 3.0, 4.0, 5.0], 0.3, 0.1, 0.3, 7, Seasonality::Additive)
-                .unwrap_err(),
+            holt_winters(
+                &[1.0, 2.0, 3.0, 4.0, 5.0],
+                0.3,
+                0.1,
+                0.3,
+                7,
+                Seasonality::Additive
+            )
+            .unwrap_err(),
             ForecastError::SeriesTooShort { .. }
         ));
         assert!(matches!(
@@ -295,8 +308,15 @@ mod tests {
     #[test]
     fn error_invalid_period_window_order() {
         assert!(matches!(
-            holt_winters(&[1.0, 2.0, 3.0, 4.0], 0.3, 0.1, 0.3, 0, Seasonality::Additive)
-                .unwrap_err(),
+            holt_winters(
+                &[1.0, 2.0, 3.0, 4.0],
+                0.3,
+                0.1,
+                0.3,
+                0,
+                Seasonality::Additive
+            )
+            .unwrap_err(),
             ForecastError::InvalidPeriod { period: 0 }
         ));
         assert!(matches!(

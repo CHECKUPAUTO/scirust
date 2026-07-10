@@ -5,9 +5,12 @@ use crate::error::ForecastError;
 
 /// Validate that a smoothing parameter lies in the closed interval `[0, 1]`.
 fn check_smoothing(name: &'static str, value: f64) -> Result<(), ForecastError> {
-    if (0.0..=1.0).contains(&value) {
+    if (0.0..=1.0).contains(&value)
+    {
         Ok(())
-    } else {
+    }
+    else
+    {
         Err(ForecastError::InvalidSmoothing { name, value })
     }
 }
@@ -45,7 +48,8 @@ impl Ses {
 /// Returns [`ForecastError::EmptySeries`] on an empty series and
 /// [`ForecastError::InvalidSmoothing`] when `alpha` is outside `[0, 1]`.
 pub fn simple_exp_smoothing(series: &[f64], alpha: f64) -> Result<Ses, ForecastError> {
-    if series.is_empty() {
+    if series.is_empty()
+    {
         return Err(ForecastError::EmptySeries);
     }
     check_smoothing("alpha", alpha)?;
@@ -53,7 +57,8 @@ pub fn simple_exp_smoothing(series: &[f64], alpha: f64) -> Result<Ses, ForecastE
     let mut level = series[0];
     let mut fitted = Vec::with_capacity(series.len());
     fitted.push(series[0]);
-    for &y in &series[1..] {
+    for &y in &series[1..]
+    {
         // The forecast of `y` made one step earlier is the current level.
         fitted.push(level);
         level = alpha * y + (1.0 - alpha) * level;
@@ -91,7 +96,9 @@ impl Holt {
 
     /// Forecast the next `h` steps as `level + i * trend` for `i = 1..=h`.
     pub fn forecast(&self, h: usize) -> Vec<f64> {
-        (1..=h).map(|i| self.level + i as f64 * self.trend).collect()
+        (1..=h)
+            .map(|i| self.level + i as f64 * self.trend)
+            .collect()
     }
 }
 
@@ -105,10 +112,12 @@ impl Holt {
 /// [`ForecastError::SeriesTooShort`] (fewer than two points) or
 /// [`ForecastError::InvalidSmoothing`] on bad input.
 pub fn holt(series: &[f64], alpha: f64, beta: f64) -> Result<Holt, ForecastError> {
-    if series.is_empty() {
+    if series.is_empty()
+    {
         return Err(ForecastError::EmptySeries);
     }
-    if series.len() < 2 {
+    if series.len() < 2
+    {
         return Err(ForecastError::SeriesTooShort {
             got: series.len(),
             need: 2,
@@ -122,7 +131,8 @@ pub fn holt(series: &[f64], alpha: f64, beta: f64) -> Result<Holt, ForecastError
     let mut fitted = Vec::with_capacity(series.len());
     fitted.push(series[0]);
 
-    for &y in &series[1..] {
+    for &y in &series[1..]
+    {
         // One-step-ahead forecast for `y` using the pre-update state.
         fitted.push(level + trend);
         let new_level = alpha * y + (1.0 - alpha) * (level + trend);
@@ -192,7 +202,8 @@ impl HoltWinters {
             .map(|i| {
                 let baseline = self.level + i as f64 * self.trend;
                 let seasonal = self.seasonals[(i - 1) % self.period];
-                match self.seasonality {
+                match self.seasonality
+                {
                     Seasonality::Additive => baseline + seasonal,
                     Seasonality::Multiplicative => baseline * seasonal,
                 }
@@ -220,14 +231,17 @@ pub fn holt_winters(
     period: usize,
     seasonality: Seasonality,
 ) -> Result<HoltWinters, ForecastError> {
-    if series.is_empty() {
+    if series.is_empty()
+    {
         return Err(ForecastError::EmptySeries);
     }
-    if period == 0 {
+    if period == 0
+    {
         return Err(ForecastError::InvalidPeriod { period });
     }
     let need = 2 * period;
-    if series.len() < need {
+    if series.len() < need
+    {
         return Err(ForecastError::SeriesTooShort {
             got: series.len(),
             need,
@@ -244,27 +258,33 @@ pub fn holt_winters(
     let mut level = series[..m].iter().sum::<f64>() / m as f64;
 
     // Initial trend: average per-position slope between the first two seasons.
-    let mut trend =
-        (0..m).map(|i| (series[m + i] - series[i]) / m as f64).sum::<f64>() / m as f64;
+    let mut trend = (0..m)
+        .map(|i| (series[m + i] - series[i]) / m as f64)
+        .sum::<f64>()
+        / m as f64;
 
     // Initial seasonals from the first season, relative to the initial level.
     // `season[t]` holds the seasonal component estimated at time `t`.
     let mut season: Vec<f64> = (0..m)
-        .map(|i| match seasonality {
+        .map(|i| match seasonality
+        {
             Seasonality::Additive => series[i] - level,
             Seasonality::Multiplicative => series[i] / level,
         })
         .collect();
 
-    for (t, &y) in series.iter().enumerate().skip(m) {
+    for (t, &y) in series.iter().enumerate().skip(m)
+    {
         let s_prev = season[t - m];
         let baseline = level + trend;
-        let new_level = match seasonality {
+        let new_level = match seasonality
+        {
             Seasonality::Additive => alpha * (y - s_prev) + (1.0 - alpha) * baseline,
             Seasonality::Multiplicative => alpha * (y / s_prev) + (1.0 - alpha) * baseline,
         };
         let new_trend = beta * (new_level - level) + (1.0 - beta) * trend;
-        let new_season = match seasonality {
+        let new_season = match seasonality
+        {
             Seasonality::Additive => gamma * (y - baseline) + (1.0 - gamma) * s_prev,
             Seasonality::Multiplicative => gamma * (y / baseline) + (1.0 - gamma) * s_prev,
         };

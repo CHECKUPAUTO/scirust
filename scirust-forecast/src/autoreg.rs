@@ -41,10 +41,12 @@ impl ArModel {
         let p = self.coeffs.len();
         let mut recent = self.history.clone();
         let mut out = Vec::with_capacity(h);
-        for _ in 0..h {
+        for _ in 0..h
+        {
             let mut pred = self.intercept;
             // `coeffs[i]` multiplies the (i+1)-th most recent value.
-            for (i, &c) in self.coeffs.iter().enumerate() {
+            for (i, &c) in self.coeffs.iter().enumerate()
+            {
                 pred += c * recent[p - 1 - i];
             }
             out.push(pred);
@@ -65,13 +67,16 @@ impl ArModel {
 /// (when `p == 0`) or [`ForecastError::SeriesTooShort`] (when the series has
 /// `p` or fewer observations).
 pub fn ar_fit(series: &[f64], p: usize) -> Result<ArModel, ForecastError> {
-    if series.is_empty() {
+    if series.is_empty()
+    {
         return Err(ForecastError::EmptySeries);
     }
-    if p == 0 {
+    if p == 0
+    {
         return Err(ForecastError::InvalidOrder { order: p });
     }
-    if series.len() <= p {
+    if series.len() <= p
+    {
         return Err(ForecastError::SeriesTooShort {
             got: series.len(),
             need: p + 1,
@@ -93,7 +98,8 @@ pub fn ar_fit(series: &[f64], p: usize) -> Result<ArModel, ForecastError> {
     let history = series[n - p..].to_vec();
 
     // Degenerate (constant) series: zero variance -> flat forecast at the mean.
-    if r[0] <= f64::EPSILON {
+    if r[0] <= f64::EPSILON
+    {
         return Ok(ArModel {
             coeffs: vec![0.0; p],
             intercept: mean,
@@ -107,20 +113,26 @@ pub fn ar_fit(series: &[f64], p: usize) -> Result<ArModel, ForecastError> {
     phi[0] = rho[1];
     let mut err = 1.0 - rho[1] * rho[1];
 
-    for k in 2..=p {
+    for k in 2..=p
+    {
         // Reflection coefficient for order k.
         let mut acc = rho[k];
-        for j in 1..k {
+        for j in 1..k
+        {
             acc -= phi[j - 1] * rho[k - j];
         }
-        let refl = if err.abs() > f64::EPSILON {
+        let refl = if err.abs() > f64::EPSILON
+        {
             acc / err
-        } else {
+        }
+        else
+        {
             0.0
         };
 
         let prev: Vec<f64> = phi[..k - 1].to_vec();
-        for j in 0..k - 1 {
+        for j in 0..k - 1
+        {
             phi[j] = prev[j] - refl * prev[k - 2 - j];
         }
         phi[k - 1] = refl;

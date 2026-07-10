@@ -36,16 +36,20 @@ impl NearestNeighbor {
 
 impl Interpolator for NearestNeighbor {
     fn eval(&self, x: f64) -> f64 {
-        if self.xs.len() == 1 {
+        if self.xs.len() == 1
+        {
             return self.ys[0];
         }
         let i = find_segment(&self.xs, x);
         let left = x - self.xs[i];
         let right = self.xs[i + 1] - x;
         // `<=` sends exact midpoints to the left node.
-        if left <= right {
+        if left <= right
+        {
             self.ys[i]
-        } else {
+        }
+        else
+        {
             self.ys[i + 1]
         }
     }

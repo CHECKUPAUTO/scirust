@@ -97,8 +97,10 @@ mod tests {
             Box::new(NearestNeighbor::new(&xs, &ys).unwrap()),
         ];
 
-        for interp in &interps {
-            for (&x, &y) in xs.iter().zip(ys.iter()) {
+        for interp in &interps
+        {
+            for (&x, &y) in xs.iter().zip(ys.iter())
+            {
                 assert!(
                     (interp.eval(x) - y).abs() < 1e-12,
                     "node ({x}, {y}) not reproduced: got {}",
@@ -120,7 +122,8 @@ mod tests {
         let lin = LinearInterp::new(&xs, &ys).unwrap();
 
         // Interior, node, and extrapolated points all match exactly.
-        for &x in &[-5.0, -2.0, -1.3, 0.5, 4.0, 6.7, 12.0] {
+        for &x in &[-5.0, -2.0, -1.3, 0.5, 4.0, 6.7, 12.0]
+        {
             assert!((lin.eval(x) - affine(x)).abs() < 1e-12);
         }
     }
@@ -139,7 +142,8 @@ mod tests {
 
         // Sample densely between the nodes: a clamped spline reproduces the
         // cubic exactly (up to rounding).
-        for i in 0..=400 {
+        for i in 0..=400
+        {
             let x = 4.0 * f64::from(i) / 400.0;
             assert!(
                 (spline.eval(x) - cubic(x)).abs() < 1e-9,
@@ -154,7 +158,8 @@ mod tests {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
         let ys: Vec<f64> = xs.iter().map(|&x| cubic(x)).collect();
         let bary = BarycentricLagrange::new(&xs, &ys).unwrap();
-        for i in 0..=400 {
+        for i in 0..=400
+        {
             let x = 4.0 * f64::from(i) / 400.0;
             assert!(
                 (bary.eval(x) - cubic(x)).abs() < 1e-9,
@@ -176,7 +181,8 @@ mod tests {
         assert!((bary.eval(0.5) - 1.75).abs() < 1e-12); // p(0.5) = 1.75
         assert!((bary.eval(1.5) - 4.75).abs() < 1e-12); // p(1.5) = 4.75
         // And it reproduces the quadratic elsewhere.
-        for &x in &[-1.0, 0.3, 2.5, 3.0] {
+        for &x in &[-1.0, 0.3, 2.5, 3.0]
+        {
             let p = x * x + x + 1.0;
             assert!((bary.eval(x) - p).abs() < 1e-10);
         }
@@ -194,13 +200,17 @@ mod tests {
 
         let mut prev = f64::NEG_INFINITY;
         let n_samples = 5000;
-        for i in 0..=n_samples {
+        for i in 0..=n_samples
+        {
             let x = 5.0 * f64::from(i) / f64::from(n_samples);
             let v = pchip.eval(x);
             // Monotone non-decreasing along the sweep.
             assert!(v >= prev - 1e-12, "monotonicity broken at x={x}");
             // No overshoot outside the global data range.
-            assert!(v >= ys[0] - 1e-12 && v <= ys[5] + 1e-12, "overshoot at x={x}");
+            assert!(
+                v >= ys[0] - 1e-12 && v <= ys[5] + 1e-12,
+                "overshoot at x={x}"
+            );
             prev = v;
         }
     }
@@ -211,12 +221,17 @@ mod tests {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         let ys = [0.0, 2.0, 2.1, 2.15, 8.0, 8.1];
         let pchip = PchipInterp::new(&xs, &ys).unwrap();
-        for seg in 0..xs.len() - 1 {
+        for seg in 0..xs.len() - 1
+        {
             let (lo, hi) = (ys[seg].min(ys[seg + 1]), ys[seg].max(ys[seg + 1]));
-            for j in 0..=50 {
+            for j in 0..=50
+            {
                 let x = xs[seg] + (xs[seg + 1] - xs[seg]) * f64::from(j) / 50.0;
                 let v = pchip.eval(x);
-                assert!(v >= lo - 1e-12 && v <= hi + 1e-12, "segment overshoot at x={x}");
+                assert!(
+                    v >= lo - 1e-12 && v <= hi + 1e-12,
+                    "segment overshoot at x={x}"
+                );
             }
         }
     }
@@ -250,20 +265,22 @@ mod tests {
 
     #[test]
     fn spline_c2_continuity_interior() {
-        // Second derivative is continuous across interior nodes (moment form).
+        // A centered second difference straddling each interior node converges
+        // to the shared moment M_k, confirming s'' is continuous there (C²).
         let xs = [0.0, 1.3, 2.1, 3.8, 5.0];
         let ys = [0.5, -1.0, 2.0, 0.0, 4.0];
         let spline = CubicSpline::natural(&xs, &ys).unwrap();
+        let m = spline.moments();
         let e = 1e-4;
-        for k in 1..xs.len() - 1 {
+        for k in 1..xs.len() - 1
+        {
             let xk = xs[k];
-            let left = (spline.eval(xk - e) - 2.0 * spline.eval(xk - 2.0 * e)
-                + spline.eval(xk - 3.0 * e))
-                / (e * e);
-            let right = (spline.eval(xk + 3.0 * e) - 2.0 * spline.eval(xk + 2.0 * e)
-                + spline.eval(xk + e))
-                / (e * e);
-            assert!((left - right).abs() < 1e-3, "s'' discontinuous at node {k}");
+            let spp = (spline.eval(xk + e) - 2.0 * spline.eval(xk) + spline.eval(xk - e)) / (e * e);
+            assert!(
+                (spp - m[k]).abs() < 1e-3,
+                "s'' mismatch across node {k}: fd={spp}, moment={}",
+                m[k]
+            );
         }
     }
 
@@ -277,7 +294,8 @@ mod tests {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         let ys: Vec<f64> = xs.iter().map(|&x| affine(x)).collect();
         let ak = AkimaSpline::new(&xs, &ys).unwrap();
-        for &x in &[0.25, 1.7, 2.5, 3.9, 4.4] {
+        for &x in &[0.25, 1.7, 2.5, 3.9, 4.4]
+        {
             assert!((ak.eval(x) - affine(x)).abs() < 1e-12);
         }
     }
@@ -318,7 +336,8 @@ mod tests {
         let spline = CubicSpline::natural(&xs, &ys).unwrap();
         let query = [0.5, 1.5, 2.5, 3.5, -0.5];
         let batch = spline.eval_all(&query);
-        for (i, &x) in query.iter().enumerate() {
+        for (i, &x) in query.iter().enumerate()
+        {
             assert!((batch[i] - spline.eval(x)).abs() < 1e-15);
         }
     }
@@ -332,8 +351,8 @@ mod tests {
         let xs = [0.0, 1.0, 2.0];
         let ys = [0.0, 1.0];
         assert_eq!(
-            LinearInterp::new(&xs, &ys),
-            Err(InterpError::LengthMismatch { xs: 3, ys: 2 })
+            LinearInterp::new(&xs, &ys).unwrap_err(),
+            InterpError::LengthMismatch { xs: 3, ys: 2 }
         );
         assert!(CubicSpline::natural(&xs, &ys).is_err());
         assert!(CubicSpline::clamped(&xs, &ys, 0.0, 0.0).is_err());
@@ -350,8 +369,8 @@ mod tests {
         let xs = [0.0, 2.0, 1.0, 3.0];
         let ys = [0.0, 1.0, 2.0, 3.0];
         assert_eq!(
-            LinearInterp::new(&xs, &ys),
-            Err(InterpError::NotStrictlyIncreasing { index: 2 })
+            LinearInterp::new(&xs, &ys).unwrap_err(),
+            InterpError::NotStrictlyIncreasing { index: 2 }
         );
         assert!(CubicSpline::natural(&xs, &ys).is_err());
         assert!(PchipInterp::new(&xs, &ys).is_err());
@@ -364,8 +383,8 @@ mod tests {
         let xs = [0.0, 1.0, 1.0, 2.0];
         let ys = [0.0, 1.0, 2.0, 3.0];
         assert_eq!(
-            LinearInterp::new(&xs, &ys),
-            Err(InterpError::NotStrictlyIncreasing { index: 2 })
+            LinearInterp::new(&xs, &ys).unwrap_err(),
+            InterpError::NotStrictlyIncreasing { index: 2 }
         );
         assert!(CubicSpline::clamped(&xs, &ys, 0.0, 0.0).is_err());
         assert!(PchipInterp::new(&xs, &ys).is_err());
@@ -375,8 +394,8 @@ mod tests {
     fn err_too_few_points() {
         // Linear / spline / pchip / barycentric need >= 2.
         assert_eq!(
-            LinearInterp::new(&[1.0], &[1.0]),
-            Err(InterpError::TooFewPoints { got: 1, need: 2 })
+            LinearInterp::new(&[1.0], &[1.0]).unwrap_err(),
+            InterpError::TooFewPoints { got: 1, need: 2 }
         );
         assert!(CubicSpline::natural(&[1.0], &[1.0]).is_err());
         assert!(PchipInterp::new(&[1.0], &[1.0]).is_err());
@@ -385,13 +404,13 @@ mod tests {
         let xs4 = [0.0, 1.0, 2.0, 3.0];
         let ys4 = [0.0, 1.0, 2.0, 3.0];
         assert_eq!(
-            AkimaSpline::new(&xs4, &ys4),
-            Err(InterpError::TooFewPoints { got: 4, need: 5 })
+            AkimaSpline::new(&xs4, &ys4).unwrap_err(),
+            InterpError::TooFewPoints { got: 4, need: 5 }
         );
         // Nearest needs >= 1.
         assert_eq!(
-            NearestNeighbor::new(&[], &[]),
-            Err(InterpError::TooFewPoints { got: 0, need: 1 })
+            NearestNeighbor::new(&[], &[]).unwrap_err(),
+            InterpError::TooFewPoints { got: 0, need: 1 }
         );
     }
 
@@ -400,15 +419,15 @@ mod tests {
         let xs = [0.0, 1.0, f64::NAN, 3.0];
         let ys = [0.0, 1.0, 2.0, 3.0];
         assert_eq!(
-            LinearInterp::new(&xs, &ys),
-            Err(InterpError::NonFinite { index: 2 })
+            LinearInterp::new(&xs, &ys).unwrap_err(),
+            InterpError::NonFinite { index: 2 }
         );
         // NaN / infinity in ys is rejected too.
         let xs2 = [0.0, 1.0, 2.0, 3.0];
         let ys2 = [0.0, f64::INFINITY, 2.0, 3.0];
         assert_eq!(
-            PchipInterp::new(&xs2, &ys2),
-            Err(InterpError::NonFinite { index: 1 })
+            PchipInterp::new(&xs2, &ys2).unwrap_err(),
+            InterpError::NonFinite { index: 1 }
         );
         // Non-finite clamp derivative is rejected.
         assert!(CubicSpline::clamped(&xs2, &[0.0, 1.0, 2.0, 3.0], f64::NAN, 0.0).is_err());
