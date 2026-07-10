@@ -5,6 +5,32 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : pas adaptatif + pharmacocinétique + corps rigide
+Suite du crate d'environnements de simulation multi-domaines (PR #288) :
+- **Intégrateur adaptatif `simulate_adaptive`** (`scirust-sim::engine`) —
+  paire de Runge–Kutta **Dormand–Prince 5(4)** (le schéma d'`ode45`) à
+  contrôle d'erreur : pas initial automatique (heuristique de Hairer),
+  contrôleur élémentaire à exposant 1/5, propriété FSAL, garde
+  `SimError::StepUnderflow` sur singularité. Le pas se resserre dans les
+  transitoires rapides et s'élargit dans les portions lisses. Testé contre
+  oracle : reproduit e^{-t} à 1e-8 en <300 pas là où un RK4 fixe en
+  demanderait ~1700, l'erreur au point final décroît avec la tolérance, le
+  pas croît une fois le transitoire de `y'=-50y` amorti, et une singularité
+  en temps fini est signalée (jamais un faux succès).
+- **`scirust-sim::pharmacokinetics`** — absorption orale à un compartiment
+  (fonction de Bateman, t_max analytique) et bolus IV à deux compartiments
+  (déclin biexponentiel, constantes hybrides α/β) ; l'aire sous la courbe
+  centrale, intégrée par le solveur adaptatif, retrouve l'identité exacte
+  `dose/k₁₀`.
+- **`scirust-sim::rigid_body`** — rotation libre (équations d'Euler sans
+  couple) : l'énergie cinétique de rotation et |L|² sont conservées à 1e-8,
+  la précession du toupie symétrique suit sa forme close, et le théorème de
+  l'axe intermédiaire (effet Dzhanibekov) est reproduit — instable autour de
+  l'axe moyen, stable autour des axes extrêmes.
+- Zéro dépendance, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`, 83
+  tests + 2 doctests, `cargo miri test` vert (les runs lourds ignorés sous
+  Miri selon la convention `scirust-stiff`).
+
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
   par Euler–Maclaurin à budget fixe (somme directe des 19 premiers termes,
