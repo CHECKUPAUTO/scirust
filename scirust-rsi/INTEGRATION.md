@@ -1,4 +1,4 @@
-# Using `scirust-rsi` from an agent (e.g. the `CHECKUPAUTO/RSI` repo)
+# Using `scirust-rsi` from an agent (e.g. the `Memorithm/RSI` repo)
 
 `scirust-rsi` is the *engine* for a recursive-self-improvement agent: it owns the
 bounded, elitist, reproducible loop (propose → evaluate → keep-if-better →
@@ -24,10 +24,10 @@ package by name:
 ```toml
 # RSI/Cargo.toml
 [dependencies]
-scirust-rsi = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master" }
+scirust-rsi = { git = "https://github.com/Memorithm/scirust", branch = "master" }
 # Optional extra building blocks for *generating* candidate algorithms:
-scirust-algogen   = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master" }
-scirust-synthesis = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master" }
+scirust-algogen   = { git = "https://github.com/Memorithm/scirust", branch = "master" }
+scirust-synthesis = { git = "https://github.com/Memorithm/scirust", branch = "master" }
 ```
 
 Or, if you want the whole umbrella, `scirust = { git = ... }` and reach the
@@ -54,7 +54,7 @@ A ready-made Claude-backed generator ships behind the optional `anthropic`
 feature — no need to write the HTTP yourself:
 
 ```toml
-scirust-rsi = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master", features = ["anthropic"] }
+scirust-rsi = { git = "https://github.com/Memorithm/scirust", branch = "master", features = ["anthropic"] }
 ```
 
 ```rust

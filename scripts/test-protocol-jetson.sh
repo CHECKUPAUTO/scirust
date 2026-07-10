@@ -15,7 +15,7 @@
 #
 # QUICK START (on the Jetson)
 #   # 1. clone the repo if you have not already
-#   git clone https://github.com/CHECKUPAUTO/scirust.git
+#   git clone https://github.com/Memorithm/scirust.git
 #   # 2. install the nightly Rust toolchain (the repo pins nightly)
 #   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 #   rustup toolchain install nightly -c rustfmt -c clippy
@@ -93,7 +93,7 @@ fi
 if [[ -z "$REPO" ]] || ! is_workspace "$REPO"; then
   bad "Could not find the scirust workspace."
   warn "Run from inside the repo, or pass --repo /path/to/scirust, or:"
-  warn "  git clone https://github.com/CHECKUPAUTO/scirust.git && \\"
+  warn "  git clone https://github.com/Memorithm/scirust.git && \\"
   warn "  $0 --repo ./scirust"
   exit 2
 fi

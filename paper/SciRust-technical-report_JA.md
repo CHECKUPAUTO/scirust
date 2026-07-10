@@ -1,8 +1,8 @@
 # SciRust: 純Rust製ディープラーニング・フレームワーク — ポータブルなGPU加速、記号回帰エンジン、および決定論的推論ランタイム
 
 **Tarek Zekriti**
-独立研究者 · contact@checkupauto.fr
-リポジトリ: https://github.com/CHECKUPAUTO/scirust
+独立研究者 · zekrititarek@gmail.com
+リポジトリ: https://github.com/Memorithm/scirust
 
 ---
 

@@ -1,8 +1,8 @@
 # SciRust: Un framework de aprendizaje profundo en Rust puro — Aceleración de GPU portátil, un motor de regresión simbólica y un tiempo de ejecución de inferencia determinista
 
 **Tarek Zekriti**
-Investigador independiente · contact@checkupauto.fr
-Repositorio: https://github.com/CHECKUPAUTO/scirust
+Investigador independiente · zekrititarek@gmail.com
+Repositorio: https://github.com/Memorithm/scirust
 
 ---
 

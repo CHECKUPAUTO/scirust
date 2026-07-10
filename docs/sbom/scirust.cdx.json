@@ -33,7 +33,7 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/CHECKUPAUTO/scirust"
+          "url": "https://github.com/Memorithm/scirust"
         }
       ],
       "components": [
@@ -152,7 +152,7 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/CHECKUPAUTO/scirust"
+          "url": "https://github.com/Memorithm/scirust"
         }
       ]
     },

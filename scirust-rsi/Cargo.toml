@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 description = "SciRust Recursive Self-Improvement — bounded, sandboxed self-improvement loops (Self-Refine, STaR, Expert Iteration, (1+λ)-ES with the 1/5 rule, Population-Based Training) with explicit safety guards and convergence guarantees"
 license-file = "../LICENSE.md"
-repository = "https://github.com/CHECKUPAUTO/scirust"
+repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
 rand = "0.8"

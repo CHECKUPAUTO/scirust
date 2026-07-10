@@ -1,6 +1,6 @@
 # Agent prompt — drive an RSI loop with `scirust-rsi`
 
-Ready-to-paste prompt for a Claude Code session **scoped to `CHECKUPAUTO/RSI`**
+Ready-to-paste prompt for a Claude Code session **scoped to `Memorithm/RSI`**
 (this scirust session does not have access to that repo). It makes `RSI` consume
 the `scirust-rsi` engine to generate and then recursively improve algorithms,
 with the safety contract enforced and verified.
@@ -8,7 +8,7 @@ with the safety contract enforced and verified.
 ```text
 Contexte
 --------
-Le dépôt CHECKUPAUTO/scirust contient désormais un crate `scirust-rsi` : un moteur
+Le dépôt Memorithm/scirust contient désormais un crate `scirust-rsi` : un moteur
 pur-Rust, déterministe et BORNÉ d'auto-amélioration récursive (boucle élitiste
 « propose → évalue → garde si STRICTEMENT meilleur → répète »).
 Doc d'intégration : scirust-rsi/INTEGRATION.md sur la branche master.
@@ -18,16 +18,16 @@ le pilote OnePlusLambda, la primitive `ascend` et le garde-fou `Guard`
 
 Objectif
 --------
-Faire du dépôt CHECKUPAUTO/RSI un CONSOMMATEUR de scirust-rsi : un agent qui
+Faire du dépôt Memorithm/RSI un CONSOMMATEUR de scirust-rsi : un agent qui
 GÉNÈRE des algorithmes candidats puis les AMÉLIORE en boucle, sans jamais
 régresser. Développe sur une nouvelle branche, ne pousse PAS sur main directement.
 
 Étapes
 ------
-1. Inspecte l'état actuel de CHECKUPAUTO/RSI (structure, Cargo.toml, ce qui existe).
+1. Inspecte l'état actuel de Memorithm/RSI (structure, Cargo.toml, ce qui existe).
    Lis aussi scirust-rsi/INTEGRATION.md et scirust-rsi/src/lib.rs dans scirust.
 2. Ajoute la dépendance git :
-     scirust-rsi = { git = "https://github.com/CHECKUPAUTO/scirust", branch = "master" }
+     scirust-rsi = { git = "https://github.com/Memorithm/scirust", branch = "master" }
    (et scirust-algogen / scirust-synthesis si tu veux un vrai générateur de code).
 3. Implémente le trait adapté à la tâche de RSI (par défaut RefineTask) où :
      - `score`  = ÉVALUATEUR : compile/teste le candidat, renvoie une Fitness

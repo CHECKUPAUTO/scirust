@@ -1,8 +1,8 @@
 # SciRust: إطار عمل للتعلم العميق بلغة رست الخالصة — تسريع GPU محمول، محرك انحدار رمزي، وزمن تشغيل استدلال حتمي
 
 **طارق زكريتي**
-باحث مستقل · contact@checkupauto.fr
-المستودع: https://github.com/CHECKUPAUTO/scirust
+باحث مستقل · zekrititarek@gmail.com
+المستودع: https://github.com/Memorithm/scirust
 
 ---
 

@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Modifié — acteur CHECKUPAUTO remplacé par TAREK ZEKRITI
+- **Attribution** : le champ `authors` de `scirust-burn-bridge` passe de
+  "CheckupAuto" à "Tarek Zekriti" ; l'identité git locale des commits est
+  désormais TAREK ZEKRITI \<zekrititarek@gmail.com\>.
+- **URLs/slugs GitHub** : toutes les références `CHECKUPAUTO/*` (26 fichiers —
+  `repository` des Cargo.toml, README, LICENSE.md, RELEASING, SBOM CycloneDX,
+  rapports techniques ×8 langues, scripts de protocole, docs scirust-rsi,
+  URI SARIF de scirust-som) pointent vers `Memorithm/*`, l'org qui héberge
+  réellement les dépôts.
+- **Marque également remplacée (2e passe, sur confirmation utilisateur)** :
+  emails de contact `contact@checkupauto.fr` → `zekrititarek@gmail.com`
+  (LICENSE, LICENSING, SECURITY, plaquette, en-têtes des rapports ×8 langues)
+  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` →
+  `LicenseRef-TarekZekriti-Dual` (LICENSE + Cargo.toml racine,
+  scirust-burn-bridge, scirust-license ; `deny.toml` et le SBOM n'y
+  référençaient rien).
+
 ### Ajouté — draft de soumission Correctness '26 (`paper/correctness26/`)
 - **Venue actée** : Correctness '26 (10ᵉ Int. Workshop on Software
   Correctness for HPC Applications, SC26 Chicago), deadline 23 juillet 2026,

@@ -101,7 +101,7 @@ pub fn render_sarif(path: &str, analysis: &Analysis) -> String {
         ));
     }
     format!(
-        r#"{{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{{"tool":{{"driver":{{"name":"scirust-som","informationUri":"https://github.com/CHECKUPAUTO/scirust","version":"0.1.0"}}}},"results":[{results}]}}]}}"#
+        r#"{{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{{"tool":{{"driver":{{"name":"scirust-som","informationUri":"https://github.com/Memorithm/scirust","version":"0.1.0"}}}},"results":[{results}]}}]}}"#
     )
 }
 

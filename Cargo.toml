@@ -6,7 +6,7 @@ publish = false
 rust-version = "1.85"
 description = "SciRust — pure-Rust deterministic deep-learning & scientific-computing platform with certifiable industrial verticals (estimation, navigation, water, OT security, functional safety), validated from cloud x86 to embedded ARM (Jetson)"
 license-file = "LICENSE.md"
-repository = "https://github.com/CHECKUPAUTO/scirust"
+repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
 scirust-core = { path = "scirust-core" }
@@ -162,4 +162,4 @@ exclude = [
     "scirust-burn-bridge",
 ]
 resolver = "2"
-license = "LicenseRef-CheckupAuto-Dual"
+license = "LicenseRef-TarekZekriti-Dual"

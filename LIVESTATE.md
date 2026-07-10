@@ -3,6 +3,27 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 110 : acteur CHECKUPAUTO → TAREK ZEKRITI
+- **Décision utilisateur (définitive)** : l'acteur CHECKUPAUTO est remplacé par
+  TAREK ZEKRITI. Appliqué : identité git locale (`user.name` TAREK ZEKRITI,
+  `user.email` zekrititarek@gmail.com — scirust ET CCOS_EXTENDED) ; champ
+  `authors` de scirust-burn-bridge → "Tarek Zekriti" ; toutes les URLs/slugs
+  GitHub `CHECKUPAUTO/*` (26 fichiers : Cargo.toml des crates, README, LICENSE.md,
+  RELEASING, SBOM, rapports techniques ×8 langues, scripts, scirust-rsi docs,
+  SARIF de scirust-som) → `Memorithm/*` (l'org qui héberge — un nom de personne
+  n'est pas une URL valide).
+- **2e passe (confirmée par l'utilisateur : « oui continu »)** : marque aussi —
+  emails `contact@checkupauto.fr` → `zekrititarek@gmail.com` (LICENSE, LICENSING,
+  SECURITY, plaquette, en-têtes des rapports ×8) et SPDX
+  `LicenseRef-CheckupAuto-Dual` → `LicenseRef-TarekZekriti-Dual` (LICENSE +
+  3 Cargo.toml ; deny.toml/SBOM sans référence). git grep -i checkupauto → 0
+  hors entrées narratives CHANGELOG/LIVESTATE.
+- **Reste** : sweep équivalent dans CCOS_EXTENDED (dépôt séparé) — fait dans la
+  même session (PR Memorithm/CCOS_EXTENDED#7, deps git + 3 Cargo.lock basculés,
+  `cargo metadata --locked` vert ×3). NB fusion : le volet 109 (Correctness '26,
+  mergé avant celui-ci) contient `paper/correctness26/` — occurrences CHECKUPAUTO
+  résiduelles de ce nouveau contenu balayées dans le commit de merge.
+
 ## Session 2026-07-10 — volet 109 : draft de soumission Correctness '26
 - **Contexte** : PR #268 (volet 108) MERGÉE dans master. Décisions utilisateur actées :
   bug reports extérieurs clos ; pas de re-licence JOSS ; plateforme d'évaluation du
