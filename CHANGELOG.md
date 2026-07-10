@@ -39,6 +39,37 @@ versions sémantiques à partir de la prochaine release taguée.
   trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
   bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
   script de preuve et au job CI QEMU.
+### Ajouté — durcissement RLS : zéro-allocation, const-generic, QR-RLS racine carrée, benchmarks mesurés
+Les 4 points du plan validé après la revue du texte Gemini — chaque
+affirmation de ce lot est adossée à un test ou une mesure :
+- **`update()` zéro-allocation** (`RlsFilter`, `VectorRls`) : les
+  intermédiaires (`P·u`, erreur a priori) vivent dans des buffers persistants
+  (`#[serde(skip)]`, redimensionnement paresseux post-désérialisation) ; le
+  gain est replié à la volée — plus aucune allocation tas par échantillon
+  (l'ancienne boucle en faisait 4). `RlsFilter::update` retourne désormais
+  `&[f64]` (vue interne) au lieu d'un `Vec` alloué.
+- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`) : variante
+  entièrement sur pile, `core`-only (extractible en `no_std` pour
+  l'embarqué), dimensions connues du compilateur ⇒ déroulage/vectorisation
+  réels. Arithmétique **bit-identique** à la version tas — vérifié par un
+  test qui compare les trajectoires de poids au bit près sur 500 pas.
+- **`QrRls`** (`qr_rls`) : RLS **racine carrée** — propage le facteur `S`
+  (`P = S·Sᵀ`, mise à jour de rang 1 de Potter, la famille de méthodes du
+  `UdFilter` maison). La semi-définie-positivité de la covariance tient **par
+  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), pas par re-symétrisation forcée —
+  la réponse honnête au risque de divergence du RLS standard (aucune
+  prétention au-delà : l'estimée reste tributaire de l'excitation, documenté).
+  Tests : équivalence aux poids près (1e-6) avec le RLS standard sur données
+  saines ; stress 100 000 pas, λ=0,9, entrées quasi-colinéaires → P finie,
+  diagonale ≥ 0, mineurs principaux 2×2 ≥ 0 ; suivi d'un système dérivant.
+- **Benchmarks mesurés** (`--bin bench_rls`, release, conteneur CI x86_64 —
+  chiffres liés à cette machine, à re-mesurer ailleurs) : ns/update
+  `VectorRls` / `QrRls` / `RlsFilterConst` : n=4 → 40 / 47 / 34 ; n=16 →
+  633 / 476 / 326 ; n=64 → 10 017 / 6 740 / 8 451. Constats mesurés : la
+  variante const-generic est ~2× plus rapide à n=16 (déroulage réel), et le
+  QR-RLS **bat** le RLS standard dès n=16 (pas de passe de symétrisation).
+  Comparaison padasip non réalisée ici (échec d'installation dans le
+  conteneur) — point ouvert, aucune revendication inter-bibliothèques.
 
 ### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
 Suite annoncée du volet précédent — les trois chantiers « suite possible »
