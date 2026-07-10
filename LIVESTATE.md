@@ -3,6 +3,49 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — fluides & thermo, volet 4 (région 3 IF97 Helmholtz, équations backward)
+- **Contexte** : PR #290 (volet 3) MERGÉE ; utilisateur a explicitement
+  demandé les deux derniers points de la liste « suite possible » :
+  région 3 IF97 (Helmholtz, point critique) et équations backward
+  T(p,h)/T(p,s) officielles. Branche repartie de master.
+- **Région 3** (`steam::region3`/`region3_from_tp`) : point clé découvert
+  avant d'écrire le Rust — j'ai balayé numériquement P(ρ) en Python et
+  constaté qu'elle n'est PAS monotone sur une large plage de densités
+  pour T sous-critique (boucle façon van der Waals à l'intérieur de la
+  cloche diphasique, physiquement attendu) ; en revanche monotone sur
+  ρ∈[80,800] kg/m³ pour tout T supercritique (vérifié par balayage fin
+  60×300 points). Décision : restreindre `region3_from_tp` au domaine
+  supercritique (T≥Tc) plutôt que d'implémenter la logique complète des
+  sous-régions 3a/3b (nécessiterait la densité de saturation ρf/ρg(T),
+  elle-même non triviale) — usage principal visé (cycles ultra-
+  supercritiques) pleinement couvert. Oracle table 33 IF97 (3 points,
+  toutes propriétés) + roundtrip densité sur grille de 5 points.
+- **Équations backward** (`thermo::backward`, nouveau module) : région 1
+  (2×20 coeffs) + région 2 en 2a/2b/2c (T_Ph : 34+38+23 ; T_Ps : 46+44+30).
+  **Bug détecté et corrigé avant merge** : la région 2a de T(p,s) utilise
+  des exposants en QUARTS D'ENTIER sur Pr (-1,5 à 1,5) — mon premier
+  script de génération de tableaux Rust castait tout en `i32` via
+  `int()`, tronquant silencieusement -1,5→-1 etc. Repéré parce que j'ai
+  systématiquement fait ré-asserter les longueurs de tableaux en Python
+  (méthode qui a déjà servi aux volets précédents) : une erreur de
+  longueur (46 vs 45) sur un tableau voisin a fait échouer la compilation
+  Rust en premier lieu, ce qui a déclenché une vérification complète de
+  TOUS les tableaux d'exposants pour des valeurs non entières — sans ce
+  réflexe de vérification systématique, le bug de troncature silencieuse
+  serait passé inaperçu (aucune erreur de compilation, juste un résultat
+  numériquement faux). Leçon retenue : toujours re-scanner les données
+  sources pour des valeurs non entières avant de choisir un type Rust,
+  ne pas supposer que tous les exposants IF97 sont des entiers simples.
+  16 exemples numériques officiels vérifiés + roundtrip forward/backward
+  sur 6 points couvrant toutes les sous-régions.
+- **Vérifié** : scirust-thermo 74 tests (+11 vs volet 3) ; scirust-fluids
+  inchangé à 57 ; clippy `-D warnings` propre (identical-if-blocks et
+  approx-constant corrigés) ; fmt appliqué.
+- **Suite possible** : aucune restante d'explicitement demandée : les
+  deux chantiers de ce volet clôturent la liste. Éventuel prolongement
+  futur non sollicité : régions 3a/3b complètes (sous-critique), backward
+  P(h,s) (régions 1/2/3), région 3 via T(p,h)/T(p,s) backward dédiées.
+
 ## Session 2026-07-10 — fluides & thermo, volet 3 (région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook)
 - **Contexte** : PR #285 (volet 2) MERGÉE ; « continu » → les trois
   « suites possibles » notées à la fin du volet 2. Branche repartie de

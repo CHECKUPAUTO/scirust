@@ -5,6 +5,46 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — fluides & thermo, volet 4 : région 3 IF97 (Helmholtz) et équations backward officielles
+Les deux derniers chantiers notés « suite possible » sont livrés :
+- **`scirust-thermo::steam::region3`/`region3_from_tp`** — IAPWS-IF97
+  région 3 (fluide dense autour du point critique), seule région dont
+  les variables naturelles sont **T et ρ** (et non T et p) : équation de
+  **Helmholtz** (et non Gibbs), 39 coefficients. `region3(t, rho)`
+  évalue directement (v, h, u, s, cp, cv, w, p — p est ici une sortie
+  dérivée). `region3_from_tp(t, p)` localise la densité par bissection
+  déterministe, **restreinte au domaine supercritique** (T ≥ 647,096 K) :
+  en dessous du point critique, une densité de type liquide et une de
+  type vapeur peuvent partager le même (T, p) (région 3 chevauche la
+  cloche diphasique côté sous-critique), ce qui rendrait la racine
+  ambiguë — vérifié empiriquement par balayage fin que P(ρ) sur
+  ρ ∈ [80, 800] kg/m³ est strictement croissante pour tout T du domaine
+  supercritique de la région 3, donc la solution y est unique par
+  construction. Oracles : **table de vérification officielle IF97 33**
+  (trois points T,ρ, toutes propriétés, à 1e-8/1e-6), aller-retour
+  densité→pression→densité sur une grille de 5 points, jointure physique
+  avec la région 2 à la frontière B23.
+- **`scirust-thermo::backward`** — équations **backward** officielles
+  T(p,h) et T(p,s) pour les régions 1 et 2 (closed-form, sans bissection) :
+  région 1 (20 coefficients chacune), région 2 en trois sous-régions
+  fittées 2a/2b/2c (34+38+23 et 46+44+30 coefficients) avec le
+  dispatch officiel (frontière `p_2bc`/`h_bc` par enthalpie, seuil
+  d'entropie 5,85 kJ/(kg·K)) et l'ajustement `T = max(T_sat, T)` près de
+  la ligne de saturation. Piège découvert et corrigé : la région 2a de
+  T(p,s) utilise des exposants en **quarts d'entier** sur la pression
+  réduite (-1,5 à 1,5, `powf`), contrairement à toutes les autres
+  corrélations du module qui n'utilisent que des entiers (`powi`) —
+  repéré parce qu'une régénération programmatique avec assertion de
+  longueur a démasqué la troncature silencieuse `int()` d'un script
+  antérieur qui aurait sinon introduit une erreur de calcul silencieuse.
+  Oracles : 16 exemples numériques officiels des publications
+  d'équations backward IF97, aller-retour contre les équations directes
+  sur 6 points (régions 1 et 2, toutes sous-régions).
+- Bilan : scirust-thermo 74 tests (+11), clippy `-D warnings` propre,
+  rustfmt appliqué. Avec ce volet, les deux chantiers explicitement
+  demandés par l'utilisateur (« la région 3 IF97… et les équations
+  backward officielles… ») sont complets.
+
 ### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
 Les trois « suites possibles » restantes du volet 2 sont livrées :
 - **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur
