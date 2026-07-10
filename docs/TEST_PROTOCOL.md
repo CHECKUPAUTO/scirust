@@ -177,3 +177,27 @@ directly, or `scripts/test-protocol.sh --only <gate>`.
   build/test, ~3 GB for `--only fmt,clippy`). On a constrained machine, run the
   heavy gates one at a time and `cargo clean` between them, or run the light
   gates locally and let CI carry the full build/test/cross matrix.
+
+---
+
+## On-device Jetson bench: the cost of determinism (O1)
+
+The x86 leg of the determinism-cost benchmark (`paper/PAPER_PLAN.md`, claims →
+evidence table, row **O1**) is measured; the aarch64 leg runs natively on a
+Jetson with a dedicated, self-contained script:
+
+```bash
+# on the Jetson, from the repo root (PR branch claude/new-session-n8bf71)
+sudo scripts/bench-o1-jetson.sh --pin-clocks     # stable wall-clock (nvpmodel -m 0 + jetson_clocks)
+scripts/bench-o1-jetson.sh                       # or: current power mode, recorded as-is
+```
+
+It builds `scirust-core --bin bench_reduction_overhead` in release, runs it 3×
+(run-to-run stability), executes the two neighbouring native-ARM evidences —
+**Q3** (`neon_matches_scalar_bit_exact`) and **R4**
+(`fingerprint_thread_invariance`) — and writes a timestamped evidence bundle
+`bench-o1-jetson-<UTC>/` (platform report incl. nvpmodel state, raw bench
+tables, test results). The bundle stays on the device (`.gitignore`d); the
+median table is what gets pasted into `paper/PAPER_PLAN.md` §4 (O1, Jetson
+leg) and one line into `LIVESTATE.md`. The script never changes device
+clocks/power state unless `--pin-clocks` is passed explicitly.

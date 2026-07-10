@@ -57,6 +57,13 @@
     distinctes à 8 threads (non-déterminisme observé). PAPER_PLAN §4 (R4/S2/O1 → [CI]/
     mesuré) et §6 (décisions) mis à jour. **Reste humain** : atelier précis + run Jetson
     du banc O1 + déclenchement de l'écriture du paper.
+  - **Protocole Jetson prêt** : `scripts/bench-o1-jetson.sh` (auto-contenu : rapport
+    plateforme avec nvpmodel consigné, `--pin-clocks` explicite jamais silencieux,
+    3 runs du banc, tests natifs Q3 NEON + R4 fingerprint, bundle d'évidence horodaté
+    ignoré par git). Smoke-testé sur x86 : chiffres cohérents avec le run initial ET
+    empreintes « figé » identiques entre processus (0x60daf62c…/0x9bf7c3f3…/
+    0xd5b8e15f…/0x7e99a9d0… aux 4 nombres de threads) — stabilité inter-processus du
+    banc vérifiée. Section « On-device Jetson bench (O1) » ajoutée à TEST_PROTOCOL.md.
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance

@@ -57,3 +57,8 @@ systemd/turboquant-*.service
 # Only the curated facade SBOM under docs/sbom/ is tracked.
 *.cdx.json
 !docs/sbom/*.cdx.json
+
+# Bundles d'évidence du banc O1 sur Jetson (scripts/bench-o1-jetson.sh) :
+# les chiffres sont reportés dans paper/PAPER_PLAN.md et LIVESTATE.md,
+# le bundle brut reste sur la machine de mesure.
+bench-o1-jetson-*/

@@ -73,7 +73,12 @@ versions sémantiques à partir de la prochaine release taguée.
     rapide** (0,76×-0,93× du temps de la baseline) et bit-stable ; la
     baseline « arrivée » a produit 3 empreintes distinctes à 8 threads
     (non-déterminisme réel observé). Wall-clock ⇒ protocole, jamais CI ;
-    volet Jetson/aarch64 restant.
+    volet Jetson/aarch64 restant — **protocole prêt** :
+    `scripts/bench-o1-jetson.sh` (rapport plateforme consigné, épinglage
+    d'horloges opt-in `--pin-clocks`, 3 runs, tests natifs Q3 NEON + R4
+    fingerprint, bundle d'évidence horodaté et git-ignoré), documenté dans
+    `docs/TEST_PROTOCOL.md`. Smoke-testé sur x86 : empreintes bit-identiques
+    entre processus séparés.
 
 ### Ajouté — `scirust-sigma` : bornes structurelles σ (« couvercle de zéro ») + audit des epsilons
 Nouvelle crate feuille **sans dépendance externe** (`std` seul) qui nomme et
