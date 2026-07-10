@@ -58,16 +58,24 @@ mkdir -p "$OUT"
 } > "$OUT/platform.txt"
 
 echo "== build (release) =="
-cargo build --release -p scirust-core --bin proof_portable_f32 \
+cargo build --release -p scirust-core \
+    --bin proof_portable_f32 --bin proof_portable_training \
     --manifest-path "$REPO/Cargo.toml"
 
-echo "== preuve =="
+echo "== preuve : fonctions portables =="
 set +e
 "$REPO/target/release/proof_portable_f32" $FULL | tee "$OUT/report.txt"
 RC=${PIPESTATUS[0]}
 set -e
 
-grep -v '^#' "$OUT/report.txt" | sha256sum | tee "$OUT/canonical.sha256"
+echo "== preuve : entraînement portable (MLP + Adam + CE, contrat poids finaux) =="
+set +e
+"$REPO/target/release/proof_portable_training" | tee "$OUT/report-training.txt"
+RC2=${PIPESTATUS[0]}
+set -e
+[[ $RC -eq 0 ]] && RC=$RC2
+
+grep -v '^#' "$OUT/report.txt" "$OUT/report-training.txt" | sha256sum | tee "$OUT/canonical.sha256"
 echo "bundle : $OUT"
 if [[ $RC -eq 0 ]]; then
     echo "VERDICT : PASS — cette machine reproduit bit à bit le contrat commis."

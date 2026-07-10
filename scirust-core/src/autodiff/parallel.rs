@@ -332,6 +332,23 @@ impl ParallelTape {
                     let av = &values[a];
                     t_grads[a] = t_grads[a].add(&g.hadamard(&av.exp()));
                 },
+                Op::ExpPortable(a) =>
+                {
+                    // depuis la sortie stockée — aucun appel libm.
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&values[i]));
+                },
+                Op::LnPortable(a) =>
+                {
+                    let av = &values[a];
+                    t_grads[a] = t_grads[a].add(&g.hadamard(&av.reciprocal()));
+                },
+                Op::MatMulPortable(a, b) =>
+                {
+                    // dA = g · Bᵀ ; dB = Aᵀ · g — via le GEMM portable.
+                    let (av, bv) = (values[a].clone(), values[b].clone());
+                    t_grads[a] = t_grads[a].add(&g.matmul_portable(&bv.transpose()));
+                    t_grads[b] = t_grads[b].add(&av.transpose().matmul_portable(&g));
+                },
                 Op::Log(a) =>
                 {
                     let av = &values[a];
@@ -522,6 +539,16 @@ impl ParallelTape {
                     let gs = g_broadcast.hadamard(&sm);
                     let sum_gs = gs.sum_axis(axis);
                     let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
+                    t_grads[input] = t_grads[input].add(&diff);
+                },
+                Op::SoftmaxPortable { input } =>
+                {
+                    // Jacobien depuis la sortie stockée (cf. reverse.rs) :
+                    // aucun appel libm, bit-exact inter-plates-formes.
+                    let sm = &values[i];
+                    let gs = g.hadamard(sm);
+                    let sum_gs = gs.sum_axis(1);
+                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(sm.rows, sm.cols)));
                     t_grads[input] = t_grads[input].add(&diff);
                 },
                 Op::LogSoftmax { input, axis } =>

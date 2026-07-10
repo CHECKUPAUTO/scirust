@@ -90,6 +90,77 @@ pub fn ifft(buf: &mut [Complex]) {
     }
 }
 
+/// FFT radix-2 **portable** : identique à [`fft`], mais les twiddle factors
+/// passent par `scirust_core::portable_f32::sincos_small_f64` (Cody–Waite +
+/// polynômes portables, erreur absolue ≤ ~2⁻⁵²) au lieu de la libm — le
+/// spectre est donc **bit-identique inter-plates-formes** (le reste de
+/// l'algorithme — bit-reversal, papillons, accumulation de `w` — n'utilise
+/// que des opérations IEEE de base en ordre fixe). Voie de référence pour
+/// l'analyse spectrale reproductible (cartographie volet 111 : « FFT
+/// portable »).
+pub fn fft_portable(buf: &mut [Complex]) {
+    let n = buf.len();
+    assert!(
+        n.is_power_of_two(),
+        "FFT size must be a power of 2, got {}",
+        n
+    );
+    if n <= 1
+    {
+        return;
+    }
+
+    bit_reverse(buf, n);
+
+    let mut len = 2usize;
+    while len <= n
+    {
+        let half = len / 2;
+        let ang = -2.0 * PI / len as f64;
+        let (s, c) = scirust_core::portable_f32::sincos_small_f64(ang);
+        let wlen = Complex::new(c, s);
+        for chunk in buf.chunks_mut(len)
+        {
+            let mut w = Complex::new(1.0, 0.0);
+            for i in 0..half
+            {
+                let even = chunk[i];
+                let odd = chunk[i + half];
+                let t = w * odd;
+                chunk[i] = even + t;
+                chunk[i + half] = even - t;
+                w *= wlen;
+            }
+        }
+        len <<= 1;
+    }
+}
+
+/// IFFT **portable** (cf. [`fft_portable`]) : conjugaison, FFT portable,
+/// conjugaison, division par n — que des opérations IEEE de base.
+pub fn ifft_portable(buf: &mut [Complex]) {
+    let n = buf.len();
+    assert!(
+        n.is_power_of_two(),
+        "IFFT size must be a power of 2, got {}",
+        n
+    );
+    if n <= 1
+    {
+        return;
+    }
+    for c in buf.iter_mut()
+    {
+        *c = c.conj();
+    }
+    fft_portable(buf);
+    let scale = 1.0 / n as f64;
+    for c in buf.iter_mut()
+    {
+        *c = c.conj() * scale;
+    }
+}
+
 /// Forward FFT of a real-valued signal.
 ///
 /// Returns the positive-frequency half-spectrum (DC to Nyquist).
@@ -115,6 +186,70 @@ mod tests {
     use super::*;
 
     const EPS: f64 = 1e-10;
+
+    /// FFT portable ≈ FFT libm (les twiddles diffèrent d'ulps), aller-retour
+    /// exact, et empreinte du spectre FIGÉE — le contrat de portabilité de
+    /// l'analyse spectrale.
+    #[test]
+    fn fft_portable_matches_and_is_fingerprinted() {
+        // signal déterministe dérivé d'entiers (identique partout)
+        let n = 256usize;
+        let signal: Vec<Complex> = (0..n)
+            .map(|i| {
+                let a = ((i.wrapping_mul(2_654_435_761)) % 2048) as f64 / 1024.0 - 1.0;
+                let b = ((i.wrapping_mul(40_503)) % 2048) as f64 / 1024.0 - 1.0;
+                Complex::new(a, b)
+            })
+            .collect();
+
+        let mut libm = signal.clone();
+        fft(&mut libm);
+        let mut portable = signal.clone();
+        fft_portable(&mut portable);
+        for i in 0..n
+        {
+            assert!(
+                (libm[i].re - portable[i].re).abs() < 1e-9
+                    && (libm[i].im - portable[i].im).abs() < 1e-9,
+                "bin {i}: libm {:?} vs portable {:?}",
+                libm[i],
+                portable[i]
+            );
+        }
+
+        // aller-retour : ifft_portable(fft_portable(x)) ≈ x
+        let mut round = signal.clone();
+        fft_portable(&mut round);
+        ifft_portable(&mut round);
+        for i in 0..n
+        {
+            assert!(
+                (round[i].re - signal[i].re).abs() < EPS
+                    && (round[i].im - signal[i].im).abs() < EPS,
+                "roundtrip {i}"
+            );
+        }
+
+        // contrat de portabilité : empreinte FNV des bits f64 du spectre
+        let mut fp = 0xcbf2_9ce4_8422_2325u64;
+        let mut fold = |v: f64| {
+            let b = v.to_bits();
+            for half in [b as u32, (b >> 32) as u32]
+            {
+                fp ^= half as u64;
+                fp = fp.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        for c in &portable
+        {
+            fold(c.re);
+            fold(c.im);
+        }
+        assert_eq!(
+            fp, 0x0acd_e0a6_7b42_7c67,
+            "empreinte fft portable : 0x{fp:016x}"
+        );
+    }
 
     #[test]
     fn test_fft_dc() {

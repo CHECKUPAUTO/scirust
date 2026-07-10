@@ -5,6 +5,221 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — TV exacte (Condat), ondelettes db6/db8, seuil SURE, Kalman à tendance (`scirust-signal::denoise`, lot 3)
+- **`total_variation_exact`** : débruitage TV 1-D **exact** par l'algorithme
+  direct de Condat (IEEE SPL 2013) — le minimiseur global unique de
+  `½‖x−y‖² + λ·TV(x)` en un seul balayage O(n), sans itération ni tolérance.
+  L'optimalité est **prouvée par les conditions KKT dans les tests** (la somme
+  courante `sᵢ = Σ(xⱼ−yⱼ)` reste dans `[−λ,+λ]`, touche exactement `±λ` aux
+  sauts du signe correspondant, finit à 0 — objectif strictement convexe ⇒
+  KKT ⇔ optimum global), sur 6 entrées variées (échelons, sinusoïde, bruit
+  pur, signal court, λ minuscule/énorme) ; objectif vérifié ≤ celui de
+  l'approximation IRLS existante ; λ énorme ⇒ aplatissement exact à la moyenne.
+- **Ondelettes Daubechies-6 et Daubechies-8** (`Wavelet::{Db6, Db8}`, 3 et 4
+  moments nuls) : constantes dérivées par factorisation spectrale et
+  **épinglées indépendamment par test** des identités qui les définissent
+  (`Σh=√2`, `‖h‖=1`, orthogonalité à double décalage, moments nuls du miroir
+  en quadrature à ~1e-10) ; reconstruction parfaite multi-niveaux pour les
+  quatre bases.
+- **Seuil SURE par niveau** (`wavelet_denoise_sure`, SureShrink
+  Donoho-Johnstone 1995) : minimise l'estimateur de risque sans biais de Stein
+  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` bande par bande (préfixes de
+  carrés sur magnitudes triées, candidats plafonnés au seuil universel), avec
+  le repli « hybride » vers le seuil universel dans les bandes trop creuses.
+  Vérifié : bat le seuil universel en SNR sur un signal dense (deux tons) où
+  VisuShrink sur-lisse.
+- **`kalman_trend_smooth`** : lisseur de Kalman/RTS à **tendance locale**
+  (état 2-D niveau+pente, F=[[1,1],[0,1]]). Là où le modèle à niveau seul
+  arbitre retard contre bruit sur un signal en rampe, le modèle à tendance la
+  suit sans biais : test discriminant — une rampe propre est reproduite à
+  <1e-3 près là où le modèle à niveau (mêmes variances) fait >100× pire ;
+  gain SNR vérifié sur signal tendanciel bruité.
+- Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
+  `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
+  `scirust-core`/serde.
+
+### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
+- **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
+  et al., SC'11), clean-room depuis le papier et **validé contre les
+  vecteurs de test publiés** de Random123 (+ implémentation Python
+  indépendante). Sortie = fonction pure (clé, compteur) ⇒ dropout/init/
+  shuffle parallélisables sur n'importe quel découpage de threads en
+  restant bit-identiques (l'« aléa order-independent » façon JAX,
+  trou commun RepDL/scirust). Arithmétique entière pure ⇒ portable par
+  construction. 6 tests (KAT publiés, invariance au découpage, 4 threads
+  bit-exacts, statistiques, empreinte-contrat).
+- **`scirust-core::exact_acc`** — accumulateur **exact** de Kulisch pour
+  produits f32 (virgule fixe 704 bits couvrant tout l'intervalle des
+  produits) : `dot_exact`/`gemm_exact` **correctement arrondis** (une seule
+  opération d'arrondi), indépendants de l'ordre, à **fusion associative**
+  (multithread bit-exact quel que soit le découpage) — la réponse au trou
+  « GEMM reproductible et parallélisable » (classe ReproBLAS, en plus
+  fort : somme exacte). Vérifié bit à bit contre la référence Shewchuk
+  (deux constructions indépendantes du même réel arrondi) ; cancellation
+  catastrophique et sous-normaux traités. 6 tests.
+- **`NdVar::rope_portable`** (tape N-D) — RoPE dont fréquences
+  (`exp`/`ln` portables) et rotations (`sin`/`cos` portables, Payne–Hanek)
+  n'appellent aucune libm : encodage positionnel des transformers bit-exact
+  inter-plates-formes, forward et backward. **`fft_portable`/`ifft_portable`**
+  (scirust-signal) — twiddle factors via `sincos_small_f64`
+  (Cody–Waite + polynômes portables, nouvelle API f64 petit-argument de
+  `portable_f32`) : analyse spectrale bit-identique inter-plates-formes.
+  Empreintes-contrat commises pour les deux.
+- **Certification d'arrondi correct** (`portable_f32::certify` + modes
+  `--certify`/`--eval` du binaire de preuve) : pour chaque entrée f32
+  (balayage exhaustif 7 × 2³²), un certificat d'intervalle prouve que le
+  résultat publié est LE f32 correctement arrondi ; l'évaluateur interne
+  est revalidé contre la fonction expédiée sur chaque entrée. Les entrées
+  non certifiées sont tranchées hors ligne en précision arbitraire
+  (`scripts/verify-certify-offline.py` : Decimal 60 chiffres, milieux
+  comparés en rationnels exacts — pas de double arrondi). Résultats de la
+  campagne : voir LIVESTATE volet 114.
+
+### Ajouté — famille Adaptive, ondelettes Db4, soustraction spectrale (`scirust-signal::denoise`, suite)
+- **Famille `Adaptive` livrée** (`denoise::adaptive`) — la cinquième famille de la
+  taxonomie n'est plus « réservée » :
+  - **`kalman_smooth`** : filtre de Kalman à niveau local (marche aléatoire +
+    bruit blanc) suivi du lisseur **Rauch-Tung-Striebel** — estimation
+    bidirectionnelle sans déphasage.
+  - **`kalman_smooth_auto`** : auto-réglage des variances par **règle de
+    parcimonie sur la blancheur des innovations** — un filtre bien spécifié
+    produit des innovations blanches, mais sur un signal non-marche-aléatoire la
+    blancheur croît indéfiniment avec `q` (le filtre finit par tout suivre) ;
+    on prend donc le plus petit `q` dont la blancheur reste à une tolérance du
+    maximum : le modèle le plus lisse que le diagnostic ne rejette pas. Vérifié :
+    ~17 dB de gain SNR sur sinusoïde bruitée là où l'argmax naïf n'en donnait
+    que ~1,4 ; suit un échelon de niveau sans le gommer.
+  - **`lms_line_enhancer` / `rls_line_enhancer`** : rehausseurs de ligne
+    adaptatifs (prédicteur sur le signal retardé — NLMS normalisé, RLS à oubli
+    exponentiel). Extraient une raie périodique du bruit large bande **sans
+    référence externe ni fréquence a priori**, et la suivent si elle dérive.
+    RLS vérifié convergent sur enregistrement court (~2·taps échantillons).
+- **Ondelettes Daubechies-4** (`Wavelet::Db4`) : la DWT est refactorisée en
+  banc de filtres orthonormal **périodisé générique** (`Wavelet::{Haar, Db4}`,
+  miroir en quadrature `g[j]=(−1)^j·h[K−1−j]`) ; `wavelet_denoise_with` expose le
+  choix de base, `wavelet_denoise` reste l'enveloppe Haar rétro-compatible.
+  Tests : orthonormalité des taps, **reconstruction parfaite** mono- et
+  multi-niveaux (< 1e-10) pour les deux bases, et Db4 > Haar en SNR sur signal
+  lisse (2 moments nuls ⇒ moins d'artefacts blocs).
+- **Soustraction spectrale** (`spectral_subtraction`) : soustraction en
+  **puissance** avec sur-soustraction et plancher spectral
+  (Berouti-Schwartz-Makhoul 1979, le raffinement de la méthode de Boll — pas
+  sa règle en magnitude) : gain par bin `√(max(floor², 1 − over·P_n/|X|²))`,
+  phase bruitée conservée — le front-end classique du rehaussement de parole.
+- **Garde-fou NLMS** : `lms_line_enhancer` refuse `mu ≥ 2` (limite de stabilité
+  en moyenne quadratique — au-delà la sortie divergeait vers ±∞) par
+  passe-plat, la convention du module pour les paramètres hors plage.
+- `catalog()` couvre désormais réellement les cinq familles (`KalmanAuto` ajouté) ;
+  wrappers `Denoiser` pour Kalman auto et ALE ; ré-exports crate-niveau.
+- **Revue adversariale multi-agents passée sur le diff** (4 dimensions ×
+  vérification contradictoire, mutation testing) ; les manques de tests
+  confirmés sont comblés par des tests *discriminants* : la passe arrière RTS
+  est vérifiée par l'absence de déphasage (pic de corrélation croisée au lag 0
+  — un mutant réduit au filtre causal échoue à lag 8), les paramètres
+  `over`/`floor` de la soustraction spectrale sont épinglés par une identité
+  exacte (`over` énorme ⇒ sortie ≡ `floor·x`), et chaque entrée du `catalog()`
+  est exécutée avec vérification du câblage des wrappers (une transposition
+  `taps`/`delay` compilerait silencieusement).
+- 77 tests unitaires + 1 doctest au total sur le crate ; `cargo fmt`/`clippy -D
+  warnings` propres ; toujours zéro dépendance hors `scirust-core`/serde.
+
+### Ajouté — entraînement 100 % portable + tanh/sigmoid portables (volet 113)
+- **`Var::{exp_portable, ln_portable, matmul_portable}`** : primitives
+  d'autodiff opt-in dont forward ET backward n'appellent aucune libm ni
+  noyau SIMD par architecture — bit-exactes inter-plates-formes (backwards :
+  exp depuis la sortie stockée ; ln = g⊙1/x division IEEE ; matmul via le
+  GEMM portable et des transposes). `CrossEntropyLoss::new_portable()`
+  bascule le log-softmax interne dessus (perte + gradient portables ;
+  gradient ≡ voie libm à 1e-6, empreinte figée).
+- **`scirust-core --bin proof_portable_training`** : entraînement témoin
+  100 % portable (MLP 32×16×10, 30 pas Adam, données/init PCG) dont la
+  trajectoire de perte et les **poids finaux** sont comparés à des
+  empreintes commises — mêmes poids au bit près sur toute machine conforme.
+  Intégré à `scripts/proof-portable-f32.sh` et au job CI QEMU aarch64.
+- **`tanh_f32` / `sigmoid_f32`** dans `portable_f32` (cœur `exp_f64`
+  factorisé, formes stables des deux côtés, saturations analysées, tanh
+  impaire exacte) : fidèlement arrondis (≤ 1 ulp vs oracle libm f64 sur
+  200 000 points), contrats contract/dense/exhaustif commis, binaire de
+  preuve étendu à 4 fonctions. Premier lot de la cartographie des trous
+  (AUDIT_REPDL §post-scriptum) : débloque LSTM/GRU portables et GELU-tanh.
+- **`sin_f32` / `cos_f32`** portables avec réduction d'argument de
+  **Payne & Hanek en arithmétique entière pure** (u128) — exacte pour tout
+  f32 fini jusqu'à 3,4×10³⁸. Les 448 bits de 2/π sont générés par nos soins
+  (π par Chudnovsky, vérification par recomposition — aucune table copiée
+  d'une libm). Quadrant + 128 bits de fraction signée ; conversion
+  i128 → f64 correctement arrondie ⇒ fidélité maintenue même aux pires cas
+  de réduction du format f32. Oracle ≤ 1 ulp vs libm f64 sur 200 000 points
+  toutes magnitudes ; parités bit-exactes ; contrats
+  contract/dense/exhaustif commis (binaire de preuve : 6 fonctions).
+  Débloque : RoPE portable (transformers), FFT portable, encodages
+  positionnels.
+- **`erf_f32` / `gelu_f32`** portables — **lot 1 complet**. erf : série de
+  Maclaurin f64 à arrêt relatif déterministe, saturation |x| ≥ 4,
+  raccourci petit-argument préservant ±0 ; GELU **exact**
+  (x/2·(1+erf(x/√2)) via le cœur f64, sans cast intermédiaire).
+  Précision vérifiée contre une table de référence **indépendante**
+  (série en Decimal 60 chiffres — pas la libm). Contrats
+  contract/dense(/exhaustif pour erf) commis ; binaire de preuve :
+  8 balayages. La voie portable offre désormais exp, ln, tanh, sigmoid,
+  sin, cos, erf, GELU — strictement plus que les transcendantales de
+  RepDL — toutes fidèlement arrondies et bit-exactes inter-plates-formes
+  par construction.
+
+### Ajouté — débruitage & détection de bruit extensibles (`scirust-signal::denoise`)
+- **Nouveau module `denoise`** : une boîte à outils de suppression de bruit
+  pensée pour être *exhaustive par familles* plutôt que par énumération. Une
+  taxonomie fermée (`DenoiserFamily` : Linear / Rank / Transform / Variational /
+  Adaptive) et un trait uniforme `Denoiser` : ajouter une méthode = choisir sa
+  famille et implémenter le trait. Couverture actuelle, chaque routine validée
+  par un gain de SNR mesuré sur un signal synthétique à référence propre connue :
+  - **Linéaire** (`linear`) : moyenne mobile, lissage gaussien, **Savitzky-Golay**
+    (ajustement polynomial par moindres carrés, préserve les pics — testé exact
+    sur un polynôme), moyenne mobile exponentielle.
+  - **Rang / ordre** (`rank`) : filtre **médian**, **Hampel** (rejet d'impulsions
+    par MAD, filtre à décision), moyenne α-tronquée, plus `impulse_mask` qui
+    étiquette explicitement quels échantillons sont du bruit.
+  - **Transformé** (`transform`) : passe-bas/passe-haut FFT idéaux, **notch** et
+    suppression du 50/60 Hz + harmoniques, filtre de **Wiener** (bruit blanc),
+    **débruitage par ondelettes** (Haar multi-niveaux, seuil universel VisuShrink
+    `σ√(2 ln N)` avec σ robuste par MAD, seuillage doux/dur).
+  - **Variationnel** (`variational`) : lisseur de **Tikhonov** (L2, système
+    tridiagonal résolu par Thomas) et **Variation Totale** (L1, IRLS lagged-
+    diffusivity, préserve les fronts — vérifié meilleur que Tikhonov sur un
+    échelon bruité).
+- **Détection & séparation bruit/information** (`denoise::detect`) : `classify`
+  caractérise le bruit sans le nommer via un panel fixe de descripteurs (σ robuste
+  par MAD ; kurtosis/facteur de crête du résidu ; planéité spectrale ; périodicité
+  par **test g de Fisher** insensible au nombre de bins ; force de tendance ;
+  pente de couleur `1/f`) et un arbre de décision → `NoiseType`
+  (Gaussian / Impulsive / Periodic / Colored / Baseline / LowNoise). `separate`
+  décompose le signal en information + bruit **puis falsifie la séparation** par un
+  **test de blancheur** du résidu (autocorrélation vs bande `±1.96/√N`) :
+  `leaked_structure` signale si de l'information a fui dans le bruit — la garantie
+  qui rend la séparation vérifiable et non simplement plausible.
+- **Pipeline « débruiteur universel »** `denoise_auto` : détecte → choisit la
+  famille adaptée → applique (Hampel pour l'impulsif, notch pour le tonal,
+  retrait de tendance pour la dérive, Wiener/ondelettes pour le large bande),
+  et `catalog()` fournit un jeu de débruiteurs par défaut couvrant chaque famille.
+- 27 tests unitaires + 1 doctest ; zéro dépendance hors `scirust-core`/serde ;
+  `cargo fmt`/`clippy -D warnings` propres.
+
+### Ajouté — preuve aarch64 en CI + softmax portable dans la tape (volet 112, suite)
+- **CI : le job `cross-check-aarch64` exécute désormais du code aarch64**
+  (qemu-user + gcc-aarch64-linux-gnu) : tests `portable_f32` + binaire de
+  preuve en mode standard sur `aarch64-unknown-linux-gnu`. QEMU implémente
+  fidèlement IEEE-754 : chaque run CI vérifie réellement l'identité bit à
+  bit x86↔ARM du contrat commis (commandes validées localement : 13/13
+  tests + verdict=PASS sous qemu). Ferme le point ouvert « CI aarch64 =
+  check only » tracé depuis le volet 108.
+- **`Var::softmax_portable()`** (+ `Tensor::softmax_portable`,
+  `Op::SoftmaxPortable` dans reverse.rs et parallel.rs) : softmax par ligne
+  dont le forward passe par `portable_f32::softmax_f32` et dont le backward
+  calcule le jacobien **depuis la sortie stockée** — aucun appel libm dans
+  le nœud, donc forward ET gradient bit-exacts inter-plates-formes. Opt-in :
+  `Var::softmax` (libm) est inchangé. Tests : forward bit-identique à la
+  référence portable, gradient équivalent au nœud libm (≤ 1e-5), empreinte
+  du gradient figée (contrat cross-platform de l'entraînement).
+
 ### Ajouté — preuve cross-platform exécutable de la voie f32 portable (volet 112)
 - **`scirust-core --bin proof_portable_f32`** : binaire de preuve
   auto-vérifiant — recalcule sur la machine locale les goldens ponctuels,

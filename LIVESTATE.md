@@ -3,6 +3,105 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 114 : les 4 chantiers restants de la cartographie
+- **Contexte** : PR #273 (volet 113) MERGÉE ; branche repartie de master.
+  Demande utilisateur : « continu sur les 4 points » (RNG contre-basé, GEMM
+  reproductible rapide, RoPE/FFT portables, arrondi correct prouvé).
+- **Point 1 — Philox4x32-10 (`scirust-core::philox`)** : clean-room depuis le
+  papier SC'11, validé contre les vecteurs publiés Random123 (+ impl Python
+  indépendante). Fonction pure (clé, compteur) ⇒ aléa order-independent
+  (dropout/init/shuffle parallèles bit-identiques). Empreinte-contrat
+  0xf96c6b6aeca699f5. QEMU aarch64 : 6/6.
+- **Point 2 — accumulateur exact de Kulisch (`scirust-core::exact_acc`)** :
+  dot/GEMM à somme EXACTE (virgule fixe 704 bits, bit 0 = 2⁻³⁵²), arrondi
+  unique ⇒ correctement arrondi + indépendant de l'ordre + fusion associative
+  (multithread bit-exact). Vérifié bit à bit contre la référence Shewchuk.
+  NB : le debug_assert de résolution a attrapé un mauvais ancrage initial
+  (LSB de mantisse à 2⁻³⁵⁰, pas 2⁻²⁹⁸) — corrigé, assert durci en public.
+  QEMU aarch64 : 6/6.
+- **Point 3 — RoPE portable (`NdVar::rope_portable`, empreinte
+  0xfffeed24261eb5d6) + FFT portable (`scirust-signal::{fft,ifft}_portable`,
+  twiddles via la nouvelle API `portable_f32::sincos_small_f64`, empreinte
+  0x0acde0a67b427c67)**. QEMU aarch64 : verts.
+- **Point 4 — certification d'arrondi correct** (`portable_f32::certify`,
+  modes `--certify`/`--eval`, `scripts/verify-certify-offline.py`).
+  Campagne exhaustive x86-64 (7 × 2³² entrées, 824 s) — entrées PROUVÉES
+  correctement arrondies par certificat d'intervalle (gardes analytiques
+  comprises) : exp 99,99915 % (36 512 non certifiées), ln 99,99998 % (695),
+  tanh (214), sigmoid (1 007), sin (3 630), cos (3 680), erf (49 244 — zone
+  de cancellation x∈[2,4], borne par entrée volontairement large). Les
+  94 982 non certifiées ont été tranchées hors ligne en précision arbitraire
+  (Decimal 60 chiffres, milieux exacts en rationnels — script corrigé pour
+  le seuil d'overflow 2¹²⁸−2¹⁰³ et l'entrée f32 exacte via son rationnel).
+  **VERDICT FINAL : 94 517 sont en fait correctement arrondies ; il reste
+  465 entrées fidèles à 1 ulp — ZÉRO cas au-delà — sur les 30 064 771 072
+  évaluations.** Par fonction (misroundings / 2³²) : exp 2, ln 5, tanh 20,
+  sigmoid 78, sin 2, cos 6, erf 352. Taux global : 1,5×10⁻⁸. Comme les
+  fonctions sont bit-identiques inter-plates-formes (contrats exhaustifs),
+  ce verdict vaut sur TOUTES les plates-formes conformes. Claim mise à jour
+  dans la doc du module : « correctement arrondi pour 99,9999985 % des
+  entrées, vérifié exhaustivement ; le reste fidèle (1 ulp), listé ».
+  L'évaluateur interne est revalidé contre la fonction expédiée sur chacune
+  des 30 milliards d'entrées.
+
+## Session 2026-07-10 — volet 113 : entraînement 100 % portable + tanh/sigmoid (lot 1 carto)
+- **Contexte** : PR #272 (volet 112) MERGÉE ; branche repartie de master. Programme
+  utilisateur acté : CE portable → entraînement MNIST-like portable avec contrat
+  de poids → cartographie des trous (lot 1 : transcendantales).
+- **CrossEntropyLoss portable** : nouveaux nœuds opt-in `Var::{exp_portable,
+  ln_portable, matmul_portable}` (backwards sans libm : Exp depuis la sortie
+  stockée, Ln = g⊙1/x, MatMul via le GEMM portable + transpose) dans reverse.rs
+  ET parallel.rs ; `CrossEntropyLoss::new_portable()` bascule le log-softmax
+  interne sur exp/ln portables. Test : perte+gradient ≡ voie libm (1e-6) +
+  empreinte figée 0x40b66c65dceb9772.
+- **Entraînement 100 % portable — `proof_portable_training`** : MLP 32×16×10,
+  batch 8, 30 pas Adam, données/init PCG déterministes ; chaque nœud du graphe
+  est portable (matmul_portable, ReLU, CE portable ; Adam = IEEE + powi/sqrt).
+  Contrats commis (x86-64) : trajectoire de perte 0x531f63eb50666b8a, **poids
+  finaux 0x4bbd3d8dc162b305**. Intégré au script de preuve (report-training.txt
+  dans le bundle) et au job CI QEMU. C'est LA réponse à « l'entraînement
+  reproductible cross-platform » : mêmes poids au bit près sur toute machine.
+- **Lot 1 carto — tanh/sigmoid portables** : `tanh_f32`/`sigmoid_f32` dans
+  portable_f32 (cœur exp_f64 factorisé ; formes stables sans cancellation ;
+  saturations analysées ; tanh impaire exacte, ±0 préservés). Oracles ≤ 1 ulp
+  vs libm f64 sur 200 k points ; contrats commis : tanh contract
+  0x418f903e10257c1e / dense 0xa25de6342faed6e8 / exhaustif 0xd6f9e8508d19f785,
+  sigmoid contract 0xea084f0622bdfec4 / dense 0xb82676717c581433 / exhaustif
+  0x6796eabedfe7cb02. Binaire de preuve étendu (4 fonctions balayées).
+  Débloque : LSTM/GRU portables, GELU-tanh.
+- **Lot 1 (suite) — sin/cos portables avec Payne–Hanek** : `sin_f32`/`cos_f32`
+  dans portable_f32. Réduction d'argument de Payne & Hanek en **arithmétique
+  entière pure u128** (exacte pour tout f32 fini jusqu'à 3,4e38) : produit
+  mantisse × 448 bits de 2/π — bits GÉNÉRÉS par nos soins (π par Chudnovsky
+  en Decimal, vérifié par recomposition ; aucune table copiée) — quadrant +
+  128 bits de fraction signée, r = fraction·(π/2) à ~2⁻⁵² relatif (conversion
+  i128→f64 correctement arrondie ⇒ fidèle même aux pires cas de réduction f32,
+  |r| ≳ 2⁻³²). Polynômes de Taylor sin(deg 15)/cos(deg 16) sur [−π/4, π/4].
+  Oracle ≤ 1 ulp vs libm f64 sur 200 k points TOUTES magnitudes ; parités
+  bit-exactes ; sin²+cos² = 1 à 1e38. Contrats commis : sin contract
+  0x39c99b71fdbce247 / dense 0x084d235e4d8ddac7 / exhaustif 0xc0719c2d610d8685,
+  cos contract 0xcdc07dac0d401d29 / dense 0xcde8a193db4b2f5c / exhaustif
+  0xb9b0750ee67e5475. Binaire de preuve : 6 fonctions balayées. Débloque :
+  RoPE portable (transformers), FFT portable (scirust-signal), encodages
+  positionnels.
+- **Lot 1 (fin) — erf + GELU exact portables** : `erf_f32` (série de Maclaurin
+  f64, arrêt relatif déterministe, saturation |x| ≥ 4 → ±1, raccourci
+  |x| < 1e-4 qui préserve ±0 — bug de signe de zéro attrapé par le test
+  specials et corrigé avant commit des goldens) et `gelu_f32` (x/2·(1+erf(x/√2))
+  via le cœur f64, sans cast intermédiaire ; gelu(−∞) = −0). Précision
+  vérifiée contre une **table de référence indépendante** (série en Decimal
+  60 chiffres, générée par nos soins — pas la libm, qui n'a pas d'erf en Rust
+  std). Contrats : erf contract 0xfe817b5a5db40dc8 / dense 0xb7d54a90605132c5 /
+  exhaustif 0x37655614b70cf42d ; gelu contract 0x8f06fb9eb406d63f / dense
+  0xf1a6e6ae9f03349b. Binaire de preuve : 8 balayages. **LOT 1 COMPLET** :
+  la voie portable offre exp, ln, tanh, sigmoid, sin, cos, erf, GELU —
+  soit STRICTEMENT PLUS que les transcendantales de RepDL (exp/log), toutes
+  sous contrat exhaustif ou dense. Prochains candidats de la carto : RNG
+  contre-basé (Philox), GEMM classe ReproBLAS, erf dans scirust-special
+  (remplacer la claim libm « partout » par la voie portable).
+- Validation avant commit : preuve native x86 PASS + QEMU aarch64 PASS
+  (tests, proof_portable_f32, proof_portable_training).
+
 ## Session 2026-07-10 — volet 112 : preuve cross-platform exécutable de portable_f32 (x86_64 ↔ Jetson)
 - **Contexte** : PR #271 (volet 111) MERGÉE ; branche repartie de master (protocole
   branche-mergée). Demande utilisateur : « on doit prouver sur jetson et x86_64
@@ -23,11 +122,37 @@
   `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
   Les autres machines (Debian x86_64, Jetson) doivent reproduire verdict=PASS
   ET ce SHA exact en mode `--full`.
-- **Volet Jetson (à exécuter par l'utilisateur sur l'appareil)** :
-  `git fetch && git checkout <branche de la PR>` puis
-  `scripts/proof-portable-f32.sh --full` — verdict=PASS attendu + SHA canonique
-  identique au volet x86_64. Idem sur la machine x86_64 Debian de l'utilisateur.
-  Reporter verdict/SHA/commit ici.
+- **PREUVE CONSTATÉE SUR LES 3 PLATES-FORMES (2026-07-10, commit dc8918e,
+  sorties fournies par l'utilisateur)** — mode `--full`, SHA canonique
+  IDENTIQUE partout : `e9ac206146dc0b0e3aeb95e3a75880564649fd09043ab5d5c76b1f07bac5b7ae`.
+  - **Jetson (aarch64)** : verdict=PASS, exhaustif 83,2 s,
+    bundle `proof-portable-f32-20260710T152117Z` (sur l'appareil).
+  - **Debian x86_64** : verdict=PASS, exhaustif 97,4 s,
+    bundle `proof-portable-f32-20260710T152258Z` (sur la machine).
+  - **Conteneur Ubuntu x86_64** : verdict=PASS, exhaustif 89,2 s,
+    bundle `proof-portable-f32-20260710T144512Z`.
+  Conclusion : l'identité bit à bit x86-64 ↔ aarch64 de la voie f32 portable
+  est **constatée sur la totalité des 2³² entrées** de exp_f32 et ln_f32
+  (goldens, balayages contrat/dense/exhaustif, softmax, GEMM — tout OK).
+  La claim « bit-exact inter-plates-formes par construction » est désormais
+  adossée à une exécution multi-machines, conformément à la discipline
+  claims → évidence du dépôt.
+- **Preuve aarch64 EN CI (suite de session, ferme le « reste ouvert » CI
+  check-only)** : le job `cross-check-aarch64` exécute désormais réellement
+  du code aarch64 — qemu-user + gcc-aarch64, `cargo test portable_f32` +
+  binaire de preuve (mode standard : goldens + contrat + dense + composites)
+  sur target aarch64-unknown-linux-gnu. Validé localement avant commit :
+  13/13 tests + verdict=PASS sous qemu (dense 5,8 s). Chaque run CI est donc
+  une vérification x86↔ARM réelle du contrat.
+- **Softmax portable branché dans la tape AD (opt-in)** :
+  `Var::softmax_portable()` / `Tensor::softmax_portable()` +
+  `Op::SoftmaxPortable` (reverse.rs et parallel.rs) — forward via
+  `portable_f32::softmax_f32`, backward **depuis la sortie stockée** (aucun
+  appel libm dans le jacobien) ⇒ nœud complet forward+gradient bit-exact
+  inter-plates-formes. Le softmax libm existant est inchangé (aucune
+  régression d'empreintes). Tests : forward bit-identique à portable_f32,
+  gradient ≈ gradient libm (1e-5) + empreinte gradient figée
+  0x5ba09810fa590787 (contrat cross-platform du backward).
 
 ## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
 - **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des

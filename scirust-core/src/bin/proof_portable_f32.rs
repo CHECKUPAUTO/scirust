@@ -28,6 +28,64 @@ fn hex_list(bits: &[u32]) -> String {
 
 fn main() -> ExitCode {
     let full = std::env::args().any(|a| a == "--full");
+    let certify = std::env::args().any(|a| a == "--certify");
+
+    // Mode outil : `--eval <fonction> <fichier>` — lit des bit patterns f32
+    // (hex, un par ligne) et imprime `entrée sortie` en hex. Sert à la
+    // vérification hors ligne des entrées non certifiées (doc de certify).
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--eval")
+    {
+        let name = &args[pos + 1];
+        let path = &args[pos + 2];
+        let f = pf::certify::FUNCTIONS
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .unwrap_or_else(|| panic!("fonction inconnue : {name}"))
+            .1;
+        let body = std::fs::read_to_string(path).expect("lecture");
+        for line in body.lines()
+        {
+            let bits = u32::from_str_radix(line.trim(), 16).expect("hex");
+            let out = f(f32::from_bits(bits));
+            println!("{bits:08x} {:08x}", out.to_bits());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if certify
+    {
+        // Campagne de certification d'arrondi correct : balayage EXHAUSTIF
+        // (les 2³² entrées de chaque fonction). Les entrées « uncertified »
+        // ne sont pas fausses — leur statut se tranche hors ligne en
+        // précision arbitraire (cf. doc de portable_f32::certify).
+        println!("PROOF-PORTABLE-F32-CERTIFY v1");
+        println!(
+            "# arch={} os={} family={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+            std::env::consts::FAMILY
+        );
+        let t = Instant::now();
+        for (name, public, eval) in pf::certify::FUNCTIONS
+        {
+            let rep = pf::certify::sweep(public, eval, 1);
+            println!(
+                "{name}.certify analytic={} certified={} uncertified={}",
+                rep.analytic, rep.certified, rep.uncertified
+            );
+            // liste complète pour la vérification hors ligne (gitignorée)
+            if !rep.samples.is_empty()
+            {
+                let body: String = rep.samples.iter().map(|b| format!("{b:08x}\n")).collect();
+                let path = format!("proof-certify-{name}.txt");
+                std::fs::write(&path, body).expect("écriture liste certify");
+                println!("# liste_complete={path}");
+            }
+        }
+        println!("# duree_certify_s={:.1}", t.elapsed().as_secs_f64());
+        return ExitCode::SUCCESS;
+    }
     let mut ok = true;
     let check_fp = |name: &str, got: u64, want: u64| -> bool {
         let pass = got == want;
@@ -83,6 +141,36 @@ fn main() -> ExitCode {
         pf::sweep_fingerprint(pf::ln_f32, pf::PROOF_STEP_CONTRACT),
         pf::PROOF_LN_FP_CONTRACT,
     );
+    ok &= check_fp(
+        "tanh.contract",
+        pf::sweep_fingerprint(pf::tanh_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_TANH_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "sigmoid.contract",
+        pf::sweep_fingerprint(pf::sigmoid_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_SIGMOID_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "sin.contract",
+        pf::sweep_fingerprint(pf::sin_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_SIN_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "cos.contract",
+        pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_COS_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "erf.contract",
+        pf::sweep_fingerprint(pf::erf_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_ERF_FP_CONTRACT,
+    );
+    ok &= check_fp(
+        "gelu.contract",
+        pf::sweep_fingerprint(pf::gelu_f32, pf::PROOF_STEP_CONTRACT),
+        pf::PROOF_GELU_FP_CONTRACT,
+    );
 
     // --- Balayage dense (pas 257, ≈ 16,7 M d'entrées par fonction) ---
     println!("dense.step={}", pf::PROOF_STEP_DENSE);
@@ -96,6 +184,36 @@ fn main() -> ExitCode {
         "ln.dense",
         pf::sweep_fingerprint(pf::ln_f32, pf::PROOF_STEP_DENSE),
         pf::PROOF_LN_FP_DENSE,
+    );
+    ok &= check_fp(
+        "tanh.dense",
+        pf::sweep_fingerprint(pf::tanh_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_TANH_FP_DENSE,
+    );
+    ok &= check_fp(
+        "sigmoid.dense",
+        pf::sweep_fingerprint(pf::sigmoid_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_SIGMOID_FP_DENSE,
+    );
+    ok &= check_fp(
+        "sin.dense",
+        pf::sweep_fingerprint(pf::sin_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_SIN_FP_DENSE,
+    );
+    ok &= check_fp(
+        "cos.dense",
+        pf::sweep_fingerprint(pf::cos_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_COS_FP_DENSE,
+    );
+    ok &= check_fp(
+        "erf.dense",
+        pf::sweep_fingerprint(pf::erf_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_ERF_FP_DENSE,
+    );
+    ok &= check_fp(
+        "gelu.dense",
+        pf::sweep_fingerprint(pf::gelu_f32, pf::PROOF_STEP_DENSE),
+        pf::PROOF_GELU_FP_DENSE,
     );
     println!("# duree_dense_s={:.1}", t.elapsed().as_secs_f64());
 
@@ -121,6 +239,31 @@ fn main() -> ExitCode {
             "ln.exhaustive",
             pf::sweep_fingerprint(pf::ln_f32, 1),
             pf::PROOF_LN_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "tanh.exhaustive",
+            pf::sweep_fingerprint(pf::tanh_f32, 1),
+            pf::PROOF_TANH_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "sigmoid.exhaustive",
+            pf::sweep_fingerprint(pf::sigmoid_f32, 1),
+            pf::PROOF_SIGMOID_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "sin.exhaustive",
+            pf::sweep_fingerprint(pf::sin_f32, 1),
+            pf::PROOF_SIN_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "cos.exhaustive",
+            pf::sweep_fingerprint(pf::cos_f32, 1),
+            pf::PROOF_COS_FP_EXHAUSTIVE,
+        );
+        ok &= check_fp(
+            "erf.exhaustive",
+            pf::sweep_fingerprint(pf::erf_f32, 1),
+            pf::PROOF_ERF_FP_EXHAUSTIVE,
         );
         println!("# duree_exhaustive_s={:.1}", t.elapsed().as_secs_f64());
     }
