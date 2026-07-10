@@ -1596,6 +1596,12 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: the degenerate edges reduce `pmf` to `exp(0.0)`,
+    // which every real libm returns as exactly 1.0 but Miri deliberately
+    // perturbs (it models the platform freedom of the transcendental
+    // intrinsics), breaking the exact 1e-15 checks. Native Build & Test jobs
+    // enforce these values.
+    #[cfg_attr(miri, ignore)]
     fn binomial_degenerate_edges() {
         let zero = Binomial::new(10, 0.0);
         assert!(close(zero.pmf(0), 1.0, 1e-15));
