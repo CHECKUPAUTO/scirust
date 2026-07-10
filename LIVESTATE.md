@@ -3,6 +3,29 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités, 6e passe (log-series, Planck, pmf de Loader)
+- **Contexte** : « enchaine sur Suites possibles restantes » après PR #294
+  (5e passe) MERGÉE. Les 3 restes annoncés : pmf de Loader grand n,
+  log-series, Planck non tronquée. Branche repartie de `origin/master`.
+- **Livré** : (a) `scirust-special` — algorithme de Loader (Loader 2000,
+  celui de R `dbinom`/`dpois`) : `stirling_error` (série asymptotique
+  x≥16 / direct sinon, validé mpmath 40 chiffres), `binom_deviance` (D₀
+  par série près de x≈np), `ln_poisson_pmf`/`ln_binomial_pmf`. Pleine
+  précision relative grand n/λ (~1e-10 → ~1e-15). `Binomial`/`Poisson`
+  ::ln_pmf recâblés dessus (aucune régression sur les tests existants).
+  (b) `Logarithmic` (log-séries `scipy.stats.logser`) ; (c) `Planck`
+  (géométrique non tronquée, limite n→∞ de Boltzmann, = géométrique
+  décalée testée). Oracles SciPy + mpmath. scirust-special 16 tests,
+  scirust-stats 54 tests + doctest, clippy 0 avertissement.
+- **Bilan volet probabilités** : **18 lois discrètes** (15 univariées + 3
+  vectorielles) + combinatoire exacte + ζ de Riemann + Loader + module
+  loterie honnête. Surface de méthodes à parité quasi complète SciPy.
+- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
+- **Suite possible** : lois discrètes de niche restantes (Bernoulli
+  explicite, dlaplace, poisson-binomiale exacte déjà faite), `interval`
+  côté continu, ou clore le volet — au choix utilisateur.
+- **NB CI** : panne Actions du dépôt possible ; validations locales.
+
 ## Session 2026-07-10 — probabilités, 5e passe (interval/expect + Yule-Simon + Boltzmann)
 - **Contexte** : « continu » après PR #292 (4e passe) MERGÉE. Branche
   repartie de `origin/master` à jour.
