@@ -76,7 +76,14 @@ pub fn exp_f32(x: f32) -> f32 {
     {
         return 0.0;
     }
-    let y = x as f64; // promotion exacte
+    exp_f64_core(x as f64) as f32
+}
+
+/// Cœur f64 de l'exponentielle portable (réduction k·ln 2 + Taylor degré 13 +
+/// remise à l'échelle 2^k). Précondition : `y` fini, |y| ≤ 300 (l'exposant k
+/// reste dans la plage normale f64) — garanti par les gardes des appelants
+/// ([`exp_f32`], [`sigmoid_f32`], [`tanh_f32`]).
+fn exp_f64_core(y: f64) -> f64 {
     // Réduction : y = k·ln2 + r, |r| ≤ ln2/2 (+ arrondi de k)
     let k = (y * core::f64::consts::LOG2_E).round();
     let r = (y - k * LN2_HI) - k * LN2_LO;
@@ -106,9 +113,63 @@ pub fn exp_f32(x: f32) -> f32 {
     p = p * r + 0.5;
     p = p * r + 1.0;
     p = p * r + 1.0;
-    // 2^k exact par construction de l'exposant (k ∈ [−152, 129] ⇒ f64 normal)
+    // 2^k exact par construction de l'exposant (|k| ≤ 434 ⇒ f64 normal)
     let scale = f64::from_bits(((1023 + k as i64) as u64) << 52);
-    (p * scale) as f32
+    p * scale
+}
+
+/// `sigmoid(x) = 1/(1+e⁻ˣ)` portable : bit-exact inter-plates-formes par
+/// construction, fidèlement arrondi (cf. doc du module). Forme stable des
+/// deux côtés (pas de cancellation) ; NaN → NaN canonique ;
+/// saturations : `x ≥ 30` → `1`, `x ≤ −120` → `0` (les sorties sous-normales
+/// intermédiaires sont produites par le cast).
+pub fn sigmoid_f32(x: f32) -> f32 {
+    if x.is_nan()
+    {
+        return CANONICAL_NAN;
+    }
+    if x >= 30.0
+    {
+        return 1.0; // 1 − e⁻³⁰ ≈ 1 − 9,4e-14 arrondit à 1 en f32
+    }
+    if x <= -120.0
+    {
+        return 0.0; // e⁻¹²⁰ est sous la moitié du plus petit sous-normal
+    }
+    let y = x as f64;
+    if y >= 0.0
+    {
+        (1.0 / (1.0 + exp_f64_core(-y))) as f32
+    }
+    else
+    {
+        let t = exp_f64_core(y);
+        (t / (1.0 + t)) as f32
+    }
+}
+
+/// `tanh(x)` portable : bit-exact inter-plates-formes par construction,
+/// fidèlement arrondi (cf. doc du module). `tanh(±0) = ±0` ; NaN → NaN
+/// canonique ; saturation `|x| ≥ 10` → `±1` (1 − tanh(10) ≈ 4e-9 arrondit
+/// à 1 en f32) ; pour `|x| < 1e-4`, `tanh(x)` arrondit à `x` (le terme x³/3
+/// est sous le demi-ulp).
+pub fn tanh_f32(x: f32) -> f32 {
+    if x.is_nan()
+    {
+        return CANONICAL_NAN;
+    }
+    let ax = x.abs();
+    if ax >= 10.0
+    {
+        return 1.0f32.copysign(x);
+    }
+    if ax < 1e-4
+    {
+        return x; // préserve aussi le signe de ±0
+    }
+    let t = exp_f64_core(-2.0 * (ax as f64));
+    let r = ((1.0 - t) / (1.0 + t)) as f32;
+    if x > 0.0 { r } else { -r }
 }
 
 /// `ln(x)` portable : bit-exact inter-plates-formes par construction,
@@ -264,6 +325,19 @@ pub const PROOF_LN_GOLDEN_BITS: [u32; 10] = [
     3207688728, 1053792543, 1060205080, 1075010958, 3222494606, 1116350389, 3263834037, 3266227280,
     1118925227, 872415231,
 ];
+
+/// Empreinte attendue de `tanh_f32` sur le balayage-contrat.
+pub const PROOF_TANH_FP_CONTRACT: u64 = 0x418f_903e_1025_7c1e;
+/// Empreinte attendue de `sigmoid_f32` sur le balayage-contrat.
+pub const PROOF_SIGMOID_FP_CONTRACT: u64 = 0xea08_4f06_22bd_fec4;
+/// Empreinte attendue de `tanh_f32` sur le balayage dense.
+pub const PROOF_TANH_FP_DENSE: u64 = 0xa25d_e634_2fae_d6e8;
+/// Empreinte attendue de `sigmoid_f32` sur le balayage dense.
+pub const PROOF_SIGMOID_FP_DENSE: u64 = 0xb826_7671_7c58_1433;
+/// Empreinte attendue de `tanh_f32` sur le balayage exhaustif.
+pub const PROOF_TANH_FP_EXHAUSTIVE: u64 = 0xd6f9_e850_8d19_f785;
+/// Empreinte attendue de `sigmoid_f32` sur le balayage exhaustif.
+pub const PROOF_SIGMOID_FP_EXHAUSTIVE: u64 = 0x6796_eabe_dfe7_cb02;
 
 /// Empreinte attendue du softmax-contrat (PCG(7), n = 64, plage [−10, 10)).
 pub const PROOF_SOFTMAX_FP: u64 = 0x2b0c_3ead_12aa_19d5;
@@ -444,6 +518,72 @@ mod tests {
             let d = ulp_diff(got, reference);
             assert!(d <= 1, "ln_f32({x}) = {got}, libm = {reference}, {d} ulp");
         }
+    }
+
+    #[test]
+    fn tanh_sigmoid_specials() {
+        assert_eq!(tanh_f32(f32::NAN).to_bits(), 0x7fc0_0000);
+        assert_eq!(sigmoid_f32(f32::NAN).to_bits(), 0x7fc0_0000);
+        assert_eq!(tanh_f32(0.0).to_bits(), 0.0f32.to_bits());
+        assert_eq!(tanh_f32(-0.0).to_bits(), (-0.0f32).to_bits());
+        assert_eq!(tanh_f32(f32::INFINITY), 1.0);
+        assert_eq!(tanh_f32(f32::NEG_INFINITY), -1.0);
+        assert_eq!(tanh_f32(15.0), 1.0);
+        assert_eq!(tanh_f32(-15.0), -1.0);
+        assert_eq!(sigmoid_f32(0.0), 0.5);
+        assert_eq!(sigmoid_f32(f32::INFINITY), 1.0);
+        assert_eq!(sigmoid_f32(f32::NEG_INFINITY), 0.0);
+        assert_eq!(sigmoid_f32(40.0), 1.0);
+        assert_eq!(sigmoid_f32(-130.0), 0.0);
+        // symétries : tanh impaire, sigmoid(−x) = 1 − sigmoid(x) (à l'ulp près)
+        for i in 1..200
+        {
+            let x = i as f32 * 0.05;
+            assert_eq!(tanh_f32(-x).to_bits(), (-tanh_f32(x)).to_bits());
+        }
+    }
+
+    /// tanh/sigmoid : ≤ 1 ulp de la référence libm f64 sur un échantillon
+    /// dense — fidèlement arrondis.
+    #[test]
+    fn tanh_sigmoid_faithful_vs_f64_oracle() {
+        let mut rng = PcgEngine::new(777);
+        for _ in 0..100_000
+        {
+            let bits = (rng.float() as f64 * 4_294_967_296.0) as u32;
+            let x = f32::from_bits(bits);
+            if !x.is_finite()
+            {
+                continue;
+            }
+            let t_ref = ((x as f64).tanh()) as f32;
+            let t_got = tanh_f32(x);
+            assert!(
+                ulp_diff(t_got, t_ref) <= 1,
+                "tanh_f32({x}) = {t_got}, libm = {t_ref}"
+            );
+            let s_ref = (1.0 / (1.0 + (-(x as f64)).exp())) as f32;
+            let s_got = sigmoid_f32(x);
+            assert!(
+                ulp_diff(s_got, s_ref) <= 1,
+                "sigmoid_f32({x}) = {s_got}, libm = {s_ref}"
+            );
+        }
+    }
+
+    #[test]
+    fn tanh_fingerprint_bit_sweep() {
+        let fp = sweep_fingerprint(tanh_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(fp, PROOF_TANH_FP_CONTRACT, "empreinte tanh : 0x{fp:016x}");
+    }
+
+    #[test]
+    fn sigmoid_fingerprint_bit_sweep() {
+        let fp = sweep_fingerprint(sigmoid_f32, PROOF_STEP_CONTRACT);
+        assert_eq!(
+            fp, PROOF_SIGMOID_FP_CONTRACT,
+            "empreinte sigmoid : 0x{fp:016x}"
+        );
     }
 
     /// ln(exp(x)) ≈ x sur la plage sûre (cohérence interne des deux voies).
