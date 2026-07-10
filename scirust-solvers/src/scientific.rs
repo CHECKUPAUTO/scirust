@@ -15,6 +15,18 @@ impl FemSolver1D {
     /// with boundary conditions u(0) = 0, u(L) = 0.
     pub fn solve_steady_heat(&self, source_term: f64) -> Vec<f64> {
         let n = self.nodes;
+        // Degenerate meshes are returned trivially rather than panicking: with 0
+        // nodes there is nothing to solve, and with 1 node the single node is a
+        // fixed boundary at 0. A real 1-D FEM mesh needs ≥ 2 nodes for `h` to be
+        // finite and the interior loop `1..n-1` not to underflow.
+        if n == 0
+        {
+            return Vec::new();
+        }
+        if n == 1
+        {
+            return vec![0.0];
+        }
         let h = self.length / (n as f64 - 1.0);
 
         // Build the stiffness matrix K and load vector F
@@ -89,6 +101,17 @@ mod tests {
     /// exact solution is the parabola `u(x) = (f/2)·x·(L − x)`. 1D linear FEM is
     /// nodally exact for this operator, so the computed nodal values must match
     /// the analytic ones to round-off.
+    // Degenerate meshes must not panic (0 or 1 node → trivial solution).
+    #[test]
+    fn steady_heat_handles_degenerate_node_counts() {
+        assert!(FemSolver1D::new(0, 1.0).solve_steady_heat(1.0).is_empty());
+        assert_eq!(FemSolver1D::new(1, 1.0).solve_steady_heat(1.0), vec![0.0]);
+        // 2 nodes = both boundaries, still no panic.
+        let u2 = FemSolver1D::new(2, 1.0).solve_steady_heat(1.0);
+        assert_eq!(u2.len(), 2);
+        assert!(u2.iter().all(|x| x.is_finite()));
+    }
+
     #[test]
     fn steady_heat_matches_analytic_parabola() {
         let n = 5;

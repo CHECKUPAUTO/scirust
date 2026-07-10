@@ -197,7 +197,10 @@ fn solve_polynomial(coeffs: &[f64]) -> SolverResult<SolveResult> {
             else
             {
                 let mut reals: Vec<f64> = all.into_iter().map(|(re, _)| re).collect();
-                reals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                // `total_cmp` is a total order over all f64 (NaN included), so a
+                // non-finite root from an ill-conditioned polynomial sorts
+                // deterministically instead of panicking `partial_cmp().unwrap()`.
+                reals.sort_by(|a, b| a.total_cmp(b));
                 Ok(SolveResult::AllReal(reals))
             }
         },
