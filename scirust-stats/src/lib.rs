@@ -8,14 +8,24 @@
 //!
 //! ## What's here
 //!
-//! - **Distributions** ([`dist`]): `Normal`, `StudentT`, `ChiSquared`, `FisherF`,
-//!   `Gamma`, `Beta`, `Exponential`, `Uniform` — each with pdf, cdf, survival
-//!   function, quantile, moments, and deterministic inverse-CDF sampling.
+//! - **Continuous distributions** ([`dist`]): `Normal`, `StudentT`, `ChiSquared`,
+//!   `FisherF`, `Gamma`, `Beta`, `Exponential`, `Uniform` — each with pdf, cdf,
+//!   survival function, quantile, moments, and deterministic inverse-CDF sampling.
+//! - **Discrete distributions** ([`discrete`]): `Binomial`, `Poisson`,
+//!   `Hypergeometric`, `Geometric` — pmf/ln-pmf, cdf, direct survival function,
+//!   SciPy-convention quantile, moments, deterministic sampling.
+//! - **Exact combinatorics** ([`comb`]): `factorial`, `binomial`, `permutations`,
+//!   `multichoose` in checked `u128` (`None` on overflow, never a wrong number),
+//!   plus overflow-free `ln_factorial` / `ln_binomial`.
 //! - **Descriptive statistics** ([`describe`]): mean, unbiased variance / std,
 //!   standard error, quantiles, median, min/max.
 //! - **Hypothesis tests** ([`htest`]): one- and two-sample t-tests (pooled &
 //!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit, one-sample
 //!   Kolmogorov–Smirnov.
+//! - **Honest lottery mathematics** ([`lottery`]): exact odds of any
+//!   `k`-of-`n` (+ bonus) game via the hypergeometric law, ticket expected
+//!   value, and a χ² draw-fairness audit. Draws are independent and uniform:
+//!   there is deliberately no "prediction" here, because none is possible.
 //!
 //! ## Guarantees
 //!
@@ -24,7 +34,9 @@
 //!   platform-dependent paths — same seed ⇒ bit-identical results.
 //! - **Validated**: distributions and tests are checked against published
 //!   reference values (z = 1.96 ⇒ 0.975, t₀.₉₇₅,₁₀ = 2.2281, χ²₀.₉₅,₅ = 11.0705,
-//!   F₀.₉₅(5,10) = 3.3258, and hand-computed test statistics).
+//!   F₀.₉₅(5,10) = 3.3258, and hand-computed test statistics); discrete laws
+//!   against SciPy 1.17 and exact rational arithmetic; lottery odds against
+//!   the officially published Powerball / EuroMillions / FDJ tables.
 //!
 //! ## Example
 //!
@@ -44,11 +56,15 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod comb;
 pub mod describe;
+pub mod discrete;
 pub mod dist;
 pub mod htest;
+pub mod lottery;
 pub mod rng;
 
+pub use discrete::{Binomial, DiscreteDistribution, Geometric, Hypergeometric, Poisson};
 pub use dist::{
     Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
 };
@@ -56,11 +72,16 @@ pub use htest::{
     Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
     t_test_two_sample,
 };
+pub use lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
 pub use rng::SplitMix64;
 
 /// One-import surface for the common statistics workflow.
 pub mod prelude {
+    pub use crate::comb::{
+        binomial, factorial, ln_binomial, ln_factorial, multichoose, permutations,
+    };
     pub use crate::describe::{mean, median, quantile, std_dev, std_error, variance};
+    pub use crate::discrete::{Binomial, DiscreteDistribution, Geometric, Hypergeometric, Poisson};
     pub use crate::dist::{
         Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
     };
@@ -68,5 +89,6 @@ pub mod prelude {
         Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
         t_test_two_sample,
     };
+    pub use crate::lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
     pub use crate::rng::SplitMix64;
 }
