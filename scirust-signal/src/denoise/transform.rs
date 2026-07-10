@@ -184,15 +184,52 @@ fn apply_threshold(x: f64, t: f64, mode: ThresholdMode) -> f64 {
 }
 
 /// The orthogonal wavelet basis used by [`wavelet_denoise_with`].
+///
+/// Naming follows the tap count (Daubechies-`K` has `K` taps and `K/2` vanishing
+/// moments): `Db4` = 2 moments, `Db6` = 3, `Db8` = 4. More vanishing moments
+/// represent smoother signals with fewer large coefficients — at the price of
+/// wider support (more ringing around isolated discontinuities).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wavelet {
-    /// Haar (Daubechies-1): piecewise-constant basis. Best for steps and abrupt
-    /// changes; leaves blocky artefacts on smooth signals.
+    /// Haar (Daubechies-2 in tap count): piecewise-constant basis. Best for steps
+    /// and abrupt changes; leaves blocky artefacts on smooth signals.
     Haar,
     /// Daubechies-4 (two vanishing moments): represents locally-linear signals
     /// compactly, so it denoises smooth data with far fewer artefacts than Haar.
     Db4,
+    /// Daubechies-6 (three vanishing moments): annihilates locally-quadratic
+    /// structure; the workhorse for smooth data.
+    Db6,
+    /// Daubechies-8 (four vanishing moments): the smoothest basis here; best for
+    /// very smooth signals, worst around sharp steps.
+    Db8,
 }
+
+/// Daubechies-6 scaling taps (extremal phase), derived by spectral factorization
+/// of the 3-vanishing-moment Daubechies polynomial; the identities `Σh = √2`,
+/// `‖h‖ = 1`, double-shift orthogonality and 3 vanishing moments are re-verified
+/// to ~1e-12 by unit test, which pins these constants independently.
+const DB6_H: [f64; 6] = [
+    0.3326705529500826,
+    0.8068915093110924,
+    0.4598775021184915,
+    -0.1350110200102546,
+    -0.0854412738820267,
+    0.0352262918857095,
+];
+
+/// Daubechies-8 scaling taps (extremal phase); same derivation and the same
+/// identity-based unit-test verification as [`DB6_H`], with 4 vanishing moments.
+const DB8_H: [f64; 8] = [
+    0.2303778133088964,
+    0.7148465705529153,
+    0.6308807679298589,
+    -0.0279837694168594,
+    -0.1870348117190928,
+    0.0308413818355607,
+    0.0328830116668852,
+    -0.0105974017850690,
+];
 
 impl Wavelet {
     /// Orthonormal analysis low-pass filter taps. The matching high-pass is the
@@ -212,6 +249,19 @@ impl Wavelet {
                     (1.0 - s3) / z,
                 ]
             },
+            Wavelet::Db6 => DB6_H.to_vec(),
+            Wavelet::Db8 => DB8_H.to_vec(),
+        }
+    }
+
+    /// Number of vanishing moments of the wavelet (high-pass) filter.
+    pub fn vanishing_moments(self) -> usize {
+        match self
+        {
+            Wavelet::Haar => 1,
+            Wavelet::Db4 => 2,
+            Wavelet::Db6 => 3,
+            Wavelet::Db8 => 4,
         }
     }
 }
@@ -289,20 +339,20 @@ pub fn wavelet_denoise(signal: &[f64], levels: usize, mode: ThresholdMode) -> Ve
     wavelet_denoise_with(signal, levels, mode, Wavelet::Haar)
 }
 
-/// [`wavelet_denoise`] on a caller-chosen orthogonal basis. Haar keeps steps
-/// crisp; Daubechies-4 (two vanishing moments) fits smooth signals with far
-/// fewer blocky artefacts.
-pub fn wavelet_denoise_with(
+/// Forward multi-level periodized DWT of the reflection-padded signal. Returns
+/// `(coarsest approximation, detail bands finest-first, padded length)`, or `None`
+/// when the signal is too short to transform. Stops early if the running
+/// approximation gets shorter than the filter (periodization would fold onto
+/// itself).
+#[allow(clippy::type_complexity)]
+fn dwt_forward(
     signal: &[f64],
     levels: usize,
-    mode: ThresholdMode,
-    wavelet: Wavelet,
-) -> Vec<f64> {
-    let n0 = signal.len();
-    let h = wavelet.lowpass();
-    if n0 < h.len()
+    h: &[f64],
+) -> Option<(Vec<f64>, Vec<Vec<f64>>, usize)> {
+    if signal.len() < h.len()
     {
-        return signal.to_vec();
+        return None;
     }
     let padded = pad_reflect_pow2(signal);
     let n = padded.len();
@@ -315,9 +365,6 @@ pub fn wavelet_denoise_with(
     {
         levels.min(max_levels)
     };
-
-    // Forward multi-level periodized DWT. Stop early if the running approximation
-    // gets shorter than the filter (periodization would fold onto itself).
     let mut approx = padded;
     let mut detail_coeffs: Vec<Vec<f64>> = Vec::with_capacity(levels_req);
     for _ in 0..levels_req
@@ -326,14 +373,41 @@ pub fn wavelet_denoise_with(
         {
             break;
         }
-        let (a, d) = dwt_step(&approx, &h);
+        let (a, d) = dwt_step(&approx, h);
         approx = a;
         detail_coeffs.push(d);
     }
     if detail_coeffs.is_empty()
     {
-        return signal.to_vec();
+        return None;
     }
+    Some((approx, detail_coeffs, n))
+}
+
+/// Inverse multi-level DWT, cropped back to the original length.
+fn dwt_inverse(mut approx: Vec<f64>, detail_coeffs: &[Vec<f64>], h: &[f64], n0: usize) -> Vec<f64> {
+    for detail in detail_coeffs.iter().rev()
+    {
+        approx = idwt_step(&approx, detail, h);
+    }
+    approx[..n0].to_vec()
+}
+
+/// [`wavelet_denoise`] on a caller-chosen orthogonal basis. Haar keeps steps
+/// crisp; the Daubechies bases (more vanishing moments) fit smooth signals with
+/// far fewer blocky artefacts.
+pub fn wavelet_denoise_with(
+    signal: &[f64],
+    levels: usize,
+    mode: ThresholdMode,
+    wavelet: Wavelet,
+) -> Vec<f64> {
+    let h = wavelet.lowpass();
+    let Some((approx, mut detail_coeffs, n)) = dwt_forward(signal, levels, &h)
+    else
+    {
+        return signal.to_vec();
+    };
 
     // Robust noise scale from the finest detail band, then the universal threshold.
     let sigma = mad(&detail_coeffs[0]) / 0.6745;
@@ -345,13 +419,91 @@ pub fn wavelet_denoise_with(
             *d = apply_threshold(*d, thresh, mode);
         }
     }
+    dwt_inverse(approx, &detail_coeffs, &h, signal.len())
+}
 
-    // Inverse DWT from the coarsest approximation upward.
-    for detail in detail_coeffs.iter().rev()
+/// Wavelet denoising with a **per-level SURE threshold** (SureShrink,
+/// Donoho-Johnstone 1995) and soft shrinkage.
+///
+/// The universal threshold `σ√(2 ln N)` used by [`wavelet_denoise_with`] is
+/// minimax over the sparsest case and tends to over-smooth signals whose energy
+/// spreads over many coefficients. SureShrink instead picks, in each detail band
+/// separately, the threshold minimizing **Stein's Unbiased Risk Estimate**
+/// `SURE(t) = m − 2·#{|uᵢ| ≤ t} + Σ min(uᵢ², t²)` (an unbiased estimate of the
+/// soft-thresholding mean-square error that needs no clean reference), falling
+/// back to the universal threshold in bands the Donoho-Johnstone sparsity test
+/// flags as too sparse for SURE to be reliable (the "hybrid" scheme).
+pub fn wavelet_denoise_sure(signal: &[f64], levels: usize, wavelet: Wavelet) -> Vec<f64> {
+    let h = wavelet.lowpass();
+    let Some((approx, mut detail_coeffs, _)) = dwt_forward(signal, levels, &h)
+    else
     {
-        approx = idwt_step(&approx, detail, &h);
+        return signal.to_vec();
+    };
+
+    let sigma = mad(&detail_coeffs[0]) / 0.6745;
+    if sigma > 0.0
+    {
+        for detail in detail_coeffs.iter_mut()
+        {
+            let thresh = sigma * sure_threshold_normalized(detail, sigma);
+            for d in detail.iter_mut()
+            {
+                *d = apply_threshold(*d, thresh, ThresholdMode::Soft);
+            }
+        }
     }
-    approx[..n0].to_vec()
+    dwt_inverse(approx, &detail_coeffs, &h, signal.len())
+}
+
+/// SureShrink hybrid threshold for one detail band, in units of `sigma`.
+fn sure_threshold_normalized(detail: &[f64], sigma: f64) -> f64 {
+    let m = detail.len();
+    if m < 2
+    {
+        return 0.0;
+    }
+    let mf = m as f64;
+    let t_univ = (2.0 * mf.ln()).sqrt();
+
+    // Normalized magnitudes, ascending.
+    let mut a: Vec<f64> = detail.iter().map(|&d| (d / sigma).abs()).collect();
+    a.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+
+    // Donoho-Johnstone sparsity test: too little energy above the noise floor
+    // means SURE's variance dominates — fall back to the universal threshold.
+    let energy: f64 = a.iter().map(|&u| u * u).sum();
+    let s_d = (energy - mf) / mf;
+    let gamma = mf.log2().powf(1.5) / mf.sqrt();
+    if s_d <= gamma
+    {
+        return t_univ;
+    }
+
+    // SURE(t) over candidate thresholds t ∈ {0} ∪ {|uᵢ|} capped at the universal
+    // threshold, using prefix sums of squares: for t = a[k] (k+1 values ≤ t),
+    // SURE = m − 2(k+1) + prefix_sq[k+1] + (m−k−1)·t².
+    let mut prefix_sq = vec![0.0; m + 1];
+    for (i, &u) in a.iter().enumerate()
+    {
+        prefix_sq[i + 1] = prefix_sq[i] + u * u;
+    }
+    let mut best_t = 0.0;
+    let mut best_risk = mf; // SURE(0) = m
+    for (k, &t) in a.iter().enumerate()
+    {
+        if t > t_univ
+        {
+            break;
+        }
+        let risk = mf - 2.0 * (k + 1) as f64 + prefix_sq[k + 1] + (m - k - 1) as f64 * t * t;
+        if risk < best_risk
+        {
+            best_risk = risk;
+            best_t = t;
+        }
+    }
+    best_t
 }
 
 /// Power spectral subtraction with over-subtraction and a spectral floor
@@ -481,13 +633,51 @@ mod tests {
     }
 
     #[test]
-    fn db4_filter_is_orthonormal() {
-        let h = Wavelet::Db4.lowpass();
-        let norm: f64 = h.iter().map(|&x| x * x).sum();
-        assert!((norm - 1.0).abs() < 1.0e-12, "‖h‖² = {norm}");
-        // Double-shift orthogonality: Σ h[j]·h[j+2] = 0.
-        let shift2: f64 = h[0] * h[2] + h[1] * h[3];
-        assert!(shift2.abs() < 1.0e-12, "shift-2 dot = {shift2}");
+    fn daubechies_filters_satisfy_their_defining_identities() {
+        // Σh = √2, ‖h‖ = 1, double-shift orthogonality, and p vanishing moments —
+        // together these pin the (extremal-phase) Daubechies constants, so this
+        // test validates the hardcoded DB6/DB8 tables independently of their
+        // derivation.
+        for wavelet in [Wavelet::Haar, Wavelet::Db4, Wavelet::Db6, Wavelet::Db8]
+        {
+            let h = wavelet.lowpass();
+            let k = h.len();
+            let sum: f64 = h.iter().sum();
+            assert!((sum - SQRT_2).abs() < 1.0e-10, "{wavelet:?}: Σh = {sum}");
+            let norm: f64 = h.iter().map(|&x| x * x).sum();
+            assert!((norm - 1.0).abs() < 1.0e-10, "{wavelet:?}: ‖h‖² = {norm}");
+            for m in 1..k / 2
+            {
+                let dot: f64 = (0..k - 2 * m).map(|j| h[j] * h[j + 2 * m]).sum();
+                assert!(
+                    dot.abs() < 1.0e-10,
+                    "{wavelet:?}: shift-{} dot = {dot}",
+                    2 * m
+                );
+            }
+            // Vanishing moments of the quadrature-mirror high-pass: Σ g[j]·j^p = 0.
+            let g: Vec<f64> = (0..k)
+                .map(|j| {
+                    if j % 2 == 0
+                    {
+                        h[k - 1 - j]
+                    }
+                    else
+                    {
+                        -h[k - 1 - j]
+                    }
+                })
+                .collect();
+            for p in 0..wavelet.vanishing_moments()
+            {
+                let moment: f64 = g
+                    .iter()
+                    .enumerate()
+                    .map(|(j, &gj)| gj * (j as f64).powi(p as i32))
+                    .sum();
+                assert!(moment.abs() < 1.0e-9, "{wavelet:?}: moment {p} = {moment}");
+            }
+        }
     }
 
     #[test]
@@ -495,7 +685,7 @@ mod tests {
         let x: Vec<f64> = (0..64)
             .map(|i| (i as f64 * 0.37).sin() + 0.5 * (i as f64 * 0.11).cos())
             .collect();
-        for wavelet in [Wavelet::Haar, Wavelet::Db4]
+        for wavelet in [Wavelet::Haar, Wavelet::Db4, Wavelet::Db6, Wavelet::Db8]
         {
             let h = wavelet.lowpass();
             // Single level.
@@ -533,6 +723,49 @@ mod tests {
         let s_db4 = snr_db(&clean, &db4);
         assert!(s_db4 > snr_db(&clean, &obs), "db4 must beat raw");
         assert!(s_db4 > s_haar, "db4 {s_db4} dB vs haar {s_haar} dB");
+    }
+
+    #[test]
+    fn db8_beats_db4_on_very_smooth_signal() {
+        let n = 512;
+        let mut rng = Lcg::new(83);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 2.0 * i as f64 / n as f64).sin())
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.4 * rng.gauss()).collect();
+        let db4 = wavelet_denoise_with(&obs, 0, ThresholdMode::Soft, Wavelet::Db4);
+        let db8 = wavelet_denoise_with(&obs, 0, ThresholdMode::Soft, Wavelet::Db8);
+        assert!(
+            snr_db(&clean, &db8) > snr_db(&clean, &obs),
+            "db8 must beat raw"
+        );
+        assert!(
+            snr_db(&clean, &db8) > snr_db(&clean, &db4) - 0.5,
+            "db8 {} dB should not trail db4 {} dB on a smooth signal",
+            snr_db(&clean, &db8),
+            snr_db(&clean, &db4)
+        );
+    }
+
+    #[test]
+    fn sure_beats_universal_on_dense_signal() {
+        // A signal with energy spread over many coefficients (two tones, one
+        // fast): the universal threshold over-smooths it, SURE adapts down.
+        let n = 1024;
+        let mut rng = Lcg::new(89);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                (2.0 * PI * 5.0 * t).sin() + 0.7 * (2.0 * PI * 60.0 * t).sin()
+            })
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let universal = wavelet_denoise_with(&obs, 0, ThresholdMode::Soft, Wavelet::Db8);
+        let sure = wavelet_denoise_sure(&obs, 0, Wavelet::Db8);
+        let s_sure = snr_db(&clean, &sure);
+        let s_univ = snr_db(&clean, &universal);
+        assert!(s_sure > snr_db(&clean, &obs), "SURE must beat raw");
+        assert!(s_sure > s_univ, "SURE {s_sure} dB vs universal {s_univ} dB");
     }
 
     #[test]

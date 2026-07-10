@@ -1,7 +1,6 @@
 //! SciRust Signal Processing
 //!
 //! Pure-Rust DSP primitives for industrial monitoring and automotive applications.
-//! Zero external dependencies beyond `scirust-core`.
 //!
 //! ## Modules
 //! - **Complex numbers** — basic complex arithmetic (`Complex`)
@@ -13,9 +12,9 @@
 //! - **Bearing diagnostics** — BPFO, BPFI, BSF, FTF calculation, fault frequency
 //!   detection for rolling-element bearings
 //! - **Order analysis** — order tracking, resampling for variable-speed rotating machinery
-//! - **Denoising & noise detection** — extensible noise-removal families (linear,
-//!   rank, transform, variational, adaptive) plus a noise characterizer/classifier
-//!   and a detect-then-denoise auto pipeline with a residual whiteness self-check
+//! - **Thresholding** — soft/hard thresholding operators for wavelet denoising
+//! - **Wavelet** — Haar DWT/IDWT, multi-level decomposition, wavelet matrix construction
+//! - **Denoising pipeline** — composite wavelet–RLS–RTS estimator combining all blocks
 
 pub mod bearing;
 pub mod cepstrum;
@@ -26,6 +25,9 @@ pub mod features;
 pub mod fft;
 pub mod mcsa;
 pub mod order;
+pub mod denoise;
+pub mod threshold;
+pub mod wavelet;
 pub mod windows;
 
 pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing_faults, ftf};
@@ -35,8 +37,9 @@ pub use complex::Complex;
 pub use denoise::{
     AutoResult, Denoiser, DenoiserFamily, NoiseProfile, NoiseType, Separation, Wavelet, catalog,
     classify, denoise_auto, estimate_noise_std, kalman_smooth, kalman_smooth_auto,
-    moving_average as denoise_moving_average, savitzky_golay, separate, total_variation,
-    wavelet_denoise, wavelet_denoise_with,
+    kalman_trend_smooth, moving_average as denoise_moving_average, savitzky_golay, separate,
+    total_variation, total_variation_exact, wavelet_denoise, wavelet_denoise_sure,
+    wavelet_denoise_with,
 };
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{
@@ -53,4 +56,8 @@ pub use mcsa::{
     analyze_broken_bar, analyze_eccentricity, diagnose_motor, slip,
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
+pub use threshold::{
+    hard_threshold, soft_threshold, sure_threshold, universal_soft_threshold,
+};
+pub use wavelet::{haar_dwt, haar_dwt_multilevel, haar_idwt, haar_idwt_multilevel, haar_matrix};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
