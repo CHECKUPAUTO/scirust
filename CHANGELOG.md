@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — preuve cross-platform exécutable de la voie f32 portable (volet 112)
+- **`scirust-core --bin proof_portable_f32`** : binaire de preuve
+  auto-vérifiant — recalcule sur la machine locale les goldens ponctuels,
+  les empreintes FNV-1a des balayages de l'espace des bits f32 de
+  `exp_f32`/`ln_f32` (contrat pas 65 537, dense pas 257, **exhaustif pas 1**
+  — les 2³² entrées — avec `--full`) et les composites softmax/GEMM, puis
+  compare tout aux constantes `PROOF_*` **commises dans le dépôt**
+  (calculées sur x86-64). Code de sortie 0 ⇔ `verdict=PASS` ⇔ la machine
+  reproduit les résultats x86-64 bit à bit. Lignes canoniques hors
+  contexte `#` : leur SHA-256 doit être identique entre machines.
+- **`scripts/proof-portable-f32.sh`** : enrobage à la convention du dépôt
+  (bundle d'évidence horodaté `proof-portable-f32-<UTC>/` : platform.txt,
+  report.txt, canonical.sha256 ; reste sur la machine, `.gitignore`d).
+  Protocole documenté dans `docs/TEST_PROTOCOL.md` (volet x86_64 Debian +
+  volet Jetson/aarch64).
+- Le contrat de preuve de `portable_f32` est désormais public
+  (`PROOF_*`, `sweep_fingerprint`, `proof_softmax_fingerprint`,
+  `proof_gemm_fingerprint`) et partagé entre les tests unitaires et le
+  binaire ; empreintes denses et exhaustives ajoutées au contrat.
+
 ### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 111)
 - **`AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
   élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)

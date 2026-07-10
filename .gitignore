@@ -63,5 +63,10 @@ systemd/turboquant-*.service
 # le bundle brut reste sur la machine de mesure.
 bench-o1-jetson-*/
 
+# Bundles d'évidence de la preuve cross-platform portable_f32
+# (scripts/proof-portable-f32.sh) : verdict et SHA reportés dans LIVESTATE.md,
+# le bundle brut reste sur la machine de mesure.
+proof-portable-f32-*/
+
 # The fuzz harness is its own cargo workspace and builds into its own target dir.
 fuzz/target/

@@ -201,3 +201,31 @@ tables, test results). The bundle stays on the device (`.gitignore`d); the
 median table is what gets pasted into `paper/PAPER_PLAN.md` §4 (O1, Jetson
 leg) and one line into `LIVESTATE.md`. The script never changes device
 clocks/power state unless `--pin-clocks` is passed explicitly.
+
+---
+
+## Cross-platform proof: the portable f32 path (x86_64 ↔ Jetson)
+
+The portable f32 path (`scirust-core/src/portable_f32.rs`) claims **bitwise
+identical results across platforms by construction**. The claim is *proved*
+per machine by replaying its committed contract:
+
+```bash
+# on EACH target platform (x86_64 Debian box, Jetson, …), from the repo root
+scripts/proof-portable-f32.sh            # goldens + step-65537 + step-257 sweeps
+scripts/proof-portable-f32.sh --full     # + exhaustive sweep: all 2³² f32 inputs
+```
+
+The script builds `scirust-core --bin proof_portable_f32` in release and runs
+it. The binary recomputes, on the local machine, the pointwise goldens, the
+FNV-1a fingerprints of bit-space sweeps of `exp_f32`/`ln_f32` (contract step
+65 537, dense step 257, exhaustive step 1 with `--full`) and the softmax/GEMM
+composite fingerprints, then compares everything against the constants
+**committed in the repository** (`PROOF_*` in `portable_f32.rs`, computed once
+on x86-64). Exit code 0 ⇔ `verdict=PASS` ⇔ this machine reproduces the
+x86-64 results bit for bit. A timestamped evidence bundle
+`proof-portable-f32-<UTC>/` (platform report, raw report, SHA-256 of the
+canonical lines) stays on the machine (`.gitignore`d); the verdict, commit
+and canonical SHA are what get reported in `LIVESTATE.md`. Comparing the
+`canonical.sha256` of two machines (same `--full` mode) is an equivalent,
+stronger statement: identical hash ⇔ every printed bit matched.
