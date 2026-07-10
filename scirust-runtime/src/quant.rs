@@ -54,23 +54,56 @@ fn quantize_multiplier(m: f64) -> (i64, u32) {
 }
 fn requant_i32(acc: i32, mult: i64, shift: u32) -> i64 {
     let total = 31 + shift;
+    // `acc*mult` fits in i64 (|acc| bounded by the i32 accumulator, |mult| < 2³¹).
+    // A degenerate/crafted model can drive `shift` large; once `total ≥ 63` the
+    // `1 << (total-1)` and `>> total` would overflow / panic, and the rounded
+    // quotient is 0 anyway, so short-circuit. (edge's requant has the same guard.)
+    if total >= 63
+    {
+        return 0;
+    }
     (acc as i64 * mult + (1i64 << (total - 1))) >> total
 }
 
-fn ru32(b: &[u8], p: &mut usize) -> u32 {
+/// Ensure `k` bytes are readable at offset `p`; a truncated (or crafted) buffer
+/// yields a clean `UnexpectedEof` instead of a slice-index panic (DoS).
+fn need(b: &[u8], p: usize, k: usize) -> io::Result<()> {
+    match p.checked_add(k)
+    {
+        Some(end) if end <= b.len() => Ok(()),
+        _ => Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            format!(
+                "QSR1 tronqué : {k} octet(s) requis à l'offset {p} (longueur {})",
+                b.len()
+            ),
+        )),
+    }
+}
+
+fn ru8(b: &[u8], p: &mut usize) -> io::Result<u8> {
+    need(b, *p, 1)?;
+    let v = b[*p];
+    *p += 1;
+    Ok(v)
+}
+fn ru32(b: &[u8], p: &mut usize) -> io::Result<u32> {
+    need(b, *p, 4)?;
     let v = u32::from_le_bytes(b[*p..*p + 4].try_into().unwrap());
     *p += 4;
-    v
+    Ok(v)
 }
-fn rf32(b: &[u8], p: &mut usize) -> f32 {
+fn rf32(b: &[u8], p: &mut usize) -> io::Result<f32> {
+    need(b, *p, 4)?;
     let v = f32::from_le_bytes(b[*p..*p + 4].try_into().unwrap());
     *p += 4;
-    v
+    Ok(v)
 }
-fn ri32(b: &[u8], p: &mut usize) -> i32 {
+fn ri32(b: &[u8], p: &mut usize) -> io::Result<i32> {
+    need(b, *p, 4)?;
     let v = i32::from_le_bytes(b[*p..*p + 4].try_into().unwrap());
     *p += 4;
-    v
+    Ok(v)
 }
 
 impl QModel {
@@ -119,37 +152,55 @@ impl QModel {
             ));
         }
         let mut p = 4usize;
-        let n = ru32(b, &mut p) as usize;
+        let n = ru32(b, &mut p)? as usize;
         // `n` is an untrusted u32 (up to ~4.3e9). Each layer needs at least a
         // 4-byte tag, so `n` cannot exceed `b.len() / 4`; capping the initial
         // reservation to that bound prevents a crafted header from requesting a
         // multi-gigabyte allocation (OOM DoS) before the loop ever reads a layer.
-        // (Truncated bodies still surface as a read error from the helpers.)
+        // Truncated bodies now surface as an `UnexpectedEof` from the readers.
         let mut layers = Vec::with_capacity(n.min(b.len() / 4));
         for _ in 0..n
         {
-            let tag = ru32(b, &mut p);
+            let tag = ru32(b, &mut p)?;
             match tag
             {
                 0 =>
                 {
-                    let in_f = ru32(b, &mut p) as usize;
-                    let out_f = ru32(b, &mut p) as usize;
-                    let s_in = rf32(b, &mut p);
-                    let relu_after = b[p] == 1;
-                    p += 1;
-                    let ns = ru32(b, &mut p) as usize;
-                    let scales: Vec<f32> = (0..ns).map(|_| rf32(b, &mut p)).collect();
-                    let nw = ru32(b, &mut p) as usize;
-                    let w_q: Vec<i8> = (0..nw)
-                        .map(|_| {
-                            let v = b[p] as i8;
-                            p += 1;
-                            v
-                        })
-                        .collect();
-                    let nb = ru32(b, &mut p) as usize;
-                    let bias_i32: Vec<i32> = (0..nb).map(|_| ri32(b, &mut p)).collect();
+                    let in_f = ru32(b, &mut p)? as usize;
+                    let out_f = ru32(b, &mut p)? as usize;
+                    let s_in = rf32(b, &mut p)?;
+                    let relu_after = ru8(b, &mut p)? == 1;
+                    let ns = ru32(b, &mut p)? as usize;
+                    let scales: Vec<f32> = (0..ns)
+                        .map(|_| rf32(b, &mut p))
+                        .collect::<io::Result<_>>()?;
+                    let nw = ru32(b, &mut p)? as usize;
+                    let mut w_q: Vec<i8> = Vec::with_capacity(nw.min(b.len()));
+                    for _ in 0..nw
+                    {
+                        w_q.push(ru8(b, &mut p)? as i8);
+                    }
+                    let nb = ru32(b, &mut p)? as usize;
+                    let bias_i32: Vec<i32> = (0..nb)
+                        .map(|_| ri32(b, &mut p))
+                        .collect::<io::Result<_>>()?;
+                    // Self-consistency: `infer` indexes `scales[o]`/`bias_i32[o]`
+                    // for `o < out_f` and multiplies `in_f·out_f` weights. A
+                    // crafted model with mismatched counts would otherwise panic
+                    // (OOB) at inference time; reject it at parse time instead.
+                    let expected_w = in_f.checked_mul(out_f).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "in_f · out_f déborde usize")
+                    })?;
+                    if ns != out_f || bias_i32.len() != out_f || nw != expected_w
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "couche incohérente : out_f={out_f}, scales={ns}, bias={}, w_q={nw} (attendu {expected_w})",
+                                bias_i32.len()
+                            ),
+                        ));
+                    }
                     layers.push(QLayer::Linear(QLinear {
                         in_f,
                         out_f,
@@ -264,6 +315,54 @@ mod tests {
             a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
             b.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
             "inference non identique apres roundtrip"
+        );
+    }
+
+    // A truncated artifact must return an error, never panic on a slice index.
+    #[test]
+    fn from_bytes_rejects_truncation_without_panicking() {
+        let m = QModel {
+            layers: vec![QLayer::Linear(QLinear {
+                in_f: 3,
+                out_f: 2,
+                s_in: 0.01,
+                relu_after: true,
+                scales: vec![0.002, 0.003],
+                w_q: vec![1, -2, 3, 4, -5, 6],
+                bias_i32: vec![10, -20],
+            })],
+        };
+        let full = m.to_bytes();
+        // Every proper prefix of a valid artifact must be a clean Err.
+        for cut in 1..full.len()
+        {
+            let r = QModel::from_bytes(&full[..cut]);
+            assert!(r.is_err(), "prefix of length {cut} should be rejected");
+        }
+    }
+
+    // A header whose declared counts are inconsistent with `out_f` must be
+    // rejected at parse time (else `infer` would index out of bounds).
+    #[test]
+    fn from_bytes_rejects_inconsistent_layer() {
+        let mut b = Vec::new();
+        b.extend_from_slice(QMAGIC);
+        b.extend_from_slice(&1u32.to_le_bytes()); // 1 layer
+        b.extend_from_slice(&0u32.to_le_bytes()); // tag linear
+        b.extend_from_slice(&3u32.to_le_bytes()); // in_f = 3
+        b.extend_from_slice(&2u32.to_le_bytes()); // out_f = 2
+        b.extend_from_slice(&0.01f32.to_le_bytes()); // s_in
+        b.push(0); // relu_after = false
+        b.extend_from_slice(&1u32.to_le_bytes()); // ns = 1  (≠ out_f = 2)
+        b.extend_from_slice(&0.002f32.to_le_bytes());
+        b.extend_from_slice(&6u32.to_le_bytes()); // nw = 6
+        b.extend_from_slice(&[0u8; 6]);
+        b.extend_from_slice(&2u32.to_le_bytes()); // nb = 2
+        b.extend_from_slice(&0i32.to_le_bytes());
+        b.extend_from_slice(&0i32.to_le_bytes());
+        assert!(
+            QModel::from_bytes(&b).is_err(),
+            "inconsistent scales count must be rejected"
         );
     }
 }
