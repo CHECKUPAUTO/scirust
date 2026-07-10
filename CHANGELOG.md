@@ -3099,6 +3099,30 @@ plutôt qu'une formule devinée) :
   une **boucle SGD multi-pas complète** dont la trajectoire de poids est
   bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
 
+### Ajouté — parité SciPy des queues et Dirichlet-multinomiale (4e passe du volet probabilités)
+> Entrée placée en bas de la section « Non publié » à dessein : chaque volet
+> parallèle insère la sienne en tête, d'où des conflits systématiques sur le
+> même bloc ; l'ajouter ici les évite.
+- **`scirust-stats::discrete` — méthodes de queue en log** : `logcdf`,
+  `logsf` et `isf` (fonction de survie inverse) ajoutées par défaut au trait
+  `DiscreteDistribution`, alignant l'API sur `scipy.stats`. `logsf` s'appuie
+  sur la survie **directe** déjà surchargée sur chaque loi (pas de
+  `ln(1 − cdf)` qui explose en queue), et `isf(p)` fait sa dichotomie sur
+  `sf` — plus précis que `quantile(1 − p)` pour les très petits `p`. Validé
+  contre SciPy (binomiale, Poisson, zêta) et par cohérence
+  `exp(logcdf) = cdf`, aller-retour `isf∘sf`.
+- **`scirust-stats::discrete::DirichletMultinomial`** — Pólya multivariée :
+  une multinomiale à probabilités Dirichlet(α)-distribuées, généralisation
+  vectorielle de la bêta-binomiale pour les **vecteurs de comptages
+  surdispersés** (comptages de mots/thèmes, essais catégoriels répétés à
+  dérive). `ln_pmf`/`pmf` par la forme fermée en ln Γ, moyenne `n·αᵢ/A`,
+  covariance avec le facteur de surdispersion `ρ = (n+A)/(1+A)`, tirage
+  séquentiel par bêta-binomiales conditionnelles (stick-breaking exact,
+  ordre fixe ⇒ reproductible bit-à-bit). Oracles SciPy 1.17.1
+  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) et fraction exacte
+  18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
+- 48 tests + doctest sur le crate, clippy 0 avertissement.
+
 ## [0.14.0] — 2026-06-13
 
 ### Réparé
