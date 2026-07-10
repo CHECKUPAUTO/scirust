@@ -3,6 +3,32 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — mécanique des fluides & thermodynamique
+- **Contexte** : demande utilisateur — « scirust n'offre pas de solutions aux
+  problématiques de mécanique des fluides, la thermodynamique… ». Constat
+  vérifié : aucun crate ne couvrait ces domaines (seule mention : primitives
+  CFD/thermo « à compléter » dans docs/TRANSPILER_DESIGN.md).
+- **Livré** : deux nouveaux crates métier sur le modèle des crates volet
+  roadmap (Rust pur, zéro dépendance, `forbid(unsafe_code)`,
+  `deny(missing_docs)`, constructeurs validés, erreurs typées, solveurs
+  itératifs déterministes — Newton/bissection à algorithme fixe).
+  - `scirust-fluids` : adimensionnels, friction en conduite
+    (Colebrook–White + explicites), Darcy–Weisbach, Bernoulli/Venturi/
+    orifice/Pitot, traînée (Stokes, Clift–Gauvin, vitesse terminale),
+    couche limite plaque plane, compressible (isentropique + choc normal),
+    canaux (Manning, ressaut, profondeurs critique/normale). 49 tests.
+  - `scirust-thermo` : gaz parfait (processus + entropie), cycles (Carnot,
+    Otto, Diesel, Brayton), transfert thermique (résistances, DTLM, NUT,
+    rayonnement, Dittus–Boelter), psychrométrie ASHRAE (Hyland–Wexler,
+    point de rosée), saturation eau IAPWS-IF97 région 4 (tables 35/36
+    reproduites à 1e-8). 40 tests.
+- **Vérifié** : `cargo test` 87 unitaires + 2 doctests verts ;
+  `cargo clippy --all-targets -- -D warnings` propre ; `cargo fmt` appliqué ;
+  membres ajoutés au workspace racine.
+- **Suite possible** : IF97 régions 1/2 (enthalpies vapeur → cycle de
+  Rankine complet), corrélations de convection externes (Churchill–
+  Bernstein), réseaux de conduites (Hardy Cross) — non entamé.
+
 ## Session 2026-07-10 — volet 114 : les 4 chantiers restants de la cartographie
 - **Contexte** : PR #273 (volet 113) MERGÉE ; branche repartie de master.
   Demande utilisateur : « continu sur les 4 points » (RNG contre-basé, GEMM
