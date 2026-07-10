@@ -1,4 +1,4 @@
-//! Water/steam properties — IAPWS-IF97, regions 1, 2, 4 and 5.
+//! Water/steam properties — IAPWS-IF97, regions 1 through 5.
 //!
 //! Clean-room implementation of the IAPWS Industrial Formulation 1997:
 //!
@@ -9,16 +9,22 @@
 //! - **Region 2** (superheated steam): ideal + residual Gibbs-energy
 //!   equation, same properties, bounded above by the saturation line and
 //!   the region-2/3 **B23** parabola.
+//! - **Region 3** (dense fluid around the critical point): the
+//!   *Helmholtz*-energy equation of state, whose natural independent
+//!   variables are `T` and `ρ` rather than `T` and `p` ([`region3`]);
+//!   [`region3_from_tp`] locates the matching density by deterministic
+//!   bisection for supercritical states, where it is unique.
 //! - **Region 5** (high-temperature steam, `1073.15 < T ≤ 2273.15 K`):
 //!   same ideal + residual structure as region 2, over gas-turbine
 //!   exhaust / ultra-supercritical HRSG conditions.
 //!
 //! All public interfaces are SI (K, Pa, J/kg, J/(kg·K), m³/kg, m/s);
 //! the IF97-native MPa/kJ units are internal. Oracle values are the
-//! official verification tables 5, 15, 35 and 36 of the IF97 release,
-//! plus the region-5 worked examples of the IF97 release document.
+//! official verification tables 5, 15, 33, 35 and 36 of the IF97
+//! release, plus the region-3 and region-5 worked examples of the IF97
+//! release document.
 
-use crate::error::{ThermoError, in_range};
+use crate::error::{ThermoError, in_range, positive};
 
 /// Specific gas constant of water used by IF97 \[J/(kg·K)\].
 pub const R_WATER: f64 = 461.526;
@@ -204,10 +210,93 @@ const R5_N: [f64; 6] = [
     3.7919454822955e-08,
 ];
 
+/// Critical density of water used by IF97 region 3 \[kg/m³\].
+pub const RHO_CRITICAL: f64 = 322.0;
+
+/// Coefficient of the `ln δ` term of the region-3 Helmholtz equation.
+const R3_N1: f64 = 1.0658070028513;
+
+/// IF97 region-3 exponents I₁…I₃₉ (Table 30).
+const R3_I: [i32; 39] = [
+    0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6,
+    7, 8, 9, 9, 10, 10, 11,
+];
+/// IF97 region-3 exponents J₁…J₃₉ (Table 30).
+const R3_J: [i32; 39] = [
+    0, 1, 2, 7, 10, 12, 23, 2, 6, 15, 17, 0, 2, 6, 7, 22, 26, 0, 2, 4, 16, 26, 0, 2, 4, 26, 1, 3,
+    26, 0, 2, 26, 2, 26, 2, 26, 0, 1, 26,
+];
+/// IF97 region-3 coefficients n₁…n₃₉ (Table 30).
+const R3_N: [f64; 39] = [
+    -15.732845290239,
+    20.944396974307,
+    -7.6867707878716,
+    2.6185947787954,
+    -2.808078114862,
+    1.2053369696517,
+    -0.0084566812812502,
+    -1.2654315477714,
+    -1.1524407806681,
+    0.88521043984318,
+    -0.64207765181607,
+    0.38493460186671,
+    -0.85214708824206,
+    4.8972281541877,
+    -3.0502617256965,
+    0.039420536879154,
+    0.12558408424308,
+    -0.2799932969871,
+    1.389979956946,
+    -2.018991502357,
+    -0.0082147637173963,
+    -0.47596035734923,
+    0.0439840744735,
+    -0.44476435428739,
+    0.90572070719733,
+    0.70522450087967,
+    0.10770512626332,
+    -0.32913623258954,
+    -0.50871062041158,
+    -0.022175400873096,
+    0.094260751665092,
+    0.16436278447961,
+    -0.013503372241348,
+    -0.014834345352472,
+    0.00057922953628084,
+    0.0032308904703711,
+    8.0964802996215e-05,
+    -0.00016557679795037,
+    -4.4923899061815e-05,
+];
+
 /// Thermodynamic state of water or steam at a (T, p) point, SI units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SteamState {
     /// Specific volume \[m³/kg\].
+    pub v: f64,
+    /// Specific enthalpy \[J/kg\].
+    pub h: f64,
+    /// Specific internal energy \[J/kg\].
+    pub u: f64,
+    /// Specific entropy \[J/(kg·K)\].
+    pub s: f64,
+    /// Isobaric specific heat \[J/(kg·K)\].
+    pub cp: f64,
+    /// Isochoric specific heat \[J/(kg·K)\].
+    pub cv: f64,
+    /// Speed of sound \[m/s\].
+    pub w: f64,
+}
+
+/// Thermodynamic state from IF97 region 3 (Helmholtz-energy
+/// formulation), same fields as [`SteamState`] plus the pressure —
+/// here a **derived** quantity, since region 3's natural independent
+/// variables are `T` and `ρ`, not `T` and `p`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Region3State {
+    /// Pressure \[Pa\], derived from `T` and `ρ`.
+    pub p: f64,
+    /// Specific volume \[m³/kg\] (`= 1/ρ`).
     pub v: f64,
     /// Specific enthalpy \[J/kg\].
     pub h: f64,
@@ -475,6 +564,103 @@ pub fn region5(t: f64, p: f64) -> Result<SteamState, ThermoError> {
         cv: cv * 1000.0,
         w,
     })
+}
+
+/// Properties of **dense fluid water** (IF97 region 3, around the
+/// critical point) at temperature `t` \[K\] and density `rho` \[kg/m³\]
+/// — region 3's own natural independent variables, from its
+/// Helmholtz-energy equation. Pressure is a *derived* output here (see
+/// [`Region3State::p`]); use [`region3_from_tp`] to locate the density
+/// matching a given pressure instead.
+///
+/// Validity (enforced): `623.15 ≤ t ≤ 863.15 K`, `ρ > 0`. This forward
+/// evaluator accepts any positive density in that temperature range;
+/// callers wanting an *officially in-region* point should stay within
+/// the (T, p) envelope documented for [`region3_from_tp`].
+pub fn region3(t: f64, rho: f64) -> Result<Region3State, ThermoError> {
+    in_range("t", t, T_MAX_REGION1, 863.15)?;
+    positive("rho", rho)?;
+    let delta = rho / RHO_CRITICAL;
+    let tau = T_CRITICAL / t;
+    let r = R_WATER / 1000.0;
+
+    let mut g = R3_N1 * delta.ln();
+    let mut gd = R3_N1 / delta;
+    let mut gdd = -R3_N1 / (delta * delta);
+    let (mut gt, mut gtt, mut gdt) = (0.0, 0.0, 0.0);
+    for k in 0..R3_N.len()
+    {
+        let (i, j, n) = (R3_I[k], R3_J[k], R3_N[k]);
+        let di = delta.powi(i);
+        let tj = tau.powi(j);
+        g += n * di * tj;
+        gd += n * f64::from(i) * delta.powi(i - 1) * tj;
+        gdd += n * f64::from(i) * f64::from(i - 1) * delta.powi(i - 2) * tj;
+        gt += n * f64::from(j) * di * tau.powi(j - 1);
+        gtt += n * f64::from(j) * f64::from(j - 1) * di * tau.powi(j - 2);
+        gdt += n * f64::from(i) * f64::from(j) * delta.powi(i - 1) * tau.powi(j - 1);
+    }
+    let p_mpa = delta * gd * r * t * rho / 1000.0;
+    let v = 1.0 / rho;
+    let h = r * t * (tau * gt + delta * gd);
+    let s = r * (tau * gt - g);
+    let cp = r
+        * (-tau * tau * gtt
+            + (delta * gd - delta * tau * gdt).powi(2) / (2.0 * delta * gd + delta * delta * gdd));
+    let cv = -r * tau * tau * gtt;
+    let w = (r
+        * t
+        * 1000.0
+        * (2.0 * delta * gd + delta * delta * gdd
+            - (delta * gd - delta * tau * gdt).powi(2) / tau / tau / gtt))
+        .sqrt();
+    Ok(Region3State {
+        p: p_mpa * 1.0e6,
+        v,
+        h: h * 1000.0,
+        u: (h - p_mpa * 1000.0 * v) * 1000.0,
+        s: s * 1000.0,
+        cp: cp * 1000.0,
+        cv: cv * 1000.0,
+        w,
+    })
+}
+
+/// Locate the density that reproduces pressure `p` at temperature `t`
+/// within IF97 region 3, then return the full state there.
+///
+/// **Supercritical only** (`T ≥ 647.096 K`): below the critical
+/// temperature a liquid-like and a vapour-like density can share the
+/// same `(T, p)` (region 3 straddles the two-phase dome there), which
+/// would make the root ambiguous; at or above `T_CRITICAL` the
+/// pressure–density relation is strictly increasing over the density
+/// bracket used here (verified by direct sweep across the whole
+/// region-3 temperature range), so the physical solution is unique.
+/// Solved by deterministic bisection — identical inputs give identical
+/// outputs everywhere.
+///
+/// Validity (enforced): `T_CRITICAL ≤ t ≤ 863.15 K`,
+/// `p_B23(t) ≤ p ≤ 100 MPa` (the B23 parabola is region 3's lower
+/// boundary against region 2 at these temperatures).
+pub fn region3_from_tp(t: f64, p: f64) -> Result<Region3State, ThermoError> {
+    in_range("t", t, T_CRITICAL, 863.15)?;
+    let p_min = b23_pressure(t)?;
+    in_range("p", p, p_min, P_MAX)?;
+
+    let (mut lo, mut hi) = (80.0, 800.0);
+    for _ in 0..200
+    {
+        let mid = 0.5 * (lo + hi);
+        if region3(t, mid)?.p > p
+        {
+            hi = mid;
+        }
+        else
+        {
+            lo = mid;
+        }
+    }
+    region3(t, 0.5 * (lo + hi))
 }
 
 /// Saturated-liquid state at temperature `t` \[K\] (region 1 evaluated
@@ -848,5 +1034,134 @@ mod tests {
         assert!(region5(2300.0, 1.0e6).is_err()); // above region 5
         assert!(region5(1500.0, 60.0e6).is_err()); // above 50 MPa
         assert!(region5(1500.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn if97_table_33_region_3() {
+        // Official IF97 verification table 33: (T, ρ) → p, h, s, cp, cv, w.
+        // rho = 500 kg/m³, T = 650 K.
+        let st = region3(650.0, 500.0).unwrap();
+        assert!(
+            (st.p - 25.5837018e6).abs() / 25.5837018e6 < 1e-8,
+            "p = {}",
+            st.p
+        );
+        assert!(
+            (st.h - 1_863_430.19).abs() / 1_863_430.19 < 1e-8,
+            "h = {}",
+            st.h
+        );
+        assert!(
+            (st.u - 1_812_262.79).abs() / 1_812_262.79 < 1e-8,
+            "u = {}",
+            st.u
+        );
+
+        // rho = 200 kg/m³, T = 650 K.
+        let st = region3(650.0, 200.0).unwrap();
+        assert!(
+            (st.s - 4854.38792).abs() / 4854.38792 < 1e-8,
+            "s = {}",
+            st.s
+        );
+        assert!(
+            (st.cp - 44657.9342).abs() / 44657.9342 < 1e-8,
+            "cp = {}",
+            st.cp
+        );
+        assert!(
+            (st.cv - 4041.18076).abs() / 4041.18076 < 1e-8,
+            "cv = {}",
+            st.cv
+        );
+        assert!(
+            (st.w - 383.444594).abs() / 383.444594 < 1e-8,
+            "w = {}",
+            st.w
+        );
+
+        // rho = 500 kg/m³, T = 750 K.
+        let st = region3(750.0, 500.0).unwrap();
+        assert!(
+            (st.p - 78.3095639e6).abs() / 78.3095639e6 < 1e-6,
+            "p = {}",
+            st.p
+        );
+    }
+
+    #[test]
+    fn region3_from_tp_recovers_the_density() {
+        // Solve at the exact pressure the table-33 forward point produces;
+        // the bisection must recover the same density (v = 1/500) closely.
+        let target = region3(650.0, 500.0).unwrap();
+        let solved = region3_from_tp(650.0, target.p).unwrap();
+        assert!(
+            (solved.v - target.v).abs() / target.v < 1e-6,
+            "v = {}",
+            solved.v
+        );
+        assert!(
+            (solved.h - target.h).abs() / target.h < 1e-6,
+            "h = {}",
+            solved.h
+        );
+    }
+
+    #[test]
+    fn region3_from_tp_roundtrips_over_a_grid() {
+        // Sweep several supercritical (T, ρ) points, derive p from the
+        // forward equation, then solve it back and check ρ is recovered.
+        for &(t, rho) in &[
+            (650.0, 300.0),
+            (700.0, 250.0),
+            (700.0, 450.0),
+            (800.0, 400.0),
+            (830.0, 400.0),
+        ]
+        {
+            let fwd = region3(t, rho).unwrap();
+            let back = region3_from_tp(t, fwd.p).unwrap();
+            assert!(
+                (1.0 / back.v - rho).abs() / rho < 1e-6,
+                "T={t}, rho={rho}: recovered {}",
+                1.0 / back.v
+            );
+        }
+    }
+
+    #[test]
+    fn region3_joins_region2_at_the_b23_boundary() {
+        // Just above the B23 pressure at a fixed supercritical T, region 3
+        // must agree closely with region 2 evaluated just below it.
+        let t = 700.0;
+        let p_b23 = b23_pressure(t).unwrap();
+        let r2 = region2(t, p_b23 * (1.0 - 1e-6)).unwrap();
+        let r3 = region3_from_tp(t, p_b23 * (1.0 + 1e-6)).unwrap();
+        assert!(
+            (r2.h - r3.h).abs() / r2.h < 1e-4,
+            "h2={}, h3={}",
+            r2.h,
+            r3.h
+        );
+        assert!(
+            (r2.s - r3.s).abs() / r2.s < 1e-4,
+            "s2={}, s3={}",
+            r2.s,
+            r3.s
+        );
+    }
+
+    #[test]
+    fn region3_rejects_out_of_domain() {
+        assert!(region3(600.0, 500.0).is_err()); // T below region 3
+        assert!(region3(900.0, 500.0).is_err()); // T above region 3
+        assert!(region3(650.0, 0.0).is_err());
+        // region3_from_tp is supercritical-only.
+        assert!(region3_from_tp(640.0, 25.0e6).is_err()); // T < T_CRITICAL
+        // Below the B23 pressure at this T: that point belongs to region 2.
+        let t = 700.0;
+        let p_b23 = b23_pressure(t).unwrap();
+        assert!(region3_from_tp(t, p_b23 * 0.5).is_err());
+        assert!(region3_from_tp(t, 150.0e6).is_err()); // above 100 MPa
     }
 }
