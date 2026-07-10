@@ -26,8 +26,23 @@
   copié/traduit ; règle écrite §3 de l'audit : jamais de copie/traduction de code
   RepDL (MIT ≠ incompatible mais attribution + confusion PolyForm), clean-room
   systématique.
-- Reste ouvert (inchangé, déjà tracé) : CI aarch64 = check only ; SIMD/GPU f32 en
-  tolérance (pas bit-exact) ; transcendantales CR prouvées = travail futur.
+- **Voie f32 portable (2e lot de la session, demande utilisateur)** :
+  `scirust-core/src/portable_f32.rs` — exp/ln/softmax/dot/gemm **bit-exacts
+  inter-plates-formes par construction** (Rust pur, zéro libm, opérations
+  IEEE-754 de base en ordre fixe ; exp = réduction k·ln2 hi/lo + Taylor 13,
+  ln = mantisse [√2/2,√2] + série atanh, interne f64 ⇒ fidèlement arrondi,
+  ≤ 1 ulp vérifié vs oracle libm sur 200 k points). 13 tests : goldens
+  bit-à-bit + empreintes FNV du balayage complet de l'espace f32 (pas 65 537 ;
+  exp 0x71e63f5e1688a7f1, ln 0x8892b8ba72ffb8b6) = contrat de portabilité à
+  exécuter sur ARM ; identiques debug/release. Clean-room (méthodes maths
+  publiques, coefficients 1/n! ; aucun code fdlibm/musl/RepDL consulté —
+  un algorithme n'est pas protégeable, seule son expression l'est).
+  `paper/RELATED_WORK.md` mis à jour (voie portable réalisée ; CR *prouvé*
+  reste futur) + post-scriptum dans l'audit.
+- Reste ouvert : CI aarch64 = check only (exécuter les empreintes portable_f32
+  sur ARM dès qu'un runner existe) ; SIMD/GPU f32 en tolérance (pas bit-exact) ;
+  arrondi correct PROUVÉ des transcendantales = travail futur ; brancher
+  softmax_f32 dans la tape si la portabilité f32 devient un objectif produit.
 - NB numérotation : cette session s'était initialement étiquetée « volet 109 » ;
   renumérotée 111 au merge (109 = Correctness '26 et 110 = identité, mergés avant).
 

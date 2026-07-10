@@ -201,3 +201,20 @@ restent le travail futur acté au volet 108.
    exécuter (pas seulement `cargo check`) les tests d'invariance et comparer
    les empreintes x86/ARM des voies entières — transformerait « bit-exact
    cross-platform par construction » en « …et testé en CI ».
+
+---
+
+## Post-scriptum (même jour, même PR)
+
+Suite de la recommandation du §5 : la **voie f32 portable** a été implémentée
+dans la foulée — `scirust-core/src/portable_f32.rs` (`exp_f32`, `ln_f32`,
+`softmax_f32`, `dot_f32`, `gemm_f32`), Rust pur sans libm, uniquement des
+opérations IEEE-754 de base en ordre fixe ⇒ **bit-exact inter-plates-formes
+par construction** (fidèlement arrondi ; l'arrondi correct *prouvé* reste
+hors claim). Les goldens bit-à-bit et les empreintes FNV du balayage complet
+de l'espace f32 sont commis dans les tests : ce sont les contrats à vérifier
+sur ARM. Implémentation clean-room (réduction d'argument + séries de
+Taylor/atanh — méthodes mathématiques publiques ; aucun code fdlibm/musl/RepDL
+consulté). Ceci ferme, dans le régime « par construction », le dernier axe où
+RepDL était plus fort ; la preuve d'arrondi correct et l'exécution ARM en CI
+restent les deux étapes suivantes.

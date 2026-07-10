@@ -93,8 +93,10 @@ pub fn reproducible_dot(a: &[f32], b: &[f32]) -> f32 {
 ///   prouvée**, contrairement aux réductions ci-dessus qui sont exactes.
 ///
 /// C'est la même classe de technique que les transcendantales de RepDL
-/// (Microsoft, arXiv:2510.09180) ; les transcendantales correctement arrondies
-/// *prouvées* en Rust pur restent le travail futur acté dans
+/// (Microsoft, arXiv:2510.09180). Pour une garantie inter-plates-formes **par
+/// construction** (sans dépendre de la libm), préférer
+/// [`crate::portable_f32::exp_f32`] ; les transcendantales correctement
+/// arrondies *prouvées* restent le travail futur acté dans
 /// `paper/RELATED_WORK.md`.
 pub fn exp_via_f64(x: f32) -> f32 {
     (x as f64).exp() as f32

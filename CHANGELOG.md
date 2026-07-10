@@ -29,6 +29,22 @@ versions sémantiques à partir de la prochaine release taguée.
   correctement arrondi hors dilemme du fabricant de tables ; identité
   inter-plates-formes probable mais non prouvée). Test de fidélité
   ≤ 0,5 ulp sur 8 000 points.
+- **`scirust-core::portable_f32`** — la **voie f32 portable** : `exp_f32`,
+  `ln_f32`, `softmax_f32`, `dot_f32`, `gemm_f32` en Rust pur **sans libm**,
+  n'employant que des opérations IEEE-754 de base en ordre fixe ⇒ résultats
+  **bit-exacts inter-plates-formes par construction** (l'axe « cross-platform
+  f32 » où RepDL était plus fort, réalisé ici sans TCB externe). exp :
+  réduction k·ln 2 (scindage hi/lo) + Taylor deg 13 ; ln : normalisation de
+  mantisse + série atanh ; softmax : max-subtract + exp portable +
+  `reproducible_sum` (équivariant bit à bit sous permutation) ; dot/gemm :
+  produits f64 exacts, accumulation séquentielle f64. Garanties énoncées
+  sans sur-promesse : fidèlement arrondi (≤ 1 ulp, vérifié contre l'oracle
+  libm f64 sur 200 000 points) ; arrondi correct *prouvé* = travail futur ;
+  caveat x87/i586 documenté. 13 tests dont goldens bit-à-bit et empreintes
+  FNV d'un balayage complet de l'espace des bits f32 (pas 65 537) — le
+  contrat de portabilité à exécuter sur ARM ; empreintes identiques
+  debug/release. Implémentation clean-room (méthodes mathématiques
+  publiques ; aucun code fdlibm/musl/RepDL consulté).
 
 ### Modifié — acteur CHECKUPAUTO remplacé par TAREK ZEKRITI
 - **Attribution** : le champ `authors` de `scirust-burn-bridge` passe de
