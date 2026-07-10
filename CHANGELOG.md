@@ -5,45 +5,73 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — fluides & thermo, volet 4 : région 3 IF97 (Helmholtz) et équations backward officielles
-Les deux derniers chantiers notés « suite possible » sont livrés :
-- **`scirust-thermo::steam::region3`/`region3_from_tp`** — IAPWS-IF97
-  région 3 (fluide dense autour du point critique), seule région dont
-  les variables naturelles sont **T et ρ** (et non T et p) : équation de
-  **Helmholtz** (et non Gibbs), 39 coefficients. `region3(t, rho)`
-  évalue directement (v, h, u, s, cp, cv, w, p — p est ici une sortie
-  dérivée). `region3_from_tp(t, p)` localise la densité par bissection
-  déterministe, **restreinte au domaine supercritique** (T ≥ 647,096 K) :
-  en dessous du point critique, une densité de type liquide et une de
-  type vapeur peuvent partager le même (T, p) (région 3 chevauche la
-  cloche diphasique côté sous-critique), ce qui rendrait la racine
-  ambiguë — vérifié empiriquement par balayage fin que P(ρ) sur
-  ρ ∈ [80, 800] kg/m³ est strictement croissante pour tout T du domaine
-  supercritique de la région 3, donc la solution y est unique par
-  construction. Oracles : **table de vérification officielle IF97 33**
-  (trois points T,ρ, toutes propriétés, à 1e-8/1e-6), aller-retour
-  densité→pression→densité sur une grille de 5 points, jointure physique
-  avec la région 2 à la frontière B23.
-- **`scirust-thermo::backward`** — équations **backward** officielles
-  T(p,h) et T(p,s) pour les régions 1 et 2 (closed-form, sans bissection) :
-  région 1 (20 coefficients chacune), région 2 en trois sous-régions
-  fittées 2a/2b/2c (34+38+23 et 46+44+30 coefficients) avec le
-  dispatch officiel (frontière `p_2bc`/`h_bc` par enthalpie, seuil
-  d'entropie 5,85 kJ/(kg·K)) et l'ajustement `T = max(T_sat, T)` près de
-  la ligne de saturation. Piège découvert et corrigé : la région 2a de
-  T(p,s) utilise des exposants en **quarts d'entier** sur la pression
-  réduite (-1,5 à 1,5, `powf`), contrairement à toutes les autres
-  corrélations du module qui n'utilisent que des entiers (`powi`) —
-  repéré parce qu'une régénération programmatique avec assertion de
-  longueur a démasqué la troncature silencieuse `int()` d'un script
-  antérieur qui aurait sinon introduit une erreur de calcul silencieuse.
-  Oracles : 16 exemples numériques officiels des publications
-  d'équations backward IF97, aller-retour contre les équations directes
-  sur 6 points (régions 1 et 2, toutes sous-régions).
-- Bilan : scirust-thermo 74 tests (+11), clippy `-D warnings` propre,
-  rustfmt appliqué. Avec ce volet, les deux chantiers explicitement
-  demandés par l'utilisateur (« la région 3 IF97… et les équations
-  backward officielles… ») sont complets.
+### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
+Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
+--release` a tourné sur une **même machine** — le seul mode de comparaison
+autorisé (voir la discipline « claims backed by measurements »).
+
+**Machine** : Jetson, L4T R38.4 (`generic` board), noyau `6.8.12-tegra`,
+aarch64, 14 cœurs (`uname -a` / `/etc/nv_tegra_release` / `nproc` — modèle
+exact non capturé par ces commandes ; classe Thor d'après le L4T R38 et les
+références Jetson existantes du dépôt).
+
+| n | `scirust::VectorRls` | padasip `FilterRLS` | rapport |
+|---|---|---|---|
+| 4 | 59,7 ns | 8 636,2 ns | **144,7×** |
+| 16 | 532,3 ns | 10 640,4 ns | **20,0×** |
+| 64 | 7 792,0 ns | 73 349,3 ns | **9,4×** |
+
+Le rapport se resserre franchement avec `n` — comportement attendu et
+honnête, pas un artefact : à petit `n` le coût fixe par appel de
+l'interpréteur Python/NumPy (création d'objets, dispatch) domine ; à mesure
+que `n` grandit, le BLAS vectorisé de NumPy amortit ce coût et rattrape du
+terrain sur l'implémentation Rust scalaire boucle-par-boucle. Sur cette même
+machine, `QrRls` reproduit l'avantage déjà observé en conteneur x86_64 (plus
+rapide que `VectorRls` dès n=16 : 433,5 ns vs 532,3 ns à n=16, 6 278,9 ns vs
+7 792,0 ns à n=64 — pas de passe de symétrisation). `RlsFilterConst`, en
+revanche, ne montre **pas** ici l'avantage net vu en conteneur (34,0 ns à
+n=4, mais 7 894,2 ns à n=64, à peu près à égalité avec la version tas) —
+chiffres bruts consignés sans lissage, l'écart de déroulage/vectorisation
+entre cibles aarch64 et x86_64 reste à creuser plutôt qu'à sur-interpréter
+sur un seul run.
+
+### Ajouté — RLS niveau 3 : oubli directionnel, annulation multi-référence, QrRlsConst, re-conditionnement
+Le lot complet validé — l'anti-windup principiel et le bouclage avec le
+pipeline de débruitage :
+- **`DirectionalRls`** (oubli directionnel, Kulhavý / Cao-Schwartz) : n'oublie
+  que dans la **direction excitée** (découpe rang-1 de la matrice
+  d'information `R` le long du régresseur, mise à jour appariée de `P` par
+  Sherman-Morrison, O(n²)/échantillon, zéro allocation). **Test discriminant
+  du windup** : 2 000 pas excités sur une seule direction à λ=0,9 — le RLS
+  standard voit sa covariance orthogonale exploser (> 10⁵⁰, λ⁻ᵏ) ; le
+  directionnel la garde **bornée à sa valeur initiale**, puis se réadapte
+  sainement quand l'excitation revient. λ=1 ≡ RLS fenêtre croissante (testé
+  à 1e-8) ; suivi de dérive vérifié.
+- **`reference_noise_cancel` + `wavelet_rls_rts_smooth_multiref`**
+  (`scirust-signal::denoise::pipeline`) : annulation de bruit **convolutive
+  multi-référence** — `MimoFirRls` apprend en ligne les chemins FIR
+  capteurs-de-référence → primaire, l'erreur a priori EST le signal nettoyé ;
+  chaînée en étage 0 du pipeline Wavelet–RLS–RTS. Tests : interférence
+  convolutive 2 références retirée (> +20 dB vs brut) ; la chaîne
+  multi-référence bat le pipeline aveugle de > 6 dB en présence
+  d'interférence + bruit large bande.
+- **`QrRlsConst<const N>`** : racine carrée de Potter **sur pile**,
+  `core`-only — le filtre embarqué durci ultime (PSD par construction +
+  zéro tas + déroulage compile-time). **Bit-identique** au `QrRls` tas
+  (ordre d'accumulation aligné, testé au bit près sur 500 pas).
+- **Re-conditionnement long-horizon** : `QrRls::recondition` /
+  `QrRlsMimo::recondition` (re-factorisation `S ← chol(S·Sᵀ)`, préserve `P`
+  au rounding près, restaure la triangularité) et
+  `DirectionalRls::recondition` (`P ← R⁻¹` exact via le `Mat::inverse` du
+  crate) + diagnostic `consistency_error()`. La factorisation de Cholesky
+  locale est **vérifiée contre l'oracle `scirust-solvers`** (dev-dependency
+  volontaire : les dépendances de prod du crate restent serde seul).
+- **`scripts/bench-rls-padasip.py`** : la moitié Python du protocole de
+  comparaison inter-bibliothèques (à exécuter sur la même machine que
+  `bench_rls`, p. ex. le Jetson) — aucun chiffre inter-bibliothèques
+  revendiqué tant que les deux moitiés n'ont pas tourné sur un même hôte.
+- 49 tests `scirust-estimation` + 93 `scirust-signal` verts ;
+  fmt/clippy `-D warnings` propres.
 
 ### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
 Les trois « suites possibles » restantes du volet 2 sont livrées :
