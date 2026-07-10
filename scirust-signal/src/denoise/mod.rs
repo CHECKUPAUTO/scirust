@@ -60,6 +60,7 @@
 pub mod adaptive;
 pub mod detect;
 pub mod linear;
+pub mod pipeline;
 pub mod rank;
 pub mod transform;
 pub mod variational;
@@ -72,6 +73,7 @@ pub use detect::{
     NoiseProfile, NoiseType, Separation, classify, estimate_noise_std, estimate_snr_db, separate,
 };
 pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_golay};
+pub use pipeline::{WaveletRlsRtsParams, wavelet_rls_rts_smooth, wavelet_rls_rts_smooth_1d};
 pub use rank::{alpha_trimmed_mean, hampel_filter, impulse_mask, median_filter};
 pub use transform::{
     ThresholdMode, Wavelet, fft_highpass, fft_lowpass, notch_filter, remove_mains_hum,
