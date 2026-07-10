@@ -3,6 +3,29 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités, 5e passe (interval/expect + Yule-Simon + Boltzmann)
+- **Contexte** : « continu » après PR #292 (4e passe) MERGÉE. Branche
+  repartie de `origin/master` à jour.
+- **Livré** : (a) `interval(c)` et `expect(f)` ajoutés par défaut au trait
+  `DiscreteDistribution` (parité `scipy.stats`) ; `expect` prend
+  `&dyn Fn(u64)->f64` (objet-sûr), sommation bornée par la queue.
+  (b) `YuleSimon` (queue lourde k≥1, pmf=α·B(k,α+1), survie fermée
+  k·B(k,α+1), moments divergents α≤1/α≤2) ; (c) `Boltzmann` (géométrique
+  tronquée 0..=n−1, Planck tronquée, formes fermées, normalisation −expm1).
+  Oracles SciPy 1.17.1 + identité exacte Yule-Simon α=2 ⇒ 4/(k(k+1)(k+2)).
+  51 tests + doctest, clippy 0 avertissement.
+- **Convention conflits maintenue** : entrée CHANGELOG **en bas** de
+  « Non publié » — la 4e passe (#292) a ainsi fusionné sans conflit.
+- **Bilan volet probabilités** : 16 lois discrètes (13 univariées + 3
+  vectorielles) + combinatoire exacte + ζ de Riemann + module loterie
+  honnête. Surface de méthodes à parité quasi complète avec SciPy
+  (pmf/logpmf/cdf/logcdf/sf/logsf/ppf/isf/interval/expect/moments/sampling).
+- **Suite possible** : pmf de Loader (saddle-point) grand n, lois de niche
+  restantes (Logarithmic/log-series, Planck non tronquée, Bernoulli
+  explicite) — non entamé.
+- **NB CI** : panne Actions du dépôt (runners, logs 404) toujours possible ;
+  validations locales (tests+clippy) uniquement.
+
 ## Session 2026-07-10 — probabilités, 4e passe (parité SciPy queues + Dirichlet-multinomiale)
 - **Contexte** : « continu » après PR #287 (3e passe : ζ de Riemann +
   Zeta/PoissonBinomial/Multinomial/MultivariateHypergeometric) MERGÉE.
