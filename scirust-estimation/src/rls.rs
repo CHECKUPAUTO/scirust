@@ -45,10 +45,7 @@ impl RlsFilter {
     /// * `delta` — initial `P(0) = δ·I`.  Large values (e.g. `1e3`) give fast
     ///   initial convergence; small values (e.g. `1.0`) stabilise the filter.
     pub fn new(n_in: usize, n_out: usize, lambda: f64, delta: f64) -> Self {
-        assert!(
-            lambda > 0.0 && lambda <= 1.0,
-            "lambda must be in (0, 1]"
-        );
+        assert!(lambda > 0.0 && lambda <= 1.0, "lambda must be in (0, 1]");
         let w = vec![0.0; n_out * n_in];
         let mut p = vec![0.0; n_in * n_in];
         for i in 0..n_in
@@ -65,7 +62,13 @@ impl RlsFilter {
     }
 
     /// Create from an existing weight matrix (row-major, `n_out × n_in`).
-    pub fn with_weights(n_in: usize, n_out: usize, lambda: f64, delta: f64, weights: Vec<f64>) -> Self {
+    pub fn with_weights(
+        n_in: usize,
+        n_out: usize,
+        lambda: f64,
+        delta: f64,
+        weights: Vec<f64>,
+    ) -> Self {
         assert_eq!(weights.len(), n_out * n_in);
         let mut f = Self::new(n_in, n_out, lambda, delta);
         f.w = weights;
@@ -75,6 +78,7 @@ impl RlsFilter {
     /// Filter one sample: predict `d̂ = w · u`, update weights using target `d`.
     ///
     /// Returns the prediction error `e = d - d̂`.
+    #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, u: &[f64], d: &[f64]) -> Vec<f64> {
         assert_eq!(u.len(), self.n_in);
         assert_eq!(d.len(), self.n_out);
@@ -229,6 +233,7 @@ impl VectorRls {
 
     /// Update with one input vector `u` and scalar target `d`.
     /// Returns the prediction error `e = d - w·u`.
+    #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, u: &[f64], d: f64) -> f64 {
         assert_eq!(u.len(), self.n);
 
@@ -293,7 +298,7 @@ mod tests {
         let n_out = 1;
         let mut rls = RlsFilter::new(n_in, n_out, 0.99, 100.0);
         // True system: y = 3·x₁ - 2·x₂
-        let true_w = vec![3.0, -2.0];
+        let true_w = [3.0, -2.0];
         // Vary inputs so the covariance stays full-rank
         let inputs = vec![
             vec![1.0, 0.0],

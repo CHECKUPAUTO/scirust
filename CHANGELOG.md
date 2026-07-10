@@ -98,6 +98,63 @@ versions sémantiques à partir de la prochaine release taguée.
   problématiques de mécanique des fluides et de thermodynamique » :
   ces deux crates posent le socle (corrélations et relations exactes
   de référence) sur lequel des verticaux CFD/procédés pourront s'appuyer.
+### Ajouté — RLS multi-canaux + pipeline composite Wavelet–RLS–RTS (intégration de la PR #278)
+- **`scirust-estimation::rls`** (`RlsFilter`, `VectorRls`) : filtre adaptatif
+  **moindres carrés récursifs** multi-canaux (matrice de poids `n_out × n_in`
+  apprise en ligne, gain `k = P·u/(λ + uᵀPu)`, facteur d'oubli `λ`,
+  covariance inverse `P` avec **symétrisation forcée** `P=(P+Pᵀ)/2` contre la
+  dérive de définie-positivité), déterministe `f64`, sérialisable. Comble le
+  trou « identification en ligne » du crate : la famille Kalman estime l'état
+  d'un modèle *connu*, le RLS **apprend** le modèle. Repris tel quel de la
+  PR #278 (développée sur Jetson), avec ses tests de convergence.
+- **`denoise::pipeline`** (`wavelet_rls_rts_smooth`, `_1d`) : le pipeline
+  composite `x̂ = M_RTS·[(I−Δ_RLS)·Wᵀ·𝒯_τ(W·s)]` de la PR #278, rebasé sur la
+  DWT périodisée du framework — il y gagne les bases Db4/Db6/Db8, les
+  longueurs arbitraires (padding par réflexion) et l'estimation σ robuste sur
+  la vraie bande fine (correction de la fenêtre à offset fixe de l'original).
+  Le seuillage doux s'applique à *tous* les coefficients (bande
+  d'approximation comprise), fidèle au design original : le biais d'amplitude
+  systématique ainsi introduit est précisément ce que l'étage RLS apprend et
+  corrige — vérifié par un test discriminant (pipeline > seuillage seul, le
+  mutant sans étages 2-3 échoue) ; `delta_norm` calculé en O(n) sans matrice
+  n×n. `scirust-signal` dépend désormais de `scirust-estimation` (pas de
+  cycle : celui-ci ne dépend que de serde).
+- Remplace la PR #278 (conflit de module `denoise.rs` vs `denoise/` et
+  duplication seuils/DWT avec le framework fusionné depuis) ; 122 tests
+  cumulés sur les deux crates + 1 doctest ; fmt/clippy `-D warnings` propres.
+
+### Ajouté — TV exacte (Condat), ondelettes db6/db8, seuil SURE, Kalman à tendance (`scirust-signal::denoise`, lot 3)
+- **`total_variation_exact`** : débruitage TV 1-D **exact** par l'algorithme
+  direct de Condat (IEEE SPL 2013) — le minimiseur global unique de
+  `½‖x−y‖² + λ·TV(x)` en un seul balayage O(n), sans itération ni tolérance.
+  L'optimalité est **prouvée par les conditions KKT dans les tests** (la somme
+  courante `sᵢ = Σ(xⱼ−yⱼ)` reste dans `[−λ,+λ]`, touche exactement `±λ` aux
+  sauts du signe correspondant, finit à 0 — objectif strictement convexe ⇒
+  KKT ⇔ optimum global), sur 6 entrées variées (échelons, sinusoïde, bruit
+  pur, signal court, λ minuscule/énorme) ; objectif vérifié ≤ celui de
+  l'approximation IRLS existante ; λ énorme ⇒ aplatissement exact à la moyenne.
+- **Ondelettes Daubechies-6 et Daubechies-8** (`Wavelet::{Db6, Db8}`, 3 et 4
+  moments nuls) : constantes dérivées par factorisation spectrale et
+  **épinglées indépendamment par test** des identités qui les définissent
+  (`Σh=√2`, `‖h‖=1`, orthogonalité à double décalage, moments nuls du miroir
+  en quadrature à ~1e-10) ; reconstruction parfaite multi-niveaux pour les
+  quatre bases.
+- **Seuil SURE par niveau** (`wavelet_denoise_sure`, SureShrink
+  Donoho-Johnstone 1995) : minimise l'estimateur de risque sans biais de Stein
+  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` bande par bande (préfixes de
+  carrés sur magnitudes triées, candidats plafonnés au seuil universel), avec
+  le repli « hybride » vers le seuil universel dans les bandes trop creuses.
+  Vérifié : bat le seuil universel en SNR sur un signal dense (deux tons) où
+  VisuShrink sur-lisse.
+- **`kalman_trend_smooth`** : lisseur de Kalman/RTS à **tendance locale**
+  (état 2-D niveau+pente, F=[[1,1],[0,1]]). Là où le modèle à niveau seul
+  arbitre retard contre bruit sur un signal en rampe, le modèle à tendance la
+  suit sans biais : test discriminant — une rampe propre est reproduite à
+  <1e-3 près là où le modèle à niveau (mêmes variances) fait >100× pire ;
+  gain SNR vérifié sur signal tendanciel bruité.
+- Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
+  `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
+  `scirust-core`/serde.
 
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon

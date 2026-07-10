@@ -154,7 +154,7 @@ pub enum ThresholdMode {
     Soft,
 }
 
-fn apply_threshold(x: f64, t: f64, mode: ThresholdMode) -> f64 {
+pub(crate) fn apply_threshold(x: f64, t: f64, mode: ThresholdMode) -> f64 {
     match mode
     {
         ThresholdMode::Hard =>
@@ -234,7 +234,7 @@ const DB8_H: [f64; 8] = [
 impl Wavelet {
     /// Orthonormal analysis low-pass filter taps. The matching high-pass is the
     /// alternating flip `g[j] = (−1)^j · h[K−1−j]` (quadrature mirror).
-    fn lowpass(self) -> Vec<f64> {
+    pub(crate) fn lowpass(self) -> Vec<f64> {
         match self
         {
             Wavelet::Haar => vec![1.0 / SQRT_2, 1.0 / SQRT_2],
@@ -345,7 +345,7 @@ pub fn wavelet_denoise(signal: &[f64], levels: usize, mode: ThresholdMode) -> Ve
 /// approximation gets shorter than the filter (periodization would fold onto
 /// itself).
 #[allow(clippy::type_complexity)]
-fn dwt_forward(
+pub(crate) fn dwt_forward(
     signal: &[f64],
     levels: usize,
     h: &[f64],
@@ -385,7 +385,12 @@ fn dwt_forward(
 }
 
 /// Inverse multi-level DWT, cropped back to the original length.
-fn dwt_inverse(mut approx: Vec<f64>, detail_coeffs: &[Vec<f64>], h: &[f64], n0: usize) -> Vec<f64> {
+pub(crate) fn dwt_inverse(
+    mut approx: Vec<f64>,
+    detail_coeffs: &[Vec<f64>],
+    h: &[f64],
+    n0: usize,
+) -> Vec<f64> {
     for detail in detail_coeffs.iter().rev()
     {
         approx = idwt_step(&approx, detail, h);
