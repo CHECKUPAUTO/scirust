@@ -1,0 +1,6 @@
+[package]
+name = "scirust-stiff"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Stiff ODE and index-1 DAE integrators: Backward Euler, adaptive Rosenbrock-W (ROS23), mass-matrix form M·y'=f. Finite-difference Jacobian, internal dense LU. Deterministic, oracle-tested. Pure Rust, no unsafe, no dependencies."

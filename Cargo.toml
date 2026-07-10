@@ -142,11 +142,21 @@ members = [
     "scirust-sigma",
     "scirust-special",
     "scirust-stats",
+    "scirust-interp",
+    "scirust-sparse",
+    "scirust-stiff",
+    "scirust-gp",
+    "scirust-units",
+    "scirust-frame",
+    "scirust-forecast",
 ]
 exclude = [
     "scirust-rustc-driver",
     "examples/simd_views_demo",
     "examples/benchmarks",
+    # Fuzz harness: its own nightly-only workspace (libfuzzer-sys), built only
+    # by the dedicated `fuzz` CI job. Never part of the main workspace build.
+    "fuzz",
     # Requires `[workspace.dependencies] burn` and the heavy external `burn`
     # crate; kept out of the default workspace build.
     "scirust-burn-bridge",

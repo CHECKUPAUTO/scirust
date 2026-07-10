@@ -1,0 +1,6 @@
+[package]
+name = "scirust-forecast"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Classical time-series forecasting: simple/double/triple exponential smoothing (Holt-Winters, additive & multiplicative), autoregressive fit via Levinson-Durbin, differencing, error metrics (MAE/RMSE/MAPE). Deterministic, oracle-tested. Pure Rust, no unsafe, no dependencies."

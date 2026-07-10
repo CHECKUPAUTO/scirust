@@ -1,0 +1,6 @@
+[package]
+name = "scirust-frame"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Lightweight typed dataframe: named columns (f64/i64/str/bool), select/filter/sort/group-by-aggregate/inner-join, CSV read & write. Deterministic, oracle-tested. Pure Rust, no unsafe, no dependencies."

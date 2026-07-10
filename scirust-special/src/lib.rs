@@ -608,6 +608,12 @@ mod tests {
     }
 
     #[test]
+    // Miri deliberately randomizes the last ULPs of transcendental float
+    // intrinsics (exp/ln/...) on every call, precisely so code cannot rely on
+    // their unspecified precision — which makes this bit-identity check fail
+    // under the interpreter by design. On real hardware (one binary, one libm)
+    // the property holds and stays enforced by the native Build & Test jobs.
+    #[cfg_attr(miri, ignore)]
     fn deterministic_across_calls() {
         // No global state / RNG: identical inputs give identical bits.
         assert_eq!(erf(1.234_567).to_bits(), erf(1.234_567).to_bits());
