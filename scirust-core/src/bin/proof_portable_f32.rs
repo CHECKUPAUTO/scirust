@@ -28,6 +28,64 @@ fn hex_list(bits: &[u32]) -> String {
 
 fn main() -> ExitCode {
     let full = std::env::args().any(|a| a == "--full");
+    let certify = std::env::args().any(|a| a == "--certify");
+
+    // Mode outil : `--eval <fonction> <fichier>` — lit des bit patterns f32
+    // (hex, un par ligne) et imprime `entrée sortie` en hex. Sert à la
+    // vérification hors ligne des entrées non certifiées (doc de certify).
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--eval")
+    {
+        let name = &args[pos + 1];
+        let path = &args[pos + 2];
+        let f = pf::certify::FUNCTIONS
+            .iter()
+            .find(|(n, _, _)| n == name)
+            .unwrap_or_else(|| panic!("fonction inconnue : {name}"))
+            .1;
+        let body = std::fs::read_to_string(path).expect("lecture");
+        for line in body.lines()
+        {
+            let bits = u32::from_str_radix(line.trim(), 16).expect("hex");
+            let out = f(f32::from_bits(bits));
+            println!("{bits:08x} {:08x}", out.to_bits());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if certify
+    {
+        // Campagne de certification d'arrondi correct : balayage EXHAUSTIF
+        // (les 2³² entrées de chaque fonction). Les entrées « uncertified »
+        // ne sont pas fausses — leur statut se tranche hors ligne en
+        // précision arbitraire (cf. doc de portable_f32::certify).
+        println!("PROOF-PORTABLE-F32-CERTIFY v1");
+        println!(
+            "# arch={} os={} family={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+            std::env::consts::FAMILY
+        );
+        let t = Instant::now();
+        for (name, public, eval) in pf::certify::FUNCTIONS
+        {
+            let rep = pf::certify::sweep(public, eval, 1);
+            println!(
+                "{name}.certify analytic={} certified={} uncertified={}",
+                rep.analytic, rep.certified, rep.uncertified
+            );
+            // liste complète pour la vérification hors ligne (gitignorée)
+            if !rep.samples.is_empty()
+            {
+                let body: String = rep.samples.iter().map(|b| format!("{b:08x}\n")).collect();
+                let path = format!("proof-certify-{name}.txt");
+                std::fs::write(&path, body).expect("écriture liste certify");
+                println!("# liste_complete={path}");
+            }
+        }
+        println!("# duree_certify_s={:.1}", t.elapsed().as_secs_f64());
+        return ExitCode::SUCCESS;
+    }
     let mut ok = true;
     let check_fp = |name: &str, got: u64, want: u64| -> bool {
         let pass = got == want;

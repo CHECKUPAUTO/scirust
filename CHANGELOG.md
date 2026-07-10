@@ -5,6 +5,43 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
+- **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
+  et al., SC'11), clean-room depuis le papier et **validé contre les
+  vecteurs de test publiés** de Random123 (+ implémentation Python
+  indépendante). Sortie = fonction pure (clé, compteur) ⇒ dropout/init/
+  shuffle parallélisables sur n'importe quel découpage de threads en
+  restant bit-identiques (l'« aléa order-independent » façon JAX,
+  trou commun RepDL/scirust). Arithmétique entière pure ⇒ portable par
+  construction. 6 tests (KAT publiés, invariance au découpage, 4 threads
+  bit-exacts, statistiques, empreinte-contrat).
+- **`scirust-core::exact_acc`** — accumulateur **exact** de Kulisch pour
+  produits f32 (virgule fixe 704 bits couvrant tout l'intervalle des
+  produits) : `dot_exact`/`gemm_exact` **correctement arrondis** (une seule
+  opération d'arrondi), indépendants de l'ordre, à **fusion associative**
+  (multithread bit-exact quel que soit le découpage) — la réponse au trou
+  « GEMM reproductible et parallélisable » (classe ReproBLAS, en plus
+  fort : somme exacte). Vérifié bit à bit contre la référence Shewchuk
+  (deux constructions indépendantes du même réel arrondi) ; cancellation
+  catastrophique et sous-normaux traités. 6 tests.
+- **`NdVar::rope_portable`** (tape N-D) — RoPE dont fréquences
+  (`exp`/`ln` portables) et rotations (`sin`/`cos` portables, Payne–Hanek)
+  n'appellent aucune libm : encodage positionnel des transformers bit-exact
+  inter-plates-formes, forward et backward. **`fft_portable`/`ifft_portable`**
+  (scirust-signal) — twiddle factors via `sincos_small_f64`
+  (Cody–Waite + polynômes portables, nouvelle API f64 petit-argument de
+  `portable_f32`) : analyse spectrale bit-identique inter-plates-formes.
+  Empreintes-contrat commises pour les deux.
+- **Certification d'arrondi correct** (`portable_f32::certify` + modes
+  `--certify`/`--eval` du binaire de preuve) : pour chaque entrée f32
+  (balayage exhaustif 7 × 2³²), un certificat d'intervalle prouve que le
+  résultat publié est LE f32 correctement arrondi ; l'évaluateur interne
+  est revalidé contre la fonction expédiée sur chaque entrée. Les entrées
+  non certifiées sont tranchées hors ligne en précision arbitraire
+  (`scripts/verify-certify-offline.py` : Decimal 60 chiffres, milieux
+  comparés en rationnels exacts — pas de double arrondi). Résultats de la
+  campagne : voir LIVESTATE volet 114.
+
 ### Ajouté — entraînement 100 % portable + tanh/sigmoid portables (volet 113)
 - **`Var::{exp_portable, ln_portable, matmul_portable}`** : primitives
   d'autodiff opt-in dont forward ET backward n'appellent aucune libm ni

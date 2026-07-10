@@ -70,3 +70,4 @@ proof-portable-f32-*/
 
 # The fuzz harness is its own cargo workspace and builds into its own target dir.
 fuzz/target/
+proof-certify-*.txt
