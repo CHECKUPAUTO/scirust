@@ -396,4 +396,77 @@ mod tests {
         let trace: f64 = (0..4).map(|i| d[i * 4 + i]).sum();
         assert!((trace - 1.0).abs() < 1e-9, "delta trace = {trace}");
     }
+
+    #[test]
+    fn rls_is_a_static_state_kalman_filter_cross_oracle() {
+        // At λ = 1 the RLS recursion IS a Kalman filter whose state is the
+        // weight vector: F = I, Q = 0, H_k = u_kᵀ, R = 1, P(0) = δ·I. The
+        // crate's own KalmanFilter (generic matrix path with an explicit
+        // innovation-covariance inversion) is therefore an independent oracle:
+        // both implementations must agree along the whole trajectory. Since H
+        // changes per sample, a fresh KalmanFilter is rebuilt each step from
+        // the carried state/covariance — pure reuse, no reimplementation.
+        use crate::kalman::KalmanFilter;
+        use crate::linalg::Mat;
+
+        let n = 3;
+        let delta = 100.0;
+        let mut rls = VectorRls::new(n, 1.0, delta);
+
+        let mut x = vec![0.0; n];
+        let mut p = Mat::identity(n);
+        for i in 0..n
+        {
+            p.set(i, i, delta);
+        }
+        let identity = Mat::identity(n);
+        let zero_q = Mat::zeros(n, n);
+        let r = Mat::new(1, 1, vec![1.0]);
+
+        struct Lcg(u64);
+        impl Lcg {
+            fn next(&mut self) -> f64 {
+                self.0 = self
+                    .0
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((self.0 >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+            }
+        }
+        let mut rng = Lcg(57);
+        let true_w = [0.8, -1.3, 2.1];
+        for _ in 0..300
+        {
+            let u: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let d: f64 = true_w.iter().zip(&u).map(|(a, b)| a * b).sum::<f64>() + 0.1 * rng.next();
+
+            rls.update(&u, d);
+
+            let h = Mat::new(1, n, u.clone());
+            let mut kf = KalmanFilter::new(
+                x.clone(),
+                p.clone(),
+                identity.clone(),
+                zero_q.clone(),
+                h,
+                r.clone(),
+            );
+            assert!(kf.update(&[d]), "Kalman update failed");
+            x = kf.state().to_vec();
+            p = kf.covariance().clone();
+
+            for (a, b) in rls.weights().iter().zip(&x)
+            {
+                assert!(
+                    (a - b).abs() < 1.0e-8 * (1.0 + a.abs()),
+                    "RLS {a} vs Kalman {b}"
+                );
+            }
+        }
+        // Both converged to the truth.
+        for (w, t) in rls.weights().iter().zip(&true_w)
+        {
+            assert!((w - t).abs() < 0.05, "{w} vs {t}");
+        }
+    }
 }
