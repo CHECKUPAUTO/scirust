@@ -22,6 +22,26 @@ versions sémantiques à partir de la prochaine release taguée.
   scirust-burn-bridge, scirust-license ; `deny.toml` et le SBOM n'y
   référençaient rien).
 
+### Ajouté — draft de soumission Correctness '26 (`paper/correctness26/`)
+- **Venue actée** : Correctness '26 (10ᵉ Int. Workshop on Software
+  Correctness for HPC Applications, SC26 Chicago), deadline 23 juillet 2026,
+  notification 1ᵉʳ septembre. Plateforme d'évaluation : **Jetson AGX Thor**
+  (décision utilisateur). JOSS écarté (licence PolyForm non-OSI, décision
+  utilisateur de ne pas re-licencier).
+- **Draft complet** : `main.tex` (ACM sigconf, ~8 pages : intro
+  « déterminisme-comme-évidence », related work avec pivot RepDL honnête,
+  trois régimes numériques + invariant σ, entraînement bit-reproductible
+  T1-T4, inférence-comme-artefact d'audit, int8 déterministe edge, gate σ +
+  étude négative « dead guards » 22 dépôts/9,16 M LOC, coût mesuré du
+  déterminisme avec la table x86-64/Thor et l'identité bit-à-bit
+  cross-platform des empreintes, limitations, table claims → évidence en
+  `table*`) ; `references.bib` (7 références, métadonnées vérifiées sur
+  arXiv/éditeur le 2026-07-10, aucune référence inventée) ; `README.md`
+  (build latexmk/Overleaf, TODO de soumission). Contrôle structurel
+  effectué : environnements/accolades équilibrés, citations et refs toutes
+  résolues. Chaque claim du papier est adossée à la table de
+  `paper/PAPER_PLAN.md` — aucune claim sans témoin exécutable.
+
 ### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
 - **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
   framework ships this guarantee tested » (README) et ses équivalents FR

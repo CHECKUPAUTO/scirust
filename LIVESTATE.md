@@ -3,7 +3,7 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
-## Session 2026-07-10 — volet 109 : acteur CHECKUPAUTO → TAREK ZEKRITI
+## Session 2026-07-10 — volet 110 : acteur CHECKUPAUTO → TAREK ZEKRITI
 - **Décision utilisateur (définitive)** : l'acteur CHECKUPAUTO est remplacé par
   TAREK ZEKRITI. Appliqué : identité git locale (`user.name` TAREK ZEKRITI,
   `user.email` zekrititarek@gmail.com — scirust ET CCOS_EXTENDED) ; champ
@@ -18,8 +18,34 @@
   `LicenseRef-CheckupAuto-Dual` → `LicenseRef-TarekZekriti-Dual` (LICENSE +
   3 Cargo.toml ; deny.toml/SBOM sans référence). git grep -i checkupauto → 0
   hors entrées narratives CHANGELOG/LIVESTATE.
-- **Reste** : sweep équivalent dans CCOS_EXTENDED (dépôt séparé) — en cours
-  dans la même session.
+- **Reste** : sweep équivalent dans CCOS_EXTENDED (dépôt séparé) — fait dans la
+  même session (PR Memorithm/CCOS_EXTENDED#7, deps git + 3 Cargo.lock basculés,
+  `cargo metadata --locked` vert ×3). NB fusion : le volet 109 (Correctness '26,
+  mergé avant celui-ci) contient `paper/correctness26/` — occurrences CHECKUPAUTO
+  résiduelles de ce nouveau contenu balayées dans le commit de merge.
+
+## Session 2026-07-10 — volet 109 : draft de soumission Correctness '26
+- **Contexte** : PR #268 (volet 108) MERGÉE dans master. Décisions utilisateur actées :
+  bug reports extérieurs clos ; pas de re-licence JOSS ; plateforme d'évaluation du
+  paper = Jetson AGX Thor ; GO d'écriture. Venue identifiée et vérifiée en ligne :
+  **Correctness '26** (SC26 Chicago), **deadline 23 JUILLET 2026**, notification 1/9,
+  ACM sigconf 7-8 pages hors réfs (repli court 4 p). Thèmes du CFP alignés
+  (« contrôle du non-déterminisme » listé explicitement).
+- **Livré** : `paper/correctness26/` — `main.tex` (draft complet ~8 p : abstract,
+  intro déterminisme-comme-évidence + contributions, related work (pivot RepDL),
+  §3 régimes + σ, §4 training T1-T4, §5 inférence/artefacts, §6 int8/NEON, §7 gate σ
+  + étude négative dead guards, §8 coût mesuré (table Thor+x86, empreintes
+  cross-platform, threats to validity), §9 limitations, §10 conclusion, table*
+  claims→évidence) ; `references.bib` (7 réfs, métadonnées VÉRIFIÉES sur arxiv.org
+  le 2026-07-10 : RepDL=Xie/Zhang/Chen 2025, EasyScale=Li et al. 2022,
+  GPU numerics=Zahid/Laguna/Le 2024) ; `README.md` (build + TODO soumission).
+  Pas de TeX dans le conteneur → contrôle structurel python (begin/end, accolades,
+  cites↔bib, refs↔labels : tout équilibré/résolu) ; compilation à faire sur
+  Overleaf/latexmk.
+- **TODO soumission (humain)** : affiliation exacte ; lien artefact relecteurs ;
+  anonymat selon CFP ; contrôle de longueur post-compilation (couper §2/§7 si > 8 p).
+- Branche claude/new-session-n8bf71 repartie de master post-merge (protocole
+  branche-mergée) ; nouvelle PR draft.
 
 ## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
 - **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this
