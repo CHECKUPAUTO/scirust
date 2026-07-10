@@ -31,7 +31,7 @@ pub use interval::IntervalFilter;
 pub use kalman::KalmanFilter;
 pub use linalg::Mat;
 pub use particle::ParticleFilter;
+pub use rls::{RlsFilter, VectorRls};
 pub use smoother::RtsSmoother;
 pub use ud::UdFilter;
-pub use rls::{RlsFilter, VectorRls};
 pub use ukf::Ukf;

@@ -18,6 +18,48 @@ versions sémantiques à partir de la prochaine release taguée.
   bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
   script de preuve et au job CI QEMU.
 
+### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
+Suite annoncée du volet précédent — les trois chantiers « suite possible »
+du LIVESTATE sont livrés :
+- **`scirust-thermo::steam` — IAPWS-IF97 régions 1 et 2** (en plus de la
+  région 4 existante) : équations de Gibbs complètes donnant v, h, u, s,
+  cp, cv et la vitesse du son pour le **liquide comprimé** (région 1,
+  273,15–623,15 K, jusqu'à 100 MPa) et la **vapeur surchauffée**
+  (région 2, jusqu'à 1073,15 K, bornée par la ligne de saturation et la
+  parabole **B23** région 2/3, elle aussi implémentée). Les 34 + 9 + 43
+  coefficients ont été extraits **programmatiquement** de
+  l'implémentation de référence (paquet `iapws`) — zéro transcription
+  manuelle. États saturés `saturated_liquid`/`saturated_vapor`.
+  Oracles : **tables de vérification officielles IF97 5 et 15**
+  reproduites à 1e-8 sur les six points (toutes propriétés), paire B23,
+  tables vapeur classiques à 100 °C, cohérence d'équilibre de phase
+  (g_f ≈ g_g, h_fg ≈ T·s_fg à ~1e-4 près, l'écart des fits régionaux).
+- **`scirust-thermo::cycles::rankine_ideal` — cycle de Rankine complet**
+  sur les propriétés IF97 : pompe isentropique (v·Δp), chaudière isobare,
+  détente isentropique (échappement humide par titrage dans la cloche,
+  ou surchauffé par bissection déterministe), condenseur isobare.
+  Rendement, travaux, chaleurs, titre de sortie. Oracles : exemple
+  classique de Cengel (3 MPa/350 °C/75 kPa → η ≈ 26,0 %, x₄ ≈ 0,886),
+  premier principe exact, borne de Carnot, sens physique de la pression
+  de condenseur.
+- **`scirust-thermo::convection`** — convection externe et naturelle :
+  plaque plane laminaire (0,664, = analogie de Colburn exacte) et mixte
+  (raccord continu à Re = 5×10⁵ vérifié), **Churchill–Bernstein**
+  (cylindre en écoulement transverse), **Ranz–Marshall** (sphère, limite
+  de conduction Nu = 2 exacte), **Churchill–Chu** (plaque verticale et
+  cylindre horizontal en convection naturelle), nombre de Rayleigh.
+  Domaines de validité imposés.
+- **`scirust-fluids::network` — méthode de Hardy Cross** pour les
+  réseaux de conduites maillés : loi de perte de charge
+  h = r·|Q|^{n−1}·Q (n = 2 Darcy–Weisbach, 1,852 Hazen–Williams),
+  corrections de boucle préservant exactement la continuité aux nœuds,
+  balayage déterministe, inversion de débit gérée par la loi signée.
+  Oracles : répartitions analytiques (2 et 3 conduites en parallèle,
+  fermeture des boucles à ~1e-8), exposant Hazen–Williams, entrées
+  dégénérées rejetées.
+- Bilan : scirust-fluids 54 tests (+6), scirust-thermo 57 tests (+18),
+  clippy `-D warnings` propre, rustfmt appliqué.
+
 ### Ajouté — preuve CR totale, all-reduce arbre fixe, basses précisions (volet 115)
 - **Arrondi correct sur 100 % du domaine f32** pour les 7 transcendantales
   portables : les 465 entrées fautives identifiées au volet 114 (sorties
@@ -111,6 +153,63 @@ versions sémantiques à partir de la prochaine release taguée.
   problématiques de mécanique des fluides et de thermodynamique » :
   ces deux crates posent le socle (corrélations et relations exactes
   de référence) sur lequel des verticaux CFD/procédés pourront s'appuyer.
+### Ajouté — RLS multi-canaux + pipeline composite Wavelet–RLS–RTS (intégration de la PR #278)
+- **`scirust-estimation::rls`** (`RlsFilter`, `VectorRls`) : filtre adaptatif
+  **moindres carrés récursifs** multi-canaux (matrice de poids `n_out × n_in`
+  apprise en ligne, gain `k = P·u/(λ + uᵀPu)`, facteur d'oubli `λ`,
+  covariance inverse `P` avec **symétrisation forcée** `P=(P+Pᵀ)/2` contre la
+  dérive de définie-positivité), déterministe `f64`, sérialisable. Comble le
+  trou « identification en ligne » du crate : la famille Kalman estime l'état
+  d'un modèle *connu*, le RLS **apprend** le modèle. Repris tel quel de la
+  PR #278 (développée sur Jetson), avec ses tests de convergence.
+- **`denoise::pipeline`** (`wavelet_rls_rts_smooth`, `_1d`) : le pipeline
+  composite `x̂ = M_RTS·[(I−Δ_RLS)·Wᵀ·𝒯_τ(W·s)]` de la PR #278, rebasé sur la
+  DWT périodisée du framework — il y gagne les bases Db4/Db6/Db8, les
+  longueurs arbitraires (padding par réflexion) et l'estimation σ robuste sur
+  la vraie bande fine (correction de la fenêtre à offset fixe de l'original).
+  Le seuillage doux s'applique à *tous* les coefficients (bande
+  d'approximation comprise), fidèle au design original : le biais d'amplitude
+  systématique ainsi introduit est précisément ce que l'étage RLS apprend et
+  corrige — vérifié par un test discriminant (pipeline > seuillage seul, le
+  mutant sans étages 2-3 échoue) ; `delta_norm` calculé en O(n) sans matrice
+  n×n. `scirust-signal` dépend désormais de `scirust-estimation` (pas de
+  cycle : celui-ci ne dépend que de serde).
+- Remplace la PR #278 (conflit de module `denoise.rs` vs `denoise/` et
+  duplication seuils/DWT avec le framework fusionné depuis) ; 122 tests
+  cumulés sur les deux crates + 1 doctest ; fmt/clippy `-D warnings` propres.
+
+### Ajouté — TV exacte (Condat), ondelettes db6/db8, seuil SURE, Kalman à tendance (`scirust-signal::denoise`, lot 3)
+- **`total_variation_exact`** : débruitage TV 1-D **exact** par l'algorithme
+  direct de Condat (IEEE SPL 2013) — le minimiseur global unique de
+  `½‖x−y‖² + λ·TV(x)` en un seul balayage O(n), sans itération ni tolérance.
+  L'optimalité est **prouvée par les conditions KKT dans les tests** (la somme
+  courante `sᵢ = Σ(xⱼ−yⱼ)` reste dans `[−λ,+λ]`, touche exactement `±λ` aux
+  sauts du signe correspondant, finit à 0 — objectif strictement convexe ⇒
+  KKT ⇔ optimum global), sur 6 entrées variées (échelons, sinusoïde, bruit
+  pur, signal court, λ minuscule/énorme) ; objectif vérifié ≤ celui de
+  l'approximation IRLS existante ; λ énorme ⇒ aplatissement exact à la moyenne.
+- **Ondelettes Daubechies-6 et Daubechies-8** (`Wavelet::{Db6, Db8}`, 3 et 4
+  moments nuls) : constantes dérivées par factorisation spectrale et
+  **épinglées indépendamment par test** des identités qui les définissent
+  (`Σh=√2`, `‖h‖=1`, orthogonalité à double décalage, moments nuls du miroir
+  en quadrature à ~1e-10) ; reconstruction parfaite multi-niveaux pour les
+  quatre bases.
+- **Seuil SURE par niveau** (`wavelet_denoise_sure`, SureShrink
+  Donoho-Johnstone 1995) : minimise l'estimateur de risque sans biais de Stein
+  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` bande par bande (préfixes de
+  carrés sur magnitudes triées, candidats plafonnés au seuil universel), avec
+  le repli « hybride » vers le seuil universel dans les bandes trop creuses.
+  Vérifié : bat le seuil universel en SNR sur un signal dense (deux tons) où
+  VisuShrink sur-lisse.
+- **`kalman_trend_smooth`** : lisseur de Kalman/RTS à **tendance locale**
+  (état 2-D niveau+pente, F=[[1,1],[0,1]]). Là où le modèle à niveau seul
+  arbitre retard contre bruit sur un signal en rampe, le modèle à tendance la
+  suit sans biais : test discriminant — une rampe propre est reproduite à
+  <1e-3 près là où le modèle à niveau (mêmes variances) fait >100× pire ;
+  gain SNR vérifié sur signal tendanciel bruité.
+- Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
+  `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
+  `scirust-core`/serde.
 
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon

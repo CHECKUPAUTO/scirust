@@ -24,6 +24,33 @@
   stochastique, bit-reproductible cross-platform, sous contrat » —
   sans équivalent (RepDL exclut les basses précisions).
 
+## Session 2026-07-10 — fluides & thermo, volet 2 (IF97 complet, convection, réseaux)
+- **Contexte** : PR #281 (volet 1) MERGÉE ; « continu » → exécution des trois
+  « suites possibles » du volet 1. Branche repartie de master
+  (même nom, procédure branche-mergée).
+- **IF97 régions 1 & 2** (`scirust-thermo::steam`) : Gibbs complet
+  (v,h,u,s,cp,cv,w), liquide comprimé + vapeur surchauffée + frontière B23.
+  Coefficients extraits par script depuis le paquet Python `iapws`
+  (implémentation de référence, scratchpad) — zéro transcription manuelle ;
+  vérifiés en Python pur AVANT écriture du Rust (6 points tables 5/15 OK),
+  puis les mêmes oracles en Rust passent à 1e-8 du premier coup.
+- **Cycle de Rankine** (`cycles::rankine_ideal`) : struct RankineCycle
+  (travaux, chaleurs, η, titre), échappement humide OU surchauffé
+  (bissection déterministe). Oracle Cengel 10-1 : η ≈ 0,260 ✓ x₄ ≈ 0,886 ✓.
+- **Convection** (`scirust-thermo::convection`) : plaque plane
+  laminaire/mixte, Churchill–Bernstein, Ranz–Marshall, Churchill–Chu
+  (×2), Rayleigh. Raccord laminaire/mixte à Re=5e5 vérifié (<0,2 %).
+- **Hardy Cross** (`scirust-fluids::network`) : NetworkPipe (h=r·|Q|ⁿ⁻¹·Q),
+  hardy_cross() déterministe, continuité préservée par construction.
+  Solutions analytiques 2 et 3 conduites parallèles à 1e-8.
+- **Vérifié** : 111 tests unitaires + 2 doctests verts ; clippy
+  `--all-targets -- -D warnings` propre ; fmt appliqué.
+- **Suite possible** : IF97 région 3 (autour du point critique, équation
+  de Helmholtz) et région 5 (>1073 K) ; équations backward T(p,h)/T(p,s)
+  (turbines réelles à rendement isentropique < 1) ; pertes de charge
+  réelles dans Hardy Cross via friction_colebrook (couplage
+  fluids ↔ conduites) — non entamé.
+
 ## Session 2026-07-10 — volet 115 : preuve a priori (tables CR) + all-reduce arbre fixe + basses précisions
 - **Contexte** : PR #277 (verdict volet 114) MERGÉE ; demande utilisateur : « allons
   sur la preuve formelle a priori (RLIBM), l'all-reduce multi-nœud à arbre fixe,
