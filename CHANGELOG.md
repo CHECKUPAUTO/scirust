@@ -5,6 +5,19 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — all-reduce TCP réel + entraînement bf16-SR reproductible (volet 116)
+- **`tcp_tree_all_reduce_rank`** (+ trait `WireState`, sérialisation
+  little-endian de Vec<f32>/Vec<ExactAcc>) : l'all-reduce à arbre fixe sur
+  **sockets TCP réels** — même ordre d'absorption que le moteur in-process,
+  donc mêmes bits (testé sous gigue, n ∈ {3, 8}, FixedOrderSum et ExactSum).
+  Multi-processus/multi-machine ready.
+- **`scirust-core --bin proof_lowprec_training`** : entraînement témoin
+  **bf16 à arrondi stochastique** (maîtres f32, copies forward bf16
+  quantifiées par SR-Philox contre-basé, graphe portable, Adam) — la
+  trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
+  bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
+  script de preuve et au job CI QEMU.
+
 ### Ajouté — preuve CR totale, all-reduce arbre fixe, basses précisions (volet 115)
 - **Arrondi correct sur 100 % du domaine f32** pour les 7 transcendantales
   portables : les 465 entrées fautives identifiées au volet 114 (sorties

@@ -119,6 +119,24 @@ impl ExactAcc {
         self.add_f64(a as f64 * b as f64);
     }
 
+    /// Sérialise l'état exact (mots positifs puis négatifs, LSB-first) —
+    /// pour un transport réseau ([`crate::tree_allreduce`]) : l'état étant
+    /// entier, les octets sont identiques sur toute plate-forme.
+    pub fn to_words(&self) -> [u64; 2 * WORDS] {
+        let mut out = [0u64; 2 * WORDS];
+        out[..WORDS].copy_from_slice(&self.pos);
+        out[WORDS..].copy_from_slice(&self.neg);
+        out
+    }
+
+    /// Reconstruit un accumulateur depuis [`ExactAcc::to_words`].
+    pub fn from_words(words: &[u64; 2 * WORDS]) -> Self {
+        let mut acc = Self::new();
+        acc.pos.copy_from_slice(&words[..WORDS]);
+        acc.neg.copy_from_slice(&words[WORDS..]);
+        acc
+    }
+
     /// Fusionne `other` dans `self` (addition mot à mot avec retenues) —
     /// associative et commutative : le résultat ne dépend ni du découpage
     /// ni de l'ordre des fusions.
