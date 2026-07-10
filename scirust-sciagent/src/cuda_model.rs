@@ -15,6 +15,7 @@ use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_cuda::{CudaChain, CudaF32, CudaMatrix};
 
 use crate::config::SciAgentConfig;
+use crate::generate::{SamplingParams, sample_row, seed_to_state};
 use crate::model::SciAgentModel;
 use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::scheduler::WarmupCosineSchedule;
@@ -187,6 +188,43 @@ impl CudaModel {
     /// (row-major), computed on Tensor cores and downloaded. Single sequence.
     pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
         self.chain.download(&self.forward_resident(tokens))
+    }
+
+    /// Autoregressive generation from `prompt`, appending up to `max_new` tokens.
+    /// **Non-cached** (re-runs the full forward each step, O(n²)) — the MVP, matching
+    /// Route A's `infer-1` before its KV cache; fine for eyeballing checkpoint quality
+    /// on short samples. Uses the shared deterministic [`sample_row`] so the sampling
+    /// is bit-identical to the CPU/Route-A paths. Stops early on token `0` (the
+    /// `<pad>`/EOS convention). Returns the full token sequence (prompt + generated).
+    pub fn generate(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+    ) -> Vec<u32> {
+        let mut tokens: Vec<u32> = if prompt.is_empty()
+        {
+            vec![0]
+        }
+        else
+        {
+            prompt.to_vec()
+        };
+        let mut rng = seed_to_state(seed);
+        for _ in 0..max_new
+        {
+            let logits = self.forward(&tokens);
+            let last = &logits[logits.len() - self.vocab..];
+            let recent: Vec<usize> = tokens.iter().map(|&t| t as usize).collect();
+            let next = sample_row(last, params, &recent, &mut rng) as u32;
+            tokens.push(next);
+            if next == 0
+            {
+                break;
+            }
+        }
+        tokens
     }
 
     /// Backward of [`Self::attention`] (the GQA analogue of Route A's
