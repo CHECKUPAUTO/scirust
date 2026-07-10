@@ -157,6 +157,29 @@ impl QrRls {
     pub fn lambda(&self) -> f64 {
         self.lambda
     }
+
+    /// Long-horizon hygiene: re-factor `S ← chol(S·Sᵀ)`.
+    ///
+    /// The Potter recursion keeps `P = S·Sᵀ` PSD, but says nothing about the
+    /// *shape* of `S` itself — over very long horizons `S` can drift toward an
+    /// ill-conditioned (far-from-triangular) square root, amplifying rounding
+    /// in later updates. Re-factoring replaces it with the lower-triangular
+    /// Cholesky factor of the *same* covariance: `P` is preserved (to
+    /// rounding), conditioning of the factor is restored. `O(n³)`; call every
+    /// `10³–10⁶` samples. Returns `false` (leaving `S` untouched) if `P` has
+    /// numerically lost strict positive definiteness. The local factorization
+    /// is cross-checked against `scirust-solvers`' Cholesky in the test suite.
+    pub fn recondition(&mut self) -> bool {
+        let n = self.n;
+        let p = self.covariance_inv();
+        let Some(l) = cholesky_lower(&p, n)
+        else
+        {
+            return false;
+        };
+        self.s = l;
+        true
+    }
 }
 
 /// Multi-output (MIMO) square-root RLS — the hardened twin of
@@ -311,6 +334,155 @@ impl QrRlsMimo {
             }
         }
         p
+    }
+
+    /// Forgetting factor.
+    pub fn lambda(&self) -> f64 {
+        self.lambda
+    }
+
+    /// Long-horizon hygiene: re-factor `S ← chol(S·Sᵀ)` (see [`QrRls::recondition`]).
+    pub fn recondition(&mut self) -> bool {
+        let n = self.n_in;
+        let p = self.covariance_inv();
+        let Some(l) = cholesky_lower(&p, n)
+        else
+        {
+            return false;
+        };
+        self.s = l;
+        true
+    }
+}
+
+/// Lower-triangular Cholesky factor of a symmetric positive-definite matrix
+/// (row-major n×n). Returns `None` on a non-positive pivot. Cross-checked
+/// against `scirust-solvers`' Cholesky in the test suite.
+pub(crate) fn cholesky_lower(a: &[f64], n: usize) -> Option<Vec<f64>> {
+    let mut l = vec![0.0; n * n];
+    for i in 0..n
+    {
+        for j in 0..=i
+        {
+            let mut s = 0.0;
+            for k in 0..j
+            {
+                s += l[i * n + k] * l[j * n + k];
+            }
+            if i == j
+            {
+                let d = a[i * n + i] - s;
+                if d <= 0.0 || !d.is_finite()
+                {
+                    return None;
+                }
+                l[i * n + i] = d.sqrt();
+            }
+            else
+            {
+                l[i * n + j] = (a[i * n + j] - s) / l[j * n + j];
+            }
+        }
+    }
+    Some(l)
+}
+
+/// Const-generic, stack-resident square-root RLS — [`QrRls`] for the embedded
+/// target: Potter factor update on plain arrays, `core`-only, no allocator.
+/// Operation-for-operation identical to [`QrRls`], so the two are
+/// **bit-identical** (verified by test): the hardened numerics and the
+/// `no_std`-ready footprint in one type.
+#[derive(Debug, Clone)]
+pub struct QrRlsConst<const N: usize> {
+    lambda: f64,
+    w: [f64; N],
+    /// Square-root factor `s[i][j]`, `P = S·Sᵀ`.
+    s: [[f64; N]; N],
+}
+
+impl<const N: usize> QrRlsConst<N> {
+    /// `lambda ∈ (0, 1]`, `S(0) = √delta·I`.
+    pub fn new(lambda: f64, delta: f64) -> Self {
+        assert!(lambda > 0.0 && lambda <= 1.0, "lambda must be in (0, 1]");
+        assert!(delta > 0.0, "delta must be positive");
+        let mut s = [[0.0; N]; N];
+        let sqrt_delta = delta.sqrt();
+        let mut i = 0;
+        while i < N
+        {
+            s[i][i] = sqrt_delta;
+            i += 1;
+        }
+        Self {
+            lambda,
+            w: [0.0; N],
+            s,
+        }
+    }
+
+    /// Update with input `u` and scalar target `d`; returns the a-priori error.
+    /// Stack only — no heap, no allocator.
+    #[allow(clippy::needless_range_loop)]
+    pub fn update(&mut self, u: &[f64; N], d: f64) -> f64 {
+        let mut d_hat = 0.0;
+        for i in 0..N
+        {
+            d_hat += self.w[i] * u[i];
+        }
+        let e = d - d_hat;
+
+        // v = Sᵀ·u — same accumulation order as QrRls for bit-identity.
+        let mut v = [0.0; N];
+        for j in 0..N
+        {
+            let mut acc = 0.0;
+            for i in 0..N
+            {
+                acc += self.s[i][j] * u[i];
+            }
+            v[j] = acc;
+        }
+        // Accumulate ‖v‖² first, then add λ — the exact order of the heap
+        // version's `lambda + iter().sum()`, required for bit-identity.
+        let mut v_norm_sq = 0.0;
+        for j in 0..N
+        {
+            v_norm_sq += v[j] * v[j];
+        }
+        let beta = self.lambda + v_norm_sq;
+        let mut f = [0.0; N];
+        for i in 0..N
+        {
+            let mut acc = 0.0;
+            for j in 0..N
+            {
+                acc += self.s[i][j] * v[j];
+            }
+            f[i] = acc;
+        }
+
+        for i in 0..N
+        {
+            self.w[i] += f[i] / beta * e;
+        }
+
+        let alpha = 1.0 / (beta + (self.lambda * beta).sqrt());
+        let inv_sqrt_lambda = 1.0 / self.lambda.sqrt();
+        for i in 0..N
+        {
+            let fi = alpha * f[i];
+            for j in 0..N
+            {
+                self.s[i][j] = (self.s[i][j] - fi * v[j]) * inv_sqrt_lambda;
+            }
+        }
+
+        e
+    }
+
+    /// Current weight vector.
+    pub fn weights(&self) -> &[f64; N] {
+        &self.w
     }
 
     /// Forgetting factor.
@@ -473,5 +645,103 @@ mod tests {
                 assert!((w - t).abs() < 1.0e-6, "w[{i}][{j}] = {w} vs {t}");
             }
         }
+    }
+
+    #[test]
+    fn qr_rls_const_is_bit_identical_to_heap_qr_rls() {
+        const N: usize = 4;
+        let mut heap = QrRls::new(N, 0.97, 50.0);
+        let mut stack: QrRlsConst<N> = QrRlsConst::new(0.97, 50.0);
+        let mut rng = Lcg(29);
+        for _ in 0..500
+        {
+            let mut u = [0.0; N];
+            for x in u.iter_mut()
+            {
+                *x = rng.next();
+            }
+            let d = 2.0 * u[0] - u[1] + 0.3 * u[3] + 0.01 * rng.next();
+            let e_heap = heap.update(&u, d);
+            let e_stack = stack.update(&u, d);
+            assert_eq!(e_heap.to_bits(), e_stack.to_bits(), "errors diverged");
+        }
+        for (a, b) in heap.weights().iter().zip(stack.weights())
+        {
+            assert_eq!(a.to_bits(), b.to_bits(), "weights diverged");
+        }
+    }
+
+    #[test]
+    fn local_cholesky_matches_scirust_solvers_oracle() {
+        // The recondition path relies on the local `cholesky_lower`; verify it
+        // against scirust-solvers' independent Cholesky on an SPD matrix built
+        // from a real filter state.
+        use scirust_solvers::linalg::{Matrix, cholesky_decompose};
+        let n = 5;
+        let mut qr = QrRls::new(n, 0.97, 25.0);
+        let mut rng = Lcg(37);
+        for _ in 0..2000
+        {
+            let u: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let d = u[0] - u[2] + 0.5 * u[4] + 0.05 * rng.next();
+            qr.update(&u, d);
+        }
+        let p = qr.covariance_inv();
+        let local = cholesky_lower(&p, n).expect("local Cholesky failed");
+        let oracle = cholesky_decompose(Matrix::from_row_major(n, n, p.clone()))
+            .expect("solvers Cholesky failed");
+        for i in 0..n
+        {
+            for j in 0..=i
+            {
+                let a = local[i * n + j];
+                let b = oracle[(i, j)];
+                assert!(
+                    (a - b).abs() < 1.0e-10 * (1.0 + a.abs()),
+                    "L[{i}][{j}]: local {a} vs solvers {b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recondition_preserves_covariance_and_restores_triangularity() {
+        let n = 4;
+        let mut qr = QrRls::new(n, 0.95, 100.0);
+        let mut rng = Lcg(41);
+        for _ in 0..50_000
+        {
+            let u: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let d = 0.7 * u[0] + 1.3 * u[1] - u[3] + 0.02 * rng.next();
+            qr.update(&u, d);
+        }
+        let p_before = qr.covariance_inv();
+        assert!(qr.recondition(), "P lost strict positive definiteness");
+        let p_after = qr.covariance_inv();
+        // Same covariance (to rounding)…
+        for (a, b) in p_before.iter().zip(&p_after)
+        {
+            assert!(
+                (a - b).abs() < 1.0e-9 * (1.0 + a.abs()),
+                "P changed: {a} vs {b}"
+            );
+        }
+        // …and the factor is again lower-triangular.
+        for i in 0..n
+        {
+            for j in (i + 1)..n
+            {
+                assert_eq!(qr.s[i * n + j], 0.0, "S[{i}][{j}] not zero");
+            }
+        }
+        // Filter keeps working after the swap.
+        let mut last = 0.0;
+        for _ in 0..500
+        {
+            let u: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let d = 0.7 * u[0] + 1.3 * u[1] - u[3];
+            last = qr.update(&u, d);
+        }
+        assert!(last.is_finite() && last.abs() < 1.0);
     }
 }

@@ -5,6 +5,44 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — RLS niveau 3 : oubli directionnel, annulation multi-référence, QrRlsConst, re-conditionnement
+Le lot complet validé — l'anti-windup principiel et le bouclage avec le
+pipeline de débruitage :
+- **`DirectionalRls`** (oubli directionnel, Kulhavý / Cao-Schwartz) : n'oublie
+  que dans la **direction excitée** (découpe rang-1 de la matrice
+  d'information `R` le long du régresseur, mise à jour appariée de `P` par
+  Sherman-Morrison, O(n²)/échantillon, zéro allocation). **Test discriminant
+  du windup** : 2 000 pas excités sur une seule direction à λ=0,9 — le RLS
+  standard voit sa covariance orthogonale exploser (> 10⁵⁰, λ⁻ᵏ) ; le
+  directionnel la garde **bornée à sa valeur initiale**, puis se réadapte
+  sainement quand l'excitation revient. λ=1 ≡ RLS fenêtre croissante (testé
+  à 1e-8) ; suivi de dérive vérifié.
+- **`reference_noise_cancel` + `wavelet_rls_rts_smooth_multiref`**
+  (`scirust-signal::denoise::pipeline`) : annulation de bruit **convolutive
+  multi-référence** — `MimoFirRls` apprend en ligne les chemins FIR
+  capteurs-de-référence → primaire, l'erreur a priori EST le signal nettoyé ;
+  chaînée en étage 0 du pipeline Wavelet–RLS–RTS. Tests : interférence
+  convolutive 2 références retirée (> +20 dB vs brut) ; la chaîne
+  multi-référence bat le pipeline aveugle de > 6 dB en présence
+  d'interférence + bruit large bande.
+- **`QrRlsConst<const N>`** : racine carrée de Potter **sur pile**,
+  `core`-only — le filtre embarqué durci ultime (PSD par construction +
+  zéro tas + déroulage compile-time). **Bit-identique** au `QrRls` tas
+  (ordre d'accumulation aligné, testé au bit près sur 500 pas).
+- **Re-conditionnement long-horizon** : `QrRls::recondition` /
+  `QrRlsMimo::recondition` (re-factorisation `S ← chol(S·Sᵀ)`, préserve `P`
+  au rounding près, restaure la triangularité) et
+  `DirectionalRls::recondition` (`P ← R⁻¹` exact via le `Mat::inverse` du
+  crate) + diagnostic `consistency_error()`. La factorisation de Cholesky
+  locale est **vérifiée contre l'oracle `scirust-solvers`** (dev-dependency
+  volontaire : les dépendances de prod du crate restent serde seul).
+- **`scripts/bench-rls-padasip.py`** : la moitié Python du protocole de
+  comparaison inter-bibliothèques (à exécuter sur la même machine que
+  `bench_rls`, p. ex. le Jetson) — aucun chiffre inter-bibliothèques
+  revendiqué tant que les deux moitiés n'ont pas tourné sur un même hôte.
+- 49 tests `scirust-estimation` + 93 `scirust-signal` verts ;
+  fmt/clippy `-D warnings` propres.
+
 ### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
 Les trois « suites possibles » restantes du volet 2 sont livrées :
 - **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur

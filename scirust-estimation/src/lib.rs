@@ -14,6 +14,7 @@
 //! bit-identical across machines — the determinism guarantee the rest of
 //! SciRust upholds, extended to estimation.
 
+pub mod directional;
 pub mod ekf;
 pub mod imm;
 pub mod interval;
@@ -28,6 +29,7 @@ pub mod smoother;
 pub mod ud;
 pub mod ukf;
 
+pub use directional::DirectionalRls;
 pub use ekf::Ekf;
 pub use imm::{Imm, ImmModel};
 pub use interval::IntervalFilter;
@@ -35,7 +37,7 @@ pub use kalman::KalmanFilter;
 pub use linalg::Mat;
 pub use mimo_fir::{LambdaFit, MimoFirRls, tune_lambda};
 pub use particle::ParticleFilter;
-pub use qr_rls::{QrRls, QrRlsMimo};
+pub use qr_rls::{QrRls, QrRlsConst, QrRlsMimo};
 pub use rls::{RlsFilter, VectorRls};
 pub use rls_const::RlsFilterConst;
 pub use smoother::RtsSmoother;

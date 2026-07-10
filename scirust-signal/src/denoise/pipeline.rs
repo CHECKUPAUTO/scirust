@@ -167,6 +167,70 @@ pub fn wavelet_rls_rts_smooth_1d(
     wavelet_rls_rts_smooth(signal, params, &x0, &f, &q, &h, &r, &p0)
 }
 
+/// Multi-reference **convolutive noise cancellation** — the classic
+/// reference-sensor setup, built on
+/// [`scirust_estimation::MimoFirRls`].
+///
+/// `primary` carries the signal of interest plus interference that reached it
+/// through unknown FIR paths from the `references` (noise-only sensors: a
+/// microphone near the engine, an accelerometer on the pump…). The adaptive
+/// filter learns those paths online; because the *clean* component of the
+/// primary is uncorrelated with the references, the FIR prediction converges
+/// to the interference alone, and the returned **a-priori error is the
+/// cleaned signal** — signal untouched, interference cancelled, drifting
+/// coupling paths tracked (λ < 1).
+pub fn reference_noise_cancel(
+    primary: &[f64],
+    references: &[&[f64]],
+    taps: usize,
+    lambda: f64,
+    delta: f64,
+) -> Vec<f64> {
+    let n = primary.len();
+    if references.is_empty() || taps == 0 || n == 0
+    {
+        return primary.to_vec();
+    }
+    for r in references
+    {
+        assert_eq!(r.len(), n, "reference length must match primary");
+    }
+    let mut canceller =
+        scirust_estimation::MimoFirRls::new(references.len(), 1, taps, lambda, delta);
+    let mut out = Vec::with_capacity(n);
+    let mut frame = vec![0.0; references.len()];
+    for k in 0..n
+    {
+        for (c, r) in references.iter().enumerate()
+        {
+            frame[c] = r[k];
+        }
+        out.push(canceller.update(&frame, &[primary[k]])[0]);
+    }
+    out
+}
+
+/// The full multi-reference chain: **cancel → shrink → correct → smooth**.
+///
+/// Stage 0 removes the convolutive interference predictable from the
+/// `references` ([`reference_noise_cancel`]); the residual broadband noise is
+/// then handled by the wavelet–RLS–RTS pipeline
+/// ([`wavelet_rls_rts_smooth_1d`]). This closes the loop between the
+/// estimation crate's MIMO filter and the denoising framework.
+#[allow(clippy::too_many_arguments)]
+pub fn wavelet_rls_rts_smooth_multiref(
+    primary: &[f64],
+    references: &[&[f64]],
+    taps: usize,
+    ref_lambda: f64,
+    params: &WaveletRlsRtsParams,
+    process_noise: f64,
+    measurement_noise: f64,
+) -> (Vec<f64>, f64) {
+    let cancelled = reference_noise_cancel(primary, references, taps, ref_lambda, 100.0);
+    wavelet_rls_rts_smooth_1d(&cancelled, params, process_noise, measurement_noise)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::testutil::{Lcg, snr_db};
@@ -319,5 +383,95 @@ mod tests {
         assert_eq!(d, 0.0);
         let (out, _) = wavelet_rls_rts_smooth_1d(&[1.0], &params, 0.1, 0.1);
         assert_eq!(out, vec![1.0]);
+    }
+
+    #[test]
+    fn reference_cancellation_removes_convolutive_interference() {
+        // Primary = clean sine + FIR-filtered copies of two reference noises.
+        // The canceller sees only the references; it must learn the coupling
+        // paths and strip the interference while leaving the sine intact.
+        let n = 4000;
+        let mut rng = Lcg::new(139);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * core::f64::consts::PI * 5.0 * i as f64 / 512.0).sin())
+            .collect();
+        let ref1: Vec<f64> = (0..n).map(|_| rng.gauss()).collect();
+        let ref2: Vec<f64> = (0..n).map(|_| rng.gauss()).collect();
+        let h1 = [0.8, -0.4, 0.2];
+        let h2 = [0.5, 0.3, -0.1];
+        let primary: Vec<f64> = (0..n)
+            .map(|k| {
+                let mut interf = 0.0;
+                for t in 0..3
+                {
+                    if k >= t
+                    {
+                        interf += h1[t] * ref1[k - t] + h2[t] * ref2[k - t];
+                    }
+                }
+                clean[k] + interf
+            })
+            .collect();
+
+        let out = reference_noise_cancel(&primary, &[&ref1, &ref2], 3, 0.999, 100.0);
+        // Judge after convergence.
+        let half = n / 2;
+        let s_out = snr_db(&clean[half..], &out[half..]);
+        let s_raw = snr_db(&clean[half..], &primary[half..]);
+        assert!(
+            s_out > s_raw + 20.0,
+            "cancellation too weak: {s_out} dB vs raw {s_raw} dB"
+        );
+    }
+
+    #[test]
+    fn multiref_pipeline_beats_pipeline_without_references() {
+        // Interference from a reference + independent broadband noise: the
+        // multi-reference chain must beat the reference-blind pipeline.
+        let n = 4096;
+        let mut rng = Lcg::new(149);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * core::f64::consts::PI * 4.0 * i as f64 / 1024.0).sin())
+            .collect();
+        let reference: Vec<f64> = (0..n).map(|_| rng.gauss()).collect();
+        let h = [1.0, -0.6, 0.3];
+        let primary: Vec<f64> = (0..n)
+            .map(|k| {
+                let mut interf = 0.0;
+                for t in 0..3
+                {
+                    if k >= t
+                    {
+                        interf += h[t] * reference[k - t];
+                    }
+                }
+                clean[k] + interf + 0.1 * rng.gauss()
+            })
+            .collect();
+
+        let params = WaveletRlsRtsParams {
+            wavelet: Wavelet::Db4,
+            wavelet_levels: 0,
+            tau: None,
+            rls_lambda: 0.98,
+            rls_delta: 100.0,
+        };
+        let (with_refs, _) = wavelet_rls_rts_smooth_multiref(
+            &primary,
+            &[&reference],
+            3,
+            0.999,
+            &params,
+            0.05,
+            0.1 * 0.1,
+        );
+        let (without_refs, _) = wavelet_rls_rts_smooth_1d(&primary, &params, 0.05, 0.1 * 0.1);
+        let half = n / 2;
+        let s_with = snr_db(&clean[half..], &with_refs[half..]);
+        let s_without = snr_db(&clean[half..], &without_refs[half..]);
+        assert!(
+            s_with > s_without + 6.0,
+            "multiref {s_with} dB should clearly beat blind {s_without} dB"
+        );
     }
 }
