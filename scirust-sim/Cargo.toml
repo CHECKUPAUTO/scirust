@@ -1,0 +1,6 @@
+[package]
+name = "scirust-sim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Multi-domain simulation environments: a deterministic time-stepping engine (RK4, symplectic Euler), a gym-style Environment trait for agent-in-the-loop simulation, and oracle-tested ready-made models across mechanics, orbital dynamics, epidemiology, ecology, chemistry, thermal, electrical, stochastic processes and queueing. Pure Rust, no unsafe, no dependencies."
