@@ -118,8 +118,42 @@ fn preset_by_name(name: &str) -> (SciAgentConfig, String) {
     }
 }
 
+/// Directories never worth ingesting for byte-level *source* pretraining — VCS
+/// internals, build artifacts, vendored deps, caches. Skipping them matters: the
+/// sorted walk reads `.git` first (dot sorts before letters), so its packed binary
+/// objects would otherwise dominate the head of the corpus — a real run collapsed
+/// deterministically on exactly that garbage (see `ROUTE_B.md`).
+fn skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "target"
+            | "node_modules"
+            | ".cargo"
+            | "dist"
+            | "build"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".idea"
+            | ".vscode"
+    )
+}
+
+/// Whether `bytes` look like source text: valid UTF-8 with no NUL byte. Binary
+/// files (compiled artifacts, images, `.git` objects, archives) fail this and are
+/// skipped — byte-level pretraining should see text, not binary blobs.
+fn is_probably_text(bytes: &[u8]) -> bool {
+    !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok()
+}
+
 /// Recursively read raw file bytes under `root` (deterministic order), up to `cap`
-/// bytes. Used for byte-level ingestion.
+/// bytes — **source text only**: non-source directories ([`skip_dir`]) and non-text
+/// files ([`is_probably_text`]) are skipped.
 fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
     if out.len() >= cap
     {
@@ -129,8 +163,11 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
     {
         if let Ok(b) = std::fs::read(root)
         {
-            let take = (cap - out.len()).min(b.len());
-            out.extend_from_slice(&b[..take]);
+            if is_probably_text(&b)
+            {
+                let take = (cap - out.len()).min(b.len());
+                out.extend_from_slice(&b[..take]);
+            }
         }
         return;
     }
@@ -143,6 +180,16 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
             if out.len() >= cap
             {
                 break;
+            }
+            if p.is_dir()
+            {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                {
+                    if skip_dir(name)
+                    {
+                        continue;
+                    }
+                }
             }
             read_bytes_recursive(&p, out, cap);
         }
