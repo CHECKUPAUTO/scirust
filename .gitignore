@@ -57,3 +57,5 @@ systemd/turboquant-*.service
 # Only the curated facade SBOM under docs/sbom/ is tracked.
 *.cdx.json
 !docs/sbom/*.cdx.json
+# The fuzz harness is its own cargo workspace and builds into its own target dir.
+fuzz/target/
