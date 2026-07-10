@@ -1,4 +1,4 @@
-Required Notice: Copyright 2026 Tarek Zekriti (https://github.com/CHECKUPAUTO/)
+Required Notice: Copyright 2026 Tarek Zekriti (https://github.com/Memorithm/)
 
 # PolyForm Noncommercial License 1.0.0
 

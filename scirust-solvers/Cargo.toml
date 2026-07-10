@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 description = "Equation, ODE, optimization and quadrature solvers built on scirust-autodiff"
 license-file = "../LICENSE.md"
-repository = "https://github.com/CHECKUPAUTO/scirust"
+repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
 scirust-autodiff = { path = "../scirust-autodiff" }

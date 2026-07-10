@@ -2,7 +2,7 @@
 
 **Tarek Zekriti**
 独立研究员 · contact@checkupauto.fr
-代码库：https://github.com/CHECKUPAUTO/scirust
+代码库：https://github.com/Memorithm/scirust
 
 ---
 

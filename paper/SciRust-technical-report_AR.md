@@ -2,7 +2,7 @@
 
 **طارق زكريتي**
 باحث مستقل · contact@checkupauto.fr
-المستودع: https://github.com/CHECKUPAUTO/scirust
+المستودع: https://github.com/Memorithm/scirust
 
 ---
 

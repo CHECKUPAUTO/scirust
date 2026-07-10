@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.85"
 description = "SciRust licensing — pure-Rust, deterministic module entitlement with hash-based (Lamport/Merkle, SHA-256 only) signed licenses; no FFI, no elliptic-curve dependency"
 license = "LicenseRef-CheckupAuto-Dual"
-repository = "https://github.com/CHECKUPAUTO/scirust"
+repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

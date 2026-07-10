@@ -2,7 +2,7 @@
 
 **Tarek Zekriti**
 独立研究者 · contact@checkupauto.fr
-リポジトリ: https://github.com/CHECKUPAUTO/scirust
+リポジトリ: https://github.com/Memorithm/scirust
 
 ---
 

@@ -3,6 +3,22 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 109 : acteur CHECKUPAUTO → TAREK ZEKRITI
+- **Décision utilisateur (définitive)** : l'acteur CHECKUPAUTO est remplacé par
+  TAREK ZEKRITI. Appliqué : identité git locale (`user.name` TAREK ZEKRITI,
+  `user.email` zekrititarek@gmail.com — scirust ET CCOS_EXTENDED) ; champ
+  `authors` de scirust-burn-bridge → "Tarek Zekriti" ; toutes les URLs/slugs
+  GitHub `CHECKUPAUTO/*` (26 fichiers : Cargo.toml des crates, README, LICENSE.md,
+  RELEASING, SBOM, rapports techniques ×8 langues, scripts, scirust-rsi docs,
+  SARIF de scirust-som) → `Memorithm/*` (l'org qui héberge — un nom de personne
+  n'est pas une URL valide).
+- **Intouché (marque CheckupAuto, à trancher séparément si voulu)** : emails
+  `contact@checkupauto.fr` (SECURITY, LICENSING, plaquette, en-têtes des rapports)
+  et identifiant SPDX `LicenseRef-CheckupAuto-Dual` (Cargo.toml ×3 + LICENSE).
+- **Reste** : CCOS_EXTENDED (dépôt séparé Memorithm/CCOS_EXTENDED) contient ~30
+  occurrences équivalentes (docs, papers, Dockerfiles, authors "Forge CHECKUPAUTO
+  <forge@checkupauto.io>") — même sweep à faire là-bas sur demande.
+
 ## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
 - **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this
   guarantee tested » falsifiée par RepDL (arXiv:2510.09180, reproductibilité bit-à-bit

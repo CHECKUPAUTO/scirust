@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Self-contained installer: recreates the `scirust-rsi` crate inside THIS repo
 # (no network / no git fetch needed) so it can be used as a local path
-# dependency. Run from the root of the CHECKUPAUTO/RSI repository:
+# dependency. Run from the root of the Memorithm/RSI repository:
 #
 #     bash vendor_scirust_rsi.sh
 #

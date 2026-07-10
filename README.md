@@ -71,7 +71,7 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 No code to copy. Install the unified `scirust` CLI and run a command:
 
 ```bash
-git clone https://github.com/CHECKUPAUTO/scirust && cd scirust
+git clone https://github.com/Memorithm/scirust && cd scirust
 cargo install --path scirust-cli      # provides the `scirust` binary
 
 scirust help                          # list every command, grouped

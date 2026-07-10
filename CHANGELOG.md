@@ -5,6 +5,18 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Modifié — acteur CHECKUPAUTO remplacé par TAREK ZEKRITI
+- **Attribution** : le champ `authors` de `scirust-burn-bridge` passe de
+  "CheckupAuto" à "Tarek Zekriti" ; l'identité git locale des commits est
+  désormais TAREK ZEKRITI \<zekrititarek@gmail.com\>.
+- **URLs/slugs GitHub** : toutes les références `CHECKUPAUTO/*` (26 fichiers —
+  `repository` des Cargo.toml, README, LICENSE.md, RELEASING, SBOM CycloneDX,
+  rapports techniques ×8 langues, scripts de protocole, docs scirust-rsi,
+  URI SARIF de scirust-som) pointent vers `Memorithm/*`, l'org qui héberge
+  réellement les dépôts.
+- **Non modifié (marque, décision séparée)** : emails `contact@checkupauto.fr`
+  et identifiant SPDX `LicenseRef-CheckupAuto-Dual`.
+
 ### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
 - **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
   framework ships this guarantee tested » (README) et ses équivalents FR

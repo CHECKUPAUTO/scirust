@@ -2,7 +2,7 @@
 //!
 //! An **inbound** scientific transpiler (Phase 0 MVP): it converts a
 //! *contractual subset* of Python/NumPy into deterministic, safe, std-only
-//! Rust. See [`docs/TRANSPILER_DESIGN.md`](https://github.com/CHECKUPAUTO/scirust/blob/master/docs/TRANSPILER_DESIGN.md)
+//! Rust. See [`docs/TRANSPILER_DESIGN.md`](https://github.com/Memorithm/scirust/blob/master/docs/TRANSPILER_DESIGN.md)
 //! for the full architecture and roadmap.
 //!
 //! Pipeline: source text → [`front_python`] (lex/parse) → [`sir`] (typed IR,

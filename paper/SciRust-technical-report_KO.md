@@ -2,7 +2,7 @@
 
 **Tarek Zekriti**
 독립 연구원 · contact@checkupauto.fr
-저장소: https://github.com/CHECKUPAUTO/scirust
+저장소: https://github.com/Memorithm/scirust
 
 ---
 
