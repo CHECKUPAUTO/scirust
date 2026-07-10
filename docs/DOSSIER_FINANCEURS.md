@@ -107,8 +107,18 @@ ajouter après coup sans réécrire son socle.
 
 - **Déterminisme certifié multi-thread** : l'entraînement réparti sur 1/2/4/8
   threads produit un résultat **bit-identique** (l'addition flottante n'étant pas
-  associative, l'ordre de réduction est figé). *Aucun framework grand public ne
-  livre cette garantie testée.*
+  associative, l'ordre de réduction est figé). *À notre connaissance, SciRust est
+  le seul framework DL **auto-contenu** (pile 100 % Rust auditable, zéro FFI dans
+  le chemin de calcul) offrant simultanément : entraînement multi-thread
+  bit-identique testé en CI (1/2/4/8 threads == séquentiel), pipeline int8
+  déterministe pour l'embarqué, et artefacts d'audit (fingerprints d'inférence,
+  journaux hash-chaînés, reconstruction par manifeste). Travaux voisins : RepDL
+  (Microsoft, 2025, arXiv:2510.09180) fournit la reproductibilité bit-à-bit
+  **cross-platform** pour un sous-ensemble float32 de PyTorch par arrondi
+  correct — garantie plus forte sur cet axe pour f32, mais en surcouche d'un TCB
+  C++/Python, sans basse précision, sans pièces d'audit. Les voies entière et
+  virgule fixe de SciRust sont bit-exactes cross-platform ; la voie f32
+  sanitized est déterministe intra-architecture.*
 - **Empreinte d'inférence 64 bits** stable entre threads **et** entre processus.
 - **Inférence certifiable** : propagation d'intervalles (IBP) et **CROWN**
   (relaxation linéaire, bornes *prouvées* plus serrées) ; **prédiction conforme**

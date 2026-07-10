@@ -27,6 +27,16 @@
 //! si sa ligne mentionne `f32` ; toute ambiguïté f32/f64 est signalée en
 //! WARNING (jamais bloquante — zéro faux positif).
 //!
+//! ## Mode `--mine <dir>` (campagne externe)
+//!
+//! Mine un dépôt **externe** (multi-langage : Rust, C/C++/CUDA/OpenCL,
+//! shaders) à la recherche de gardes epsilon mortes — littéraux f32 sous
+//! `f32::MIN_POSITIVE` (mécanisme M1, flush FTZ/DAZ) ou sous `1/f32::MAX`
+//! (mécanisme M2, inversion en `inf`). Voir `scirust_sigma::mine` pour les
+//! heuristiques exactes. Sortie : rapport Markdown déterministe (+ bloc TSV
+//! pour agrégation). Ce mode est purement analytique : code de sortie 0, ne
+//! modifie jamais le dépôt scanné.
+//!
 //! Le binaire ne modifie JAMAIS aucun fichier.
 
 use std::fmt::Write as _;
@@ -36,6 +46,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use scirust_sigma::SIGMA_SANITIZED_F32;
+use scirust_sigma::mine;
 
 const EXIT_OK: u8 = 0;
 const EXIT_CHECK_FAILED: u8 = 1;
@@ -940,6 +951,186 @@ fn report_hash(_body: &str) -> Option<String> {
 }
 
 // =========================================================================
+// Mode --mine : rapport Markdown du minage d'un dépôt externe
+// =========================================================================
+
+fn build_mine_report(root: &Path, outcome: &mine::MineOutcome) -> String {
+    let mut body = String::new();
+    let _ = writeln!(body, "# Rapport de minage « dead guards »");
+    let _ = writeln!(body);
+    let _ = writeln!(
+        body,
+        "Généré par `epsilon-audit --mine` (crate `scirust-sigma`, std-only, parsing lexical)."
+    );
+    let _ = writeln!(body, "Racine minée : `{}`.", root.display());
+    let _ = writeln!(
+        body,
+        "Seuils : M1 (flush FTZ/DAZ) `< {:e}` = `f32::MIN_POSITIVE` ; M2 (inversion) `< {:e}` = `1/f32::MAX`.",
+        mine::M1_FLUSH_THRESHOLD,
+        mine::M2_INVERSION_THRESHOLD
+    );
+    let _ = writeln!(
+        body,
+        "Rapport déterministe (tri stable, aucun horodatage) — reproductible bit-à-bit."
+    );
+    let _ = writeln!(body);
+
+    // 1. Statistiques.
+    let m2_count = outcome
+        .candidates
+        .iter()
+        .filter(|c| c.mechanism == mine::Mechanism::M2Inversion)
+        .count();
+    let _ = writeln!(body, "## 1. Statistiques");
+    let _ = writeln!(body);
+    let _ = writeln!(body, "| Mesure | Valeur |");
+    let _ = writeln!(body, "|---|---:|");
+    let _ = writeln!(body, "| Fichiers scannés | {} |", outcome.files_scanned);
+    let _ = writeln!(body, "| Lignes scannées | {} |", outcome.lines_scanned);
+    let _ = writeln!(
+        body,
+        "| Fichiers exclus (tests, vendor…) | {} |",
+        outcome.files_excluded
+    );
+    let _ = writeln!(
+        body,
+        "| Candidats (CONFIRMED-F32 + PROBABLE-F32) | {} |",
+        outcome.candidates.len()
+    );
+    let _ = writeln!(body, "| — dont mécanisme M2 (inversion) | {m2_count} |");
+    let _ = writeln!(
+        body,
+        "| Littéraux sous-seuil UNCERTAIN (non comptés) | {} |",
+        outcome.uncertain.len()
+    );
+    let _ = writeln!(
+        body,
+        "| Littéraux sous-seuil NOT-F32 (écartés) | {} |",
+        outcome.not_f32_count
+    );
+    let _ = writeln!(
+        body,
+        "| Drapeaux fast-math/FTZ (fichiers de build) | {} |",
+        outcome.fastmath.len()
+    );
+    let _ = writeln!(body);
+
+    // 2. Candidats.
+    let _ = writeln!(body, "## 2. Candidats (à revue manuelle)");
+    let _ = writeln!(body);
+    if outcome.candidates.is_empty()
+    {
+        let _ = writeln!(body, "Aucun candidat.");
+    }
+    else
+    {
+        let _ = writeln!(
+            body,
+            "| Fichier:ligne | Langage | Littéral | Mécanisme | Typage | Garde | Extrait |"
+        );
+        let _ = writeln!(body, "|---|---|---|---|---|---|---|");
+        for c in &outcome.candidates
+        {
+            let _ = writeln!(
+                body,
+                "| `{}:{}` | {} | `{}` | {} | {} | {} | `{}` |",
+                c.file.display(),
+                c.line,
+                c.language.label(),
+                c.literal,
+                c.mechanism.label(),
+                c.verdict.label(),
+                c.guard_marker.unwrap_or("—"),
+                c.extract.replace('|', "\\|")
+            );
+        }
+    }
+    let _ = writeln!(body);
+
+    // 3. Bloc TSV (agrégation machine).
+    let _ = writeln!(body, "## 3. TSV (agrégation)");
+    let _ = writeln!(body);
+    let _ = writeln!(body, "```tsv");
+    let _ = writeln!(
+        body,
+        "file\tline\tlang\tliteral\tvalue\tmechanism\tverdict\tguard\textract"
+    );
+    for c in &outcome.candidates
+    {
+        let _ = writeln!(
+            body,
+            "{}\t{}\t{}\t{}\t{:e}\t{}\t{}\t{}\t{}",
+            c.file.display(),
+            c.line,
+            c.language.label(),
+            c.literal,
+            c.value,
+            c.mechanism.label(),
+            c.verdict.label(),
+            c.guard_marker.unwrap_or("-"),
+            c.extract
+        );
+    }
+    let _ = writeln!(body, "```");
+    let _ = writeln!(body);
+
+    // 4. Drapeaux fast-math (colonne « FTZ probable » de l'étude).
+    let _ = writeln!(body, "## 4. Drapeaux fast-math / FTZ");
+    let _ = writeln!(body);
+    if outcome.fastmath.is_empty()
+    {
+        let _ = writeln!(body, "Aucun drapeau détecté dans les fichiers de build.");
+    }
+    else
+    {
+        // Liste bornée : les gros dépôts CUDA citent ftz des centaines de fois.
+        const MAX_LISTED: usize = 40;
+        for h in outcome.fastmath.iter().take(MAX_LISTED)
+        {
+            let _ = writeln!(
+                body,
+                "- `{}:{}` — `{}`",
+                h.file.display(),
+                h.line,
+                h.pattern
+            );
+        }
+        if outcome.fastmath.len() > MAX_LISTED
+        {
+            let _ = writeln!(
+                body,
+                "- … et {} autres occurrences (comptées, non listées).",
+                outcome.fastmath.len() - MAX_LISTED
+            );
+        }
+    }
+    let _ = writeln!(body);
+
+    // 5. Incertains (transparence, jamais comptés).
+    let _ = writeln!(
+        body,
+        "## 5. Littéraux UNCERTAIN ({} — non comptés comme findings)",
+        outcome.uncertain.len()
+    );
+    let _ = writeln!(body);
+    let _ = writeln!(body, "```text");
+    for c in &outcome.uncertain
+    {
+        let _ = writeln!(
+            body,
+            "{}:{}  {}  {}",
+            c.file.display(),
+            c.line,
+            c.literal,
+            c.extract
+        );
+    }
+    let _ = writeln!(body, "```");
+
+    body
+}
+
+// =========================================================================
 // Arguments
 // =========================================================================
 
@@ -947,12 +1138,14 @@ struct Args {
     root: PathBuf,
     out: Option<PathBuf>,
     check: bool,
+    mine: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, AuditError> {
     let mut root = PathBuf::from(".");
     let mut out = None;
     let mut check = false;
+    let mut mine = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next()
     {
@@ -973,6 +1166,13 @@ fn parse_args() -> Result<Args, AuditError> {
                     .ok_or_else(|| AuditError::Usage("--out attend un chemin".to_string()))?;
                 out = Some(PathBuf::from(v));
             },
+            "--mine" =>
+            {
+                let v = it
+                    .next()
+                    .ok_or_else(|| AuditError::Usage("--mine attend un chemin".to_string()))?;
+                mine = Some(PathBuf::from(v));
+            },
             "--help" | "-h" =>
             {
                 return Err(AuditError::Usage(usage()));
@@ -985,6 +1185,10 @@ fn parse_args() -> Result<Args, AuditError> {
             {
                 out = Some(PathBuf::from(&other["--out=".len()..]));
             },
+            other if other.starts_with("--mine=") =>
+            {
+                mine = Some(PathBuf::from(&other["--mine=".len()..]));
+            },
             other =>
             {
                 return Err(AuditError::Usage(format!(
@@ -994,16 +1198,24 @@ fn parse_args() -> Result<Args, AuditError> {
             },
         }
     }
-    Ok(Args { root, out, check })
+    Ok(Args {
+        root,
+        out,
+        check,
+        mine,
+    })
 }
 
 fn usage() -> String {
-    "usage: epsilon-audit [--root <path>] [--out <file>] [--check]\n\
+    "usage: epsilon-audit [--root <path>] [--out <file>] [--check] [--mine <dir>]\n\
      \n\
        --root <path>  racine du parcours (défaut : .)\n\
        --out <file>   écrit le rapport Markdown dans <file> (défaut : stdout)\n\
        --check        gate CI : sort ≠ 0 si une garde f32 sous σ_sanitized\n\
-                      subsiste hors test dans scirust-gpu/src"
+                      subsiste hors test dans scirust-gpu/src\n\
+       --mine <dir>   mine un dépôt externe (multi-langage) à la recherche de\n\
+                      gardes epsilon mortes (M1 flush / M2 inversion) ;\n\
+                      rapport Markdown+TSV, code de sortie toujours 0"
         .to_string()
 }
 
@@ -1013,6 +1225,56 @@ fn usage() -> String {
 
 fn run() -> Result<u8, AuditError> {
     let args = parse_args()?;
+
+    // Mode --mine : campagne externe, indépendante de --root/--check.
+    if let Some(dir) = &args.mine
+    {
+        if !dir.is_dir()
+        {
+            return Err(AuditError::Usage(format!(
+                "--mine : répertoire introuvable : {}",
+                dir.display()
+            )));
+        }
+        let outcome = mine::mine_dir(dir);
+        let body = build_mine_report(dir, &outcome);
+        let mut report = body.clone();
+        match report_hash(&body)
+        {
+            Some(hash) =>
+            {
+                let _ = writeln!(report, "\n---\n\nReport-SHA256: `{hash}`");
+            },
+            None =>
+            {
+                let _ = writeln!(
+                    report,
+                    "\n---\n\nReport-SHA256: (omis — feature `report-hash` désactivée)"
+                );
+            },
+        }
+        match &args.out
+        {
+            Some(path) =>
+            {
+                fs::write(path, report.as_bytes())?;
+                eprintln!(
+                    "epsilon-audit --mine: {} fichiers, {} lignes, {} candidats → {}",
+                    outcome.files_scanned,
+                    outcome.lines_scanned,
+                    outcome.candidates.len(),
+                    path.display()
+                );
+            },
+            None =>
+            {
+                let stdout = io::stdout();
+                let mut lock = stdout.lock();
+                lock.write_all(report.as_bytes())?;
+            },
+        }
+        return Ok(EXIT_OK);
+    }
 
     if !args.root.exists()
     {

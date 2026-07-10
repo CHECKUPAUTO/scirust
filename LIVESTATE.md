@@ -1,7 +1,47 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-07-09
+> Dernière mise à jour : 2026-07-10
+
+## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
+- **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this
+  guarantee tested » falsifiée par RepDL (arXiv:2510.09180, reproductibilité bit-à-bit
+  cross-platform f32 par arrondi correct, surcouche PyTorch). Remplacée partout
+  (README.md, docs/INDUSTRIAL_ROADMAP.md, docs/DOSSIER_FINANCEURS.md ; entrée 0.14.0 du
+  CHANGELOG rectifiée avec note datée) par la formulation « à notre connaissance, seul
+  framework auto-contenu (100 % Rust, zéro FFI) offrant simultanément multi-thread
+  bit-identique CI + int8 embarqué + pièces d'audit ; RepDL plus fort sur cross-platform
+  f32 ». Preuve : `grep -rn "No mainstream framework"` et `"framework grand public"` → 0.
+  Le rapport technique ne portait PAS la claim (« treat as best-effort » — défendable).
+- **Lot 2a (fait)** : `epsilon-audit --mine <dir>` — nouveau module public
+  `scirust-sigma::mine` (std-only). M1 = f32 sous `f32::MIN_POSITIVE` (flush FTZ/DAZ),
+  M2 = sous `1/f32::MAX` (1/d → inf sans FTZ), M2 ⊂ M1 classés séparément. Typage :
+  Rust suffixe/ligne ; C nu = double (jamais compté) ; shaders f32 par défaut. Piège
+  résolu : comparaison au seuil sur la valeur ARRONDIE f32 (`1.17549435e-38` parse f64
+  sous σ exact mais arrondit À `f32::MIN_POSITIVE` → garde licite, non capturée).
+  Exclusions test*/bench*/vendor ; fast-math (`-ffast-math`, `use_fast_math`,
+  `-funsafe-math-optimizations`, `ftz`) dans les fichiers de build. 27 tests fixtures.
+  fmt + clippy -D warnings + 27 tests verts. Gate `--check` existant intact.
+- **Lot 2b (fait)** : campagne `/tmp/mining` sur 22 dépôts (SHA notés dans l'étude),
+  clones sparse pour les géants, 22 450 fichiers / 9 160 848 lignes. 14 candidats bruts,
+  TOUS relus en contexte : 12 = tolérances de test approx de ndarray (`#[cfg(test)]`
+  inline dans src/), 2 = constantes `*_SUBNORMAL_F32` du lexer WGSL de naga (tests).
+  → **0 CONFIRMED_DEAD_GUARD, verdict NO-GO** (règle ≥3 confirmés dans ≥2 dépôts).
+  Modèle de menace FTZ néanmoins confirmé : 9/22 dépôts activent fast-math/FTZ en build
+  (ggml/llama.cpp/whisper CPU+CUDA+HIP, pytorch QNNPACK, tensorflow kernels mlir ftz,
+  candle flash-attn, OpenBLAS power, ncnn, tract bench). Étude complète, méthodo, table
+  SHA+LOC, findings, limitations, règle de décision : `docs/DEAD_GUARDS_STUDY.md`.
+  Aucun bug report posté (branche GO non prise) ; aucune issue/PR externe.
+- **Lot 3 (fait)** : `paper/RELATED_WORK.md` (FR, citable ; pivot RepDL honnête ;
+  motivation voie sanitized via arXiv:2410.09172 ; PAS de section prévalence — NO-GO)
+  + `paper/PAPER_PLAN.md` (titre + 2 variantes ; recommandation VENUE : atelier
+  correctness/reproducibility d'abord — **JOSS bloqué par la licence PolyForm
+  non-OSI** ; table claims→évidence T1-P1 avec test exact + commande par claim ;
+  TODO-EVIDENCE : R4 fingerprint thread-count en CI, S2 gate epsilon-audit à câbler
+  en job CI, O1 banc overhead ordre-figé vs libre ; réponses rapporteurs a/b/c).
+- **Décisions restant humaines** : (1) poster ou non de futurs bug reports (sans objet
+  ici — NO-GO) ; (2) choix de venue + re-licence éventuelle pour JOSS ; (3) go/no-go
+  d'écriture du paper complet (conditionné au banc O1).
 
 ## Session 2026-07-09 — volet 107 : déterminisme — bornes σ (`scirust-sigma`) + audit epsilon
 - **Nouvel invariant nommé (déterminisme)** : `scirust-sigma` (crate feuille, ZÉRO dépendance

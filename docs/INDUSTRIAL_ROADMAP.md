@@ -95,7 +95,14 @@ définition de fini (toujours : gates verts + oracle + doc).
   `train_batch_threaded_is_thread_count_invariant` (contributions
   délibérément sensibles à l'ordre, ±1e16) +
   `parallel_tape_training_is_deterministic_across_threads` (vrai backward
-  autograd). Aucun framework grand public n'offre cette garantie testée.
+  autograd). À notre connaissance, SciRust est le seul framework DL
+  **auto-contenu** (pile 100 % Rust auditable, zéro FFI dans le chemin de
+  calcul) à livrer cette garantie testée en CI avec, en plus, l'int8
+  déterministe embarqué et les pièces d'audit. Travaux voisins : RepDL
+  (Microsoft, 2025, arXiv:2510.09180) fournit la reproductibilité bit-à-bit
+  **cross-platform** d'un sous-ensemble float32 de PyTorch par arrondi
+  correct — garantie plus forte sur cet axe pour f32, mais en surcouche d'un
+  TCB C++/Python, sans basse précision ni pièces d'audit.
 - **FAIT (boucle complète)** : `multi_step_training_is_thread_count_invariant`
   — une vraie boucle SGD multi-pas (modèle linéaire partagé, shards par
   worker, perte MSE, autograd réel) produit une trajectoire de poids
