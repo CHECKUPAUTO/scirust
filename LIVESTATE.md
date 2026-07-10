@@ -3,48 +3,75 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
-## Session 2026-07-10 — fluides & thermo, volet 4 (région 3 IF97 Helmholtz, équations backward)
-- **Contexte** : PR #290 (volet 3) MERGÉE ; utilisateur a explicitement
-  demandé les deux derniers points de la liste « suite possible » :
-  région 3 IF97 (Helmholtz, point critique) et équations backward
-  T(p,h)/T(p,s) officielles. Branche repartie de master.
-- **Région 3** (`steam::region3`/`region3_from_tp`) : point clé découvert
-  avant d'écrire le Rust — j'ai balayé numériquement P(ρ) en Python et
-  constaté qu'elle n'est PAS monotone sur une large plage de densités
-  pour T sous-critique (boucle façon van der Waals à l'intérieur de la
-  cloche diphasique, physiquement attendu) ; en revanche monotone sur
-  ρ∈[80,800] kg/m³ pour tout T supercritique (vérifié par balayage fin
-  60×300 points). Décision : restreindre `region3_from_tp` au domaine
-  supercritique (T≥Tc) plutôt que d'implémenter la logique complète des
-  sous-régions 3a/3b (nécessiterait la densité de saturation ρf/ρg(T),
-  elle-même non triviale) — usage principal visé (cycles ultra-
-  supercritiques) pleinement couvert. Oracle table 33 IF97 (3 points,
-  toutes propriétés) + roundtrip densité sur grille de 5 points.
-- **Équations backward** (`thermo::backward`, nouveau module) : région 1
-  (2×20 coeffs) + région 2 en 2a/2b/2c (T_Ph : 34+38+23 ; T_Ps : 46+44+30).
-  **Bug détecté et corrigé avant merge** : la région 2a de T(p,s) utilise
-  des exposants en QUARTS D'ENTIER sur Pr (-1,5 à 1,5) — mon premier
-  script de génération de tableaux Rust castait tout en `i32` via
-  `int()`, tronquant silencieusement -1,5→-1 etc. Repéré parce que j'ai
-  systématiquement fait ré-asserter les longueurs de tableaux en Python
-  (méthode qui a déjà servi aux volets précédents) : une erreur de
-  longueur (46 vs 45) sur un tableau voisin a fait échouer la compilation
-  Rust en premier lieu, ce qui a déclenché une vérification complète de
-  TOUS les tableaux d'exposants pour des valeurs non entières — sans ce
-  réflexe de vérification systématique, le bug de troncature silencieuse
-  serait passé inaperçu (aucune erreur de compilation, juste un résultat
-  numériquement faux). Leçon retenue : toujours re-scanner les données
-  sources pour des valeurs non entières avant de choisir un type Rust,
-  ne pas supposer que tous les exposants IF97 sont des entiers simples.
-  16 exemples numériques officiels vérifiés + roundtrip forward/backward
-  sur 6 points couvrant toutes les sous-régions.
-- **Vérifié** : scirust-thermo 74 tests (+11 vs volet 3) ; scirust-fluids
-  inchangé à 57 ; clippy `-D warnings` propre (identical-if-blocks et
-  approx-constant corrigés) ; fmt appliqué.
-- **Suite possible** : aucune restante d'explicitement demandée : les
-  deux chantiers de ce volet clôturent la liste. Éventuel prolongement
-  futur non sollicité : régions 3a/3b complètes (sous-critique), backward
-  P(h,s) (régions 1/2/3), région 3 via T(p,h)/T(p,s) backward dédiées.
+## Session 2026-07-10 — probabilités, 6e passe (log-series, Planck, pmf de Loader)
+- **Contexte** : « enchaine sur Suites possibles restantes » après PR #294
+  (5e passe) MERGÉE. Les 3 restes annoncés : pmf de Loader grand n,
+  log-series, Planck non tronquée. Branche repartie de `origin/master`.
+- **Livré** : (a) `scirust-special` — algorithme de Loader (Loader 2000,
+  celui de R `dbinom`/`dpois`) : `stirling_error` (série asymptotique
+  x≥16 / direct sinon, validé mpmath 40 chiffres), `binom_deviance` (D₀
+  par série près de x≈np), `ln_poisson_pmf`/`ln_binomial_pmf`. Pleine
+  précision relative grand n/λ (~1e-10 → ~1e-15). `Binomial`/`Poisson`
+  ::ln_pmf recâblés dessus (aucune régression sur les tests existants).
+  (b) `Logarithmic` (log-séries `scipy.stats.logser`) ; (c) `Planck`
+  (géométrique non tronquée, limite n→∞ de Boltzmann, = géométrique
+  décalée testée). Oracles SciPy + mpmath. scirust-special 16 tests,
+  scirust-stats 54 tests + doctest, clippy 0 avertissement.
+- **Bilan volet probabilités** : **18 lois discrètes** (15 univariées + 3
+  vectorielles) + combinatoire exacte + ζ de Riemann + Loader + module
+  loterie honnête. Surface de méthodes à parité quasi complète SciPy.
+- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
+- **Suite possible** : lois discrètes de niche restantes (Bernoulli
+  explicite, dlaplace, poisson-binomiale exacte déjà faite), `interval`
+  côté continu, ou clore le volet — au choix utilisateur.
+- **NB CI** : panne Actions du dépôt possible ; validations locales.
+
+## Session 2026-07-10 — probabilités, 5e passe (interval/expect + Yule-Simon + Boltzmann)
+- **Contexte** : « continu » après PR #292 (4e passe) MERGÉE. Branche
+  repartie de `origin/master` à jour.
+- **Livré** : (a) `interval(c)` et `expect(f)` ajoutés par défaut au trait
+  `DiscreteDistribution` (parité `scipy.stats`) ; `expect` prend
+  `&dyn Fn(u64)->f64` (objet-sûr), sommation bornée par la queue.
+  (b) `YuleSimon` (queue lourde k≥1, pmf=α·B(k,α+1), survie fermée
+  k·B(k,α+1), moments divergents α≤1/α≤2) ; (c) `Boltzmann` (géométrique
+  tronquée 0..=n−1, Planck tronquée, formes fermées, normalisation −expm1).
+  Oracles SciPy 1.17.1 + identité exacte Yule-Simon α=2 ⇒ 4/(k(k+1)(k+2)).
+  51 tests + doctest, clippy 0 avertissement.
+- **Convention conflits maintenue** : entrée CHANGELOG **en bas** de
+  « Non publié » — la 4e passe (#292) a ainsi fusionné sans conflit.
+- **Bilan volet probabilités** : 16 lois discrètes (13 univariées + 3
+  vectorielles) + combinatoire exacte + ζ de Riemann + module loterie
+  honnête. Surface de méthodes à parité quasi complète avec SciPy
+  (pmf/logpmf/cdf/logcdf/sf/logsf/ppf/isf/interval/expect/moments/sampling).
+- **Suite possible** : pmf de Loader (saddle-point) grand n, lois de niche
+  restantes (Logarithmic/log-series, Planck non tronquée, Bernoulli
+  explicite) — non entamé.
+- **NB CI** : panne Actions du dépôt (runners, logs 404) toujours possible ;
+  validations locales (tests+clippy) uniquement.
+
+## Session 2026-07-10 — probabilités, 4e passe (parité SciPy queues + Dirichlet-multinomiale)
+- **Contexte** : « continu » après PR #287 (3e passe : ζ de Riemann +
+  Zeta/PoissonBinomial/Multinomial/MultivariateHypergeometric) MERGÉE.
+  Branche repartie de `origin/master` à jour.
+- **Livré** : (a) `logcdf`/`logsf`/`isf` ajoutés par défaut au trait
+  `DiscreteDistribution` — parité `scipy.stats`, `logsf`/`isf` s'appuient sur
+  la survie directe (pas de `ln(1−cdf)`) ; (b) `DirichletMultinomial`
+  (Pólya multivariée) — ln_pmf/pmf forme fermée ln Γ, moyenne, covariance
+  avec facteur de surdispersion ρ=(n+A)/(1+A), tirage par bêta-binomiales
+  conditionnelles (stick-breaking, reproductible). Oracles SciPy 1.17.1 +
+  fraction exacte 18/143 ; 2 catégories = bêta-binomiale, α=[1,1]=uniforme.
+  48 tests + doctest, clippy 0 avertissement.
+- **Convention conflits** : entrée CHANGELOG placée **en bas** de la section
+  « Non publié » (pas en tête) — les volets parallèles collent tous la leur
+  en tête, d'où des conflits systématiques ; #287 a dû être rebasée 2×.
+- **Bilan volet probabilités** : 14 lois discrètes (11 univariées + 3
+  vectorielles) + combinatoire exacte + module loterie honnête (aucune
+  « prédiction », impossible et documentée). Dépasse statrs (9 univariées).
+- **Suite possible** : pmf de Loader (saddle-point) pour binomiale/Poisson à
+  très grand n, `interval`/`expect` façon SciPy, lois discrètes restantes
+  (Yule-Simon, Boltzmann) — non entamé.
+- **NB CI** : la panne Actions du dépôt (runners non assignés, logs 404,
+  ~17h29 UTC) persistait ; validations locales uniquement (tests+clippy).
 
 ## Session 2026-07-10 — fluides & thermo, volet 3 (région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook)
 - **Contexte** : PR #285 (volet 2) MERGÉE ; « continu » → les trois
