@@ -3,6 +3,7 @@ use std::path::Path;
 
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTrainer;
+use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
 
 #[derive(Parser)]
 #[command(
@@ -25,12 +26,15 @@ struct Args {
     #[arg(long)]
     recursive: bool,
 
+    /// Comma-separated source extensions to train on (e.g. `rs,md,toml,py`).
     #[arg(long, default_value = "rs")]
     extension: String,
 }
 
 fn main() {
     let args = Args::parse();
+    let exts = parse_extensions(&args.extension);
+    eprintln!("Training on extensions: {exts:?}");
     let mut all_texts: Vec<String> = Vec::new();
 
     for path in &args.input
@@ -45,7 +49,7 @@ fn main() {
         }
         else if p.is_dir() && args.recursive
         {
-            collect_dir(p, &args.extension, &mut all_texts);
+            collect_dir(p, &exts, &mut all_texts);
         }
     }
 
@@ -68,7 +72,7 @@ fn main() {
     );
 }
 
-fn collect_dir(dir: &Path, ext: &str, texts: &mut Vec<String>) {
+fn collect_dir(dir: &Path, exts: &[String], texts: &mut Vec<String>) {
     if let Ok(entries) = fs::read_dir(dir)
     {
         for entry in entries.flatten()
@@ -76,9 +80,16 @@ fn collect_dir(dir: &Path, ext: &str, texts: &mut Vec<String>) {
             let path = entry.path();
             if path.is_dir()
             {
-                collect_dir(&path, ext, texts);
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                {
+                    if skip_source_dir(name)
+                    {
+                        continue;
+                    }
+                }
+                collect_dir(&path, exts, texts);
             }
-            else if path.extension().and_then(|e| e.to_str()) == Some(ext)
+            else if matches_extension(&path, exts)
             {
                 if let Ok(content) = fs::read_to_string(&path)
                 {

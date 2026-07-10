@@ -176,6 +176,50 @@ impl ShardLoader {
     }
 }
 
+// ---- corpus-walk helpers (shared by collect-data / train-tokenizer) ----
+
+/// Parse a comma-separated extension spec (`"rs,md,toml"` or `".rs, .md"`) into a
+/// normalized lowercase list with any leading dots stripped. Empty entries drop.
+pub fn parse_extensions(spec: &str) -> Vec<String> {
+    spec.split(',')
+        .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect()
+}
+
+/// Whether `path`'s extension is one of `exts` (case-insensitive).
+pub fn matches_extension(path: &Path, exts: &[String]) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .map(|e| exts.contains(&e))
+        .unwrap_or(false)
+}
+
+/// Directories never worth walking for source-corpus collection — VCS internals,
+/// build artifacts, vendored deps, caches. Skipping them keeps binary/generated
+/// noise (and, for byte-level, `.git`'s packed objects) out of the corpus.
+pub fn skip_source_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "target"
+            | "node_modules"
+            | ".cargo"
+            | "dist"
+            | "build"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".idea"
+            | ".vscode"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

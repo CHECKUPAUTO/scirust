@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTokenizer;
+use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
 
 #[derive(Parser)]
 #[command(
     name = "collect-data",
-    about = "Tokenize Rust code into packed training shards"
+    about = "Tokenize source code into packed training shards"
 )]
 struct Args {
     #[arg(short, long)]
@@ -23,6 +24,7 @@ struct Args {
     #[arg(short, long, default_value = "./data/shards")]
     output: PathBuf,
 
+    /// Comma-separated source extensions to ingest (e.g. `rs,md,toml,py`).
     #[arg(long, default_value = "rs")]
     extension: String,
 
@@ -43,6 +45,9 @@ fn main() {
     let tok = BpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
     eprintln!("Tokenizer loaded: vocab_size={}", tok.vocab_size());
 
+    let exts = parse_extensions(&args.extension);
+    eprintln!("Ingesting extensions: {exts:?}");
+
     let mut all_tokens: Vec<u32> = Vec::new();
     for path in &args.input
     {
@@ -57,7 +62,7 @@ fn main() {
         }
         else if p.is_dir() && args.recursive
         {
-            collect_dir(p, &args.extension, &tok, &mut all_tokens);
+            collect_dir(p, &exts, &tok, &mut all_tokens);
         }
     }
 
@@ -92,7 +97,7 @@ fn main() {
     eprintln!("Done: {} shards written to {:?}", num_shards, args.output);
 }
 
-fn collect_dir(dir: &Path, ext: &str, tok: &BpeTokenizer, tokens: &mut Vec<u32>) {
+fn collect_dir(dir: &Path, exts: &[String], tok: &BpeTokenizer, tokens: &mut Vec<u32>) {
     if let Ok(entries) = fs::read_dir(dir)
     {
         for entry in entries.flatten()
@@ -100,9 +105,16 @@ fn collect_dir(dir: &Path, ext: &str, tok: &BpeTokenizer, tokens: &mut Vec<u32>)
             let path = entry.path();
             if path.is_dir()
             {
-                collect_dir(&path, ext, tok, tokens);
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                {
+                    if skip_source_dir(name)
+                    {
+                        continue;
+                    }
+                }
+                collect_dir(&path, exts, tok, tokens);
             }
-            else if path.extension().and_then(|e| e.to_str()) == Some(ext)
+            else if matches_extension(&path, exts)
             {
                 if let Ok(content) = fs::read_to_string(&path)
                 {
