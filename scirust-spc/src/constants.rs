@@ -43,34 +43,14 @@ pub const MIN_N: usize = 2;
 /// Largest subgroup size covered by the tabulated `d2`/`d3` values.
 pub const MAX_N: usize = 10;
 
-/// Lanczos approximation of `ln Γ(x)` for `x > 0` (g = 7, 9 coefficients).
+/// `ln Γ(x)` for `x > 0`, delegated to the audited `scirust-special` crate.
 ///
-/// Accurate to roughly 15 significant digits across the half-integer and
-/// integer arguments that `c4` needs.
+/// This used to carry its own Lanczos implementation (byte-identical to the one
+/// in `scirust-special`); it now shares the single validated version so there is
+/// one place to audit. The `ln_gamma_matches_known_values` test below stays as a
+/// cross-check that the shared implementation still meets `c4`'s needs.
 fn ln_gamma(x: f64) -> f64 {
-    // Coefficients for g = 7.
-    const G: f64 = 7.0;
-    const C: [f64; 9] = [
-        0.999_999_999_999_809_9,
-        676.520_368_121_885_1,
-        -1_259.139_216_722_402_8,
-        771.323_428_777_653_1,
-        -176.615_029_162_140_6,
-        12.507_343_278_686_905,
-        -0.138_571_095_265_720_12,
-        9.984_369_578_019_572e-6,
-        1.505_632_735_149_311_6e-7,
-    ];
-    // Reflection is unnecessary here: c4 only ever evaluates Γ at arguments
-    // >= 1/2, well away from the poles on the negative axis.
-    let xm1 = x - 1.0;
-    let mut a = C[0];
-    let t = xm1 + G + 0.5;
-    for (i, &coef) in C.iter().enumerate().skip(1)
-    {
-        a += coef / (xm1 + i as f64);
-    }
-    0.5 * (2.0 * core::f64::consts::PI).ln() + (xm1 + 0.5) * t.ln() - t + a.ln()
+    scirust_special::ln_gamma(x)
 }
 
 /// `c4(n) = sqrt(2/(n-1)) · Γ(n/2) / Γ((n-1)/2)`, the unbiasing constant for

@@ -3380,12 +3380,20 @@ name = "scirust-spc"
 version = "0.1.0"
 dependencies = [
  "scirust-estimation",
+ "scirust-special",
  "serde",
 ]
 
 [[package]]
 name = "scirust-special"
 version = "0.1.0"
+
+[[package]]
+name = "scirust-stats"
+version = "0.1.0"
+dependencies = [
+ "scirust-special",
+]
 
 [[package]]
 name = "scirust-symbolic"
@@ -3473,6 +3481,7 @@ name = "scirust-tolerance"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "scirust-special",
  "serde",
 ]
 

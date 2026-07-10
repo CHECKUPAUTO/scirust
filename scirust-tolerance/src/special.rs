@@ -16,7 +16,7 @@
 //! - [`ncchi2_cdf`] — non-central χ² CDF (Poisson mixture of central χ²), the
 //!   sampling law behind the acceptance-sampling operating-characteristic curve.
 
-use core::f64::consts::{FRAC_2_SQRT_PI, PI};
+use core::f64::consts::PI;
 
 /// Error function `erf(x) = (2/√π) ∫₀ˣ e^{-t²} dt`.
 ///
@@ -33,37 +33,11 @@ use core::f64::consts::{FRAC_2_SQRT_PI, PI};
 /// below the ULP of `1.0` — which also avoids the `e^{x²}` intermediate
 /// overflow the series would otherwise hit near `|x| ≈ 27`.
 pub fn erf(x: f64) -> f64 {
-    if x == 0.0
-    {
-        return 0.0;
-    }
-    // Series is written for x > 0 and reflected via erf(-x) = -erf(x).
-    let ax = x.abs();
-    if ax >= 6.0
-    {
-        return if x < 0.0 { -1.0 } else { 1.0 };
-    }
-    // term_0 = ax; term_{n} = term_{n-1} · 2·ax² / (2n+1)
-    let two_x2 = 2.0 * ax * ax;
-    let mut term = ax;
-    let mut sum = ax;
-    let mut n = 1.0;
-    loop
-    {
-        term *= two_x2 / (2.0 * n + 1.0);
-        sum += term;
-        if term <= sum * 1e-18
-        {
-            break;
-        }
-        n += 1.0;
-        if n > 1000.0
-        {
-            break;
-        }
-    }
-    let val = FRAC_2_SQRT_PI * (-ax * ax).exp() * sum;
-    if x < 0.0 { -val } else { val }
+    // Delegated to the audited `scirust-special` implementation (regularized
+    // incomplete gamma), which is at least as accurate as the former local
+    // Kummer series and shared with every other consumer. The module's own
+    // tests below now cross-validate the shared version.
+    scirust_special::erf(x)
 }
 
 /// Complementary error function `erfc(x) = 1 - erf(x)`, accurate in the tail.
@@ -78,50 +52,10 @@ pub fn erf(x: f64) -> f64 {
 /// by the modified-Lentz algorithm, which keeps full relative accuracy
 /// where `erf(x) → 1` and `1 - erf(x)` would lose all significant digits.
 pub fn erfc(x: f64) -> f64 {
-    if x < 0.0
-    {
-        // erfc(-x) = 2 - erfc(x); for x ≤ -4 this is 2 to full precision.
-        return 2.0 - erfc(-x);
-    }
-    if x < 4.0
-    {
-        return 1.0 - erf(x);
-    }
-    // erfc(x) = e^{-x²}/√π · CF, with the continued fraction
-    //   CF = 1/(x + a₁/(x + a₂/(x + …))),  a₁ = 1,  aₖ = (k-1)/2 for k ≥ 2,
-    // evaluated by the modified-Lentz algorithm (b₀ = 0, bₖ = x).
-    let tiny = 1e-300;
-    let mut f = tiny;
-    let mut c = f;
-    let mut d = 0.0_f64;
-    let mut k = 1.0;
-    loop
-    {
-        let a = if k == 1.0 { 1.0 } else { (k - 1.0) / 2.0 };
-        d = x + a * d;
-        if d.abs() < tiny
-        {
-            d = tiny;
-        }
-        d = 1.0 / d;
-        c = x + a / c;
-        if c.abs() < tiny
-        {
-            c = tiny;
-        }
-        let delta = c * d;
-        f *= delta;
-        if (delta - 1.0).abs() < 1e-16
-        {
-            break;
-        }
-        k += 1.0;
-        if k > 400.0
-        {
-            break;
-        }
-    }
-    (-x * x).exp() / PI.sqrt() * f
+    // Delegated to `scirust-special`, whose `erfc` is likewise tail-accurate
+    // (upper incomplete gamma), replacing the former local Lentz continued
+    // fraction. See the note on `erf`.
+    scirust_special::erfc(x)
 }
 
 /// Standard-normal cumulative distribution `Φ(z) = P(Z ≤ z)`.
@@ -208,90 +142,17 @@ pub fn inv_normal_cdf(p: f64) -> f64 {
     x
 }
 
-/// Natural log of the gamma function (Lanczos, `g = 7`), for `x > 0`.
+/// Natural log of the gamma function, for `x > 0` — delegated to
+/// `scirust-special` (was a byte-identical local Lanczos copy).
 fn ln_gamma(x: f64) -> f64 {
-    const G: f64 = 7.0;
-    const C: [f64; 9] = [
-        0.999_999_999_999_809_9,
-        676.520_368_121_885_1,
-        -1_259.139_216_722_402_8,
-        771.323_428_777_653_1,
-        -176.615_029_162_140_6,
-        12.507_343_278_686_905,
-        -0.138_571_095_265_720_12,
-        9.984_369_578_019_572e-6,
-        1.505_632_735_149_311_6e-7,
-    ];
-    let xm1 = x - 1.0;
-    let mut a = C[0];
-    let t = xm1 + G + 0.5;
-    for (i, &coef) in C.iter().enumerate().skip(1)
-    {
-        a += coef / (xm1 + i as f64);
-    }
-    0.5 * (2.0 * PI).ln() + (xm1 + 0.5) * t.ln() - t + a.ln()
+    scirust_special::ln_gamma(x)
 }
 
 /// Regularised lower incomplete gamma function `P(a, x) = γ(a, x) / Γ(a)`,
-/// `a > 0`, `x ≥ 0` (Numerical Recipes: series for `x < a+1`, continued
-/// fraction for the complement otherwise).
+/// delegated to `scirust-special::regularized_gamma_p` (was a local
+/// Numerical-Recipes series/continued-fraction copy).
 fn gammp(a: f64, x: f64) -> f64 {
-    if x <= 0.0
-    {
-        return 0.0;
-    }
-    let gln = ln_gamma(a);
-    if x < a + 1.0
-    {
-        // Series expansion for P(a, x).
-        let mut ap = a;
-        let mut sum = 1.0 / a;
-        let mut del = sum;
-        for _ in 0..300
-        {
-            ap += 1.0;
-            del *= x / ap;
-            sum += del;
-            if del.abs() < sum.abs() * 1e-16
-            {
-                break;
-            }
-        }
-        sum * (-x + a * x.ln() - gln).exp()
-    }
-    else
-    {
-        // Lentz continued fraction for Q(a, x) = 1 − P(a, x).
-        let tiny = 1e-300;
-        let mut b = x + 1.0 - a;
-        let mut c = 1.0 / tiny;
-        let mut d = 1.0 / b;
-        let mut h = d;
-        for i in 1..300
-        {
-            let an = -(i as f64) * (i as f64 - a);
-            b += 2.0;
-            d = an * d + b;
-            if d.abs() < tiny
-            {
-                d = tiny;
-            }
-            c = b + an / c;
-            if c.abs() < tiny
-            {
-                c = tiny;
-            }
-            d = 1.0 / d;
-            let del = d * c;
-            h *= del;
-            if (del - 1.0).abs() < 1e-16
-            {
-                break;
-            }
-        }
-        let q = (-x + a * x.ln() - gln).exp() * h;
-        1.0 - q
-    }
+    scirust_special::regularized_gamma_p(a, x)
 }
 
 /// Cumulative distribution of the chi-square law with `dof` degrees of freedom,

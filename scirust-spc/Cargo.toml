@@ -7,4 +7,5 @@ description = "SciRust Statistical Process Control — Shewhart/EWMA/CUSUM chart
 
 [dependencies]
 scirust-estimation = { path = "../scirust-estimation" }
+scirust-special = { path = "../scirust-special" }
 serde = { version = "1", features = ["derive"] }
