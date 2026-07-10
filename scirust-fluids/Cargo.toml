@@ -1,0 +1,6 @@
+[package]
+name = "scirust-fluids"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic fluid mechanics: dimensionless groups, pipe friction (Colebrook-White, Darcy-Weisbach), Bernoulli/orifice/Pitot relations, external drag, flat-plate boundary layers, compressible isentropic & normal-shock relations, open-channel hydraulics. Validated inputs, oracle-tested. Pure Rust, no unsafe, no dependencies."
