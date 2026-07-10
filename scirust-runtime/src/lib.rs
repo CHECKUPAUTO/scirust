@@ -330,6 +330,7 @@ pub fn parse_manifest(text: &str) -> Result<Vec<LayerSpec>, String> {
 pub mod attest;
 pub mod difr;
 pub mod enclave;
+pub mod hash;
 pub mod proof;
 pub mod proofcli;
 pub mod quant;

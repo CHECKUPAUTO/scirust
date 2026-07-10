@@ -3,6 +3,32 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 109 : audit de couverture RepDL + fermeture des écarts (clean-room)
+- **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
+  23 items de l'API publique de RepDL (ops/func/nn/optim/utils/from_torch_module)
+  contre SciRust. 18 déjà couverts (dont conv2d + les 2 gradients, BatchNorm1d/2d,
+  CrossEntropy, softmax, réductions 1D/2D, Adam), 2 couverts par composition
+  (sum/mean 4D dims 0,2,3 via reshape ; expand_as via broadcast 2D), 1 N/A par
+  conception (`from_torch_module` — SciRust n'est pas une surcouche PyTorch ;
+  safetensors/SRT1/ONNX-JSON en tiennent lieu), 3 écarts réels **fermés ce volet**.
+- **Écarts fermés (implémentations clean-room, specs publiques uniquement)** :
+  (1) `Adam::with_amsgrad()` (Reddi et al. 2018 ; buffer v_max bias-corrigé ;
+  oracle de convergence + test anti-pic pas AMSGrad < 10 % pas Adam) dans
+  `scirust-core/src/autodiff/optim.rs` ; (2) `scirust_runtime::hash` —
+  `sha256_hex_f32/tensor/state_dict` (équiv. `repdl.utils.get_hash`, encodage LE
+  des bits IEEE-754, clés triées, 5 tests) ; (3) `reproducible::{exp_via_f64,
+  ln_via_f64}` (même classe de technique que RepDL, doc honnête : fidèlement
+  arrondi, déterminisme inter-plates-formes probable non prouvé — le CR prouvé en
+  Rust pur reste travail futur du volet 108).
+- **Copyright : zéro risque constaté et politique actée** — aucun code RepDL dans
+  le dépôt (grep exhaustif : 7 fichiers documentaires seulement, citations) ;
+  audit mené sur spécification (API + prose + arXiv:2510.09180), aucun code lu →
+  copié/traduit ; règle écrite §3 de l'audit : jamais de copie/traduction de code
+  RepDL (MIT ≠ incompatible mais attribution + confusion PolyForm), clean-room
+  systématique.
+- Reste ouvert (inchangé, déjà tracé) : CI aarch64 = check only ; SIMD/GPU f32 en
+  tolérance (pas bit-exact) ; transcendantales CR prouvées = travail futur.
+
 ## Session 2026-07-10 — volet 108 : honnêteté README (RepDL) + étude « dead guards » (NO-GO) + positionnement paper
 - **Lot 1 (bloquant, fait)** : claim d'unicité « No mainstream framework ships this
   guarantee tested » falsifiée par RepDL (arXiv:2510.09180, reproductibilité bit-à-bit

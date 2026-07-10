@@ -5,6 +5,31 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 109)
+- **`AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
+  élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)
+  (MIT, arXiv:2510.09180) contre SciRust — 18/23 items déjà couverts, 2 par
+  composition, 1 non applicable par conception, 3 fermés ci-dessous. Analyse
+  du risque de copyright : **aucun code RepDL dans le dépôt** (citations
+  documentaires uniquement), démarche clean-room actée par écrit (audit §3).
+- **`Adam::with_amsgrad()`** (`scirust-core`) : variante AMSGrad (Reddi,
+  Kale & Kumar, ICLR 2018) — le dénominateur utilise le maximum historique
+  du 2ᵉ moment (bias-corrigé), jamais décroissant. Oracle de convergence +
+  test de la propriété anti-pic (pas AMSGrad < 10 % des pas Adam après un
+  pic de gradient).
+- **`scirust_runtime::hash`** : empreintes SHA-256 hex de slices `f32`, de
+  tenseurs (forme incluse) et de `state_dict` (clés triées ⇒ indépendant de
+  l'ordre d'insertion) ; encodage little-endian des bits IEEE-754 ⇒
+  identique sur toute plate-forme pour des données bit-identiques.
+  L'outil de *constat* de la reproductibilité (deux machines, même hash),
+  complément cryptographique des fingerprints FNV-1a. 5 tests.
+- **`reproducible::{exp_via_f64, ln_via_f64}`** (`scirust-core`) :
+  transcendantales f32 par promotion en `f64` — même classe de technique
+  que RepDL, documentation honnête de la garantie (fidèlement arrondi ;
+  correctement arrondi hors dilemme du fabricant de tables ; identité
+  inter-plates-formes probable mais non prouvée). Test de fidélité
+  ≤ 0,5 ulp sur 8 000 points.
+
 ### Ajouté/Modifié — honnêteté du README, étude empirique « dead guards », positionnement paper
 - **Correction d'honnêteté (claims d'unicité)** : la claim « No mainstream
   framework ships this guarantee tested » (README) et ses équivalents FR

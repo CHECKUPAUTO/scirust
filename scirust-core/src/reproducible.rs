@@ -78,6 +78,33 @@ pub fn reproducible_dot(a: &[f32], b: &[f32]) -> f32 {
     ) as f32
 }
 
+/// `exp(x)` par **promotion en `f64`** : l'argument `f32` est promu, l'exponentielle
+/// est évaluée en double précision, puis arrondie (au plus près) vers `f32`.
+///
+/// Classe de garantie, énoncée précisément :
+/// - **précision** : tant que l'`exp` `f64` de la plate-forme est fidèle
+///   (erreur < 1 ulp `f64`, le cas de toutes les libm courantes), le résultat
+///   est le `f32` **correctement arrondi**, sauf si la valeur exacte tombe à
+///   ≈ 2⁻⁵² (relatif) d'une frontière d'arrondi `f32` (dilemme du fabricant de
+///   tables) — cas non prouvés impossibles, mais de mesure quasi nulle ;
+/// - **déterminisme** : bit-stable sur un binaire/une libm donnés. L'identité
+///   bit-à-bit *inter-plates-formes* est très probable (il faudrait qu'une
+///   erreur libm `f64` traverse une frontière d'arrondi `f32`) mais **pas
+///   prouvée**, contrairement aux réductions ci-dessus qui sont exactes.
+///
+/// C'est la même classe de technique que les transcendantales de RepDL
+/// (Microsoft, arXiv:2510.09180) ; les transcendantales correctement arrondies
+/// *prouvées* en Rust pur restent le travail futur acté dans
+/// `paper/RELATED_WORK.md`.
+pub fn exp_via_f64(x: f32) -> f32 {
+    (x as f64).exp() as f32
+}
+
+/// `ln(x)` par promotion en `f64` — mêmes garanties que [`exp_via_f64`].
+pub fn ln_via_f64(x: f32) -> f32 {
+    (x as f64).ln() as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +179,35 @@ mod tests {
 
         let f64_ref: f64 = a.iter().zip(&b).map(|(&x, &y)| x as f64 * y as f64).sum();
         assert!((reference as f64 - f64_ref).abs() < 1e-4);
+    }
+
+    /// exp/ln promus : à ≤ 0,5 ulp `f32` (+ marge) de la référence `f64`,
+    /// c'est-à-dire fidèlement arrondis sur tout l'échantillon.
+    #[test]
+    fn promoted_exp_ln_are_faithful() {
+        for i in 0..4000
+        {
+            let x = -40.0 + i as f32 * 0.02; // [-40, 40)
+            let r = exp_via_f64(x) as f64;
+            let t = (x as f64).exp();
+            assert!(
+                (r - t).abs() <= t * 1.0001 * 2f64.powi(-24),
+                "exp_via_f64({x}) = {r}, référence f64 = {t}"
+            );
+        }
+        for i in 1..4000
+        {
+            let x = i as f32 * 0.25; // (0, 1000)
+            let r = ln_via_f64(x) as f64;
+            let t = (x as f64).ln();
+            assert!(
+                (r - t).abs() <= t.abs().max(f64::MIN_POSITIVE) * 1.0001 * 2f64.powi(-24) + 1e-12,
+                "ln_via_f64({x}) = {r}, référence f64 = {t}"
+            );
+        }
+        assert_eq!(exp_via_f64(0.0), 1.0);
+        assert_eq!(ln_via_f64(1.0), 0.0);
+        assert!((ln_via_f64(exp_via_f64(1.0)) - 1.0).abs() < 1e-6);
     }
 
     #[test]
