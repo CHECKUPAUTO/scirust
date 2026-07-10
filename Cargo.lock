@@ -3254,6 +3254,7 @@ name = "scirust-signal"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
+ "scirust-estimation",
  "serde",
 ]
 
