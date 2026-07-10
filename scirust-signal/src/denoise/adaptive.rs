@@ -171,6 +171,90 @@ fn whiteness_score(x: &[f64]) -> f64 {
     within as f64 / max_lag as f64
 }
 
+/// Local **linear-trend** Kalman filter + RTS smoother (2-D state: level + slope).
+///
+/// State model: `level_k = level_{k-1} + slope_{k-1} + w_l`,
+/// `slope_k = slope_{k-1} + w_b`, observation `y_k = level_k + v_k`. Where the
+/// local-*level* smoother ([`kalman_smooth`]) must trade lag against noise on a
+/// trending signal, the trend model tracks ramps *unbiasedly*: a clean ramp is
+/// reproduced almost exactly, and drifting sensor baselines are followed without
+/// the systematic under-shoot of the level-only model. `process_var_slope` sets
+/// how fast the slope itself may wander (small ⇒ near-linear trend).
+pub fn kalman_trend_smooth(
+    signal: &[f64],
+    process_var_level: f64,
+    process_var_slope: f64,
+    meas_var: f64,
+) -> Vec<f64> {
+    let n = signal.len();
+    if n < 3 || process_var_level < 0.0 || process_var_slope <= 0.0 || meas_var <= 0.0
+    {
+        return signal.to_vec();
+    }
+    let (ql, qb, r) = (process_var_level, process_var_slope, meas_var);
+
+    // Forward pass. State z = (level, slope); F = [[1,1],[0,1]]; H = [1,0].
+    // Filtered state/covariance and predicted covariance per step (symmetric 2×2
+    // stored as (p11, p12, p22)).
+    let mut lf = vec![0.0; n];
+    let mut bf = vec![0.0; n];
+    let mut pf = vec![(0.0, 0.0, 0.0); n];
+    let mut pp = vec![(0.0, 0.0, 0.0); n];
+
+    // Semi-diffuse start: level from the first sample, slope unknown but bounded.
+    let mut l_pred = signal[0];
+    let mut b_pred = 0.0;
+    let mut p_pred = (r + ql, 0.0, r + qb);
+    for i in 0..n
+    {
+        if i > 0
+        {
+            let (p11, p12, p22) = pf[i - 1];
+            l_pred = lf[i - 1] + bf[i - 1];
+            b_pred = bf[i - 1];
+            p_pred = (p11 + 2.0 * p12 + p22 + ql, p12 + p22, p22 + qb);
+        }
+        pp[i] = p_pred;
+        let (pp11, pp12, pp22) = p_pred;
+        let s = pp11 + r;
+        let k1 = pp11 / s;
+        let k2 = pp12 / s;
+        let e = signal[i] - l_pred;
+        lf[i] = l_pred + k1 * e;
+        bf[i] = b_pred + k2 * e;
+        pf[i] = ((1.0 - k1) * pp11, (1.0 - k1) * pp12, pp22 - k2 * pp12);
+    }
+
+    // RTS backward pass: G = P_f·Fᵀ·(P_pred[k+1])⁻¹, z_s = z_f + G(z_{s,k+1} − z_{p,k+1}).
+    let mut ls = lf.clone();
+    let mut bs = bf.clone();
+    for i in (0..n - 1).rev()
+    {
+        let (p11, p12, p22) = pf[i];
+        let (pp11, pp12, pp22) = pp[i + 1];
+        let det = pp11 * pp22 - pp12 * pp12;
+        if det.abs() < 1.0e-300
+        {
+            continue;
+        }
+        // P_f·Fᵀ with Fᵀ = [[1,0],[1,1]] → [[p11+p12, p12],[p12+p22, p22]].
+        let a11 = p11 + p12;
+        let a12 = p12;
+        let a21 = p12 + p22;
+        let a22 = p22;
+        // (P_pred)⁻¹ = 1/det · [[pp22, −pp12],[−pp12, pp11]].
+        let g11 = (a11 * pp22 - a12 * pp12) / det;
+        let g12 = (-a11 * pp12 + a12 * pp11) / det;
+        let g21 = (a21 * pp22 - a22 * pp12) / det;
+        let g22 = (-a21 * pp12 + a22 * pp11) / det;
+        let dl = ls[i + 1] - (lf[i] + bf[i]);
+        let db = bs[i + 1] - bf[i];
+        ls[i] = lf[i] + g11 * dl + g12 * db;
+        bs[i] = bf[i] + g21 * dl + g22 * db;
+    }
+    ls
+}
+
 /// Adaptive line enhancer with a normalized-LMS predictor.
 ///
 /// The filter predicts `y[i]` from the *delayed* samples
@@ -368,6 +452,53 @@ mod tests {
         let x = [1.0, 2.0];
         assert_eq!(kalman_smooth(&x, 0.0, 1.0), x.to_vec());
         assert_eq!(kalman_smooth_auto(&x).output, x.to_vec());
+    }
+
+    #[test]
+    fn trend_smoother_reproduces_clean_ramp_where_level_model_fails() {
+        // On a noiseless ramp the linear-trend model is exact — the smoother must
+        // reproduce it almost perfectly, while the local-level model (with the
+        // same variances) systematically distorts it. This is the discriminating
+        // test for the 2-D state.
+        let ramp: Vec<f64> = (0..256).map(|i| 0.05 * i as f64).collect();
+        let r = 1.0e-2;
+        let trend = kalman_trend_smooth(&ramp, 1.0e-8, 1.0e-8, r);
+        let level = kalman_smooth(&ramp, 1.0e-8, r);
+        let max_err = |est: &[f64]| {
+            est.iter()
+                .zip(ramp.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max)
+        };
+        let e_trend = max_err(&trend);
+        let e_level = max_err(&level);
+        assert!(e_trend < 1.0e-3, "trend max error {e_trend}");
+        assert!(
+            e_trend < e_level / 100.0,
+            "trend {e_trend} should be ≪ level {e_level}"
+        );
+    }
+
+    #[test]
+    fn trend_smoother_denoises_a_trending_signal() {
+        let n = 512;
+        let mut rng = Lcg::new(97);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| 0.02 * i as f64 + (2.0 * PI * 2.0 * i as f64 / n as f64).sin())
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.4 * rng.gauss()).collect();
+        let r = 0.4 * 0.4;
+        let out = kalman_trend_smooth(&obs, 1.0e-4 * r, 1.0e-4 * r, r);
+        assert!(snr_db(&clean, &out) > snr_db(&clean, &obs) + 3.0);
+    }
+
+    #[test]
+    fn trend_smoother_degenerate_inputs_pass_through() {
+        assert!(kalman_trend_smooth(&[], 1.0, 1.0, 1.0).is_empty());
+        let x = [1.0, 2.0];
+        assert_eq!(kalman_trend_smooth(&x, 1.0, 1.0, 1.0), x.to_vec());
+        let y = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(kalman_trend_smooth(&y, 1.0, 0.0, 1.0), y.to_vec());
     }
 
     #[test]

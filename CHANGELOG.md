@@ -5,6 +5,39 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — TV exacte (Condat), ondelettes db6/db8, seuil SURE, Kalman à tendance (`scirust-signal::denoise`, lot 3)
+- **`total_variation_exact`** : débruitage TV 1-D **exact** par l'algorithme
+  direct de Condat (IEEE SPL 2013) — le minimiseur global unique de
+  `½‖x−y‖² + λ·TV(x)` en un seul balayage O(n), sans itération ni tolérance.
+  L'optimalité est **prouvée par les conditions KKT dans les tests** (la somme
+  courante `sᵢ = Σ(xⱼ−yⱼ)` reste dans `[−λ,+λ]`, touche exactement `±λ` aux
+  sauts du signe correspondant, finit à 0 — objectif strictement convexe ⇒
+  KKT ⇔ optimum global), sur 6 entrées variées (échelons, sinusoïde, bruit
+  pur, signal court, λ minuscule/énorme) ; objectif vérifié ≤ celui de
+  l'approximation IRLS existante ; λ énorme ⇒ aplatissement exact à la moyenne.
+- **Ondelettes Daubechies-6 et Daubechies-8** (`Wavelet::{Db6, Db8}`, 3 et 4
+  moments nuls) : constantes dérivées par factorisation spectrale et
+  **épinglées indépendamment par test** des identités qui les définissent
+  (`Σh=√2`, `‖h‖=1`, orthogonalité à double décalage, moments nuls du miroir
+  en quadrature à ~1e-10) ; reconstruction parfaite multi-niveaux pour les
+  quatre bases.
+- **Seuil SURE par niveau** (`wavelet_denoise_sure`, SureShrink
+  Donoho-Johnstone 1995) : minimise l'estimateur de risque sans biais de Stein
+  `SURE(t) = m − 2·#{|uᵢ|≤t} + Σmin(uᵢ²,t²)` bande par bande (préfixes de
+  carrés sur magnitudes triées, candidats plafonnés au seuil universel), avec
+  le repli « hybride » vers le seuil universel dans les bandes trop creuses.
+  Vérifié : bat le seuil universel en SNR sur un signal dense (deux tons) où
+  VisuShrink sur-lisse.
+- **`kalman_trend_smooth`** : lisseur de Kalman/RTS à **tendance locale**
+  (état 2-D niveau+pente, F=[[1,1],[0,1]]). Là où le modèle à niveau seul
+  arbitre retard contre bruit sur un signal en rampe, le modèle à tendance la
+  suit sans biais : test discriminant — une rampe propre est reproduite à
+  <1e-3 près là où le modèle à niveau (mêmes variances) fait >100× pire ;
+  gain SNR vérifié sur signal tendanciel bruité.
+- Ré-exports module + crate ; 86 tests unitaires + 1 doctest au total ;
+  `cargo fmt`/`clippy -D warnings` propres ; zéro dépendance hors
+  `scirust-core`/serde.
+
 ### Ajouté — les 4 chantiers restants de la cartographie (volet 114)
 - **`scirust-core::philox`** — RNG **contre-basé** Philox4x32-10 (Salmon
   et al., SC'11), clean-room depuis le papier et **validé contre les
