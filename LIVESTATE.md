@@ -3,6 +3,49 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
+- **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
+  23 items de l'API publique de RepDL (ops/func/nn/optim/utils/from_torch_module)
+  contre SciRust. 18 déjà couverts (dont conv2d + les 2 gradients, BatchNorm1d/2d,
+  CrossEntropy, softmax, réductions 1D/2D, Adam), 2 couverts par composition
+  (sum/mean 4D dims 0,2,3 via reshape ; expand_as via broadcast 2D), 1 N/A par
+  conception (`from_torch_module` — SciRust n'est pas une surcouche PyTorch ;
+  safetensors/SRT1/ONNX-JSON en tiennent lieu), 3 écarts réels **fermés ce volet**.
+- **Écarts fermés (implémentations clean-room, specs publiques uniquement)** :
+  (1) `Adam::with_amsgrad()` (Reddi et al. 2018 ; buffer v_max bias-corrigé ;
+  oracle de convergence + test anti-pic pas AMSGrad < 10 % pas Adam) dans
+  `scirust-core/src/autodiff/optim.rs` ; (2) `scirust_runtime::hash` —
+  `sha256_hex_f32/tensor/state_dict` (équiv. `repdl.utils.get_hash`, encodage LE
+  des bits IEEE-754, clés triées, 5 tests) ; (3) `reproducible::{exp_via_f64,
+  ln_via_f64}` (même classe de technique que RepDL, doc honnête : fidèlement
+  arrondi, déterminisme inter-plates-formes probable non prouvé — le CR prouvé en
+  Rust pur reste travail futur du volet 108).
+- **Copyright : zéro risque constaté et politique actée** — aucun code RepDL dans
+  le dépôt (grep exhaustif : 7 fichiers documentaires seulement, citations) ;
+  audit mené sur spécification (API + prose + arXiv:2510.09180), aucun code lu →
+  copié/traduit ; règle écrite §3 de l'audit : jamais de copie/traduction de code
+  RepDL (MIT ≠ incompatible mais attribution + confusion PolyForm), clean-room
+  systématique.
+- **Voie f32 portable (2e lot de la session, demande utilisateur)** :
+  `scirust-core/src/portable_f32.rs` — exp/ln/softmax/dot/gemm **bit-exacts
+  inter-plates-formes par construction** (Rust pur, zéro libm, opérations
+  IEEE-754 de base en ordre fixe ; exp = réduction k·ln2 hi/lo + Taylor 13,
+  ln = mantisse [√2/2,√2] + série atanh, interne f64 ⇒ fidèlement arrondi,
+  ≤ 1 ulp vérifié vs oracle libm sur 200 k points). 13 tests : goldens
+  bit-à-bit + empreintes FNV du balayage complet de l'espace f32 (pas 65 537 ;
+  exp 0x71e63f5e1688a7f1, ln 0x8892b8ba72ffb8b6) = contrat de portabilité à
+  exécuter sur ARM ; identiques debug/release. Clean-room (méthodes maths
+  publiques, coefficients 1/n! ; aucun code fdlibm/musl/RepDL consulté —
+  un algorithme n'est pas protégeable, seule son expression l'est).
+  `paper/RELATED_WORK.md` mis à jour (voie portable réalisée ; CR *prouvé*
+  reste futur) + post-scriptum dans l'audit.
+- Reste ouvert : CI aarch64 = check only (exécuter les empreintes portable_f32
+  sur ARM dès qu'un runner existe) ; SIMD/GPU f32 en tolérance (pas bit-exact) ;
+  arrondi correct PROUVÉ des transcendantales = travail futur ; brancher
+  softmax_f32 dans la tape si la portabilité f32 devient un objectif produit.
+- NB numérotation : cette session s'était initialement étiquetée « volet 109 » ;
+  renumérotée 111 au merge (109 = Correctness '26 et 110 = identité, mergés avant).
+
 ## Session 2026-07-10 — volet 110 : acteur CHECKUPAUTO → TAREK ZEKRITI
 - **Décision utilisateur (définitive)** : l'acteur CHECKUPAUTO est remplacé par
   TAREK ZEKRITI. Appliqué : identité git locale (`user.name` TAREK ZEKRITI,

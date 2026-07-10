@@ -64,5 +64,6 @@ pub mod amp;
 pub mod distributed;
 pub mod dp;
 pub mod logging;
+pub mod portable_f32;
 pub mod pruning;
 pub mod reproducible;

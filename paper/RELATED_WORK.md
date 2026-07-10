@@ -90,10 +90,15 @@ que la classe de bug « garde sous-normale » n'y a pas été observée : la
 motivation de la voie sanitized est la *portabilité des comportements*, pas
 une prévalence de bugs chez autrui. Pour les régimes où l'identité
 inter-plateformes est exigée, SciRust fournit les voies entière et virgule
-fixe, bit-exactes cross-platform par construction ; la convergence de la
-voie f32 vers la portabilité totale (transcendantales correctement arrondies
-en Rust pur) est un travail futur explicite, en dialogue avec l'approche
-RepDL.
+fixe, bit-exactes cross-platform par construction — ainsi, depuis 2026-07-10,
+qu'une **voie f32 portable** (`scirust-core/src/portable_f32.rs`) : exp/ln
+Rust pur sans libm (réduction d'argument + séries, évaluation interne f64),
+softmax et GEMM de référence n'employant que des opérations IEEE-754 de base
+en ordre fixe, donc bit-exacts inter-plateformes *par construction*
+(fidèlement arrondis ; goldens bit-à-bit et empreintes FNV commis comme
+contrat de portabilité). L'arrondi correct *prouvé* de ces transcendantales
+(dilemme du fabricant de tables) reste un travail futur explicite, en
+dialogue avec l'approche RepDL.
 
 ## Références
 

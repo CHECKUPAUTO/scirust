@@ -118,9 +118,11 @@ pub struct Adam {
     pub beta2: f32,
     pub epsilon: f32,
     pub weight_decay: f32,
-    t: usize,                  // step counter (pour bias correction)
-    m: HashMap<usize, Tensor>, // 1er moment (moyenne mobile gradient)
-    v: HashMap<usize, Tensor>, // 2e moment (moyenne mobile gradient²)
+    pub amsgrad: bool,
+    t: usize,                      // step counter (pour bias correction)
+    m: HashMap<usize, Tensor>,     // 1er moment (moyenne mobile gradient)
+    v: HashMap<usize, Tensor>,     // 2e moment (moyenne mobile gradient²)
+    v_max: HashMap<usize, Tensor>, // max historique du 2e moment (AMSGrad)
 }
 
 impl Adam {
@@ -131,9 +133,11 @@ impl Adam {
             beta2: 0.999,
             epsilon: 1e-8,
             weight_decay: 0.0,
+            amsgrad: false,
             t: 0,
             m: HashMap::new(),
             v: HashMap::new(),
+            v_max: HashMap::new(),
         }
     }
 
@@ -150,6 +154,17 @@ impl Adam {
 
     pub fn with_epsilon(mut self, eps: f32) -> Self {
         self.epsilon = eps;
+        self
+    }
+
+    /// Active la variante **AMSGrad** (Reddi, Kale & Kumar, *On the
+    /// Convergence of Adam and Beyond*, ICLR 2018) : le dénominateur du pas
+    /// utilise le **maximum historique** du second moment au lieu de sa
+    /// moyenne mobile. Il ne peut donc jamais décroître, ce qui évite les
+    /// pas géants après un pic de gradient et restaure la garantie de
+    /// convergence qu'Adam perd sur certains problèmes convexes.
+    pub fn with_amsgrad(mut self) -> Self {
+        self.amsgrad = true;
         self
     }
 }
@@ -179,6 +194,11 @@ impl Optimizer for Adam {
                 .v
                 .entry(idx)
                 .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
+            let mut v_max = self.amsgrad.then(|| {
+                self.v_max
+                    .entry(idx)
+                    .or_insert_with(|| Tensor::zeros(value.rows, value.cols))
+            });
 
             for i in 0..value.data.len()
             {
@@ -195,7 +215,15 @@ impl Optimizer for Adam {
 
                 // bias correction
                 let m_hat = m.data[i] / bc1;
-                let v_hat = v.data[i] / bc2;
+                let mut v_hat = v.data[i] / bc2;
+
+                // AMSGrad : normalisation par le max historique du 2e moment
+                // (jamais décroissant), bias-corrigé comme v.
+                if let Some(vm) = &mut v_max
+                {
+                    vm.data[i] = vm.data[i].max(v.data[i]);
+                    v_hat = vm.data[i] / bc2;
+                }
 
                 // θ -= lr * m̂ / (√v̂ + ε)
                 value.data[i] -= self.lr * m_hat / (v_hat.sqrt() + self.epsilon);
@@ -420,6 +448,84 @@ mod tests {
             "x[1] = {}, target = {}",
             params[1],
             target[1]
+        );
+    }
+
+    // ---------- AMSGrad ---------- //
+
+    #[test]
+    fn amsgrad_converges_on_quadratic() {
+        // Même oracle que adam_converges_on_quadratic, variante AMSGrad :
+        // minimise f(x) = (x - 3)² partant de x = 0.
+        let lr = 0.1;
+        let n_steps = 200;
+        let target = 3.0_f32;
+
+        let mut x_value = 0.0_f32;
+        let mut opt = Adam::new(lr).with_amsgrad();
+
+        for _ in 0..n_steps
+        {
+            let tape = Tape::new();
+            let x = tape.input(Tensor::from_vec(vec![x_value], 1, 1));
+            let target_t = tape.input(Tensor::from_vec(vec![target], 1, 1));
+            let diff = x.sub(target_t);
+            let loss = diff.hadamard(diff).sum();
+            tape.backward(loss.idx());
+
+            opt.step(&[x.idx()], &tape);
+            x_value = tape.value(x.idx()).data[0];
+        }
+
+        assert!(
+            (x_value - target).abs() < 0.05,
+            "AMSGrad n'a pas convergé: x final = {}, target = {}",
+            x_value,
+            target
+        );
+    }
+
+    #[test]
+    fn amsgrad_keeps_denominator_after_gradient_spike() {
+        // Propriété définitoire d'AMSGrad (Reddi et al. 2018) : après un pic
+        // de gradient, Adam « oublie » le grand 2e moment (moyenne mobile) et
+        // reprend de grands pas ; AMSGrad garde le max historique et ses pas
+        // restent petits. β2 volontairement bas pour que l'oubli d'Adam soit
+        // rapide et le contraste net.
+        fn tail_displacement(amsgrad: bool) -> f32 {
+            let mut opt = Adam::new(0.1).with_betas(0.9, 0.1);
+            if amsgrad
+            {
+                opt = opt.with_amsgrad();
+            }
+            let mut x = 0.0_f32;
+            let mut tail = 0.0_f32;
+            for step in 0..20
+            {
+                // loss = c·x → gradient constant c : 100 au 1er pas, puis 0,01.
+                let c = if step == 0 { 100.0 } else { 0.01 };
+                let tape = Tape::new();
+                let xv = tape.input(Tensor::from_vec(vec![x], 1, 1));
+                let cv = tape.input(Tensor::from_vec(vec![c], 1, 1));
+                let loss = xv.hadamard(cv).sum();
+                tape.backward(loss.idx());
+                opt.step(&[xv.idx()], &tape);
+                let new_x = tape.value(xv.idx()).data[0];
+                if step > 0
+                {
+                    tail += (new_x - x).abs();
+                }
+                x = new_x;
+            }
+            tail
+        }
+
+        let adam = tail_displacement(false);
+        let ams = tail_displacement(true);
+        assert!(
+            ams < adam * 0.1,
+            "AMSGrad devrait faire des pas bien plus petits après le pic: \
+             adam={adam}, amsgrad={ams}"
         );
     }
 
