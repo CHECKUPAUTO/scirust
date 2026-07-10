@@ -7,4 +7,5 @@ description = "SciRust signal processing — FFT, window functions, time/frequen
 
 [dependencies]
 scirust-core = { path = "../scirust-core" }
+scirust-estimation = { path = "../scirust-estimation" }
 serde = { version = "1", features = ["derive"] }
