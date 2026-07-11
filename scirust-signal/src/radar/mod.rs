@@ -13,9 +13,11 @@
 //! [`music`]) for angle estimation — from the conventional beamformer through
 //! MVDR/Capon to the MUSIC subspace method — [`fmcw`] for the continuous-wave /
 //! mmWave model, where range and velocity fall out of two FFTs of the mixer's
-//! beat signal rather than a matched filter, and [`detect`] for the 2-D
-//! detection stage: CFAR over the range-Doppler map followed by clustering of
-//! the detections into target centroids.
+//! beat signal rather than a matched filter, [`detect`] for the 2-D detection
+//! stage — CFAR over the range-Doppler map followed by clustering of the
+//! detections into target centroids — and [`track`] for the temporal layer that
+//! associates those centroids across frames and smooths them with α–β track
+//! filters.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -27,6 +29,7 @@ pub mod fmcw;
 pub mod matched_filter;
 pub mod mti;
 pub mod music;
+pub mod track;
 pub mod waveform;
 
 pub use ambiguity::ambiguity;
@@ -39,4 +42,5 @@ pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_reso
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;
 pub use music::music_spectrum;
+pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
 pub use waveform::{barker_code, lfm_chirp};

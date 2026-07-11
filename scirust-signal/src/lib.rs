@@ -30,8 +30,10 @@
 //!   delay-and-sum beamforming,
 //!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources, and
 //!   MUSIC subspace direction finding via a from-scratch complex-Hermitian
-//!   eigensolver) and FMCW processing (beat-frequency ranging, range
-//!   resolution, and the range-Doppler cube from raw beat chirps)
+//!   eigensolver), FMCW processing (beat-frequency ranging, range
+//!   resolution, and the range-Doppler cube from raw beat chirps) and target
+//!   tracking (α–β constant-velocity track filters and a nearest-neighbour
+//!   multi-target tracker over the clustered detections)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -76,10 +78,11 @@ pub use mcsa::{
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
-    Detection, ambiguity, barker_code, beamform_spectrum, beat_frequency_to_range, ca_cfar,
-    ca_cfar_2d, ca_cfar_alpha, cluster_detections, covariance, cross_correlate, doppler_spectrum,
-    estimate_doa, lfm_chirp, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha,
-    peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile, range_resolution,
+    AlphaBeta, Detection, MultiTracker, Track, ambiguity, barker_code, beamform_spectrum,
+    beat_frequency_to_range, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cluster_detections, covariance,
+    critically_damped_gains, cross_correlate, doppler_spectrum, estimate_doa, lfm_chirp,
+    mti_canceller, music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag,
+    peak_to_sidelobe, range_doppler, range_doppler_map, range_profile, range_resolution,
     steering_vector,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
