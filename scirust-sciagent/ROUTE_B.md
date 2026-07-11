@@ -195,6 +195,20 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   collapse). Both a byte-level ~270M and a BPE ~304M from-scratch pretrain now run
   raw-source → trained checkpoint in bf16 on the Thor, resumable.
 
+- **B11/B12 — generation, validated end-to-end.** `CudaModel::generate` (non-cached:
+  forward → last-row logits → shared deterministic sampler) + `examples/cuda_generate`
+  load a trained checkpoint and sample on Tensor cores. **Thor, byte model (step 500,
+  1.57 nats/char):** `fn main() {` → recognizable under-trained code babble — word
+  fragments, `//`/`()`/`,`/newlines/digits, 59 distinct tokens of 200 (no collapse).
+  This closes the loop: **train → checkpoint → load → generate → decode → text**, all
+  bf16 on Blackwell Tensor cores. B12 also fixed two footguns found here:
+  `latest_checkpoint` sorted lexicographically (loaded `step_900` over `step_3000`,
+  breaking resume + generate-from-latest — now numeric); and made BPE training
+  **deterministic** (tie-broken merges) so a tokenizer is reproducible, with a loud
+  `<unk>`-fraction guard so a corrupt tokenizer fails clearly instead of emitting
+  garbage. The whole SLM lifecycle — pretrain, checkpoint, resume, generate — now runs
+  from raw source on the Thor; the only remaining lever for quality is **scale**.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
