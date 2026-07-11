@@ -36,6 +36,7 @@ path = "src/main.rs"
 members = [
     "examples/mnist_classifier",
     "examples/quickstart_v2",
+    "examples/obd2_diagnostic",
     "examples/cifar10_classifier",
     "examples/transformer_demo",
     "examples/transformer_compress",

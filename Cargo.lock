@@ -1823,6 +1823,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "obd2_diagnostic"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2708,6 +2715,7 @@ dependencies = [
  "nalgebra",
  "ndarray",
  "num-bigint",
+ "num-rational",
  "num-traits",
  "rand 0.8.6",
  "rand_distr 0.4.3",

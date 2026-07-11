@@ -64,6 +64,7 @@ pub mod amp;
 pub mod distributed;
 pub mod dp;
 pub mod exact_acc;
+pub mod formal_proof;
 pub mod logging;
 pub mod lowprec;
 pub mod philox;

@@ -28,9 +28,20 @@
 //!   **correctement arrondi pour 99,9999985 % des entrées** — il reste 465
 //!   entrées fidèles à 1 ulp sur 30 064 771 072 (exp 2, ln 5, tanh 20,
 //!   sigmoid 78, sin 2, cos 6, erf 352), zéro cas au-delà. Le verdict vaut
-//!   sur toute plate-forme conforme (sorties bit-identiques partout). La
-//!   preuve formelle a priori (dilemme du fabricant de tables) reste hors
-//!   claim — la nôtre est une vérification exhaustive a posteriori.
+//!   sur toute plate-forme conforme (sorties bit-identiques partout). Cette
+//!   campagne reste une vérification exhaustive **a posteriori** (elle teste
+//!   toutes les entrées, mais ne prouve pas analytiquement la borne).
+//!   Pour `exp`/`tanh`/`sigmoid` (dont le cœur `exp_f64_core` partage le même
+//!   polynôme de Taylor degré 13, minoré loin de zéro sur sa plage réduite),
+//!   [`crate::formal_proof`] ajoute une preuve **a priori** complémentaire :
+//!   borne d'erreur relative dérivée analytiquement en arithmétique
+//!   rationnelle exacte (reste de Lagrange pour la troncature de Taylor,
+//!   théorème γ_k de Higham pour l'arrondi du schéma de Horner), valable sur
+//!   tout le domaine continu réduit — pas seulement les points testés. Le
+//!   dilemme du fabricant de tables pour `sin`/`cos`/`ln`/`erf` (dont le
+//!   cœur s'annule près de zéro, ce qui casse la borne d'erreur relative
+//!   uniforme utilisée ici) reste hors claim : seule la vérification
+//!   exhaustive a posteriori ci-dessus les couvre.
 //! - **Performance** : voie de référence/d'audit, pas optimisée (GEMM naïf
 //!   mono-thread, softmax allouant). Pour la vitesse intra-architecture,
 //!   utiliser les chemins SIMD ; pour le bit-exact cross-platform rapide,

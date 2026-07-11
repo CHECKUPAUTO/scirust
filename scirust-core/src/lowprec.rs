@@ -164,37 +164,42 @@ impl Fp8Format {
     }
 }
 
-/// f32 → FP8 (RNE, **saturant** au max fini — convention d'entraînement).
-/// NaN → NaN canonique du format ; ±inf → saturation (E4M3) ou ±inf (E5M2).
-pub fn f32_to_fp8_rne(x: f32, fmt: Fp8Format) -> u8 {
+/// Décomposition commune f32 → FP8, partagée par RNE et l'arrondi
+/// stochastique : `Ok(code)` couvre les cas déjà tranchés sans dépendre
+/// d'aucune décision d'arrondi (NaN/inf/saturation/flush-to-zero) ; `Err`
+/// porte (signe, mantisse tronquée `kept`, reste `rem`, largeur `shift`,
+/// champ d'exposant FP8 `e_field`) pour les cas où RNE et arrondi
+/// stochastique divergent — factoriser évite de dupliquer (et risquer de
+/// désynchroniser) cette arithmétique de troncature délicate.
+fn fp8_pre_round(x: f32, fmt: Fp8Format) -> Result<u8, (u8, u32, u32, u32, u8)> {
     let (bias, mbits, nan_code, max_fin) = fmt.params();
     let bits = x.to_bits();
     let sign = ((bits >> 24) & 0x80) as u8;
     if x.is_nan()
     {
-        return sign | nan_code;
+        return Ok(sign | nan_code);
     }
     if x.is_infinite()
     {
-        return match fmt
+        return Ok(match fmt
         {
             Fp8Format::E4M3 => sign | 0x7e, // sature au max fini (S.1111.110)
             Fp8Format::E5M2 => sign | 0x7c, // ±inf
-        };
+        });
     }
     let ax = x.abs();
     if ax > max_fin
     {
         // saturation (comportement train-time usuel, documenté)
-        return match fmt
+        return Ok(match fmt
         {
             Fp8Format::E4M3 => sign | 0x7e,
             Fp8Format::E5M2 => sign | 0x7b, // S.11110.11 = 57344
-        };
+        });
     }
     if ax == 0.0
     {
-        return sign;
+        return Ok(sign);
     }
     // décompose |x| = m·2^e, m ∈ [2^23, 2^24)
     let exp = ((bits >> 23) & 0xff) as i32;
@@ -215,7 +220,7 @@ pub fn f32_to_fp8_rne(x: f32, fmt: Fp8Format) -> u8 {
     let min_sub_exp = 1 - bias - mbits as i32; // exposant du plus petit sous-normal
     if lead_exp < min_sub_exp - 1
     {
-        return sign; // sous le demi plus petit sous-normal ⇒ ±0
+        return Ok(sign); // sous le demi plus petit sous-normal ⇒ ±0
     }
     // nombre de bits de mantisse conservés : mbits (normal) ou moins (sous-normal)
     let (kept_bits, e_field): (i32, u8) = if e8 >= 1
@@ -230,8 +235,12 @@ pub fn f32_to_fp8_rne(x: f32, fmt: Fp8Format) -> u8 {
     let shift = (23 - kept_bits).max(0) as u32;
     let kept = m24 >> shift;
     let rem = m24 & ((1u32 << shift) - 1);
-    let half = 1u32 << (shift - 1);
-    let round_up = rem > half || (rem == half && (kept & 1) == 1);
+    Err((sign, kept, rem, shift, e_field))
+}
+
+/// Termine l'encodage FP8 : combine `kept`/`e_field` en code, applique le
+/// report d'arrondi (`round_up`) et la saturation au max fini.
+fn fp8_finish(sign: u8, kept: u32, e_field: u8, mbits: u32, round_up: bool, fmt: Fp8Format) -> u8 {
     let mut code = if e_field >= 1
     {
         (((e_field as u32) << mbits) | (kept & ((1 << mbits) - 1))) as u8
@@ -253,6 +262,19 @@ pub fn f32_to_fp8_rne(x: f32, fmt: Fp8Format) -> u8 {
         {},
     }
     sign | code
+}
+
+/// f32 → FP8 (RNE, **saturant** au max fini — convention d'entraînement).
+/// NaN → NaN canonique du format ; ±inf → saturation (E4M3) ou ±inf (E5M2).
+pub fn f32_to_fp8_rne(x: f32, fmt: Fp8Format) -> u8 {
+    let (kept, rem, shift, e_field, sign) = match fp8_pre_round(x, fmt)
+    {
+        Ok(code) => return code,
+        Err((sign, kept, rem, shift, e_field)) => (kept, rem, shift, e_field, sign),
+    };
+    let half = 1u32 << (shift - 1);
+    let round_up = rem > half || (rem == half && (kept & 1) == 1);
+    fp8_finish(sign, kept, e_field, fmt.params().1, round_up, fmt)
 }
 
 /// FP8 → f32 (exact).
@@ -319,6 +341,28 @@ pub fn f32_to_bf16_stochastic(x: f32, rng: &Philox4x32, stream: u32, index: u64)
     {
         upper
     }
+}
+
+/// f32 → FP8 par **arrondi stochastique** (Philox contre-basé) : monte avec
+/// probabilité (reste/2^shift), non biaisé, reproductible et indépendant du
+/// découpage — le pendant FP8 de [`f32_to_bf16_stochastic`], sur la
+/// décomposition partagée [`fp8_pre_round`].
+pub fn f32_to_fp8_stochastic(
+    x: f32,
+    fmt: Fp8Format,
+    rng: &Philox4x32,
+    stream: u32,
+    index: u64,
+) -> u8 {
+    let (kept, rem, shift, e_field, sign) = match fp8_pre_round(x, fmt)
+    {
+        Ok(code) => return code,
+        Err((sign, kept, rem, shift, e_field)) => (kept, rem, shift, e_field, sign),
+    };
+    // tirage uniforme sur `shift` bits (shift ∈ [~20,24] ⇒ tient dans un
+    // tirage u32) ; monte ssi tirage < reste (reste nul ⇒ jamais monté).
+    let draw = rng.u32_at(stream, index) >> (32 - shift);
+    fp8_finish(sign, kept, e_field, fmt.params().1, draw < rem, fmt)
 }
 
 // ================================================================== //
@@ -506,6 +550,90 @@ mod tests {
             f32_to_bf16_stochastic(1.0, &rng, 2, 0),
             f32_to_bf16_rne(1.0)
         );
+    }
+
+    /// FP8 arrondi stochastique : pour toute paire de codes consécutifs (les
+    /// deux formats), un point pris strictement entre les deux atterrit
+    /// TOUJOURS sur l'un des deux voisins (jamais un troisième code — la
+    /// décomposition [`fp8_pre_round`] reste cohérente même en sous-normal),
+    /// avec une fréquence de montée qui suit le reste (test au point 1/4 :
+    /// nettement plus souvent le bas que le haut).
+    #[test]
+    fn fp8_stochastic_lands_on_rne_neighbors_and_tracks_remainder() {
+        let rng = Philox4x32::new(0x05ee_df98);
+        for fmt in [Fp8Format::E4M3, Fp8Format::E5M2]
+        {
+            for c in 0..0x7du8
+            {
+                let (a, b) = (fp8_to_f32(c, fmt), fp8_to_f32(c + 1, fmt));
+                if !a.is_finite() || !b.is_finite() || b <= a
+                {
+                    continue;
+                }
+                // point au quart de l'intervalle : reste ≈ 1/4 côté bas
+                let q1 = (a as f64 + (b as f64 - a as f64) * 0.25) as f32;
+                let mut up = 0u32;
+                let n = 400u64;
+                for i in 0..n
+                {
+                    let code = f32_to_fp8_stochastic(q1, fmt, &rng, c as u32, i);
+                    assert!(
+                        code == c || code == c + 1,
+                        "{fmt:?} code {c:02x}: tirage {code:02x} hors des voisins"
+                    );
+                    if code == c + 1
+                    {
+                        up += 1;
+                    }
+                }
+                let freq = up as f64 / n as f64;
+                assert!(
+                    freq < 0.45,
+                    "{fmt:?} code {c:02x}: fréquence de montée {freq} trop haute pour 1/4"
+                );
+            }
+        }
+    }
+
+    /// FP8 arrondi stochastique : reproductible (mêmes index ⇒ mêmes bits),
+    /// non biaisé (moyenne ≈ x), valeurs exactes jamais perturbées — le
+    /// pendant FP8 de `stochastic_rounding_is_reproducible_and_unbiased`.
+    #[test]
+    fn fp8_stochastic_rounding_is_reproducible_and_unbiased() {
+        let rng = Philox4x32::new(4_102_026);
+        for fmt in [Fp8Format::E4M3, Fp8Format::E5M2]
+        {
+            let x = fp8_to_f32(0x30, fmt) * 1.3; // entre deux codes FP8
+            let fwd: Vec<u8> = (0..64)
+                .map(|i| f32_to_fp8_stochastic(x, fmt, &rng, 0, i))
+                .collect();
+            let rev: Vec<u8> = (0..64)
+                .rev()
+                .map(|i| f32_to_fp8_stochastic(x, fmt, &rng, 0, i))
+                .collect();
+            for i in 0..64
+            {
+                assert_eq!(fwd[i], rev[63 - i], "{fmt:?} non reproductible");
+            }
+            let n = 50_000u64;
+            let mean: f64 = (0..n)
+                .map(|i| fp8_to_f32(f32_to_fp8_stochastic(x, fmt, &rng, 1, i), fmt) as f64)
+                .sum::<f64>()
+                / n as f64;
+            let rne = f32_to_fp8_rne(x, fmt);
+            let (lo, hi) = (fp8_to_f32(rne - 1, fmt), fp8_to_f32(rne, fmt));
+            let grid = (hi - lo).abs().max(fp8_to_f32(rne + 1, fmt) - hi);
+            assert!(
+                (mean - x as f64).abs() < grid as f64 * 0.05,
+                "{fmt:?} biais : moyenne {mean} vs {x}"
+            );
+            // valeur exacte (code pile) : jamais perturbée
+            let exact = fp8_to_f32(0x20, fmt);
+            assert_eq!(
+                f32_to_fp8_stochastic(exact, fmt, &rng, 2, 0),
+                f32_to_fp8_rne(exact, fmt)
+            );
+        }
     }
 
     /// GEMM bf16 exact : petits entiers exacts + empreinte-contrat.
