@@ -55,17 +55,14 @@ impl Rng {
     }
 }
 
+type Dataset = Vec<([f32; N_FEATURES], usize)>;
+
 /// Génère 100K + cas avec bruit réaliste
-#[allow(clippy::type_complexity)]
 fn generate_ultra_dataset(
     n_train: usize,
     n_val: usize,
     n_test: usize,
-) -> (
-    Vec<([f32; N_FEATURES], usize)>,
-    Vec<([f32; N_FEATURES], usize)>,
-    Vec<([f32; N_FEATURES], usize)>,
-) {
+) -> (Dataset, Dataset, Dataset) {
     let mut rng = Rng::new(SEED);
     let mut train_data = Vec::new();
     let mut val_data = Vec::new();
@@ -253,22 +250,13 @@ fn main() {
 
         // Validation (toutes les 2 epochs pour accélérer)
         let mut val_correct = 0;
-        let mut _val_loss = 0.0;
         if (epoch + 1) % 2 == 0
         {
             for (features, label) in &val_data
             {
                 let tape = Tape::new();
                 let x = tape.input(Tensor::from_vec(features.to_vec(), 1, N_FEATURES));
-                let mut target_data = vec![0.0; N_CLASSES];
-                target_data[*label] = 1.0;
-                let target = tape.input(Tensor::from_vec(target_data, 1, N_CLASSES));
-
                 let logits = model.forward(&tape, x);
-                let loss = loss_fn.forward(&tape, logits, target);
-                tape.backward(loss.idx());
-
-                _val_loss += tape.value(loss.idx()).data[0];
 
                 let scores = tape.value(logits.idx());
                 let pred = scores

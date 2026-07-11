@@ -35,6 +35,13 @@ cargo run -p obd2_diagnostic --release --bin obd2_megaverse       # 8 epochs
 cargo run -p obd2_diagnostic --release --bin obd2_megaverse -- 3  # nb epochs au choix
 ```
 
+**Version DONNÉES RÉELLES** (43 139 relevés d'une Opel Corsa 2012, détection d'anomalie mélange) :
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_real                # défauts : CSV committé, 40 epochs
+cargo run -p obd2_diagnostic --release --bin obd2_real -- <csv> <ep>  # CSV + epochs au choix
+```
+
 ## Ce que fait le programme
 
 1. **Encode** chaque situation d'atelier en 7 nombres (le code défaut + des
@@ -118,11 +125,64 @@ mélangées (oubli catastrophique) et un graphe d'autodiff par exemple
 (~9 h par epoch). Le commentaire d'en-tête de `main_megaverse.rs` détaille
 les trois corrections.
 
+## Version DONNÉES RÉELLES (`obd2_real`)
+
+Fini le synthétique : le binary `obd2_real` s'entraîne sur de la **vraie
+télémétrie d'atelier** — 43 139 relevés d'une Opel Corsa 1.2 (2012) captés
+via un adaptateur ELM327 (dataset Hugging Face
+[`PedroCuisinier2025/OBD2_panel_opel_2012`](https://huggingface.co/datasets/PedroCuisinier2025/OBD2_panel_opel_2012),
+licence CC-BY-4.0 ; l'échantillon committé dans `data/opel_corsa_telemetry.csv`
+est 1 relevé complet sur 5 du dataset original de 394 406 lignes).
+
+**Principe** : le modèle apprend la relation *saine* entre 10 capteurs
+(RPM, MAF, charge moteur, sondes O2, pressions/températures…) et la
+**correction carburant long terme** (`LONG_FUEL_TRIM_1`). Au diagnostic,
+un résidu |trim observé − trim prédit| au-delà du seuil (p99 des résidus
+de validation) signale une **anomalie du mélange** — la logique P0171 du
+premier exemple, apprise cette fois sur données réelles.
+
+Résultats mesurés (split par segments de conduite, sans fuite temporelle) :
+
+| Métrique | Valeur |
+|----------|--------|
+| Train / Val / Test | 28 538 / 7 139 / 7 462 relevés (segments distincts) |
+| MAE baseline (moyenne) | 6.61 % trim |
+| **MAE modèle (test)** | **2.74 % trim** |
+| Seuil d'anomalie (p99) | ±8.85 % trim |
+| Entraînement | 1.5 s (40 epochs, batch 256) |
+| Prise d'air simulée (+14 % trim) | ⚠ détectée (résidu 14.8 %) |
+
+Anecdote de vraies données : cette Opel affiche un trim long terme moyen de
+**+14.4 %** — la voiture réelle a probablement elle-même une petite prise
+d'air ou un MAF vieillissant. C'est exactement le genre de signal que le
+modèle apprend à contextualiser.
+
+Limite honnête : corrompre *un seul* capteur (ex. MAF −35 %) n'est pas
+toujours détecté sur un relevé isolé — les capteurs corrélés (charge,
+pression) « compensent » dans la prédiction. Un vrai outil analyserait le
+résidu **sur la durée** (moyenne glissante par trajet), pas relevé par relevé.
+
+## Poids sauvegardés (safetensors)
+
+Les modèles entraînés sont sérialisés dans `models/` au format
+**safetensors** via `scirust_core::io::safetensors::save_state_dict` :
+
+- `models/obd2_real_fueltrim.safetensors` (12 Ko) — poids + **métadonnées
+  embarquées** : noms des features, moyennes/écarts-types de normalisation,
+  seuil d'anomalie, source des données. Le fichier est **auto-suffisant** :
+  une future API de diagnostic n'a besoin que de lui.
+- `models/obd2_megaverse.safetensors` (~660 Ko) — poids du classifieur
+  1000 causes + métadonnées (architecture, seed, précision test).
+
+Le round-trip est vérifié à chaque run : rechargement dans un modèle
+vierge via `load_state_dict` → écart maximal de prédiction = 0.
+
 ## Honnêteté sur les limites
 
-Le jeu de données est **synthétique**, même en version massive. L'IA apprend
-les patterns parfaits. Avec de vraies données d'atelier (bruitées,
-contradictoires, avec des cas limites), les probabilités seraient plus
-**nuancées** — et c'est justement là que le classement des hypothèses devient
-utile pour le mécanicien. Cet exemple est **pédagogique & d'entraînement**,
-pas un outil de diagnostic homologué.
+Les versions massive/ultra/mégaverse restent **synthétiques** : l'IA y
+apprend des patterns générés. La version `obd2_real` s'entraîne sur de
+vraies données, mais d'**une seule voiture saine** : elle détecte des
+anomalies de mélange par rapport à la normale apprise, elle ne classifie
+pas 1000 causes racines sur données réelles (il faudrait un historique
+d'atelier labellisé « cause confirmée » pour ça). Cet exemple est
+**pédagogique & d'entraînement**, pas un outil de diagnostic homologué.

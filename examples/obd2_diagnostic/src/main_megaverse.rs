@@ -26,6 +26,7 @@
 
 use scirust_core::autodiff::optim::{Adam, Optimizer};
 use scirust_core::autodiff::reverse::{Tape, Tensor};
+use scirust_core::io::safetensors::save_state_dict;
 use scirust_core::nn::{
     CrossEntropyLoss, KaimingNormal, Linear, Module, PcgEngine, ReLU, Sequential, Zeros,
 };
@@ -448,4 +449,30 @@ fn main() {
     {
         diagnose(&mut model, &test_x[i], test_y[i]);
     }
+
+    println!("💾 SAUVEGARDE DES POIDS (safetensors)");
+    println!("────────────────────────────────────");
+    let models_dir = ["models", "examples/obd2_diagnostic/models"]
+        .into_iter()
+        .find(|d| std::path::Path::new(d).exists())
+        .unwrap_or("models");
+    std::fs::create_dir_all(models_dir).ok();
+    let weights_path = format!("{models_dir}/obd2_megaverse.safetensors");
+
+    let sd = model.state_dict();
+    let mut meta: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    meta.insert("model".into(), "obd2_megaverse".into());
+    meta.insert(
+        "arch".into(),
+        format!("{N_FEATURES}-256-128-{N_CLASSES} ReLU"),
+    );
+    meta.insert("n_classes".into(), N_CLASSES.to_string());
+    meta.insert("n_features".into(), N_FEATURES.to_string());
+    meta.insert("seed".into(), SEED.to_string());
+    meta.insert("test_acc".into(), format!("{:.4}", test_acc));
+    save_state_dict(&weights_path, &sd, Some(meta)).expect("échec sauvegarde poids");
+    let size = std::fs::metadata(&weights_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    println!("  Poids → {weights_path} ({:.1} Ko)", size as f32 / 1024.0);
 }
