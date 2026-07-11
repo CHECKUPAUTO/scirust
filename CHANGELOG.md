@@ -5,6 +5,21 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : traitement Doppler radar (`radar::doppler`) — bloc 3
+Troisième bloc du domaine radar : la **carte distance-Doppler**, surface sur
+laquelle le CFAR détecte (cœur commun des deux projets de référence).
+- **`doppler_spectrum`** — FFT temps-lent d'une case distance (un échantillon
+  complexe par impulsion) ; le bin 0 est le Doppler nul (cible fixe / fouillis).
+- **`range_doppler_map`** — à partir d'une pile de `M` impulsions comprimées en
+  distance, FFT temps-lent par case distance → carte magnitude `N×M`
+  `[distance][doppler]`. Sépare les cibles mobiles du fouillis stationnaire.
+- Oracles : une cible **fixe** tombe dans le bin Doppler 0 avec intégration
+  cohérente (magnitude = M) ; une cible **mobile** (rampe de phase de k₀ cycles
+  sur les M impulsions) tombe dans le bin k₀ (au signe FFT près) et **pas** au
+  Doppler nul ; rejet des entrées non-puissance-de-2 / irrégulières.
+- Construit sur la FFT existante du crate, sans dépendance. 3 tests (126 au
+  total) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : détection CFAR radar (`radar::cfar`) — bloc 2
 Deuxième bloc du domaine radar : la **détection à taux de fausse alarme
 constant**, le maillon détection des chaînes de traitement des deux projets de
