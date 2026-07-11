@@ -56,6 +56,7 @@ impl Rng {
 }
 
 /// Génère 100K + cas avec bruit réaliste
+#[allow(clippy::type_complexity)]
 fn generate_ultra_dataset(
     n_train: usize,
     n_val: usize,
@@ -252,7 +253,7 @@ fn main() {
 
         // Validation (toutes les 2 epochs pour accélérer)
         let mut val_correct = 0;
-        let mut val_loss = 0.0;
+        let mut _val_loss = 0.0;
         if (epoch + 1) % 2 == 0
         {
             for (features, label) in &val_data
@@ -267,7 +268,7 @@ fn main() {
                 let loss = loss_fn.forward(&tape, logits, target);
                 tape.backward(loss.idx());
 
-                val_loss += tape.value(loss.idx()).data[0];
+                _val_loss += tape.value(loss.idx()).data[0];
 
                 let scores = tape.value(logits.idx());
                 let pred = scores

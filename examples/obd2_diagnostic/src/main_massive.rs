@@ -57,6 +57,7 @@ impl Rng {
         ((self.state >> 32) as f32) / (u32::MAX as f32)
     }
 
+    #[allow(dead_code)]
     fn next_u32(&mut self) -> u32 {
         self.state = self
             .state
@@ -67,6 +68,7 @@ impl Rng {
 }
 
 /// Génère N_TRAIN + N_VAL + N_TEST cas d'entraînement avec bruit réaliste
+#[allow(clippy::type_complexity)]
 fn generate_massive_dataset(
     n_train: usize,
     n_val: usize,
