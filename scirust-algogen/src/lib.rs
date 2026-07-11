@@ -1191,8 +1191,30 @@ fn bellman_ford(graph: &Graph, source: usize) -> Vec<Option<f64>> {
             }
         }
     }
+    // A further |V| passes that can still relax an edge indicate a
+    // negative-weight cycle reachable from `source`: the "shortest path" to
+    // that vertex (and anything reachable from it) is unbounded below, not
+    // the particular finite value the fixed number of passes above happened
+    // to settle on. Mark it `-infinity`, which propagates through further
+    // relaxations and ends up `None` below — the convention this module
+    // already uses for "no well-defined distance."
+    for _ in 0..graph.vertices
+    {
+        for &(u, v, w) in &graph.edges
+        {
+            let w = w.unwrap_or(1.0);
+            if dist[u] + w < dist[v]
+            {
+                dist[v] = f64::NEG_INFINITY;
+            }
+            if !graph.directed && dist[v] + w < dist[u]
+            {
+                dist[u] = f64::NEG_INFINITY;
+            }
+        }
+    }
     dist.into_iter()
-        .map(|d| if d == f64::INFINITY { None } else { Some(d) })
+        .map(|d| if d.is_finite() { Some(d) } else { None })
         .collect()
 }
 
@@ -1227,10 +1249,44 @@ fn floyd_warshall(graph: &Graph) -> Vec<Vec<Option<f64>>> {
             }
         }
     }
+    // `dist[k][k] < 0` after the main loop means k sits on a negative-weight
+    // cycle: any pair (i, j) that routes through k (i.e. i can reach k and k
+    // can reach j) has an unbounded-below, undefined shortest path — not the
+    // finite value the DP above happened to compute. Mark those pairs
+    // `-infinity`, mapped to `None` below, the same convention `bellman_ford`
+    // uses.
+    for k in 0..n
+    {
+        if dist[k][k] < 0.0
+        {
+            // Snapshot "does i reach k" / "does k reach j" before mutating:
+            // marking dist[i][j] below can otherwise overwrite the very
+            // dist[i][k] or dist[k][j] cell (when j == k or i == k) that a
+            // later iteration of this same pass still needs to read,
+            // spuriously making it look unreachable and silently skipping
+            // pairs that should have been marked.
+            let reaches_k: Vec<bool> = (0..n).map(|i| dist[i][k].is_finite()).collect();
+            let k_reaches: Vec<bool> = (0..n).map(|j| dist[k][j].is_finite()).collect();
+            for i in 0..n
+            {
+                if !reaches_k[i]
+                {
+                    continue;
+                }
+                for j in 0..n
+                {
+                    if k_reaches[j]
+                    {
+                        dist[i][j] = f64::NEG_INFINITY;
+                    }
+                }
+            }
+        }
+    }
     dist.iter()
         .map(|row| {
             row.iter()
-                .map(|&d| if d == f64::INFINITY { None } else { Some(d) })
+                .map(|&d| if d.is_finite() { Some(d) } else { None })
                 .collect()
         })
         .collect()
@@ -2462,6 +2518,31 @@ mod tests {
     }
 
     #[test]
+    fn test_bellman_ford_negative_cycle_is_undefined_not_a_finite_number() {
+        // 1 -> 2 -> 1 has total weight -3 + 1 = -2: a negative cycle
+        // reachable from source 0. The "shortest path" through it is
+        // unbounded below (mathematically undefined), not some particular
+        // finite number that happens to fall out after `vertices` passes —
+        // vertex 3 sits outside the cycle and must stay unaffected.
+        let mut g = Graph::new(4, true);
+        g.add_edge(0, 1, Some(1.0));
+        g.add_edge(1, 2, Some(-3.0));
+        g.add_edge(2, 1, Some(1.0));
+        g.add_edge(0, 3, Some(5.0));
+        let dist = shortest_path(&g, 0, PathStrategy::BellmanFord);
+        assert_eq!(dist[0], Some(0.0));
+        assert_eq!(
+            dist[1], None,
+            "vertex on a reachable negative cycle has no well-defined distance"
+        );
+        assert_eq!(
+            dist[2], None,
+            "vertex reachable only through the negative cycle likewise has none"
+        );
+        assert_eq!(dist[3], Some(5.0), "unaffected vertex must stay finite");
+    }
+
+    #[test]
     fn test_mst_all_strategies() {
         let mut g = Graph::new(4, false);
         g.add_edge(0, 1, Some(1.0));
@@ -2786,6 +2867,25 @@ mod tests {
         assert_eq!(dist[0], Some(0.0));
         assert_eq!(dist[1], Some(4.0));
         assert_eq!(dist[2], Some(7.0));
+    }
+
+    #[test]
+    fn test_floyd_warshall_negative_cycle_is_undefined_not_a_finite_number() {
+        // Same negative cycle as the Bellman-Ford regression above:
+        // `select_path` can route a negative-weight graph to either
+        // strategy depending on size/sparsity, so both must agree that a
+        // vertex on (or only reachable through) a negative cycle has no
+        // well-defined distance.
+        let mut g = Graph::new(4, true);
+        g.add_edge(0, 1, Some(1.0));
+        g.add_edge(1, 2, Some(-3.0));
+        g.add_edge(2, 1, Some(1.0));
+        g.add_edge(0, 3, Some(5.0));
+        let dist = shortest_path(&g, 0, PathStrategy::FloydWarshall);
+        assert_eq!(dist[0], Some(0.0));
+        assert_eq!(dist[1], None);
+        assert_eq!(dist[2], None);
+        assert_eq!(dist[3], Some(5.0));
     }
 
     #[test]
