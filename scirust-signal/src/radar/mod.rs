@@ -12,6 +12,7 @@
 pub mod ambiguity;
 pub mod beamform;
 pub mod cfar;
+pub mod doa;
 pub mod doppler;
 pub mod matched_filter;
 pub mod mti;
@@ -20,6 +21,7 @@ pub mod waveform;
 pub use ambiguity::ambiguity;
 pub use beamform::{beamform_spectrum, estimate_doa, steering_vector};
 pub use cfar::{ca_cfar, ca_cfar_alpha, os_cfar, os_cfar_alpha};
+pub use doa::{covariance, mvdr_spectrum};
 pub use doppler::{doppler_spectrum, range_doppler_map};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;

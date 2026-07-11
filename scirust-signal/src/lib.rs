@@ -25,8 +25,8 @@
 //!   response, range-Doppler coupling), Doppler processing (range-Doppler map),
 //!   MTI clutter cancellers, CFAR detection (cell-averaging and
 //!   ordered-statistic, with the closed-form threshold scaling) and array
-//!   processing (ULA steering vectors, delay-and-sum beamforming, DOA
-//!   estimation)
+//!   processing (ULA steering vectors, delay-and-sum beamforming, and
+//!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -71,8 +71,8 @@ pub use mcsa::{
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
-    ambiguity, barker_code, beamform_spectrum, ca_cfar, ca_cfar_alpha, cross_correlate,
-    doppler_spectrum, estimate_doa, lfm_chirp, mti_canceller, os_cfar, os_cfar_alpha, peak_lag,
-    peak_to_sidelobe, range_doppler_map, steering_vector,
+    ambiguity, barker_code, beamform_spectrum, ca_cfar, ca_cfar_alpha, covariance, cross_correlate,
+    doppler_spectrum, estimate_doa, lfm_chirp, mti_canceller, mvdr_spectrum, os_cfar,
+    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler_map, steering_vector,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
