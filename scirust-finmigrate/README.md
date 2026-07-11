@@ -1,7 +1,10 @@
 # scirust-finmigrate
 
 An **audit-gated COBOL→Rust financial migration harness**, demonstrated end to
-end on one representative unit: `INTACCR`, a monthly interest-accrual routine.
+end on two representative units:
+* `INTACCR` — a monthly interest-accrual routine (single arithmetic store).
+* `AMORTSCH` — a fixed-payment loan amortization schedule (running balance,
+  accumulated rounding drift, final-payment reconciliation to exactly `0.00`).
 
 It is the reference template for the migration protocol:
 
@@ -18,7 +21,11 @@ It is the reference template for the migration protocol:
 | `tests/sandbox/gen_baseline.py` | 1 | Deterministic Golden Baseline generator (Python `decimal`). |
 | `tests/sandbox/golden_baseline.csv` | 1 | The oracle (+ `.sha256` tamper evidence). |
 | `tests/equivalence.rs` | 2 | Exact decimal equivalence proof against the baseline. |
-| `src/lib.rs` | 2–3 | The decimal-exact port, reversibility shim, replay tracing. |
+| `src/lib.rs` | 2–3 | INTACCR port, reversibility shim, replay tracing. |
+| `cobol/AMORTSCH.cbl` · `cobol/SEMANTICS_AMORT.md` | 1 | Unit 2: amortization source + contract. |
+| `tests/sandbox/gen_amort_baseline.py` · `amort_baseline.csv` | 1 | Unit 2 baseline generator + oracle. |
+| `src/amort.rs` · `tests/amort_equivalence.rs` | 2 | Unit 2 port + per-period equivalence proof. |
+| `tests/no_float_guard.rs` | — | Fails if `f32`/`f64` appears in the money path. |
 | `audit_trail.log` | 3 | Append-only decision log incl. the recorded red→green. |
 
 ## The four hidden dependencies this unit exercises
