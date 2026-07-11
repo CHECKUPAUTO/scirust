@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optique de rayons — matrices ABCD + faisceaux gaussiens (`beams`) — bloc 12
+Deuxième bloc optronique : la conception du **train optique** (lentilles,
+miroirs, espace libre) par **matrices de transfert ABCD**, et la propagation
+d'un **faisceau gaussien** via le paramètre complexe `q`.
+- **`RayMatrix`** — matrice 2×2 `[[a,b],[c,d]]` agissant sur un rayon `(y, θ)` :
+  constructeurs `identity` / `free_space` / `thin_lens` / `curved_mirror` /
+  `flat_interface`, composition `then` (produit `next·self`), `determinant`
+  (`= n_in/n_out`), `apply`.
+- **Faisceaux gaussiens** — `rayleigh_range` (`z_R = πw0²/λ`), `beam_radius`
+  (`w(z) = w0√(1+(z/z_R)²)`), `radius_of_curvature`, `divergence` (`λ/(πw0)`),
+  `gouy_phase`, plus le paramètre `q` : `q_at_waist`, `propagate_q`
+  (`q' = (Aq+B)/(Cq+D)`), `beam_radius_from_q`, `radius_from_q`.
+- Oracles : déterminant unité des éléments sans perte (et `n1/n2` pour un
+  dioptre plan) ; un rayon collimaté focalise à `f` ; la condition d'imagerie
+  annule `B` et donne le grandissement `−si/so` ; géométrie du faisceau
+  (waist `w0`, √2 à `z_R`, divergence, phase de Gouy) ; le `q` en espace libre
+  reproduit `w(z)` et `R(z)` ; une lentille reforme un waist au plan gaussien
+  prédit `s' = f·z_R²/(f²+z_R²)`. 8 tests (37 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — PSF, MTF et déconvolution (`optics`) — bloc 11
 Premier bloc du volet **optronique / optique de précision / traitement de
 l'image** : la qualité d'image et la restauration d'un imageur EO/IR, dans le
