@@ -937,7 +937,7 @@ impl SimdBackend for NeonBackend {
         b: f32,
         mc: crate::matrix::view::MatrixViewMut<f32>,
     ) {
-        ScalarBackend.sgemm_f32(a, ma, mb, b, mc);
+        unsafe { sgemm_f32_neon(a, ma, mb, b, mc) }
     }
     fn relu_f32(&self, v: &mut [f32]) {
         ScalarBackend.relu_f32(v);
@@ -945,6 +945,57 @@ impl SimdBackend for NeonBackend {
 }
 
 // ---- NEON kernel free functions ----
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn scal_f32_neon(beta: f32, c: &mut [f32]) {
+    use std::arch::aarch64::*;
+    let bv = vdupq_n_f32(beta);
+    let n = c.len();
+    let mut i = 0;
+    while i + 4 <= n
+    {
+        let v = vld1q_f32(c.as_ptr().add(i));
+        vst1q_f32(c.as_mut_ptr().add(i), vmulq_f32(v, bv));
+        i += 4;
+    }
+    for x in &mut c[i..n]
+    {
+        *x *= beta;
+    }
+}
+
+/// NEON SGEMM (`C = alpha·A·B + beta·C`, row-major), même formulation
+/// rank-1 / axpy-sur-lignes que le palier x86 — porte le gain multi-plateforme
+/// sur Jetson / Raspberry Pi / RK3588 (remplaçait un fallback scalaire).
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn sgemm_f32_neon(
+    alpha: f32,
+    a: crate::matrix::view::MatrixView<f32>,
+    b: crate::matrix::view::MatrixView<f32>,
+    beta: f32,
+    mut c: crate::matrix::view::MatrixViewMut<f32>,
+) {
+    let m = a.rows();
+    let k = a.cols();
+    for i in 0..m
+    {
+        let a_row = a.row_slice(i).expect("A row");
+        let c_row = c.row_slice_mut(i).expect("C row");
+        scal_f32_neon(beta, c_row);
+        for (p, &a_ip) in a_row.iter().enumerate().take(k)
+        {
+            let s = alpha * a_ip;
+            if s == 0.0
+            {
+                continue;
+            }
+            let b_row = b.row_slice(p).expect("B row");
+            saxpy_f32_neon(s, b_row, c_row);
+        }
+    }
+}
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn saxpy_f32_neon(alpha: f32, x: &[f32], y: &mut [f32]) {
