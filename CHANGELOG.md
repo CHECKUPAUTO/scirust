@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : traitement d'antenne / goniométrie radar (`radar::beamform`) — bloc 5
+Cinquième bloc du domaine radar : le passage **multi-voies** — estimation de la
+direction d'arrivée (DOA) sur réseau linéaire uniforme (ULA), la voie *angle*
+qui complète la chaîne distance-Doppler (goniométrie des deux projets de
+référence).
+- **`steering_vector`** — vecteur directionnel `a(θ)` d'un ULA (`exp(j·2π·d·m·
+  sin θ)`) : magnitude unité, tout-à-un au perpendiculaire (`θ = 0`).
+- **`beamform_spectrum`** — formateur de voie conventionnel (delay-and-sum /
+  Bartlett) : puissance moyenne `|aᴴ(θ)·x|²` sur les snapshots, spectre spatial
+  dont les pics donnent les directions des sources.
+- **`estimate_doa`** — angle du pic du spectre (estimation DOA mono-source).
+- Oracles : une onde plane depuis `θ0` → pic du formateur à `θ0` (à la
+  résolution de la grille) ; deux sources séparées ressortent chacune au-dessus
+  d'une direction vide. Sans dépendance nouvelle. 4 tests (138 au total) ;
+  `fmt`/`clippy -D warnings` propres. Les estimateurs haute résolution
+  (MVDR/Capon, MUSIC) réutiliseront ces vecteurs directionnels dans un bloc
+  ultérieur.
+
 ### Ajouté — `scirust-signal` : fonction d'ambiguïté + MTI radar — bloc 4
 Quatrième bloc du domaine radar : l'analyse de forme d'onde et le rejet de
 fouillis fixe.
