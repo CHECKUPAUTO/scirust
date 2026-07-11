@@ -3,46 +3,94 @@
 //! valeur décimale approchée (pour la lecture humaine — la preuve elle-même
 //! ne dépend que des fractions exactes, imprimées aussi).
 
+use num_rational::BigRational;
 use num_traits::ToPrimitive;
-use scirust_core::formal_proof::prove_exp_family;
+use scirust_core::formal_proof::{BoundProof, prove_cos, prove_exp_family, prove_ln, prove_sin};
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    println!("PROOF-FORMAL-BOUNDS v1");
-    let proof = prove_exp_family();
+fn f(x: &BigRational) -> f64 {
+    x.to_f64().unwrap()
+}
+
+fn print_bound_proof(proof: &BoundProof) -> bool {
     println!("famille : {}", proof.name);
     println!(
         "R (borne de la plage réduite)      = {} ≈ {:.12}",
         proof.range_bound,
-        proof.range_bound.to_f64().unwrap()
+        f(&proof.range_bound)
     );
     println!(
-        "borne de troncature (Lagrange)     = {} ≈ {:.3e}",
-        proof.truncation_bound,
-        proof.truncation_bound.to_f64().unwrap()
+        "borne de troncature (Lagrange)      ≈ {:.3e}",
+        f(&proof.truncation_bound)
     );
     println!(
-        "borne d'arrondi Horner (Higham γ)  = {} ≈ {:.3e}",
-        proof.rounding_bound,
-        proof.rounding_bound.to_f64().unwrap()
+        "borne d'arrondi flottant propagée   ≈ {:.3e}",
+        f(&proof.rounding_bound)
     );
     println!(
-        "borne d'erreur relative totale     ≈ {:.3e} (2^{:.2})",
-        proof.relative_bound.to_f64().unwrap(),
-        proof.relative_bound.to_f64().unwrap().log2()
+        "borne d'erreur relative totale      ≈ {:.3e} (2^{:.2})",
+        f(&proof.relative_bound),
+        f(&proof.relative_bound).log2()
     );
     println!(
-        "seuil d'arrondi correct            = {} = 2^-25 ≈ {:.3e}",
-        proof.threshold,
-        proof.threshold.to_f64().unwrap()
+        "seuil d'arrondi correct             = 2^-25 ≈ {:.3e}",
+        f(&proof.threshold)
     );
     let ok = proof.holds();
     println!(
-        "marge (seuil / borne)              ≈ {:.3e}",
-        (proof.threshold.to_f64().unwrap() / proof.relative_bound.to_f64().unwrap())
+        "marge (seuil / borne)               ≈ {:.3e}",
+        f(&proof.threshold) / f(&proof.relative_bound)
     );
     println!("verdict={}", if ok { "PASS" } else { "FAIL" });
-    if ok
+    println!();
+    ok
+}
+
+fn main() -> ExitCode {
+    println!("PROOF-FORMAL-BOUNDS v1");
+
+    let mut all_ok = true;
+
+    all_ok &= print_bound_proof(&prove_exp_family());
+    all_ok &= print_bound_proof(&prove_sin());
+    all_ok &= print_bound_proof(&prove_cos());
+
+    let ln_proof = prove_ln();
+    println!("famille : {}", ln_proof.name);
+    println!(
+        "|s| max (s = (m−1)/(m+1))           ≈ {:.6e}",
+        f(&ln_proof.s_max)
+    );
+    println!(
+        "borne relative cas e=0 (x≈1)        ≈ {:.3e} (2^{:.2})",
+        f(&ln_proof.e0_relative_bound),
+        f(&ln_proof.e0_relative_bound).log2()
+    );
+    println!(
+        "borne relative cas e≠0              ≈ {:.3e} (2^{:.2})",
+        f(&ln_proof.ene0_relative_bound),
+        f(&ln_proof.ene0_relative_bound).log2()
+    );
+    println!(
+        "borne d'erreur relative totale       ≈ {:.3e} (2^{:.2})",
+        f(&ln_proof.relative_bound),
+        f(&ln_proof.relative_bound).log2()
+    );
+    println!(
+        "seuil d'arrondi correct              = 2^-25 ≈ {:.3e}",
+        f(&ln_proof.threshold)
+    );
+    let ln_ok = ln_proof.holds();
+    println!(
+        "marge (seuil / borne)                ≈ {:.3e}",
+        f(&ln_proof.threshold) / f(&ln_proof.relative_bound)
+    );
+    println!("verdict={}", if ln_ok { "PASS" } else { "FAIL" });
+    all_ok &= ln_ok;
+
+    println!();
+    println!("verdict_global={}", if all_ok { "PASS" } else { "FAIL" });
+    if all_ok
     {
         ExitCode::SUCCESS
     }
