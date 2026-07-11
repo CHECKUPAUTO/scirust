@@ -1,0 +1,11 @@
+[package]
+name = "scirust-machining"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust productique mécanique — cinématique de coupe (Vc/N/Vf/MRR), effort et puissance de coupe (Kienzle), durée de vie outil (Taylor), temps d'usinage, rugosité théorique et économie d'usinage (Gilbert)"
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"
