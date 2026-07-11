@@ -28,6 +28,12 @@ cargo run -p obd2_diagnostic --release --bin obd2_massive
 cargo run -p obd2_diagnostic --release --bin obd2_ultra
 ```
 
+**Version MÉGAVERSE** (1 000 000 cas synthétiques, 1000 causes, classification extrême) — le défi ultime :
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_megaverse
+```
+
 ## Ce que fait le programme
 
 1. **Encode** chaque situation d'atelier en 7 nombres (le code défaut + des
