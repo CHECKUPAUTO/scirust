@@ -21,6 +21,8 @@
 //!   résistante (**ISO 898-1**), pas et angle d'hélice.
 //! - [`hertz`] — mécanique du contact de **Hertz** : pression et dimensions de
 //!   contact linéaire/ponctuel (engrenages, roulements, cames).
+//! - [`bearings`] — durée de vie des roulements (**ISO 281**, L10), charge
+//!   dynamique équivalente et durée corrigée en fiabilité.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -64,6 +66,7 @@
 //! assert!(pc > 0.0);
 //! ```
 
+pub mod bearings;
 pub mod economics;
 pub mod forces;
 pub mod gears;
@@ -75,6 +78,10 @@ pub mod time;
 pub mod tolerancing;
 pub mod toollife;
 
+pub use bearings::{
+    BearingType, Reliability, adjusted_rating_life, basic_rating_life_hours,
+    basic_rating_life_revs, equivalent_dynamic_load,
+};
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
 pub use gears::{
