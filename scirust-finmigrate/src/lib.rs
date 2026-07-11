@@ -22,6 +22,7 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 
 pub mod amort;
+pub mod daycount;
 pub mod paycalc;
 
 /// Fractional digits of a `PIC ...V99` money field.

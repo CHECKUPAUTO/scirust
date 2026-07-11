@@ -11,6 +11,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
     ("src/amort.rs", include_str!("../src/amort.rs")),
     ("src/paycalc.rs", include_str!("../src/paycalc.rs")),
+    ("src/daycount.rs", include_str!("../src/daycount.rs")),
 ];
 
 #[test]
