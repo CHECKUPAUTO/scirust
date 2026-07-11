@@ -16,6 +16,9 @@
 //!   rank, transform, variational, adaptive) plus a noise characterizer/classifier,
 //!   a detect-then-denoise auto pipeline with a residual whiteness self-check, and
 //!   the composite wavelet–RLS–RTS estimation pipeline
+//! - **Digital filters** — windowed-sinc FIR (lowpass/highpass), Butterworth IIR
+//!   via cascaded second-order sections, and a general direct-form-II-transposed
+//!   `lfilter`
 
 pub mod bearing;
 pub mod cepstrum;
@@ -24,6 +27,7 @@ pub mod denoise;
 pub mod envelope;
 pub mod features;
 pub mod fft;
+pub mod filter;
 pub mod mcsa;
 pub mod order;
 pub mod windows;
@@ -49,6 +53,9 @@ pub use features::{
     zero_crossing_rate,
 };
 pub use fft::{fft, fft_real, ifft};
+pub use filter::{
+    Biquad, butter_highpass_sos, butter_lowpass_sos, fir_highpass, fir_lowpass, lfilter, sos_filter,
+};
 pub use mcsa::{
     BarSeverity, BrokenBarResult, EccentricityResult, MotorDiagnosis, MotorFault,
     analyze_broken_bar, analyze_eccentricity, diagnose_motor, slip,
