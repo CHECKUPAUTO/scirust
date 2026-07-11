@@ -3,7 +3,7 @@
 //! deterministic grid world.
 
 use crate::engine::SimError;
-use crate::env::{Environment, Step};
+use crate::env::{Environment, FiniteActionSpace, Step};
 use crate::rng::SplitMix64;
 
 /// Which way the cart is pushed at a [`CartPole`] step.
@@ -113,8 +113,14 @@ impl Environment for CartPole {
     }
 }
 
+impl FiniteActionSpace for CartPole {
+    fn actions(&self) -> Vec<Push> {
+        vec![Push::Left, Push::Right]
+    }
+}
+
 /// A movement direction in a [`GridWorld`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Move {
     /// Increase `y` by one.
     Up,
@@ -251,6 +257,12 @@ impl Environment for GridWorld {
             reward: -1.0,
             done: self.done,
         }
+    }
+}
+
+impl FiniteActionSpace for GridWorld {
+    fn actions(&self) -> Vec<Move> {
+        vec![Move::Up, Move::Down, Move::Left, Move::Right]
     }
 }
 

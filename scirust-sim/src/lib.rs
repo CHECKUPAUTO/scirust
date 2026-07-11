@@ -52,8 +52,13 @@
 //! (`|t, y, dydt| model.derivatives(t, y, dydt)`) when adaptive or stiff
 //! stepping is needed; stiff plants (e.g. Robertson kinetics) belong there.
 //! The [`Environment`] trait mirrors the `(state, reward, done)` step shape of
-//! `scirust_learning::rl::Env`, so RL agents can drive these environments
-//! through a thin adapter.
+//! `scirust_learning::rl::Env`. Enabling the optional **`rl`** feature adds
+//! [`rl_bridge::RlEnv`], an adapter that presents any
+//! [`Environment`] + [`FiniteActionSpace`] as a `scirust_learning::rl::Env`, so
+//! the existing tabular/PPO/deep agents train on these environments unchanged
+//! (a tabular Q-learner finding the shortest path on [`envs::GridWorld`] is a
+//! test of the feature). The feature is off by default, keeping the core crate
+//! dependency-free.
 //!
 //! ## Error handling
 //!
@@ -95,6 +100,8 @@ pub mod mechanics;
 pub mod orbital;
 pub mod pharmacokinetics;
 pub mod rigid_body;
+#[cfg(feature = "rl")]
+pub mod rl_bridge;
 pub mod rng;
 pub mod stochastic;
 pub mod thermal;
@@ -103,5 +110,5 @@ pub use engine::{
     SecondOrderSystem, SimError, System, Trajectory, simulate, simulate_adaptive,
     simulate_second_order,
 };
-pub use env::{Environment, Step, run_episode};
+pub use env::{Environment, FiniteActionSpace, Step, run_episode};
 pub use rng::SplitMix64;
