@@ -5,6 +5,34 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — preuve formelle a priori, FP8 reproductible, TCP inter-machines (volet 117)
+- **`scirust-core::formal_proof`** (nouveau) : preuve **a priori** (bornes
+  d'erreur dérivées analytiquement, pas testées point par point) de
+  l'arrondi correct pour `exp`/`tanh`/`sigmoid` — reste de Lagrange (Taylor)
+  + théorème γ_k de Higham (Horner), en arithmétique rationnelle exacte
+  (`num-rational`). Binaire `proof_formal_bounds` : borne d'erreur relative
+  ≈ 2⁻⁴⁷·⁰⁷, marge ≈ 4,4×10⁶ sous le seuil 2⁻²⁵. Complète (sans remplacer)
+  la vérification exhaustive a posteriori du volet 115-A ; `sin`/`cos`/`ln`/
+  `erf` restent hors périmètre (cœur s'annulant près de zéro — documenté).
+- **`scirust-core --bin proof_fp8_training`** : entraînement témoin
+  **FP8 E4M3 à arrondi stochastique** (même recette que le témoin bf16 du
+  volet 116) — `f32_to_fp8_stochastic` (nouveau, `lowprec.rs` refactoré en
+  `fp8_pre_round`/`fp8_finish` partagés avec la variante RNE existante).
+  Trajectoire de perte et codes FP8 finaux sous contrat d'empreinte,
+  bit-reproductibles cross-platform (validé QEMU avant commit).
+- **`proof_tcp_multihost`** (+ `scripts/proof-tcp-multihost.sh`) :
+  all-reduce à arbre fixe sur **TCP entre machines physiques séparées**
+  (pas seulement 127.0.0.1) — chaque rang régénère son entrée localement
+  (Philox seed+rang) et le rang 0 recalcule la référence en-process pour
+  comparer bit à bit au résultat reçu par le réseau : preuve
+  **auto-vérifiante**, sans empreinte à récolter au préalable. Validé
+  multi-processus (3 et 8 rangs) et en inter-architectures réel (un rang
+  sous émulation `qemu-aarch64` parlant TCP avec des rangs x86-64 natifs).
+- Gap CI comblé : `lowprec` et `tree_allreduce` n'étaient jamais exécutés
+  par le job QEMU `cross-check-aarch64` (validés manuellement seulement) —
+  ajoutés, ainsi que `formal_proof` et `proof_formal_bounds`.
+- 759 tests (+6), clippy et fmt propres.
+
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1
   par Euler–Maclaurin à budget fixe (somme directe des 19 premiers termes,

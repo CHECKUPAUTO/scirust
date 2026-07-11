@@ -1,7 +1,78 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-07-10
+> Dernière mise à jour : 2026-07-11
+
+## Session 2026-07-11 — volet 117 : preuve formelle a priori + FP8 reproductible + TCP inter-machines
+- **Contexte** : demande utilisateur « que reste-t-il à coder ? » sur l'audit
+  RepDL/reproductibilité → 3 lacunes identifiées puis « traite tous les
+  items » : (A) aucune preuve a priori (style RLIBM/Gappa) des bornes
+  d'erreur, seule la vérification exhaustive a posteriori existait ; (B) le
+  FP8 (volet 115-C) n'avait pas d'équivalent au témoin d'entraînement
+  bf16-SR du volet 116-B ; (C) l'all-reduce TCP (volet 116-A) n'avait été
+  exercé qu'en boucle locale (127.0.0.1), jamais sur un vrai réseau ni entre
+  architectures distinctes.
+- **A — Preuve formelle a priori** (`scirust-core::formal_proof`, nouveau) :
+  borne d'erreur relative dérivée **analytiquement** (pas testée point par
+  point) pour `exp`/`tanh`/`sigmoid`, dont le cœur `exp_f64_core` partage le
+  même Taylor degré 13 sur une plage réduite où e^r reste loin de zéro.
+  Méthode : **reste de Lagrange** pour la troncature du Taylor + **théorème
+  γ_k de Higham** (`γ_k = ku/(1−ku)`, *Accuracy and Stability of Numerical
+  Algorithms*) pour l'arrondi du schéma de Horner, le tout en **arithmétique
+  rationnelle exacte** (`num-rational`/`num-bigint`, aucune confiance dans le
+  flottant de la machine qui fait la preuve) avec des bornes citables pour
+  les constantes irrationnelles (π < 355/113 Milü, ln 2 < 0,693147181,
+  vérifiables directement). Résultat : borne d'erreur relative ≈ 6,77e-15
+  (2⁻⁴⁷·⁰⁷), marge ≈ 4,4×10⁶ sous le seuil d'arrondi correct 2⁻²⁵ — preuve
+  valable sur tout le domaine réel réduit, pas seulement les points testés.
+  Binaire `proof_formal_bounds` (imprime les fractions exactes + décimales),
+  intégré au script de preuve et au job CI QEMU (arithmétique entière pure —
+  déterminisme cross-arch quasi tautologique, vérifié quand même par
+  discipline). **Portée honnête** : sin/cos/ln/erf NON couverts — leur cœur
+  s'annule près de zéro (`sin(r)→0`), ce qui casse la borne d'erreur relative
+  uniforme utilisée ici et demanderait une analyse via `sin(r)/r` (Jordan)
+  non entreprise ; seule la vérification exhaustive a posteriori (volet 115-A)
+  les couvre. Doc de `portable_f32.rs` mise à jour pour distinguer précisément
+  les deux classes de garantie par fonction.
+- **B — Entraînement FP8 E4M3 reproductible** (`proof_fp8_training`,
+  nouveau) : même recette que le témoin bf16 (volet 116-B) — maîtres f32,
+  copies forward FP8 E4M3 quantifiées par arrondi stochastique Philox
+  contre-basé. `lowprec.rs` refactoré (`fp8_pre_round`/`fp8_finish`
+  extraits de `f32_to_fp8_rne`, réutilisés par la nouvelle
+  `f32_to_fp8_stochastic`) pour ne jamais dupliquer la logique de
+  troncature de mantisse. Contrat commis (x86-64), validé bit-identique
+  sous QEMU aarch64 avant commit : trajectoire de perte
+  0x9d51f587bc9d5db4, codes FP8 finaux 0xe55a5fa4691a544c. Intégré au
+  script de preuve (report-fp8.txt) et au job CI QEMU.
+- **C — All-reduce TCP entre machines physiques séparées**
+  (`proof_tcp_multihost`, nouveau binaire + `scripts/proof-tcp-multihost.sh`) :
+  chaque rang régénère sa propre entrée localement (Philox, seed+rang —
+  reproductible sur n'importe quelle machine) et communique par sockets TCP
+  réels ; le rang 0 recalcule la référence EN-PROCESS et compare bit à bit
+  au résultat reçu par le réseau — **preuve auto-vérifiante**, aucune
+  empreinte à récolter au préalable sur du matériel externe. Validé : 3
+  rangs multi-processus (boucle locale) PASS, arbre 8 rangs (nœuds internes
+  non-racine) PASS, désaccord de seed délibéré → `verdict=FAIL` (le contrôle
+  n'est pas un trompe-l'œil), et **test inter-architectures réel** : un rang
+  tournant sous émulation `qemu-aarch64` communiquant en TCP véritable avec
+  des rangs x86-64 natifs → PASS. Script documenté avec un exemple concret
+  à 2 machines (adresses de bind vs adresses externes joignables).
+- **Gap CI comblé au passage** : les modules `lowprec` et `tree_allreduce`
+  avaient été validés manuellement sous QEMU dans des volets précédents mais
+  n'étaient jamais réellement exécutés par `cross-check-aarch64` (seul
+  `portable_f32` l'était) — deux lignes `cargo test` ajoutées ; `formal_proof`
+  ajouté dès son introduction.
+- **Vérifié** : 759 tests (`cargo test -p scirust-core --lib --release`,
+  0 échec, +6 sur le volet 116), clippy `--lib --bins --tests --release
+  -- -D warnings` propre, `cargo fmt --check` propre, script
+  `proof-portable-f32.sh` rejoué de bout en bout (5 volets de preuve,
+  tous PASS, SHA-256 canonique recalculé).
+- **Suite possible** (non entamée, documentée) : preuve a priori pour
+  sin/cos/ln/erf (nécessite l'analyse « rapport borné loin de zéro » via
+  Jordan pour sin/cos et l'équivalent pour ln) ; exécution de
+  `proof-tcp-multihost.sh` sur du matériel réellement séparé (Jetson +
+  x86-64) pour compléter la preuve auto-vérifiante par une observation
+  humaine directe sur deux machines physiques.
 
 ## Session 2026-07-10 — volet 116 : all-reduce sur TCP réel + entraînement bf16-SR reproductible
 - **A — Transport TCP réel pour l'arbre fixe** : `WireState` (encodage
