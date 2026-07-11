@@ -1,24 +1,37 @@
-//! Official IAPWS-IF97 **backward** equations: `T(p,h)` and `T(p,s)`
-//! for regions 1 and 2.
+//! Official IAPWS-IF97 **backward** equations: closed-form `T`/`v`/`p`
+//! as functions of `(p,h)`, `(p,s)` or `(h,s)`, for regions 1, 2 and 3.
 //!
-//! [`crate::steam::region1`] and [`crate::steam::region2`] take
-//! `(T, p)` and compute `h`/`s`/etc. forward. Given `(p, h)` or `(p, s)`
-//! instead — the natural outputs of an energy balance, e.g. a real
-//! turbine's actual exit enthalpy — the *forward* equations would need
-//! an iterative solve for `T` (as [`crate::cycles::rankine_real`] does,
-//! by bisection). IF97 also publishes dedicated closed-form backward
-//! correlations, fitted directly against the forward equations to
-//! within their own tight tolerance band, for when repeated bisection
-//! is a performance bottleneck. Region 2's backward equations split
-//! into three fitted sub-regions (2a/2b/2c) purely to keep each
-//! polynomial small; the split boundaries are internal implementation
-//! detail, not user-facing.
+//! [`crate::steam::region1`], [`crate::steam::region2`] and
+//! [`crate::steam::region3`] take `(T, p)` or `(T, ρ)` and compute the
+//! rest forward. Given `(p, h)`, `(p, s)` or `(h, s)` instead — the
+//! natural outputs of an energy balance, e.g. a real turbine's actual
+//! exit enthalpy — the *forward* equations would need an iterative
+//! solve (as [`crate::cycles::rankine_real`] does, by bisection, and as
+//! [`crate::steam::region3_from_tp`] does for density). IF97 also
+//! publishes dedicated closed-form backward correlations, fitted
+//! directly against the forward equations to within their own tight
+//! tolerance band, for when repeated bisection is a performance
+//! bottleneck:
+//!
+//! - `T(p,h)`/`T(p,s)` for regions 1 and 2 (each split into fitted
+//!   sub-regions purely to keep the polynomials small — 2a/2b/2c for
+//!   region 2 — the split boundaries are internal, not user-facing).
+//! - `T(p,h)`/`v(p,h)`/`T(p,s)`/`v(p,s)` for region 3, split into
+//!   sub-regions 3a/3b. Unlike [`crate::steam::region3_from_tp`], which
+//!   locates density by bisection and is therefore restricted to the
+//!   supercritical domain (`p(ρ)` is non-monotonic inside the
+//!   two-phase dome below the critical point), these closed-form fits
+//!   are valid across the *whole* region-3 domain, subcritical
+//!   included — there is no density to solve for.
+//! - `p(h,s)` for regions 1, 2 (2a/2b/2c) and 3 (3a/3b).
 //!
 //! All public interfaces are SI (Pa, J/kg, J/(kg·K), K); the IF97-native
 //! MPa/kJ units are internal. Oracle values are the worked examples of
-//! the official backward-equation releases (IF97 eqs. 11, 13, 22–27).
+//! the official backward-equation releases (IF97 eqs. 11, 13, 22–27;
+//! Supp-Tv(ph,ps)3-2014 eqs. 2-9; Supp-PHS12-2014 eqs. 1-5;
+//! Supp-phs3-2014 eq. 1).
 
-use crate::error::{ThermoError, in_range};
+use crate::error::{ThermoError, finite, in_range};
 
 /// IF97 region-1 backward `T(p,h)` exponents (Table 6).
 const B1_PH_I: [i32; 20] = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 4, 5, 6];
@@ -363,6 +376,616 @@ const B2C_PS_N: [f64; 30] = [
     -1.6429828281347e-10,
 ];
 
+/// IF97 region-3a backward `v(p,h)` exponents (Table 10).
+const B3A_VPH_I: [i32; 32] = [
+    -12, -12, -12, -12, -10, -10, -10, -8, -8, -6, -6, -6, -4, -4, -3, -2, -2, -1, -1, -1, -1, 0,
+    0, 1, 1, 1, 2, 2, 3, 4, 5, 8,
+];
+
+const B3A_VPH_J: [i32; 32] = [
+    6, 8, 12, 18, 4, 7, 10, 5, 12, 3, 4, 22, 2, 3, 7, 3, 16, 0, 1, 2, 3, 0, 1, 0, 1, 2, 0, 2, 0, 2,
+    2, 2,
+];
+
+const B3A_VPH_N: [f64; 32] = [
+    0.00529944062966028,
+    -0.170099690234461,
+    11.1323814312927,
+    -2178.98123145125,
+    -0.000506061827980875,
+    0.556495239685324,
+    -9.43672726094016,
+    -0.297856807561527,
+    93.9353943717186,
+    0.0192944939465981,
+    0.421740664704763,
+    -3689141.2628233,
+    -0.00737566847600639,
+    -0.354753242424366,
+    -1.99768169338727,
+    1.15456297059049,
+    5683.6687581596,
+    0.00808169540124668,
+    0.172416341519307,
+    1.04270175292927,
+    -0.297691372792847,
+    0.560394465163593,
+    0.275234661176914,
+    -0.148347894866012,
+    -0.0651142513478515,
+    -2.92468715386302,
+    0.0664876096952665,
+    3.52335014263844,
+    -0.0146340792313332,
+    -2.24503486668184,
+    1.10533464706142,
+    -0.0408757344495612,
+];
+
+/// IF97 region-3b backward `v(p,h)` exponents (Table 10).
+const B3B_VPH_I: [i32; 30] = [
+    -12, -12, -8, -8, -8, -8, -8, -8, -6, -6, -6, -6, -6, -6, -4, -4, -4, -3, -3, -2, -2, -1, -1,
+    -1, -1, 0, 1, 1, 2, 2,
+];
+
+const B3B_VPH_J: [i32; 30] = [
+    0, 1, 0, 1, 3, 6, 7, 8, 0, 1, 2, 5, 6, 10, 3, 6, 10, 0, 2, 1, 2, 0, 1, 4, 5, 0, 0, 1, 2, 6,
+];
+
+const B3B_VPH_N: [f64; 30] = [
+    -2.25196934336318e-09,
+    1.40674363313486e-08,
+    2.3378408528056e-06,
+    -3.31833715229001e-05,
+    0.00107956778514318,
+    -0.271382067378863,
+    1.07202262490333,
+    -0.853821329075382,
+    -2.15214194340526e-05,
+    0.00076965608822273,
+    -0.00431136580433864,
+    0.453342167309331,
+    -0.507749535873652,
+    -100.475154528389,
+    -0.219201924648793,
+    -3.21087965668917,
+    607.567815637771,
+    0.000557686450685932,
+    0.18749904002955,
+    0.00905368030448107,
+    0.285417173048685,
+    0.0329924030996098,
+    0.239897419685483,
+    4.82754995951394,
+    -11.8035753702231,
+    0.169490044091791,
+    -0.0179967222507787,
+    0.0371810116332674,
+    -0.0536288335065096,
+    1.6069710109252,
+];
+
+/// IF97 region-3a backward `T(p,h)` exponents (Table 8).
+const B3A_TPH_I: [i32; 31] = [
+    -12, -12, -12, -12, -12, -12, -12, -12, -10, -10, -10, -8, -8, -8, -8, -5, -3, -2, -2, -2, -1,
+    -1, 0, 0, 1, 3, 3, 4, 4, 10, 12,
+];
+
+const B3A_TPH_J: [i32; 31] = [
+    0, 1, 2, 6, 14, 16, 20, 22, 1, 5, 12, 0, 2, 4, 10, 2, 0, 1, 3, 4, 0, 2, 0, 1, 1, 0, 1, 0, 3, 4,
+    5,
+];
+
+const B3A_TPH_N: [f64; 31] = [
+    -1.33645667811215e-07,
+    4.55912656802978e-06,
+    -1.46294640700979e-05,
+    0.0063934131297008,
+    372.783927268847,
+    -7186.54377460447,
+    573494.7521034,
+    -2675693.29111439,
+    -3.34066283302614e-05,
+    -0.0245479214069597,
+    47.8087847764996,
+    7.64664131818904e-06,
+    0.00128350627676972,
+    0.0171219081377331,
+    -8.51007304583213,
+    -0.0136513461629781,
+    -3.84460997596657e-06,
+    0.00337423807911655,
+    -0.551624873066791,
+    0.72920227710747,
+    -0.00992522757376041,
+    -0.119308831407288,
+    0.793929190615421,
+    0.454270731799386,
+    0.20999859125991,
+    -0.00642109823904738,
+    -0.023515586860454,
+    0.00252233108341612,
+    -0.00764885133368119,
+    0.0136176427574291,
+    -0.0133027883575669,
+];
+
+/// IF97 region-3b backward `T(p,h)` exponents (Table 9).
+const B3B_TPH_I: [i32; 33] = [
+    -12, -12, -10, -10, -10, -10, -10, -8, -8, -8, -8, -8, -6, -6, -6, -4, -4, -3, -2, -2, -1, -1,
+    -1, -1, -1, -1, 0, 0, 1, 3, 5, 6, 8,
+];
+
+const B3B_TPH_J: [i32; 33] = [
+    0, 1, 0, 1, 5, 10, 12, 0, 1, 2, 4, 10, 0, 1, 2, 0, 1, 5, 0, 4, 2, 4, 6, 10, 14, 16, 0, 2, 1, 1,
+    1, 1, 1,
+];
+
+const B3B_TPH_N: [f64; 33] = [
+    3.2325457364492e-05,
+    -0.000127575556587181,
+    -0.000475851877356068,
+    0.00156183014181602,
+    0.105724860113781,
+    -85.8514221132534,
+    724.140095480911,
+    0.00296475810273257,
+    -0.00592721983365988,
+    -0.0126305422818666,
+    -0.115716196364853,
+    84.9000969739595,
+    -0.0108602260086615,
+    0.0154304475328851,
+    0.0750455441524466,
+    0.0252520973612982,
+    -0.0602507901232996,
+    -3.07622221350501,
+    -0.0574011959864879,
+    5.03471360939849,
+    -0.925081888584834,
+    3.91733882917546,
+    -77.314600713019,
+    9493.08762098587,
+    -1410437.19679409,
+    8491662.30819026,
+    0.861095729446704,
+    0.32334644281172,
+    0.873281936020439,
+    -0.436653048526683,
+    0.286596714529479,
+    -0.131778331276228,
+    0.00676682064330275,
+];
+
+/// IF97 region-3a backward `v(p,s)` exponents (Table 15).
+const B3A_VPS_I: [i32; 28] = [
+    -12, -12, -12, -10, -10, -10, -10, -8, -8, -8, -8, -6, -5, -4, -3, -3, -2, -2, -1, -1, 0, 0, 0,
+    1, 2, 4, 5, 6,
+];
+
+const B3A_VPS_J: [i32; 28] = [
+    10, 12, 14, 4, 8, 10, 20, 5, 6, 14, 16, 28, 1, 5, 2, 4, 3, 8, 1, 2, 0, 1, 3, 0, 0, 2, 2, 0,
+];
+
+const B3A_VPS_N: [f64; 28] = [
+    79.5544074093975,
+    -2382.6124298459,
+    17681.3100617787,
+    -0.00110524727080379,
+    -15.3213833655326,
+    297.544599376982,
+    -35031520.6871242,
+    0.277513761062119,
+    -0.523964271036888,
+    -148011.182995403,
+    1600148.99374266,
+    1708023226634.27,
+    0.000246866996006494,
+    1.6532608479798,
+    -0.118008384666987,
+    2.537986423559,
+    0.965127704669424,
+    -28.2172420532826,
+    0.203224612353823,
+    1.10648186063513,
+    0.52612794845128,
+    0.277000018736321,
+    1.08153340501132,
+    -0.0744127885357893,
+    0.0164094443541384,
+    -0.0680468275301065,
+    0.025798857610164,
+    -0.000145749861944416,
+];
+
+/// IF97 region-3b backward `v(p,s)` exponents (Table 15).
+const B3B_VPS_I: [i32; 31] = [
+    -12, -12, -12, -12, -12, -12, -10, -10, -10, -10, -8, -5, -5, -5, -4, -4, -4, -4, -3, -2, -2,
+    -2, -2, -2, -2, 0, 0, 0, 1, 1, 2,
+];
+
+const B3B_VPS_J: [i32; 31] = [
+    0, 1, 2, 3, 5, 6, 0, 1, 2, 4, 0, 1, 2, 3, 0, 1, 2, 3, 1, 0, 1, 2, 3, 4, 12, 0, 1, 2, 0, 2, 2,
+];
+
+const B3B_VPS_N: [f64; 31] = [
+    5.91599780322238e-05,
+    -0.00185465997137856,
+    0.0104190510480013,
+    0.0059864730203859,
+    -0.771391189901699,
+    1.72549765557036,
+    -0.000467076079846526,
+    0.0134533823384439,
+    -0.0808094336805495,
+    0.508139374365767,
+    0.00128584643361683,
+    -1.63899353915435,
+    5.86938199318063,
+    -2.92466667918613,
+    -0.00614076301499537,
+    5.76199014049172,
+    -12.1613320606788,
+    1.67637540957944,
+    -7.44135838773463,
+    0.0378168091437659,
+    4.01432203027688,
+    16.0279837479185,
+    3.17848779347728,
+    -3.58362310304853,
+    -1159952.60446827,
+    0.199256573577909,
+    -0.122270624794624,
+    -19.1449143716586,
+    -0.0150448002905284,
+    14.6407900162154,
+    -3.2747778718823,
+];
+
+/// IF97 region-3a backward `T(p,s)` exponents (Table 13).
+const B3A_TPS_I: [i32; 33] = [
+    -12, -12, -10, -10, -10, -10, -8, -8, -8, -8, -6, -6, -6, -5, -5, -5, -4, -4, -4, -2, -2, -1,
+    -1, 0, 0, 0, 1, 2, 2, 3, 8, 8, 10,
+];
+
+const B3A_TPS_J: [i32; 33] = [
+    28, 32, 4, 10, 12, 14, 5, 7, 8, 28, 2, 6, 32, 0, 14, 32, 6, 10, 36, 1, 4, 1, 6, 0, 1, 4, 0, 0,
+    3, 2, 0, 1, 2,
+];
+
+const B3A_TPS_N: [f64; 33] = [
+    1500420082.63875,
+    -159397258480.424,
+    0.000502181140217975,
+    -67.2057767855466,
+    1450.58545404456,
+    -8238.8953488889,
+    -0.154852214233853,
+    11.2305046746695,
+    -29.7000213482822,
+    43856513263.5495,
+    0.00137837838635464,
+    -2.97478527157462,
+    9717779473494.13,
+    -5.71527767052398e-05,
+    28830.794977842,
+    -74442828926270.3,
+    12.8017324848921,
+    -368.275545889071,
+    6647689047791770.0,
+    0.044935925195888,
+    -4.22897836099655,
+    -0.240614376434179,
+    -4.74341365254924,
+    0.72409399912611,
+    0.923874349695897,
+    3.99043655281015,
+    0.0384066651868009,
+    -0.00359344365571848,
+    -0.735196448821653,
+    0.188367048396131,
+    0.000141064266818704,
+    -0.00257418501496337,
+    0.00123220024851555,
+];
+
+/// IF97 region-3b backward `T(p,s)` exponents (Table 14).
+const B3B_TPS_I: [i32; 28] = [
+    -12, -12, -12, -12, -8, -8, -8, -6, -6, -6, -5, -5, -5, -5, -5, -4, -3, -3, -2, 0, 2, 3, 4, 5,
+    6, 8, 12, 14,
+];
+
+const B3B_TPS_J: [i32; 28] = [
+    1, 3, 4, 7, 0, 1, 3, 0, 2, 4, 0, 1, 2, 4, 6, 12, 1, 6, 2, 0, 1, 1, 0, 24, 0, 3, 1, 2,
+];
+
+const B3B_TPS_N: [f64; 28] = [
+    0.52711170160166,
+    -40.1317830052742,
+    153.020073134484,
+    -2247.99398218827,
+    -0.193993484669048,
+    -1.40467557893768,
+    42.6799878114024,
+    0.752810643416743,
+    22.6657238616417,
+    -622.873556909932,
+    -0.660823667935396,
+    0.841267087271658,
+    -25.3717501764397,
+    485.708963532948,
+    880.531517490555,
+    2650155.92794626,
+    -0.359287150025783,
+    -656.991567673753,
+    2.41768149185367,
+    0.856873461222588,
+    0.655143675313458,
+    -0.213535213206406,
+    0.00562974957606348,
+    -316955725450471.0,
+    -0.000699997000152457,
+    0.0119845803210767,
+    1.93848122022095e-05,
+    -2.15095749182309e-05,
+];
+
+/// IF97 region-1 backward `p(h,s)` exponents (Table 2).
+const B1_PHS_I: [i32; 19] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 4, 4, 5];
+
+const B1_PHS_J: [i32; 19] = [0, 1, 2, 4, 5, 6, 8, 14, 0, 1, 4, 6, 0, 1, 10, 4, 1, 4, 0];
+
+const B1_PHS_N: [f64; 19] = [
+    -0.691997014660582,
+    -18.361254878756,
+    -9.28332409297335,
+    65.9639569909906,
+    -16.2060388912024,
+    450.620017338667,
+    854.68067822417,
+    6075.23214001162,
+    32.6487682621856,
+    -26.9408844582931,
+    -319.9478483343,
+    -928.35430704332,
+    30.3634537455249,
+    -65.0540422444146,
+    -4309.9131651613,
+    -747.512324096068,
+    730.000345529245,
+    1142.84032569021,
+    -436.407041874559,
+];
+
+/// IF97 region-2a backward `p(h,s)` exponents (Table 3).
+const B2A_PHS_I: [i32; 29] = [
+    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5, 5, 6, 7,
+];
+
+const B2A_PHS_J: [i32; 29] = [
+    1, 3, 6, 16, 20, 22, 0, 1, 2, 3, 5, 6, 10, 16, 20, 22, 3, 16, 20, 0, 2, 3, 6, 16, 16, 3, 16, 3,
+    1,
+];
+
+const B2A_PHS_N: [f64; 29] = [
+    -0.0182575361923032,
+    -0.125229548799536,
+    0.592290437320145,
+    6.04769706185122,
+    238.624965444474,
+    -298.639090222922,
+    0.051225081304075,
+    -0.437266515606486,
+    0.413336902999504,
+    -5.16468254574773,
+    -5.57014838445711,
+    12.8555037824478,
+    11.414410895329,
+    -119.504225652714,
+    -2847.7798596156,
+    4317.57846408006,
+    1.1289404080265,
+    1974.09186206319,
+    1516.12444706087,
+    0.0141324451421235,
+    0.585501282219601,
+    -2.97258075863012,
+    5.94567314847319,
+    -6236.56565798905,
+    9659.86235133332,
+    6.81500934948134,
+    -6332.07286824489,
+    -5.5891922446576,
+    0.0400645798472063,
+];
+
+/// IF97 region-2b backward `p(h,s)` exponents (Table 4).
+const B2B_PHS_I: [i32; 33] = [
+    0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 8,
+    12, 14,
+];
+
+const B2B_PHS_J: [i32; 33] = [
+    0, 1, 2, 4, 8, 0, 1, 2, 3, 5, 12, 1, 6, 18, 0, 1, 7, 12, 1, 16, 1, 12, 1, 8, 18, 1, 16, 1, 3,
+    14, 18, 10, 16,
+];
+
+const B2B_PHS_N: [f64; 33] = [
+    0.0801496989929495,
+    -0.543862807146111,
+    0.337455597421283,
+    8.9055545115745,
+    313.840736431485,
+    0.797367065977789,
+    -1.2161697355624,
+    8.72803386937477,
+    -16.9769781757602,
+    -186.552827328416,
+    95115.9274344237,
+    -18.9168510120494,
+    -4334.0703719484,
+    543212633.012715,
+    0.144793408386013,
+    128.024559637516,
+    -67230.9534071268,
+    33697238.0095287,
+    -586.63419676272,
+    -22140322476.9889,
+    1716.06668708389,
+    -570817595.806302,
+    -3121.09693178482,
+    -2078413.8463301,
+    3056059461577.86,
+    3221.57004314333,
+    326810259797.295,
+    -1441.04158934487,
+    410.694867802691,
+    109077066873.024,
+    -24796465425889.3,
+    1888019068.65134,
+    -123651009018773.0,
+];
+
+/// IF97 region-2c backward `p(h,s)` exponents (Table 5).
+const B2C_PHS_I: [i32; 31] = [
+    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6, 6, 10, 12, 16,
+];
+
+const B2C_PHS_J: [i32; 31] = [
+    0, 1, 2, 3, 4, 8, 0, 2, 5, 8, 14, 2, 3, 7, 10, 18, 0, 5, 8, 16, 18, 18, 1, 4, 6, 14, 8, 18, 7,
+    7, 10,
+];
+
+const B2C_PHS_N: [f64; 31] = [
+    0.112225607199012,
+    -3.39005953606712,
+    -32.0503911730094,
+    -197.5973051049,
+    -407.693861553446,
+    13294.3775222331,
+    1.70846839774007,
+    37.3694198142245,
+    3581.44365815434,
+    423014.446424664,
+    -751071025.760063,
+    52.3446127607898,
+    -228.351290812417,
+    -960652.417056937,
+    -80705929.2526074,
+    1626980172256.69,
+    0.772465073604171,
+    46392.9973837746,
+    -13731788.5134128,
+    1704703926305.12,
+    -25110462818730.8,
+    31774883083552.0,
+    53.8685623675312,
+    -55308.9094625169,
+    -1028615.22421405,
+    2042494187562.34,
+    273918446.626977,
+    -2639631463126850.0,
+    -1078908541.08088,
+    -29649262098.0124,
+    -1117549073234240.0,
+];
+
+/// IF97 region-3a backward `p(h,s)` exponents (Table 6).
+const B3A_PHS_I: [i32; 33] = [
+    0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 6, 7, 8, 10, 10, 14, 18, 20, 22, 22, 24,
+    28, 28, 32, 32,
+];
+
+const B3A_PHS_J: [i32; 33] = [
+    0, 1, 5, 0, 3, 4, 8, 14, 6, 16, 0, 2, 3, 0, 1, 4, 5, 28, 28, 24, 1, 32, 36, 22, 28, 36, 16, 28,
+    36, 16, 36, 10, 28,
+];
+
+const B3A_PHS_N: [f64; 33] = [
+    7.70889828326934,
+    -26.0835009128688,
+    267.416218930389,
+    17.2221089496844,
+    -293.54233214597,
+    614.135601882478,
+    -61056.2757725674,
+    -65127225.1118219,
+    73591.9313521937,
+    -11664650591.4191,
+    35.5267086434461,
+    -596.144543825955,
+    -475.842430145708,
+    69.6781965359503,
+    335.674250377312,
+    25052.6809130882,
+    146997.380630766,
+    5.38069315091534e+19,
+    1.43619827291346e+21,
+    3.64985866165994e+19,
+    -2547.41561156775,
+    2.40120197096563e+27,
+    -3.93847464679496e+29,
+    1.47073407024852e+24,
+    -4.26391250432059e+31,
+    1.94509340621077e+38,
+    6.66212132114896e+23,
+    7.06777016552858e+33,
+    1.75563621975576e+41,
+    1.08408607429124e+28,
+    7.30872705175151e+43,
+    1.5914584739887e+24,
+    3.77121605943324e+40,
+];
+
+/// IF97 region-3b backward `p(h,s)` exponents (Table 7).
+const B3B_PHS_I: [i32; 35] = [
+    -12, -12, -12, -12, -12, -10, -10, -10, -10, -8, -8, -6, -6, -6, -6, -5, -4, -4, -4, -3, -3,
+    -3, -3, -2, -2, -1, 0, 2, 2, 5, 6, 8, 10, 14, 14,
+];
+
+const B3B_PHS_J: [i32; 35] = [
+    2, 10, 12, 14, 20, 2, 10, 14, 18, 2, 8, 2, 6, 7, 8, 10, 4, 5, 8, 1, 3, 5, 6, 0, 1, 0, 3, 0, 1,
+    0, 1, 1, 1, 3, 7,
+];
+
+const B3B_PHS_N: [f64; 35] = [
+    1.25244360717979e-13,
+    -0.0126599322553713,
+    5.06878030140626,
+    31.7847171154202,
+    -391041.161399932,
+    -9.75733406392044e-11,
+    -18.6312419488279,
+    510.973543414101,
+    373847.005822362,
+    2.99804024666572e-08,
+    20.0544393820342,
+    -4.98030487662829e-06,
+    -10.230180636003,
+    55.2819126990325,
+    -206.211367510878,
+    -7940.12232324823,
+    7.82248472028153,
+    -58.6544326902468,
+    3550.73647696481,
+    -0.000115303107290162,
+    -1.75092403171802,
+    257.98168774816,
+    -727.048374179467,
+    0.000121644822609198,
+    0.0393137871762692,
+    0.00704181005909296,
+    -82.910820069811,
+    -0.26517881813125,
+    13.7531682453991,
+    -52.2394090753046,
+    2405.56298941048,
+    -22736.1631268929,
+    89074.6343932567,
+    -23923456.5822486,
+    5687958081.29714,
+];
+
 fn poly(i: &[i32], j: &[i32], n: &[f64], x: f64, y: f64) -> f64 {
     let mut sum = 0.0;
     for k in 0..n.len()
@@ -473,6 +1096,253 @@ pub fn region2_t_ps(p: f64, s: f64) -> Result<f64, ThermoError> {
         poly(&B2C_PS_I, &B2C_PS_J, &B2C_PS_N, pr, 2.0 - s_kj / 2.9251)
     };
     Ok(clamp_to_saturation(t, pr))
+}
+
+/// Region-3a/3b sub-region boundary for `(p,h)` dispatch, specific
+/// enthalpy \[kJ/kg\] as a function of pressure `p` \[MPa\]
+/// (Supp-Tv(ph,ps)3-2014 eq. 1). `h` at or below this value is
+/// sub-region 3a (liquid-like), above it 3b (vapour-like) — purely an
+/// internal fit boundary, not a phase transition (above the critical
+/// point region 3 is a single continuous fluid).
+fn h_3ab(p_mpa: f64) -> f64 {
+    2014.64004206875 + 3.74696550136983 * p_mpa - 0.0219921901054187 * p_mpa * p_mpa
+        + 8.7513168600995e-05 * p_mpa * p_mpa * p_mpa
+}
+
+/// Critical specific entropy \[J/(kg·K)\] — the region-3a/3b dispatch
+/// boundary for every `(p,s)`- or `(h,s)`-based region-3 backward
+/// query. Unlike [`h_3ab`]'s `(p,h)` boundary, this one depends only on
+/// `s`, not on pressure (Supp-Tv(ph,ps)3-2014 / Supp-phs3-2014).
+const S_CRITICAL: f64 = 4412.02148223476;
+
+/// Region-3 **backward** equation `v(p, h)` \[m³/kg\]: specific volume
+/// of dense/near-critical water from its pressure `p` \[Pa\] and
+/// specific enthalpy `h` \[J/kg\] (Supp-Tv(ph,ps)3-2014 eqs. 4-5),
+/// dispatched to fitted sub-region 3a or 3b by [`h_3ab`]. Unlike
+/// [`crate::steam::region3_from_tp`]'s density bisection, this
+/// closed-form fit is valid across the whole region-3 domain,
+/// subcritical included — there is no density to solve for.
+pub fn region3_v_ph(p: f64, h: f64) -> Result<f64, ThermoError> {
+    in_range("p", p, f64::MIN_POSITIVE, crate::steam::P_MAX)?;
+    let pr = p / 1.0e8;
+    let hk = h / 1000.0;
+    let v = if hk <= h_3ab(p / 1.0e6)
+    {
+        0.0028
+            * poly(
+                &B3A_VPH_I,
+                &B3A_VPH_J,
+                &B3A_VPH_N,
+                pr + 0.128,
+                hk / 2100.0 - 0.727,
+            )
+    }
+    else
+    {
+        0.0088
+            * poly(
+                &B3B_VPH_I,
+                &B3B_VPH_J,
+                &B3B_VPH_N,
+                pr + 0.0661,
+                hk / 2800.0 - 0.72,
+            )
+    };
+    Ok(v)
+}
+
+/// Region-3 **backward** equation `T(p, h)` \[K\] (Supp-Tv(ph,ps)3-2014
+/// eqs. 2-3), dispatched the same way as [`region3_v_ph`].
+pub fn region3_t_ph(p: f64, h: f64) -> Result<f64, ThermoError> {
+    in_range("p", p, f64::MIN_POSITIVE, crate::steam::P_MAX)?;
+    let pr = p / 1.0e8;
+    let hk = h / 1000.0;
+    let t = if hk <= h_3ab(p / 1.0e6)
+    {
+        760.0
+            * poly(
+                &B3A_TPH_I,
+                &B3A_TPH_J,
+                &B3A_TPH_N,
+                pr + 0.240,
+                hk / 2300.0 - 0.615,
+            )
+    }
+    else
+    {
+        860.0
+            * poly(
+                &B3B_TPH_I,
+                &B3B_TPH_J,
+                &B3B_TPH_N,
+                pr + 0.298,
+                hk / 2800.0 - 0.72,
+            )
+    };
+    Ok(t)
+}
+
+/// Region-3 **backward** equation `v(p, s)` \[m³/kg\] (Supp-Tv(ph,ps)3-2014
+/// eqs. 8-9), dispatched to sub-region 3a/3b purely by `s` against
+/// [`S_CRITICAL`] — unlike the `(p,h)` dispatch, no pressure-dependent
+/// boundary is needed.
+pub fn region3_v_ps(p: f64, s: f64) -> Result<f64, ThermoError> {
+    in_range("p", p, f64::MIN_POSITIVE, crate::steam::P_MAX)?;
+    let pr = p / 1.0e8;
+    let sk = s / 1000.0;
+    let v = if s <= S_CRITICAL
+    {
+        0.0028
+            * poly(
+                &B3A_VPS_I,
+                &B3A_VPS_J,
+                &B3A_VPS_N,
+                pr + 0.187,
+                sk / 4.4 - 0.755,
+            )
+    }
+    else
+    {
+        0.0088
+            * poly(
+                &B3B_VPS_I,
+                &B3B_VPS_J,
+                &B3B_VPS_N,
+                pr + 0.298,
+                sk / 5.3 - 0.816,
+            )
+    };
+    Ok(v)
+}
+
+/// Region-3 **backward** equation `T(p, s)` \[K\] (Supp-Tv(ph,ps)3-2014
+/// eqs. 6-7), dispatched the same way as [`region3_v_ps`].
+pub fn region3_t_ps(p: f64, s: f64) -> Result<f64, ThermoError> {
+    in_range("p", p, f64::MIN_POSITIVE, crate::steam::P_MAX)?;
+    let pr = p / 1.0e8;
+    let sk = s / 1000.0;
+    let t = if s <= S_CRITICAL
+    {
+        760.0
+            * poly(
+                &B3A_TPS_I,
+                &B3A_TPS_J,
+                &B3A_TPS_N,
+                pr + 0.240,
+                sk / 4.4 - 0.703,
+            )
+    }
+    else
+    {
+        860.0
+            * poly(
+                &B3B_TPS_I,
+                &B3B_TPS_J,
+                &B3B_TPS_N,
+                pr + 0.760,
+                sk / 5.3 - 0.818,
+            )
+    };
+    Ok(t)
+}
+
+/// Region-1 **backward** equation `p(h, s)` \[Pa\]: pressure of
+/// compressed/subcooled liquid water from its specific enthalpy `h`
+/// \[J/kg\] and specific entropy `s` \[J/(kg·K)\] (Supp-PHS12-2014 eq. 1).
+pub fn region1_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
+    finite("h", h)?;
+    finite("s", s)?;
+    let nu = h / 1000.0 / 3400.0 + 0.05;
+    let sigma = s / 1000.0 / 7.6 + 0.05;
+    Ok(100.0e6 * poly(&B1_PHS_I, &B1_PHS_J, &B1_PHS_N, nu, sigma))
+}
+
+/// Region-2a/2b sub-region boundary for `p(h,s)` dispatch, specific
+/// enthalpy \[kJ/kg\] as a function of entropy `s` \[kJ/(kg·K)\]
+/// (Supp-PHS12-2014 eq. 2).
+fn hab_s(s_kj: f64) -> f64 {
+    -3498.98083432139 + 2575.60716905876 * s_kj - 421.073558227969 * s_kj * s_kj
+        + 27.6349063799944 * s_kj * s_kj * s_kj
+}
+
+/// Region-2 **backward** equation `p(h, s)` \[Pa\]: pressure of
+/// superheated steam from its specific enthalpy `h` \[J/kg\] and
+/// specific entropy `s` \[J/(kg·K)\], dispatched across the three
+/// fitted sub-regions 2a/2b/2c (Supp-PHS12-2014 eqs. 3-5) by [`hab_s`]
+/// and the same `s = 5.85 kJ/(kg·K)` split used in [`region2_t_ps`].
+pub fn region2_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
+    finite("h", h)?;
+    finite("s", s)?;
+    let hk = h / 1000.0;
+    let sk = s / 1000.0;
+    let p = if hk <= hab_s(sk)
+    {
+        let suma = poly(
+            &B2A_PHS_I,
+            &B2A_PHS_J,
+            &B2A_PHS_N,
+            hk / 4200.0 - 0.5,
+            sk / 12.0 - 1.2,
+        );
+        4.0e6 * suma.powi(4)
+    }
+    else if sk >= 5.85
+    {
+        let suma = poly(
+            &B2B_PHS_I,
+            &B2B_PHS_J,
+            &B2B_PHS_N,
+            hk / 4100.0 - 0.6,
+            sk / 7.9 - 1.01,
+        );
+        100.0e6 * suma.powi(4)
+    }
+    else
+    {
+        let suma = poly(
+            &B2C_PHS_I,
+            &B2C_PHS_J,
+            &B2C_PHS_N,
+            hk / 3500.0 - 0.7,
+            sk / 5.9 - 1.1,
+        );
+        100.0e6 * suma.powi(4)
+    };
+    Ok(p)
+}
+
+/// Region-3 **backward** equation `p(h, s)` \[Pa\]: pressure of
+/// dense/near-critical water from its specific enthalpy `h` \[J/kg\]
+/// and specific entropy `s` \[J/(kg·K)\], dispatched to sub-region
+/// 3a/3b by [`S_CRITICAL`] (Supp-phs3-2014 eq. 1).
+pub fn region3_p_hs(h: f64, s: f64) -> Result<f64, ThermoError> {
+    finite("h", h)?;
+    finite("s", s)?;
+    let hk = h / 1000.0;
+    let sk = s / 1000.0;
+    let p = if s <= S_CRITICAL
+    {
+        99.0e6
+            * poly(
+                &B3A_PHS_I,
+                &B3A_PHS_J,
+                &B3A_PHS_N,
+                hk / 2300.0 - 1.01,
+                sk / 4.4 - 0.75,
+            )
+    }
+    else
+    {
+        16.6e6
+            / poly(
+                &B3B_PHS_I,
+                &B3B_PHS_J,
+                &B3B_PHS_N,
+                hk / 2800.0 - 0.681,
+                sk / 5.3 - 0.792,
+            )
+    };
+    Ok(p)
 }
 
 #[cfg(test)]
@@ -594,5 +1464,183 @@ mod tests {
         assert!(region1_t_ph(200.0e6, 500.0e3).is_err());
         assert!(region2_t_ph(-1.0, 3000.0e3).is_err());
         assert!(region2_t_ps(200.0e6, 7500.0).is_err());
+    }
+
+    #[test]
+    fn if97_region3_backward_worked_examples() {
+        // Official Supp-Tv(ph,ps)3-2014 worked examples, sub-regions 3a/3b.
+        let v = region3_v_ph(20.0e6, 1700.0e3).unwrap();
+        assert!(
+            (v - 0.001749903962).abs() / 0.001749903962 < 1e-8,
+            "3a v = {v}"
+        );
+        let v = region3_v_ph(100.0e6, 2100.0e3).unwrap();
+        assert!(
+            (v - 0.001676229776).abs() / 0.001676229776 < 1e-8,
+            "3a v = {v}"
+        );
+        let v = region3_v_ph(20.0e6, 2500.0e3).unwrap();
+        assert!(
+            (v - 0.006670547043).abs() / 0.006670547043 < 1e-8,
+            "3b v = {v}"
+        );
+        let v = region3_v_ph(100.0e6, 2700.0e3).unwrap();
+        assert!(
+            (v - 0.002404234998).abs() / 0.002404234998 < 1e-8,
+            "3b v = {v}"
+        );
+
+        let t = region3_t_ph(20.0e6, 1700.0e3).unwrap();
+        assert!((t - 629.3083892).abs() / 629.3083892 < 1e-8, "3a T = {t}");
+        let t = region3_t_ph(20.0e6, 2500.0e3).unwrap();
+        assert!((t - 641.8418053).abs() / 641.8418053 < 1e-8, "3b T = {t}");
+
+        let v = region3_v_ps(20.0e6, 3800.0).unwrap();
+        assert!(
+            (v - 0.001733791463).abs() / 0.001733791463 < 1e-8,
+            "3a v = {v}"
+        );
+        let v = region3_v_ps(20.0e6, 5000.0).unwrap();
+        assert!(
+            (v - 0.006262101987).abs() / 0.006262101987 < 1e-8,
+            "3b v = {v}"
+        );
+
+        let t = region3_t_ps(20.0e6, 3800.0).unwrap();
+        assert!((t - 628.2959869).abs() / 628.2959869 < 1e-8, "3a T = {t}");
+        let t = region3_t_ps(20.0e6, 5000.0).unwrap();
+        assert!((t - 640.1176443).abs() / 640.1176443 < 1e-8, "3b T = {t}");
+    }
+
+    #[test]
+    fn region3_subcritical_backward_agrees_with_forward_round_trip() {
+        // Below the critical point, region 3 is bounded below by the
+        // B23 curve (not the saturation curve -- B23(T) < Psat(T) in
+        // this band, ceding part of what would otherwise be region 2's
+        // domain to region 3's vapour-like 3b branch) and above by
+        // 100 MPa on the liquid-like 3a branch. This is exactly the
+        // "compressed liquid, too hot for region 1" domain these
+        // backward equations serve, unlike `region3_from_tp`'s density
+        // bisection (restricted to supercritical T because p(rho) is
+        // non-monotonic inside the two-phase dome below the critical
+        // point). Scan from a density comfortably past that
+        // near-critical loop so `p` increases monotonically with rho.
+        let t = 630.0;
+        let p_b23 = crate::steam::b23_pressure(t).unwrap();
+        let mut found = false;
+        for i in 0..400
+        {
+            let rho = 550.0 + i as f64;
+            if let Ok(st) = crate::steam::region3(t, rho)
+            {
+                if st.p > 1.001 * p_b23 && st.p <= crate::steam::P_MAX
+                {
+                    found = true;
+                    let t_ph = region3_t_ph(st.p, st.h).unwrap();
+                    let v_ph = region3_v_ph(st.p, st.h).unwrap();
+                    let t_ps = region3_t_ps(st.p, st.s).unwrap();
+                    let v_ps = region3_v_ps(st.p, st.s).unwrap();
+                    assert!((t_ph - t).abs() < 0.03, "T_ph = {t_ph}, want {t}");
+                    assert!((t_ps - t).abs() < 0.03, "T_ps = {t_ps}, want {t}");
+                    assert!(
+                        (v_ph - st.v).abs() / st.v < 1e-3,
+                        "v_ph = {v_ph}, want {}",
+                        st.v
+                    );
+                    assert!(
+                        (v_ps - st.v).abs() / st.v < 1e-3,
+                        "v_ps = {v_ps}, want {}",
+                        st.v
+                    );
+                    break;
+                }
+            }
+        }
+        assert!(
+            found,
+            "no subcritical region-3 state found in the scan range"
+        );
+    }
+
+    #[test]
+    fn if97_p_hs_worked_examples() {
+        // Official Supp-PHS12-2014 / Supp-phs3-2014 worked examples.
+        let p = region1_p_hs(0.001e3, 0.0).unwrap();
+        assert!(
+            (p - 0.0009800980612e6).abs() / 0.0009800980612e6 < 1e-6,
+            "p = {p}"
+        );
+        let p = region1_p_hs(90.0e3, 0.0).unwrap();
+        assert!((p - 91.92954727e6).abs() / 91.92954727e6 < 1e-8, "p = {p}");
+        let p = region1_p_hs(1500.0e3, 3400.0).unwrap();
+        assert!((p - 58.68294423e6).abs() / 58.68294423e6 < 1e-8, "p = {p}");
+
+        // Sub-region 2a/2b/2c.
+        let p = region2_p_hs(2800.0e3, 6500.0).unwrap();
+        assert!(
+            (p - 1.371012767e6).abs() / 1.371012767e6 < 1e-7,
+            "2a p = {p}"
+        );
+        let p = region2_p_hs(2800.0e3, 6000.0).unwrap();
+        assert!(
+            (p - 4.793911442e6).abs() / 4.793911442e6 < 1e-8,
+            "2b p = {p}"
+        );
+        let p = region2_p_hs(2800.0e3, 5100.0).unwrap();
+        assert!(
+            (p - 94.39202060e6).abs() / 94.39202060e6 < 1e-7,
+            "2c p = {p}"
+        );
+
+        // Sub-region 3a/3b.
+        let p = region3_p_hs(1700.0e3, 3800.0).unwrap();
+        assert!(
+            (p - 25.55703246e6).abs() / 25.55703246e6 < 1e-7,
+            "3a p = {p}"
+        );
+        let p = region3_p_hs(2400.0e3, 4700.0).unwrap();
+        assert!(
+            (p - 63.63924887e6).abs() / 63.63924887e6 < 1e-7,
+            "3b p = {p}"
+        );
+    }
+
+    #[test]
+    fn p_hs_agrees_with_forward_round_trip() {
+        // Region 1: forward (T,p) -> (h,s), backward p(h,s) recovers p.
+        for &(t, p) in &[(300.0, 3.0e6), (450.0, 50.0e6)]
+        {
+            let st = crate::steam::region1(t, p).unwrap();
+            let p_hs = region1_p_hs(st.h, st.s).unwrap();
+            assert!(
+                (p_hs - p).abs() / p < 1e-3,
+                "p_hs({},{}) = {p_hs}, want {p}",
+                st.h,
+                st.s
+            );
+        }
+
+        // Region 2, spanning sub-regions.
+        for &(t, p) in &[(400.0, 0.1e6), (700.0, 10.0e6)]
+        {
+            let st = crate::steam::region2(t, p).unwrap();
+            let p_hs = region2_p_hs(st.h, st.s).unwrap();
+            assert!(
+                (p_hs - p).abs() / p < 1e-3,
+                "p_hs({},{}) = {p_hs}, want {p}",
+                st.h,
+                st.s
+            );
+        }
+    }
+
+    #[test]
+    fn region3_and_phs_reject_non_finite_input() {
+        assert!(region3_v_ph(0.0, 500.0e3).is_err());
+        assert!(region3_t_ph(200.0e6, 500.0e3).is_err());
+        assert!(region3_v_ps(-1.0, 4000.0).is_err());
+        assert!(region1_p_hs(f64::NAN, 0.0).is_err());
+        assert!(region2_p_hs(0.0, f64::NAN).is_err());
+        assert!(region3_p_hs(f64::INFINITY, 4000.0).is_err());
     }
 }
