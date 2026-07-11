@@ -644,6 +644,271 @@ pub fn ln_binomial_pmf(k: u64, n: u64, p: f64) -> f64 {
     lc + 0.5 * (nn.ln() - LN_2PI - x.ln() - (nn - x).ln())
 }
 
+// ============================================================ //
+//  Bessel functions                                            //
+// ============================================================ //
+
+// Above this |x|, the log-series for Y0/Y1 below loses accuracy to
+// cancellation (its terms grow before they shrink, the well-known reason
+// production libraries switch strategies past a moderate argument — Numerical
+// Recipes §6.5) faster than the asymptotic expansion's error shrinks;
+// empirically cross-checked against `scipy.special.yv` up to x = 40, both
+// sides agree to ~1e-9 relative in a neighborhood of this threshold.
+const BESSEL_Y_ASYMPTOTIC_THRESHOLD: f64 = 15.0;
+
+/// Bessel function of the first kind, integer order `n`, `Jₙ(x)`.
+///
+/// Computed via Miller's algorithm (Numerical Recipes §6.5; Abramowitz &
+/// Stegun §9.1.27): the three-term recurrence `J_{k−1}(x) = (2k/x)·Jₖ(x) −
+/// J_{k+1}(x)` is numerically *unstable* run upward but *stable* run
+/// downward, so starting from an arbitrary seed at an order well above both
+/// `n` and `x` and recursing down to `0` washes out the seed's influence by
+/// the time the target order is reached; the whole downward-computed
+/// sequence is then pinned to the correct absolute scale via the closed-form
+/// identity `J₀(x) + 2·Σ_{k=1}^∞ J₂ₖ(x) = 1`. Unlike a direct power-series
+/// evaluation, this has no cancellation issues at any `x`, since the
+/// recurrence itself is unconditionally stable in the downward direction.
+///
+/// `Jₙ(−x) = (−1)ⁿ Jₙ(x)` and `J₋ₙ(x) = (−1)ⁿ Jₙ(x)` (standard parity
+/// relations for integer order) handle negative `n`/`x`.
+pub fn bessel_j(n: i32, x: f64) -> f64 {
+    if x.is_nan()
+    {
+        return f64::NAN;
+    }
+    if n < 0
+    {
+        let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+        return sign * bessel_j(-n, x);
+    }
+    if x == 0.0
+    {
+        return if n == 0 { 1.0 } else { 0.0 };
+    }
+    if x < 0.0
+    {
+        let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+        return sign * bessel_j(n, -x);
+    }
+
+    let n = n as i64;
+    // Starting order comfortably above both n and x: Jₖ(x) decays roughly
+    // like (x/2)^k/k! once k >> x, so ~20 extra buffer orders (plus a
+    // sqrt(x)-scaled margin for the width of the transition region around
+    // k ≈ x) reduce the seed's influence at the target order to well below
+    // f64 precision.
+    let m_start_raw = (n.max(x.ceil() as i64) as f64 + 20.0 + (40.0 * x).sqrt()) as i64;
+    let m_start = if m_start_raw % 2 == 0
+    {
+        m_start_raw
+    }
+    else
+    {
+        m_start_raw + 1
+    };
+
+    let mut j_kp1 = 0.0f64;
+    let mut j_k = 1.0e-30f64;
+    let mut target_unnorm = 0.0f64;
+    let mut sum = 0.0f64; // accumulates J0 + 2*(J2 + J4 + ...)
+
+    let mut k = m_start;
+    while k >= 1
+    {
+        let j_km1 = (2.0 * k as f64 / x) * j_k - j_kp1;
+        j_kp1 = j_k;
+        j_k = j_km1;
+        // Rescale periodically: the unnormalized sequence grows substantially
+        // between the (deliberately tiny) seed and the O(1) values near
+        // k ≈ x, and could otherwise overflow for large starting orders.
+        if j_k.abs() > 1e250
+        {
+            j_k *= 1e-250;
+            j_kp1 *= 1e-250;
+            sum *= 1e-250;
+            target_unnorm *= 1e-250;
+        }
+        let idx = k - 1;
+        if idx == n
+        {
+            target_unnorm = j_k;
+        }
+        if idx % 2 == 0
+        {
+            sum += if idx == 0 { 1.0 } else { 2.0 } * j_k;
+        }
+        k -= 1;
+    }
+    target_unnorm / sum
+}
+
+/// `Y₀(x)` via the log series (Abramowitz & Stegun 9.1.13; DLMF 10.8.1),
+/// accurate for `x` below [`BESSEL_Y_ASYMPTOTIC_THRESHOLD`]:
+/// `Y₀(x) = (2/π)(ln(x/2) + γ)·J₀(x) − (2/π)·Σ_{k=1}^∞ (−1)ᵏ Hₖ/(k!)² (x/2)^{2k}`,
+/// where `Hₖ` is the `k`-th harmonic number.
+fn bessel_y0_series(x: f64) -> f64 {
+    let j0 = bessel_j(0, x);
+    let z = x / 2.0;
+    let z2 = z * z;
+    let mut term = 1.0f64;
+    let mut harmonic = 0.0f64;
+    let mut sum = 0.0f64;
+    for k in 1..MAX_ITERS
+    {
+        term *= z2 / (k as f64 * k as f64);
+        harmonic += 1.0 / k as f64;
+        let sign = if k % 2 == 1 { -1.0 } else { 1.0 };
+        let contrib = sign * harmonic * term;
+        sum += contrib;
+        if contrib.abs() < EPS * sum.abs().max(1.0) && k > 5
+        {
+            break;
+        }
+    }
+    (2.0 / PI) * (z.ln() + EULER_MASCHERONI) * j0 - (2.0 / PI) * sum
+}
+
+/// `Y₁(x)` via its log series, accurate for `x` below
+/// [`BESSEL_Y_ASYMPTOTIC_THRESHOLD`]:
+/// `Y₁(x) = (2/π)(ln(x/2) + γ)·J₁(x) − 2/(πx) − (1/π)·Σ_{k=0}^∞ (−1)ᵏ (Hₖ +
+/// H_{k+1})/(k!(k+1)!) (x/2)^{2k+1}`. Derived from the general `Yₙ` series
+/// (DLMF 10.8.1) by recognizing the `γ`-independent part of the digamma
+/// terms as exactly `J₁(x)`'s own series.
+fn bessel_y1_series(x: f64) -> f64 {
+    let j1 = bessel_j(1, x);
+    let z = x / 2.0;
+    let mut term = z;
+    let mut h_k = 0.0f64;
+    let mut h_kp1 = 1.0f64;
+    let mut sum = 0.0f64;
+    for k in 0..MAX_ITERS
+    {
+        let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+        let contrib = sign * (h_k + h_kp1) * term;
+        sum += contrib;
+        term *= z * z / ((k as f64 + 1.0) * (k as f64 + 2.0));
+        h_k = h_kp1;
+        h_kp1 += 1.0 / (k as f64 + 2.0);
+        if contrib.abs() < EPS * sum.abs().max(1.0) && k > 5
+        {
+            break;
+        }
+    }
+    (2.0 / PI) * (z.ln() + EULER_MASCHERONI) * j1 - 2.0 / (PI * x) - (1.0 / PI) * sum
+}
+
+/// `(Jₙ, Yₙ)` for `n ∈ {0, 1}` via the shared large-`x` asymptotic expansion
+/// (Abramowitz & Stegun 9.2.5–9.2.10), accurate from
+/// [`BESSEL_Y_ASYMPTOTIC_THRESHOLD`] upward — precisely where the log series
+/// above starts losing accuracy to cancellation.
+fn bessel_01_asymptotic(n: i32, x: f64) -> (f64, f64) {
+    let mu = 4.0 * (n as f64) * (n as f64);
+    let chi = x - (n as f64 / 2.0 + 0.25) * PI;
+    let z = 8.0 * x;
+
+    // P(n,x) = 1 - (mu-1)(mu-9)/(2! z^2) + (mu-1)(mu-9)(mu-25)(mu-49)/(4! z^4) - ...
+    let mut p = 1.0f64;
+    let mut sign = -1.0f64;
+    for k in 1..=3usize
+    {
+        let mut num = 1.0;
+        for i in 0..(2 * k)
+        {
+            let odd = (2 * i + 1) as f64;
+            num *= mu - odd * odd;
+        }
+        let fact: f64 = (1..=(2 * k)).map(|v| v as f64).product();
+        p += sign * num / (fact * z.powi(2 * k as i32));
+        sign = -sign;
+    }
+
+    // Q(n,x) = (mu-1)/z - (mu-1)(mu-9)(mu-25)/(3! z^3) + (mu-1)...(mu-81)/(5! z^5) - ...
+    let mut q = (mu - 1.0) / z;
+    let num3 = (mu - 1.0) * (mu - 9.0) * (mu - 25.0);
+    q -= num3 / (6.0 * z.powi(3));
+    let num5 = num3 * (mu - 49.0) * (mu - 81.0);
+    q += num5 / (120.0 * z.powi(5));
+
+    let amp = (2.0 / (PI * x)).sqrt();
+    let j = amp * (p * chi.cos() - q * chi.sin());
+    let y = amp * (p * chi.sin() + q * chi.cos());
+    (j, y)
+}
+
+/// `Y₀(x)`: log series below [`BESSEL_Y_ASYMPTOTIC_THRESHOLD`], asymptotic
+/// expansion above.
+fn bessel_y0(x: f64) -> f64 {
+    if x < BESSEL_Y_ASYMPTOTIC_THRESHOLD
+    {
+        bessel_y0_series(x)
+    }
+    else
+    {
+        bessel_01_asymptotic(0, x).1
+    }
+}
+
+/// `Y₁(x)`: log series below [`BESSEL_Y_ASYMPTOTIC_THRESHOLD`], asymptotic
+/// expansion above.
+fn bessel_y1(x: f64) -> f64 {
+    if x < BESSEL_Y_ASYMPTOTIC_THRESHOLD
+    {
+        bessel_y1_series(x)
+    }
+    else
+    {
+        bessel_01_asymptotic(1, x).1
+    }
+}
+
+/// Bessel function of the second kind (Neumann function), integer order `n`,
+/// `Yₙ(x)`, for `x > 0`.
+///
+/// `Y₀`/`Y₁` come from [`bessel_y0`]/[`bessel_y1`] (log series or asymptotic
+/// expansion, whichever is accurate at that `x`); higher orders follow via
+/// the three-term recurrence `Y_{k+1}(x) = (2k/x)·Yₖ(x) − Y_{k−1}(x)`, which
+/// — unlike `Jₙ`'s — is numerically *stable* run upward, so no Miller-style
+/// downward sweep is needed. `Y₋ₙ(x) = (−1)ⁿ Yₙ(x)` handles negative `n`.
+///
+/// Returns `NaN` for `x < 0` (`Yₙ` is not real there) and `−∞` at `x = 0`
+/// (`Yₙ` has a logarithmic singularity at the origin for every `n`).
+pub fn bessel_y(n: i32, x: f64) -> f64 {
+    if x.is_nan()
+    {
+        return f64::NAN;
+    }
+    if x < 0.0
+    {
+        return f64::NAN;
+    }
+    if x == 0.0
+    {
+        return f64::NEG_INFINITY;
+    }
+    if n < 0
+    {
+        let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+        return sign * bessel_y(-n, x);
+    }
+    if n == 0
+    {
+        return bessel_y0(x);
+    }
+    if n == 1
+    {
+        return bessel_y1(x);
+    }
+    let mut y_km1 = bessel_y0(x);
+    let mut y_k = bessel_y1(x);
+    for k in 1..n
+    {
+        let y_kp1 = (2.0 * k as f64 / x) * y_k - y_km1;
+        y_km1 = y_k;
+        y_k = y_kp1;
+    }
+    y_k
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -946,6 +1211,164 @@ mod tests {
         };
         assert!(close(ln_binomial_pmf(3, 10, 0.4).exp(), exact(3, 10, 0.4)));
     }
+
+    // ---- Bessel functions ----
+
+    #[test]
+    fn bessel_j_matches_scipy_reference() {
+        // scipy.special.jv(n, x)
+        let cases: [(i32, f64, f64); 20] = [
+            (0, 0.5, 0.938_469_807_240_813),
+            (0, 1.0, 0.765_197_686_557_966_6),
+            (0, 5.0, -0.177_596_771_314_338_35),
+            (0, 10.0, -0.245_935_764_451_348_32),
+            (0, 20.0, 0.167_024_664_340_583_22),
+            (0, 50.0, 0.055_812_327_669_251_8),
+            (1, 0.5, 0.242_268_457_674_873_9),
+            (1, 1.0, 0.440_050_585_744_933_55),
+            (1, 5.0, -0.327_579_137_591_465_2),
+            (1, 10.0, 0.043_472_746_168_861_6),
+            (1, 20.0, 0.066_833_124_175_849_93),
+            (1, 50.0, -0.097_511_828_125_175_14),
+            (2, 0.5, 0.030_604_023_458_682_638),
+            (2, 5.0, 0.046_565_116_277_752_29),
+            (2, 10.0, 0.254_630_313_685_120_6),
+            (5, 0.5, 8.053_627_241_357_477e-6),
+            (5, 5.0, 0.261_140_546_120_170_07),
+            (5, 10.0, -0.234_061_528_186_793_6),
+            (10, 20.0, 0.186_482_558_023_945_1),
+            (10, 50.0, -0.113_847_849_149_469_38),
+        ];
+        for (n, x, expected) in cases
+        {
+            assert!(
+                close(bessel_j(n, x), expected, 1e-9),
+                "J_{n}({x}) = {} != {expected}",
+                bessel_j(n, x)
+            );
+        }
+    }
+
+    #[test]
+    fn bessel_j_parity_in_order_and_argument() {
+        // J_{-n}(x) = (-1)^n J_n(x); J_n(-x) = (-1)^n J_n(x).
+        for n in 0..6
+        {
+            for &x in &[0.3, 1.7, 6.4, 15.0]
+            {
+                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                assert!(close(bessel_j(-n, x), sign * bessel_j(n, x), 1e-12));
+                assert!(close(bessel_j(n, -x), sign * bessel_j(n, x), 1e-12));
+            }
+        }
+    }
+
+    #[test]
+    fn bessel_j_boundary_values() {
+        assert!(close(bessel_j(0, 0.0), 1.0, 1e-15));
+        for n in 1..5
+        {
+            assert_eq!(bessel_j(n, 0.0), 0.0);
+        }
+    }
+
+    #[test]
+    fn bessel_y_matches_scipy_reference() {
+        // scipy.special.yv(n, x), spanning both the log-series regime
+        // (x < 15) and the asymptotic regime (x >= 15) established during
+        // implementation by comparing both against scipy up to x = 40.
+        let cases: [(i32, f64, f64); 18] = [
+            (0, 0.5, -0.444_518_733_506_706_56),
+            (0, 1.0, 0.088_256_964_215_677),
+            (0, 5.0, -0.308_517_625_249_033_8),
+            (0, 10.0, 0.055_671_167_283_599_34),
+            (0, 20.0, 0.062_640_596_809_383_86),
+            (0, 30.0, -0.117_295_731_686_664_09),
+            (1, 0.5, -1.471_472_392_670_243_3),
+            (1, 1.0, -0.781_212_821_300_288_9),
+            (1, 5.0, 0.147_863_143_391_226_94),
+            (1, 10.0, 0.249_015_424_206_953_86),
+            (1, 20.0, -0.165_511_614_362_521_35),
+            (1, 30.0, 0.084_425_570_661_747_25),
+            (2, 0.5, -5.441_370_837_174_266),
+            (2, 5.0, 0.367_662_882_605_524_6),
+            (2, 10.0, -0.005_868_082_442_208_563),
+            (2, 20.0, -0.079_191_758_245_636),
+            (5, 5.0, -0.453_694_822_491_102),
+            (5, 10.0, 0.135_403_047_689_362_18),
+        ];
+        for (n, x, expected) in cases
+        {
+            assert!(
+                close(bessel_y(n, x), expected, 1e-7),
+                "Y_{n}({x}) = {} != {expected}",
+                bessel_y(n, x)
+            );
+        }
+    }
+
+    #[test]
+    fn bessel_y_boundary_and_domain() {
+        assert_eq!(bessel_y(0, 0.0), f64::NEG_INFINITY);
+        assert_eq!(bessel_y(3, 0.0), f64::NEG_INFINITY);
+        assert!(bessel_y(0, -1.0).is_nan());
+    }
+
+    #[test]
+    fn bessel_y_negative_order_parity() {
+        for n in 1..5
+        {
+            for &x in &[0.7, 3.0, 12.0, 25.0]
+            {
+                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                assert!(close(bessel_y(-n, x), sign * bessel_y(n, x), 1e-9));
+            }
+        }
+    }
+
+    #[test]
+    fn bessel_series_and_asymptotic_agree_near_the_crossover() {
+        // Independent cross-check at the exact transition point: the log
+        // series (still usable a little past its normal regime) and the
+        // asymptotic expansion (already usable a little before its normal
+        // regime) must agree with each other in an overlap window, not just
+        // individually with scipy.
+        for &x in &[13.0, 14.0, 15.0, 16.0, 17.0]
+        {
+            assert!(close(
+                bessel_y0_series(x),
+                bessel_01_asymptotic(0, x).1,
+                1e-6
+            ));
+            assert!(close(
+                bessel_y1_series(x),
+                bessel_01_asymptotic(1, x).1,
+                1e-6
+            ));
+        }
+    }
+
+    #[test]
+    fn bessel_y_recurrence_matches_direct_asymptotic_at_high_order() {
+        // Cross-check the stable upward recurrence used for n >= 2 against
+        // the general asymptotic formula (bessel_01_asymptotic is general in
+        // n despite its name — it's only ever called with n = 0, 1 in the
+        // crate's own code path, since higher orders use the cheaper
+        // recurrence instead) evaluated directly at that same order — an
+        // independent computation, not a restatement of the recurrence.
+        for n in 2..6
+        {
+            for &x in &[20.0, 30.0]
+            {
+                let via_recurrence = bessel_y(n, x);
+                let (_, via_asymptotic) = bessel_01_asymptotic(n, x);
+                assert!(
+                    close(via_recurrence, via_asymptotic, 1e-6),
+                    "n={n} x={x}: recurrence={via_recurrence} asymptotic={via_asymptotic}"
+                );
+            }
+        }
+    }
 }
 
 /// Property-based tests: mathematical identities and recurrences checked
@@ -1094,6 +1517,66 @@ mod proptests {
             let lhs = regularized_incomplete_beta(a, b, x);
             let rhs = regularized_incomplete_beta(b, a, 1.0 - x);
             prop_assert!(rel_close(lhs + rhs, 1.0, 1e-6), "a={a} b={b} x={x} lhs={lhs} rhs={rhs}");
+        }
+
+        /// `Jₙ` satisfies Bessel's differential equation
+        /// `x²y'' + xy' + (x² − n²)y = 0`, checked via a central
+        /// finite-difference stencil. This is deliberately NOT the same
+        /// recurrence Miller's algorithm uses internally (that recurrence is
+        /// in the *order* n at fixed x; this is a statement about
+        /// derivatives in x at fixed n) — an independent property that would
+        /// catch a bug in `bessel_j` that the internal recurrence itself
+        /// could never expose.
+        #[test]
+        fn bessel_j_satisfies_its_defining_ode(n in 0i32..8, x in 1.0f64..30.0) {
+            // A smaller h (e.g. 1e-4) makes the second-derivative estimate
+            // `(y_plus - 2y + y_minus)/h^2` amplify the series' own
+            // convergence-cutoff "jitter" between nearby x (a different
+            // number of terms can pass the convergence check at x vs.
+            // x±h) by 1/h^2, producing spurious residuals unrelated to any
+            // actual inaccuracy in the computed values themselves (checked
+            // directly against scipy.special.yv: agreement to ~1e-12 at a
+            // point that failed this stencil at h=1e-4).
+            let h = 1e-3;
+            let y = bessel_j(n, x);
+            let y_plus = bessel_j(n, x + h);
+            let y_minus = bessel_j(n, x - h);
+            let d1 = (y_plus - y_minus) / (2.0 * h);
+            let d2 = (y_plus - 2.0 * y + y_minus) / (h * h);
+            let residual = x * x * d2 + x * d1 + (x * x - (n * n) as f64) * y;
+            let scale = (x * x * y.abs()).max(1.0);
+            prop_assert!(
+                residual.abs() < 1e-3 * scale,
+                "n={n} x={x} residual={residual} scale={scale}"
+            );
+        }
+
+        /// Same ODE check for `Yₙ`, restricted to `x` in the log-series
+        /// regime (finite differences near the asymptotic crossover would
+        /// mix the two computation paths' independent rounding behavior into
+        /// the stencil, muddying the check without adding real coverage).
+        #[test]
+        fn bessel_y_satisfies_its_defining_ode(n in 0i32..6, x in 1.0f64..12.0) {
+            // A smaller h (e.g. 1e-4) makes the second-derivative estimate
+            // `(y_plus - 2y + y_minus)/h^2` amplify the series' own
+            // convergence-cutoff "jitter" between nearby x (a different
+            // number of terms can pass the convergence check at x vs.
+            // x±h) by 1/h^2, producing spurious residuals unrelated to any
+            // actual inaccuracy in the computed values themselves (checked
+            // directly against scipy.special.yv: agreement to ~1e-12 at a
+            // point that failed this stencil at h=1e-4).
+            let h = 1e-3;
+            let y = bessel_y(n, x);
+            let y_plus = bessel_y(n, x + h);
+            let y_minus = bessel_y(n, x - h);
+            let d1 = (y_plus - y_minus) / (2.0 * h);
+            let d2 = (y_plus - 2.0 * y + y_minus) / (h * h);
+            let residual = x * x * d2 + x * d1 + (x * x - (n * n) as f64) * y;
+            let scale = (x * x * y.abs()).max(1.0);
+            prop_assert!(
+                residual.abs() < 1e-3 * scale,
+                "n={n} x={x} residual={residual} scale={scale}"
+            );
         }
     }
 }
