@@ -399,3 +399,50 @@ mod tests {
         assert_relative_eq!(sol.value.as_slice(), b.as_slice(), epsilon = 1e-9);
     }
 }
+
+/// LAPACK-style property test: BiCGSTAB's residual must be small on a
+/// well-conditioned, possibly non-symmetric system — the regime it targets
+/// that plain CG cannot handle — checked over many random matrices.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::linalg::Matrix;
+    use proptest::prelude::*;
+
+    /// Force strict row diagonal dominance (Gershgorin ⇒ nonsingular and
+    /// well-conditioned), without symmetry — the target regime for
+    /// BiCGSTAB, vs. the SPD-only regime CG handles.
+    fn diagonally_dominant(n: usize, raw: &[f64]) -> Matrix {
+        let mut m = Matrix::from_row_major(n, n, raw.to_vec());
+        for i in 0..n
+        {
+            let off_sum: f64 = (0..n).filter(|&j| j != i).map(|j| m[(i, j)].abs()).sum();
+            let sign = if m[(i, i)] < 0.0 { -1.0 } else { 1.0 };
+            m[(i, i)] = sign * (m[(i, i)].abs() + off_sum) + sign;
+        }
+        m
+    }
+
+    proptest! {
+        #[test]
+        fn residual_is_small_on_diagonally_dominant_nonsymmetric_systems(
+            raw in prop::collection::vec(-10.0f64..10.0, 16),
+            b in prop::collection::vec(-10.0f64..10.0, 4),
+        ) {
+            let n = 4;
+            let a = diagonally_dominant(n, &raw);
+            let tol = Tolerance { max_iter: 1000, ..Tolerance::default() };
+            let sol = bicgstab(
+                |x, y| y.copy_from_slice(&a.matvec(x).unwrap()),
+                &b,
+                vec![0.0; n],
+                tol,
+            )
+            .expect("BiCGSTAB must converge on a well-conditioned system");
+            let ax = a.matvec(&sol.value).unwrap();
+            let b_norm = norm2(&b).max(1e-300);
+            let res = ax.iter().zip(&b).map(|(axi, bi)| (axi - bi).powi(2)).sum::<f64>().sqrt();
+            prop_assert!(res / b_norm < 1e-6, "relative residual {} too large", res / b_norm);
+        }
+    }
+}

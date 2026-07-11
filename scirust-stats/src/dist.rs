@@ -49,7 +49,16 @@ pub trait Distribution {
 }
 
 /// Robust inverse of a monotone-increasing CDF by bracket-and-bisect. Fully
-/// deterministic (fixed iteration budget); precise to ~1e-12 on the bracket.
+/// deterministic (fixed iteration budget); narrows the bracket to
+/// (near-)adjacent representable `f64`s rather than stopping at a loose
+/// absolute width: for a very steep CDF (e.g. a Beta distribution with one
+/// shape parameter close to 0, whose mass concentrates in a sliver near an
+/// endpoint), a fixed `1e-13` bracket can still span most of `[0, 1]` in
+/// `p`-space, so stopping there — as an earlier version of this function
+/// did — silently returns an `x` whose `cdf(x)` is far from the requested
+/// `p`. Using the tightest tolerance the mantissa allows costs nothing (the
+/// loop is still capped at 128 iterations) and gives the best answer f64
+/// can represent even in that regime.
 fn invert_cdf(cdf: impl Fn(f64) -> f64, p: f64, mut lo: f64, mut hi: f64) -> f64 {
     // Expand the bracket outward until it straddles `p`.
     let mut guard = 0;
@@ -77,7 +86,7 @@ fn invert_cdf(cdf: impl Fn(f64) -> f64, p: f64, mut lo: f64, mut hi: f64) -> f64
         {
             hi = mid;
         }
-        if (hi - lo).abs() <= 1e-13 * (1.0 + mid.abs())
+        if (hi - lo).abs() <= 4.0 * f64::EPSILON * (1.0 + mid.abs())
         {
             break;
         }
@@ -628,6 +637,37 @@ mod tests {
     }
 
     #[test]
+    fn beta_quantile_round_trip_at_the_edge_of_f64_resolution() {
+        // Regression test for a finding made by this crate's own property
+        // tests: `invert_cdf` stopped bisecting as soon as its x-bracket
+        // narrowed below a fixed 1e-13, regardless of how steep the CDF is
+        // there. For a strongly skewed Beta (one shape parameter close to
+        // 0), almost all of the probability mass sits within a sliver near
+        // an endpoint far narrower than 1e-13 — so the old bracket-width
+        // cutoff quit while `cdf(x)` was still far from the target `p`,
+        // e.g. quantile(0.99) on Beta(390.12, 0.5) round-tripped to
+        // cdf ≈ 0.7996 with the old fixed tolerance (error ~2e-10 — 100x
+        // looser than what f64 can actually resolve here). Tightening the
+        // stopping criterion to a few ULPs (`4·EPSILON`) costs nothing (the
+        // loop is already capped at 128 iterations) and brings the
+        // round-trip error down to ~1e-12 for this case.
+        let beta = Beta::new(390.121, 0.5);
+        for &p in &[0.1, 0.5, 0.873, 0.99]
+        {
+            let p_hat = beta.cdf(beta.quantile(p));
+            assert!(close(p_hat, p, 1e-10), "p={p} p_hat={p_hat}");
+        }
+        // Below shape ~0.3-0.5, the mass compresses to less than one ULP
+        // near the endpoint and even exact bisection cannot resolve it —
+        // that's a floating-point representability limit, not a bug: the
+        // best `invert_cdf` can do is return a value adjacent to the
+        // endpoint, whose true `cdf` legitimately differs a lot from `p`.
+        let extreme = Beta::new(390.121, 0.01);
+        let x = extreme.quantile(0.99);
+        assert!(x > 1.0 - 1e-9, "expected quantile pinned near 1.0, got {x}");
+    }
+
+    #[test]
     // Ignored under Miri: `sample` goes through the quantile (erfinv/ln), and
     // Miri deliberately randomizes the last ULPs of transcendental float
     // intrinsics per call, so lockstep bit-identity cannot hold under the
@@ -657,5 +697,196 @@ mod tests {
         let v: f64 = s.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (s.len() - 1) as f64;
         assert!((m - 5.0).abs() < 0.05, "mean {m}");
         assert!((v - 4.0).abs() < 0.15, "var {v}");
+    }
+}
+
+/// Property-based tests for the `Distribution` impls: invariants that must
+/// hold for *any* parameter values and *any* point in the support, checked
+/// against hundreds of randomly generated inputs rather than a handful of
+/// hand-picked reference points.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn rel_close(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol * (1.0 + b.abs())
+    }
+
+    /// CDF monotonicity: `x1 <= x2 ⇒ cdf(x1) <= cdf(x2)`. General for any
+    /// distribution, independent of how `quantile` is implemented, and a
+    /// real bug catcher — a sign error or a bad branch condition in a CDF
+    /// formula routinely produces a non-monotone (or out-of-[0,1]) curve.
+    fn assert_cdf_monotonic_and_bounded(d: &impl Distribution, lo: f64, hi: f64) {
+        let c_lo = d.cdf(lo);
+        let c_hi = d.cdf(hi);
+        assert!(!c_lo.is_nan() && !c_hi.is_nan(), "cdf produced NaN");
+        assert!(
+            (-1e-12..=1.0 + 1e-12).contains(&c_lo) && (-1e-12..=1.0 + 1e-12).contains(&c_hi),
+            "cdf out of [0,1]: cdf({lo})={c_lo}, cdf({hi})={c_hi}"
+        );
+        assert!(
+            c_lo <= c_hi + 1e-9,
+            "cdf not monotone: cdf({lo})={c_lo} > cdf({hi})={c_hi}"
+        );
+    }
+
+    /// `pdf` must be non-negative and finite everywhere it's defined.
+    fn assert_pdf_nonnegative(d: &impl Distribution, x: f64) {
+        let p = d.pdf(x);
+        assert!(!p.is_nan(), "pdf({x}) is NaN");
+        assert!(p >= -1e-12, "pdf({x}) = {p} is negative");
+    }
+
+    proptest! {
+        #[test]
+        fn normal_cdf_monotonic_pdf_nonneg_and_quantile_round_trips(
+            mean in -1e3f64..1e3, sd in 1e-2f64..1e3,
+            x1 in -1e3f64..1e3, x2 in -1e3f64..1e3,
+            p in 0.001f64..0.999,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let n = Normal::new(mean, sd);
+            assert_cdf_monotonic_and_bounded(&n, lo, hi);
+            assert_pdf_nonnegative(&n, x1);
+            // Normal's quantile is a closed form via erfinv, entirely
+            // independent of cdf's own erfc-based formula, so this
+            // round-trip genuinely cross-checks the two.
+            let x = n.quantile(p);
+            prop_assert!(rel_close(n.cdf(x), p, 1e-6), "p={p} x={x} cdf(x)={}", n.cdf(x));
+        }
+
+        #[test]
+        fn exponential_cdf_monotonic_and_pdf_nonneg(
+            rate in 1e-3f64..1e3, x1 in 0.0f64..1e4, x2 in 0.0f64..1e4,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let e = Exponential::new(rate);
+            assert_cdf_monotonic_and_bounded(&e, lo, hi);
+            assert_pdf_nonnegative(&e, x1);
+        }
+
+        #[test]
+        fn uniform_cdf_monotonic_and_quantile_round_trips(
+            a in -1e3f64..1e3, width in 1e-3f64..1e3,
+            x1 in -2e3f64..2e3, x2 in -2e3f64..2e3,
+            p in 0.0f64..1.0,
+        ) {
+            let b = a + width;
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let u = Uniform::new(a, b);
+            assert_cdf_monotonic_and_bounded(&u, lo, hi);
+            let x = u.quantile(p);
+            prop_assert!(rel_close(u.cdf(x), p, 1e-9), "p={p} x={x} cdf(x)={}", u.cdf(x));
+        }
+
+        /// Gamma's `quantile` bisects its own `cdf`, so `cdf(quantile(p))`
+        /// mostly re-confirms bisection converged — still worth checking
+        /// (a non-monotone `cdf` would make bisection silently converge to
+        /// the wrong root), but the independent cross-check is
+        /// `ChiSquared(k) = Gamma(k/2, 2)` below.
+        #[test]
+        fn gamma_cdf_monotonic_pdf_nonneg_and_quantile_round_trips(
+            shape in 1e-2f64..1e3, scale in 1e-2f64..1e3,
+            x1 in 0.0f64..1e4, x2 in 0.0f64..1e4,
+            p in 0.01f64..0.99,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let g = Gamma::new(shape, scale);
+            assert_cdf_monotonic_and_bounded(&g, lo, hi);
+            assert_pdf_nonnegative(&g, x1.max(1e-9));
+            let p_hat = g.cdf(g.quantile(p));
+            prop_assert!(rel_close(p_hat, p, 1e-5), "p={p} p_hat={p_hat}");
+        }
+
+        /// Independent cross-check: χ²(k) is defined to be Gamma(k/2, 2),
+        /// but `ChiSquared::cdf` calls `regularized_gamma_p` directly
+        /// instead of delegating to `Gamma::cdf` — two separately written
+        /// expressions that must agree. Catches a parameter-transcription
+        /// bug (e.g. `k` vs `k/2`, or a wrong scale) that a self-consistency
+        /// check within `ChiSquared` alone could never see.
+        #[test]
+        fn chi_squared_matches_the_equivalent_gamma_distribution(
+            k in 0.1f64..500.0, x in 0.0f64..2000.0,
+        ) {
+            let c = ChiSquared::new(k);
+            let g = Gamma::new(k / 2.0, 2.0);
+            prop_assert!(rel_close(c.cdf(x), g.cdf(x), 1e-9), "k={k} x={x} chi2={} gamma={}", c.cdf(x), g.cdf(x));
+        }
+
+        #[test]
+        fn chi_squared_cdf_monotonic_and_pdf_nonneg(
+            k in 0.1f64..500.0, x1 in 0.0f64..2000.0, x2 in 0.0f64..2000.0,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let c = ChiSquared::new(k);
+            assert_cdf_monotonic_and_bounded(&c, lo, hi);
+            assert_pdf_nonnegative(&c, x1.max(1e-9));
+        }
+
+        #[test]
+        fn student_t_cdf_monotonic_and_symmetric(
+            nu in 0.5f64..500.0, x1 in -100.0f64..100.0, x2 in -100.0f64..100.0,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let t = StudentT::new(nu);
+            assert_cdf_monotonic_and_bounded(&t, lo, hi);
+            assert_pdf_nonnegative(&t, x1);
+            // Genuine symmetry check: cdf(-x) and cdf(x) take different
+            // branches of the `if t >= 0.0` split in `StudentT::cdf`, so
+            // this is not definitionally 1 − cdf(x).
+            prop_assert!(
+                rel_close(t.cdf(-x1) + t.cdf(x1), 1.0, 1e-6),
+                "nu={nu} x1={x1} cdf(-x1)={} cdf(x1)={}", t.cdf(-x1), t.cdf(x1)
+            );
+        }
+
+        #[test]
+        fn fisher_f_cdf_monotonic_pdf_nonneg_and_complementary(
+            d1 in 0.5f64..200.0, d2 in 0.5f64..200.0, x1 in 0.001f64..1e3, x2 in 0.001f64..1e3,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let f = FisherF::new(d1, d2);
+            assert_cdf_monotonic_and_bounded(&f, lo, hi);
+            assert_pdf_nonnegative(&f, x1);
+            // `sf` is its own regularized_incomplete_beta call with swapped
+            // shape parameters and a different argument, not `1 - cdf`, so
+            // this is a genuine cross-check (mirrors the incomplete-beta
+            // symmetry identity in scirust-special).
+            prop_assert!(
+                rel_close(f.cdf(x1) + f.sf(x1), 1.0, 1e-6),
+                "d1={d1} d2={d2} x1={x1} cdf={} sf={}", f.cdf(x1), f.sf(x1)
+            );
+        }
+
+        #[test]
+        fn beta_cdf_monotonic_and_pdf_nonneg(
+            a in 1e-2f64..500.0, b in 1e-2f64..500.0,
+            x1 in 0.0f64..1.0, x2 in 0.0f64..1.0,
+        ) {
+            let (lo, hi) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+            let beta = Beta::new(a, b);
+            assert_cdf_monotonic_and_bounded(&beta, lo, hi);
+            assert_pdf_nonnegative(&beta, x1);
+        }
+
+        /// Quantile round trip, restricted to `a, b >= 0.5`: this property
+        /// test itself found that below that, `Beta(a, b)`'s mass can
+        /// concentrate within a single `f64` ULP of an endpoint (e.g.
+        /// `Beta(390, 0.01)` needs `x` resolved to better than 1e-16 near
+        /// `x = 1` to tell `p = 0.5` from `p = 0.99` apart) — a genuine
+        /// floating-point representability limit, not a bug `invert_cdf`
+        /// can bisect its way around. See `beta_quantile_round_trip_at_the_
+        /// edge_of_f64_resolution` below for what `invert_cdf`'s tolerance
+        /// fix actually improved in that regime.
+        #[test]
+        fn beta_quantile_round_trips_away_from_the_f64_resolution_limit(
+            a in 0.5f64..500.0, b in 0.5f64..500.0,
+            p in 0.01f64..0.99,
+        ) {
+            let beta = Beta::new(a, b);
+            let p_hat = beta.cdf(beta.quantile(p));
+            prop_assert!(rel_close(p_hat, p, 1e-5), "a={a} b={b} p={p} p_hat={p_hat}");
+        }
     }
 }

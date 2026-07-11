@@ -251,3 +251,88 @@ mod tests {
         Ok(())
     }
 }
+
+/// LAPACK-style property tests: instead of point values, check the residual
+/// and structural invariants that must hold for *any* well-conditioned
+/// input, across many randomly generated matrices.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::linalg::{Matrix, norm2};
+    use proptest::prelude::*;
+
+    /// Force strict row diagonal dominance (Gershgorin ⇒ nonsingular) so
+    /// every sampled matrix is guaranteed well-conditioned — otherwise a
+    /// generic random 4×4 matrix is singular or near-singular often enough
+    /// that a residual property would be flaky rather than informative.
+    fn diagonally_dominant(n: usize, raw: &[f64]) -> Matrix {
+        let mut m = Matrix::from_row_major(n, n, raw.to_vec());
+        for i in 0..n
+        {
+            let off_sum: f64 = (0..n).filter(|&j| j != i).map(|j| m[(i, j)].abs()).sum();
+            let sign = if m[(i, i)] < 0.0 { -1.0 } else { 1.0 };
+            m[(i, i)] = sign * (m[(i, i)].abs() + off_sum) + sign;
+        }
+        m
+    }
+
+    proptest! {
+        /// Residual check: for any diagonally dominant A and any b, the
+        /// computed x must satisfy ‖A·x − b‖ ≈ 0 relative to ‖b‖ — across
+        /// magnitudes spanning micro- to mega-scale, exercising the
+        /// relative (not absolute) pivot threshold fixed in an earlier
+        /// audit chantier.
+        #[test]
+        fn solve_residual_is_small_on_diagonally_dominant_systems(
+            raw in prop::collection::vec(-10.0f64..10.0, 16),
+            b in prop::collection::vec(-10.0f64..10.0, 4),
+            scale in prop::sample::select(vec![1e-6, 1.0, 1e6]),
+        ) {
+            let n = 4;
+            let a = diagonally_dominant(n, &raw);
+            let a_scaled = Matrix::from_fn(n, n, |i, j| a[(i, j)] * scale);
+            let b_scaled: Vec<f64> = b.iter().map(|v| v * scale).collect();
+            let lu = lu_decompose(a_scaled.clone())
+                .expect("a diagonally dominant matrix must not be reported singular");
+            let x = solve_lu(&lu, &b_scaled).expect("solve must succeed on a well-conditioned system");
+            let ax = a_scaled.matvec(&x).unwrap();
+            let b_norm = norm2(&b_scaled).max(1e-300);
+            let res = ax.iter().zip(&b_scaled).map(|(axi, bi)| (axi - bi).powi(2)).sum::<f64>().sqrt();
+            prop_assert!(res / b_norm < 1e-8, "relative residual {} too large (b_norm={b_norm})", res / b_norm);
+        }
+
+        /// Structural check: the factorization itself satisfies P·A = L·U —
+        /// independent of any solve, so it catches an indexing/permutation
+        /// bug even in a case where a solve's residual would happen to look
+        /// fine for one particular b.
+        #[test]
+        fn factorization_satisfies_p_a_equals_l_u(raw in prop::collection::vec(-10.0f64..10.0, 16)) {
+            let n = 4;
+            let a = diagonally_dominant(n, &raw);
+            let lu = lu_decompose(a.clone())
+                .expect("a diagonally dominant matrix must not be reported singular");
+            let mut l = Matrix::identity(n);
+            let mut u = Matrix::zeros(n, n);
+            for i in 0..n
+            {
+                for j in 0..n
+                {
+                    if j < i { l[(i, j)] = lu.lu[(i, j)]; } else { u[(i, j)] = lu.lu[(i, j)]; }
+                }
+            }
+            let l_u = l.matmul(&u).unwrap();
+            let pa = Matrix::from_fn(n, n, |i, j| a[(lu.piv[i], j)]);
+            for i in 0..n
+            {
+                for j in 0..n
+                {
+                    let tol = 1e-9 * (1.0 + pa[(i, j)].abs());
+                    prop_assert!(
+                        (l_u[(i, j)] - pa[(i, j)]).abs() < tol,
+                        "P·A != L·U at ({i},{j}): {} vs {}", l_u[(i, j)], pa[(i, j)]
+                    );
+                }
+            }
+        }
+    }
+}

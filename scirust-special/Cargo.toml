@@ -6,3 +6,6 @@ publish = false
 description = "Special functions (gamma, erf, beta, digamma, incomplete gamma/beta) — the audited, deterministic numeric base shared by the statistics, reliability, tolerancing and metrology crates. Pure Rust, no dependencies, no unsafe."
 
 [dependencies]
+
+[dev-dependencies]
+proptest = "1"

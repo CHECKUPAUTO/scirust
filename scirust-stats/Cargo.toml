@@ -7,3 +7,6 @@ description = "Probability distributions and classical statistical inference (t/
 
 [dependencies]
 scirust-special = { path = "../scirust-special" }
+
+[dev-dependencies]
+proptest = "1"

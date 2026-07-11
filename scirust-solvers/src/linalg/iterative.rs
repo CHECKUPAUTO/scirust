@@ -333,3 +333,47 @@ mod tests {
         );
     }
 }
+
+/// LAPACK-style property test: CG's residual, not just its reported
+/// convergence flag, must be small on any SPD system — checked over many
+/// randomly generated matrices rather than fixed point values.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::linalg::Matrix;
+    use proptest::prelude::*;
+
+    /// A = MᵀM + n·I is SPD for any M (see cholesky.rs's proptests for the
+    /// same construction).
+    fn spd_from(n: usize, raw: &[f64]) -> Matrix {
+        let m = Matrix::from_row_major(n, n, raw.to_vec());
+        let mut a = m.transpose().matmul(&m).unwrap();
+        for i in 0..n
+        {
+            a[(i, i)] += n as f64;
+        }
+        a
+    }
+
+    proptest! {
+        #[test]
+        fn residual_is_small_on_random_spd_systems(
+            raw in prop::collection::vec(-10.0f64..10.0, 16),
+            b in prop::collection::vec(-10.0f64..10.0, 4),
+        ) {
+            let n = 4;
+            let a = spd_from(n, &raw);
+            let sol = conjugate_gradient(
+                |x, y| y.copy_from_slice(&a.matvec(x).unwrap()),
+                &b,
+                vec![0.0; n],
+                Tolerance::default(),
+            )
+            .expect("CG must converge on a well-conditioned SPD system");
+            let ax = a.matvec(&sol.value).unwrap();
+            let b_norm = norm2(&b).max(1e-300);
+            let res = ax.iter().zip(&b).map(|(axi, bi)| (axi - bi).powi(2)).sum::<f64>().sqrt();
+            prop_assert!(res / b_norm < 1e-6, "relative residual {} too large", res / b_norm);
+        }
+    }
+}
