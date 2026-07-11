@@ -1,0 +1,18 @@
+[package]
+name = "scirust-finmigrate"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Audit-gated COBOL→Rust financial migration harness: sandbox, golden baseline, and exact decimal equivalence proof for the INTACCR interest-accrual unit."
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+publish = false
+
+[dependencies]
+# Decimal-exact fixed-point arithmetic. NO floating point is permitted in the
+# money path (see audit_report.md Gap-1). rust_decimal reproduces COMP-3
+# semantics and exposes the explicit rounding strategies COBOL requires.
+rust_decimal = "1"
+
+[dev-dependencies]
+# Equivalence test reads the committed Golden Baseline CSV.
