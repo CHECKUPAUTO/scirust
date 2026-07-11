@@ -25,6 +25,8 @@
 //!   dynamique équivalente et durée corrigée en fiabilité.
 //! - [`springs`] — ressorts hélicoïdaux de compression (**EN 13906**) : raideur,
 //!   flèche et cisaillement corrigé (facteur de Wahl).
+//! - [`shafts`] — arbres de transmission : torsion/flexion des sections
+//!   circulaires, contrainte équivalente de **von Mises** et angle de torsion.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -75,6 +77,7 @@ pub mod gears;
 pub mod hertz;
 pub mod kinematics;
 pub mod roughness;
+pub mod shafts;
 pub mod springs;
 pub mod threads;
 pub mod time;
@@ -101,6 +104,10 @@ pub use kinematics::{
 };
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
+};
+pub use shafts::{
+    angle_of_twist_deg, bending_stress, polar_section_modulus_hollow, polar_section_modulus_solid,
+    section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
 };
 pub use springs::HelicalSpring;
 pub use threads::MetricThread;
