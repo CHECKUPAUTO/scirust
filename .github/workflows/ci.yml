@@ -222,6 +222,17 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Run Miri on pure-numeric crates
+        # proptest's default failure-persistence backend calls
+        # std::env::current_dir() to absolutize its regression-file path —
+        # entirely unrelated to the numeric code under test, but Miri's
+        # isolation sandbox rejects `getcwd` as unsupported by default,
+        # aborting the whole run. `-Zmiri-isolation-error=warn` demotes that
+        # specific class of unsupported-operation to a warning (an OS error
+        # is returned instead, which proptest already handles by skipping
+        # persisted-failure loading) without weakening Miri's actual UB
+        # detection for the crates' own in-memory, I/O-free logic.
+        env:
+          MIRIFLAGS: "-Zmiri-isolation-error=warn"
         run: |
           cargo miri test \
             -p scirust-special -p scirust-stats \
