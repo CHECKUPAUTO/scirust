@@ -5,6 +5,65 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — QRD-RLS sans racine carrée (Gentleman 1973) + décomposition systolique de McWhirter
+Trois axes de recherche proposés pour durcir/accélérer le RLS MIMO ; deux
+livrés avec preuve, un troisième explicitement différé plutôt que bâclé.
+
+- **`GivensQrdRls`** — référence QRD-RLS par rotations de Givens
+  séquentielles (`√`-based), la forme **information** (racine de `P⁻¹`), duale
+  de la forme **covariance** (`QrRls`/Potter) déjà dans le crate. Chaque
+  rotation est une transformation orthogonale exacte ⇒ stable par
+  construction, sans re-symétrisation. Cross-vérifié contre `VectorRls`
+  (poids à 1e-6 près sur 1500 pas aléatoires) — un second oracle indépendant
+  pour la même solution de moindres carrés.
+- **`SquaredGivensRls`** (Gentleman, *« Least squares computations by Givens
+  transformations without square roots »*, 1973) — la même récursion sans
+  aucune racine carrée : chaque ligne triangulaire est stockée comme un poids
+  `d_i` et un vecteur `t_i` normalisé (`t_i[i]=1`), et la substitution complète
+  du calcul de Givens fait disparaître tous les `√` (dérivation intégrale en
+  tête de module). Bonus : l'échelle `√d_i` de chaque ligne s'annule dans les
+  équations normales, donc l'extraction des poids par substitution arrière ne
+  nécessite **ni `√` ni division** (diagonale unitaire). MIMO natif
+  (`n_in`/`n_out`), zéro allocation tas.
+  **Vérifié, pas juste plausible** : le `R` physique reconstruit
+  (`√d_i·t_i`) colle au `R` `√`-based de `GivensQrdRls` à 1e-6 près sur 1500
+  pas — preuve que la dérivation sans racine est exacte, pas seulement
+  numériquement chanceuse ; version MIMO cross-vérifiée contre `RlsFilter`.
+  Deux bugs de dérivation ont été attrapés *par ces tests mêmes* avant tout
+  commit : la convention d'initialisation `R(0)` (racine de l'**information**,
+  donc `1/√delta`, pas `√delta`) et le poids `d_in` du résidu entrant, qui
+  **évolue à chaque ligne** et doit être propagé plutôt que réinitialisé —
+  exactement le genre d'erreur silencieuse qu'une dérivation « recopiée d'un
+  papier de mémoire » aurait laissée passer sans un oracle pour la détecter.
+  **Mesuré** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs, `cargo run
+  --bin bench_rls --release`) : plus rapide que `VectorRls` à toutes les
+  tailles (43,3 ns vs 75,0 ns à n=4 ; 313,9 ns vs 808,0 ns à n=16 ; 4 402,0 ns
+  vs 12 797,4 ns à n=64 — 1,7×–2,9×), et plus rapide que `QrRls` (racine
+  carrée) à toutes les tailles aussi (1,7×–2,2×) — conforme à la promesse de
+  la littérature (racine éliminée, moitié moins de multiplications).
+- **`squared_givens::systolic`** — le réseau triangulaire de McWhirter
+  (*« RLS minimization using a systolic array »*, 1983), rendu vérifiable :
+  deux fonctions pures `boundary_cell`/`internal_cell` à communication
+  **plus-proche-voisin uniquement** (aucune cellule ne lit la colonne d'une
+  autre), qui reproduisent `SquaredGivensRls::update` **bit pour bit** sur
+  400 pas aléatoires — la preuve que la mise à jour se décompose réellement
+  sans risque de concurrence de données. Présenté honnêtement comme un
+  **modèle logiciel de référence** de la structure de flux (le point d'ancrage
+  naturel pour un futur portage GPU/FPGA à ordonnancement en vagues), pas
+  comme une revendication de parallélisme matériel réalisé sur CPU.
+- **Axe bloc-canal (FQRD-RLS multicanal, BLAS-3) délibérément non livré** :
+  un vrai gain de débit bloc-canal nécessite un vrai GEMM par blocs (niveau
+  BLAS-3) branché sur les mises à jour Givens — ce qui romprait la frontière
+  volontaire du crate (zéro dépendance hors `serde`) en le couplant à
+  `scirust-core`/`scirust-simd`. Documenté ici comme plan concret plutôt que
+  silencieusement abandonné : traiter `B` échantillons par bloc via `B`
+  passes Givens/Squared-Givens séquentielles est déjà l'algorithme
+  bloc-récursif correct (amortit l'overhead d'appel, pas un vrai GEMM) ; le
+  vrai débit BLAS-3 demanderait de faire appel aux noyaux SIMD existants du
+  workspace pour les mises à jour internes — hors périmètre de ce lot.
+- 6 nouveaux tests (55 au total sur `scirust-estimation`) ; fmt/clippy
+  `-D warnings` propres.
+
 ### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
 Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
 --release` a tourné sur une **même machine** — le seul mode de comparaison
