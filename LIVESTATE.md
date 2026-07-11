@@ -1,7 +1,24 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-07-10
+> Dernière mise à jour : 2026-07-11
+
+## Session 2026-07-11 — probabilités, 8e passe (test d'adéquation χ² des lois ajustées)
+- **Contexte** : « continu » après PR #302 (7e passe) MERGÉE. Branche
+  repartie de `origin/master`. Pivot annoncé : capacité (GOF) plutôt que
+  d'ajouter des lois.
+- **Livré** : `htest::chi2_gof_discrete(observed, dist, ddof, min_expected)`
+  — test du χ² de Pearson entre une loi discrète et des comptages ; effectifs
+  attendus tirés de la loi (pmf + classe de queue par sf), regroupement de
+  Cochran (≥ min_expected, absorbe les classes 0 des supports k≥1), df ajusté
+  des paramètres estimés, délègue à `chi_square_gof`. Boucle fit_mom → pmf →
+  htest. Oracle SciPy (Poisson(1.98) : χ²=2.2792, df=4, p=0.6846). 59 tests
+  + doctest, clippy 0 avertissement.
+- **Bilan volet probabilités (8 PR)** : 19 lois discrètes + combinatoire
+  exacte + ζ de Riemann + Loader + inférence MoM + **GOF** + module loterie
+  honnête. Chaîne complète : modéliser → ajuster → valider l'ajustement.
+- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
+- **NB CI** : panne Actions du dépôt possible ; validations locales.
 
 ## Session 2026-07-10 — probabilités, 7e passe (Laplace discrète + fit méthode des moments)
 - **Contexte** : « continu » après PR #297 (6e passe) MERGÉE. Branche

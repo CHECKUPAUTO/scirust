@@ -3344,6 +3344,24 @@ plutôt qu'une formule devinée) :
 - 57 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
   **19 lois discrètes** (16 univariées + 3 vectorielles) + inférence MoM.
 
+### Ajouté — test d'adéquation χ² pour lois discrètes ajustées (8e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes).
+- **`scirust-stats::htest::chi2_gof_discrete`** — test du χ² de Pearson entre
+  une **loi discrète ajustée** et des comptages observés, boucle qui manquait
+  entre `fit_mom`, les pmf et `htest`. Les effectifs attendus sont tirés de la
+  loi (`N·pmf(i)` pour les valeurs exactes, `N·sf(L−2)` pour la classe de
+  queue « ≥ L−1 », somme exacte à N) ; **regroupement adjacent** jusqu'à
+  `min_expected` (règle de Cochran ≥ 5) qui absorbe aussi les classes de
+  probabilité nulle des supports commençant à 1 (Geometric) ; degrés de
+  liberté ajustés du nombre de paramètres estimés (`ddof`). Délègue le calcul
+  final au `chi_square_gof` existant. Validé contre SciPy
+  (`chisquare`/`chi2.sf`) : Poisson(1.98) sur 6 classes ⇒ χ²=2.2792, df=4,
+  p=0.6846 ; rejet d'un mauvais ajustement, regroupement d'une classe 0 de
+  Geometric, entrées dégénérées → `None`.
+- 59 tests + doctest sur le crate, clippy 0 avertissement. Le volet
+  probabilités boucle : lois → combinatoire → ζ → Loader → inférence (MoM)
+  → **validation de l'ajustement (GOF)**.
+
 ## [0.14.0] — 2026-06-13
 
 ### Réparé
