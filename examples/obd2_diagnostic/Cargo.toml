@@ -12,5 +12,9 @@ path = "src/main.rs"
 name = "obd2_massive"
 path = "src/main_massive.rs"
 
+[[bin]]
+name = "obd2_ultra"
+path = "src/main_ultra.rs"
+
 [dependencies]
 scirust-core = { path = "../../scirust-core" }

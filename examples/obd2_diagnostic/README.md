@@ -22,6 +22,12 @@ cargo run -p obd2_diagnostic --release
 cargo run -p obd2_diagnostic --release --bin obd2_massive
 ```
 
+**Version ultra-massive** (100 000 cas synthétiques, 10 causes, modèle très profond) — défi à grande échelle :
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_ultra
+```
+
 ## Ce que fait le programme
 
 1. **Encode** chaque situation d'atelier en 7 nombres (le code défaut + des
