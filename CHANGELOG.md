@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-mcp` : les simulations `scirust-sim` exposées comme outils MCP
+Un agent peut désormais lancer une simulation `scirust-sim` par un simple
+appel d'outil MCP (schéma JSON typé, journal d'audit SHA-256 par appel comme
+les autres outils), sans écrire de code d'intégration :
+- **`sim_epidemic`** — épidémie SIR : renvoie R0, la fraction infectée au pic
+  et le jour du pic, le taux d'attaque final.
+- **`sim_battery_discharge`** — plante batterie Thévenin 1-RC + thermique
+  (`scirust-bms`) à courant constant : SoC, tension terminale et température
+  finales, température stationnaire, constante de temps de polarisation.
+- **`sim_grid_stability`** — équation d'oscillation machine-réseau
+  (`scirust-grid`) : existence d'un point de synchronisme, angle d'équilibre
+  `asin(P_m/P_max)`, fréquence électromécanique petit signal, et — si une
+  perturbation est fournie — verdict de retour à l'équilibre du transitoire.
+- `scirust-mcp` dépend maintenant de `scirust-sim` ; 6 tests d'outils + les
+  assertions du registre. `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-sim` : plantes des verticales industrielles (batterie, HVAC, réseau)
 Les verticales `scirust-bms`/`scirust-hvac`/`scirust-grid` fournissaient la
 physique et des estimateurs mais aucun simulateur pas-à-pas ; trois nouveaux

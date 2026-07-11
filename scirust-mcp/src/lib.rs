@@ -84,6 +84,10 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
+    for tool in tools::sim::sim_tools()
+    {
+        registry.register(tool);
+    }
     registry.register(tools::cli_passthrough::cli_tool());
     registry
 }
@@ -105,6 +109,9 @@ mod tests {
         assert!(registry.names().contains(&"sis_verify_sif_loop"));
         assert!(registry.names().contains(&"sis_reactor_trip_bypass"));
         assert!(registry.names().contains(&"grid_state_estimate"));
+        assert!(registry.names().contains(&"sim_epidemic"));
+        assert!(registry.names().contains(&"sim_battery_discharge"));
+        assert!(registry.names().contains(&"sim_grid_stability"));
         assert!(registry.names().contains(&"biomed_cbf_safe_dose"));
         assert!(registry.names().contains(&"maritime_collision_risk"));
         assert!(registry.names().contains(&"fab_r2r_update"));
