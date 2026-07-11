@@ -23,6 +23,8 @@ pub mod hrv;
 pub mod lomb;
 
 pub use conformal_beats::ConformalBeats;
+#[cfg(feature = "sim")]
+pub use control::GlucoseSystem;
 pub use control::{
     AutoModeMonitor, GlucoseModel, InsulinOnBoard, PidController, PidGains, SafeDose,
     cbf_safe_dose, max_safe_bolus, predictive_suspend, suspend_on_low,

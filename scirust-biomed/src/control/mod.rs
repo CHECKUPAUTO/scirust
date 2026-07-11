@@ -12,8 +12,13 @@ pub mod barrier;
 pub mod insulin_safety;
 pub mod iob;
 pub mod pid;
+/// Steppable-`System` bridge for the glucose plant (optional `sim` feature).
+#[cfg(feature = "sim")]
+pub mod sim;
 
 pub use barrier::{GlucoseModel, SafeDose, cbf_safe_dose};
 pub use insulin_safety::{AutoModeMonitor, max_safe_bolus, predictive_suspend, suspend_on_low};
 pub use iob::InsulinOnBoard;
 pub use pid::{PidController, PidGains};
+#[cfg(feature = "sim")]
+pub use sim::GlucoseSystem;

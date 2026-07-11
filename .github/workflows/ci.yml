@@ -71,6 +71,8 @@ jobs:
         run: cargo clippy -p scirust-sim --features rl --all-targets -- -D warnings
       - name: Run clippy (scirust-sim stiff feature)
         run: cargo clippy -p scirust-sim --features stiff --all-targets -- -D warnings
+      - name: Run clippy (scirust-biomed sim feature)
+        run: cargo clippy -p scirust-biomed --features sim --all-targets -- -D warnings
 
   # Gate σ (S2 de paper/PAPER_PLAN.md) : échoue si une garde f32 sous
   # σ_sanitized (= f32::MIN_POSITIVE) subsiste hors test dans scirust-gpu/src
@@ -150,6 +152,10 @@ jobs:
       # (Robertson kinetics). Cover it explicitly like the rl feature.
       - name: Test scirust-sim stiff bridge (stiff feature)
         run: cargo test -p scirust-sim --features stiff
+      # The scirust-biomed `sim` feature exposes its glucose plant as a
+      # scirust_sim::System; the default workspace run does not build it.
+      - name: Test scirust-biomed sim bridge (sim feature)
+        run: cargo test -p scirust-biomed --features sim
 
   # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
   # A pure `cargo check` needs no cross linker and would have caught the
