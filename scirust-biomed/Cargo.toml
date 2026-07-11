@@ -7,7 +7,14 @@ description = "SciRust biomedical signals — ECG R-peak detection, rhythm class
 
 [dependencies]
 scirust-core = { path = "../scirust-core" }
+scirust-sim = { path = "../scirust-sim", optional = true }
 serde = { version = "1", features = ["derive"] }
+
+[features]
+# Expose this crate's glucose-insulin dynamics as a `scirust_sim::System`, so
+# the shared simulation engine can integrate it. Off by default — pulls in
+# scirust-sim only when requested.
+sim = ["dep:scirust-sim"]
 
 [dev-dependencies]
 approx = "0.5"

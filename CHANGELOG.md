@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-biomed` : dynamique glycémique exposée comme `System` (feature `sim`)
+Premier exemple du sens **inverse** de la couche de simulation : au lieu que
+`scirust-sim` redéclare la physique d'une verticale, la verticale expose son
+propre modèle via le trait partagé.
+- **`control::sim::GlucoseSystem`** (derrière la feature optionnelle `sim`) —
+  enveloppe le modèle glycémique affine `dG/dt = -a·(G − G_b) − k·u`
+  (`control::GlucoseModel`, le *plant* du filtre CBF) avec un débit d'insuline
+  constant, et implémente `scirust_sim::System`. Le moteur de `scirust-sim`
+  (RK4, Dormand–Prince) intègre donc directement le modèle physiologique de la
+  verticale, sans que `scirust-sim` ait à le redéclarer.
+- Oracle en forme close : `G(t) = G* + (G0 − G*)·e^{−a·t}` avec l'état
+  stationnaire `G* = G_b − (k/a)·u`. Les tests confrontent la trajectoire
+  numérique à cette solution exacte, vérifient la relaxation vers `G_b` à u=0
+  et l'annulation de la dérivée à l'équilibre.
+- Feature **off par défaut** (build par défaut inchangé ; `scirust-sim` tiré
+  seulement sous `sim`, aucun cycle car `scirust-sim` ne dépend d'aucune
+  verticale). Étapes CI dédiées (`test`/`clippy -D warnings --features sim`),
+  comme les features `rl`/`stiff`. 44 tests avec la feature (+3, +1 doctest) ;
+  `fmt`/`clippy` propres.
+
 ### Ajouté — `scirust-mcp` : outil MCP `sim_stiff_robertson` (intégrateur raide implicite)
 Expose la cinétique **raide** de Robertson via l'intégrateur implicite
 Rosenbrock-W(2,3) de `scirust-sim` (pont `stiff_bridge` vers `scirust-stiff`) :
