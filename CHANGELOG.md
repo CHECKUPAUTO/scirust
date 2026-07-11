@@ -5,6 +5,20 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-mcp` : outil MCP `sim_stiff_robertson` (intégrateur raide implicite)
+Expose la cinétique **raide** de Robertson via l'intégrateur implicite
+Rosenbrock-W(2,3) de `scirust-sim` (pont `stiff_bridge` vers `scirust-stiff`) :
+- **`sim_stiff_robertson`** — constantes de vitesse paramétrables (défauts
+  canoniques `k₁=0.04`, `k₂=3·10⁷`, `k₃=10⁴`, neuf ordres de grandeur d'écart),
+  état initial et horizon configurables. Renvoie les concentrations finales
+  `[a, b, c]`, la masse totale `a+b+c` (invariant linéaire conservé) et la
+  fraction convertie en C. Une méthode explicite (RK4) exploserait sur le
+  transitoire initial rapide ; l'implicite non.
+- `scirust-mcp` active désormais la feature `stiff` de `scirust-sim` (tire
+  `scirust-stiff` dans le build serveur uniquement). 6 outils `sim_*` au total ;
+  +2 tests d'outils (oracle Hairer & Wanner à t=0.4 : a≈0.9851, c≈0.0149 ;
+  validation), assertion de registre. `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-sim` : double pendule chaotique (`mechanics::DoublePendulum`)
 Le premier système **chaotique** de la bibliothèque de simulation, l'exemple
 canonique de chaos déterministe :
