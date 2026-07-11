@@ -31,7 +31,8 @@ cargo run -p obd2_diagnostic --release --bin obd2_ultra
 **Version MÉGAVERSE** (1 000 000 cas synthétiques, 1000 causes, classification extrême) — le défi ultime :
 
 ```bash
-cargo run -p obd2_diagnostic --release --bin obd2_megaverse
+cargo run -p obd2_diagnostic --release --bin obd2_megaverse       # 8 epochs
+cargo run -p obd2_diagnostic --release --bin obd2_megaverse -- 3  # nb epochs au choix
 ```
 
 ## Ce que fait le programme
@@ -79,6 +80,43 @@ Résultats sur données synthétiques :
 Le 56.6 % sur 10 classes reflète la séparabilité réelle des patterns générés.
 Avec de vraies données d'atelier (signatures causales plus fortes), les
 résultats seraient meilleurs.
+
+## Version MÉGAVERSE (1M cas × 1000 causes)
+
+Le binary `obd2_megaverse` pousse le framework à l'échelle :
+- **1 000 000 cas synthétiques** (800K train / 100K val / 100K test)
+- **1000 causes racines**, chacune avec une signature unique de 8 capteurs
+  anormaux (haut/bas) parmi 20 — unicité vérifiée à la génération
+- **Mini-batches de 256** via le support multi-batch natif (matmul batché +
+  CrossEntropy à labels entiers) : 3 125 graphes d'autodiff par epoch au
+  lieu de 800 000
+- **Shuffle Fisher-Yates** de l'ordre des exemples à chaque epoch
+- **Bruit** : ±0.03 à l'entraînement, ±0.05 au test (plus dur)
+
+Résultats mesurés (modèle 20 → 256 → 128 → 1000, ~167K paramètres,
+Adam lr=0.001, seed 42) :
+
+| Métrique | Valeur |
+|----------|--------|
+| Génération des 1M cas | 0.07 s |
+| Entraînement (3 epochs) | 157 s (~52 s/epoch) |
+| Validation | **100.00 %** dès l'epoch 1 |
+| **Test (100 000 cas)** | **100.00 %** (100000/100000) |
+| Baseline aléatoire | 0.10 % |
+
+Le 100 % s'explique : chaque cause possède une signature de capteurs
+**unique et bien séparée** du bruit (écart signal ~0.3-0.45 vs bruit ±0.05).
+Le réseau n'a « plus qu'à » apprendre 1000 régions de décision dans un
+espace à 20 dimensions — ce que 800K exemples rendent possible. C'est une
+démonstration de **capacité et de passage à l'échelle du framework**
+(1M cas, 1000 classes, minutes de calcul), pas une mesure de difficulté
+du diagnostic réel.
+
+La v1 de ce binary plafonnait à ~0.1 % : signatures en collision
+(périodicité modulo 20 → 20 signatures pour 1000 causes), données jamais
+mélangées (oubli catastrophique) et un graphe d'autodiff par exemple
+(~9 h par epoch). Le commentaire d'en-tête de `main_megaverse.rs` détaille
+les trois corrections.
 
 ## Honnêteté sur les limites
 
