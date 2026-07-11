@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : goniométrie haute résolution MVDR/Capon (`radar::doa`) — bloc 6
+Sixième bloc du domaine radar : la DOA **haute résolution**, qui sépare des
+sources plus proches que la largeur de faisceau du réseau.
+- **`covariance`** — matrice de covariance spatiale `R = (1/T)·Σ x·xᴴ` (M×M
+  hermitienne) des snapshots du réseau.
+- **`mvdr_spectrum`** — formateur **MVDR / Capon** :
+  `P(θ) = 1/(aᴴ(θ)·R⁻¹·a(θ))`, chargement diagonal pour la stabilité. Bien plus
+  résolvant que le formateur conventionnel (Bartlett). Repose sur un **inverse
+  matriciel complexe** (Gauss-Jordan avec pivotage partiel) écrit sur place,
+  sans dépendance nouvelle.
+- Oracles : le MVDR pique à la direction de la source ; **deux sources à 6°**
+  (dans le faisceau ~11° d'un réseau à 10 éléments) sont **résolues** par le
+  MVDR — le point médian est un creux entre deux pics — alors que le Bartlett les
+  fusionne ; la covariance est bien hermitienne. 3 tests (141 au total) ;
+  `fmt`/`clippy -D warnings` propres. MUSIC (sous-espace bruit par
+  eigendécomposition) viendra dans un bloc ultérieur.
+
 ### Ajouté — `scirust-signal` : traitement d'antenne / goniométrie radar (`radar::beamform`) — bloc 5
 Cinquième bloc du domaine radar : le passage **multi-voies** — estimation de la
 direction d'arrivée (DOA) sur réseau linéaire uniforme (ULA), la voie *angle*
