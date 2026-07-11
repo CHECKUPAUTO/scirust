@@ -100,7 +100,16 @@ pub fn latest_checkpoint(dir: &Path) -> Option<std::path::PathBuf> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().ok().is_some_and(|t| t.is_dir()))
         .collect();
-    dirs.sort_by_key(|d| d.file_name());
+    // Sort by the numeric `step_N` suffix, NOT lexicographically — otherwise
+    // "step_900" sorts after "step_1000"/"step_3000" ('9' > '1'), so the newest
+    // checkpoint is missed (breaking both resume and generate-from-latest).
+    dirs.sort_by_key(|d| {
+        d.file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix("step_"))
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0)
+    });
 
     let last = dirs.last()?;
     if last.path().join("meta.json").exists()

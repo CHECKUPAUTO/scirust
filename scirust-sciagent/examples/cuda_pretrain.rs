@@ -118,8 +118,42 @@ fn preset_by_name(name: &str) -> (SciAgentConfig, String) {
     }
 }
 
+/// Directories never worth ingesting for byte-level *source* pretraining — VCS
+/// internals, build artifacts, vendored deps, caches. Skipping them matters: the
+/// sorted walk reads `.git` first (dot sorts before letters), so its packed binary
+/// objects would otherwise dominate the head of the corpus — a real run collapsed
+/// deterministically on exactly that garbage (see `ROUTE_B.md`).
+fn skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "target"
+            | "node_modules"
+            | ".cargo"
+            | "dist"
+            | "build"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".idea"
+            | ".vscode"
+    )
+}
+
+/// Whether `bytes` look like source text: valid UTF-8 with no NUL byte. Binary
+/// files (compiled artifacts, images, `.git` objects, archives) fail this and are
+/// skipped — byte-level pretraining should see text, not binary blobs.
+fn is_probably_text(bytes: &[u8]) -> bool {
+    !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok()
+}
+
 /// Recursively read raw file bytes under `root` (deterministic order), up to `cap`
-/// bytes. Used for byte-level ingestion.
+/// bytes — **source text only**: non-source directories ([`skip_dir`]) and non-text
+/// files ([`is_probably_text`]) are skipped.
 fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
     if out.len() >= cap
     {
@@ -129,8 +163,11 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
     {
         if let Ok(b) = std::fs::read(root)
         {
-            let take = (cap - out.len()).min(b.len());
-            out.extend_from_slice(&b[..take]);
+            if is_probably_text(&b)
+            {
+                let take = (cap - out.len()).min(b.len());
+                out.extend_from_slice(&b[..take]);
+            }
         }
         return;
     }
@@ -143,6 +180,16 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
             if out.len() >= cap
             {
                 break;
+            }
+            if p.is_dir()
+            {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                {
+                    if skip_dir(name)
+                    {
+                        continue;
+                    }
+                }
             }
             read_bytes_recursive(&p, out, cap);
         }
@@ -301,6 +348,21 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default_lr);
+    // Global grad-norm clip (default 1.0; SCIAGENT_CLIP overrides, <= 0 disables).
+    let max_grad_norm = std::env::var("SCIAGENT_CLIP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0f32);
+    // AdamW epsilon (default 1e-5, bf16-appropriate; SCIAGENT_EPS overrides).
+    let adam_eps = std::env::var("SCIAGENT_EPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1e-5f32);
+    // Held-out validation fraction (tail; default 2%; SCIAGENT_VAL_FRAC overrides, 0 disables).
+    let val_frac = std::env::var("SCIAGENT_VAL_FRAC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.02f32);
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -309,13 +371,18 @@ fn main() {
         start_step,
         seq_len,
         weight_decay: 0.0,
+        adam_eps,
         log_interval: 25,
         save_interval: 100,
         checkpoint_dir: ckpt_dir.clone(),
+        max_grad_norm,
+        val_frac,
+        eval_interval: 100,
         ..Default::default()
     };
     println!(
-        "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | ckpt → {ckpt_dir}\n"
+        "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
+         eps {adam_eps:.0e} | clip {max_grad_norm} | ckpt → {ckpt_dir}\n"
     );
 
     let losses = trainer.pretrain(&tokens, &mut model, &config, &cfg);

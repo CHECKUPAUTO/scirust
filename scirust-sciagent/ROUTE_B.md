@@ -161,6 +161,54 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   350M-from-scratch pretrain — the goal that motivated the whole route — now runs in
   bf16 on the Thor, resumable.
 
+- **B7/B8 — training stability at 270M (debugged on the Thor).** Scaling to a
+  byte-level ~270M model (`code350m` preset) exposed a **deterministic collapse**: the
+  loss fell to ~2, then jumped to the `ln(256) = 5.55` uniform floor and stuck. The
+  debugging is worth recording because three plausible fixes each *disproved* a
+  hypothesis:
+  - **LR** (3e-3 → 3e-4): collapsed at the *same* step — not LR magnitude.
+  - **B7 grad-norm clipping** (`sumsq` reduction + `global_grad_norm` + a `grad_scale`
+    in `adamw_step`, gradient-checked): the `gnorm` it logged stayed *small* (~5) at the
+    collapse — no spike — and Adam's `m/√v` is nearly scale-invariant to global clipping
+    anyway, so it was a near-no-op. (Kept as hygiene + the `gnorm` diagnostic.)
+  - **AdamW eps** (1e-8 → 1e-5, bf16-appropriate): no change.
+
+  The **localizer** settled it: the collapse was at the *same corpus byte offset*
+  (~166,400) at two seq lengths (step 325 @ 512, step 650 @ 256), i.e. a **pathological
+  batch, not the optimizer**. The sorted file walk reads `.git` first, so byte 166 K was
+  deep in **`.git`'s packed binary objects** — the model was training on compressed
+  garbage. **B8** fixes ingestion to source text only (skip `.git`/`target`/… and
+  non-UTF-8/NUL files). With clean data the same 270M run trains **stably**: loss
+  **12.16 → 1.97 nats/byte** (84 %) over 500 steps, sailing straight through the old
+  step-325 cliff. Lesson: a data-quality bug can masquerade as a numerics bug — the
+  fix was hygiene, not the optimizer.
+
+- **B9 — BPE-350M pipeline, validated end-to-end.** The *true* 350M (32768-vocab
+  BPE, 304M params) runs the full path on the Thor: `train-tokenizer` (32574 merges)
+  → `collect-data` (3.25M tokens → LE-u32 shards, multi-extension + dir hygiene) →
+  `cuda_pretrain SCIAGENT_CONFIG=350m SCIAGENT_SHARDS=…`. 3000 bf16 steps at ~129
+  tok/s: loss **10.45 → 8.94** — which *looks* weak but is the ln(32768)=10.4 vocab
+  scale; **normalized per character it's ~1.79 nats/char** (8.94 ÷ ~5 chars/token),
+  matching the byte model's 1.97 nats/char while processing 5× fewer tokens per
+  document — the efficiency BPE buys. The plateau is under-training, not instability
+  (3000 × 512 = 1.5 M tokens ≈ half an epoch of a 304M model; `gnorm` small, no
+  collapse). Both a byte-level ~270M and a BPE ~304M from-scratch pretrain now run
+  raw-source → trained checkpoint in bf16 on the Thor, resumable.
+
+- **B11/B12 — generation, validated end-to-end.** `CudaModel::generate` (non-cached:
+  forward → last-row logits → shared deterministic sampler) + `examples/cuda_generate`
+  load a trained checkpoint and sample on Tensor cores. **Thor, byte model (step 500,
+  1.57 nats/char):** `fn main() {` → recognizable under-trained code babble — word
+  fragments, `//`/`()`/`,`/newlines/digits, 59 distinct tokens of 200 (no collapse).
+  This closes the loop: **train → checkpoint → load → generate → decode → text**, all
+  bf16 on Blackwell Tensor cores. B12 also fixed two footguns found here:
+  `latest_checkpoint` sorted lexicographically (loaded `step_900` over `step_3000`,
+  breaking resume + generate-from-latest — now numeric); and made BPE training
+  **deterministic** (tie-broken merges) so a tokenizer is reproducible, with a loud
+  `<unk>`-fraction guard so a corrupt tokenizer fails clearly instead of emitting
+  garbage. The whole SLM lifecycle — pretrain, checkpoint, resume, generate — now runs
+  from raw source on the Thor; the only remaining lever for quality is **scale**.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

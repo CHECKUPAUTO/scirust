@@ -15,6 +15,7 @@ use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_cuda::{CudaChain, CudaF32, CudaMatrix};
 
 use crate::config::SciAgentConfig;
+use crate::generate::{SamplingParams, sample_row, seed_to_state};
 use crate::model::SciAgentModel;
 use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::scheduler::WarmupCosineSchedule;
@@ -187,6 +188,43 @@ impl CudaModel {
     /// (row-major), computed on Tensor cores and downloaded. Single sequence.
     pub fn forward(&self, tokens: &[u32]) -> Vec<f32> {
         self.chain.download(&self.forward_resident(tokens))
+    }
+
+    /// Autoregressive generation from `prompt`, appending up to `max_new` tokens.
+    /// **Non-cached** (re-runs the full forward each step, O(n²)) — the MVP, matching
+    /// Route A's `infer-1` before its KV cache; fine for eyeballing checkpoint quality
+    /// on short samples. Uses the shared deterministic [`sample_row`] so the sampling
+    /// is bit-identical to the CPU/Route-A paths. Stops early on token `0` (the
+    /// `<pad>`/EOS convention). Returns the full token sequence (prompt + generated).
+    pub fn generate(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        params: &SamplingParams,
+        seed: u64,
+    ) -> Vec<u32> {
+        let mut tokens: Vec<u32> = if prompt.is_empty()
+        {
+            vec![0]
+        }
+        else
+        {
+            prompt.to_vec()
+        };
+        let mut rng = seed_to_state(seed);
+        for _ in 0..max_new
+        {
+            let logits = self.forward(&tokens);
+            let last = &logits[logits.len() - self.vocab..];
+            let recent: Vec<usize> = tokens.iter().map(|&t| t as usize).collect();
+            let next = sample_row(last, params, &recent, &mut rng) as u32;
+            tokens.push(next);
+            if next == 0
+            {
+                break;
+            }
+        }
+        tokens
     }
 
     /// Backward of [`Self::attention`] (the GQA analogue of Route A's
@@ -461,6 +499,10 @@ pub struct CudaTrainer {
     m_blocks: Vec<BlockMasters>,
     v_blocks: Vec<BlockMasters>,
     step: u32,
+    /// Global grad-norm clip threshold (`<= 0` disables). Default `1.0`.
+    max_grad_norm: f32,
+    /// The last step's pre-clip global grad norm (for logging / diagnostics).
+    last_grad_norm: f32,
 }
 
 impl CudaTrainer {
@@ -519,12 +561,26 @@ impl CudaTrainer {
             m_blocks,
             v_blocks,
             step: 0,
+            max_grad_norm: 1.0,
+            last_grad_norm: 0.0,
         })
     }
 
     /// The vocabulary width (logit columns).
     pub fn vocab(&self) -> usize {
         self.model.vocab
+    }
+
+    /// Set the global grad-norm clip threshold (`<= 0` disables clipping). Standard
+    /// pretraining practice is `1.0` (the default).
+    pub fn set_max_grad_norm(&mut self, max_norm: f32) {
+        self.max_grad_norm = max_norm;
+    }
+
+    /// The last training step's pre-clip global gradient L2 norm — the diagnostic
+    /// that reveals gradient spikes.
+    pub fn last_grad_norm(&self) -> f32 {
+        self.last_grad_norm
     }
 
     /// One mixed-precision AdamW training step on `(tokens, targets)`: forward →
@@ -553,6 +609,42 @@ impl CudaTrainer {
         let dlogits = self.model.chain.cross_entropy_grad(&logits, targets);
         let grads = self.model.backward(tokens, &dlogits);
 
+        // Global gradient-norm clipping: compute ‖g‖ over every weight's grad, then
+        // scale so the update's norm is ≤ max_grad_norm. A non-finite norm (NaN/inf
+        // from a pathological batch) → scale 0, i.e. skip the update so a spike can't
+        // corrupt the weights. This is what keeps the 270M bf16 pretrain from
+        // diverging at a bad batch.
+        let max_norm = self.max_grad_norm;
+        let gnorm = {
+            let mut grad_refs: Vec<&CudaMatrix> = vec![&grads.d_embedding, &grads.d_final_norm];
+            for bg in &grads.blocks
+            {
+                grad_refs.push(&bg.dnorm1);
+                grad_refs.push(&bg.dwq);
+                grad_refs.push(&bg.dwk);
+                grad_refs.push(&bg.dwv);
+                grad_refs.push(&bg.dwo);
+                grad_refs.push(&bg.dnorm2);
+                grad_refs.push(&bg.dwg);
+                grad_refs.push(&bg.dwu);
+                grad_refs.push(&bg.dwd);
+            }
+            self.model.chain.global_grad_norm(&grad_refs)
+        };
+        self.last_grad_norm = gnorm;
+        let scale = if !gnorm.is_finite()
+        {
+            0.0
+        }
+        else if max_norm > 0.0 && gnorm > max_norm
+        {
+            max_norm / gnorm
+        }
+        else
+        {
+            1.0
+        };
+
         // AdamW updates — fp32 masters mutated in place, bf16 views refreshed.
         let step = self.step;
         let ch = &self.model.chain;
@@ -567,6 +659,7 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
+            scale,
         );
         ch.adamw_step(
             &mut self.master_final_norm,
@@ -579,6 +672,7 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
+            scale,
         );
         for i in 0..self.model.blocks.len()
         {
@@ -605,6 +699,7 @@ impl CudaTrainer {
                     adam_eps,
                     weight_decay,
                     step,
+                    scale,
                 );
             };
             one(
@@ -630,6 +725,36 @@ impl CudaTrainer {
             one(&mut mb.wd, &mut mm.wd, &mut mv.wd, &bg.dwd, &mut b.wd);
         }
         loss
+    }
+
+    /// Mean cross-entropy over up to `max_windows` non-overlapping `seq_len` windows
+    /// of `val_tokens` — **no update** (pure forward), so it measures held-out
+    /// generalization rather than the train loss on the repeatedly-seen corpus.
+    /// Returns `NaN` if there isn't a full window.
+    pub fn eval_loss(&self, val_tokens: &[u32], seq_len: usize, max_windows: usize) -> f32 {
+        let s = seq_len;
+        let vocab = self.model.vocab;
+        let mut total = 0.0f64;
+        let mut count = 0usize;
+        let mut cursor = 0usize;
+        while cursor + s < val_tokens.len() && count < max_windows.max(1)
+        {
+            let inputs = &val_tokens[cursor..cursor + s];
+            let targets = &val_tokens[cursor + 1..cursor + s + 1];
+            let logits = self.model.forward_resident(inputs);
+            let host = self.model.chain.download(&logits);
+            total += host_cross_entropy(&host, targets, s, vocab) as f64;
+            count += 1;
+            cursor += s;
+        }
+        if count == 0
+        {
+            f32::NAN
+        }
+        else
+        {
+            (total / count as f64) as f32
+        }
     }
 
     /// Forward `tokens → logits` on the (possibly trained) bf16 model — a thin
@@ -713,6 +838,31 @@ impl CudaTrainer {
             );
             return losses;
         }
+        self.max_grad_norm = cfg.max_grad_norm;
+
+        // Hold out the tail as a validation split (never trained on) so we can track
+        // generalization, not just train loss on the repeatedly-seen corpus. Keep at
+        // least one train window and one val window, else skip validation.
+        let val_len = ((tokens.len() as f32 * cfg.val_frac.max(0.0)) as usize)
+            .min(tokens.len().saturating_sub(s + 1));
+        let (train_tokens, val_tokens): (&[u32], &[u32]) = if val_len > s + 1
+        {
+            let cut = tokens.len() - val_len;
+            (&tokens[..cut], &tokens[cut..])
+        }
+        else
+        {
+            (tokens, &[])
+        };
+        if !val_tokens.is_empty()
+        {
+            println!(
+                "held-out validation: {} tokens ({:.0}% tail)\n",
+                val_tokens.len(),
+                cfg.val_frac * 100.0
+            );
+        }
+
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
@@ -720,12 +870,12 @@ impl CudaTrainer {
         let t0 = std::time::Instant::now();
         while step < cfg.total_steps
         {
-            if cursor + s + 1 > tokens.len()
+            if cursor + s + 1 > train_tokens.len()
             {
                 cursor = 0;
             }
-            let inputs = &tokens[cursor..cursor + s];
-            let targets = &tokens[cursor + 1..cursor + s + 1];
+            let inputs = &train_tokens[cursor..cursor + s];
+            let targets = &train_tokens[cursor + 1..cursor + s + 1];
             let lr = schedule.lr_at(step);
             let loss = self.train_step(
                 inputs,
@@ -744,7 +894,17 @@ impl CudaTrainer {
                 let done = (step - cfg.start_step) * s;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
                 let tps = done as f64 / secs;
-                println!("[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | {tps:>8.0} tok/s");
+                // gnorm is the pre-clip grad norm — a spike shows here even though the
+                // clip keeps it from corrupting the weights.
+                let gnorm = self.last_grad_norm();
+                println!(
+                    "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
+                );
+            }
+            if cfg.eval_interval > 0 && !val_tokens.is_empty() && step % cfg.eval_interval == 0
+            {
+                let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                println!("            └─ held-out val loss {val:>9.4}");
             }
             if cfg.save_interval > 0 && step % cfg.save_interval == 0
             {
@@ -796,6 +956,16 @@ pub struct CudaPretrainConfig {
     pub save_interval: usize,
     /// Directory the `step_N/` checkpoints are written under.
     pub checkpoint_dir: String,
+    /// Global gradient-norm clip threshold (`<= 0` disables). Default `1.0` —
+    /// standard for pretraining, and what keeps a bad batch from diverging the run.
+    pub max_grad_norm: f32,
+    /// Fraction of the token stream held out (from the tail) for validation
+    /// (`0.0` disables held-out eval). Default `0.02`.
+    pub val_frac: f32,
+    /// Report held-out validation loss every this many steps (0 = never).
+    pub eval_interval: usize,
+    /// Max validation windows averaged per eval (bounds eval cost). Default `32`.
+    pub eval_windows: usize,
 }
 
 impl Default for CudaPretrainConfig {
@@ -807,12 +977,18 @@ impl Default for CudaPretrainConfig {
             total_steps: 50_000,
             start_step: 0,
             betas: (0.9, 0.95),
-            adam_eps: 1e-8,
+            // bf16-appropriate epsilon: larger than the fp32 default 1e-8 to keep the
+            // AdamW `m/(√v+eps)` ratio well-conditioned when moments get tiny.
+            adam_eps: 1e-5,
             weight_decay: 0.1,
             seq_len: 128,
             log_interval: 100,
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
+            max_grad_norm: 1.0,
+            val_frac: 0.02,
+            eval_interval: 250,
+            eval_windows: 32,
         }
     }
 }

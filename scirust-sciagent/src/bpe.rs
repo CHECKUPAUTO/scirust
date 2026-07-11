@@ -92,7 +92,12 @@ impl BpeTrainer {
                 .into_iter()
                 .filter(|&(_, count)| count >= self.min_frequency as u64)
                 .collect();
-            ranked.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
+            // Deterministic order: by count DESC, ties broken by the pair ids ASC.
+            // Without the tiebreak, `sort_unstable` leaves equal-count pairs in an
+            // arbitrary order, so the same corpus can yield a different tokenizer
+            // across runs — meaning a lost/corrupt tokenizer.json can't be
+            // regenerated to stay compatible with already-tokenised shards.
+            ranked.sort_unstable_by(|&(pa, ca), &(pb, cb)| cb.cmp(&ca).then(pa.cmp(&pb)));
             let batch: Vec<(usize, usize)> = ranked
                 .into_iter()
                 .take(merge_batch_size)
@@ -424,6 +429,57 @@ mod tests {
 
         let decoded = tok.decode(&encoded);
         assert_eq!(decoded, "low");
+    }
+
+    #[test]
+    fn bpe_encode_survives_save_load() {
+        // Realistic corpus: multi-line, with the Unicode a real code+docs corpus has
+        // (→ ᵀ × ✅ ⊙ √ é), which the byte-level base vocab represents as `<NNN>`
+        // placeholder keys — the case a pure-ASCII test misses.
+        let sample =
+            "fn main() {\n    // rms → √(mean(x²)+eps) · wᵀ ✅ é ⊙\n    println!(\"hi\");\n}\n";
+        let texts = vec![sample.repeat(50)];
+        let trainer = BpeTrainer::new(1024).min_frequency(1);
+        let tok = trainer.train(&texts);
+        let before = tok.encode("fn main");
+        let unk_before = before.iter().filter(|&&id| id == 3).count();
+        assert!(
+            unk_before < before.len(),
+            "encode is all <unk> BEFORE save (train bug): {before:?}"
+        );
+
+        let path = std::env::temp_dir().join("scirust_bpe_roundtrip.json");
+        let path = path.to_str().unwrap();
+        tok.save_json(path).unwrap();
+        let tok2 = BpeTokenizer::load_json(path).unwrap();
+        assert!(
+            tok2.vocab.contains_key("f"),
+            "base token \"f\" lost after save/load — vocab has {} entries",
+            tok2.vocab.len()
+        );
+        let after = tok2.encode("fn main");
+        assert_eq!(
+            before, after,
+            "encode differs after save/load — save/load loses the vocab.\n\
+             before {before:?}\nafter  {after:?}"
+        );
+        assert_eq!(tok2.decode(&after), "fn main", "decode after load");
+    }
+
+    #[test]
+    fn bpe_training_is_deterministic() {
+        let texts = vec![
+            "fn a() { let x = 1; }\nfn b() { let y = 2; }\n".repeat(20),
+            "// → ᵀ × ✅ comment ⊙ √\nstruct S { f: u32 }\n".repeat(20),
+        ];
+        let train = || BpeTrainer::new(600).min_frequency(1).train(&texts);
+        let (t1, t2) = (train(), train());
+        assert_eq!(t1.merges, t2.merges, "merges differ across identical runs");
+        assert_eq!(
+            t1.encode("fn a() { let x"),
+            t2.encode("fn a() { let x"),
+            "encode differs across identical runs"
+        );
     }
 
     #[test]
