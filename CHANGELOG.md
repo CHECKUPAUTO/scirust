@@ -5,6 +5,29 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — PSF, MTF et déconvolution (`optics`) — bloc 11
+Premier bloc du volet **optronique / optique de précision / traitement de
+l'image** : la qualité d'image et la restauration d'un imageur EO/IR, dans le
+crate vision existant.
+- **`gaussian_psf`** — fonction d'étalement du point (PSF) gaussienne normalisée
+  (`Σ = 1`), taille impaire.
+- **`apply_psf`** — flou optique direct (convolution image ⊛ PSF), réutilise
+  `convolve2d`.
+- **`line_spread`** / **`mtf`** — fonction d'étalement de ligne (LSF) puis
+  **fonction de transfert de modulation** (MTF) : module normalisé de la DFT de
+  la LSF (`MTF[0] = 1`), fréquences en cycles/pixel, DFT directe sans contrainte
+  de puissance de deux.
+- **`mtf50`** — métrique de résolution : fréquence où la MTF chute à 0,5
+  (interpolée), le chiffre-clé d'une optique de précision.
+- **`richardson_lucy`** — déconvolution de Richardson–Lucy (restauration
+  itérative spatiale, uniquement des convolutions ; conserve le flux, reste
+  positive).
+- Oracles : la PSF est normalisée / symétrique / à pic central ; la MTF d'une
+  gaussienne suit la forme fermée `exp(−2π²σ²f²)` et décroît de façon monotone ;
+  le `MTF50` suit `√(ln2/2)/(πσ)` ; Richardson–Lucy est l'identité pour une PSF
+  de Dirac et re-concentre un point flouté (pic remonté, flux conservé). 7 tests
+  (29 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : pistage — filtre α–β + traqueur multi-cibles (`radar::track`) — bloc 10
 Dixième bloc du domaine radar : la **couche temporelle** qui associe les
 détections d'une trame aux pistes existantes et lisse chaque état. Clôt la

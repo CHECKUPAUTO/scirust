@@ -1,6 +1,14 @@
 //! Computer vision patterns: CNN layers, object detection, image classification, segmentation.
+//!
+//! The [`optics`] module adds optronic image-quality and restoration tools — the
+//! point-spread function, the modulation transfer function (with the `MTF50`
+//! resolution metric), and Richardson–Lucy deconvolution — for EO/IR / precision
+//! optical imaging.
 
 use serde::{Deserialize, Serialize};
+
+pub mod optics;
+pub use optics::{Axis, apply_psf, gaussian_psf, line_spread, mtf, mtf50, richardson_lucy};
 
 // ─── Image Representation ───────────────────────────────────────────────────
 
