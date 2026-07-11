@@ -15,6 +15,8 @@
 //!   production maximale et de coût minimal.
 //! - [`time`] — temps de coupe (temps machine) des opérations élémentaires.
 //! - [`roughness`] — rugosité théorique de l'état de surface en tournage.
+//! - [`gears`] — engrenages cylindriques droits : géométrie de la denture à
+//!   développante (module) et flexion en pied de dent (**Lewis**).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -60,6 +62,7 @@
 
 pub mod economics;
 pub mod forces;
+pub mod gears;
 pub mod kinematics;
 pub mod roughness;
 pub mod time;
@@ -68,6 +71,10 @@ pub mod toollife;
 
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
+pub use gears::{
+    SpurGear, center_distance, gear_ratio, lewis_bending_stress, pitch_line_velocity_m_s,
+    tangential_force_from_power, tangential_force_from_torque,
+};
 pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
     mrr_milling_mm3_min, mrr_turning_cm3_min, spindle_speed_rpm,
