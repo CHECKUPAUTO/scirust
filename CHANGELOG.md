@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : détection CFAR radar (`radar::cfar`) — bloc 2
+Deuxième bloc du domaine radar : la **détection à taux de fausse alarme
+constant**, le maillon détection des chaînes de traitement des deux projets de
+référence (OpenRadar, AERIS/plfm_radar).
+- **`ca_cfar`** — CFAR à moyennage de cellules : seuil `α · moyenne(cellules de
+  référence)` avec le facteur en forme close `α = N·(P_fa^{−1/N} − 1)`, cellules
+  de garde autour de la cellule testée. Renvoie un masque de détection.
+- **`os_cfar`** — CFAR à statistique d'ordre (k-ième plus petite cellule de
+  référence), **robuste aux cibles interférentes** et aux bords de fouillis qui
+  masqueraient le CA-CFAR ; facteur `α` trouvé par bissection sur
+  `P_fa(α) = ∏ (N−i)/(N−i+α)`.
+- Oracles : identité CFAR `(1 + α/N)^{−N} = P_fa` ; **taux de fausse alarme tenu
+  statistiquement** (bruit exponentiel, 20 000 cellules, empirique ≈ P_fa) ;
+  l'OS-CFAR détecte une cible que le CA-CFAR masque à cause d'un interféreur
+  dans la fenêtre ; `α_os` inverse bien la formule de P_fa.
+- Sans dépendance nouvelle. 6 tests (123 au total dans le crate) ; `fmt`/`clippy
+  -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : traitement du signal radar (module `radar`) — bloc 1
 Premier bloc d'un domaine **radar/optronique** (utile aux systèmes de défense
 type Safran/Sagem), en extension des crates existants : la compression

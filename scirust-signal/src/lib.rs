@@ -20,8 +20,9 @@
 //!   via cascaded second-order sections, and a general direct-form-II-transposed
 //!   `lfilter`
 //! - **Radar** — pulse-compression waveforms (linear-FM chirp, Barker phase
-//!   codes) and matched filtering (cross-correlation, peak/echo-delay
-//!   estimation, peak-to-sidelobe ratio)
+//!   codes), matched filtering (cross-correlation, peak/echo-delay estimation,
+//!   peak-to-sidelobe ratio) and CFAR detection (cell-averaging and
+//!   ordered-statistic, with the closed-form threshold scaling)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -65,5 +66,8 @@ pub use mcsa::{
     analyze_broken_bar, analyze_eccentricity, diagnose_motor, slip,
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
-pub use radar::{barker_code, cross_correlate, lfm_chirp, peak_lag, peak_to_sidelobe};
+pub use radar::{
+    barker_code, ca_cfar, ca_cfar_alpha, cross_correlate, lfm_chirp, os_cfar, os_cfar_alpha,
+    peak_lag, peak_to_sidelobe,
+};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
