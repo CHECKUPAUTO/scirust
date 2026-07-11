@@ -5,20 +5,93 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — `scirust-sim` : pont RL vers `scirust-learning` (feature `rl`)
-- **`scirust-sim::rl_bridge::RlEnv`** — adaptateur qui présente n'importe quel
-  `Environment` + nouveau trait **`FiniteActionSpace`** comme un
-  `scirust_learning::rl::Env`. Les agents RL existants (Q-learning tabulaire,
-  PPO, deep) pilotent donc **CartPole** et **GridWorld** sans réécriture : les
-  deux traits partageaient déjà la forme `reset` / `step → (état, récompense,
-  fin)`, l'adaptateur fournit en plus `available_actions`. Preuve
-  bout-en-bout : un `TabularAgent<(usize,usize), Move>` entraîné sur
-  `RlEnv<GridWorld>` **converge vers le plus court chemin** (politique gloutonne
-  = distance de Manhattan). `Move` dérive désormais `Hash` (clé de Q-table).
-- **Zéro coût par défaut** : le pont est derrière la feature optionnelle `rl`
-  (dépendances `scirust-learning` + `rand` uniquement alors) ; le crate reste
-  sans dépendance et Miri-propre en configuration par défaut. Feature couverte
-  en CI (`cargo test/clippy -p scirust-sim --features rl`).
+### Ajouté — axe 3 (bloc-canal) du brief QRD-RLS : `BlockQrdRls`, absorption par blocs via Householder
+Le troisième axe du brief Gentleman/McWhirter, précédemment documenté comme
+délibérément différé, est maintenant livré — avec un périmètre honnête et un
+résultat de banc mesuré qui ne va **pas** dans le sens espéré par le brief.
+
+- **`BlockQrdRls`** (nouveau module `block_qrd_rls`) — absorbe un bloc de `B`
+  nouveaux échantillons en une seule réduction QR par réflecteurs de
+  Householder (Golub & Van Loan, Alg. 5.1.1) sur le système augmenté
+  `(n+B)×n`, au lieu de `B` rotations de Givens séquentielles. Chaque
+  réflecteur est appliqué aux colonnes restantes du facteur *et* aux `n_out`
+  colonnes du second membre. Zéro dépendance externe ajoutée (boucles denses
+  écrites à la main, pas de GEMM BLAS-3 — voir plus bas).
+- **Portée précisée dans la doc du module** : deux idées distinctes se
+  cachent derrière « FQRD-RLS bloc-canal multicanal » dans la littérature.
+  (1) le traitement par blocs de plusieurs échantillons temporels — c'est ce
+  qui est livré ici. (2) les algorithmes QRD-RLS « rapides » à récursion
+  d'ordre (Cioffi–Kailath, en `O(n)` au lieu de `O(n²)` par échantillon) —
+  une dérivation entièrement différente, **non livrée**, qui demanderait sa
+  propre validation croisée from scratch plutôt qu'une généralisation de
+  taille de bloc de Gentleman. Par ailleurs, même dans le périmètre (1), le
+  vrai gain BLAS-3 (représentation compacte WY, `Q = I − Y·T·Yᵀ`, deux
+  produits matrice-matrice) n'est **pas** implémenté — chaque réflecteur est
+  appliqué colonne par colonne (un produit scalaire + un `axpy` par colonne
+  restante, de forme BLAS-2), documenté explicitement comme tel plutôt que
+  survendu.
+- **Pondération de récence à l'intérieur d'un bloc** — dérivée puis vérifiée,
+  pas supposée : `B` appels séquentiels à `update()` mettent chacun à
+  l'échelle **tout** le facteur existant par `√λ` (voir la doc de
+  `squared_givens`), donc `B` échantillons groupés doivent reproduire un
+  facteur existant mis à l'échelle par `λ^(B/2)` au total, l'échantillon le
+  plus ancien du bloc par `λ^((B-1)/2)`, le plus récent par `λ⁰ = 1`.
+  Deux tests cross-oracle confirment que cette construction reproduit
+  exactement l'absorption séquentielle : `update_block(..., block_size=1)`
+  colle à `GivensQrdRls::update` à 1e-6 près sur 1000 pas, et grouper le même
+  flux en blocs de 5 colle au traitement un-par-un à 1e-6 près sur 400
+  échantillons. Cross-vérifié aussi en MIMO contre `SquaredGivensRls`
+  (`n_in=3, n_out=2`, blocs de 8, 250 blocs) et sur un système dérivant.
+  5 nouveaux tests (60 au total sur `scirust-estimation`).
+- **Mesuré, pas supposé** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs,
+  `cargo run --bin bench_rls --release`) — le résultat honnête : grouper en
+  blocs aide *par rapport à lui-même* (`B=64` vs `B=1` : 5,0× plus rapide à
+  n=4 ; 9,0× à n=16 ; 21,2× à n=64), mais **ne bat jamais** `SquaredGivensRls`
+  séquentiel, même à `B=64` :
+
+  | n | SquaredGivensRls | BlockQrdRls B=1 | BlockQrdRls B=64 |
+  |---|---|---|---|
+  | 4 | 34,5 ns | 256,1 ns | 51,2 ns |
+  | 16 | 272,8 ns | 3 559,4 ns | 395,1 ns |
+  | 64 | 3 447,5 ns | 184 834,7 ns | 8 726,6 ns |
+
+  Explication : les réflecteurs de Householder réintroduisent le `√` et la
+  `÷` que la substitution de Gentleman avait éliminés du chemin chaud de
+  `SquaredGivensRls`. Le brief espérait un gain de débit bloc-canal ; la
+  mesure dit que ce gain n'existe pas à ces tailles avec cette formulation,
+  et que la vraie restructuration BLAS-3 (WY compacte) — ou un portage vers
+  de vrais noyaux SIMD — resterait nécessaire pour espérer dépasser l'axe 1.
+  Conservé malgré ce résultat négatif : c'est une implémentation correcte,
+  testée, du bloc-canal tel que demandé, et la mesure elle-même est la
+  réponse honnête à la question posée par le brief.
+
+### Ajouté — fluides & thermo, volet 5 : régions 3a/3b IF97 en sous-critique, équations backward `p(h,s)`
+Les deux derniers chantiers explicitement demandés sur les équations backward IF97 :
+- **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — les équations
+  backward officielles **`v(p,h)`, `T(p,h)`, `v(p,s)`, `T(p,s)`** de la
+  région 3, dispatchées sur les sous-régions fittées **3a/3b** (frontière
+  `h_3ab(p)` pour les requêtes `(p,h)`, entropie critique pour `(p,s)`).
+  Contrairement à `region3_from_tp` (bissection de densité, restreinte au
+  supercritique car `p(ρ)` n'est pas monotone sous le point critique), ces
+  corrélations closed-form sont valides sur **tout** le domaine région 3,
+  sous-critique inclus — aucune densité à résoudre. Découverte notable en
+  écrivant le test de vérification : sous le point critique, la région 3
+  est bornée **en dessous par la frontière B23** et non par la courbe de
+  saturation — `B23(T) < Psat(T)` dans cette bande étroite (623,15 K à
+  647,096 K), ce qui cède à la région 3 une branche « vapeur-like » (3b)
+  même sous-critique, en plus de la branche liquide (3a) classique.
+- **`scirust-thermo::backward::region{1,2,3}_p_hs`** — équation backward
+  officielle **`p(h,s)`** pour les régions 1, 2 (dispatch 2a/2b/2c par la
+  frontière `hab_s(s)` et le seuil `s ≥ 5,85 kJ/(kg·K)`) et 3 (dispatch
+  3a/3b par l'entropie critique) — pression directement depuis l'état
+  thermodynamique (h,s), sans bissection ni connaissance préalable de T.
+- Méthodologie inchangée : les 14 groupes de coefficients (32 à 46 termes
+  chacun) ont été extraits programmatiquement du paquet Python de référence
+  `iapws`, scannés pour d'éventuels exposants non entiers (aucun cette
+  fois — la leçon du volet précédent tenue), puis vérifiés en Python pur
+  contre les 33 exemples numériques officiels des publications
+  Supp-Tv(ph,ps)3-2014, Supp-PHS12-2014 et Supp-phs3-2014 avant l'écriture
+  du Rust.
 
 ### Ajouté — QRD-RLS sans racine carrée (Gentleman 1973) + décomposition systolique de McWhirter
 Trois axes de recherche proposés pour durcir/accélérer le RLS MIMO ; deux
