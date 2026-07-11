@@ -112,6 +112,23 @@ fn main() {
         eprintln!("empty prompt");
         std::process::exit(1);
     }
+    // Guard: a prompt that encodes to mostly <unk> (id 3) means the tokenizer can't
+    // read the text — a mismatched or corrupt tokenizer.json. Fail loudly instead of
+    // "generating" from garbage (the shards would be garbage too — re-tokenise).
+    if tokenizer.is_some()
+    {
+        let unk = prompt.iter().filter(|&&t| t == 3).count();
+        if unk * 2 > prompt.len()
+        {
+            eprintln!(
+                "tokenizer error: {unk}/{} prompt tokens are <unk> — this tokenizer.json can't\n\
+                 encode the text (mismatched or corrupt). Re-run train-tokenizer + collect-data\n\
+                 to regenerate the tokenizer and shards, then retrain.",
+                prompt.len()
+            );
+            std::process::exit(1);
+        }
+    }
 
     let params = SamplingParams {
         temperature: env_f32("SCIAGENT_TEMP", 0.0),

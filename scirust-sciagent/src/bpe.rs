@@ -427,6 +427,41 @@ mod tests {
     }
 
     #[test]
+    fn bpe_encode_survives_save_load() {
+        // Realistic corpus: multi-line, with the Unicode a real code+docs corpus has
+        // (→ ᵀ × ✅ ⊙ √ é), which the byte-level base vocab represents as `<NNN>`
+        // placeholder keys — the case a pure-ASCII test misses.
+        let sample =
+            "fn main() {\n    // rms → √(mean(x²)+eps) · wᵀ ✅ é ⊙\n    println!(\"hi\");\n}\n";
+        let texts = vec![sample.repeat(50)];
+        let trainer = BpeTrainer::new(1024).min_frequency(1);
+        let tok = trainer.train(&texts);
+        let before = tok.encode("fn main");
+        let unk_before = before.iter().filter(|&&id| id == 3).count();
+        assert!(
+            unk_before < before.len(),
+            "encode is all <unk> BEFORE save (train bug): {before:?}"
+        );
+
+        let path = std::env::temp_dir().join("scirust_bpe_roundtrip.json");
+        let path = path.to_str().unwrap();
+        tok.save_json(path).unwrap();
+        let tok2 = BpeTokenizer::load_json(path).unwrap();
+        assert!(
+            tok2.vocab.contains_key("f"),
+            "base token \"f\" lost after save/load — vocab has {} entries",
+            tok2.vocab.len()
+        );
+        let after = tok2.encode("fn main");
+        assert_eq!(
+            before, after,
+            "encode differs after save/load — save/load loses the vocab.\n\
+             before {before:?}\nafter  {after:?}"
+        );
+        assert_eq!(tok2.decode(&after), "fn main", "decode after load");
+    }
+
+    #[test]
     fn test_bpe_encode_decode_roundtrip() {
         let trainer = BpeTrainer::new(50).min_frequency(1);
         let texts = vec![
