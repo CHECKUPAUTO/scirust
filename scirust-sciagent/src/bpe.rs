@@ -92,7 +92,12 @@ impl BpeTrainer {
                 .into_iter()
                 .filter(|&(_, count)| count >= self.min_frequency as u64)
                 .collect();
-            ranked.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
+            // Deterministic order: by count DESC, ties broken by the pair ids ASC.
+            // Without the tiebreak, `sort_unstable` leaves equal-count pairs in an
+            // arbitrary order, so the same corpus can yield a different tokenizer
+            // across runs — meaning a lost/corrupt tokenizer.json can't be
+            // regenerated to stay compatible with already-tokenised shards.
+            ranked.sort_unstable_by(|&(pa, ca), &(pb, cb)| cb.cmp(&ca).then(pa.cmp(&pb)));
             let batch: Vec<(usize, usize)> = ranked
                 .into_iter()
                 .take(merge_batch_size)
@@ -459,6 +464,22 @@ mod tests {
              before {before:?}\nafter  {after:?}"
         );
         assert_eq!(tok2.decode(&after), "fn main", "decode after load");
+    }
+
+    #[test]
+    fn bpe_training_is_deterministic() {
+        let texts = vec![
+            "fn a() { let x = 1; }\nfn b() { let y = 2; }\n".repeat(20),
+            "// → ᵀ × ✅ comment ⊙ √\nstruct S { f: u32 }\n".repeat(20),
+        ];
+        let train = || BpeTrainer::new(600).min_frequency(1).train(&texts);
+        let (t1, t2) = (train(), train());
+        assert_eq!(t1.merges, t2.merges, "merges differ across identical runs");
+        assert_eq!(
+            t1.encode("fn a() { let x"),
+            t2.encode("fn a() { let x"),
+            "encode differs across identical runs"
+        );
     }
 
     #[test]
