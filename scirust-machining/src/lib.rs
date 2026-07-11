@@ -19,6 +19,8 @@
 //!   développante (module) et flexion en pied de dent (**Lewis**).
 //! - [`threads`] — filetages métriques ISO : diamètres primitif/noyau, section
 //!   résistante (**ISO 898-1**), pas et angle d'hélice.
+//! - [`hertz`] — mécanique du contact de **Hertz** : pression et dimensions de
+//!   contact linéaire/ponctuel (engrenages, roulements, cames).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -65,6 +67,7 @@
 pub mod economics;
 pub mod forces;
 pub mod gears;
+pub mod hertz;
 pub mod kinematics;
 pub mod roughness;
 pub mod threads;
@@ -77,6 +80,10 @@ pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_
 pub use gears::{
     SpurGear, center_distance, gear_ratio, lewis_bending_stress, pitch_line_velocity_m_s,
     tangential_force_from_power, tangential_force_from_torque,
+};
+pub use hertz::{
+    effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
+    point_contact_max_pressure, point_contact_radius,
 };
 pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
