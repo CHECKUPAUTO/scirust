@@ -763,6 +763,14 @@ pub struct GaussianMixtureModel {
     pub components: Vec<GaussianComponent>,
     config: GmmConfig,
     log_likelihood_history: Vec<f64>,
+    /// Per-dimension variance floor, fixed at fit time as a small fraction of
+    /// the training data's own per-dimension variance. An absolute floor
+    /// (e.g. a bare `1e-10`) silently over-smooths any dataset whose natural
+    /// scale is itself far below that — inflating fitted standard deviations
+    /// past the true cluster separation and collapsing distinct clusters
+    /// into one. Falls back to a tiny absolute value only for a
+    /// (near-)degenerate dimension with essentially zero spread.
+    variance_floor: Vec<f64>,
 }
 
 impl GaussianMixtureModel {
@@ -771,23 +779,59 @@ impl GaussianMixtureModel {
             components: Vec::new(),
             config,
             log_likelihood_history: Vec::new(),
+            variance_floor: Vec::new(),
         }
     }
 
-    fn gaussian_pdf(x: &[f64], mean: &[f64], variance: &[f64]) -> f64 {
+    /// Population variance per dimension across `data`.
+    fn data_variance(data: &[Vec<f64>], dim: usize) -> Vec<f64> {
+        let n = data.len() as f64;
+        let mut mean = vec![0.0; dim];
+        for x in data
+        {
+            for d in 0..dim
+            {
+                mean[d] += x[d];
+            }
+        }
+        for m in mean.iter_mut()
+        {
+            *m /= n;
+        }
+        let mut var = vec![0.0; dim];
+        for x in data
+        {
+            for d in 0..dim
+            {
+                let diff = x[d] - mean[d];
+                var[d] += diff * diff;
+            }
+        }
+        for v in var.iter_mut()
+        {
+            *v /= n;
+        }
+        var
+    }
+
+    fn gaussian_pdf(x: &[f64], mean: &[f64], variance: &[f64], floor: &[f64]) -> f64 {
         let dim = x.len();
         let mut log_prob = 0.0;
         for d in 0..dim
         {
             let diff = x[d] - mean[d];
-            let var = variance[d].max(1e-10);
+            let var = variance[d].max(floor[d]);
             log_prob += -0.5 * (diff * diff / var + var.ln() + (2.0 * std::f64::consts::PI).ln());
         }
         log_prob.exp()
     }
 
     #[allow(clippy::needless_range_loop)]
-    fn responsibilities(data: &[Vec<f64>], components: &[GaussianComponent]) -> Vec<Vec<f64>> {
+    fn responsibilities(
+        data: &[Vec<f64>],
+        components: &[GaussianComponent],
+        floor: &[f64],
+    ) -> Vec<Vec<f64>> {
         let n = data.len();
         let k = components.len();
         let mut resp = vec![vec![0.0; k]; n];
@@ -798,7 +842,7 @@ impl GaussianMixtureModel {
             let mut log_probs = Vec::with_capacity(k);
             for c in components
             {
-                let lp = Self::gaussian_pdf(&data[i], &c.mean, &c.variance)
+                let lp = Self::gaussian_pdf(&data[i], &c.mean, &c.variance, floor)
                     .max(1e-300)
                     .ln()
                     + c.weight.ln();
@@ -822,13 +866,13 @@ impl GaussianMixtureModel {
         resp
     }
 
-    fn log_likelihood(data: &[Vec<f64>], components: &[GaussianComponent]) -> f64 {
+    fn log_likelihood(data: &[Vec<f64>], components: &[GaussianComponent], floor: &[f64]) -> f64 {
         data.iter()
             .map(|x| {
                 let mut total = 0.0;
                 for c in components
                 {
-                    total += c.weight * Self::gaussian_pdf(x, &c.mean, &c.variance);
+                    total += c.weight * Self::gaussian_pdf(x, &c.mean, &c.variance, floor);
                 }
                 total.max(1e-300).ln()
             })
@@ -854,6 +898,13 @@ impl GaussianMixtureModel {
         let k = self.config.n_components.min(n);
         let mut rng = Rng::new(self.config.seed);
 
+        // The data's own per-dimension variance anchors both the initial
+        // component variance and the variance floor to the data's actual
+        // scale, rather than to hardcoded values that only happen to suit
+        // O(1)-scale data.
+        let data_var = Self::data_variance(data, dim);
+        self.variance_floor = data_var.iter().map(|&v| (v * 1e-9).max(1e-300)).collect();
+
         // Initialize components via random sampling
         let mut indices: Vec<usize> = (0..n).collect();
         rng.shuffle(&mut indices);
@@ -861,10 +912,9 @@ impl GaussianMixtureModel {
         self.components = (0..k)
             .map(|j| {
                 let sample = &data[indices[j]];
-                let variance = vec![1.0; dim];
                 GaussianComponent {
                     mean: sample.clone(),
-                    variance,
+                    variance: data_var.clone(),
                     weight: 1.0 / k as f64,
                 }
             })
@@ -875,7 +925,7 @@ impl GaussianMixtureModel {
         for _ in 0..self.config.max_iterations
         {
             // E-step
-            let resp = Self::responsibilities(data, &self.components);
+            let resp = Self::responsibilities(data, &self.components, &self.variance_floor);
 
             // M-step
             for j in 0..k
@@ -911,7 +961,7 @@ impl GaussianMixtureModel {
                 }
                 for d in 0..dim
                 {
-                    new_var[d] = (new_var[d] / n_j).max(1e-10);
+                    new_var[d] = (new_var[d] / n_j).max(self.variance_floor[d]);
                 }
 
                 // Update weight
@@ -925,7 +975,7 @@ impl GaussianMixtureModel {
             }
 
             // Check convergence
-            let ll = Self::log_likelihood(data, &self.components);
+            let ll = Self::log_likelihood(data, &self.components, &self.variance_floor);
             self.log_likelihood_history.push(ll);
 
             if self.log_likelihood_history.len() >= 2
@@ -941,7 +991,7 @@ impl GaussianMixtureModel {
 
     /// Predict the most likely component for each sample.
     pub fn predict(&self, data: &[Vec<f64>]) -> Vec<usize> {
-        let resp = Self::responsibilities(data, &self.components);
+        let resp = Self::responsibilities(data, &self.components, &self.variance_floor);
         resp.iter()
             .map(|r| {
                 r.iter()
@@ -955,12 +1005,12 @@ impl GaussianMixtureModel {
 
     /// Predict responsibilities (soft assignment) for each sample.
     pub fn predict_proba(&self, data: &[Vec<f64>]) -> Vec<Vec<f64>> {
-        Self::responsibilities(data, &self.components)
+        Self::responsibilities(data, &self.components, &self.variance_floor)
     }
 
     /// Compute log-likelihood of the data.
     pub fn score(&self, data: &[Vec<f64>]) -> f64 {
-        Self::log_likelihood(data, &self.components)
+        Self::log_likelihood(data, &self.components, &self.variance_floor)
     }
 
     /// Compute BIC (Bayesian Information Criterion). Lower is better.
@@ -1693,6 +1743,65 @@ mod tests {
         assert!(aic.is_finite());
         // BIC should be >= AIC (BIC has stronger penalty)
         assert!(bic >= aic);
+    }
+
+    #[test]
+    fn test_gmm_separates_tiny_scale_clusters() {
+        // Two clusters separated by 1e-6, each jittered by only ~1e-8 — well
+        // separated relative to their own true variance (~1e-16), but far
+        // smaller than a hardcoded initial variance of 1.0 or an absolute
+        // variance floor of 1e-10 (whose implied std of 1e-5 alone dwarfs the
+        // 1e-6 separation). A GMM whose initialization and variance floor
+        // scale with the data should still recover the two clusters cleanly.
+        let scale = 1e-6;
+        let n = 100;
+        let half = n / 2;
+        let data: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                if i < half
+                {
+                    let j = i as f64;
+                    vec![scale * 0.01 * (j / half as f64 - 0.5)]
+                }
+                else
+                {
+                    let j = (i - half) as f64;
+                    vec![scale + scale * 0.01 * (j / half as f64 - 0.5)]
+                }
+            })
+            .collect();
+
+        let config = GmmConfig {
+            n_components: 2,
+            max_iterations: 100,
+            tolerance: 1e-15,
+            seed: 42,
+        };
+        let mut gmm = GaussianMixtureModel::new(config);
+        gmm.fit(&data);
+        let labels = gmm.predict(&data);
+
+        // Each half should be assigned overwhelmingly to a single, shared
+        // label, and the two halves' labels should differ.
+        let count_0_first_half = labels[..half].iter().filter(|&&l| l == 0).count();
+        let count_0_second_half = labels[half..].iter().filter(|&&l| l == 0).count();
+        let first_half_purity = count_0_first_half.max(half - count_0_first_half);
+        let second_half_purity = count_0_second_half.max(half - count_0_second_half);
+        assert!(
+            first_half_purity >= half - half / 20,
+            "first half should be >=95% one label, got {count_0_first_half}/{half} label-0"
+        );
+        assert!(
+            second_half_purity >= half - half / 20,
+            "second half should be >=95% one label, got {count_0_second_half}/{half} label-0"
+        );
+        // The dominant label of each half must differ (else it's one big blob).
+        let first_half_label = count_0_first_half > half / 2;
+        let second_half_label = count_0_second_half > half / 2;
+        assert_ne!(
+            first_half_label, second_half_label,
+            "the two clusters should be assigned different labels"
+        );
     }
 
     // ---- One-Class SVM tests ----
