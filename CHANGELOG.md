@@ -5,6 +5,28 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : détection 2-D — CFAR 2-D + clustering (`radar::detect`) — bloc 9
+Neuvième bloc du domaine radar : l'**étage de détection** qui transforme la carte
+distance-Doppler en une courte liste de cibles — exactement l'enchaînement des
+projets de référence (OpenRadar) : CFAR 2-D → clustering.
+- **`ca_cfar_2d`** — CFAR à moyenne de cellules sur une carte de **puissance**
+  `power[distance][doppler]` : pour chaque cellule testée, le seuil est
+  `α · moyenne(cellules d'entraînement)` sur la fenêtre carrée de demi-largeur
+  `train + guard` privée de la région de garde `(2·guard+1)²`, avec `α` du même
+  `ca_cfar_alpha` que le détecteur 1-D (`N = (2(train+guard)+1)² − (2·guard+1)²`).
+  Masque de détection booléen ; bords jamais marqués.
+- **`Detection`** / **`cluster_detections`** — regroupement des détections en
+  cibles par étiquetage de composantes connexes (8-connexité), centroïde pondéré
+  par l'amplitude (coordonnées de bin fractionnaires), amplitude crête et nombre
+  de cellules ; trié par crête décroissante.
+- Oracles : le CFAR 2-D détecte une cible ponctuelle sur un plancher plat (une
+  seule détection) et tient le **taux de fausse alarme** de conception sur bruit
+  exponentiel 2-D ; le clustering sépare deux blobs distants (centroïdes pondérés
+  exacts, plus fort en tête), fusionne les cellules en contact diagonal ; la
+  chaîne CFAR-2-D → clustering localise deux cibles ; gardes (masque vide /
+  formes incohérentes / carte trop petite). 6 tests (157 au total) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : goniométrie sous-espace MUSIC (`radar::music`) — bloc 8
 Huitième bloc du domaine radar : la méthode **sous-espace MUSIC** (MUltiple
 SIgnal Classification), qui clôt la voie *angle*. Là où le MVDR affine encore le
