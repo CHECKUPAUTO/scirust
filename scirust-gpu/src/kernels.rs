@@ -77,10 +77,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
         }
 
         workgroupBarrier();
-        
-        // Accumulate over tile
+
+        // Accumulate over tile. As[koff*16+lid.x] holds A[wg_row+lid.x,
+        // t_base+koff] (loaded above as As[lid.y*16u+lid.x] with lid.y as the
+        // k-offset); Bs[lid.y*16+koff] holds B[t_base+koff, wg_col+lid.y]
+        // (loaded above as Bs[lid.y*16u+lid.x] with lid.x as the k-offset).
         for (var q: u32 = 0u; q < 16u; q = q + 1u) {
-            acc = acc + As[lid.y * 16u + q] * Bs[q * 16u + lid.x];
+            acc = acc + As[q * 16u + lid.x] * Bs[lid.y * 16u + q];
         }
 
         workgroupBarrier();
@@ -241,8 +244,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
         }
 
         workgroupBarrier();
+        // Same indexing scheme (and same fix) as TILED_GEMM_WGSL above: As
+        // was loaded with lid.y as the k-offset, Bs with lid.x as the
+        // k-offset, so the correct read is As[koff*16+lid.x]*Bs[lid.y*16+koff].
         for (var q: u32 = 0u; q < 16u; q = q + 1u) {
-            acc = acc + As[lid.y * 16u + q] * Bs[q * 16u + lid.x];
+            acc = acc + As[q * 16u + lid.x] * Bs[lid.y * 16u + q];
         }
         workgroupBarrier();
     }

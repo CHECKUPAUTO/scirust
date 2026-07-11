@@ -1001,7 +1001,22 @@ impl Dual {
     }
     pub fn powf(self, other: Self) -> Self {
         let v = self.primal.powf(other.primal);
-        let d = v * (other.tangent * self.primal.ln() + other.primal * self.tangent / self.primal);
+        // Constant-exponent fast path: d/dx[x^n] = n·x^(n-1)·x'. Unlike the
+        // general log-derivative formula below (valid only for primal > 0,
+        // since it goes through `ln(self.primal)`), this holds for any base,
+        // including negative — e.g. d/dx[x^2] at x = -3 is -6, not NaN. This
+        // is also the overwhelmingly common case (a fixed integer/real power
+        // of a variable). The general formula remains for the case where the
+        // exponent itself varies (`other.tangent != 0`), which has no real
+        // derivative for a negative base and is left as NaN by design.
+        let d = if other.tangent == 0.0
+        {
+            other.primal * self.primal.powf(other.primal - 1.0) * self.tangent
+        }
+        else
+        {
+            v * (other.tangent * self.primal.ln() + other.primal * self.tangent / self.primal)
+        };
         Self {
             primal: v,
             tangent: d,
@@ -1261,6 +1276,40 @@ mod tests {
         let fx = x.sin();
         assert!((fx.primal - 0.0).abs() < 1e-10);
         assert!((fx.tangent - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_dual_powf_constant_exponent_on_negative_base() {
+        // Regression test for a P0 audit finding: the log-derivative formula
+        // (v * (n·ln(x) + ...)) unconditionally computed `self.primal.ln()`,
+        // which is NaN for a negative base — even for a constant integer
+        // exponent, where the real derivative is perfectly well-defined.
+        // d/dx[x^2] at x = -3 is 2*(-3) = -6, not NaN.
+        let x = Dual::var(-3.0);
+        let fx = x.powf(Dual::primal(2.0));
+        assert_eq!(fx.primal, 9.0);
+        assert!(
+            (fx.tangent - (-6.0)).abs() < 1e-10,
+            "expected tangent -6, got {}",
+            fx.tangent
+        );
+
+        // Odd power: d/dx[x^3] at x = -2 is 3*(-2)^2 = 12.
+        let y = Dual::var(-2.0);
+        let fy = y.powf(Dual::primal(3.0));
+        assert_eq!(fy.primal, -8.0);
+        assert!(
+            (fy.tangent - 12.0).abs() < 1e-10,
+            "expected tangent 12, got {}",
+            fy.tangent
+        );
+
+        // Positive-base case must still match the classical log-derivative
+        // result (no regression there).
+        let z = Dual::var(2.0);
+        let fz = z.powf(Dual::primal(3.0));
+        assert_eq!(fz.primal, 8.0);
+        assert!((fz.tangent - 12.0).abs() < 1e-10);
     }
 
     #[test]
