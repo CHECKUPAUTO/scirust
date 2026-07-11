@@ -1,5 +1,6 @@
-//! Electrical circuit models: RC charging (closed form) and the series RLC
-//! circuit (underdamped closed form + passivity of the stored energy).
+//! Electrical circuit models: RC charging (closed form), the series RLC
+//! circuit (underdamped closed form + passivity of the stored energy), and the
+//! nonlinear **Van der Pol** oscillator (a self-sustaining limit cycle).
 
 use crate::engine::{SimError, System};
 
@@ -158,6 +159,60 @@ impl System for SeriesRlc {
     }
 }
 
+/// The Van der Pol oscillator: `x'' - μ·(1 - x²)·x' + x = 0`, state `y = [x, v]`.
+///
+/// A self-sustaining nonlinear oscillator and the archetypal **limit-cycle**
+/// system. The nonlinear damping `-μ·(1 - x²)·x'` injects energy when `|x| < 1`
+/// and removes it when `|x| > 1`, so every trajectory except the unstable fixed
+/// point at the origin spirals onto one and the *same* stable periodic orbit —
+/// unlike a linear oscillator, whose amplitude is set by its initial condition.
+/// It originates in Balthasar van der Pol's triode-circuit work; at large `μ` it
+/// stiffens into a relaxation oscillator (integrable via the `stiff` feature),
+/// and `μ = 0` degenerates to the simple harmonic oscillator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VanDerPol {
+    mu: f64,
+}
+
+impl VanDerPol {
+    /// Create the oscillator with nonlinearity parameter `μ ≥ 0` (finite).
+    pub fn new(mu: f64) -> Result<Self, SimError> {
+        check_non_negative("mu", mu)?;
+        Ok(VanDerPol { mu })
+    }
+
+    /// The nonlinearity parameter `μ`.
+    pub fn mu(&self) -> f64 {
+        self.mu
+    }
+
+    /// The oscillator "energy" `E = ½·(x² + v²)` of a state `[x, v]`, or `None`
+    /// when the state does not have length 2. Its rate `dE/dt = μ·(1 - x²)·v²`
+    /// is positive inside the strip `|x| < 1` and negative outside — the
+    /// mechanism that pulls every trajectory onto the limit cycle (and, when
+    /// `μ = 0`, is conserved).
+    pub fn energy(&self, state: &[f64]) -> Option<f64> {
+        let [x, v] = *state
+        else
+        {
+            return None;
+        };
+        Some(0.5 * (x * x + v * v))
+    }
+}
+
+impl System for VanDerPol {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+        let (x, v) = (y[0], y[1]);
+        dydt[0] = v;
+        dydt[1] = self.mu * (1.0 - x * x) * v - x;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +300,71 @@ mod tests {
             let e = lc.energy(row).unwrap();
             assert!((e - e0).abs() < 1e-9 * e0, "energy drifted to {e}");
         }
+    }
+
+    #[test]
+    // Ignored under Miri: a many-step accuracy/statistics run that is
+    // minutes-slow under the interpreter and exercises no surface beyond
+    // what the fast Miri-checked tests cover. Native Build & Test jobs
+    // enforce it.
+    #[cfg_attr(miri, ignore)]
+    fn van_der_pol_settles_onto_one_limit_cycle_from_inside_and_outside() {
+        let sys = VanDerPol::new(1.0).unwrap();
+        // One trajectory starting just off the unstable origin and one starting
+        // far outside both converge onto the same stable periodic orbit.
+        let inner = simulate(&sys, &[0.1, 0.0], 0.0, 60.0, 0.005).unwrap();
+        let outer = simulate(&sys, &[4.0, 0.0], 0.0, 60.0, 0.005).unwrap();
+        // Peak |x| over the settled last third of each run.
+        let settled_amplitude = |ys: &[Vec<f64>]| {
+            let start = 2 * ys.len() / 3;
+            ys[start..].iter().map(|r| r[0].abs()).fold(0.0, f64::max)
+        };
+        let (ai, ao) = (settled_amplitude(&inner.y), settled_amplitude(&outer.y));
+        assert!(
+            (ai - ao).abs() < 0.05,
+            "different limit cycles: {ai} vs {ao}"
+        );
+        // The classic result: the Van der Pol limit-cycle amplitude is ≈ 2.
+        assert!((ai - 2.0).abs() < 0.1, "amplitude {ai} not near 2");
+    }
+
+    #[test]
+    // Ignored under Miri: see the note on the limit-cycle test above.
+    #[cfg_attr(miri, ignore)]
+    fn zero_mu_is_the_energy_conserving_harmonic_oscillator() {
+        // μ = 0 ⇒ x'' + x = 0. From x(0)=1, v(0)=0: x(t)=cos t, energy ½ held.
+        let sho = VanDerPol::new(0.0).unwrap();
+        let traj = simulate(&sho, &[1.0, 0.0], 0.0, 20.0, 0.001).unwrap();
+        let e0 = sho.energy(&traj.y[0]).unwrap();
+        for (t, row) in traj.t.iter().zip(traj.y.iter())
+        {
+            assert!((row[0] - t.cos()).abs() < 1e-6, "t = {t}: x = {}", row[0]);
+            let e = sho.energy(row).unwrap();
+            assert!((e - e0).abs() < 1e-9 * e0, "energy drifted to {e}");
+        }
+    }
+
+    #[test]
+    fn energy_grows_inside_the_unit_strip_and_shrinks_outside() {
+        // dE/dt = x·x' + v·v' = μ·(1 - x²)·v²: injected for |x| < 1, removed for
+        // |x| > 1, zero on the boundary — the self-oscillation mechanism.
+        let sys = VanDerPol::new(1.0).unwrap();
+        let de_dt = |x: f64, v: f64| {
+            let mut d = [0.0; 2];
+            sys.derivatives(0.0, &[x, v], &mut d);
+            x * d[0] + v * d[1]
+        };
+        assert!(de_dt(0.5, 1.0) > 0.0, "no energy pumped inside the strip");
+        assert!(de_dt(2.0, 1.0) < 0.0, "no dissipation outside the strip");
+        assert!(de_dt(1.0, 1.0).abs() < 1e-12, "boundary damping not zero");
+    }
+
+    #[test]
+    fn van_der_pol_rejects_bad_mu() {
+        assert!(VanDerPol::new(-0.5).is_err());
+        assert!(VanDerPol::new(f64::NAN).is_err());
+        let sys = VanDerPol::new(1.0).unwrap();
+        assert!(sys.energy(&[1.0]).is_none());
     }
 
     #[test]
