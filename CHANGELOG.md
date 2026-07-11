@@ -5,6 +5,21 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : pont RL vers `scirust-learning` (feature `rl`)
+- **`scirust-sim::rl_bridge::RlEnv`** — adaptateur qui présente n'importe quel
+  `Environment` + nouveau trait **`FiniteActionSpace`** comme un
+  `scirust_learning::rl::Env`. Les agents RL existants (Q-learning tabulaire,
+  PPO, deep) pilotent donc **CartPole** et **GridWorld** sans réécriture : les
+  deux traits partageaient déjà la forme `reset` / `step → (état, récompense,
+  fin)`, l'adaptateur fournit en plus `available_actions`. Preuve
+  bout-en-bout : un `TabularAgent<(usize,usize), Move>` entraîné sur
+  `RlEnv<GridWorld>` **converge vers le plus court chemin** (politique gloutonne
+  = distance de Manhattan). `Move` dérive désormais `Hash` (clé de Q-table).
+- **Zéro coût par défaut** : le pont est derrière la feature optionnelle `rl`
+  (dépendances `scirust-learning` + `rand` uniquement alors) ; le crate reste
+  sans dépendance et Miri-propre en configuration par défaut. Feature couverte
+  en CI (`cargo test/clippy -p scirust-sim --features rl`).
+
 ### Ajouté — QRD-RLS sans racine carrée (Gentleman 1973) + décomposition systolique de McWhirter
 Trois axes de recherche proposés pour durcir/accélérer le RLS MIMO ; deux
 livrés avec preuve, un troisième explicitement différé plutôt que bâclé.

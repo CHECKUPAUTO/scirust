@@ -67,6 +67,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run clippy (scirust-gpu wgpu feature)
         run: cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings
+      - name: Run clippy (scirust-sim rl feature)
+        run: cargo clippy -p scirust-sim --features rl --all-targets -- -D warnings
 
   # Gate σ (S2 de paper/PAPER_PLAN.md) : échoue si une garde f32 sous
   # σ_sanitized (= f32::MIN_POSITIVE) subsiste hors test dans scirust-gpu/src
@@ -136,6 +138,12 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Run tests (stable)
         run: cargo test --workspace
+      # The `rl` feature is off by default (it pulls scirust-learning), so the
+      # workspace test run above does not exercise the scirust-sim ↔
+      # scirust-learning RL bridge. Cover it explicitly, mirroring the
+      # portable-simd / wgpu feature jobs.
+      - name: Test scirust-sim rl bridge (rl feature)
+        run: cargo test -p scirust-sim --features rl
 
   # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
   # A pure `cargo check` needs no cross linker and would have caught the
