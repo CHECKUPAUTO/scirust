@@ -29,6 +29,8 @@
 //!   circulaires, contrainte équivalente de **von Mises** et angle de torsion.
 //! - [`keys`] — clavetages (clavette parallèle, **ISO 773**) : cisaillement de
 //!   la clavette et pression de matage sur les flancs.
+//! - [`belts`] — transmissions par courroie (**Euler-Eytelwein**) : rapport des
+//!   tensions plate/trapézoïdale, angle d'enroulement et puissance transmise.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -73,6 +75,7 @@
 //! ```
 
 pub mod bearings;
+pub mod belts;
 pub mod economics;
 pub mod forces;
 pub mod gears;
@@ -90,6 +93,10 @@ pub mod toollife;
 pub use bearings::{
     BearingType, Reliability, adjusted_rating_life, basic_rating_life_hours,
     basic_rating_life_revs, equivalent_dynamic_load,
+};
+pub use belts::{
+    belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
+    wrap_angle_small_pulley_rad,
 };
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
