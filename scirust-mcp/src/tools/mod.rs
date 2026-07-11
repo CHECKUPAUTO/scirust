@@ -12,6 +12,7 @@ pub mod fatigue;
 pub mod grid;
 pub mod linalg;
 pub mod maritime;
+pub mod sim;
 pub mod sis;
 pub mod tolerance;
 pub mod trader;

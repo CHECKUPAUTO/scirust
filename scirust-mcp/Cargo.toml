@@ -19,6 +19,7 @@ scirust-fatigue = { path = "../scirust-fatigue" }
 scirust-grid = { path = "../scirust-grid" }
 scirust-maritime = { path = "../scirust-maritime" }
 scirust-sciagent = { path = "../scirust-sciagent" }
+scirust-sim = { path = "../scirust-sim" }
 scirust-sis = { path = "../scirust-sis" }
 scirust-solvers = { path = "../scirust-solvers" }
 scirust-tolerance = { path = "../scirust-tolerance" }

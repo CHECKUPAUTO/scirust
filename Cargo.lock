@@ -3020,6 +3020,7 @@ dependencies = [
  "scirust-grid",
  "scirust-maritime",
  "scirust-sciagent",
+ "scirust-sim",
  "scirust-sis",
  "scirust-solvers",
  "scirust-tolerance",

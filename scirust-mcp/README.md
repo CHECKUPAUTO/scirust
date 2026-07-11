@@ -44,6 +44,9 @@ une réécriture.
 | `discovery_scan` | Découverte OT/IT | Sonde des cibles réseau (OPC-UA, Modbus, mDNS) via `scirust-discovery`, sous portée signée — voir `scirust-discovery/README.md` |
 | `sis_verify_sif_loop` | Sûreté procédés (IEC 61511) | PFDavg total + SIL atteint d'une boucle SIF multi-sous-systèmes via `scirust-sis` |
 | `sis_size_proof_test_interval` | Sûreté procédés (IEC 61511) | Intervalle de test de preuve maximal pour un PFDavg cible, par inversion numérique |
+| `sim_epidemic` | Simulation (`scirust-sim`) | Épidémie SIR : R0, pic infecté et jour du pic, taux d'attaque final |
+| `sim_battery_discharge` | Simulation (`scirust-sim`) | Cellule Thévenin 1-RC + thermique (plante `scirust-bms`) à courant constant : SoC, tension, température finales |
+| `sim_grid_stability` | Simulation (`scirust-sim`) | Équation d'oscillation machine-réseau (plante `scirust-grid`) : synchronisme, équilibre, fréquence petit signal, transitoire |
 | `scirust_cli` | Passe-plat | Exécute n'importe quelle sous-commande du CLI `scirust` (`linsolve`, `solve`, `diff`, `integrate`, `ode`, `certify`, `conformal`, `evo`, `analyze`, ...) |
 
 `discovery_scan` ne peut jamais s'auto-autoriser depuis la conversation : la
