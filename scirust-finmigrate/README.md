@@ -9,6 +9,9 @@ end on two representative units:
   a positive-integer exponent so it stays fixed-point decimal instead of
   triggering COBOL's floating-point `**` (proven equal to the float path at the
   cent).
+* `DAYCOUNT` — accrued interest on the 30/360 US (NASD bond-basis) day count,
+  implementing the February end-of-month rules that Excel `DAYS360` omits (the
+  divergence is recorded per-scenario as audit evidence).
 
 It is the reference template for the migration protocol:
 

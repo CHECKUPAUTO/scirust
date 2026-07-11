@@ -31,8 +31,8 @@ at the cent level over a portfolio.
 denies floating point at the API boundary; there is no `f32`/`f64` in the
 money path. Enforced by construction — every signature and intermediate is
 `Decimal`, and the `no_float_in_money_path` guard test greps the crate sources
-(`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`) for `f32`/`f64` and fails if
-any appears. The
+(`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`, `src/daycount.rs`) for
+`f32`/`f64` and fails if any appears. The
 `MANDATORY CONSTRAINTS` in the audit trail record the same rule.
 
 ### Gap-2 — Implied scale is enforced on STORE, not at print. **(mitigated)**
@@ -246,3 +246,53 @@ at their shared boundary.
 ## Production gate
 Regenerate `pay_baseline.csv` from a live `cobc -x -free cobol/PAYCALC.cbl` under
 the production `ARITH` option and re-diff at exact parity before shipping.
+
+---
+
+# Pre-Migration Audit — DAYCOUNT (30/360 US Accrued Interest)
+
+**Unit:** `cobol/DAYCOUNT.cbl` → `scirust-finmigrate::daycount`
+**Date:** 2026-07-11 · **Gate status:** Phase 1 & 2 complete vs the model baseline
+(`tests/sandbox/day_baseline.csv`). Contract: `cobol/SEMANTICS_DAY.md`.
+
+## Why a fourth unit
+The arithmetic is a single `principal·rate·days/360`; the entire risk lives in
+`days`. "30/360 US" is a name shared by two *different* conventions, and the
+legacy answer depends on which one the shop coded.
+
+### Gap-H — "30/360 US" is ambiguous: NASD bond basis vs Excel DAYS360. **(decided + evidenced)**
+The SIFMA/NASD **bond basis** applies February end-of-month rules; Excel
+`DAYS360` (US) does **not**. They disagree whenever a date is the last day of
+February — materially: `28-Feb-2023 → 31-Aug-2023` is **180** days on the NASD
+basis but **183** in Excel; on a $100,000 position at 5% that is a **$41.67**
+difference for one period. **Decision:** implement the NASD bond basis (the
+standard for US corporate bonds), cited in `SEMANTICS_DAY.md`. **Evidence:** the
+baseline records the Excel count alongside the NASD count for every row; 3 of 10
+scenarios diverge, and the equivalence test pins the NASD value.
+
+### Gap-I — Rule ordering is load-bearing. **(mitigated)**
+The four adjustment rules must run in order, with the February flags read from
+the **original** dates, and rule 3 must test `D1 = 30 or 31` so it catches a
+`D1 = 31` that rule 4 has not yet reduced. Otherwise `31-Jan → 31-Mar` yields 61
+instead of 60. **Mitigation:** the port reproduces the exact order and the
+`30 or 31` clause; `thirty_first_rules` pins the boundary cases.
+
+### Gap-J — Leap-year definition of "last day of February". **(mitigated)**
+"Last day of February" is 29 in a leap year, else 28. The Gregorian century rule
+is a classic trap: **1900 is not leap, 2000 is**. A wrong rule mis-flags Feb-EOM
+and shifts the day count. **Mitigation:** `is_leap` = `y%4==0 && (y%100!=0 ||
+y%400==0)`; `leap_year_rule` pins 1900/2000.
+
+### Gap-K — Single rounding event on the interest. **(mitigated)**
+`principal·rate·days/360` rounds **once** into the 2 dp field; `days/360` is not
+pre-rounded (same discipline as INTACCR Gap-4). `interest_single_rounding` pins
+`1055.5555… → 1055.56`.
+
+## Contract note
+Dates are assumed valid with `Date2 ≥ Date1` (forward accrual). The rules are
+asymmetric in D1/D2, so a reversed pair is out of contract — documented, not
+silently "handled".
+
+## Production gate
+Regenerate `day_baseline.csv` from a live `cobc -x -free cobol/DAYCOUNT.cbl` and
+re-diff before shipping.
