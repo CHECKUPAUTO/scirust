@@ -5,224 +5,33 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
-### Ajouté — fluides & thermo, volet 5 : régions 3a/3b IF97 en sous-critique, équations backward `p(h,s)`
-Les deux derniers chantiers explicitement demandés sur les équations backward IF97 :
-- **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — les équations
-  backward officielles **`v(p,h)`, `T(p,h)`, `v(p,s)`, `T(p,s)`** de la
-  région 3, dispatchées sur les sous-régions fittées **3a/3b** (frontière
-  `h_3ab(p)` pour les requêtes `(p,h)`, entropie critique pour `(p,s)`).
-  Contrairement à `region3_from_tp` (bissection de densité, restreinte au
-  supercritique car `p(ρ)` n'est pas monotone sous le point critique), ces
-  corrélations closed-form sont valides sur **tout** le domaine région 3,
-  sous-critique inclus — aucune densité à résoudre. Découverte notable en
-  écrivant le test de vérification : sous le point critique, la région 3
-  est bornée **en dessous par la frontière B23** et non par la courbe de
-  saturation — `B23(T) < Psat(T)` dans cette bande étroite (623,15 K à
-  647,096 K), ce qui cède à la région 3 une branche « vapeur-like » (3b)
-  même sous-critique, en plus de la branche liquide (3a) classique.
-- **`scirust-thermo::backward::region{1,2,3}_p_hs`** — équation backward
-  officielle **`p(h,s)`** pour les régions 1, 2 (dispatch 2a/2b/2c par la
-  frontière `hab_s(s)` et le seuil `s ≥ 5,85 kJ/(kg·K)`) et 3 (dispatch
-  3a/3b par l'entropie critique) — pression directement depuis l'état
-  thermodynamique (h,s), sans bissection ni connaissance préalable de T.
-- Méthodologie inchangée : les 14 groupes de coefficients (32 à 46 termes
-  chacun) ont été extraits programmatiquement du paquet Python de référence
-  `iapws`, scannés pour d'éventuels exposants non entiers (aucun cette
-  fois — la leçon du volet précédent tenue), puis vérifiés en Python pur
-  contre les 33 exemples numériques officiels des publications
-  Supp-Tv(ph,ps)3-2014, Supp-PHS12-2014 et Supp-phs3-2014 avant l'écriture
-  du Rust.
-
-### Ajouté — QRD-RLS sans racine carrée (Gentleman 1973) + décomposition systolique de McWhirter
-Trois axes de recherche proposés pour durcir/accélérer le RLS MIMO ; deux
-livrés avec preuve, un troisième explicitement différé plutôt que bâclé.
-
-- **`GivensQrdRls`** — référence QRD-RLS par rotations de Givens
-  séquentielles (`√`-based), la forme **information** (racine de `P⁻¹`), duale
-  de la forme **covariance** (`QrRls`/Potter) déjà dans le crate. Chaque
-  rotation est une transformation orthogonale exacte ⇒ stable par
-  construction, sans re-symétrisation. Cross-vérifié contre `VectorRls`
-  (poids à 1e-6 près sur 1500 pas aléatoires) — un second oracle indépendant
-  pour la même solution de moindres carrés.
-- **`SquaredGivensRls`** (Gentleman, *« Least squares computations by Givens
-  transformations without square roots »*, 1973) — la même récursion sans
-  aucune racine carrée : chaque ligne triangulaire est stockée comme un poids
-  `d_i` et un vecteur `t_i` normalisé (`t_i[i]=1`), et la substitution complète
-  du calcul de Givens fait disparaître tous les `√` (dérivation intégrale en
-  tête de module). Bonus : l'échelle `√d_i` de chaque ligne s'annule dans les
-  équations normales, donc l'extraction des poids par substitution arrière ne
-  nécessite **ni `√` ni division** (diagonale unitaire). MIMO natif
-  (`n_in`/`n_out`), zéro allocation tas.
-  **Vérifié, pas juste plausible** : le `R` physique reconstruit
-  (`√d_i·t_i`) colle au `R` `√`-based de `GivensQrdRls` à 1e-6 près sur 1500
-  pas — preuve que la dérivation sans racine est exacte, pas seulement
-  numériquement chanceuse ; version MIMO cross-vérifiée contre `RlsFilter`.
-  Deux bugs de dérivation ont été attrapés *par ces tests mêmes* avant tout
-  commit : la convention d'initialisation `R(0)` (racine de l'**information**,
-  donc `1/√delta`, pas `√delta`) et le poids `d_in` du résidu entrant, qui
-  **évolue à chaque ligne** et doit être propagé plutôt que réinitialisé —
-  exactement le genre d'erreur silencieuse qu'une dérivation « recopiée d'un
-  papier de mémoire » aurait laissée passer sans un oracle pour la détecter.
-  **Mesuré** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs, `cargo run
-  --bin bench_rls --release`) : plus rapide que `VectorRls` à toutes les
-  tailles (43,3 ns vs 75,0 ns à n=4 ; 313,9 ns vs 808,0 ns à n=16 ; 4 402,0 ns
-  vs 12 797,4 ns à n=64 — 1,7×–2,9×), et plus rapide que `QrRls` (racine
-  carrée) à toutes les tailles aussi (1,7×–2,2×) — conforme à la promesse de
-  la littérature (racine éliminée, moitié moins de multiplications).
-- **`squared_givens::systolic`** — le réseau triangulaire de McWhirter
-  (*« RLS minimization using a systolic array »*, 1983), rendu vérifiable :
-  deux fonctions pures `boundary_cell`/`internal_cell` à communication
-  **plus-proche-voisin uniquement** (aucune cellule ne lit la colonne d'une
-  autre), qui reproduisent `SquaredGivensRls::update` **bit pour bit** sur
-  400 pas aléatoires — la preuve que la mise à jour se décompose réellement
-  sans risque de concurrence de données. Présenté honnêtement comme un
-  **modèle logiciel de référence** de la structure de flux (le point d'ancrage
-  naturel pour un futur portage GPU/FPGA à ordonnancement en vagues), pas
-  comme une revendication de parallélisme matériel réalisé sur CPU.
-- **Axe bloc-canal (FQRD-RLS multicanal, BLAS-3) délibérément non livré** :
-  un vrai gain de débit bloc-canal nécessite un vrai GEMM par blocs (niveau
-  BLAS-3) branché sur les mises à jour Givens — ce qui romprait la frontière
-  volontaire du crate (zéro dépendance hors `serde`) en le couplant à
-  `scirust-core`/`scirust-simd`. Documenté ici comme plan concret plutôt que
-  silencieusement abandonné : traiter `B` échantillons par bloc via `B`
-  passes Givens/Squared-Givens séquentielles est déjà l'algorithme
-  bloc-récursif correct (amortit l'overhead d'appel, pas un vrai GEMM) ; le
-  vrai débit BLAS-3 demanderait de faire appel aux noyaux SIMD existants du
-  workspace pour les mises à jour internes — hors périmètre de ce lot.
-- 6 nouveaux tests (55 au total sur `scirust-estimation`) ; fmt/clippy
-  `-D warnings` propres.
-
-### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
-Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
---release` a tourné sur une **même machine** — le seul mode de comparaison
-autorisé (voir la discipline « claims backed by measurements »).
-
-**Machine** : Jetson, L4T R38.4 (`generic` board), noyau `6.8.12-tegra`,
-aarch64, 14 cœurs (`uname -a` / `/etc/nv_tegra_release` / `nproc` — modèle
-exact non capturé par ces commandes ; classe Thor d'après le L4T R38 et les
-références Jetson existantes du dépôt).
-
-| n | `scirust::VectorRls` | padasip `FilterRLS` | rapport |
-|---|---|---|---|
-| 4 | 59,7 ns | 8 636,2 ns | **144,7×** |
-| 16 | 532,3 ns | 10 640,4 ns | **20,0×** |
-| 64 | 7 792,0 ns | 73 349,3 ns | **9,4×** |
-
-Le rapport se resserre franchement avec `n` — comportement attendu et
-honnête, pas un artefact : à petit `n` le coût fixe par appel de
-l'interpréteur Python/NumPy (création d'objets, dispatch) domine ; à mesure
-que `n` grandit, le BLAS vectorisé de NumPy amortit ce coût et rattrape du
-terrain sur l'implémentation Rust scalaire boucle-par-boucle. Sur cette même
-machine, `QrRls` reproduit l'avantage déjà observé en conteneur x86_64 (plus
-rapide que `VectorRls` dès n=16 : 433,5 ns vs 532,3 ns à n=16, 6 278,9 ns vs
-7 792,0 ns à n=64 — pas de passe de symétrisation). `RlsFilterConst`, en
-revanche, ne montre **pas** ici l'avantage net vu en conteneur (34,0 ns à
-n=4, mais 7 894,2 ns à n=64, à peu près à égalité avec la version tas) —
-chiffres bruts consignés sans lissage, l'écart de déroulage/vectorisation
-entre cibles aarch64 et x86_64 reste à creuser plutôt qu'à sur-interpréter
-sur un seul run.
-
-### Ajouté — RLS niveau 3 : oubli directionnel, annulation multi-référence, QrRlsConst, re-conditionnement
-Le lot complet validé — l'anti-windup principiel et le bouclage avec le
-pipeline de débruitage :
-- **`DirectionalRls`** (oubli directionnel, Kulhavý / Cao-Schwartz) : n'oublie
-  que dans la **direction excitée** (découpe rang-1 de la matrice
-  d'information `R` le long du régresseur, mise à jour appariée de `P` par
-  Sherman-Morrison, O(n²)/échantillon, zéro allocation). **Test discriminant
-  du windup** : 2 000 pas excités sur une seule direction à λ=0,9 — le RLS
-  standard voit sa covariance orthogonale exploser (> 10⁵⁰, λ⁻ᵏ) ; le
-  directionnel la garde **bornée à sa valeur initiale**, puis se réadapte
-  sainement quand l'excitation revient. λ=1 ≡ RLS fenêtre croissante (testé
-  à 1e-8) ; suivi de dérive vérifié.
-- **`reference_noise_cancel` + `wavelet_rls_rts_smooth_multiref`**
-  (`scirust-signal::denoise::pipeline`) : annulation de bruit **convolutive
-  multi-référence** — `MimoFirRls` apprend en ligne les chemins FIR
-  capteurs-de-référence → primaire, l'erreur a priori EST le signal nettoyé ;
-  chaînée en étage 0 du pipeline Wavelet–RLS–RTS. Tests : interférence
-  convolutive 2 références retirée (> +20 dB vs brut) ; la chaîne
-  multi-référence bat le pipeline aveugle de > 6 dB en présence
-  d'interférence + bruit large bande.
-- **`QrRlsConst<const N>`** : racine carrée de Potter **sur pile**,
-  `core`-only — le filtre embarqué durci ultime (PSD par construction +
-  zéro tas + déroulage compile-time). **Bit-identique** au `QrRls` tas
-  (ordre d'accumulation aligné, testé au bit près sur 500 pas).
-- **Re-conditionnement long-horizon** : `QrRls::recondition` /
-  `QrRlsMimo::recondition` (re-factorisation `S ← chol(S·Sᵀ)`, préserve `P`
-  au rounding près, restaure la triangularité) et
-  `DirectionalRls::recondition` (`P ← R⁻¹` exact via le `Mat::inverse` du
-  crate) + diagnostic `consistency_error()`. La factorisation de Cholesky
-  locale est **vérifiée contre l'oracle `scirust-solvers`** (dev-dependency
-  volontaire : les dépendances de prod du crate restent serde seul).
-- **`scripts/bench-rls-padasip.py`** : la moitié Python du protocole de
-  comparaison inter-bibliothèques (à exécuter sur la même machine que
-  `bench_rls`, p. ex. le Jetson) — aucun chiffre inter-bibliothèques
-  revendiqué tant que les deux moitiés n'ont pas tourné sur un même hôte.
-- 49 tests `scirust-estimation` + 93 `scirust-signal` verts ;
-  fmt/clippy `-D warnings` propres.
-
-### Ajouté — fluides & thermo, volet 3 : région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook
-Les trois « suites possibles » restantes du volet 2 sont livrées :
-- **`scirust-thermo::steam::region5`** — IAPWS-IF97 région 5 (vapeur
-  très haute température, 1073,15 < T ≤ 2273,15 K, ≤ 50 MPa : échappement
-  de turbine à gaz, chaudières de récupération ultra-supercritiques).
-  Même structure Gibbs idéal + résiduel que la région 2 (coefficients
-  extraits du même paquet de référence `iapws`, vérifiés en Python pur).
-  Oracles : les **exemples numériques officiels de la publication IF97**
-  pour la région 5 (v, h, u, s, cp, cv, w — six valeurs à 1e-8) ; jointure
-  physique avec la région 2 vérifiée à la frontière 1073,15 K.
-- **`scirust-thermo::cycles::rankine_real`** — cycle de Rankine
-  **irréversible** : turbine et pompe à rendement isentropique réel
-  (`RankineCycleReal`, avec l'efficacité idéale jointe pour comparaison
-  directe). L'état de sortie réel de la turbine est localisé directement
-  depuis son enthalpie réelle (titre direct dans la cloche, ou bissection
-  déterministe sur h si encore surchauffée) — sans avoir besoin des
-  lourdes équations « backward » T(p,h) IF97 par sous-région. Vérifié :
-  η_t=η_p=1 reproduit exactement le cycle idéal ; à 85 %/85 % le
-  rendement réel chute sous l'idéal et — fait physique non trivial —
-  la vapeur d'échappement devient plus sèche (titre plus élevé) qu'à
-  l'idéal, car une détente moins efficace laisse plus d'enthalpie dans
-  la vapeur ; premier principe vérifié exact sur le cycle réel.
-- **`scirust-fluids::network::hardy_cross_darcy`** — couplage direct de
-  Hardy Cross à `pipe::friction_factor` : `PhysicalPipe` (diamètre,
-  longueur, rugosité réels) plutôt qu'une résistance précalculée ; à
-  chaque itération externe, le facteur de friction de Darcy est
-  recalculé au Reynolds courant (laminaire/Colebrook-White/mélange,
-  exactement comme dans `scirust-fluids::pipe`), substitution successive
-  jusqu'à convergence — la méthode standard des solveurs de réseaux réels
-  pour la dépendance (faible) de f à Re. Vérifié : conduite plus large
-  transporte plus de débit, continuité exacte préservée, et la perte de
-  charge Darcy-Weisbach recalculée **à partir des dimensions physiques**
-  ferme la boucle à 1e-6 près (validation physique de bout en bout, pas
-  seulement la cohérence interne d'une itération).
-- Bilan : scirust-fluids 57 tests (+3), scirust-thermo 63 tests (+6),
-  clippy `-D warnings` propre, rustfmt appliqué.
-### Ajouté — RLS MIMO, le cran au-dessus : QR-RLS multi-sorties, FIR spatio-temporel, auto-λ, oracle Kalman
-Améliorations du filtre RLS MIMO en réutilisant les briques du dépôt :
-- **`QrRlsMimo`** : la forme racine carrée (facteur de Potter, PSD par
-  construction) étendue aux sorties multiples — le facteur `S` ne dépend que
-  des entrées, donc une seule récursion partagée entre toutes les sorties
-  (`O(n_in² + n_out·n_in)`/échantillon, zéro allocation). Tests : ligne 0
-  **bit-identique** au `QrRls` scalaire ; équivalence 1e-6 avec `RlsFilter`
-  sur système 2 sorties.
-- **Oracle croisé RLS ≡ Kalman** : à λ=1 le RLS *est* un filtre de Kalman à
-  état statique (`F=I, Q=0, H_k=u_kᵀ, R=1`). Nouveau test qui rejoue la même
-  trajectoire dans le `KalmanFilter` du crate (chemin matriciel générique avec
-  inversion explicite, reconstruit à chaque pas avec le `H` courant) et exige
-  l'accord à 1e-8 sur 300 pas — deux implémentations indépendantes du même
-  estimateur se vérifient mutuellement.
-- **`MimoFirRls`** : le vrai filtre adaptatif MIMO **spatio-temporel** —
-  lignes à retard par canal d'entrée, régresseur empilé sur un cœur
-  `RlsFilter`, noyau FIR identifié exposé par paire (sortie, entrée). Test :
-  un couplage convolutif 2×2 à 3 coefficients (diaphonie/écho) est identifié
-  à 1e-3 près sur bruit blanc. C'est la dimension temporelle qui manquait au
-  filtre instantané.
-- **`tune_lambda`** : choix du facteur d'oubli par **blancheur des
-  innovations** — chaque λ candidat est scoré par le test d'autocorrélation
-  `±1.96/√N`, et le plus grand λ que le diagnostic ne rejette pas gagne (la
-  règle de parcimonie de `denoise::adaptive::kalman_smooth_auto`, réappliquée
-  à l'identification). Tests : système statique → garde λ=1 ; système
-  dérivant → rejette λ=1.
-- 41 tests `scirust-estimation` verts ; fmt/clippy `-D warnings` propres.
+### Ajouté — preuve formelle a priori, FP8 reproductible, TCP inter-machines (volet 117)
+- **`scirust-core::formal_proof`** (nouveau) : preuve **a priori** (bornes
+  d'erreur dérivées analytiquement, pas testées point par point) de
+  l'arrondi correct pour `exp`/`tanh`/`sigmoid` — reste de Lagrange (Taylor)
+  + théorème γ_k de Higham (Horner), en arithmétique rationnelle exacte
+  (`num-rational`). Binaire `proof_formal_bounds` : borne d'erreur relative
+  ≈ 2⁻⁴⁷·⁰⁷, marge ≈ 4,4×10⁶ sous le seuil 2⁻²⁵. Complète (sans remplacer)
+  la vérification exhaustive a posteriori du volet 115-A ; `sin`/`cos`/`ln`/
+  `erf` restent hors périmètre (cœur s'annulant près de zéro — documenté).
+- **`scirust-core --bin proof_fp8_training`** : entraînement témoin
+  **FP8 E4M3 à arrondi stochastique** (même recette que le témoin bf16 du
+  volet 116) — `f32_to_fp8_stochastic` (nouveau, `lowprec.rs` refactoré en
+  `fp8_pre_round`/`fp8_finish` partagés avec la variante RNE existante).
+  Trajectoire de perte et codes FP8 finaux sous contrat d'empreinte,
+  bit-reproductibles cross-platform (validé QEMU avant commit).
+- **`proof_tcp_multihost`** (+ `scripts/proof-tcp-multihost.sh`) :
+  all-reduce à arbre fixe sur **TCP entre machines physiques séparées**
+  (pas seulement 127.0.0.1) — chaque rang régénère son entrée localement
+  (Philox seed+rang) et le rang 0 recalcule la référence en-process pour
+  comparer bit à bit au résultat reçu par le réseau : preuve
+  **auto-vérifiante**, sans empreinte à récolter au préalable. Validé
+  multi-processus (3 et 8 rangs) et en inter-architectures réel (un rang
+  sous émulation `qemu-aarch64` parlant TCP avec des rangs x86-64 natifs).
+- Gap CI comblé : `lowprec` et `tree_allreduce` n'étaient jamais exécutés
+  par le job QEMU `cross-check-aarch64` (validés manuellement seulement) —
+  ajoutés, ainsi que `formal_proof` et `proof_formal_bounds`.
+- 759 tests (+6), clippy et fmt propres.
 
 ### Ajouté — ζ de Riemann et 5 lois discrètes de plus (3e passe du volet probabilités)
 - **`scirust-special::riemann_zeta`/`riemann_zeta_tail`** — ζ(s) pour s > 1

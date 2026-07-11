@@ -60,7 +60,8 @@ mkdir -p "$OUT"
 echo "== build (release) =="
 cargo build --release -p scirust-core \
     --bin proof_portable_f32 --bin proof_portable_training \
-    --bin proof_lowprec_training \
+    --bin proof_lowprec_training --bin proof_fp8_training \
+    --bin proof_formal_bounds \
     --manifest-path "$REPO/Cargo.toml"
 
 echo "== preuve : fonctions portables =="
@@ -83,7 +84,21 @@ RC3=${PIPESTATUS[0]}
 set -e
 [[ $RC -eq 0 ]] && RC=$RC3
 
-grep -v '^#' "$OUT/report.txt" "$OUT/report-training.txt" "$OUT/report-lowprec.txt" | sha256sum | tee "$OUT/canonical.sha256"
+echo "== preuve : entraînement FP8 E4M3 + arrondi stochastique (contrat codes FP8) =="
+set +e
+"$REPO/target/release/proof_fp8_training" | tee "$OUT/report-fp8.txt"
+RC4=${PIPESTATUS[0]}
+set -e
+[[ $RC -eq 0 ]] && RC=$RC4
+
+echo "== preuve : bornes formelles a priori (exp/tanh/sigmoid, arithmétique rationnelle exacte) =="
+set +e
+"$REPO/target/release/proof_formal_bounds" | tee "$OUT/report-formal.txt"
+RC5=${PIPESTATUS[0]}
+set -e
+[[ $RC -eq 0 ]] && RC=$RC5
+
+grep -v '^#' "$OUT/report.txt" "$OUT/report-training.txt" "$OUT/report-lowprec.txt" "$OUT/report-fp8.txt" "$OUT/report-formal.txt" | sha256sum | tee "$OUT/canonical.sha256"
 echo "bundle : $OUT"
 if [[ $RC -eq 0 ]]; then
     echo "VERDICT : PASS — cette machine reproduit bit à bit le contrat commis."
