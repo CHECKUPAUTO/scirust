@@ -137,7 +137,13 @@ fn main() {
     // non-linéarité, puis 5 sorties (une par cause racine).
     let mut rng = PcgEngine::new(42); // graine fixe => résultat reproductible
     let mut model = Sequential::new()
-        .add(Linear::new(N_FEATURES, 16, &KaimingNormal, &Zeros, &mut rng))
+        .add(Linear::new(
+            N_FEATURES,
+            16,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        ))
         .add(ReLU::new())
         .add(Linear::new(16, N_CLASSES, &KaimingNormal, &Zeros, &mut rng));
 
@@ -152,10 +158,12 @@ fn main() {
     );
 
     // ---- Boucle d'entraînement ----
-    for epoch in 0..n_epochs {
+    for epoch in 0..n_epochs
+    {
         let mut epoch_loss = 0.0;
 
-        for (features, label) in &data {
+        for (features, label) in &data
+        {
             let tape = Tape::new();
             let x = tape.input(Tensor::from_vec(features.to_vec(), 1, N_FEATURES));
 
@@ -174,7 +182,8 @@ fn main() {
             epoch_loss += tape.value(loss.idx()).data[0];
         }
 
-        if epoch == 0 || (epoch + 1) % 100 == 0 {
+        if epoch == 0 || (epoch + 1) % 100 == 0
+        {
             println!(
                 "  Epoch {:>4} : loss = {:.6}",
                 epoch + 1,
@@ -185,8 +194,10 @@ fn main() {
 
     // ---- Vérification : l'IA a-t-elle bien appris ses cas ? ----
     let mut correct = 0;
-    for (features, label) in &data {
-        if predict_class(&mut model, features) == *label {
+    for (features, label) in &data
+    {
+        if predict_class(&mut model, features) == *label
+        {
             correct += 1;
         }
     }
@@ -230,7 +241,8 @@ fn main() {
         ),
     ];
 
-    for (code, description, features) in &cas_reels {
+    for (code, description, features) in &cas_reels
+    {
         diagnose(&mut model, code, description, features);
     }
 }
@@ -242,8 +254,10 @@ fn predict_class(model: &mut Sequential, features: &[f32; N_FEATURES]) -> usize 
     let logits = model.forward(&tape, x);
     let scores = tape.value(logits.idx());
     let mut best = 0;
-    for i in 1..N_CLASSES {
-        if scores.data[i] > scores.data[best] {
+    for i in 1..N_CLASSES
+    {
+        if scores.data[i] > scores.data[best]
+        {
             best = i;
         }
     }
@@ -265,7 +279,8 @@ fn diagnose(model: &mut Sequential, code: &str, description: &str, features: &[f
     println!("  Code       : {}", code);
     println!("  Symptomes  : {}", description);
     println!("  Hypotheses (classees par l'IA) :");
-    for (rank, (cause_idx, p)) in ranked.iter().enumerate() {
+    for (rank, (cause_idx, p)) in ranked.iter().enumerate()
+    {
         let marker = if rank == 0 { ">>" } else { "  " };
         println!("    {} {:>5.1}%  {}", marker, p * 100.0, CAUSES[*cause_idx]);
     }
