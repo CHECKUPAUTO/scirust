@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Modifié — `scirust-rl-algo` : `AlgoEnv` unifié sur le trait `Env` partagé
+Le crate de découverte d'algorithmes définissait son propre trait
+d'environnement `AlgoEnv` (avec `reset`/`step`/`available_actions`), doublant
+le trait `scirust_learning::rl::Env` déjà présent dans une dépendance directe.
+Cette duplication est supprimée :
+- **`AlgoEnv` devient un sous-trait** de `scirust_learning::rl::Env`
+  (`AlgoEnv: Env<State = AlgoSearchState, Action = AlgoAction>`). Les trois
+  méthodes `reset`/`step`/`available_actions` proviennent maintenant de `Env` ;
+  `AlgoEnv` ne conserve que ses spécificités : `observe`, `reward` (décomposition
+  correction/efficacité/simplicité) et `is_terminal`.
+- `AlgoSearchEnv` implémente désormais `Env` puis `AlgoEnv` ; les agents
+  tabulaires / policy-gradient partagés de `scirust-learning` s'appliquent
+  directement à l'environnement de recherche d'algorithmes, sans abstraction
+  d'environnement dupliquée.
+- Changement interne au crate : aucune signature de méthode publique modifiée,
+  47 tests verts, `clippy -D warnings` et `fmt` propres.
+
 ### Ajouté — preuve a priori étendue à sin/cos/ln (volet 118)
 - **`scirust-core::formal_proof`** (étendu) : boîte à outils générique de
   propagation d'erreur d'arrondi `(valeur, erreur)` (modèle IEEE standard,
