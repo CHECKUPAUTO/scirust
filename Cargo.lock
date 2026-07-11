@@ -3071,6 +3071,7 @@ name = "scirust-finmigrate"
 version = "0.1.0"
 dependencies = [
  "rust_decimal",
+ "sha2",
 ]
 
 [[package]]
