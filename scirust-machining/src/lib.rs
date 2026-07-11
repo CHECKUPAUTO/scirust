@@ -23,6 +23,8 @@
 //!   contact linéaire/ponctuel (engrenages, roulements, cames).
 //! - [`bearings`] — durée de vie des roulements (**ISO 281**, L10), charge
 //!   dynamique équivalente et durée corrigée en fiabilité.
+//! - [`springs`] — ressorts hélicoïdaux de compression (**EN 13906**) : raideur,
+//!   flèche et cisaillement corrigé (facteur de Wahl).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -73,6 +75,7 @@ pub mod gears;
 pub mod hertz;
 pub mod kinematics;
 pub mod roughness;
+pub mod springs;
 pub mod threads;
 pub mod time;
 pub mod tolerancing;
@@ -99,6 +102,7 @@ pub use kinematics::{
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
 };
+pub use springs::HelicalSpring;
 pub use threads::MetricThread;
 pub use time::{
     drilling_time_min, milling_time_min, number_of_passes, pass_time_min, turning_time_min,
