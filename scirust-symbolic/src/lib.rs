@@ -578,7 +578,24 @@ pub fn solve_quadratic(expr: &Expr, var: &str) -> Vec<f64> {
     }
     let disc = disc.max(0.0);
     let sqrt_disc = disc.sqrt();
-    let mut roots = vec![(-b + sqrt_disc) / (2.0 * a), (-b - sqrt_disc) / (2.0 * a)];
+    // Stable form (Numerical Recipes §5.6; Goldberg 1991): computing
+    // q = -½(b + sign(b)·√disc) — a sum of same-signed terms — and then the
+    // roots q/a and c/q (Vieta) avoids the catastrophic cancellation of the
+    // naive (-b ± √disc)/(2a) when b² ≫ 4ac (well-separated roots). The
+    // final sort below makes root order independent of which formula
+    // produced which value, so no ordering convention is lost.
+    let mut roots = if sqrt_disc.abs() < 1e-300 && b.abs() < 1e-300
+    {
+        // q would be 0 (disc == 0 and b == 0, i.e. a repeated root at 0).
+        let x = -b / (2.0 * a);
+        vec![x, x]
+    }
+    else
+    {
+        let sign_b = if b < 0.0 { -1.0 } else { 1.0 };
+        let q = -0.5 * (b + sign_b * sqrt_disc);
+        vec![q / a, c / q]
+    };
     roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     roots
 }
@@ -1319,6 +1336,27 @@ mod tests {
         let roots = solve_quadratic(&e, "x");
         assert!((roots[0] + 2.0).abs() < 1e-6);
         assert!((roots[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_solve_quadratic_no_cancellation_with_well_separated_roots() {
+        // Regression test for a P1 audit finding: the naive
+        // (-b ± √disc)/(2a) formula loses essentially all precision on the
+        // small root when b² ≫ 4ac. True roots of x² + 1e8·x + 1 = 0 are
+        // ≈ -1e8 and ≈ -1e-8 (product = c/a = 1, by Vieta).
+        let e = parse("x^2 + 100000000*x + 1").unwrap();
+        let roots = solve_quadratic(&e, "x");
+        assert_eq!(roots.len(), 2);
+        assert!(
+            ((roots[0] - (-1e8)) / 1e8).abs() < 1e-12,
+            "large root: {:e}",
+            roots[0]
+        );
+        assert!(
+            ((roots[1] - (-1e-8)) / 1e-8).abs() < 1e-6,
+            "small root should be accurate to ~1e-6 relative, got {:e}",
+            roots[1]
+        );
     }
 
     #[test]

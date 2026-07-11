@@ -62,7 +62,9 @@ pub fn solve_linear(a: f64, b: f64) -> Result<f64, String> {
 
 /// Solve a quadratic equation `a*x^2 + b*x + c = 0`.
 ///
-/// Returns the two real roots.  Errors if `a == 0` or the discriminant is negative.
+/// Returns the two real roots (first the "+√disc" root, then the "−√disc"
+/// root — the same order the naive formula would give). Errors if `a == 0`
+/// or the discriminant is negative.
 pub fn solve_quadratic(a: f64, b: f64, c: f64) -> Result<(f64, f64), String> {
     if a == 0.0
     {
@@ -74,7 +76,32 @@ pub fn solve_quadratic(a: f64, b: f64, c: f64) -> Result<(f64, f64), String> {
         return Err("no real solutions".into());
     }
     let sqrt_disc = disc.sqrt();
-    Ok(((-b + sqrt_disc) / (2.0 * a), (-b - sqrt_disc) / (2.0 * a)))
+    // Stable form (Numerical Recipes §5.6; Goldberg 1991, "What Every
+    // Computer Scientist Should Know About Floating-Point Arithmetic"):
+    // computing q = -½(b + sign(b)·√disc) — always a sum of same-signed
+    // terms — and then the roots q/a and c/q (Vieta) avoids the
+    // catastrophic cancellation of the naive (-b ± √disc)/(2a) when
+    // b² ≫ 4ac (well-separated roots).
+    if sqrt_disc.abs() < 1e-300 && b.abs() < 1e-300
+    {
+        // q would be 0 (disc == 0 and b == 0, i.e. a repeated root at 0).
+        let x = -b / (2.0 * a);
+        return Ok((x, x));
+    }
+    let sign_b = if b < 0.0 { -1.0 } else { 1.0 };
+    let q = -0.5 * (b + sign_b * sqrt_disc);
+    // q = a·root₊ when b < 0, or a·root₋ when b ≥ 0 (Vieta: root₊·root₋ = c/a
+    // pins down the other root as c/q either way).
+    Ok(
+        if b < 0.0
+        {
+            (q / a, c / q)
+        }
+        else
+        {
+            (c / q, q / a)
+        },
+    )
 }
 
 /// Prove that two expression strings are approximately equal by parsing and
@@ -436,6 +463,24 @@ mod tests {
         let (r1, r2) = solve_quadratic(1.0, 0.0, -4.0).unwrap();
         assert!((r1 - 2.0).abs() < 1e-10);
         assert!((r2 + 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_solve_quadratic_no_cancellation_with_well_separated_roots() {
+        // Regression test for a P1 audit finding: the naive
+        // (-b ± √disc)/(2a) formula subtracts two ~1e8-magnitude quantities
+        // that agree to ~8 digits when b² ≫ 4ac, losing essentially all
+        // precision on the small root. True roots of x² + 1e8·x + 1 = 0 are
+        // ≈ -1e-8 and ≈ -1e8 (product = c/a = 1, by Vieta).
+        let (r_plus, r_minus) = solve_quadratic(1.0, 1e8, 1.0).unwrap();
+        assert!(
+            ((r_plus - (-1e-8)) / 1e-8).abs() < 1e-6,
+            "small root should be accurate to ~1e-6 relative, got {r_plus:e}"
+        );
+        assert!(
+            ((r_minus - (-1e8)) / 1e8).abs() < 1e-12,
+            "large root: {r_minus:e}"
+        );
     }
 
     #[test]
