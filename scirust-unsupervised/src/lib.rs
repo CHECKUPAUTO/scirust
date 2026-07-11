@@ -321,7 +321,12 @@ impl IsolationForest {
         }
     }
 
-    fn build_tree(data: &[Vec<f64>], max_depth: usize, rng: &mut Rng) -> IsolNode {
+    fn build_tree(
+        data: &[Vec<f64>],
+        max_depth: usize,
+        rng: &mut Rng,
+        feature_scale: &[f64],
+    ) -> IsolNode {
         if data.len() <= 1 || max_depth == 0
         {
             return IsolNode::Leaf { size: data.len() };
@@ -345,7 +350,14 @@ impl IsolationForest {
             .map(|r| r[feature])
             .fold(f64::NEG_INFINITY, f64::max);
 
-        if (max_val - min_val).abs() < 1e-10
+        // "Effectively constant" must be judged relative to the feature's own
+        // scale across the whole training set (`feature_scale`, fixed once at
+        // fit time), not a bare absolute constant: for data whose natural
+        // magnitude is itself far below `1e-10`, an absolute floor silently
+        // blocks every split, so a real, isolatable outlier (that differs
+        // from the rest by far more than the rest's own spread, but still by
+        // a tiny absolute amount) can never be separated out.
+        if (max_val - min_val).abs() < 1e-9 * feature_scale[feature].max(1e-300)
         {
             return IsolNode::Leaf { size: data.len() };
         }
@@ -363,8 +375,8 @@ impl IsolationForest {
         IsolNode::Internal {
             feature,
             threshold,
-            left: Box::new(Self::build_tree(&left, max_depth - 1, rng)),
-            right: Box::new(Self::build_tree(&right, max_depth - 1, rng)),
+            left: Box::new(Self::build_tree(&left, max_depth - 1, rng, feature_scale)),
+            right: Box::new(Self::build_tree(&right, max_depth - 1, rng, feature_scale)),
         }
     }
 
@@ -413,6 +425,19 @@ impl IsolationForest {
         let effective_subsample = self.config.subsample_size.min(n);
         self.avg_path = Self::c(effective_subsample);
 
+        // Per-feature scale over the *full* training set, fixed once here so
+        // every tree's "is this feature constant" check judges a node's local
+        // range against the feature's own natural spread rather than an
+        // arbitrary absolute constant.
+        let n_features = data.first().map_or(0, |row| row.len());
+        let feature_scale: Vec<f64> = (0..n_features)
+            .map(|f| {
+                let min_v = data.iter().map(|r| r[f]).fold(f64::INFINITY, f64::min);
+                let max_v = data.iter().map(|r| r[f]).fold(f64::NEG_INFINITY, f64::max);
+                max_v - min_v
+            })
+            .collect();
+
         self.trees.clear();
         for _ in 0..self.config.n_trees
         {
@@ -423,7 +448,8 @@ impl IsolationForest {
                 .take(self.config.subsample_size)
                 .map(|&i| data[i].clone())
                 .collect();
-            let tree = Self::build_tree(&subsample, self.config.max_depth, &mut rng);
+            let tree =
+                Self::build_tree(&subsample, self.config.max_depth, &mut rng, &feature_scale);
             self.trees.push(tree);
         }
     }
@@ -1439,6 +1465,44 @@ mod tests {
         assert!(
             anomalies.iter().any(|&i| (6..10).contains(&i)),
             "a detected anomaly should be in the planted outlier group"
+        );
+    }
+
+    #[test]
+    fn test_iforest_isolates_tiny_scale_anomaly_via_relative_range() {
+        // All points cluster tightly around 1e-9 (jitter amplitude ~1e-13)
+        // except one outlier deviating by 5e-11 — about 500x the cluster's
+        // own spread, but still a tiny 5e-11 in absolute terms: far below a
+        // hardcoded "is this feature constant" floor of 1e-10. A relative
+        // check (scaled to the feature's own range across the training set)
+        // must still let this split happen, so the outlier is isolated in a
+        // single split while inliers need many more to separate from each
+        // other, and therefore must score as more anomalous.
+        let base = 1e-9;
+        let n_inliers = 40;
+        let mut data: Vec<Vec<f64>> = (0..n_inliers)
+            .map(|i| {
+                let jitter = 1e-13 * (i as f64 / n_inliers as f64 - 0.5);
+                vec![base + jitter]
+            })
+            .collect();
+        data.push(vec![base + 5e-11]);
+
+        let config = IForestConfig {
+            n_trees: 50,
+            subsample_size: data.len(),
+            max_depth: 10,
+            seed: 42,
+        };
+        let mut iforest = IsolationForest::new(config);
+        iforest.fit(&data);
+
+        let scores = iforest.anomaly_scores(&data);
+        let outlier_score = *scores.last().unwrap();
+        let max_inlier_score = scores[..n_inliers].iter().cloned().fold(f64::MIN, f64::max);
+        assert!(
+            outlier_score > max_inlier_score,
+            "tiny-but-real anomaly should score above all inliers: outlier={outlier_score} max_inlier={max_inlier_score}"
         );
     }
 
