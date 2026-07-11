@@ -9,6 +9,8 @@
 //!   multiplicative seasonality ([`HoltWinters`], [`Seasonality`]).
 //! - [`ar_fit`] — autoregressive AR(p) fitting via the Yule-Walker equations
 //!   and the Levinson-Durbin recursion ([`ArModel`]).
+//! - [`arima_fit`] — ARIMA(p, d, q) fitting via differencing plus a joint
+//!   AR/MA fit ([`ArimaModel`]).
 //! - [`difference`] / [`moving_average`] — series-transformation helpers.
 //! - [`metrics`] — [`mae`](metrics::mae), [`rmse`](metrics::rmse) and
 //!   [`mape`](metrics::mape) accuracy scores.
@@ -38,12 +40,14 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod arima;
 pub mod autoreg;
 pub mod error;
 pub mod metrics;
 pub mod smoothing;
 pub mod utils;
 
+pub use arima::{ArimaModel, arima_fit};
 pub use autoreg::{ArModel, ar_fit};
 pub use error::ForecastError;
 pub use metrics::{mae, mape, rmse};
@@ -210,6 +214,118 @@ mod tests {
         assert!(approx(fc[0], expected, 1e-9));
         // ... and is close to the true conditional mean phi * x_last.
         assert!(approx(fc[0], phi * last, 0.1 * (last.abs() + 1.0) + 0.2));
+    }
+
+    // ---------- ARIMA ----------
+
+    #[test]
+    fn arima_p0_d0_q0_constant_series_is_flat_forecast() {
+        let series = [9.0; 40];
+        let model = arima_fit(&series, 0, 0, 0).unwrap();
+        assert!(approx(model.intercept(), 9.0, 1e-9));
+        assert!(model.ar_coefficients().is_empty());
+        assert!(model.ma_coefficients().is_empty());
+        for v in model.forecast(5)
+        {
+            assert!(approx(v, 9.0, 1e-9));
+        }
+    }
+
+    #[test]
+    fn arima_diff_integrate_recovers_linear_trend() {
+        // A noiseless linear trend differences down to an exact constant, so
+        // ARIMA(0, 1, 0) (a random walk with drift) should recover the slope
+        // exactly and its forecasts should exactly continue the line — this
+        // exercises the d-fold differencing and re-integration round trip.
+        let a = 2.0;
+        let b = 3.0;
+        let n = 50;
+        let series: Vec<f64> = (0..n).map(|t| a + b * t as f64).collect();
+        let model = arima_fit(&series, 0, 1, 0).unwrap();
+        assert_eq!(model.d(), 1);
+        assert!(approx(model.intercept(), b, 1e-9));
+        let fc = model.forecast(5);
+        for (i, v) in fc.iter().enumerate()
+        {
+            let t = n + i;
+            let truth = a + b * t as f64;
+            assert!(approx(*v, truth, 1e-6), "h={i}: {v} vs {truth}");
+        }
+    }
+
+    #[test]
+    fn arima_ma1_recovers_theta() {
+        // x_t = mu + e_t + theta * e_{t-1}.
+        let theta = 0.6;
+        let mu = 5.0;
+        let mut state = 0xABCD_EF01_2345_6789_u64;
+        let n = 4000;
+        let e: Vec<f64> = (0..n).map(|_| next_unit(&mut state)).collect();
+        let mut x = vec![0.0; n];
+        x[0] = mu + e[0];
+        for t in 1..n
+        {
+            x[t] = mu + e[t] + theta * e[t - 1];
+        }
+        let model = arima_fit(&x, 0, 0, 1).unwrap();
+        assert!(model.ar_coefficients().is_empty());
+        assert_eq!(model.ma_coefficients().len(), 1);
+        assert!(
+            approx(model.ma_coefficients()[0], theta, 0.15),
+            "theta_hat = {}",
+            model.ma_coefficients()[0]
+        );
+        assert!(
+            approx(model.intercept(), mu, 0.15),
+            "intercept_hat = {}",
+            model.intercept()
+        );
+    }
+
+    #[test]
+    fn arima_arma11_recovers_coefficients() {
+        // x_t - mu = phi * (x_{t-1} - mu) + e_t + theta * e_{t-1}.
+        let phi = 0.5;
+        let theta = 0.4;
+        let mu = 2.0;
+        let mut state = 0x0FED_CBA9_8765_4321_u64;
+        let n = 6000;
+        let e: Vec<f64> = (0..n).map(|_| 0.5 * next_unit(&mut state)).collect();
+        let mut x = vec![0.0; n];
+        x[0] = mu + e[0];
+        for t in 1..n
+        {
+            x[t] = mu + phi * (x[t - 1] - mu) + e[t] + theta * e[t - 1];
+        }
+        let model = arima_fit(&x, 1, 0, 1).unwrap();
+        assert_eq!(model.ar_coefficients().len(), 1);
+        assert_eq!(model.ma_coefficients().len(), 1);
+        assert!(
+            approx(model.ar_coefficients()[0], phi, 0.15),
+            "phi_hat = {}",
+            model.ar_coefficients()[0]
+        );
+        assert!(
+            approx(model.ma_coefficients()[0], theta, 0.15),
+            "theta_hat = {}",
+            model.ma_coefficients()[0]
+        );
+    }
+
+    #[test]
+    fn arima_error_empty_series() {
+        assert_eq!(
+            arima_fit(&[], 1, 0, 1).unwrap_err(),
+            ForecastError::EmptySeries
+        );
+    }
+
+    #[test]
+    fn arima_error_series_too_short() {
+        assert!(matches!(
+            arima_fit(&[1.0, 2.0, 3.0], 2, 1, 2).unwrap_err(),
+            ForecastError::SeriesTooShort { .. }
+        ));
     }
 
     // ---------- Utilities ----------
