@@ -67,6 +67,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run clippy (scirust-gpu wgpu feature)
         run: cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings
+      - name: Run clippy (scirust-sim rl feature)
+        run: cargo clippy -p scirust-sim --features rl --all-targets -- -D warnings
 
   # Gate σ (S2 de paper/PAPER_PLAN.md) : échoue si une garde f32 sous
   # σ_sanitized (= f32::MIN_POSITIVE) subsiste hors test dans scirust-gpu/src
@@ -136,6 +138,12 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Run tests (stable)
         run: cargo test --workspace
+      # The `rl` feature is off by default (it pulls scirust-learning), so the
+      # workspace test run above does not exercise the scirust-sim ↔
+      # scirust-learning RL bridge. Cover it explicitly, mirroring the
+      # portable-simd / wgpu feature jobs.
+      - name: Test scirust-sim rl bridge (rl feature)
+        run: cargo test -p scirust-sim --features rl
 
   # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
   # A pure `cargo check` needs no cross linker and would have caught the
@@ -169,9 +177,14 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
         run: |
           cargo test -p scirust-core --lib portable_f32 --release --target aarch64-unknown-linux-gnu
+          cargo test -p scirust-core --lib lowprec --release --target aarch64-unknown-linux-gnu
+          cargo test -p scirust-core --lib tree_allreduce --release --target aarch64-unknown-linux-gnu
+          cargo test -p scirust-core --lib formal_proof --release --target aarch64-unknown-linux-gnu
           cargo run --release -p scirust-core --bin proof_portable_f32 --target aarch64-unknown-linux-gnu
           cargo run --release -p scirust-core --bin proof_portable_training --target aarch64-unknown-linux-gnu
           cargo run --release -p scirust-core --bin proof_lowprec_training --target aarch64-unknown-linux-gnu
+          cargo run --release -p scirust-core --bin proof_fp8_training --target aarch64-unknown-linux-gnu
+          cargo run --release -p scirust-core --bin proof_formal_bounds --target aarch64-unknown-linux-gnu
 
   deny:
     name: License & Security Audit

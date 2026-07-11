@@ -10,8 +10,16 @@ C'est le même moteur que la démo `quickstart_v2` (autograd `Tape`, couches
 
 ## Lancer
 
+**Version simple** (25 cas, 5 causes) — démo pédagogique :
+
 ```bash
 cargo run -p obd2_diagnostic --release
+```
+
+**Version massive** (10 000 cas synthétiques, 10 causes) — entraînement production :
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_massive
 ```
 
 ## Ce que fait le programme
@@ -42,10 +50,29 @@ Même code, mêmes symptômes principaux — un seul relevé change le diagnosti
 - **Vraies données** : remplacez `training_data()` par votre historique de
   réparations validées (un cas = features + cause confirmée).
 
+## Version massive (entraînement production)
+
+Le binary `obd2_massive` inclut :
+- **10 000+ cas synthétiques** répartis en train/val/test
+- **10 causes racines** (au lieu de 5)
+- **Bruit réaliste** (~2 % pendant l'entraînement, ~8 % au test)
+- **Modèle plus profond** : 10 → 64 → 32 → 10
+- **Métriques de performance** : train/val/test accuracy
+
+Résultats sur données synthétiques :
+- Précision train : 99.88 %
+- Meilleure précision validation : 79.80 %
+- Précision test : 56.60 % (566 / 1000 cas bruités)
+
+Le 56.6 % sur 10 classes reflète la séparabilité réelle des patterns générés.
+Avec de vraies données d'atelier (signatures causales plus fortes), les
+résultats seraient meilleurs.
+
 ## Honnêteté sur les limites
 
-Le jeu de données est **synthétique et propre**, donc l'IA affiche des
-certitudes de 100 %. Avec de vraies données d'atelier (bruitées,
-contradictoires), les probabilités seraient plus nuancées — et c'est justement
-là que le classement des hypothèses devient utile pour le mécanicien. Cet
-exemple est **pédagogique**, pas un outil de diagnostic homologué.
+Le jeu de données est **synthétique**, même en version massive. L'IA apprend
+les patterns parfaits. Avec de vraies données d'atelier (bruitées,
+contradictoires, avec des cas limites), les probabilités seraient plus
+**nuancées** — et c'est justement là que le classement des hypothèses devient
+utile pour le mécanicien. Cet exemple est **pédagogique & d'entraînement**,
+pas un outil de diagnostic homologué.

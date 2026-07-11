@@ -3,215 +3,76 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-11
 
-## Session 2026-07-11 — fluides & thermo, volet 5 (régions 3a/3b IF97 sous-critique, backward p(h,s))
-
-Demande explicite de l'utilisateur : « la région 3a/3b complètes en
-sous-critique, équations backward P(h,s) » — les deux items notés comme
-« suite possible » à la fin du volet 4 (PR #296).
-
-**Point de départ inattendu** : la branche `claude/scirust-fluid-mechanics-ml4ot6`
-locale pointait encore sur le commit du volet 4 (`efce652`), mais
-`git merge-base --is-ancestor` a montré qu'il n'était PAS ancêtre
-d'`origin/master` — la PR avait été *squash-mergée* (SHA différent). Ni le
-CHANGELOG.md ni le LIVESTATE.md ne portent trace de l'entrée « volet 4 »
-qu'on avait pourtant écrite et poussée : le code (région 3 Helmholtz,
-backward T(p,h)/T(p,s)) est bien présent sur master, mais sa narration a dû
-être perdue dans un merge automatique concurrent (l'automatisation
-CHECKUPAUTO fusionne vite, parfois plusieurs PR quasi simultanées sur des
-fichiers texte prependés en tête — un point de fragilité du dépôt à garder
-en tête, pas quelque chose à reconstruire rétroactivement). Procédure
-suivie : `git fetch origin master && git checkout -B
-claude/scirust-fluid-mechanics-ml4ot6 origin/master` pour repartir propre,
-comme prescrit pour une branche dont la PR est déjà mergée.
-
-**Contenu livré** (tout dans `scirust-thermo::backward`, même fichier que
-le volet 4) :
-- `region3_v_ph` / `region3_t_ph` / `region3_v_ps` / `region3_t_ps` —
-  équations backward officielles région 3 (Supp-Tv(ph,ps)3-2014), dispatch
-  3a/3b par `h_3ab(p)` (pour p,h) ou par l'entropie critique `S_CRITICAL`
-  (pour p,s, indépendant de la pression).
-- `region1_p_hs` / `region2_p_hs` / `region3_p_hs` — équation backward
-  officielle p(h,s) (Supp-PHS12-2014 pour 1/2, Supp-phs3-2014 pour 3),
-  région 2 dispatchée 2a/2b/2c par `hab_s(s)` + seuil 5,85 kJ/(kg·K).
-
-**Découverte physique en écrivant le test de round-trip sous-critique** :
-j'ai d'abord supposé (à tort) que la région 3 sous-critique se logeait entre
-la courbe de saturation Psat(T) et la frontière B23(T). Un scan direct en
-Rust (`saturation_pressure(630)` vs `b23_pressure(630)`) a montré l'inverse :
-B23(630 K) ≈ 17,28 MPa < Psat(630 K) ≈ 17,97 MPa, et B23(623,15 K) =
-Psat(623,15 K) exactement (point de jonction 1-2-3-4). Autrement dit, entre
-623,15 K et le point critique, B23 croît moins vite que Psat : la région 2
-perd donc son domaine [0, Psat(T)] habituel au profit de [0, B23(T)]
-seulement, et la région 3 récupère la bande (B23(T), 100 MPa) tout entière —
-y compris la fine tranche (B23(T), Psat(T)) qui serait « vapeur surchauffée »
-si on ignorait ce détail. C'est exactement pourquoi la région 3 a une
-branche 3b (vapeur-like) même sous le point critique, pas seulement en
-supercritique. Le test de round-trip scanne donc `ρ` en partant d'une valeur
-délibérément **après** la boucle de van der Waals locale (repérée par un
-diagnostic imprimé, minimum local de P(ρ) autour de ρ≈480 à 630 K) pour
-retomber sur la branche liquide monotone, puis vérifie `region3_from_tp`-style
-round-trip contre les nouvelles équations backward.
-
-**Méthodologie de vérification inchangée** (celle qui avait débusqué le bug
-d'exposants fractionnaires au volet 4) : script Python qui (1) extrait les 14
-groupes de coefficients (32 à 46 termes chacun, ~500 nombres) du paquet
-`iapws` par regex, (2) scanne systématiquement tous les `Li`/`Lj` pour des
-valeurs non entières — aucune cette fois, contrairement à `Backward2a_T_Ps`
-au volet précédent — (3) réimplémente les 14 formules en Python pur et les
-vérifie contre les **33 exemples numériques officiels** des trois
-publications avant d'écrire une seule ligne de Rust, (4) génère les tableaux
-Rust programmatiquement (jamais de transcription manuelle).
-
-**Tests** : 79 tests thermo (+5 vs volet 4 : exemples officiels région 3
-backward, round-trip sous-critique, exemples officiels p(h,s), round-trip
-p(h,s) région 1/2, rejets de domaine). `cargo test -p scirust-fluids -p
-scirust-thermo` vert ; `cargo clippy --all-targets -- -D warnings` propre
-sur tout le workspace ; `cargo fmt` appliqué.
-
-**Suite possible (non sollicitée)** : rien d'identifié à ce stade — les deux
-derniers chantiers explicitement notés (3a/3b sous-critique, backward
-p(h,s)) sont maintenant couverts. D'éventuels compléments resteraient à
-la demande explicite de l'utilisateur (ex. équation Tsat(h,s) région 4,
-backward p(h,s) avec dispatch universel multi-régions façon `_Bound_hs` de
-la référence — nettement plus lourd, nécessiterait un classifieur de région
-à partir de (h,s) seul).
-
-## Session 2026-07-10 — probabilités, 7e passe (Laplace discrète + fit méthode des moments)
-- **Contexte** : « continu » après PR #297 (6e passe) MERGÉE. Branche
-  repartie de `origin/master`. Les « suites possibles » restantes étant des
-  lois de niche, choix d'ajouter une loi à réelle valeur applicative
-  (DiscreteLaplace = mécanisme DP) + une capacité nouvelle (ajustement MoM).
-- **Livré** : (a) `DiscreteLaplace` (dlaplace, support ℤ, API i64 façon
-  Skellam) — loi du mécanisme géométrique en confidentialité différentielle,
-  pmf=tanh(a/2)e^(−a|k|), cdf/sf fermées, tirage=différence de 2 géométriques.
-  (b) `fit_mom` sur Poisson/Geometric/NegativeBinomial — inférence par la
-  méthode des moments (équivalent `.fit()` SciPy), NegBinom `None` si pas de
-  surdispersion. Oracles SciPy + round-trip mean/var. 57 tests + doctest,
-  clippy 0 avertissement.
-- **Bilan volet probabilités** : **19 lois discrètes** (16 univariées + 3
-  vectorielles) + combinatoire exacte + ζ de Riemann + Loader + inférence
-  MoM + module loterie honnête. Parité SciPy discrète atteinte sur l'utile.
-- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
-- **Suite** : le volet est mûr ; prochaine valeur = pivot vers une capacité
-  (GOF des lois ajustées, EMV) ou un autre domaine, pas plus de lois.
-- **NB CI** : panne Actions du dépôt possible ; validations locales.
-
-## Session 2026-07-10 — probabilités, 6e passe (log-series, Planck, pmf de Loader)
-- **Contexte** : « enchaine sur Suites possibles restantes » après PR #294
-  (5e passe) MERGÉE. Les 3 restes annoncés : pmf de Loader grand n,
-  log-series, Planck non tronquée. Branche repartie de `origin/master`.
-- **Livré** : (a) `scirust-special` — algorithme de Loader (Loader 2000,
-  celui de R `dbinom`/`dpois`) : `stirling_error` (série asymptotique
-  x≥16 / direct sinon, validé mpmath 40 chiffres), `binom_deviance` (D₀
-  par série près de x≈np), `ln_poisson_pmf`/`ln_binomial_pmf`. Pleine
-  précision relative grand n/λ (~1e-10 → ~1e-15). `Binomial`/`Poisson`
-  ::ln_pmf recâblés dessus (aucune régression sur les tests existants).
-  (b) `Logarithmic` (log-séries `scipy.stats.logser`) ; (c) `Planck`
-  (géométrique non tronquée, limite n→∞ de Boltzmann, = géométrique
-  décalée testée). Oracles SciPy + mpmath. scirust-special 16 tests,
-  scirust-stats 54 tests + doctest, clippy 0 avertissement.
-- **Bilan volet probabilités** : **18 lois discrètes** (15 univariées + 3
-  vectorielles) + combinatoire exacte + ζ de Riemann + Loader + module
-  loterie honnête. Surface de méthodes à parité quasi complète SciPy.
-- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
-- **Suite possible** : lois discrètes de niche restantes (Bernoulli
-  explicite, dlaplace, poisson-binomiale exacte déjà faite), `interval`
-  côté continu, ou clore le volet — au choix utilisateur.
-- **NB CI** : panne Actions du dépôt possible ; validations locales.
-
-## Session 2026-07-10 — probabilités, 5e passe (interval/expect + Yule-Simon + Boltzmann)
-- **Contexte** : « continu » après PR #292 (4e passe) MERGÉE. Branche
-  repartie de `origin/master` à jour.
-- **Livré** : (a) `interval(c)` et `expect(f)` ajoutés par défaut au trait
-  `DiscreteDistribution` (parité `scipy.stats`) ; `expect` prend
-  `&dyn Fn(u64)->f64` (objet-sûr), sommation bornée par la queue.
-  (b) `YuleSimon` (queue lourde k≥1, pmf=α·B(k,α+1), survie fermée
-  k·B(k,α+1), moments divergents α≤1/α≤2) ; (c) `Boltzmann` (géométrique
-  tronquée 0..=n−1, Planck tronquée, formes fermées, normalisation −expm1).
-  Oracles SciPy 1.17.1 + identité exacte Yule-Simon α=2 ⇒ 4/(k(k+1)(k+2)).
-  51 tests + doctest, clippy 0 avertissement.
-- **Convention conflits maintenue** : entrée CHANGELOG **en bas** de
-  « Non publié » — la 4e passe (#292) a ainsi fusionné sans conflit.
-- **Bilan volet probabilités** : 16 lois discrètes (13 univariées + 3
-  vectorielles) + combinatoire exacte + ζ de Riemann + module loterie
-  honnête. Surface de méthodes à parité quasi complète avec SciPy
-  (pmf/logpmf/cdf/logcdf/sf/logsf/ppf/isf/interval/expect/moments/sampling).
-- **Suite possible** : pmf de Loader (saddle-point) grand n, lois de niche
-  restantes (Logarithmic/log-series, Planck non tronquée, Bernoulli
-  explicite) — non entamé.
-- **NB CI** : panne Actions du dépôt (runners, logs 404) toujours possible ;
-  validations locales (tests+clippy) uniquement.
-
-## Session 2026-07-10 — probabilités, 4e passe (parité SciPy queues + Dirichlet-multinomiale)
-- **Contexte** : « continu » après PR #287 (3e passe : ζ de Riemann +
-  Zeta/PoissonBinomial/Multinomial/MultivariateHypergeometric) MERGÉE.
-  Branche repartie de `origin/master` à jour.
-- **Livré** : (a) `logcdf`/`logsf`/`isf` ajoutés par défaut au trait
-  `DiscreteDistribution` — parité `scipy.stats`, `logsf`/`isf` s'appuient sur
-  la survie directe (pas de `ln(1−cdf)`) ; (b) `DirichletMultinomial`
-  (Pólya multivariée) — ln_pmf/pmf forme fermée ln Γ, moyenne, covariance
-  avec facteur de surdispersion ρ=(n+A)/(1+A), tirage par bêta-binomiales
-  conditionnelles (stick-breaking, reproductible). Oracles SciPy 1.17.1 +
-  fraction exacte 18/143 ; 2 catégories = bêta-binomiale, α=[1,1]=uniforme.
-  48 tests + doctest, clippy 0 avertissement.
-- **Convention conflits** : entrée CHANGELOG placée **en bas** de la section
-  « Non publié » (pas en tête) — les volets parallèles collent tous la leur
-  en tête, d'où des conflits systématiques ; #287 a dû être rebasée 2×.
-- **Bilan volet probabilités** : 14 lois discrètes (11 univariées + 3
-  vectorielles) + combinatoire exacte + module loterie honnête (aucune
-  « prédiction », impossible et documentée). Dépasse statrs (9 univariées).
-- **Suite possible** : pmf de Loader (saddle-point) pour binomiale/Poisson à
-  très grand n, `interval`/`expect` façon SciPy, lois discrètes restantes
-  (Yule-Simon, Boltzmann) — non entamé.
-- **NB CI** : la panne Actions du dépôt (runners non assignés, logs 404,
-  ~17h29 UTC) persistait ; validations locales uniquement (tests+clippy).
-
-## Session 2026-07-10 — fluides & thermo, volet 3 (région 5 IF97, Rankine réel, Hardy Cross ↔ Colebrook)
-- **Contexte** : PR #285 (volet 2) MERGÉE ; « continu » → les trois
-  « suites possibles » notées à la fin du volet 2. Branche repartie de
-  master (procédure branche-mergée).
-- **Région 5 IF97** (`steam::region5`) : coefficients (6+6 termes,
-  bien plus compacts que régions 1/2) extraits du même script sur le
-  paquet `iapws` que les volets précédents ; formules vérifiées en
-  Python pur AVANT le Rust — les 6 exemples numériques officiels de la
-  publication IF97 pour la région 5 passent à 1e-8 du premier coup.
-  Note technique : le code de référence utilise pour cv/w de la région 5
-  une forme algébrique différente (dérivées totales, dénominateur
-  `gopp+grpp` sans le terme `1-π²·`) de celle de la région 2 ; vérifié
-  par calcul à la main qu'elles sont algébriquement identiques (le
-  terme idéal `g0ππ=-1/π²` absorbe exactement la différence) — réutilisé
-  la forme région-2 (résiduel seul + `1-π²grpp`) pour cohérence de code,
-  pas de nouvelle famille de formule à maintenir.
-- **Rankine réel** (`cycles::rankine_real`) : au lieu d'implémenter les
-  énormes tables de coefficients des équations « backward » officielles
-  IF97 T(p,h)/T(p,s) par sous-région (2a/2b/2c, ~40 termes chacune),
-  décision de réutiliser le même principe de bissection déterministe déjà
-  en place pour l'échappement surchauffé (volet 2), mais sur h au lieu
-  de s — beaucoup moins de code, même garantie déterministe, couvre
-  exactement le besoin (localiser l'état réel d'échappement depuis son
-  enthalpie réelle). RankineCycleReal expose `ideal_efficiency` pour
-  comparaison directe en un seul appel. Résultat physique intéressant
-  vérifié par test : à rendement dégradé, la vapeur d'échappement
-  devient PLUS sèche (pas plus humide) — moins de travail extrait laisse
-  plus d'enthalpie dans la vapeur.
-- **Hardy Cross ↔ Colebrook** (`network::hardy_cross_darcy`) :
-  `PhysicalPipe` + boucle externe de substitution successive qui
-  recalcule f(Re) à chaque itération via `pipe::friction_factor` puis
-  appelle `hardy_cross` (interne, r figé) jusqu'à convergence des deux
-  boucles. Vérifié que h=f(L/D)V²/(2g) est intrinsèquement quadratique
-  en V par construction (le comportement linéaire de Hagen-Poiseuille en
-  laminaire vient de f∝1/Re, pas d'une loi de puissance différente) donc
-  le point fixe de l'itération EST la solution physique exacte, pas une
-  approximation — vérifié par un test qui recalcule la perte de charge
-  Darcy-Weisbach à partir des dimensions physiques après convergence et
-  contrôle la fermeture de boucle à 1e-6.
-- **Vérifié** : scirust-fluids 57 tests (+3 vs volet 2), scirust-thermo
-  63 tests (+6), clippy `-D warnings` propre, fmt appliqué.
-- **Suite possible** : IF97 région 3 (Helmholtz, autour du point
-  critique — nécessite un solveur de densité itératif, nettement plus
-  complexe que les régions Gibbs explicites) ; équations backward
-  officielles T(p,h)/T(p,s) si un jour la bissection s'avère insuffisante
-  (par ex. pour des besoins de performance) — non entamé.
+## Session 2026-07-11 — volet 117 : preuve formelle a priori + FP8 reproductible + TCP inter-machines
+- **Contexte** : demande utilisateur « que reste-t-il à coder ? » sur l'audit
+  RepDL/reproductibilité → 3 lacunes identifiées puis « traite tous les
+  items » : (A) aucune preuve a priori (style RLIBM/Gappa) des bornes
+  d'erreur, seule la vérification exhaustive a posteriori existait ; (B) le
+  FP8 (volet 115-C) n'avait pas d'équivalent au témoin d'entraînement
+  bf16-SR du volet 116-B ; (C) l'all-reduce TCP (volet 116-A) n'avait été
+  exercé qu'en boucle locale (127.0.0.1), jamais sur un vrai réseau ni entre
+  architectures distinctes.
+- **A — Preuve formelle a priori** (`scirust-core::formal_proof`, nouveau) :
+  borne d'erreur relative dérivée **analytiquement** (pas testée point par
+  point) pour `exp`/`tanh`/`sigmoid`, dont le cœur `exp_f64_core` partage le
+  même Taylor degré 13 sur une plage réduite où e^r reste loin de zéro.
+  Méthode : **reste de Lagrange** pour la troncature du Taylor + **théorème
+  γ_k de Higham** (`γ_k = ku/(1−ku)`, *Accuracy and Stability of Numerical
+  Algorithms*) pour l'arrondi du schéma de Horner, le tout en **arithmétique
+  rationnelle exacte** (`num-rational`/`num-bigint`, aucune confiance dans le
+  flottant de la machine qui fait la preuve) avec des bornes citables pour
+  les constantes irrationnelles (π < 355/113 Milü, ln 2 < 0,693147181,
+  vérifiables directement). Résultat : borne d'erreur relative ≈ 6,77e-15
+  (2⁻⁴⁷·⁰⁷), marge ≈ 4,4×10⁶ sous le seuil d'arrondi correct 2⁻²⁵ — preuve
+  valable sur tout le domaine réel réduit, pas seulement les points testés.
+  Binaire `proof_formal_bounds` (imprime les fractions exactes + décimales),
+  intégré au script de preuve et au job CI QEMU (arithmétique entière pure —
+  déterminisme cross-arch quasi tautologique, vérifié quand même par
+  discipline). **Portée honnête** : sin/cos/ln/erf NON couverts — leur cœur
+  s'annule près de zéro (`sin(r)→0`), ce qui casse la borne d'erreur relative
+  uniforme utilisée ici et demanderait une analyse via `sin(r)/r` (Jordan)
+  non entreprise ; seule la vérification exhaustive a posteriori (volet 115-A)
+  les couvre. Doc de `portable_f32.rs` mise à jour pour distinguer précisément
+  les deux classes de garantie par fonction.
+- **B — Entraînement FP8 E4M3 reproductible** (`proof_fp8_training`,
+  nouveau) : même recette que le témoin bf16 (volet 116-B) — maîtres f32,
+  copies forward FP8 E4M3 quantifiées par arrondi stochastique Philox
+  contre-basé. `lowprec.rs` refactoré (`fp8_pre_round`/`fp8_finish`
+  extraits de `f32_to_fp8_rne`, réutilisés par la nouvelle
+  `f32_to_fp8_stochastic`) pour ne jamais dupliquer la logique de
+  troncature de mantisse. Contrat commis (x86-64), validé bit-identique
+  sous QEMU aarch64 avant commit : trajectoire de perte
+  0x9d51f587bc9d5db4, codes FP8 finaux 0xe55a5fa4691a544c. Intégré au
+  script de preuve (report-fp8.txt) et au job CI QEMU.
+- **C — All-reduce TCP entre machines physiques séparées**
+  (`proof_tcp_multihost`, nouveau binaire + `scripts/proof-tcp-multihost.sh`) :
+  chaque rang régénère sa propre entrée localement (Philox, seed+rang —
+  reproductible sur n'importe quelle machine) et communique par sockets TCP
+  réels ; le rang 0 recalcule la référence EN-PROCESS et compare bit à bit
+  au résultat reçu par le réseau — **preuve auto-vérifiante**, aucune
+  empreinte à récolter au préalable sur du matériel externe. Validé : 3
+  rangs multi-processus (boucle locale) PASS, arbre 8 rangs (nœuds internes
+  non-racine) PASS, désaccord de seed délibéré → `verdict=FAIL` (le contrôle
+  n'est pas un trompe-l'œil), et **test inter-architectures réel** : un rang
+  tournant sous émulation `qemu-aarch64` communiquant en TCP véritable avec
+  des rangs x86-64 natifs → PASS. Script documenté avec un exemple concret
+  à 2 machines (adresses de bind vs adresses externes joignables).
+- **Gap CI comblé au passage** : les modules `lowprec` et `tree_allreduce`
+  avaient été validés manuellement sous QEMU dans des volets précédents mais
+  n'étaient jamais réellement exécutés par `cross-check-aarch64` (seul
+  `portable_f32` l'était) — deux lignes `cargo test` ajoutées ; `formal_proof`
+  ajouté dès son introduction.
+- **Vérifié** : 759 tests (`cargo test -p scirust-core --lib --release`,
+  0 échec, +6 sur le volet 116), clippy `--lib --bins --tests --release
+  -- -D warnings` propre, `cargo fmt --check` propre, script
+  `proof-portable-f32.sh` rejoué de bout en bout (5 volets de preuve,
+  tous PASS, SHA-256 canonique recalculé).
+- **Suite possible** (non entamée, documentée) : preuve a priori pour
+  sin/cos/ln/erf (nécessite l'analyse « rapport borné loin de zéro » via
+  Jordan pour sin/cos et l'équivalent pour ln) ; exécution de
+  `proof-tcp-multihost.sh` sur du matériel réellement séparé (Jetson +
+  x86-64) pour compléter la preuve auto-vérifiante par une observation
+  humaine directe sur deux machines physiques.
 
 ## Session 2026-07-10 — volet 116 : all-reduce sur TCP réel + entraînement bf16-SR reproductible
 - **A — Transport TCP réel pour l'arbre fixe** : `WireState` (encodage

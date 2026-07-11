@@ -42,6 +42,20 @@ pub trait Environment {
     fn step(&mut self, action: &Self::Action) -> Step<Self::Observation>;
 }
 
+/// An [`Environment`] whose action set is finite and can be enumerated.
+///
+/// This is what lets an environment be driven by a reinforcement-learning
+/// agent that must choose among the available actions (tabular Q-learning,
+/// ε-greedy exploration, …). The `rl` feature's adapter uses it to fill in
+/// `scirust_learning::rl::Env::available_actions`. The action set here is
+/// state-independent; environments whose legal actions depend on the state
+/// would need a richer interface.
+pub trait FiniteActionSpace: Environment {
+    /// Every action the agent may take. Must be non-empty and stable across
+    /// the episode.
+    fn actions(&self) -> Vec<Self::Action>;
+}
+
 /// Run one episode: `reset`, then repeatedly ask `policy` for an action and
 /// `step` until the episode ends or `max_steps` is reached.
 ///

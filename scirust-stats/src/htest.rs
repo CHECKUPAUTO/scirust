@@ -4,6 +4,7 @@
 //! to the audited `scirust-special` numeric base.
 
 use crate::describe::{mean, variance};
+use crate::discrete::DiscreteDistribution;
 use crate::dist::{ChiSquared, Distribution, FisherF, StudentT};
 
 /// Outcome of a hypothesis test.
@@ -176,6 +177,81 @@ pub fn chi_square_gof(observed: &[f64], expected: &[f64], ddof: usize) -> Option
     })
 }
 
+/// Pearson's χ² goodness-of-fit test for a **discrete distribution**.
+///
+/// `observed[i]` is the count of observations equal to the value `i`, except
+/// the final entry `observed[L−1]`, which counts the whole upper tail
+/// (value `≥ L−1`). Expected counts are taken from `dist` — `N·pmf(i)` for the
+/// exact bins and `N·sf(L−2)` for the tail bin — so they sum to `N` exactly.
+///
+/// Adjacent bins are pooled until every pooled expected count reaches
+/// `min_expected` (Cochran's rule of thumb is `5`), which also absorbs the
+/// zero-probability leading bins of supports that start at 1 (e.g.
+/// [`crate::discrete::Geometric`]). `ddof` is the number of parameters
+/// estimated from the data — pass `1` when the distribution was fitted with
+/// `fit_mom` on one parameter, `0` when fully specified — and is subtracted
+/// from `(pooled bins − 1)` degrees of freedom.
+///
+/// Returns `None` if there is no data, fewer than two bins survive pooling, or
+/// the residual degrees of freedom are non-positive.
+pub fn chi2_gof_discrete<D: DiscreteDistribution>(
+    observed: &[u64],
+    dist: &D,
+    ddof: usize,
+    min_expected: f64,
+) -> Option<TestResult> {
+    let l = observed.len();
+    let n: f64 = observed.iter().map(|&c| c as f64).sum();
+    if l < 2 || n <= 0.0
+    {
+        return None;
+    }
+    // Expected counts: exact bins 0..L−1, tail bin = N·P(X ≥ L−1).
+    let mut expected = vec![0.0_f64; l];
+    for (i, e) in expected.iter_mut().enumerate().take(l - 1)
+    {
+        *e = n * dist.pmf(i as u64);
+    }
+    expected[l - 1] = n * dist.sf((l - 2) as u64);
+
+    // Pool adjacent bins so each pooled expected ≥ min_expected (> 0 floor so
+    // zero-probability bins always merge forward).
+    let floor = min_expected.max(1e-12);
+    let (mut po, mut pe) = (Vec::new(), Vec::new());
+    let (mut co, mut ce) = (0.0_f64, 0.0_f64);
+    for i in 0..l
+    {
+        co += observed[i] as f64;
+        ce += expected[i];
+        if ce >= floor
+        {
+            po.push(co);
+            pe.push(ce);
+            co = 0.0;
+            ce = 0.0;
+        }
+    }
+    // Fold any small trailing remainder into the last pooled bin.
+    if ce > 0.0 || co > 0.0
+    {
+        if let (Some(lo), Some(le)) = (po.last_mut(), pe.last_mut())
+        {
+            *lo += co;
+            *le += ce;
+        }
+        else
+        {
+            po.push(co);
+            pe.push(ce);
+        }
+    }
+    if po.len() < 2
+    {
+        return None;
+    }
+    chi_square_gof(&po, &pe, ddof)
+}
+
 /// One-sample Kolmogorov–Smirnov test that `data` is drawn from `dist`.
 ///
 /// Returns the D statistic and the asymptotic p-value (Kolmogorov distribution).
@@ -314,5 +390,45 @@ mod tests {
         let shifted = Normal::new(1.0, 1.0);
         let r2 = ks_test_one_sample(&sample, &shifted).unwrap();
         assert!(r2.p_value < 1e-6, "shifted p = {}", r2.p_value);
+    }
+
+    #[test]
+    fn discrete_gof_poisson_matches_scipy() {
+        use crate::discrete::Poisson;
+        // Binned counts 0,1,2,3,4,≥5 (N = 100); a Poisson(1.98) fit.
+        let observed = [10u64, 28, 32, 18, 8, 4];
+        let dist = Poisson::new(1.98);
+        // One parameter estimated ⇒ ddof = 1; every expected ≥ 5 ⇒ no pooling.
+        let r = chi2_gof_discrete(&observed, &dist, 1, 5.0).unwrap();
+        assert!(
+            (r.statistic - 2.279_187_103).abs() < 1e-6,
+            "chi2 = {}",
+            r.statistic
+        );
+        assert!((r.df - 4.0).abs() < 1e-12);
+        assert!(
+            (r.p_value - 0.684_560_899).abs() < 1e-6,
+            "p = {}",
+            r.p_value
+        );
+    }
+
+    #[test]
+    fn discrete_gof_rejects_bad_fit_and_pools() {
+        use crate::discrete::{Geometric, Poisson};
+        // Data clearly not Poisson(1.0): far too much mass in the tail.
+        let observed = [5u64, 5, 5, 5, 80];
+        let bad = Poisson::new(1.0);
+        let r = chi2_gof_discrete(&observed, &bad, 1, 5.0).unwrap();
+        assert!(r.p_value < 1e-6, "bad fit not rejected, p = {}", r.p_value);
+        // Geometric support starts at 1: bin 0 has zero probability and must
+        // pool forward rather than break the test (expected > 0 everywhere).
+        let obs_g = [0u64, 50, 25, 13, 12];
+        let g = Geometric::new(0.5);
+        let rg = chi2_gof_discrete(&obs_g, &g, 1, 5.0);
+        assert!(rg.is_some());
+        // Degenerate: a single bin cannot yield a test.
+        assert!(chi2_gof_discrete(&[10], &bad, 0, 5.0).is_none());
+        assert!(chi2_gof_discrete(&[0, 0, 0], &bad, 0, 5.0).is_none());
     }
 }
