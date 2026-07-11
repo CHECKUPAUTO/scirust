@@ -267,6 +267,9 @@ jobs:
       - name: Smoke-run QSR1 deserializer fuzzer
         working-directory: fuzz
         run: cargo fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+      - name: Smoke-run ONNX JSON importer fuzzer
+        working-directory: fuzz
+        run: cargo fuzz run import_onnx_json_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
 
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
