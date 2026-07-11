@@ -1,0 +1,12 @@
+[package]
+name    = "obd2_diagnostic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "obd2_diagnostic"
+path = "src/main.rs"
+
+[dependencies]
+scirust-core = { path = "../../scirust-core" }
