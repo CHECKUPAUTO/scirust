@@ -32,7 +32,8 @@
 //!    - [`chemistry`] — consecutive reactions (Bateman), reversible reaction,
 //!      and the stiff Robertson benchmark (integrated via the `stiff` feature);
 //!    - [`thermal`] — Newton cooling, 1-D heat conduction (method of lines);
-//!    - [`electrical`] — RC charging, series RLC;
+//!    - [`electrical`] — RC charging, series RLC, and the nonlinear Van der
+//!      Pol limit-cycle oscillator;
 //!    - [`stochastic`] — geometric Brownian motion, Ornstein–Uhlenbeck,
 //!      and an M/M/1 queue by discrete-event simulation;
 //!    - [`pharmacokinetics`] — oral one-compartment and IV two-compartment

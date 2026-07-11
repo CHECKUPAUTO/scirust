@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : oscillateur de Van der Pol (`electrical::VanDerPol`)
+Le premier **cycle limite** de la bibliothèque, complément naturel du double
+pendule chaotique : les deux comportements-phares de la dynamique non linéaire.
+- **`electrical::VanDerPol`** — oscillateur auto-entretenu
+  `x'' - μ·(1 - x²)·x' + x = 0`, état `[x, v]`, implémente `System`. L'amortis-
+  sement non linéaire injecte de l'énergie quand `|x| < 1` et en retire quand
+  `|x| > 1`, si bien que toute trajectoire (sauf le point fixe instable à
+  l'origine) converge vers **le même** orbite périodique stable — contrairement
+  à un oscillateur linéaire dont l'amplitude dépend des conditions initiales.
+- Oracles : deux trajectoires (départ *à l'intérieur* près de l'origine et *à
+  l'extérieur*) rejoignent le même cycle d'**amplitude ≈ 2** (résultat
+  classique) ; `μ = 0` redonne l'oscillateur harmonique (`x(t) = cos t`, énergie
+  conservée) ; signe de `dE/dt = μ·(1 - x²)·v²` (pompage/dissipation selon la
+  bande unité). À grand `μ` il devient raide (intégrable via la feature `stiff`).
+- 4 tests supplémentaires (102 au total par défaut, +2 doctests). `fmt`/`clippy
+  -D warnings` propres ; runs lourds ignorés sous Miri (convention du crate).
+
 ### Ajouté — `scirust-biomed` : dynamique glycémique exposée comme `System` (feature `sim`)
 Premier exemple du sens **inverse** de la couche de simulation : au lieu que
 `scirust-sim` redéclare la physique d'une verticale, la verticale expose son
