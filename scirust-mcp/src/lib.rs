@@ -112,6 +112,8 @@ mod tests {
         assert!(registry.names().contains(&"sim_epidemic"));
         assert!(registry.names().contains(&"sim_battery_discharge"));
         assert!(registry.names().contains(&"sim_grid_stability"));
+        assert!(registry.names().contains(&"sim_hvac_zone"));
+        assert!(registry.names().contains(&"sim_pharmacokinetics_oral"));
         assert!(registry.names().contains(&"biomed_cbf_safe_dose"));
         assert!(registry.names().contains(&"maritime_collision_risk"));
         assert!(registry.names().contains(&"fab_r2r_update"));

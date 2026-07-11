@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-mcp` : outils MCP `sim_hvac_zone` et `sim_pharmacokinetics_oral`
+Deux nouveaux simulateurs `scirust-sim` exposés comme outils MCP (schéma JSON
+typé, journal d'audit SHA-256 par appel), sans feature ni dépendance
+supplémentaire :
+- **`sim_hvac_zone`** — zone bâtiment **2R2C** (`scirust-hvac`) pilotée par une
+  température extérieure et une puissance HVAC constantes : renvoie l'état
+  stationnaire exact et linéaire (air `t_out + Q·(R_aw+R_wo)`, mur
+  `t_out + Q·R_wo`), la conductance de déperdition `1/(R_aw+R_wo)` (W/K), et les
+  températures air/mur atteintes après `duration_s`.
+- **`sim_pharmacokinetics_oral`** — absorption orale premier ordre, corps à
+  **un compartiment** (`scirust-sim`, courbe de Bateman) : renvoie la
+  concentration plasmatique maximale C_max et l'instant t_max, la demi-vie
+  d'élimination `ln(2)/k_e`, l'exposition totale **exacte** AUC(0..∞)
+  `= F·dose/(V·k_e)`, et la concentration en fin d'horizon.
+- 5 outils `sim_*` au total (3 → 5) ; +4 tests d'outils, assertions de registre
+  mises à jour. `fmt`/`clippy -D warnings` propres.
+
 ### Modifié — `scirust-rl-algo` : `AlgoEnv` unifié sur le trait `Env` partagé
 Le crate de découverte d'algorithmes définissait son propre trait
 d'environnement `AlgoEnv` (avec `reset`/`step`/`available_actions`), doublant

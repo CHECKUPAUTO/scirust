@@ -1,14 +1,17 @@
 //! Outils MCP pour `scirust-sim` : exposent les simulateurs déterministes
-//! (épidémiologie, plante batterie, stabilité réseau) comme outils appelables
-//! par un agent — il décrit un scénario en JSON et récupère les métriques
-//! clés (pic épidémique, tension/température de fin de décharge, verdict de
-//! synchronisme) sans écrire de code d'intégration.
+//! (épidémiologie, plante batterie, stabilité réseau, zone thermique HVAC,
+//! pharmacocinétique orale) comme outils appelables par un agent — il décrit
+//! un scénario en JSON et récupère les métriques clés (pic épidémique,
+//! tension/température de fin de décharge, verdict de synchronisme, état
+//! stationnaire thermique, C_max/t_max/AUC) sans écrire de code d'intégration.
 
 use crate::registry::McpTool;
 use scirust_sim::battery::{BatteryParams, TheveninBattery};
 use scirust_sim::engine::FirstOrderForm;
 use scirust_sim::epidemiology::Sir;
 use scirust_sim::grid::SwingEquation;
+use scirust_sim::hvac::ZoneThermal2R2C;
+use scirust_sim::pharmacokinetics::OralOneCompartment;
 use scirust_sim::simulate;
 use serde_json::{Value, json};
 
@@ -48,6 +51,8 @@ pub fn sim_tools() -> Vec<McpTool> {
         epidemic_tool(),
         battery_discharge_tool(),
         grid_stability_tool(),
+        hvac_zone_tool(),
+        pharmacokinetics_oral_tool(),
     ]
 }
 
@@ -261,6 +266,139 @@ fn grid_stability_tool() -> McpTool {
     }
 }
 
+// ============================================================ //
+//  2R2C single-zone building thermal (HVAC plant)              //
+// ============================================================ //
+
+fn hvac_zone_tool() -> McpTool {
+    McpTool {
+        name: "sim_hvac_zone".to_string(),
+        description: "Simulate a single-zone 2R2C building thermal model (scirust-sim, the \
+            scirust-hvac plant): an air node coupled through the wall thermal mass to a fixed \
+            outside temperature, driven by a constant HVAC heat input `q_hvac`. Returns the \
+            exact linear steady-state air and wall temperatures, the zone heat-loss conductance \
+            1/(R_aw+R_wo) in W/K, and the air/wall temperatures reached after `duration_s`. \
+            Positive `q_hvac` heats, negative cools. Deterministic."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "c_air": { "type": "number", "description": "air thermal capacitance (J/K, > 0)" },
+                "c_wall": { "type": "number", "description": "wall-mass thermal capacitance (J/K, > 0)" },
+                "r_aw": { "type": "number", "description": "air-to-wall thermal resistance (K/W, > 0)" },
+                "r_wo": { "type": "number", "description": "wall-to-outside thermal resistance (K/W, > 0)" },
+                "t_outside": { "type": "number", "description": "outside temperature (held constant)" },
+                "q_hvac": { "type": "number", "description": "HVAC heat delivered to the air (W); positive heats" },
+                "t_air0": { "type": "number", "description": "initial air temperature, default = t_outside" },
+                "t_wall0": { "type": "number", "description": "initial wall temperature, default = t_outside" },
+                "duration_s": { "type": "number", "description": "simulated duration (s), default 12·c_wall·(r_aw+r_wo) (~a dozen slow time constants)" },
+                "dt": { "type": "number", "description": "integration step (s), default duration_s/4000 clamped to [0.1, 30]" },
+            },
+            "required": ["c_air", "c_wall", "r_aw", "r_wo", "t_outside", "q_hvac"],
+        }),
+        handler: Box::new(|args| {
+            let c_air = req_f64(&args, "c_air")?;
+            let c_wall = req_f64(&args, "c_wall")?;
+            let r_aw = req_f64(&args, "r_aw")?;
+            let r_wo = req_f64(&args, "r_wo")?;
+            let t_outside = req_f64(&args, "t_outside")?;
+            let q_hvac = req_f64(&args, "q_hvac")?;
+            let t_air0 = opt_f64(&args, "t_air0", t_outside)?;
+            let t_wall0 = opt_f64(&args, "t_wall0", t_outside)?;
+            let duration = opt_f64(&args, "duration_s", 12.0 * c_wall * (r_aw + r_wo))?;
+            let dt = opt_f64(&args, "dt", (duration / 4000.0).clamp(0.1, 30.0))?;
+
+            let zone = ZoneThermal2R2C::new(c_air, c_wall, r_aw, r_wo, t_outside, q_hvac)
+                .map_err(|e| e.to_string())?;
+            let (ss_air, ss_wall) = zone.steady_state();
+            let traj = simulate(&zone, &[t_air0, t_wall0], 0.0, duration, dt)
+                .map_err(|e| e.to_string())?;
+            let last = traj.last_state().ok_or("empty trajectory")?;
+            let reached = (last[0] - ss_air).abs() < 1e-2 && (last[1] - ss_wall).abs() < 1e-2;
+
+            Ok(json!({
+                "steady_state_t_air": ss_air,
+                "steady_state_t_wall": ss_wall,
+                "conductance_w_per_k": zone.conductance(),
+                "final_t_air": last[0],
+                "final_t_wall": last[1],
+                "reached_steady_state": reached,
+            }))
+        }),
+    }
+}
+
+// ============================================================ //
+//  Oral one-compartment pharmacokinetics                       //
+// ============================================================ //
+
+fn pharmacokinetics_oral_tool() -> McpTool {
+    McpTool {
+        name: "sim_pharmacokinetics_oral".to_string(),
+        description: "Simulate first-order oral absorption into a one-compartment body \
+            (scirust-sim): a gut depot holding the bioavailable fraction F of `dose` empties at \
+            rate `k_a` into a central compartment that eliminates at rate `k_e`, producing the \
+            Bateman plasma-concentration curve. Returns the peak concentration C_max and the \
+            time t_max it occurs, the terminal elimination half-life ln(2)/k_e, the total \
+            exposure AUC(0..inf) = F·dose/(volume·k_e), and the plasma concentration at the end \
+            of the horizon. Deterministic."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "k_a": { "type": "number", "description": "first-order absorption rate (1/time, > 0)" },
+                "k_e": { "type": "number", "description": "first-order elimination rate (1/time, > 0)" },
+                "volume": { "type": "number", "description": "volume of distribution (dose units per concentration, > 0)" },
+                "dose": { "type": "number", "description": "administered dose (> 0)" },
+                "bioavailability": { "type": "number", "description": "absorbed fraction F in (0, 1], default 1.0" },
+                "duration": { "type": "number", "description": "horizon in time units, default 10 elimination half-lives" },
+                "dt": { "type": "number", "description": "integration step, default duration/4000 clamped to [1e-4, 0.5]" },
+            },
+            "required": ["k_a", "k_e", "volume", "dose"],
+        }),
+        handler: Box::new(|args| {
+            let k_a = req_f64(&args, "k_a")?;
+            let k_e = req_f64(&args, "k_e")?;
+            let volume = req_f64(&args, "volume")?;
+            let dose = req_f64(&args, "dose")?;
+            let f = opt_f64(&args, "bioavailability", 1.0)?;
+            let half_life = std::f64::consts::LN_2 / k_e;
+            let duration = opt_f64(&args, "duration", 10.0 * half_life)?;
+            let dt = opt_f64(&args, "dt", (duration / 4000.0).clamp(1e-4, 0.5))?;
+
+            let pk =
+                OralOneCompartment::new(k_a, k_e, volume, f, dose).map_err(|e| e.to_string())?;
+            let traj =
+                simulate(&pk, &pk.initial_state(), 0.0, duration, dt).map_err(|e| e.to_string())?;
+
+            // Peak central amount from the trajectory (robust even at k_a = k_e,
+            // where the closed-form t_max is singular).
+            let central = traj.column(1).ok_or("empty trajectory")?;
+            let (peak_idx, &peak_amt) = central
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .ok_or("empty trajectory")?;
+            let last = traj.last_state().ok_or("empty trajectory")?;
+
+            let mut out = json!({
+                "c_max": pk.concentration(peak_amt),
+                "t_max": traj.t[peak_idx],
+                "half_life": half_life,
+                // Exact: AUC of concentration over [0, inf) = F·dose/(V·k_e).
+                "auc_inf": f * dose / (volume * k_e),
+                "final_concentration": pk.concentration(last[1]),
+            });
+            // Analytic t_max cross-check when the Bateman term is non-singular.
+            if let Some(t) = pk.peak_time()
+            {
+                out["analytic_t_max"] = json!(t);
+            }
+            Ok(out)
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,5 +491,78 @@ mod tests {
         assert_eq!(out["synchronized"], json!(false));
         assert_eq!(out["equilibrium_angle_rad"], Value::Null);
         assert!(out.get("transient").is_none());
+    }
+
+    #[test]
+    fn hvac_tool_reports_linear_steady_state_and_settles() {
+        let tool = hvac_zone_tool();
+        // Explicit long horizon so the assertion does not ride the default heuristic.
+        let out = (tool.handler)(json!({
+            "c_air": 1200.0, "c_wall": 20000.0, "r_aw": 0.05, "r_wo": 0.2,
+            "t_outside": 5.0, "q_hvac": 500.0, "duration_s": 100000.0,
+        }))
+        .unwrap();
+        // t_air = 5 + 500·0.25 = 130; t_wall = 5 + 500·0.2 = 105.
+        assert!((out["steady_state_t_air"].as_f64().unwrap() - 130.0).abs() < 1e-9);
+        assert!((out["steady_state_t_wall"].as_f64().unwrap() - 105.0).abs() < 1e-9);
+        // Conductance = 1/(0.05 + 0.2) = 4 W/K.
+        assert!((out["conductance_w_per_k"].as_f64().unwrap() - 4.0).abs() < 1e-12);
+        assert_eq!(out["reached_steady_state"], json!(true));
+        assert!((out["final_t_air"].as_f64().unwrap() - 130.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn hvac_tool_validates_inputs() {
+        let tool = hvac_zone_tool();
+        // Missing a required physical parameter.
+        assert!(
+            (tool.handler)(json!({
+                "c_wall": 20000.0, "r_aw": 0.05, "r_wo": 0.2, "t_outside": 5.0, "q_hvac": 500.0
+            }))
+            .is_err()
+        );
+        // Non-positive capacitance.
+        assert!(
+            (tool.handler)(json!({
+                "c_air": 0.0, "c_wall": 20000.0, "r_aw": 0.05, "r_wo": 0.2,
+                "t_outside": 5.0, "q_hvac": 500.0
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn pk_oral_tool_reports_cmax_tmax_auc_and_half_life() {
+        let tool = pharmacokinetics_oral_tool();
+        let out = (tool.handler)(json!({
+            "k_a": 1.2, "k_e": 0.25, "volume": 30.0, "dose": 100.0, "bioavailability": 0.8,
+        }))
+        .unwrap();
+        // Analytic t_max = ln(k_a/k_e)/(k_a - k_e) = ln(4.8)/0.95 ≈ 1.6512.
+        assert!((out["t_max"].as_f64().unwrap() - 1.6512).abs() < 0.05);
+        assert!((out["analytic_t_max"].as_f64().unwrap() - 1.6512).abs() < 1e-3);
+        // AUC(0..inf) = F·dose/(V·k_e) = 0.8·100/(30·0.25) ≈ 10.6667.
+        assert!((out["auc_inf"].as_f64().unwrap() - 10.666_666_7).abs() < 1e-4);
+        // Half-life = ln2/0.25 ≈ 2.7726.
+        assert!((out["half_life"].as_f64().unwrap() - 2.772_589).abs() < 1e-4);
+        assert!(out["c_max"].as_f64().unwrap() > 0.0);
+        // The concentration has fallen well below its peak by the end of 10 half-lives.
+        assert!(out["final_concentration"].as_f64().unwrap() < out["c_max"].as_f64().unwrap());
+    }
+
+    #[test]
+    fn pk_oral_tool_validates_inputs() {
+        let tool = pharmacokinetics_oral_tool();
+        assert!((tool.handler)(json!({ "k_a": 1.2, "k_e": 0.25, "volume": 30.0 })).is_err()); // missing dose
+        assert!(
+            (tool.handler)(json!({ "k_a": 0.0, "k_e": 0.25, "volume": 30.0, "dose": 100.0 }))
+                .is_err()
+        ); // bad k_a
+        assert!(
+            (tool.handler)(json!({
+                "k_a": 1.2, "k_e": 0.25, "volume": 30.0, "dose": 100.0, "bioavailability": 1.5
+            }))
+            .is_err()
+        ); // bad F
     }
 }
