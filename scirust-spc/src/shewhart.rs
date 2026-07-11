@@ -14,7 +14,12 @@ impl ControlChart {
     pub fn from_samples(data: &[f64]) -> Self {
         let n = data.len().max(1) as f64;
         let center = data.iter().sum::<f64>() / n;
-        let var = data.iter().map(|&x| (x - center).powi(2)).sum::<f64>() / n;
+        // Bessel's correction: an unbiased variance estimator divides by
+        // n-1 (degrees of freedom), not n. Dividing by n systematically
+        // underestimates sigma -- most severely for small reference
+        // samples -- which tightens the Western Electric control limits
+        // and inflates the false-alarm rate.
+        let var = data.iter().map(|&x| (x - center).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
         Self {
             center,
             sigma: var.sqrt(),
@@ -106,7 +111,26 @@ mod tests {
     fn calibrates_center_and_sigma() {
         let chart = ControlChart::from_samples(&[1.0, 2.0, 3.0, 4.0, 5.0]);
         assert!((chart.center - 3.0).abs() < 1e-9);
+        // Sample variance with Bessel's correction (unbiased, ÷(n-1)):
+        // sum((x-3)^2)/(5-1) = 10/4 = 2.5.
+        assert!((chart.sigma - 2.5_f64.sqrt()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn from_samples_bessel_correction_avoids_false_alarm() {
+        // n=2 maximizes the relative gap between the population (÷n) and
+        // sample (÷(n-1)) variance estimators: the biased population
+        // estimator makes sigma too small, so a point that is genuinely
+        // within 3 true sample-sigma of the reference gets incorrectly
+        // flagged as a Rule 1 violation.
+        let chart = ControlChart::from_samples(&[-1.0, 1.0]);
+        assert!((chart.center - 0.0).abs() < 1e-9);
+        // sample variance = ((-1)^2 + 1^2)/(2-1) = 2, sigma = sqrt(2).
         assert!((chart.sigma - 2.0_f64.sqrt()).abs() < 1e-9);
+
+        // 3.2 is only ~2.26 true sample-sigma from center (3.2/sqrt(2)),
+        // well inside the 3-sigma control limit -- must NOT fire Rule 1.
+        assert_eq!(western_electric(&chart, &[3.2]), None);
     }
 
     #[test]
