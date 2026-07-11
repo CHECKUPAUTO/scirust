@@ -1,0 +1,8 @@
+case_id,principal,monthly_rate,payment,num_periods
+typical_5pct,10000.00,0.0041667,200.00,60
+zero_rate,1200.00,0.0000000,100.00,12
+early_payoff,500.00,0.0041667,300.00,12
+rounding_drift,1000.00,0.0033333,90.00,12
+neg_amortization,10000.00,0.0100000,50.00,6
+single_period,1000.00,0.0050000,250.00,1
+uneven_tail,1000.00,0.0041667,333.33,4

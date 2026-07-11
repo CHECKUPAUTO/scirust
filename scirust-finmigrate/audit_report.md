@@ -29,8 +29,10 @@ would introduce base-2 representation error (e.g. `0.1` is inexact) and drift
 at the cent level over a portfolio.
 **Mitigation:** the port uses `rust_decimal::Decimal` exclusively. The crate
 denies floating point at the API boundary; there is no `f32`/`f64` in the
-money path. Enforced by test `no_float_in_money_path` and by the
-`MANDATORY CONSTRAINTS` in the audit trail.
+money path. Enforced by construction — every signature and intermediate is
+`Decimal`, and the `no_float_in_money_path` guard test greps the crate sources
+(`src/lib.rs`, `src/amort.rs`) for `f32`/`f64` and fails if any appears. The
+`MANDATORY CONSTRAINTS` in the audit trail record the same rule.
 
 ### Gap-2 — Implied scale is enforced on STORE, not at print. **(mitigated)**
 `PIC S9(9)V99` always carries exactly 2 fractional digits; `SV9(5)` exactly 5.
@@ -123,3 +125,63 @@ semantic model", explicitly labelled as such.
 * COMP-3 packed-decimal layout (BCD, 2 digits/byte, sign nibble C/F/D):
   https://www.mainframestechhelp.com/tutorials/cobol/comp-3.htm ·
   http://www.3480-3590-data-conversion.com/article-packed-fields.html
+
+---
+
+# Pre-Migration Audit — AMORTSCH (Loan Amortization Schedule)
+
+**Unit:** `cobol/AMORTSCH.cbl` → `scirust-finmigrate::amort::amortize`
+**Date:** 2026-07-11 · **Gate status:** Phase 1 & 2 complete vs the model baseline
+(`tests/sandbox/amort_baseline.csv`). Contract: `cobol/SEMANTICS_AMORT.md`.
+
+## Why a second unit
+INTACCR was a single arithmetic store. AMORTSCH carries a **running balance
+across periods**, which surfaces two failure modes a one-shot routine cannot,
+plus it re-exercises every INTACCR gap (COMP-3, implied scale, NEAREST-AWAY-FROM-ZERO,
+one-rounding-event) on each iteration.
+
+### Gap-A — Accumulated rounding drift. **(mitigated)**
+Interest is independently `ROUNDED` to the cent every period, on the current
+balance. Over N periods these half-cent roundings accumulate; a port that
+rounds even slightly differently (banker's, or rounding the product before the
+store) drifts by whole pennies by the final row. **Mitigation:** the same
+`store_money_rounded` (MidpointAwayFromZero, single event) is applied per period;
+the equivalence test checks every period-row of every scenario, so drift is
+caught at the first divergent cent. Scenario `rounding_drift` targets ties.
+
+### Gap-B — Final-payment reconciliation. **(mitigated)**
+Because of Gap-A the scheduled payment cannot close the balance to zero. The
+legacy rule — at the last period, or as soon as `princ >= balance`, set
+`princ := balance` and let the actual payment absorb the difference — is what
+makes the ending balance **exactly 0.00**. The `>=` boundary and the last-period
+test are load-bearing: `>` instead of `>=`, or testing only the last period,
+leaves a residual penny (an audit finding) or overshoots below zero.
+**Mitigation:** reproduced verbatim; the equivalence test asserts the closing
+balance is exactly `0.00` and matches the baseline row count (early-payoff /
+reconciliation timing). Scenarios `neg_amortization`, `early_payoff`,
+`uneven_tail`, `single_period` pin the boundary cases.
+
+### Gap-C — Negative amortization & row count. **(mitigated)**
+When `payment < interest` the principal portion is negative and the balance
+**grows**; the loop still terminates via the last-period payoff. Early payoff
+(large payment) makes the schedule **shorter** than `num_periods`. Both change
+the emitted row set, so the test compares row COUNT, not just values.
+
+### Gap-D — Size error under runaway neg-am. **(documented divergence)**
+A balance growing past `9(9)V99` would silently truncate on the legacy platform;
+the port returns `AccrualError::SizeError` (loud stop). Sandbox scenarios are
+bounded (generation asserts no field overflows), so the equivalence set never
+fires it; proven separately in `amort::tests::size_error_on_runaway_negative_amortization`.
+
+### Deliberate scope choice — no annuity formula
+The scheduled payment is an **input**, not derived from
+`P·i / (1 − (1+i)^−n)`. COBOL's `**` operator evaluates with **floating-point**
+intermediates even inside an otherwise fixed-point `COMPUTE` — importing float
+into the money path. Keeping the payment an input holds the no-float mandate;
+migrating the annuity-payment derivation is a separate unit with its own audit
+of that float dependency.
+
+## Production gate
+Identical to §5 above: regenerate `amort_baseline.csv` from a live `cobc -x -free
+cobol/AMORTSCH.cbl` (or the z/OS build under the production `ARITH` option),
+drive it with `amort_scenarios.csv`, and re-diff at exact parity before shipping.

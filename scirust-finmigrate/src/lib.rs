@@ -21,13 +21,15 @@
 
 use rust_decimal::{Decimal, RoundingStrategy};
 
+pub mod amort;
+
 /// Fractional digits of a `PIC ...V99` money field.
 pub const MONEY_SCALE: u32 = 2;
 /// Fractional digits of the `PIC SV9(5)` rate field.
 pub const RATE_SCALE: u32 = 5;
 
 /// `|value|` must not exceed `PIC S9(9)V99` = 999_999_999.99.
-fn money_max() -> Decimal {
+pub(crate) fn money_max() -> Decimal {
     Decimal::new(99_999_999_999, MONEY_SCALE)
 }
 
@@ -58,7 +60,7 @@ pub enum AccrualError {
 }
 
 /// Coerce a value into a fixed-scale money field using COBOL ROUNDED semantics.
-fn store_money_rounded(value: Decimal) -> Decimal {
+pub(crate) fn store_money_rounded(value: Decimal) -> Decimal {
     value.round_dp_with_strategy(MONEY_SCALE, RoundingStrategy::MidpointAwayFromZero)
 }
 
@@ -67,7 +69,7 @@ fn store_money_trunc(value: Decimal) -> Decimal {
     value.round_dp_with_strategy(MONEY_SCALE, RoundingStrategy::ToZero)
 }
 
-fn check_size(field: &'static str, value: Decimal) -> Result<Decimal, AccrualError> {
+pub(crate) fn check_size(field: &'static str, value: Decimal) -> Result<Decimal, AccrualError> {
     if value.abs() > money_max()
     {
         Err(AccrualError::SizeError { field, value })
