@@ -50,18 +50,28 @@ impl Rng {
     }
 
     fn next_f32(&mut self) -> f32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.state >> 32) as f32) / (u32::MAX as f32)
     }
 
     fn next_u32(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.state >> 32) as u32
     }
 }
 
 /// Génère N_TRAIN + N_VAL + N_TEST cas d'entraînement avec bruit réaliste
-fn generate_massive_dataset(n_train: usize, n_val: usize, n_test: usize) -> (
+fn generate_massive_dataset(
+    n_train: usize,
+    n_val: usize,
+    n_test: usize,
+) -> (
     Vec<([f32; N_FEATURES], usize)>,
     Vec<([f32; N_FEATURES], usize)>,
     Vec<([f32; N_FEATURES], usize)>,
@@ -71,16 +81,20 @@ fn generate_massive_dataset(n_train: usize, n_val: usize, n_test: usize) -> (
     let mut val_data = Vec::new();
     let mut test_data = Vec::new();
 
-    for class_id in 0..N_CLASSES {
-        for _ in 0..(n_train / N_CLASSES) {
+    for class_id in 0..N_CLASSES
+    {
+        for _ in 0..(n_train / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, false);
             train_data.push((features, class_id));
         }
-        for _ in 0..(n_val / N_CLASSES) {
+        for _ in 0..(n_val / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, false);
             val_data.push((features, class_id));
         }
-        for _ in 0..(n_test / N_CLASSES) {
+        for _ in 0..(n_test / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, true); // bruit plus élevé
             test_data.push((features, class_id));
         }
@@ -93,70 +107,83 @@ fn generate_case_for_class(class_id: usize, rng: &mut Rng, high_noise: bool) -> 
     let noise_level = if high_noise { 0.08 } else { 0.02 };
     let mut features = [0.5; N_FEATURES];
 
-    match class_id {
-        0 => {
+    match class_id
+    {
+        0 =>
+        {
             // Prise d'air : pauvre + trim élevé + MAF NORMAL + ralenti instable
             features[0] = 0.85 + rng.next_f32() * 0.08; // mélange pauvre fort
             features[1] = 0.15 + rng.next_f32() * 0.08; // MAF normal
             features[4] = 0.80 + rng.next_f32() * 0.08; // trim très élevé
             features[5] = 0.75 + rng.next_f32() * 0.08; // ralenti instable
             features[8] = 0.20 + rng.next_f32() * 0.08; // pression normal
-        }
-        1 => {
+        },
+        1 =>
+        {
             // MAF encrassé : pauvre + MAF BAS (clé !) + trim élevé
             features[0] = 0.80 + rng.next_f32() * 0.08; // mélange pauvre
             features[2] = 0.80 + rng.next_f32() * 0.08; // débit d'air BAS (distinctif)
             features[4] = 0.75 + rng.next_f32() * 0.08; // trim moyen-élevé
             features[5] = 0.30 + rng.next_f32() * 0.08; // ralenti stable
-        }
-        2 => {
+        },
+        2 =>
+        {
             // Allumage : ratés + trim NORMAL + ralenti instable
             features[1] = 0.85 + rng.next_f32() * 0.08; // ratés d'allumage forts
             features[4] = 0.48 + rng.next_f32() * 0.08; // trim normal
             features[5] = 0.80 + rng.next_f32() * 0.08; // ralenti instable
-        }
-        3 => {
+        },
+        3 =>
+        {
             // Catalyseur : code cata + tout le reste normal
             features[3] = 0.90 + rng.next_f32() * 0.08; // code cata fort
             features[4] = 0.50 + rng.next_f32() * 0.08; // trim normal
             features[0] = 0.20 + rng.next_f32() * 0.08; // pas de pauvre
-        }
-        4 => {
+        },
+        4 =>
+        {
             // EVAP : code EVAP + tout normal
             features[6] = 0.90 + rng.next_f32() * 0.08; // code EVAP fort
             features[4] = 0.50 + rng.next_f32() * 0.08;
-        }
-        5 => {
+        },
+        5 =>
+        {
             // Thermostat : temp anormale + tout normal
             features[7] = 0.85 + rng.next_f32() * 0.08; // temp moteur anormale
             features[4] = 0.50 + rng.next_f32() * 0.08;
             features[0] = 0.25 + rng.next_f32() * 0.08;
-        }
-        6 => {
+        },
+        6 =>
+        {
             // O2 / Lambda : sonde défectueuse + peut sembler pauvre
             features[8] = 0.15 + rng.next_f32() * 0.08; // sonde défectueuse (clé)
             features[0] = 0.65 + rng.next_f32() * 0.08; // peut sembler pauvre
-        }
-        7 => {
+        },
+        7 =>
+        {
             // Injecteur : ratés légers + trim bas
             features[1] = 0.50 + rng.next_f32() * 0.08; // ratés légers
             features[4] = 0.40 + rng.next_f32() * 0.08; // trim bas
-        }
-        8 => {
+        },
+        8 =>
+        {
             // Pompe carburant : pression basse + pauvre
             features[9] = 0.85 + rng.next_f32() * 0.08; // pression basse (clé)
             features[0] = 0.75 + rng.next_f32() * 0.08; // mélange pauvre
-        }
-        9 => {
+        },
+        9 =>
+        {
             // Turbo : boost anormal + débit d'air élevé
             features[4] = 0.65 + rng.next_f32() * 0.08; // boost anormal
             features[2] = 0.20 + rng.next_f32() * 0.08; // débit d'air élevé (pas bas)
-        }
-        _ => {}
+        },
+        _ =>
+        {},
     }
 
     // Ajouter du bruit petit
-    for f in features.iter_mut() {
+    for f in features.iter_mut()
+    {
         let noise = (rng.next_f32() - 0.5) * 2.0 * noise_level;
         *f = (*f + noise).clamp(0.0, 1.0);
     }
@@ -180,7 +207,13 @@ fn main() {
     // Modèle plus profond : 10 -> 64 -> 32 -> 10
     let mut rng = PcgEngine::new(SEED);
     let mut model = Sequential::new()
-        .add(Linear::new(N_FEATURES, 64, &KaimingNormal, &Zeros, &mut rng))
+        .add(Linear::new(
+            N_FEATURES,
+            64,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        ))
         .add(ReLU::new())
         .add(Linear::new(64, 32, &KaimingNormal, &Zeros, &mut rng))
         .add(ReLU::new())
@@ -191,7 +224,10 @@ fn main() {
 
     let n_epochs = 50;
     println!("Modèle : 10 -> 64 -> 32 -> 10\n");
-    println!("Entraînement : {} epochs, Adam(lr=0.001, batch_size={})\n", n_epochs, n_train);
+    println!(
+        "Entraînement : {} epochs, Adam(lr=0.001, batch_size={})\n",
+        n_epochs, n_train
+    );
 
     // ---- Boucle d'entraînement ----
     let mut best_val_acc = 0.0;
@@ -219,8 +255,15 @@ fn main() {
             train_loss += tape.value(loss.idx()).data[0];
 
             let scores = tape.value(logits.idx());
-            let pred = scores.data.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
-            if pred == *label {
+            let pred = scores
+                .data
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0;
+            if pred == *label
+            {
                 train_correct += 1;
             }
         }
@@ -229,14 +272,16 @@ fn main() {
         let mut val_correct = 0;
         for (features, label) in &val_data
         {
-            if predict_class(&mut model, features) == *label {
+            if predict_class(&mut model, features) == *label
+            {
                 val_correct += 1;
             }
         }
 
         let train_acc = train_correct as f32 / n_train as f32;
         let val_acc = val_correct as f32 / n_val as f32;
-        if val_acc > best_val_acc {
+        if val_acc > best_val_acc
+        {
             best_val_acc = val_acc;
         }
 
@@ -256,7 +301,8 @@ fn main() {
     let mut test_correct = 0;
     for (features, label) in &test_data
     {
-        if predict_class(&mut model, features) == *label {
+        if predict_class(&mut model, features) == *label
+        {
             test_correct += 1;
         }
     }
@@ -264,7 +310,12 @@ fn main() {
     let test_acc = test_correct as f32 / n_test as f32;
     println!("\n=== RÉSULTATS FINAUX ===");
     println!("Meilleure val_acc : {:.2}%", best_val_acc * 100.0);
-    println!("Test accuracy     : {:.2}% ({}/{})", test_acc * 100.0, test_correct, n_test);
+    println!(
+        "Test accuracy     : {:.2}% ({}/{})",
+        test_acc * 100.0,
+        test_correct,
+        n_test
+    );
 
     // ---- Cas de test réel ----
     println!("\n=== DIAGNOSTIC DE CAS RÉELS (test set) ===");
@@ -283,8 +334,10 @@ fn predict_class(model: &mut Sequential, features: &[f32; N_FEATURES]) -> usize 
     let logits = model.forward(&tape, x);
     let scores = tape.value(logits.idx());
     let mut best = 0;
-    for i in 1..N_CLASSES {
-        if scores.data[i] > scores.data[best] {
+    for i in 1..N_CLASSES
+    {
+        if scores.data[i] > scores.data[best]
+        {
             best = i;
         }
     }
@@ -303,9 +356,16 @@ fn diagnose(model: &mut Sequential, features: &[f32; N_FEATURES], true_label: us
     let (pred, pred_p) = ranked[0];
     let match_mark = if pred == true_label { "✓" } else { "✗" };
 
-    println!("\nCause réelle : {} | Prédiction : {} ({:.1}%) {}", CAUSES[true_label], CAUSES[pred], pred_p * 100.0, match_mark);
+    println!(
+        "\nCause réelle : {} | Prédiction : {} ({:.1}%) {}",
+        CAUSES[true_label],
+        CAUSES[pred],
+        pred_p * 100.0,
+        match_mark
+    );
     println!("  Top 3 hypothèses :");
-    for (i, (cause_idx, p)) in ranked.iter().take(3).enumerate() {
+    for (i, (cause_idx, p)) in ranked.iter().take(3).enumerate()
+    {
         println!("    {}. {:.1}% — {}", i + 1, p * 100.0, CAUSES[*cause_idx]);
     }
 }
