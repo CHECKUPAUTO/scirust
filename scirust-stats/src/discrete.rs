@@ -1713,6 +1713,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: the pmf/cdf go through `ln_gamma`/`exp`, whose last
+    // bits Miri deliberately perturbs (it models the platform freedom of the
+    // transcendental intrinsics), so the 1e-12 SciPy checks can miss. Native
+    // Build & Test jobs enforce these values.
+    #[cfg_attr(miri, ignore)]
     fn negative_binomial_matches_scipy() {
         // SciPy nbinom(5, 0.4): failures before the 5th success.
         let nb = NegativeBinomial::new(5.0, 0.4);
