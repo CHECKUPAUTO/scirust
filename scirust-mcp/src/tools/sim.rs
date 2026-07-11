@@ -1,18 +1,23 @@
 //! Outils MCP pour `scirust-sim` : exposent les simulateurs déterministes
 //! (épidémiologie, plante batterie, stabilité réseau, zone thermique HVAC,
-//! pharmacocinétique orale) comme outils appelables par un agent — il décrit
-//! un scénario en JSON et récupère les métriques clés (pic épidémique,
-//! tension/température de fin de décharge, verdict de synchronisme, état
-//! stationnaire thermique, C_max/t_max/AUC) sans écrire de code d'intégration.
+//! pharmacocinétique orale, cinétique raide de Robertson) comme outils
+//! appelables par un agent — il décrit un scénario en JSON et récupère les
+//! métriques clés (pic épidémique, tension/température de fin de décharge,
+//! verdict de synchronisme, état stationnaire thermique, C_max/t_max/AUC,
+//! concentrations finales et masse conservée) sans écrire de code
+//! d'intégration. La cinétique raide utilise l'intégrateur implicite
+//! Rosenbrock via la feature `stiff` de `scirust-sim`.
 
 use crate::registry::McpTool;
 use scirust_sim::battery::{BatteryParams, TheveninBattery};
+use scirust_sim::chemistry::Robertson;
 use scirust_sim::engine::FirstOrderForm;
 use scirust_sim::epidemiology::Sir;
 use scirust_sim::grid::SwingEquation;
 use scirust_sim::hvac::ZoneThermal2R2C;
 use scirust_sim::pharmacokinetics::OralOneCompartment;
 use scirust_sim::simulate;
+use scirust_sim::stiff_bridge::simulate_rosenbrock;
 use serde_json::{Value, json};
 
 /// Read a numeric field: `Ok(None)` if absent, `Err` if present but not a
@@ -53,6 +58,7 @@ pub fn sim_tools() -> Vec<McpTool> {
         grid_stability_tool(),
         hvac_zone_tool(),
         pharmacokinetics_oral_tool(),
+        stiff_robertson_tool(),
     ]
 }
 
@@ -399,6 +405,69 @@ fn pharmacokinetics_oral_tool() -> McpTool {
     }
 }
 
+// ============================================================ //
+//  Robertson stiff kinetics (implicit Rosenbrock solver)       //
+// ============================================================ //
+
+fn stiff_robertson_tool() -> McpTool {
+    McpTool {
+        name: "sim_stiff_robertson".to_string(),
+        description: "Integrate the Robertson autocatalytic reaction — the canonical *stiff* ODE \
+            benchmark, whose rate constants span nine orders of magnitude — with scirust-sim's \
+            implicit **Rosenbrock-W(2,3)** solver (via scirust-stiff). An explicit method (RK4) \
+            would need an impractically small step or blow up on the fast initial transient; the \
+            implicit method's stability is decoupled from it. Returns the final species \
+            concentrations [a, b, c], the conserved total mass a+b+c, and the fraction of mass \
+            converted to C. Deterministic."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "k1": { "type": "number", "description": "rate A→B (> 0), default 0.04" },
+                "k2": { "type": "number", "description": "rate B+B→B+C (> 0), default 3e7" },
+                "k3": { "type": "number", "description": "rate B+C→A+C (> 0), default 1e4" },
+                "duration": { "type": "number", "description": "integration horizon in time units, default 0.4 (Hairer & Wanner's reference point)" },
+                "a0": { "type": "number", "description": "initial concentration of A, default 1.0" },
+                "b0": { "type": "number", "description": "initial concentration of B, default 0.0" },
+                "c0": { "type": "number", "description": "initial concentration of C, default 0.0" },
+                "rtol": { "type": "number", "description": "relative tolerance (> 0), default 1e-7" },
+                "atol": { "type": "number", "description": "absolute tolerance (> 0), default 1e-10" },
+                "h0": { "type": "number", "description": "initial step (> 0), default 1e-6" },
+            },
+            "required": [],
+        }),
+        handler: Box::new(|args| {
+            let k1 = opt_f64(&args, "k1", 0.04)?;
+            let k2 = opt_f64(&args, "k2", 3.0e7)?;
+            let k3 = opt_f64(&args, "k3", 1.0e4)?;
+            let duration = opt_f64(&args, "duration", 0.4)?;
+            let a0 = opt_f64(&args, "a0", 1.0)?;
+            let b0 = opt_f64(&args, "b0", 0.0)?;
+            let c0 = opt_f64(&args, "c0", 0.0)?;
+            let rtol = opt_f64(&args, "rtol", 1e-7)?;
+            let atol = opt_f64(&args, "atol", 1e-10)?;
+            let h0 = opt_f64(&args, "h0", 1e-6)?;
+
+            let rob = Robertson::new(k1, k2, k3).map_err(|e| e.to_string())?;
+            let traj = simulate_rosenbrock(&rob, &[a0, b0, c0], 0.0, duration, rtol, atol, h0)
+                .map_err(|e| e.to_string())?;
+            let last = traj.last_state().ok_or("empty trajectory")?;
+            let mass = last[0] + last[1] + last[2];
+            let total0 = a0 + b0 + c0;
+
+            Ok(json!({
+                "final_a": last[0],
+                "final_b": last[1],
+                "final_c": last[2],
+                "total_mass": mass,
+                "mass_conserved": (mass - total0).abs() < 1e-6 * total0.abs().max(1.0),
+                "fraction_converted_to_c": if total0 > 0.0 { last[2] / total0 } else { 0.0 },
+                "steps": traj.t.len(),
+            }))
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -564,5 +633,27 @@ mod tests {
             }))
             .is_err()
         ); // bad F
+    }
+
+    #[test]
+    fn stiff_robertson_tool_conserves_mass_and_matches_reference() {
+        let tool = stiff_robertson_tool();
+        // Defaults: classic constants, integrated to t = 0.4.
+        let out = (tool.handler)(json!({})).unwrap();
+        // Hairer & Wanner reference at t = 0.4: a ≈ 0.9851, b ≈ 3.4e-5, c ≈ 0.0149.
+        assert!((out["final_a"].as_f64().unwrap() - 0.9851).abs() < 2e-3);
+        let b = out["final_b"].as_f64().unwrap();
+        assert!(b > 0.0 && b < 1e-4, "b = {b}");
+        assert!((out["final_c"].as_f64().unwrap() - 0.0149).abs() < 2e-3);
+        assert!((out["total_mass"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+        assert_eq!(out["mass_conserved"], json!(true));
+    }
+
+    #[test]
+    fn stiff_robertson_tool_validates_inputs() {
+        let tool = stiff_robertson_tool();
+        // Robertson::new rejects non-positive / non-finite rate constants.
+        assert!((tool.handler)(json!({ "k1": -1.0 })).is_err());
+        assert!((tool.handler)(json!({ "k2": 0.0 })).is_err());
     }
 }
