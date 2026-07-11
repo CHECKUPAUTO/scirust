@@ -3265,6 +3265,26 @@ plutôt qu'une formule devinée) :
   avertissement. Couverture : **18 lois discrètes** (15 univariées + 3
   vectorielles).
 
+### Ajouté — Laplace discrète + ajustement méthode des moments (7e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes).
+- **`scirust-stats::discrete::DiscreteLaplace`** — loi de Laplace discrète
+  (géométrique bilatérale) sur ℤ, `pmf(k) = tanh(a/2)·e^(−a|k|)`
+  (`scipy.stats.dlaplace`) : différence de deux géométriques, **loi du
+  mécanisme géométrique de la confidentialité différentielle** (bruit entier
+  à garantie ε-DP pure ; pour une sensibilité 1 et un budget ε, prendre
+  a = ε). Support ℤ ⇒ API `i64` propre comme `Skellam` (pmf/ln_pmf/cdf/sf
+  directe/moments/tirage déterministe = différence de deux géométriques).
+  Symétrique, moyenne 0. Oracles SciPy `dlaplace(0.8)`.
+- **Ajustement par la méthode des moments** — `Poisson::fit_mom`,
+  `Geometric::fit_mom`, `NegativeBinomial::fit_mom` (associées, `-> Option`) :
+  une **capacité d'inférence** (l'équivalent de `.fit()` de SciPy) qui estime
+  les paramètres depuis un échantillon. Poisson `λ̂ = moyenne` (= EMV),
+  géométrique `p̂ = 1/moyenne`, binomiale négative `p̂ = m/v, r̂ = m²/(v−m)`
+  (définie sous surdispersion `v > m` seulement, `None` sinon — le cas
+  sous-dispersé relève d'une Poisson). Validé par round-trip mean/var.
+- 57 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
+  **19 lois discrètes** (16 univariées + 3 vectorielles) + inférence MoM.
+
 ## [0.14.0] — 2026-06-13
 
 ### Réparé

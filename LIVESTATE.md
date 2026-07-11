@@ -3,6 +3,26 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-10
 
+## Session 2026-07-10 — probabilités, 7e passe (Laplace discrète + fit méthode des moments)
+- **Contexte** : « continu » après PR #297 (6e passe) MERGÉE. Branche
+  repartie de `origin/master`. Les « suites possibles » restantes étant des
+  lois de niche, choix d'ajouter une loi à réelle valeur applicative
+  (DiscreteLaplace = mécanisme DP) + une capacité nouvelle (ajustement MoM).
+- **Livré** : (a) `DiscreteLaplace` (dlaplace, support ℤ, API i64 façon
+  Skellam) — loi du mécanisme géométrique en confidentialité différentielle,
+  pmf=tanh(a/2)e^(−a|k|), cdf/sf fermées, tirage=différence de 2 géométriques.
+  (b) `fit_mom` sur Poisson/Geometric/NegativeBinomial — inférence par la
+  méthode des moments (équivalent `.fit()` SciPy), NegBinom `None` si pas de
+  surdispersion. Oracles SciPy + round-trip mean/var. 57 tests + doctest,
+  clippy 0 avertissement.
+- **Bilan volet probabilités** : **19 lois discrètes** (16 univariées + 3
+  vectorielles) + combinatoire exacte + ζ de Riemann + Loader + inférence
+  MoM + module loterie honnête. Parité SciPy discrète atteinte sur l'utile.
+- **Convention conflits maintenue** : entrée CHANGELOG en bas de section.
+- **Suite** : le volet est mûr ; prochaine valeur = pivot vers une capacité
+  (GOF des lois ajustées, EMV) ou un autre domaine, pas plus de lois.
+- **NB CI** : panne Actions du dépôt possible ; validations locales.
+
 ## Session 2026-07-10 — probabilités, 6e passe (log-series, Planck, pmf de Loader)
 - **Contexte** : « enchaine sur Suites possibles restantes » après PR #294
   (5e passe) MERGÉE. Les 3 restes annoncés : pmf de Loader grand n,
