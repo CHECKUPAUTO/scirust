@@ -320,20 +320,34 @@ pub fn regularized_gamma_q(a: f64, x: f64) -> f64 {
     }
 }
 
-// Series expansion for P(a, x), converging quickly when x < a + 1.
+// Series expansion for P(a, x), converging quickly when x < a + 1 — except in
+// the boundary layer x ≈ a, where the number of terms needed to converge
+// grows like O(√a) (this is precisely the regime Temme's 1987 uniform
+// asymptotic expansion targets). Rather than silently truncate at a fixed
+// `MAX_ITERS` and return a wrong result for large `a`, the cap scales with
+// `√a` (empirically ~8·√a terms suffice; 20·√a leaves comfortable margin),
+// bounded to avoid an unbounded loop on pathological input, and a genuine
+// non-convergence returns `NaN` instead of a truncated series value.
 fn gamma_series_p(a: f64, x: f64) -> f64 {
     let mut ap = a;
     let mut sum = 1.0 / a;
     let mut del = sum;
-    for _ in 0..MAX_ITERS
+    let iters = (((20.0 * a.sqrt()).ceil() as usize).saturating_add(MAX_ITERS)).min(50_000_000);
+    let mut converged = false;
+    for _ in 0..iters
     {
         ap += 1.0;
         del *= x / ap;
         sum += del;
         if del.abs() < sum.abs() * EPS
         {
+            converged = true;
             break;
         }
+    }
+    if !converged
+    {
+        return f64::NAN;
     }
     sum * (-x + a * x.ln() - ln_gamma(a)).exp()
 }
@@ -784,6 +798,34 @@ mod tests {
             regularized_gamma_p(5.0, 5.0),
             0.559_506_714_934_7,
             1e-9
+        ));
+    }
+
+    #[test]
+    fn regularized_gamma_p_accurate_for_large_a_near_boundary() {
+        // Regression test for a P0 audit finding: with the series capped at a
+        // fixed MAX_ITERS=300, P(a, a) for large a converged too early and
+        // returned a silently wrong value (e.g. P(1e4, 1e4) = 0.4999… instead
+        // of 0.50133; P(1e5, 1e5) = 0.3294 instead of 0.50042). Reference
+        // values computed with mpmath (dps=30): mp.gammainc(a, 0, a,
+        // regularized=True).
+        assert!(close(
+            regularized_gamma_p(1e4, 1e4),
+            0.501_329_808_339_955_2,
+            1e-9
+        ));
+        assert!(close(
+            regularized_gamma_p(1e5, 1e5),
+            0.500_420_522_110_365_1,
+            1e-9
+        ));
+        // P(a, a) → 1/2 as a → ∞ (Stirling), consistent with both points above.
+        assert!(close(regularized_gamma_p(1e6, 1e6), 0.5, 1e-3));
+        // P + Q = 1 must still hold exactly in this regime.
+        assert!(close(
+            regularized_gamma_p(1e5, 1e5) + regularized_gamma_q(1e5, 1e5),
+            1.0,
+            1e-12
         ));
     }
 

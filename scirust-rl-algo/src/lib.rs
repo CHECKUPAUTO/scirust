@@ -1302,11 +1302,14 @@ impl ActorCriticAgent {
         self.value_net
             .train_sgd(state_feats, &v_target, self.lr_value);
 
-        // Update policy
+        // Update policy: nudge the taken action's target probability by the
+        // TD error directly (Sutton & Barto, 2018, §13.5: θ += α·δ·∇ln π).
+        // Scaling by log π(a|s) — which is always ≤ 0 — would invert the sign
+        // and push probability away from good actions; see the identical fix
+        // and rationale in `ReinforceAgent::train_episode` above.
         let probs = self.policy_net.forward_softmax(state_feats);
         let mut policy_target = probs.clone();
-        let log_prob = (probs[action_idx].max(1e-10)).ln();
-        let grad_scale = td_error * log_prob;
+        let grad_scale = td_error;
         policy_target[action_idx] += self.lr_policy * grad_scale;
         let sum: f64 = policy_target.iter().sum();
         if sum > 0.0
@@ -2944,6 +2947,34 @@ mod tests {
         let next_feats = vec![0.2; 32];
         // Should not panic
         agent.update(&feats, 2, 1.0, &next_feats, false, 5);
+    }
+
+    #[test]
+    fn test_actor_critic_positive_td_error_increases_action_probability() {
+        // Regression test for a P0 audit finding: `update` scaled the policy
+        // nudge by `td_error * log_prob(action)`, and log_prob is always <= 0,
+        // so a POSITIVE td_error (the action did better than expected)
+        // DECREASED that action's probability instead of increasing it — the
+        // update pushed probability mass away from good actions. This mirrors
+        // the identical, already-fixed bug pattern in `ReinforceAgent`.
+        let mut agent = ActorCriticAgent::new(8, 8, 4, 0.05, 0.05, 0.95, 42);
+        let feats = vec![0.3; 8];
+        let action = 1;
+
+        let p_before = agent.policy_net.forward_softmax(&feats)[action];
+
+        // A large positive reward with `done = true` (v_next = 0) guarantees
+        // td_error = reward - v(feats) > 0 for any bounded initial critic.
+        for _ in 0..10
+        {
+            agent.update(&feats, action, 5.0, &feats, true, 4);
+        }
+
+        let p_after = agent.policy_net.forward_softmax(&feats)[action];
+        assert!(
+            p_after > p_before,
+            "positive TD error should increase the taken action's probability: before={p_before}, after={p_after}"
+        );
     }
 
     // --- Heuristic Search Tests ---

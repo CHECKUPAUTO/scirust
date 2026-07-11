@@ -218,27 +218,143 @@ pub fn plan_fusion(m: usize, k: usize, n: usize, act: Option<FusedAct>) -> Fused
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::wgpu_backend::WgpuContext;
+
+    /// Independent CPU oracle for the fused kernel, derived directly from the
+    /// `FUSED_GEMM_WGSL` source's index arithmetic (not from the tile-loading
+    /// logic under test): `C = act(op(A)·op(B) + bias)`. This is exactly the
+    /// GPU-vs-CPU-oracle validation the audit found missing — the previous
+    /// tests short-circuited before ever dispatching the kernel, which is why
+    /// a P0 indexing bug in the tiled accumulation went unnoticed.
+    #[allow(clippy::too_many_arguments)]
+    fn cpu_fused_oracle(
+        a: &[f32],
+        b: &[f32],
+        bias: Option<&[f32]>,
+        m: usize,
+        k: usize,
+        n: usize,
+        ta: bool,
+        tb: bool,
+        act: FusedAct,
+    ) -> Vec<f32> {
+        let apply_act = |x: f32| -> f32 {
+            match act
+            {
+                FusedAct::None => x,
+                FusedAct::Relu => x.max(0.0),
+                FusedAct::Gelu =>
+                {
+                    0.5 * x * (1.0 + (0.797_884_6 * (x + 0.044715 * x * x * x)).tanh())
+                },
+                FusedAct::Silu => x * (1.0 / (1.0 + (-x).exp())),
+                FusedAct::Sigmoid => 1.0 / (1.0 + (-x).exp()),
+                FusedAct::Tanh => x.tanh(),
+            }
+        };
+        let mut out = vec![0.0f32; m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let mut acc = 0.0f32;
+                for p in 0..k
+                {
+                    // Matches FUSED_GEMM_WGSL's `a_idx`/`b_idx` `select(...)`
+                    // exactly: ta/tb pick between a row-major (m,k)/(k,n)
+                    // layout and its transposed (k,m)/(n,k) storage.
+                    let a_val = if ta { a[p * m + i] } else { a[i * k + p] };
+                    let b_val = if tb { b[j * k + p] } else { b[p * n + j] };
+                    acc += a_val * b_val;
+                }
+                let beta_term = bias.map(|bi| bi[i * n + j]).unwrap_or(0.0);
+                out[i * n + j] = apply_act(acc + beta_term);
+            }
+        }
+        out
+    }
+
+    fn rel_err(gpu: &[f32], cpu: &[f32]) -> f32 {
+        let num: f32 = gpu
+            .iter()
+            .zip(cpu)
+            .map(|(g, c)| (g - c) * (g - c))
+            .sum::<f32>()
+            .sqrt();
+        let den: f32 = cpu.iter().map(|c| c * c).sum::<f32>().sqrt().max(1e-30);
+        num / den
+    }
 
     #[test]
     fn test_fused_gemm_relu() {
-        let Some(_ctx) = WgpuContext::new().ok()
+        // Deliberately not a multiple of 16 (the tile size): this is exactly
+        // the size class the audit found untested, and where a boundary
+        // indexing bug would show up alongside the core accumulation bug.
+        let (m, k, n) = (13usize, 19usize, 7usize);
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.31 - 3.0).sin()).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.17 + 1.0).cos()).collect();
+
+        let Ok(ctx) = WgpuContext::new()
         else
         {
+            eprintln!("wgpu: no adapter available, skipping fused GEMM+ReLU parity");
             return;
         };
-        // Fused tiled SGEMM test requires hardware adapter — validated by
-        // the non-fused GEMM path in wgpu_backend tests.
-        eprintln!("wgpu: fused test skipped (validated via non-fused path)");
+        let layer = plan_fusion(m, k, n, Some(FusedAct::Relu));
+        let gpu = layer.execute(&ctx, &a, &b, None, false, false).unwrap();
+        let cpu = cpu_fused_oracle(&a, &b, None, m, k, n, false, false, FusedAct::Relu);
+        assert_eq!(gpu.len(), cpu.len());
+        assert!(rel_err(&gpu, &cpu) < 1e-3, "gpu={gpu:?} cpu={cpu:?}");
+        // ReLU output must be non-negative on both paths.
+        assert!(gpu.iter().all(|&x| x >= 0.0));
     }
 
     #[test]
     fn test_fused_gemm_gelu() {
-        let Some(_ctx) = WgpuContext::new().ok()
+        // With bias, and again a non-multiple-of-16 shape.
+        let (m, k, n) = (20usize, 16usize, 11usize);
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32 * 0.23 - 2.0).sin()).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.11 + 0.5).cos()).collect();
+        let bias: Vec<f32> = (0..m * n).map(|i| (i as f32 * 0.07).sin() * 0.3).collect();
+
+        let Ok(ctx) = WgpuContext::new()
         else
         {
+            eprintln!("wgpu: no adapter available, skipping fused GEMM+GELU parity");
             return;
         };
-        eprintln!("wgpu: fused test skipped (validated via non-fused path)");
+        let layer = plan_fusion(m, k, n, Some(FusedAct::Gelu));
+        let gpu = layer
+            .execute(&ctx, &a, &b, Some(&bias), false, false)
+            .unwrap();
+        let cpu = cpu_fused_oracle(&a, &b, Some(&bias), m, k, n, false, false, FusedAct::Gelu);
+        assert_eq!(gpu.len(), cpu.len());
+        assert!(rel_err(&gpu, &cpu) < 1e-3, "gpu={gpu:?} cpu={cpu:?}");
+    }
+
+    #[test]
+    fn test_fused_gemm_transpose_and_bias() {
+        // Exercises op(A) = Aᵀ together with bias and a third activation
+        // (Silu), on a non-multiple-of-16 shape.
+        let (m, k, n) = (9usize, 14usize, 17usize);
+        // Stored transposed: A is (k, m) so that op(A) = Aᵀ is (m, k).
+        let a: Vec<f32> = (0..k * m).map(|i| (i as f32 * 0.19 - 1.0).sin()).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32 * 0.13 + 0.2).cos()).collect();
+        let bias: Vec<f32> = (0..m * n).map(|i| (i as f32 * 0.05).cos() * 0.2).collect();
+
+        let Ok(ctx) = WgpuContext::new()
+        else
+        {
+            eprintln!("wgpu: no adapter available, skipping fused transpose+bias parity");
+            return;
+        };
+        let layer = plan_fusion(m, k, n, Some(FusedAct::Silu));
+        let gpu = layer
+            .execute(&ctx, &a, &b, Some(&bias), true, false)
+            .unwrap();
+        let cpu = cpu_fused_oracle(&a, &b, Some(&bias), m, k, n, true, false, FusedAct::Silu);
+        assert_eq!(gpu.len(), cpu.len());
+        assert!(rel_err(&gpu, &cpu) < 1e-3, "gpu={gpu:?} cpu={cpu:?}");
     }
 }
