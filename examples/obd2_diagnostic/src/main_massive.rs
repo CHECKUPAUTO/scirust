@@ -19,6 +19,12 @@ const N_FEATURES: usize = 10;
 const N_CLASSES: usize = 10;
 const SEED: u64 = 42;
 
+type Dataset = (
+    Vec<([f32; N_FEATURES], usize)>,
+    Vec<([f32; N_FEATURES], usize)>,
+    Vec<([f32; N_FEATURES], usize)>,
+);
+
 const CAUSES: [&str; N_CLASSES] = [
     "Prise d'air / fuite depression",
     "Capteur MAF encrassé",
@@ -56,28 +62,10 @@ impl Rng {
             .wrapping_add(1442695040888963407);
         ((self.state >> 32) as f32) / (u32::MAX as f32)
     }
-
-    #[allow(dead_code)]
-    fn next_u32(&mut self) -> u32 {
-        self.state = self
-            .state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.state >> 32) as u32
-    }
 }
 
 /// Génère N_TRAIN + N_VAL + N_TEST cas d'entraînement avec bruit réaliste
-#[allow(clippy::type_complexity)]
-fn generate_massive_dataset(
-    n_train: usize,
-    n_val: usize,
-    n_test: usize,
-) -> (
-    Vec<([f32; N_FEATURES], usize)>,
-    Vec<([f32; N_FEATURES], usize)>,
-    Vec<([f32; N_FEATURES], usize)>,
-) {
+fn generate_massive_dataset(n_train: usize, n_val: usize, n_test: usize) -> Dataset {
     let mut rng = Rng::new(SEED);
     let mut train_data = Vec::new();
     let mut val_data = Vec::new();
