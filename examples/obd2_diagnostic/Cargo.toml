@@ -16,5 +16,9 @@ path = "src/main_massive.rs"
 name = "obd2_ultra"
 path = "src/main_ultra.rs"
 
+[[bin]]
+name = "obd2_megaverse"
+path = "src/main_megaverse.rs"
+
 [dependencies]
 scirust-core = { path = "../../scirust-core" }
