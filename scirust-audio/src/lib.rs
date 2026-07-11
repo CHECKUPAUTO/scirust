@@ -495,6 +495,12 @@ pub fn pitch_autocorrelation(
         {
             corr += signal[i] * signal[i + lag];
         }
+        // Normalize by the number of overlapping terms: without this, the
+        // raw sum shrinks as `lag` grows purely from having fewer terms,
+        // biasing the peak toward the smallest lag (highest frequency)
+        // regardless of periodicity — most visible on short frames with
+        // only a few periods of the true fundamental.
+        corr /= (signal.len() - lag) as f64;
         if corr > best_corr
         {
             best_corr = corr;
@@ -1264,6 +1270,27 @@ mod tests {
         // max_lag = sr/min_freq must fit inside the signal.
         let sig = vec![0.0; 10];
         assert!(pitch_autocorrelation(&sig, 8000, 100.0, 1000.0).is_none());
+    }
+
+    #[test]
+    fn test_pitch_autocorrelation_short_frame_low_fundamental() {
+        // A 25ms frame (200 samples) contains only 2 periods of an 80 Hz
+        // tone. The raw (unnormalized) autocorrelation sum has fewer
+        // overlapping terms at large lags, biasing it toward the smallest
+        // lag in range regardless of periodicity: without normalizing by
+        // the overlap count, this used to return max_freq (500.0) — a 6x
+        // error — instead of the true ~80 Hz fundamental.
+        let sr = 8000;
+        let freq = 80.0;
+        let n = 200;
+        let sig: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * freq * i as f64 / sr as f64).sin())
+            .collect();
+        let pitch = pitch_autocorrelation(&sig, sr, 50.0, 500.0).expect("pitch should be found");
+        assert!(
+            (pitch - freq).abs() < 5.0,
+            "expected pitch near {freq} Hz, got {pitch}"
+        );
     }
 
     #[test]
