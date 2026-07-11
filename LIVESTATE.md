@@ -3,6 +3,58 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-11
 
+## Session 2026-07-11 — volet 118 : preuve a priori étendue à sin/cos/ln
+- **Contexte** : PR #307 (volet 117) MERGÉE. Demande utilisateur : traiter les
+  deux points identifiés comme suite possible — (1) preuve a priori pour
+  sin/cos/ln/erf, (2) test TCP sur du matériel physiquement séparé.
+- **Preuve a priori sin/cos/ln** (`scirust-core::formal_proof`, étendu) :
+  boîte à outils générique de propagation d'erreur d'arrondi `(valeur,
+  erreur)` (`ErrBound`, `add_b`/`mul_b`/`div_b`, modèle IEEE standard
+  `fl(a∘b)=(a∘b)(1+δ)`, toujours majoré par inégalité triangulaire — jamais
+  d'annulation supposée, donc conservateur mais toujours valide), rejouant
+  EXACTEMENT la même séquence d'opérations que le code (`sin_poly`,
+  `cos_poly`, `ln_f64_core`). Deux méthodes : **bornée loin de zéro**
+  (`cos`, `cos(0)=1` — même schéma que `exp`) et **à facteur extrait**
+  (`sin`, `ln` — noyaux qui s'annulent au centre de leur plage, minorés via
+  l'inégalité de Jordan `sin(r)≥(2/π)r` pour sin, l'inégalité algébrique
+  `atanh(s)≥s` pour ln ; un argument structurel — le graphe de calcul, vu
+  comme fonction du paramètre libre, est une somme à coefficients positifs
+  de puissances ≥1 — justifie qu'une SEULE évaluation au bord de la plage
+  majore l'erreur relative sur toute la plage, garde-fou empirique testé).
+  `ln` traité en 2 cas exhaustifs (e=0 via Sterbenz — `m−1` calculé SANS
+  AUCUNE erreur d'arrondi — et e≠0 via une constante), constantes f64
+  réellement exécutées (`LN2_HI`/`LN2_LO`, `SQRT_2`) converties en leur
+  valeur rationnelle EXACTE (tout f64 fini est un dyadique exact) plutôt que
+  réapprochées. Résultats (marge = seuil/borne, toutes ≫ 1) : exp/tanh/
+  sigmoid 2⁻⁴⁷·⁰⁷ (marge ×4,4·10⁶, déjà acquis au volet 117), **sin
+  2⁻⁵¹·¹⁰ (marge ×7,2·10⁷)**, **cos 2⁻⁵⁰·⁵³ (marge ×4,8·10⁷)**, **ln
+  2⁻⁴²·¹⁴ (marge ×1,4·10⁵)**. `proof_formal_bounds` imprime les 4 preuves ;
+  déjà branché au script et au job CI QEMU (aucun changement de script/CI
+  nécessaire, le branchement du volet 117 couvrait déjà le binaire entier).
+  **Portée** : chaque preuve couvre le NOYAU polynomial, pas la réduction
+  d'argument qui l'alimente (Payne–Hanek, extraction d'exposant IEEE) —
+  cette dernière reste couverte par la certification exhaustive a
+  posteriori (volet 115-A). `erf` reste explicitement hors périmètre : sa
+  série converge sur une plage bien plus large (`|y|<4` contre `|s|≲0,25`
+  pour ln), avec jusqu'à ~80 termes dont les premiers ne décroissent PAS en
+  module — un simple reste de Lagrange ne suffit plus, il faudrait une
+  borne de queue géométrique à partir d'un rang calculé plus un argument en
+  deux régions ; non traité, documenté honnêtement comme travail futur.
+- **Test TCP sur matériel physiquement séparé** : PAS un chantier de code —
+  `scripts/proof-tcp-multihost.sh` et le binaire auto-vérifiant existent
+  déjà (volet 117-C) et couvrent la même garantie logique (recalcul de la
+  référence en-process + comparaison bit à bit) que le test inter-
+  architectures déjà exécuté sous QEMU. Il ne manque qu'une exécution sur
+  deux machines physiques réellement séparées (Jetson + x86-64), hors de
+  portée de cette session sandboxée (aucun accès à du matériel externe) —
+  reste noté comme travail futur nécessitant l'utilisateur ou un accès
+  matériel dédié, pas une lacune de code.
+- **Vérifié** : 764 tests (+5 vs volet 117 : `sin_correctly_rounded_a_priori`,
+  `cos_correctly_rounded_a_priori`, `ln_correctly_rounded_a_priori`,
+  `sin_cos_range_covers_pi_over_4`, `sin_boundary_evaluation_dominates_interior`),
+  0 échec, clippy et fmt propres, `proof-portable-f32.sh` rejoué de bout en
+  bout (PASS, SHA-256 canonique recalculé).
+
 ## Session 2026-07-11 — volet 117 : preuve formelle a priori + FP8 reproductible + TCP inter-machines
 - **Contexte** : demande utilisateur « que reste-t-il à coder ? » sur l'audit
   RepDL/reproductibilité → 3 lacunes identifiées puis « traite tous les

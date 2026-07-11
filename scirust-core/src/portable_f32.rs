@@ -31,17 +31,19 @@
 //!   sur toute plate-forme conforme (sorties bit-identiques partout). Cette
 //!   campagne reste une vérification exhaustive **a posteriori** (elle teste
 //!   toutes les entrées, mais ne prouve pas analytiquement la borne).
-//!   Pour `exp`/`tanh`/`sigmoid` (dont le cœur `exp_f64_core` partage le même
-//!   polynôme de Taylor degré 13, minoré loin de zéro sur sa plage réduite),
-//!   [`crate::formal_proof`] ajoute une preuve **a priori** complémentaire :
-//!   borne d'erreur relative dérivée analytiquement en arithmétique
-//!   rationnelle exacte (reste de Lagrange pour la troncature de Taylor,
-//!   théorème γ_k de Higham pour l'arrondi du schéma de Horner), valable sur
-//!   tout le domaine continu réduit — pas seulement les points testés. Le
-//!   dilemme du fabricant de tables pour `sin`/`cos`/`ln`/`erf` (dont le
-//!   cœur s'annule près de zéro, ce qui casse la borne d'erreur relative
-//!   uniforme utilisée ici) reste hors claim : seule la vérification
-//!   exhaustive a posteriori ci-dessus les couvre.
+//!   Pour `exp`/`tanh`/`sigmoid`/`sin`/`cos`/`ln` (6 des 7 fonctions),
+//!   [`crate::formal_proof`] ajoute une preuve **a priori** complémentaire
+//!   sur le NOYAU polynomial (pas la réduction d'argument, toujours couverte
+//!   par la vérification exhaustive ci-dessus) : borne d'erreur relative
+//!   dérivée analytiquement en arithmétique rationnelle exacte (reste de
+//!   Lagrange pour la troncature de Taylor, propagation d'arrondi flottant
+//!   pour le schéma de Horner, minorée soit par bornage loin de zéro —
+//!   `exp`/`cos` — soit par un facteur extrait — `sin` via l'inégalité de
+//!   Jordan, `ln` via `atanh(s) ≥ s` — cf. doc du module), valable sur tout
+//!   le domaine continu réduit, pas seulement les points testés. Seul `erf`
+//!   reste hors claim a priori (sa série converge sur une plage bien plus
+//!   large, `|y|<4`, avec des termes non monotones en début de série — la
+//!   vérification exhaustive a posteriori ci-dessus le couvre néanmoins).
 //! - **Performance** : voie de référence/d'audit, pas optimisée (GEMM naïf
 //!   mono-thread, softmax allouant). Pour la vitesse intra-architecture,
 //!   utiliser les chemins SIMD ; pour le bit-exact cross-platform rapide,
@@ -70,9 +72,13 @@ use crate::reproducible::reproducible_sum;
 const CANONICAL_NAN: f32 = f32::from_bits(0x7fc0_0000);
 
 /// ln 2 tronqué à 28 bits de mantisse : k·LN2_HI est exact pour |k| ≤ 2⁸.
-const LN2_HI: f64 = f64::from_bits(core::f64::consts::LN_2.to_bits() & 0xFFFF_FFFF_FF00_0000);
-/// Reste ln 2 − LN2_HI (différence exacte en f64).
-const LN2_LO: f64 = core::f64::consts::LN_2 - LN2_HI;
+/// `pub(crate)` : réutilisée telle quelle par [`crate::formal_proof`] (preuve
+/// a priori de `ln_f64_core`) pour éviter toute divergence entre la
+/// constante prouvée et la constante réellement exécutée.
+pub(crate) const LN2_HI: f64 =
+    f64::from_bits(core::f64::consts::LN_2.to_bits() & 0xFFFF_FFFF_FF00_0000);
+/// Reste ln 2 − LN2_HI (différence exacte en f64). `pub(crate)`, cf. LN2_HI.
+pub(crate) const LN2_LO: f64 = core::f64::consts::LN_2 - LN2_HI;
 
 /// `exp(x)` portable : bit-exact inter-plates-formes par construction,
 /// fidèlement arrondi (cf. doc du module). NaN → NaN canonique ;
