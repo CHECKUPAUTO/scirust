@@ -5,6 +5,10 @@ end on two representative units:
 * `INTACCR` — a monthly interest-accrual routine (single arithmetic store).
 * `AMORTSCH` — a fixed-payment loan amortization schedule (running balance,
   accumulated rounding drift, final-payment reconciliation to exactly `0.00`).
+* `PAYCALC` — the level (annuity) payment that AMORTSCH consumes, computed with
+  a positive-integer exponent so it stays fixed-point decimal instead of
+  triggering COBOL's floating-point `**` (proven equal to the float path at the
+  cent).
 
 It is the reference template for the migration protocol:
 

@@ -1,0 +1,9 @@
+case_id,principal,monthly_rate,num_periods
+mortgage_5pct_5yr,10000.00,0.0041667,60
+auto_3pct_4yr,25000.00,0.0025000,48
+card_18pct_2yr,3000.00,0.0150000,24
+high_5pct_mo_1yr,1000.00,0.0500000,12
+zero_rate_10,1200.00,0.0000000,10
+single_period,5000.00,0.0041667,1
+long_120,50000.00,0.0033333,120
+small_principal,100.00,0.0100000,36

@@ -31,7 +31,8 @@ at the cent level over a portfolio.
 denies floating point at the API boundary; there is no `f32`/`f64` in the
 money path. Enforced by construction — every signature and intermediate is
 `Decimal`, and the `no_float_in_money_path` guard test greps the crate sources
-(`src/lib.rs`, `src/amort.rs`) for `f32`/`f64` and fails if any appears. The
+(`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`) for `f32`/`f64` and fails if
+any appears. The
 `MANDATORY CONSTRAINTS` in the audit trail record the same rule.
 
 ### Gap-2 — Implied scale is enforced on STORE, not at print. **(mitigated)**
@@ -185,3 +186,63 @@ of that float dependency.
 Identical to §5 above: regenerate `amort_baseline.csv` from a live `cobc -x -free
 cobol/AMORTSCH.cbl` (or the z/OS build under the production `ARITH` option),
 drive it with `amort_scenarios.csv`, and re-diff at exact parity before shipping.
+
+---
+
+# Pre-Migration Audit — PAYCALC (Annuity Payment)
+
+**Unit:** `cobol/PAYCALC.cbl` → `scirust-finmigrate::paycalc::payment`
+**Date:** 2026-07-11 · **Gate status:** Phase 1 & 2 complete vs the model baseline
+(`tests/sandbox/pay_baseline.csv`). Contract: `cobol/SEMANTICS_PAY.md`.
+
+## Why a third unit
+PAYCALC computes the fixed payment AMORTSCH consumes — closing the loop — and is
+the unit that collides with the project's central tension: the **no-floating-point
+mandate** versus a formula the legacy would normally evaluate in float.
+
+### Gap-E — Exponentiation dispatches to float on a fractional/negative exponent. **(mitigated by rewrite)**
+Authoritative COBOL rule: an expression with a **fractional or negative
+exponent** is evaluated "as if all operands … converted to long-precision
+floating point"; but an exponentiation "to a nonzero **integer** power" is "a
+succession of multiplications" in **fixed-point**. The textbook annuity formula
+`P·i / (1 − (1+i)^−n)` uses a negative exponent ⇒ float ⇒ base-2 error in the
+money path. **Mitigation:** the port uses the algebraically-identical
+positive-integer form `P·i·f/(f−1)`, `f=(1+i)^n`, so every operation is
+fixed-point decimal. This is a genuine migration *decision*, not a mechanical
+port — documented in the audit trail.
+
+### Gap-F — Intermediate precision of the multiply chain. **(mitigated by staged scale)**
+`(1+i)^n` as repeated multiplication grows fractional digits without bound;
+COBOL caps fixed-point intermediates at 30/31 digits and `rust_decimal` at 28
+significant digits (the Gap-6 tension, now on the critical path). **Mitigation:**
+`WS-FACTOR` is stored at a fixed **9 dp** — a single rounding event at a scale
+far coarser than either cap. Under the documented bounds (`n ≤ 120`, `i ≤ 0.05`,
+so `f ≤ ~372`) the 28-vs-30/31-digit difference lives far below the 10th decimal
+and cannot change the 9-dp factor or the 2-dp payment. Proven empirically:
+`rust_decimal` (28-digit) and the Python model (38-digit) agree exactly on the
+9-dp factor for every scenario.
+
+### Gap-G — Zero-rate division by zero. **(mitigated)**
+At `i = 0`, `f = 1` and `f − 1 = 0`; the annuity divide is undefined. The legacy
+program special-cases it to the straight-line payment `principal / num_periods`.
+The port reproduces the branch; a zero *term* (`num_periods = 0`, outside the
+`9(3)` domain of ≥ 1) is rejected as a `SizeError` rather than dividing by zero.
+
+## Cross-check: the arithmetic change does not move the money
+The baseline generator computes the payment **both** ways — decimal-native (the
+shipped path) and legacy-float (IEEE-754 double, the arithmetic the
+negative-exponent form would have used) — and asserts they are equal **to the
+cent** for every scenario. All 8 scenarios agree. This is the evidence that
+choosing decimal over float (Gap-E) is safe: it changes the arithmetic, not the
+customer's payment. The float path exists only in the oracle; the shipped port
+is decimal-only (enforced by `tests/no_float_guard.rs`, now covering
+`src/paycalc.rs`).
+
+## Composition proof
+`paycalc::tests::payment_amortizes_to_zero_in_amort` feeds PAYCALC's payment into
+AMORTSCH and checks the schedule closes to exactly `0.00` — the two units agree
+at their shared boundary.
+
+## Production gate
+Regenerate `pay_baseline.csv` from a live `cobc -x -free cobol/PAYCALC.cbl` under
+the production `ARITH` option and re-diff at exact parity before shipping.
