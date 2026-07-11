@@ -19,6 +19,9 @@
 //! - **Digital filters** — windowed-sinc FIR (lowpass/highpass), Butterworth IIR
 //!   via cascaded second-order sections, and a general direct-form-II-transposed
 //!   `lfilter`
+//! - **Radar** — pulse-compression waveforms (linear-FM chirp, Barker phase
+//!   codes) and matched filtering (cross-correlation, peak/echo-delay
+//!   estimation, peak-to-sidelobe ratio)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -30,6 +33,7 @@ pub mod fft;
 pub mod filter;
 pub mod mcsa;
 pub mod order;
+pub mod radar;
 pub mod windows;
 
 pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing_faults, ftf};
@@ -61,4 +65,5 @@ pub use mcsa::{
     analyze_broken_bar, analyze_eccentricity, diagnose_motor, slip,
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
+pub use radar::{barker_code, cross_correlate, lfm_chirp, peak_lag, peak_to_sidelobe};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

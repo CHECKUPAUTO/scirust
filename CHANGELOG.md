@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : traitement du signal radar (module `radar`) — bloc 1
+Premier bloc d'un domaine **radar/optronique** (utile aux systèmes de défense
+type Safran/Sagem), en extension des crates existants : la compression
+d'impulsion, cœur du traitement de distance d'un radar pulse-Doppler.
+- **`radar::waveform`** — génération de formes d'onde : chirp **LFM** (bande de
+  fréquence balayée linéairement, amplitude unité, produit temps-bande
+  paramétrable) et **codes de phase de Barker** (longueurs 2–13).
+- **`radar::matched_filter`** — **filtre adapté / compression d'impulsion** :
+  corrélation croisée complexe, estimation du retard d'écho au pic, rapport
+  pic/lobes secondaires.
+- Oracles exacts : le pic d'autocorrélation du chirp **égale l'énergie** de
+  l'impulsion et son lobe principal se comprime (largeur ≈ fs/B ≪ durée) ;
+  l'autocorrélation du **Barker-13** a un rapport pic/lobes = **13** (propriété
+  définitoire) ; le filtre adapté **localise un écho retardé** au bon retard ;
+  la fréquence instantanée du chirp balaie bien −B/2 → +B/2.
+- Construit sur le `Complex`/FFT existant, sans dépendance nouvelle. 8 tests
+  d'oracle (117 au total dans le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-sim` : oscillateur de Van der Pol (`electrical::VanDerPol`)
 Le premier **cycle limite** de la bibliothèque, complément naturel du double
 pendule chaotique : les deux comportements-phares de la dynamique non linéaire.
