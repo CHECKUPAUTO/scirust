@@ -3052,6 +3052,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-machining"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
 name = "scirust-macros"
 version = "0.1.0"
 dependencies = [

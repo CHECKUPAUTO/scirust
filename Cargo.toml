@@ -139,6 +139,7 @@ members = [
     "scirust-fab",
     "scirust-agtech",
     "scirust-fatigue",
+    "scirust-machining",
     "scirust-tolerance",
     "scirust-sigma",
     "scirust-special",
