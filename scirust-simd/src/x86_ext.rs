@@ -77,17 +77,59 @@ pub fn bf16_to_f32_slice(src: &[u16], dst: &mut [f32]) {
 /// Divise par deux la bande passante mémoire par rapport au `f32` plein tout en
 /// gardant une accumulation `f32` précise.
 ///
-/// Implémentation portable (convertit puis FMA scalaire) : correcte partout et
-/// point de repli naturel quand l'ISA `avx512bf16` est absente. Sur une puce
-/// `avx512bf16`, le corps de boucle se remplace un-pour-un par `_mm512_dpbf16_ps`.
+/// Chemin AVX-512 (élargissement `bf16 → f32` par `_mm512_cvtepu16_epi32` +
+/// décalage de 16 bits, puis FMA `f32`) quand `avx512f` est présent — 16 voies
+/// par pas ; repli scalaire sinon. Sur une puce dotée de l'ISA `avx512bf16`, la
+/// boucle interne se remplacerait un-pour-un par `_mm512_dpbf16_ps` (un seul
+/// produit-fusionné par paire de `bf16`) ; le présent chemin `f32` est le repli
+/// exact et portable de cette instruction.
 pub fn dot_bf16(a: &[u16], b: &[u16]) -> f32 {
     assert_eq!(a.len(), b.len(), "dot_bf16: length mismatch");
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx512f")
+        {
+            // SAFETY: gated by the runtime detection just above.
+            return unsafe { dot_bf16_avx512(a, b) };
+        }
+    }
+    dot_bf16_scalar(a, b)
+}
+
+/// Repli scalaire de [`dot_bf16`] (aussi la référence des tests).
+pub fn dot_bf16_scalar(a: &[u16], b: &[u16]) -> f32 {
     let mut acc = 0.0f32;
     for (&x, &y) in a.iter().zip(b)
     {
         acc += bf16_to_f32(x) * bf16_to_f32(y);
     }
     acc
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn dot_bf16_avx512(a: &[u16], b: &[u16]) -> f32 {
+    use core::arch::x86_64::*;
+    let n = a.len();
+    let mut acc = _mm512_setzero_ps();
+    let mut i = 0;
+    while i + 16 <= n
+    {
+        // 16×bf16 (u16) → 16×f32 : zero-extend u16→u32 puis <<16 (place la
+        // mantisse/exposant bf16 en tête d'un f32), reinterprété en f32.
+        let ai = _mm256_loadu_si256(a.as_ptr().add(i) as *const __m256i);
+        let bi = _mm256_loadu_si256(b.as_ptr().add(i) as *const __m256i);
+        let af = _mm512_castsi512_ps(_mm512_slli_epi32::<16>(_mm512_cvtepu16_epi32(ai)));
+        let bf = _mm512_castsi512_ps(_mm512_slli_epi32::<16>(_mm512_cvtepu16_epi32(bi)));
+        acc = _mm512_fmadd_ps(af, bf, acc);
+        i += 16;
+    }
+    let mut sum = _mm512_reduce_add_ps(acc);
+    for j in i..n
+    {
+        sum += bf16_to_f32(a[j]) * bf16_to_f32(b[j]);
+    }
+    sum
 }
 
 // ===================================================================== //

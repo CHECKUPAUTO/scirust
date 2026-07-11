@@ -684,6 +684,25 @@ pub enum Activation {
     Identity,
     /// `max(x, 0)` — appliquée en registre (`_mm512_max_ps`).
     Relu,
+    /// GELU (approximation tanh) — via le noyau vectorisé de
+    /// [`crate::activations`].
+    Gelu,
+    /// SiLU / swish (`x·sigmoid(x)`) — via [`crate::activations`].
+    Silu,
+}
+
+impl Activation {
+    /// Applique l'activation scalaire (repli + référence).
+    #[inline]
+    fn apply_scalar(self, x: f32) -> f32 {
+        match self
+        {
+            Activation::Identity => x,
+            Activation::Relu => x.max(0.0),
+            Activation::Gelu => crate::activations::gelu_scalar(x),
+            Activation::Silu => crate::activations::silu_scalar(x),
+        }
+    }
 }
 
 /// **Couche dense fusionnée** : `out = act(alpha·A·B + biais)`, avec `A` de
@@ -743,12 +762,7 @@ fn sgemm_bias_act_scalar(
             {
                 acc += a_row[p] * b.row_slice(p).expect("B row")[j];
             }
-            let mut v = alpha * acc + bias[j];
-            if act == Activation::Relu
-            {
-                v = v.max(0.0);
-            }
-            c_row[j] = v;
+            c_row[j] = act.apply_scalar(alpha * acc + bias[j]);
         }
     }
 }
@@ -781,12 +795,7 @@ unsafe fn sgemm_bias_act_avx512(
             let row = c_ptr.add(i * n);
             for j in 0..n
             {
-                let mut v = *bias_ptr.add(j);
-                if act == Activation::Relu
-                {
-                    v = v.max(0.0);
-                }
-                *row.add(j) = v;
+                *row.add(j) = act.apply_scalar(*bias_ptr.add(j));
             }
         }
         return;
@@ -885,11 +894,14 @@ unsafe fn micro_kernel_bias_act(
     let zero = _mm512_setzero_ps();
     for (i, ai) in acc.iter().enumerate().take(mr)
     {
-        let mut v = _mm512_add_ps(*ai, biasv);
-        if act == Activation::Relu
+        let pre = _mm512_add_ps(*ai, biasv);
+        let v = match act
         {
-            v = _mm512_max_ps(v, zero);
-        }
+            Activation::Identity => pre,
+            Activation::Relu => _mm512_max_ps(pre, zero),
+            Activation::Gelu => crate::activations::gelu_ps(pre),
+            Activation::Silu => crate::activations::silu_ps(pre),
+        };
         _mm512_mask_storeu_ps(c.add(i * ldc), mask, v);
     }
 }
@@ -917,9 +929,14 @@ mod tests {
             let bias: Vec<f32> = (0..n).map(|j| (j as f32) * 0.1 - 0.7).collect();
             for &alpha in &[1.0f32, -0.5, 2.0]
             {
-                for &act in &[Activation::Identity, Activation::Relu]
+                for &act in &[
+                    Activation::Identity,
+                    Activation::Relu,
+                    Activation::Gelu,
+                    Activation::Silu,
+                ]
                 {
-                    // Référence naïve indépendante.
+                    // Référence naïve indépendante (activation scalaire).
                     let mut want = vec![0.0f32; m * n];
                     for i in 0..m
                     {
@@ -930,12 +947,7 @@ mod tests {
                             {
                                 acc += a[i * k + p] * b[p * n + j];
                             }
-                            let mut v = alpha * acc + bias[j];
-                            if act == Activation::Relu
-                            {
-                                v = v.max(0.0);
-                            }
-                            want[i * n + j] = v;
+                            want[i * n + j] = act.apply_scalar(alpha * acc + bias[j]);
                         }
                     }
 

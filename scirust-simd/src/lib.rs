@@ -636,6 +636,8 @@ mod tests {
     }
 }
 
+pub mod activations;
+pub mod attention;
 pub mod complex;
 pub mod dispatch;
 pub mod gemm;
