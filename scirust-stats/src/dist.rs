@@ -637,6 +637,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this asserts a tight (1e-10) CDF∘quantile round-trip,
+    // where the quantile is a bisection over a transcendental CDF. Miri perturbs
+    // the float intrinsics non-deterministically, so the round-trip drifts past
+    // the tolerance. The native Build & Test jobs enforce the real accuracy.
+    #[cfg_attr(miri, ignore)]
     fn beta_quantile_round_trip_at_the_edge_of_f64_resolution() {
         // Regression test for a finding made by this crate's own property
         // tests: `invert_cdf` stopped bisecting as soon as its x-bracket
@@ -704,7 +709,10 @@ mod tests {
 /// hold for *any* parameter values and *any* point in the support, checked
 /// against hundreds of randomly generated inputs rather than a handful of
 /// hand-picked reference points.
-#[cfg(test)]
+// Excluded from Miri: proptest runs hundreds of randomized cases per property
+// — impractically slow under the interpreter — and its harness is not designed
+// to run under Miri. The native Build & Test jobs exercise these properties.
+#[cfg(all(test, not(miri)))]
 mod proptests {
     use super::*;
     use proptest::prelude::*;

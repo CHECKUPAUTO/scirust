@@ -804,6 +804,12 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: this asserts tight numerical identities — notably the
+    // P + Q = 1 complementarity to 1e-12 — on heavy transcendental series. Miri
+    // perturbs the float intrinsics (exp/ln/…) non-deterministically, so the two
+    // independently summed series drift past that tolerance. The native Build &
+    // Test jobs enforce the real accuracy.
+    #[cfg_attr(miri, ignore)]
     fn regularized_gamma_p_accurate_for_large_a_near_boundary() {
         // Regression test for a P0 audit finding: with the series capped at a
         // fixed MAX_ITERS=300, P(a, a) for large a converged too early and
@@ -950,7 +956,10 @@ mod tests {
 /// the function (a recurrence, a symmetry, a complementarity relation), not
 /// a restatement of the implementation, so it can catch bugs the point
 /// tests miss.
-#[cfg(test)]
+// Excluded from Miri: proptest runs hundreds of randomized cases per property
+// — impractically slow under the interpreter — and its harness is not designed
+// to run under Miri. The native Build & Test jobs exercise these properties.
+#[cfg(all(test, not(miri)))]
 mod proptests {
     use super::*;
     use proptest::prelude::*;
