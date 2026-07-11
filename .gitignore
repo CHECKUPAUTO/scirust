@@ -69,6 +69,10 @@ bench-o1-jetson-*/
 proof-portable-f32-*/
 
 # The fuzz harness is its own cargo workspace and builds into its own target dir.
+# corpus/ and artifacts/ are local run byproducts (inputs discovered by
+# libFuzzer, crash repros) — not source, not tracked.
 fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
 proof-certify-*.txt
 misrounds-*.txt
