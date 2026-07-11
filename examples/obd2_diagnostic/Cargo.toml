@@ -8,5 +8,9 @@ publish = false
 name = "obd2_diagnostic"
 path = "src/main.rs"
 
+[[bin]]
+name = "obd2_massive"
+path = "src/main_massive.rs"
+
 [dependencies]
 scirust-core = { path = "../../scirust-core" }
