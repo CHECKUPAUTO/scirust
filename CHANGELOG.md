@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : fonction d'ambiguïté + MTI radar — bloc 4
+Quatrième bloc du domaine radar : l'analyse de forme d'onde et le rejet de
+fouillis fixe.
+- **`radar::ambiguity::ambiguity`** — surface d'ambiguïté `|χ(τ, ν)|` (réponse
+  conjointe retard-Doppler) d'une forme d'onde, calculée par corrélation croisée
+  de la forme d'onde modulée en Doppler avec l'originale. Expose le **couplage
+  distance-Doppler** (crête diagonale du chirp LFM). Oracles : pic à l'origine =
+  énergie et maximum global ; la coupe Doppler-nul **égale l'autocorrélation**
+  (coupe filtre adapté) ; la crête LFM est **cisaillée** (le retard du pic varie
+  monotonement avec le Doppler).
+- **`radar::mti::mti_canceller`** — annuleur MTI à `order` impulsions
+  (différences premières en cascade, poids binomiaux `[1,−1]`, `[1,−2,1]`, …).
+  Réponse **exactement nulle au continu** → fouillis stationnaire supprimé, cible
+  mobile passée avec le gain `|1−e^{−j2πf}|^order`. Oracles : fouillis constant →
+  zéro exact ; tonalité mobile passée avec le gain binomial ; fouillis retiré /
+  cible conservée.
+- Réutilise `cross_correlate` du bloc 1, sans dépendance. 8 tests (134 au total)
+  ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : traitement Doppler radar (`radar::doppler`) — bloc 3
 Troisième bloc du domaine radar : la **carte distance-Doppler**, surface sur
 laquelle le CFAR détecte (cœur commun des deux projets de référence).
