@@ -151,9 +151,9 @@ impl Normalizer {
         let mut t_std = 0.0;
         for s in data
         {
-            for k in 0..N_FEATURES
+            for (m, f) in mean.iter_mut().zip(&s.features)
             {
-                mean[k] += s.features[k];
+                *m += f;
             }
             t_mean += s.trim;
         }
