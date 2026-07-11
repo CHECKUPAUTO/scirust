@@ -77,11 +77,21 @@ impl KalmanFilter {
         {
             *xi += kyi;
         }
-        // P ← (I − K H) P
+        // P ← (I − K H) P (I − K H)ᵀ + K R Kᵀ — the Joseph form. Algebraically
+        // equivalent to the shorter (I − K H) P, but the short form only
+        // stays symmetric and positive semi-definite if K is exactly the
+        // optimal Kalman gain; any finite-precision drift (or a
+        // slightly-off K from a caller) can otherwise produce an
+        // asymmetric or indefinite P after many updates. Joseph's form is
+        // symmetric and PSD by construction for any K (Bucy & Joseph 1968;
+        // Grewal & Andrews, Kalman Filtering, §6.3.4) — the standard choice
+        // for a filter meant to run over long, unattended horizons.
         let n = self.x.len();
         let kh = k.matmul(&self.h);
         let i_kh = Mat::identity(n).sub(&kh);
-        self.p = i_kh.matmul(&self.p);
+        let i_kh_t = i_kh.t();
+        let krk_t = k.matmul(&self.r).matmul(&k.t());
+        self.p = i_kh.matmul(&self.p).matmul(&i_kh_t).add(&krk_t);
         true
     }
 }
@@ -155,6 +165,41 @@ mod tests {
             "vel {}",
             kf.state()[1]
         );
+    }
+
+    #[test]
+    fn joseph_form_keeps_covariance_symmetric_and_psd_under_a_stiff_filter() {
+        // Invariant test for a P1 audit finding (defensive fix, not a
+        // reproduced failure): in double precision this specific 2-state
+        // filter's short update (I − K H) P does not visibly drift within
+        // 500 (or even 5e5, empirically checked) iterations — the asymmetry
+        // Joseph's form guards against is a worst-case risk (imperfect or
+        // non-exactly-optimal K, long unattended horizons, lower precision),
+        // not something f64 rounding alone reliably exposes here. This test
+        // locks in the property the Joseph form *guarantees by construction*
+        // — P stays symmetric and PSD — under a stiff, near-singular
+        // measurement. See Bucy & Joseph 1968; Grewal & Andrews, Kalman
+        // Filtering, §6.3.4.
+        let f = Mat::identity(2);
+        let q = Mat::diag(&[1e-9, 1e-9]);
+        let h = Mat::new(1, 2, vec![1.0, 0.0]);
+        let r = Mat::new(1, 1, vec![1e-8]); // very confident measurement
+        let p0 = Mat::diag(&[1e6, 1e6]);
+        let mut kf = KalmanFilter::new(vec![0.0, 0.0], p0, f, q, h, r);
+        for k in 0..500
+        {
+            kf.predict();
+            assert!(kf.update(&[k as f64 * 1e-3]));
+            let p = kf.covariance();
+            assert!(
+                p.get(0, 0) >= -1e-9 && p.get(1, 1) >= -1e-9,
+                "negative variance at step {k}: diag = ({}, {})",
+                p.get(0, 0),
+                p.get(1, 1)
+            );
+            let asym = (p.get(0, 1) - p.get(1, 0)).abs();
+            assert!(asym < 1e-9, "asymmetric covariance at step {k}: {asym:e}");
+        }
     }
 
     #[test]

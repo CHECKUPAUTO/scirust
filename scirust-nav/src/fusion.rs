@@ -110,9 +110,18 @@ impl GnssInsFusion {
         {
             *xi += d;
         }
-        // P = (I - K H) P.
+        // P = (I − K H) P (I − K H)ᵀ + K R Kᵀ — the Joseph form. Algebraically
+        // equivalent to the shorter (I − K H) P, but the short form is only
+        // guaranteed symmetric/PSD for an exactly optimal K; the Joseph form
+        // stays symmetric and PSD by construction regardless of rounding
+        // (Bucy & Joseph 1968; Grewal & Andrews, Kalman Filtering, §6.3.4) —
+        // the standard choice for a navigation filter meant to run unattended
+        // for long stretches (dead-reckoning under a bridge, an urban canyon).
         let kh = k.matmul(&h);
-        self.p = Mat::identity(4).sub(&kh).matmul(&self.p);
+        let i_kh = Mat::identity(4).sub(&kh);
+        let i_kh_t = i_kh.t();
+        let krk_t = k.matmul(&r).matmul(&k.t());
+        self.p = i_kh.matmul(&self.p).matmul(&i_kh_t).add(&krk_t);
         true
     }
 
@@ -373,6 +382,46 @@ mod tests {
             "vy {} should approach -1",
             v[1]
         );
+    }
+
+    #[test]
+    fn joseph_form_keeps_covariance_symmetric_and_psd_under_confident_fixes() {
+        // Invariant test for a P1 audit finding: the Kalman covariance
+        // update now uses the Joseph form (I − K H) P (I − K H)ᵀ + K R Kᵀ,
+        // which is symmetric and PSD by construction regardless of
+        // finite-precision rounding — unlike the algebraically equivalent
+        // but only conditionally-safe short form (I − K H) P this filter
+        // used before (Bucy & Joseph 1968; Grewal & Andrews, Kalman
+        // Filtering, §6.3.4). Exercised under repeated, very confident GNSS
+        // fixes (tiny sigma_gnss), the stiffest regime for this filter.
+        let mut fusion =
+            GnssInsFusion::new([0.0, 0.0], [1.0, 0.0], 0.3, 1e-4, [2.0, 2.0, 1.0, 1.0]);
+        for k in 0..500
+        {
+            fusion.predict([0.01, -0.01], 0.1);
+            let ok = fusion.update_gnss([k as f64 * 0.1, -(k as f64) * 0.05]);
+            assert!(ok, "update_gnss unexpectedly rejected at step {k}");
+            let p = &fusion.p;
+            for i in 0..4
+            {
+                assert!(
+                    p.get(i, i) >= -1e-9,
+                    "negative variance at step {k}, index {i}: {}",
+                    p.get(i, i)
+                );
+            }
+            for i in 0..4
+            {
+                for j in (i + 1)..4
+                {
+                    let asym = (p.get(i, j) - p.get(j, i)).abs();
+                    assert!(
+                        asym < 1e-6,
+                        "asymmetric covariance at step {k}, ({i},{j}): {asym:e}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
