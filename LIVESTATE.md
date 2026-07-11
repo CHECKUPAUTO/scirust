@@ -1,7 +1,80 @@
 # LIVESTATE — scirust
 
 > Fichier de bord partagé entre agents.
-> Dernière mise à jour : 2026-07-10
+> Dernière mise à jour : 2026-07-11
+
+## Session 2026-07-11 — fluides & thermo, volet 5 (régions 3a/3b IF97 sous-critique, backward p(h,s))
+
+Demande explicite de l'utilisateur : « la région 3a/3b complètes en
+sous-critique, équations backward P(h,s) » — les deux items notés comme
+« suite possible » à la fin du volet 4 (PR #296).
+
+**Point de départ inattendu** : la branche `claude/scirust-fluid-mechanics-ml4ot6`
+locale pointait encore sur le commit du volet 4 (`efce652`), mais
+`git merge-base --is-ancestor` a montré qu'il n'était PAS ancêtre
+d'`origin/master` — la PR avait été *squash-mergée* (SHA différent). Ni le
+CHANGELOG.md ni le LIVESTATE.md ne portent trace de l'entrée « volet 4 »
+qu'on avait pourtant écrite et poussée : le code (région 3 Helmholtz,
+backward T(p,h)/T(p,s)) est bien présent sur master, mais sa narration a dû
+être perdue dans un merge automatique concurrent (l'automatisation
+CHECKUPAUTO fusionne vite, parfois plusieurs PR quasi simultanées sur des
+fichiers texte prependés en tête — un point de fragilité du dépôt à garder
+en tête, pas quelque chose à reconstruire rétroactivement). Procédure
+suivie : `git fetch origin master && git checkout -B
+claude/scirust-fluid-mechanics-ml4ot6 origin/master` pour repartir propre,
+comme prescrit pour une branche dont la PR est déjà mergée.
+
+**Contenu livré** (tout dans `scirust-thermo::backward`, même fichier que
+le volet 4) :
+- `region3_v_ph` / `region3_t_ph` / `region3_v_ps` / `region3_t_ps` —
+  équations backward officielles région 3 (Supp-Tv(ph,ps)3-2014), dispatch
+  3a/3b par `h_3ab(p)` (pour p,h) ou par l'entropie critique `S_CRITICAL`
+  (pour p,s, indépendant de la pression).
+- `region1_p_hs` / `region2_p_hs` / `region3_p_hs` — équation backward
+  officielle p(h,s) (Supp-PHS12-2014 pour 1/2, Supp-phs3-2014 pour 3),
+  région 2 dispatchée 2a/2b/2c par `hab_s(s)` + seuil 5,85 kJ/(kg·K).
+
+**Découverte physique en écrivant le test de round-trip sous-critique** :
+j'ai d'abord supposé (à tort) que la région 3 sous-critique se logeait entre
+la courbe de saturation Psat(T) et la frontière B23(T). Un scan direct en
+Rust (`saturation_pressure(630)` vs `b23_pressure(630)`) a montré l'inverse :
+B23(630 K) ≈ 17,28 MPa < Psat(630 K) ≈ 17,97 MPa, et B23(623,15 K) =
+Psat(623,15 K) exactement (point de jonction 1-2-3-4). Autrement dit, entre
+623,15 K et le point critique, B23 croît moins vite que Psat : la région 2
+perd donc son domaine [0, Psat(T)] habituel au profit de [0, B23(T)]
+seulement, et la région 3 récupère la bande (B23(T), 100 MPa) tout entière —
+y compris la fine tranche (B23(T), Psat(T)) qui serait « vapeur surchauffée »
+si on ignorait ce détail. C'est exactement pourquoi la région 3 a une
+branche 3b (vapeur-like) même sous le point critique, pas seulement en
+supercritique. Le test de round-trip scanne donc `ρ` en partant d'une valeur
+délibérément **après** la boucle de van der Waals locale (repérée par un
+diagnostic imprimé, minimum local de P(ρ) autour de ρ≈480 à 630 K) pour
+retomber sur la branche liquide monotone, puis vérifie `region3_from_tp`-style
+round-trip contre les nouvelles équations backward.
+
+**Méthodologie de vérification inchangée** (celle qui avait débusqué le bug
+d'exposants fractionnaires au volet 4) : script Python qui (1) extrait les 14
+groupes de coefficients (32 à 46 termes chacun, ~500 nombres) du paquet
+`iapws` par regex, (2) scanne systématiquement tous les `Li`/`Lj` pour des
+valeurs non entières — aucune cette fois, contrairement à `Backward2a_T_Ps`
+au volet précédent — (3) réimplémente les 14 formules en Python pur et les
+vérifie contre les **33 exemples numériques officiels** des trois
+publications avant d'écrire une seule ligne de Rust, (4) génère les tableaux
+Rust programmatiquement (jamais de transcription manuelle).
+
+**Tests** : 79 tests thermo (+5 vs volet 4 : exemples officiels région 3
+backward, round-trip sous-critique, exemples officiels p(h,s), round-trip
+p(h,s) région 1/2, rejets de domaine). `cargo test -p scirust-fluids -p
+scirust-thermo` vert ; `cargo clippy --all-targets -- -D warnings` propre
+sur tout le workspace ; `cargo fmt` appliqué.
+
+**Suite possible (non sollicitée)** : rien d'identifié à ce stade — les deux
+derniers chantiers explicitement notés (3a/3b sous-critique, backward
+p(h,s)) sont maintenant couverts. D'éventuels compléments resteraient à
+la demande explicite de l'utilisateur (ex. équation Tsat(h,s) région 4,
+backward p(h,s) avec dispatch universel multi-régions façon `_Bound_hs` de
+la référence — nettement plus lourd, nécessiterait un classifieur de région
+à partir de (h,s) seul).
 
 ## Session 2026-07-10 — probabilités, 6e passe (log-series, Planck, pmf de Loader)
 - **Contexte** : « enchaine sur Suites possibles restantes » après PR #294

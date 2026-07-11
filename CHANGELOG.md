@@ -5,6 +5,34 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — fluides & thermo, volet 5 : régions 3a/3b IF97 en sous-critique, équations backward `p(h,s)`
+Les deux derniers chantiers explicitement demandés sur les équations backward IF97 :
+- **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — les équations
+  backward officielles **`v(p,h)`, `T(p,h)`, `v(p,s)`, `T(p,s)`** de la
+  région 3, dispatchées sur les sous-régions fittées **3a/3b** (frontière
+  `h_3ab(p)` pour les requêtes `(p,h)`, entropie critique pour `(p,s)`).
+  Contrairement à `region3_from_tp` (bissection de densité, restreinte au
+  supercritique car `p(ρ)` n'est pas monotone sous le point critique), ces
+  corrélations closed-form sont valides sur **tout** le domaine région 3,
+  sous-critique inclus — aucune densité à résoudre. Découverte notable en
+  écrivant le test de vérification : sous le point critique, la région 3
+  est bornée **en dessous par la frontière B23** et non par la courbe de
+  saturation — `B23(T) < Psat(T)` dans cette bande étroite (623,15 K à
+  647,096 K), ce qui cède à la région 3 une branche « vapeur-like » (3b)
+  même sous-critique, en plus de la branche liquide (3a) classique.
+- **`scirust-thermo::backward::region{1,2,3}_p_hs`** — équation backward
+  officielle **`p(h,s)`** pour les régions 1, 2 (dispatch 2a/2b/2c par la
+  frontière `hab_s(s)` et le seuil `s ≥ 5,85 kJ/(kg·K)`) et 3 (dispatch
+  3a/3b par l'entropie critique) — pression directement depuis l'état
+  thermodynamique (h,s), sans bissection ni connaissance préalable de T.
+- Méthodologie inchangée : les 14 groupes de coefficients (32 à 46 termes
+  chacun) ont été extraits programmatiquement du paquet Python de référence
+  `iapws`, scannés pour d'éventuels exposants non entiers (aucun cette
+  fois — la leçon du volet précédent tenue), puis vérifiés en Python pur
+  contre les 33 exemples numériques officiels des publications
+  Supp-Tv(ph,ps)3-2014, Supp-PHS12-2014 et Supp-phs3-2014 avant l'écriture
+  du Rust.
+
 ### Mesuré — RLS scirust vs padasip, même machine (protocole exécuté sur Jetson)
 Le protocole `scripts/bench-rls-padasip.py` + `cargo run --bin bench_rls
 --release` a tourné sur une **même machine** — le seul mode de comparaison
