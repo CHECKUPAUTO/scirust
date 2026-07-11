@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : plantes des verticales industrielles (batterie, HVAC, réseau)
+Les verticales `scirust-bms`/`scirust-hvac`/`scirust-grid` fournissaient la
+physique et des estimateurs mais aucun simulateur pas-à-pas ; trois nouveaux
+modules `scirust-sim` implémentent le trait `System` correspondant, testés
+contre oracle et sans dépendance :
+- **`scirust-sim::battery`** — modèle Thévenin 1-RC (SoC, surtension de
+  polarisation, thermique auto-échauffement). Comptage coulométrique **exact**
+  (invariant linéaire, RK4 au bit près), relaxation RC en forme close vers
+  `I·R₁`, température stationnaire `T_amb + P·R_th`, tension terminale.
+- **`scirust-sim::hvac`** — zone bâtiment **2R2C** (air + masse murale) ;
+  état stationnaire exact et linéaire `T_air = T_ext + Q·(R_aw+R_wo)`,
+  relaxation biexponentielle vers l'extérieur quand `Q = 0`.
+- **`scirust-sim::grid`** — **équation d'oscillation** machine-réseau (single
+  machine–infinite bus), `SecondOrderSystem`. Équilibre `δ* = asin(P_m/P_max)`,
+  fréquence électromécanique petit signal `√((ω_s/2H)·P_max·cos δ*)`, énergie
+  transitoire conservée sans amortissement, décroissance vers `δ*` avec
+  amortissement, détection de perte de synchronisme (`P_m > P_max`).
+- 11 tests supplémentaires (94 au total, +2 doctests ; 97 avec la feature `rl`).
+  `fmt`/`clippy -D warnings` propres ; `cargo miri test` vert (runs lourds
+  ignorés sous Miri, convention `scirust-stiff`).
+
 ### Ajouté — axe 3 (bloc-canal) du brief QRD-RLS : `BlockQrdRls`, absorption par blocs via Householder
 Le troisième axe du brief Gentleman/McWhirter, précédemment documenté comme
 délibérément différé, est maintenant livré — avec un périmètre honnête et un
