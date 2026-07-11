@@ -312,3 +312,84 @@ mod tests {
         Ok(())
     }
 }
+
+/// LAPACK-style property tests over random matrices, checking the
+/// structural invariants of Householder QR (orthogonality, reconstruction)
+/// and the least-squares solve's residual, rather than fixed point values.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::linalg::{Matrix, norm2};
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Q, reconstructed from the Householder reflections, must be
+        /// orthogonal: QᵀQ = I (Golub & Van Loan, §5.2) — true for *any*
+        /// matrix (even rank-deficient ones), so no conditioning is forced
+        /// here.
+        #[test]
+        fn q_is_orthogonal(raw in prop::collection::vec(-10.0f64..10.0, 16)) {
+            let n = 4;
+            let a = Matrix::from_row_major(n, n, raw);
+            let qr = qr_decompose(a).unwrap();
+            let q = qr.q();
+            let qtq = q.transpose().matmul(&q).unwrap();
+            let id = Matrix::identity(n);
+            for i in 0..n
+            {
+                for j in 0..n
+                {
+                    prop_assert!(
+                        (qtq[(i, j)] - id[(i, j)]).abs() < 1e-8,
+                        "QᵀQ != I at ({i},{j}): {}", qtq[(i, j)]
+                    );
+                }
+            }
+        }
+
+        /// Reconstruction: Q·R must equal the original A.
+        #[test]
+        fn reconstructs_a_as_q_r(raw in prop::collection::vec(-10.0f64..10.0, 16)) {
+            let n = 4;
+            let a = Matrix::from_row_major(n, n, raw);
+            let qr = qr_decompose(a.clone()).unwrap();
+            let qr_prod = qr.q().matmul(&qr.r()).unwrap();
+            for i in 0..n
+            {
+                for j in 0..n
+                {
+                    let tol = 1e-8 * (1.0 + a[(i, j)].abs());
+                    prop_assert!(
+                        (qr_prod[(i, j)] - a[(i, j)]).abs() < tol,
+                        "Q·R != A at ({i},{j}): {} vs {}", qr_prod[(i, j)], a[(i, j)]
+                    );
+                }
+            }
+        }
+
+        /// LAPACK-style residual check for the square least-squares solve.
+        #[test]
+        fn least_squares_residual_is_small_on_square_systems(
+            raw in prop::collection::vec(-10.0f64..10.0, 16),
+            b in prop::collection::vec(-10.0f64..10.0, 4),
+        ) {
+            let n = 4;
+            // Force diagonal dominance so the system is well-conditioned —
+            // otherwise a generic random 4x4 matrix is singular/near-
+            // singular often enough to make this property flaky.
+            let mut a = Matrix::from_row_major(n, n, raw);
+            for i in 0..n
+            {
+                let off_sum: f64 = (0..n).filter(|&j| j != i).map(|j| a[(i, j)].abs()).sum();
+                let sign = if a[(i, i)] < 0.0 { -1.0 } else { 1.0 };
+                a[(i, i)] = sign * (a[(i, i)].abs() + off_sum) + sign;
+            }
+            let qr = qr_decompose(a.clone()).unwrap();
+            let x = solve_qr_least_squares(&qr, &b).expect("well-conditioned square solve must succeed");
+            let ax = a.matvec(&x).unwrap();
+            let b_norm = norm2(&b).max(1e-300);
+            let res = ax.iter().zip(&b).map(|(axi, bi)| (axi - bi).powi(2)).sum::<f64>().sqrt();
+            prop_assert!(res / b_norm < 1e-7, "relative residual {} too large", res / b_norm);
+        }
+    }
+}

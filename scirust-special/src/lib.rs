@@ -332,7 +332,9 @@ fn gamma_series_p(a: f64, x: f64) -> f64 {
     let mut ap = a;
     let mut sum = 1.0 / a;
     let mut del = sum;
-    let iters = (((20.0 * a.sqrt()).ceil() as usize).saturating_add(MAX_ITERS)).min(50_000_000);
+    let iters = ((20.0 * a.sqrt()).ceil() as usize)
+        .saturating_add(MAX_ITERS)
+        .min(50_000_000);
     let mut converged = false;
     for _ in 0..iters
     {
@@ -937,5 +939,152 @@ mod tests {
             c * p.powi(k as i32) * (1.0 - p).powi((n - k) as i32)
         };
         assert!(close(ln_binomial_pmf(3, 10, 0.4).exp(), exact(3, 10, 0.4)));
+    }
+}
+
+/// Property-based tests: mathematical identities and recurrences checked
+/// against hundreds of randomly generated inputs, rather than a handful of
+/// hand-picked points — the LAPACK/SciPy-style complement to the point-value
+/// tests above (audit finding: no property-based testing anywhere in the
+/// repo). Each property is a genuine, independent mathematical fact about
+/// the function (a recurrence, a symmetry, a complementarity relation), not
+/// a restatement of the implementation, so it can catch bugs the point
+/// tests miss.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn rel_close(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol * (1.0 + b.abs())
+    }
+
+    proptest! {
+        /// Γ(x+1) = x·Γ(x), checked in log space (ln Γ(x+1) = ln Γ(x) + ln x)
+        /// so it holds far beyond where `gamma()` itself would overflow.
+        #[test]
+        fn gamma_recurrence(x in 0.01f64..200.0) {
+            let lhs = ln_gamma(x + 1.0);
+            let rhs = ln_gamma(x) + x.ln();
+            prop_assert!(rel_close(lhs, rhs, 1e-9), "x={x} lhs={lhs} rhs={rhs}");
+        }
+
+        /// ψ(x+1) = ψ(x) + 1/x (digamma recurrence).
+        #[test]
+        fn digamma_recurrence(x in 0.1f64..200.0) {
+            let lhs = digamma(x + 1.0);
+            let rhs = digamma(x) + 1.0 / x;
+            prop_assert!(rel_close(lhs, rhs, 1e-7), "x={x} lhs={lhs} rhs={rhs}");
+        }
+
+        /// B(a+1, b) = B(a, b)·a/(a+b), checked in log space.
+        #[test]
+        fn beta_recurrence(a in 0.05f64..500.0, b in 0.05f64..500.0) {
+            let lhs = ln_beta(a + 1.0, b);
+            let rhs = ln_beta(a, b) + a.ln() - (a + b).ln();
+            prop_assert!(rel_close(lhs, rhs, 1e-8), "a={a} b={b} lhs={lhs} rhs={rhs}");
+        }
+
+        /// erf is an odd function: erf(-x) = -erf(x).
+        #[test]
+        fn erf_is_odd(x in 0.0f64..8.0) {
+            prop_assert!((erf(-x) + erf(x)).abs() < 1e-12, "x={x}");
+        }
+
+        /// erf and erfc are complementary: erf(x) + erfc(x) = 1.
+        #[test]
+        fn erf_erfc_complementary(x in -8.0f64..8.0) {
+            prop_assert!(rel_close(erf(x) + erfc(x), 1.0, 1e-12), "x={x}");
+        }
+
+        /// erfinv is a genuine inverse of erf on (-1, 1).
+        #[test]
+        fn erfinv_inverts_erf_round_trip(y in -0.999_999f64..0.999_999) {
+            let x = erfinv(y);
+            let back = erf(x);
+            prop_assert!(rel_close(back, y, 1e-6), "y={y} x={x} back={back}");
+        }
+
+        /// The regularized lower/upper incomplete gamma split unity:
+        /// P(a, x) + Q(a, x) = 1 for every valid (a, x). NOTE: in both
+        /// branches of `regularized_gamma_p`/`_q`, one side is defined
+        /// *literally* as `1 - ` the other (see their bodies), so this
+        /// identity holds by construction and cannot detect a wrong value
+        /// from `gamma_series_p`/`gamma_cf_q` — it only guards against NaN,
+        /// panics, and domain errors across a wide (a, x) range. Genuine
+        /// accuracy checks are the recurrence and asymptotic properties
+        /// below.
+        #[test]
+        fn regularized_gamma_p_plus_q_is_one(a in 0.01f64..2000.0, x in 0.0f64..4000.0) {
+            let p = regularized_gamma_p(a, x);
+            let q = regularized_gamma_q(a, x);
+            prop_assert!(!p.is_nan() && !q.is_nan(), "a={a} x={x} p={p} q={q}");
+            prop_assert!(rel_close(p + q, 1.0, 1e-6), "a={a} x={x} p={p} q={q}");
+        }
+
+        /// Independent accuracy check via the integration-by-parts
+        /// recurrence `γ(a+1, x) = a·γ(a, x) − x^a·e^{−x}`, i.e.
+        /// `P(a+1, x) = P(a, x) − x^a·e^{−x} / Γ(a+1)`. Unlike the P+Q=1
+        /// identity above, the correction term is computed independently
+        /// (via `ln_gamma`, not via `P` or `Q` themselves), so this *can*
+        /// catch a truncated/non-converged `gamma_series_p` — including in
+        /// the `x ≈ a` boundary layer (Temme 1987) where a P0 audit finding
+        /// lived: a fixed iteration cap silently returned a wrong value for
+        /// large `a` there.
+        #[test]
+        fn regularized_gamma_p_upward_recurrence(a in 0.5f64..5000.0, x in 0.01f64..10000.0) {
+            let p_a = regularized_gamma_p(a, x);
+            let p_a1 = regularized_gamma_p(a + 1.0, x);
+            prop_assert!(!p_a.is_nan() && !p_a1.is_nan(), "a={a} x={x} p_a={p_a} p_a1={p_a1}");
+            let correction = (a * x.ln() - x - ln_gamma(a + 1.0)).exp();
+            prop_assert!(
+                rel_close(p_a1, p_a - correction, 1e-6),
+                "a={a} x={x} p_a={p_a} p_a1={p_a1} correction={correction}"
+            );
+        }
+
+        /// Same recurrence, deliberately stressed at `x ≈ a` — the
+        /// boundary layer where the defining series needs O(√a) terms to
+        /// converge (Temme 1987). Uniform sampling over a wide (a, x) box
+        /// (as in the property above) rarely lands close enough to `x = a`
+        /// to exercise this regime, so it is targeted explicitly here.
+        #[test]
+        fn regularized_gamma_p_upward_recurrence_near_the_boundary_layer(
+            a in 1000.0f64..50000.0,
+            frac in 0.9f64..1.1,
+        ) {
+            let x = a * frac;
+            let p_a = regularized_gamma_p(a, x);
+            let p_a1 = regularized_gamma_p(a + 1.0, x);
+            prop_assert!(!p_a.is_nan() && !p_a1.is_nan(), "a={a} x={x} p_a={p_a} p_a1={p_a1}");
+            let correction = (a * x.ln() - x - ln_gamma(a + 1.0)).exp();
+            prop_assert!(
+                rel_close(p_a1, p_a - correction, 1e-6),
+                "a={a} x={x} p_a={p_a} p_a1={p_a1} correction={correction}"
+            );
+        }
+
+        /// Independent accuracy check at the boundary layer `x = a` itself,
+        /// via Temme's (1987) uniform asymptotic expansion
+        /// `P(a, a) = 1/2 + 1/(3·√(2πa)) + O(a^{-3/2})`, computed from
+        /// scratch (no call into `regularized_gamma_p`/`_q`'s own
+        /// machinery) — the same regime and the same P0 bug as above, but
+        /// via a completely different oracle.
+        #[test]
+        fn regularized_gamma_p_matches_asymptotic_at_the_boundary(a in 1000.0f64..1_000_000.0) {
+            let p = regularized_gamma_p(a, a);
+            let asymptotic = 0.5 + 1.0 / (3.0 * (2.0 * std::f64::consts::PI * a).sqrt());
+            prop_assert!(!p.is_nan(), "a={a} p={p}");
+            prop_assert!(rel_close(p, asymptotic, 1e-4), "a={a} p={p} asymptotic={asymptotic}");
+        }
+
+        /// The regularized incomplete beta is complementary in its
+        /// arguments: I_x(a, b) + I_{1-x}(b, a) = 1.
+        #[test]
+        fn regularized_incomplete_beta_symmetry(a in 0.05f64..200.0, b in 0.05f64..200.0, x in 0.0f64..1.0) {
+            let lhs = regularized_incomplete_beta(a, b, x);
+            let rhs = regularized_incomplete_beta(b, a, 1.0 - x);
+            prop_assert!(rel_close(lhs + rhs, 1.0, 1e-6), "a={a} b={b} x={x} lhs={lhs} rhs={rhs}");
+        }
     }
 }
