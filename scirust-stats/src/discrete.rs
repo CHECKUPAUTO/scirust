@@ -259,6 +259,17 @@ impl Poisson {
         );
         Self { lambda }
     }
+
+    /// Fit by the method of moments: `λ̂ = mean(data)` (which is also the MLE).
+    /// `None` for an empty sample or a non-positive mean.
+    pub fn fit_mom(data: &[f64]) -> Option<Self> {
+        if data.is_empty()
+        {
+            return None;
+        }
+        let m = data.iter().sum::<f64>() / data.len() as f64;
+        (m > 0.0 && m.is_finite()).then(|| Self::new(m))
+    }
 }
 
 impl DiscreteDistribution for Poisson {
@@ -399,6 +410,17 @@ impl Geometric {
     fn ln_q(&self) -> f64 {
         (-self.p).ln_1p()
     }
+
+    /// Fit by the method of moments (support `k ≥ 1`): `p̂ = 1/mean(data)`.
+    /// `None` unless the sample mean is `≥ 1` (the support's minimum).
+    pub fn fit_mom(data: &[f64]) -> Option<Self> {
+        if data.is_empty()
+        {
+            return None;
+        }
+        let m = data.iter().sum::<f64>() / data.len() as f64;
+        (m >= 1.0 && m.is_finite()).then(|| Self::new(1.0 / m))
+    }
 }
 
 impl DiscreteDistribution for Geometric {
@@ -464,6 +486,24 @@ impl NegativeBinomial {
             "NegativeBinomial: p must be within (0, 1]"
         );
         Self { r, p }
+    }
+
+    /// Fit by the method of moments from the sample mean `m` and unbiased
+    /// sample variance `v`: `p̂ = m/v`, `r̂ = m²/(v − m)`.
+    ///
+    /// Defined only under **overdispersion** (`v > m`, the regime the negative
+    /// binomial models); returns `None` otherwise (including `v ≤ m`, which a
+    /// Poisson fits better) and for fewer than two observations.
+    pub fn fit_mom(data: &[f64]) -> Option<Self> {
+        if data.len() < 2
+        {
+            return None;
+        }
+        let n = data.len() as f64;
+        let m = data.iter().sum::<f64>() / n;
+        let v = data.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1.0);
+        // Defined only under overdispersion (v > m) with a positive mean.
+        (m > 0.0 && v.is_finite() && v > m).then(|| Self::new(m * m / (v - m), m / v))
     }
 }
 
@@ -1562,6 +1602,92 @@ impl DiscreteDistribution for Planck {
     }
 }
 
+// ============================================================ //
+//  Discrete Laplace (support ℤ — outside the u64 trait)        //
+// ============================================================ //
+
+/// Discrete Laplace (two-sided geometric) distribution on all of ℤ:
+/// `pmf(k) = tanh(a/2)·e^(−a·|k|)` (SciPy's `dlaplace`). It is the difference
+/// of two i.i.d. geometric variables and the law behind the **geometric
+/// mechanism** of differential privacy (integer-valued additive noise with a
+/// pure-DP guarantee). Symmetric about 0, so the mean is 0.
+///
+/// Like [`Skellam`], its support is ℤ, so it exposes its own `i64` methods
+/// rather than the non-negative-integer [`DiscreteDistribution`] trait.
+#[derive(Debug, Clone, Copy)]
+pub struct DiscreteLaplace {
+    a: f64,
+}
+
+impl DiscreteLaplace {
+    /// Rate `a > 0` (larger `a` ⇒ tighter concentration around 0). For the
+    /// DP geometric mechanism with sensitivity 1 and budget ε, take `a = ε`.
+    pub fn new(a: f64) -> Self {
+        assert!(
+            a > 0.0 && a.is_finite(),
+            "DiscreteLaplace: a must be finite and > 0"
+        );
+        Self { a }
+    }
+
+    /// Probability mass `P(X = k)`, `k ∈ ℤ`.
+    pub fn pmf(&self, k: i64) -> f64 {
+        // tanh(a/2) = (1−e^(−a))/(1+e^(−a)), the normalizer.
+        (self.a * 0.5).tanh() * (-self.a * k.unsigned_abs() as f64).exp()
+    }
+    /// Natural log of the probability mass.
+    pub fn ln_pmf(&self, k: i64) -> f64 {
+        (self.a * 0.5).tanh().ln() - self.a * k.unsigned_abs() as f64
+    }
+    /// Cumulative distribution `P(X ≤ k)`.
+    pub fn cdf(&self, k: i64) -> f64 {
+        // Geometric tail sum in closed form, split at 0 by symmetry.
+        // For k < 0, P(X ≤ k) = Σ_{m ≥ |k|} tanh(a/2)e^(−am) = e^(a·k)/(1+e^(−a)).
+        let denom = 1.0 + (-self.a).exp();
+        if k < 0
+        {
+            (self.a * k as f64).exp() / denom
+        }
+        else
+        {
+            1.0 - (-self.a * (k as f64 + 1.0)).exp() / denom
+        }
+    }
+    /// Survival function `P(X > k)`.
+    pub fn sf(&self, k: i64) -> f64 {
+        let denom = 1.0 + (-self.a).exp();
+        if k < 0
+        {
+            1.0 - (self.a * k as f64).exp() / denom
+        }
+        else
+        {
+            (-self.a * (k as f64 + 1.0)).exp() / denom
+        }
+    }
+    /// Mean, `0` by symmetry.
+    pub fn mean(&self) -> f64 {
+        0.0
+    }
+    /// Variance `2·e^(−a) / (1 − e^(−a))²`.
+    pub fn variance(&self) -> f64 {
+        let q = (-self.a).exp();
+        2.0 * q / ((1.0 - q) * (1.0 - q))
+    }
+    /// Standard deviation.
+    pub fn std_dev(&self) -> f64 {
+        self.variance().sqrt()
+    }
+    /// One deterministic draw as the difference of two geometric variables
+    /// (support `k ≥ 0`), consuming the rng in a fixed order.
+    pub fn sample(&self, rng: &mut SplitMix64) -> i64 {
+        // Geometric(1−e^(−a)) counting failures ⇒ shift the k≥1 Geometric by 1.
+        let p = -(-self.a).exp_m1(); // 1 − e^(−a)
+        let g = Geometric::new(p);
+        (g.sample(rng) as i64 - 1) - (g.sample(rng) as i64 - 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1713,6 +1839,11 @@ mod tests {
     }
 
     #[test]
+    // Ignored under Miri: the pmf/cdf go through `ln_gamma`/`exp`, whose last
+    // bits Miri deliberately perturbs (it models the platform freedom of the
+    // transcendental intrinsics), so the 1e-12 SciPy checks can miss. Native
+    // Build & Test jobs enforce these values.
+    #[cfg_attr(miri, ignore)]
     fn negative_binomial_matches_scipy() {
         // SciPy nbinom(5, 0.4): failures before the 5th success.
         let nb = NegativeBinomial::new(5.0, 0.4);
@@ -2197,5 +2328,65 @@ mod tests {
             0.185_165_382_579_258_7,
             1e-12
         ));
+    }
+
+    #[test]
+    fn discrete_laplace_matches_scipy() {
+        // SciPy dlaplace(0.8), support ℤ.
+        let d = DiscreteLaplace::new(0.8);
+        assert!(close(d.pmf(0), 0.379_948_962_255_224_9, 1e-12));
+        assert!(close(d.pmf(1), 0.170_722_073_627_553_5, 1e-12));
+        assert!(close(d.pmf(-1), 0.170_722_073_627_553_5, 1e-12));
+        assert!(close(d.pmf(-3), 0.034_468_192_210_230_23, 1e-12));
+        assert!(close(d.pmf(4), 0.015_487_557_100_816_039, 1e-12));
+        assert!(close(d.cdf(0), 0.689_974_481_127_612_5, 1e-12));
+        assert!(close(d.cdf(2), 0.937_406_927_250_178_6, 1e-12));
+        assert!(close(d.cdf(-1), 0.310_025_518_872_387_55, 1e-12));
+        assert!(close(d.sf(2), 0.062_593_072_749_821_4, 1e-11));
+        assert!(close(d.mean(), 0.0, 1e-15));
+        assert!(close(d.variance(), 2.963_534_189_184_372, 1e-11));
+        // Symmetry and total mass.
+        assert!(close(d.pmf(5), d.pmf(-5), 1e-13));
+        let total: f64 = (-60..=60).map(|k| d.pmf(k)).sum();
+        assert!(close(total, 1.0, 1e-12));
+        // cdf + sf = 1 on both sides of 0.
+        for k in -5..=5_i64
+        {
+            assert!(close(d.cdf(k) + d.sf(k), 1.0, 1e-12), "k = {k}");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn discrete_laplace_sampling_is_deterministic_and_symmetric() {
+        let d = DiscreteLaplace::new(0.8);
+        let mut r1 = SplitMix64::new(5);
+        let mut r2 = SplitMix64::new(5);
+        let a: Vec<i64> = (0..30_000).map(|_| d.sample(&mut r1)).collect();
+        let b: Vec<i64> = (0..30_000).map(|_| d.sample(&mut r2)).collect();
+        assert_eq!(a, b);
+        let m = a.iter().sum::<i64>() as f64 / a.len() as f64;
+        assert!(m.abs() < 0.06, "mean {m}");
+    }
+
+    #[test]
+    fn method_of_moments_fitting() {
+        // Poisson: λ̂ = mean.
+        let dp = [3.0, 5.0, 2.0, 4.0, 6.0, 3.0, 4.0, 5.0];
+        let p = Poisson::fit_mom(&dp).unwrap();
+        assert!(close(p.mean(), 4.0, 1e-13));
+        assert!(Poisson::fit_mom(&[]).is_none());
+        // Geometric (k ≥ 1): p̂ = 1/mean.
+        let dg = [1.0, 2.0, 1.0, 3.0, 1.0, 4.0, 2.0, 1.0];
+        let g = Geometric::fit_mom(&dg).unwrap();
+        assert!(close(g.mean(), 1.875, 1e-13)); // 1/p̂ = mean
+        assert!(Geometric::fit_mom(&[0.4, 0.6]).is_none()); // mean < 1
+        // Negative binomial: overdispersed data ⇒ recovers sample mean/var.
+        let dnb = [0.0, 1.0, 0.0, 5.0, 2.0, 10.0, 0.0, 3.0, 1.0, 8.0, 0.0, 4.0];
+        let nb = NegativeBinomial::fit_mom(&dnb).unwrap();
+        assert!(close(nb.mean(), 2.833_333_333_333_333_5, 1e-12));
+        assert!(close(nb.variance(), 11.242_424_242_424_242, 1e-11));
+        // Underdispersed (var ≤ mean) ⇒ no negative-binomial fit.
+        assert!(NegativeBinomial::fit_mom(&[2.0, 2.0, 2.0, 3.0]).is_none());
     }
 }

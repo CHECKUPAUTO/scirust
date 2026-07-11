@@ -26,6 +26,7 @@ pub mod qr_rls;
 pub mod rls;
 pub mod rls_const;
 pub mod smoother;
+pub mod squared_givens;
 pub mod ud;
 pub mod ukf;
 
@@ -41,5 +42,6 @@ pub use qr_rls::{QrRls, QrRlsConst, QrRlsMimo};
 pub use rls::{RlsFilter, VectorRls};
 pub use rls_const::RlsFilterConst;
 pub use smoother::RtsSmoother;
+pub use squared_givens::{GivensQrdRls, SquaredGivensRls};
 pub use ud::UdFilter;
 pub use ukf::Ukf;
