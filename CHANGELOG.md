@@ -5,6 +5,29 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : pistage — filtre α–β + traqueur multi-cibles (`radar::track`) — bloc 10
+Dixième bloc du domaine radar : la **couche temporelle** qui associe les
+détections d'une trame aux pistes existantes et lisse chaque état. Clôt la
+chaîne détection → piste.
+- **`AlphaBeta`** — filtre α–β scalaire pour un état à vitesse constante
+  `(x, v)` : `predict` (`x + v·dt`), `update` (prédit puis corrige de
+  `α·résidu` / `(β/dt)·résidu`), `coast` (avance sans mesure). Non biaisé à erreur
+  d'état permanent nulle sur une rampe.
+- **`critically_damped_gains(θ)`** — gains critiques `α = 1 − θ²`, `β = (1 − θ)²`.
+- **`Track`** — piste 2-D (un `AlphaBeta` par coordonnée distance/Doppler)
+  consommant une `Detection`, avec cycle de vie hits/misses et amplitude.
+- **`MultiTracker`** — traqueur multi-cibles au plus proche voisin : à chaque
+  `step`, prédiction de toutes les pistes, association gloutonne des détections à
+  la piste prédite la plus proche dans une porte, mise à jour des pistes
+  associées, extrapolation des autres, naissance des pistes pour les détections
+  orphelines, mort après `max_misses` trames extrapolées.
+- Oracles : les gains critiques suivent la forme fermée ; le filtre α–β suit une
+  rampe à vitesse constante sans retard (position et vitesse exactes) ;
+  l'extrapolation avance d'un pas de vitesse ; le traqueur suit une cible unique
+  (vitesse estimée exacte), garde deux cibles éloignées séparées (ids stables),
+  crée puis supprime une piste perdue. 6 tests (163 au total) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : détection 2-D — CFAR 2-D + clustering (`radar::detect`) — bloc 9
 Neuvième bloc du domaine radar : l'**étage de détection** qui transforme la carte
 distance-Doppler en une courte liste de cibles — exactement l'enchaînement des
