@@ -638,4 +638,8 @@ mod tests {
 
 pub mod complex;
 pub mod dispatch;
+pub mod gemm;
 pub mod matrix;
+
+#[cfg(target_arch = "x86_64")]
+pub mod x86_ext;
