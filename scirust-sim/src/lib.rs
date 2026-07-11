@@ -27,7 +27,8 @@
 //!    - [`orbital`] — planar two-body Kepler problem;
 //!    - [`epidemiology`] — SIR and SEIR compartmental models;
 //!    - [`ecology`] — Lotka–Volterra predator–prey, logistic growth;
-//!    - [`chemistry`] — consecutive reactions (Bateman), reversible reaction;
+//!    - [`chemistry`] — consecutive reactions (Bateman), reversible reaction,
+//!      and the stiff Robertson benchmark (integrated via the `stiff` feature);
 //!    - [`thermal`] — Newton cooling, 1-D heat conduction (method of lines);
 //!    - [`electrical`] — RC charging, series RLC;
 //!    - [`stochastic`] — geometric Brownian motion, Ornstein–Uhlenbeck,
@@ -54,10 +55,12 @@
 //! ## Interoperability
 //!
 //! [`System::derivatives`] uses the same in-place shape as the closures taken
-//! by `scirust_solvers::ode::dopri5` and by `scirust-stiff`, so any model in
-//! this crate can be handed to those integrators with a one-line adapter
-//! (`|t, y, dydt| model.derivatives(t, y, dydt)`) when adaptive or stiff
-//! stepping is needed; stiff plants (e.g. Robertson kinetics) belong there.
+//! by `scirust_solvers::ode::dopri5` and by `scirust-stiff`. For genuinely
+//! **stiff** plants (e.g. the [`chemistry::Robertson`] kinetics) the explicit
+//! engine would need an impractically small step; enabling the optional
+//! **`stiff`** feature adds [`stiff_bridge`], which integrates any [`System`]
+//! with `scirust-stiff`'s L-stable Backward Euler and adaptive Rosenbrock-W
+//! methods.
 //! The [`Environment`] trait mirrors the `(state, reward, done)` step shape of
 //! `scirust_learning::rl::Env`. Enabling the optional **`rl`** feature adds
 //! [`rl_bridge::RlEnv`], an adapter that presents any
@@ -113,6 +116,8 @@ pub mod rigid_body;
 #[cfg(feature = "rl")]
 pub mod rl_bridge;
 pub mod rng;
+#[cfg(feature = "stiff")]
+pub mod stiff_bridge;
 pub mod stochastic;
 pub mod thermal;
 
