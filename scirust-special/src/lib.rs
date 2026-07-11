@@ -520,6 +520,114 @@ pub fn riemann_zeta(s: f64) -> f64 {
     acc + riemann_zeta_tail(s, 20.0)
 }
 
+// ============================================================ //
+//  Loader saddle-point pmf (Catherine Loader, 2000)            //
+// ============================================================ //
+
+const LN_2PI: f64 = 1.837_877_066_409_345_5; // ln(2π)
+
+/// Stirling series remainder `δ(x) = ln Γ(x+1) − [(x+½)ln x − x + ½ln(2π)]`.
+///
+/// The small correction that Stirling's approximation omits. Computing a
+/// binomial/Poisson pmf as `exp(Σ ln Γ)` loses relative precision at large
+/// arguments because it subtracts large `ln Γ` values; keeping `δ` separate
+/// (Loader 2000, as used by R's `dbinom`/`dpois`) avoids that cancellation.
+///
+/// For `x ≥ 16` an asymptotic series in `1/x` gives full `f64` accuracy; for
+/// smaller `x` the direct `ln Γ` form is used (its cancellation there is mild).
+/// `δ(0)` diverges and is never evaluated — the pmf endpoints are closed forms.
+pub fn stirling_error(x: f64) -> f64 {
+    if x <= 0.0 || x.is_nan()
+    {
+        return f64::NAN;
+    }
+    if x >= 16.0
+    {
+        // δ(x) = 1/(12x) − 1/(360x³) + 1/(1260x⁵) − 1/(1680x⁷) + 1/(1188x⁹).
+        let inv = 1.0 / x;
+        let z = inv * inv;
+        inv * (1.0 / 12.0
+            + z * (-1.0 / 360.0 + z * (1.0 / 1260.0 + z * (-1.0 / 1680.0 + z / 1188.0))))
+    }
+    else
+    {
+        ln_gamma(x + 1.0) - (x + 0.5) * x.ln() + x - 0.5 * LN_2PI
+    }
+}
+
+/// Binomial deviance `D₀(x, np) = x·ln(x/np) + np − x`, evaluated by a series
+/// near `x ≈ np` to avoid the cancellation of the naive logarithm form
+/// (Loader 2000). `x > 0`, `np > 0`.
+pub fn binom_deviance(x: f64, np: f64) -> f64 {
+    if (x - np).abs() < 0.1 * (x + np)
+    {
+        let v = (x - np) / (x + np);
+        let mut s = (x - np) * v;
+        let mut ej = 2.0 * x * v;
+        let v2 = v * v;
+        for j in 1..MAX_ITERS
+        {
+            ej *= v2;
+            let s1 = s + ej / (2 * j + 1) as f64;
+            if s1 == s
+            {
+                return s1;
+            }
+            s = s1;
+        }
+        s
+    }
+    else
+    {
+        x * (x / np).ln() + np - x
+    }
+}
+
+/// Natural log of the Poisson pmf `ln P(X = k)` for rate `λ > 0`, via the
+/// Loader saddle-point form `−δ(k) − D₀(k, λ) − ½ln(2πk)` (with the closed
+/// endpoint `−λ` at `k = 0`). Higher relative accuracy at large `λ` than
+/// `k·ln λ − λ − ln k!`.
+pub fn ln_poisson_pmf(k: u64, lambda: f64) -> f64 {
+    if lambda <= 0.0 || lambda.is_nan()
+    {
+        return f64::NAN;
+    }
+    if k == 0
+    {
+        return -lambda;
+    }
+    let x = k as f64;
+    -stirling_error(x) - binom_deviance(x, lambda) - 0.5 * (2.0 * PI * x).ln()
+}
+
+/// Natural log of the binomial pmf `ln P(X = k)` for `n` trials, success
+/// probability `p ∈ [0, 1]`, via the Loader saddle-point form. Closed-form
+/// endpoints handle `k = 0`, `k = n`, `p = 0`, `p = 1`; `k > n` gives `−∞`.
+pub fn ln_binomial_pmf(k: u64, n: u64, p: f64) -> f64 {
+    if k > n || !(0.0..=1.0).contains(&p)
+    {
+        return if k > n { f64::NEG_INFINITY } else { f64::NAN };
+    }
+    if k == 0
+    {
+        return n as f64 * (-p).ln_1p();
+    }
+    if k == n
+    {
+        return n as f64 * p.ln();
+    }
+    // Interior: p ∈ (0, 1) here (p = 0 ⇒ only k = 0, p = 1 ⇒ only k = n).
+    let (nn, x) = (n as f64, k as f64);
+    let q = 1.0 - p;
+    let lc = stirling_error(nn)
+        - stirling_error(x)
+        - stirling_error(nn - x)
+        - binom_deviance(x, nn * p)
+        - binom_deviance(nn - x, nn * q);
+    // dbinom = exp(lc)·sqrt(n / (2π·x·(n−x))).
+    lc + 0.5 * (nn.ln() - LN_2PI - x.ln() - (nn - x).ln())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,5 +841,59 @@ mod tests {
             regularized_gamma_p(3.3, 2.2).to_bits(),
             regularized_gamma_p(3.3, 2.2).to_bits()
         );
+    }
+
+    #[test]
+    fn stirling_error_matches_high_precision() {
+        // Reference δ(n) from mpmath (40-digit lnΓ).
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * (1.0 + b.abs());
+        assert!(close(stirling_error(1.0), 0.081_061_466_795_327_26));
+        assert!(close(stirling_error(2.0), 0.041_340_695_955_409_3));
+        assert!(close(stirling_error(5.0), 0.016_644_691_189_821_193));
+        assert!(close(stirling_error(10.0), 0.008_330_563_433_362_87));
+        assert!(close(stirling_error(15.0), 0.005_554_733_551_962_801));
+        // Series branch (x ≥ 16); reference δ(16) = 0.00520765591960964…
+        assert!(close(stirling_error(16.0), 0.005_207_655_919_609_64));
+        assert!(close(stirling_error(100.0), 0.000_833_330_555_634_914_7));
+        assert!(close(stirling_error(1000.0), 8.333_333_055_555_635e-5));
+    }
+
+    #[test]
+    fn loader_pmf_matches_scipy_at_large_n() {
+        // SciPy (which itself uses Loader) — the regime where the naive
+        // exp(Σ lnΓ) path loses relative precision.
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * (1.0 + b.abs());
+        assert!(close(
+            ln_binomial_pmf(30_000, 100_000, 0.3).exp(),
+            0.002_752_954_648_397_429
+        ));
+        assert!(close(
+            ln_binomial_pmf(31_000, 100_000, 0.3).exp(),
+            1.444_411_387_472_601_2e-13
+        ));
+        assert!(close(
+            ln_binomial_pmf(500, 1000, 0.5).exp(),
+            0.025_225_018_178_360_804
+        ));
+        assert!(close(
+            ln_poisson_pmf(10_000, 10_000.0).exp(),
+            0.003_989_389_558_963_281
+        ));
+        assert!(close(
+            ln_poisson_pmf(50, 50.0).exp(),
+            0.056_325_006_325_191_66
+        ));
+        // Endpoints and degenerate parameters.
+        assert!(close(ln_binomial_pmf(0, 10, 0.3).exp(), 0.7_f64.powi(10)));
+        assert!(close(ln_binomial_pmf(10, 10, 0.3).exp(), 0.3_f64.powi(10)));
+        assert_eq!(ln_binomial_pmf(11, 10, 0.3), f64::NEG_INFINITY);
+        assert!(close(ln_poisson_pmf(0, 4.2).exp(), (-4.2_f64).exp()));
+        // Small-n agreement with the exact factorial form.
+        let exact = |k: u32, n: u32, p: f64| {
+            let fact = |m: u32| (1..=u64::from(m)).product::<u64>() as f64;
+            let c = fact(n) / (fact(k) * fact(n - k));
+            c * p.powi(k as i32) * (1.0 - p).powi((n - k) as i32)
+        };
+        assert!(close(ln_binomial_pmf(3, 10, 0.4).exp(), exact(3, 10, 0.4)));
     }
 }

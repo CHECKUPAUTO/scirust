@@ -67,6 +67,37 @@ versions sémantiques à partir de la prochaine release taguée.
   trajectoire de perte ET les codes bf16 finaux sous contrat d'empreinte,
   bit-reproductibles cross-platform (validé QEMU avant commit). Intégré au
   script de preuve et au job CI QEMU.
+### Ajouté — durcissement RLS : zéro-allocation, const-generic, QR-RLS racine carrée, benchmarks mesurés
+Les 4 points du plan validé après la revue du texte Gemini — chaque
+affirmation de ce lot est adossée à un test ou une mesure :
+- **`update()` zéro-allocation** (`RlsFilter`, `VectorRls`) : les
+  intermédiaires (`P·u`, erreur a priori) vivent dans des buffers persistants
+  (`#[serde(skip)]`, redimensionnement paresseux post-désérialisation) ; le
+  gain est replié à la volée — plus aucune allocation tas par échantillon
+  (l'ancienne boucle en faisait 4). `RlsFilter::update` retourne désormais
+  `&[f64]` (vue interne) au lieu d'un `Vec` alloué.
+- **`RlsFilterConst<const N_IN, const N_OUT>`** (`rls_const`) : variante
+  entièrement sur pile, `core`-only (extractible en `no_std` pour
+  l'embarqué), dimensions connues du compilateur ⇒ déroulage/vectorisation
+  réels. Arithmétique **bit-identique** à la version tas — vérifié par un
+  test qui compare les trajectoires de poids au bit près sur 500 pas.
+- **`QrRls`** (`qr_rls`) : RLS **racine carrée** — propage le facteur `S`
+  (`P = S·Sᵀ`, mise à jour de rang 1 de Potter, la famille de méthodes du
+  `UdFilter` maison). La semi-définie-positivité de la covariance tient **par
+  construction** (`xᵀSSᵀx = ‖Sᵀx‖² ≥ 0`), pas par re-symétrisation forcée —
+  la réponse honnête au risque de divergence du RLS standard (aucune
+  prétention au-delà : l'estimée reste tributaire de l'excitation, documenté).
+  Tests : équivalence aux poids près (1e-6) avec le RLS standard sur données
+  saines ; stress 100 000 pas, λ=0,9, entrées quasi-colinéaires → P finie,
+  diagonale ≥ 0, mineurs principaux 2×2 ≥ 0 ; suivi d'un système dérivant.
+- **Benchmarks mesurés** (`--bin bench_rls`, release, conteneur CI x86_64 —
+  chiffres liés à cette machine, à re-mesurer ailleurs) : ns/update
+  `VectorRls` / `QrRls` / `RlsFilterConst` : n=4 → 40 / 47 / 34 ; n=16 →
+  633 / 476 / 326 ; n=64 → 10 017 / 6 740 / 8 451. Constats mesurés : la
+  variante const-generic est ~2× plus rapide à n=16 (déroulage réel), et le
+  QR-RLS **bat** le RLS standard dès n=16 (pas de passe de symétrisation).
+  Comparaison padasip non réalisée ici (échec d'installation dans le
+  conteneur) — point ouvert, aucune revendication inter-bibliothèques.
 
 ### Ajouté — fluides & thermo, volet 2 : IF97 complet (Rankine), convection, réseaux
 Suite annoncée du volet précédent — les trois chantiers « suite possible »
@@ -3058,6 +3089,115 @@ plutôt qu'une formule devinée) :
   CI : contributions sensibles à l'ordre (±1e16), vrai backward autograd, et
   une **boucle SGD multi-pas complète** dont la trajectoire de poids est
   bit-identique pour 1/2/4 threads (l'invariance se compose sur l'entraînement).
+
+### Ajouté — parité SciPy des queues et Dirichlet-multinomiale (4e passe du volet probabilités)
+> Entrée placée en bas de la section « Non publié » à dessein : chaque volet
+> parallèle insère la sienne en tête, d'où des conflits systématiques sur le
+> même bloc ; l'ajouter ici les évite.
+- **`scirust-stats::discrete` — méthodes de queue en log** : `logcdf`,
+  `logsf` et `isf` (fonction de survie inverse) ajoutées par défaut au trait
+  `DiscreteDistribution`, alignant l'API sur `scipy.stats`. `logsf` s'appuie
+  sur la survie **directe** déjà surchargée sur chaque loi (pas de
+  `ln(1 − cdf)` qui explose en queue), et `isf(p)` fait sa dichotomie sur
+  `sf` — plus précis que `quantile(1 − p)` pour les très petits `p`. Validé
+  contre SciPy (binomiale, Poisson, zêta) et par cohérence
+  `exp(logcdf) = cdf`, aller-retour `isf∘sf`.
+- **`scirust-stats::discrete::DirichletMultinomial`** — Pólya multivariée :
+  une multinomiale à probabilités Dirichlet(α)-distribuées, généralisation
+  vectorielle de la bêta-binomiale pour les **vecteurs de comptages
+  surdispersés** (comptages de mots/thèmes, essais catégoriels répétés à
+  dérive). `ln_pmf`/`pmf` par la forme fermée en ln Γ, moyenne `n·αᵢ/A`,
+  covariance avec le facteur de surdispersion `ρ = (n+A)/(1+A)`, tirage
+  séquentiel par bêta-binomiales conditionnelles (stick-breaking exact,
+  ordre fixe ⇒ reproductible bit-à-bit). Oracles SciPy 1.17.1
+  (`dirichlet_multinomial([1,2,3], 10)` pmf/logpmf/cov) et fraction exacte
+  18/143 ; à 2 catégories = bêta-binomiale (testé), α = [1,1] = uniforme.
+- 48 tests + doctest sur le crate, clippy 0 avertissement.
+
+### Ajouté — interval/expect + Yule-Simon + Boltzmann (5e passe du volet probabilités)
+> Entrée en bas de section (voir la note de la 4e passe) pour éviter les
+> conflits de merge systématiques sur le bloc de tête.
+- **`scirust-stats::discrete` — `interval` et `expect`** ajoutés par défaut au
+  trait `DiscreteDistribution`, complétant la parité `scipy.stats` :
+  `interval(c)` renvoie l'intervalle équilibré `(quantile((1−c)/2),
+  quantile((1+c)/2))` ; `expect(f)` calcule `E[f(X)] = Σ f(k)·pmf(k)` par
+  sommation déterministe bornée (arrêt quand la masse de queue `sf(k)` est
+  négligeable, plafond de sécurité). Validés SciPy (intervalles binomiale/
+  Poisson/Yule-Simon, `E[X]`/`E[X²]` = moyenne / var+moyenne²).
+- **`scirust-stats::discrete::YuleSimon`** — loi **à queue lourde** sur k ≥ 1,
+  `pmf(k) = α·B(k, α+1)` (attachement préférentiel : fréquences de mots,
+  citations). Queue en loi de puissance `k^(−(α+1))` ⇒ moyenne finie ssi
+  α > 1, variance ssi α > 2 ; survie en forme fermée `sf(k) = k·B(k, α+1)`.
+  Oracles SciPy `yulesimon(2.5)` et identité exacte `α=2 ⇒ 4/(k(k+1)(k+2))`.
+- **`scirust-stats::discrete::Boltzmann`** — géométrique tronquée à `0..=n−1`
+  (Planck tronquée, `scipy.stats.boltzmann`),
+  `pmf(k) = (1−e^(−λ))e^(−λk)/(1−e^(−λN))` ; pmf/cdf/survie directe et
+  moments en forme fermée (normalisation via `−expm1` pour la précision aux
+  petits `λN`). Oracles SciPy `boltzmann(1.4, 10)`.
+- 51 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
+  16 lois discrètes (13 univariées + 3 vectorielles).
+
+### Ajouté — log-series, Planck, et pmf de Loader (6e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes) pour éviter
+> les conflits de merge sur le bloc de tête.
+- **`scirust-special` — algorithme de Loader (saddle-point, Loader 2000)** :
+  `stirling_error(x)` (reste de la série de Stirling δ, série asymptotique
+  en 1/x pour x ≥ 16, forme directe sinon — validé contre mpmath 40 chiffres),
+  `binom_deviance(x, np)` (D₀ par série près de x ≈ np pour éviter
+  l'annulation), et les pmf en log `ln_poisson_pmf`/`ln_binomial_pmf`. Gagne
+  la **pleine précision relative à grand n/λ** là où `exp(Σ lnΓ)` dérivait
+  (~1e-10 → ~1e-15). `Binomial::ln_pmf` et `Poisson::ln_pmf` recâblés dessus
+  (c'est l'algorithme qu'utilise R `dbinom`/`dpois` et SciPy). Validé contre
+  SciPy : `binom(1e5, 0.3)`, `poisson(1e4)`, endpoints exacts.
+- **`scirust-stats::discrete::Logarithmic`** — loi log-séries sur k ≥ 1,
+  `pmf(k) = −pᵏ/(k·ln(1−p))` (`scipy.stats.logser`), modèle d'abondance
+  d'espèces de Fisher ; moyenne/variance en forme fermée. Oracles
+  `logser(0.6)`.
+- **`scirust-stats::discrete::Planck`** — géométrique **non tronquée** sur
+  k ≥ 0, `pmf(k) = (1−e^(−λ))e^(−λk)` (`scipy.stats.planck`), limite n → ∞
+  de Boltzmann ; testée égale à la géométrique décalée. Oracles
+  `planck(0.9)`.
+- scirust-special 16 tests, scirust-stats 54 tests + doctest, clippy 0
+  avertissement. Couverture : **18 lois discrètes** (15 univariées + 3
+  vectorielles).
+
+### Ajouté — Laplace discrète + ajustement méthode des moments (7e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes).
+- **`scirust-stats::discrete::DiscreteLaplace`** — loi de Laplace discrète
+  (géométrique bilatérale) sur ℤ, `pmf(k) = tanh(a/2)·e^(−a|k|)`
+  (`scipy.stats.dlaplace`) : différence de deux géométriques, **loi du
+  mécanisme géométrique de la confidentialité différentielle** (bruit entier
+  à garantie ε-DP pure ; pour une sensibilité 1 et un budget ε, prendre
+  a = ε). Support ℤ ⇒ API `i64` propre comme `Skellam` (pmf/ln_pmf/cdf/sf
+  directe/moments/tirage déterministe = différence de deux géométriques).
+  Symétrique, moyenne 0. Oracles SciPy `dlaplace(0.8)`.
+- **Ajustement par la méthode des moments** — `Poisson::fit_mom`,
+  `Geometric::fit_mom`, `NegativeBinomial::fit_mom` (associées, `-> Option`) :
+  une **capacité d'inférence** (l'équivalent de `.fit()` de SciPy) qui estime
+  les paramètres depuis un échantillon. Poisson `λ̂ = moyenne` (= EMV),
+  géométrique `p̂ = 1/moyenne`, binomiale négative `p̂ = m/v, r̂ = m²/(v−m)`
+  (définie sous surdispersion `v > m` seulement, `None` sinon — le cas
+  sous-dispersé relève d'une Poisson). Validé par round-trip mean/var.
+- 57 tests + doctest sur le crate, clippy 0 avertissement. Couverture :
+  **19 lois discrètes** (16 univariées + 3 vectorielles) + inférence MoM.
+
+### Ajouté — test d'adéquation χ² pour lois discrètes ajustées (8e passe du volet probabilités)
+> Entrée en bas de section (convention des passes précédentes).
+- **`scirust-stats::htest::chi2_gof_discrete`** — test du χ² de Pearson entre
+  une **loi discrète ajustée** et des comptages observés, boucle qui manquait
+  entre `fit_mom`, les pmf et `htest`. Les effectifs attendus sont tirés de la
+  loi (`N·pmf(i)` pour les valeurs exactes, `N·sf(L−2)` pour la classe de
+  queue « ≥ L−1 », somme exacte à N) ; **regroupement adjacent** jusqu'à
+  `min_expected` (règle de Cochran ≥ 5) qui absorbe aussi les classes de
+  probabilité nulle des supports commençant à 1 (Geometric) ; degrés de
+  liberté ajustés du nombre de paramètres estimés (`ddof`). Délègue le calcul
+  final au `chi_square_gof` existant. Validé contre SciPy
+  (`chisquare`/`chi2.sf`) : Poisson(1.98) sur 6 classes ⇒ χ²=2.2792, df=4,
+  p=0.6846 ; rejet d'un mauvais ajustement, regroupement d'une classe 0 de
+  Geometric, entrées dégénérées → `None`.
+- 59 tests + doctest sur le crate, clippy 0 avertissement. Le volet
+  probabilités boucle : lois → combinatoire → ζ → Loader → inférence (MoM)
+  → **validation de l'ajustement (GOF)**.
 
 ## [0.14.0] — 2026-06-13
 

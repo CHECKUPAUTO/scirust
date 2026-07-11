@@ -11,19 +11,24 @@
 //! - **Continuous distributions** ([`dist`]): `Normal`, `StudentT`, `ChiSquared`,
 //!   `FisherF`, `Gamma`, `Beta`, `Exponential`, `Uniform` — each with pdf, cdf,
 //!   survival function, quantile, moments, and deterministic inverse-CDF sampling.
-//! - **Discrete distributions** ([`discrete`]): `Binomial`, `Poisson`,
-//!   `Hypergeometric`, `Geometric`, `NegativeBinomial`, `BetaBinomial`,
-//!   `Zipfian`, `Zeta` (via `riemann_zeta`), `PoissonBinomial`, plus
-//!   `Skellam` on ℤ and the vector-valued `Multinomial` /
-//!   `MultivariateHypergeometric` — pmf/ln-pmf, cdf, direct survival
-//!   function, SciPy-convention quantile, moments, deterministic sampling.
+//! - **Discrete distributions** ([`discrete`]): `Binomial`, `Poisson` (both via
+//!   Loader's saddle-point pmf), `Hypergeometric`, `Geometric`,
+//!   `NegativeBinomial`, `BetaBinomial`, `Zipfian`, `Zeta` (via `riemann_zeta`),
+//!   `PoissonBinomial`, `YuleSimon`, `Boltzmann`, `Logarithmic`, `Planck`,
+//!   `Skellam` and `DiscreteLaplace` on ℤ, and the vector-valued `Multinomial`,
+//!   `MultivariateHypergeometric` and `DirichletMultinomial` — pmf/ln-pmf,
+//!   cdf, direct survival function, `logcdf`/`logsf`/`isf`, `interval`,
+//!   `expect` (SciPy parity), quantile, moments, deterministic sampling, plus
+//!   method-of-moments fitting (`Poisson`/`Geometric`/`NegativeBinomial`).
 //! - **Exact combinatorics** ([`comb`]): `factorial`, `binomial`, `permutations`,
 //!   `multichoose` in checked `u128` (`None` on overflow, never a wrong number),
 //!   plus overflow-free `ln_factorial` / `ln_binomial`.
 //! - **Descriptive statistics** ([`describe`]): mean, unbiased variance / std,
 //!   standard error, quantiles, median, min/max.
 //! - **Hypothesis tests** ([`htest`]): one- and two-sample t-tests (pooled &
-//!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit, one-sample
+//!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit (raw counts *and* a
+//!   `chi2_gof_discrete` that bins a fitted discrete distribution, pools thin
+//!   bins, and adjusts the dof for estimated parameters), one-sample
 //!   Kolmogorov–Smirnov.
 //! - **Honest lottery mathematics** ([`lottery`]): exact odds of any
 //!   `k`-of-`n` (+ bonus) game via the hypergeometric law, ticket expected
@@ -68,15 +73,16 @@ pub mod lottery;
 pub mod rng;
 
 pub use discrete::{
-    BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
-    MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta, Zipfian,
+    BetaBinomial, Binomial, Boltzmann, DirichletMultinomial, DiscreteDistribution, DiscreteLaplace,
+    Geometric, Hypergeometric, Logarithmic, Multinomial, MultivariateHypergeometric,
+    NegativeBinomial, Planck, Poisson, PoissonBinomial, Skellam, YuleSimon, Zeta, Zipfian,
 };
 pub use dist::{
     Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
 };
 pub use htest::{
-    Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
-    t_test_two_sample,
+    Tail, TestResult, chi_square_gof, chi2_gof_discrete, ks_test_one_sample, one_way_anova,
+    t_test_one_sample, t_test_two_sample,
 };
 pub use lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
 pub use rng::SplitMix64;
@@ -88,16 +94,17 @@ pub mod prelude {
     };
     pub use crate::describe::{mean, median, quantile, std_dev, std_error, variance};
     pub use crate::discrete::{
-        BetaBinomial, Binomial, DiscreteDistribution, Geometric, Hypergeometric, Multinomial,
-        MultivariateHypergeometric, NegativeBinomial, Poisson, PoissonBinomial, Skellam, Zeta,
-        Zipfian,
+        BetaBinomial, Binomial, Boltzmann, DirichletMultinomial, DiscreteDistribution,
+        DiscreteLaplace, Geometric, Hypergeometric, Logarithmic, Multinomial,
+        MultivariateHypergeometric, NegativeBinomial, Planck, Poisson, PoissonBinomial, Skellam,
+        YuleSimon, Zeta, Zipfian,
     };
     pub use crate::dist::{
         Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
     };
     pub use crate::htest::{
-        Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
-        t_test_two_sample,
+        Tail, TestResult, chi_square_gof, chi2_gof_discrete, ks_test_one_sample, one_way_anova,
+        t_test_one_sample, t_test_two_sample,
     };
     pub use crate::lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
     pub use crate::rng::SplitMix64;

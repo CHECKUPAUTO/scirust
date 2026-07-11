@@ -1823,6 +1823,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "obd2_diagnostic"
+version = "0.1.0"
+dependencies = [
+ "scirust-core",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2755,6 +2762,7 @@ version = "0.1.0"
 name = "scirust-estimation"
 version = "0.1.0"
 dependencies = [
+ "scirust-solvers",
  "serde",
 ]
 

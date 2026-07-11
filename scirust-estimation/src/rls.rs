@@ -35,6 +35,13 @@ pub struct RlsFilter {
     w: Vec<f64>,
     /// Inverse input covariance (n_in × n_in), row-major.
     p: Vec<f64>,
+    /// Scratch: gain numerator `P·u` (n_in). Persistent so [`Self::update`]
+    /// performs **zero heap allocations** per sample.
+    #[serde(skip, default)]
+    scratch_pu: Vec<f64>,
+    /// Scratch: a-priori error `e = d − ŷ` (n_out), also the return storage.
+    #[serde(skip, default)]
+    scratch_e: Vec<f64>,
 }
 
 impl RlsFilter {
@@ -58,6 +65,8 @@ impl RlsFilter {
             lambda,
             w,
             p,
+            scratch_pu: vec![0.0; n_in],
+            scratch_e: vec![0.0; n_out],
         }
     }
 
@@ -77,48 +86,58 @@ impl RlsFilter {
 
     /// Filter one sample: predict `d̂ = w · u`, update weights using target `d`.
     ///
-    /// Returns the prediction error `e = d - d̂`.
+    /// Returns the a-priori prediction error `e = d - d̂` (a view into internal
+    /// storage, valid until the next call). The hot loop performs **no heap
+    /// allocation**: all intermediates live in persistent scratch buffers, and
+    /// the Kalman gain `k = pu/denom` is folded into the updates on the fly.
     #[allow(clippy::needless_range_loop)]
-    pub fn update(&mut self, u: &[f64], d: &[f64]) -> Vec<f64> {
+    pub fn update(&mut self, u: &[f64], d: &[f64]) -> &[f64] {
         assert_eq!(u.len(), self.n_in);
         assert_eq!(d.len(), self.n_out);
+        // One-time resize after deserialization (scratch is #[serde(skip)]).
+        if self.scratch_pu.len() != self.n_in
+        {
+            self.scratch_pu.resize(self.n_in, 0.0);
+        }
+        if self.scratch_e.len() != self.n_out
+        {
+            self.scratch_e.resize(self.n_out, 0.0);
+        }
 
-        // Prediction: d̂ = w · u
-        let mut d_hat = vec![0.0; self.n_out];
+        // Error: e = d - w·u  (prediction folded in).
         for i in 0..self.n_out
         {
             let row_start = i * self.n_in;
+            let mut d_hat = 0.0;
             for j in 0..self.n_in
             {
-                d_hat[i] += self.w[row_start + j] * u[j];
+                d_hat += self.w[row_start + j] * u[j];
             }
+            self.scratch_e[i] = d[i] - d_hat;
         }
 
-        // Error: e = d - d̂
-        let e: Vec<f64> = d.iter().zip(&d_hat).map(|(a, b)| a - b).collect();
-
-        // Gain: k = P·u / (λ + uᵀ·P·u)
-        let mut pu = vec![0.0; self.n_in];
+        // Gain numerator: pu = P·u ; denominator: λ + uᵀ·P·u.
         for i in 0..self.n_in
         {
             let row_start = i * self.n_in;
+            let mut acc = 0.0;
             for j in 0..self.n_in
             {
-                pu[i] += self.p[row_start + j] * u[j];
+                acc += self.p[row_start + j] * u[j];
             }
+            self.scratch_pu[i] = acc;
         }
-        let upu: f64 = u.iter().zip(&pu).map(|(a, b)| a * b).sum();
+        let upu: f64 = u.iter().zip(&self.scratch_pu).map(|(a, b)| a * b).sum();
         let denom = self.lambda + upu;
-        let gain: Vec<f64> = pu.iter().map(|v| v / denom).collect();
 
-        // Weight update: w += k ⊗ e  (outer product)
+        // Weight update: w += k ⊗ e with k[j] = pu[j]/denom.
         for i in 0..self.n_out
         {
             let row_start = i * self.n_in;
-            let ei = e[i];
+            let ei = self.scratch_e[i];
             for j in 0..self.n_in
             {
-                self.w[row_start + j] += gain[j] * ei;
+                self.w[row_start + j] += self.scratch_pu[j] / denom * ei;
             }
         }
 
@@ -127,10 +146,11 @@ impl RlsFilter {
         for i in 0..self.n_in
         {
             let row_start = i * self.n_in;
-            let ki = gain[i];
+            let ki = self.scratch_pu[i] / denom;
             for j in 0..self.n_in
             {
-                self.p[row_start + j] = (self.p[row_start + j] - ki * pu[j]) / self.lambda;
+                self.p[row_start + j] =
+                    (self.p[row_start + j] - ki * self.scratch_pu[j]) / self.lambda;
             }
         }
         // Enforce exact symmetry: P = (P + Pᵀ) / 2
@@ -145,7 +165,7 @@ impl RlsFilter {
             }
         }
 
-        e
+        &self.scratch_e
     }
 
     /// Current weight matrix (row-major `n_out × n_in`).
@@ -216,6 +236,9 @@ pub struct VectorRls {
     lambda: f64,
     w: Vec<f64>,
     p: Vec<f64>,
+    /// Scratch buffer `P·u` — persistent so `update` never allocates.
+    #[serde(skip, default)]
+    scratch_pu: Vec<f64>,
 }
 
 impl VectorRls {
@@ -228,40 +251,52 @@ impl VectorRls {
         {
             p[i * n + i] = delta;
         }
-        Self { n, lambda, w, p }
+        Self {
+            n,
+            lambda,
+            w,
+            p,
+            scratch_pu: vec![0.0; n],
+        }
     }
 
     /// Update with one input vector `u` and scalar target `d`.
-    /// Returns the prediction error `e = d - w·u`.
+    /// Returns the prediction error `e = d - w·u`. Zero heap allocation per call.
     #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, u: &[f64], d: f64) -> f64 {
         assert_eq!(u.len(), self.n);
+        if self.scratch_pu.len() != self.n
+        {
+            self.scratch_pu.resize(self.n, 0.0);
+        }
 
         let d_hat: f64 = self.w.iter().zip(u).map(|(a, b)| a * b).sum();
         let e = d - d_hat;
 
         // Gain numerator: pu = P·u
-        let mut pu = vec![0.0; self.n];
         for i in 0..self.n
         {
             let row_start = i * self.n;
+            let mut acc = 0.0;
             for j in 0..self.n
             {
-                pu[i] += self.p[row_start + j] * u[j];
+                acc += self.p[row_start + j] * u[j];
             }
+            self.scratch_pu[i] = acc;
         }
-        let upu: f64 = u.iter().zip(&pu).map(|(a, b)| a * b).sum();
+        let upu: f64 = u.iter().zip(&self.scratch_pu).map(|(a, b)| a * b).sum();
         let denom = self.lambda + upu;
 
         // Weight and covariance updates (symmetric form)
         for i in 0..self.n
         {
-            let ki = pu[i] / denom;
+            let ki = self.scratch_pu[i] / denom;
             self.w[i] += ki * e;
             let row_start = i * self.n;
             for j in 0..self.n
             {
-                self.p[row_start + j] = (self.p[row_start + j] - ki * pu[j]) / self.lambda;
+                self.p[row_start + j] =
+                    (self.p[row_start + j] - ki * self.scratch_pu[j]) / self.lambda;
             }
         }
         // Enforce exact symmetry: P = (P + Pᵀ) / 2
@@ -360,5 +395,78 @@ mod tests {
         let d = rls.delta(1.0);
         let trace: f64 = (0..4).map(|i| d[i * 4 + i]).sum();
         assert!((trace - 1.0).abs() < 1e-9, "delta trace = {trace}");
+    }
+
+    #[test]
+    fn rls_is_a_static_state_kalman_filter_cross_oracle() {
+        // At λ = 1 the RLS recursion IS a Kalman filter whose state is the
+        // weight vector: F = I, Q = 0, H_k = u_kᵀ, R = 1, P(0) = δ·I. The
+        // crate's own KalmanFilter (generic matrix path with an explicit
+        // innovation-covariance inversion) is therefore an independent oracle:
+        // both implementations must agree along the whole trajectory. Since H
+        // changes per sample, a fresh KalmanFilter is rebuilt each step from
+        // the carried state/covariance — pure reuse, no reimplementation.
+        use crate::kalman::KalmanFilter;
+        use crate::linalg::Mat;
+
+        let n = 3;
+        let delta = 100.0;
+        let mut rls = VectorRls::new(n, 1.0, delta);
+
+        let mut x = vec![0.0; n];
+        let mut p = Mat::identity(n);
+        for i in 0..n
+        {
+            p.set(i, i, delta);
+        }
+        let identity = Mat::identity(n);
+        let zero_q = Mat::zeros(n, n);
+        let r = Mat::new(1, 1, vec![1.0]);
+
+        struct Lcg(u64);
+        impl Lcg {
+            fn next(&mut self) -> f64 {
+                self.0 = self
+                    .0
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((self.0 >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+            }
+        }
+        let mut rng = Lcg(57);
+        let true_w = [0.8, -1.3, 2.1];
+        for _ in 0..300
+        {
+            let u: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let d: f64 = true_w.iter().zip(&u).map(|(a, b)| a * b).sum::<f64>() + 0.1 * rng.next();
+
+            rls.update(&u, d);
+
+            let h = Mat::new(1, n, u.clone());
+            let mut kf = KalmanFilter::new(
+                x.clone(),
+                p.clone(),
+                identity.clone(),
+                zero_q.clone(),
+                h,
+                r.clone(),
+            );
+            assert!(kf.update(&[d]), "Kalman update failed");
+            x = kf.state().to_vec();
+            p = kf.covariance().clone();
+
+            for (a, b) in rls.weights().iter().zip(&x)
+            {
+                assert!(
+                    (a - b).abs() < 1.0e-8 * (1.0 + a.abs()),
+                    "RLS {a} vs Kalman {b}"
+                );
+            }
+        }
+        // Both converged to the truth.
+        for (w, t) in rls.weights().iter().zip(&true_w)
+        {
+            assert!((w - t).abs() < 0.05, "{w} vs {t}");
+        }
     }
 }

@@ -7,8 +7,16 @@
 //! every node. Hardy Cross iteratively corrects each loop's flows until
 //! the head loss around every loop closes; loop corrections preserve
 //! node continuity exactly, by construction.
+//!
+//! [`hardy_cross`] takes a fixed resistance per pipe. [`hardy_cross_darcy`]
+//! couples this to [`crate::pipe::friction_factor`]: each pipe is given
+//! its real diameter, length and roughness, and its Darcy resistance is
+//! recomputed from the actual Reynolds number at every outer iteration
+//! (laminar, Colebrook–White or the documented blend, exactly as in
+//! [`crate::pipe`]) — sizing a real network rather than one with
+//! pre-guessed friction factors.
 
-use crate::error::{FluidsError, finite, in_range, positive};
+use crate::error::{FluidsError, finite, in_range, non_negative, positive};
 
 /// A pipe's head-loss law `h = r·|Q|^{n−1}·Q` \[m\] for flow `Q` \[m³/s\].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -170,6 +178,128 @@ pub fn hardy_cross(
     })
 }
 
+/// A physical pipe whose Darcy resistance is derived from its actual
+/// dimensions rather than pre-computed, for use with
+/// [`hardy_cross_darcy`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicalPipe {
+    diameter: f64,
+    length: f64,
+    roughness: f64,
+}
+
+impl PhysicalPipe {
+    /// Build a physical pipe from its internal diameter `D > 0` \[m\],
+    /// length `L > 0` \[m\] and absolute roughness `ε ≥ 0` \[m\], with
+    /// `ε/D ≤ 0.1` (the validity range of [`crate::pipe::friction_factor`]).
+    pub fn new(diameter: f64, length: f64, roughness: f64) -> Result<Self, FluidsError> {
+        positive("diameter", diameter)?;
+        positive("length", length)?;
+        non_negative("roughness", roughness)?;
+        in_range("roughness / diameter", roughness / diameter, 0.0, 0.1)?;
+        Ok(Self {
+            diameter,
+            length,
+            roughness,
+        })
+    }
+
+    /// Cross-sectional area `π D²/4` \[m²\].
+    pub fn area(&self) -> f64 {
+        std::f64::consts::PI * self.diameter * self.diameter / 4.0
+    }
+}
+
+/// Solve a looped network of **physical** pipes, coupling [`hardy_cross`]
+/// to [`crate::pipe::friction_factor`].
+///
+/// At each outer iteration, every pipe's Darcy friction factor is
+/// recomputed from its current Reynolds number, producing a resistance
+/// `r = f L/(2 g D A²)` (Darcy–Weisbach, `h = r Q²`); an inner
+/// [`hardy_cross`] pass then corrects the loop flows for that frozen
+/// set of resistances. Repeating this outer loop to convergence is the
+/// standard successive-substitution treatment of a Re-dependent `f` in
+/// real pipe-network solvers: `h = f (L/D) V²/(2g)` is quadratic in `V`
+/// by the Darcy–Weisbach definition itself in every regime — laminar
+/// flow's linear-in-`V` head loss falls out of `f` itself scaling as
+/// `1/Re`, not from a different power law — so the fixed point of this
+/// iteration is the exact physical solution.
+///
+/// * `pipes` — physical dimensions of each pipe
+/// * `loops`, `initial_flows` — as [`hardy_cross`]
+/// * `density`, `dyn_viscosity` — fluid properties \[kg/m³\], \[Pa·s\]
+/// * `gravity` — \[m/s²\], > 0
+/// * `tolerance` — convergence threshold on both the inner loop
+///   correction and the outer flow change between successive friction
+///   updates \[m³/s\], > 0
+/// * `max_outer_iterations`, `max_inner_iterations` — iteration budgets
+///
+/// Deterministic: the friction factor at (near-)zero flow is evaluated
+/// at a floored Reynolds number so it never triggers a domain error;
+/// identical inputs give identical outputs everywhere.
+#[allow(clippy::too_many_arguments)]
+pub fn hardy_cross_darcy(
+    pipes: &[PhysicalPipe],
+    loops: &[Vec<(usize, f64)>],
+    initial_flows: &[f64],
+    density: f64,
+    dyn_viscosity: f64,
+    gravity: f64,
+    tolerance: f64,
+    max_outer_iterations: usize,
+    max_inner_iterations: usize,
+) -> Result<Vec<f64>, FluidsError> {
+    positive("density", density)?;
+    positive("dyn_viscosity", dyn_viscosity)?;
+    positive("gravity", gravity)?;
+    positive("tolerance", tolerance)?;
+    if initial_flows.len() != pipes.len()
+    {
+        return Err(FluidsError::OutOfRange {
+            name: "initial_flows.len()",
+            value: initial_flows.len() as f64,
+            min: pipes.len() as f64,
+            max: pipes.len() as f64,
+        });
+    }
+    if max_outer_iterations == 0
+    {
+        return Err(FluidsError::NonPositive {
+            name: "max_outer_iterations",
+            value: 0.0,
+        });
+    }
+
+    let mut flows = initial_flows.to_vec();
+    for _ in 0..max_outer_iterations
+    {
+        let mut net_pipes = Vec::with_capacity(pipes.len());
+        for (p, &q) in pipes.iter().zip(flows.iter())
+        {
+            let area = p.area();
+            let speed = q.abs() / area;
+            let re = (density * speed * p.diameter / dyn_viscosity).max(1e-9);
+            let f = crate::pipe::friction_factor(re, p.roughness / p.diameter)?;
+            let r = f * p.length / (2.0 * gravity * p.diameter * area * area);
+            net_pipes.push(NetworkPipe::new(r, 2.0)?);
+        }
+        let new_flows = hardy_cross(&net_pipes, loops, &flows, tolerance, max_inner_iterations)?;
+        let max_change = new_flows
+            .iter()
+            .zip(flows.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        flows = new_flows;
+        if max_change < tolerance
+        {
+            return Ok(flows);
+        }
+    }
+    Err(FluidsError::NoConvergence {
+        what: "Hardy Cross / Darcy-Weisbach outer iteration",
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +426,129 @@ mod tests {
         // Bad pipe law.
         assert!(NetworkPipe::new(0.0, 2.0).is_err());
         assert!(NetworkPipe::new(1.0, 5.0).is_err());
+    }
+
+    // ---------------------------------------------------------------- //
+    //  hardy_cross_darcy: real pipes coupled to friction_factor.       //
+    // ---------------------------------------------------------------- //
+
+    const WATER_RHO: f64 = 998.0;
+    const WATER_MU: f64 = 1.002e-3;
+    const G: f64 = 9.81;
+
+    #[test]
+    fn darcy_symmetric_pipes_split_evenly() {
+        // Two physically identical pipes must split any total flow
+        // evenly, whatever their (equal, unknown a priori) friction
+        // factor turns out to be.
+        let p = PhysicalPipe::new(0.10, 100.0, 4.5e-5).unwrap();
+        let flows = hardy_cross_darcy(
+            &[p, p],
+            &[vec![(0, 1.0), (1, -1.0)]],
+            &[0.08, 0.02],
+            WATER_RHO,
+            WATER_MU,
+            G,
+            1e-10,
+            60,
+            200,
+        )
+        .unwrap();
+        assert!((flows[0] - 0.05).abs() < 1e-6, "q0 = {}", flows[0]);
+        assert!((flows[1] - 0.05).abs() < 1e-6, "q1 = {}", flows[1]);
+    }
+
+    #[test]
+    fn darcy_wider_pipe_carries_more_flow_and_closes_physically() {
+        // A wider parallel pipe (same length/roughness) is less
+        // resistant and must carry the larger share; continuity must be
+        // preserved, and the converged flows must satisfy the REAL
+        // Darcy-Weisbach head-loss balance (not just the frozen-r
+        // balance of a single outer step).
+        let wide = PhysicalPipe::new(0.10, 100.0, 4.5e-5).unwrap();
+        let narrow = PhysicalPipe::new(0.05, 100.0, 4.5e-5).unwrap();
+        let total = 0.10;
+        let flows = hardy_cross_darcy(
+            &[wide, narrow],
+            &[vec![(0, 1.0), (1, -1.0)]],
+            &[total * 0.5, total * 0.5],
+            WATER_RHO,
+            WATER_MU,
+            G,
+            1e-10,
+            60,
+            200,
+        )
+        .unwrap();
+        assert!(
+            flows[0] > flows[1],
+            "wide={}, narrow={}",
+            flows[0],
+            flows[1]
+        );
+        assert!((flows[0] + flows[1] - total).abs() < 1e-8, "{flows:?}");
+
+        // Recompute each pipe's head loss from first principles at the
+        // converged flow and check the loop closes.
+        let head_loss = |p: &PhysicalPipe, q: f64| -> f64 {
+            let area = p.area();
+            let speed = q.abs() / area;
+            let re = (WATER_RHO * speed * p.diameter / WATER_MU).max(1e-9);
+            let f = crate::pipe::friction_factor(re, p.roughness / p.diameter).unwrap();
+            f * p.length / p.diameter * speed * speed / (2.0 * G)
+        };
+        let h0 = head_loss(&wide, flows[0]);
+        let h1 = head_loss(&narrow, flows[1]);
+        assert!((h0 - h1).abs() / h0.max(h1) < 1e-6, "h0={h0}, h1={h1}");
+    }
+
+    #[test]
+    fn darcy_rejects_invalid_pipes_and_inputs() {
+        assert!(PhysicalPipe::new(0.0, 100.0, 1e-5).is_err());
+        assert!(PhysicalPipe::new(0.1, 100.0, -1e-5).is_err());
+        assert!(PhysicalPipe::new(0.1, 100.0, 0.02).is_err()); // eps/D = 0.2 > 0.1
+        let p = PhysicalPipe::new(0.1, 100.0, 4.5e-5).unwrap();
+        assert!(
+            hardy_cross_darcy(
+                &[p, p],
+                &[vec![(0, 1.0), (1, -1.0)]],
+                &[1.0],
+                WATER_RHO,
+                WATER_MU,
+                G,
+                1e-9,
+                10,
+                50
+            )
+            .is_err()
+        );
+        assert!(
+            hardy_cross_darcy(
+                &[p],
+                &[vec![(0, 1.0)]],
+                &[1.0],
+                -1.0,
+                WATER_MU,
+                G,
+                1e-9,
+                10,
+                50
+            )
+            .is_err()
+        );
+        assert!(
+            hardy_cross_darcy(
+                &[p],
+                &[vec![(0, 1.0)]],
+                &[1.0],
+                WATER_RHO,
+                WATER_MU,
+                G,
+                1e-9,
+                0,
+                50
+            )
+            .is_err()
+        );
     }
 }
