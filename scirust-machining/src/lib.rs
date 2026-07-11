@@ -27,6 +27,8 @@
 //!   flèche et cisaillement corrigé (facteur de Wahl).
 //! - [`shafts`] — arbres de transmission : torsion/flexion des sections
 //!   circulaires, contrainte équivalente de **von Mises** et angle de torsion.
+//! - [`keys`] — clavetages (clavette parallèle, **ISO 773**) : cisaillement de
+//!   la clavette et pression de matage sur les flancs.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -75,6 +77,7 @@ pub mod economics;
 pub mod forces;
 pub mod gears;
 pub mod hertz;
+pub mod keys;
 pub mod kinematics;
 pub mod roughness;
 pub mod shafts;
@@ -97,6 +100,9 @@ pub use gears::{
 pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
     point_contact_max_pressure, point_contact_radius,
+};
+pub use keys::{
+    key_bearing_pressure, key_shear_stress, required_length_for_bearing, tangential_force,
 };
 pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
