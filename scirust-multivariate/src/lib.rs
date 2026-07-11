@@ -321,6 +321,20 @@ fn jacobi_eigen(a: &Matrix) -> (Vec<f64>, Vec<Vec<f64>>) {
         v.data[i][i] = 1.0;
     }
 
+    // Relative convergence threshold `n · eps · max|a_ij|` (Golub & Van
+    // Loan, *Matrix Computations*, §8.5), rather than a fixed absolute
+    // constant: data at a small physical scale (e.g. sensor readings
+    // ~1e-7) has an off-diagonal norm that never crosses a fixed 1e-12
+    // cutoff, so the sweep stopped after zero rotations and PCA/eigen
+    // silently returned the untouched input as if it were diagonal.
+    let scale_ref = a
+        .data
+        .iter()
+        .flatten()
+        .fold(0.0f64, |acc, &v| acc.max(v.abs()))
+        .max(1e-300);
+    let converge_tol = (n as f64) * f64::EPSILON * scale_ref;
+
     let max_iters = 100 * n * n;
     for _ in 0..max_iters
     {
@@ -341,7 +355,7 @@ fn jacobi_eigen(a: &Matrix) -> (Vec<f64>, Vec<Vec<f64>>) {
             }
         }
 
-        if max_val < 1e-12
+        if max_val < converge_tol
         {
             break;
         }
@@ -2007,6 +2021,37 @@ mod tests {
         assert!(
             (v0[0] * v0[1]) > 0.0,
             "eigenvector components must share sign: {v0:?}"
+        );
+    }
+
+    #[test]
+    fn pca_known_2d_covariance_eigen_at_a_tiny_physical_scale() {
+        // Regression test for a P1 audit finding: the same perfectly
+        // correlated 2D data as `pca_known_2d_covariance_eigen` above, scaled
+        // down to ~1e-7 (a plausible sensor-reading magnitude), gave a
+        // covariance ~2e-14 — below the old fixed 1e-12 Jacobi convergence
+        // threshold — so the sweep performed zero rotations and PCA silently
+        // returned explained_variance_ratio = [0.5, 0.5] and eigenvector
+        // (1, 0) instead of the true [1.0, 0.0] and (1/√2, 1/√2).
+        let scale = 1e-7;
+        let data = Matrix::from_slice(&[
+            &[-2.0 * scale, -2.0 * scale],
+            &[-scale, -scale],
+            &[0.0, 0.0],
+            &[1.0 * scale, 1.0 * scale],
+            &[2.0 * scale, 2.0 * scale],
+        ]);
+        let pca = pca_fit(&data);
+        assert!(
+            (pca.explained_variance_ratio[0] - 1.0).abs() < 1e-6,
+            "explained_variance_ratio: {:?}",
+            pca.explained_variance_ratio
+        );
+        let inv_sqrt2 = 1.0 / 2.0_f64.sqrt();
+        let v0 = &pca.eigenvectors[0];
+        assert!(
+            (v0[0].abs() - inv_sqrt2).abs() < 1e-6 && (v0[1].abs() - inv_sqrt2).abs() < 1e-6,
+            "top eigenvector: {v0:?}"
         );
     }
 

@@ -14,8 +14,13 @@ use crate::linalg::{axpy, dot, norm2};
 use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
-/// Valeur minimale pour un pivot (évite division par zéro).
-const PIVOT_EPS: f64 = 1e-30;
+/// Seuil de « pivot nul » (courbure `pᵀAp` stagnante) exprimé relativement à
+/// `‖p‖²` — dimensionnellement une courbure par unité de norme au carré,
+/// donc invariant d'échelle : un système `A·x=b` mis à l'échelle par un
+/// facteur physique quelconque (unités SI micro, etc.) n'est plus déclaré
+/// singulier à tort (cf. Golub & Van Loan §3.4.6, seuil relatif à la norme
+/// plutôt qu'absolu).
+const PIVOT_EPS_REL: f64 = 1e-14;
 
 /// Seuil de détection de divergence : si résidu > ce ratio × meilleur résidu.
 const DIVERGENCE_RATIO: f64 = 10.0;
@@ -72,6 +77,23 @@ where
     check_finite(rs_old, "rs_old", 0)?;
     let mut last_res = rs_old.sqrt();
 
+    // Convergence initiale (b = 0, ou x0 déjà solution) : GMRES et le CG creux
+    // font déjà ce test avant la boucle de Krylov ; son absence ici faisait
+    // tomber directement sur le test de pivot (p = r = 0 ⇒ pᵀAp = 0) et
+    // retourner à tort SolverError::Singular sur un système parfaitement
+    // régulier.
+    if last_res <= tol.abs + tol.rel * b_norm
+    {
+        return Ok(Solution {
+            value: x,
+            info: ConvergenceInfo {
+                iterations: 0,
+                residual: last_res,
+                converged: true,
+            },
+        });
+    }
+
     // Backup du meilleur état pour rollback
     let mut best_x = x.clone();
     let mut best_res = last_res;
@@ -101,12 +123,16 @@ where
         let pap = dot(&p, &ap);
         check_finite(pap, "pap", k)?;
 
-        if pap.abs() < PIVOT_EPS
+        // p ≠ 0 here (the initial-convergence gate above returns before p can
+        // become the zero vector), so ‖p‖² is a safe, strictly positive scale
+        // reference for the curvature test.
+        let p_norm_sq = dot(&p, &p).max(1e-300);
+        if (pap / p_norm_sq).abs() < PIVOT_EPS_REL
         {
             warn!(
                 target: "solver",
-                "Conjugate gradient stalled: p^T·A·p = {:.3e} at iteration {} — restoring backup",
-                pap, k
+                "Conjugate gradient stalled: p^T·A·p / ‖p‖² = {:.3e} at iteration {} — restoring backup",
+                pap / p_norm_sq, k
             );
             return Err(SolverError::Singular { row: k, pivot: pap });
         }
@@ -225,5 +251,85 @@ mod tests {
         }
         // CG converge en ≤ n itérations sur matrice n×n SPD
         assert!(sol.info.iterations <= n);
+    }
+
+    #[test]
+    fn cg_converges_immediately_on_homogeneous_system() {
+        // Regression test for a P1 audit finding: with b = 0 and x0 = 0,
+        // r = p = 0 so pᵀAp = 0, which the old absolute PIVOT_EPS test
+        // reported as SolverError::Singular on a perfectly regular matrix
+        // (the identity). GMRES and the sparse CG both test convergence
+        // before entering the Krylov loop; dense CG did not.
+        let n = 4;
+        let identity = Matrix::from_fn(n, n, |i, j| if i == j { 1.0 } else { 0.0 });
+        let b = vec![0.0; n];
+        let sol = conjugate_gradient(
+            |x, y| y.copy_from_slice(&identity.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            Tolerance::default(),
+        )
+        .expect("a homogeneous system with a regular matrix must converge, not error");
+        assert_eq!(sol.info.iterations, 0);
+        for &xi in &sol.value
+        {
+            assert_eq!(xi, 0.0);
+        }
+    }
+
+    #[test]
+    fn cg_converges_immediately_when_x0_is_already_the_solution() {
+        let n = 3;
+        let mat = Matrix::from_fn(n, n, |i, j| if i == j { 2.0 } else { 0.0 });
+        let x_true = vec![1.0, 2.0, 3.0];
+        let b = mat.matvec(&x_true).unwrap();
+        let sol = conjugate_gradient(
+            |x, y| y.copy_from_slice(&mat.matvec(x).unwrap()),
+            &b,
+            x_true.clone(),
+            Tolerance::default(),
+        )
+        .expect("starting exactly at the solution must converge, not error");
+        assert_eq!(sol.info.iterations, 0);
+        assert_relative_eq!(sol.value.as_slice(), x_true.as_slice(), epsilon = 1e-12);
+    }
+
+    #[test]
+    fn cg_solves_a_tiny_scale_system_without_false_singularity() {
+        // Regression test for a P1 audit finding: PIVOT_EPS was an absolute
+        // 1e-30 compared directly against pᵀAp, a quantity that scales with
+        // the physical scale of A and b — a regular system at a tiny scale
+        // (e.g. capacitance in Farads, ~1e-12) was declared singular.
+        let n = 4;
+        let scale = 1e-9;
+        let mat = Matrix::from_fn(n, n, |i, j| {
+            if i == j
+            {
+                4.0 * scale
+            }
+            else if (i as isize - j as isize).abs() == 1
+            {
+                -scale
+            }
+            else
+            {
+                0.0
+            }
+        });
+        let x_true = vec![1.0 * scale, 2.0 * scale, 3.0 * scale, 4.0 * scale];
+        let b = mat.matvec(&x_true).unwrap();
+        let sol = conjugate_gradient(
+            |x, y| y.copy_from_slice(&mat.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            Tolerance::default(),
+        )
+        .expect("a regular system at a tiny physical scale must not be reported singular");
+        assert_relative_eq!(
+            sol.value.as_slice(),
+            x_true.as_slice(),
+            epsilon = 1e-6,
+            max_relative = 1e-6
+        );
     }
 }

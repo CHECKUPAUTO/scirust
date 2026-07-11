@@ -134,10 +134,17 @@ impl Mat {
     }
 
     /// Inverse via Gauss–Jordan elimination with partial pivoting; `None` if
-    /// singular (pivot below `1e-12`).
+    /// singular (pivot below `n · eps · max|a_ij|`, relative to the matrix's
+    /// own scale — Golub & Van Loan, *Matrix Computations*, §3.4.6 — rather
+    /// than a fixed absolute constant, so a regular matrix at a small
+    /// physical scale isn't declared singular. This inverse feeds the
+    /// Kalman/EKF update, where a false singularity would otherwise abort
+    /// state estimation for any state space in small physical units.
     pub fn inverse(&self) -> Option<Mat> {
         assert_eq!(self.rows, self.cols, "inverse needs square matrix");
         let n = self.rows;
+        let max_abs = self.data.iter().fold(0.0f64, |acc, &v| acc.max(v.abs()));
+        let piv_tol = (n as f64) * f64::EPSILON * max_abs.max(1e-300);
         // Augment [A | I].
         let mut a = vec![0.0; n * 2 * n];
         for i in 0..n
@@ -162,7 +169,7 @@ impl Mat {
                     piv = r;
                 }
             }
-            if best < 1e-12
+            if best < piv_tol
             {
                 return None;
             }
@@ -266,5 +273,34 @@ mod tests {
     fn singular_matrix_has_no_inverse() {
         let a = Mat::new(2, 2, vec![1.0, 2.0, 2.0, 4.0]);
         assert!(a.inverse().is_none());
+    }
+
+    #[test]
+    fn inverse_round_trips_at_a_tiny_physical_scale() {
+        // Regression test for a P1 audit finding: the pivot threshold was a
+        // fixed absolute 1e-12 compared directly against the pivot magnitude
+        // — the same regular matrix as `inverse_round_trips_to_identity`
+        // above, scaled down to a tiny physical magnitude (this `inverse`
+        // feeds the Kalman/EKF update, where state spaces in small SI units
+        // are common), was declared singular even though it is perfectly
+        // well-conditioned (scaling doesn't change the condition number).
+        let scale = 1e-13;
+        let a = Mat::new(
+            3,
+            3,
+            vec![2.0, 1.0, 1.0, 1.0, 3.0, 2.0, 1.0, 0.0, 0.0]
+                .into_iter()
+                .map(|v| v * scale)
+                .collect(),
+        );
+        let inv = a
+            .inverse()
+            .expect("a regular matrix at a tiny physical scale must not be reported singular");
+        let prod = a.matmul(&inv);
+        let id = Mat::identity(3);
+        for (p, q) in prod.data.iter().zip(&id.data)
+        {
+            assert!((p - q).abs() < 1e-6, "{p} != {q}");
+        }
     }
 }

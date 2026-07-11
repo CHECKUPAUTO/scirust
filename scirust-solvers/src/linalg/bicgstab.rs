@@ -22,6 +22,14 @@ use crate::linalg::{dot, norm2};
 use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
 use tracing::warn;
 
+// Dimensionless breakdown threshold. `rho` and `r_hat_v` below are raw dot
+// products of vectors that scale with the physical magnitude of `b` (e.g.
+// ~1e-14 for a system in micro-units), so comparing them directly against a
+// fixed absolute epsilon declared any small-scale-but-regular system
+// "singular". Normalizing each by the product of the vector norms turns the
+// test into a cosine-like, scale-invariant measure (Cauchy–Schwarz bounds it
+// to [-1, 1]) — this is the normalization Barrett et al., "Templates for the
+// Solution of Linear Systems" (1994), use for breakdown detection.
 const BREAKDOWN_EPS: f64 = 1e-13;
 
 fn check_finite(value: f64, iter: usize) -> SolverResult<()> {
@@ -84,10 +92,27 @@ where
     }
     // Résidu de référence fixe (pas de tirage aléatoire — voir doc de module).
     let r_hat = r.clone();
+    let r_hat_norm = norm2(&r_hat).max(1e-300);
 
     let b_norm = norm2(b).max(1e-30);
     let mut best_x = x.clone();
     let mut best_res = norm2(&r);
+
+    // Convergence initiale (b = 0, ou x0 déjà solution) : GMRES fait déjà ce
+    // test avant la boucle de Krylov. Sans lui, r_hat = r = 0 rend
+    // rho_new = ⟨r_hat, r⟩ = 0 et le test de breakdown ci-dessous déclarait à
+    // tort un système régulier « singulier ».
+    if best_res <= tol.abs + tol.rel * b_norm
+    {
+        return Ok(Solution {
+            value: x,
+            info: ConvergenceInfo {
+                iterations: 0,
+                residual: best_res,
+                converged: true,
+            },
+        });
+    }
 
     let mut rho_old = 1.0f64;
     let mut alpha = 1.0f64;
@@ -99,7 +124,8 @@ where
     {
         let rho_new = dot(&r_hat, &r);
         check_finite(rho_new, k)?;
-        if rho_new.abs() < BREAKDOWN_EPS
+        let r_norm = norm2(&r).max(1e-300);
+        if (rho_new / (r_hat_norm * r_norm)).abs() < BREAKDOWN_EPS
         {
             warn!(target: "solver", "BiCGSTAB breakdown: rho ≈ 0 at iteration {k}");
             x.copy_from_slice(&best_x);
@@ -138,7 +164,8 @@ where
 
         let r_hat_v = dot(&r_hat, &v);
         check_finite(r_hat_v, k)?;
-        if r_hat_v.abs() < BREAKDOWN_EPS
+        let v_norm = norm2(&v).max(1e-300);
+        if (r_hat_v / (r_hat_norm * v_norm)).abs() < BREAKDOWN_EPS
         {
             warn!(target: "solver", "BiCGSTAB breakdown: r_hat·v ≈ 0 at iteration {k}");
             x.copy_from_slice(&best_x);
@@ -332,5 +359,43 @@ mod tests {
             Tolerance::default(),
         );
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn bicgstab_converges_immediately_on_homogeneous_system() {
+        // Regression test for a P1 audit finding: with b = 0, r = r_hat = 0
+        // so rho_new = ⟨r_hat, r⟩ = 0, which the old absolute BREAKDOWN_EPS
+        // test reported as SolverError::Singular on a perfectly regular
+        // matrix (the identity).
+        let n = 4;
+        let identity = Matrix::from_fn(n, n, |i, j| if i == j { 1.0 } else { 0.0 });
+        let sol = bicgstab(
+            |x, y| y.copy_from_slice(&identity.matvec(x).unwrap()),
+            &vec![0.0; n],
+            vec![0.0; n],
+            Tolerance::default(),
+        )
+        .expect("a homogeneous system with a regular matrix must converge, not error");
+        assert_eq!(sol.info.iterations, 0);
+    }
+
+    #[test]
+    fn bicgstab_solves_a_tiny_scale_system_without_false_breakdown() {
+        // Regression test for a P1 audit finding: BREAKDOWN_EPS was compared
+        // directly against rho = ⟨r_hat, r⟩, a quantity that scales
+        // quadratically with ‖b‖ — a regular system with a small ‖b‖ (e.g.
+        // ~1e-7, plausible in SI micro-units) was declared singular even
+        // though it is perfectly well-conditioned (here, the identity).
+        let n = 3;
+        let identity = Matrix::from_fn(n, n, |i, j| if i == j { 1.0 } else { 0.0 });
+        let b = vec![1e-7, 1e-7, 1e-7];
+        let sol = bicgstab(
+            |x, y| y.copy_from_slice(&identity.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            Tolerance::default(),
+        )
+        .expect("a regular system with a tiny ‖b‖ must not be reported singular");
+        assert_relative_eq!(sol.value.as_slice(), b.as_slice(), epsilon = 1e-9);
     }
 }

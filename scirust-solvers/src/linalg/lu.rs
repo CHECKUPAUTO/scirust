@@ -10,7 +10,14 @@ use super::Matrix;
 use crate::{SolverError, SolverResult};
 use tracing::warn;
 
-const PIVOT_EPS: f64 = 1e-14;
+/// Given the largest-magnitude entry of the matrix and its size, returns the
+/// pivot-rejection threshold `n · eps · max|a_ij|` (Golub & Van Loan, *Matrix
+/// Computations*, §3.4.6) — relative to the matrix's own scale rather than a
+/// fixed absolute constant, so a regular matrix at a small physical scale
+/// isn't declared singular.
+fn pivot_tol(n: usize, max_abs: f64) -> f64 {
+    (n as f64) * f64::EPSILON * max_abs.max(1e-300)
+}
 
 fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
@@ -29,12 +36,19 @@ pub struct Lu {
     pub piv: Vec<usize>,
     /// Nombre de swaps effectués (pour le signe du déterminant).
     pub swap_count: usize,
+    /// Seuil de pivot (relatif à l'échelle de la matrice d'origine), reporté
+    /// depuis `lu_decompose` pour que `solve_lu` applique le même critère.
+    piv_tol: f64,
 }
 
 /// Factorisation LU avec pivot partiel par ligne (Doolittle).
 /// Mute `a` (copie locale) ; renvoie l'objet `Lu`.
 pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
     let n = a.ensure_square()?;
+    let max_abs = (0..n)
+        .flat_map(|i| (0..n).map(move |j| (i, j)))
+        .fold(0.0f64, |acc, (i, j)| acc.max(a[(i, j)].abs()));
+    let piv_tol = pivot_tol(n, max_abs);
     let mut piv = (0..n).collect::<Vec<_>>();
     let mut swap_count = 0;
 
@@ -53,7 +67,7 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
                 max_idx = i;
             }
         }
-        if max_val < PIVOT_EPS
+        if max_val < piv_tol
         {
             warn!(
                 target: "solver",
@@ -91,6 +105,7 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
         lu: a,
         piv,
         swap_count,
+        piv_tol,
     })
 }
 
@@ -137,7 +152,7 @@ pub fn solve_lu(lu: &Lu, b: &[f64]) -> SolverResult<Vec<f64>> {
             s -= lu.lu[(i, j)] * x[j];
         }
         let pivot = lu.lu[(i, i)];
-        if pivot.abs() < PIVOT_EPS
+        if pivot.abs() < lu.piv_tol
         {
             warn!(
                 target: "solver",
@@ -170,6 +185,27 @@ mod tests {
         let x = solve(a, &b)?;
         assert_relative_eq!(x[0], 1.4, epsilon = 1e-12);
         assert_relative_eq!(x[1], 1.2, epsilon = 1e-12);
+        Ok(())
+    }
+
+    #[test]
+    fn solve_2x2_at_a_tiny_physical_scale() -> SolverResult<()> {
+        // Regression test for a P1 audit finding: PIVOT_EPS was a fixed
+        // absolute 1e-14 compared directly against the pivot magnitude — the
+        // same regular 2x2 system as `solve_2x2` above, scaled down to a tiny
+        // physical magnitude, was declared singular even though it is
+        // perfectly well-conditioned (scaling doesn't change the condition
+        // number).
+        let scale = 1e-16;
+        let a = Matrix::from_row_major(
+            2,
+            2,
+            vec![2.0 * scale, 1.0 * scale, 1.0 * scale, 3.0 * scale],
+        );
+        let b = vec![4.0 * scale, 5.0 * scale];
+        let x = solve(a, &b)?;
+        assert_relative_eq!(x[0], 1.4, epsilon = 1e-9);
+        assert_relative_eq!(x[1], 1.2, epsilon = 1e-9);
         Ok(())
     }
 

@@ -6,8 +6,14 @@ use super::Matrix;
 use crate::{SolverError, SolverResult};
 use tracing::warn;
 
-/// Seuil de tolérance pour les pivots Cholesky.
-const PIVOT_EPS: f64 = 1e-15;
+/// Given the largest-magnitude entry seen so far and the matrix size,
+/// returns the pivot-rejection threshold `n · eps · max|·|` (Golub & Van
+/// Loan, *Matrix Computations*, §3.4.6) — relative to scale rather than a
+/// fixed absolute constant, so a regular matrix at a small physical scale
+/// isn't declared singular/non-SPD.
+fn pivot_tol(n: usize, max_abs: f64) -> f64 {
+    (n as f64) * f64::EPSILON * max_abs.max(1e-300)
+}
 
 fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
@@ -22,6 +28,10 @@ fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
 /// Renvoie L (matrice triangulaire inf avec zéros au-dessus).
 pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
     let n = a.ensure_square()?;
+    let max_abs = (0..n)
+        .flat_map(|i| (0..n).map(move |j| (i, j)))
+        .fold(0.0f64, |acc, (i, j)| acc.max(a[(i, j)].abs()));
+    let piv_tol = pivot_tol(n, max_abs);
     let mut l = Matrix::zeros(n, n);
 
     for i in 0..n
@@ -59,7 +69,7 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
             else
             {
                 let ljj = l[(j, j)];
-                if ljj.abs() < PIVOT_EPS
+                if ljj.abs() < piv_tol
                 {
                     warn!(
                         target: "solver",
@@ -93,6 +103,12 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
         check_finite(bi, &format!("b[{i}]"))?;
     }
 
+    // L n'est pas reçue avec la matrice A d'origine ; sa propre diagonale est
+    // la référence d'échelle disponible ici (cf. cholesky_decompose, qui
+    // utilise max|a_ij|).
+    let max_abs = (0..n).fold(0.0f64, |acc, i| acc.max(l[(i, i)].abs()));
+    let piv_tol = pivot_tol(n, max_abs);
+
     // L · y = b (substitution avant)
     let mut y = vec![0.0; n];
     for i in 0..n
@@ -103,7 +119,7 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
             s -= l[(i, j)] * y[j];
         }
         let diag = l[(i, i)];
-        if diag.abs() < PIVOT_EPS
+        if diag.abs() < piv_tol
         {
             return Err(SolverError::Singular {
                 row: i,
@@ -123,7 +139,7 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
             s -= l[(j, i)] * x[j];
         }
         let diag = l[(i, i)];
-        if diag.abs() < PIVOT_EPS
+        if diag.abs() < piv_tol
         {
             return Err(SolverError::Singular {
                 row: i,
@@ -178,6 +194,33 @@ mod tests {
         for (axi, bi) in ax.iter().zip(&b)
         {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-9);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cholesky_solve_at_a_tiny_physical_scale() -> SolverResult<()> {
+        // Regression test for a P1 audit finding: PIVOT_EPS was a fixed
+        // absolute 1e-15 compared directly against L's diagonal — the same
+        // regular SPD system as `cholesky_solve` above, scaled down so that L's
+        // diagonal (which scales as √scale) falls well below the old cutoff,
+        // was declared not-SPD even though it is perfectly well-conditioned.
+        let scale = 1e-34;
+        let a = Matrix::from_row_major(
+            3,
+            3,
+            vec![4.0, 12.0, -16.0, 12.0, 37.0, -43.0, -16.0, -43.0, 98.0]
+                .into_iter()
+                .map(|v| v * scale)
+                .collect(),
+        );
+        let b = vec![1.0 * scale, 2.0 * scale, 3.0 * scale];
+        let l = cholesky_decompose(a.clone())?;
+        let x = solve_cholesky(&l, &b)?;
+        let ax = a.matvec(&x)?;
+        for (axi, bi) in ax.iter().zip(&b)
+        {
+            assert_relative_eq!(*axi, *bi, epsilon = 1e-9, max_relative = 1e-6);
         }
         Ok(())
     }
