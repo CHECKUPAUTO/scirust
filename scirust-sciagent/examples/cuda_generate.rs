@@ -140,6 +140,24 @@ fn main() {
     let out = cm.generate(&prompt, max_new, &params, seed);
     let generated = &out[prompt.len()..];
 
+    // Raw ids first — so an empty/garbled decode is still diagnosable (e.g. an
+    // under-trained model looping on one token, or generating special/placeholder
+    // ids that `decode` skips).
+    println!("prompt ids:    {:?}", prompt);
+    let head: Vec<u32> = generated.iter().take(32).copied().collect();
+    println!(
+        "generated ids: {head:?}{}",
+        if generated.len() > 32 { " …" } else { "" }
+    );
+    let mut distinct = generated.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    println!(
+        "distinct generated ids: {} of {}",
+        distinct.len(),
+        generated.len()
+    );
+
     let text =
         match &tokenizer
         {
@@ -147,6 +165,6 @@ fn main() {
             None => String::from_utf8_lossy(&out.iter().map(|&t| t as u8).collect::<Vec<_>>())
                 .into_owned(),
         };
-    println!("=== generation ({} new tokens) ===", generated.len());
+    println!("\n=== generation ({} new tokens) ===", generated.len());
     println!("{text}");
 }
