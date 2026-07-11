@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : double pendule chaotique (`mechanics::DoublePendulum`)
+Le premier système **chaotique** de la bibliothèque de simulation, l'exemple
+canonique de chaos déterministe :
+- **`mechanics::DoublePendulum`** — deux masses `m1`/`m2` sur deux tiges rigides
+  `l1`/`l2`, état `[θ1, ω1, θ2, ω2]`, accélérations sous forme lagrangienne
+  standard, implémente `System` comme les autres modèles de mécanique.
+- Méthode `energy` (cinétique + potentielle) : premier intégrale du mouvement,
+  **conservée à 1e-6** le long d'une orbite chaotique par l'intégrateur adaptatif
+  Dormand–Prince à tolérance serrée — l'oracle du test.
+- Test de **dépendance sensible aux conditions initiales** : deux trajectoires
+  différant de 1e-8 (intégrées à l'identique, donc divergence physique et non
+  numérique) s'écartent de O(1) — amplification > 1e6× que seul un système
+  chaotique produit.
+- 3 tests supplémentaires (98 au total par défaut, +2 doctests). `fmt`/`clippy
+  -D warnings` propres ; runs lourds ignorés sous Miri (convention du crate).
+
 ### Ajouté — `scirust-mcp` : outils MCP `sim_hvac_zone` et `sim_pharmacokinetics_oral`
 Deux nouveaux simulateurs `scirust-sim` exposés comme outils MCP (schéma JSON
 typé, journal d'audit SHA-256 par appel), sans feature ni dépendance
