@@ -36,7 +36,14 @@
 //!      drug models (closed-form and AUC oracles);
 //!    - [`rigid_body`] — torque-free rotation (Euler's equations), with
 //!      energy/angular-momentum conservation and the intermediate-axis
-//!      instability.
+//!      instability;
+//!    - [`battery`] — a Thévenin (1-RC) battery cell with self-heating
+//!      (the `scirust-bms` plant), coulomb-counting and RC/thermal oracles;
+//!    - [`hvac`] — a 2R2C single-zone building thermal model
+//!      (the `scirust-hvac` plant), with an exact linear steady state;
+//!    - [`grid`] — the synchronous-machine swing equation
+//!      (the `scirust-grid` plant), with equilibrium, small-signal frequency
+//!      and an energy invariant.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
 //! generator and every model are implemented here. There are no dependencies,
@@ -89,6 +96,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod battery;
 pub mod chemistry;
 pub mod ecology;
 pub mod electrical;
@@ -96,6 +104,8 @@ pub mod engine;
 pub mod env;
 pub mod envs;
 pub mod epidemiology;
+pub mod grid;
+pub mod hvac;
 pub mod mechanics;
 pub mod orbital;
 pub mod pharmacokinetics;
