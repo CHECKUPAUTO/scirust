@@ -47,13 +47,20 @@ impl Rng {
     }
 
     fn next_f32(&mut self) -> f32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.state >> 32) as f32) / (u32::MAX as f32)
     }
 }
 
 /// Génère 100K + cas avec bruit réaliste
-fn generate_ultra_dataset(n_train: usize, n_val: usize, n_test: usize) -> (
+fn generate_ultra_dataset(
+    n_train: usize,
+    n_val: usize,
+    n_test: usize,
+) -> (
     Vec<([f32; N_FEATURES], usize)>,
     Vec<([f32; N_FEATURES], usize)>,
     Vec<([f32; N_FEATURES], usize)>,
@@ -63,16 +70,20 @@ fn generate_ultra_dataset(n_train: usize, n_val: usize, n_test: usize) -> (
     let mut val_data = Vec::new();
     let mut test_data = Vec::new();
 
-    for class_id in 0..N_CLASSES {
-        for _ in 0..(n_train / N_CLASSES) {
+    for class_id in 0..N_CLASSES
+    {
+        for _ in 0..(n_train / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, false);
             train_data.push((features, class_id));
         }
-        for _ in 0..(n_val / N_CLASSES) {
+        for _ in 0..(n_val / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, false);
             val_data.push((features, class_id));
         }
-        for _ in 0..(n_test / N_CLASSES) {
+        for _ in 0..(n_test / N_CLASSES)
+        {
             let features = generate_case_for_class(class_id, &mut rng, true);
             test_data.push((features, class_id));
         }
@@ -85,59 +96,72 @@ fn generate_case_for_class(class_id: usize, rng: &mut Rng, high_noise: bool) -> 
     let noise_level = if high_noise { 0.08 } else { 0.02 };
     let mut features = [0.5; N_FEATURES];
 
-    match class_id {
-        0 => {
+    match class_id
+    {
+        0 =>
+        {
             features[0] = 0.85 + rng.next_f32() * 0.08;
             features[1] = 0.15 + rng.next_f32() * 0.08;
             features[4] = 0.80 + rng.next_f32() * 0.08;
             features[5] = 0.75 + rng.next_f32() * 0.08;
             features[8] = 0.20 + rng.next_f32() * 0.08;
-        }
-        1 => {
+        },
+        1 =>
+        {
             features[0] = 0.80 + rng.next_f32() * 0.08;
             features[2] = 0.80 + rng.next_f32() * 0.08;
             features[4] = 0.75 + rng.next_f32() * 0.08;
             features[5] = 0.30 + rng.next_f32() * 0.08;
-        }
-        2 => {
+        },
+        2 =>
+        {
             features[1] = 0.85 + rng.next_f32() * 0.08;
             features[4] = 0.48 + rng.next_f32() * 0.08;
             features[5] = 0.80 + rng.next_f32() * 0.08;
-        }
-        3 => {
+        },
+        3 =>
+        {
             features[3] = 0.90 + rng.next_f32() * 0.08;
             features[4] = 0.50 + rng.next_f32() * 0.08;
             features[0] = 0.20 + rng.next_f32() * 0.08;
-        }
-        4 => {
+        },
+        4 =>
+        {
             features[6] = 0.90 + rng.next_f32() * 0.08;
             features[4] = 0.50 + rng.next_f32() * 0.08;
-        }
-        5 => {
+        },
+        5 =>
+        {
             features[7] = 0.85 + rng.next_f32() * 0.08;
             features[4] = 0.50 + rng.next_f32() * 0.08;
             features[0] = 0.25 + rng.next_f32() * 0.08;
-        }
-        6 => {
+        },
+        6 =>
+        {
             features[8] = 0.15 + rng.next_f32() * 0.08;
             features[0] = 0.65 + rng.next_f32() * 0.08;
-        }
-        7 => {
+        },
+        7 =>
+        {
             features[1] = 0.50 + rng.next_f32() * 0.08;
             features[4] = 0.40 + rng.next_f32() * 0.08;
-        }
-        8 => {
+        },
+        8 =>
+        {
             features[9] = 0.85 + rng.next_f32() * 0.08;
             features[0] = 0.75 + rng.next_f32() * 0.08;
-        }
-        9 => {
+        },
+        9 =>
+        {
             features[4] = 0.65 + rng.next_f32() * 0.08;
             features[2] = 0.20 + rng.next_f32() * 0.08;
-        }
-        _ => {}
+        },
+        _ =>
+        {},
     }
 
-    for f in features.iter_mut() {
+    for f in features.iter_mut()
+    {
         let noise = (rng.next_f32() - 0.5) * 2.0 * noise_level;
         *f = (*f + noise).clamp(0.0, 1.0);
     }
@@ -164,7 +188,13 @@ fn main() {
     // Modèle très profond : 10 -> 128 -> 64 -> 32 -> 10
     let mut rng = PcgEngine::new(SEED);
     let mut model = Sequential::new()
-        .add(Linear::new(N_FEATURES, 128, &KaimingNormal, &Zeros, &mut rng))
+        .add(Linear::new(
+            N_FEATURES,
+            128,
+            &KaimingNormal,
+            &Zeros,
+            &mut rng,
+        ))
         .add(ReLU::new())
         .add(Linear::new(128, 64, &KaimingNormal, &Zeros, &mut rng))
         .add(ReLU::new())
@@ -176,13 +206,8 @@ fn main() {
     let mut opt = Adam::new(0.0005); // lr encore plus bas pour 100K
 
     let n_epochs = 30;
-    println!(
-        "Modèle : 10 -> 128 -> 64 -> 32 -> 10 (très profond)\n"
-    );
-    println!(
-        "Entraînement : {} epochs, Adam(lr=0.0005)\n",
-        n_epochs
-    );
+    println!("Modèle : 10 -> 128 -> 64 -> 32 -> 10 (très profond)\n");
+    println!("Entraînement : {} epochs, Adam(lr=0.0005)\n", n_epochs);
 
     let train_start = std::time::Instant::now();
     let mut best_val_acc = 0.0;
@@ -219,7 +244,8 @@ fn main() {
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .unwrap()
                 .0;
-            if pred == *label {
+            if pred == *label
+            {
                 train_correct += 1;
             }
         }
@@ -227,7 +253,8 @@ fn main() {
         // Validation (toutes les 2 epochs pour accélérer)
         let mut val_correct = 0;
         let mut val_loss = 0.0;
-        if (epoch + 1) % 2 == 0 {
+        if (epoch + 1) % 2 == 0
+        {
             for (features, label) in &val_data
             {
                 let tape = Tape::new();
@@ -250,13 +277,15 @@ fn main() {
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .unwrap()
                     .0;
-                if pred == *label {
+                if pred == *label
+                {
                     val_correct += 1;
                 }
             }
 
             let val_acc = val_correct as f32 / n_val as f32;
-            if val_acc > best_val_acc {
+            if val_acc > best_val_acc
+            {
                 best_val_acc = val_acc;
                 best_epoch = epoch + 1;
             }
@@ -269,7 +298,9 @@ fn main() {
                 train_acc * 100.0,
                 val_acc * 100.0
             );
-        } else {
+        }
+        else
+        {
             let train_acc = train_correct as f32 / n_train as f32;
             println!(
                 "Epoch {:>2} | loss={:.4} | train_acc={:.2}%",
@@ -287,7 +318,8 @@ fn main() {
     let mut test_correct = 0;
     for (features, label) in &test_data
     {
-        if predict_class(&mut model, features) == *label {
+        if predict_class(&mut model, features) == *label
+        {
             test_correct += 1;
         }
     }
@@ -296,9 +328,21 @@ fn main() {
 
     println!("\n=== 🚀 RÉSULTATS ULTRA-MASSIFS ===");
     println!("Temps génération data : {:.2}s", gen_time);
-    println!("Temps entraînement    : {:.2}s ({} epochs)", train_time, n_epochs);
-    println!("Meilleure val_acc     : {:.2}% (epoch {})", best_val_acc * 100.0, best_epoch);
-    println!("Test accuracy         : {:.2}% ({}/{})", test_acc * 100.0, test_correct, n_test);
+    println!(
+        "Temps entraînement    : {:.2}s ({} epochs)",
+        train_time, n_epochs
+    );
+    println!(
+        "Meilleure val_acc     : {:.2}% (epoch {})",
+        best_val_acc * 100.0,
+        best_epoch
+    );
+    println!(
+        "Test accuracy         : {:.2}% ({}/{})",
+        test_acc * 100.0,
+        test_correct,
+        n_test
+    );
 
     println!("\n=== DIAGNOSTICS DE CAS RÉELS (test set) ===");
     for i in 0..8
@@ -316,8 +360,10 @@ fn predict_class(model: &mut Sequential, features: &[f32; N_FEATURES]) -> usize 
     let logits = model.forward(&tape, x);
     let scores = tape.value(logits.idx());
     let mut best = 0;
-    for i in 1..N_CLASSES {
-        if scores.data[i] > scores.data[best] {
+    for i in 1..N_CLASSES
+    {
+        if scores.data[i] > scores.data[best]
+        {
             best = i;
         }
     }
@@ -338,11 +384,18 @@ fn diagnose(model: &mut Sequential, features: &[f32; N_FEATURES], true_label: us
 
     println!(
         "\n  Réelle: {} | Prédiction: {} ({:.1}%) {}",
-        CAUSES[true_label], CAUSES[pred], pred_p * 100.0, match_mark
+        CAUSES[true_label],
+        CAUSES[pred],
+        pred_p * 100.0,
+        match_mark
     );
-    println!("    Top 3 : {:.1}% {} | {:.1}% {} | {:.1}% {}",
-        ranked[0].1 * 100.0, CAUSES[ranked[0].0],
-        ranked[1].1 * 100.0, CAUSES[ranked[1].0],
-        ranked[2].1 * 100.0, CAUSES[ranked[2].0],
+    println!(
+        "    Top 3 : {:.1}% {} | {:.1}% {} | {:.1}% {}",
+        ranked[0].1 * 100.0,
+        CAUSES[ranked[0].0],
+        ranked[1].1 * 100.0,
+        CAUSES[ranked[1].0],
+        ranked[2].1 * 100.0,
+        CAUSES[ranked[2].0],
     );
 }
