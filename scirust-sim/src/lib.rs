@@ -47,7 +47,10 @@
 //!      (the `scirust-hvac` plant), with an exact linear steady state;
 //!    - [`grid`] — the synchronous-machine swing equation
 //!      (the `scirust-grid` plant), with equilibrium, small-signal frequency
-//!      and an energy invariant.
+//!      and an energy invariant;
+//!    - [`laser`] — the single-mode semiconductor-laser rate equations
+//!      (carrier/photon densities), with threshold, the linear light–current
+//!      law and the relaxation-oscillation frequency as oracles.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
 //! generator and every model are implemented here. There are no dependencies,
@@ -112,6 +115,7 @@ pub mod envs;
 pub mod epidemiology;
 pub mod grid;
 pub mod hvac;
+pub mod laser;
 pub mod mechanics;
 pub mod orbital;
 pub mod pharmacokinetics;

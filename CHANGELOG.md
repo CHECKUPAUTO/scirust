@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : optoélectronique — équations de bilan du laser à semi-conducteur (`laser`) — bloc 13
+Troisième pilier optronique — l'**optoélectronique** (dynamique de dispositif) —
+via les **équations de bilan** monomode du laser à semi-conducteur couplant la
+densité de porteurs `n` et de photons `s`, comme `System` de `scirust-sim`.
+- **`SemiconductorLaser`** / **`LaserParams`** — état `[n, s]` :
+  `n' = J − n/τ_n − g₀(n−n_t)s`, `s' = Γg₀(n−n_t)s − s/τ_p + Γβ·n/τ_n`.
+- Grandeurs à forme fermée (limite `β→0`) : `threshold_density`
+  (`n_th = n_t + 1/(Γg₀τ_p)`), `threshold_pump` (`J_th = n_th/τ_n`),
+  `steady_state_photon_density` (loi lumière-courant linéaire
+  `s_ss = Γτ_p(J−J_th)`), `steady_state_carrier_density` (écrêtage du gain à
+  `n_th`), `relaxation_frequency` (`f_r = √(g₀s_ss/τ_p)/2π`).
+- Oracles : seuil et courbe L-I linéaire (formes fermées) ; l'allumage converge
+  vers l'état stationnaire fermé ; sous le seuil le laser reste éteint ; une
+  petite perturbation sonne à la fréquence d'oscillation de relaxation (période
+  mesurée sur la trajectoire) ; l'émission spontanée `β>0` amorce l'allumage
+  sans graine de photons ; rejet des paramètres invalides. 7 tests (109 au total
+  pour le crate) ; `fmt`/`clippy -D warnings`/`miri` propres.
+
 ### Ajouté — `scirust-vision` : optique de rayons — matrices ABCD + faisceaux gaussiens (`beams`) — bloc 12
 Deuxième bloc optronique : la conception du **train optique** (lentilles,
 miroirs, espace libre) par **matrices de transfert ABCD**, et la propagation
