@@ -17,6 +17,8 @@
 //! - [`roughness`] — rugosité théorique de l'état de surface en tournage.
 //! - [`gears`] — engrenages cylindriques droits : géométrie de la denture à
 //!   développante (module) et flexion en pied de dent (**Lewis**).
+//! - [`threads`] — filetages métriques ISO : diamètres primitif/noyau, section
+//!   résistante (**ISO 898-1**), pas et angle d'hélice.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -65,6 +67,7 @@ pub mod forces;
 pub mod gears;
 pub mod kinematics;
 pub mod roughness;
+pub mod threads;
 pub mod time;
 pub mod tolerancing;
 pub mod toollife;
@@ -82,6 +85,7 @@ pub use kinematics::{
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
 };
+pub use threads::MetricThread;
 pub use time::{
     drilling_time_min, milling_time_min, number_of_passes, pass_time_min, turning_time_min,
 };
