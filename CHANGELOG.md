@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : pont raide vers `scirust-stiff` (feature `stiff`) + Robertson
+Les plantes **raides** (transitoire rapide + queue lente) ne peuvent pas être
+intégrées par le moteur explicite ; ce volet les route vers les intégrateurs
+implicites de `scirust-stiff` :
+- **`scirust-sim::chemistry::Robertson`** — le système autocatalytique de
+  Robertson (`k₁=0,04`, `k₂=3·10⁷`, `k₃=10⁴`), banc d'essai raide canonique,
+  implémente `System` comme les autres modèles ; masse `a+b+c` invariante.
+- **`scirust-sim::stiff_bridge`** (feature `stiff`) — `simulate_rosenbrock`
+  (Rosenbrock-W adaptatif) et `simulate_backward_euler` (Euler implicite
+  L-stable) adaptent tout `System` (dérivée in-place) aux closures de
+  `scirust-stiff` (retour par valeur), et remappent `Solution`/`StiffError`
+  vers `Trajectory`/`SimError`. Oracles : décroissance raide `y'=-50y` vs
+  forme close ; Robertson à t=0,4 vs solution de référence (a≈0,985, c≈0,0149)
+  avec conservation de masse ; accord Euler implicite ↔ Rosenbrock ; et
+  démonstration que RK4 explicite explose (`NonFinite`) là où le pont raide
+  réussit.
+- **Zéro coût par défaut** : la feature `stiff` (seule à tirer `scirust-stiff`)
+  laisse le crate sans dépendance et Miri-propre en configuration par défaut ;
+  feature couverte en CI (`cargo test/clippy -p scirust-sim --features stiff`).
+
 ### Ajouté — `scirust-mcp` : les simulations `scirust-sim` exposées comme outils MCP
 Un agent peut désormais lancer une simulation `scirust-sim` par un simple
 appel d'outil MCP (schéma JSON typé, journal d'audit SHA-256 par appel comme

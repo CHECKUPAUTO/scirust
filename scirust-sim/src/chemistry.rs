@@ -2,10 +2,12 @@
 //! Bateman closed form as the oracle) and a reversible reaction relaxing to
 //! its equilibrium constant.
 //!
-//! These models are non-stiff by construction. Genuinely stiff kinetics
-//! (e.g. the Robertson problem, with rate constants spanning nine orders of
-//! magnitude) should be adapted to `scirust-stiff`'s implicit integrators
-//! instead — see the crate-level interoperability notes.
+//! The first two models are non-stiff by construction. The [`Robertson`]
+//! autocatalytic system is the canonical **stiff** kinetics benchmark (rate
+//! constants spanning nine orders of magnitude); it implements [`System`] like
+//! the others, but integrating it needs an implicit method — hand it to the
+//! [`stiff_bridge`](crate::stiff_bridge) (the `stiff` feature) rather than the
+//! explicit `simulate`, which would need an impractically small step.
 
 use crate::engine::{SimError, System};
 
@@ -123,6 +125,66 @@ impl System for ReversibleReaction {
     }
 }
 
+/// The **Robertson** autocatalytic reaction system, the classic stiff-ODE
+/// benchmark (Robertson 1966; Hairer & Wanner, *Solving ODE II*):
+///
+/// `A →(k₁) B`, `B + B →(k₂) C + B`, `B + C →(k₃) A + C`, state `y = [a, b, c]`:
+///
+/// `a' = -k₁·a + k₃·b·c`, `b' = k₁·a - k₃·b·c - k₂·b²`, `c' = k₂·b²`.
+///
+/// With the canonical constants `k₁ = 0.04`, `k₂ = 3·10⁷`, `k₃ = 10⁴` the fast
+/// and slow modes differ by nine orders of magnitude, so an explicit method
+/// needs a minuscule step — integrate with
+/// [`stiff_bridge`](crate::stiff_bridge) instead. Total mass `a + b + c` is a
+/// linear invariant (conserved to round-off in the derivative: the three rates
+/// sum to zero).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Robertson {
+    k1: f64,
+    k2: f64,
+    k3: f64,
+}
+
+impl Robertson {
+    /// The canonical Robertson constants `k₁ = 0.04`, `k₂ = 3·10⁷`, `k₃ = 10⁴`.
+    pub fn classic() -> Self {
+        Robertson {
+            k1: 0.04,
+            k2: 3.0e7,
+            k3: 1.0e4,
+        }
+    }
+
+    /// Custom rate constants; all three must be finite and positive.
+    pub fn new(k1: f64, k2: f64, k3: f64) -> Result<Self, SimError> {
+        check_rate("k1", k1)?;
+        check_rate("k2", k2)?;
+        check_rate("k3", k3)?;
+        Ok(Robertson { k1, k2, k3 })
+    }
+
+    /// The usual initial condition `[1, 0, 0]` (all mass in species A).
+    pub fn initial_state(&self) -> [f64; 3] {
+        [1.0, 0.0, 0.0]
+    }
+}
+
+impl System for Robertson {
+    fn dim(&self) -> usize {
+        3
+    }
+
+    fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+        let (a, b, c) = (y[0], y[1], y[2]);
+        let slow = self.k1 * a;
+        let recomb = self.k3 * b * c;
+        let auto = self.k2 * b * b;
+        dydt[0] = -slow + recomb;
+        dydt[1] = slow - recomb - auto;
+        dydt[2] = auto;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +262,27 @@ mod tests {
         assert!(sys.exact(-1.0, 0.5).is_none());
         let rev = ReversibleReaction::new(1.0, 1.0).unwrap();
         assert!(rev.exact(f64::NAN, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn robertson_derivatives_conserve_mass_and_validate() {
+        // The three rates sum to zero at any state, so total mass is a linear
+        // invariant regardless of the (stiff) constants. Integration itself is
+        // exercised in the stiff_bridge module (the `stiff` feature).
+        let rob = Robertson::classic();
+        let mut dydt = [0.0; 3];
+        for state in [[1.0, 0.0, 0.0], [0.7, 3e-5, 0.3], [0.2, 1e-4, 0.8]]
+        {
+            rob.derivatives(0.0, &state, &mut dydt);
+            assert!(
+                dydt.iter().sum::<f64>().abs() < 1e-6,
+                "mass rate ≠ 0 at {state:?}"
+            );
+            assert!(dydt[2] >= 0.0, "species C only accumulates");
+        }
+        assert_eq!(rob.initial_state(), [1.0, 0.0, 0.0]);
+        assert!(Robertson::new(0.04, 3.0e7, 1.0e4).is_ok());
+        assert!(Robertson::new(-1.0, 3.0e7, 1.0e4).is_err());
+        assert!(Robertson::new(0.04, f64::NAN, 1.0e4).is_err());
     }
 }

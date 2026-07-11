@@ -11,7 +11,13 @@ description = "Multi-domain simulation environments: a deterministic time-steppi
 # `scirust-learning::rl` through the `rl_bridge::RlEnv` adapter. `rand` is
 # pulled only for the feature's Q-learning test.
 rl = ["dep:scirust-learning", "dep:rand"]
+# With `stiff` enabled, `stiff_bridge` integrates any `System` with the
+# implicit/linearly-implicit solvers in `scirust-stiff` (Backward Euler,
+# adaptive Rosenbrock-W), for stiff plants like the Robertson kinetics that
+# the explicit engine cannot step efficiently.
+stiff = ["dep:scirust-stiff"]
 
 [dependencies]
 scirust-learning = { path = "../scirust-learning", optional = true }
+scirust-stiff = { path = "../scirust-stiff", optional = true }
 rand = { version = "0.8", optional = true }
