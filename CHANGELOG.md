@@ -5,6 +5,31 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar FMCW / mmWave (`radar::fmcw`) — bloc 7
+Septième bloc du domaine radar : le modèle **FMCW** (onde continue modulée en
+fréquence) — celui des radars automobiles / mmWave (TI, OpenRadar). Au lieu de
+comprimer une impulsion codée par filtrage adapté, le FMCW *mélange* l'écho avec
+la rampe émise ; la distance et la vitesse tombent de deux FFT du signal de
+battement.
+- **`beat_frequency_to_range`** — distance depuis la fréquence de battement
+  `R = f_b·c / (2·pente)` (garde sur pente non finie / négative).
+- **`range_resolution`** — résolution distance `ΔR = c / (2·B)`.
+- **`range_profile`** — profil distance d'une rampe : FFT temps-rapide du
+  battement complexe (garde puissance de deux). Une cible à distance `R` pique au
+  bin de sa fréquence de battement.
+- **`range_doppler`** — **cube distance-Doppler** depuis les rampes de battement
+  brutes : FFT temps-rapide (distance) de chaque rampe puis FFT temps-lent
+  (Doppler) de chaque bin distance ; carte `N×M` `[distance][doppler]`, bin
+  Doppler 0 = cible fixe. Ne recouvre pas `doppler::range_doppler_map` (qui
+  suppose les impulsions déjà comprimées en distance) : ici on part du battement
+  brut et on fait les deux FFT.
+- Oracles : le profil distance d'un ton de battement pique au bon bin avec
+  intégration cohérente d'amplitude `N` ; l'aller-retour distance→battement→
+  distance boucle ; une cible mobile se localise en `(distance, doppler)` avec un
+  pic d'amplitude `N·M`, une cible fixe reste au Doppler 0 ; entrées non-
+  puissance-de-deux / irrégulières → vide. 6 tests (147 au total) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : goniométrie haute résolution MVDR/Capon (`radar::doa`) — bloc 6
 Sixième bloc du domaine radar : la DOA **haute résolution**, qui sépare des
 sources plus proches que la largeur de faisceau du réseau.
