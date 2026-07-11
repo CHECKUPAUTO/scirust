@@ -26,7 +26,9 @@
 //! - **Descriptive statistics** ([`describe`]): mean, unbiased variance / std,
 //!   standard error, quantiles, median, min/max.
 //! - **Hypothesis tests** ([`htest`]): one- and two-sample t-tests (pooled &
-//!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit, one-sample
+//!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit (raw counts *and* a
+//!   `chi2_gof_discrete` that bins a fitted discrete distribution, pools thin
+//!   bins, and adjusts the dof for estimated parameters), one-sample
 //!   Kolmogorov–Smirnov.
 //! - **Honest lottery mathematics** ([`lottery`]): exact odds of any
 //!   `k`-of-`n` (+ bonus) game via the hypergeometric law, ticket expected
@@ -79,8 +81,8 @@ pub use dist::{
     Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
 };
 pub use htest::{
-    Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
-    t_test_two_sample,
+    Tail, TestResult, chi_square_gof, chi2_gof_discrete, ks_test_one_sample, one_way_anova,
+    t_test_one_sample, t_test_two_sample,
 };
 pub use lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
 pub use rng::SplitMix64;
@@ -101,8 +103,8 @@ pub mod prelude {
         Beta, ChiSquared, Distribution, Exponential, FisherF, Gamma, Normal, StudentT, Uniform,
     };
     pub use crate::htest::{
-        Tail, TestResult, chi_square_gof, ks_test_one_sample, one_way_anova, t_test_one_sample,
-        t_test_two_sample,
+        Tail, TestResult, chi_square_gof, chi2_gof_discrete, ks_test_one_sample, one_way_anova,
+        t_test_one_sample, t_test_two_sample,
     };
     pub use crate::lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
     pub use crate::rng::SplitMix64;
