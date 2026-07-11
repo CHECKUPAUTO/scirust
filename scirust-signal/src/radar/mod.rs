@@ -9,10 +9,11 @@
 //! length), then thresholded adaptively so the false-alarm rate stays fixed as
 //! the noise/clutter level varies.
 //!
-//! Alongside the pulse chain sit array processing ([`beamform`], [`doa`]) for
-//! angle estimation and [`fmcw`] for the continuous-wave / mmWave model, where
-//! range and velocity fall out of two FFTs of the mixer's beat signal rather
-//! than a matched filter.
+//! Alongside the pulse chain sit array processing ([`beamform`], [`doa`],
+//! [`music`]) for angle estimation — from the conventional beamformer through
+//! MVDR/Capon to the MUSIC subspace method — and [`fmcw`] for the
+//! continuous-wave / mmWave model, where range and velocity fall out of two
+//! FFTs of the mixer's beat signal rather than a matched filter.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -22,6 +23,7 @@ pub mod doppler;
 pub mod fmcw;
 pub mod matched_filter;
 pub mod mti;
+pub mod music;
 pub mod waveform;
 
 pub use ambiguity::ambiguity;
@@ -32,4 +34,5 @@ pub use doppler::{doppler_spectrum, range_doppler_map};
 pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_resolution};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;
+pub use music::music_spectrum;
 pub use waveform::{barker_code, lfm_chirp};

@@ -25,10 +25,11 @@
 //!   response, range-Doppler coupling), Doppler processing (range-Doppler map),
 //!   MTI clutter cancellers, CFAR detection (cell-averaging and
 //!   ordered-statistic, with the closed-form threshold scaling), array
-//!   processing (ULA steering vectors, delay-and-sum beamforming, and
-//!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources) and
-//!   FMCW processing (beat-frequency ranging, range resolution, and the
-//!   range-Doppler cube from raw beat chirps)
+//!   processing (ULA steering vectors, delay-and-sum beamforming,
+//!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources, and
+//!   MUSIC subspace direction finding via a from-scratch complex-Hermitian
+//!   eigensolver) and FMCW processing (beat-frequency ranging, range
+//!   resolution, and the range-Doppler cube from raw beat chirps)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -75,7 +76,7 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     ambiguity, barker_code, beamform_spectrum, beat_frequency_to_range, ca_cfar, ca_cfar_alpha,
     covariance, cross_correlate, doppler_spectrum, estimate_doa, lfm_chirp, mti_canceller,
-    mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler,
-    range_doppler_map, range_profile, range_resolution, steering_vector,
+    music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe,
+    range_doppler, range_doppler_map, range_profile, range_resolution, steering_vector,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

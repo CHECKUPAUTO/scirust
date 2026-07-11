@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : goniométrie sous-espace MUSIC (`radar::music`) — bloc 8
+Huitième bloc du domaine radar : la méthode **sous-espace MUSIC** (MUltiple
+SIgnal Classification), qui clôt la voie *angle*. Là où le MVDR affine encore le
+formateur, MUSIC décompose la covariance en sous-espaces signal / bruit et
+exploite l'orthogonalité de chaque vecteur directionnel de source au sous-espace
+bruit — résolution limitée par le nombre de snapshots et le SNR, non par
+l'ouverture du réseau.
+- **`music_spectrum`** — spectre `P(θ) = 1/‖Eₙᴴ·a(θ)‖²` : `Eₙ` est le
+  sous-espace bruit (vecteurs propres des `M − num_sources` plus petites valeurs
+  propres de la covariance). Pique aux directions des sources. `num_sources`
+  borné à `1..=M-1`.
+- Repose sur un **solveur propre hermitien complexe** écrit sur place (rotations
+  de Jacobi cycliques complexes : annulation de phase puis rotation de Jacobi
+  réelle sur le bloc 2×2), sans dépendance nouvelle — réutilisable pour ESPRIT.
+- Oracles : le solveur propre reconstruit `A = V·diag(λ)·Vᴴ`, `Vᴴ V = I`, valeurs
+  propres réelles de trace correcte ; MUSIC pique à la source unique ; **deux
+  sources à 6°** (sous le faisceau ~11°) sont **résolues** (creux au médian) ;
+  entrées dégénérées (réseau vide / à un élément) → spectre nul. 4 tests (151 au
+  total) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar FMCW / mmWave (`radar::fmcw`) — bloc 7
 Septième bloc du domaine radar : le modèle **FMCW** (onde continue modulée en
 fréquence) — celui des radars automobiles / mmWave (TI, OpenRadar). Au lieu de
