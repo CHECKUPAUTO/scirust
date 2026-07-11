@@ -1,6 +1,7 @@
 //! Classical mechanics models: spring–mass–damper, pendulum, projectile with
-//! linear drag. Each is validated against an analytic solution or an energy
-//! argument in the tests.
+//! linear drag, and the chaotic double pendulum. Each is validated against an
+//! analytic solution or an energy argument (and, for the double pendulum,
+//! sensitive dependence on initial conditions) in the tests.
 
 use crate::engine::{SimError, System};
 
@@ -184,10 +185,97 @@ impl System for Projectile {
     }
 }
 
+/// A planar double pendulum: a bob (`m1`) on a rigid rod (`l1`) hangs from a
+/// fixed pivot, and a second bob (`m2`) hangs from the first on its own rod
+/// (`l2`). Angles `θ1`, `θ2` are measured from the downward vertical. State
+/// `y = [θ1, ω1, θ2, ω2]`.
+///
+/// This is the textbook example of *deterministic chaos*: the motion is fully
+/// determined by the initial conditions, yet two nearby starts diverge
+/// exponentially (a positive Lyapunov exponent). Undamped, the total
+/// mechanical energy is exactly conserved by the true dynamics — the oracle
+/// the tests check. The accelerations are the standard Lagrangian form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DoublePendulum {
+    m1: f64,
+    m2: f64,
+    l1: f64,
+    l2: f64,
+    gravity: f64,
+}
+
+impl DoublePendulum {
+    /// Create the model. Both masses, both lengths and `gravity` must be
+    /// finite and positive.
+    pub fn new(m1: f64, m2: f64, l1: f64, l2: f64, gravity: f64) -> Result<Self, SimError> {
+        check_positive("m1", m1)?;
+        check_positive("m2", m2)?;
+        check_positive("l1", l1)?;
+        check_positive("l2", l2)?;
+        check_positive("gravity", gravity)?;
+        Ok(DoublePendulum {
+            m1,
+            m2,
+            l1,
+            l2,
+            gravity,
+        })
+    }
+
+    /// Total mechanical energy (kinetic + gravitational potential, heights
+    /// measured downward from the pivot) of a state `[θ1, ω1, θ2, ω2]`, or
+    /// `None` when the state does not have length 4. Conserved by the exact
+    /// undamped dynamics.
+    pub fn energy(&self, state: &[f64]) -> Option<f64> {
+        let [t1, w1, t2, w2] = *state
+        else
+        {
+            return None;
+        };
+        let (m1, m2, l1, l2, g) = (self.m1, self.m2, self.l1, self.l2, self.gravity);
+        // Bob-2's velocity is the vector sum of both rods' contributions, hence
+        // the cross term in cos(θ1 − θ2).
+        let ke = 0.5 * m1 * l1 * l1 * w1 * w1
+            + 0.5
+                * m2
+                * (l1 * l1 * w1 * w1
+                    + l2 * l2 * w2 * w2
+                    + 2.0 * l1 * l2 * w1 * w2 * (t1 - t2).cos());
+        let pe = -(m1 + m2) * g * l1 * t1.cos() - m2 * g * l2 * t2.cos();
+        Some(ke + pe)
+    }
+}
+
+impl System for DoublePendulum {
+    fn dim(&self) -> usize {
+        4
+    }
+
+    fn derivatives(&self, _t: f64, y: &[f64], dydt: &mut [f64]) {
+        let (t1, w1, t2, w2) = (y[0], y[1], y[2], y[3]);
+        let (m1, m2, l1, l2, g) = (self.m1, self.m2, self.l1, self.l2, self.gravity);
+        let delta = t1 - t2;
+        let (sd, cd) = (delta.sin(), delta.cos());
+        // Shared denominator: 2·m1 + m2 − m2·cos(2Δ) = 2·(m1 + m2·sin²Δ) > 0.
+        let den = 2.0 * m1 + m2 - m2 * (2.0 * delta).cos();
+
+        dydt[0] = w1;
+        dydt[2] = w2;
+        dydt[1] = (-g * (2.0 * m1 + m2) * t1.sin()
+            - m2 * g * (t1 - 2.0 * t2).sin()
+            - 2.0 * sd * m2 * (w2 * w2 * l2 + w1 * w1 * l1 * cd))
+            / (l1 * den);
+        dydt[3] = (2.0
+            * sd
+            * (w1 * w1 * l1 * (m1 + m2) + g * (m1 + m2) * t1.cos() + w2 * w2 * l2 * m2 * cd))
+            / (l2 * den);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::simulate;
+    use crate::engine::{simulate, simulate_adaptive};
 
     #[test]
     // Ignored under Miri: a many-step accuracy/statistics run that is
@@ -334,5 +422,64 @@ mod tests {
         assert!(spring.energy(&[1.0]).is_none());
         let pendulum = Pendulum::new(1.0, 9.81, 0.0).unwrap();
         assert!(pendulum.energy(&[1.0, 2.0, 3.0]).is_none());
+    }
+
+    #[test]
+    // Ignored under Miri: a long, transcendental-heavy chaotic run, minutes
+    // slow under the interpreter and covered by the native Build & Test jobs.
+    #[cfg_attr(miri, ignore)]
+    fn double_pendulum_conserves_energy() {
+        // A high-energy (chaotic) start: both rods raised well above horizontal.
+        let sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0, 9.81).unwrap();
+        let y0 = [2.2, 0.0, 2.0, 0.0];
+        // Energy is a first integral of the flow; a tight adaptive tolerance
+        // keeps the integrated energy on it despite the chaotic trajectory.
+        let traj = simulate_adaptive(&sys, &y0, 0.0, 15.0, 1e-11, 1e-12).unwrap();
+        let e0 = sys.energy(&traj.y[0]).unwrap();
+        for row in &traj.y
+        {
+            let e = sys.energy(row).unwrap();
+            assert!(
+                (e - e0).abs() < 1e-6 * e0.abs(),
+                "energy drifted to {e} from {e0}"
+            );
+        }
+    }
+
+    #[test]
+    // Ignored under Miri: see `double_pendulum_conserves_energy`.
+    #[cfg_attr(miri, ignore)]
+    fn double_pendulum_shows_sensitive_dependence_on_initial_conditions() {
+        // Two starts differing by 1e-8 in θ1 only, integrated identically
+        // (same fixed-step RK4), so any divergence is physical, not numerical.
+        let sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0, 9.81).unwrap();
+        let a = simulate(&sys, &[2.0, 0.0, 2.0, 0.0], 0.0, 20.0, 1e-4).unwrap();
+        let b = simulate(&sys, &[2.0 + 1e-8, 0.0, 2.0, 0.0], 0.0, 20.0, 1e-4).unwrap();
+
+        let sep = |i: usize| -> f64 {
+            let (u, v) = (&a.y[i], &b.y[i]);
+            u.iter()
+                .zip(v)
+                .map(|(p, q)| (p - q) * (p - q))
+                .sum::<f64>()
+                .sqrt()
+        };
+        // Early separation is ~1e-8; by the end the trajectories are O(1)
+        // apart — an enormous amplification only a chaotic system produces.
+        let early = sep(a.len() / 20);
+        let late = sep(a.len() - 1);
+        assert!(early < 1e-5, "unexpectedly large early separation {early}");
+        assert!(late > 0.1, "no chaotic divergence: late separation {late}");
+        assert!(late > 1e6 * early, "separation grew only {}×", late / early);
+    }
+
+    #[test]
+    fn double_pendulum_rejects_bad_parameters() {
+        assert!(DoublePendulum::new(0.0, 1.0, 1.0, 1.0, 9.81).is_err());
+        assert!(DoublePendulum::new(1.0, -1.0, 1.0, 1.0, 9.81).is_err());
+        assert!(DoublePendulum::new(1.0, 1.0, 1.0, 1.0, 0.0).is_err());
+        assert!(DoublePendulum::new(1.0, 1.0, f64::NAN, 1.0, 9.81).is_err());
+        let dp = DoublePendulum::new(1.0, 1.0, 1.0, 1.0, 9.81).unwrap();
+        assert!(dp.energy(&[1.0, 2.0, 3.0]).is_none());
     }
 }

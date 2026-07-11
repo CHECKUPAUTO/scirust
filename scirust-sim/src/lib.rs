@@ -23,7 +23,9 @@
 //!    ([`envs::CartPole`], [`envs::GridWorld`]) and an episode runner.
 //! 3. **Ready-made domain models**, each validated in its test module against
 //!    an analytic solution or a conservation law:
-//!    - [`mechanics`] — spring–mass–damper, pendulum, projectile with drag;
+//!    - [`mechanics`] — spring–mass–damper, pendulum, projectile with drag,
+//!      and the chaotic double pendulum (energy conservation and sensitive
+//!      dependence on initial conditions as oracles);
 //!    - [`orbital`] — planar two-body Kepler problem;
 //!    - [`epidemiology`] — SIR and SEIR compartmental models;
 //!    - [`ecology`] — Lotka–Volterra predator–prey, logistic growth;
