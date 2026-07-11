@@ -5,7 +5,7 @@
 //! must name the machine it was measured on. This exists so that performance
 //! claims about the RLS stack are *measured*, never asserted.
 
-use scirust_estimation::{QrRls, RlsFilter, RlsFilterConst, VectorRls};
+use scirust_estimation::{QrRls, RlsFilter, RlsFilterConst, SquaredGivensRls, VectorRls};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -67,6 +67,12 @@ fn main() {
         let mut q = QrRls::new(n, 0.98, 100.0);
         bench("QrRls (square-root)", n, iters / n.max(1), |u, d| {
             black_box(q.update(u, d));
+        });
+
+        let mut sg = SquaredGivensRls::new(n, 1, 0.98, 100.0);
+        bench("SquaredGivensRls (no sqrt)", n, iters / n.max(1), |u, d| {
+            sg.update(u, &[d]);
+            black_box(sg.weights_diag());
         });
     }
 
