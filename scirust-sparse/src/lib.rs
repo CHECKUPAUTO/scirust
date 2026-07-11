@@ -48,9 +48,19 @@ use std::fmt;
 /// A single sparse column: `(row, value)` pairs used inside [`SparseLu`].
 type SparseCol = Vec<(usize, f64)>;
 
-/// Pivots whose magnitude is at or below this threshold are treated as zero,
-/// causing the LU factorization to report the matrix as singular.
-const PIVOT_TOL: f64 = 1e-12;
+/// Given the largest-magnitude entry of a matrix and its size, returns the
+/// pivot-rejection threshold `n · eps · max|a_ij|` (Golub & Van Loan, *Matrix
+/// Computations*, §3.4.6). A pivot at or below this is treated as
+/// numerically zero.
+///
+/// This is deliberately *relative* to the matrix's own scale rather than a
+/// fixed absolute constant: a regular matrix at a small physical scale (e.g.
+/// capacitances in Farads, ~1e-12) was previously declared singular by a
+/// fixed `1e-12` cutoff even though it is perfectly well-conditioned once
+/// rescaled.
+fn pivot_tol(n: usize, max_abs: f64) -> f64 {
+    (n as f64) * f64::EPSILON * max_abs.max(1e-300)
+}
 
 /// Errors returned by the sparse matrix and solver routines.
 ///
@@ -678,6 +688,8 @@ impl SparseLu {
             });
         }
         let n = a.rows;
+        let max_abs = a.data.iter().fold(0.0f64, |acc, &v| acc.max(v.abs()));
+        let piv_tol = pivot_tol(n, max_abs);
         // pinv[i] == usize::MAX means original row `i` is not yet a pivot;
         // otherwise it holds that row's permuted pivot index.
         let mut pinv = vec![usize::MAX; n];
@@ -743,7 +755,7 @@ impl SparseLu {
                     }
                 }
             }
-            if piv_row == usize::MAX || piv_mag <= PIVOT_TOL
+            if piv_row == usize::MAX || piv_mag <= piv_tol
             {
                 return Err(SparseError::Singular);
             }
@@ -895,7 +907,14 @@ pub fn solve_tridiagonal(
     let mut c_prime = vec![0.0f64; n];
     let mut d_prime = vec![0.0f64; n];
 
-    if diag[0].abs() <= PIVOT_TOL
+    let max_abs = sub
+        .iter()
+        .chain(diag.iter())
+        .chain(sup.iter())
+        .fold(0.0f64, |acc, &v| acc.max(v.abs()));
+    let piv_tol = pivot_tol(n, max_abs);
+
+    if diag[0].abs() <= piv_tol
     {
         return Err(SparseError::ZeroPivot { index: 0 });
     }
@@ -908,7 +927,7 @@ pub fn solve_tridiagonal(
     for i in 1..n
     {
         let denom = diag[i] - sub[i - 1] * c_prime[i - 1];
-        if denom.abs() <= PIVOT_TOL
+        if denom.abs() <= piv_tol
         {
             return Err(SparseError::ZeroPivot { index: i });
         }
@@ -1333,6 +1352,47 @@ mod tests {
         let got = solve_tridiagonal(&sub, &diag, &sup, &rhs).unwrap();
         let want = dense_solve(&dense, &rhs);
         assert_close(&got, &want, 1e-10);
+    }
+
+    #[test]
+    fn sparse_lu_solves_a_tiny_scale_system_without_false_singularity() {
+        // Regression test for a P1 audit finding: PIVOT_TOL was a fixed
+        // absolute 1e-12 compared directly against the pivot magnitude — a
+        // regular matrix at a small physical scale (e.g. capacitances in
+        // Farads, ~1e-12) was declared singular even though it is perfectly
+        // well-conditioned once rescaled.
+        let scale = 1e-13;
+        let n = 4;
+        let a = rand_spd(n, 0x7777_0001)
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| v * scale).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let lu = SparseLu::factor(&dense_to_csc(&a))
+            .expect("a regular matrix at a tiny physical scale must not be reported singular");
+        let mut seed = 0x8888_0001u64;
+        let b: Vec<f64> = (0..n).map(|_| next_sym(&mut seed) * scale).collect();
+        let got = lu.solve(&b).unwrap();
+        let want = dense_solve(&a, &b);
+        assert_close(&got, &want, 1e-6);
+    }
+
+    #[test]
+    fn tridiagonal_solves_a_tiny_scale_system_without_false_zero_pivot() {
+        // Same P1 finding, for solve_tridiagonal's Thomas algorithm.
+        let n = 6;
+        let scale = 1e-13;
+        let dense = laplacian(n)
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| v * scale).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let rhs: Vec<f64> = (0..n).map(|i| ((i as f64 * 0.5) - 1.0) * scale).collect();
+        let sub = vec![-scale; n - 1];
+        let sup = vec![-scale; n - 1];
+        let diag = vec![2.0 * scale; n];
+        let got = solve_tridiagonal(&sub, &diag, &sup, &rhs)
+            .expect("a regular tridiagonal system at a tiny scale must not be reported singular");
+        let want = dense_solve(&dense, &rhs);
+        assert_close(&got, &want, 1e-6);
     }
 
     #[test]

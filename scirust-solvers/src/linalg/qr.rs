@@ -14,6 +14,15 @@ use tracing::warn;
 /// Seuil de NaN/Inf.
 const FINITE_EPS: f64 = 1e-15;
 
+/// Given the largest-magnitude entry seen so far and the matrix size,
+/// returns the pivot-rejection threshold `n · eps · max|·|` (Golub & Van
+/// Loan, *Matrix Computations*, §3.4.6) — relative to scale rather than a
+/// fixed absolute constant, so a regular system at a small physical scale
+/// isn't declared singular.
+fn pivot_tol(n: usize, max_abs: f64) -> f64 {
+    (n as f64) * f64::EPSILON * max_abs.max(1e-300)
+}
+
 fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
     if !value.is_finite()
     {
@@ -184,6 +193,12 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
         check_finite(bi, &format!("b[{i}]"))?;
     }
 
+    // R n'est pas reçue avec la matrice A d'origine ; sa propre diagonale
+    // (la partie triangulaire sup. de `qr.data`) est la référence d'échelle
+    // disponible ici pour le test de pivot ci-dessous.
+    let max_abs = (0..qr.n.min(qr.m)).fold(0.0f64, |acc, i| acc.max(qr.data[(i, i)].abs()));
+    let piv_tol = pivot_tol(qr.n, max_abs);
+
     // y = Q^T · b (en appliquant les H_k dans l'ordre)
     let mut y = b.to_vec();
     let p = qr.tau.len();
@@ -218,7 +233,7 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
             s -= qr.data[(i, j)] * x[j];
         }
         let pivot = qr.data[(i, i)];
-        if pivot.abs() < FINITE_EPS
+        if pivot.abs() < piv_tol
         {
             warn!(
                 target: "solver",
@@ -248,6 +263,33 @@ mod tests {
         for (axi, bi) in ax.iter().zip(&b)
         {
             assert_relative_eq!(*axi, *bi, epsilon = 1e-9);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn qr_solve_square_at_a_tiny_physical_scale() -> SolverResult<()> {
+        // Regression test for a P1 audit finding: FINITE_EPS was a fixed
+        // absolute 1e-15 compared directly against R's diagonal (which scales
+        // linearly with A) — the same regular system as `qr_solve_square`
+        // above, scaled down, was declared singular even though it is
+        // perfectly well-conditioned.
+        let scale = 1e-17;
+        let a = Matrix::from_row_major(
+            3,
+            3,
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0]
+                .into_iter()
+                .map(|v| v * scale)
+                .collect(),
+        );
+        let b = vec![6.0 * scale, 15.0 * scale, 25.0 * scale];
+        let qr = qr_decompose(a.clone())?;
+        let x = solve_qr_least_squares(&qr, &b)?;
+        let ax = a.matvec(&x)?;
+        for (axi, bi) in ax.iter().zip(&b)
+        {
+            assert_relative_eq!(*axi, *bi, epsilon = 1e-9, max_relative = 1e-6);
         }
         Ok(())
     }
