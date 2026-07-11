@@ -13,6 +13,7 @@
 
 use rand::prelude::*;
 use rand::rngs::StdRng;
+use scirust_learning::rl::Env;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -379,13 +380,22 @@ impl ProblemSpec {
     }
 }
 
-/// The main RL environment trait for algorithm search.
-pub trait AlgoEnv {
-    fn reset(&mut self) -> AlgoSearchState;
-    fn step(&mut self, action: &AlgoAction) -> (AlgoSearchState, f64, bool);
+/// The RL environment trait for algorithm search.
+///
+/// This extends the shared [`scirust_learning::rl::Env`] trait — which
+/// supplies `reset`, `step` and `available_actions` with
+/// `State = AlgoSearchState` and `Action = AlgoAction` — with the
+/// algorithm-search-specific hooks below. Sharing `Env` means the same
+/// environment trains directly with the crate's tabular / policy-gradient
+/// agents (no duplicated environment abstraction), while still exposing its
+/// reward decomposition and terminal predicate for the search heuristics.
+pub trait AlgoEnv: Env<State = AlgoSearchState, Action = AlgoAction> {
+    /// Return the current search state without advancing the episode.
     fn observe(&self) -> AlgoSearchState;
+    /// Score a state from its weighted correctness / efficiency / simplicity.
     fn reward(&self, state: &AlgoSearchState) -> f64;
-    fn available_actions(&self, state: &AlgoSearchState) -> Vec<AlgoAction>;
+    /// Whether the episode is over (a perfect algorithm or the step budget
+    /// has been spent).
     fn is_terminal(&self, state: &AlgoSearchState) -> bool;
 }
 
@@ -528,7 +538,10 @@ impl AlgoSearchEnv {
     }
 }
 
-impl AlgoEnv for AlgoSearchEnv {
+impl Env for AlgoSearchEnv {
+    type State = AlgoSearchState;
+    type Action = AlgoAction;
+
     fn reset(&mut self) -> AlgoSearchState {
         self.step_count = 0;
         self.state = AlgoSearchState {
@@ -607,19 +620,6 @@ impl AlgoEnv for AlgoSearchEnv {
         (self.state.clone(), r, done)
     }
 
-    fn observe(&self) -> AlgoSearchState {
-        self.state.clone()
-    }
-
-    fn reward(&self, state: &AlgoSearchState) -> f64 {
-        let correctness = self.problem.evaluate_correctness(&state.algorithm);
-        let simplicity = 1.0 / (1.0 + state.algorithm.simplicity_cost());
-        let efficiency = 1.0 / state.algorithm.estimated_complexity();
-        self.reward_correctness_weight * correctness
-            + self.reward_simplicity_weight * simplicity
-            + self.reward_efficiency_weight * efficiency
-    }
-
     fn available_actions(&self, state: &AlgoSearchState) -> Vec<AlgoAction> {
         let mut actions = vec![AlgoAction::Noop];
         let len = state.algorithm.instructions.len();
@@ -650,6 +650,21 @@ impl AlgoEnv for AlgoSearchEnv {
         }
 
         actions
+    }
+}
+
+impl AlgoEnv for AlgoSearchEnv {
+    fn observe(&self) -> AlgoSearchState {
+        self.state.clone()
+    }
+
+    fn reward(&self, state: &AlgoSearchState) -> f64 {
+        let correctness = self.problem.evaluate_correctness(&state.algorithm);
+        let simplicity = 1.0 / (1.0 + state.algorithm.simplicity_cost());
+        let efficiency = 1.0 / state.algorithm.estimated_complexity();
+        self.reward_correctness_weight * correctness
+            + self.reward_simplicity_weight * simplicity
+            + self.reward_efficiency_weight * efficiency
     }
 
     fn is_terminal(&self, state: &AlgoSearchState) -> bool {
