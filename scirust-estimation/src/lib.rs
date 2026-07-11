@@ -14,6 +14,7 @@
 //! bit-identical across machines — the determinism guarantee the rest of
 //! SciRust upholds, extended to estimation.
 
+pub mod block_qrd_rls;
 pub mod directional;
 pub mod ekf;
 pub mod imm;
@@ -30,6 +31,7 @@ pub mod squared_givens;
 pub mod ud;
 pub mod ukf;
 
+pub use block_qrd_rls::BlockQrdRls;
 pub use directional::DirectionalRls;
 pub use ekf::Ekf;
 pub use imm::{Imm, ImmModel};

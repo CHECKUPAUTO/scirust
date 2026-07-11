@@ -5,7 +5,9 @@
 //! must name the machine it was measured on. This exists so that performance
 //! claims about the RLS stack are *measured*, never asserted.
 
-use scirust_estimation::{QrRls, RlsFilter, RlsFilterConst, SquaredGivensRls, VectorRls};
+use scirust_estimation::{
+    BlockQrdRls, QrRls, RlsFilter, RlsFilterConst, SquaredGivensRls, VectorRls,
+};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -43,6 +45,37 @@ fn bench<F: FnMut(&[f64], f64)>(label: &str, n: usize, iters: usize, mut f: F) {
     );
 }
 
+/// Bench `BlockQrdRls::update_block` at a fixed block size, reporting
+/// ns/*sample* (total time / (iters·block_size)) so it is directly
+/// comparable to the per-sample figures above.
+fn bench_block(n: usize, block_size: usize, blocks: usize) {
+    let mut rng = Lcg(42);
+    let inputs: Vec<Vec<f64>> = (0..256)
+        .map(|_| (0..(n * block_size)).map(|_| rng.next()).collect())
+        .collect();
+    let targets: Vec<Vec<f64>> = (0..256)
+        .map(|_| (0..block_size).map(|_| rng.next()).collect())
+        .collect();
+    let mut b = BlockQrdRls::new(n, 1, 0.98, 100.0);
+    for i in 0..blocks / 10
+    {
+        b.update_block(&inputs[i % 256], &targets[i % 256], block_size);
+    }
+    let t0 = Instant::now();
+    for i in 0..blocks
+    {
+        b.update_block(&inputs[i % 256], &targets[i % 256], block_size);
+        black_box(b.factor());
+    }
+    let dt = t0.elapsed();
+    let samples = blocks * block_size;
+    println!(
+        "{:>28}  n={n:>3}  {:>9.1} ns/update  ({blocks} blocks of {block_size}, {samples} samples)",
+        format!("BlockQrdRls (B={block_size})"),
+        dt.as_nanos() as f64 / samples as f64
+    );
+}
+
 fn main() {
     println!("RLS update() benchmark — deterministic inputs, release build\n");
     let iters = 2_000_000;
@@ -74,6 +107,16 @@ fn main() {
             sg.update(u, &[d]);
             black_box(sg.weights_diag());
         });
+
+        // Block/batch QRD-RLS (axis 3): does grouping samples into one
+        // Householder-QR reduction beat sequential per-sample updates? Not a
+        // foregone conclusion — Householder reintroduces the √ and ÷ that
+        // SquaredGivensRls eliminated. Measure, don't assume.
+        let block_iters = (iters / n.max(1)) / 64;
+        for &b in &[1usize, 4, 16, 64]
+        {
+            bench_block(n, b, block_iters.max(1));
+        }
     }
 
     // Const-generic variants need compile-time sizes: measure the same three

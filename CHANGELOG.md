@@ -5,6 +5,66 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — axe 3 (bloc-canal) du brief QRD-RLS : `BlockQrdRls`, absorption par blocs via Householder
+Le troisième axe du brief Gentleman/McWhirter, précédemment documenté comme
+délibérément différé, est maintenant livré — avec un périmètre honnête et un
+résultat de banc mesuré qui ne va **pas** dans le sens espéré par le brief.
+
+- **`BlockQrdRls`** (nouveau module `block_qrd_rls`) — absorbe un bloc de `B`
+  nouveaux échantillons en une seule réduction QR par réflecteurs de
+  Householder (Golub & Van Loan, Alg. 5.1.1) sur le système augmenté
+  `(n+B)×n`, au lieu de `B` rotations de Givens séquentielles. Chaque
+  réflecteur est appliqué aux colonnes restantes du facteur *et* aux `n_out`
+  colonnes du second membre. Zéro dépendance externe ajoutée (boucles denses
+  écrites à la main, pas de GEMM BLAS-3 — voir plus bas).
+- **Portée précisée dans la doc du module** : deux idées distinctes se
+  cachent derrière « FQRD-RLS bloc-canal multicanal » dans la littérature.
+  (1) le traitement par blocs de plusieurs échantillons temporels — c'est ce
+  qui est livré ici. (2) les algorithmes QRD-RLS « rapides » à récursion
+  d'ordre (Cioffi–Kailath, en `O(n)` au lieu de `O(n²)` par échantillon) —
+  une dérivation entièrement différente, **non livrée**, qui demanderait sa
+  propre validation croisée from scratch plutôt qu'une généralisation de
+  taille de bloc de Gentleman. Par ailleurs, même dans le périmètre (1), le
+  vrai gain BLAS-3 (représentation compacte WY, `Q = I − Y·T·Yᵀ`, deux
+  produits matrice-matrice) n'est **pas** implémenté — chaque réflecteur est
+  appliqué colonne par colonne (un produit scalaire + un `axpy` par colonne
+  restante, de forme BLAS-2), documenté explicitement comme tel plutôt que
+  survendu.
+- **Pondération de récence à l'intérieur d'un bloc** — dérivée puis vérifiée,
+  pas supposée : `B` appels séquentiels à `update()` mettent chacun à
+  l'échelle **tout** le facteur existant par `√λ` (voir la doc de
+  `squared_givens`), donc `B` échantillons groupés doivent reproduire un
+  facteur existant mis à l'échelle par `λ^(B/2)` au total, l'échantillon le
+  plus ancien du bloc par `λ^((B-1)/2)`, le plus récent par `λ⁰ = 1`.
+  Deux tests cross-oracle confirment que cette construction reproduit
+  exactement l'absorption séquentielle : `update_block(..., block_size=1)`
+  colle à `GivensQrdRls::update` à 1e-6 près sur 1000 pas, et grouper le même
+  flux en blocs de 5 colle au traitement un-par-un à 1e-6 près sur 400
+  échantillons. Cross-vérifié aussi en MIMO contre `SquaredGivensRls`
+  (`n_in=3, n_out=2`, blocs de 8, 250 blocs) et sur un système dérivant.
+  5 nouveaux tests (60 au total sur `scirust-estimation`).
+- **Mesuré, pas supposé** (conteneur x86_64, Intel Xeon @2.80GHz, 4 cœurs,
+  `cargo run --bin bench_rls --release`) — le résultat honnête : grouper en
+  blocs aide *par rapport à lui-même* (`B=64` vs `B=1` : 5,0× plus rapide à
+  n=4 ; 9,0× à n=16 ; 21,2× à n=64), mais **ne bat jamais** `SquaredGivensRls`
+  séquentiel, même à `B=64` :
+
+  | n | SquaredGivensRls | BlockQrdRls B=1 | BlockQrdRls B=64 |
+  |---|---|---|---|
+  | 4 | 34,5 ns | 256,1 ns | 51,2 ns |
+  | 16 | 272,8 ns | 3 559,4 ns | 395,1 ns |
+  | 64 | 3 447,5 ns | 184 834,7 ns | 8 726,6 ns |
+
+  Explication : les réflecteurs de Householder réintroduisent le `√` et la
+  `÷` que la substitution de Gentleman avait éliminés du chemin chaud de
+  `SquaredGivensRls`. Le brief espérait un gain de débit bloc-canal ; la
+  mesure dit que ce gain n'existe pas à ces tailles avec cette formulation,
+  et que la vraie restructuration BLAS-3 (WY compacte) — ou un portage vers
+  de vrais noyaux SIMD — resterait nécessaire pour espérer dépasser l'axe 1.
+  Conservé malgré ce résultat négatif : c'est une implémentation correcte,
+  testée, du bloc-canal tel que demandé, et la mesure elle-même est la
+  réponse honnête à la question posée par le brief.
+
 ### Ajouté — fluides & thermo, volet 5 : régions 3a/3b IF97 en sous-critique, équations backward `p(h,s)`
 Les deux derniers chantiers explicitement demandés sur les équations backward IF97 :
 - **`scirust-thermo::backward::region3_{v,t}_{ph,ps}`** — les équations
