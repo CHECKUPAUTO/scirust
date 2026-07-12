@@ -21,6 +21,7 @@
 
 use crate::attention::multi_head_attention;
 use crate::gemm::{Activation, sgemm_bias_act, sgemm_tiled};
+use crate::kv_cache::KvCache;
 use crate::matrix::view::{MatrixView, MatrixViewMut};
 use crate::norm::rmsnorm;
 
@@ -131,6 +132,92 @@ impl TransformerBlock<'_> {
         for (xi, fi) in x.iter_mut().zip(&f2)
         {
             *xi += *fi; // résidu
+        }
+    }
+
+    /// **Pas de décodage incrémental** (génération autoregressive) : traite un
+    /// unique nouveau token `x_t` (longueur `d_model`) à la position absolue
+    /// `pos`, en s'appuyant sur `cache` pour l'attention causale sur tout le
+    /// préfixe déjà vu. Met `x_t` à jour en place et empile ses `K`/`V` dans le
+    /// cache.
+    ///
+    /// Équivaut, ligne par ligne, au chemin *prefill* [`Self::forward`] (causal)
+    /// exécuté sur toute la séquence — mais en `O(pos·d)` par token au lieu de
+    /// recalculer le préfixe. Vérifié dans les tests (`decode_matches_prefill`).
+    pub fn forward_decode(&self, x_t: &mut [f32], pos: usize, cache: &mut KvCache) {
+        let d = self.d_model;
+        let h = self.n_heads;
+        let dff = self.d_ff;
+        assert_eq!(x_t.len(), d, "forward_decode: x_t length != d_model");
+        assert_eq!(
+            d % h,
+            0,
+            "forward_decode: d_model non divisible par n_heads"
+        );
+        let dh = d / h;
+
+        // ---- Attention (pre-norm), 1 token ----
+        let mut hn = x_t.to_vec();
+        rmsnorm(&mut hn, 1, d, self.norm1, self.eps);
+
+        let mut q = vec![0.0f32; d];
+        let mut k = vec![0.0f32; d];
+        let mut v = vec![0.0f32; d];
+        proj(&hn, 1, d, self.wq, d, &mut q);
+        proj(&hn, 1, d, self.wk, d, &mut k);
+        proj(&hn, 1, d, self.wv, d, &mut v);
+
+        rope_row_heads(&mut q, h, dh, self.rope_base, pos);
+        rope_row_heads(&mut k, h, dh, self.rope_base, pos);
+
+        cache.append(&k, &v);
+        let scale = 1.0 / (dh as f32).sqrt();
+        let mut attn = vec![0.0f32; d];
+        cache.decode_step(&q, h, dh, scale, &mut attn);
+
+        let mut o = vec![0.0f32; d];
+        proj(&attn, 1, d, self.wo, d, &mut o);
+        for (xi, oi) in x_t.iter_mut().zip(&o)
+        {
+            *xi += *oi; // résidu
+        }
+
+        // ---- FFN (pre-norm), 1 token ----
+        let mut hn2 = x_t.to_vec();
+        rmsnorm(&mut hn2, 1, d, self.norm2, self.eps);
+        let mut f1 = vec![0.0f32; dff];
+        sgemm_bias_act(
+            1.0,
+            MatrixView::new(&hn2, 1, d),
+            MatrixView::new(self.w1, d, dff),
+            self.b1,
+            Activation::Silu,
+            MatrixViewMut::new(&mut f1, 1, dff),
+        );
+        let mut f2 = vec![0.0f32; d];
+        proj(&f1, 1, dff, self.w2, d, &mut f2);
+        for (xi, fi) in x_t.iter_mut().zip(&f2)
+        {
+            *xi += *fi; // résidu
+        }
+    }
+}
+
+/// RoPE par tête sur **une** ligne (longueur `h·d_head`) à la position `pos`.
+fn rope_row_heads(row: &mut [f32], h: usize, d_head: usize, base: f32, pos: usize) {
+    let half = d_head / 2;
+    let posf = pos as f32;
+    for hh in 0..h
+    {
+        let off = hh * d_head;
+        for i in 0..half
+        {
+            let theta = base.powf(-2.0 * i as f32 / d_head as f32);
+            let (sin, cos) = (posf * theta).sin_cos();
+            let a = row[off + 2 * i];
+            let b = row[off + 2 * i + 1];
+            row[off + 2 * i] = a * cos - b * sin;
+            row[off + 2 * i + 1] = a * sin + b * cos;
         }
     }
 }
@@ -353,6 +440,75 @@ mod tests {
         for i in 0..s * dm
         {
             assert!((got[i] - want[i]).abs() <= 1e-5, "idx {i}");
+        }
+    }
+
+    #[test]
+    fn decode_matches_prefill() {
+        // Décoder token par token via forward_decode + cache KV doit reproduire,
+        // ligne par ligne, le prefill causal forward() sur toute la séquence.
+        let (s, d, h, dff) = (7usize, 8usize, 2usize, 16usize);
+        let eps = 1e-5f32;
+        let base = 10000.0f32;
+        let mk = |n: usize, seed: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| ((i as f32 + seed) * 0.019).sin() * 0.5)
+                .collect()
+        };
+        let (wq, wk, wv, wo) = (
+            mk(d * d, 1.0),
+            mk(d * d, 2.0),
+            mk(d * d, 3.0),
+            mk(d * d, 4.0),
+        );
+        let (w1, b1, w2) = (mk(d * dff, 5.0), mk(dff, 6.0), mk(dff * d, 7.0));
+        let norm1: Vec<f32> = (0..d).map(|i| 1.0 + i as f32 * 0.01).collect();
+        let norm2: Vec<f32> = (0..d).map(|i| 0.9 + i as f32 * 0.02).collect();
+
+        let block = TransformerBlock {
+            d_model: d,
+            n_heads: h,
+            d_ff: dff,
+            wq: &wq,
+            wk: &wk,
+            wv: &wv,
+            wo: &wo,
+            w1: &w1,
+            b1: &b1,
+            w2: &w2,
+            norm1: &norm1,
+            norm2: &norm2,
+            eps,
+            rope_base: base,
+            causal: true,
+        };
+
+        let x0: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.05).cos()).collect();
+
+        // Prefill : forward complet.
+        let mut prefill = x0.clone();
+        block.forward(&mut prefill, s);
+
+        // Décodage incrémental : un token à la fois.
+        let mut cache = KvCache::new(s, d);
+        let mut decoded = vec![0.0f32; s * d];
+        for t in 0..s
+        {
+            let mut row = x0[t * d..t * d + d].to_vec();
+            block.forward_decode(&mut row, t, &mut cache);
+            decoded[t * d..t * d + d].copy_from_slice(&row);
+        }
+        assert_eq!(cache.len(), s);
+
+        for i in 0..s * d
+        {
+            let tol = 2e-3 * (1.0 + prefill[i].abs());
+            assert!(
+                (decoded[i] - prefill[i]).abs() <= tol,
+                "idx {i}: decode {} vs prefill {}",
+                decoded[i],
+                prefill[i]
+            );
         }
     }
 }
