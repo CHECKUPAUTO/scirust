@@ -59,6 +59,7 @@ pub enum BackendKind {
     Avx2,
     Avx512,
     Neon,
+    Sve,
     PortableSimd,
 }
 
@@ -71,6 +72,7 @@ impl BackendKind {
             BackendKind::Avx2 => "x86_64/AVX2",
             BackendKind::Avx512 => "x86_64/AVX-512",
             BackendKind::Neon => "aarch64/NEON",
+            BackendKind::Sve => "aarch64/SVE",
             BackendKind::PortableSimd => "portable_simd",
         }
     }
@@ -118,9 +120,14 @@ pub fn detect_backend() -> BackendKind {
                 }
             }
 
-            // ARM64 — NEON est baseline depuis ARMv8, toujours dispo
+            // ARM64 — SVE d'abord (vecteurs scalables, Graviton 3/A64FX/Neoverse
+            // V2…) puis NEON (baseline ARMv8, toujours dispo).
             #[cfg(target_arch = "aarch64")]
             {
+                if std::arch::is_aarch64_feature_detected!("sve")
+                {
+                    return BackendKind::Sve;
+                }
                 if std::arch::is_aarch64_feature_detected!("neon")
                 {
                     return BackendKind::Neon;
@@ -149,6 +156,8 @@ pub fn runtime_backend() -> &'static dyn SimdBackend {
 
         #[cfg(target_arch = "aarch64")]
         BackendKind::Neon => &NeonBackend,
+        #[cfg(target_arch = "aarch64")]
+        BackendKind::Sve => &SveBackend,
 
         _ => &ScalarBackend,
     }
@@ -1042,6 +1051,85 @@ unsafe fn sdot_f32_neon(x: &[f32], y: &[f32]) -> f32 {
     sum
 }
 
+// =================================================================== //
+//  SVE backend (aarch64) — kernels scalables, longueur vectorielle    //
+//  runtime. Réutilise les noyaux validés de `crate::sve`.             //
+// =================================================================== //
+
+/// Backend **SVE** : `saxpy`/`sdot`/`sscal` scalables (largeur vectorielle
+/// déterminée au runtime, cf. [`crate::sve`]). Construit uniquement quand
+/// `is_aarch64_feature_detected!("sve")` réussit (Graviton 3, A64FX, Neoverse
+/// V2…). `f64` et `relu` retombent sur le scalaire, comme le backend NEON.
+#[cfg(target_arch = "aarch64")]
+pub struct SveBackend;
+
+#[cfg(target_arch = "aarch64")]
+impl SimdBackend for SveBackend {
+    fn name(&self) -> &'static str {
+        "sve"
+    }
+    fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
+        crate::sve::saxpy_f32_sve(alpha, x, y);
+    }
+    fn daxpy_f64(&self, a: f64, x: &[f64], y: &mut [f64]) {
+        ScalarBackend.daxpy_f64(a, x, y);
+    }
+    fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
+        crate::sve::sdot_f32_sve(x, y)
+    }
+    fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
+        ScalarBackend.ddot_f64(x, y)
+    }
+    fn sgemv_f32(
+        &self,
+        alpha: f32,
+        a: crate::matrix::view::MatrixView<f32>,
+        x: &[f32],
+        beta: f32,
+        y: &mut [f32],
+    ) {
+        let m = a.rows();
+        for (i, item) in y.iter_mut().enumerate().take(m)
+        {
+            let row = a.row_slice(i).expect("row_slice");
+            let dot = crate::sve::sdot_f32_sve(row, x);
+            *item = alpha * dot + beta * *item;
+        }
+    }
+    /// SGEMM par formulation rank-1 (axpy-sur-lignes), même structure que les
+    /// paliers x86/NEON mais noyaux SVE scalables (`sscal` + `saxpy`).
+    fn sgemm_f32(
+        &self,
+        alpha: f32,
+        a: crate::matrix::view::MatrixView<f32>,
+        b: crate::matrix::view::MatrixView<f32>,
+        beta: f32,
+        mut c: crate::matrix::view::MatrixViewMut<f32>,
+    ) {
+        let m = a.rows();
+        let k = a.cols();
+        for i in 0..m
+        {
+            let a_row = a.row_slice(i).expect("A row");
+            let c_row = c.row_slice_mut(i).expect("C row");
+            crate::sve::sscal_f32_sve(beta, c_row);
+            for (p, &a_ip) in a_row.iter().enumerate().take(k)
+            {
+                let s = alpha * a_ip;
+                if s == 0.0
+                {
+                    continue;
+                }
+                let b_row = b.row_slice(p).expect("B row");
+                crate::sve::saxpy_f32_sve(s, b_row, c_row);
+            }
+        }
+    }
+    fn relu_f32(&self, v: &mut [f32]) {
+        ScalarBackend.relu_f32(v);
+    }
+}
+
 // ------------------------------------------------------------------ //
 //  Tests                                                              //
 // ------------------------------------------------------------------ //
@@ -1073,6 +1161,10 @@ mod tests {
             {
                 v.push((&NeonBackend, "neon"));
             }
+            if std::arch::is_aarch64_feature_detected!("sve")
+            {
+                v.push((&SveBackend, "sve"));
+            }
         }
         v
     }
@@ -1087,6 +1179,7 @@ mod tests {
                 | BackendKind::Avx2
                 | BackendKind::Avx512
                 | BackendKind::Neon
+                | BackendKind::Sve
                 | BackendKind::PortableSimd
         ));
     }

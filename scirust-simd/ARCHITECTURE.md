@@ -19,16 +19,18 @@ puis le met en cache :
 ```
                  detect_backend()  (OnceLock, coût amorti = 1 load atomique)
                         │
-     ┌──────────┬───────┴────┬──────────┬───────────┐
-   AVX-512    AVX2/FMA      SSE2       NEON        Scalaire
-  (x86_64)   (x86_64)     (x86_64)   (aarch64)    (partout)
+     ┌──────────┬───────┴────┬──────────┬──────┬──────┬──────────┐
+   AVX-512    AVX2/FMA      SSE2       SVE    NEON        Scalaire
+  (x86_64)   (x86_64)     (x86_64)  (aarch64)(aarch64)   (partout)
 ```
 
 - **x86_64** : `AVX-512F` (+ `VNNI`/`BW` selon les kernels) → `AVX2+FMA` →
   `SSE2`. Détection via `std::is_x86_feature_detected!`.
-- **aarch64** : `NEON` (baseline ARMv8), plus de vrais **kernels `SVE`
-  scalables** (`saxpy`/`sdot`/`sscal`, longueur vectorielle runtime, bords
-  prédiqués) et la quantification int8 `dotprod`/`i8mm`.
+- **aarch64** : **`SVE`** (kernels scalables `saxpy`/`sdot`/`sscal`/`sgemm`,
+  longueur vectorielle runtime — Graviton 3/A64FX/Neoverse V2) si présent, sinon
+  **`NEON`** (baseline ARMv8) ; plus la quantification int8 `dotprod`/`i8mm`. Le
+  backend est choisi par `detect_backend()` (SVE avant NEON) et sert tout le trait
+  `SimdBackend`.
 - **Partout ailleurs** : chemin scalaire, toujours correct.
 
 Conséquence : **le même code source** tourne du serveur AVX-512 à un Jetson /
@@ -47,7 +49,7 @@ Du bas (silicium) vers le haut (application) :
 
 | Couche | Module(s) | Contenu |
 |---|---|---|
-| **Dispatch / backends** | `dispatch`, `matrix`, `portable` | Détection CPU, trait `SimdBackend` (saxpy/sdot/…), backends AVX-512/AVX2/SSE2/NEON/scalaire |
+| **Dispatch / backends** | `dispatch`, `matrix`, `portable` | Détection CPU, trait `SimdBackend` (saxpy/sdot/…), backends AVX-512/AVX2/SSE2/**SVE**/NEON/scalaire |
 | **BLAS — GEMM** | `gemm` | SGEMM (`f32`) & DGEMM (`f64`) tuilés/packés, multi-thread, GEMM fusionné `act(A·B+b)` |
 | **Activations** | `activations` | `exp` vectorisée (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
 | **Quantification** | `quant` | dot int8 `u8·i8→i32` (VNNI **et** ARM `i8mm` USDOT), `i8·i8→i32` (ARM `dotprod` SDOT / AVX-512BW), bf16 (natif `avx512bf16` ou élargissement) — **cross-arch** |
