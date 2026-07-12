@@ -62,6 +62,16 @@
 //!   fermés (**Bredt**) et sections minces ouvertes (Saint-Venant).
 //! - [`stress_concentration`] — concentration de contrainte : facteur `Kt`,
 //!   contrainte de pointe sur section nette et facteur de fatigue `Kf`.
+//! - [`forced_vibrations`] — vibrations **forcées** à 1 ddl : amplification
+//!   dynamique, phase, transmissibilité et réponse au balourd tournant.
+//! - [`balancing`] — équilibrage des rotors : force centrifuge de balourd,
+//!   correction en un plan et balourd résiduel admissible (**ISO 1940-1**).
+//! - [`critical_speed`] — vitesses critiques des arbres tournants : critique d'un
+//!   disque, **Rankine** (flèche statique) et combinaison de **Dunkerley**.
+//! - [`flywheel`] — volant d'inertie : coefficient de fluctuation, énergie à
+//!   emmagasiner et inertie requise pour régulariser la vitesse.
+//! - [`impact`] — chocs et charges dynamiques : restitution, choc direct de deux
+//!   masses et facteur d'amplification (charge subite ou tombant d'une hauteur).
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -107,18 +117,23 @@
 //! assert!(pc > 0.0);
 //! ```
 
+pub mod balancing;
 pub mod beams;
 pub mod bearings;
 pub mod belts;
 pub mod buckling;
 pub mod cams;
+pub mod critical_speed;
 pub mod dynamics;
 pub mod economics;
+pub mod flywheel;
+pub mod forced_vibrations;
 pub mod forces;
 pub mod friction;
 pub mod gears;
 pub mod hertz;
 pub mod hyperstatism;
+pub mod impact;
 pub mod iso6336;
 pub mod keys;
 pub mod kinematics;
@@ -139,6 +154,10 @@ pub mod torsion_profiles;
 pub mod trusses;
 pub mod vibrations;
 
+pub use balancing::{
+    centrifugal_force, correction_mass, permissible_eccentricity_um, permissible_unbalance_g_mm,
+    unbalance,
+};
 pub use beams::{
     bending_stress as beam_bending_stress, deflection_cantilever_end_load,
     deflection_simply_supported_center_load, deflection_simply_supported_udl,
@@ -161,12 +180,23 @@ pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
     shm_displacement, shm_velocity,
 };
+pub use critical_speed::{
+    critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
+    rad_to_rpm,
+};
 pub use dynamics::{
     angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
     inertia_solid_cylinder, inertia_solid_sphere, inertia_thin_ring, kinetic_energy_rotation,
     kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
+pub use flywheel::{
+    coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
+};
+pub use forced_vibrations::{
+    frequency_ratio, magnification_factor, phase_lag_rad, resonance_peak_ratio,
+    rotating_unbalance_response, transmissibility,
+};
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
 pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
@@ -183,6 +213,9 @@ pub use hertz::{
 };
 pub use hyperstatism::{
     degree_of_hyperstaticity, independent_loops, is_isostatic, kinematic_unknowns, static_unknowns,
+};
+pub use impact::{
+    direct_impact_velocities, energy_lost, falling_load_factor, suddenly_applied_factor,
 };
 pub use iso6336::{
     contact_stress, elasticity_factor_ze, nominal_contact_stress, safety_factor_pitting,
