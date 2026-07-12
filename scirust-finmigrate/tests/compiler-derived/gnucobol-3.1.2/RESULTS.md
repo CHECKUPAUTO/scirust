@@ -22,7 +22,12 @@ statements and business algorithms were not changed.
 
 ## Compiler-derived results
 
-| Unit | Executed cases/rows | Compared fields | Numerical differences |
+The **Numerical differences** column reports comparison **(B)** below —
+committed baselines vs the semantic model. It is *not* the reproduction check:
+re-running GnuCOBOL against the committed baselines yields 0 mismatches for every
+unit (comparison (A)). See "Two distinct comparisons" immediately below.
+
+| Unit | Executed cases/rows | Compared fields | Model-vs-compiler differences |
 |---|---:|---|---:|
 | INTACCR | 75 scenarios | principal, rate, rounded interest, truncated interest, new balance | 0 |
 | AMORTSCH | 94 schedule rows | period, interest, principal, payment, balance | 0 |
@@ -30,6 +35,38 @@ statements and business algorithms were not changed.
 | DAYCOUNT | 10 scenarios | NASD days, interest | 0 |
 | BRKTCALC | 9 scenarios | base, marginal tax | 0 |
 | CURRCVT | 10 scenarios | amount, source, target, triangulated result, euro intermediate | 3 (documented, Gap-R) |
+
+## Two distinct comparisons — do not conflate them
+
+This evidence set involves **two separate comparisons**, each answering a
+different question. They use different reference data and therefore report
+different numbers. Both statements below are simultaneously true.
+
+**(A) Faithfulness / reproducibility — committed baselines vs live GnuCOBOL.**
+`tools/run_baselines.py verify` recompiles and re-runs every `*-RUN.cbl` wrapper
+and asserts that the committed `baselines/*.csv` reproduce, cell-for-cell, what a
+fresh GnuCOBOL 3.1.2 run emits: **0 mismatches over 1179 field comparisons**.
+There are 0 mismatches *because the committed baselines record raw GnuCOBOL
+output* — including the three CURRCVT 0-decimal cells, which were corrected to
+their raw compiler values (295182.43 / 21267.96 / 581860.75). This comparison
+proves the CSVs are an honest transcript of the compiler; it says nothing about
+the semantic model.
+
+**(B) Equivalence — committed baselines vs the semantic model.**
+`tools/run_baselines.py check` compares the same committed `baselines/*.csv`
+against the independent semantic-model baselines under `../../sandbox`:
+**0 unexpected mismatches + 3 documented divergences**. The three divergences are
+exactly the CURRCVT 0-decimal-currency `result` cells (audit Gap-R, detailed
+below), where the committed COBOL wrapper's fixed 2-dp result field differs from
+the model's target-minor-unit rounding.
+
+In short: **0 mismatches in (A)** measures the baselines against the compiler
+(reproduction fidelity); **3 divergences in (B)** measure the initial semantic
+model against GnuCOBOL (a real COBOL-vs-model scale difference). The same three
+`result` cells that are "correct" in (A) — because they faithfully record raw
+GnuCOBOL — are the three "divergences" flagged in (B) against the model. The
+"Numerical differences" column in the results table above reports comparison
+**(B)** (model vs compiler); comparison (A) has no mismatches by construction.
 
 ## Derived audit columns not emitted by the COBOL programs
 
@@ -68,9 +105,12 @@ The baselines and compiler logs are regenerated from scratch by the deterministi
 standard-library driver `tools/run_baselines.py` (`generate` / `verify` /
 `check`). The exact toolchain, compile flags, run commands, normalization
 procedure, and manifest regeneration are documented in `REPRODUCE.md`. `verify`
-confirms the committed CSVs equal live GnuCOBOL output (0 mismatches over 1179
-field comparisons); the integrity manifest `SHA256SUMS` covers every committed
-file including the per-program `compiler-logs/`.
+is comparison **(A)** above: it confirms the committed CSVs equal live GnuCOBOL
+output (0 mismatches over 1179 field comparisons) — 0 precisely because the
+baselines record raw GnuCOBOL, including the 3 corrected CURRCVT cells. `check`
+is comparison **(B)**: baselines vs the semantic model, 0 unexpected + 3
+documented Gap-R divergences. The integrity manifest `SHA256SUMS` covers every
+committed file including the per-program `compiler-logs/`.
 
 ## Representation-only difference
 
