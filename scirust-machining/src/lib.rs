@@ -36,6 +36,8 @@
 //!   rendement et condition d'irréversibilité (filets carré/trapézoïdal).
 //! - [`torseurs`] — torseurs de la mécanique du solide (statique/cinématique) :
 //!   transport du moment, invariants, axe central, comoment (puissance).
+//! - [`liaisons`] — les 11 liaisons mécaniques normalisées : degrés de liberté,
+//!   mobilité et inconnues statiques (dualité avec [`torseurs`]).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -87,6 +89,7 @@ pub mod gears;
 pub mod hertz;
 pub mod keys;
 pub mod kinematics;
+pub mod liaisons;
 pub mod power_screws;
 pub mod roughness;
 pub mod shafts;
@@ -123,6 +126,7 @@ pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
     mrr_milling_mm3_min, mrr_turning_cm3_min, spindle_speed_rpm,
 };
+pub use liaisons::{LIAISONS, Liaison};
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
