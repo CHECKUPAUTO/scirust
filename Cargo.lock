@@ -3083,6 +3083,13 @@ name = "scirust-forecast"
 version = "0.1.0"
 
 [[package]]
+name = "scirust-fractional"
+version = "0.1.0"
+dependencies = [
+ "scirust-special",
+]
+
+[[package]]
 name = "scirust-frame"
 version = "0.1.0"
 
