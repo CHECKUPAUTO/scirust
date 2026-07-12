@@ -24,7 +24,7 @@ use crate::complex::Complex;
 /// that `a = V · diag(eigenvalues) · Vᴴ`. Eigenvalues are real (the matrix is
 /// assumed Hermitian); the eigenvectors are orthonormal.
 #[allow(clippy::needless_range_loop)] // dense matrix sweep — indices are the algorithm
-fn hermitian_eig(mut a: Vec<Vec<Complex>>) -> (Vec<f64>, Vec<Vec<Complex>>) {
+pub(super) fn hermitian_eig(mut a: Vec<Vec<Complex>>) -> (Vec<f64>, Vec<Vec<Complex>>) {
     let n = a.len();
     // Accumulated eigenvectors, initialised to the identity.
     let mut v: Vec<Vec<Complex>> = (0..n)

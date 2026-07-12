@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — goniométrie ESPRIT (`radar::esprit`) — bloc 18
+Estimation d'angle d'arrivée **sans grille** : complément de MUSIC qui, au lieu
+de balayer un spectre, lit les angles directement sur les valeurs propres.
+- **`esprit_doa(snapshots, spacing, num_sources)`** — exploite l'invariance
+  rotationnelle d'un réseau linéaire uniforme : les deux sous-réseaux (premiers
+  et derniers `M−1` capteurs) voient les mêmes fronts d'onde à un déphasage
+  `e^{jμ}` près, `μ = 2π·spacing·sin θ` étant le pas de phase du vecteur
+  directionnel. La matrice `Ψ` reliant leurs sous-espaces signal (moindres
+  carrés `E₁Ψ = E₂`) est semblable à `diag(e^{jμ_k})` ; ses valeurs propres
+  donnent `sin θ_k = μ_k / (2π·spacing)`, angles renvoyés triés.
+- Réutilise l'eigensolveur hermitien de `radar::music` pour le sous-espace, plus
+  un **eigensolveur complexe** écrit de zéro (réduction de Hessenberg par
+  rotations de Givens puis **algorithme QR à décalage** de Wilkinson) pour la
+  matrice `Ψ` non hermitienne. Sans dépendance.
+- Oracles : les valeurs propres d'une matrice triangulaire sont sa diagonale et
+  celles d'une rotation restent sur le cercle unité ; ESPRIT restitue une source
+  unique et **résout deux sources hors grille** à mieux que 0,5° ; gardes
+  (réseau < 2 capteurs, système singulier → vide). 5 tests (168 au total pour le
+  crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — déconvolution de Wiener (`optics`) — bloc 17
 Restauration d'image dans le **domaine fréquentiel**, complément de la
 déconvolution spatiale de Richardson–Lucy.
