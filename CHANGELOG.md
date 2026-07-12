@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : optoélectronique — photodiode à avalanche APD (`apd`) — bloc 16
+Le récepteur optoélectronique haute sensibilité (lidar, télémétrie laser), qui
+complète la photodiode : un gain d'avalanche `M` amplifie le signal mais ajoute
+un **bruit d'excès** (facteur de McIntyre).
+- **`excess_noise_factor(M, k)`** — facteur de McIntyre `F(M) = k·M + (1−k)(2−1/M)`.
+- **`Apd`** / **`ApdParams`** — courant primaire / multiplié / de signal, bruit
+  d'excès, variances de bruit de grenaille (`2q·I·M²·F·B`) et thermique
+  (`4k_B·T·B/R_L`), et le rapport signal/bruit `SNR = I_s²/(σ²_grenaille +
+  σ²_thermique)`.
+- Oracles : `F(1) = 1` pour tout `k`, `F → 2−1/M` (k=0) et `F = M` (k=1),
+  monotone ; courants et variances aux formes fermées ; le **SNR passe par un
+  optimum** (gain 50 meilleur que 1 — limité par le thermique — et que 1000 —
+  limité par le bruit d'excès) ; rejet des paramètres invalides (gain < 1,
+  `k ∉ [0,1]`). 4 tests (118 au total pour le crate) ;
+  `fmt`/`clippy -D warnings`/`miri` propres.
+
 ### Ajouté — `scirust-sim` : optoélectronique — photodiode / photodétecteur (`photodiode`) — bloc 15
 Le récepteur optoélectronique, complément du laser (émetteur) : puissance optique
 → photocourant → tension limitée par un `RC`, comme `System` de `scirust-sim`.
