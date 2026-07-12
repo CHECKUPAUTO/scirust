@@ -1,0 +1,2 @@
+$ cobc -fsyntax-only -free -Wall normalized-sources/CURRCVT-RUN.cbl
+(no diagnostics: 0 warnings, 0 errors)
