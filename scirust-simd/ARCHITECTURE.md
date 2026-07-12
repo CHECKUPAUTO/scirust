@@ -48,7 +48,8 @@ Du bas (silicium) vers le haut (application) :
 | **Dispatch / backends** | `dispatch`, `matrix`, `portable` | Détection CPU, trait `SimdBackend` (saxpy/sdot/…), backends AVX-512/AVX2/SSE2/NEON/scalaire |
 | **BLAS — GEMM** | `gemm` | SGEMM (`f32`) & DGEMM (`f64`) tuilés/packés, multi-thread, GEMM fusionné `act(A·B+b)` |
 | **Activations** | `activations` | `exp` vectorisée (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
-| **Quantification** | `x86_ext` | dot int8 `u8·i8→i32` (VNNI), bf16 mixed-precision, masques `k`, NT-stores, prefetch |
+| **Quantification** | `quant` | dot int8 `u8·i8→i32` (VNNI **et** ARM `i8mm` USDOT), `i8·i8→i32` (ARM `dotprod` SDOT / AVX-512BW), bf16 (natif `avx512bf16` ou élargissement) — **cross-arch** |
+| **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
 | **Attention** | `attention`, `kv_cache` | naïve, **flash** (softmax en ligne), **causale**, **multi-tête**, **cache KV** |
 | **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
 | **Assemblage** | `transformer`, `model` | Bloc décodeur pre-norm (prefill **+** decode), modèle multi-couche + génération |
@@ -160,7 +161,8 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`matrix`](src/matrix/) | Trait `SimdBackend`, vues matricielles |
 | [`gemm`](src/gemm.rs) | SGEMM/DGEMM tuilés, parallèles, fusionnés |
 | [`activations`](src/activations.rs) | `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` vectorisés |
-| [`x86_ext`](src/x86_ext.rs) | VNNI int8, bf16, masques `k`, NT-stores, prefetch |
+| [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
+| [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
 | [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
 | [`kv_cache`](src/kv_cache.rs) | Cache KV, décodage incrémental |
 | [`norm`](src/norm.rs) | RMSNorm, LayerNorm, RoPE |
