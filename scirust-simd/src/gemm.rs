@@ -723,199 +723,118 @@ impl Activation {
 /// diffusé sur chaque ligne, et `out` de forme `m×n` (row-major).
 ///
 /// C'est le calcul exact d'une couche linéaire suivie d'une activation
-/// (`Y = act(X·W + b)`), en **un seul passage** : le biais et l'activation sont
-/// appliqués directement dans l'épilogue du micro-kernel, dans les registres,
-/// sans matérialiser la pré-activation ni relire la sortie (moins de trafic
-/// mémoire que trois opérations séparées). Réutilise le packing/blocking du
-/// SGEMM tuilé. Dispatch AVX-512 / repli scalaire.
+/// (`Y = act(X·W + b)`). Le produit `alpha·A·B` passe par le **GEMM tuilé/packé
+/// complet** ([`sgemm_tiled`]) — donc **n'importe quel `k`** et l'accélération
+/// AVX-512/multi-bloc — puis le biais et l'activation sont appliqués en **un
+/// seul passage `O(m·n)`** (épilogue vectorisé), négligeable devant le matmul.
+/// Dispatch AVX-512 / repli scalaire pour l'épilogue.
 pub fn sgemm_bias_act(
     alpha: f32,
     a: MatrixView<f32>,
     b: MatrixView<f32>,
     bias: &[f32],
     act: Activation,
-    c: MatrixViewMut<f32>,
+    mut c: MatrixViewMut<f32>,
 ) {
     let (m, k, n) = (a.rows(), a.cols(), b.cols());
     assert_eq!(b.rows(), k, "sgemm_bias_act: A.cols != B.rows");
     assert_eq!(c.rows(), m, "sgemm_bias_act: C.rows != A.rows");
     assert_eq!(c.cols(), n, "sgemm_bias_act: C.cols != B.cols");
     assert_eq!(bias.len(), n, "sgemm_bias_act: bias length != N");
+    if m == 0 || n == 0
+    {
+        return;
+    }
 
+    // Pointeur de base vers le buffer contigu `m×n` de C, capturé avant que
+    // `sgemm_tiled` ne consomme la vue.
+    let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
+
+    // C = alpha·A·B  (GEMM tuilé complet — tout k). `k == 0` ⇒ C reste nul.
+    sgemm_tiled(alpha, a, b, 0.0, c);
+
+    // Épilogue : C[i,j] = act(C[i,j] + biais[j]), en un passage.
+    // SAFETY: `c_ptr` désigne le buffer row-major contigu `m×n` de C (col_stride
+    // 1) ; la vue `c` a été consommée par `sgemm_tiled` et n'a plus d'emprunt
+    // actif, donc on reconstruit une tranche mutable exclusive valide.
+    let cs = unsafe { std::slice::from_raw_parts_mut(c_ptr, m * n) };
     #[cfg(target_arch = "x86_64")]
     {
         if std::is_x86_feature_detected!("avx512f")
         {
             // SAFETY: gated by the runtime detection just above.
-            unsafe { sgemm_bias_act_avx512(alpha, a, b, bias, act, c) };
+            unsafe { bias_act_epilogue_avx512(cs, m, n, bias, act) };
             return;
         }
     }
-    sgemm_bias_act_scalar(alpha, a, b, bias, act, c);
+    bias_act_epilogue_scalar(cs, m, n, bias, act);
 }
 
-#[allow(clippy::needless_range_loop)]
-fn sgemm_bias_act_scalar(
-    alpha: f32,
-    a: MatrixView<f32>,
-    b: MatrixView<f32>,
-    bias: &[f32],
-    act: Activation,
-    mut c: MatrixViewMut<f32>,
-) {
-    let (m, k, n) = (a.rows(), a.cols(), b.cols());
+/// Épilogue scalaire : `c[i,j] = act(c[i,j] + bias[j])` (repli portable).
+fn bias_act_epilogue_scalar(c: &mut [f32], m: usize, n: usize, bias: &[f32], act: Activation) {
     for i in 0..m
     {
-        let a_row = a.row_slice(i).expect("A row");
-        let c_row = c.row_slice_mut(i).expect("C row");
-        for j in 0..n
+        let row = &mut c[i * n..i * n + n];
+        for (j, cj) in row.iter_mut().enumerate()
         {
-            let mut acc = 0.0f32;
-            for p in 0..k
-            {
-                acc += a_row[p] * b.row_slice(p).expect("B row")[j];
-            }
-            c_row[j] = act.apply_scalar(alpha * acc + bias[j]);
+            *cj = act.apply_scalar(*cj + bias[j]);
         }
     }
 }
 
+/// Applique l'activation à un vecteur `__m512` de pré-activations.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-unsafe fn sgemm_bias_act_avx512(
-    alpha: f32,
-    a: MatrixView<f32>,
-    b: MatrixView<f32>,
+#[inline]
+unsafe fn apply_act_ps(
+    pre: core::arch::x86_64::__m512,
+    act: Activation,
+) -> core::arch::x86_64::__m512 {
+    use core::arch::x86_64::*;
+    match act
+    {
+        Activation::Identity => pre,
+        Activation::Relu => _mm512_max_ps(pre, _mm512_setzero_ps()),
+        Activation::Gelu => crate::activations::gelu_ps(pre),
+        Activation::Silu => crate::activations::silu_ps(pre),
+    }
+}
+
+/// Épilogue AVX-512 : `c[i,j] = act(c[i,j] + bias[j])`, 16 voies + reste masqué.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn bias_act_epilogue_avx512(
+    c: &mut [f32],
+    m: usize,
+    n: usize,
     bias: &[f32],
     act: Activation,
-    mut c: MatrixViewMut<f32>,
-) {
-    let (m, k, n) = (a.rows(), a.cols(), b.cols());
-    if m == 0 || n == 0
-    {
-        return;
-    }
-    let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
-    let a_ptr = a.row_slice(0).expect("A base").as_ptr();
-    let b_ptr = b.row_slice(0).expect("B base").as_ptr();
-    let bias_ptr = bias.as_ptr();
-
-    // K==0 ou alpha==0 : la sortie vaut act(biais) partout.
-    if k == 0 || alpha == 0.0
-    {
-        for i in 0..m
-        {
-            let row = c_ptr.add(i * n);
-            for j in 0..n
-            {
-                *row.add(j) = act.apply_scalar(*bias_ptr.add(j));
-            }
-        }
-        return;
-    }
-
-    let mut bpack = vec![0.0f32; KC * NC.div_ceil(NR) * NR];
-    let mut apack = vec![0.0f32; KC * MC.div_ceil(MR) * MR];
-
-    // La fusion biais+activation ne s'applique qu'au DERNIER bloc K (quand
-    // l'accumulation de C est complète). Pour rester simple et correct, on
-    // impose KC >= k (un seul passage K) : les couches denses ont un k modéré
-    // et cela garde l'épilogue exact. Sinon on retombe sur la voie scalaire.
-    if k > KC
-    {
-        drop((bpack, apack));
-        sgemm_bias_act_scalar(
-            alpha,
-            a,
-            b,
-            bias,
-            act,
-            MatrixViewMut::new(std::slice::from_raw_parts_mut(c_ptr, m * n), m, n),
-        );
-        return;
-    }
-    let kc = k;
-
-    let mut jc = 0;
-    while jc < n
-    {
-        let nc = NC.min(n - jc);
-        let n_panels = nc.div_ceil(NR);
-        pack_b(b_ptr.add(jc), n, kc, nc, &mut bpack);
-        let mut ic = 0;
-        while ic < m
-        {
-            let mc = MC.min(m - ic);
-            pack_a(alpha, a_ptr.add(ic * k), k, mc, kc, &mut apack);
-            let m_panels = mc.div_ceil(MR);
-            for ip in 0..m_panels
-            {
-                let i0 = ic + ip * MR;
-                let mr = MR.min(m - i0);
-                let apanel = &apack[ip * kc * MR..];
-                for jp in 0..n_panels
-                {
-                    let j0 = jc + jp * NR;
-                    let nr = NR.min(n - j0);
-                    let bpanel = &bpack[jp * kc * NR..];
-                    micro_kernel_bias_act(
-                        apanel.as_ptr(),
-                        bpanel.as_ptr(),
-                        kc,
-                        mr,
-                        nr,
-                        bias_ptr.add(j0),
-                        act,
-                        c_ptr.add(i0 * n + j0),
-                        n,
-                    );
-                }
-            }
-            ic += MC;
-        }
-        jc += NC;
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f")]
-#[allow(clippy::too_many_arguments)]
-unsafe fn micro_kernel_bias_act(
-    apanel: *const f32,
-    bpanel: *const f32,
-    kc: usize,
-    mr: usize,
-    nr: usize,
-    bias: *const f32,
-    act: Activation,
-    c: *mut f32,
-    ldc: usize,
 ) {
     use core::arch::x86_64::*;
-    let mask: u16 = if nr >= 16 { 0xffff } else { (1u16 << nr) - 1 };
-    let mut acc = [_mm512_setzero_ps(); MR];
-    for p in 0..kc
+    let bias_ptr = bias.as_ptr();
+    for i in 0..m
     {
-        let bv = _mm512_loadu_ps(bpanel.add(p * NR));
-        let arow = apanel.add(p * MR);
-        for (i, ai) in acc.iter_mut().enumerate()
+        let row = c.as_mut_ptr().add(i * n);
+        let mut j = 0;
+        while j + 16 <= n
         {
-            *ai = _mm512_fmadd_ps(_mm512_set1_ps(*arow.add(i)), bv, *ai);
+            let pre = _mm512_add_ps(
+                _mm512_loadu_ps(row.add(j)),
+                _mm512_loadu_ps(bias_ptr.add(j)),
+            );
+            _mm512_storeu_ps(row.add(j), apply_act_ps(pre, act));
+            j += 16;
         }
-    }
-    let biasv = _mm512_maskz_loadu_ps(mask, bias);
-    let zero = _mm512_setzero_ps();
-    for (i, ai) in acc.iter().enumerate().take(mr)
-    {
-        let pre = _mm512_add_ps(*ai, biasv);
-        let v = match act
+        let rem = n - j;
+        if rem > 0
         {
-            Activation::Identity => pre,
-            Activation::Relu => _mm512_max_ps(pre, zero),
-            Activation::Gelu => crate::activations::gelu_ps(pre),
-            Activation::Silu => crate::activations::silu_ps(pre),
-        };
-        _mm512_mask_storeu_ps(c.add(i * ldc), mask, v);
+            let mask = (1u16 << rem) - 1;
+            let pre = _mm512_add_ps(
+                _mm512_maskz_loadu_ps(mask, row.add(j)),
+                _mm512_maskz_loadu_ps(mask, bias_ptr.add(j)),
+            );
+            _mm512_mask_storeu_ps(row.add(j), mask, apply_act_ps(pre, act));
+        }
     }
 }
 
@@ -925,7 +844,9 @@ mod tests {
 
     #[test]
     fn bias_act_matches_naive() {
-        // k=300 > KC(256) exerce le repli scalaire ; les autres, la voie AVX-512.
+        // k=300 et k=600 > KC(256) : depuis la levée de la contrainte, ils
+        // passent par le GEMM tuilé multi-bloc-K + épilogue (plus de repli
+        // scalaire) — d'où leur présence explicite ici.
         let shapes = [
             (1usize, 1usize, 1usize),
             (2, 3, 5),
@@ -934,6 +855,7 @@ mod tests {
             (17, 33, 13),
             (16, 16, 32),
             (12, 300, 20),
+            (9, 600, 40),
         ];
         for &(m, k, n) in &shapes
         {
