@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — analyse micro-Doppler (`radar::micro_doppler`) — bloc 27
+La signature **temps-fréquence** des micro-mouvements d'une cible (pales de rotor,
+hélice, démarche) — base de la reconnaissance de cible non coopérative (NCTR).
+- **`spectrogram(signal, win_len, hop)`** — TFCT à fenêtre de Hann sur la FFT
+  puissance-de-deux du crate (spectre de magnitude par trame) ;
+  **`bin_frequencies(win_len, fs)`** — fréquences Doppler signées des bins.
+- Descripteurs : **`ridge`** (fréquence dominante par trame = Doppler instantané),
+  **`mean_doppler`** (Doppler de corps, moyenne de la crête), **`doppler_bandwidth`**
+  (extension crête-à-crête) et **`cadence`** (fréquence de répétition du
+  micro-mouvement, par pic d'autocorrélation de la crête au-delà du lobe
+  principal). Sans dépendance.
+- Oracles (signal synthétique de diffuseur tournant, fréquence instantanée
+  `f_b + f_max·cos(2π f_rot t)`) : la moyenne de la crête **retrouve le Doppler de
+  corps** `f_b` ; la bande **reflète le micro-mouvement** (≈ 2·f_max) et est nulle
+  pour un ton pur ; la cadence **retrouve la fréquence de rotation** `f_rot` ; un
+  ton pur a une crête plate à sa fréquence ; gardes (fenêtre non-puissance-de-deux,
+  hop nul, signal trop court, crête vide). 6 tests (204 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — filtre à association probabiliste PDAF (`radar::pda`) — bloc 26
 Montée en fidélité du pistage en **milieu encombré** : là où `radar::mtt`
 associe chaque piste à une seule mesure par un choix dur au plus proche voisin
