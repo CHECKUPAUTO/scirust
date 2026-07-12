@@ -278,6 +278,176 @@ pub fn flash_attention(
     }
 }
 
+/// **Flash-attention causale** (self-attention, `t = s`) : la requête `i` ne
+/// regarde que les clés `0..=i` (masquage du futur), comme en inférence
+/// décodeur/LLM. `q`, `k`, `v` sont tous `s×d`.
+///
+/// Le masquage est **gratuit** ici : au lieu de calculer puis d'annuler les
+/// scores futurs, on **borne** simplement le balayage des clés à `[0, i+1)` —
+/// ce qui divise aussi le travail par ~2 (triangle inférieur). Softmax en
+/// ligne identique à [`flash_attention`], mémoire `O(d + FLASH_BC)` par requête.
+pub fn flash_attention_causal(
+    q: &[f32],
+    s: usize,
+    d: usize,
+    k: &[f32],
+    v: &[f32],
+    scale: f32,
+    out: &mut [f32],
+) {
+    use crate::activations::exp_inplace;
+    assert_eq!(q.len(), s * d, "flash_attention_causal: Q shape");
+    assert_eq!(
+        k.len(),
+        s * d,
+        "flash_attention_causal: K shape (t must equal s)"
+    );
+    assert_eq!(
+        v.len(),
+        s * d,
+        "flash_attention_causal: V shape (t must equal s)"
+    );
+    assert_eq!(out.len(), s * d, "flash_attention_causal: out shape");
+
+    let backend = runtime_backend();
+    let mut scores = vec![0.0f32; FLASH_BC];
+
+    for i in 0..s
+    {
+        let q_row = &q[i * d..i * d + d];
+        let o = &mut out[i * d..i * d + d];
+        o.iter_mut().for_each(|x| *x = 0.0);
+        let mut m = f32::NEG_INFINITY;
+        let mut l = 0.0f32;
+
+        let t_eff = i + 1; // clés autorisées : 0..=i
+        let mut j0 = 0;
+        while j0 < t_eff
+        {
+            let bc = FLASH_BC.min(t_eff - j0);
+            let mut block_max = f32::NEG_INFINITY;
+            for (jj, sc) in scores[..bc].iter_mut().enumerate()
+            {
+                let k_row = &k[(j0 + jj) * d..(j0 + jj) * d + d];
+                let val = scale * backend.sdot_f32(q_row, k_row);
+                *sc = val;
+                block_max = block_max.max(val);
+            }
+
+            let m_new = m.max(block_max);
+            let corr = if m == f32::NEG_INFINITY
+            {
+                0.0
+            }
+            else
+            {
+                (m - m_new).exp()
+            };
+
+            for sc in scores[..bc].iter_mut()
+            {
+                *sc -= m_new;
+            }
+            exp_inplace(&mut scores[..bc]);
+
+            l = l * corr + scores[..bc].iter().sum::<f32>();
+            for x in o.iter_mut()
+            {
+                *x *= corr;
+            }
+            for (jj, &p) in scores[..bc].iter().enumerate()
+            {
+                let v_row = &v[(j0 + jj) * d..(j0 + jj) * d + d];
+                backend.saxpy_f32(p, v_row, o);
+            }
+
+            m = m_new;
+            j0 += bc;
+        }
+
+        if l != 0.0
+        {
+            let inv = 1.0 / l;
+            for x in o.iter_mut()
+            {
+                *x *= inv;
+            }
+        }
+    }
+}
+
+/// **Attention multi-tête** : `h` têtes indépendantes de dimension `d_head`
+/// chacune, sur des tenseurs à têtes concaténées le long de l'axe des features
+/// (layout usuel après la projection QKV) — `q` est `s×(h·d_head)`, `k` et `v`
+/// sont `t×(h·d_head)`, `out` est `s×(h·d_head)`. Chaque tête `head` attend
+/// indépendamment sur ses `d_head` colonnes `[head·d_head, (head+1)·d_head)`.
+///
+/// `causal = true` applique le masquage causal (exige `t == s`) via
+/// [`flash_attention_causal`] ; sinon [`flash_attention`]. Les têtes sont
+/// extraites/réinsérées en buffers contigus pour réutiliser les noyaux flash.
+#[allow(clippy::too_many_arguments)]
+pub fn multi_head_attention(
+    q: &[f32],
+    s: usize,
+    t: usize,
+    h: usize,
+    d_head: usize,
+    k: &[f32],
+    v: &[f32],
+    scale: f32,
+    causal: bool,
+    out: &mut [f32],
+) {
+    let dm = h * d_head; // dimension modèle (features concaténées)
+    assert_eq!(q.len(), s * dm, "multi_head_attention: Q shape");
+    assert_eq!(k.len(), t * dm, "multi_head_attention: K shape");
+    assert_eq!(v.len(), t * dm, "multi_head_attention: V shape");
+    assert_eq!(out.len(), s * dm, "multi_head_attention: out shape");
+    if causal
+    {
+        assert_eq!(t, s, "multi_head_attention: causal exige t == s");
+    }
+
+    let mut qh = vec![0.0f32; s * d_head];
+    let mut kh = vec![0.0f32; t * d_head];
+    let mut vh = vec![0.0f32; t * d_head];
+    let mut oh = vec![0.0f32; s * d_head];
+
+    for head in 0..h
+    {
+        let off = head * d_head;
+        // Extraction de la tête vers des buffers contigus.
+        for r in 0..s
+        {
+            qh[r * d_head..r * d_head + d_head]
+                .copy_from_slice(&q[r * dm + off..r * dm + off + d_head]);
+        }
+        for r in 0..t
+        {
+            kh[r * d_head..r * d_head + d_head]
+                .copy_from_slice(&k[r * dm + off..r * dm + off + d_head]);
+            vh[r * d_head..r * d_head + d_head]
+                .copy_from_slice(&v[r * dm + off..r * dm + off + d_head]);
+        }
+
+        if causal
+        {
+            flash_attention_causal(&qh, s, d_head, &kh, &vh, scale, &mut oh);
+        }
+        else
+        {
+            flash_attention(&qh, s, d_head, &kh, t, &vh, scale, &mut oh);
+        }
+
+        // Réinsertion de la sortie de la tête.
+        for r in 0..s
+        {
+            out[r * dm + off..r * dm + off + d_head]
+                .copy_from_slice(&oh[r * d_head..r * d_head + d_head]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,6 +581,169 @@ mod tests {
                     got[idx],
                     want[idx]
                 );
+            }
+        }
+    }
+
+    /// Référence causale : softmax sur les clés `0..=i` seulement.
+    fn causal_ref(q: &[f32], s: usize, d: usize, k: &[f32], v: &[f32], scale: f32) -> Vec<f32> {
+        let mut out = vec![0.0f32; s * d];
+        for i in 0..s
+        {
+            let t_eff = i + 1;
+            let mut row = vec![0.0f32; t_eff];
+            for (j, r) in row.iter_mut().enumerate()
+            {
+                let mut acc = 0.0f32;
+                for e in 0..d
+                {
+                    acc += q[i * d + e] * k[j * d + e];
+                }
+                *r = scale * acc;
+            }
+            let m = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let mut sum = 0.0f32;
+            for r in row.iter_mut()
+            {
+                *r = (*r - m).exp();
+                sum += *r;
+            }
+            for e in 0..d
+            {
+                let mut acc = 0.0f32;
+                for (j, &p) in row.iter().enumerate()
+                {
+                    acc += p * v[j * d + e];
+                }
+                out[i * d + e] = acc / sum;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn flash_causal_matches_reference() {
+        // s=100 > FLASH_BC exerce le balayage causal multi-bloc et le triangle.
+        for &(s, d) in &[(1usize, 1usize), (4, 8), (17, 5), (64, 16), (100, 12)]
+        {
+            let q: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.07).sin()).collect();
+            let k: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.05).cos() * 2.0).collect();
+            let v: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.03) - 0.5).collect();
+            let scale = 1.0 / (d as f32).sqrt();
+
+            let want = causal_ref(&q, s, d, &k, &v, scale);
+            let mut got = vec![0.0f32; s * d];
+            flash_attention_causal(&q, s, d, &k, &v, scale, &mut got);
+            for idx in 0..s * d
+            {
+                let tol = 1e-4 * (1.0 + want[idx].abs());
+                assert!(
+                    (got[idx] - want[idx]).abs() <= tol,
+                    "causal s={s} d={d} idx={idx}: {} vs {}",
+                    got[idx],
+                    want[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn causal_first_query_is_value_row_zero() {
+        // Requête 0 ne voit que la clé 0 → softmax trivial → out[0] == v[0].
+        let (s, d) = (4, 3);
+        let q: Vec<f32> = (0..s * d).map(|i| (i as f32).sin()).collect();
+        let k: Vec<f32> = (0..s * d).map(|i| (i as f32).cos()).collect();
+        let v: Vec<f32> = (0..s * d).map(|i| i as f32 * 0.5).collect();
+        let mut out = vec![0.0f32; s * d];
+        flash_attention_causal(&q, s, d, &k, &v, 0.3, &mut out);
+        for e in 0..d
+        {
+            assert!((out[e] - v[e]).abs() <= 1e-5, "out[0][{e}] != v[0][{e}]");
+        }
+    }
+
+    #[test]
+    fn multi_head_matches_per_head() {
+        for &(s, t, h, dh) in &[(3usize, 5usize, 2usize, 4usize), (8, 8, 3, 6)]
+        {
+            let dm = h * dh;
+            let q: Vec<f32> = (0..s * dm).map(|i| (i as f32 * 0.09).sin()).collect();
+            let k: Vec<f32> = (0..t * dm).map(|i| (i as f32 * 0.04).cos()).collect();
+            let v: Vec<f32> = (0..t * dm).map(|i| (i as f32 * 0.02) - 0.3).collect();
+            let scale = 1.0 / (dh as f32).sqrt();
+
+            let mut got = vec![0.0f32; s * dm];
+            multi_head_attention(&q, s, t, h, dh, &k, &v, scale, false, &mut got);
+
+            // Référence : chaque tête via attention_ref sur ses colonnes.
+            for head in 0..h
+            {
+                let off = head * dh;
+                let mut qh = vec![0.0f32; s * dh];
+                let mut kh = vec![0.0f32; t * dh];
+                let mut vh = vec![0.0f32; t * dh];
+                for r in 0..s
+                {
+                    qh[r * dh..r * dh + dh].copy_from_slice(&q[r * dm + off..r * dm + off + dh]);
+                }
+                for r in 0..t
+                {
+                    kh[r * dh..r * dh + dh].copy_from_slice(&k[r * dm + off..r * dm + off + dh]);
+                    vh[r * dh..r * dh + dh].copy_from_slice(&v[r * dm + off..r * dm + off + dh]);
+                }
+                let want_h = attention_ref(&qh, s, dh, &kh, t, &vh, scale);
+                for r in 0..s
+                {
+                    for e in 0..dh
+                    {
+                        let g = got[r * dm + off + e];
+                        let w = want_h[r * dh + e];
+                        assert!(
+                            (g - w).abs() <= 1e-4 * (1.0 + w.abs()),
+                            "head {head} r={r} e={e}: {g} vs {w}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn multi_head_causal_matches_per_head() {
+        let (s, h, dh) = (6usize, 2usize, 4usize);
+        let dm = h * dh;
+        let q: Vec<f32> = (0..s * dm).map(|i| (i as f32 * 0.11).sin()).collect();
+        let k: Vec<f32> = (0..s * dm).map(|i| (i as f32 * 0.06).cos()).collect();
+        let v: Vec<f32> = (0..s * dm).map(|i| (i as f32 * 0.03) - 0.4).collect();
+        let scale = 1.0 / (dh as f32).sqrt();
+
+        let mut got = vec![0.0f32; s * dm];
+        multi_head_attention(&q, s, s, h, dh, &k, &v, scale, true, &mut got);
+
+        for head in 0..h
+        {
+            let off = head * dh;
+            let mut qh = vec![0.0f32; s * dh];
+            let mut kh = vec![0.0f32; s * dh];
+            let mut vh = vec![0.0f32; s * dh];
+            for r in 0..s
+            {
+                qh[r * dh..r * dh + dh].copy_from_slice(&q[r * dm + off..r * dm + off + dh]);
+                kh[r * dh..r * dh + dh].copy_from_slice(&k[r * dm + off..r * dm + off + dh]);
+                vh[r * dh..r * dh + dh].copy_from_slice(&v[r * dm + off..r * dm + off + dh]);
+            }
+            let want_h = causal_ref(&qh, s, dh, &kh, &vh, scale);
+            for r in 0..s
+            {
+                for e in 0..dh
+                {
+                    let g = got[r * dm + off + e];
+                    let w = want_h[r * dh + e];
+                    assert!(
+                        (g - w).abs() <= 1e-4 * (1.0 + w.abs()),
+                        "causal head {head} r={r} e={e}: {g} vs {w}"
+                    );
+                }
             }
         }
     }
