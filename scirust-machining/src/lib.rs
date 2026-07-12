@@ -72,6 +72,16 @@
 //!   emmagasiner et inertie requise pour régulariser la vitesse.
 //! - [`impact`] — chocs et charges dynamiques : restitution, choc direct de deux
 //!   masses et facteur d'amplification (charge subite ou tombant d'une hauteur).
+//! - [`slider_crank`] — mécanisme bielle-manivelle : course, vitesse et
+//!   accélération du piston selon l'angle de manivelle.
+//! - [`fourbar`] — quadrilatère articulé : critère de **Grashof** et
+//!   classification (manivelle-balancier, double-manivelle…).
+//! - [`epicyclic`] — trains épicycloïdaux : équation de **Willis**, vitesses
+//!   soleil/couronne/porte-satellites et rapport de réduction.
+//! - [`universal_joint`] — joint de **Cardan** : irrégularité de transmission,
+//!   rapport de vitesses instantané et bornes de fluctuation.
+//! - [`geneva`] — croix de Malte : indexeur intermittent, angle de la roue menée,
+//!   rapport de vitesses et angles d'indexage/repos.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -126,11 +136,14 @@ pub mod cams;
 pub mod critical_speed;
 pub mod dynamics;
 pub mod economics;
+pub mod epicyclic;
 pub mod flywheel;
 pub mod forced_vibrations;
 pub mod forces;
+pub mod fourbar;
 pub mod friction;
 pub mod gears;
+pub mod geneva;
 pub mod hertz;
 pub mod hyperstatism;
 pub mod impact;
@@ -142,6 +155,7 @@ pub mod mohr;
 pub mod power_screws;
 pub mod roughness;
 pub mod shafts;
+pub mod slider_crank;
 pub mod springs;
 pub mod stress_concentration;
 pub mod thermal;
@@ -152,6 +166,7 @@ pub mod toollife;
 pub mod torseurs;
 pub mod torsion_profiles;
 pub mod trusses;
+pub mod universal_joint;
 pub mod vibrations;
 
 pub use balancing::{
@@ -190,6 +205,9 @@ pub use dynamics::{
     kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
+pub use epicyclic::{
+    carrier_speed, reduction_ratio_ring_fixed, ring_speed, ring_teeth, sun_speed, willis_ratio,
+};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
 };
@@ -198,6 +216,7 @@ pub use forced_vibrations::{
     rotating_unbalance_response, transmissibility,
 };
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
+pub use fourbar::{FourBarType, classify, is_grashof};
 pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
     max_static_friction, within_adhesion_cone,
@@ -206,6 +225,10 @@ pub use gears::{
     HelicalGear, SpurGear, center_distance, gear_ratio, lewis_bending_stress,
     minimum_teeth_no_undercut, pitch_line_velocity_m_s, tangential_force_from_power,
     tangential_force_from_torque, transverse_contact_ratio,
+};
+pub use geneva::{
+    center_distance_ratio, crank_ratio, driven_angle, dwell_crank_angle, indexing_crank_angle,
+    velocity_ratio as geneva_velocity_ratio,
 };
 pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
@@ -243,6 +266,9 @@ pub use shafts::{
     angle_of_twist_deg, bending_stress, polar_section_modulus_hollow, polar_section_modulus_solid,
     section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
 };
+pub use slider_crank::{
+    obliquity_ratio, piston_acceleration_approx, piston_displacement, piston_velocity,
+};
 pub use springs::HelicalSpring;
 pub use stress_concentration::{
     fatigue_stress_concentration, nominal_stress_plate_with_hole, peak_stress,
@@ -267,6 +293,11 @@ pub use torsion_profiles::{
     thin_strip_max_shear, thin_strip_torsion_constant,
 };
 pub use trusses::{axial_stress, member_elongation, two_member_joint};
+pub use universal_joint::{
+    max_velocity_ratio as cardan_max_velocity_ratio,
+    min_velocity_ratio as cardan_min_velocity_ratio, output_angle,
+    velocity_ratio as cardan_velocity_ratio,
+};
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
