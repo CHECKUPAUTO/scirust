@@ -19,7 +19,10 @@
 //! detections into target centroids — and [`track`] for the temporal layer that
 //! associates those centroids across frames and smooths them with α–β track
 //! filters, with [`kalman`] adding a full constant-velocity Kalman filter and
-//! an Interacting-Multiple-Model estimator for manoeuvring targets.
+//! an Interacting-Multiple-Model estimator for manoeuvring targets, and
+//! [`imm2d`] extending that to a planar coordinated-turn IMM (a general linear
+//! Kalman filter blending constant-velocity and constant-turn-rate models) for
+//! tracking turning targets in the (x, y) plane.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -29,6 +32,7 @@ pub mod doa;
 pub mod doppler;
 pub mod esprit;
 pub mod fmcw;
+pub mod imm2d;
 pub mod kalman;
 pub mod matched_filter;
 pub mod mti;
@@ -44,6 +48,7 @@ pub use doa::{covariance, mvdr_spectrum};
 pub use doppler::{doppler_spectrum, range_doppler_map};
 pub use esprit::esprit_doa;
 pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_resolution};
+pub use imm2d::{Imm2D, KalmanLinear, ct_model_2d, cv_model_2d};
 pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;

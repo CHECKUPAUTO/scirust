@@ -5,6 +5,30 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — IMM à virage coordonné 2-D (`radar::imm2d`) — bloc 20
+Pistage de cibles **manœuvrantes** dans le plan : là où l'IMM 1-D (bloc 19)
+approxime une manœuvre en gonflant le bruit de process d'un modèle à vitesse
+constante, ce bloc ajoute un vrai modèle de **virage coordonné** qui fait
+tourner le vecteur vitesse à une cadence angulaire ω constante.
+- **`KalmanLinear`** — filtre de Kalman linéaire général à `n` états / `m`
+  mesures (matrices denses, mise à jour par factorisation de Cholesky,
+  vraisemblance gaussienne de l'innovation). Réutilisable bien au-delà du
+  pistage.
+- **`cv_model_2d`** / **`ct_model_2d`** — les deux modèles de mouvement plan sur
+  l'état cartésien `[x, vₓ, y, v_y]` : quasi-vitesse-constante et virage
+  coordonné à cadence ω fixe (dégénère vers CV quand ω→0).
+- **`Imm2D`** — estimateur Interacting Multiple Model sur un banc de ces modèles
+  (typiquement CV + un ou deux CT à ±ω) : en ligne droite le modèle CV gagne,
+  dès le virage le modèle CT correspondant prend le relais et le pistage suit
+  l'arc au lieu de le survoler. Sans dépendance.
+- Oracles : CT dégénère vers CV quand ω→0 ; le Kalman linéaire restitue la
+  vitesse constante 2-D ; le filtre CT **suit une trajectoire circulaire bien
+  mieux qu'un filtre CV** (erreur < moitié) ; l'IMM **choisit le modèle de
+  virage et bat un filtre CV seul sur une manœuvre** (probabilité du mode CT qui
+  monte) ; probabilités de mode valides ; Cholesky résout un système connu et
+  rejette une matrice non définie positive ; garde du banc vide. 7 tests (182 au
+  total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — filtrage de Kalman / IMM (`radar::kalman`) — bloc 19
 Montée en gamme du pistage : le filtre α–β à gains fixes est complété par un
 filtre de Kalman adaptatif et un estimateur multi-modèles pour cibles
