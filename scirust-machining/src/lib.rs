@@ -136,6 +136,16 @@
 //!   cadence de production.
 //! - [`oee`] — taux de rendement synthétique (**TRS/OEE**) : disponibilité,
 //!   performance, qualité et leur produit.
+//! - [`torsion_springs`] — ressorts de torsion : raideur angulaire, rotation et
+//!   contrainte de flexion du fil.
+//! - [`extension_springs`] — ressorts de traction : raideur, tension initiale et
+//!   effort/flèche au décollement des spires.
+//! - [`leaf_springs`] — ressorts à lames : contrainte, flèche et raideur d'un
+//!   empilage en console.
+//! - [`belleville_washers`] — rondelles **Belleville** : loi effort-flèche non
+//!   linéaire (Almen-László) et charge d'aplatissement.
+//! - [`elastomer_mounts`] — plots élastomères : facteur de forme, module
+//!   apparent et raideurs compression/cisaillement.
 //!
 //! ## Positionnement
 //!
@@ -180,6 +190,7 @@
 pub mod balancing;
 pub mod beams;
 pub mod bearings;
+pub mod belleville_washers;
 pub mod belts;
 pub mod bernoulli;
 pub mod bevel_worm_gears;
@@ -192,8 +203,10 @@ pub mod critical_speed;
 pub mod dimension_chains;
 pub mod dynamics;
 pub mod economics;
+pub mod elastomer_mounts;
 pub mod endurance_limit;
 pub mod epicyclic;
+pub mod extension_springs;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
 pub mod flywheel;
@@ -215,6 +228,7 @@ pub mod iso6336;
 pub mod journal_bearings;
 pub mod keys;
 pub mod kinematics;
+pub mod leaf_springs;
 pub mod liaisons;
 pub mod mohr;
 pub mod msa;
@@ -239,6 +253,7 @@ pub mod tolerancing;
 pub mod toollife;
 pub mod torseurs;
 pub mod torsion_profiles;
+pub mod torsion_springs;
 pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
@@ -258,6 +273,7 @@ pub use bearings::{
     BearingType, Reliability, adjusted_rating_life, basic_rating_life_hours,
     basic_rating_life_revs, equivalent_dynamic_load,
 };
+pub use belleville_washers::{flatten_load, k1_factor, load as belleville_load};
 pub use belts::{
     belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
     wrap_angle_small_pulley_rad,
@@ -299,12 +315,20 @@ pub use dynamics::{
     kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
+pub use elastomer_mounts::{
+    apparent_compression_modulus, compression_stiffness, deflection as elastomer_deflection,
+    shape_factor, shear_stiffness,
+};
 pub use endurance_limit::{
     corrected_endurance_limit, fatigue_strength_at_cycles, sn_coefficients,
     steel_endurance_estimate,
 };
 pub use epicyclic::{
     carrier_speed, reduction_ratio_ring_fixed, ring_speed, ring_teeth, sun_speed, willis_ratio,
+};
+pub use extension_springs::{
+    body_shear_stress, deflection as extension_spring_deflection, force_at_deflection,
+    rate as extension_spring_rate,
 };
 pub use fastener_groups::{group_polar_moment, primary_shear, resultant_shear, secondary_shear};
 pub use fatigue_mean_stress::{
@@ -372,6 +396,10 @@ pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
     mrr_milling_mm3_min, mrr_turning_cm3_min, spindle_speed_rpm,
 };
+pub use leaf_springs::{
+    bending_stress as leaf_spring_bending_stress, deflection as leaf_spring_deflection,
+    rate as leaf_spring_rate,
+};
 pub use liaisons::{LIAISONS, Liaison};
 pub use mohr::{
     max_in_plane_shear, mohr_radius, normal_stress_rotated, principal_angle_rad,
@@ -436,6 +464,9 @@ pub use torseurs::Torseur;
 pub use torsion_profiles::{
     bredt_shear_stress, bredt_twist_rate, rectangular_max_shear, rectangular_torsion_constant,
     thin_strip_max_shear, thin_strip_torsion_constant,
+};
+pub use torsion_springs::{
+    angular_deflection, angular_rate, bending_stress as torsion_spring_bending_stress,
 };
 pub use trusses::{axial_stress, member_elongation, two_member_joint};
 pub use universal_joint::{
