@@ -82,6 +82,16 @@
 //!   rapport de vitesses instantané et bornes de fluctuation.
 //! - [`geneva`] — croix de Malte : indexeur intermittent, angle de la roue menée,
 //!   rapport de vitesses et angles d'indexage/repos.
+//! - [`bernoulli`] — mécanique des fluides : pression hydrostatique/dynamique,
+//!   charge de **Bernoulli**, continuité, **Torricelli** et **Reynolds**.
+//! - [`pipe_flow`] — pertes de charge : **Darcy-Weisbach**, facteur de frottement
+//!   (**Colebrook**, Swamee-Jain) et pertes singulières.
+//! - [`pumps`] — pompes centrifuges : puissances, **NPSH** disponible, lois
+//!   d'affinité et vitesse spécifique.
+//! - [`thermo_cycles`] — cycles thermodynamiques : rendements **Carnot**, Otto,
+//!   Diesel et COP des machines frigorifiques/pompes à chaleur.
+//! - [`heat_exchanger`] — échangeurs : **DTLM** et méthode **NUT-efficacité**
+//!   (ε-NTU) co-courant/contre-courant.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -131,6 +141,7 @@ pub mod balancing;
 pub mod beams;
 pub mod bearings;
 pub mod belts;
+pub mod bernoulli;
 pub mod buckling;
 pub mod cams;
 pub mod critical_speed;
@@ -144,6 +155,7 @@ pub mod fourbar;
 pub mod friction;
 pub mod gears;
 pub mod geneva;
+pub mod heat_exchanger;
 pub mod hertz;
 pub mod hyperstatism;
 pub mod impact;
@@ -152,13 +164,16 @@ pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
 pub mod mohr;
+pub mod pipe_flow;
 pub mod power_screws;
+pub mod pumps;
 pub mod roughness;
 pub mod shafts;
 pub mod slider_crank;
 pub mod springs;
 pub mod stress_concentration;
 pub mod thermal;
+pub mod thermo_cycles;
 pub mod threads;
 pub mod time;
 pub mod tolerancing;
@@ -186,6 +201,10 @@ pub use bearings::{
 pub use belts::{
     belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
     wrap_angle_small_pulley_rad,
+};
+pub use bernoulli::{
+    continuity_velocity, dynamic_pressure, hydrostatic_pressure, reynolds_number,
+    torricelli_velocity, total_head,
 };
 pub use buckling::{
     EndCondition, critical_load, critical_stress, effective_length, is_euler_valid,
@@ -230,6 +249,10 @@ pub use geneva::{
     center_distance_ratio, crank_ratio, driven_angle, dwell_crank_angle, indexing_crank_angle,
     velocity_ratio as geneva_velocity_ratio,
 };
+pub use heat_exchanger::{
+    actual_heat_transfer, capacity_ratio, effectiveness_counterflow, effectiveness_parallel_flow,
+    heat_duty_lmtd, lmtd, ntu,
+};
 pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
     point_contact_max_pressure, point_contact_radius,
@@ -256,8 +279,15 @@ pub use mohr::{
     principal_stresses, safety_factor, shear_stress_rotated, tresca_plane, von_mises_plane,
     von_mises_principal,
 };
+pub use pipe_flow::{
+    colebrook_friction, darcy_head_loss, laminar_friction_factor, minor_loss, swamee_jain_friction,
+};
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
+};
+pub use pumps::{
+    affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
+    specific_speed,
 };
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
@@ -276,6 +306,10 @@ pub use stress_concentration::{
 pub use thermal::{
     conduction_heat_flow, convection_heat_flow, linear_expansion, sensible_heat,
     thermal_resistance, thermal_stress,
+};
+pub use thermo_cycles::{
+    carnot_efficiency, cop_heat_pump_carnot, cop_refrigerator_carnot, diesel_efficiency,
+    otto_efficiency, thermal_efficiency,
 };
 pub use threads::MetricThread;
 pub use time::{
