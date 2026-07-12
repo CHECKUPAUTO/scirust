@@ -5,6 +5,31 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — imagerie SAR, compression azimutale (`radar::sar`) — bloc 36
+Le mode **imagerie** du radar. Une antenne réelle de longueur `D` a une résolution
+transverse `λR/D`, grossière à longue distance ; le **SAR** la raffine en
+synthétisant une longue ouverture à partir du mouvement du porteur : en passant
+devant une cible ponctuelle à la distance minimale `R₀`, l'histoire de distance
+trace une parabole `R(x) ≈ R₀ + (x−x₀)²/(2R₀)`, imprimant une phase quadratique
+(un **chirp azimutal**) sur le signal lent. Le filtrage adapté de ce chirp — la
+compression d'impulsion de `radar::matched_filter`, mais en azimut — focalise la
+cible en un pic net.
+- **`synthetic_aperture_length(λ, R, D)`** = `λR/D` (ouverture synthétisée) ;
+  **`azimuth_resolution(D)`** = `D/2`, la résolution transverse **indépendante de
+  la distance** ; **`azimuth_doppler_bandwidth(v, D)`** = `2v/D` ;
+  **`azimuth_chirp_rate(v, λ, R)`** = `2v²/(λR)`.
+- **`azimuth_history(R, x₀, λ, positions)`** — l'histoire de phase lente
+  `exp(−j·2π·(x−x₀)²/(λR))` ; **`azimuth_reference(R, λ, positions)`** — le chirp
+  de référence ; **`focus_azimuth(signal, reference)`** — compression azimutale
+  par corrélation (réutilise `cross_correlate`).
+- Oracles : formules fermées (résolution `D/2` indépendante de R, ouverture ∝ R,
+  bande `2v/D`) ; taux de chirp ∝ `v²` et ∝ `1/R` ; l'histoire azimutale **est un
+  chirp FM linéaire** (différence seconde de phase constante) et correspond à la
+  parabole ; le **filtre adapté focalise une cible ponctuelle** exactement à sa
+  position azimutale (pic de corrélation) ; **deux cibles séparées résolues** en
+  deux pics ; gardes. 7 tests (259 au total pour le crate) ; `fmt`/`clippy -D
+  warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — traitement adaptatif spatio-temporel (STAP) (`radar::stap`) — bloc 35
 Le filtre anti-fouillis des radars aéroportés. Sous une plateforme en mouvement, le
 fouillis de sol se replie sur une **crête** angle-Doppler `f_d = β·f_s` (avec

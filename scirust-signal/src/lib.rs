@@ -68,7 +68,11 @@
 //!   adaptive processing (STAP) for airborne radar — a joint angle-Doppler
 //!   adaptive filter (`w = R⁻¹s/(sᴴR⁻¹s)`) that nulls the ground-clutter ridge
 //!   `f_d = β·f_s` while holding unit gain on the target, so a slow mover buried
-//!   in clutter but off the ridge is recovered at near the full `NM` gain
+//!   in clutter but off the ridge is recovered at near the full `NM` gain, and
+//!   synthetic-aperture radar (SAR) azimuth compression — focusing a target's
+//!   quadratic slow-time phase history (an azimuth chirp) by matched filtering to
+//!   synthesise a `λR/D` aperture, giving the range-independent `D/2` cross-range
+//!   resolution
 
 pub mod bearing;
 pub mod cepstrum;
@@ -115,19 +119,21 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarLink, RadarMultiTracker, RadarTrack, Track, adaptive_weights, albersheim_pd,
-    albersheim_snr, ambiguity, angle_from_phase, barker_code, beam_voltage, beamform_spectrum,
-    beat_frequency_to_range, bin_frequencies, blind_speed, ca_cfar, ca_cfar_2d, ca_cfar_alpha,
-    cadence, cluster_detections, clutter_covariance, clutter_ridge_doppler, covariance,
-    critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth,
-    doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, fold_range, fold_velocity,
-    lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler, monopulse_estimate_angle,
-    monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum, mvdr_spectrum, optimal_sinr,
-    os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe, phase_difference, phase_from_signals,
-    range_bins, range_doppler, range_doppler_map, range_profile, range_resolution,
-    rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile,
-    ridge as micro_doppler_ridge, single_pulse_threshold, space_time_steering, spatial_frequency,
-    spectrogram, steering_vector, stepped_range_profile, stepped_range_resolution, swerling1_pd,
-    swerling1_required_snr, synthetic_bandwidth, unambiguous_angle, unambiguous_range,
+    albersheim_snr, ambiguity, angle_from_phase, azimuth_chirp_rate, azimuth_doppler_bandwidth,
+    azimuth_history, azimuth_reference, azimuth_resolution, barker_code, beam_voltage,
+    beamform_spectrum, beat_frequency_to_range, bin_frequencies, blind_speed, ca_cfar, ca_cfar_2d,
+    ca_cfar_alpha, cadence, cluster_detections, clutter_covariance, clutter_ridge_doppler,
+    covariance, critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d,
+    doppler_bandwidth, doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, focus_azimuth,
+    fold_range, fold_velocity, lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler,
+    monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum,
+    mvdr_spectrum, optimal_sinr, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe,
+    phase_difference, phase_from_signals, range_bins, range_doppler, range_doppler_map,
+    range_profile, range_resolution, rayleigh_cdf as clutter_rayleigh_cdf,
+    rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile, ridge as micro_doppler_ridge,
+    single_pulse_threshold, space_time_steering, spatial_frequency, spectrogram, steering_vector,
+    stepped_range_profile, stepped_range_resolution, swerling1_pd, swerling1_required_snr,
+    synthetic_aperture_length, synthetic_bandwidth, unambiguous_angle, unambiguous_range,
     unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile,
     wrap_phase,
 };

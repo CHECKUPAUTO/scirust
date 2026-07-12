@@ -48,7 +48,11 @@
 //! [`stap`] closes the airborne-radar loop with space-time adaptive processing —
 //! a joint angle-Doppler adaptive filter that nulls the ground-clutter ridge
 //! (`f_d = β·f_s`) while holding unit gain on the target, pulling slow movers out
-//! of clutter that no angle-only or Doppler-only filter can separate.
+//! of clutter that no angle-only or Doppler-only filter can separate. [`sar`]
+//! adds the imaging mode: synthetic-aperture azimuth compression that focuses a
+//! target's quadratic slow-time phase history (an azimuth chirp) into a sharp
+//! peak, synthesising a `λR/D` aperture for the range-independent `D/2`
+//! cross-range resolution.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -72,6 +76,7 @@ pub mod music;
 pub mod pda;
 pub mod prf;
 pub mod range_equation;
+pub mod sar;
 pub mod stap;
 pub mod stepped_frequency;
 pub mod swerling;
@@ -112,6 +117,10 @@ pub use prf::{
     velocity_from_doppler,
 };
 pub use range_equation::RadarLink;
+pub use sar::{
+    azimuth_chirp_rate, azimuth_doppler_bandwidth, azimuth_history, azimuth_reference,
+    azimuth_resolution, focus_azimuth, synthetic_aperture_length,
+};
 pub use stap::{
     adaptive_weights, clutter_covariance, clutter_ridge_doppler, optimal_sinr, space_time_steering,
     spatial_frequency,
