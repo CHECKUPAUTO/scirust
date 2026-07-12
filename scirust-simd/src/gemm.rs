@@ -27,8 +27,13 @@
 //!   mutable) confiés à des threads via `std::thread::scope` — aucune
 //!   dépendance externe.
 //!
-//! Repli automatique : hors `avx512f`, on délègue au SGEMM scalaire de
-//! référence. Le résultat est vérifié *proche* du scalaire dans les tests.
+//! Dispatch runtime : sur `x86_64` avec `avx512f`, le noyau AVX-512 (tuile
+//! `8×16`) ; sur `aarch64` avec `NEON` (baseline ARMv8), un noyau packé de même
+//! structure à tuile registre `8×8` (`MR_N×NR_N`, 16 accumulateurs
+//! `float32x4_t`) — donc **tout l'embarqué ARM passe du scalaire au vectorisé**.
+//! Partout ailleurs, repli sur le SGEMM scalaire de référence. Les trois chemins
+//! sont vérifiés *proches* du scalaire dans les tests (y compris sous émulation
+//! `qemu-aarch64` pour la validation réelle du noyau NEON).
 
 use crate::matrix::backend::{ScalarBackend, SimdBackend};
 use crate::matrix::view::{MatrixView, MatrixViewMut};
@@ -47,6 +52,22 @@ const KC: usize = 256;
 const MC: usize = 256;
 #[cfg(target_arch = "x86_64")]
 const NC: usize = 1024;
+
+/// Dimensions de blocking SGEMM **NEON** (aarch64). La tuile registre est
+/// `MR_N×NR_N = 8×8` : un `float32x4_t` tient 4 `f32`, donc `NR_N = 8` colonnes
+/// = 2 vecteurs, `MR_N = 8` lignes → 16 accumulateurs `float32x4_t` (le banc
+/// AArch64 en compte 32, large marge). Gated aarch64 : sur les autres cibles ces
+/// constantes seraient du code mort → erreur sous `-D warnings`.
+#[cfg(target_arch = "aarch64")]
+const MR_N: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const NR_N: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const KC_N: usize = 256;
+#[cfg(target_arch = "aarch64")]
+const MC_N: usize = 256;
+#[cfg(target_arch = "aarch64")]
+const NC_N: usize = 512;
 
 /// SGEMM tuilé (mono-thread) : `C = alpha·A(m×k)·B(k×n) + beta·C(m×n)`,
 /// row-major. Dispatch runtime vers le noyau AVX-512 packé si disponible,
@@ -70,6 +91,16 @@ pub fn sgemm_tiled(
             // SAFETY: gated by the runtime detection just above; slices come
             // from validated MatrixView / MatrixViewMut.
             unsafe { sgemm_tiled_avx512(alpha, a, b, beta, c) };
+            return;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon")
+        {
+            // SAFETY: NEON est la baseline ARMv8 (toujours détecté ici) ; les
+            // slices proviennent de vues validées row-major contiguës.
+            unsafe { sgemm_tiled_neon(alpha, a, b, beta, c) };
             return;
         }
     }
@@ -358,6 +389,225 @@ unsafe fn micro_kernel_8x16(
         let crow = c.add(i * ldc);
         let cv = _mm512_maskz_loadu_ps(mask, crow);
         _mm512_mask_storeu_ps(crow, mask, _mm512_add_ps(cv, *ai));
+    }
+}
+
+// ===================================================================== //
+//  Noyau NEON packé (aarch64) — même structure, tuile registre 8×8       //
+// ===================================================================== //
+
+/// Applique `beta` sur toute la matrice C (row-major) — analogue NEON de
+/// [`scale_c_avx512`]. Le noyau accumule ensuite `alpha·A·B` par-dessus.
+#[cfg(target_arch = "aarch64")]
+unsafe fn scale_c_neon(beta: f32, m: usize, n: usize, c: *mut f32) {
+    use core::arch::aarch64::*;
+    if beta == 1.0
+    {
+        return;
+    }
+    let bv = vdupq_n_f32(beta);
+    for i in 0..m
+    {
+        let row = c.add(i * n);
+        let mut j = 0;
+        while j + 4 <= n
+        {
+            let r = if beta == 0.0
+            {
+                vdupq_n_f32(0.0)
+            }
+            else
+            {
+                vmulq_f32(vld1q_f32(row.add(j)), bv)
+            };
+            vst1q_f32(row.add(j), r);
+            j += 4;
+        }
+        while j < n
+        {
+            *row.add(j) = if beta == 0.0 { 0.0 } else { *row.add(j) * beta };
+            j += 1;
+        }
+    }
+}
+
+/// Pack un panneau `B[pc.., jc..]` de `kc×nc` en panneaux de `NR_N` colonnes,
+/// zéro-paddé à `NR_N` (analogue NEON de [`pack_b`]).
+#[cfg(target_arch = "aarch64")]
+unsafe fn pack_b_neon(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32]) {
+    let n_panels = nc.div_ceil(NR_N);
+    for panel in 0..n_panels
+    {
+        let j0 = panel * NR_N;
+        let nr = NR_N.min(nc - j0);
+        let base = panel * kc * NR_N;
+        for p in 0..kc
+        {
+            let src_row = b.add(p * ldb + j0);
+            let dst_row = base + p * NR_N;
+            for j in 0..nr
+            {
+                dst[dst_row + j] = *src_row.add(j);
+            }
+            for j in nr..NR_N
+            {
+                dst[dst_row + j] = 0.0;
+            }
+        }
+    }
+}
+
+/// Pack un panneau `A[ic.., pc..]` de `mc×kc` en panneaux de `MR_N` lignes,
+/// zéro-paddé à `MR_N`, avec `alpha` fusionné (analogue NEON de [`pack_a`]).
+#[cfg(target_arch = "aarch64")]
+unsafe fn pack_a_neon(
+    alpha: f32,
+    a: *const f32,
+    lda: usize,
+    mc: usize,
+    kc: usize,
+    dst: &mut [f32],
+) {
+    let m_panels = mc.div_ceil(MR_N);
+    for panel in 0..m_panels
+    {
+        let i0 = panel * MR_N;
+        let mr = MR_N.min(mc - i0);
+        let base = panel * kc * MR_N;
+        for p in 0..kc
+        {
+            let dst_row = base + p * MR_N;
+            for i in 0..mr
+            {
+                dst[dst_row + i] = alpha * *a.add((i0 + i) * lda + p);
+            }
+            for i in mr..MR_N
+            {
+                dst[dst_row + i] = 0.0;
+            }
+        }
+    }
+}
+
+/// SGEMM tuilé/packé NEON — même ordonnancement de blocs que
+/// [`sgemm_tiled_avx512`], tuile registre `8×8`.
+#[cfg(target_arch = "aarch64")]
+unsafe fn sgemm_tiled_neon(
+    alpha: f32,
+    a: MatrixView<f32>,
+    b: MatrixView<f32>,
+    beta: f32,
+    mut c: MatrixViewMut<f32>,
+) {
+    let (m, k, n) = (a.rows(), a.cols(), b.cols());
+    if m == 0 || n == 0
+    {
+        return;
+    }
+    let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
+    scale_c_neon(beta, m, n, c_ptr);
+    if k == 0 || alpha == 0.0
+    {
+        return;
+    }
+    let a_ptr = a.row_slice(0).expect("A base").as_ptr();
+    let b_ptr = b.row_slice(0).expect("B base").as_ptr();
+
+    let mut bpack = vec![0.0f32; KC_N * NC_N.div_ceil(NR_N) * NR_N];
+    let mut apack = vec![0.0f32; KC_N * MC_N.div_ceil(MR_N) * MR_N];
+
+    let mut jc = 0;
+    while jc < n
+    {
+        let nc = NC_N.min(n - jc);
+        let n_panels = nc.div_ceil(NR_N);
+        let mut pc = 0;
+        while pc < k
+        {
+            let kc = KC_N.min(k - pc);
+            pack_b_neon(b_ptr.add(pc * n + jc), n, kc, nc, &mut bpack);
+            let mut ic = 0;
+            while ic < m
+            {
+                let mc = MC_N.min(m - ic);
+                pack_a_neon(alpha, a_ptr.add(ic * k + pc), k, mc, kc, &mut apack);
+                let m_panels = mc.div_ceil(MR_N);
+                for ip in 0..m_panels
+                {
+                    let i0 = ic + ip * MR_N;
+                    let mr = MR_N.min(m - i0);
+                    let apanel = &apack[ip * kc * MR_N..];
+                    for jp in 0..n_panels
+                    {
+                        let j0 = jc + jp * NR_N;
+                        let nr = NR_N.min(n - j0);
+                        let bpanel = &bpack[jp * kc * NR_N..];
+                        micro_kernel_neon_8x8(
+                            apanel.as_ptr(),
+                            bpanel.as_ptr(),
+                            kc,
+                            mr,
+                            nr,
+                            c_ptr.add(i0 * n + j0),
+                            n,
+                        );
+                    }
+                }
+                ic += MC_N;
+            }
+            pc += KC_N;
+        }
+        jc += NC_N;
+    }
+}
+
+/// Micro-kernel packé NEON : `C_tile[mr×nr] += Apanel[kc×MR_N] · Bpanel[kc×NR_N]`.
+///
+/// `Apanel`/`Bpanel` sont contigus (stride unitaire), zéro-paddés à `MR_N`/`NR_N`,
+/// `alpha` déjà fusionné dans `Apanel`. Maintient `MR_N×2` accumulateurs
+/// `float32x4_t` (8 lignes × 8 colonnes) sur toute la dimension `kc`. NEON n'a
+/// pas de store masqué : la tuile est déposée dans un tampon `[f32; NR_N]` par
+/// ligne, puis les `nr` colonnes utiles des `mr` lignes sont ajoutées à `C`
+/// (déjà scalé par `beta`).
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::too_many_arguments)]
+unsafe fn micro_kernel_neon_8x8(
+    apanel: *const f32,
+    bpanel: *const f32,
+    kc: usize,
+    mr: usize,
+    nr: usize,
+    c: *mut f32,
+    ldc: usize,
+) {
+    use core::arch::aarch64::*;
+    debug_assert!(mr <= MR_N && nr <= NR_N);
+
+    // 8 lignes, chacune deux moitiés de 4 colonnes.
+    let mut acc0 = [vdupq_n_f32(0.0); MR_N];
+    let mut acc1 = [vdupq_n_f32(0.0); MR_N];
+    for p in 0..kc
+    {
+        let b0 = vld1q_f32(bpanel.add(p * NR_N));
+        let b1 = vld1q_f32(bpanel.add(p * NR_N + 4));
+        let arow = apanel.add(p * MR_N);
+        for i in 0..MR_N
+        {
+            let av = vdupq_n_f32(*arow.add(i));
+            acc0[i] = vfmaq_f32(acc0[i], av, b0);
+            acc1[i] = vfmaq_f32(acc1[i], av, b1);
+        }
+    }
+    let mut tmp = [0.0f32; NR_N];
+    for i in 0..mr
+    {
+        vst1q_f32(tmp.as_mut_ptr(), acc0[i]);
+        vst1q_f32(tmp.as_mut_ptr().add(4), acc1[i]);
+        let crow = c.add(i * ldc);
+        for (j, &t) in tmp.iter().enumerate().take(nr)
+        {
+            *crow.add(j) += t;
+        }
     }
 }
 
