@@ -152,6 +152,108 @@ pub fn rmsnorm_backward(
     }
 }
 
+/// Backward de GELU (approximation tanh, comme le forward de
+/// [`crate::activations::gelu_scalar`]) : `dx = dy · gelu'(x)`.
+///
+/// Avec `g(x) = √(2/π)·(x + 0.044715·x³)` et `t = tanh(g)` :
+/// `gelu'(x) = 0.5·(1 + t) + 0.5·x·(1 − t²)·g'(x)`,
+/// `g'(x) = √(2/π)·(1 + 3·0.044715·x²)`.
+pub fn gelu_backward(x: &[f32], dy: &[f32], dx: &mut [f32]) {
+    assert_eq!(x.len(), dy.len(), "gelu_backward: length");
+    assert_eq!(x.len(), dx.len(), "gelu_backward: length");
+    const C0: f32 = 0.797_884_6; // √(2/π)
+    const C1: f32 = 0.044_715;
+    for i in 0..x.len()
+    {
+        let xi = x[i];
+        let g = C0 * (xi + C1 * xi * xi * xi);
+        let t = g.tanh();
+        let gp = C0 * (1.0 + 3.0 * C1 * xi * xi);
+        let deriv = 0.5 * (1.0 + t) + 0.5 * xi * (1.0 - t * t) * gp;
+        dx[i] = dy[i] * deriv;
+    }
+}
+
+/// Backward de LayerNorm (`y = (x − μ)/√(σ²+eps)·γ + β`), par ligne (`rows × d`).
+/// Produit `dx` et **accumule** `dgamma`, `dbeta` (sommés sur les lignes ; mets-
+/// les à zéro avant si tu ne veux pas d'accumulation).
+///
+/// Soit `x̂ = (x − μ)/σ` et `dŷ_i = dY_i·γ_i`. Alors, par ligne :
+/// `dβ_i += dY_i`, `dγ_i += dY_i·x̂_i`, et
+/// `dx_i = (1/(d·σ))·[ d·dŷ_i − Σ_k dŷ_k − x̂_i·Σ_k dŷ_k·x̂_k ]`.
+#[allow(clippy::too_many_arguments)]
+pub fn layernorm_backward(
+    x: &[f32],
+    rows: usize,
+    d: usize,
+    gamma: &[f32],
+    eps: f32,
+    dy: &[f32],
+    dx: &mut [f32],
+    dgamma: &mut [f32],
+    dbeta: &mut [f32],
+) {
+    assert_eq!(x.len(), rows * d, "layernorm_backward: X shape");
+    assert_eq!(gamma.len(), d, "layernorm_backward: gamma shape");
+    assert_eq!(dy.len(), rows * d, "layernorm_backward: dY shape");
+    assert_eq!(dx.len(), rows * d, "layernorm_backward: dX shape");
+    assert_eq!(dgamma.len(), d, "layernorm_backward: dgamma shape");
+    assert_eq!(dbeta.len(), d, "layernorm_backward: dbeta shape");
+
+    let df = d as f32;
+    for r in 0..rows
+    {
+        let xr = &x[r * d..r * d + d];
+        let dyr = &dy[r * d..r * d + d];
+        let dxr = &mut dx[r * d..r * d + d];
+
+        let mean = xr.iter().sum::<f32>() / df;
+        let var = xr.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / df;
+        let sigma = (var + eps).sqrt();
+        let inv = 1.0 / sigma;
+
+        // Sommes de réduction sur la ligne.
+        let mut sum_dyh = 0.0f32; // Σ dŷ_k
+        let mut sum_dyh_xh = 0.0f32; // Σ dŷ_k·x̂_k
+        for k in 0..d
+        {
+            let xh = (xr[k] - mean) * inv;
+            let dyh = dyr[k] * gamma[k];
+            sum_dyh += dyh;
+            sum_dyh_xh += dyh * xh;
+        }
+
+        for j in 0..d
+        {
+            let xh = (xr[j] - mean) * inv;
+            let dyh = dyr[j] * gamma[j];
+            dxr[j] = inv / df * (df * dyh - sum_dyh - xh * sum_dyh_xh);
+            dgamma[j] += dyr[j] * xh;
+            dbeta[j] += dyr[j];
+        }
+    }
+}
+
+/// Backward de softmax **par ligne** : reçoit la **sortie** `y = softmax(x)`
+/// (`rows × d`) et `dy` (gradient de la sortie), écrit `dx`.
+/// `dx_i = y_i·(dY_i − Σ_k dY_k·y_k)` (produit par la jacobienne du softmax).
+pub fn softmax_backward(y: &[f32], rows: usize, d: usize, dy: &[f32], dx: &mut [f32]) {
+    assert_eq!(y.len(), rows * d, "softmax_backward: Y shape");
+    assert_eq!(dy.len(), rows * d, "softmax_backward: dY shape");
+    assert_eq!(dx.len(), rows * d, "softmax_backward: dX shape");
+    for r in 0..rows
+    {
+        let yr = &y[r * d..r * d + d];
+        let dyr = &dy[r * d..r * d + d];
+        let dxr = &mut dx[r * d..r * d + d];
+        let dot: f32 = (0..d).map(|k| dyr[k] * yr[k]).sum();
+        for j in 0..d
+        {
+            dxr[j] = yr[j] * (dyr[j] - dot);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +404,112 @@ mod tests {
         // dγ vs numérique (on fait varier g).
         let gg = num_grad(&g, &seed, 1e-3, |gg| rmsnorm_fwd(&x, rows, d, gg, eps));
         assert_close(&dg, &gg, 3e-2, "rmsnorm dgamma");
+    }
+
+    // ---- Références forward supplémentaires ----
+
+    fn gelu_fwd(x: &[f32]) -> Vec<f32> {
+        const C0: f32 = 0.797_884_6;
+        const C1: f32 = 0.044_715;
+        x.iter()
+            .map(|&v| 0.5 * v * (1.0 + (C0 * (v + C1 * v * v * v)).tanh()))
+            .collect()
+    }
+
+    fn layernorm_fwd(x: &[f32], rows: usize, d: usize, g: &[f32], b: &[f32], eps: f32) -> Vec<f32> {
+        let mut y = vec![0.0f32; rows * d];
+        for r in 0..rows
+        {
+            let row = &x[r * d..r * d + d];
+            let mean = row.iter().sum::<f32>() / d as f32;
+            let var = row.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / d as f32;
+            let inv = 1.0 / (var + eps).sqrt();
+            for j in 0..d
+            {
+                y[r * d + j] = (row[j] - mean) * inv * g[j] + b[j];
+            }
+        }
+        y
+    }
+
+    fn softmax_fwd(x: &[f32], rows: usize, d: usize) -> Vec<f32> {
+        let mut y = vec![0.0f32; rows * d];
+        for r in 0..rows
+        {
+            let row = &x[r * d..r * d + d];
+            let m = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let mut sum = 0.0f32;
+            for j in 0..d
+            {
+                let e = (row[j] - m).exp();
+                y[r * d + j] = e;
+                sum += e;
+            }
+            for j in 0..d
+            {
+                y[r * d + j] /= sum;
+            }
+        }
+        y
+    }
+
+    #[test]
+    fn gelu_backward_gradcheck() {
+        let x: Vec<f32> = (0..50).map(|i| (i as f32 * 0.23).sin() * 3.0).collect();
+        let seed: Vec<f32> = (0..50).map(|i| (i as f32 * 0.15).cos() + 0.4).collect();
+        let mut dx = vec![0.0f32; x.len()];
+        gelu_backward(&x, &seed, &mut dx);
+        let g = num_grad(&x, &seed, 1e-3, gelu_fwd);
+        assert_close(&dx, &g, 2e-2, "gelu dX");
+    }
+
+    #[test]
+    fn layernorm_backward_gradcheck() {
+        let (rows, d) = (3usize, 7usize);
+        let x: Vec<f32> = (0..rows * d)
+            .map(|i| (i as f32 * 0.29).sin() * 2.0 + 1.0)
+            .collect();
+        let g: Vec<f32> = (0..d).map(|i| 0.5 + i as f32 * 0.1).collect();
+        let b: Vec<f32> = (0..d).map(|i| i as f32 * 0.05 - 0.1).collect();
+        let eps = 1e-5f32;
+        let seed: Vec<f32> = (0..rows * d)
+            .map(|i| (i as f32 * 0.17).cos() + 0.2)
+            .collect();
+
+        let mut dx = vec![0.0f32; rows * d];
+        let mut dg = vec![0.0f32; d];
+        let mut db = vec![0.0f32; d];
+        layernorm_backward(&x, rows, d, &g, eps, &seed, &mut dx, &mut dg, &mut db);
+
+        let gx = num_grad(&x, &seed, 1e-3, |xx| {
+            layernorm_fwd(xx, rows, d, &g, &b, eps)
+        });
+        assert_close(&dx, &gx, 3e-2, "layernorm dX");
+        let gg = num_grad(&g, &seed, 1e-3, |gg| {
+            layernorm_fwd(&x, rows, d, gg, &b, eps)
+        });
+        assert_close(&dg, &gg, 3e-2, "layernorm dgamma");
+        let gb = num_grad(&b, &seed, 1e-3, |bb| {
+            layernorm_fwd(&x, rows, d, &g, bb, eps)
+        });
+        assert_close(&db, &gb, 3e-2, "layernorm dbeta");
+    }
+
+    #[test]
+    fn softmax_backward_gradcheck() {
+        let (rows, d) = (4usize, 6usize);
+        let x: Vec<f32> = (0..rows * d)
+            .map(|i| (i as f32 * 0.31).sin() * 2.0)
+            .collect();
+        let seed: Vec<f32> = (0..rows * d)
+            .map(|i| (i as f32 * 0.19).cos() + 0.3)
+            .collect();
+
+        let y = softmax_fwd(&x, rows, d);
+        let mut dx = vec![0.0f32; rows * d];
+        softmax_backward(&y, rows, d, &seed, &mut dx);
+
+        let gx = num_grad(&x, &seed, 1e-3, |xx| softmax_fwd(xx, rows, d));
+        assert_close(&dx, &gx, 2e-2, "softmax dX");
     }
 }
