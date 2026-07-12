@@ -176,6 +176,15 @@
 //!   (uniforme, triangulaire, trapézoïdale).
 //! - [`cables`] — câbles paraboliques : tension horizontale/maximale et longueur
 //!   développée (ponts suspendus).
+//! - [`gear_trains`] — trains d'engrenages ordinaires : rapports simple/composé,
+//!   vitesse et couple de sortie, effet des roues folles.
+//! - [`rack_pinion`] — pignon-crémaillère : rayon primitif, vitesse linéaire,
+//!   course par tour et effort.
+//! - [`chain_drive`] — transmissions par chaîne à rouleaux : diamètre primitif,
+//!   vitesse, rapport et longueur de chaîne.
+//! - [`couplings`] — accouplements à plateaux : couple transmissible par les
+//!   boulons et conversion puissance ↔ couple.
+//! - [`splines`] — cannelures : couple transmissible par matage des flancs.
 //!
 //! ## Positionnement
 //!
@@ -231,7 +240,9 @@ pub mod buckling;
 pub mod cables;
 pub mod cams;
 pub mod centroids;
+pub mod chain_drive;
 pub mod convection_correlations;
+pub mod couplings;
 pub mod creep;
 pub mod critical_speed;
 pub mod dimension_chains;
@@ -253,6 +264,7 @@ pub mod forces;
 pub mod fourbar;
 pub mod fracture;
 pub mod friction;
+pub mod gear_trains;
 pub mod gears;
 pub mod geneva;
 pub mod hardness;
@@ -278,12 +290,14 @@ pub mod process_time;
 pub mod pulley_systems;
 pub mod pump_system;
 pub mod pumps;
+pub mod rack_pinion;
 pub mod radiation;
 pub mod riveted_joints;
 pub mod roughness;
 pub mod shafts;
 pub mod sheet_bending;
 pub mod slider_crank;
+pub mod splines;
 pub mod springs;
 pub mod stress_concentration;
 pub mod thermal;
@@ -352,9 +366,13 @@ pub use cams::{
     shm_displacement, shm_velocity,
 };
 pub use centroids::{composite_centroid, total_area};
+pub use chain_drive::{
+    chain_length_pitches, chain_velocity, sprocket_pitch_diameter, sprocket_speed_ratio,
+};
 pub use convection_correlations::{
     convection_coefficient, dittus_boelter, prandtl_number, rayleigh_number,
 };
+pub use couplings::{bolt_force_from_torque, power_to_torque, torque_from_bolts};
 pub use creep::{larson_miller_parameter, norton_creep_rate, rupture_time_from_lmp};
 pub use critical_speed::{
     critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
@@ -411,6 +429,9 @@ pub use fracture::{
 pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
     max_static_friction, within_adhesion_cone,
+};
+pub use gear_trains::{
+    compound_train_ratio, gear_pair_speed_ratio, is_direction_reversed, output_speed, output_torque,
 };
 pub use gears::{
     HelicalGear, SpurGear, center_distance, gear_ratio, lewis_bending_stress,
@@ -486,6 +507,9 @@ pub use pumps::{
     affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
     specific_speed,
 };
+pub use rack_pinion::{
+    force_from_torque, linear_velocity, pinion_pitch_radius, travel_per_revolution,
+};
 pub use radiation::{
     STEFAN_BOLTZMANN, blackbody_emissive_power, gray_body_emissive_power,
     net_radiation_to_surroundings, radiation_coefficient,
@@ -505,6 +529,7 @@ pub use sheet_bending::{bend_allowance, bend_deduction, developed_length, outsid
 pub use slider_crank::{
     obliquity_ratio, piston_acceleration_approx, piston_displacement, piston_velocity,
 };
+pub use splines::{mean_radius, torque_capacity};
 pub use springs::HelicalSpring;
 pub use stress_concentration::{
     fatigue_stress_concentration, nominal_stress_plate_with_hole, peak_stress,
