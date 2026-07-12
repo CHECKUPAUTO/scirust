@@ -34,6 +34,9 @@
 // `core::arch::aarch64` — activée uniquement pour la cible aarch64 (toolchain
 // nightly épinglée). `dotprod` (SDOT) est stable depuis 1.99. Cf. `crate::quant`.
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_neon_i8mm))]
+// Intrinsèques SVE (`sv*`) encore *unstable* dans `core::arch::aarch64` —
+// kernels scalables de `crate::sve` (toolchain nightly épinglée).
+#![cfg_attr(target_arch = "aarch64", feature(stdarch_aarch64_sve))]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
@@ -363,30 +366,7 @@ mod neon_fns {
 // =============================================================================
 
 #[cfg(target_arch = "aarch64")]
-pub mod sve {
-    /// SVE vector length in elements of `T`, or 0 when SVE is unavailable.
-    ///
-    /// Reads the architectural vector length with `rdvl` (stable inline
-    /// asm). The instruction is only executed after runtime detection, so
-    /// this is safe to call on any aarch64 core.
-    pub fn sve_vector_length_elements<T>() -> usize {
-        if !std::arch::is_aarch64_feature_detected!("sve")
-        {
-            return 0;
-        }
-        let vl_bytes: u64;
-        // SAFETY: rdvl is only reached when the CPU reports SVE support.
-        unsafe {
-            core::arch::asm!(
-                ".arch_extension sve",
-                "rdvl {0}, #1",
-                out(reg) vl_bytes,
-                options(nomem, nostack, preserves_flags)
-            );
-        }
-        vl_bytes as usize / core::mem::size_of::<T>()
-    }
-}
+pub mod sve;
 
 // =============================================================================
 // Runtime dispatch (auto-select best SIMD backend)
