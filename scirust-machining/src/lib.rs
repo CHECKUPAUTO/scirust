@@ -46,6 +46,14 @@
 //!   et cône d'adhérence, arc-boutement sur plan incliné.
 //! - [`dynamics`] — dynamique du solide en rotation : énergie cinétique, moments
 //!   d'inertie usuels, théorème de **Huygens**, PFD (`M = J·α`) et puissance.
+//! - [`cams`] — cames à disque : lois de mouvement du suiveur (MHS, cycloïdale),
+//!   déplacement/vitesse/accélération.
+//! - [`vibrations`] — vibrations à **1 ddl** (masse-ressort-amortisseur) :
+//!   pulsation propre, amortissement, décrément logarithmique.
+//! - [`beams`] — RDM flexion des poutres : moments quadratiques, contrainte de
+//!   flexion et flèches des cas de charge usuels.
+//! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
+//!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -89,8 +97,10 @@
 //! assert!(pc > 0.0);
 //! ```
 
+pub mod beams;
 pub mod bearings;
 pub mod belts;
+pub mod cams;
 pub mod dynamics;
 pub mod economics;
 pub mod forces;
@@ -106,12 +116,20 @@ pub mod power_screws;
 pub mod roughness;
 pub mod shafts;
 pub mod springs;
+pub mod thermal;
 pub mod threads;
 pub mod time;
 pub mod tolerancing;
 pub mod toollife;
 pub mod torseurs;
+pub mod vibrations;
 
+pub use beams::{
+    bending_stress as beam_bending_stress, deflection_cantilever_end_load,
+    deflection_simply_supported_center_load, deflection_simply_supported_udl,
+    moment_cantilever_end_load, moment_simply_supported_center_load, moment_simply_supported_udl,
+    second_moment_circle, second_moment_rectangle,
+};
 pub use bearings::{
     BearingType, Reliability, adjusted_rating_life, basic_rating_life_hours,
     basic_rating_life_revs, equivalent_dynamic_load,
@@ -119,6 +137,10 @@ pub use bearings::{
 pub use belts::{
     belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
     wrap_angle_small_pulley_rad,
+};
+pub use cams::{
+    cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
+    shm_displacement, shm_velocity,
 };
 pub use dynamics::{
     angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
@@ -165,6 +187,10 @@ pub use shafts::{
     section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
 };
 pub use springs::HelicalSpring;
+pub use thermal::{
+    conduction_heat_flow, convection_heat_flow, linear_expansion, sensible_heat,
+    thermal_resistance, thermal_stress,
+};
 pub use threads::MetricThread;
 pub use time::{
     drilling_time_min, milling_time_min, number_of_passes, pass_time_min, turning_time_min,
@@ -176,3 +202,7 @@ pub use tolerancing::{
 };
 pub use toollife::{ExtendedTaylor, taylor_cutting_speed, taylor_tool_life};
 pub use torseurs::Torseur;
+pub use vibrations::{
+    critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
+    natural_frequency_rad, quality_factor,
+};
