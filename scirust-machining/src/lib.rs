@@ -215,6 +215,16 @@
 //!   contact, effort et couple.
 //! - [`press_brake`] — mise en forme : pliage à la presse — effort de pliage et
 //!   retour élastique (springback).
+//! - [`merchant`] — usinage : coupe orthogonale (**Merchant**) — rapport de
+//!   coupe, angle de cisaillement et déformation.
+//! - [`milling_chip`] — usinage : fraisage — avance par dent, angle d'engagement
+//!   et épaisseur de copeau.
+//! - [`drilling_ops`] — usinage : perçage — couple, puissance, pénétration et
+//!   poussée d'un foret.
+//! - [`chvorinov`] — fonderie : solidification — module thermique, règle de
+//!   **Chvorinov** et masselotte.
+//! - [`gating`] — fonderie : remplissage — vitesse de descente (**Torricelli**),
+//!   temps de coulée et profil anti-aspiration.
 //!
 //! ## Positionnement
 //!
@@ -273,6 +283,7 @@ pub mod cams;
 pub mod castigliano;
 pub mod centroids;
 pub mod chain_drive;
+pub mod chvorinov;
 pub mod combined_stress;
 pub mod composites;
 pub mod convection_correlations;
@@ -283,6 +294,7 @@ pub mod deflection_cases;
 pub mod dimension_chains;
 pub mod distributed_loads;
 pub mod drag_lift;
+pub mod drilling_ops;
 pub mod dynamics;
 pub mod economics;
 pub mod elasticity_relations;
@@ -301,6 +313,7 @@ pub mod forces;
 pub mod fourbar;
 pub mod fracture;
 pub mod friction;
+pub mod gating;
 pub mod gear_trains;
 pub mod gears;
 pub mod geneva;
@@ -318,6 +331,8 @@ pub mod keys;
 pub mod kinematics;
 pub mod leaf_springs;
 pub mod liaisons;
+pub mod merchant;
+pub mod milling_chip;
 pub mod mohr;
 pub mod msa;
 pub mod oee;
@@ -419,6 +434,7 @@ pub use centroids::{composite_centroid, total_area};
 pub use chain_drive::{
     chain_length_pitches, chain_velocity, sprocket_pitch_diameter, sprocket_speed_ratio,
 };
+pub use chvorinov::{casting_modulus, riser_modulus, solidification_time};
 pub use combined_stress::{
     combined_axial_bending, equivalent_bending_moment, equivalent_twisting_moment,
     von_mises_bending_torsion,
@@ -447,6 +463,7 @@ pub use distributed_loads::{
     uniform_resultant,
 };
 pub use drag_lift::{drag_force, drag_power, lift_force, terminal_velocity};
+pub use drilling_ops::{drilling_power_kw, drilling_thrust, drilling_torque, penetration_rate};
 pub use dynamics::{
     angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
     inertia_solid_cylinder, inertia_solid_sphere, inertia_thin_ring, kinetic_energy_rotation,
@@ -496,6 +513,7 @@ pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
     max_static_friction, within_adhesion_cone,
 };
+pub use gating::{choke_area, pouring_time, sprue_exit_velocity, sprue_taper_ratio};
 pub use gear_trains::{
     compound_train_ratio, gear_pair_speed_ratio, is_direction_reversed, output_speed, output_torque,
 };
@@ -550,6 +568,10 @@ pub use leaf_springs::{
     rate as leaf_spring_rate,
 };
 pub use liaisons::{LIAISONS, Liaison};
+pub use merchant::{
+    chip_thickness_ratio, merchant_shear_angle, shear_angle, shear_strain as merchant_shear_strain,
+};
+pub use milling_chip::{chip_thickness_at_angle, engagement_angle, feed_per_tooth, teeth_in_cut};
 pub use mohr::{
     max_in_plane_shear, mohr_radius, normal_stress_rotated, principal_angle_rad,
     principal_stresses, safety_factor, shear_stress_rotated, tresca_plane, von_mises_plane,
