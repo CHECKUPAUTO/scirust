@@ -643,6 +643,7 @@ pub mod dispatch;
 pub mod gemm;
 pub mod matrix;
 pub mod norm;
+pub mod transformer;
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_ext;
