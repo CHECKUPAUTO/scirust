@@ -15,7 +15,10 @@ pub use beams::{
     RayMatrix, beam_radius, beam_radius_from_q, divergence, gouy_phase, propagate_q, q_at_waist,
     radius_from_q, radius_of_curvature, rayleigh_range,
 };
-pub use optics::{Axis, apply_psf, gaussian_psf, line_spread, mtf, mtf50, richardson_lucy};
+pub use optics::{
+    Axis, airy_first_null, airy_psf, apply_psf, gaussian_psf, line_spread, mtf, mtf50,
+    rayleigh_resolution, richardson_lucy,
+};
 
 // ─── Image Representation ───────────────────────────────────────────────────
 

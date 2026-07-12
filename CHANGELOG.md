@@ -5,6 +5,21 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — PSF d'Airy / limite de diffraction (`optics`) — bloc 14
+Prolongement du volet traitement d'image de précision : la **PSF d'Airy**, réponse
+d'un système limité par la diffraction (ouverture circulaire), qui complète la PSF
+gaussienne.
+- **`airy_psf(size, first_null)`** — PSF d'Airy normalisée (`Σ = 1`), intensité
+  `[2·J₁(v)/v]²` avec le premier anneau sombre à `first_null` pixels (réutilise
+  `scirust_special::bessel_j`).
+- **`rayleigh_resolution(λ, D)`** — résolution angulaire de Rayleigh `θ = 1,22·λ/D`.
+- **`airy_first_null(λ, D, f, pitch)`** — rayon du premier anneau en pixels sur un
+  plan focal `1,22·λ·f/(D·pitch)`, l'argument de `airy_psf`.
+- Oracles : PSF normalisée, symétrique, à pic central ; le premier anneau sombre
+  tombe exactement au rayon `first_null` (zéro de J₁) ; les formes fermées de
+  Rayleigh et du rayon d'anneau. 3 tests (38 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-sim` : optoélectronique — équations de bilan du laser à semi-conducteur (`laser`) — bloc 13
 Troisième pilier optronique — l'**optoélectronique** (dynamique de dispositif) —
 via les **équations de bilan** monomode du laser à semi-conducteur couplant la
