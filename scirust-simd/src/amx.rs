@@ -254,6 +254,45 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
 }
 
 // ===================================================================== //
+//  Couche dense quantifiée int8 (inférence)                              //
+// ===================================================================== //
+
+/// **Couche linéaire quantifiée int8** : `Y[f32] = scale ⊙ (X·W) + biais`, avec
+/// `X` activations `i8` (`m×k`), `W` poids `i8` (`k×n`), `scale`/`biais` des
+/// vecteurs de longueur `n` (déquantification **par canal de sortie** + biais).
+///
+/// C'est l'analogue int8 de [`crate::gemm::sgemm_bias_act`] : le produit
+/// `X·W` accumulé en `i32` passe par le **GEMM AMX** ([`amx_matmul_i8`], donc
+/// `_tile_dpbssd` sur silicium AMX, sinon repli scalaire), puis un épilogue
+/// `O(m·n)` déquantifie (`i32 → f32` × `scale[j]`) et ajoute le biais. Motif
+/// standard de l'inférence quantifiée (activation `u8`/`i8`, poids `i8` par
+/// canal).
+pub fn qlinear_i8(
+    x: &[i8],
+    w: &[i8],
+    m: usize,
+    k: usize,
+    n: usize,
+    scale: &[f32],
+    bias: &[f32],
+) -> Vec<f32> {
+    assert_eq!(scale.len(), n, "qlinear_i8: scale length != N");
+    assert_eq!(bias.len(), n, "qlinear_i8: bias length != N");
+    let acc = amx_matmul_i8(x, w, m, k, n);
+    let mut y = vec![0f32; m * n];
+    for i in 0..m
+    {
+        let arow = &acc[i * n..i * n + n];
+        let yrow = &mut y[i * n..i * n + n];
+        for j in 0..n
+        {
+            yrow[j] = scale[j] * (arow[j] as f32) + bias[j];
+        }
+    }
+    y
+}
+
+// ===================================================================== //
 //  AMX bf16 : C(f32) = A(bf16)·B(bf16)  (TDPBF16PS)                       //
 // ===================================================================== //
 
@@ -453,6 +492,47 @@ mod tests {
         let a = [1i8, 2, 3, 4, 5, 6];
         let b = [7i8, 8, 9, 10, 11, 12];
         assert_eq!(matmul_i8_scalar(&a, &b, 2, 3, 2), vec![58, 64, 139, 154]);
+    }
+
+    #[test]
+    fn qlinear_i8_matches_reference() {
+        // Déquantification par canal + biais au-dessus du GEMM AMX/scalaire.
+        for &(m, k, n) in &[(1usize, 1usize, 1usize), (4, 6, 3), (18, 70, 20)]
+        {
+            let x: Vec<i8> = (0..m * k)
+                .map(|t| ((t as i32 * 7 - 61) % 128) as i8)
+                .collect();
+            let w: Vec<i8> = (0..k * n)
+                .map(|t| ((t as i32 * -5 + 23) % 128) as i8)
+                .collect();
+            let scale: Vec<f32> = (0..n).map(|j| 0.001 * (j as f32 + 1.0)).collect();
+            let bias: Vec<f32> = (0..n).map(|j| (j as f32) * 0.1 - 0.5).collect();
+
+            let got = qlinear_i8(&x, &w, m, k, n, &scale, &bias);
+            // Référence indépendante : accumulation i32 naïve, puis déquant+biais.
+            let mut want = vec![0f32; m * n];
+            for i in 0..m
+            {
+                for j in 0..n
+                {
+                    let mut acc = 0i32;
+                    for p in 0..k
+                    {
+                        acc += (x[i * k + p] as i32) * (w[p * n + j] as i32);
+                    }
+                    want[i * n + j] = scale[j] * (acc as f32) + bias[j];
+                }
+            }
+            for t in 0..m * n
+            {
+                assert!(
+                    (got[t] - want[t]).abs() <= 1e-3 * (1.0 + want[t].abs()),
+                    "shape {m}x{k}x{n} t={t}: {} vs {}",
+                    got[t],
+                    want[t]
+                );
+            }
+        }
     }
 
     #[test]

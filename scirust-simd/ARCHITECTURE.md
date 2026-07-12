@@ -93,12 +93,18 @@ pas seulement compilation).
 | SGEMM 1024³, 4 threads | 110 GFLOP/s | ~163× |
 | DGEMM 1024³, 4 threads | 127 GFLOP/s | — |
 | Couche dense fusionnée 4096×1024×1024 (ReLU) | 53.9 GFLOP/s | ~86× |
+| **AMX int8** 512³ (`_tile_dpbssd`, silicium) | 35.6 GOP/s | ~17× |
+| **AMX bf16** 512³ (`_tile_dpbf16ps`, silicium) | 28.8 GFLOP/s | ~14× |
 
 Le **GEMM fusionné** (`sgemm_bias_act`) calcule `act(α·A·B + biais)` : `A·B` par
 le GEMM tuilé (n'importe quel `k`), puis un épilogue biais+activation vectorisé
-en un seul passage `O(m·n)`.
+en un seul passage `O(m·n)`. Son analogue **quantifié int8**
+([`amx::qlinear_i8`](src/amx.rs)) déquantifie `X·W` (GEMM AMX) par canal + biais.
 
-Voir [`gemm`](src/gemm.rs) et le benchmark [`examples/bench.rs`](examples/bench.rs).
+Les chiffres AMX sont mesurés **sur silicium AMX** (la machine expose
+`amx_tile`/`amx_int8`/`amx_bf16`), tuilage `16×64×16` non encore optimisé pour le
+pic — cf. [`examples/amx_bench.rs`](examples/amx_bench.rs). Voir aussi
+[`gemm`](src/gemm.rs) et [`examples/bench.rs`](examples/bench.rs).
 
 ---
 
