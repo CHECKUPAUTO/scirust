@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — détection CFAR de petites cibles (`detect`) — bloc 23
+Pont entre l'optronique et le pistage : le détecteur CFAR **côté image**, analogue
+EO/IR du CFAR radar, qui extrait de petites cibles chaudes d'un fond thermique
+variable et les réduit en centroïdes prêts à alimenter la chaîne de pistage.
+- **`cfar_mask(image, guard, train, k)`** — masque de détection : pour chaque
+  pixel, estime le fond local sur un **anneau de cellules d'apprentissage** autour
+  d'une **bande de garde** (pour qu'une cible ne corrompe pas sa propre estimation
+  de fond) et marque le pixel s'il dépasse la moyenne locale de `k` écarts-types
+  locaux. Le seuil suivant les statistiques *locales*, une cible est trouvée sur
+  ciel sombre comme sur piédestal brillant.
+- **`detect_targets(image, guard, train, k)`** / **`TargetDetection`** — regroupe
+  les pixels seuillés par composantes connexes (`connected_components`) et les
+  réduit en centroïdes **pondérés par l'intensité** (position sous-pixel, amplitude
+  crête, nombre de pixels).
+- Oracles : détecte une cible ponctuelle sur fond plat ; aucune détection sur fond
+  uniforme ; détecte une cible **sur piédestal brillant** (le CFAR suit le niveau
+  local) ; le centroïde pondéré est **sous-pixel** ; résout deux cibles séparées ;
+  un seuil `k` plus élevé **ne fait pas croître** les fausses alarmes (fond
+  bruité). 6 tests (47 au total pour le crate) ; `fmt`/`clippy -D warnings`
+  propres.
+
 ### Ajouté — `scirust-signal` : radar — pistage multicible à porte NIS (`radar::mtt`) — bloc 22
 Bouclage de la chaîne de pistage : un tracker **multicible** de bout en bout sur
 mesures **polaires**, un `RadarEkf` par piste, avec association par **porte
