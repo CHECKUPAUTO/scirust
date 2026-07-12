@@ -155,6 +155,91 @@ pub fn lewis_bending_stress(ft_n: f64, face_width_mm: f64, module_mm: f64, lewis
     ft_n / (face_width_mm * module_mm * lewis_y)
 }
 
+/// Nombre de dents minimal du pignon pour éviter l'interférence de taillage
+/// (denture normale, sans déport) : `z_min = 2 / sin²α`, angle de pression
+/// `pressure_angle` (degrés). À 20° on obtient ≈ 17,1 dents.
+///
+/// Panique si `pressure_angle` n'est pas dans `]0°, 90°[`.
+pub fn minimum_teeth_no_undercut(pressure_angle_deg: f64) -> f64 {
+    assert!(
+        pressure_angle_deg > 0.0 && pressure_angle_deg < 90.0,
+        "l'angle de pression doit être dans ]0°, 90°["
+    );
+    let s = pressure_angle_deg.to_radians().sin();
+    2.0 / (s * s)
+}
+
+/// Rapport de conduite transversal `εα` (sans dimension) d'un engrènement de
+/// deux roues **de même module et angle de pression** :
+///
+/// ```text
+/// εα = [√(ra1²−rb1²) + √(ra2²−rb2²) − a·sinα] / pb
+/// ```
+///
+/// avec `ra` rayon de tête, `rb` rayon de base, `a` entraxe, `pb` pas de base.
+/// Un `εα ≥ 1` est requis pour la continuité de l'engrènement (en pratique
+/// `εα ≥ 1,2`). Panique si les modules ou angles diffèrent.
+pub fn transverse_contact_ratio(g1: &SpurGear, g2: &SpurGear) -> f64 {
+    assert!(
+        (g1.module_mm - g2.module_mm).abs() < 1e-9
+            && (g1.pressure_angle_deg - g2.pressure_angle_deg).abs() < 1e-9,
+        "l'engrènement exige un module et un angle de pression communs"
+    );
+    let ra1 = g1.tip_diameter() / 2.0;
+    let rb1 = g1.base_diameter() / 2.0;
+    let ra2 = g2.tip_diameter() / 2.0;
+    let rb2 = g2.base_diameter() / 2.0;
+    let a = center_distance(g1, g2);
+    let alpha = g1.pressure_angle_deg.to_radians();
+    let path = (ra1 * ra1 - rb1 * rb1).sqrt() + (ra2 * ra2 - rb2 * rb2).sqrt() - a * alpha.sin();
+    path / g1.base_pitch()
+}
+
+/// Roue cylindrique **hélicoïdale**, définie par son module normal, son nombre
+/// de dents, son angle d'hélice et son angle de pression normal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HelicalGear {
+    /// Module normal `mn` (mm).
+    pub normal_module_mm: f64,
+    /// Nombre de dents `z`.
+    pub teeth: u32,
+    /// Angle d'hélice `β` (degrés).
+    pub helix_angle_deg: f64,
+    /// Angle de pression normal `αn` (degrés).
+    pub normal_pressure_angle_deg: f64,
+}
+
+impl HelicalGear {
+    /// Module apparent (transversal) `mt = mn / cos β` (mm).
+    pub fn transverse_module(&self) -> f64 {
+        self.normal_module_mm / self.helix_angle_deg.to_radians().cos()
+    }
+
+    /// Diamètre primitif `d = mn·z / cos β` (mm).
+    pub fn pitch_diameter(&self) -> f64 {
+        self.transverse_module() * self.teeth as f64
+    }
+
+    /// Nombre de dents équivalent (denture droite virtuelle)
+    /// `zv = z / cos³β`, utilisé pour le calcul de résistance à la flexion.
+    pub fn virtual_teeth(&self) -> f64 {
+        let c = self.helix_angle_deg.to_radians().cos();
+        self.teeth as f64 / (c * c * c)
+    }
+
+    /// Pas axial `px = π·mn / sin β` (mm).
+    ///
+    /// Panique si l'angle d'hélice est nul (denture droite : pas axial infini).
+    pub fn axial_pitch(&self) -> f64 {
+        let s = self.helix_angle_deg.to_radians().sin();
+        assert!(
+            s.abs() > 0.0,
+            "une denture droite n'a pas de pas axial fini"
+        );
+        PI * self.normal_module_mm / s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
