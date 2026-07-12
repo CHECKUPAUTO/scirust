@@ -85,6 +85,32 @@ impl RadarEkf {
         (px.hypot(py), py.atan2(px))
     }
 
+    /// The **normalised innovation squared** `yᵀ·S⁻¹·y` (Mahalanobis distance) of
+    /// a candidate polar measurement against the current predicted state — the
+    /// statistic a validation gate thresholds against a χ² quantile (2 d.o.f.).
+    /// `None` if the target is at the origin or the innovation covariance is not
+    /// positive definite.
+    pub fn nis(&self, range: f64, bearing: f64, range_var: f64, bearing_var: f64) -> Option<f64> {
+        let (px, py) = (self.x[POS_X], self.x[POS_Y]);
+        let r2 = px * px + py * py;
+        let r = r2.sqrt();
+        if r < 1e-12
+        {
+            return None;
+        }
+        let h = vec![
+            vec![px / r, 0.0, py / r, 0.0],
+            vec![-py / r2, 0.0, px / r2, 0.0],
+        ];
+        let y = [range - r, wrap_pi(bearing - py.atan2(px))];
+        let mut s = mat_mul(&mat_mul(&h, &self.p), &mat_t(&h));
+        s[0][0] += range_var;
+        s[1][1] += bearing_var;
+        let l = cholesky(&s)?;
+        let sinv_y = chol_solve(&l, &y);
+        Some(y[0] * sinv_y[0] + y[1] * sinv_y[1])
+    }
+
     /// Time update: linear constant-velocity prediction of state and covariance.
     pub fn predict(&mut self) {
         self.x = mat_vec(&self.f, &self.x);
