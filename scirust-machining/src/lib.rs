@@ -146,6 +146,16 @@
 //!   linéaire (Almen-László) et charge d'aplatissement.
 //! - [`elastomer_mounts`] — plots élastomères : facteur de forme, module
 //!   apparent et raideurs compression/cisaillement.
+//! - [`fins`] — ailettes : paramètre d'ailette, efficacité, efficience et flux
+//!   évacué (bout adiabatique).
+//! - [`radiation`] — rayonnement (**Stefan-Boltzmann**) : émittance, échange net
+//!   avec l'environnement et coefficient linéarisé.
+//! - [`transient_conduction`] — conduction transitoire : nombres de **Biot** et
+//!   **Fourier**, capacité thermique localisée.
+//! - [`convection_correlations`] — convection : **Prandtl**, **Nusselt** → `h`,
+//!   **Dittus-Boelter** et **Rayleigh**.
+//! - [`thermal_network`] — réseaux de résistances thermiques : convection,
+//!   série/parallèle et coefficient global d'échange.
 //!
 //! ## Positionnement
 //!
@@ -198,6 +208,7 @@ pub mod bolted_joints;
 pub mod brakes;
 pub mod buckling;
 pub mod cams;
+pub mod convection_correlations;
 pub mod creep;
 pub mod critical_speed;
 pub mod dimension_chains;
@@ -209,6 +220,7 @@ pub mod epicyclic;
 pub mod extension_springs;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
+pub mod fins;
 pub mod flywheel;
 pub mod forced_vibrations;
 pub mod forces;
@@ -238,6 +250,7 @@ pub mod power_screws;
 pub mod process_time;
 pub mod pulley_systems;
 pub mod pumps;
+pub mod radiation;
 pub mod riveted_joints;
 pub mod roughness;
 pub mod shafts;
@@ -246,6 +259,7 @@ pub mod slider_crank;
 pub mod springs;
 pub mod stress_concentration;
 pub mod thermal;
+pub mod thermal_network;
 pub mod thermo_cycles;
 pub mod threads;
 pub mod time;
@@ -254,6 +268,7 @@ pub mod toollife;
 pub mod torseurs;
 pub mod torsion_profiles;
 pub mod torsion_springs;
+pub mod transient_conduction;
 pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
@@ -301,6 +316,9 @@ pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
     shm_displacement, shm_velocity,
 };
+pub use convection_correlations::{
+    convection_coefficient, dittus_boelter, prandtl_number, rayleigh_number,
+};
 pub use creep::{larson_miller_parameter, norton_creep_rate, rupture_time_from_lmp};
 pub use critical_speed::{
     critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
@@ -335,6 +353,7 @@ pub use fatigue_mean_stress::{
     gerber_safety_factor, goodman_safety_factor, mean_stress, soderberg_safety_factor,
     stress_amplitude, stress_ratio,
 };
+pub use fins::{fin_effectiveness, fin_efficiency, fin_heat_rate, fin_parameter};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
 };
@@ -423,6 +442,10 @@ pub use pumps::{
     affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
     specific_speed,
 };
+pub use radiation::{
+    STEFAN_BOLTZMANN, blackbody_emissive_power, gray_body_emissive_power,
+    net_radiation_to_surroundings, radiation_coefficient,
+};
 pub use riveted_joints::{
     bearing_strength, joint_efficiency, rivet_shear_strength, solid_plate_strength,
     tearing_strength,
@@ -446,6 +469,10 @@ pub use thermal::{
     conduction_heat_flow, convection_heat_flow, linear_expansion, sensible_heat,
     thermal_resistance, thermal_stress,
 };
+pub use thermal_network::{
+    convection_resistance, heat_flow, overall_heat_transfer_coefficient, parallel_resistance,
+    series_resistance,
+};
 pub use thermo_cycles::{
     carnot_efficiency, cop_heat_pump_carnot, cop_refrigerator_carnot, diesel_efficiency,
     otto_efficiency, thermal_efficiency,
@@ -467,6 +494,9 @@ pub use torsion_profiles::{
 };
 pub use torsion_springs::{
     angular_deflection, angular_rate, bending_stress as torsion_spring_bending_stress,
+};
+pub use transient_conduction::{
+    biot_number, fourier_number, lumped_capacitance_valid, lumped_temperature, time_constant,
 };
 pub use trusses::{axial_stress, member_elongation, two_member_joint};
 pub use universal_joint::{
