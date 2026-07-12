@@ -15,7 +15,12 @@
 //! Richardson–Lucy deconvolution is purely spatial (convolutions only).
 
 use crate::{Image, Kernel, convolve2d};
+use scirust_special::bessel_j;
 use std::f64::consts::PI;
+
+/// The first zero of `J₁`, where the Airy pattern has its first dark ring — the
+/// Rayleigh resolution limit.
+const AIRY_FIRST_ZERO: f64 = 3.831_705_970_207_512;
 
 /// The axis along which a line-spread function runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +190,61 @@ pub fn richardson_lucy(blurred: &Image, psf: &Image, iterations: usize) -> Image
     estimate
 }
 
+/// A normalized (`Σ = 1`) **Airy point-spread function** of odd `size × size` —
+/// the diffraction-limited response of a circular aperture — with its first dark
+/// ring `first_null` pixels from the centre. The intensity at radius `r` is
+/// `[2·J₁(v)/v]²` with `v = j₁,₁·r/first_null` (and `1` at the centre). Unlike a
+/// Gaussian blur this carries the characteristic ringing, and its central lobe
+/// sets the optical resolution.
+pub fn airy_psf(size: usize, first_null: f64) -> Image {
+    let n = size.max(1) | 1;
+    let half = (n / 2) as f64;
+    let mut data = vec![0.0; n * n];
+    let mut sum = 0.0;
+    for y in 0..n
+    {
+        for x in 0..n
+        {
+            let dx = x as f64 - half;
+            let dy = y as f64 - half;
+            let r = (dx * dx + dy * dy).sqrt();
+            let v = AIRY_FIRST_ZERO * r / first_null;
+            // 2·J₁(v)/v → 1 as v → 0 (the central peak).
+            let amp = if v.abs() < 1e-12
+            {
+                1.0
+            }
+            else
+            {
+                2.0 * bessel_j(1, v) / v
+            };
+            let intensity = amp * amp;
+            data[y * n + x] = intensity;
+            sum += intensity;
+        }
+    }
+    for val in &mut data
+    {
+        *val /= sum;
+    }
+    Image::from_vec(n, n, data)
+}
+
+/// The **Rayleigh angular resolution** `θ = 1.22·λ/D` (radians): the smallest
+/// angular separation two point sources of wavelength `wavelength` can have and
+/// still be resolved through a circular aperture of diameter `aperture`.
+pub fn rayleigh_resolution(wavelength: f64, aperture: f64) -> f64 {
+    1.22 * wavelength / aperture
+}
+
+/// The **Airy first-null radius in pixels** on a focal-plane array:
+/// `1.22·λ·f/(D·pixel_pitch)` — the radius of the diffraction central lobe, and
+/// the argument to [`airy_psf`]. `focal_length` and `pixel_pitch` share a length
+/// unit.
+pub fn airy_first_null(wavelength: f64, aperture: f64, focal_length: f64, pixel_pitch: f64) -> f64 {
+    1.22 * wavelength * focal_length / (aperture * pixel_pitch)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +354,40 @@ mod tests {
         assert!(mtf(&[]).is_empty());
         assert!(mtf(&[0.0, 0.0, 0.0]).is_empty());
         assert_eq!(mtf50(&[1.0], 1), 0.0);
+    }
+
+    #[test]
+    fn airy_psf_is_normalized_symmetric_and_peaked() {
+        let psf = airy_psf(21, 5.0);
+        assert_eq!((psf.width, psf.height), (21, 21));
+        assert!((psf.data.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        // Bright central peak, rotationally symmetric.
+        let c = psf.get(10, 10);
+        assert!(psf.data.iter().all(|&v| v <= c + 1e-15));
+        assert!((psf.get(13, 10) - psf.get(10, 13)).abs() < 1e-15);
+        assert!((psf.get(7, 10) - psf.get(13, 10)).abs() < 1e-15);
+        // Even size is bumped to odd.
+        assert_eq!(airy_psf(20, 5.0).width, 21);
+    }
+
+    #[test]
+    fn airy_first_dark_ring_falls_at_the_null_radius() {
+        // With the first null placed exactly at 5 px, the pixel 5 px off-centre
+        // sits on the first zero of J₁ — the dark ring — so its intensity is ~0.
+        let psf = airy_psf(21, 5.0);
+        let ring = psf.get(15, 10); // r = 5 from centre (10,10)
+        assert!(ring < psf.get(10, 10) * 1e-4, "first ring not dark: {ring}");
+        // Just inside the ring is brighter than on it (the central lobe).
+        assert!(psf.get(13, 10) > ring);
+    }
+
+    #[test]
+    fn rayleigh_and_airy_null_match_closed_forms() {
+        // θ = 1.22·λ/D.
+        assert!((rayleigh_resolution(500e-9, 0.1) - 1.22 * 500e-9 / 0.1).abs() < 1e-20);
+        // First-null radius in pixels = 1.22·λ·f/(D·pitch).
+        let (lambda, d, f, pitch) = (550e-9, 0.05, 0.2, 5e-6);
+        let expected = 1.22 * lambda * f / (d * pitch);
+        assert!((airy_first_null(lambda, d, f, pitch) - expected).abs() < 1e-12);
     }
 }
