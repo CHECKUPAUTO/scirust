@@ -71,6 +71,15 @@ propriétés le rendent rapide :
 4. **Parallélisme** : découpe de la dimension `M` en blocs de lignes disjoints
    via `std::thread::scope` (aucune dépendance externe).
 
+Le **même GEMM packé est porté sur NEON** (aarch64) : structure identique
+(blocking `MC_N`/`KC_N`/`NC_N`, packing de `A`/`B`), tuile registre `8×8`
+(16 accumulateurs `float32x4_t`, épilogue par tampon car NEON n'a pas de store
+masqué). Conséquence : **tout le stack — Transformer et entraînement — passe du
+scalaire au vectorisé sur l'embarqué ARM** (Jetson, Raspberry Pi, RK3588), et
+non plus seulement les primitives `saxpy`/`sdot`. Le noyau est validé
+bit-à-tolérance contre le scalaire **sous `qemu-aarch64`** (exécution réelle,
+pas seulement compilation).
+
 ### Perfs mesurées (machine AVX-512, 4 cœurs)
 
 | Kernel | Débit | Gain vs naïf |
