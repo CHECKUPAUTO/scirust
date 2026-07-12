@@ -5,6 +5,28 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — radiométrie IR et sensibilité NETD/MRTD (`radiometry`) — bloc 24
+Le pendant *radiométrique* du module `optics` (qui couvre la réponse spatiale
+PSF/MTF) : la physique qui fixe la plus petite différence de température qu'un
+capteur EO/IR peut voir.
+- **Radiométrie** — loi de Planck (`planck_radiance`, `planck_radiance_dt`),
+  exitance de Stefan–Boltzmann `M = σT⁴` (`radiant_exitance`) et sa dérivée
+  `4σT³`, loi du déplacement de Wien `λ_peak = b/T` (`peak_wavelength`), et
+  radiance / **contraste thermique** intégrés en bande par quadrature
+  (`band_radiance`, `thermal_contrast`).
+- **Sensibilité** — **`netd`** (différence de température équivalente au bruit :
+  le ΔT donnant un signal égal au bruit détecteur)
+  `NETD = 4F²√Δf / (π√A_d·τ_o·D*·(∂L/∂T)_bande)`, et **`mrtd`** (différence de
+  température minimale résolvable) `MRTD = k·NETD/MTF`, compromis
+  sensibilité-thermique / résolution qui combine la NETD à la MTF de `optics`.
+- Oracles : l'intégrale de Planck sur tout le spectre × π **retrouve σT⁴** ;
+  exitance et dérivée aux formes fermées (et différence finie) ; le pic de Wien
+  **se décale en 1/T** et la courbe de Planck y culmine ; ∂L/∂T analytique =
+  différence finie ; le contraste thermique est positif et **croît avec la
+  température** ; la NETD **suit ses lois d'échelle** (∝ F², 1/D*, 1/contraste,
+  1/√A_d) ; la MRTD **diverge quand la MTF s'annule**. 7 tests (54 au total pour
+  le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — détection CFAR de petites cibles (`detect`) — bloc 23
 Pont entre l'optronique et le pistage : le détecteur CFAR **côté image**, analogue
 EO/IR du CFAR radar, qui extrait de petites cibles chaudes d'un fond thermique
