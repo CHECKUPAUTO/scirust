@@ -34,7 +34,10 @@
 //! bandwidth / cadence descriptors) for target classification, and
 //! [`swerling`] for detection statistics — the probability of detecting a
 //! fluctuating or steady target versus SNR (Swerling I closed form and
-//! Albersheim's equation), the complement to the CFAR threshold.
+//! Albersheim's equation), the complement to the CFAR threshold — and
+//! [`range_equation`] for the link budget: the SNR a radar delivers on a target
+//! of a given RCS at range, and the maximum detection range that closes with the
+//! [`swerling`] required SNR.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -53,6 +56,7 @@ pub mod mti;
 pub mod mtt;
 pub mod music;
 pub mod pda;
+pub mod range_equation;
 pub mod swerling;
 pub mod track;
 pub mod waveform;
@@ -76,6 +80,7 @@ pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
 pub use pda::PdaFilter;
+pub use range_equation::RadarLink;
 pub use swerling::{
     albersheim_pd, albersheim_snr, single_pulse_threshold, swerling1_pd, swerling1_required_snr,
 };

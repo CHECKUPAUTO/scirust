@@ -48,9 +48,11 @@
 //!   soft-combining every gated measurement rather than a hard
 //!   nearest-neighbour pick), micro-Doppler analysis (a Hann-windowed
 //!   spectrogram of the slow-time return with ridge / bulk-Doppler / bandwidth /
-//!   cadence descriptors for target classification), and detection statistics
+//!   cadence descriptors for target classification), detection statistics
 //!   (Swerling I and Albersheim probability-of-detection versus SNR, the
-//!   complement to the CFAR threshold)
+//!   complement to the CFAR threshold), and the radar range equation (a
+//!   monostatic link budget giving delivered SNR versus RCS and range, and the
+//!   maximum detection range that closes with the required SNR)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -96,8 +98,8 @@ pub use mcsa::{
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
-    RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity, barker_code,
-    beamform_spectrum, beat_frequency_to_range, bin_frequencies, ca_cfar, ca_cfar_2d,
+    RadarLink, RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity,
+    barker_code, beamform_spectrum, beat_frequency_to_range, bin_frequencies, ca_cfar, ca_cfar_2d,
     ca_cfar_alpha, cadence, cluster_detections, covariance, critically_damped_gains,
     cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth, doppler_spectrum, esprit_doa,
     estimate_doa, lfm_chirp, mean_doppler, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
