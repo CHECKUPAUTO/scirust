@@ -92,6 +92,16 @@
 //!   Diesel et COP des machines frigorifiques/pompes à chaleur.
 //! - [`heat_exchanger`] — échangeurs : **DTLM** et méthode **NUT-efficacité**
 //!   (ε-NTU) co-courant/contre-courant.
+//! - [`bolted_joints`] — assemblages boulonnés précontraints (**VDI 2230**) :
+//!   précharge, facteur de charge et répartition de l'effort extérieur.
+//! - [`fastener_groups`] — groupes de boulons/rivets sous charge excentrée :
+//!   cisaillements primaire et secondaire, effort résultant.
+//! - [`welds`] — soudures : gorge des cordons d'angle, cisaillement direct et
+//!   cisaillement d'un groupe de cordons sous moment.
+//! - [`riveted_joints`] — assemblages rivés : modes de ruine (rivets, matage,
+//!   déchirure) et rendement du joint.
+//! - [`interference_fit`] — frettage : pression de contact (Lamé), couple/effort
+//!   transmissible et échauffement de montage.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -142,12 +152,14 @@ pub mod beams;
 pub mod bearings;
 pub mod belts;
 pub mod bernoulli;
+pub mod bolted_joints;
 pub mod buckling;
 pub mod cams;
 pub mod critical_speed;
 pub mod dynamics;
 pub mod economics;
 pub mod epicyclic;
+pub mod fastener_groups;
 pub mod flywheel;
 pub mod forced_vibrations;
 pub mod forces;
@@ -159,6 +171,7 @@ pub mod heat_exchanger;
 pub mod hertz;
 pub mod hyperstatism;
 pub mod impact;
+pub mod interference_fit;
 pub mod iso6336;
 pub mod keys;
 pub mod kinematics;
@@ -167,6 +180,7 @@ pub mod mohr;
 pub mod pipe_flow;
 pub mod power_screws;
 pub mod pumps;
+pub mod riveted_joints;
 pub mod roughness;
 pub mod shafts;
 pub mod slider_crank;
@@ -183,6 +197,7 @@ pub mod torsion_profiles;
 pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
+pub mod welds;
 
 pub use balancing::{
     centrifugal_force, correction_mass, permissible_eccentricity_um, permissible_unbalance_g_mm,
@@ -206,6 +221,9 @@ pub use bernoulli::{
     continuity_velocity, dynamic_pressure, hydrostatic_pressure, reynolds_number,
     torricelli_velocity, total_head,
 };
+pub use bolted_joints::{
+    bolt_working_load, load_factor, preload_from_torque, residual_clamp_load, separation_load,
+};
 pub use buckling::{
     EndCondition, critical_load, critical_stress, effective_length, is_euler_valid,
     limiting_slenderness, radius_of_gyration, slenderness_ratio,
@@ -227,6 +245,7 @@ pub use economics::MachiningEconomics;
 pub use epicyclic::{
     carrier_speed, reduction_ratio_ring_fixed, ring_speed, ring_teeth, sun_speed, willis_ratio,
 };
+pub use fastener_groups::{group_polar_moment, primary_shear, resultant_shear, secondary_shear};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
 };
@@ -263,6 +282,10 @@ pub use hyperstatism::{
 pub use impact::{
     direct_impact_velocities, energy_lost, falling_load_factor, suddenly_applied_factor,
 };
+pub use interference_fit::{
+    assembly_temperature_rise, contact_pressure_same_material, holding_axial_force, holding_torque,
+    hub_hoop_stress,
+};
 pub use iso6336::{
     contact_stress, elasticity_factor_ze, nominal_contact_stress, safety_factor_pitting,
 };
@@ -288,6 +311,10 @@ pub use power_screws::{
 pub use pumps::{
     affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
     specific_speed,
+};
+pub use riveted_joints::{
+    bearing_strength, joint_efficiency, rivet_shear_strength, solid_plate_strength,
+    tearing_strength,
 };
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
@@ -335,4 +362,8 @@ pub use universal_joint::{
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
+};
+pub use welds::{
+    butt_weld_stress, fillet_direct_shear_stress, fillet_throat_area, throat_thickness,
+    weld_group_torsional_shear,
 };
