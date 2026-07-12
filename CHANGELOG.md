@@ -5,6 +5,67 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : optoélectronique — équations de bilan du laser à semi-conducteur (`laser`) — bloc 13
+Troisième pilier optronique — l'**optoélectronique** (dynamique de dispositif) —
+via les **équations de bilan** monomode du laser à semi-conducteur couplant la
+densité de porteurs `n` et de photons `s`, comme `System` de `scirust-sim`.
+- **`SemiconductorLaser`** / **`LaserParams`** — état `[n, s]` :
+  `n' = J − n/τ_n − g₀(n−n_t)s`, `s' = Γg₀(n−n_t)s − s/τ_p + Γβ·n/τ_n`.
+- Grandeurs à forme fermée (limite `β→0`) : `threshold_density`
+  (`n_th = n_t + 1/(Γg₀τ_p)`), `threshold_pump` (`J_th = n_th/τ_n`),
+  `steady_state_photon_density` (loi lumière-courant linéaire
+  `s_ss = Γτ_p(J−J_th)`), `steady_state_carrier_density` (écrêtage du gain à
+  `n_th`), `relaxation_frequency` (`f_r = √(g₀s_ss/τ_p)/2π`).
+- Oracles : seuil et courbe L-I linéaire (formes fermées) ; l'allumage converge
+  vers l'état stationnaire fermé ; sous le seuil le laser reste éteint ; une
+  petite perturbation sonne à la fréquence d'oscillation de relaxation (période
+  mesurée sur la trajectoire) ; l'émission spontanée `β>0` amorce l'allumage
+  sans graine de photons ; rejet des paramètres invalides. 7 tests (109 au total
+  pour le crate) ; `fmt`/`clippy -D warnings`/`miri` propres.
+
+### Ajouté — `scirust-vision` : optique de rayons — matrices ABCD + faisceaux gaussiens (`beams`) — bloc 12
+Deuxième bloc optronique : la conception du **train optique** (lentilles,
+miroirs, espace libre) par **matrices de transfert ABCD**, et la propagation
+d'un **faisceau gaussien** via le paramètre complexe `q`.
+- **`RayMatrix`** — matrice 2×2 `[[a,b],[c,d]]` agissant sur un rayon `(y, θ)` :
+  constructeurs `identity` / `free_space` / `thin_lens` / `curved_mirror` /
+  `flat_interface`, composition `then` (produit `next·self`), `determinant`
+  (`= n_in/n_out`), `apply`.
+- **Faisceaux gaussiens** — `rayleigh_range` (`z_R = πw0²/λ`), `beam_radius`
+  (`w(z) = w0√(1+(z/z_R)²)`), `radius_of_curvature`, `divergence` (`λ/(πw0)`),
+  `gouy_phase`, plus le paramètre `q` : `q_at_waist`, `propagate_q`
+  (`q' = (Aq+B)/(Cq+D)`), `beam_radius_from_q`, `radius_from_q`.
+- Oracles : déterminant unité des éléments sans perte (et `n1/n2` pour un
+  dioptre plan) ; un rayon collimaté focalise à `f` ; la condition d'imagerie
+  annule `B` et donne le grandissement `−si/so` ; géométrie du faisceau
+  (waist `w0`, √2 à `z_R`, divergence, phase de Gouy) ; le `q` en espace libre
+  reproduit `w(z)` et `R(z)` ; une lentille reforme un waist au plan gaussien
+  prédit `s' = f·z_R²/(f²+z_R²)`. 8 tests (37 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
+### Ajouté — `scirust-vision` : optronique — PSF, MTF et déconvolution (`optics`) — bloc 11
+Premier bloc du volet **optronique / optique de précision / traitement de
+l'image** : la qualité d'image et la restauration d'un imageur EO/IR, dans le
+crate vision existant.
+- **`gaussian_psf`** — fonction d'étalement du point (PSF) gaussienne normalisée
+  (`Σ = 1`), taille impaire.
+- **`apply_psf`** — flou optique direct (convolution image ⊛ PSF), réutilise
+  `convolve2d`.
+- **`line_spread`** / **`mtf`** — fonction d'étalement de ligne (LSF) puis
+  **fonction de transfert de modulation** (MTF) : module normalisé de la DFT de
+  la LSF (`MTF[0] = 1`), fréquences en cycles/pixel, DFT directe sans contrainte
+  de puissance de deux.
+- **`mtf50`** — métrique de résolution : fréquence où la MTF chute à 0,5
+  (interpolée), le chiffre-clé d'une optique de précision.
+- **`richardson_lucy`** — déconvolution de Richardson–Lucy (restauration
+  itérative spatiale, uniquement des convolutions ; conserve le flux, reste
+  positive).
+- Oracles : la PSF est normalisée / symétrique / à pic central ; la MTF d'une
+  gaussienne suit la forme fermée `exp(−2π²σ²f²)` et décroît de façon monotone ;
+  le `MTF50` suit `√(ln2/2)/(πσ)` ; Richardson–Lucy est l'identité pour une PSF
+  de Dirac et re-concentre un point flouté (pic remonté, flux conservé). 7 tests
+  (29 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : pistage — filtre α–β + traqueur multi-cibles (`radar::track`) — bloc 10
 Dixième bloc du domaine radar : la **couche temporelle** qui associe les
 détections d'une trame aux pistes existantes et lisse chaque état. Clôt la

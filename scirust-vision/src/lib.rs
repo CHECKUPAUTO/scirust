@@ -1,6 +1,21 @@
 //! Computer vision patterns: CNN layers, object detection, image classification, segmentation.
+//!
+//! The [`optics`] module adds optronic image-quality and restoration tools — the
+//! point-spread function, the modulation transfer function (with the `MTF50`
+//! resolution metric), and Richardson–Lucy deconvolution — for EO/IR / precision
+//! optical imaging. The [`beams`] module adds ray optics: ABCD ray-transfer
+//! matrices and Gaussian-beam propagation via the complex q-parameter, for
+//! optical-train design.
 
 use serde::{Deserialize, Serialize};
+
+pub mod beams;
+pub mod optics;
+pub use beams::{
+    RayMatrix, beam_radius, beam_radius_from_q, divergence, gouy_phase, propagate_q, q_at_waist,
+    radius_from_q, radius_of_curvature, rayleigh_range,
+};
+pub use optics::{Axis, apply_psf, gaussian_psf, line_spread, mtf, mtf50, richardson_lucy};
 
 // ─── Image Representation ───────────────────────────────────────────────────
 
