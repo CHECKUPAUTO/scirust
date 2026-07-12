@@ -34,7 +34,12 @@ pub fn compute_hrv(rr_seconds: &[f64]) -> HrvMetrics {
     }
     let mean = rr_seconds.iter().sum::<f64>() / n as f64;
     let mean_hr_bpm = if mean > 0.0 { 60.0 / mean } else { 0.0 };
-    let var = rr_seconds.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+    // Bessel's correction: SDNN is conventionally the *sample* standard
+    // deviation (dividing by n-1, degrees of freedom), matching clinical HRV
+    // toolkits (Kubios, NeuroKit2, pyHRV). Dividing by n underestimates
+    // SDNN, most severely for short recordings.
+    let var =
+        rr_seconds.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0).max(1.0);
     let sdnn_ms = var.sqrt() * 1000.0;
 
     let diffs: Vec<f64> = rr_seconds.windows(2).map(|w| w[1] - w[0]).collect();
@@ -70,14 +75,37 @@ mod tests {
 
     #[test]
     fn alternating_rr_matches_hand_computation() {
-        // 0.8 / 0.9 s alternating: std = 50 ms, successive diffs ±100 ms.
+        // 0.8 / 0.9 s alternating, n=20: deviations are +/-0.05s each.
+        // Sample variance (Bessel's correction, /(n-1)): (20*0.05^2)/19 =
+        // 0.05/19 s^2 -> SDNN = 1000*0.05*sqrt(20/19) ms. Successive diffs
+        // +/-100 ms.
         let rr: Vec<f64> = (0..20)
             .map(|k| if k % 2 == 0 { 0.8 } else { 0.9 })
             .collect();
         let m = compute_hrv(&rr);
-        assert!((m.sdnn_ms - 50.0).abs() < 1e-6, "SDNN {}", m.sdnn_ms);
+        let expected_sdnn = 1000.0 * 0.05 * (20.0_f64 / 19.0).sqrt();
+        assert!(
+            (m.sdnn_ms - expected_sdnn).abs() < 1e-6,
+            "SDNN {}",
+            m.sdnn_ms
+        );
         assert!((m.rmssd_ms - 100.0).abs() < 1e-6, "RMSSD {}", m.rmssd_ms);
         assert!((m.pnn50 - 100.0).abs() < 1e-6, "pNN50 {}", m.pnn50);
+    }
+
+    #[test]
+    fn sdnn_uses_bessel_corrected_sample_variance() {
+        // n=2 maximizes the relative gap between the population (/n) and
+        // sample (/(n-1)) variance estimators. mean=0.9s, deviations =
+        // [-0.1, 0.1]s, sum of squared deviations = 0.02 s^2. Sample
+        // variance = 0.02/(2-1) = 0.02 s^2, SDNN = sqrt(0.02)*1000 =
+        // 100*sqrt(2) ms -- not the population-variance value of 100 ms.
+        let m = compute_hrv(&[0.8, 1.0]);
+        assert!(
+            (m.sdnn_ms - 100.0 * 2.0_f64.sqrt()).abs() < 1e-9,
+            "SDNN {}",
+            m.sdnn_ms
+        );
     }
 
     #[test]
@@ -95,8 +123,9 @@ mod tests {
     fn sdnn_and_rmssd_are_distinct_formulas() {
         // RR = [0.8, 0.8, 0.8, 1.2] s. Hand computation:
         //   mean = 0.9 s -> mean HR = 60/0.9 = 66.6667 bpm.
-        //   deviations = [-0.1, -0.1, -0.1, 0.3]; population var = 0.12/4 = 0.03;
-        //   SDNN = sqrt(0.03)*1000 = 173.2051 ms.
+        //   deviations = [-0.1, -0.1, -0.1, 0.3]; sample var (Bessel's
+        //   correction, /(n-1)) = 0.12/3 = 0.04; SDNN = sqrt(0.04)*1000 =
+        //   200.0 ms.
         //   successive diffs = [0, 0, 0.4]; RMSSD = sqrt(0.16/3)*1000 = 230.9401 ms.
         //   pNN50: one of three diffs (0.4 s) exceeds 50 ms -> 33.3333 %.
         // RMSSD > SDNN here, so a test that conflated the two would fail.
@@ -106,11 +135,7 @@ mod tests {
             "HR {}",
             m.mean_hr_bpm
         );
-        assert!(
-            (m.sdnn_ms - 173.205_080_757).abs() < 1e-6,
-            "SDNN {}",
-            m.sdnn_ms
-        );
+        assert!((m.sdnn_ms - 200.0).abs() < 1e-6, "SDNN {}", m.sdnn_ms);
         assert!(
             (m.rmssd_ms - 230.940_107_676).abs() < 1e-6,
             "RMSSD {}",
