@@ -42,6 +42,8 @@
 //! (Rayleigh, Weibull, log-normal) that CFAR thresholds are designed against, and
 //! [`prf`] gives the pulse-repetition-frequency ambiguities — unambiguous range
 //! and velocity, blind speeds, and range/velocity folding.
+//! [`stepped_frequency`] synthesises wideband range resolution from a burst of
+//! narrowband pulses stepped in frequency, resolved by an inverse DFT.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -64,6 +66,7 @@ pub mod music;
 pub mod pda;
 pub mod prf;
 pub mod range_equation;
+pub mod stepped_frequency;
 pub mod swerling;
 pub mod track;
 pub mod waveform;
@@ -99,6 +102,10 @@ pub use prf::{
     velocity_from_doppler,
 };
 pub use range_equation::RadarLink;
+pub use stepped_frequency::{
+    max_unambiguous_range, range_bins, range_profile as stepped_range_profile,
+    range_resolution as stepped_range_resolution, synthetic_bandwidth,
+};
 pub use swerling::{
     albersheim_pd, albersheim_snr, single_pulse_threshold, swerling1_pd, swerling1_required_snr,
 };
