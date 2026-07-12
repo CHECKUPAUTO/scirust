@@ -102,6 +102,16 @@
 //!   déchirure) et rendement du joint.
 //! - [`interference_fit`] — frettage : pression de contact (Lamé), couple/effort
 //!   transmissible et échauffement de montage.
+//! - [`brakes`] — freins et embrayages : couple d'un embrayage à disques
+//!   (usure/pression uniforme) et couple de freinage d'un frein à sangle.
+//! - [`journal_bearings`] — paliers lisses : charge unitaire, nombre de
+//!   **Sommerfeld**, frottement de **Petroff** et film minimal.
+//! - [`bevel_worm_gears`] — engrenages coniques et roue-vis : angles de cône,
+//!   rapport de réduction, angle d'hélice, rendement et irréversibilité.
+//! - [`pulley_systems`] — poulies et moufles : avantage mécanique, effort à
+//!   fournir, rapport de vitesses et rendement.
+//! - [`hydraulic_cylinders`] — vérins hydrauliques : efforts sortie/rentrée,
+//!   vitesse de tige, débit et puissance fluide.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -152,7 +162,9 @@ pub mod beams;
 pub mod bearings;
 pub mod belts;
 pub mod bernoulli;
+pub mod bevel_worm_gears;
 pub mod bolted_joints;
+pub mod brakes;
 pub mod buckling;
 pub mod cams;
 pub mod critical_speed;
@@ -169,16 +181,19 @@ pub mod gears;
 pub mod geneva;
 pub mod heat_exchanger;
 pub mod hertz;
+pub mod hydraulic_cylinders;
 pub mod hyperstatism;
 pub mod impact;
 pub mod interference_fit;
 pub mod iso6336;
+pub mod journal_bearings;
 pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
 pub mod mohr;
 pub mod pipe_flow;
 pub mod power_screws;
+pub mod pulley_systems;
 pub mod pumps;
 pub mod riveted_joints;
 pub mod roughness;
@@ -221,8 +236,16 @@ pub use bernoulli::{
     continuity_velocity, dynamic_pressure, hydrostatic_pressure, reynolds_number,
     torricelli_velocity, total_head,
 };
+pub use bevel_worm_gears::{
+    bevel_pitch_angle_gear, bevel_pitch_angle_pinion, worm_efficiency, worm_gear_ratio,
+    worm_lead_angle, worm_self_locking,
+};
 pub use bolted_joints::{
     bolt_working_load, load_factor, preload_from_torque, residual_clamp_load, separation_load,
+};
+pub use brakes::{
+    band_brake_torque, band_tension_ratio, disc_clutch_torque_uniform_pressure,
+    disc_clutch_torque_uniform_wear,
 };
 pub use buckling::{
     EndCondition, critical_load, critical_stress, effective_length, is_euler_valid,
@@ -276,6 +299,9 @@ pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
     point_contact_max_pressure, point_contact_radius,
 };
+pub use hydraulic_cylinders::{
+    bore_area, extend_force, fluid_power, piston_speed, retract_force, rod_side_area,
+};
 pub use hyperstatism::{
     degree_of_hyperstaticity, independent_loops, is_isostatic, kinematic_unknowns, static_unknowns,
 };
@@ -288,6 +314,10 @@ pub use interference_fit::{
 };
 pub use iso6336::{
     contact_stress, elasticity_factor_ze, nominal_contact_stress, safety_factor_pitting,
+};
+pub use journal_bearings::{
+    minimum_film_thickness, petroff_friction_coefficient, petroff_torque, sommerfeld_number,
+    unit_load,
 };
 pub use keys::{
     key_bearing_pressure, key_shear_stress, required_length_for_bearing, tangential_force,
@@ -307,6 +337,10 @@ pub use pipe_flow::{
 };
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
+};
+pub use pulley_systems::{
+    actual_mechanical_advantage, efficiency as pulley_efficiency, effort_required,
+    velocity_ratio as pulley_velocity_ratio,
 };
 pub use pumps::{
     affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
