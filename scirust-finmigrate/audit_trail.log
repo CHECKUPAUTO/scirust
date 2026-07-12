@@ -322,3 +322,20 @@
     (iep_to_itl, large_dem_to_itl). Rust equivalence tests updated for the new
     counts (brkt 14, curr 14, day 15); full suite + no-float guard PASS.
     SHA256SUMS regenerated; sha256sum -c all OK.
+
+# ============================================================================
+# PRODUCTION GATES — consolidated exit checklist
+# ============================================================================
+
+[2026-07-12] DELIVERABLE: Added PRODUCTION_GATES.md — a single authoritative
+    exit checklist stating explicitly that the units are NOT production-ready.
+    Consolidates the previously-scattered gates: G1 re-run under the target IBM
+    Enterprise COBOL / z/OS compiler & runtime under the production ARITH option
+    (the GnuCOBOL evidence is not the production compiler; fixed-point
+    intermediates cap at 30/31 digits on IBM, cf. APAR PH64936); G2 confirm
+    intermediate precision (CURRCVT Gap-Q 3-dp euro, INTACCR Gap-6); G3 reconcile
+    against real production data / legacy historical outputs; G4 full input-domain
+    & size-error behaviour on target; G5 business/legal sign-off on the CURRCVT
+    Gap-R behaviour change; G6 operational readiness (rollback, reconstruction).
+    Per-unit gate matrix + a sign-off table. Linked from README.md and
+    audit_report.md. No arithmetic changed; documentation only.
