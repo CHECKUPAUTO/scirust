@@ -35,7 +35,10 @@
 //!   ranging, range
 //!   resolution, and the range-Doppler cube from raw beat chirps) and target
 //!   tracking (α–β constant-velocity track filters and a nearest-neighbour
-//!   multi-target tracker over the clustered detections)
+//!   multi-target tracker over the clustered detections, plus a full
+//!   constant-velocity Kalman filter and an Interacting-Multiple-Model
+//!   estimator that switches between quiet and agile models to follow
+//!   manoeuvring targets)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -80,11 +83,11 @@ pub use mcsa::{
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
-    AlphaBeta, Detection, MultiTracker, Track, ambiguity, barker_code, beamform_spectrum,
-    beat_frequency_to_range, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cluster_detections, covariance,
-    critically_damped_gains, cross_correlate, doppler_spectrum, esprit_doa, estimate_doa,
-    lfm_chirp, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag,
-    peak_to_sidelobe, range_doppler, range_doppler_map, range_profile, range_resolution,
-    steering_vector,
+    AlphaBeta, Detection, Imm, KalmanCV, MultiTracker, Track, ambiguity, barker_code,
+    beamform_spectrum, beat_frequency_to_range, ca_cfar, ca_cfar_2d, ca_cfar_alpha,
+    cluster_detections, covariance, critically_damped_gains, cross_correlate, doppler_spectrum,
+    esprit_doa, estimate_doa, lfm_chirp, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
+    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
+    range_resolution, steering_vector,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
