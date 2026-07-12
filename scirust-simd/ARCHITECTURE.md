@@ -26,7 +26,9 @@ puis le met en cache :
 
 - **x86_64** : `AVX-512F` (+ `VNNI`/`BW` selon les kernels) → `AVX2+FMA` →
   `SSE2`. Détection via `std::is_x86_feature_detected!`.
-- **aarch64** : `NEON` (baseline ARMv8), plus une amorce `SVE`.
+- **aarch64** : `NEON` (baseline ARMv8), plus de vrais **kernels `SVE`
+  scalables** (`saxpy`/`sdot`/`sscal`, longueur vectorielle runtime, bords
+  prédiqués) et la quantification int8 `dotprod`/`i8mm`.
 - **Partout ailleurs** : chemin scalaire, toujours correct.
 
 Conséquence : **le même code source** tourne du serveur AVX-512 à un Jetson /
@@ -162,6 +164,7 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`gemm`](src/gemm.rs) | SGEMM/DGEMM tuilés, parallèles, fusionnés |
 | [`activations`](src/activations.rs) | `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` vectorisés |
 | [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
+| [`sve`](src/sve.rs) | kernels SVE scalables `saxpy`/`sdot`/`sscal` (aarch64) |
 | [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
 | [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
 | [`kv_cache`](src/kv_cache.rs) | Cache KV, décodage incrémental |
