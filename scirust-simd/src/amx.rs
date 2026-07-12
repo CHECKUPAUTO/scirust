@@ -285,6 +285,169 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
 }
 
 // ===================================================================== //
+//  B pré-empaqueté (poids statiques) : le packing VNNI hors du chemin chaud //
+// ===================================================================== //
+
+/// Pré-empaquette `B` (`k×n` int8, row-major) dans la disposition **tuile AMX
+/// VNNI**, une fois pour toutes (poids statiques). Chaque panneau `(nb, kb)` est
+/// stocké sur `16` lignes de `64` octets (stride fixe `MAX_K`), les `nr·4`
+/// premiers octets de chaque ligne portant la donnée VNNI
+/// `b_tile[p][4j+r] = B[kb+4p+r][nb+j]`, le reste à zéro. Panneaux ordonnés
+/// `nb`-majeur / `kb`-mineur, taille uniforme `16·64` ⇒ offset direct.
+///
+/// [`amx_matmul_i8_prepacked`] consomme ce tampon **sans re-packer** `B` — c'est
+/// le gros gain quand la même matrice de poids sert à de nombreux `forward`.
+#[cfg(target_arch = "x86_64")]
+pub fn prepack_b_i8(b: &[i8], k: usize, n: usize) -> Vec<i8> {
+    assert_eq!(b.len(), k * n, "prepack_b_i8: B shape mismatch");
+    let n_nb = n.div_ceil(MAX_N);
+    let n_kb = k.div_ceil(MAX_K);
+    let panel = MAX_M * MAX_K; // 16 lignes × 64 octets
+    let mut out = vec![0i8; n_nb * n_kb * panel];
+    for ib in 0..n_nb
+    {
+        let nb = ib * MAX_N;
+        let nr = MAX_N.min(n - nb);
+        for jb in 0..n_kb
+        {
+            let kb = jb * MAX_K;
+            let kr = MAX_K.min(k - kb);
+            let base = (ib * n_kb + jb) * panel;
+            let kp = kr.div_ceil(4);
+            for p in 0..kp
+            {
+                for j in 0..nr
+                {
+                    for r in 0..4
+                    {
+                        let kk = 4 * p + r;
+                        if kk < kr
+                        {
+                            out[base + p * MAX_K + 4 * j + r] = b[(kb + kk) * n + nb + j];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Nombre d'octets d'un `B` pré-empaqueté par [`prepack_b_i8`] pour `(k, n)`.
+#[cfg(target_arch = "x86_64")]
+pub fn prepack_b_i8_len(k: usize, n: usize) -> usize {
+    n.div_ceil(MAX_N) * k.div_ceil(MAX_K) * MAX_M * MAX_K
+}
+
+/// GEMM int8 AMX avec `B` **déjà empaqueté** par [`prepack_b_i8`] : `C[m×n] =
+/// A[m×k]·B[k×n]`. Suppose AMX utilisable (panne sinon — n'appeler qu'après
+/// [`amx_int8_usable`]). Ne re-packe **que** `A` (petit, dynamique), pas `B`.
+#[cfg(target_arch = "x86_64")]
+pub fn amx_matmul_i8_prepacked(
+    a: &[i8],
+    b_packed: &[i8],
+    m: usize,
+    k: usize,
+    n: usize,
+) -> Vec<i32> {
+    assert_eq!(a.len(), m * k, "amx_matmul_i8_prepacked: A shape mismatch");
+    assert_eq!(
+        b_packed.len(),
+        prepack_b_i8_len(k, n),
+        "amx_matmul_i8_prepacked: B_packed taille"
+    );
+    assert!(
+        amx_int8_usable(),
+        "amx_matmul_i8_prepacked: AMX indisponible"
+    );
+    let mut c = vec![0i32; m * n];
+    // SAFETY: amx_int8_usable() vient d'être vérifié (ISA + permission noyau).
+    unsafe { amx_matmul_i8_prepacked_tiled(a, b_packed, m, k, n, &mut c) };
+    c
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "amx-int8,amx-tile")]
+unsafe fn amx_matmul_i8_prepacked_tiled(
+    a: &[i8],
+    b_packed: &[i8],
+    m: usize,
+    k: usize,
+    n: usize,
+    c: &mut [i32],
+) {
+    use core::arch::x86_64::*;
+    let n_kb = k.div_ceil(MAX_K);
+    let panel = MAX_M * MAX_K;
+    let mut a_buf = [0i8; MAX_M * MAX_K];
+    let mut c_buf = [0i32; MAX_M * MAX_N];
+
+    let mut mb = 0;
+    while mb < m
+    {
+        let mr = MAX_M.min(m - mb);
+        let mut ib = 0;
+        let mut nb = 0;
+        while nb < n
+        {
+            let nr = MAX_N.min(n - nb);
+            let stride_b = nr * 4;
+
+            let mut cfg = TileConfig::zeroed();
+            cfg.rows[TMM_C] = mr as u8;
+            cfg.colsb[TMM_C] = stride_b as u16;
+            cfg.rows[TMM_A] = mr as u8;
+            cfg.colsb[TMM_A] = MAX_K as u16;
+            cfg.rows[TMM_B] = (MAX_K / 4) as u8;
+            cfg.colsb[TMM_B] = stride_b as u16;
+            _tile_loadconfig(&cfg as *const _ as *const u8);
+            _tile_zero::<{ TMM_C as i32 }>();
+
+            let mut jb = 0;
+            let mut kb = 0;
+            while kb < k
+            {
+                let kr = MAX_K.min(k - kb);
+                if kr < MAX_K
+                {
+                    a_buf.fill(0);
+                }
+                for i in 0..mr
+                {
+                    for p in 0..kr
+                    {
+                        a_buf[i * MAX_K + p] = a[(mb + i) * k + kb + p];
+                    }
+                }
+                // Panneau B pré-empaqueté : stride mémoire = MAX_K (64), la tuile
+                // ne lit que `stride_b` octets/ligne.
+                let bp = &b_packed[(ib * n_kb + jb) * panel..];
+                _tile_loadd::<{ TMM_A as i32 }>(a_buf.as_ptr() as *const u8, MAX_K);
+                _tile_loadd::<{ TMM_B as i32 }>(bp.as_ptr() as *const u8, MAX_K);
+                _tile_dpbssd::<{ TMM_C as i32 }, { TMM_A as i32 }, { TMM_B as i32 }>();
+
+                kb += MAX_K;
+                jb += 1;
+            }
+
+            _tile_stored::<{ TMM_C as i32 }>(c_buf.as_mut_ptr() as *mut u8, stride_b);
+            for i in 0..mr
+            {
+                for j in 0..nr
+                {
+                    c[(mb + i) * n + nb + j] = c_buf[i * nr + j];
+                }
+            }
+
+            nb += MAX_N;
+            ib += 1;
+        }
+        mb += MAX_M;
+    }
+    _tile_release();
+}
+
+// ===================================================================== //
 //  Couche dense quantifiée int8 (inférence)                              //
 // ===================================================================== //
 
@@ -549,6 +712,36 @@ mod tests {
         let a = [1i8, 2, 3, 4, 5, 6];
         let b = [7i8, 8, 9, 10, 11, 12];
         assert_eq!(matmul_i8_scalar(&a, &b, 2, 3, 2), vec![58, 64, 139, 154]);
+    }
+
+    #[test]
+    fn prepacked_matches_plain() {
+        let _guard = AMX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        if !amx_int8_usable()
+        {
+            return; // chemin pré-empaqueté réservé au matériel AMX
+        }
+        // Le GEMM à B pré-empaqueté doit être identique au GEMM AMX standard,
+        // sur des formes multi-tuiles + bords partiels (M/N>16, K>64).
+        for &(m, k, n) in &[
+            (1usize, 1usize, 1usize),
+            (16, 64, 16),
+            (17, 65, 19),
+            (40, 100, 24),
+        ]
+        {
+            let a: Vec<i8> = (0..m * k)
+                .map(|t| ((t as i32 * 7 - 61) % 128) as i8)
+                .collect();
+            let b: Vec<i8> = (0..k * n)
+                .map(|t| ((t as i32 * -5 + 23) % 128) as i8)
+                .collect();
+            let bp = prepack_b_i8(&b, k, n);
+            assert_eq!(bp.len(), prepack_b_i8_len(k, n));
+            let got = amx_matmul_i8_prepacked(&a, &bp, m, k, n);
+            let want = amx_matmul_i8(&a, &b, m, k, n);
+            assert_eq!(got, want, "shape {m}x{k}x{n}");
+        }
     }
 
     #[test]
