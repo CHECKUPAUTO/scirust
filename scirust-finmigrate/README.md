@@ -15,6 +15,10 @@ end on two representative units:
 * `BRKTCALC` — progressive (marginal) bracketed tax over a COBOL `OCCURS` table;
   each rate applies only to its slice of the base, with a single rounding event
   (the wrong flat-top-rate figure is recorded as audit evidence).
+* `CURRCVT` — national↔national euro conversion by triangulation (EC 1103/97):
+  route through the euro, round the intermediate to ≥3 dp, then to the target
+  currency's minor unit (2 dp, or 0 dp for ITL/ESP); the unlawful direct
+  cross-rate is recorded to show the legally-material divergence.
 
 It is the reference template for the migration protocol:
 

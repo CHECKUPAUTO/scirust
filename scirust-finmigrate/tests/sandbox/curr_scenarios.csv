@@ -1,0 +1,11 @@
+case_id,amount,from_ccy,to_ccy
+dem_to_frf,100.00,DEM,FRF
+frf_to_dem,100.00,FRF,DEM
+frf_to_itl,1000.00,FRF,ITL
+dem_to_esp,250.00,DEM,ESP
+itl_to_frf,100000,ITL,FRF
+iep_to_dem,100.00,IEP,DEM
+dem_to_iep,100.00,DEM,IEP
+esp_to_itl,50000,ESP,ITL
+small_dem_to_frf,1.00,DEM,FRF
+large_frf_to_dem,9999999.00,FRF,DEM
