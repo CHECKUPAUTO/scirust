@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — statistiques de détection Swerling (`radar::swerling`) — bloc 28
+Complément du CFAR (qui fixe le seuil pour un taux de fausse alarme donné) : la
+**probabilité de détection** `P_d` en fonction du rapport signal/bruit, selon la
+fluctuation de la SER de la cible (cas de **Swerling**).
+- **`single_pulse_threshold(pfa)`** — seuil quadratique mono-impulsion
+  `V_T = −ln(P_fa)`.
+- **`swerling1_pd(snr, pfa) = P_fa^{1/(1+SNR)}`** — `P_d` Swerling I
+  mono-impulsion (cible Rayleigh à fluctuation lente) ; **`swerling1_required_snr`**
+  l'inverse (SNR linéaire requis pour un `P_d`).
+- **`albersheim_snr(pd, pfa, n_pulses)`** — équation d'**Albersheim** (cible
+  stable non fluctuante) : SNR (dB) requis après intégration non cohérente de
+  `n` impulsions, `−5·log₁₀N + (6,2 + 4,54/√(N+0,44))·log₁₀(A + 0,12·A·B + 1,7·B)` ;
+  **`albersheim_pd`** l'inverse (`P_d` depuis un SNR dB).
+- Oracles : seuil = loi de fausse alarme ; Swerling I → `P_fa` sans signal, →1 à
+  fort SNR, monotone, inversion aller-retour ; Albersheim **aller-retour**
+  forward/inverse à 1e-6 sur quatre points, `P_d` croît avec le SNR et avec le
+  P_fa, l'intégration **abaisse le SNR requis** ; la **perte de fluctuation**
+  Swerling I dépasse la cible stable (> 3 dB à `P_d = 0,9`). 5 tests (209 au total
+  pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — analyse micro-Doppler (`radar::micro_doppler`) — bloc 27
 La signature **temps-fréquence** des micro-mouvements d'une cible (pales de rotor,
 hélice, démarche) — base de la reconnaissance de cible non coopérative (NCTR).
