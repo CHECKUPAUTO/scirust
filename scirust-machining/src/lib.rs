@@ -195,6 +195,16 @@
 //!   d'écrouissage de **Hollomon**.
 //! - [`strain_energy`] — énergie de déformation élastique : densités, module de
 //!   résilience et énergie totale.
+//! - [`beam_reactions`] — RDM : réactions d'appui et moments maximaux de poutres
+//!   isostatiques (charge excentrée, répartie, console).
+//! - [`combined_stress`] — RDM : sollicitations composées (traction+flexion,
+//!   flexion+torsion), moments idéaux d'arbre.
+//! - [`pressure_vessels`] — RDM : réservoirs sous pression, parois minces
+//!   (cylindre/sphère) et cylindres épais (**Lamé**).
+//! - [`deflection_cases`] — RDM : flèches et pentes complémentaires et
+//!   **superposition** des cas de charge.
+//! - [`castigliano`] — RDM : énergie de déformation des éléments (traction,
+//!   flexion, torsion) et principe de **Castigliano**.
 //!
 //! ## Positionnement
 //!
@@ -238,6 +248,7 @@
 
 pub mod area_moments;
 pub mod balancing;
+pub mod beam_reactions;
 pub mod beams;
 pub mod bearings;
 pub mod belleville_washers;
@@ -249,13 +260,16 @@ pub mod brakes;
 pub mod buckling;
 pub mod cables;
 pub mod cams;
+pub mod castigliano;
 pub mod centroids;
 pub mod chain_drive;
+pub mod combined_stress;
 pub mod composites;
 pub mod convection_correlations;
 pub mod couplings;
 pub mod creep;
 pub mod critical_speed;
+pub mod deflection_cases;
 pub mod dimension_chains;
 pub mod distributed_loads;
 pub mod drag_lift;
@@ -299,6 +313,7 @@ pub mod oee;
 pub mod open_channel;
 pub mod pipe_flow;
 pub mod power_screws;
+pub mod pressure_vessels;
 pub mod process_time;
 pub mod pulley_systems;
 pub mod pump_system;
@@ -341,6 +356,10 @@ pub use balancing::{
     centrifugal_force, correction_mass, permissible_eccentricity_um, permissible_unbalance_g_mm,
     unbalance,
 };
+pub use beam_reactions::{
+    cantilever_point_load_moment, cantilever_udl_moment, ss_point_load_max_moment,
+    ss_point_load_reactions, ss_udl_reaction,
+};
 pub use beams::{
     bending_stress as beam_bending_stress, deflection_cantilever_end_load,
     deflection_simply_supported_center_load, deflection_simply_supported_udl,
@@ -380,9 +399,14 @@ pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
     shm_displacement, shm_velocity,
 };
+pub use castigliano::{axial_energy, bending_energy, torsion_energy, total_energy};
 pub use centroids::{composite_centroid, total_area};
 pub use chain_drive::{
     chain_length_pitches, chain_velocity, sprocket_pitch_diameter, sprocket_speed_ratio,
+};
+pub use combined_stress::{
+    combined_axial_bending, equivalent_bending_moment, equivalent_twisting_moment,
+    von_mises_bending_torsion,
 };
 pub use composites::{
     longitudinal_strength, reuss_modulus, rule_of_mixtures_density, voigt_modulus,
@@ -395,6 +419,10 @@ pub use creep::{larson_miller_parameter, norton_creep_rate, rupture_time_from_lm
 pub use critical_speed::{
     critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
     rad_to_rpm,
+};
+pub use deflection_cases::{
+    cantilever_end_slope, cantilever_udl_deflection, fixed_fixed_center_deflection,
+    simply_supported_center_slope, superpose_deflections,
 };
 pub use dimension_chains::{
     closing_max, closing_min, closing_nominal, rss_tolerance, worst_case_tolerance,
@@ -519,6 +547,10 @@ pub use pipe_flow::{
 };
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
+};
+pub use pressure_vessels::{
+    thick_cylinder_hoop_inner, thick_cylinder_hoop_outer, thin_cylinder_hoop,
+    thin_cylinder_longitudinal, thin_sphere,
 };
 pub use process_time::{batch_time, stations_required, throughput_per_hour, time_per_piece};
 pub use pulley_systems::{
