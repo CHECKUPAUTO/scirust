@@ -61,7 +61,10 @@
 //!   folding, with the invariant range–velocity ambiguity product `cλ/8`), and
 //!   stepped-frequency synthetic wideband ranging (a high-resolution range
 //!   profile from an inverse DFT of a burst of frequency-stepped narrowband
-//!   pulses, resolution `c/(2·N·Δf)`)
+//!   pulses, resolution `c/(2·N·Δf)`), and phase-comparison (interferometric)
+//!   angle estimation (off-boresight angle from the phase difference across a
+//!   two-element baseline, `θ = arcsin(Δφ·λ/(2π·d))`, with its resolution vs.
+//!   unambiguous-field-of-view `arcsin(λ/2d)` trade-off)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -108,18 +111,19 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarLink, RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity,
-    barker_code, beam_voltage, beamform_spectrum, beat_frequency_to_range, bin_frequencies,
-    blind_speed, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections, covariance,
-    critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth,
-    doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, fold_range, fold_velocity,
-    lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler, monopulse_estimate_angle,
-    monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
-    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_bins, range_doppler, range_doppler_map,
-    range_profile, range_resolution, rayleigh_cdf as clutter_rayleigh_cdf,
-    rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile, ridge as micro_doppler_ridge,
-    single_pulse_threshold, spectrogram, steering_vector, stepped_range_profile,
-    stepped_range_resolution, swerling1_pd, swerling1_required_snr, synthetic_bandwidth,
-    unambiguous_range, unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf,
-    weibull_quantile,
+    angle_from_phase, barker_code, beam_voltage, beamform_spectrum, beat_frequency_to_range,
+    bin_frequencies, blind_speed, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections,
+    covariance, critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d,
+    doppler_bandwidth, doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, fold_range,
+    fold_velocity, lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler,
+    monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum,
+    mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe, phase_difference,
+    phase_from_signals, range_bins, range_doppler, range_doppler_map, range_profile,
+    range_resolution, rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf,
+    rayleigh_quantile, ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram,
+    steering_vector, stepped_range_profile, stepped_range_resolution, swerling1_pd,
+    swerling1_required_snr, synthetic_bandwidth, unambiguous_angle, unambiguous_range,
+    unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile,
+    wrap_phase,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

@@ -12,7 +12,8 @@
 //! Alongside the pulse chain sit array processing ([`beamform`], [`doa`],
 //! [`music`], [`esprit`]) for angle estimation — from the conventional
 //! beamformer through MVDR/Capon to the MUSIC and ESPRIT subspace methods, with
-//! [`monopulse`] for single-dwell sum/difference angle estimation —
+//! [`monopulse`] for single-dwell sum/difference angle estimation and
+//! [`interferometer`] for phase-comparison (interferometric) angle estimation —
 //! [`fmcw`] for the continuous-wave /
 //! mmWave model, where range and velocity fall out of two FFTs of the mixer's
 //! beat signal rather than a matched filter, [`detect`] for the 2-D detection
@@ -56,6 +57,7 @@ pub mod ekf;
 pub mod esprit;
 pub mod fmcw;
 pub mod imm2d;
+pub mod interferometer;
 pub mod kalman;
 pub mod matched_filter;
 pub mod micro_doppler;
@@ -85,6 +87,9 @@ pub use ekf::RadarEkf;
 pub use esprit::esprit_doa;
 pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_resolution};
 pub use imm2d::{Imm2D, KalmanLinear, ct_model_2d, cv_model_2d};
+pub use interferometer::{
+    angle_from_phase, phase_difference, phase_from_signals, unambiguous_angle, wrap_phase,
+};
 pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use micro_doppler::{
