@@ -7,13 +7,17 @@
 //! matrices and Gaussian-beam propagation via the complex q-parameter, for
 //! optical-train design. The [`detect`] module adds image-domain small-target
 //! CFAR detection — the EO/IR analogue of the radar CFAR — turning a thermal
-//! frame into intensity-weighted target centroids for the tracking chain.
+//! frame into intensity-weighted target centroids for the tracking chain. The
+//! [`radiometry`] module adds thermal-infrared radiometry (Planck, Stefan–
+//! Boltzmann, Wien) and the NETD / MRTD sensor-sensitivity metrics that spec a
+//! thermal imager.
 
 use serde::{Deserialize, Serialize};
 
 pub mod beams;
 pub mod detect;
 pub mod optics;
+pub mod radiometry;
 pub use beams::{
     RayMatrix, beam_radius, beam_radius_from_q, divergence, gouy_phase, propagate_q, q_at_waist,
     radius_from_q, radius_of_curvature, rayleigh_range,
@@ -22,6 +26,10 @@ pub use detect::{TargetDetection, cfar_mask, detect_targets};
 pub use optics::{
     Axis, airy_first_null, airy_psf, apply_psf, gaussian_psf, line_spread, mtf, mtf50,
     rayleigh_resolution, richardson_lucy, wiener_deconvolution,
+};
+pub use radiometry::{
+    band_radiance, exitance_derivative, mrtd, netd, peak_wavelength, planck_radiance,
+    planck_radiance_dt, radiant_exitance, thermal_contrast,
 };
 
 // ─── Image Representation ───────────────────────────────────────────────────
