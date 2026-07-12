@@ -31,7 +31,10 @@
 //! soft-combining every gated measurement instead of a hard nearest-neighbour
 //! pick. [`micro_doppler`] adds the time–frequency signature of target
 //! micro-motion (a Hann-windowed spectrogram plus ridge / bulk-Doppler /
-//! bandwidth / cadence descriptors) for target classification.
+//! bandwidth / cadence descriptors) for target classification, and
+//! [`swerling`] for detection statistics — the probability of detecting a
+//! fluctuating or steady target versus SNR (Swerling I closed form and
+//! Albersheim's equation), the complement to the CFAR threshold.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -50,6 +53,7 @@ pub mod mti;
 pub mod mtt;
 pub mod music;
 pub mod pda;
+pub mod swerling;
 pub mod track;
 pub mod waveform;
 
@@ -72,5 +76,8 @@ pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
 pub use pda::PdaFilter;
+pub use swerling::{
+    albersheim_pd, albersheim_snr, single_pulse_threshold, swerling1_pd, swerling1_required_snr,
+};
 pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
 pub use waveform::{barker_code, lfm_chirp};
