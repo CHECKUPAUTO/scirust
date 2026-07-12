@@ -104,6 +104,33 @@ jobs:
       - name: Verify COBOL reference corpus
         run: ./scripts/verify-cobol-corpus.sh
 
+  # Compiler-derived equivalence gate for the six scirust-finmigrate units.
+  # Pinned to ubuntu-22.04 because that image ships GnuCOBOL 3.1.2 — the exact
+  # version recorded in metadata/compiler-version.txt — so `verify` reproduces
+  # the committed baselines byte-for-byte against a live compiler. `check` needs
+  # no compiler and is version-independent. Both the deterministic driver and
+  # these commands are documented in the unit's REPRODUCE.md and stay runnable
+  # locally with identical results.
+  finmigrate-compiler:
+    name: finmigrate GnuCOBOL Equivalence
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: scirust-finmigrate/tests/compiler-derived/gnucobol-3.1.2
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install GnuCOBOL 3.1.2
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gnucobol
+          cobc --version
+      - name: Verify integrity manifest (SHA-256)
+        run: sha256sum -c SHA256SUMS
+      - name: Model-equivalence check (no compiler; version-independent)
+        run: python3 tools/run_baselines.py check
+      - name: Reproduce baselines vs live GnuCOBOL (verify)
+        run: python3 tools/run_baselines.py verify
+
   build-test:
     name: Build & Test (nightly, x86_64)
     runs-on: ubuntu-latest
