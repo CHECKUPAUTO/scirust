@@ -34,9 +34,9 @@ fn main() {
     println!("Threads disponibles  : {threads}\n");
 
     bench_sgemm(1024, threads);
-    // NB : le chemin AVX-512 fusionné de `sgemm_bias_act` exige k ≤ KC (256) ;
-    // au-delà il retombe en scalaire. On benche donc din = 256 (fast path).
-    bench_dense(4096, 256, 1024);
+    // `sgemm_bias_act` accélère désormais tout k (GEMM tuilé + épilogue), y
+    // compris les grandes dimensions d'entrée.
+    bench_dense(4096, 1024, 1024);
 }
 
 fn bench_sgemm(dim: usize, threads: usize) {
