@@ -112,6 +112,16 @@
 //!   fournir, rapport de vitesses et rendement.
 //! - [`hydraulic_cylinders`] — vérins hydrauliques : efforts sortie/rentrée,
 //!   vitesse de tige, débit et puissance fluide.
+//! - [`fatigue_mean_stress`] — fatigue à contrainte moyenne : critères de
+//!   **Goodman**, **Soderberg** et **Gerber** (diagramme de Haigh).
+//! - [`endurance_limit`] — limite d'endurance : facteurs de **Marin** et droite
+//!   **S-N** (Basquin) à nombre fini de cycles.
+//! - [`creep`] — fluage : paramètre de **Larson-Miller** et vitesse de fluage
+//!   secondaire (**Norton**).
+//! - [`hardness`] — dureté : essais **Brinell** et **Vickers**, estimation de
+//!   la résistance à la traction.
+//! - [`fracture`] — mécanique de la rupture : facteur d'intensité de contrainte,
+//!   taille critique de fissure et contrainte de **Griffith**.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -167,18 +177,23 @@ pub mod bolted_joints;
 pub mod brakes;
 pub mod buckling;
 pub mod cams;
+pub mod creep;
 pub mod critical_speed;
 pub mod dynamics;
 pub mod economics;
+pub mod endurance_limit;
 pub mod epicyclic;
 pub mod fastener_groups;
+pub mod fatigue_mean_stress;
 pub mod flywheel;
 pub mod forced_vibrations;
 pub mod forces;
 pub mod fourbar;
+pub mod fracture;
 pub mod friction;
 pub mod gears;
 pub mod geneva;
+pub mod hardness;
 pub mod heat_exchanger;
 pub mod hertz;
 pub mod hydraulic_cylinders;
@@ -255,6 +270,7 @@ pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
     shm_displacement, shm_velocity,
 };
+pub use creep::{larson_miller_parameter, norton_creep_rate, rupture_time_from_lmp};
 pub use critical_speed::{
     critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
     rad_to_rpm,
@@ -265,10 +281,18 @@ pub use dynamics::{
     kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
+pub use endurance_limit::{
+    corrected_endurance_limit, fatigue_strength_at_cycles, sn_coefficients,
+    steel_endurance_estimate,
+};
 pub use epicyclic::{
     carrier_speed, reduction_ratio_ring_fixed, ring_speed, ring_teeth, sun_speed, willis_ratio,
 };
 pub use fastener_groups::{group_polar_moment, primary_shear, resultant_shear, secondary_shear};
+pub use fatigue_mean_stress::{
+    gerber_safety_factor, goodman_safety_factor, mean_stress, soderberg_safety_factor,
+    stress_amplitude, stress_ratio,
+};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
 };
@@ -278,6 +302,9 @@ pub use forced_vibrations::{
 };
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
 pub use fourbar::{FourBarType, classify, is_grashof};
+pub use fracture::{
+    critical_crack_length, fracture_safety_factor, griffith_stress, stress_intensity,
+};
 pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
     max_static_friction, within_adhesion_cone,
@@ -291,6 +318,7 @@ pub use geneva::{
     center_distance_ratio, crank_ratio, driven_angle, dwell_crank_angle, indexing_crank_angle,
     velocity_ratio as geneva_velocity_ratio,
 };
+pub use hardness::{brinell_hardness, tensile_strength_from_brinell, vickers_hardness};
 pub use heat_exchanger::{
     actual_heat_transfer, capacity_ratio, effectiveness_counterflow, effectiveness_parallel_flow,
     heat_duty_lmtd, lmtd, ntu,
