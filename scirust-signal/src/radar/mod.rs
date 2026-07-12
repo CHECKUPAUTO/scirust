@@ -45,6 +45,10 @@
 //! and velocity, blind speeds, and range/velocity folding.
 //! [`stepped_frequency`] synthesises wideband range resolution from a burst of
 //! narrowband pulses stepped in frequency, resolved by an inverse DFT.
+//! [`stap`] closes the airborne-radar loop with space-time adaptive processing —
+//! a joint angle-Doppler adaptive filter that nulls the ground-clutter ridge
+//! (`f_d = β·f_s`) while holding unit gain on the target, pulling slow movers out
+//! of clutter that no angle-only or Doppler-only filter can separate.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -68,6 +72,7 @@ pub mod music;
 pub mod pda;
 pub mod prf;
 pub mod range_equation;
+pub mod stap;
 pub mod stepped_frequency;
 pub mod swerling;
 pub mod track;
@@ -107,6 +112,10 @@ pub use prf::{
     velocity_from_doppler,
 };
 pub use range_equation::RadarLink;
+pub use stap::{
+    adaptive_weights, clutter_covariance, clutter_ridge_doppler, optimal_sinr, space_time_steering,
+    spatial_frequency,
+};
 pub use stepped_frequency::{
     max_unambiguous_range, range_bins, range_profile as stepped_range_profile,
     range_resolution as stepped_range_resolution, synthetic_bandwidth,

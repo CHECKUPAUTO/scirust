@@ -5,6 +5,32 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — traitement adaptatif spatio-temporel (STAP) (`radar::stap`) — bloc 35
+Le filtre anti-fouillis des radars aéroportés. Sous une plateforme en mouvement, le
+fouillis de sol se replie sur une **crête** angle-Doppler `f_d = β·f_s` (avec
+`f_s = (d/λ)·sin θ`) : une cible lente noyée dans le fouillis en distance et en
+Doppler en est pourtant **séparée dans le plan 2-D** — elle est hors crête. Un
+filtre qui s'adapte conjointement sur les `N` éléments d'antenne **et** les `M`
+impulsions du CPI place un zéro le long de la crête tout en gardant un gain unité
+sur la cible : ce qu'aucun filtre 1-D (angle seul ou Doppler seul) ne peut faire.
+- **`space_time_steering(f_s, f_d, N, M)`** — vecteur directeur spatio-temporel
+  `s = b(f_d) ⊗ a(f_s)` (produit de Kronecker, longueur `NM`) ;
+  **`spatial_frequency(θ, d)`** = `(d/λ)·sin θ` ; **`clutter_ridge_doppler(f_s, β)`**
+  = `β·f_s`, la crête du fouillis.
+- **`clutter_covariance(N, M, patches, β, σ_n²)`** — covariance interférence+bruit
+  `R = σ_n²·I + Σ P_c·s_c s_cᴴ` (parcelles de fouillis sur la crête).
+- **`adaptive_weights(R, s)`** = `R⁻¹s/(sᴴR⁻¹s)` (poids MVDR/SMI) ;
+  **`optimal_sinr(R, s, P)`** = `P·sᴴR⁻¹s`, le SINR de sortie — profond sur la
+  crête, proche du gain cohérent plein `NM` hors crête. Réutilise l'inverse
+  matriciel complexe de `radar::doa`.
+- Oracles : vecteur directeur = **produit de Kronecker** (`|s|²=NM`, factorisation) ;
+  bruit blanc ⇒ poids = **filtre adapté** `s/NM`, gain unité, SINR `P·NM/σ²` ;
+  **encoche de fouillis** (cible endo-fouillis fortement atténuée, cible hors crête
+  conservée) ; le poids **annule** la parcelle de fouillis co-Doppler tout en
+  gardant la cible ; le **minimum de SINR tombe exactement sur la crête** ; relations
+  crête/fréquence spatiale ; gardes. 7 tests (252 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — goniométrie interférométrique (phase-comparison) (`radar::interferometer`) — bloc 34
 Là où le monopulse d'amplitude ([`radar::monopulse`]) lit l'angle dans le *rapport*
 de deux faisceaux dépointés, un **interféromètre de phase** le lit dans la
