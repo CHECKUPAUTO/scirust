@@ -185,8 +185,13 @@ const MAX_K: usize = 64; // octets int8/ligne
 unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, c: &mut [i32]) {
     use core::arch::x86_64::*;
 
-    // Tampons de packing (taille max d'une tuile), réutilisés par panneau.
-    let mut a_buf = [0i8; MAX_M * MAX_K];
+    let n_kb = k.div_ceil(MAX_K);
+    let panel = MAX_M * MAX_K;
+    // Panneaux A packés une fois par bloc de lignes `mb`, réutilisés sur tous les
+    // panneaux `N` (élimine la redondance `n/16`× du packing de A). B reste packé
+    // par `(nb, kb)` — il dépend de `nb` (cf. [`amx_matmul_i8_prepacked_tiled`]
+    // pour le cas poids statiques où B aussi est pré-empaqueté).
+    let mut a_panels = vec![0i8; n_kb * panel];
     let mut b_buf = [0i8; (MAX_K / 4) * (MAX_N * 4)];
     let mut c_buf = [0i32; MAX_M * MAX_N];
 
@@ -194,6 +199,28 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
     while mb < m
     {
         let mr = MAX_M.min(m - mb);
+
+        // Pack A une fois pour ce `mb` (copie contiguë par ligne, colonnes
+        // `kr..64` zéro-paddées pour le dernier bloc `K` partiel).
+        for jb in 0..n_kb
+        {
+            let kb = jb * MAX_K;
+            let kr = MAX_K.min(k - kb);
+            let dst = &mut a_panels[jb * panel..jb * panel + panel];
+            for i in 0..mr
+            {
+                let src = &a[(mb + i) * k + kb..(mb + i) * k + kb + kr];
+                dst[i * MAX_K..i * MAX_K + kr].copy_from_slice(src);
+                if kr < MAX_K
+                {
+                    for p in kr..MAX_K
+                    {
+                        dst[i * MAX_K + p] = 0;
+                    }
+                }
+            }
+        }
+
         let mut nb = 0;
         while nb < n
         {
@@ -215,35 +242,19 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
             _tile_loadconfig(&cfg as *const _ as *const u8);
             _tile_zero::<{ TMM_C as i32 }>();
 
+            let mut jb = 0;
             let mut kb = 0;
             while kb < k
             {
                 let kr = MAX_K.min(k - kb);
-                // Un bloc **plein** (`kr == MAX_K`) réécrit intégralement les
-                // tampons ⇒ pas de remise à zéro (économise deux `fill` de 1 Kio
-                // par tuile, le cas courant). Seuls les blocs `K` **partiels** (le
-                // dernier) ont besoin du zéro-padding.
-                let partial = kr < MAX_K;
-
-                // Pack A : mr lignes × 64 octets (stride fixe MAX_K), zéro au-delà
-                // de kr.
-                if partial
-                {
-                    a_buf.fill(0);
-                }
-                for i in 0..mr
-                {
-                    for p in 0..kr
-                    {
-                        a_buf[i * MAX_K + p] = a[(mb + i) * k + kb + p];
-                    }
-                }
-                // Pack B VNNI : b_buf[p*stride_b + 4*j + r] = B[kb + 4p+r][nb+j],
-                // lignes au-delà de ceil(kr/4) laissées à zéro.
-                if partial
+                // Un bloc **plein** (`kr == MAX_K`) réécrit intégralement `b_buf`
+                // ⇒ pas de remise à zéro ; seuls les blocs `K` partiels en ont
+                // besoin.
+                if kr < MAX_K
                 {
                     b_buf.fill(0);
                 }
+                // Pack B VNNI : b_buf[p*stride_b + 4*j + r] = B[kb + 4p+r][nb+j].
                 let kp = kr.div_ceil(4);
                 for p in 0..kp
                 {
@@ -260,11 +271,13 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
                     }
                 }
 
-                _tile_loadd::<{ TMM_A as i32 }>(a_buf.as_ptr() as *const u8, MAX_K);
+                let ap = &a_panels[jb * panel..];
+                _tile_loadd::<{ TMM_A as i32 }>(ap.as_ptr() as *const u8, MAX_K);
                 _tile_loadd::<{ TMM_B as i32 }>(b_buf.as_ptr() as *const u8, stride_b);
                 _tile_dpbssd::<{ TMM_C as i32 }, { TMM_A as i32 }, { TMM_B as i32 }>();
 
                 kb += MAX_K;
+                jb += 1;
             }
 
             // Décharge la tuile C accumulée dans un tampon puis dans la sortie.
@@ -379,13 +392,39 @@ unsafe fn amx_matmul_i8_prepacked_tiled(
     use core::arch::x86_64::*;
     let n_kb = k.div_ceil(MAX_K);
     let panel = MAX_M * MAX_K;
-    let mut a_buf = [0i8; MAX_M * MAX_K];
+    // Tous les panneaux A d'un bloc de lignes `mb` (16×64 chacun), packés **une
+    // seule fois** puis réutilisés sur tous les panneaux `N` — au lieu de re-packer
+    // A pour chaque `nb` (redondance `n/16`×, dominante quand B est pré-empaqueté).
+    let mut a_panels = vec![0i8; n_kb * panel];
     let mut c_buf = [0i32; MAX_M * MAX_N];
 
     let mut mb = 0;
     while mb < m
     {
         let mr = MAX_M.min(m - mb);
+
+        // Pack A une fois pour ce `mb` : chaque ligne est une copie contiguë
+        // (`copy_from_slice` ⇒ `memcpy` vectorisé) ; colonnes `kr..64` zéro-paddées
+        // pour le dernier bloc `K` partiel.
+        for jb in 0..n_kb
+        {
+            let kb = jb * MAX_K;
+            let kr = MAX_K.min(k - kb);
+            let dst = &mut a_panels[jb * panel..jb * panel + panel];
+            for i in 0..mr
+            {
+                let src = &a[(mb + i) * k + kb..(mb + i) * k + kb + kr];
+                dst[i * MAX_K..i * MAX_K + kr].copy_from_slice(src);
+                if kr < MAX_K
+                {
+                    for p in kr..MAX_K
+                    {
+                        dst[i * MAX_K + p] = 0;
+                    }
+                }
+            }
+        }
+
         let mut ib = 0;
         let mut nb = 0;
         while nb < n
@@ -403,31 +442,15 @@ unsafe fn amx_matmul_i8_prepacked_tiled(
             _tile_loadconfig(&cfg as *const _ as *const u8);
             _tile_zero::<{ TMM_C as i32 }>();
 
-            let mut jb = 0;
-            let mut kb = 0;
-            while kb < k
+            for jb in 0..n_kb
             {
-                let kr = MAX_K.min(k - kb);
-                if kr < MAX_K
-                {
-                    a_buf.fill(0);
-                }
-                for i in 0..mr
-                {
-                    for p in 0..kr
-                    {
-                        a_buf[i * MAX_K + p] = a[(mb + i) * k + kb + p];
-                    }
-                }
+                let ap = &a_panels[jb * panel..];
                 // Panneau B pré-empaqueté : stride mémoire = MAX_K (64), la tuile
                 // ne lit que `stride_b` octets/ligne.
                 let bp = &b_packed[(ib * n_kb + jb) * panel..];
-                _tile_loadd::<{ TMM_A as i32 }>(a_buf.as_ptr() as *const u8, MAX_K);
+                _tile_loadd::<{ TMM_A as i32 }>(ap.as_ptr() as *const u8, MAX_K);
                 _tile_loadd::<{ TMM_B as i32 }>(bp.as_ptr() as *const u8, MAX_K);
                 _tile_dpbssd::<{ TMM_C as i32 }, { TMM_A as i32 }, { TMM_B as i32 }>();
-
-                kb += MAX_K;
-                jb += 1;
             }
 
             _tile_stored::<{ TMM_C as i32 }>(c_buf.as_mut_ptr() as *mut u8, stride_b);
@@ -569,22 +592,46 @@ const MAX_K_BF16: usize = 32;
 unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usize, c: &mut [f32]) {
     use core::arch::x86_64::*;
 
-    // Tampons bf16 (u16) et f32, dimensionnés au pire cas d'une tuile.
-    let mut a_buf = [0u16; MAX_M * MAX_K_BF16]; // 16×32 bf16 = 16×64 octets
+    let n_kb = k.div_ceil(MAX_K_BF16);
+    let a_panel = MAX_M * MAX_K_BF16; // 16 lignes × 32 bf16
+    // Panneaux A packés une fois par bloc de lignes `mb`, réutilisés sur tous les
+    // panneaux `N` (cf. variante int8).
+    let mut a_panels = vec![0u16; n_kb * a_panel];
     let mut b_buf = [0u16; (MAX_K_BF16 / 2) * (MAX_N * 2)]; // 16 lignes × N·2 bf16
     let mut c_buf = [0f32; MAX_M * MAX_N];
+    let stride_a = MAX_K_BF16 * 2; // 32 bf16 = 64 octets
 
     let mut mb = 0;
     while mb < m
     {
         let mr = MAX_M.min(m - mb);
+
+        // Pack A une fois pour ce `mb` (copie contiguë par ligne).
+        for jb in 0..n_kb
+        {
+            let kb = jb * MAX_K_BF16;
+            let kr = MAX_K_BF16.min(k - kb);
+            let dst = &mut a_panels[jb * a_panel..jb * a_panel + a_panel];
+            for i in 0..mr
+            {
+                let src = &a[(mb + i) * k + kb..(mb + i) * k + kb + kr];
+                dst[i * MAX_K_BF16..i * MAX_K_BF16 + kr].copy_from_slice(src);
+                if kr < MAX_K_BF16
+                {
+                    for p in kr..MAX_K_BF16
+                    {
+                        dst[i * MAX_K_BF16 + p] = 0;
+                    }
+                }
+            }
+        }
+
         let mut nb = 0;
         while nb < n
         {
             let nr = MAX_N.min(n - nb);
             let stride_c = nr * 4; // N f32 = N·4 octets
             let stride_b = nr * 2 * 2; // N·2 bf16 = N·4 octets
-            let stride_a = MAX_K_BF16 * 2; // 32 bf16 = 64 octets
 
             // Config unique par panneau (cf. variante int8 : LDTILECFG zéro-padde
             // les tuiles ; dimensions A/B fixées au max, blocs K partiels zéro-
@@ -599,30 +646,17 @@ unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usi
             _tile_loadconfig(&cfg as *const _ as *const u8);
             _tile_zero::<{ TMM_C as i32 }>();
 
+            let mut jb = 0;
             let mut kb = 0;
             while kb < k
             {
                 let kr = MAX_K_BF16.min(k - kb);
-                // Idem int8 : seuls les blocs `K` partiels ont besoin du zéro-
-                // padding ; un bloc plein réécrit tout le tampon.
-                let partial = kr < MAX_K_BF16;
-
-                if partial
-                {
-                    a_buf.fill(0);
-                }
-                for i in 0..mr
-                {
-                    for p in 0..kr
-                    {
-                        a_buf[i * MAX_K_BF16 + p] = a[(mb + i) * k + kb + p];
-                    }
-                }
-                // Pack B VNNI bf16 : b_buf[p*(nr*2) + 2*j + r] = B[kb + 2p+r][nb+j].
-                if partial
+                // Idem int8 : seul un bloc `K` partiel a besoin du zéro-padding.
+                if kr < MAX_K_BF16
                 {
                     b_buf.fill(0);
                 }
+                // Pack B VNNI bf16 : b_buf[p*(nr*2) + 2*j + r] = B[kb + 2p+r][nb+j].
                 let kp = kr.div_ceil(2);
                 for p in 0..kp
                 {
@@ -639,11 +673,13 @@ unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usi
                     }
                 }
 
-                _tile_loadd::<{ TMM_A as i32 }>(a_buf.as_ptr() as *const u8, stride_a);
+                let ap = &a_panels[jb * a_panel..];
+                _tile_loadd::<{ TMM_A as i32 }>(ap.as_ptr() as *const u8, stride_a);
                 _tile_loadd::<{ TMM_B as i32 }>(b_buf.as_ptr() as *const u8, stride_b);
                 _tile_dpbf16ps::<{ TMM_C as i32 }, { TMM_A as i32 }, { TMM_B as i32 }>();
 
                 kb += MAX_K_BF16;
+                jb += 1;
             }
 
             _tile_stored::<{ TMM_C as i32 }>(c_buf.as_mut_ptr() as *mut u8, stride_c);

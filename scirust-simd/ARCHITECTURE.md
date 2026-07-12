@@ -93,9 +93,9 @@ pas seulement compilation).
 | SGEMM 1024³, 4 threads | 110 GFLOP/s | ~163× |
 | DGEMM 1024³, 4 threads | 127 GFLOP/s | — |
 | Couche dense fusionnée 4096×1024×1024 (ReLU) | 53.9 GFLOP/s | ~86× |
-| **AMX int8** 512³ (`_tile_dpbssd`, silicium) | 37.7 GOP/s | ~18× |
-| **AMX bf16** 512³ (`_tile_dpbf16ps`, silicium) | 34.4 GFLOP/s | ~16× |
-| **Bloc décodeur int8 W8A8** (s=128, d=1024, d_ff=4096) | ×1.34 vs `f32` | poids ÷4, erreur RMS 0,01 % |
+| **AMX int8** 512³ (`_tile_dpbssd`, silicium) | 47.5 GOP/s | ~23× |
+| **AMX bf16** 512³ (`_tile_dpbf16ps`, silicium) | 44 GFLOP/s | ~21× |
+| **Bloc décodeur int8 W8A8** (s=128, d=1024, d_ff=4096) | ×1.97 vs `f32` | poids ÷4, erreur RMS 0,01 % |
 
 Le **GEMM fusionné** (`sgemm_bias_act`) calcule `act(α·A·B + biais)` : `A·B` par
 le GEMM tuilé (n'importe quel `k`), puis un épilogue biais+activation vectorisé
@@ -112,9 +112,12 @@ poids ÷4, sortie fidèle (le résidu non quantifié dilue le bruit int8) — cf
 
 Les chiffres AMX sont mesurés **sur silicium AMX** (la machine expose
 `amx_tile`/`amx_int8`/`amx_bf16`) — cf. [`examples/amx_bench.rs`](examples/amx_bench.rs).
-Le packing ne remet à zéro les tampons de tuiles que pour les blocs `K` partiels
-(les blocs pleins les réécrivent intégralement). Les GEMM AMX sont **mono-thread
-par conception** : la variante multi-thread corrompt l'état de tuiles au
+Deux optimisations de packing : (1) les tampons de tuiles ne sont remis à zéro que
+pour les blocs `K` partiels (les pleins les réécrivent) ; (2) les panneaux `A`
+sont packés **une seule fois par bloc de lignes** puis réutilisés sur tous les
+panneaux `N` (élimine la redondance `n/16`×, ~+25 % de débit), et les poids
+statiques sont **pré-empaquetés** hors du chemin chaud (`prepack_b_i8`). Les GEMM
+AMX sont **mono-thread par conception** : la variante multi-thread corrompt l'état de tuiles au
 changement de contexte sur plateforme virtualisée (~0,1 %) ; le parallélisme
 fiable passe par le GEMM `f32` [`sgemm_parallel`](src/gemm.rs). Voir aussi
 [`examples/bench.rs`](examples/bench.rs).
