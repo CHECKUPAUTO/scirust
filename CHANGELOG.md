@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — ambiguïtés de PRF et vitesses aveugles (`radar::prf`) — bloc 31
+Les deux limites dures qu'impose l'échantillonnage à la fréquence de répétition
+des impulsions (PRF) d'un radar pulsé-Doppler.
+- **`unambiguous_range(prf)`** = `c/(2·PRF)` — portée non ambiguë ;
+  **`unambiguous_velocity(λ, prf)`** = `λ·PRF/4` — vitesse non ambiguë ;
+  **`max_doppler(prf)`** = `PRF/2` (Nyquist).
+- **`blind_speed(n, λ, prf)`** = `n·λ·PRF/2` — vitesses aveugles (Doppler = n·PRF,
+  annulées par le canceller MTI avec le fouillis) ;
+  **`velocity_from_doppler(f_d, λ)`** = `λ·f_d/2`.
+- **`fold_range(range, prf)`** et **`fold_velocity(v, λ, prf)`** — repli d'une
+  portée / vitesse vraie vers sa valeur mesurée (aliasée).
+- Oracles : portée non ambiguë ∝ 1/PRF ; **produit d'ambiguïté portée·vitesse =
+  cλ/8 invariant** de la PRF (le dilemme pulsé-Doppler) ; les vitesses aveugles
+  sont des multiples uniformément espacés (`v_blind(1) = 2·v_ua`) ; à la Doppler
+  de Nyquist la vitesse vaut `v_ua` ; le repli de portée enroule au-delà de
+  `R_ua` ; le repli de vitesse aliase au-delà de `±v_ua` et reste dans
+  l'intervalle. 6 tests (227 au total pour le crate) ; `fmt`/`clippy -D warnings`
+  propres.
+
 ### Ajouté — `scirust-signal` : radar — statistiques d'amplitude du fouillis (`radar::clutter`) — bloc 30
 Les lois d'amplitude que les seuils CFAR visent : sur mer calme le fouillis est
 **Rayleigh**, mais sur mer forte ou terrain il devient **piqué** (queue lourde

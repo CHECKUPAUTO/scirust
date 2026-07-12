@@ -55,7 +55,9 @@
 //!   maximum detection range that closes with the required SNR), and clutter
 //!   amplitude statistics (Rayleigh, Weibull, and log-normal distributions — the
 //!   spiky-clutter models CFAR thresholds are designed against, with a
-//!   self-contained error function)
+//!   self-contained error function), and pulse-repetition-frequency ambiguities
+//!   (unambiguous range and velocity, MTI blind speeds, and range/velocity
+//!   folding, with the invariant range–velocity ambiguity product `cλ/8`)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -102,14 +104,15 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarLink, RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity,
-    barker_code, beamform_spectrum, beat_frequency_to_range, bin_frequencies, ca_cfar, ca_cfar_2d,
-    ca_cfar_alpha, cadence, cluster_detections, covariance, critically_damped_gains,
+    barker_code, beamform_spectrum, beat_frequency_to_range, bin_frequencies, blind_speed, ca_cfar,
+    ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections, covariance, critically_damped_gains,
     cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth, doppler_spectrum, erf as erf_fn,
-    esprit_doa, estimate_doa, lfm_chirp, lognormal_cdf, lognormal_pdf, mean_doppler, mti_canceller,
-    music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe,
-    range_doppler, range_doppler_map, range_profile, range_resolution,
-    rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile,
-    ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram, steering_vector,
-    swerling1_pd, swerling1_required_snr, weibull_cdf, weibull_pdf, weibull_quantile,
+    esprit_doa, estimate_doa, fold_range, fold_velocity, lfm_chirp, lognormal_cdf, lognormal_pdf,
+    max_doppler, mean_doppler, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
+    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
+    range_resolution, rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf,
+    rayleigh_quantile, ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram,
+    steering_vector, swerling1_pd, swerling1_required_snr, unambiguous_range, unambiguous_velocity,
+    velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

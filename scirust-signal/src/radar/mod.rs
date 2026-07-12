@@ -38,7 +38,9 @@
 //! [`range_equation`] for the link budget: the SNR a radar delivers on a target
 //! of a given RCS at range, and the maximum detection range that closes with the
 //! [`swerling`] required SNR. [`clutter`] supplies the amplitude distributions
-//! (Rayleigh, Weibull, log-normal) that CFAR thresholds are designed against.
+//! (Rayleigh, Weibull, log-normal) that CFAR thresholds are designed against, and
+//! [`prf`] gives the pulse-repetition-frequency ambiguities — unambiguous range
+//! and velocity, blind speeds, and range/velocity folding.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -58,6 +60,7 @@ pub mod mti;
 pub mod mtt;
 pub mod music;
 pub mod pda;
+pub mod prf;
 pub mod range_equation;
 pub mod swerling;
 pub mod track;
@@ -86,6 +89,10 @@ pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
 pub use pda::PdaFilter;
+pub use prf::{
+    blind_speed, fold_range, fold_velocity, max_doppler, unambiguous_range, unambiguous_velocity,
+    velocity_from_doppler,
+};
 pub use range_equation::RadarLink;
 pub use swerling::{
     albersheim_pd, albersheim_snr, single_pulse_threshold, swerling1_pd, swerling1_required_snr,
