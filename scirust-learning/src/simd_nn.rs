@@ -159,6 +159,118 @@ impl DenseLayer {
     }
 }
 
+/// Perceptron multi-couche : pile de [`DenseLayer`] entraînée **end-to-end**
+/// (forward → perte MSE → backward chaîné couche par couche → SGD). Les
+/// dimensions doivent s'enchaîner (`layers[i].out_dim == layers[i+1].in_dim`).
+///
+/// La rétropropagation applique la règle de la chaîne : le gradient `dX` d'une
+/// couche devient le `dY` de la couche précédente — chaque backward de couche
+/// étant lui-même validé par gradcheck ([`DenseLayer::backward`]).
+#[derive(Clone, Debug)]
+pub struct Mlp {
+    pub layers: Vec<DenseLayer>,
+}
+
+impl Mlp {
+    /// Construit un MLP à partir de couches dont les dimensions s'enchaînent.
+    pub fn new(layers: Vec<DenseLayer>) -> Self {
+        assert!(!layers.is_empty(), "Mlp: au moins une couche requise");
+        for w in layers.windows(2)
+        {
+            assert_eq!(
+                w[0].out_dim, w[1].in_dim,
+                "Mlp: dimensions non enchaînées ({} -> {})",
+                w[0].out_dim, w[1].in_dim
+            );
+        }
+        Self { layers }
+    }
+
+    /// **Forward** (inférence) : `x` (`batch × in_dim`) → sortie
+    /// (`batch × out_dim` de la dernière couche).
+    pub fn forward(&self, x: &[f32], batch: usize) -> Vec<f32> {
+        let mut cur = x.to_vec();
+        for l in &self.layers
+        {
+            cur = l.forward(&cur, batch);
+        }
+        cur
+    }
+
+    /// Forward en mémorisant l'entrée de chaque couche (nécessaire au backward).
+    /// Renvoie `layers.len()+1` tenseurs : `[x, a₁, …, a_L]` (le dernier = sortie).
+    fn forward_cache(&self, x: &[f32], batch: usize) -> Vec<Vec<f32>> {
+        let mut acts = Vec::with_capacity(self.layers.len() + 1);
+        acts.push(x.to_vec());
+        for l in &self.layers
+        {
+            let next = l.forward(acts.last().unwrap(), batch);
+            acts.push(next);
+        }
+        acts
+    }
+
+    /// Perte MSE et **gradients de toutes les couches** (dans l'ordre `0..L`),
+    /// pour une cible `target` (`batch × out_dim`), **sans** mettre à jour les
+    /// poids. `dL/dY = (2/N)·(pred − target)`.
+    pub fn mse_loss_and_grads(
+        &self,
+        x: &[f32],
+        batch: usize,
+        target: &[f32],
+    ) -> (f32, Vec<DenseGrads>) {
+        let acts = self.forward_cache(x, batch);
+        let pred = acts.last().unwrap();
+        assert_eq!(pred.len(), target.len(), "mse: target shape");
+        let n = pred.len() as f32;
+        let loss: f32 = pred
+            .iter()
+            .zip(target)
+            .map(|(p, t)| (p - t) * (p - t))
+            .sum::<f32>()
+            / n;
+
+        // Gradient de la perte par rapport à la sortie.
+        let mut dy: Vec<f32> = pred
+            .iter()
+            .zip(target)
+            .map(|(p, t)| 2.0 / n * (p - t))
+            .collect();
+
+        // Backward chaîné, de la dernière couche à la première.
+        let mut grads_rev = Vec::with_capacity(self.layers.len());
+        for l in (0..self.layers.len()).rev()
+        {
+            let g = self.layers[l].backward(&acts[l], batch, &dy);
+            dy = g.dx.clone(); // dX de la couche l = dY de la couche l-1
+            grads_rev.push(g);
+        }
+        grads_rev.reverse(); // remet dans l'ordre 0..L
+        (loss, grads_rev)
+    }
+
+    /// Applique un pas SGD à chaque couche à partir des gradients (ordre `0..L`).
+    pub fn sgd_step(&mut self, grads: &[DenseGrads], lr: f32) {
+        assert_eq!(
+            grads.len(),
+            self.layers.len(),
+            "sgd_step: un gradient par couche"
+        );
+        for (l, g) in self.layers.iter_mut().zip(grads)
+        {
+            l.sgd_step(g, lr);
+        }
+    }
+
+    /// Un pas d'entraînement complet (forward + backward + update) sur la MSE.
+    /// Renvoie la perte **avant** la mise à jour.
+    pub fn train_step_mse(&mut self, x: &[f32], batch: usize, target: &[f32], lr: f32) -> f32 {
+        let (loss, grads) = self.mse_loss_and_grads(x, batch, target);
+        self.sgd_step(&grads, lr);
+        loss
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +426,98 @@ mod tests {
         let y1 = l.forward(&x, batch);
         let loss1 = mse(&y1);
         assert!(loss1 < loss0, "MSE n'a pas baissé : {loss0} -> {loss1}");
+    }
+
+    fn make_mlp() -> Mlp {
+        // 4 -> 8 (ReLU) -> 6 (SiLU) -> 3 (Identity).
+        Mlp::new(vec![
+            DenseLayer::new(4, 8, mk(4 * 8, 1.0), mk(8, 2.0), Act::Relu),
+            DenseLayer::new(8, 6, mk(8 * 6, 3.0), mk(6, 4.0), Act::Silu),
+            DenseLayer::new(6, 3, mk(6 * 3, 5.0), mk(3, 6.0), Act::Identity),
+        ])
+    }
+
+    #[test]
+    fn mlp_forward_dims_chain() {
+        let mlp = make_mlp();
+        let batch = 5;
+        let x = mk(batch * 4, 7.0);
+        let y = mlp.forward(&x, batch);
+        assert_eq!(y.len(), batch * 3);
+    }
+
+    #[test]
+    fn mlp_backprop_gradcheck() {
+        // Le backprop CHAÎNÉ à travers la pile doit matcher les différences
+        // finies : on vérifie dW de la 1re couche (le gradient a traversé les
+        // 3 couches) contre le numérique.
+        let mut mlp = make_mlp();
+        let batch = 4;
+        let x = mk(batch * 4, 7.0);
+        let target = mk(batch * 3, 8.0);
+        let h = 1e-3f32;
+
+        let (_, grads) = mlp.mse_loss_and_grads(&x, batch, &target);
+
+        let loss = |m: &Mlp| -> f32 {
+            let pred = m.forward(&x, batch);
+            pred.iter()
+                .zip(&target)
+                .map(|(p, t)| (p - t) * (p - t))
+                .sum::<f32>()
+                / pred.len() as f32
+        };
+
+        // Échantillon de poids de la couche 0.
+        for &i in &[0usize, 5, 11, 23, 31]
+        {
+            let orig = mlp.layers[0].w[i];
+            mlp.layers[0].w[i] = orig + h;
+            let lp = loss(&mlp);
+            mlp.layers[0].w[i] = orig - h;
+            let lm = loss(&mlp);
+            mlp.layers[0].w[i] = orig;
+            let num = (lp - lm) / (2.0 * h);
+            assert!(
+                (grads[0].dw[i] - num).abs() <= 3e-2 * (1.0 + num.abs()),
+                "dW0[{i}] chaîné : {} vs numérique {}",
+                grads[0].dw[i],
+                num
+            );
+        }
+    }
+
+    #[test]
+    fn mlp_training_reduces_loss_over_epochs() {
+        // Entraîne le MLP sur une cible fixe et vérifie que la loss décroît
+        // franchement sur plusieurs époques (apprentissage end-to-end).
+        let mut mlp = make_mlp();
+        let batch = 16;
+        let x = mk(batch * 4, 7.0);
+        // Cible = sortie d'un MLP "enseignant" fixe (donc atteignable en principe).
+        let teacher = {
+            let mut t = make_mlp();
+            for l in t.layers.iter_mut()
+            {
+                for w in l.w.iter_mut()
+                {
+                    *w *= 1.3;
+                }
+            }
+            t
+        };
+        let target = teacher.forward(&x, batch);
+
+        let loss0 = mlp.mse_loss_and_grads(&x, batch, &target).0;
+        let mut last = loss0;
+        for _ in 0..300
+        {
+            last = mlp.train_step_mse(&x, batch, &target, 0.05);
+        }
+        assert!(last.is_finite(), "loss non finie");
+        assert!(
+            last < loss0 * 0.5,
+            "la loss n'a pas suffisamment décru : {loss0} -> {last}"
+        );
     }
 }
