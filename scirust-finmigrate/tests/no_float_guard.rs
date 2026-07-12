@@ -13,6 +13,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/paycalc.rs", include_str!("../src/paycalc.rs")),
     ("src/daycount.rs", include_str!("../src/daycount.rs")),
     ("src/brktcalc.rs", include_str!("../src/brktcalc.rs")),
+    ("src/currcvt.rs", include_str!("../src/currcvt.rs")),
 ];
 
 #[test]

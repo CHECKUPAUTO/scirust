@@ -1,0 +1,11 @@
+case_id,amount,from_ccy,to_ccy,result,direct,euro
+dem_to_frf,100.00,DEM,FRF,335.38,335.39,51.129
+frf_to_dem,100.00,FRF,DEM,29.82,29.82,15.245
+frf_to_itl,1000.00,FRF,ITL,295182,295182,152.449
+dem_to_esp,250.00,DEM,ESP,21268,21268,127.823
+itl_to_frf,100000,ITL,FRF,338.78,338.77,51.646
+iep_to_dem,100.00,IEP,DEM,248.34,248.34,126.974
+dem_to_iep,100.00,DEM,IEP,40.27,40.27,51.129
+esp_to_itl,50000,ESP,ITL,581861,581861,300.506
+small_dem_to_frf,1.00,DEM,FRF,3.35,3.35,0.511
+large_frf_to_dem,9999999.00,FRF,DEM,2981643.32,2981643.32,1524490.020

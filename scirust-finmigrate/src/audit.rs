@@ -105,6 +105,18 @@ const UNITS: &[Embedded] = &[
             "Gap-O empty/partial-brackets",
         ],
     },
+    Embedded {
+        unit: "CURRCVT",
+        baseline: "curr_baseline.csv",
+        csv: include_str!("../tests/sandbox/curr_baseline.csv"),
+        sha256_sidecar: include_str!("../tests/sandbox/curr_baseline.sha256"),
+        gaps: &[
+            "Gap-P triangulation-mandatory",
+            "Gap-Q euro-intermediate-3dp (GATE)",
+            "Gap-R variable-target-minor-unit",
+            "Gap-S rates-6-sig-figs",
+        ],
+    },
 ];
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -231,7 +243,7 @@ mod tests {
     #[test]
     fn every_baseline_digest_verifies() {
         let units = audit_units();
-        assert_eq!(units.len(), 5, "expected five migrated units");
+        assert_eq!(units.len(), 6, "expected six migrated units");
         for u in &units
         {
             assert!(

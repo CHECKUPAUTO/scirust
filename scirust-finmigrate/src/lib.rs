@@ -24,6 +24,7 @@ use rust_decimal::{Decimal, RoundingStrategy};
 pub mod amort;
 pub mod audit;
 pub mod brktcalc;
+pub mod currcvt;
 pub mod daycount;
 pub mod paycalc;
 
@@ -61,6 +62,8 @@ pub struct Accrual {
 pub enum AccrualError {
     /// Which field overflowed, and the offending value (pre-truncation).
     SizeError { field: &'static str, value: Decimal },
+    /// A currency code with no fixed euro conversion rate (CURRCVT).
+    UnknownCurrency { code: String },
 }
 
 /// Coerce a value into a fixed-scale money field using COBOL ROUNDED semantics.

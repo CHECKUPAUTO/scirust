@@ -32,7 +32,7 @@ denies floating point at the API boundary; there is no `f32`/`f64` in the
 money path. Enforced by construction — every signature and intermediate is
 `Decimal`, and the `no_float_in_money_path` guard test greps the crate sources
 (`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`, `src/daycount.rs`,
-`src/brktcalc.rs`) for `f32`/`f64` and fails if any appears. The
+`src/brktcalc.rs`, `src/currcvt.rs`) for `f32`/`f64` and fails if any appears. The
 `MANDATORY CONSTRAINTS` in the audit trail record the same rule.
 
 ### Gap-2 — Implied scale is enforced on STORE, not at print. **(mitigated)**
@@ -343,3 +343,61 @@ A negative base is out of contract (a tax base is ≥ 0); the port returns
 ## Production gate
 Regenerate `brkt_baseline.csv` from a live `cobc -x -free cobol/BRKTCALC.cbl` and
 re-diff before shipping.
+
+---
+
+# Pre-Migration Audit — CURRCVT (Euro Conversion by Triangulation)
+
+**Unit:** `cobol/CURRCVT.cbl` → `scirust-finmigrate::currcvt`
+**Date:** 2026-07-11 · **Gate status:** Phase 1 & 2 complete vs the model baseline
+(`tests/sandbox/curr_baseline.csv`). Contract: `cobol/SEMANTICS_CURR.md`.
+
+## Why a sixth unit
+A LEGALLY DEFINED conversion algorithm — Council Regulation (EC) No 1103/97 —
+whose rounding steps are prescribed by law. Getting them wrong is not just a
+rounding bug, it is non-compliance. It also introduces two things the prior
+units did not: a per-currency **rate table** and a **variable output scale**.
+
+### Gap-P — Triangulation is mandatory; a direct cross-rate is not equivalent. **(mitigated + evidenced)**
+National→national conversion must route through the euro with an intermediate
+rounding. The "obvious" `amount × rate_to / rate_from` skips the euro rounding
+and is unlawful — and it really differs: 100 DEM → FRF is **335.38** lawfully but
+**335.39** direct (a one-centime, legally-material divergence); 100 000 ITL → FRF
+diverges too. **Mitigation:** the port triangulates; the baseline records the
+direct figure per row and the equivalence test asserts ≥ 2 lawful≠direct rows.
+
+### Gap-Q — Intermediate euro rounded to ≥ 3 dp, once. **(mitigated — GATE)**
+The euro amount is rounded to not fewer than 3 decimals (this unit uses exactly
+3). Rounding it to 2 dp, or leaving it unrounded, changes the result. Using
+**more** than 3 dp is permitted by the regulation and can change the final minor
+unit in edge cases — so the chosen intermediate precision is part of the contract
+and **must be confirmed against the target system** (a live-compiler GATE item,
+mirroring INTACCR Gap-6).
+
+### Gap-R — Variable target minor unit. **(mitigated)**
+The final rounding scale is the target currency's minor unit — 2 dp for
+DEM/FRF/IEP, **0 dp for ITL/ESP**. A port that hard-codes 2 dp mis-rounds every
+lira/peseta amount. `minor(to)` is looked up per target; `target_minor_unit_zero_for_lira`
+pins the 0-dp case.
+
+### Gap-S — Six-significant-figure rates, never truncated. **(mitigated)**
+Rates are fixed/irrevocable at six significant figures (`1936.27`, `0.787564` —
+both 6 sig figs) and must not be rounded or truncated further. The port stores
+them as exact decimals; a rate < 1 (IEP) and a large rate (ITL) are both
+exercised.
+
+## Contract note
+Both endpoints are national currencies (neither is the euro); euro-endpoint
+conversion (which rounds directly to cents without the 3-dp intermediate) is a
+separate case, out of scope. An unknown currency code returns
+`AccrualError::UnknownCurrency` rather than a silent zero.
+
+## Production gate
+Regenerate `curr_baseline.csv` from a live `cobc -x -free cobol/CURRCVT.cbl` and
+**confirm the target's intermediate-euro precision** (Gap-Q) before shipping.
+
+## References
+* Council Regulation (EC) No 1103/97 (rates, triangulation, ≥3-dp intermediate):
+  https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=CELEX:31997R1103
+* European Commission — converting to the euro (rounding rules):
+  https://economy-finance.ec.europa.eu/euro/enlargement-euro-area/adoption-fixed-euro-conversion-rate/converting-euro_en
