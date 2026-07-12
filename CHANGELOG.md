@@ -5,6 +5,45 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — filtre à association probabiliste PDAF (`radar::pda`) — bloc 26
+Montée en fidélité du pistage en **milieu encombré** : là où `radar::mtt`
+associe chaque piste à une seule mesure par un choix dur au plus proche voisin
+(qu'un faux écho plus proche peut détourner), le **PDAF** garde toutes les
+mesures de la porte, pondérées par leur probabilité d'association.
+- **`PdaFilter`** — PDAF monocible sur l'état cartésien à vitesse constante
+  `[x, vₓ, y, v_y]` avec mesures de position `(x, y)`. Chaque trame : prédiction,
+  puis mise à jour par innovation combinée `ν̄ = Σ βᵢ νᵢ` sur les mesures de la
+  porte, avec `β₀` la probabilité de non-détection (PDA paramétrique :
+  `b = λ·|2πS|^{1/2}·(1 − P_D·P_G)/P_D`). La covariance porte le terme de
+  **dispersion des innovations** `K(Σβᵢ νᵢνᵢᵀ − ν̄ν̄ᵀ)Kᵀ` qui la gonfle selon
+  l'ambiguïté d'association. Réutilise les utilitaires matriciels denses de
+  `radar::imm2d`. Sans dépendance.
+- Oracles : sans clutter (λ=0) et une mesure par trame, le PDAF se réduit à un
+  Kalman et **suit une cible à vitesse constante** ; **suit une cible à travers
+  un clutter dense** (mesure vraie bruitée + 5 faux échos par trame) ; une trame
+  sans détection **coaste et gonfle la covariance** (β₀=1) ; β₀ **chute quand une
+  mesure tombe sur la prédiction** et vaut 1 sur trame vide. 4 tests (198 au
+  total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
+### Ajouté — `scirust-vision` : optronique — transmission atmosphérique et bilan de portée (`atmosphere`) — bloc 25
+Le chaînon qui transforme la sensibilité intrinsèque du capteur (NETD) en **bilan
+de portée** : l'atmosphère entre la cible et le capteur atténue le contraste, donc
+ce qui est détectable dépend du trajet.
+- **`transmittance(α, R) = e^{−αR}`** — loi de **Beer–Lambert** ; **`optical_depth`**
+  `α·R` ; **`extinction(absorption, scattering)`** additive.
+- **`extinction_from_visibility(V) = 3.912/V`** — loi de **Koschmieder** (seuil de
+  contraste 2 %) ; **`extinction_from_transmittance(τ, R) = −ln(τ)/R`** (inverse).
+- **`apparent_contrast(C₀, α, R) = C₀·e^{−αR}`** — loi de transmission du contraste ;
+  **`required_delta_t(NETD, α, R) = NETD/τ`** — le ΔT cible nécessaire pour percer
+  le trajet à la portée `R`, qui croît avec la distance.
+- Oracles : transmittance unitaire à portée nulle et décroissance monotone
+  (forme fermée `e^{−αR}`) ; **Beer–Lambert multiplicatif** sur segments
+  `τ(R₁+R₂)=τ(R₁)τ(R₂)` ; profondeur optique ↔ transmittance inverses avec
+  aller-retour de l'extinction ; la visibilité de Koschmieder **atteint le seuil
+  2 %** ; extinction additive et contraste apparent en forme fermée ; le ΔT requis
+  **croît avec la portée** (= NETD à portée nulle). 6 tests (60 au total pour le
+  crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — radiométrie IR et sensibilité NETD/MRTD (`radiometry`) — bloc 24
 Le pendant *radiométrique* du module `optics` (qui couvre la réponse spatiale
 PSF/MTF) : la physique qui fixe la plus petite différence de température qu'un

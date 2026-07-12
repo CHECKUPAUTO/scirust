@@ -10,14 +10,21 @@
 //! frame into intensity-weighted target centroids for the tracking chain. The
 //! [`radiometry`] module adds thermal-infrared radiometry (Planck, Stefan–
 //! Boltzmann, Wien) and the NETD / MRTD sensor-sensitivity metrics that spec a
-//! thermal imager.
+//! thermal imager. The [`atmosphere`] module adds Beer–Lambert atmospheric
+//! transmission and the EO/IR range budget — carrying that sensitivity through
+//! an attenuating path to the target ΔT detectable at range.
 
 use serde::{Deserialize, Serialize};
 
+pub mod atmosphere;
 pub mod beams;
 pub mod detect;
 pub mod optics;
 pub mod radiometry;
+pub use atmosphere::{
+    apparent_contrast, extinction, extinction_from_transmittance, extinction_from_visibility,
+    optical_depth, required_delta_t, transmittance,
+};
 pub use beams::{
     RayMatrix, beam_radius, beam_radius_from_q, divergence, gouy_phase, propagate_q, q_at_waist,
     radius_from_q, radius_of_curvature, rayleigh_range,

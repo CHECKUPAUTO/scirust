@@ -42,8 +42,11 @@
 //!   Kalman filter blending constant-velocity and constant-turn-rate models to
 //!   track turning targets in the (x, y) plane, an extended Kalman filter
 //!   that tracks a Cartesian state directly from raw polar range/bearing
-//!   measurements, and a multi-target tracker of per-target EKFs associated by
-//!   a statistical normalised-innovation-squared validation gate)
+//!   measurements, a multi-target tracker of per-target EKFs associated by
+//!   a statistical normalised-innovation-squared validation gate, and a
+//!   probabilistic data association filter that tracks through clutter by
+//!   soft-combining every gated measurement rather than a hard
+//!   nearest-neighbour pick)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -88,7 +91,7 @@ pub use mcsa::{
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
-    AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, RadarEkf,
+    AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarMultiTracker, RadarTrack, Track, ambiguity, barker_code, beamform_spectrum,
     beat_frequency_to_range, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cluster_detections, covariance,
     critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d, doppler_spectrum,
