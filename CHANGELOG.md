@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — transmission atmosphérique et bilan de portée (`atmosphere`) — bloc 25
+Le chaînon qui transforme la sensibilité intrinsèque du capteur (NETD) en **bilan
+de portée** : l'atmosphère entre la cible et le capteur atténue le contraste, donc
+ce qui est détectable dépend du trajet.
+- **`transmittance(α, R) = e^{−αR}`** — loi de **Beer–Lambert** ; **`optical_depth`**
+  `α·R` ; **`extinction(absorption, scattering)`** additive.
+- **`extinction_from_visibility(V) = 3.912/V`** — loi de **Koschmieder** (seuil de
+  contraste 2 %) ; **`extinction_from_transmittance(τ, R) = −ln(τ)/R`** (inverse).
+- **`apparent_contrast(C₀, α, R) = C₀·e^{−αR}`** — loi de transmission du contraste ;
+  **`required_delta_t(NETD, α, R) = NETD/τ`** — le ΔT cible nécessaire pour percer
+  le trajet à la portée `R`, qui croît avec la distance.
+- Oracles : transmittance unitaire à portée nulle et décroissance monotone
+  (forme fermée `e^{−αR}`) ; **Beer–Lambert multiplicatif** sur segments
+  `τ(R₁+R₂)=τ(R₁)τ(R₂)` ; profondeur optique ↔ transmittance inverses avec
+  aller-retour de l'extinction ; la visibilité de Koschmieder **atteint le seuil
+  2 %** ; extinction additive et contraste apparent en forme fermée ; le ΔT requis
+  **croît avec la portée** (= NETD à portée nulle). 6 tests (60 au total pour le
+  crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — radiométrie IR et sensibilité NETD/MRTD (`radiometry`) — bloc 24
 Le pendant *radiométrique* du module `optics` (qui couvre la réponse spatiale
 PSF/MTF) : la physique qui fixe la plus petite différence de température qu'un
