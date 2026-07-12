@@ -263,6 +263,20 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   + retrain** to take effect (step 6) — the `step_20000` checkpoint stays paired with
   its v1 tokenizer.
 
+- **B15 — corpus-quality filter + deterministic walk (step 5, corpus half).** A shared
+  `source_quality(name, content)` gate drops the low-value bulk the `step_20000`
+  samples were full of — lockfiles, `@generated`/`DO NOT EDIT` files, minified/giant-
+  line blobs, and numeric/string **data tables** (low letter density or high digit
+  density) — while staying conservative enough that ordinary `.rs` (macros, match
+  arms, small lookup tables) passes. It's wired into `collect-data`, `train-tokenizer`,
+  and the `cuda_pretrain` byte path, each printing a kept/skipped **summary by reason**
+  (no silent truncation) with a `--no-quality-filter` opt-out. Same pass also fixes a
+  latent **determinism bug**: `collect-data`/`train-tokenizer` walked `read_dir` in
+  OS-arbitrary order, so the corpus — and the trained tokenizer/shards — were
+  irreproducible across machines; both now sort entries (the byte path already did).
+  Together with B14 this is the *fix corpus + tokenizer* half of the endorsed plan;
+  the payoff lands on the **re-tokenise → retrain** (step 6).
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
