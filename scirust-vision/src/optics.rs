@@ -9,12 +9,16 @@
 //! to 50 % — is the number on the datasheet). Given a known PSF, an image blurred
 //! by the optics can be partly **restored** by deconvolution.
 //!
-//! This module works on the crate's [`Image`](crate::Image), reuses its spatial
-//! [`convolve2d`](crate::convolve2d), and is dependency-free: the MTF is a direct
-//! DFT of the line-spread function (no power-of-two constraint) and
-//! Richardson–Lucy deconvolution is purely spatial (convolutions only).
+//! This module works on the crate's [`Image`](crate::Image) and reuses its
+//! spatial [`convolve2d`](crate::convolve2d). The MTF is a direct DFT of the
+//! line-spread function (no power-of-two constraint) and Richardson–Lucy
+//! deconvolution is purely spatial (convolutions only); the alternative
+//! **Wiener** deconvolution is frequency-domain, built on a separable 2-D FFT
+//! (via `scirust-signal`, power-of-two dimensions). The diffraction-limited Airy
+//! PSF reuses `scirust-special` for its Bessel function.
 
 use crate::{Image, Kernel, convolve2d};
+use scirust_signal::{Complex, fft, ifft};
 use scirust_special::bessel_j;
 use std::f64::consts::PI;
 
@@ -188,6 +192,101 @@ pub fn richardson_lucy(blurred: &Image, psf: &Image, iterations: usize) -> Image
         }
     }
     estimate
+}
+
+/// The separable 2-D FFT of a `w × h` complex buffer (row-major): a 1-D FFT of
+/// every row followed by a 1-D FFT of every column. `w` and `h` must be powers
+/// of two.
+fn fft2(data: &mut [Complex], w: usize, h: usize) {
+    for row in data.chunks_mut(w)
+    {
+        fft(row);
+    }
+    let mut col = vec![Complex::zero(); h];
+    for c in 0..w
+    {
+        for (y, slot) in col.iter_mut().enumerate()
+        {
+            *slot = data[y * w + c];
+        }
+        fft(&mut col);
+        for (y, &v) in col.iter().enumerate()
+        {
+            data[y * w + c] = v;
+        }
+    }
+}
+
+/// The separable 2-D inverse FFT, the exact inverse of [`fft2`].
+fn ifft2(data: &mut [Complex], w: usize, h: usize) {
+    for row in data.chunks_mut(w)
+    {
+        ifft(row);
+    }
+    let mut col = vec![Complex::zero(); h];
+    for c in 0..w
+    {
+        for (y, slot) in col.iter_mut().enumerate()
+        {
+            *slot = data[y * w + c];
+        }
+        ifft(&mut col);
+        for (y, &v) in col.iter().enumerate()
+        {
+            data[y * w + c] = v;
+        }
+    }
+}
+
+/// **Wiener deconvolution**: frequency-domain image restoration given a known
+/// (square, odd) `psf`. It computes
+/// `F̂ = 𝔉⁻¹[ conj(H)/(|H|² + nsr) · G ]`, where `G` and `H` are the DFTs of the
+/// `blurred` image and the (mean-preserving, origin-centred) PSF, and `nsr` is
+/// the noise-to-signal power ratio that regularises the inverse — larger `nsr`
+/// suppresses noise amplification at the cost of sharpness; `nsr → 0` is the pure
+/// inverse filter. Complements the spatial [`richardson_lucy`].
+///
+/// The image dimensions must both be powers of two and the PSF must be a square
+/// no larger than the image; otherwise an empty [`Image`] is returned.
+pub fn wiener_deconvolution(blurred: &Image, psf: &Image, nsr: f64) -> Image {
+    let (w, h) = (blurred.width, blurred.height);
+    let ps = psf.width;
+    if w == 0
+        || h == 0
+        || w & (w - 1) != 0
+        || h & (h - 1) != 0
+        || psf.height != ps
+        || ps == 0
+        || ps > w
+        || ps > h
+    {
+        return Image::new(0, 0);
+    }
+    // Embed the mean-preserving PSF into a w×h buffer with its centre at the
+    // origin (circular wraparound), so the convolution theorem holds shift-free.
+    let psum: f64 = psf.data.iter().sum();
+    let half = ps / 2;
+    let mut hbuf = vec![Complex::zero(); w * h];
+    for py in 0..ps
+    {
+        for px in 0..ps
+        {
+            let x = (px + w - half) % w;
+            let y = (py + h - half) % h;
+            hbuf[y * w + x] += Complex::new(psf.get(px, py) / psum, 0.0);
+        }
+    }
+    let mut gbuf: Vec<Complex> = blurred.data.iter().map(|&v| Complex::new(v, 0.0)).collect();
+    fft2(&mut hbuf, w, h);
+    fft2(&mut gbuf, w, h);
+    for (g, hh) in gbuf.iter_mut().zip(hbuf.iter())
+    {
+        let denom = hh.mag_sq() + nsr;
+        let numer = hh.conj() * *g; // conj(H)·G
+        *g = Complex::new(numer.re / denom, numer.im / denom);
+    }
+    ifft2(&mut gbuf, w, h);
+    Image::from_vec(w, h, gbuf.iter().map(|c| c.re).collect())
 }
 
 /// A normalized (`Σ = 1`) **Airy point-spread function** of odd `size × size` —
@@ -389,5 +488,90 @@ mod tests {
         let (lambda, d, f, pitch) = (550e-9, 0.05, 0.2, 5e-6);
         let expected = 1.22 * lambda * f / (d * pitch);
         assert!((airy_first_null(lambda, d, f, pitch) - expected).abs() < 1e-12);
+    }
+
+    /// Mean-preserving **circular** convolution of an image with a (square, odd)
+    /// PSF — the exact forward model Wiener deconvolution inverts. Convolution
+    /// offset `px − half`, wrapped modulo the image dimensions.
+    fn circular_convolve(img: &Image, psf: &Image) -> Image {
+        let (w, h) = (img.width, img.height);
+        let psum: f64 = psf.data.iter().sum();
+        let half = (psf.width / 2) as isize;
+        let mut out = Image::new(w, h);
+        for y in 0..h
+        {
+            for x in 0..w
+            {
+                let mut acc = 0.0;
+                for py in 0..psf.height
+                {
+                    for px in 0..psf.width
+                    {
+                        let sx =
+                            (x as isize - (px as isize - half)).rem_euclid(w as isize) as usize;
+                        let sy =
+                            (y as isize - (py as isize - half)).rem_euclid(h as isize) as usize;
+                        acc += img.get(sx, sy) * psf.get(px, py) / psum;
+                    }
+                }
+                out.set(x, y, acc);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn wiener_inverts_a_circular_blur() {
+        // A structured 16×16 scene, blurred by a known PSF, is recovered by
+        // Wiener deconvolution with vanishing regularisation.
+        let (w, h) = (16usize, 16usize);
+        let mut scene = Image::new(w, h);
+        for y in 0..h
+        {
+            for x in 0..w
+            {
+                scene.set(x, y, ((x * 7 + y * 13) % 11) as f64 + 1.0);
+            }
+        }
+        let psf = gaussian_psf(5, 1.1);
+        let blurred = circular_convolve(&scene, &psf);
+        let restored = wiener_deconvolution(&blurred, &psf, 1e-12);
+        for (r, s) in restored.data.iter().zip(scene.data.iter())
+        {
+            assert!((r - s).abs() < 1e-5, "restored {r} vs {s}");
+        }
+    }
+
+    #[test]
+    fn wiener_with_a_delta_psf_is_the_identity() {
+        let (w, h) = (8usize, 8usize);
+        let mut img = Image::new(w, h);
+        for (i, v) in img.data.iter_mut().enumerate()
+        {
+            *v = (i % 5) as f64;
+        }
+        let delta = gaussian_psf(1, 1.0); // a single unit sample
+        let restored = wiener_deconvolution(&img, &delta, 1e-12);
+        for (r, s) in restored.data.iter().zip(img.data.iter())
+        {
+            assert!((r - s).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn wiener_guards_non_power_of_two_and_oversized_psf() {
+        let img = Image::new(6, 8); // width not a power of two
+        assert!(
+            wiener_deconvolution(&img, &gaussian_psf(3, 1.0), 0.1)
+                .data
+                .is_empty()
+        );
+        // A PSF larger than the image.
+        let small = Image::new(4, 4);
+        assert!(
+            wiener_deconvolution(&small, &gaussian_psf(5, 1.0), 0.1)
+                .data
+                .is_empty()
+        );
     }
 }

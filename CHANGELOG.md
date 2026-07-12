@@ -5,6 +5,21 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — déconvolution de Wiener (`optics`) — bloc 17
+Restauration d'image dans le **domaine fréquentiel**, complément de la
+déconvolution spatiale de Richardson–Lucy.
+- **`wiener_deconvolution(blurred, psf, nsr)`** — filtre de Wiener
+  `F̂ = 𝔉⁻¹[ conj(H)/(|H|² + nsr)·G ]` : `G`/`H` sont les TF de l'image floue et
+  de la PSF (préservant la moyenne, centrée à l'origine avec repli circulaire),
+  `nsr` le rapport bruit/signal qui régularise l'inverse. Bâti sur une **FFT 2-D
+  séparable** (FFT lignes puis colonnes via `scirust-signal`, dimensions
+  puissances de deux).
+- Oracles : une convolution circulaire connue est **inversée exactement** par
+  Wiener à régularisation évanescente (aller-retour scène→flou→restauration à
+  1e-5) ; une PSF de Dirac est l'identité ; gardes (dimensions non-puissance-de-
+  deux, PSF plus grande que l'image → image vide). 3 tests (41 au total pour le
+  crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-sim` : optoélectronique — photodiode à avalanche APD (`apd`) — bloc 16
 Le récepteur optoélectronique haute sensibilité (lidar, télémétrie laser), qui
 complète la photodiode : un gain d'avalanche `M` amplifie le signal mais ajoute
