@@ -245,6 +245,16 @@
 //!   isotherme/adiabatique et température de refoulement.
 //! - [`vacuum_gripping`] — préhension par le vide : effort de ventouse, charge
 //!   admissible, diamètre requis et nombre de ventouses.
+//! - [`ball_screw`] — vis à billes : conversion rotation ↔ translation et
+//!   couple ↔ effort axial (rendement catalogue).
+//! - [`reflected_inertia`] — inertie ramenée à l'arbre moteur : réducteur, vis à
+//!   billes, inertie propre de vis et ratio d'inertie.
+//! - [`motion_profile`] — profil de mouvement trapézoïdal/triangulaire : temps et
+//!   distances de rampe, vitesse de crête, durée totale.
+//! - [`motor_torque`] — couple moteur : couple d'accélération (`J·α`), couple
+//!   total et couple **efficace (RMS)** sur un cycle.
+//! - [`stepper_motor`] — moteur pas à pas : résolution angulaire, cadence
+//!   d'impulsions, vitesse et résolution linéaire.
 //!
 //! ## Positionnement
 //!
@@ -290,6 +300,7 @@ pub mod accelerated_life;
 pub mod air_flow;
 pub mod area_moments;
 pub mod balancing;
+pub mod ball_screw;
 pub mod beam_reactions;
 pub mod beams;
 pub mod bearings;
@@ -358,6 +369,8 @@ pub mod maintenance;
 pub mod merchant;
 pub mod milling_chip;
 pub mod mohr;
+pub mod motion_profile;
+pub mod motor_torque;
 pub mod msa;
 pub mod oee;
 pub mod open_channel;
@@ -372,6 +385,7 @@ pub mod pump_system;
 pub mod pumps;
 pub mod rack_pinion;
 pub mod radiation;
+pub mod reflected_inertia;
 pub mod reliability;
 pub mod riveted_joints;
 pub mod rolling;
@@ -381,6 +395,7 @@ pub mod sheet_bending;
 pub mod slider_crank;
 pub mod splines;
 pub mod springs;
+pub mod stepper_motor;
 pub mod strain_energy;
 pub mod stress_concentration;
 pub mod system_reliability;
@@ -420,6 +435,7 @@ pub use balancing::{
     centrifugal_force, correction_mass, permissible_eccentricity_um, permissible_unbalance_g_mm,
     unbalance,
 };
+pub use ball_screw::{axial_force_from_torque, drive_torque, linear_speed, rotational_speed_rpm};
 pub use beam_reactions::{
     cantilever_point_load_moment, cantilever_udl_moment, ss_point_load_max_moment,
     ss_point_load_reactions, ss_udl_reaction,
@@ -616,6 +632,10 @@ pub use mohr::{
     principal_stresses, safety_factor, shear_stress_rotated, tresca_plane, von_mises_plane,
     von_mises_principal,
 };
+pub use motion_profile::{
+    accel_distance, accel_time, is_triangular, trapezoidal_total_time, triangular_peak_velocity,
+};
+pub use motor_torque::{acceleration_torque, angular_acceleration, rms_torque, total_torque};
 pub use msa::{gage_rr, number_distinct_categories, percent_rr, total_variation};
 pub use oee::{availability, oee, performance, quality};
 pub use open_channel::{chezy_velocity, hydraulic_radius, manning_flow, manning_velocity};
@@ -651,6 +671,9 @@ pub use radiation::{
     STEFAN_BOLTZMANN, blackbody_emissive_power, gray_body_emissive_power,
     net_radiation_to_surroundings, radiation_coefficient,
 };
+pub use reflected_inertia::{
+    ballscrew_load_inertia, inertia_ratio, inertia_through_gear, screw_inertia_solid,
+};
 pub use reliability::{
     exponential_reliability, failure_rate_from_mtbf, mtbf_from_failure_rate, mtbf_from_test,
     probability_of_failure,
@@ -673,6 +696,10 @@ pub use slider_crank::{
 };
 pub use splines::{mean_radius, torque_capacity};
 pub use springs::HelicalSpring;
+pub use stepper_motor::{
+    linear_resolution, pulse_rate_for_speed, speed_from_pulse_rate, step_angle_deg,
+    steps_per_revolution,
+};
 pub use strain_energy::{
     axial_strain_energy_density, modulus_of_resilience, shear_strain_energy_density,
     total_strain_energy,
