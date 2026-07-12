@@ -209,6 +209,15 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   garbage. The whole SLM lifecycle — pretrain, checkpoint, resume, generate — now runs
   from raw source on the Thor; the only remaining lever for quality is **scale**.
 
+- **First real 350M run — the system works at scale.** With a fresh deterministic
+  tokenizer (28.5 M chars → 5.6 M BPE tokens) and 2 % held out, a **20,000-step** bf16
+  pretrain of the 304M model ran to completion on the Thor at ~125 tok/s, no collapse
+  (`gnorm` 3–8, spikes clipped). **Held-out val loss fell 10.46 → 6.42** (best; still
+  declining at step 20k), i.e. ~**1.3 nats/char** — below the byte model's 1.97 —
+  with train ≈ val (6.74 vs 6.76), so it is **generalizing, not memorizing** at ~1.8
+  epochs. A genuine from-scratch code LM, trained end-to-end in bf16 on Blackwell
+  Tensor cores. Still early (val hadn't plateaued); more corpus + steps keep helping.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
