@@ -33,22 +33,19 @@
 use crate::matrix::backend::{ScalarBackend, SimdBackend};
 use crate::matrix::view::{MatrixView, MatrixViewMut};
 
-/// Dimensions de blocking. `MR`/`NR` fixent la tuile registre ; `MC`/`KC`/`NC`
-/// dimensionnent les panneaux packés pour la hiérarchie de caches.
-///
-/// Ces constantes ne sont consommées que par les noyaux packés
-/// `#[cfg(target_arch = "x86_64")]` ci-dessous ; sur les autres cibles (le
-/// cross-check aarch64) elles sont inutilisées, ce que `-D warnings` refuserait
-/// sans ce `allow`.
-#[allow(dead_code)]
+/// Dimensions de blocking SGEMM. `MR`/`NR` fixent la tuile registre ;
+/// `MC`/`KC`/`NC` dimensionnent les panneaux packés pour la hiérarchie de
+/// caches. Utilisées uniquement par le noyau AVX-512 (cf. `cfg` : sur les
+/// cibles sans ce noyau elles seraient du code mort → erreur sous `-D warnings`).
+#[cfg(target_arch = "x86_64")]
 const MR: usize = 8;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const NR: usize = 16;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const KC: usize = 256;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const MC: usize = 256;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const NC: usize = 1024;
 
 /// SGEMM tuilé (mono-thread) : `C = alpha·A(m×k)·B(k×n) + beta·C(m×n)`,
@@ -369,19 +366,17 @@ unsafe fn micro_kernel_8x16(
 // ===================================================================== //
 
 /// Tuile registre f64 : un `zmm` contient 8 `f64`, donc `NR_D = 8` colonnes ;
-/// `MR_D = 8` lignes → 8 accumulateurs `zmm`.
-///
-/// Comme les constantes SGEMM, elles ne servent qu'aux noyaux
-/// `#[cfg(target_arch = "x86_64")]` et sont inutilisées ailleurs.
-#[allow(dead_code)]
+/// `MR_D = 8` lignes → 8 accumulateurs `zmm`. Noyau AVX-512 uniquement (cf.
+/// `cfg`, même raison que les constantes SGEMM ci-dessus).
+#[cfg(target_arch = "x86_64")]
 const MR_D: usize = 8;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const NR_D: usize = 8;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const KC_D: usize = 256;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const MC_D: usize = 256;
-#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
 const NC_D: usize = 512;
 
 /// DGEMM tuilé (mono-thread) : `C = alpha·A(m×k)·B(k×n) + beta·C(m×n)` en `f64`,

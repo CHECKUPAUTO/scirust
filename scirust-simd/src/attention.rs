@@ -175,6 +175,109 @@ pub fn attention(
     );
 }
 
+/// Taille de bloc de clés/valeurs pour [`flash_attention`].
+const FLASH_BC: usize = 64;
+
+/// **Flash-attention** (une tête) : même résultat que [`attention`], mais avec
+/// un **softmax en ligne** qui ne matérialise **jamais** la matrice de scores
+/// `s×t`. Pour chaque requête, on balaie les clés/valeurs par blocs de
+/// `FLASH_BC` en maintenant un état de taille `O(d)` — le maximum courant `m`,
+/// la somme courante `l` et l'accumulateur de sortie `o` — rééchelonnés à
+/// chaque bloc (`×exp(m_ancien − m_nouveau)`). La mémoire de travail est donc
+/// `O(d + FLASH_BC)` par requête au lieu de `O(t)`, ce qui rend les longues
+/// séquences traitables (le principe de FlashAttention).
+///
+/// `exp` est vectorisée ([`crate::activations`]) et l'accumulation `o += p·v`
+/// passe par le kernel `saxpy` dispatché. Résultat numériquement identique à
+/// [`attention`] (à l'arrondi près), vérifié dans les tests.
+#[allow(clippy::too_many_arguments)]
+pub fn flash_attention(
+    q: &[f32],
+    s: usize,
+    d: usize,
+    k: &[f32],
+    t: usize,
+    v: &[f32],
+    scale: f32,
+    out: &mut [f32],
+) {
+    use crate::activations::exp_inplace;
+    assert_eq!(q.len(), s * d, "flash_attention: Q shape");
+    assert_eq!(k.len(), t * d, "flash_attention: K shape");
+    assert_eq!(v.len(), t * d, "flash_attention: V shape");
+    assert_eq!(out.len(), s * d, "flash_attention: out shape");
+
+    let backend = runtime_backend();
+    let mut scores = vec![0.0f32; FLASH_BC]; // buffer de bloc, réutilisé
+
+    for i in 0..s
+    {
+        let q_row = &q[i * d..i * d + d];
+        let o = &mut out[i * d..i * d + d];
+        o.iter_mut().for_each(|x| *x = 0.0);
+        let mut m = f32::NEG_INFINITY; // max courant
+        let mut l = 0.0f32; // somme courante des exponentielles
+
+        let mut j0 = 0;
+        while j0 < t
+        {
+            let bc = FLASH_BC.min(t - j0);
+            // Scores du bloc : s_j = scale · q·k_j.
+            let mut block_max = f32::NEG_INFINITY;
+            for (jj, sc) in scores[..bc].iter_mut().enumerate()
+            {
+                let k_row = &k[(j0 + jj) * d..(j0 + jj) * d + d];
+                let v = scale * backend.sdot_f32(q_row, k_row);
+                *sc = v;
+                block_max = block_max.max(v);
+            }
+
+            let m_new = m.max(block_max);
+            // Correction du bloc précédent : ×exp(m − m_new) (0 au 1er bloc).
+            let corr = if m == f32::NEG_INFINITY
+            {
+                0.0
+            }
+            else
+            {
+                (m - m_new).exp()
+            };
+
+            // p_j = exp(s_j − m_new), vectorisé.
+            for sc in scores[..bc].iter_mut()
+            {
+                *sc -= m_new;
+            }
+            exp_inplace(&mut scores[..bc]);
+
+            // Rééchelonne l'état, puis accumule le bloc.
+            l = l * corr + scores[..bc].iter().sum::<f32>();
+            for x in o.iter_mut()
+            {
+                *x *= corr;
+            }
+            for (jj, &p) in scores[..bc].iter().enumerate()
+            {
+                let v_row = &v[(j0 + jj) * d..(j0 + jj) * d + d];
+                backend.saxpy_f32(p, v_row, o); // o += p · v_j
+            }
+
+            m = m_new;
+            j0 += bc;
+        }
+
+        // Normalisation finale : o /= l.
+        if l != 0.0
+        {
+            let inv = 1.0 / l;
+            for x in o.iter_mut()
+            {
+                *x *= inv;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +375,39 @@ mod tests {
                 assert!(
                     (got[idx] - want[idx]).abs() <= tol,
                     "s={s} d={d} t={t} idx={idx}: {} vs {}",
+                    got[idx],
+                    want[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn flash_attention_matches_reference() {
+        // t=200 > FLASH_BC(64) exerce le rééchelonnement en ligne sur 4 blocs.
+        for &(s, d, t) in &[
+            (1usize, 1usize, 1usize),
+            (3, 4, 5),
+            (8, 16, 12),
+            (7, 5, 64),
+            (5, 8, 200),
+        ]
+        {
+            let q: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.07).sin()).collect();
+            let k: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.05).cos() * 3.0).collect();
+            let v: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.03) - 0.5).collect();
+            let scale = 1.0 / (d as f32).sqrt();
+
+            let want = attention_ref(&q, s, d, &k, t, &v, scale);
+            let mut got = vec![0.0f32; s * d];
+            flash_attention(&q, s, d, &k, t, &v, scale, &mut got);
+
+            for idx in 0..s * d
+            {
+                let tol = 1e-4 * (1.0 + want[idx].abs());
+                assert!(
+                    (got[idx] - want[idx]).abs() <= tol,
+                    "flash s={s} d={d} t={t} idx={idx}: {} vs {}",
                     got[idx],
                     want[idx]
                 );
