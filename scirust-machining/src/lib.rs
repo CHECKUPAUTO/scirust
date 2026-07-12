@@ -225,6 +225,16 @@
 //!   **Chvorinov** et masselotte.
 //! - [`gating`] — fonderie : remplissage — vitesse de descente (**Torricelli**),
 //!   temps de coulée et profil anti-aspiration.
+//! - [`reliability`] — fiabilité : modèle **exponentiel** (taux constant) —
+//!   fiabilité, probabilité de défaillance, MTBF et estimation par essai.
+//! - [`weibull`] — fiabilité : distribution de **Weibull** — fiabilité, taux de
+//!   hasard et durées de vie `Bx` (mortalité infantile, usure).
+//! - [`system_reliability`] — fiabilité des systèmes : série, parallèle
+//!   (redondance active) et redondance `k`-sur-`n`.
+//! - [`maintenance`] — maintenance : MTBF, MTTR, disponibilité intrinsèque et
+//!   maintenabilité.
+//! - [`accelerated_life`] — essais de vie accélérée : facteur d'**Arrhenius**,
+//!   règle des « 10 °C » et déclassement (derating).
 //!
 //! ## Positionnement
 //!
@@ -266,6 +276,7 @@
 //! assert!(pc > 0.0);
 //! ```
 
+pub mod accelerated_life;
 pub mod area_moments;
 pub mod balancing;
 pub mod beam_reactions;
@@ -331,6 +342,7 @@ pub mod keys;
 pub mod kinematics;
 pub mod leaf_springs;
 pub mod liaisons;
+pub mod maintenance;
 pub mod merchant;
 pub mod milling_chip;
 pub mod mohr;
@@ -347,6 +359,7 @@ pub mod pump_system;
 pub mod pumps;
 pub mod rack_pinion;
 pub mod radiation;
+pub mod reliability;
 pub mod riveted_joints;
 pub mod rolling;
 pub mod roughness;
@@ -357,6 +370,7 @@ pub mod splines;
 pub mod springs;
 pub mod strain_energy;
 pub mod stress_concentration;
+pub mod system_reliability;
 pub mod thermal;
 pub mod thermal_network;
 pub mod thermo_cycles;
@@ -375,9 +389,13 @@ pub mod upsetting;
 pub mod vibrations;
 pub mod water_hammer;
 pub mod wedge;
+pub mod weibull;
 pub mod welds;
 pub mod wire_drawing;
 
+pub use accelerated_life::{
+    BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
+};
 pub use area_moments::{
     composite_second_moment, parallel_axis as parallel_axis_area, polar_second_moment,
     radius_of_gyration as area_radius_of_gyration,
@@ -568,6 +586,7 @@ pub use leaf_springs::{
     rate as leaf_spring_rate,
 };
 pub use liaisons::{LIAISONS, Liaison};
+pub use maintenance::{inherent_availability, maintainability, mtbf, mttr};
 pub use merchant::{
     chip_thickness_ratio, merchant_shear_angle, shear_angle, shear_strain as merchant_shear_strain,
 };
@@ -608,6 +627,10 @@ pub use radiation::{
     STEFAN_BOLTZMANN, blackbody_emissive_power, gray_body_emissive_power,
     net_radiation_to_surroundings, radiation_coefficient,
 };
+pub use reliability::{
+    exponential_reliability, failure_rate_from_mtbf, mtbf_from_failure_rate, mtbf_from_test,
+    probability_of_failure,
+};
 pub use riveted_joints::{
     bearing_strength, joint_efficiency, rivet_shear_strength, solid_plate_strength,
     tearing_strength,
@@ -633,6 +656,7 @@ pub use strain_energy::{
 pub use stress_concentration::{
     fatigue_stress_concentration, nominal_stress_plate_with_hole, peak_stress,
 };
+pub use system_reliability::{k_out_of_n_reliability, parallel_reliability, series_reliability};
 pub use thermal::{
     conduction_heat_flow, convection_heat_flow, linear_expansion, sensible_heat,
     thermal_resistance, thermal_stress,
@@ -680,6 +704,7 @@ pub use vibrations::{
 };
 pub use water_hammer::{critical_time, joukowsky_surge, wave_speed_elastic, wave_speed_rigid};
 pub use wedge::{driving_force, extraction_force, ideal_mechanical_advantage, self_locking};
+pub use weibull::{weibull_b_life, weibull_hazard_rate, weibull_reliability};
 pub use welds::{
     butt_weld_stress, fillet_direct_shear_stress, fillet_throat_area, throat_thickness,
     weld_group_torsional_shear,
