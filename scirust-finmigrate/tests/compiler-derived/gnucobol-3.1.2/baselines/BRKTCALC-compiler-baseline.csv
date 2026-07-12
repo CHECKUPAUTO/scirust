@@ -1,0 +1,10 @@
+case_id,base,tax
+zero_base,0.00,0.00
+in_zero_bracket,5000.00,0.00
+exactly_on_boundary_10k,10000.00,0.00
+exactly_on_boundary_40k,40000.00,3000.00
+mid_third_bracket,60000.00,7400.00
+typical_100k,100000.00,16500.00
+into_top_bracket,200000.00,43300.00
+rounding_sensitive,12345.67,234.57
+near_max_base,900000000.00,287979300.00

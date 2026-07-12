@@ -1,0 +1,2 @@
+# The committed compiler logs are evidence; override the repo-root *.log ignore.
+!*.log

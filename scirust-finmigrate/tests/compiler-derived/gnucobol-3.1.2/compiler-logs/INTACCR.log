@@ -1,0 +1,2 @@
+$ cobc -fsyntax-only -free -Wall normalized-sources/INTACCR-RUN.cbl
+(no diagnostics: 0 warnings, 0 errors)
