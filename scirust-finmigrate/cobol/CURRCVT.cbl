@@ -18,9 +18,16 @@
       *      — 2 dp for most, 0 dp for ITL / ESP — NEAREST-AWAY-FROM-ZERO.
       *
       * Scope: both source and target are NATIONAL currencies (neither is the
-      * euro); that is the case the triangulation rule governs. WS-RESULT's
-      * PICTURE is set by the copybook to the target's minor unit (shown here
-      * at V99 for a 2 dp target; a 0 dp target uses PIC S9(11)).
+      * euro); that is the case the triangulation rule governs.
+      *
+      * Gap-R (variable target minor unit) is implemented here rather than
+      * hard-coded: WS-MINOR-UNIT carries the target currency's minor unit
+      * (from the currency master — 0 for ITL/ESP, 2 otherwise) and the final
+      * ROUNDED COMPUTE targets a result field of the matching scale. The
+      * caller reads WS-RESULT-0 when WS-MINOR-UNIT = 0, otherwise WS-RESULT-2.
+      * (Audit trail 2026-07-12: this closes the Gap-R divergence the GnuCOBOL
+      * compiler evidence exposed, where a fixed 2-dp result field mis-rounded
+      * every lira/peseta amount by a minor unit.)
       ******************************************************************
        IDENTIFICATION DIVISION.
        PROGRAM-ID. CURRCVT.
@@ -29,14 +36,20 @@
        01  WS-AMOUNT      PIC S9(11)V99  COMP-3.
        01  WS-RATE-FROM   PIC S9(5)V9(6) COMP-3.
        01  WS-RATE-TO     PIC S9(5)V9(6) COMP-3.
+       01  WS-MINOR-UNIT  PIC 9.
        01  WS-EURO        PIC S9(13)V999 COMP-3.
-       01  WS-RESULT      PIC S9(11)V99  COMP-3.
+       01  WS-RESULT-0    PIC S9(13)     COMP-3.
+       01  WS-RESULT-2    PIC S9(11)V99  COMP-3.
        PROCEDURE DIVISION.
        0000-CONVERT.
       *    Step 1: source national amount -> euro, ROUNDED to 3 dp
       *    (intermediate; never fewer than 3 decimals).
            COMPUTE WS-EURO ROUNDED = WS-AMOUNT / WS-RATE-FROM.
       *    Step 2: euro -> target national amount, ROUNDED to the target's
-      *    minor unit (WS-RESULT scale = target minor unit).
-           COMPUTE WS-RESULT ROUNDED = WS-EURO * WS-RATE-TO.
+      *    minor unit (0 dp for ITL/ESP, else 2 dp) — Gap-R.
+           IF WS-MINOR-UNIT = 0
+               COMPUTE WS-RESULT-0 ROUNDED = WS-EURO * WS-RATE-TO
+           ELSE
+               COMPUTE WS-RESULT-2 ROUNDED = WS-EURO * WS-RATE-TO
+           END-IF.
            GOBACK.

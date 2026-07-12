@@ -374,11 +374,18 @@ unit in edge cases — so the chosen intermediate precision is part of the contr
 and **must be confirmed against the target system** (a live-compiler GATE item,
 mirroring INTACCR Gap-6).
 
-### Gap-R — Variable target minor unit. **(mitigated)**
+### Gap-R — Variable target minor unit. **(mitigated + reconciled in COBOL)**
 The final rounding scale is the target currency's minor unit — 2 dp for
 DEM/FRF/IEP, **0 dp for ITL/ESP**. A port that hard-codes 2 dp mis-rounds every
 lira/peseta amount. `minor(to)` is looked up per target; `target_minor_unit_zero_for_lira`
-pins the 0-dp case.
+pins the 0-dp case. The live GnuCOBOL 3.1.2 evidence (2026-07-12) confirmed the
+legacy COBOL had exactly this defect — a fixed 2-dp result field, diverging by a
+minor unit on frf_to_itl / dem_to_esp / esp_to_itl. **Reconciled 2026-07-12:**
+`CURRCVT.cbl` and its `-RUN` wrapper now carry `WS-MINOR-UNIT` and round into a
+result field of the matching scale (`WS-RESULT-0` / `WS-RESULT-2`), so COBOL,
+model and Rust agree on every emitted field (`run_baselines.py check` → 0
+divergences). Full trace in `audit_trail.log` and
+`tests/compiler-derived/gnucobol-3.1.2/RESULTS.md`.
 
 ### Gap-S — Six-significant-figure rates, never truncated. **(mitigated)**
 Rates are fixed/irrevocable at six significant figures (`1936.27`, `0.787564` —
@@ -393,8 +400,12 @@ separate case, out of scope. An unknown currency code returns
 `AccrualError::UnknownCurrency` rather than a silent zero.
 
 ## Production gate
-Regenerate `curr_baseline.csv` from a live `cobc -x -free cobol/CURRCVT.cbl` and
-**confirm the target's intermediate-euro precision** (Gap-Q) before shipping.
+Compiler-derived validation is now in place: all ten scenarios were run through a
+live GnuCOBOL 3.1.2 build (`tests/compiler-derived/gnucobol-3.1.2`), Gap-R is
+reconciled, and `run_baselines.py verify`/`check` gate the evidence in CI.
+Remaining before shipping on the true target: **confirm the target system's
+intermediate-euro precision** (Gap-Q) and re-run the same evidence under IBM
+Enterprise COBOL / z/OS (GnuCOBOL is not that environment).
 
 ## References
 * Council Regulation (EC) No 1103/97 (rates, triangulation, ≥3-dp intermediate):
