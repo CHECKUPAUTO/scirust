@@ -5,6 +5,22 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-sim` : optoélectronique — photodiode / photodétecteur (`photodiode`) — bloc 15
+Le récepteur optoélectronique, complément du laser (émetteur) : puissance optique
+→ photocourant → tension limitée par un `RC`, comme `System` de `scirust-sim`.
+- **`Photodiode`** / **`PhotodiodeParams`** — état `[v]` :
+  `v' = (I_ph − v/R_L)/C_j` avec `I_ph = ℛ·P_opt + I_dark`.
+- **`responsivity(η, λ)`** — sensibilité spectrale `ℛ = η·q·λ/(h·c)` (A/W),
+  linéaire en longueur d'onde.
+- Grandeurs fermées : `photocurrent`, `steady_state_voltage` (`I_ph·R_L`),
+  `time_constant` (`R_L·C_j`), `bandwidth` (`1/(2π·R_L·C_j)`).
+- Oracles : la sensibilité suit la forme fermée et croît linéairement avec λ ;
+  photocourant / tension stationnaire / bande passante fermées ; le courant
+  d'obscurité fixe le plancher sans lumière ; la réponse à un échelon charge avec
+  la constante de temps `RC` (`v(τ) = v_ss(1−1/e)`, puis `v_ss` à 10τ) ; rejet
+  des paramètres invalides. 5 tests (114 au total pour le crate) ;
+  `fmt`/`clippy -D warnings`/`miri` propres.
+
 ### Ajouté — `scirust-vision` : optronique — PSF d'Airy / limite de diffraction (`optics`) — bloc 14
 Prolongement du volet traitement d'image de précision : la **PSF d'Airy**, réponse
 d'un système limité par la diffraction (ouverture circulaire), qui complète la PSF
