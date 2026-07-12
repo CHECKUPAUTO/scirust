@@ -255,6 +255,16 @@
 //!   total et couple **efficace (RMS)** sur un cycle.
 //! - [`stepper_motor`] — moteur pas à pas : résolution angulaire, cadence
 //!   d'impulsions, vitesse et résolution linéaire.
+//! - [`first_order_response`] — automatique : système du **premier ordre** —
+//!   réponse indicielle, constante de temps et fréquence de coupure.
+//! - [`second_order_response`] — automatique : système du **second ordre** —
+//!   pulsation amortie, dépassement, temps de pic et de réponse.
+//! - [`bode_first_order`] — automatique : diagramme de **Bode** d'un premier
+//!   ordre — gain (dB), phase et pulsation de coupure.
+//! - [`pid_control`] — automatique : régulateur **PID** — sortie parallèle,
+//!   forme standard et réglage de **Ziegler-Nichols**.
+//! - [`feedback_loop`] — automatique : boucle de contre-réaction — gain en boucle
+//!   fermée, sensibilité et erreur statique.
 //!
 //! ## Positionnement
 //!
@@ -308,6 +318,7 @@ pub mod belleville_washers;
 pub mod belts;
 pub mod bernoulli;
 pub mod bevel_worm_gears;
+pub mod bode_first_order;
 pub mod bolted_joints;
 pub mod brakes;
 pub mod buckling;
@@ -339,7 +350,9 @@ pub mod extension_springs;
 pub mod extrusion;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
+pub mod feedback_loop;
 pub mod fins;
+pub mod first_order_response;
 pub mod flow_meters;
 pub mod flywheel;
 pub mod forced_vibrations;
@@ -374,6 +387,7 @@ pub mod motor_torque;
 pub mod msa;
 pub mod oee;
 pub mod open_channel;
+pub mod pid_control;
 pub mod pipe_flow;
 pub mod pneumatic_cylinders;
 pub mod power_screws;
@@ -390,6 +404,7 @@ pub mod reliability;
 pub mod riveted_joints;
 pub mod rolling;
 pub mod roughness;
+pub mod second_order_response;
 pub mod shafts;
 pub mod sheet_bending;
 pub mod slider_crank;
@@ -462,6 +477,9 @@ pub use bernoulli::{
 pub use bevel_worm_gears::{
     bevel_pitch_angle_gear, bevel_pitch_angle_pinion, worm_efficiency, worm_gear_ratio,
     worm_lead_angle, worm_self_locking,
+};
+pub use bode_first_order::{
+    corner_frequency_rad as bode_corner_frequency_rad, decibels, magnitude_db, phase_deg,
 };
 pub use bolted_joints::{
     bolt_working_load, load_factor, preload_from_torque, residual_clamp_load, separation_load,
@@ -549,7 +567,14 @@ pub use fatigue_mean_stress::{
     gerber_safety_factor, goodman_safety_factor, mean_stress, soderberg_safety_factor,
     stress_amplitude, stress_ratio,
 };
+pub use feedback_loop::{
+    closed_loop_gain, closed_loop_gain_with_feedback, sensitivity, steady_state_error_step,
+};
 pub use fins::{fin_effectiveness, fin_efficiency, fin_heat_rate, fin_parameter};
+pub use first_order_response::{
+    corner_frequency_rad as first_order_corner_frequency_rad, cutoff_frequency_hz, step_response,
+    time_to_fraction,
+};
 pub use flow_meters::{beta_ratio, flow_rate, pressure_drop_for_flow};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
@@ -639,6 +664,10 @@ pub use motor_torque::{acceleration_torque, angular_acceleration, rms_torque, to
 pub use msa::{gage_rr, number_distinct_categories, percent_rr, total_variation};
 pub use oee::{availability, oee, performance, quality};
 pub use open_channel::{chezy_velocity, hydraulic_radius, manning_flow, manning_velocity};
+pub use pid_control::{
+    derivative_gain, integral_gain, pid_output, ziegler_nichols_kp, ziegler_nichols_td,
+    ziegler_nichols_ti,
+};
 pub use pipe_flow::{
     colebrook_friction, darcy_head_loss, laminar_friction_factor, minor_loss, swamee_jain_friction,
 };
@@ -686,6 +715,7 @@ pub use rolling::{contact_length, draft, max_draft, roll_force, roll_torque};
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
 };
+pub use second_order_response::{damped_frequency, overshoot, peak_time, settling_time_2pct};
 pub use shafts::{
     angle_of_twist_deg, bending_stress, polar_section_modulus_hollow, polar_section_modulus_solid,
     section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
