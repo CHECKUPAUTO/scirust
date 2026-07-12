@@ -38,6 +38,8 @@
 //!   transport du moment, invariants, axe central, comoment (puissance).
 //! - [`liaisons`] — les 11 liaisons mécaniques normalisées : degrés de liberté,
 //!   mobilité et inconnues statiques (dualité avec [`torseurs`]).
+//! - [`hyperstatism`] — isostatisme/hyperstatisme d'un mécanisme : boucles
+//!   indépendantes, mobilité et degré d'hyperstaticité `h = m + 6μ − Ic`.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -87,6 +89,7 @@ pub mod economics;
 pub mod forces;
 pub mod gears;
 pub mod hertz;
+pub mod hyperstatism;
 pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
@@ -118,6 +121,9 @@ pub use gears::{
 pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
     point_contact_max_pressure, point_contact_radius,
+};
+pub use hyperstatism::{
+    degree_of_hyperstaticity, independent_loops, is_isostatic, kinematic_unknowns, static_unknowns,
 };
 pub use keys::{
     key_bearing_pressure, key_shear_stress, required_length_for_bearing, tangential_force,
