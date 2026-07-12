@@ -156,6 +156,16 @@
 //!   **Dittus-Boelter** et **Rayleigh**.
 //! - [`thermal_network`] — réseaux de résistances thermiques : convection,
 //!   série/parallèle et coefficient global d'échange.
+//! - [`drag_lift`] — traînée et portance : efforts aérodynamiques, puissance de
+//!   traînée et vitesse limite de chute.
+//! - [`flow_meters`] — débitmètres déprimogènes (orifice, **Venturi**) : débit,
+//!   perte de pression et facteur de vitesse d'approche.
+//! - [`open_channel`] — écoulement à surface libre : rayon hydraulique, formules
+//!   de **Manning** et de **Chézy**.
+//! - [`water_hammer`] — coup de bélier : célérité de l'onde, surpression de
+//!   **Joukowsky** et durée critique de manœuvre.
+//! - [`pump_system`] — point de fonctionnement pompe-réseau : intersection des
+//!   caractéristiques pompe et réseau.
 //!
 //! ## Positionnement
 //!
@@ -212,6 +222,7 @@ pub mod convection_correlations;
 pub mod creep;
 pub mod critical_speed;
 pub mod dimension_chains;
+pub mod drag_lift;
 pub mod dynamics;
 pub mod economics;
 pub mod elastomer_mounts;
@@ -221,6 +232,7 @@ pub mod extension_springs;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
 pub mod fins;
+pub mod flow_meters;
 pub mod flywheel;
 pub mod forced_vibrations;
 pub mod forces;
@@ -245,10 +257,12 @@ pub mod liaisons;
 pub mod mohr;
 pub mod msa;
 pub mod oee;
+pub mod open_channel;
 pub mod pipe_flow;
 pub mod power_screws;
 pub mod process_time;
 pub mod pulley_systems;
+pub mod pump_system;
 pub mod pumps;
 pub mod radiation;
 pub mod riveted_joints;
@@ -272,6 +286,7 @@ pub mod transient_conduction;
 pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
+pub mod water_hammer;
 pub mod welds;
 
 pub use balancing::{
@@ -327,6 +342,7 @@ pub use critical_speed::{
 pub use dimension_chains::{
     closing_max, closing_min, closing_nominal, rss_tolerance, worst_case_tolerance,
 };
+pub use drag_lift::{drag_force, drag_power, lift_force, terminal_velocity};
 pub use dynamics::{
     angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
     inertia_solid_cylinder, inertia_solid_sphere, inertia_thin_ring, kinetic_energy_rotation,
@@ -354,6 +370,7 @@ pub use fatigue_mean_stress::{
     stress_amplitude, stress_ratio,
 };
 pub use fins::{fin_effectiveness, fin_efficiency, fin_heat_rate, fin_parameter};
+pub use flow_meters::{beta_ratio, flow_rate, pressure_drop_for_flow};
 pub use flywheel::{
     coefficient_of_fluctuation, energy_fluctuation, mean_speed, required_inertia, stored_energy,
 };
@@ -427,6 +444,7 @@ pub use mohr::{
 };
 pub use msa::{gage_rr, number_distinct_categories, percent_rr, total_variation};
 pub use oee::{availability, oee, performance, quality};
+pub use open_channel::{chezy_velocity, hydraulic_radius, manning_flow, manning_velocity};
 pub use pipe_flow::{
     colebrook_friction, darcy_head_loss, laminar_friction_factor, minor_loss, swamee_jain_friction,
 };
@@ -438,6 +456,7 @@ pub use pulley_systems::{
     actual_mechanical_advantage, efficiency as pulley_efficiency, effort_required,
     velocity_ratio as pulley_velocity_ratio,
 };
+pub use pump_system::{operating_flow, operating_head, pump_head, system_head};
 pub use pumps::{
     affinity_flow, affinity_head, affinity_power, hydraulic_power, npsh_available, shaft_power,
     specific_speed,
@@ -508,6 +527,7 @@ pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
 };
+pub use water_hammer::{critical_time, joukowsky_surge, wave_speed_elastic, wave_speed_rigid};
 pub use welds::{
     butt_weld_stress, fillet_direct_shear_stress, fillet_throat_area, throat_thickness,
     weld_group_torsional_shear,
