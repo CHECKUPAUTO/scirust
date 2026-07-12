@@ -17,7 +17,7 @@ pub use beams::{
 };
 pub use optics::{
     Axis, airy_first_null, airy_psf, apply_psf, gaussian_psf, line_spread, mtf, mtf50,
-    rayleigh_resolution, richardson_lucy,
+    rayleigh_resolution, richardson_lucy, wiener_deconvolution,
 };
 
 // ─── Image Representation ───────────────────────────────────────────────────
