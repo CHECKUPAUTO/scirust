@@ -316,22 +316,25 @@ pub fn coherence_umass(
     for i in 1..n_top
     {
         let w = top_indices[i];
-        // D(w_i): number of documents containing w_i
-        let d_wi: f64 = doc_word_matrix
-            .iter()
-            .filter(|doc| doc.contains(&w))
-            .count() as f64;
         for j in 0..i
         {
             let wj = top_indices[j];
-            // D(w_i, w_j): documents containing both
+            // D(w_j): number of documents containing the conditioning word w_j.
+            let d_wj: f64 = doc_word_matrix
+                .iter()
+                .filter(|doc| doc.contains(&wj))
+                .count() as f64;
+            // D(w_i, w_j): documents containing both.
             let d_wi_wj: f64 = doc_word_matrix
                 .iter()
                 .filter(|doc| doc.contains(&w) && doc.contains(&wj))
                 .count() as f64;
-            if d_wi > 1.0 && d_wi_wj > 0.0
+            if d_wj > 0.0 && d_wi_wj > 0.0
             {
-                score += (d_wi_wj + 1.0).ln() / d_wi.ln();
+                // UMass coherence (Mimno et al. 2011): log of the ratio, not
+                // a ratio of two logs, and conditioned on D(w_j) -- not
+                // D(w_i).
+                score += ((d_wi_wj + 1.0) / d_wj).ln();
                 count += 1;
             }
         }
@@ -446,8 +449,30 @@ mod tests {
         let topic_term = vec![10, 8, 5, 2, 0];
         let doc_word_matrix = vec![vec![0, 1, 2], vec![0, 1], vec![2, 3]];
         let score = coherence_umass(&topic_term, &doc_word_matrix, 0);
-        // Score should be finite and negative (UMass is typically negative)
-        assert!(score.is_finite());
+        // Hand-derived from the UMass formula ln((D(w_i,w_j)+1)/D(w_j)) over the
+        // four pairs with a nonzero co-occurrence count: (w1,w0): ln(3/2);
+        // (w2,w0): ln(2/2); (w2,w1): ln(2/2); (w3,w2): ln(2/2). Average of
+        // [ln(1.5), 0, 0, 0] over 4 terms.
+        assert!((score - (1.5_f64.ln() / 4.0)).abs() < 1e-9, "score={score}");
+    }
+
+    #[test]
+    fn test_coherence_umass_matches_reference_formula() {
+        // UMass coherence (Mimno et al. 2011) is
+        // sum_{i>j} ln( (D(w_i,w_j)+1) / D(w_j) ), i.e. the log of a ratio,
+        // conditioned on the *earlier* (higher-ranked) word's document
+        // frequency D(w_j) -- not a ratio of two logarithms, and not
+        // conditioned on D(w_i). word 0 appears in 4 of 5 documents; word 1
+        // co-occurs with it in only 1 of those, so the pair should score
+        // ln((1+1)/4) = ln(0.5), a clearly negative, hand-verifiable value.
+        let topic_term = vec![5, 3];
+        let doc_word_matrix = vec![vec![0, 1], vec![0], vec![0], vec![0], vec![2]];
+        let score = coherence_umass(&topic_term, &doc_word_matrix, 0);
+        assert!(
+            (score - 0.5_f64.ln()).abs() < 1e-9,
+            "expected ln(0.5) ~= {}, got {score}",
+            0.5_f64.ln()
+        );
     }
 
     #[test]
