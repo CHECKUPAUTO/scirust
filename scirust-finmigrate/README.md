@@ -48,11 +48,15 @@ It is the reference template for the migration protocol:
 ## Run it
 
 ```sh
-# (Phase 1) regenerate the Golden Baseline — must be byte-stable
+# (Phase 1) regenerate a Golden Baseline — must be byte-stable
 python3 tests/sandbox/gen_baseline.py
 
 # (Phase 2) prove equivalence + run unit tests
 cargo test -p scirust-finmigrate
+
+# (Phase 3) consolidated audit: verify every baseline's SHA-256 and print a
+# one-shot audit report across all units. Exits non-zero on any tamper.
+cargo run -p scirust-finmigrate --bin finaudit
 ```
 
 ## Status & production gate
