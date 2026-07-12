@@ -643,6 +643,7 @@ pub mod dispatch;
 pub mod gemm;
 pub mod kv_cache;
 pub mod matrix;
+pub mod model;
 pub mod norm;
 pub mod transformer;
 
