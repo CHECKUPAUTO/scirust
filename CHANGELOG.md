@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — filtre de Kalman étendu polaire (`radar::ekf`) — bloc 21
+Pistage à partir de mesures **radar réelles** : les trackers précédents
+supposent une position cartésienne déjà disponible, alors qu'un radar fournit
+distance et azimut (mesure polaire, fonction non linéaire de l'état).
+- **`RadarEkf`** — filtre de Kalman **étendu** sur l'état cartésien
+  `[x, vₓ, y, v_y]` : la prédiction reste linéaire (vitesse constante, donc
+  exacte), et la correction linéarise l'observation polaire
+  `h(x) = (√(x²+y²), atan2(y, x))` via sa jacobienne autour de l'estimé courant.
+  L'innovation d'azimut est **repliée** dans `(−π, π]` pour qu'une cible
+  franchissant la frontière ±π soit suivie sans discontinuité. Distance et azimut
+  ont chacun leur variance de mesure.
+- Réutilise les utilitaires matriciels denses de `radar::imm2d` (produit,
+  transposée, Cholesky) désormais `pub(super)`. Sans dépendance.
+- Oracles : `wrap_pi` mappe dans l'intervalle principal ; l'EKF **restitue une
+  trajectoire cartésienne à partir de mesures polaires** (position et vitesse à
+  la vérité) ; **suit une cible franchissant le repli d'azimut** (le long de
+  −x) sans décrochage ; la mise à jour réduit la variance de position ; la mesure
+  prédite correspond à l'état ; garde à l'origine (azimut indéfini → mise à jour
+  inerte). 6 tests (188 au total pour le crate) ; `fmt`/`clippy -D warnings`
+  propres.
+
 ### Ajouté — `scirust-signal` : radar — IMM à virage coordonné 2-D (`radar::imm2d`) — bloc 20
 Pistage de cibles **manœuvrantes** dans le plan : là où l'IMM 1-D (bloc 19)
 approxime une manœuvre en gonflant le bruit de process d'un modèle à vitesse

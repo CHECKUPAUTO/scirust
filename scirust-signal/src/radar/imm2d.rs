@@ -350,7 +350,7 @@ impl Imm2D {
     }
 }
 
-// ---- small dense-matrix helpers (f64, row-major) ----
+// ---- small dense-matrix helpers (f64, row-major); shared within `radar` ----
 
 /// The `n×n` diagonal matrix with the given diagonal.
 fn diag(d: &[f64]) -> Vec<Vec<f64>> {
@@ -364,7 +364,7 @@ fn diag(d: &[f64]) -> Vec<Vec<f64>> {
 }
 
 /// Matrix product `a·b`.
-fn mat_mul(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+pub(super) fn mat_mul(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let (n, k, m) = (a.len(), b.len(), b[0].len());
     let mut c = vec![vec![0.0; m]; n];
     for i in 0..n
@@ -385,14 +385,14 @@ fn mat_mul(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
 }
 
 /// Matrix–vector product `a·v`.
-fn mat_vec(a: &[Vec<f64>], v: &[f64]) -> Vec<f64> {
+pub(super) fn mat_vec(a: &[Vec<f64>], v: &[f64]) -> Vec<f64> {
     a.iter()
         .map(|row| row.iter().zip(v).map(|(x, y)| x * y).sum())
         .collect()
 }
 
 /// Elementwise sum `a + b`.
-fn mat_add(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+pub(super) fn mat_add(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
     a.iter()
         .zip(b)
         .map(|(ra, rb)| ra.iter().zip(rb).map(|(x, y)| x + y).collect())
@@ -400,7 +400,7 @@ fn mat_add(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
 }
 
 /// Transpose.
-fn mat_t(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
+pub(super) fn mat_t(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let (rows, cols) = (a.len(), a[0].len());
     let mut t = vec![vec![0.0; rows]; cols];
     for i in 0..rows
@@ -415,7 +415,7 @@ fn mat_t(a: &[Vec<f64>]) -> Vec<Vec<f64>> {
 
 /// Lower-triangular Cholesky factor `L` with `A = L·Lᵀ`; `None` if `A` is not
 /// positive definite.
-fn cholesky(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+pub(super) fn cholesky(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let n = a.len();
     let mut l = vec![vec![0.0; n]; n];
     for i in 0..n
@@ -445,7 +445,7 @@ fn cholesky(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
 }
 
 /// Solve `A·x = b` given the Cholesky factor `L` of `A` (`A = L·Lᵀ`).
-fn chol_solve(l: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
+pub(super) fn chol_solve(l: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
     let n = b.len();
     let mut y = vec![0.0; n];
     for i in 0..n
