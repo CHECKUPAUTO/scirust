@@ -95,11 +95,20 @@ pas seulement compilation).
 | Couche dense fusionnée 4096×1024×1024 (ReLU) | 53.9 GFLOP/s | ~86× |
 | **AMX int8** 512³ (`_tile_dpbssd`, silicium) | 37.7 GOP/s | ~18× |
 | **AMX bf16** 512³ (`_tile_dpbf16ps`, silicium) | 34.4 GFLOP/s | ~16× |
+| **Bloc décodeur int8 W8A8** (s=128, d=1024, d_ff=4096) | ×1.34 vs `f32` | poids ÷4, erreur RMS 0,01 % |
 
 Le **GEMM fusionné** (`sgemm_bias_act`) calcule `act(α·A·B + biais)` : `A·B` par
 le GEMM tuilé (n'importe quel `k`), puis un épilogue biais+activation vectorisé
 en un seul passage `O(m·n)`. Son analogue **quantifié int8**
 ([`amx::qlinear_i8`](src/amx.rs)) déquantifie `X·W` (GEMM AMX) par canal + biais.
+
+Le **bloc décodeur quantifié int8 (W8A8)** ([`qtransformer`](src/qtransformer.rs))
+branche les six projections (`Wq`/`Wk`/`Wv`/`Wo`/`W1`/`W2`) sur le GEMM AMX : poids
+quantifiés **par canal** et **pré-empaquetés** une fois en disposition tuile
+(`amx::prepack_b_i8`, packing VNNI hors du chemin chaud), activations quantifiées
+**par token** à l'exécution. Résultat mesuré (silicium) : plus rapide que le `f32`,
+poids ÷4, sortie fidèle (le résidu non quantifié dilue le bruit int8) — cf.
+[`examples/qtransformer_bench.rs`](examples/qtransformer_bench.rs).
 
 Les chiffres AMX sont mesurés **sur silicium AMX** (la machine expose
 `amx_tile`/`amx_int8`/`amx_bf16`) — cf. [`examples/amx_bench.rs`](examples/amx_bench.rs).
@@ -176,7 +185,8 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`gemm`](src/gemm.rs) | SGEMM/DGEMM tuilés, parallèles, fusionnés |
 | [`activations`](src/activations.rs) | `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` vectorisés |
 | [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
-| [`amx`](src/amx.rs) | GEMM Intel AMX à tuiles — int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) (x86) |
+| [`amx`](src/amx.rs) | GEMM Intel AMX à tuiles — int8/bf16, poids pré-empaquetés, `qlinear_i8` (x86) |
+| [`qtransformer`](src/qtransformer.rs) | bloc décodeur **quantifié int8 W8A8** (projections AMX) (x86) |
 | [`sve`](src/sve.rs) | kernels SVE scalables `saxpy`/`sdot`/`sscal` (aarch64) |
 | [`sme`](src/sme.rs) | ARM SME — sonde + référence rang-1 (accumulateur ZA), aarch64 |
 | [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
