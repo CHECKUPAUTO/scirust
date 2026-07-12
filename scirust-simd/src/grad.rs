@@ -254,6 +254,93 @@ pub fn softmax_backward(y: &[f32], rows: usize, d: usize, dy: &[f32], dx: &mut [
     }
 }
 
+/// Backward de l'attention **une tête** `O = softmax(scale·Q·Kᵀ)·V`.
+///
+/// À partir de `dout` (gradient de `O`, `s×d`), écrit `dq` (`s×d`), `dk`
+/// (`t×d`), `dv` (`t×d`). `Q` est `s×d`, `K`/`V` sont `t×d`. Recompute
+/// `P = softmax(scale·Q·Kᵀ)` puis applique la chaîne :
+/// `dV = Pᵀ·dO`, `dP = dO·Vᵀ`, `dScores = softmax'(P, dP)`,
+/// `dQ = scale·dScores·K`, `dK = scale·dScoresᵀ·Q`. Les produits passent par le
+/// GEMM tuilé ; le softmax backward est [`softmax_backward`].
+#[allow(clippy::too_many_arguments)]
+pub fn attention_backward(
+    q: &[f32],
+    s: usize,
+    d: usize,
+    k: &[f32],
+    t: usize,
+    v: &[f32],
+    scale: f32,
+    dout: &[f32],
+    dq: &mut [f32],
+    dk: &mut [f32],
+    dv: &mut [f32],
+) {
+    assert_eq!(q.len(), s * d, "attention_backward: Q shape");
+    assert_eq!(k.len(), t * d, "attention_backward: K shape");
+    assert_eq!(v.len(), t * d, "attention_backward: V shape");
+    assert_eq!(dout.len(), s * d, "attention_backward: dO shape");
+    assert_eq!(dq.len(), s * d, "attention_backward: dQ shape");
+    assert_eq!(dk.len(), t * d, "attention_backward: dK shape");
+    assert_eq!(dv.len(), t * d, "attention_backward: dV shape");
+
+    // P = softmax(scale · Q·Kᵀ)  (s×t).
+    let kt = transpose(k, t, d); // d×t
+    let mut p = vec![0.0f32; s * t];
+    sgemm_tiled(
+        scale,
+        MatrixView::new(q, s, d),
+        MatrixView::new(&kt, d, t),
+        0.0,
+        MatrixViewMut::new(&mut p, s, t),
+    );
+    crate::attention::softmax_rows(&mut p, s, t);
+
+    // dV = Pᵀ · dO  (t×d).
+    let pt = transpose(&p, s, t); // t×s
+    sgemm_tiled(
+        1.0,
+        MatrixView::new(&pt, t, s),
+        MatrixView::new(dout, s, d),
+        0.0,
+        MatrixViewMut::new(dv, t, d),
+    );
+
+    // dP = dO · Vᵀ  (s×t).
+    let vt = transpose(v, t, d); // d×t
+    let mut dp = vec![0.0f32; s * t];
+    sgemm_tiled(
+        1.0,
+        MatrixView::new(dout, s, d),
+        MatrixView::new(&vt, d, t),
+        0.0,
+        MatrixViewMut::new(&mut dp, s, t),
+    );
+
+    // dScores = softmax'(P, dP)  (s×t).
+    let mut dscores = vec![0.0f32; s * t];
+    softmax_backward(&p, s, t, &dp, &mut dscores);
+
+    // dQ = scale · dScores · K  (s×d).
+    sgemm_tiled(
+        scale,
+        MatrixView::new(&dscores, s, t),
+        MatrixView::new(k, t, d),
+        0.0,
+        MatrixViewMut::new(dq, s, d),
+    );
+
+    // dK = scale · dScoresᵀ · Q  (t×d).
+    let dst = transpose(&dscores, s, t); // t×s
+    sgemm_tiled(
+        scale,
+        MatrixView::new(&dst, t, s),
+        MatrixView::new(q, s, d),
+        0.0,
+        MatrixViewMut::new(dk, t, d),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +598,38 @@ mod tests {
 
         let gx = num_grad(&x, &seed, 1e-3, |xx| softmax_fwd(xx, rows, d));
         assert_close(&dx, &gx, 2e-2, "softmax dX");
+    }
+
+    #[test]
+    fn attention_backward_gradcheck() {
+        use crate::attention::attention;
+        let (s, d, t) = (3usize, 4usize, 5usize);
+        let scale = 1.0 / (d as f32).sqrt();
+        let q: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.11).sin()).collect();
+        let k: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.07).cos()).collect();
+        let v: Vec<f32> = (0..t * d).map(|i| (i as f32 * 0.05) - 0.3).collect();
+        let seed: Vec<f32> = (0..s * d).map(|i| (i as f32 * 0.13).cos() + 0.2).collect(); // = dO
+
+        let mut dq = vec![0.0f32; s * d];
+        let mut dk = vec![0.0f32; t * d];
+        let mut dv = vec![0.0f32; t * d];
+        attention_backward(&q, s, d, &k, t, &v, scale, &seed, &mut dq, &mut dk, &mut dv);
+
+        // Perte L = Σ O·seed ; O = attention(Q,K,V).
+        let fwd = |qq: &[f32], kk: &[f32], vv: &[f32]| -> Vec<f32> {
+            let mut o = vec![0.0f32; s * d];
+            attention(qq, s, d, kk, t, vv, scale, &mut o);
+            o
+        };
+        let num = |input: &[f32], f: &dyn Fn(&[f32]) -> Vec<f32>| -> Vec<f32> {
+            num_grad(input, &seed, 1e-3, f)
+        };
+
+        let gq = num(&q, &|qq| fwd(qq, &k, &v));
+        assert_close(&dq, &gq, 3e-2, "attention dQ");
+        let gk = num(&k, &|kk| fwd(&q, kk, &v));
+        assert_close(&dk, &gk, 3e-2, "attention dK");
+        let gv = num(&v, &|vv| fwd(&q, &k, vv));
+        assert_close(&dv, &gv, 3e-2, "attention dV");
     }
 }
