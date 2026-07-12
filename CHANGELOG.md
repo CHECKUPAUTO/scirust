@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — télémétrie large bande à fréquence échelonnée (`radar::stepped_frequency`) — bloc 33
+Une résolution en distance fine sans matériel large bande : une rafale de `N`
+impulsions bande étroite aux fréquences `fₙ = n·Δf` échantillonne la réflectivité
+en fréquence, et une **DFT inverse** en synthétise un profil de distance haute
+résolution.
+- **`synthetic_bandwidth(N, Δf)`** = `N·Δf` ; **`range_resolution(N, Δf)`** =
+  `c/(2·N·Δf)` (fixée par la bande synthétisée) ; **`max_unambiguous_range(Δf)`**
+  = `c/(2·Δf)` (fenêtre non ambiguë).
+- **`range_profile(measurements)`** — magnitude de la FFT inverse des échantillons
+  complexes par pas (longueur puissance de deux) ; **`range_bins(N, Δf)`** — la
+  distance de chaque case.
+- Oracles : formules bande/résolution (résolution qui **s'améliore avec la bande
+  synthétisée**, fenêtre qui s'élargit quand Δf diminue) ; un **diffuseur
+  ponctuel se localise exactement sur sa case** (profil piquant à la bonne
+  distance) ; **deux diffuseurs séparés** résolus en deux pics ; gardes
+  (longueur non puissance-de-deux → vide). 5 tests (238 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — goniométrie monopulse (`radar::monopulse`) — bloc 32
 La mesure d'angle de précision des radars de poursuite : à partir d'une **seule**
 impulsion, deux faisceaux dépointés de part et d'autre du dépointage forment une

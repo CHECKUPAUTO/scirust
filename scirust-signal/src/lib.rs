@@ -56,9 +56,12 @@
 //!   maximum detection range that closes with the required SNR), and clutter
 //!   amplitude statistics (Rayleigh, Weibull, and log-normal distributions — the
 //!   spiky-clutter models CFAR thresholds are designed against, with a
-//!   self-contained error function), and pulse-repetition-frequency ambiguities
+//!   self-contained error function), pulse-repetition-frequency ambiguities
 //!   (unambiguous range and velocity, MTI blind speeds, and range/velocity
-//!   folding, with the invariant range–velocity ambiguity product `cλ/8`)
+//!   folding, with the invariant range–velocity ambiguity product `cλ/8`), and
+//!   stepped-frequency synthetic wideband ranging (a high-resolution range
+//!   profile from an inverse DFT of a burst of frequency-stepped narrowband
+//!   pulses, resolution `c/(2·N·Δf)`)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -111,10 +114,12 @@ pub use radar::{
     doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, fold_range, fold_velocity,
     lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler, monopulse_estimate_angle,
     monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
-    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
-    range_resolution, rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf,
-    rayleigh_quantile, ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram,
-    steering_vector, swerling1_pd, swerling1_required_snr, unambiguous_range, unambiguous_velocity,
-    velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile,
+    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_bins, range_doppler, range_doppler_map,
+    range_profile, range_resolution, rayleigh_cdf as clutter_rayleigh_cdf,
+    rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile, ridge as micro_doppler_ridge,
+    single_pulse_threshold, spectrogram, steering_vector, stepped_range_profile,
+    stepped_range_resolution, swerling1_pd, swerling1_required_snr, synthetic_bandwidth,
+    unambiguous_range, unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf,
+    weibull_quantile,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
