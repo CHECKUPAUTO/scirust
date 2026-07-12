@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — goniométrie monopulse (`radar::monopulse`) — bloc 32
+La mesure d'angle de précision des radars de poursuite : à partir d'une **seule**
+impulsion, deux faisceaux dépointés de part et d'autre du dépointage forment une
+voie **somme** `Σ = A + B` et une voie **différence** `Δ = A − B`, dont le rapport
+`Δ/Σ` donne l'angle hors dépointage — précision bien plus fine que la largeur de
+faisceau.
+- **`beam_voltage(θ, θ₀, σ)`** — gain (tension) d'un faisceau gaussien.
+- **`monopulse_ratio(θ, squint, σ)`** = `Δ/Σ` (faisceaux à ±squint) = exactement
+  `tanh(θ·squint/σ²)` ; **`monopulse_slope(squint, σ)`** = `squint/σ²`, la pente
+  du discriminateur au dépointage ; **`estimate_angle(ratio, squint, σ)`** =
+  `atanh(ratio)·σ²/squint`, l'inversion.
+- Oracles : rapport **nul au dépointage** et **impair** (le signe donne le côté) ;
+  monotone et borné à (−1, 1) ; **égal à la forme fermée tanh** ; l'estimation
+  **inverse exactement** le rapport (angle retrouvé) ; **linéarisation** près du
+  dépointage (`ratio ≈ k_m·θ`) ; gardes. 6 tests (233 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — ambiguïtés de PRF et vitesses aveugles (`radar::prf`) — bloc 31
 Les deux limites dures qu'impose l'échantillonnage à la fréquence de répétition
 des impulsions (PRF) d'un radar pulsé-Doppler.
