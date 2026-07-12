@@ -166,6 +166,16 @@
 //!   **Joukowsky** et durée critique de manœuvre.
 //! - [`pump_system`] — point de fonctionnement pompe-réseau : intersection des
 //!   caractéristiques pompe et réseau.
+//! - [`centroids`] — centroïdes de surfaces composées : aire totale et position
+//!   du centre de gravité (évidements négatifs).
+//! - [`area_moments`] — moments quadratiques composés : théorème de **Huygens**,
+//!   rayon de giration et axes perpendiculaires.
+//! - [`wedge`] — coins : effort d'entrée, avantage mécanique idéal et condition
+//!   d'auto-blocage avec frottement.
+//! - [`distributed_loads`] — charges réparties : résultante et position
+//!   (uniforme, triangulaire, trapézoïdale).
+//! - [`cables`] — câbles paraboliques : tension horizontale/maximale et longueur
+//!   développée (ponts suspendus).
 //!
 //! ## Positionnement
 //!
@@ -207,6 +217,7 @@
 //! assert!(pc > 0.0);
 //! ```
 
+pub mod area_moments;
 pub mod balancing;
 pub mod beams;
 pub mod bearings;
@@ -217,11 +228,14 @@ pub mod bevel_worm_gears;
 pub mod bolted_joints;
 pub mod brakes;
 pub mod buckling;
+pub mod cables;
 pub mod cams;
+pub mod centroids;
 pub mod convection_correlations;
 pub mod creep;
 pub mod critical_speed;
 pub mod dimension_chains;
+pub mod distributed_loads;
 pub mod drag_lift;
 pub mod dynamics;
 pub mod economics;
@@ -287,8 +301,13 @@ pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
 pub mod water_hammer;
+pub mod wedge;
 pub mod welds;
 
+pub use area_moments::{
+    composite_second_moment, parallel_axis as parallel_axis_area, polar_second_moment,
+    radius_of_gyration as area_radius_of_gyration,
+};
 pub use balancing::{
     centrifugal_force, correction_mass, permissible_eccentricity_um, permissible_unbalance_g_mm,
     unbalance,
@@ -327,10 +346,12 @@ pub use buckling::{
     EndCondition, critical_load, critical_stress, effective_length, is_euler_valid,
     limiting_slenderness, radius_of_gyration, slenderness_ratio,
 };
+pub use cables::{horizontal_tension, max_tension, parabolic_length};
 pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
     shm_displacement, shm_velocity,
 };
+pub use centroids::{composite_centroid, total_area};
 pub use convection_correlations::{
     convection_coefficient, dittus_boelter, prandtl_number, rayleigh_number,
 };
@@ -341,6 +362,10 @@ pub use critical_speed::{
 };
 pub use dimension_chains::{
     closing_max, closing_min, closing_nominal, rss_tolerance, worst_case_tolerance,
+};
+pub use distributed_loads::{
+    trapezoidal_resultant, triangular_centroid_from_zero, triangular_resultant, uniform_centroid,
+    uniform_resultant,
 };
 pub use drag_lift::{drag_force, drag_power, lift_force, terminal_velocity};
 pub use dynamics::{
@@ -528,6 +553,7 @@ pub use vibrations::{
     natural_frequency_rad, quality_factor,
 };
 pub use water_hammer::{critical_time, joukowsky_surge, wave_speed_elastic, wave_speed_rigid};
+pub use wedge::{driving_force, extraction_force, ideal_mechanical_advantage, self_locking};
 pub use welds::{
     butt_weld_stress, fillet_direct_shear_stress, fillet_throat_area, throat_thickness,
     weld_group_torsional_shear,
