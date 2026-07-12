@@ -15,8 +15,9 @@
 //!   production maximale et de coût minimal.
 //! - [`time`] — temps de coupe (temps machine) des opérations élémentaires.
 //! - [`roughness`] — rugosité théorique de l'état de surface en tournage.
-//! - [`gears`] — engrenages cylindriques droits : géométrie de la denture à
-//!   développante (module) et flexion en pied de dent (**Lewis**).
+//! - [`gears`] — engrenages cylindriques droits et **hélicoïdaux** : géométrie
+//!   de la denture à développante, flexion en pied de dent (**Lewis**), dents
+//!   minimales anti-interférence et rapport de conduite.
 //! - [`threads`] — filetages métriques ISO : diamètres primitif/noyau, section
 //!   résistante (**ISO 898-1**), pas et angle d'hélice.
 //! - [`hertz`] — mécanique du contact de **Hertz** : pression et dimensions de
@@ -33,6 +34,8 @@
 //!   tensions plate/trapézoïdale, angle d'enroulement et puissance transmise.
 //! - [`power_screws`] — vis de transmission : couple de montée/descente,
 //!   rendement et condition d'irréversibilité (filets carré/trapézoïdal).
+//! - [`torseurs`] — torseurs de la mécanique du solide (statique/cinématique) :
+//!   transport du moment, invariants, axe central, comoment (puissance).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -92,6 +95,7 @@ pub mod threads;
 pub mod time;
 pub mod tolerancing;
 pub mod toollife;
+pub mod torseurs;
 
 pub use bearings::{
     BearingType, Reliability, adjusted_rating_life, basic_rating_life_hours,
@@ -104,8 +108,9 @@ pub use belts::{
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
 pub use gears::{
-    SpurGear, center_distance, gear_ratio, lewis_bending_stress, pitch_line_velocity_m_s,
-    tangential_force_from_power, tangential_force_from_torque,
+    HelicalGear, SpurGear, center_distance, gear_ratio, lewis_bending_stress,
+    minimum_teeth_no_undercut, pitch_line_velocity_m_s, tangential_force_from_power,
+    tangential_force_from_torque, transverse_contact_ratio,
 };
 pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
@@ -139,3 +144,4 @@ pub use tolerancing::{
     general_straightness_flatness, general_symmetry,
 };
 pub use toollife::{ExtendedTaylor, taylor_cutting_speed, taylor_tool_life};
+pub use torseurs::Torseur;
