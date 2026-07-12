@@ -185,6 +185,16 @@
 //! - [`couplings`] — accouplements à plateaux : couple transmissible par les
 //!   boulons et conversion puissance ↔ couple.
 //! - [`splines`] — cannelures : couple transmissible par matage des flancs.
+//! - [`elasticity_relations`] — constantes élastiques isotropes : relations entre
+//!   `E`, `G`, `K`, `ν` et coefficient de **Lamé**.
+//! - [`hookes_law_3d`] — loi de **Hooke** généralisée 3D : déformations
+//!   triaxiales, cisaillement, déformation volumique.
+//! - [`composites`] — règle des mélanges : bornes de **Voigt** et **Reuss**,
+//!   masse volumique et résistance longitudinale.
+//! - [`true_stress_strain`] — grandeurs vraies (rationnelles) et loi
+//!   d'écrouissage de **Hollomon**.
+//! - [`strain_energy`] — énergie de déformation élastique : densités, module de
+//!   résilience et énergie totale.
 //!
 //! ## Positionnement
 //!
@@ -241,6 +251,7 @@ pub mod cables;
 pub mod cams;
 pub mod centroids;
 pub mod chain_drive;
+pub mod composites;
 pub mod convection_correlations;
 pub mod couplings;
 pub mod creep;
@@ -250,6 +261,7 @@ pub mod distributed_loads;
 pub mod drag_lift;
 pub mod dynamics;
 pub mod economics;
+pub mod elasticity_relations;
 pub mod elastomer_mounts;
 pub mod endurance_limit;
 pub mod epicyclic;
@@ -270,6 +282,7 @@ pub mod geneva;
 pub mod hardness;
 pub mod heat_exchanger;
 pub mod hertz;
+pub mod hookes_law_3d;
 pub mod hydraulic_cylinders;
 pub mod hyperstatism;
 pub mod impact;
@@ -299,6 +312,7 @@ pub mod sheet_bending;
 pub mod slider_crank;
 pub mod splines;
 pub mod springs;
+pub mod strain_energy;
 pub mod stress_concentration;
 pub mod thermal;
 pub mod thermal_network;
@@ -311,6 +325,7 @@ pub mod torseurs;
 pub mod torsion_profiles;
 pub mod torsion_springs;
 pub mod transient_conduction;
+pub mod true_stress_strain;
 pub mod trusses;
 pub mod universal_joint;
 pub mod vibrations;
@@ -369,6 +384,9 @@ pub use centroids::{composite_centroid, total_area};
 pub use chain_drive::{
     chain_length_pitches, chain_velocity, sprocket_pitch_diameter, sprocket_speed_ratio,
 };
+pub use composites::{
+    longitudinal_strength, reuss_modulus, rule_of_mixtures_density, voigt_modulus,
+};
 pub use convection_correlations::{
     convection_coefficient, dittus_boelter, prandtl_number, rayleigh_number,
 };
@@ -392,6 +410,10 @@ pub use dynamics::{
     kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
+pub use elasticity_relations::{
+    bulk_modulus_from_e_nu, lame_first_parameter, poisson_from_e_g, shear_modulus_from_e_nu,
+    youngs_modulus_from_g_nu,
+};
 pub use elastomer_mounts::{
     apparent_compression_modulus, compression_stiffness, deflection as elastomer_deflection,
     shape_factor, shear_stiffness,
@@ -451,6 +473,7 @@ pub use hertz::{
     effective_modulus, effective_radius, line_contact_half_width, line_contact_max_pressure,
     point_contact_max_pressure, point_contact_radius,
 };
+pub use hookes_law_3d::{axial_strain, hydrostatic_stress, shear_strain, volumetric_strain};
 pub use hydraulic_cylinders::{
     bore_area, extend_force, fluid_power, piston_speed, retract_force, rod_side_area,
 };
@@ -531,6 +554,10 @@ pub use slider_crank::{
 };
 pub use splines::{mean_radius, torque_capacity};
 pub use springs::HelicalSpring;
+pub use strain_energy::{
+    axial_strain_energy_density, modulus_of_resilience, shear_strain_energy_density,
+    total_strain_energy,
+};
 pub use stress_concentration::{
     fatigue_stress_concentration, nominal_stress_plate_with_hole, peak_stress,
 };
@@ -567,6 +594,7 @@ pub use torsion_springs::{
 pub use transient_conduction::{
     biot_number, fourier_number, lumped_capacitance_valid, lumped_temperature, time_constant,
 };
+pub use true_stress_strain::{hollomon_stress, true_strain, true_stress};
 pub use trusses::{axial_stress, member_elongation, two_member_joint};
 pub use universal_joint::{
     max_velocity_ratio as cardan_max_velocity_ratio,
