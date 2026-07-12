@@ -165,7 +165,13 @@ fn rustc_compiles(src: &str, idx: usize) -> Option<bool> {
         return None;
     }
     let status = Command::new("rustc")
-        .args(["--edition", "2021", "--crate-type", "lib", "--emit=metadata"])
+        .args([
+            "--edition",
+            "2021",
+            "--crate-type",
+            "lib",
+            "--emit=metadata",
+        ])
         .arg("-o")
         .arg(&out_path)
         .arg(&src_path)
@@ -263,8 +269,9 @@ fn main() {
     {
         match std::fs::read(&text)
         {
-            Ok(b) => Some(tail_split(&b.iter().map(|&x| x as u32).collect::<Vec<_>>(), val_frac)
-                .to_vec()),
+            Ok(b) => Some(
+                tail_split(&b.iter().map(|&x| x as u32).collect::<Vec<_>>(), val_frac).to_vec(),
+            ),
             Err(e) =>
             {
                 eprintln!("could not read {text}: {e} — skipping val metrics");
@@ -303,7 +310,14 @@ fn main() {
         {
             total_chars as f32 / val.len() as f32
         };
-        let nats_per_char = if chars_per_token > 0.0 { val_loss / chars_per_token } else { f32::NAN };
+        let nats_per_char = if chars_per_token > 0.0
+        {
+            val_loss / chars_per_token
+        }
+        else
+        {
+            f32::NAN
+        };
         println!(
             "val   loss (held-out {:.0}% tail): {val_loss:.4} nats/token   (perplexity {:.2})",
             val_frac * 100.0,
@@ -420,7 +434,10 @@ fn main() {
         // the decoded text (always ok). The byte-level path is the meaningful one.
         let (text, utf8_valid): (String, bool) = match &tokenizer
         {
-            Some(tok) => (tok.decode(&out.iter().map(|&t| t as usize).collect::<Vec<_>>()), true),
+            Some(tok) => (
+                tok.decode(&out.iter().map(|&t| t as usize).collect::<Vec<_>>()),
+                true,
+            ),
             None =>
             {
                 let bytes: Vec<u8> = out.iter().map(|&t| t as u8).collect();
@@ -468,9 +485,18 @@ fn main() {
     // ---- Step 4: the report ------------------------------------------------------
     let pct = |k: usize| 100.0 * k as f32 / n_samples as f32;
     println!("\n=== quality over {n_samples} samples ===");
-    println!("valid UTF-8:        {:.1}%  ({utf8_ok}/{n_samples})", pct(utf8_ok));
-    println!("balanced ()[]{{}}:    {:.1}%  ({balanced_ok}/{n_samples})", pct(balanced_ok));
-    println!("syn::parse_file ok: {:.1}%  ({syn_ok}/{n_samples})", pct(syn_ok));
+    println!(
+        "valid UTF-8:        {:.1}%  ({utf8_ok}/{n_samples})",
+        pct(utf8_ok)
+    );
+    println!(
+        "balanced ()[]{{}}:    {:.1}%  ({balanced_ok}/{n_samples})",
+        pct(balanced_ok)
+    );
+    println!(
+        "syn::parse_file ok: {:.1}%  ({syn_ok}/{n_samples})",
+        pct(syn_ok)
+    );
     if run_rustc
     {
         if rustc_ran > 0

@@ -42,7 +42,7 @@ use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::{source_quality, ShardLoader};
+use scirust_sciagent::train::dataset::{ShardLoader, source_quality};
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
 /// to train on an actual code tree with no tokenizer.

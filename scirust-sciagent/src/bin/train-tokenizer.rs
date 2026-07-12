@@ -47,7 +47,14 @@ fn main() {
     let filter = !args.no_quality_filter;
     eprintln!(
         "corpus-quality filter: {}",
-        if filter { "on" } else { "OFF (--no-quality-filter)" }
+        if filter
+        {
+            "on"
+        }
+        else
+        {
+            "OFF (--no-quality-filter)"
+        }
     );
     let mut all_texts: Vec<String> = Vec::new();
     let mut skipped: BTreeMap<&'static str, usize> = BTreeMap::new();

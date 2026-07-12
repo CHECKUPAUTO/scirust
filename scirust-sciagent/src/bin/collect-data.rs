@@ -75,7 +75,14 @@ fn main() {
     let filter = !args.no_quality_filter;
     eprintln!(
         "corpus-quality filter: {}",
-        if filter { "on" } else { "OFF (--no-quality-filter)" }
+        if filter
+        {
+            "on"
+        }
+        else
+        {
+            "OFF (--no-quality-filter)"
+        }
     );
 
     let mut all_tokens: Vec<u32> = Vec::new();

@@ -17,7 +17,14 @@ fn byte_to_str(b: u8) -> String {
 /// to the legacy `byte_to_str` representation); bytes `128..=255` map into the
 /// `256..=383` block, which never collides with ASCII.
 fn byte_to_unit(b: u8) -> char {
-    let u = if b < 128 { b as u32 } else { 256 + (b as u32 - 128) };
+    let u = if b < 128
+    {
+        b as u32
+    }
+    else
+    {
+        256 + (b as u32 - 128)
+    };
     char::from_u32(u).expect("byte-unit codepoint is always valid")
 }
 
@@ -647,10 +654,16 @@ mod tests {
         );
         // A literal "<200>" in the text must survive (structural decode, not skipped
         // as if it were a placeholder).
-        assert!(out.contains("<200>"), "real <200> text was dropped: {out:?}");
+        assert!(
+            out.contains("<200>"),
+            "real <200> text was dropped: {out:?}"
+        );
         // All 256 bytes are base tokens ⇒ encode never emits `<unk>` (id 3) for bytes.
         let unk = tok.encode("ΩΩΩ ∑∫∂ 🔥").iter().filter(|&&t| t == 3).count();
-        assert_eq!(unk, 0, "v2 must have every byte in the base vocab (no <unk>)");
+        assert_eq!(
+            unk, 0,
+            "v2 must have every byte in the base vocab (no <unk>)"
+        );
     }
 
     #[test]
@@ -663,7 +676,11 @@ mod tests {
         tok.save_json(path).unwrap();
         let tok2 = BpeTokenizer::load_json(path).unwrap();
         let s = "日本語 → ok";
-        assert_eq!(tok.encode(s), tok2.encode(s), "encode differs after save/load");
+        assert_eq!(
+            tok.encode(s),
+            tok2.encode(s),
+            "encode differs after save/load"
+        );
         assert_eq!(
             tok2.decode(&tok2.encode(s)),
             s,
