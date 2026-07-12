@@ -8,3 +8,8 @@ typical_100k,100000.00
 into_top_bracket,200000.00
 rounding_sensitive,12345.67
 near_max_base,900000000.00
+exactly_on_boundary_85k,85000.00
+exactly_on_boundary_165k,165000.00
+just_below_85k,84999.99
+just_above_165k,165000.01
+tie_round_10k_plus,10000.05

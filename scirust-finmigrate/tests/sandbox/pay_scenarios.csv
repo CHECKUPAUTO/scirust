@@ -7,3 +7,7 @@ zero_rate_10,1200.00,0.0000000,10
 single_period,5000.00,0.0041667,1
 long_120,50000.00,0.0033333,120
 small_principal,100.00,0.0100000,36
+max_rate_max_periods,1000.00,0.0500000,120
+low_rate_long,10000.00,0.0010000,120
+large_principal_5yr,500000.00,0.0025000,60
+single_zero_rate,1000.00,0.0000000,1

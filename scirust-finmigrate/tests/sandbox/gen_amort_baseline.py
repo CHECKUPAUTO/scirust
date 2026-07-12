@@ -102,6 +102,14 @@ def scenarios() -> list[tuple[str, Decimal, Decimal, Decimal, int]]:
         # Balance not divisible by payment: last scheduled period leaves a stub
         # that reconciliation must clear exactly.
         ("uneven_tail", d("1000.00"), d("0.0041667"), d("333.33"), 4),
+        # Two periods, clean split: interest then reconciled final payoff to 0.00.
+        ("two_period_even", d("1000.00"), d("0.0050000"), d("502.50"), 2),
+        # Large principal near the field magnitude; balance stays in PIC range
+        # across every period and closes exactly.
+        ("large_principal", d("900000000.00"), d("0.0041667"), d("5000000.00"), 3),
+        # Rounding tie on the per-period interest: 100.00*0.0000500 = 0.005
+        # EXACTLY -> ROUNDED 0.01, stressing accumulated-drift reconciliation.
+        ("amort_tie_round", d("100.00"), d("0.0000500"), d("20.00"), 6),
     ]
 
 

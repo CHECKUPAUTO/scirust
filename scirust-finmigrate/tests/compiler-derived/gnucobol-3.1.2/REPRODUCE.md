@@ -35,7 +35,9 @@ cobc --version                          # must report 3.1.2.0
   `amort_scenarios.csv`, `pay_scenarios.csv`, `day_scenarios.csv`,
   `brkt_scenarios.csv`, `curr_scenarios.csv`. For CURRCVT the driver maps each
   ISO currency code to its fixed EC-1103/97 rate (DEM 1.95583, FRF 6.55957,
-  ITL 1936.27, ESP 166.386, IEP 0.787564).
+  ITL 1936.27, ESP 166.386, IEP 0.787564) and to its minor unit / decimal places
+  (ITL 0, ESP 0, all others 2), which it passes as the wrapper's fourth input
+  (Gap-R).
 
 ## Normalization procedure (already applied; recorded for provenance)
 
@@ -87,7 +89,7 @@ python3 tools/run_baselines.py generate
 python3 tools/run_baselines.py verify         # -> 0 mismatches
 
 # 3. no-compiler consistency check vs the model baselines in ../../sandbox
-python3 tools/run_baselines.py check          # -> 0 unexpected, 3 documented Gap-R divergences
+python3 tools/run_baselines.py check          # -> 0 unexpected, 0 divergences (Gap-R reconciled)
 
 # 4. regenerate and verify the integrity manifest
 LC_ALL=C; find . -type f ! -name SHA256SUMS ! -path './tools/_build/*' \
@@ -99,19 +101,24 @@ sha256sum -c SHA256SUMS                        # -> all OK
 `tools/_build/` (git-ignored). A clean `generate` reproduces every CSV
 byte-for-byte.
 
-## Faithfulness / known divergence (CURRCVT, audit Gap-R)
+## CURRCVT Gap-R reconciliation (2026-07-12)
 
-`CURRCVT-RUN.cbl` stores its result in a fixed 2-dp field (`WS-RESULT PIC
-S9(11)V99`) and does not implement the target-currency minor unit. For the three
-0-decimal-currency targets the raw COBOL result therefore carries two decimals
-and diverges from the model/Rust baseline (which rounds to the minor unit):
+`CURRCVT-RUN.cbl` now implements the target-currency minor unit (audit Gap-R). It
+ACCEPTs a fourth input, `WS-MINOR-UNIT` (0 for ITL/ESP, 2 otherwise — the
+currency-master value the driver supplies from its `MINOR` table), and rounds into
+a result field of the matching scale: `WS-RESULT-0 PIC S9(13)` for 0-dp targets,
+`WS-RESULT-2 PIC S9(11)V99` otherwise, DISPLAYing the correctly-scaled field.
 
-| Scenario   | Raw GnuCOBOL result | Model / Rust (0-dp) |
-|------------|--------------------:|--------------------:|
-| frf_to_itl | 295182.43           | 295182              |
-| dem_to_esp | 21267.96            | 21268               |
-| esp_to_itl | 581860.75           | 581861              |
+The earlier wrapper stored every result in a fixed 2-dp field and so diverged from
+the model by a minor unit on the three 0-decimal-currency targets:
 
-These baselines record the **raw GnuCOBOL value**. `tools/run_baselines.py check`
-treats these three `result` cells as documented divergences and fails on any
-*other* mismatch. See `RESULTS.md`.
+| Scenario   | Old wrapper (2-dp) | Model / Rust & reconciled wrapper (minor unit) |
+|------------|-------------------:|-----------------------------------------------:|
+| frf_to_itl | 295182.43          | 295182                                         |
+| dem_to_esp | 21267.96           | 21268                                          |
+| esp_to_itl | 581860.75          | 581861                                         |
+
+The committed baselines now record the reconciled whole-number values, equal to
+the model. `tools/run_baselines.py check` keeps an explicit **empty** Gap-R
+exception set, so any regression surfaces as an *unexpected* mismatch. See
+`RESULTS.md` for the full historical trace.

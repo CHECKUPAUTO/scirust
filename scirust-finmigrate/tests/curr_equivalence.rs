@@ -72,7 +72,7 @@ fn curr_equivalence_against_golden_baseline() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 10, "expected 10 scenarios");
+    assert_eq!(checked, 14, "expected 14 scenarios");
     // The whole point of the unit: at least one lawful-vs-direct divergence.
     assert!(
         divergences >= 2,

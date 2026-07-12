@@ -10,6 +10,10 @@ tiny_principal,0.01,0.10000
 large_principal_in_range,990000000.00,0.01000
 negative_rate,5000.00,-0.04250
 typical_savings,2500.75,0.03500
+neg_principal_neg_rate,-5000.00,-0.04250
+near_max_principal_high_rate,900000000.00,0.09999
+half_cent_negative_up,-100.00,0.00180
+tiny_negative,-0.01,0.10000
 rand_000,245840116.97,0.67715
 rand_001,393422492.07,0.57145
 rand_002,763932007.36,0.24952

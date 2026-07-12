@@ -21,14 +21,16 @@ Modes
              with the model baselines in ../../sandbox for the shared emitted
              fields (this is the divergence-aware equivalence check)
 
-Faithfulness note (CURRCVT)
----------------------------
-`CURRCVT-RUN.cbl` stores its result in a fixed 2-dp field (`WS-RESULT PIC
-S9(11)V99`); it does not implement the target-currency minor unit (audit Gap-R).
-For the three 0-decimal-currency targets (ITL/ESP) the raw COBOL result therefore
-carries two decimals (e.g. 295182.43) and diverges from the model/Rust baseline,
-which rounds to the target minor unit (295182). These baselines record the raw
-COBOL value; the divergence is documented in RESULTS.md.
+Faithfulness note (CURRCVT — Gap-R reconciled 2026-07-12)
+---------------------------------------------------------
+`CURRCVT-RUN.cbl` now implements the target-currency minor unit (audit Gap-R):
+it ACCEPTs `WS-MINOR-UNIT` (0 for ITL/ESP, 2 otherwise) after the two rates and
+rounds into a result field of the matching scale. The driver supplies that minor
+unit from the `MINOR` table below. For the three 0-decimal-currency targets the
+raw COBOL result is therefore a whole number (e.g. 295182) and equals the
+model/Rust baseline. The earlier wrapper used a fixed 2-dp field and diverged by
+a minor unit on those rows; that history is recorded in RESULTS.md. `check` now
+expects zero divergences.
 """
 
 from __future__ import annotations
@@ -59,6 +61,12 @@ SYNTAX = ["cobc", "-fsyntax-only", "-free", "-Wall"]
 RATE = {
     "DEM": "1.95583", "FRF": "6.55957", "ITL": "1936.27",
     "ESP": "166.386", "IEP": "0.787564",
+}
+
+# Target currency minor unit (decimal places) — the currency-master value the
+# CURRCVT wrapper rounds to (Gap-R). 0 for ITL/ESP, 2 otherwise.
+MINOR = {
+    "DEM": "2", "FRF": "2", "ITL": "0", "ESP": "0", "IEP": "2",
 }
 
 
@@ -147,7 +155,8 @@ def emit_brktcalc(exe, s):
 
 
 def emit_currcvt(exe, s):
-    o = run(exe, [s["amount"], RATE[s["from_ccy"]], RATE[s["to_ccy"]]])  # DISPLAY: euro, result
+    # inputs: amount, rate_from, rate_to, target minor unit (Gap-R)
+    o = run(exe, [s["amount"], RATE[s["from_ccy"]], RATE[s["to_ccy"]], MINOR[s["to_ccy"]]])  # DISPLAY: euro, result
     return [{"case_id": s["case_id"], "amount": s["amount"], "from_ccy": s["from_ccy"],
              "to_ccy": s["to_ccy"], "result": fmt(o[1]), "euro": fmt(o[0])}]
 
@@ -224,9 +233,10 @@ def cmd_check():
         "BRKTCALC": ("brkt_baseline.csv", ["base", "tax"], ["case_id"]),
         "CURRCVT": ("curr_baseline.csv", ["amount", "result", "euro"], ["case_id"]),
     }
-    # Documented COBOL-vs-model divergences (audit Gap-R: CURRCVT 0-dp targets).
-    KNOWN = {("CURRCVT", "frf_to_itl", "result"), ("CURRCVT", "dem_to_esp", "result"),
-             ("CURRCVT", "esp_to_itl", "result")}
+    # Gap-R was reconciled 2026-07-12 (CURRCVT-RUN now rounds to the target minor
+    # unit); no COBOL-vs-model divergences remain. Kept as an explicit empty set
+    # so a regression would surface as an UNEXPECTED mismatch, not a silent pass.
+    KNOWN: set[tuple[str, str, str]] = set()
     total = mism = known = 0
     for unit, (mf, cols, keys) in model.items():
         comp = list(csv.DictReader(open(os.path.join(BASELINES, f"{unit}-compiler-baseline.csv"))))

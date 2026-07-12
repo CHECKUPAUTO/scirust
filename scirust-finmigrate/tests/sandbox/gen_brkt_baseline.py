@@ -71,6 +71,15 @@ def scenarios():
         ("into_top_bracket", d("200000.00")),        # includes 35000*0.32
         ("rounding_sensitive", d("12345.67")),       # 2345.67*0.10 = 234.567 -> 234.57
         ("near_max_base", d("900000000.00")),        # large; stays in field
+        # --- remaining bracket boundaries (exact) ----------------------------
+        ("exactly_on_boundary_85k", d("85000.00")),   # fills brackets 1+2, 3 empty
+        ("exactly_on_boundary_165k", d("165000.00")), # fills 1..3, top bracket empty
+        # --- one cent either side of a boundary ------------------------------
+        ("just_below_85k", d("84999.99")),            # last cent taxed at 0.22
+        ("just_above_165k", d("165000.01")),          # first cent taxed at 0.32
+        # --- rounding tie at a bracket edge ----------------------------------
+        # 0.05 into bracket 1: 0.05*0.10 = 0.005 EXACTLY -> ROUNDED 0.01.
+        ("tie_round_10k_plus", d("10000.05")),
     ]
 
 
