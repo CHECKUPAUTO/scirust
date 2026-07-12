@@ -42,6 +42,8 @@
 //!   indépendantes, mobilité et degré d'hyperstaticité `h = m + 6μ − Ic`.
 //! - [`friction`] — frottement sec de **Coulomb** : adhérence/glissement, angle
 //!   et cône d'adhérence, arc-boutement sur plan incliné.
+//! - [`dynamics`] — dynamique du solide en rotation : énergie cinétique, moments
+//!   d'inertie usuels, théorème de **Huygens**, PFD (`M = J·α`) et puissance.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -87,6 +89,7 @@
 
 pub mod bearings;
 pub mod belts;
+pub mod dynamics;
 pub mod economics;
 pub mod forces;
 pub mod friction;
@@ -113,6 +116,11 @@ pub use bearings::{
 pub use belts::{
     belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
     wrap_angle_small_pulley_rad,
+};
+pub use dynamics::{
+    angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
+    inertia_solid_cylinder, inertia_solid_sphere, inertia_thin_ring, kinetic_energy_rotation,
+    kinetic_energy_translation, parallel_axis, rotational_power, torque_from_angular_accel,
 };
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
