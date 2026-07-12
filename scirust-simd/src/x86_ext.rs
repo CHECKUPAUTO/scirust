@@ -1,17 +1,16 @@
 //! # Extensions x86_64 avancées
 //!
-//! Kernels qui vont au-delà du SIMD flottant « classique » (AVX2/AVX-512F) et
-//! exploitent des fonctionnalités plus pointues de la micro-architecture :
+//! Kernels x86-spécifiques qui vont au-delà du SIMD flottant « classique »
+//! (AVX2/AVX-512F) et exploitent des fonctionnalités plus pointues de la
+//! micro-architecture :
 //!
-//! * **AVX-512 VNNI** (`_mm512_dpbusd_epi32`) — produit scalaire entier `u8·i8`
-//!   accumulé en `i32`, socle de l'inférence **quantifiée** (int8).
-//! * **BF16 mixed-precision** — stockage en `bfloat16` (moitié de la bande
-//!   passante mémoire), calcul accumulé en `f32` (le repli matériel exact de
-//!   `VDPBF16PS` quand l'ISA `avx512bf16` est absente).
 //! * **Masques `k` AVX-512** — mise à jour *conditionnelle* par voie
-//!   (`axpy_masked_f32`), sans branche ni écriture des voies inactives.
+//!   ([`axpy_masked_f32`]), sans branche ni écriture des voies inactives.
 //! * **Prefetch logiciel + stores non-temporels** — pour les flux qui
-//!   dépassent le cache (`scale_stream_f32`, `axpy_prefetch_f32`).
+//!   dépassent le cache ([`scale_stream_f32`], [`axpy_prefetch_f32`]).
+//!
+//! La **quantification** (int8 VNNI/dotprod, bf16), qui est cross-arch, vit
+//! désormais dans [`crate::quant`].
 //!
 //! Chaque entrée publique fait de la détection *runtime* et retombe sur une
 //! implémentation scalaire portable, donc l'appel est sûr sur n'importe quel
@@ -27,170 +26,6 @@
 //! slices. Les stores non-temporels sont suivis d'un `sfence` avant tout retour.
 
 #![allow(clippy::missing_safety_doc)]
-
-// ===================================================================== //
-//  BF16 (bfloat16) — conversions round-to-nearest-even                   //
-// ===================================================================== //
-
-/// Convertit un `f32` en `bfloat16` (stocké dans les 16 bits de poids fort),
-/// avec arrondi *round-to-nearest-even* — identique au comportement matériel.
-/// Les `NaN` sont préservés (quiet).
-#[inline]
-pub fn f32_to_bf16(x: f32) -> u16 {
-    let bits = x.to_bits();
-    if (bits & 0x7fff_ffff) > 0x7f80_0000
-    {
-        // NaN → NaN quiet, on garde le signe.
-        return ((bits >> 16) as u16) | 0x0040;
-    }
-    // round-to-nearest-even : on ajoute le bit de garde + le biais pair.
-    let rounding_bias = 0x0000_7fff + ((bits >> 16) & 1);
-    ((bits.wrapping_add(rounding_bias)) >> 16) as u16
-}
-
-/// Convertit un `bfloat16` (16 bits de poids fort) en `f32` (exact, sans perte).
-#[inline]
-pub fn bf16_to_f32(x: u16) -> f32 {
-    f32::from_bits((x as u32) << 16)
-}
-
-/// Convertit une tranche `f32 → bf16`.
-pub fn f32_to_bf16_slice(src: &[f32], dst: &mut [u16]) {
-    assert_eq!(src.len(), dst.len(), "f32_to_bf16_slice: length mismatch");
-    for (d, &s) in dst.iter_mut().zip(src)
-    {
-        *d = f32_to_bf16(s);
-    }
-}
-
-/// Convertit une tranche `bf16 → f32`.
-pub fn bf16_to_f32_slice(src: &[u16], dst: &mut [f32]) {
-    assert_eq!(src.len(), dst.len(), "bf16_to_f32_slice: length mismatch");
-    for (d, &s) in dst.iter_mut().zip(src)
-    {
-        *d = bf16_to_f32(s);
-    }
-}
-
-/// Produit scalaire **BF16 mixed-precision** : entrées stockées en `bf16`,
-/// produits et accumulation en `f32` — exactement la sémantique de `VDPBF16PS`.
-/// Divise par deux la bande passante mémoire par rapport au `f32` plein tout en
-/// gardant une accumulation `f32` précise.
-///
-/// Chemin AVX-512 (élargissement `bf16 → f32` par `_mm512_cvtepu16_epi32` +
-/// décalage de 16 bits, puis FMA `f32`) quand `avx512f` est présent — 16 voies
-/// par pas ; repli scalaire sinon. Sur une puce dotée de l'ISA `avx512bf16`, la
-/// boucle interne se remplacerait un-pour-un par `_mm512_dpbf16_ps` (un seul
-/// produit-fusionné par paire de `bf16`) ; le présent chemin `f32` est le repli
-/// exact et portable de cette instruction.
-pub fn dot_bf16(a: &[u16], b: &[u16]) -> f32 {
-    assert_eq!(a.len(), b.len(), "dot_bf16: length mismatch");
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::is_x86_feature_detected!("avx512f")
-        {
-            // SAFETY: gated by the runtime detection just above.
-            return unsafe { dot_bf16_avx512(a, b) };
-        }
-    }
-    dot_bf16_scalar(a, b)
-}
-
-/// Repli scalaire de [`dot_bf16`] (aussi la référence des tests).
-pub fn dot_bf16_scalar(a: &[u16], b: &[u16]) -> f32 {
-    let mut acc = 0.0f32;
-    for (&x, &y) in a.iter().zip(b)
-    {
-        acc += bf16_to_f32(x) * bf16_to_f32(y);
-    }
-    acc
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f")]
-unsafe fn dot_bf16_avx512(a: &[u16], b: &[u16]) -> f32 {
-    use core::arch::x86_64::*;
-    let n = a.len();
-    let mut acc = _mm512_setzero_ps();
-    let mut i = 0;
-    while i + 16 <= n
-    {
-        // 16×bf16 (u16) → 16×f32 : zero-extend u16→u32 puis <<16 (place la
-        // mantisse/exposant bf16 en tête d'un f32), reinterprété en f32.
-        let ai = _mm256_loadu_si256(a.as_ptr().add(i) as *const __m256i);
-        let bi = _mm256_loadu_si256(b.as_ptr().add(i) as *const __m256i);
-        let af = _mm512_castsi512_ps(_mm512_slli_epi32::<16>(_mm512_cvtepu16_epi32(ai)));
-        let bf = _mm512_castsi512_ps(_mm512_slli_epi32::<16>(_mm512_cvtepu16_epi32(bi)));
-        acc = _mm512_fmadd_ps(af, bf, acc);
-        i += 16;
-    }
-    let mut sum = _mm512_reduce_add_ps(acc);
-    for j in i..n
-    {
-        sum += bf16_to_f32(a[j]) * bf16_to_f32(b[j]);
-    }
-    sum
-}
-
-// ===================================================================== //
-//  VNNI — produit scalaire entier quantifié (u8 · i8 → i32)              //
-// ===================================================================== //
-
-/// Produit scalaire quantifié `sum(a[i] as i32 * b[i] as i32)` avec activations
-/// `u8` (non signées) et poids `i8` (signés) — la convention usuelle de
-/// l'inférence int8. Utilise **AVX-512 VNNI** (`VPDPBUSD`, 4 MAC entiers par
-/// voie et par instruction) quand disponible, sinon repli scalaire.
-///
-/// L'accumulation `i32` est exacte (aucun débordement pour des longueurs
-/// réalistes : borne `|somme| ≤ len · 255 · 128`).
-pub fn dot_u8i8_i32(a: &[u8], b: &[i8]) -> i32 {
-    assert_eq!(a.len(), b.len(), "dot_u8i8_i32: length mismatch");
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::is_x86_feature_detected!("avx512vnni") && std::is_x86_feature_detected!("avx512bw")
-        {
-            // SAFETY: gated by the runtime detection just above.
-            return unsafe { dot_u8i8_i32_vnni(a, b) };
-        }
-    }
-    dot_u8i8_i32_scalar(a, b)
-}
-
-/// Repli scalaire portable de [`dot_u8i8_i32`] (aussi la référence des tests).
-pub fn dot_u8i8_i32_scalar(a: &[u8], b: &[i8]) -> i32 {
-    let mut acc: i32 = 0;
-    for (&x, &y) in a.iter().zip(b)
-    {
-        acc += (x as i32) * (y as i32);
-    }
-    acc
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512vnni,avx512bw,avx512f")]
-unsafe fn dot_u8i8_i32_vnni(a: &[u8], b: &[i8]) -> i32 {
-    use core::arch::x86_64::*;
-    let n = a.len();
-    let mut acc = _mm512_setzero_si512();
-    let mut i = 0;
-    while i + 64 <= n
-    {
-        let va = _mm512_loadu_si512(a.as_ptr().add(i) as *const __m512i);
-        let vb = _mm512_loadu_si512(b.as_ptr().add(i) as *const __m512i);
-        // dpbusd : a non signé (u8), b signé (i8), 4 produits/voie → i32.
-        acc = _mm512_dpbusd_epi32(acc, va, vb);
-        i += 64;
-    }
-    let r = n - i;
-    if r > 0
-    {
-        let mask: u64 = (1u64 << r) - 1;
-        let va = _mm512_maskz_loadu_epi8(mask, a.as_ptr().add(i) as *const i8);
-        let vb = _mm512_maskz_loadu_epi8(mask, b.as_ptr().add(i));
-        acc = _mm512_dpbusd_epi32(acc, va, vb);
-    }
-    _mm512_reduce_add_epi32(acc)
-}
 
 // ===================================================================== //
 //  Masque k AVX-512 — axpy conditionnel par voie                         //
@@ -358,64 +193,6 @@ unsafe fn axpy_prefetch_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bf16_roundtrip_exact_powers_of_two() {
-        for e in -30i32..30
-        {
-            let v = 2f32.powi(e);
-            assert_eq!(bf16_to_f32(f32_to_bf16(v)), v, "2^{e}");
-        }
-        assert_eq!(bf16_to_f32(f32_to_bf16(0.0)), 0.0);
-        assert_eq!(bf16_to_f32(f32_to_bf16(1.0)), 1.0);
-        assert!(bf16_to_f32(f32_to_bf16(f32::NAN)).is_nan());
-    }
-
-    #[test]
-    fn bf16_conversion_within_relative_tolerance() {
-        // bf16 a 8 bits de mantisse effectifs → erreur relative < 2^-8.
-        for k in 1..1000
-        {
-            let v = (k as f32) * 0.123 - 40.0;
-            if v == 0.0
-            {
-                continue;
-            }
-            let r = bf16_to_f32(f32_to_bf16(v));
-            let rel = ((r - v) / v).abs();
-            assert!(rel <= 2f32.powi(-8), "v={v} rel={rel}");
-        }
-    }
-
-    #[test]
-    fn dot_bf16_matches_f32_reference_loosely() {
-        let a: Vec<f32> = (0..500).map(|i| (i as f32 * 0.01).sin()).collect();
-        let b: Vec<f32> = (0..500).map(|i| (i as f32 * 0.02).cos()).collect();
-        let mut ab = vec![0u16; a.len()];
-        let mut bb = vec![0u16; b.len()];
-        f32_to_bf16_slice(&a, &mut ab);
-        f32_to_bf16_slice(&b, &mut bb);
-        let got = dot_bf16(&ab, &bb);
-        let want: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
-        assert!(
-            (got - want).abs() <= 1e-1 * (1.0 + want.abs()),
-            "{got} vs {want}"
-        );
-    }
-
-    #[test]
-    fn vnni_dot_matches_scalar_all_lengths() {
-        for len in 0..=200usize
-        {
-            let a: Vec<u8> = (0..len).map(|i| ((i * 7 + 3) % 256) as u8).collect();
-            let b: Vec<i8> = (0..len)
-                .map(|i| ((i as i32 * 5 - 17) % 128) as i8)
-                .collect();
-            let got = dot_u8i8_i32(&a, &b);
-            let want = dot_u8i8_i32_scalar(&a, &b);
-            assert_eq!(got, want, "len={len}");
-        }
-    }
 
     #[test]
     fn axpy_masked_matches_scalar() {

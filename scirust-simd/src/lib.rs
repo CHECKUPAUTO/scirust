@@ -30,6 +30,10 @@
 //! ```
 
 #![cfg_attr(feature = "portable-simd", feature(portable_simd))]
+// Intrinsèque NEON `i8mm` (USDOT `u8·i8`) encore *unstable* dans
+// `core::arch::aarch64` — activée uniquement pour la cible aarch64 (toolchain
+// nightly épinglée). `dotprod` (SDOT) est stable depuis 1.99. Cf. `crate::quant`.
+#![cfg_attr(target_arch = "aarch64", feature(stdarch_neon_i8mm))]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
@@ -646,6 +650,7 @@ pub mod kv_cache;
 pub mod matrix;
 pub mod model;
 pub mod norm;
+pub mod quant;
 pub mod transformer;
 
 #[cfg(target_arch = "x86_64")]
