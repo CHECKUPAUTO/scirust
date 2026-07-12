@@ -235,6 +235,34 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   **measure quality precisely → then** scale the corpus / add KV-cache / try FP8, in
   that order, each gated on the previous.
 
+- **Quality verdict on `step_20000` (the number that set the next moves).** Measured
+  on the Thor: train **6.62** (ppl 750) vs held-out val **6.80** (ppl 896) → gap
+  **+0.18** nats/token, so it is genuinely **generalizing, not memorizing**; **1.19
+  nats/char**. But over 32 deterministic samples: **0 % parse** (`syn`), **0 %
+  balanced brackets**, yet **no degeneracy** (0.1 % trigram-repeat, 0.92 type-token
+  ratio, longest run ~1 token). Read: the model learned the **texture** of Rust
+  (`mod tests { use super::*; #[test] fn …`, doc-comments, `.collect()`, real crate
+  names) but not coherence — *undertrained*, not broken. Two concrete faults surfaced
+  in the samples: non-ASCII bytes leaking as `<194><183>` placeholders (a tokenizer
+  bug), and heavy quoted-string / test-fixture soup (corpus content). → B14 + a
+  cleaner, larger corpus + more steps.
+
+- **B14 — reversible byte-level BPE (kills the `<NNN>` leak).** The old tokenizer keyed
+  every non-ASCII byte as a `<NNN>` placeholder that `decode` then *dropped*, so any
+  multibyte UTF-8 (`· — é ✅ 世`) was destroyed and leaked as literal `<194><183>` in
+  generations. `bpe.rs` now uses a GPT-2-style **reversible byte↔char map**: all 256
+  bytes are base tokens, `encode` maps each byte to a distinct unit char, and `decode`
+  concatenates the bytes each token stands for and UTF-8-decodes **once at the end** —
+  so a multibyte char split across two BPE tokens reassembles, and no byte can ever
+  become a placeholder. The JSON is version-tagged (`byte_level_v2`); a missing tag
+  means a legacy tokenizer, so the embedded `bpe.json` + `sciagent` CLI keep their
+  exact old decode. Tests round-trip arbitrary UTF-8 (accents, CJK, emoji, raw bytes),
+  assert no placeholder leak, and confirm the legacy path is unchanged. Base vocab is
+  now corpus-independent (always the 256 bytes in order), so `encode` never emits
+  `<unk>` for a byte and training is even more deterministic. Requires a **re-tokenise
+  + retrain** to take effect (step 6) — the `step_20000` checkpoint stays paired with
+  its v1 tokenizer.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
