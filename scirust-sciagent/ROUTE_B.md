@@ -209,6 +209,74 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   garbage. The whole SLM lifecycle — pretrain, checkpoint, resume, generate — now runs
   from raw source on the Thor; the only remaining lever for quality is **scale**.
 
+- **First real 350M run — the system works at scale.** With a fresh deterministic
+  tokenizer (28.5 M chars → 5.6 M BPE tokens) and 2 % held out, a **20,000-step** bf16
+  pretrain of the 304M model ran to completion on the Thor at ~125 tok/s, no collapse
+  (`gnorm` 3–8, spikes clipped). **Held-out val loss fell 10.46 → 6.42** (best; still
+  declining at step 20k), i.e. ~**1.3 nats/char** — below the byte model's 1.97 —
+  with train ≈ val (6.74 vs 6.76), so it is **generalizing, not memorizing** at ~1.8
+  epochs. A genuine from-scratch code LM, trained end-to-end in bf16 on Blackwell
+  Tensor cores. Still early (val hadn't plateaued); more corpus + steps keep helping.
+
+- **B13 — quality-evaluation harness (put a number on it before scaling).**
+  `examples/cuda_eval` (feature `eval` = `cuda` + `syn`) + `CudaModel::eval_loss` turn
+  the eyeball test into measurement, the gate before spending more compute. It (1)
+  reports the exact loss picture — train loss (from the checkpoint meta) vs a freshly
+  measured **held-out val loss**, perplexity `exp(loss)`, and **nats/char** (`val_loss
+  / chars_per_token`, chars counted by decoding the val stream); (2) generates a
+  **deterministic batch** of N samples (same prompt, `seed = base + i`, reproducible);
+  and (3) scores them: **valid-UTF-8** rate (only < 100 % for byte models — a BPE
+  decode is UTF-8 by construction), **balanced `()[]{}`** rate (lexical), **`syn::
+  parse_file`** accept rate, an optional **`rustc --crate-type lib`** compile rate
+  (`SCIAGENT_RUSTC=1`), and **repetition/diversity** (mean trigram-repeat, longest
+  single-token run, type-token ratio). `CudaModel::eval_loss` is the inference-only
+  twin of `CudaTrainer::eval_loss` — no fp32 masters/moments allocated, so a plain
+  2-bytes/param model scores a split. This is step 2–4 of the post-first-run plan:
+  **measure quality precisely → then** scale the corpus / add KV-cache / try FP8, in
+  that order, each gated on the previous.
+
+- **Quality verdict on `step_20000` (the number that set the next moves).** Measured
+  on the Thor: train **6.62** (ppl 750) vs held-out val **6.80** (ppl 896) → gap
+  **+0.18** nats/token, so it is genuinely **generalizing, not memorizing**; **1.19
+  nats/char**. But over 32 deterministic samples: **0 % parse** (`syn`), **0 %
+  balanced brackets**, yet **no degeneracy** (0.1 % trigram-repeat, 0.92 type-token
+  ratio, longest run ~1 token). Read: the model learned the **texture** of Rust
+  (`mod tests { use super::*; #[test] fn …`, doc-comments, `.collect()`, real crate
+  names) but not coherence — *undertrained*, not broken. Two concrete faults surfaced
+  in the samples: non-ASCII bytes leaking as `<194><183>` placeholders (a tokenizer
+  bug), and heavy quoted-string / test-fixture soup (corpus content). → B14 + a
+  cleaner, larger corpus + more steps.
+
+- **B14 — reversible byte-level BPE (kills the `<NNN>` leak).** The old tokenizer keyed
+  every non-ASCII byte as a `<NNN>` placeholder that `decode` then *dropped*, so any
+  multibyte UTF-8 (`· — é ✅ 世`) was destroyed and leaked as literal `<194><183>` in
+  generations. `bpe.rs` now uses a GPT-2-style **reversible byte↔char map**: all 256
+  bytes are base tokens, `encode` maps each byte to a distinct unit char, and `decode`
+  concatenates the bytes each token stands for and UTF-8-decodes **once at the end** —
+  so a multibyte char split across two BPE tokens reassembles, and no byte can ever
+  become a placeholder. The JSON is version-tagged (`byte_level_v2`); a missing tag
+  means a legacy tokenizer, so the embedded `bpe.json` + `sciagent` CLI keep their
+  exact old decode. Tests round-trip arbitrary UTF-8 (accents, CJK, emoji, raw bytes),
+  assert no placeholder leak, and confirm the legacy path is unchanged. Base vocab is
+  now corpus-independent (always the 256 bytes in order), so `encode` never emits
+  `<unk>` for a byte and training is even more deterministic. Requires a **re-tokenise
+  + retrain** to take effect (step 6) — the `step_20000` checkpoint stays paired with
+  its v1 tokenizer.
+
+- **B15 — corpus-quality filter + deterministic walk (step 5, corpus half).** A shared
+  `source_quality(name, content)` gate drops the low-value bulk the `step_20000`
+  samples were full of — lockfiles, `@generated`/`DO NOT EDIT` files, minified/giant-
+  line blobs, and numeric/string **data tables** (low letter density or high digit
+  density) — while staying conservative enough that ordinary `.rs` (macros, match
+  arms, small lookup tables) passes. It's wired into `collect-data`, `train-tokenizer`,
+  and the `cuda_pretrain` byte path, each printing a kept/skipped **summary by reason**
+  (no silent truncation) with a `--no-quality-filter` opt-out. Same pass also fixes a
+  latent **determinism bug**: `collect-data`/`train-tokenizer` walked `read_dir` in
+  OS-arbitrary order, so the corpus — and the trained tokenizer/shards — were
+  irreproducible across machines; both now sort entries (the byte path already did).
+  Together with B14 this is the *fix corpus + tokenizer* half of the endorsed plan;
+  the payoff lands on the **re-tokenise → retrain** (step 6).
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

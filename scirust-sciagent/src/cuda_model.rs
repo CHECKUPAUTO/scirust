@@ -190,6 +190,36 @@ impl CudaModel {
         self.chain.download(&self.forward_resident(tokens))
     }
 
+    /// Mean next-token cross-entropy (nats/token) over up to `max_windows`
+    /// non-overlapping `seq_len` windows of `tokens` — the inference-only twin of
+    /// [`CudaTrainer::eval_loss`], with no optimizer state allocated. Lets a plain
+    /// [`CudaModel`] (2 bytes/param, no fp32 masters/moments) score a held-out split.
+    /// Returns `NaN` if the corpus is shorter than one window.
+    pub fn eval_loss(&self, tokens: &[u32], seq_len: usize, max_windows: usize) -> f32 {
+        let s = seq_len;
+        let mut total = 0.0f64;
+        let mut count = 0usize;
+        let mut cursor = 0usize;
+        while cursor + s < tokens.len() && count < max_windows.max(1)
+        {
+            let inputs = &tokens[cursor..cursor + s];
+            let targets = &tokens[cursor + 1..cursor + s + 1];
+            let logits = self.forward_resident(inputs);
+            let host = self.chain.download(&logits);
+            total += host_cross_entropy(&host, targets, s, self.vocab) as f64;
+            count += 1;
+            cursor += s;
+        }
+        if count == 0
+        {
+            f32::NAN
+        }
+        else
+        {
+            (total / count as f64) as f32
+        }
+    }
+
     /// Autoregressive generation from `prompt`, appending up to `max_new` tokens.
     /// **Non-cached** (re-runs the full forward each step, O(n²)) — the MVP, matching
     /// Route A's `infer-1` before its KV cache; fine for eyeballing checkpoint quality

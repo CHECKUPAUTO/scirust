@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
@@ -6,6 +6,44 @@ const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>",
 fn byte_to_str(b: u8) -> String {
     let single = vec![b];
     String::from_utf8(single).unwrap_or_else(|_| format!("<{b}>"))
+}
+
+/// Reversible byte → "unit char" map (GPT-2-style, simplified) for the **v2**
+/// byte-level scheme. Every byte value maps to a distinct Unicode scalar, so the
+/// base vocab is representable as ordinary keys AND `decode` is exactly invertible:
+/// no byte can collapse to a `<NNN>` placeholder, so multibyte UTF-8 (`· — é ✅ 世`)
+/// round-trips through encode → decode unchanged. Bytes `0..=127` map to
+/// themselves (ASCII — so a v2 tokenizer's ASCII tokens are byte-for-byte identical
+/// to the legacy `byte_to_str` representation); bytes `128..=255` map into the
+/// `256..=383` block, which never collides with ASCII.
+fn byte_to_unit(b: u8) -> char {
+    let u = if b < 128
+    {
+        b as u32
+    }
+    else
+    {
+        256 + (b as u32 - 128)
+    };
+    char::from_u32(u).expect("byte-unit codepoint is always valid")
+}
+
+/// Inverse of [`byte_to_unit`]: a unit char back to its byte, or `None` if `c` is
+/// not a unit char (e.g. a character from a legacy special-token string).
+fn unit_to_byte(c: char) -> Option<u8> {
+    let u = c as u32;
+    if u < 128
+    {
+        Some(u as u8)
+    }
+    else if (256..384).contains(&u)
+    {
+        Some((u - 256 + 128) as u8)
+    }
+    else
+    {
+        None
+    }
 }
 
 pub struct BpeTrainer {
@@ -38,20 +76,14 @@ impl BpeTrainer {
             rev.push(tok.to_string());
         }
 
-        // Ajouter tous les bytes uniques du corpus (byte-level BPE)
-        let mut byte_set = HashSet::new();
-        for t in texts
+        // Base vocab: ALL 256 byte values, each as its reversible unit char (v2
+        // scheme). Adding every byte — not just those the corpus happens to contain —
+        // guarantees `encode` never emits `<unk>` for a byte and `decode` is fully
+        // reversible, independent of corpus coverage. The order is byte-ascending, so
+        // the base ids are deterministic across corpora.
+        for b in 0u8..=255
         {
-            for b in t.bytes()
-            {
-                byte_set.insert(b);
-            }
-        }
-        let mut byte_ids: Vec<u8> = byte_set.into_iter().collect();
-        byte_ids.sort();
-        for b in &byte_ids
-        {
-            let s = byte_to_str(*b);
+            let s = byte_to_unit(b).to_string();
             if !vocab.contains_key(&s)
             {
                 vocab.insert(s.clone(), id);
@@ -60,11 +92,14 @@ impl BpeTrainer {
             }
         }
 
-        // Étape 2 : tokeniser chaque texte en séquence de bytes
+        // Étape 2 : tokeniser chaque texte en séquence de bytes (unit chars)
         let mut corpus: Vec<Vec<usize>> = Vec::with_capacity(texts.len());
         for t in texts
         {
-            let ids: Vec<usize> = t.bytes().map(|b| vocab[&byte_to_str(b)]).collect();
+            let ids: Vec<usize> = t
+                .bytes()
+                .map(|b| vocab[&byte_to_unit(b).to_string()])
+                .collect();
             corpus.push(ids);
         }
 
@@ -166,7 +201,12 @@ impl BpeTrainer {
             merges.len()
         );
 
-        BpeTokenizer { vocab, rev, merges }
+        BpeTokenizer {
+            vocab,
+            rev,
+            merges,
+            reversible: true,
+        }
     }
 }
 
@@ -175,6 +215,12 @@ pub struct BpeTokenizer {
     vocab: BTreeMap<String, usize>,
     rev: Vec<String>,
     merges: Vec<(usize, usize, usize)>,
+    /// `true` for the **v2** reversible byte-level scheme (`byte_to_unit`), `false`
+    /// for a legacy tokenizer (`byte_to_str` + `<NNN>` placeholders, e.g. the
+    /// embedded `bpe.json`). Selects both the byte→key map in `encode` and the
+    /// `decode` path, so old and new tokenizers stay bit-for-bit compatible with the
+    /// data they were trained on.
+    reversible: bool,
 }
 
 impl BpeTokenizer {
@@ -183,7 +229,15 @@ impl BpeTokenizer {
         rev: Vec<String>,
         merges: Vec<(usize, usize, usize)>,
     ) -> Self {
-        Self { vocab, rev, merges }
+        // Infer the scheme: a v2 vocab always contains every 256-byte unit char, so
+        // the byte-128 unit ('Ā', U+0100) is present iff this is a v2 tokenizer.
+        let reversible = vocab.contains_key(&byte_to_unit(128).to_string());
+        Self {
+            vocab,
+            rev,
+            merges,
+            reversible,
+        }
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -194,10 +248,23 @@ impl BpeTokenizer {
         *self.vocab.get(name).unwrap_or(&3)
     }
 
+    /// The base-vocab key for a single byte under this tokenizer's scheme: the
+    /// reversible unit char (v2) or the legacy `byte_to_str` (`<NNN>` for non-ASCII).
+    fn byte_key(&self, b: u8) -> String {
+        if self.reversible
+        {
+            byte_to_unit(b).to_string()
+        }
+        else
+        {
+            byte_to_str(b)
+        }
+    }
+
     pub fn encode(&self, text: &str) -> Vec<usize> {
         let mut ids: Vec<usize> = text
             .bytes()
-            .map(|b| *self.vocab.get(&byte_to_str(b)).unwrap_or(&3))
+            .map(|b| *self.vocab.get(&self.byte_key(b)).unwrap_or(&3))
             .collect();
 
         if ids.is_empty()
@@ -268,18 +335,47 @@ impl BpeTokenizer {
     }
 
     pub fn decode(&self, ids: &[usize]) -> String {
+        if self.reversible
+        {
+            // v2: structural + fully reversible. Each non-special token is a string of
+            // unit chars, each standing for exactly one byte; concatenate all those
+            // bytes and UTF-8-decode ONCE at the end — so a multibyte char split
+            // across two tokens reassembles correctly (the whole reason `<NNN>` is
+            // gone). Named specials (ids `0..len`) carry no bytes and are skipped by
+            // id, not by string content, so a learned merge that happens to look like
+            // "<200>" is emitted as the real text it is.
+            let mut bytes: Vec<u8> = Vec::new();
+            for &id in ids
+            {
+                if id < SPECIAL_TOKENS.len()
+                {
+                    continue;
+                }
+                if let Some(s) = self.rev.get(id)
+                {
+                    for ch in s.chars()
+                    {
+                        if let Some(b) = unit_to_byte(ch)
+                        {
+                            bytes.push(b);
+                        }
+                    }
+                }
+            }
+            return String::from_utf8_lossy(&bytes).into_owned();
+        }
+
+        // Legacy: concatenate token strings, skipping specials + `<NNN>` placeholders.
+        // A blanket `starts_with('<')` also swallowed every learned merge that BEGINS
+        // with a literal '<' ("<T", "< ", "<<") — which a Rust corpus is full of
+        // (generics, comparisons, shifts) — silently deleting '<' from decoded code,
+        // so `is_non_text_token` matches only the exact `<NNN>` byte-placeholder shape.
         let mut out = String::new();
         for &id in ids
         {
             if id < self.rev.len()
             {
                 let s = &self.rev[id];
-                // Skip only the true non-text tokens: the named specials and the
-                // `<NNN>` placeholders for non-UTF-8 bytes. A blanket
-                // `starts_with('<')` also swallowed every learned merge that
-                // BEGINS with a literal '<' ("<T", "< ", "<<") — which a Rust
-                // corpus is full of (generics, comparisons, shifts) — silently
-                // deleting '<' from decoded code.
                 if !Self::is_non_text_token(s)
                 {
                     out.push_str(s);
@@ -317,6 +413,9 @@ impl BpeTokenizer {
 
     pub fn save_json(&self, path: &str) -> std::io::Result<()> {
         let json = serde_json::json!({
+            // Scheme tag: v2 tokenizers decode reversibly (no `<NNN>`); its absence
+            // means a legacy tokenizer, so a re-loaded file keeps its original decode.
+            "version": if self.reversible { "byte_level_v2" } else { "legacy_v1" },
             "vocab": self.vocab,
             "merges": self.merges.iter().map(|(a, b, c)| format!("{a} {b} {c}")).collect::<Vec<_>>(),
         });
@@ -326,48 +425,20 @@ impl BpeTokenizer {
 
     pub fn load_json(path: &str) -> std::io::Result<Self> {
         let s = fs::read_to_string(path)?;
-        let json: serde_json::Value = serde_json::from_str(&s)?;
-        let vocab: BTreeMap<String, usize> = serde_json::from_value(json["vocab"].clone())?;
-        let rev: Vec<String> = {
-            let mut v = vec![String::new(); vocab.len()];
-            for (s, &id) in &vocab
-            {
-                if id < v.len()
-                {
-                    v[id] = s.clone();
-                }
-            }
-            v
-        };
-        let merges: Vec<(usize, usize, usize)> = json["merges"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|m| {
-                        let parts: Vec<&str> = m.as_str()?.split_whitespace().collect();
-                        if parts.len() == 3
-                        {
-                            Some((
-                                parts[0].parse().ok()?,
-                                parts[1].parse().ok()?,
-                                parts[2].parse().ok()?,
-                            ))
-                        }
-                        else
-                        {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(Self { vocab, rev, merges })
+        Self::from_json_str(&s)
     }
 
     pub fn from_embedded() -> std::io::Result<Self> {
         let bpe_json = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tokenizer/bpe.json"));
         let s = std::str::from_utf8(bpe_json)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Self::from_json_str(s)
+    }
+
+    /// Parse a tokenizer from its JSON text. The `"version"` tag selects the decode
+    /// scheme: `"byte_level_v2"` → reversible byte-level; anything else (including a
+    /// missing tag, e.g. the legacy embedded `bpe.json`) → legacy `<NNN>` decode.
+    fn from_json_str(s: &str) -> std::io::Result<Self> {
         let json: serde_json::Value = serde_json::from_str(s)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let vocab: BTreeMap<String, usize> = serde_json::from_value(json["vocab"].clone())?;
@@ -404,7 +475,13 @@ impl BpeTokenizer {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(Self { vocab, rev, merges })
+        let reversible = json.get("version").and_then(|v| v.as_str()) == Some("byte_level_v2");
+        Ok(Self {
+            vocab,
+            rev,
+            merges,
+            reversible,
+        })
     }
 }
 
@@ -541,5 +618,74 @@ mod tests {
         let texts = vec!["test".to_string()];
         let tok = trainer.train(&texts);
         assert!(tok.encode("").is_empty());
+    }
+
+    #[test]
+    fn bpe_v2_roundtrips_arbitrary_utf8() {
+        // v2 tokenizers reconstruct bytes structurally, so ANY UTF-8 — multibyte
+        // punctuation, accents, CJK, emoji — round-trips through encode→decode
+        // exactly. This is the whole point of the reversible scheme: no `<NNN>`, and
+        // multibyte chars split across two BPE tokens still reassemble.
+        let corpus = "fn f() { let s = \"café — π ≈ 3.14 · ✅ 世界 🚀\"; }\n".repeat(40);
+        let tok = BpeTrainer::new(800).min_frequency(1).train(&[corpus]);
+        for s in [
+            "café — π ≈ 3.14 · ✅ 世界 🚀",
+            "fn main() { let x: Vec<u8> = vec![0xFF, 0x00]; }",
+            "// rms → √(mean(x²)+eps) · wᵀ",
+            "",
+            "a",
+        ]
+        {
+            let ids = tok.encode(s);
+            assert_eq!(tok.decode(&ids), s, "v2 must round-trip exactly: {s:?}");
+        }
+    }
+
+    #[test]
+    fn bpe_v2_never_leaks_placeholder() {
+        // No decoded output may contain a `<NNN>` byte placeholder — the artifact the
+        // old scheme leaked for every non-ASCII byte (`<194><183>` etc. in real runs).
+        let corpus = "let x = \"— · é ✅\";\n".repeat(50);
+        let tok = BpeTrainer::new(400).min_frequency(1).train(&[corpus]);
+        let out = tok.decode(&tok.encode("— · é ✅ literal <200> stays"));
+        assert!(
+            !out.contains("<194>") && !out.contains("<183>"),
+            "byte placeholder leaked into decode: {out:?}"
+        );
+        // A literal "<200>" in the text must survive (structural decode, not skipped
+        // as if it were a placeholder).
+        assert!(
+            out.contains("<200>"),
+            "real <200> text was dropped: {out:?}"
+        );
+        // All 256 bytes are base tokens ⇒ encode never emits `<unk>` (id 3) for bytes.
+        let unk = tok.encode("ΩΩΩ ∑∫∂ 🔥").iter().filter(|&&t| t == 3).count();
+        assert_eq!(
+            unk, 0,
+            "v2 must have every byte in the base vocab (no <unk>)"
+        );
+    }
+
+    #[test]
+    fn bpe_v2_scheme_survives_save_load() {
+        let tok = BpeTrainer::new(400)
+            .min_frequency(1)
+            .train(&["日本語 test → ok\n".repeat(30)]);
+        let path = std::env::temp_dir().join("scirust_bpe_v2_roundtrip.json");
+        let path = path.to_str().unwrap();
+        tok.save_json(path).unwrap();
+        let tok2 = BpeTokenizer::load_json(path).unwrap();
+        let s = "日本語 → ok";
+        assert_eq!(
+            tok.encode(s),
+            tok2.encode(s),
+            "encode differs after save/load"
+        );
+        assert_eq!(
+            tok2.decode(&tok2.encode(s)),
+            s,
+            "v2 decode must survive save/load (version tag preserved)"
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -19,6 +19,10 @@ ureq = { version = "2", features = ["json"], optional = true }
 # SHA-256 to verify downloaded crate tarballs against the crates.io checksum
 # (supply-chain integrity, audit finding S3). Only needed by the `fetch` binary.
 sha2 = { version = "0.10", optional = true }
+# Rust parser — the `syn`-parse quality metric in the `cuda_eval` harness (how many
+# generated samples are syntactically valid Rust). Pure-Rust, no C deps, but only
+# pulled by the `eval` feature so the default/CI builds stay lean.
+syn = { version = "2", features = ["full", "parsing"], optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -40,6 +44,10 @@ gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
 # Thor-only to build (needs the CUDA toolkit); parity vs the CPU model is checked
 # at bf16 tolerance in tests/cuda_parity.rs.
 cuda = ["dep:scirust-cuda", "scirust-cuda/cuda"]
+# Route B quality-evaluation harness (`cuda_eval`): CUDA generation + `syn`-parse
+# scoring of the generated Rust. Enables `cuda` and pulls `syn`. Opt-in so a plain
+# `--features cuda` build/test doesn't compile `syn`.
+eval = ["cuda", "dep:syn"]
 
 [[bin]]
 name = "fetch-crates"
@@ -100,3 +108,8 @@ required-features = ["cuda"]
 [[example]]
 name = "cuda_generate"
 required-features = ["cuda"]
+
+# Route B checkpoint quality evaluation — CUDA generation + `syn`-parse scoring.
+[[example]]
+name = "cuda_eval"
+required-features = ["eval"]

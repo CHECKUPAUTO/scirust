@@ -2,9 +2,13 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTokenizer;
-use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
+use scirust_sciagent::train::dataset::{
+    matches_extension, parse_extensions, skip_source_dir, source_quality,
+};
 
 #[derive(Parser)]
 #[command(
@@ -36,6 +40,26 @@ struct Args {
 
     #[arg(long, default_value_t = 100_000)]
     tokens_per_shard: usize,
+
+    /// Disable the corpus-quality filter (keep generated/minified/data-table files).
+    /// Off by default: the filter drops low-value bulk that dilutes the code model.
+    #[arg(long)]
+    no_quality_filter: bool,
+}
+
+/// Kept/skipped tallies for the quality filter, so nothing is dropped silently.
+#[derive(Default)]
+struct CollectStats {
+    kept: usize,
+    skipped: usize,
+    reasons: BTreeMap<&'static str, usize>,
+}
+
+impl CollectStats {
+    fn skip(&mut self, reason: &'static str) {
+        self.skipped += 1;
+        *self.reasons.entry(reason).or_insert(0) += 1;
+    }
 }
 
 fn main() {
@@ -48,7 +72,21 @@ fn main() {
     let exts = parse_extensions(&args.extension);
     eprintln!("Ingesting extensions: {exts:?}");
 
+    let filter = !args.no_quality_filter;
+    eprintln!(
+        "corpus-quality filter: {}",
+        if filter
+        {
+            "on"
+        }
+        else
+        {
+            "OFF (--no-quality-filter)"
+        }
+    );
+
     let mut all_tokens: Vec<u32> = Vec::new();
+    let mut stats = CollectStats::default();
     for path in &args.input
     {
         let p = Path::new(path);
@@ -56,16 +94,19 @@ fn main() {
         {
             if let Ok(content) = fs::read_to_string(p)
             {
-                let ids = tok.encode_with_special(&content, true, true);
-                all_tokens.extend(ids.iter().map(|&i| i as u32));
+                ingest_file(p, &content, filter, &tok, &mut all_tokens, &mut stats);
             }
         }
         else if p.is_dir() && args.recursive
         {
-            collect_dir(p, &exts, &tok, &mut all_tokens);
+            collect_dir(p, &exts, filter, &tok, &mut all_tokens, &mut stats);
         }
     }
 
+    eprintln!(
+        "files kept {} | skipped {} | reasons {:?}",
+        stats.kept, stats.skipped, stats.reasons
+    );
     eprintln!("Total tokens: {}", all_tokens.len());
     eprintln!("Packing into shards of {} tokens...", args.tokens_per_shard);
 
@@ -97,12 +138,46 @@ fn main() {
     eprintln!("Done: {} shards written to {:?}", num_shards, args.output);
 }
 
-fn collect_dir(dir: &Path, exts: &[String], tok: &BpeTokenizer, tokens: &mut Vec<u32>) {
+/// Tokenize one file into `tokens`, applying the quality filter and updating stats.
+fn ingest_file(
+    path: &Path,
+    content: &str,
+    filter: bool,
+    tok: &BpeTokenizer,
+    tokens: &mut Vec<u32>,
+    stats: &mut CollectStats,
+) {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if filter
+    {
+        if let Err(reason) = source_quality(name, content)
+        {
+            stats.skip(reason);
+            return;
+        }
+    }
+    let ids = tok.encode_with_special(content, true, true);
+    tokens.extend(ids.iter().map(|&i| i as u32));
+    stats.kept += 1;
+}
+
+fn collect_dir(
+    dir: &Path,
+    exts: &[String],
+    filter: bool,
+    tok: &BpeTokenizer,
+    tokens: &mut Vec<u32>,
+    stats: &mut CollectStats,
+) {
     if let Ok(entries) = fs::read_dir(dir)
     {
-        for entry in entries.flatten()
+        // Sort by path so the corpus order is deterministic across machines/runs —
+        // `read_dir` yields OS-arbitrary order, which would make the shards (and the
+        // tokenizer) irreproducible.
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths
         {
-            let path = entry.path();
             if path.is_dir()
             {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str())
@@ -112,14 +187,13 @@ fn collect_dir(dir: &Path, exts: &[String], tok: &BpeTokenizer, tokens: &mut Vec
                         continue;
                     }
                 }
-                collect_dir(&path, exts, tok, tokens);
+                collect_dir(&path, exts, filter, tok, tokens, stats);
             }
             else if matches_extension(&path, exts)
             {
                 if let Ok(content) = fs::read_to_string(&path)
                 {
-                    let ids = tok.encode_with_special(&content, true, true);
-                    tokens.extend(ids.iter().map(|&i| i as u32));
+                    ingest_file(&path, &content, filter, tok, tokens, stats);
                 }
             }
         }

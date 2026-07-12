@@ -42,7 +42,7 @@ use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::ShardLoader;
+use scirust_sciagent::train::dataset::{ShardLoader, source_quality};
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
 /// to train on an actual code tree with no tokenizer.
@@ -165,6 +165,17 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
         {
             if is_probably_text(&b)
             {
+                // Same corpus-quality gate as collect-data: skip generated/minified/
+                // data-table files (valid UTF-8 is already established, so the str
+                // conversion is safe).
+                let name = root.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if let Ok(text) = std::str::from_utf8(&b)
+                {
+                    if source_quality(name, text).is_err()
+                    {
+                        return;
+                    }
+                }
                 let take = (cap - out.len()).min(b.len());
                 out.extend_from_slice(&b[..take]);
             }
