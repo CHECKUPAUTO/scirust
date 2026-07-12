@@ -52,6 +52,16 @@
 //!   pulsation propre, amortissement, décrément logarithmique.
 //! - [`beams`] — RDM flexion des poutres : moments quadratiques, contrainte de
 //!   flexion et flèches des cas de charge usuels.
+//! - [`buckling`] — flambage des colonnes comprimées (**Euler**) : charge
+//!   critique, longueur de flambement, élancement et domaine de validité.
+//! - [`mohr`] — état de contrainte plan (cercle de **Mohr**) : contraintes
+//!   principales, cisaillement maximal, critères de **von Mises** et **Tresca**.
+//! - [`trusses`] — treillis : contrainte axiale, allongement des barres et
+//!   équilibre d'un nœud par la méthode des nœuds.
+//! - [`torsion_profiles`] — torsion des profils non circulaires : tubes minces
+//!   fermés (**Bredt**) et sections minces ouvertes (Saint-Venant).
+//! - [`stress_concentration`] — concentration de contrainte : facteur `Kt`,
+//!   contrainte de pointe sur section nette et facteur de fatigue `Kf`.
 //! - [`thermal`] — thermique : dilatation, conduction (**Fourier**), convection,
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
@@ -100,6 +110,7 @@
 pub mod beams;
 pub mod bearings;
 pub mod belts;
+pub mod buckling;
 pub mod cams;
 pub mod dynamics;
 pub mod economics;
@@ -112,16 +123,20 @@ pub mod iso6336;
 pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
+pub mod mohr;
 pub mod power_screws;
 pub mod roughness;
 pub mod shafts;
 pub mod springs;
+pub mod stress_concentration;
 pub mod thermal;
 pub mod threads;
 pub mod time;
 pub mod tolerancing;
 pub mod toollife;
 pub mod torseurs;
+pub mod torsion_profiles;
+pub mod trusses;
 pub mod vibrations;
 
 pub use beams::{
@@ -137,6 +152,10 @@ pub use bearings::{
 pub use belts::{
     belt_speed_m_s, slack_tension, tension_ratio_flat, tension_ratio_vbelt, transmissible_power_w,
     wrap_angle_small_pulley_rad,
+};
+pub use buckling::{
+    EndCondition, critical_load, critical_stress, effective_length, is_euler_valid,
+    limiting_slenderness, radius_of_gyration, slenderness_ratio,
 };
 pub use cams::{
     cycloidal_acceleration, cycloidal_displacement, cycloidal_velocity, shm_acceleration,
@@ -176,6 +195,11 @@ pub use kinematics::{
     mrr_milling_mm3_min, mrr_turning_cm3_min, spindle_speed_rpm,
 };
 pub use liaisons::{LIAISONS, Liaison};
+pub use mohr::{
+    max_in_plane_shear, mohr_radius, normal_stress_rotated, principal_angle_rad,
+    principal_stresses, safety_factor, shear_stress_rotated, tresca_plane, von_mises_plane,
+    von_mises_principal,
+};
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
@@ -187,6 +211,9 @@ pub use shafts::{
     section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
 };
 pub use springs::HelicalSpring;
+pub use stress_concentration::{
+    fatigue_stress_concentration, nominal_stress_plate_with_hole, peak_stress,
+};
 pub use thermal::{
     conduction_heat_flow, convection_heat_flow, linear_expansion, sensible_heat,
     thermal_resistance, thermal_stress,
@@ -202,6 +229,11 @@ pub use tolerancing::{
 };
 pub use toollife::{ExtendedTaylor, taylor_cutting_speed, taylor_tool_life};
 pub use torseurs::Torseur;
+pub use torsion_profiles::{
+    bredt_shear_stress, bredt_twist_rate, rectangular_max_shear, rectangular_torsion_constant,
+    thin_strip_max_shear, thin_strip_torsion_constant,
+};
+pub use trusses::{axial_stress, member_elongation, two_member_joint};
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
