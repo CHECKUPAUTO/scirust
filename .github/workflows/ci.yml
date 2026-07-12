@@ -92,6 +92,18 @@ jobs:
       - name: Run epsilon-audit --check
         run: cargo run -q -p scirust-sigma --bin epsilon-audit -- --root . --check
 
+  # Tamper-evidence gate for the validated public COBOL reference corpus
+  # (external/cobol-reference/selected). Verifies every file against its SHA-256
+  # manifest and that the recorded GnuCOBOL exit codes (0) and intentional
+  # warning counts (7/8) are preserved. Coreutils only — no toolchain needed.
+  cobol-corpus:
+    name: COBOL Corpus Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Verify COBOL reference corpus
+        run: ./scripts/verify-cobol-corpus.sh
+
   build-test:
     name: Build & Test (nightly, x86_64)
     runs-on: ubuntu-latest
